@@ -1,0 +1,42 @@
+-- LuaCov configuration file
+
+-- Reporter to use
+-- Options: "default" (text), "lcov" (for genhtml), "cobertura" (XML for IDEs)
+-- Note: "html" reporter is broken due to missing asset files
+reporter = "lcov"
+
+-- Include patterns: track coverage for project modules only
+include = {
+    "build/tecs",
+    "build/tecs2d",
+    "build/reins",
+    "build/stagecoach"
+}
+
+-- Exclude patterns: skip test files and external dependencies
+exclude = {
+    "build/spec",     -- Test files
+    "busted",         -- Test framework
+    "luassert",       -- Assertion library
+    "luacov",         -- Coverage tool itself
+    "datafile",       -- External libs
+    "penlight",
+    "pl",
+    "template"
+}
+
+-- Output files (will be moved to build/ by Makefile)
+statsfile = "luacov.stats.out"
+reportfile = "coverage.info"   -- Direct output to final name for LCOV reporter
+
+-- Module path mappings for cleaner report names
+modules = {
+    ["tecs"] = "build/tecs/init.lua",
+    ["tecs.*"] = "build/tecs",
+    ["tecs2d"] = "build/tecs2d/init.lua",
+    ["tecs2d.*"] = "build/tecs2d",
+    ["reins"] = "build/reins/init.lua",
+    ["reins.*"] = "build/reins",
+    ["stagecoach"] = "build/stagecoach/init.lua",
+    ["stagecoach.*"] = "build/stagecoach"
+}

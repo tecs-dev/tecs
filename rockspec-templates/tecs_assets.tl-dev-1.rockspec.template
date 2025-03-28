@@ -1,0 +1,57 @@
+rockspec_format = "3.0"
+package = "tecs_assets.tl"
+version = "dev-1"
+
+source = {
+    url = "git+https://github.com/tecs-dev/tecs.git",
+    branch = "main"
+}
+
+description = {
+    summary = "Asynchronous asset loading system for Tecs",
+    detailed = [[
+Tecs Assets provides a threaded asset loading system for the Tecs ECS framework.
+It supports loading assets in background threads with a configurable thread pool
+for optimal performance.
+
+Features:
+- Multi-threaded asset loading
+- Configurable thread pool
+- Love2D asset integration
+- Handle-based asset management
+- Automatic resource cleanup
+    ]],
+    homepage = "https://github.com/your-org/tecs",
+    license = "MIT"
+}
+
+dependencies = {
+    "lua >= 5.1, < 5.5",
+    "tecs.tl >= 0.2.0",
+}
+
+test_dependencies = {
+    "busted",
+}
+
+build_dependencies = {
+    "cyan >= 0.4.0",
+}
+
+test = {
+    type = "busted",
+    flags = { "--loaders=teal" }
+}
+
+build = {
+    type = "make",
+    build_command = "cyan build -q",
+    modules = {
+        -- {{LUA_FILES}}
+    },
+    install = {
+        lua = {
+            -- {{TEAL_FILES}}
+        }
+    }
+}

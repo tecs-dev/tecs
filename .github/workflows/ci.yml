@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        lua-version: ["5.1", "5.2", "5.3", "5.4", "luajit"]
+        include:
+          - lua-version: "5.1"
+            luarocks-version: "3.12.2"
+          - lua-version: "5.2"
+            luarocks-version: "3.12.2"
+          - lua-version: "5.3"
+            luarocks-version: "3.12.2"
+          - lua-version: "5.4"
+            luarocks-version: "3.12.2"
+          - lua-version: "luajit"
+            luarocks-version: "3.12.2"
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Lua
+      uses: leafo/gh-actions-lua@v11
+      with:
+        luaVersion: ${{ matrix.lua-version }}
+
+    - name: Setup LuaRocks
+      uses: leafo/gh-actions-luarocks@v4
+      with:
+        luarocksVersion: ${{ matrix.luarocks-version }}
+
+    - name: Install dependencies
+      run: |
+        luarocks install busted
+        luarocks install luacov
+        # Install Cyan from development branch to fix sorting bug
+        git clone https://github.com/teal-language/cyan.git /tmp/cyan
+        cd /tmp/cyan && luarocks make
+
+    - name: Install Teal compiler
+      run: |
+        luarocks install tl
+
+    - name: Build project
+      run: |
+        make clean
+        if [ "${{ matrix.lua-version }}" = "5.2" ] || [ "${{ matrix.lua-version }}" = "5.3" ] || [ "${{ matrix.lua-version }}" = "5.4" ]; then
+          # Use tl directly for Lua versions where cyan has compatibility issues
+          mkdir -p build
+          find src -name "*.tl" -print0 | while IFS= read -r -d '' file; do
+            outfile="build/${file#src/}"
+            outfile="${outfile%.tl}.lua"
+            mkdir -p "$(dirname "$outfile")"
+            tl gen "$file" -o "$outfile"
+          done
+        else
+          # Use cyan for LuaJIT and Lua 5.1
+          cyan build --no-script
+        fi
+
+    - name: Run tests
+      run: |
+        make test
+
+    - name: Run tests without FFI (fallback mode)
+      if: matrix.lua-version != 'luajit'
+      run: |
+        TECS_DISABLE_FFI=1 make test
+
+  test-ffi-fallback:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup LuaJIT
+      uses: leafo/gh-actions-lua@v11
+      with:
+        luaVersion: "luajit"
+
+    - name: Setup LuaRocks
+      uses: leafo/gh-actions-luarocks@v4
+      with:
+        luarocksVersion: "3.12.2"
+
+    - name: Install dependencies
+      run: |
+        luarocks install busted
+        # Install Cyan from development branch to fix sorting bug
+        git clone https://github.com/teal-language/cyan.git /tmp/cyan
+        cd /tmp/cyan && luarocks make
+        luarocks install tl
+
+    - name: Build project
+      run: |
+        make clean
+        cyan build --no-script
+
+    - name: Test FFI fallback mode on LuaJIT
+      run: |
+        TECS_DISABLE_FFI=1 make test
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Lua
+      uses: leafo/gh-actions-lua@v11
+      with:
+        luaVersion: "luajit"
+
+    - name: Setup LuaRocks
+      uses: leafo/gh-actions-luarocks@v4
+      with:
+        luarocksVersion: "3.12.2"
+
+    - name: Install Teal
+      run: |
+        # Install Cyan from development branch to fix sorting bug
+        git clone https://github.com/teal-language/cyan.git /tmp/cyan
+        cd /tmp/cyan && luarocks make
+        luarocks install tl
+
+    - name: Type check
+      run: |
+        cyan check src/**/*.tl

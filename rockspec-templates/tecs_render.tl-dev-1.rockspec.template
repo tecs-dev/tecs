@@ -1,0 +1,57 @@
+rockspec_format = "3.0"
+package = "tecs_render.tl"
+version = "dev-1"
+
+source = {
+    url = "git+https://github.com/tecs-dev/tecs.git",
+    branch = "main"
+}
+
+description = {
+    summary = "3D rendering pipeline for Tecs ECS framework",
+    detailed = [[
+Tecs Render provides a high-performance 3D rendering pipeline integrated with
+the Tecs ECS framework. It includes camera management, lighting, and layer-based
+rendering with Love2D integration.
+
+Features:
+- 3D rendering pipeline
+- Camera management and transforms
+- Layer-based rendering
+- Lighting system with shadows
+- Love2D graphics integration
+    ]],
+    homepage = "https://github.com/your-org/tecs",
+    license = "MIT"
+}
+
+dependencies = {
+    "lua >= 5.1, < 5.5",
+    "tecs.tl >= 0.2.0",
+}
+
+test_dependencies = {
+    "busted",
+}
+
+build_dependencies = {
+    "cyan >= 0.4.0",
+}
+
+test = {
+    type = "busted",
+    flags = { "--loaders=teal" }
+}
+
+build = {
+    type = "make",
+    build_command = "cyan build -q",
+    modules = {
+        -- {{LUA_FILES}}
+    },
+    install = {
+        lua = {
+            -- {{TEAL_FILES}}
+        }
+    }
+}

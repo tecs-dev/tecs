@@ -1,0 +1,17 @@
+/build/
+node_modules/
+/docs/.vitepress/cache
+
+# Example build directories
+examples/**/build/
+
+# macOS system files
+.DS_Store
+
+# Code coverage files (now in build/ but keep for backwards compat)
+luacov.stats.out
+luacov.report.out
+coverage-html/
+coverage.xml
+coverage.info
+*.lcov

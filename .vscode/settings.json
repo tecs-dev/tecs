@@ -1,0 +1,13 @@
+{
+    "makefile.configureOnOpen": false,
+    "files.trimTrailingWhitespace": true,
+    "[teal]": {
+        "editor.rulers": [120]
+    },
+    "[lua]": {
+        "editor.rulers": [120]
+    },
+    "[markdown]": {
+        "editor.rulers": [120]
+    }
+}
