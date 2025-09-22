@@ -1,48 +1,67 @@
 .PHONY: all build test test-no-ffi clean dev compile check find-busted trim-whitespace \
 	coverage coverage-report coverage-xml coverage-lcov coverage-html \
-	tecs_controller-example tecs_assets-example tecs_render-example ballbench-example \
-	newrock test-rockspec test-install typecheck rebuild help rockspecs docs
+	check-examples build-examples new-example \
+	example-text-bench example-sprite-collision example-assets example-audio example-ball-bench example-circles \
+	example-controller example-lighting example-love-interop example-orbiting-shapes example-particles \
+	example-physics example-physics-bench example-shape-bench example-sprite-bench \
+	example-sprite-onloop example-tiled example-transform-demo example-ui example-mesh-demo example-layer-fx \
+	example-camera-target example-material-demo example-camera-multi example-msdf-text example-tween-demo \
+	example-save-game \
+	newrock test-rockspec typecheck rebuild help rockspecs docs docs-dev \
+	json-bench ecs-bench snapshot-bench bitset-bench download-love12 check-love12
 
 .SILENT: clean test test-no-ffi find-busted
 
 VERSION=0.2.0
 LUA_CMD ?= luajit
 
+# Love2D 12 (nightly) for GPU rendering features
+LOVE12_DIR := $(CURDIR)/bin/love2d
+# Nightly build URLs (via nightly.link for unauthenticated access)
+NIGHTLY_BASE := https://nightly.link/love2d/love/workflows/main/main
+# Detect OS
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+	LOVE12_BIN := $(LOVE12_DIR)/love.app/Contents/MacOS/love
+else ifeq ($(UNAME_S),Linux)
+	LOVE12_BIN := $(LOVE12_DIR)/love
+else
+	# Windows (MSYS/MinGW)
+	LOVE12_BIN := $(LOVE12_DIR)/love.exe
+endif
+
 # Paths
 SPEC_DIR=./spec
 LUA_DIR=./build
 TL_SRC_DIR=./src
-LUAROCKS_BIN ?= $(HOME)/.luarocks/bin
-LUAROCKS_LUA ?= $(HOME)/.luarocks/share/lua/5.1
-LUAROCKS_CLIB ?= $(HOME)/.luarocks/lib/lua/5.1
+VENDOR_BIN=$(CURDIR)/vendor/bin
+VENDOR_LUA=$(CURDIR)/vendor/share/lua/5.1
+VENDOR_CLIB=$(CURDIR)/vendor/lib/lua/5.1
 
-# Commands - use which to find busted in PATH, fallback to LUAROCKS_BIN
-BUSTED_CMD ?= $(shell which busted 2>/dev/null || echo "$(LUAROCKS_BIN)/busted")
+# Love executable - default to Love2D 12 for GPU rendering
+LOVE := $(LOVE12_BIN)
+
+# Environment for running tl - use local vendor tree, fall back to system paths
+TEAL_LUA_PATH := $(VENDOR_LUA)/?.lua;$(VENDOR_LUA)/?/init.lua;;
+TEAL_LUA_CPATH := $(VENDOR_CLIB)/?.so;;
+TEAL_ENV = PATH="$(VENDOR_BIN):$$PATH" LUA_PATH="$(TEAL_LUA_PATH)$$LUA_PATH" LUA_CPATH="$(TEAL_LUA_CPATH)$$LUA_CPATH" LOVE="$(LOVE)"
+
+# Commands - prefer local vendor busted, fallback to system busted
+BUSTED_CMD ?= $(shell [ -x "$(VENDOR_BIN)/busted" ] && echo "$(VENDOR_BIN)/busted" || which busted 2>/dev/null)
 LUACOV_COBERTURA_CMD ?= $(shell which luacov-cobertura 2>/dev/null || echo "$(LUAROCKS_BIN)/luacov-cobertura")
 
 # Common LUA paths for coverage targets
-COVERAGE_LUA_PATH="../$(LUA_DIR)/?.lua;../$(LUA_DIR)/?/init.lua;$(LUAROCKS_LUA)/?.lua;$(LUAROCKS_LUA)/?/init.lua;"
-COVERAGE_LUA_CPATH="$(LUAROCKS_CLIB)/?.so;"
+COVERAGE_LUA_PATH="../$(LUA_DIR)/?.lua;../$(LUA_DIR)/?/init.lua;$(VENDOR_LUA)/?.lua;$(VENDOR_LUA)/?/init.lua;"
+COVERAGE_LUA_CPATH="$(VENDOR_CLIB)/?.so;"
 
 # Source files for dependency tracking
 SOURCE_TL := $(shell find $(TL_SRC_DIR) -name "*.tl" 2>/dev/null || true)
+SOURCE_GLSL := $(shell find $(TL_SRC_DIR) -name "*.glsl" 2>/dev/null || true)
 
-# Test support files that need to be compiled
-TEST_HELPERS=spec/tecs/test_helpers.tl
-TEST_MOCKS=spec/love2d/love2d_mock.tl \
-          spec/love2d/tecs2d_input_mock.tl
-
-# Find all test spec files
-TEST_SPECS := $(shell find spec -name "*_spec.tl" 2>/dev/null || true)
-
-# Generated test files (put in separate dir to avoid cyan --prune)
+# Test deps live under build/test_deps and are compiled by the post-build
+# script scripts/compile_specs.tl in a single Lua process (much faster than
+# forking `tl gen` per file).
 TEST_BUILD_DIR=$(LUA_DIR)/test_deps
-TEST_HELPER_LUA=$(TEST_BUILD_DIR)/spec/tecs/test_helpers.lua
-TEST_MOCK_LUA=$(patsubst spec/%.tl,$(TEST_BUILD_DIR)/spec/%.lua,$(TEST_MOCKS))
-TEST_SPEC_LUA=$(patsubst spec/%.tl,$(TEST_BUILD_DIR)/spec/%.lua,$(TEST_SPECS))
-
-# All compiled test dependencies
-TEST_DEPS_LUA=$(TEST_HELPER_LUA) $(TEST_MOCK_LUA) $(TEST_SPEC_LUA)
 
 all: build test
 
@@ -50,14 +69,19 @@ build: compile
 
 dev:
 	@echo "Installing development dependencies..."
-	luarocks install --local --lua-version=5.1 busted
-	luarocks install --local --lua-version=5.1 cyan
-	luarocks install --local --lua-version=5.1 --server=https://luarocks.org/dev busted-tl
-	luarocks install --local --lua-version=5.1 luacov
-	luarocks install --local --lua-version=5.1 luacov-cobertura
-	luarocks install --local --lua-version=5.1 luacov-reporter-lcov
-	luarocks install --local --lua-version=5.1 luafilesystem
+	@echo "Installing tl (dev, from git source)..."
+	@rm -rf /tmp/tl-dev && git clone --depth 1 https://github.com/teal-language/tl.git /tmp/tl-dev
+	@cd /tmp/tl-dev && luarocks make --tree=$(shell pwd)/vendor --lua-version=5.1 tl-dev-1.rockspec
+	luarocks install --tree=vendor --lua-version=5.1 busted
+	luarocks install --tree=vendor --lua-version=5.1 luacov
+	luarocks install --tree=vendor --lua-version=5.1 luacov-cobertura
+	luarocks install --tree=vendor --lua-version=5.1 luacov-reporter-lcov
+	luarocks install --tree=vendor --lua-version=5.1 luafilesystem
+	@echo "Installing documentation dependencies..."
+	cd docs && npm install
 	@echo "Development dependencies installed!"
+	@echo "Running initial build..."
+	$(MAKE) build
 
 find-busted:
 	luarocks path --lr-path
@@ -65,44 +89,71 @@ find-busted:
 	find ~/.luarocks -name "runner.lua" | grep busted
 
 check:
-	cyan check src/**/*.tl
+	$(TEAL_ENV) tl check $(SOURCE_TL)
 
-# Use cyan's built-in incremental compilation with auto-prune
-compile: $(SOURCE_TL) tlconfig.lua
-	@mkdir -p $(LUA_DIR)
-	cyan build --no-script
+compile: $(SOURCE_TL) $(SOURCE_GLSL) tlconfig.lua
+	@$(TEAL_ENV) tl -q gen --root src --output-dir build $(SOURCE_TL)
+	@# Copy shader files (always sync from source, preserving directory structure)
+	@cd src && find tecs2d/gfx/internal -name "*.glsl" -exec sh -c 'mkdir -p "../$(LUA_DIR)/$$(dirname {})" && cp {} "../$(LUA_DIR)/{}"' \;
+	@echo "Synced $(words $(SOURCE_GLSL)) shader files"
+	@$(TEAL_ENV) luajit scripts/compile_specs.lua
 
 # Force full rebuild
 rebuild: clean compile
 
-# Compile test helpers individually (in separate dir to avoid cyan --prune)
-$(TEST_HELPER_LUA): $(TEST_HELPERS) | $(LUA_DIR)
-	@echo "Compiling test helpers..."
-	@mkdir -p $(TEST_BUILD_DIR)/spec/tecs
-	@tl check $(TEST_HELPERS) >/dev/null 2>&1 || (echo "ERROR: $(TEST_HELPERS) has type errors" && tl check $(TEST_HELPERS) && exit 1)
-	@tl gen $(TEST_HELPERS) -o $(TEST_HELPER_LUA)
-
-# Compile test mocks individually (in separate dir to avoid cyan --prune)
-$(TEST_BUILD_DIR)/spec/%.lua: spec/%.tl | $(LUA_DIR)
-	@echo "Compiling test mock: $<"
-	@mkdir -p $(dir $@)
-	@tl check "$<" >/dev/null 2>&1 || (echo "ERROR: $< has type errors" && tl check "$<" && exit 1)
-	@tl gen "$<" -o "$@"
-
-
-# Test type checking is handled during compilation; tests run on pre-compiled Lua
-
-test: $(TEST_DEPS_LUA)
+test: compile
 	@echo "Running tests..."
-	LUA_PATH="$(LUA_DIR)/?.lua;$(LUA_DIR)/?/init.lua;$(TEST_BUILD_DIR)/?.lua;$(TEST_BUILD_DIR)/?/init.lua;;" LUA=$(LUA_CMD) $(BUSTED_CMD) $(TEST_BUILD_DIR)
-
-# Run tests with FFI disabled using normal Lua, not luajit
-test-no-ffi:
-	@echo "Running tests with FFI disabled (fallback mode)..."
-	TECS_DISABLE_FFI=1 LUA_CMD=lua $(MAKE) test
+	LUA_PATH="$(LUA_DIR)/?.lua;$(LUA_DIR)/?/init.lua;$(TEST_BUILD_DIR)/?.lua;$(TEST_BUILD_DIR)/?/init.lua;$(VENDOR_LUA)/?.lua;$(VENDOR_LUA)/?/init.lua;;" $(BUSTED_CMD) --no-auto-insulate $(TEST_BUILD_DIR)
 
 clean:
 	rm -rf build
+	rm -rf examples/*/build
+
+# Install target for luarocks (called by luarocks make/build)
+# LUADIR is set by luarocks. ROCK selects which rock is being installed:
+#   ROCK=tecs   -> renderer-agnostic ECS core only
+#   ROCK=tecs2d -> LÖVE2D engine layer only (depends on the tecs rock)
+install:
+ifdef LUADIR
+	@# SAFETY: refuse to install if LUADIR/tecs is a symlink. Some downstream
+	@# projects (e.g. tecs-starter) symlink their vendor/tecs to this repo's
+	@# src/tecs for fast dev iteration. luarocks's install-time cleanup
+	@# resolves through such symlinks and would destroy this source tree.
+	@if [ -L "$(LUADIR)/tecs" ] || [ -L "$(LUADIR)/tecs2d" ]; then \
+		echo "Refusing to install: $(LUADIR)/tecs or tecs2d is a symlink (likely a downstream project's dev mode pointing at this source tree)."; \
+		echo "Remove the symlinks before running luarocks install/make against this rockspec."; \
+		exit 1; \
+	fi
+	@if [ -z "$(ROCK)" ]; then \
+		echo "ROCK not specified - this Makefile is invoked by luarocks with ROCK=tecs or ROCK=tecs2d."; \
+		echo "Set ROCK explicitly when running 'make install' by hand."; \
+		exit 1; \
+	fi
+	@echo "Installing $(ROCK) to $(LUADIR)..."
+	@case "$(ROCK)" in \
+		tecs) \
+			mkdir -p $(LUADIR)/tecs/internal/ffi $(LUADIR)/tecs/internal/world \
+			         $(LUADIR)/tecs/utils/json/internal; \
+			cp -r build/tecs/* $(LUADIR)/tecs/; \
+			rsync -a --include='*/' --include='*.tl' --exclude='*' src/tecs/ $(LUADIR)/tecs/; \
+			;; \
+		tecs2d) \
+			mkdir -p $(LUADIR)/tecs2d/internal $(LUADIR)/tecs2d/assets/internal \
+			         $(LUADIR)/tecs2d/gfx/internal $(LUADIR)/tecs2d/gfx/bmfont \
+			         $(LUADIR)/tecs2d/audio/internal $(LUADIR)/tecs2d/ui/internal \
+			         $(LUADIR)/tecs2d/mcp $(LUADIR)/tecs2d/tiled/internal; \
+			cp -r build/tecs2d/* $(LUADIR)/tecs2d/; \
+			rsync -a --include='*/' --include='*.tl' --exclude='*' src/tecs2d/ $(LUADIR)/tecs2d/; \
+			;; \
+		*) \
+			echo "Unknown rock: $(ROCK)"; \
+			exit 1; \
+			;; \
+	esac
+	@echo "Installation complete"
+else
+	@echo "LUADIR not set - skipping installation"
+endif
 
 trim-whitespace:
 	@find src spec -name "*.tl" -exec sed -i.bak 's/[[:space:]]*$$//' {} \;
@@ -112,7 +163,7 @@ trim-whitespace:
 	@echo "Trimmed trailing whitespace from .tl and .md files"
 
 # Run tests with coverage collection
-coverage: clean $(TEST_DEPS_LUA)
+coverage: clean compile
 	@echo "Running tests with code coverage..."
 	# Clean up any existing coverage files
 	@rm -f build/luacov.stats.out build/luacov.report.out build/coverage.*
@@ -174,106 +225,274 @@ coverage-html: coverage-lcov
 		echo "  brew install lcov"; \
 	fi
 
-# ================= Test Installation =================
-test-install: build
-	@echo "Setting up test installation in build/test-install..."
-	@rm -rf build/test-install
-	@mkdir -p build/test-install
-	@echo "Copying install-example..."
-	@cp -r examples/install-example/* build/test-install/
-	@echo "Setting up vendor directory structure..."
-	@mkdir -p build/test-install/src/vendor/share/lua/5.1
-	@echo "Copying compiled Tecs modules to vendor..."
-	@cp -r build/tecs build/test-install/src/vendor/share/lua/5.1/
-	@cp -r build/tecs2d build/test-install/src/vendor/share/lua/5.1/
-	@cp -r build/tecs_render build/test-install/src/vendor/share/lua/5.1/
-	@cp -r build/tecs_controller build/test-install/src/vendor/share/lua/5.1/
-	@cp -r build/tecs_assets build/test-install/src/vendor/share/lua/5.1/
-	@echo "Compiling Teal files..."
-	@cd build/test-install && tl gen src/main.tl -o build/main.lua
-	@cd build/test-install && tl gen src/conf.tl -o build/conf.lua
-	@echo "Copying assets to build directory..."
-	@cp -r build/test-install/assets build/test-install/build/ 2>/dev/null || true
-	@echo "Done! Running Love2D from build directory..."
-	@cd build/test-install/build && love .
-
 # ================= LuaRocks =================
 newrock:
 	@if [ -z "$(ROCK)" ] || [ -z "$(NEW_VERSION)" ]; then \
 		echo "Usage: make newrock ROCK=<rockspec> NEW_VERSION=<version>"; \
-		echo "Example: make newrock ROCK=tecs.tl NEW_VERSION=0.3.0"; \
+		echo "Example: make newrock ROCK=tecs NEW_VERSION=0.3.0"; \
 		exit 1; \
 	fi
-	@if [ ! -f "rockspec-templates/$(ROCK)-dev-1.rockspec.template" ]; then \
-		echo "Error: rockspec-templates/$(ROCK)-dev-1.rockspec.template not found"; \
+	@if [ ! -f "$(ROCK)-dev-1.rockspec" ]; then \
+		echo "Error: $(ROCK)-dev-1.rockspec not found"; \
 		exit 1; \
 	fi
-	luarocks new_version --dir build --tag=v$(NEW_VERSION) rockspec-templates/$(ROCK)-dev-1.rockspec.template $(NEW_VERSION)
+	luarocks new_version --dir build --tag=v$(NEW_VERSION) $(ROCK)-dev-1.rockspec $(NEW_VERSION)
 
 # Test local rockspec installation
 test-rockspec: build
 	@echo "Testing rockspec syntax validation..."
-	@echo "Validating tecs.tl..."
-	@luarocks lint build/tecs.tl-dev-1.rockspec
-	@echo "Validating tecs2d.tl..."
-	@luarocks lint build/tecs2d.tl-dev-1.rockspec
-	@echo "Validating tecs_render.tl..."
-	@luarocks lint build/tecs_render.tl-dev-1.rockspec
-	@echo "Validating tecs_controller.tl..."
-	@luarocks lint build/tecs_controller.tl-dev-1.rockspec
-	@echo "Validating tecs_assets.tl..."
-	@luarocks lint build/tecs_assets.tl-dev-1.rockspec
-	@echo "All rockspecs validated successfully!"
+	@echo "Validating tecs..."
+	@luarocks lint tecs-dev-1.rockspec
+	@echo "Validating tecs2d..."
+	@luarocks lint tecs2d-dev-1.rockspec
+	@echo "Rockspecs validated successfully!"
 	@echo ""
 	@echo "Note: For full installation testing, update the source.url field in rockspecs"
 	@echo "to point to your actual git repository, then run luarocks install locally."
 
 # ================= Examples =================
-tecs-controller-example: build
-	@./examples/tecs_controller/run.sh
 
-tecs-assets-example: build
-	@./examples/tecs_assets/run.sh
+# Example directories (explicit list for autocomplete)
+EXAMPLE_DIRS := examples/text-bench examples/sprite-collision examples/assets examples/audio \
+                examples/ball-bench examples/controller examples/lighting \
+                examples/orbiting-shapes examples/particles examples/physics \
+                examples/physics-bench examples/shape-bench examples/sprite-bench \
+                examples/camera-target examples/camera-multi examples/tiled examples/transform-demo examples/ui
 
-tecs-render-example: build
-	@./examples/tecs_render/run.sh
+# Type check all examples
+check-examples: build
+	@echo "Type checking examples..."
+	@for dir in $(EXAMPLE_DIRS); do \
+		name=$$(basename "$$dir"); \
+		echo "=== Checking $$name ==="; \
+		(cd "$$dir" && $(TEAL_ENV) tl check -I src $$(find src -name "*.tl")) || exit 1; \
+	done
+	@echo "All examples type-check successfully!"
 
-ballbench-example: build
-	@./examples/ballbench/run.sh $(ENTITIES) $(DRAW)
+# Build all examples
+build-examples: build
+	@echo "Building examples..."
+	@for dir in $(EXAMPLE_DIRS); do \
+		echo "  Building $$(basename $$dir)..."; \
+		(cd "$$dir" && $(TEAL_ENV) tl run shared/run.tl --build-only) || exit 1; \
+	done
+	@echo "All examples built successfully!"
+
+# Individual example targets (explicit for autocomplete)
+example-text-bench: build $(LOVE12_BIN)
+	@cd examples/text-bench && TECS_BENCHMARK=1 $(TEAL_ENV) tl run shared/run.tl $(ENTITIES)
+
+example-sprite-collision: build $(LOVE12_BIN)
+	@cd examples/sprite-collision && $(TEAL_ENV) tl run shared/run.tl
+
+example-assets: build $(LOVE12_BIN)
+	@cd examples/assets && $(TEAL_ENV) tl run shared/run.tl
+
+example-audio: build $(LOVE12_BIN)
+	@cd examples/audio && $(TEAL_ENV) tl run shared/run.tl
+
+example-ball-bench: build $(LOVE12_BIN)
+	@cd examples/ball-bench && TECS_BENCHMARK=1 $(TEAL_ENV) tl run shared/run.tl $(ENTITIES)
+
+example-circles: build $(LOVE12_BIN)
+	@cd examples/circles && $(TEAL_ENV) tl run shared/run.tl $(ENTITIES)
+
+example-controller: build $(LOVE12_BIN)
+	@cd examples/controller && $(TEAL_ENV) tl run shared/run.tl
+
+example-lighting: build $(LOVE12_BIN)
+	@cd examples/lighting && $(TEAL_ENV) tl run shared/run.tl $(ENTITIES)
+
+example-love-interop: build $(LOVE12_BIN)
+	@cd examples/love-interop && $(TEAL_ENV) tl run shared/run.tl
+
+example-orbiting-shapes: build $(LOVE12_BIN)
+	@cd examples/orbiting-shapes && $(TEAL_ENV) tl run shared/run.tl
+
+example-particles: build $(LOVE12_BIN)
+	@cd examples/particles && $(TEAL_ENV) tl run shared/run.tl
+
+example-physics: build $(LOVE12_BIN)
+	@cd examples/physics && $(TEAL_ENV) tl run shared/run.tl
+
+example-physics-bench: build $(LOVE12_BIN)
+	@cd examples/physics-bench && TECS_BENCHMARK=1 $(TEAL_ENV) tl run shared/run.tl $(ENTITIES)
+
+example-shape-bench: build $(LOVE12_BIN)
+	@cd examples/shape-bench && TECS_BENCHMARK=1 SHAPE=$(SHAPE) $(TEAL_ENV) tl run shared/run.tl $(ENTITIES)
+
+example-sprite-bench: build $(LOVE12_BIN)
+	@cd examples/sprite-bench && TECS_BENCHMARK=1 $(TEAL_ENV) tl run shared/run.tl $(ENTITIES)
+
+example-sprite-onloop: build $(LOVE12_BIN)
+	@cd examples/sprite-onloop && $(TEAL_ENV) tl run shared/run.tl
+
+example-tiled: build $(LOVE12_BIN)
+	@cd examples/tiled && $(TEAL_ENV) tl run shared/run.tl
+
+example-transform-demo: build $(LOVE12_BIN)
+	@cd examples/transform-demo && $(TEAL_ENV) tl run shared/run.tl
+
+example-ui: build $(LOVE12_BIN)
+	@cd examples/ui && $(TEAL_ENV) tl run shared/run.tl
+
+example-mesh-demo: build $(LOVE12_BIN)
+	@cd examples/mesh-demo && $(TEAL_ENV) tl run shared/run.tl
+
+example-layer-fx: build $(LOVE12_BIN)
+	@cd examples/layer-fx && $(TEAL_ENV) tl run shared/run.tl
+
+example-material-demo: build $(LOVE12_BIN)
+	@cd examples/material-demo && $(TEAL_ENV) tl run shared/run.tl
+
+example-camera-multi: build $(LOVE12_BIN)
+	@cd examples/camera-multi && $(TEAL_ENV) tl run shared/run.tl
+
+example-msdf-text: build $(LOVE12_BIN)
+	@cd examples/msdf-text && $(TEAL_ENV) tl run shared/run.tl
+
+example-camera-target: build $(LOVE12_BIN)
+	@cd examples/camera-target && $(TEAL_ENV) tl run shared/run.tl
+
+example-tween-demo: build $(LOVE12_BIN)
+	@cd examples/tween-demo && $(TEAL_ENV) tl run shared/run.tl
+
+example-save-game: build $(LOVE12_BIN)
+	@cd examples/save-game && $(TEAL_ENV) tl run shared/run.tl
+
+# Create a new example from template
+new-example:
+	@if [ -z "$(NAME)" ]; then \
+		echo "Usage: make new-example NAME=my-example"; \
+		exit 1; \
+	fi
+	@if [ -d "examples/$(NAME)" ]; then \
+		echo "Error: examples/$(NAME) already exists"; \
+		exit 1; \
+	fi
+	@echo "Creating example: $(NAME)"
+	@mkdir -p examples/$(NAME)/src
+	@ln -s ../shared examples/$(NAME)/shared
+	@ln -s shared/tlconfig.lua examples/$(NAME)/tlconfig.lua
+	@cp examples/_template/src/conf.tl examples/$(NAME)/src/
+	@cp examples/_template/src/main.tl examples/$(NAME)/src/
+	@echo "Created examples/$(NAME)/"
+	@echo "  - Edit src/main.tl to implement your example"
+	@echo "  - Run with: make example-$(NAME)"
 
 typecheck:
 	@echo "Type checking source files..."
-	@cyan check src/**/*.tl
+	@$(TEAL_ENV) tl check $(SOURCE_TL)
 
-# Generate rockspecs from current file structure into build/
-rockspecs: build
-	@echo "Generating rockspecs from file discovery..."
-	@tl run cyan-plugins/generate_rockspecs.tl
 
 # Generate documentation using tealdoc (TODO: Doesn't really work for Tecs at the moment)
 docs: build
 	@echo "Generating tealdoc documentation..."
 	@mkdir -p build/docs
-	@tealdoc html src/tecs/init.tl src/tecs/types.tl -o build/docs/tecs.html
+	@$(TEAL_ENV) tealdoc html src/tecs/init.tl src/tecs/types.tl -o build/docs/tecs.html
 	@echo "Documentation generated in build/docs/"
+
+# Run Vite documentation dev server with hot reload
+docs-dev:
+	@cd docs && [ -d node_modules ] || npm install
+	@cd docs && npm run docs:dev
+
+# ================= Benchmarks =================
+# All bench targets accept three optional filters (handy for targeted profiling):
+#   CASE=<n>                run only the case at 1-based index n (see "Running N/M" in output)
+#   VARIANTS=a,b            run only the named variants (CSV, defaults to all)
+#   PARAMS='k=v,k=v'        run only expansions whose parameters match all given values
+#                           (values are coerced: "true"/"false" → boolean, numbers → number)
+# Examples:
+#   make ecs-bench CASE=3 VARIANTS=tecs
+#   make ecs-bench PARAMS='count=1000,defer=true'
+#   make ecs-bench CASE=12 PARAMS='count=1000,defer=true' VARIANTS=tecs
+json-bench: build
+	@cd benches/json-bench && BENCH_CASE="$(CASE)" BENCH_VARIANTS="$(VARIANTS)" BENCH_PARAMS="$(PARAMS)" luajit main.lua
+
+# Set EVOLVED_PATH to point at a checkout of https://github.com/BlackMATov/evolved.lua
+# (defaults to ~/projects/evolved.lua).
+ecs-bench: build
+	@cd benches/ecs-bench && BENCH_CASE="$(CASE)" BENCH_VARIANTS="$(VARIANTS)" BENCH_PARAMS="$(PARAMS)" luajit main.lua
+
+snapshot-bench: build
+	@cd benches/snapshot-bench && BENCH_CASE="$(CASE)" BENCH_VARIANTS="$(VARIANTS)" BENCH_PARAMS="$(PARAMS)" luajit main.lua
+
+bitset-bench: build
+	@cd benches/bitset && BENCH_CASE="$(CASE)" BENCH_VARIANTS="$(VARIANTS)" BENCH_PARAMS="$(PARAMS)" luajit main.lua
+
+# ================= Love2D 12 (GPU Features) =================
+
+# Auto-download Love2D 12 if missing
+$(LOVE12_BIN):
+	@$(MAKE) --no-print-directory download-love12
+
+# Download Love2D 12 nightly (nightly.link wraps artifacts in a double-zip)
+download-love12:
+	@rm -rf $(LOVE12_DIR)
+	@mkdir -p $(LOVE12_DIR)
+ifeq ($(UNAME_S),Darwin)
+	@echo "Downloading Love2D 12 for macOS..."
+	@curl -sL -o $(LOVE12_DIR)/outer.zip $(NIGHTLY_BASE)/love-macos.zip
+	@cd $(LOVE12_DIR) && unzip -q outer.zip && unzip -q love-macos.zip && rm -f outer.zip love-macos.zip
+else ifeq ($(UNAME_S),Linux)
+	@echo "Downloading Love2D 12 for Linux..."
+	@curl -sL -o $(LOVE12_DIR)/outer.zip $(NIGHTLY_BASE)/love-linux-X64.AppImage.zip
+	@cd $(LOVE12_DIR) && unzip -q outer.zip && rm -f outer.zip && mv love-* love && chmod +x love
+else
+	@echo "Downloading Love2D 12 for Windows..."
+	@curl -sL -o $(LOVE12_DIR)/outer.zip $(NIGHTLY_BASE)/love-windows-x64.zip
+	@cd $(LOVE12_DIR) && unzip -q outer.zip && rm -f outer.zip
+endif
+	@echo "Love2D 12 installed to $(LOVE12_DIR)/"
+
+# Check if Love2D 12 is installed
+check-love12:
+	@if [ ! -f "$(LOVE12_BIN)" ]; then \
+		echo "Love2D 12 not found. Run 'make download-love12' to install."; \
+		exit 1; \
+	fi
+	@echo "Love2D 12 found at $(LOVE12_BIN)"
+	@$(LOVE12_BIN) --version
+
+system-info: $(LOVE12_BIN)
+	@$(LOVE) scripts/dump_system_info.lua
 
 help:
 	@echo "Available Makefile targets:"
-	@echo "  build       - Incremental build (cyan only)"
-	@echo "  rebuild     - Force full rebuild (clean + compile)"
-	@echo "  test        - Run tests with parallel compilation"
-	@echo "  test-no-ffi - Run tests with FFI disabled"
-	@echo "  typecheck   - Type check source files only"
-	@echo "  check       - Type check source files only"
-	@echo "  rockspecs   - Generate rockspecs from file structure"
-	@echo "  docs        - Generate tealdoc documentation"
-	@echo "  clean       - Remove build directory"
+	@echo "  build          - Incremental build (tl gen)"
+	@echo "  rebuild        - Force full rebuild (clean + compile)"
+	@echo "  dev            - Install development dependencies"
+	@echo "  test           - Run tests"
+	@echo "  test-no-ffi    - Run tests with FFI disabled"
+	@echo "  typecheck      - Type check source files only"
+	@echo "  check-examples - Type check all examples"
+	@echo "  build-examples - Build all examples"
+	@echo "  clean          - Remove build directory"
 	@echo ""
-	@echo "Parallel builds:"
-	@echo "  make -j4 test  - Recommended for fast testing"
-	@echo "  make -j8 test  - Max parallelism"
+	@echo "Love2D 12 (GPU features):"
+	@echo "  download-love12 - Download Love2D 12 nightly (auto-runs when needed)"
+	@echo "  check-love12    - Verify Love2D 12 installation"
+	@echo "  system-info     - Dump system info for bug reports (copies to clipboard)"
 	@echo ""
-	@echo "Optimizations:"
-	@echo "  ✓ Incremental compilation"
-	@echo "  ✓ Parallel test dependencies"
-	@echo "  ✓ Busted handles test type checking automatically"
+	@echo "Examples (run with 'make example-<name>'):"
+	@echo "  example-text-bench   - Text rendering benchmark"
+	@echo "  example-sprite-collision    - Slice-based collision demo"
+	@echo "  example-assets              - Asset loading demo"
+	@echo "  example-audio               - Spatial audio demo"
+	@echo "  example-ball-bench          - Ball physics benchmark"
+	@echo "  example-controller          - Gamepad input demo"
+	@echo "  example-lighting            - Lighting & shadows stress test"
+	@echo "  example-love-interop        - GPU/CPU draw interleaving demo"
+	@echo "  example-orbiting-shapes     - Hierarchical transform demo"
+	@echo "  example-particles           - Particle effects demo"
+	@echo "  example-physics             - Physics collision demo"
+	@echo "  example-physics-bench       - Physics benchmark"
+	@echo "  example-shape-bench         - Shape rendering benchmark (SHAPE=rectangle|circle|ellipse|arc|line)"
+	@echo "  example-sprite-bench        - Sprite rendering benchmark"
+	@echo "  example-tiled     			 - Tiled map + physics collision"
+	@echo "  example-transform-demo      - Transform/pivot/shader showcase"
+	@echo "  example-ui                  - UI layout system demo"
+	@echo "  example-layer-fx            - Per-layer shader effects demo"
+	@echo "  example-material-demo       - GPU material system demo"
+	@echo "  example-camera-multi           - Multi-camera demo (minimap + splitscreen)"

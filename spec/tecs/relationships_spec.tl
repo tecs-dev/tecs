@@ -1,0 +1,605 @@
+require("busted")
+local tecs <const> = require("tecs")
+local luassert <const> = require("luassert")
+
+describe("relationships", function()
+    local world: tecs.World
+
+    before_each(function()
+        world = tecs.newWorld()
+    end)
+
+    describe("relationship teardown (cascade)", function()
+        it("should cascade delete when parent is despawned", function()
+            local ChildOf = tecs.newTagRelationship({
+                name = "ChildOfCascadeTest",
+                exclusive = true,
+                sparse = true,
+                reverseIndex = true,
+                cascadeDelete = true,
+            })
+
+            local parent = world:spawn()
+            local child1 = world:spawn(ChildOf(parent) as tecs.Component)
+            local child2 = world:spawn(ChildOf(parent) as tecs.Component)
+
+            -- Commit spawns
+            world:update(0)
+
+            luassert.is_true(world:isAlive(parent), "Parent should be alive initially")
+            luassert.is_true(world:isAlive(child1), "Child1 should be alive")
+            luassert.is_true(world:isAlive(child2), "Child2 should be alive")
+
+            -- Despawn parent should cascade to children
+            world:despawn(parent)
+
+            -- Force changes to be committed
+            world:update(0)
+
+            luassert.is_false(world:isAlive(parent), "Parent should be despawned")
+            luassert.is_false(world:isAlive(child1), "Child1 should be cascade deleted")
+            luassert.is_false(world:isAlive(child2), "Child2 should be cascade deleted")
+        end)
+
+        it("cascade-deletes children that carry many unrelated components", function()
+            -- Mirrors a real pattern (bubble + label-child with several
+            -- rendering components). If cascade misbehaves when the child has
+            -- non-trivial component baggage, this catches it.
+            local record Marker is tecs.Component end
+            local record Pos is tecs.Component
+                x: number
+                y: number
+                metamethod __call: function(self, x: number, y: number): Pos
+            end
+            local record Tint is tecs.Component
+                r: number
+                g: number
+                b: number
+                metamethod __call: function(self, r: number, g: number, b: number): Tint
+            end
+            local MarkerComp = tecs.newTagComponent({
+                name = "CascadeMarker" .. math.random(1, 1000000),
+                container = Marker,
+            })
+            local PosComp: Pos = tecs.newComponent({
+                name = "CascadePos" .. math.random(1, 1000000),
+                container = Pos,
+                fields = {"x", "y"},
+            })
+            local TintComp: Tint = tecs.newComponent({
+                name = "CascadeTint" .. math.random(1, 1000000),
+                container = Tint,
+                fields = {"r", "g", "b"},
+            })
+            local ChildOf = tecs.newTagRelationship({
+                name = "CascadeChildOf" .. math.random(1, 1000000),
+                exclusive = true,
+                sparse = true,
+                reverseIndex = true,
+                cascadeDelete = true,
+            })
+
+            local parent = world:spawn(PosComp(1, 2), TintComp(0.5, 0.5, 0.5), MarkerComp)
+            local labels: {integer} = {}
+            for i = 1, 5 do
+                labels[i] = world:spawn(
+                    ChildOf(parent) as tecs.Component,
+                    PosComp(i, i * 2),
+                    TintComp(1, 1, 1),
+                    MarkerComp
+                )
+            end
+            world:update(0)
+
+            luassert.is_true(world:isAlive(parent))
+            for i = 1, 5 do
+                luassert.is_true(world:isAlive(labels[i]), "Label " .. i .. " alive pre-despawn")
+            end
+
+            world:despawn(parent)
+            world:update(0)
+
+            luassert.is_false(world:isAlive(parent))
+            for i = 1, 5 do
+                luassert.is_false(
+                    world:isAlive(labels[i]),
+                    "Label " .. i .. " should have cascade-despawned"
+                )
+            end
+        end)
+
+        it("should not cascade delete when relationship is just removed", function()
+            local ChildOf = tecs.newRelationship({
+                name = "ChildOfNoCascadeTest",
+                exclusive = true,
+            })
+
+            local parent = world:spawn()
+            local child = world:spawn(ChildOf(parent) as tecs.Component)
+
+            -- Commit spawns
+            world:update(0)
+
+            luassert.is_true(world:isAlive(parent), "Parent should be alive")
+            luassert.is_true(world:isAlive(child), "Child should be alive")
+
+            -- Remove relationship (orphan the child)
+            world:remove(child, ChildOf(parent) as tecs.Component)
+
+            -- Force changes to be committed
+            world:update(0)
+
+            luassert.is_true(world:isAlive(parent), "Parent should still be alive")
+            luassert.is_true(world:isAlive(child), "Child should still be alive (orphaned, not deleted)")
+            -- For exclusive relationships, passing the wildcard should work
+            -- But currently it returns the wildcard container instead of nil
+            -- This might be a separate bug to fix
+            local childOfRel = world:get(child, ChildOf(parent) as tecs.Component)
+            luassert.is_nil(childOfRel, "Child should no longer have specific ChildOf(parent)")
+        end)
+
+        it("should not cascade delete when reparenting", function()
+            local ChildOf = tecs.newRelationship({
+                name = "ChildOfReparentTest",
+                exclusive = true,
+            })
+
+            local parent1 = world:spawn()
+            local parent2 = world:spawn()
+            local child = world:spawn(ChildOf(parent1) as tecs.Component)
+
+            -- Commit spawns
+            world:update(0)
+
+            luassert.is_true(world:isAlive(child), "Child should be alive")
+
+            -- Reparent to parent2 (exclusive relationship replaces parent1)
+            world:set(child, ChildOf(parent2) as tecs.Component)
+
+            -- Force changes to be committed
+            world:update(0)
+
+            luassert.is_true(world:isAlive(parent1), "Parent1 should still be alive")
+            luassert.is_true(world:isAlive(parent2), "Parent2 should still be alive")
+            luassert.is_true(world:isAlive(child), "Child should still be alive after reparenting")
+
+            local childOfRel = world:get(child, ChildOf(parent2) as tecs.Component)
+            luassert.is_not_nil(childOfRel, "Child should have ChildOf(parent2)")
+            luassert.equals(parent2, (childOfRel as tecs.Relationship).target, "Child should be child of parent2")
+
+            -- Exclusive relationship should have removed the old ChildOf(parent1)
+            local oldRel = world:get(child, ChildOf(parent1) as tecs.Component)
+            luassert.is_nil(oldRel, "Child should no longer have ChildOf(parent1) after reparenting")
+        end)
+    end)
+
+    describe("relationship creation methods", function()
+        local components = require("tecs.internal.components")
+        local types = require("tecs.types")
+        local type Relationship = types.components.Relationship
+
+        describe("newTagRelationship", function()
+            it("should create a basic tag relationship", function()
+                local TagFollows = components.newTagRelationship({
+                    name = "TagFollows"
+                })
+
+                luassert.is_not_nil(TagFollows)
+                luassert.is_equal("TagFollows", TagFollows.componentName)
+                luassert.is_not_nil(TagFollows.componentType)
+                luassert.is_not_nil(TagFollows.exclusiveRelationship)
+            end)
+
+            it("should support exclusive option", function()
+                local ExclusiveTag = components.newTagRelationship({
+                    name = "ExclusiveTag",
+                    exclusive = true
+                })
+
+                luassert.is_true(ExclusiveTag.exclusiveRelationship)
+            end)
+
+            it("should work with targeting method", function()
+                local TagFollows2 = components.newTagRelationship({
+                    name = "TagFollows2"
+                })
+
+                local entity1 = world:spawn()
+                local entity2 = world:spawn()
+
+                local targetingResult = TagFollows2:targeting(entity2)
+                luassert.is_not_nil(targetingResult)
+            end)
+        end)
+
+        describe("newFFIRelationship", function()
+            it("should create an FFI relationship with data fields", function()
+                local record TestFFIRel is Relationship
+                    delay: number
+                    power: integer
+                end
+
+                local FFIRel = components.newFFIRelationship({
+                    name = "FFIRel",
+                    container = TestFFIRel,
+                    fields = {
+                        {"delay", "float"},
+                        {"power", "int32_t"}
+                    }
+                })
+
+                luassert.is_not_nil(FFIRel)
+                luassert.is_equal("FFIRel", FFIRel.componentName)
+                luassert.is_equal(TestFFIRel, FFIRel.componentType)
+                luassert.is_not_nil(FFIRel.exclusiveRelationship)
+            end)
+
+            it("should support exclusive option and targeting", function()
+                local record ExclusiveFFIRel is Relationship
+                    value: integer
+                end
+
+                local FFIRel = components.newFFIRelationship({
+                    name = "ExclusiveFFIRel",
+                    container = ExclusiveFFIRel,
+                    fields = {{"value", "int32_t"}},
+                    exclusive = true
+                })
+
+                luassert.is_true(FFIRel.exclusiveRelationship)
+
+                local entity1 = world:spawn()
+                local entity2 = world:spawn()
+
+                local targetingResult = FFIRel:targeting(entity2)
+                luassert.is_not_nil(targetingResult)
+            end)
+
+            it("should run custom __call for FFI relationships", function()
+                local callCount = 0
+
+                local record CustomCallFFIRel is Relationship
+                    value: integer
+                    doubled: integer
+                end
+
+                local FFIRel = components.newFFIRelationship({
+                    name = "CustomCallFFIRel",
+                    container = CustomCallFFIRel,
+                    fields = {{"value", "int32_t"}, {"doubled", "int32_t"}},
+                    __call = function(instance: CustomCallFFIRel, target: integer, value: integer)
+                        callCount = callCount + 1
+                        instance.target = target
+                        instance.value = value
+                        instance.doubled = value * 2
+                    end
+                })
+
+                local inst = FFIRel(world:spawn(), 21) as CustomCallFFIRel
+                luassert.is_equal(1, callCount)
+                luassert.is_equal(21, inst.value)
+                luassert.is_equal(42, inst.doubled)
+            end)
+
+            it("should apply the provided metatable to FFI relationship instances", function()
+                local record MetaFFIRel is Relationship
+                    value: integer
+                end
+
+                local mt = {
+                    __index = {
+                        bonus = function(self: MetaFFIRel): integer
+                            return self.value + 5
+                        end
+                    }
+                }
+
+                local FFIRel = components.newFFIRelationship({
+                    name = "MetaFFIRel",
+                    container = MetaFFIRel,
+                    fields = {{"value", "int32_t"}},
+                    metatable = mt,
+                    init = function(instance: MetaFFIRel, target: integer, value: integer)
+                        instance.target = target
+                        instance.value = value
+                    end
+                })
+
+                local inst = FFIRel(world:spawn(), 9) as any
+                luassert.is_equal(14, inst:bonus())
+            end)
+        end)
+
+        describe("Integration test", function()
+            it("should create both types without conflicts", function()
+                local TagRel = components.newTagRelationship({
+                    name = "PerfTagRel"
+                })
+
+                local record DataFFIRel is Relationship
+                    value: number
+                end
+
+                local FFIDataRel = components.newFFIRelationship({
+                    name = "PerfFFIDataRel",
+                    container = DataFFIRel,
+                    fields = {{"value", "double"}}
+                })
+
+                local TableRel = components.newRelationship({
+                    name = "PerfTableRel"
+                })
+
+                luassert.is_not_nil(TagRel)
+                luassert.is_not_nil(FFIDataRel)
+                luassert.is_not_nil(TableRel)
+
+                luassert.is_not_nil(TagRel.componentName)
+                luassert.is_not_nil(FFIDataRel.componentName)
+                luassert.is_not_nil(TableRel.componentName)
+            end)
+        end)
+    end)
+
+    describe("wildcard relationship queries", function()
+        it("should allow querying for any entity with a relationship via wildcard", function()
+            local Likes = tecs.newRelationship({
+                name = "LikesWildcardTest"
+            })
+
+            local target1 = world:spawn()
+            local target2 = world:spawn()
+            local entity1 = world:spawn(Likes(target1) as tecs.Component)
+            local entity2 = world:spawn(Likes(target2) as tecs.Component)
+            local entityNoRel = world:spawn()
+
+            world:update(0)
+
+            -- Query using the wildcard relationship (no specific target)
+            local query = world:query({include = {Likes}})
+            local foundEntities: {integer: boolean} = {}
+            for archetype, len, entities in query:iter() do
+                for row = 1, len do
+                    foundEntities[entities[row]] = true
+                end
+            end
+
+            luassert.is_true(foundEntities[entity1], "entity1 should be found with wildcard query")
+            luassert.is_true(foundEntities[entity2], "entity2 should be found with wildcard query")
+            luassert.is_nil(foundEntities[entityNoRel], "entityNoRel should NOT be found")
+            luassert.is_nil(foundEntities[target1], "target1 should NOT be found (it's a target, not a source)")
+            luassert.is_nil(foundEntities[target2], "target2 should NOT be found (it's a target, not a source)")
+        end)
+
+        it("should allow querying for specific target with :targeting()", function()
+            local Follows = tecs.newRelationship({
+                name = "FollowsTargetingTest"
+            })
+
+            local leader1 = world:spawn()
+            local leader2 = world:spawn()
+            local follower1 = world:spawn(Follows(leader1) as tecs.Component)
+            local follower2 = world:spawn(Follows(leader2) as tecs.Component)
+            local followerBoth = world:spawn(Follows(leader1) as tecs.Component, Follows(leader2) as tecs.Component)
+
+            world:update(0)
+
+            -- Query for entities following leader1 specifically
+            local query = world:query({include = {Follows:targeting(leader1)}})
+            local foundEntities: {integer: boolean} = {}
+            for archetype, len, entities in query:iter() do
+                for row = 1, len do
+                    foundEntities[entities[row]] = true
+                end
+            end
+
+            luassert.is_true(foundEntities[follower1], "follower1 should be found")
+            luassert.is_true(foundEntities[followerBoth], "followerBoth should be found")
+            luassert.is_nil(foundEntities[follower2], "follower2 should NOT be found (follows leader2)")
+        end)
+
+        it("should work with FFI tag relationships and componentHash propagation", function()
+            local components = require("tecs.internal.components")
+
+            local ChildOf = components.newTagRelationship({
+                name = "ChildOfHashTest"
+            })
+
+            local parent = world:spawn()
+            world:update(0)
+
+            -- Spawn child with ChildOf - this tests componentHash propagation
+            -- The FFI instance needs componentHash for archetype hashing
+            local child = world:spawn(ChildOf(parent) as tecs.Component)
+            world:update(0)
+
+            -- Query using wildcard should find the child
+            local query = world:query({include = {ChildOf}})
+            local foundEntities: {integer: boolean} = {}
+            for archetype, len, entities in query:iter() do
+                for row = 1, len do
+                    foundEntities[entities[row]] = true
+                end
+            end
+
+            luassert.is_true(foundEntities[child], "child should be found with wildcard query")
+            luassert.is_nil(foundEntities[parent], "parent should NOT be found")
+        end)
+
+        it("should give per-entity FFI relationships unique componentId", function()
+            local components = require("tecs.internal.components")
+
+            local ChildOf = components.newTagRelationship({
+                name = "ChildOfUniqueIdTest"
+            })
+
+            local instance1 = ChildOf(100)
+            local instance2 = ChildOf(200)
+            local instance1Again = ChildOf(100)
+
+            -- Same target should return same cached instance
+            luassert.equals(instance1, instance1Again)
+
+            -- Different targets should have different IDs
+            luassert.not_equals(instance1.componentId, instance2.componentId)
+
+            -- tostring should include target for disambiguation
+            luassert.matches("100", tostring(instance1))
+            luassert.matches("200", tostring(instance2))
+        end)
+
+        it("should correctly group entities with different relationship targets", function()
+            local components = require("tecs.internal.components")
+
+            local ChildOf = components.newTagRelationship({
+                name = "ChildOfGroupingTest"
+            })
+
+            local parent1 = world:spawn()
+            local parent2 = world:spawn()
+            world:update(0)
+
+            -- Spawn children with different parents
+            local child1 = world:spawn(ChildOf(parent1) as tecs.Component)
+            local child2 = world:spawn(ChildOf(parent2) as tecs.Component)
+            world:update(0)
+
+            -- Query for children of parent1
+            local query1 = world:query({include = {ChildOf:targeting(parent1)}})
+            local found1: {integer: boolean} = {}
+            for archetype, len, entities in query1:iter() do
+                for row = 1, len do
+                    found1[entities[row]] = true
+                end
+            end
+
+            luassert.is_true(found1[child1], "child1 should be found targeting parent1")
+            luassert.is_nil(found1[child2], "child2 should NOT be found (targets parent2)")
+        end)
+    end)
+
+    describe("world:getFirstRelationship", function()
+        it("should return the relationship instance with correct target", function()
+            local ChildOf = tecs.newTagRelationship({
+                name = "ChildOfGetFirstTest",
+                exclusive = true
+            })
+
+            local parent = world:spawn()
+            local child = world:spawn(ChildOf(parent) as tecs.Component)
+            world:update(0)
+
+            local rel = world:getFirstRelationship(child, ChildOf)
+            luassert.is_not_nil(rel, "should return relationship instance")
+            luassert.equals(parent, rel.target, "should have correct target")
+        end)
+
+        it("last exclusive sibling wins when multiple passed to spawn", function()
+            local ChildOf = tecs.newTagRelationship({
+                name = "ChildOfExclusiveSpawnTest",
+                exclusive = true
+            })
+
+            local parent1 = world:spawn()
+            local parent2 = world:spawn()
+            local parent3 = world:spawn()
+
+            -- Spawn with three exclusive siblings: only the last should win
+            local child = world:spawn(
+                ChildOf(parent1) as tecs.Component,
+                ChildOf(parent2) as tecs.Component,
+                ChildOf(parent3) as tecs.Component
+            )
+            world:update(0)
+
+            local rel = world:getFirstRelationship(child, ChildOf)
+            luassert.is_not_nil(rel, "should return relationship instance")
+            luassert.equals(parent3, rel.target, "last exclusive sibling should win")
+        end)
+
+        it("interleaved exclusive containers resolve independently in spawn", function()
+            local ChildOf = tecs.newTagRelationship({
+                name = "ChildOfInterleavedTest",
+                exclusive = true
+            })
+            local MemberOf = tecs.newTagRelationship({
+                name = "MemberOfInterleavedTest",
+                exclusive = true
+            })
+
+            local parentA = world:spawn()
+            local parentB = world:spawn()
+            local groupA = world:spawn()
+            local groupB = world:spawn()
+
+            -- Interleave two different exclusive containers in the same spawn.
+            -- Pattern: ChildOf(A), MemberOf(A), ChildOf(B), MemberOf(B)
+            -- Expected: only ChildOf(B) and MemberOf(B) survive.
+            local entity = world:spawn(
+                ChildOf(parentA) as tecs.Component,
+                MemberOf(groupA) as tecs.Component,
+                ChildOf(parentB) as tecs.Component,
+                MemberOf(groupB) as tecs.Component
+            )
+            world:update(0)
+
+            local childRel = world:getFirstRelationship(entity, ChildOf)
+            local memberRel = world:getFirstRelationship(entity, MemberOf)
+            luassert.is_not_nil(childRel, "should have ChildOf relationship")
+            luassert.is_not_nil(memberRel, "should have MemberOf relationship")
+            luassert.equals(parentB, childRel.target, "ChildOf should resolve to last B")
+            luassert.equals(groupB, memberRel.target, "MemberOf should resolve to last B")
+        end)
+
+        it("should return nil for entities without the relationship", function()
+            local ChildOf = tecs.newTagRelationship({
+                name = "ChildOfGetFirstNilTest",
+                exclusive = true
+            })
+
+            local entity = world:spawn()
+            world:update(0)
+
+            local rel = world:getFirstRelationship(entity, ChildOf)
+            luassert.is_nil(rel, "should return nil for entity without relationship")
+        end)
+
+        it("should return correct target after reparenting", function()
+            local ChildOf = tecs.newTagRelationship({
+                name = "ChildOfGetFirstReparentTest",
+                exclusive = true
+            })
+
+            local parent1 = world:spawn()
+            local parent2 = world:spawn()
+            local child = world:spawn(ChildOf(parent1) as tecs.Component)
+            world:update(0)
+
+            -- Reparent
+            world:set(child, ChildOf(parent2) as tecs.Component)
+            world:update(0)
+
+            local rel = world:getFirstRelationship(child, ChildOf)
+            luassert.is_not_nil(rel, "should return relationship after reparent")
+            luassert.equals(parent2, rel.target, "should have new parent as target")
+        end)
+
+        it("should work with non-exclusive relationships", function()
+            local Likes = tecs.newTagRelationship({
+                name = "LikesGetFirstTest"
+            })
+
+            local target1 = world:spawn()
+            local target2 = world:spawn()
+            local entity = world:spawn(Likes(target1) as tecs.Component, Likes(target2) as tecs.Component)
+            world:update(0)
+
+            local rel = world:getFirstRelationship(entity, Likes)
+            luassert.is_not_nil(rel, "should return a relationship instance")
+            -- Should be one of the two targets
+            local target = rel.target
+            luassert.is_true(target == target1 or target == target2,
+                "should return one of the relationship targets")
+        end)
+    end)
+end)

@@ -1,0 +1,109 @@
+<svg width="66" height="37" viewBox="0 0 66 37" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      @font-face {
+        font-family: 'Jersey15';
+        src: url('data:font/woff2;base64,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') format('woff2');
+      }
+    </style>
+    <radialGradient id="glow" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#120a1c" stop-opacity="1"/>
+      <stop offset="60%" stop-color="#0a0612" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#060408" stop-opacity="1"/>
+    </radialGradient>
+    <radialGradient id="lensTopLeft" cx="8%" cy="8%" r="45%">
+      <stop offset="0%" stop-color="white" stop-opacity="0.45"/>
+      <stop offset="20%" stop-color="white" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="transparent" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="lensBottomRight" cx="92%" cy="85%" r="35%">
+      <stop offset="0%" stop-color="white" stop-opacity="0.25"/>
+      <stop offset="20%" stop-color="white" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="transparent" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="nesRed" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ee5050"/>
+      <stop offset="55%" stop-color="#ee5050"/>
+      <stop offset="59%" stop-color="#b03030"/>
+      <stop offset="100%" stop-color="#b03030"/>
+    </linearGradient>
+    <pattern id="scan" patternUnits="userSpaceOnUse" width="57" height="4">
+      <rect width="57" height="2" fill="transparent"/>
+      <rect y="2" width="57" height="2" fill="black" opacity="0.12"/>
+    </pattern>
+    <linearGradient id="woodTop" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#4E3628"/>
+      <stop offset="100%" stop-color="#3A241E"/>
+    </linearGradient>
+    <linearGradient id="woodLeft" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#4E3628"/>
+      <stop offset="100%" stop-color="#3A241E"/>
+    </linearGradient>
+    <linearGradient id="woodBottom" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#2E1A16"/>
+      <stop offset="100%" stop-color="#1A100E"/>
+    </linearGradient>
+    <linearGradient id="woodRight" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2E1A16"/>
+      <stop offset="100%" stop-color="#1A100E"/>
+    </linearGradient>
+    <linearGradient id="panelGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#555"/>
+      <stop offset="100%" stop-color="#2a2a2a"/>
+    </linearGradient>
+    <rect id="shape" x="3" y="3" width="51" height="31" rx="3"/>
+    <clipPath id="screen">
+      <use href="#shape"/>
+    </clipPath>
+    <clipPath id="tvClip">
+      <rect x="0" y="0" width="66" height="37" rx="1"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#tvClip)">
+    <!-- Wood border -->
+    <rect x="0" y="0" width="66" height="37" fill="#2E1A16"/>
+    <line x1="0" y1="36" x2="66" y2="36" stroke="url(#woodBottom)" stroke-width="1"/>
+    <line x1="0" y1="0.5" x2="66" y2="0.5" stroke="url(#woodTop)" stroke-width="1"/>
+    <line x1="0.5" y1="0" x2="0.5" y2="37" stroke="url(#woodLeft)" stroke-width="1"/>
+
+    <!-- Control panel -->
+    <rect x="56" y="3" width="8" height="31" fill="url(#panelGrad)"/>
+    <!-- Dial -->
+    <circle cx="60" cy="10" r="2.5" fill="#1a1a1a" stroke="#444" stroke-width="0.5"/>
+    <rect x="59.5" y="8" width="1" height="2" fill="#777" rx="0.3"/>
+    <!-- Small dial -->
+    <circle cx="60" cy="18" r="1.5" fill="#1a1a1a" stroke="#444" stroke-width="0.5"/>
+    <!-- Speaker grilles -->
+    <line x1="57.5" y1="23" x2="62.5" y2="23" stroke="#1a1a1a" stroke-width="0.8"/>
+    <line x1="57.5" y1="24.5" x2="62.5" y2="24.5" stroke="#1a1a1a" stroke-width="0.8"/>
+    <line x1="57.5" y1="26" x2="62.5" y2="26" stroke="#1a1a1a" stroke-width="0.8"/>
+    <line x1="57.5" y1="27.5" x2="62.5" y2="27.5" stroke="#1a1a1a" stroke-width="0.8"/>
+    <!-- Power LED -->
+    <circle cx="60" cy="31" r="0.8" fill="#cc2020" opacity="0.7"/>
+    <!-- Right wood border (on top of panel) -->
+    <line x1="65.5" y1="0" x2="65.5" y2="37" stroke="url(#woodRight)" stroke-width="1"/>
+  </g>
+  <!-- Border glow: outer -->
+  <rect x="2" y="2" width="53" height="33" rx="4" fill="none" stroke="white" stroke-width="1" opacity="0.1"/>
+  <!-- Border inner -->
+  <rect x="3" y="3" width="51" height="31" rx="3" fill="none" stroke="white" stroke-width="1" opacity="0.3"/>
+
+  <!-- Screen -->
+  <use href="#shape" fill="url(#glow)"/>
+
+  <g clip-path="url(#screen)">
+    <!-- Text with NES two-tone red -->
+    <text x="28.5" y="23.5" text-anchor="middle" font-family="'Jersey15', sans-serif" font-size="26" fill="url(#nesRed)" letter-spacing="0.5">Tecs</text>
+    <text x="28.5" y="23.5" text-anchor="middle" font-family="'Jersey15', sans-serif" font-size="26" fill="url(#nesRed)" letter-spacing="0.5">Tecs</text>
+
+<!-- Lens flare top-left -->
+    <rect x="0" y="0" width="57" height="37" fill="url(#lensTopLeft)"/>
+
+    <!-- Lens flare bottom-right -->
+    <rect x="0" y="0" width="57" height="37" fill="url(#lensBottomRight)"/>
+
+    <!-- Purple underline -->
+    <rect x="6" y="28" width="45" height="2" fill="#3d1670"/>
+  </g>
+</svg>

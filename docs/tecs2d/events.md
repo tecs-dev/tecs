@@ -4,41 +4,32 @@ outline: deep
 
 # Love2D events
 
-Tecs2D provides type-safe event wrappers for Love2D callbacks, allowing you to observe and react to window, input, and
-system events through the [event system](../reference/events.md). Love2D events are automatically captured and emitted
-by Tecs2D when you use the framework. You can observe these events on the [world](../reference/world.md) or use
+Tecs provides type-safe event wrappers for Love2D callbacks, allowing you to observe and react to window, input, and
+system events through the [event system](../tecs/events.md). Love2D events are automatically captured and emitted
+by Tecs when you use the framework. You can observe these events on the [world](../tecs/world.md) or use
 traditional Love2D callbacks.
+
+::: tip World-level events use address `0`
+Love2D events are world-level events, so use address `0` when observing them.
+See [Events](../tecs/events.md#address-types) for more on address types.
+:::
 
 ## Event flow
 
-When an input event occurs: (1) **Tecs2D handler** captures it first, (2) event is **emitted to world observers**
-(if any exist), (3) traditional **love.* callbacks** are also called (if defined).
-
-```
-Love2D Events ⌨️🕹️🎮🖱️
-        │
-        │ Enqueues
-        ▼
-Tecs2D Handler 🌵
-        │
-        ├─── Emits ────────► Tecs Observers 📬
-        │
-        └─── Delegates ────► love.* callbacks ❤️
-```
-
-This means you can use both approaches:
+When an event is emitted from Love2D, Tecs emits the event to the Tecs event system and then emits the event to any
+registered `love.*` function. This means you can use both approaches:
 
 ```lua
 local tecs2d = require("tecs2d")
 
--- Tecs2D event observation (recommended)
-world:observe(tecs2d.events.MousePressed, function(e: tecs2d.events.MousePressed)
+-- Tecs events work
+world:observe(0, tecs2d.MousePressed, function(e: tecs2d.MousePressed)
     handleClick(e.x, e.y, e.button)
 end)
 
--- Traditional Love2D callback (still works)
+-- Love2D callbacks work too
 function love.mousepressed(x, y, button, istouch, presses)
-    -- This will also be called
+    handleClick(x, y, button)
 end
 ```
 
@@ -48,12 +39,14 @@ end
 
 #### Focus
 
-Triggered when the window gains or loses focus.
+Triggered when the window gains or loses focus. *See [love.focus](https://love2d.org/wiki/love.focus)*
+
+| Property    | Type        | Description                                |
+| ----------- | ----------- | ------------------------------------------ |
+| `visible`   | `boolean`   | `true` if the window has focus             |
 
 ```lua
-local tecs2d = require("tecs2d")
-
-world:observe(tecs2d.events.Focus, function(e: tecs2d.events.Focus)
+world:observe(0, tecs2d.Focus, function(e: tecs2d.Focus)
     if e.visible then
         resumeGame()
     else
@@ -62,45 +55,48 @@ world:observe(tecs2d.events.Focus, function(e: tecs2d.events.Focus)
 end)
 ```
 
-*See [love.focus](https://love2d.org/wiki/love.focus)*
-
 #### MouseFocus
 
-Triggered when the window gains or loses mouse focus.
+Triggered when the window gains or loses mouse focus. *See [love.mousefocus](https://love2d.org/wiki/love.mousefocus)*
+
+| Property   | Type        | Description                                |
+| ---------- | ----------- | ------------------------------------------ |
+| `focus`    | `boolean`   | `true` if the window has mouse focus       |
 
 ```lua
-world:observe(events.MouseFocus, function(e: events.MouseFocus)
+world:observe(0, tecs2d.MouseFocus, function(e: tecs2d.MouseFocus)
     if not e.focus then
-        -- Mouse left the window, stop dragging
         stopDragging()
     end
 end)
 ```
 
-*See [love.mousefocus](https://love2d.org/wiki/love.mousefocus)*
-
 #### Resize
 
-Triggered when the window is resized.
+Triggered when the window is resized. *See [love.resize](https://love2d.org/wiki/love.resize)*
+
+| Property   | Type       | Description                |
+| ---------- | ---------- | -------------------------- |
+| `width`    | `number`   | New width of the window    |
+| `height`   | `number`   | New height of the window   |
 
 ```lua
-world:observe(events.Resize, function(e: events.Resize)
-    print("Window resized to", e.width, "x", e.height)
-    -- Update camera viewport
+world:observe(0, tecs2d.Resize, function(e: tecs2d.Resize)
     camera:updateViewport(e.width, e.height)
 end)
 ```
 
-*See [love.resize](https://love2d.org/wiki/love.resize)*
-
 #### Visible
 
-Triggered when the window is shown or hidden.
+Triggered when the window is shown or hidden. *See [love.visible](https://love2d.org/wiki/love.visible)*
+
+| Property    | Type        | Description                                |
+| ----------- | ----------- | ------------------------------------------ |
+| `visible`   | `boolean`   | `true` if the window is visible            |
 
 ```lua
-world:observe(events.Visible, function(e: events.Visible)
+world:observe(0, tecs2d.Visible, function(e: tecs2d.Visible)
     if not e.visible then
-        -- Window minimized, pause music
         audio:pauseMusic()
     else
         audio:resumeMusic()
@@ -108,178 +104,359 @@ world:observe(events.Visible, function(e: events.Visible)
 end)
 ```
 
-*See [love.visible](https://love2d.org/wiki/love.visible)*
+#### Exposed
+
+Triggered when the window is exposed and needs to be redrawn. *See [love.exposed](https://love2d.org/wiki/love.exposed)*
+
+No properties.
+
+#### Occluded
+
+Triggered when the window is fully occluded by another window. *See
+[love.occluded](https://love2d.org/wiki/love.occluded)*
+
+No properties.
+
+### Keyboard events
+
+#### KeyPressed
+
+Triggered when a key is pressed. *See [love.keypressed](https://love2d.org/wiki/love.keypressed)*
+
+| Property     | Type                          | Description                                                                |
+| ------------ | ----------------------------- | -------------------------------------------------------------------------- |
+| `key`        | `love.keyboard.KeyConstant`   | The key that was pressed (e.g., `"space"`, `"a"`)                          |
+| `scancode`   | `love.keyboard.Scancode`      | Hardware scancode for the key                                              |
+| `isrepeat`   | `boolean`                     | Whether this is a repeat event. Delay depends on user's system settings.   |
+
+```lua
+world:observe(0, tecs2d.KeyPressed, function(e: tecs2d.KeyPressed)
+    if e.key == "escape" then
+        pauseGame()
+    end
+end)
+```
+
+#### KeyReleased
+
+Triggered when a key is released. *See [love.keyreleased](https://love2d.org/wiki/love.keyreleased)*
+
+| Property     | Type                         | Description                                      |
+| ------------ | ---------------------------- | ------------------------------------------------ |
+| `key`        | `love.keyboard.KeyConstant`  | The key that was released                        |
+| `scancode`   | `love.keyboard.Scancode`     | Hardware scancode for the key                    |
+
+```lua
+world:observe(0, tecs2d.KeyReleased, function(e: tecs2d.KeyReleased)
+    if e.key == "space" then
+        endChargeAttack()
+    end
+end)
+```
 
 ### Mouse events
 
 #### MousePressed
 
-Triggered when a mouse button is pressed.
+Triggered when a mouse button is pressed. *See [love.mousepressed](https://love2d.org/wiki/love.mousepressed)*
+
+| Property    | Type        | Description                                             |
+| ----------- | ----------- | ------------------------------------------------------- |
+| `x`         | `number`    | Mouse x position in pixels                              |
+| `y`         | `number`    | Mouse y position in pixels                              |
+| `button`    | `number`    | Button index (1 = left, 2 = right, 3 = middle)          |
+| `istouch`   | `boolean`   | `true` if from a touchscreen                            |
+| `presses`   | `number`    | Number of clicks for double/triple-click detection      |
 
 ```lua
-world:observe(events.MousePressed, function(e: events.MousePressed)
-    -- e.x, e.y: Mouse position
-    -- e.button: Button number (1=left, 2=right, 3=middle)
-    -- e.istouch: True if from touchscreen
-    -- e.presses: Number of clicks (for double-click detection)
-
+world:observe(0, tecs2d.MousePressed, function(e: tecs2d.MousePressed)
     if e.button == 1 and e.presses == 2 then
         handleDoubleClick(e.x, e.y)
     end
 end)
 ```
 
-*See [love.mousepressed](https://love2d.org/wiki/love.mousepressed)*
-
 #### MouseReleased
 
-Triggered when a mouse button is released.
+Triggered when a mouse button is released. *See [love.mousereleased](https://love2d.org/wiki/love.mousereleased)*
+
+| Property    | Type        | Description                                             |
+| ----------- | ----------- | ------------------------------------------------------- |
+| `x`         | `number`    | Mouse x position in pixels                              |
+| `y`         | `number`    | Mouse y position in pixels                              |
+| `button`    | `number`    | Button index (1 = left, 2 = right, 3 = middle)          |
+| `istouch`   | `boolean`   | `true` if from a touchscreen                            |
+| `presses`   | `number`    | Number of clicks                                        |
 
 ```lua
-world:observe(events.MouseReleased, function(e: events.MouseReleased)
+world:observe(0, tecs2d.MouseReleased, function(e: tecs2d.MouseReleased)
     if e.button == 1 then
         endDragOperation(e.x, e.y)
     end
 end)
 ```
 
-*See [love.mousereleased](https://love2d.org/wiki/love.mousereleased)*
-
 ### Joystick events
 
 #### JoystickAdded
 
-Triggered when a joystick/gamepad is connected.
+Triggered when a joystick/gamepad is connected. *See [love.joystickadded](https://love2d.org/wiki/love.joystickadded)*
+
+| Property     | Type                         | Description                    |
+| ------------ | ---------------------------- | ------------------------------ |
+| `joystick`   | `love.joystick.Joystick`     | The newly connected joystick   |
 
 ```lua
-world:observe(events.JoystickAdded, function(e: events.JoystickAdded)
-    local name = e.joystick:getName()
-    print("Controller connected:", name)
-
-    -- Configure the new joystick
+world:observe(0, tecs2d.JoystickAdded, function(e: tecs2d.JoystickAdded)
     if e.joystick:isGamepad() then
         setupGamepadMappings(e.joystick)
     end
 end)
 ```
 
-*See [love.joystickadded](https://love2d.org/wiki/love.joystickadded)*
-
 #### JoystickRemoved
 
-Triggered when a joystick/gamepad is disconnected.
+Triggered when a joystick/gamepad is disconnected. *See
+[love.joystickremoved](https://love2d.org/wiki/love.joystickremoved)*
+
+| Property     | Type                         | Description                       |
+| ------------ | ---------------------------- | --------------------------------- |
+| `joystick`   | `love.joystick.Joystick`     | The now-disconnected joystick     |
 
 ```lua
-world:observe(events.JoystickRemoved, function(e: events.JoystickRemoved)
-    print("Controller disconnected")
-
-    -- Switch to keyboard controls if no controllers left
+world:observe(0, tecs2d.JoystickRemoved, function(e: tecs2d.JoystickRemoved)
     if love.joystick.getJoystickCount() == 0 then
         switchToKeyboardControls()
     end
 end)
 ```
 
-*See [love.joystickremoved](https://love2d.org/wiki/love.joystickremoved)*
-
 ### File events
 
 #### DirectoryDropped
 
-Triggered when a directory is dragged and dropped onto the window.
+Triggered when a directory is dragged and dropped onto the window. *See
+[love.directorydropped](https://love2d.org/wiki/love.directorydropped)*
+
+| Property   | Type       | Description                                |
+| ---------- | ---------- | ------------------------------------------ |
+| `path`     | `string`   | Full platform-dependent directory path     |
+| `x`        | `number`   | X position where the directory was dropped |
+| `y`        | `number`   | Y position where the directory was dropped |
 
 ```lua
-world:observe(events.DirectoryDropped, function(e: events.DirectoryDropped)
-    print("Directory dropped:", e.path)
-
-    -- Mount the directory for reading
+world:observe(0, tecs2d.DirectoryDropped, function(e: tecs2d.DirectoryDropped)
     love.filesystem.mount(e.path, "dropped")
-
-    -- Load all images from the directory
     loadImagesFromDirectory("dropped")
 end)
 ```
 
-*See [love.directorydropped](https://love2d.org/wiki/love.directorydropped)*
-
 #### FileDropped
 
-Triggered when a file is dragged and dropped onto the window.
+Triggered when a file is dragged and dropped onto the window. *See
+[love.filedropped](https://love2d.org/wiki/love.filedropped)*
+
+| Property   | Type                            | Description                            |
+| ---------- | ------------------------------- | -------------------------------------- |
+| `file`     | `love.filesystem.DroppedFile`   | The unopened file that was dropped     |
+| `x`        | `number`                        | X position where the file was dropped  |
+| `y`        | `number`                        | Y position where the file was dropped  |
 
 ```lua
-world:observe(events.FileDropped, function(e: events.FileDropped)
-    local file = e.file
-    local filename = file:getFilename()
-
-    print("File dropped:", filename)
-
-    -- Check file extension and handle accordingly
+world:observe(0, tecs2d.FileDropped, function(e: tecs2d.FileDropped)
+    local filename = e.file:getFilename()
     if filename:match("%.png$") or filename:match("%.jpg$") then
-        loadDroppedImage(file)
-    elseif filename:match("%.lua$") or filename:match("%.tl$") then
-        loadDroppedScript(file)
+        loadDroppedImage(e.file)
     end
 end)
 ```
-
-*See [love.filedropped](https://love2d.org/wiki/love.filedropped)*
 
 ### Application events
 
 #### Quit
 
-Triggered when the application is about to close.
+Triggered when the application is about to close. *See [love.quit](https://love2d.org/wiki/love.quit)*
+
+| Property       | Type        | Description        |
+| -------------- | ----------- | ------------------ |
+| `exitstatus`   | `integer`   | The exit code      |
 
 ```lua
-world:observe(events.Quit, function(e: events.Quit)
-    print("Quitting with status:", e.exitstatus)
-
-    -- Save game state
+world:observe(0, tecs2d.Quit, function(e: tecs2d.Quit)
     saveGameState()
-
-    -- Cleanup resources
     cleanupResources()
-
-    -- The quit event is handled automatically by Tecs2D
-    -- Return false from love.quit() to prevent quitting
 end)
 ```
 
-*See [love.quit](https://love2d.org/wiki/love.quit)*
+#### LocaleChanged
 
-## Integration with systems
+Triggered when the system locale changes. *See [love.localechanged](https://love2d.org/wiki/love.localechanged)*
 
-Use events within your [systems](../reference/systems.md) for reactive gameplay:
+No properties.
+
+#### ThemeChanged
+
+Triggered when the system theme changes. *See [love.themechanged](https://love2d.org/wiki/love.themechanged)*
+
+| Property   | Type       | Description                           |
+| ---------- | ---------- | ------------------------------------- |
+| `theme`    | `string`   | The new theme (`"light"` or `"dark"`) |
 
 ```lua
-world:addSystem({
-    phase = tecs.phases.Startup,
-    run = function()
-        -- React to window resize by updating UI
-        world:observe(events.Resize, function(e: events.Resize)
-            local uiEntities = world:query({ UIElement })
-            for _, entity in ipairs(uiEntities) do
-                local ui = entity[UIElement]
-                ui:updateLayout(e.width, e.height)
-            end
-        end)
-
-        -- Handle file drops for level editor
-        world:observe(events.FileDropped, function(e: events.FileDropped)
-            if levelEditor.active then
-                levelEditor:importAsset(e.file)
-            end
-        end)
-    end
-})
+world:observe(0, tecs2d.ThemeChanged, function(e: tecs2d.ThemeChanged)
+    updateUITheme(e.theme)
+end)
 ```
 
-*See [Queries](../reference/queries.md) for entity queries and [Phases](../reference/phases.md) for execution phases*
+#### AudioDisconnected
 
-## Best practices
+Triggered when the audio device is disconnected. *See
+[love.audiodisconnected](https://love2d.org/wiki/love.audiodisconnected)*
 
-1. **Use events for decoupling**: React to events instead of checking states
-2. **Prefer Tecs2D events**: Use the event system over Love2D callbacks for consistency
-3. **Check for observers**: Only emit custom events if there are listeners
-4. **Clean up observers**: Remove observers when entities are destroyed
-5. **Use appropriate phases**: Set up observers in Startup phase
+No properties.
+
+### Touch events
+
+#### TouchPressed
+
+Triggered when a touch press is detected. *See [love.touchpressed](https://love2d.org/wiki/love.touchpressed)*
+
+| Property       | Type                            | Description                           |
+| -------------- | ------------------------------- | ------------------------------------- |
+| `id`           | `any`                           | Identifier for the touch press        |
+| `x`            | `number`                        | X position of the touch               |
+| `y`            | `number`                        | Y position of the touch               |
+| `pressure`     | `number`                        | Pressure being applied (0-1)          |
+| `deviceType`   | `love.touch.TouchDeviceType`    | Type of touchscreen or touchpad       |
+| `isMouse`      | `boolean`                       | `true` if from mouse emulation        |
+
+```lua
+world:observe(0, tecs2d.TouchPressed, function(e: tecs2d.TouchPressed)
+    handleTouch(e.id, e.x, e.y)
+end)
+```
+
+#### TouchMoved
+
+Triggered when a touch point moves. *See [love.touchmoved](https://love2d.org/wiki/love.touchmoved)*
+
+| Property       | Type                            | Description                           |
+| -------------- | ------------------------------- | ------------------------------------- |
+| `id`           | `any`                           | Identifier for the touch press        |
+| `x`            | `number`                        | X position of the touch               |
+| `y`            | `number`                        | Y position of the touch               |
+| `dx`           | `number`                        | X component of movement delta         |
+| `dy`           | `number`                        | Y component of movement delta         |
+| `pressure`     | `number`                        | Pressure being applied (0-1)          |
+| `deviceType`   | `love.touch.TouchDeviceType`    | Type of touchscreen or touchpad       |
+| `isMouse`      | `boolean`                       | `true` if from mouse emulation        |
+
+```lua
+world:observe(0, tecs2d.TouchMoved, function(e: tecs2d.TouchMoved)
+    handleTouchDrag(e.id, e.dx, e.dy)
+end)
+```
+
+#### TouchReleased
+
+Triggered when a touch point is released. *See [love.touchreleased](https://love2d.org/wiki/love.touchreleased)*
+
+| Property       | Type                            | Description                           |
+| -------------- | ------------------------------- | ------------------------------------- |
+| `id`           | `any`                           | Identifier for the touch press        |
+| `x`            | `number`                        | X position of the touch               |
+| `y`            | `number`                        | Y position of the touch               |
+| `pressure`     | `number`                        | Pressure being applied (0-1)          |
+| `deviceType`   | `love.touch.TouchDeviceType`    | Type of touchscreen or touchpad       |
+| `isMouse`      | `boolean`                       | `true` if from mouse emulation        |
+
+```lua
+world:observe(0, tecs2d.TouchReleased, function(e: tecs2d.TouchReleased)
+    handleTouchRelease(e.id, e.x, e.y)
+end)
+```
+
+### Sensor events
+
+#### SensorUpdated
+
+Triggered when a device sensor is updated. *See [love.sensorupdated](https://love2d.org/wiki/love.sensorupdated)*
+
+| Property       | Type                         | Description                                         |
+| -------------- | ---------------------------- | --------------------------------------------------- |
+| `sensorType`   | `love.sensor.SensorType`     | Type of sensor (`"accelerometer"` or `"gyroscope"`) |
+| `x`            | `number`                     | X component of sensor data                          |
+| `y`            | `number`                     | Y component of sensor data                          |
+| `z`            | `number`                     | Z component of sensor data                          |
+
+```lua
+world:observe(0, tecs2d.SensorUpdated, function(e: tecs2d.SensorUpdated)
+    handleSensor(e.sensorType, e.x, e.y, e.z)
+end)
+```
+
+#### JoystickSensorUpdated
+
+Triggered when a joystick sensor is updated. *See
+[love.joysticksensorupdated](https://love2d.org/wiki/love.joysticksensorupdated)*
+
+| Property       | Type                            | Description                                         |
+| -------------- | ------------------------------- | --------------------------------------------------- |
+| `joystick`     | `love.joystick.Joystick`        | The joystick with the sensor                        |
+| `sensorType`   | `love.joystick.SensorType`      | Type of sensor (`"accelerometer"` or `"gyroscope"`) |
+| `x`            | `number`                        | X component of sensor data                          |
+| `y`            | `number`                        | Y component of sensor data                          |
+| `z`            | `number`                        | Z component of sensor data                          |
+
+```lua
+world:observe(0, tecs2d.JoystickSensorUpdated, function(e: tecs2d.JoystickSensorUpdated)
+    handleJoystickSensor(e.joystick, e.sensorType, e.x, e.y, e.z)
+end)
+```
+
+### Drag-and-drop lifecycle events
+
+#### DropBegan
+
+Triggered when a drag operation begins over the window.
+
+| Property   | Type       | Description                      |
+| ---------- | ---------- | -------------------------------- |
+| `x`        | `number`   | X position where drag started    |
+| `y`        | `number`   | Y position where drag started    |
+
+```lua
+world:observe(0, tecs2d.DropBegan, function(e: tecs2d.DropBegan)
+    showDropZone()
+end)
+```
+
+#### DropMoved
+
+Triggered when a drag operation moves over the window.
+
+| Property   | Type       | Description                |
+| ---------- | ---------- | -------------------------- |
+| `x`        | `number`   | Current drag x position    |
+| `y`        | `number`   | Current drag y position    |
+
+```lua
+world:observe(0, tecs2d.DropMoved, function(e: tecs2d.DropMoved)
+    updateDropHighlight(e.x, e.y)
+end)
+```
+
+#### DropCompleted
+
+Triggered when a drag operation is completed over the window.
+
+| Property   | Type       | Description                            |
+| ---------- | ---------- | -------------------------------------- |
+| `x`        | `number`   | X position where drop completed        |
+| `y`        | `number`   | Y position where drop completed        |
+
+```lua
+world:observe(0, tecs2d.DropCompleted, function(e: tecs2d.DropCompleted)
+    hideDropZone()
+end)
+```

@@ -1,101 +1,114 @@
-local compat <const> = require("tecs.internal.utils.compat")
-local table_clear <const> = compat.clear
+local table_clear <const> = require("table.clear")
+local table_new <const> = require("table.new") as function(integer, integer): {any}
+local C <const> = require("ffi")
 local schema <const> = require("tecs.internal.ffi.schema")
 local FFIEvents <const> = require("tecs.internal.ffi.FFIEvents")
+local types <const> = require("tecs.types")
+local pool <const> = require("tecs.utils.pool")
 
-local record events
-    --- Create a new event emitter.
-    --- @return a new event emitter.
-    newEmitter: function(): Emitter
-
-    --- Configure an event to have an appropriate __call based constructor.
-    ---
-    --- The initializer is used to configure the state of event instances. The constructor should
-    --- not assign a metatable as that's handled by this method automatically.
-    ---
-    --- @param event The event instance to configure.
-    --- @param constructor A function that creates an instance of the event.
-    newEvent: function<E is Event>(event: E, constructor: EventConstructor<E>)
-
-    --- Configure an FFI event to have an appropriate __call based constructor.
-    ---
-    --- The initializer is used to configure the state of event instances.
-    ---
-    --- @param event The event type to configure.
-    --- @param fields Field definitions in format {{"name", "type"}, ...}
-    --- @param structName Optional struct name (auto-generated if not provided)
-    newFFIEvent: function<E is Event>(event: E, fields: {{string, string}}, structName?: string)
-
-    --- An event that can be emitted.
-    interface Event
-        --- The unique ID of the event.
-        eventId: integer
-    end
-
-    --- An event listener that synchronously receives an event of type `E`.
-    type EventListener = function<E is Event>(event: E)
-
-    type EventConstructor = function<E is Event>(...: any): E
-
-    --- An event emitter that can observe, stop observing, and emit events.
-    interface Emitter
-        --- Observes an event by type.
-        ---
-        --- The callback is called immediately when an event of the given type is emitted.
-        ---
-        --- @param eventType The type of event to observe.
-        --- @param callback The callback to call when the event is emitted
-        --- @param id The optional ID used to remove the observer.
-        observe: function<E is Event>(self, eventType: E, callback: function(event: E), id?: string)
-
-        --- Observes an event by type, at most once.
-        ---
-        --- The callback is called immediately when an event of the given type is emitted.
-        --- After the callback is called, the observer is removed.
-        ---
-        --- @param eventType The type of event to observe.
-        --- @param callback The callback to call when the event is emitted
-        observeOnce: function<E is Event>(self, eventType: E, callback: function(event: E))
-
-        --- Stops observing an event by type.
-        ---
-        --- @param eventType The type of event to stop observing.
-        --- @param callbackOrId The callback to stop observing or the ID of the observer.
-        stopObserving: function<E is Event>(self, eventType: E, callbackOrId: function(event: E) | string)
-
-        --- Checks if the world has any observers for the given event type.
-        ---
-        --- @param eventType The type of event to check for observers.
-        --- @return true if the world has observers for the event type.
-        hasObservers: function<E is Event>(self, eventType: E): boolean
-
-        --- Emits an event to all observers of the event type.
-        ---
-        --- @param eventType The type of event to emit.
-        emit: function<E is Event>(self, event: E)
-
-        --- Remove all observers.
-        reset: function(self)
-    end
-end
-
-local type Event = events.Event
+local type Event = types.events.Event
+local type EventInit = types.events.EventInit
 
 --- The next event ID to assign when the next event type is created.
 local NEXT_ID: integer = 1
 
---- Global FFI event manager for arena allocation (lazy-initialized)
-local __globalFFIManager: FFIEvents.Manager = nil
+local NOOP_INIT <const> = function(_instance: any) end
 
---- Get or create the global FFI manager
-local function _getFFIManager(): FFIEvents.Manager
-    if not __globalFFIManager then
-        __globalFFIManager = FFIEvents.new()
+local record events
+
+    --- Configure an event to have an appropriate __call based constructor.
+    ---
+    --- The event's `.init` hook is used to configure the state of event instances.
+    --- It should not assign a metatable as that's handled by this method automatically.
+    ---
+    --- @param event The event instance to configure.
+    newEvent: function<E is Event>(event: E)
+
+    --- Configure an FFI event to have an appropriate __call based constructor.
+    ---
+    --- The event's `.init` hook is used to configure the state of event instances.
+    ---
+    --- @param event The event type to configure.
+    --- @param fields Field definitions in format {{"name", "type"}, ...}
+    --- @param structName Optional struct name (auto-generated if not provided)
+    newFFIEvent: function<E is Event>(
+        event: E,
+        fields: {{string, string}},
+        structName?: string
+    )
+
+    --- Centralized message bus for address-based event routing.
+    --- Addresses are integers: 0 for world-level events, entity IDs for entity events.
+    record MessageBus is types.events.MessageBus
+        -- address -> eventId -> {id_or_false, cb, id_or_false, cb, ...}
+        -- callbacks[0] stores the logical size of the interleaved array.
+        _observers: {integer: {integer: {any}}}
+        -- Total live observer count across all addresses/events.
+        -- Used as a zero-observer fast-path in `hasObservers`: when
+        -- no observer has ever been registered (or all have been
+        -- removed), we skip the per-address hashmap lookup entirely.
+        -- Single field read + int comparison vs hashmap walk — hot
+        -- per-entity despawn path reads this on every iteration to
+        -- decide whether OnDespawn fan-out is needed.
+        _totalObservers: integer
+        -- Reentrant emit depth counter.
+        _emitDepth: integer
+        -- lazy, staggered: {address, eventId, idOrCb, address, eventId, idOrCb, ...}
+        _deferredUnsubscribes: {any}
+        -- Pool of reusable interleaved callbacks arrays. Clear-on-release so
+        -- released arrays promptly drop observer closures (which may root
+        -- captured state). Per-bus so event churn doesn't pollute other
+        -- subsystems' sizing.
+        _callbacksPool: pool.TablePool
+        -- Pool of reusable eventId -> callbacks maps. Clear-on-acquire: the
+        -- maps hold plain integer keys and array refs, clearing a large
+        -- hash part on every release would waste work on pool entries that
+        -- may never be reused.
+        _byAddressPool: pool.TablePool
+
+        --- Create a new MessageBus.
+        new: function(): MessageBus
+
+        --- Observe an event type at a specific address.
+        --- Address 0 is for world-level events, entity IDs for entity events.
+        observe: function<E is Event>(
+            self: MessageBus,
+            address: integer,
+            eventType: E,
+            observer: function(E), id?: string
+        )
+
+        --- Observe an event type at a specific address, at most once.
+        observeOnce: function<E is Event>(
+            self: MessageBus,
+            address: integer,
+            eventType: E,
+            observer: function(E)
+        )
+
+        --- Stop observing an event type at a specific address.
+        stopObserving: function<E is Event>(
+            self: MessageBus,
+            address: integer,
+            eventType: E,
+            observerOrId: function(E)|string
+        )
+
+        --- Emit an event to all observers at the specified address.
+        emit: function<E is Event>(self: MessageBus, address: integer, event: E)
+
+        --- Check if any observers exist for an event type at an address.
+        hasObservers: function<E is Event>(self: MessageBus, address: integer, eventType: E): boolean
+
+        --- Clear all observers for an address (used on entity despawn).
+        clearAddress: function(self: MessageBus, address: integer)
+
+        --- Reset the entire message bus.
+        reset: function(self: MessageBus)
     end
-    return __globalFFIManager
 end
 
-function events.newEvent<E is Event>(event: E, constructor: events.EventConstructor<E>)
+function events.newEvent<E is Event>(event: E)
     if event.eventId then
         error("Event has already been configured: " .. tostring(event) .. " : " .. event.eventId)
     end
@@ -104,360 +117,357 @@ function events.newEvent<E is Event>(event: E, constructor: events.EventConstruc
     NEXT_ID = NEXT_ID + 1
     event.eventId = id
     local MT <const> = { __index = event }
+    local eventAny = event as {string: any}
+    local init = eventAny.init as EventInit<E> or NOOP_INIT as EventInit<E>
+    eventAny.init = init
 
+    eventAny.__tecs_mt = MT
     setmetatable(event, {
         __call = function(_self: E, ...: any): E
-            local instance = assert(constructor(...), "Event constructor must return an instance of the event")
-            instance.eventId = id
-            return setmetatable(instance, MT) as E
+            local instance = setmetatable({eventId = id}, MT) as E
+            init(instance, ...)
+            return instance
         end
     })
 end
 
-function events.newFFIEvent<E is Event>(event: E, fields: {{string, string}}, structName?: string)
+function events.newFFIEvent<E is Event>(
+    event: E,
+    fields: {{string, string}},
+    structName?: string
+)
     if event.eventId then
         error("Event has already been configured: " .. tostring(event) .. " : " .. event.eventId)
     end
 
+    schema.validateFields(fields, {eventId = true, typeId = true})
+
+    local resolvedStructName = structName
+
+    -- Inject eventId as first field
+    local nFields <const> = #fields
+    local ffiFields: {{string, string}} = table_new(nFields + 1, 0) as {{string, string}}
+    ffiFields[1] = {"eventId", "int32_t"}
+    for i = 1, nFields do
+        ffiFields[i + 1] = fields[i]
+    end
+
+    -- Precompute field names for the constructor
+    local fieldNames: {string} = table_new(nFields, 0) as {string}
+    for i = 1, nFields do
+        fieldNames[i] = fields[i][1]
+    end
+
+    -- Register the schema globally so the struct is defined once and all
+    -- worlds can allocate this event type from their leased FFI slice.
+    local ffiManager = FFIEvents.global()
+    local ffiTypeId = ffiManager:registerEvent(event, ffiFields, resolvedStructName)
+    resolvedStructName = ffiManager.registrations[event].structName
+
     local id <const> = NEXT_ID
     NEXT_ID = NEXT_ID + 1
     event.eventId = id
+    local eventAny = event as {string: any}
+    eventAny.__tecs_ffi = true
+    eventAny.__tecs_ffi_fields = ffiFields
+    eventAny.__tecs_ffi_structName = resolvedStructName
+    eventAny.__tecs_ffi_typeId = ffiTypeId
 
-    schema.validateFields(fields, false)
-
-    if schema.isFFIAvailable() then
-        -- Inject eventId as first field (int32_t for consistency)
-        local ffiFields: {{string, string}} = {{"eventId", "int32_t"}}
-        for i = 1, #fields do
-            table.insert(ffiFields, fields[i])
+    local init = eventAny.init as EventInit<E>
+    if not init then
+        init = function(instance: E, ...: any)
+            local anyInstance = instance as {string:any}
+            local args = {...}
+            for i = 1, #args do
+                anyInstance[fieldNames[i]] = args[i]
+            end
         end
-
-        -- Arena allocate and create FFI constructor that vends from arena
-        _getFFIManager():registerEvent(event, ffiFields, structName)
-        setmetatable(event, {
-            __call = function(_self: E, ...: any): E
-                local instance = _getFFIManager():vendEvent(event)
-                instance.eventId = id
-                local nargs = select('#', ...)
-                for i = 1, nargs do
-                    local fieldName = ffiFields[i + 1][1]  -- +1 to skip eventId at position 1
-                    (instance as {string:any})[fieldName] = select(i, ...)
-                end
-                return instance as E
-            end
-        })
-    else
-        -- Fallback that uses table-based events with schema defaults
-        local fallbackConstructor = schema.createFallbackConstructor(fields)
-        setmetatable(event, {
-            __call = function(_self: E, ...: any): E
-                local instance: E = fallbackConstructor(...) as E
-                instance.eventId = id
-                return instance
-            end
-        })
+        eventAny.init = init
     end
+
+    setmetatable(event, {
+        __call = function(_self: E, ...: any): E
+            local instance = C.new(resolvedStructName as string) as {string:any}
+            instance.eventId = id
+            instance.typeId = ffiTypeId
+            init(instance as E, ...)
+            return instance as E
+        end
+    })
 end
 
 -------------------------------------------------------------------------------
--- Event Emitter implementation
+-- MessageBus implementation
 -------------------------------------------------------------------------------
 
-local record ObserverContainer
-    callbacks: {function(Event)}
-    --- Parallel array of IDs (false = no ID)
-    ids: {string | boolean}
-    size: integer
-    --- ID -> index lookup
-    indexById: {string: integer}
-    --- callback -> set of indices (using any for weak keys)
-    indexByFn: {any: {integer: boolean}}
-end
+local MessageBus <const> = events.MessageBus
 
-local record EventEmitter is events.Emitter
-    _eventObservers: {integer: ObserverContainer}
-    _isEmitting: boolean
-    --- Queue of deferred operations during emit
-    _changeQueue: {any}
-    _changeQueueSize: integer
-end
-
--- Operation codes for change queue
-local OP_OBSERVE <const> = 1
-local OP_STOP_OBSERVING <const> = 2
-
--- Weak key metatable for indexByFn
-local WEAK_KEYS_MT <const> = { __mode = "k" }
-
-local EVENT_EMITTER_MT <const>: metatable<EventEmitter> = {
-    __index = EventEmitter
+local MESSAGE_BUS_MT <const>: metatable<events.MessageBus> = {
+    __index = MessageBus
 }
 
---- Get or create an observer container for a specific event ID, and cache it
-local function getOrCreateContainer(self: EventEmitter, eventId: integer): ObserverContainer
-    local container = self._eventObservers[eventId]
-    if not container then
-        container = {
-            callbacks = {},
-            ids = {},
-            size = 0,
-            indexById = {},
-            indexByFn = setmetatable({}, WEAK_KEYS_MT)
-        }
-        self._eventObservers[eventId] = container
-    end
-    return container
+function MessageBus.new(): events.MessageBus
+    local bus: events.MessageBus = {
+        _observers = {},
+        _totalObservers = 0,
+        _emitDepth = 0,
+        _callbacksPool = pool.newTablePool({ clearOn = "release" }),
+        _byAddressPool = pool.newTablePool({ clearOn = "acquire" }),
+    }
+    return setmetatable(bus, MESSAGE_BUS_MT)
 end
 
-function EventEmitter:observe<E is Event>(eventType: E, observer: function(E), id?: string)
+function MessageBus:observe<E is Event>(address: integer, eventType: E, observer: function(E), id?: string)
     local eventId = assert(eventType.eventId, "Event type must be registered with newEvent or newFFIEvent")
 
-    -- If we're emitting, queue the operation
-    -- We do this dance to avoid needing to copy events before emitting to ensure predictability.
-    if self._isEmitting then
-        local queue = self._changeQueue
-        local qSize = self._changeQueueSize
-        queue[qSize + 1] = OP_OBSERVE
-        queue[qSize + 2] = eventId
-        queue[qSize + 3] = observer
-        queue[qSize + 4] = id as any or false
-        self._changeQueueSize = qSize + 4
-        return
+    local byAddress = self._observers[address]
+    if not byAddress then
+        byAddress = self._byAddressPool:acquire() as {integer: {any}}
+        self._observers[address] = byAddress
     end
 
-    local container = getOrCreateContainer(self, eventId)
-    local newIndex = container.size + 1
-    container.callbacks[newIndex] = observer
-    container.ids[newIndex] = id or false
-    container.size = newIndex
-
-    if id then
-        container.indexById[id] = newIndex
+    local callbacks = byAddress[eventId]
+    if not callbacks then
+        callbacks = self._callbacksPool:acquire() as {any}
+        callbacks[0] = 0
+        byAddress[eventId] = callbacks
     end
 
-    local fnIndices = container.indexByFn[observer as any]
-    if fnIndices then
-        fnIndices[newIndex] = true
-    else
-        container.indexByFn[observer as any] = {[newIndex] = true}
-    end
+    local n = callbacks[0] as integer
+    callbacks[n + 1] = id or false
+    callbacks[n + 2] = observer
+    callbacks[0] = n + 2
+    self._totalObservers = self._totalObservers + 1
 end
 
-function EventEmitter:observeOnce<E is Event>(eventType: E, observer: function(E))
+function MessageBus:observeOnce<E is Event>(address: integer, eventType: E, observer: function(E))
     local wrappedFunction: function(E)
     wrappedFunction = function(e: E)
-        self:stopObserving(eventType, wrappedFunction)
+        self:stopObserving(address, eventType, wrappedFunction)
         observer(e)
     end
-    self:observe(eventType, wrappedFunction)
+    self:observe(address, eventType, wrappedFunction)
 end
 
-local function removeAtIndex(container: ObserverContainer, idx: integer)
-    local size = container.size
-    if idx == nil or idx < 1 or idx > size then
-        return
+--- Remove a pair at index (interleaved format: id at idx, callback at idx+1).
+--- Caller must update callbacks[0] after removal.
+local function removeAtIndex(callbacks: {any}, idx: integer, size: integer)
+    -- Swap-pop: move last pair to this position
+    if idx < size - 1 then
+        callbacks[idx] = callbacks[size - 1]
+        callbacks[idx + 1] = callbacks[size]
     end
-
-    -- Clean up lookup maps for removed element
-    local ids = container.ids
-    local removedId = ids[idx]
-    if removedId is string then
-        container.indexById[removedId as string] = nil
-    end
-
-    local callbacks = container.callbacks
-    local removedFn = callbacks[idx]
-    local fnIndices = container.indexByFn[removedFn as any]
-    if fnIndices then
-        fnIndices[idx] = nil
-        -- Clean up empty set to prevent map bloat
-        if next(fnIndices) == nil then
-            container.indexByFn[removedFn as any] = nil
-        end
-    end
-
-    -- Swap-pop: move last element to this position
-    if idx < size then
-        local lastFn = callbacks[size]
-        local lastId = ids[size]
-        callbacks[idx] = lastFn
-        ids[idx] = lastId
-
-        -- Update lookup maps for moved element
-        if lastId is string then
-            container.indexById[lastId as string] = idx
-        end
-
-        local lastFnIndices = container.indexByFn[lastFn as any]
-        if lastFnIndices then
-            lastFnIndices[size] = nil
-            lastFnIndices[idx] = true
-        end
-    end
-
-    -- Clear last position
+    callbacks[size - 1] = nil
     callbacks[size] = nil
-    ids[size] = nil
-    container.size = size - 1
 end
 
-function EventEmitter:stopObserving<E is Event>(eventType: E, observerOrId: function(E) | string)
+function MessageBus:stopObserving<E is Event>(address: integer, eventType: E, observerOrId: function(E)|string)
     local eventId = assert(eventType.eventId, "Event type must be registered with newEvent or newFFIEvent")
 
-    -- If we're emitting, queue the operation
-    if self._isEmitting then
-        local queue = self._changeQueue
-        local qSize = self._changeQueueSize
-        queue[qSize + 1] = OP_STOP_OBSERVING
-        queue[qSize + 2] = eventId
-        queue[qSize + 3] = observerOrId
-        self._changeQueueSize = qSize + 3
+    -- If we're emitting, defer the removal
+    if self._emitDepth > 0 then
+        local deferred = self._deferredUnsubscribes
+        if not deferred then
+            deferred = {}
+            self._deferredUnsubscribes = deferred
+        end
+        local n = deferred[0] as integer or 0
+        deferred[n + 1] = address
+        deferred[n + 2] = eventId
+        deferred[n + 3] = observerOrId
+        deferred[0] = n + 3
         return
     end
 
-    local container = self._eventObservers[eventId]
-    if not container or container.size == 0 then
+    local byAddress = self._observers[address]
+    if not byAddress then
         return
     end
 
+    local callbacks = byAddress[eventId]
+    if not callbacks then
+        return
+    end
+
+    local size = callbacks[0] as integer
+    if size == 0 then
+        return
+    end
+    local originalSize = size
+
+    -- Interleaved format: {id, cb, id, cb, ...}
     if observerOrId is string then
-        removeAtIndex(container, container.indexById[observerOrId])
-    else
-        -- Remove all instances of this callback
-        local fnSet = container.indexByFn[observerOrId as any]
-        if fnSet then
-            local idx = next(fnSet)
-            while idx do
-                removeAtIndex(container, idx)
-                idx = next(fnSet)
+        -- Search by ID (at odd indices)
+        for i = 1, size - 1, 2 do
+            if callbacks[i] == observerOrId then
+                removeAtIndex(callbacks, i, size)
+                size = size - 2
+                break
             end
+        end
+    else
+        -- Search by function (at even indices), remove all matches
+        local i = size - 1
+        while i >= 1 do
+            if callbacks[i + 1] == observerOrId then
+                removeAtIndex(callbacks, i, size)
+                size = size - 2
+            end
+            i = i - 2
         end
     end
 
-    if container.size == 0 then
-        self._eventObservers[eventId] = nil
+    callbacks[0] = size
+    -- Size is observers × 2 (interleaved id+cb).
+    self._totalObservers = self._totalObservers - math.floor((originalSize - size) / 2)
+
+    if size == 0 then
+        self._callbacksPool:release(callbacks)
+        byAddress[eventId] = nil
+        -- Clean up empty address entry
+        if next(byAddress) == nil then
+            self._byAddressPool:release(byAddress)
+            self._observers[address] = nil
+        end
     end
 end
 
-function EventEmitter:hasObservers<E is Event>(eventType: E): boolean
-    assert(eventType.eventId, "Event type must be registered with newEvent or newFFIEvent")
-    local container = self._eventObservers[eventType.eventId]
-    return container and container.size > 0 or false
-end
-
-local function processChangeQueue(self: EventEmitter)
-    local qSize = self._changeQueueSize
-    if qSize == 0 then
+local function processDeferredUnsubscribes(self: events.MessageBus)
+    local deferred = self._deferredUnsubscribes
+    if not deferred then
         return
     end
 
-    local i, queue = 1, self._changeQueue
-    while i <= qSize do
-        local op = queue[i]
-        if op == OP_OBSERVE then
-            local eventId = queue[i + 1] as integer
-            local observer = queue[i + 2] as function(Event)
-            local id = queue[i + 3]
-            -- Direct container manipulation since we have the integer ID
-            local container = getOrCreateContainer(self, eventId)
-            local newIndex = container.size + 1
-            container.callbacks[newIndex] = observer
-            container.ids[newIndex] = id and id ~= false and (id as string) or false
-            container.size = newIndex
-            if id and id ~= false then
-                container.indexById[id as string] = newIndex
-            end
-            local fnIndices = container.indexByFn[observer as any]
-            if fnIndices then
-                fnIndices[newIndex] = true
-            else
-                container.indexByFn[observer as any] = {[newIndex] = true}
-            end
-            i = i + 4
-        elseif op == OP_STOP_OBSERVING then
-            local eventId = queue[i + 1] as integer
-            local observerOrId = queue[i + 2] as function(Event) | string
-            local container = self._eventObservers[eventId]
-            if container and container.size > 0 then
-                if observerOrId is string then
-                    local idx = container.indexById[observerOrId as string]
-                    if idx then
-                        removeAtIndex(container, idx)
+    local dSize = deferred[0] as integer or 0
+    if dSize == 0 then
+        return
+    end
+
+    local observers = self._observers
+
+    -- Staggered format: {address, eventId, idOrCb, address, eventId, idOrCb, ...}
+    for i = 1, dSize - 2, 3 do
+        local address = deferred[i] as integer
+        local eventId = deferred[i + 1] as integer
+        local observerOrId = deferred[i + 2] as function(Event) | string
+
+        local byAddress = observers[address]
+        if byAddress then
+            local callbacks = byAddress[eventId]
+            if callbacks then
+                local size = callbacks[0] as integer
+                if size > 0 then
+                    local originalSize = size
+                    if observerOrId is string then
+                        for j = 1, size - 1, 2 do
+                            if callbacks[j] == observerOrId then
+                                removeAtIndex(callbacks, j, size)
+                                size = size - 2
+                                break
+                            end
+                        end
+                    else
+                        local j = size - 1
+                        while j >= 1 do
+                            if callbacks[j + 1] == observerOrId then
+                                removeAtIndex(callbacks, j, size)
+                                size = size - 2
+                            end
+                            j = j - 2
+                        end
                     end
-                else
-                    local fnSet = container.indexByFn[observerOrId as any]
-                    if fnSet then
-                        while true do
-                            local anyIdx = next(fnSet)
-                            if not anyIdx then break end
-                            removeAtIndex(container, anyIdx)
+                    callbacks[0] = size
+                    self._totalObservers = self._totalObservers - math.floor((originalSize - size) / 2)
+                    if size == 0 then
+                        self._callbacksPool:release(callbacks)
+                        byAddress[eventId] = nil
+                        if next(byAddress) == nil then
+                            self._byAddressPool:release(byAddress)
+                            observers[address] = nil
                         end
                     end
                 end
-                if container.size == 0 then
-                    self._eventObservers[eventId] = nil
-                end
             end
-            i = i + 3
-        else
-            error("Invalid operation in change queue: " .. tostring(op))
         end
     end
 
-    table_clear(queue)
-    self._changeQueueSize = 0
+    deferred[0] = 0
+    table_clear(deferred)
 end
 
-function EventEmitter:emit<E is Event>(event: E)
-    local container = self._eventObservers[event.eventId]
-    if not container then
+function MessageBus:emit<E is Event>(address: integer, event: E)
+    local byAddress = self._observers[address]
+    if not byAddress then
         return
     end
 
-    local size = container.size
+    local callbacks = byAddress[event.eventId]
+    if not callbacks then
+        return
+    end
+
+    local size = callbacks[0] as integer
     if size == 0 then
         return
     end
 
-    -- Mark that we're emitting
-    local wasEmitting = self._isEmitting
-    self._isEmitting = true
+    self._emitDepth = self._emitDepth + 1
 
-    local callbacks = container.callbacks
-    for i = 1, size do
-        callbacks[i](event)
+    -- Callbacks are at even indices (2, 4, 6, ...)
+    for i = 2, size, 2 do
+        (callbacks[i] as function(Event))(event)
     end
 
-    -- Restore emit state and process queued changes if we're the top-level emit
-    self._isEmitting = wasEmitting
-    if not wasEmitting then
-        processChangeQueue(self)
+    self._emitDepth = self._emitDepth - 1
+
+    if self._emitDepth == 0 then
+        processDeferredUnsubscribes(self)
     end
 end
 
-function EventEmitter:reset()
-    for _, container in pairs(self._eventObservers) do
-        table_clear(container.callbacks as {any})
-        table_clear(container.ids as {any})
-        table_clear(container.indexById as {any})
-        table_clear(container.indexByFn as {any})
-        container.size = 0
+function MessageBus:hasObservers<E is Event>(address: integer, eventType: E): boolean
+    -- Fast path: when the bus has no observers at all, skip the
+    -- two hashmap lookups. Read one integer field + branch.
+    if self._totalObservers == 0 then return false end
+    local byAddress = self._observers[address]
+    if not byAddress then
+        return false
     end
-
-    self._isEmitting = false
-    self._changeQueueSize = 0
-    table_clear(self._changeQueue)
-    table_clear(self._eventObservers as {any})
+    local callbacks = byAddress[eventType.eventId]
+    return callbacks ~= nil and callbacks[0] as integer > 0
 end
 
-function events.newEmitter(): events.Emitter
-    local emitter: EventEmitter = {
-        _eventObservers = {},
-        _isEmitting = false,
-        _changeQueue = {},
-        _changeQueueSize = 0
-    }
-    return setmetatable(emitter, EVENT_EMITTER_MT) as events.Emitter
+function MessageBus:clearAddress(address: integer)
+    local byAddress = self._observers[address]
+    if byAddress then
+        local removed = 0
+        for _, callbacks in pairs(byAddress) do
+            removed = removed + math.floor((callbacks[0] as integer) / 2)
+            self._callbacksPool:release(callbacks as {any})
+        end
+        self._byAddressPool:release(byAddress)
+        self._observers[address] = nil
+        self._totalObservers = self._totalObservers - removed
+    end
+end
+
+function MessageBus:reset()
+    if self._totalObservers > 0 then
+        for _, byAddress in pairs(self._observers) do
+            for _, callbacks in pairs(byAddress) do
+                self._callbacksPool:release(callbacks as {any})
+            end
+            self._byAddressPool:release(byAddress)
+        end
+        table_clear(self._observers)
+        self._totalObservers = 0
+    end
+
+    self._emitDepth = 0
+    if self._deferredUnsubscribes then
+        self._deferredUnsubscribes[0] = 0
+        table_clear(self._deferredUnsubscribes)
+    end
 end
 
 return events

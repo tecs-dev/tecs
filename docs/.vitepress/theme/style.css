@@ -4,43 +4,21 @@
  */
 
 /**
+ * Palette
+ *
+ * Mode-independent color constants. Each hex value appears here and nowhere else.
+ * -------------------------------------------------------------------------- */
+
+:root {
+  --tecs-c-near-black: #110f0d;
+  --tecs-c-purple: #372455;
+  --tecs-c-lavender: #867795;
+  --tecs-c-crimson: #dd2020;
+  --tecs-c-tan: #9b8d75;
+}
+
+/**
  * Colors
- *
- * Each colors have exact same color scale system with 3 levels of solid
- * colors with different brightness, and 1 soft color.
- *
- * - `XXX-1`: The most solid color used mainly for colored text. It must
- *   satisfy the contrast ratio against when used on top of `XXX-soft`.
- *
- * - `XXX-2`: The color used mainly for hover state of the button.
- *
- * - `XXX-3`: The color for solid background, such as bg color of the button.
- *   It must satisfy the contrast ratio with pure white (#ffffff) text on
- *   top of it.
- *
- * - `XXX-soft`: The color used for subtle background such as custom container
- *   or badges. It must satisfy the contrast ratio when putting `XXX-1` colors
- *   on top of it.
- *
- *   The soft color must be semi transparent alpha channel. This is crucial
- *   because it allows adding multiple "soft" colors on top of each other
- *   to create a accent, such as when having inline code block inside
- *   custom containers.
- *
- * - `default`: The color used purely for subtle indication without any
- *   special meanings attached to it such as bg color for menu hover state.
- *
- * - `brand`: Used for primary brand colors, such as link text, button with
- *   brand theme, etc.
- *
- * - `tip`: Used to indicate useful information. The default theme uses the
- *   brand color for this by default.
- *
- * - `warning`: Used to indicate warning to the users. Used in custom
- *   container, badges, etc.
- *
- * - `danger`: Used to show error, or dangerous message to the users. Used
- *   in custom container, badges, etc.
  * -------------------------------------------------------------------------- */
 
 :root {
@@ -49,11 +27,21 @@
   --vp-c-default-3: var(--vp-c-gray-3);
   --vp-c-default-soft: var(--vp-c-gray-soft);
 
-  /* Custom brand colors using magenta */
-  --vp-c-brand-1: #c66366; /* Primary brand color - used for links */
-  --vp-c-brand-2: #e27175; /* Hover state */
-  --vp-c-brand-3: #ac5558; /* Pressed/active state */
-  --vp-c-brand-soft: rgba(198, 0, 206, 0.14); /* Soft background variant */
+  --vp-c-bg: #e8e4dc;
+  --vp-c-bg-alt: #e0dcd4;
+  --vp-c-bg-elv: #e0ddd8;
+  --vp-c-bg-soft: #e0ddd8;
+  --vp-c-divider: #cdc8c0;
+
+  --vp-sidebar-bg-color: #d5d0c8;
+  --vp-nav-bg-color: #d5d0c8;
+  --vp-nav-screen-bg-color: #d5d0c8;
+  --vp-local-nav-bg-color: #d5d0c8;
+
+  --vp-c-brand-1: var(--tecs-c-purple);
+  --vp-c-brand-2: #4a3570;
+  --vp-c-brand-3: var(--vp-c-brand-1);
+  --vp-c-brand-soft: #37245524;
 
   --vp-c-tip-1: var(--vp-c-brand-1);
   --vp-c-tip-2: var(--vp-c-brand-2);
@@ -92,18 +80,6 @@
  * -------------------------------------------------------------------------- */
 
 :root {
-  --vp-home-hero-name-color: transparent;
-  --vp-home-hero-name-background: -webkit-linear-gradient(
-    120deg,
-    #bd34fe 30%,
-    #41d1ff
-  );
-
-  --vp-home-hero-image-background-image: linear-gradient(
-    -45deg,
-    #bd34fe 50%,
-    #47caff 50%
-  );
   --vp-home-hero-image-filter: blur(44px);
 }
 
@@ -138,102 +114,222 @@
   --docsearch-primary-color: var(--vp-c-brand-1) !important;
 }
 
+/**
+ * Hero & Typography
+ * -------------------------------------------------------------------------- */
+
 :root {
-  --vp-home-hero-name-background: linear-gradient(
-    120deg,
-    #d2aa82,
-    #985a1c
-  );
+  --vp-home-hero-name-color: var(--vp-c-brand-1);
 
   --vp-home-hero-image-background-image: linear-gradient(
     180deg,
-    #008cc3 20%,     /* Sky blue */
-    #f4e2b0 50%,    /* Transition - light sand */
-    #2d1c05 100%    /* Desert tan */
+    var(--tecs-c-near-black) 0%,
+    var(--tecs-c-purple) 20%,
+    var(--tecs-c-crimson) 45%,
+    var(--tecs-c-lavender) 70%,
+    var(--tecs-c-tan) 100%
   );
 
-  .VPHome {
-    .tagline {
-      a {
-        color: #009fa2;
-      }
-    }
+  .VPHome .tagline a {
+    color: var(--tecs-c-tan);
   }
 
-  /* Jersey 10 font for hero name */
   .VPHero .name {
-    font-family: "Jersey 10", sans-serif !important;
+    font-family: "Jersey 15", sans-serif !important;
     font-size: 60pt !important;
     font-weight: 600 !important;
     font-style: normal !important;
   }
 
   .VPHero .text {
-    font-size: 2.4rem;
+    font-size: 2.2rem;
+  }
+
+  .VPNavBarTitle .logo {
+    height: 40px;
+    width: auto;
   }
 
   .VPNavBarTitle .title {
-    color: #60ad31;
+    background: repeating-linear-gradient(
+      to bottom,
+      var(--vp-c-brand-1) 0px,
+      var(--vp-c-brand-1) 3px,
+      color-mix(in srgb, var(--vp-c-brand-1) 90%, black) 3px,
+      color-mix(in srgb, var(--vp-c-brand-1) 90%, black) 5px
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
   }
 
   .title {
-    font-family: "Jersey 10", sans-serif !important;
+    font-family: "Jersey 15", sans-serif !important;
     font-size: 2rem;
   }
 
-  /* Apply Jersey 10 font to headings with green color */
   h1, h2, h3, h4, h5 {
-    font-family: "Jersey 10", sans-serif !important;
+    font-family: "Jersey 15", sans-serif !important;
     font-weight: 400;
     font-style: normal;
   }
 
   h1, h2 {
-    color: #985a1c; /* Green for headings only in light mode */
+    color: var(--vp-c-brand-1);
   }
 
-  h1.heading {
-    color: var(--vp-c-text-1) !important;
+  h3, h4, h5 {
+    color: var(--vp-c-brand-2);
   }
 
+  h1.heading,
   .VPFeatures h2 {
     color: var(--vp-c-text-1) !important;
   }
 
   .vp-doc {
-    h1 {
-      font-size: 3.3rem !important;
-    }
+    h1 { font-size: 3.0rem !important; }
 
     h2 {
-      font-size: 2.5rem !important;
+      font-size: 2.2rem !important;
+      margin-top: 38px;
+      padding-top: 30px;
     }
 
     h3 {
-      font-size: 1.8rem !important;
+      font-size: 1.5rem !important;
+      margin-top: 40px;
     }
 
     h4 {
-      font-size: 1.5rem !important;
+      font-size: 1.2rem !important;
+      margin-top: 40px;
     }
 
-    h5 {
-      font-size: 1.2rem !important;
+    h5 { font-size: 0.9rem !important; }
+
+    a { color: var(--tecs-c-tan); }
+
+    code:not(pre code) {
+      font-family: "Jersey 15", monospace !important;
+      font-size: 1.25em !important;
+      padding: 1px 4px;
+      color: var(--vp-c-text-2);
     }
   }
 }
 
 /**
- * Dark Mode Customizations
+ * Dark Mode
  * -------------------------------------------------------------------------- */
 
 .dark {
-  /* Keep special heading styles unchanged */
-  h1.heading {
-    color: var(--vp-c-text-1) !important;
+  --vp-c-brand-1: var(--tecs-c-lavender);
+  --vp-c-brand-2: #a192b1;
+  --vp-c-brand-3: var(--vp-c-brand-1);
+  --vp-c-brand-soft: #86779529;
+
+  --vp-c-text-1: #c8c2b4;
+  --vp-c-text-2: #9a9386;
+  --vp-c-text-3: #6a6458;
+
+  --vp-c-bg: var(--tecs-c-near-black);
+  --vp-c-bg-alt: var(--vp-c-bg);
+  --vp-c-bg-elv: #2a2724;
+  --vp-c-bg-soft: #211f1c;
+
+  --vp-sidebar-bg-color: #000;
+  --vp-nav-bg-color: #000;
+  --vp-nav-screen-bg-color: #000;
+  --vp-local-nav-bg-color: #000;
+
+  --vp-c-border: #524e3d;
+  --vp-c-divider: #3a3730;
+  --vp-c-gutter: var(--vp-c-bg);
+
+  --vp-code-block-bg: #16141b;
+
+  .vp-doc h1 {
+    color: var(--tecs-c-lavender) !important;
+    font-size: 2.2rem !important;
+    border: 4px solid var(--tecs-c-lavender);
+    border-radius: 26px;
+    padding: 2px 12px;
+    margin-left: -12px;
+    display: inline-block;
   }
 
-  .VPFeatures h2 {
-    color: var(--vp-c-text-1) !important;
+  .VPNavBarTitle .title span {
+    color: var(--tecs-c-crimson) !important;
   }
+
+  .VPNavBarTitle .title {
+    background: repeating-linear-gradient(
+      to bottom,
+      var(--tecs-c-crimson) 0px,
+      var(--tecs-c-crimson) 3px,
+      color-mix(in srgb, var(--tecs-c-crimson) 85%, black) 3px,
+      color-mix(in srgb, var(--tecs-c-crimson) 85%, black) 5px
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .outline-marker {
+    background-color: var(--tecs-c-crimson) !important;
+  }
+
+  .VPSidebar {
+    background: linear-gradient(to bottom right, #272727, #110f0d) !important;
+  }
+
+  .VPNavBarTitle.has-sidebar .title {
+    border-bottom: none !important;
+  }
+
+  .vp-doc th {
+    background-color: var(--tecs-c-purple);
+  }
+}
+
+/**
+ * Feature Cards
+ * -------------------------------------------------------------------------- */
+
+.VPNav {
+  background-color: var(--vp-nav-bg-color) !important;
+}
+
+.VPFeature .details a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+/**
+ * Display Font Overrides
+ * -------------------------------------------------------------------------- */
+
+.VPButton.medium {
+  font-family: "Jersey 15", sans-serif !important;
+  font-size: 1.3rem !important;
+}
+
+.VPSidebar .VPSidebarItem .text {
+  font-family: "Jersey 15", sans-serif;
+  font-size: 1.1rem;
+}
+
+.custom-block-title {
+  font-family: "Jersey 15", sans-serif;
+  font-size: 1.3rem;
+}
+
+.VPDocAsideOutline .outline-link {
+  font-family: "Jersey 15", sans-serif;
+  font-size: 1rem;
+}
+
+.VPDocAsideOutline .outline-title {
+  font-family: "Jersey 15", sans-serif;
 }

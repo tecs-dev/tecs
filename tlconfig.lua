@@ -5,10 +5,15 @@ return {
     gen_compat = "off",
     include_dir = { "types/", "types/luajit", "src/" },
     global_env_def = "love2d",
-    disable_warnings = {"redeclaration"},
-    scripts = {
-        build = {
-            post = "cyan-plugins/generate_rockspecs.tl"
-        }
-    }
+    dont_prune = {
+        "test_deps",
+        "test_deps/**/*",
+        "*.rockspec",
+        "*.tl",
+        "tecs/tecs",
+        "tecs2d/assets/internal/internal",
+        "tecs2d/gfx/internal/gpu/shaders",
+        "tecs2d/gfx/internal/gpu/shaders/*.glsl",
+        "tecs2d/gfx/internal/**/*.glsl",
+    },
 }

@@ -1,9 +1,26 @@
+.kiro/
+.vscode/
+.claude/
+
 /build/
+/vendor/
+/bin/love2d/
+.love12/
 node_modules/
 /docs/.vitepress/cache
+/docs/.vitepress/dist
 
 # Example build directories
 examples/**/build/
+
+# Benchmark copied modules
+benches/json-bench/tecs/
+
+# Benchmark profile output
+benches/*/profiles/
+
+# Benchmark result log (appended by bench.suite, diffed by compare.lua)
+benches/results/
 
 # macOS system files
 .DS_Store
@@ -14,4 +31,7 @@ luacov.report.out
 coverage-html/
 coverage.xml
 coverage.info
-*.lcov
+
+*.lcov.mcp.json
+.mcp.json
+*.src.rock

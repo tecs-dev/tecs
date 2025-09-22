@@ -1,8 +1,10 @@
 local tecs <const> = require("tecs")
 local Archetype <const> = require("tecs.internal.Archetype")
+local ffi <const> = require("tecs.internal.ffi")
+local type logging = require("tecs.utils.logging")
 
-local type Int32Array = tecs.Int32Array
-local setIntArraySize <const> = tecs.ffi.setIntArraySize
+local type DoubleArray = tecs.DoubleArray
+local setDoubleArraySize <const> = ffi.setDoubleArraySize
 
 local record TestHelpers
     -- Export types using record definitions
@@ -77,7 +79,7 @@ local record TestHelpers
     createMockFile: function(): MockFile
 
     -- Create a mock sink for logging tests
-    createMockSink: function(): tecs.logging.LogSink
+    createMockSink: function(): logging.LogSink
 
     -- Add entities to an archetype with optional component data
     addEntitiesToArchetype: function(archetype: Archetype, entityIds: {integer}, componentData: {{tecs.Component: any}})
@@ -98,25 +100,22 @@ function TestHelpers.createComponentProvider(prefix: string, testId: integer): T
     provider.PosComponent = tecs.newComponent({
         name = prefix .. "Pos" .. testId,
         container = posContainer,
-        constructor = function(x: number, y: number): TestHelpers.Pos
-            return {x = x or 0, y = y or 0, componentType = posContainer}
-        end
+        fields = {"x", "y"},
+        defaults = {0, 0},
     })
 
     provider.VelComponent = tecs.newComponent({
         name = prefix .. "Vel" .. testId,
         container = velContainer,
-        constructor = function(x: number, y: number): TestHelpers.Vel
-            return {x = x or 0, y = y or 0, componentType = velContainer}
-        end
+        fields = {"x", "y"},
+        defaults = {0, 0},
     })
 
     provider.HealthComponent = tecs.newComponent({
         name = prefix .. "Health" .. testId,
         container = healthContainer,
-        constructor = function(value: number, max: number): TestHelpers.Health
-            return {value = value or 100, max = max or 100, componentType = healthContainer}
-        end
+        fields = {"value", "max"},
+        defaults = {100, 100},
     })
 
     provider.DeadComponent = tecs.newComponent({
@@ -127,17 +126,15 @@ function TestHelpers.createComponentProvider(prefix: string, testId: integer): T
     provider.SpriteComponent = tecs.newComponent({
         name = prefix .. "Sprite" .. testId,
         container = spriteContainer,
-        constructor = function(texture: string, width: number, height: number): TestHelpers.Sprite
-            return {texture = texture or "", width = width or 0, height = height or 0, componentType = spriteContainer}
-        end
+        fields = {"texture", "width", "height"},
+        defaults = {"", 0, 0},
     })
 
     provider.TransformComponent = tecs.newComponent({
         name = prefix .. "Transform" .. testId,
         container = transformContainer,
-        constructor = function(scale: number, rotation: number): TestHelpers.Transform
-            return {scale = scale or 1, rotation = rotation or 0, componentType = transformContainer}
-        end
+        fields = {"scale", "rotation"},
+        defaults = {1, 0},
     })
 
     function provider:createRelationship(name: string, exclusive: boolean): tecs.Relationship
@@ -199,19 +196,19 @@ function TestHelpers.createMockFile(): TestHelpers.MockFile
     } as any as TestHelpers.MockFile
 end
 
-function TestHelpers.createMockSink(): tecs.logging.LogSink
+function TestHelpers.createMockSink(): logging.LogSink
     local spy <const> = require("luassert.spy")
 
     return {
         log = spy.new(function() end),
         flush = spy.new(function() end),
         close = spy.new(function() end)
-    } as any as tecs.logging.LogSink
+    } as any as logging.LogSink
 end
 
 -- Record for accessing archetype implementation fields
 local record ArchetypeImpl
-    entities: Int32Array  -- FFI array
+    entities: DoubleArray  -- FFI array
     columns: {tecs.Component: any}
 end
 
@@ -222,9 +219,9 @@ function TestHelpers.addEntitiesToArchetype(archetype: Archetype, entityIds: {in
     for i, entityId in ipairs(entityIds) do
         -- Ensure capacity and add to FFI array
         local newCount = archImpl.entities[0] + 1
-        archImpl.entities = ffi.ensureCapacityInt32(archImpl.entities, newCount)
+        archImpl.entities = ffi.ensureCapacityDouble(archImpl.entities, newCount)
         (archImpl.entities as {integer})[newCount] = entityId
-        setIntArraySize(archImpl.entities, newCount)
+        setDoubleArraySize(archImpl.entities, newCount)
 
         if componentData and componentData[i] then
             for comp, value in pairs(componentData[i]) do

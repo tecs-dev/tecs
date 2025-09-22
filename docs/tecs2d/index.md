@@ -2,289 +2,127 @@
 outline: deep
 ---
 
-# Tecs2D Reference
+# Getting Started
 
-Tecs2D integrates Tecs with Love2D.
+Tecs2D is a 2D game engine built on top of [Tecs](/tecs/) and [Love2D 12](https://love2d.org).
+It wires the ECS into the Love2D event loop and adds rendering, audio, input, physics, tiled maps,
+tweens, and dev tooling.
+
+The fastest way to start is the [starter template](https://github.com/tecs-dev/tecs-starter).
+
+## Prerequisites
+
+You will need to install these tools to use Tecs2D:
+
+| Tool           | Description            | Link                                                                              |
+| -------------- | ---------------------- | --------------------------------------------------------------------------------- |
+| **LuaRocks**   | Lua package manager    | [Installation](https://github.com/luarocks/luarocks/blob/main/docs/download.md)   |
+| **Teal**       | Typed Lua compiler     | [Download](https://teal-language.org/#download)                                   |
+
+And install Tecs2D into your project:
+
+```bash
+luarocks install --tree=vendor --lua-version=5.1 tecs2d
+```
+
+This installs the `tecs2d` rock and pulls in the core `tecs` rock as a dependency.
 
 ## Installation
 
-You can install Tecs2D using LuaRocks:
+::: code-group
 
-```bash
-luarocks install --tree=src/vendor tecs2d.tl
+```bash [Git Clone]
+git clone https://github.com/tecs-dev/tecs-starter.git my-game
+cd my-game
+make run
 ```
 
-::: info Installation help
-See the [install](/guide/install) guide for more info
+```bash [GitHub CLI]
+gh repo create my-game --template tecs-dev/tecs-starter --clone
+cd my-game
+make run
+```
+
 :::
 
-## Module Structure
+You should see a demo with a movable player.
 
-Tecs2D is organized as a single top-level module that re-exports all submodules:
+## What's Included
 
-```lua
-local tecs2d = require("tecs2d")
+The starter template comes pre-configured with:
 
--- Access submodules through the main module
-local input = tecs2d.input
-local events = tecs2d.events
-local stats = tecs2d.stats
+- **Makefile** - Incremental builds, asset copying, dependency management
+- **tlconfig.lua** - Teal compiler configuration
+- **Type definitions** - Downloaded automatically for Love2D, LuaJIT FFI, etc.
+- **Demo game** - Simple player movement with camera follow
+
+### Project Structure
+
+```
+my-game/
+├── Makefile              # Build orchestration
+├── tlconfig.lua          # Teal configuration
+├── src/
+│   ├── main.tl           # Game entry point
+│   ├── conf.tl           # Love2D configuration
+│   └── plugins/
+│       └── game.tl       # Game logic
+├── assets/               # Images, sounds, fonts
+├── types/                # Type definitions (generated)
+├── build/                # Compiled output (generated)
+└── src/vendor/           # Dependencies (generated)
 ```
 
-## Getting Started
+## Wiring up Tecs2D
+
+`tecs2d.run` configures the world, render pipeline, and game plugin, then takes over Love2D's main loop:
 
 ```lua
--- main.tl
-local tecs = require("tecs")
-local tecs2d = require("tecs2d")
+local tecs <const> = require("tecs")
+local tecs2d <const> = require("tecs2d")
+local gfx <const> = require("tecs2d.gfx")
 
--- Give love2d a custom `run` function to run tecs2d
-function love.run(): function(): string | number
-    return tecs2d.run(1 / 60, gamePlugin)
-end
-```
-
-### tecs2d.run
-
-Creates a complete Love2D game loop integrated with Tecs's world and phase system. This function replaces the default
-Love2D run loop with one that manages a Tecs world, handles fixed timestep updates, and integrates all Love2D events
-with the ECS architecture.
-
-```lua
--- main.tl
-function love.run(): function(): string | number
-    return tecs2d.run(1 / 60, gamePlugin)
-end
-```
-
-#### Parameters
-
-| Name | Type | Description |
-|------|------|-------------|
-| `timestep` | `number` | The fixed timestep in seconds between each update (e.g., `1/60` for 60 FPS) |
-| `gamePlugin` | `function(world: tecs.World)` | A plugin function that receives the world and sets up your game |
-
-#### Returns
-
-```lua
-function(): integer | string
-```
-
-A function that should be assigned to `love.run` to drive the game loop
-
-### tecs2d.quit
-
-Triggers a quit event to exit the application cleanly. This is the recommended way to exit a Tecs2D application.
-
-```lua
--- Exit on escape key
-if tecs2d.input.isKeyReleased("escape") then
-    tecs2d.quit()
+local function game(world: tecs.World)
+    -- register components, spawn entities, add systems
 end
 
--- Exit with custom error code
-if criticalError then
-    tecs2d.quit(1)  -- Exit code 1 for error
-end
-```
-
-::: danger `tecs2d.quit()` does not quit immediately
-Calling `tecs2d.quit()` causes the game to exit at the end of the frame or start of the next frame. It does not
-cause the function that called it to immediately exit.
-:::
-
-#### Parameters
-
-| Name       | Type                | Description                                         |
-|------------|---------------------|-----------------------------------------------------|
-| `exitCode` | `number` (optional) | The exit code to return (defaults to 0 for success) |
-
-#### Usage Notes
-
-- The default exit code is 0 (success)
-- Non-zero exit codes typically indicate an error condition
-
-## Core Modules
-
-These modules provide Love2D-specific functionality and are accessed through `tecs2d.moduleName`:
-
-### [tecs2d.input](/tecs2d/input-handling)
-
-Global input state module that captures and manages all Love2D input events:
-
-```lua
-local tecs2d = require("tecs2d")
-if tecs2d.input.isKeyPressed("space") then
-    -- Handle space key press
-end
-```
-
-### [tecs2d.events](/tecs2d/events)
-
-Type-safe wrappers for all Love2D callbacks as Tecs events:
-
-- `tecs2d.events.MousePressed` - Mouse button press events
-- `tecs2d.events.MouseReleased` - Mouse button release events
-- `tecs2d.events.MouseFocus` - Mouse focus change events
-- `tecs2d.events.KeyPressed` - Keyboard press events (via Input module)
-- `tecs2d.events.Focus` - Window focus events
-- `tecs2d.events.Resize` - Window resize events
-- `tecs2d.events.Quit` - Application quit events
-- `tecs2d.events.JoystickAdded` - Controller connection events
-- `tecs2d.events.JoystickRemoved` - Controller disconnection events
-- `tecs2d.events.FileDropped` - File drag-and-drop events
-- `tecs2d.events.DirectoryDropped` - Directory drag-and-drop events
-- `tecs2d.events.Visible` - Window visibility changes
-
-### [tecs2d.stats](/tecs2d/stats)
-
-Performance monitoring and debug display system, showing FPS, memory usage, entity count, system performance, and more.
-
-```lua
-world:addPlugin(tecs2d.stats.plugin({
-    enabled = true,
-    drawMode = "fps"
-}))
-```
-
-## Integration Features
-
-### Automatic Phase Mapping
-
-Tecs2D automatically integrates Love2D's rendering pipeline with Tecs phases:
-
-| Tecs Phase | Love2D Integration |
-|------------|-------------------|
-| `tecs.phases.RenderFirst` | Clears screen, resets graphics state |
-| `tecs.phases.Render` | Calls `love.draw()` if defined |
-| `tecs.phases.RenderLast` | Presents rendered frame |
-| `tecs.phases.Update` | Calls `love.update()` if defined |
-| `tecs.phases.FixedFirst` | Marks entry to fixed timestep phases |
-| `tecs.phases.FixedLast` | Clears latched input, marks exit from fixed phases |
-| `tecs.phases.PostStartup` | Steps timer after initialization |
-
-### Input Resource
-
-Input is available through the tecs2d module:
-
-```lua
-local tecs2d = require("tecs2d")
-
--- Check keyboard state
-if tecs2d.input.isKeyDown("w") then
-    -- Move forward
-end
-
--- Check mouse position
-local mouseX, mouseY = input:getMousePosition()
-
--- Check gamepad
-local gamepad = input:getJoystick(1)
-if gamepad and gamepad:isGamepadDown("a") then
-    -- Jump
-end
-```
-
-::: tip Why use this?
-You can still use `love.keyboard.isDown()` and the like, but Tecs2D efficiently buffers keyboard events and tracks
-when keys are released or pressed in a way that _just works_ across fixed and non-fixed update phases.
-:::
-
-### Event Observation
-
-Love2D events are translated into Tecs2D events. These events can be observed like any other Tecs event:
-
-```lua
-world:observe(tecs2d.events.MousePressed, function(e: tecs2d.events.MousePressed)
-    print("Mouse clicked at", e.x, e.y, "button", e.button)
-end)
-
-world:observe(tecs2d.events.Resize, function(e: tecs2d.events.Resize)
-    print("Window resized to", e.width, "x", e.height)
-end)
-```
-
-Traditional Love2D callbacks continue to work alongside Tecs2D:
-
-```lua
--- Both approaches work simultaneously
-function love.draw()
-    -- Called during tecs.phases.Render
-end
-
-world:addSystem({
-    phase = tecs.phases.Render,
-    run = function()
-        -- Also runs during render phase
-    end
+love.run = tecs2d.run({
+    fps = 60,
+    game = game,
+    render = gfx.newRenderConfig({
+        virtualWidth = 800,
+        virtualHeight = 600,
+    }),
 })
 ```
 
-::: tip Why use Tecs2D events?
-You can still use `love.*` events as usual, but using Tecs2D events allows for building decoupled and composable
-plugins that don't have to hijack `love.*` callback methods. Any number of Tecs plugins can listen to these Love2D
-events and react to them. The events are also nearly zero cost in that they are only emitted if something is listening
-and use FFI events when the runtime allows it.
-:::
+The pure-ECS pieces (`World`, components, queries, systems) come from [Tecs](/tecs/). Tecs2D
+adds the engine layer: rendering, audio, input, etc. Install `tecs2d` when you want the full
+engine layer; it depends on `tecs` automatically.
 
-## Basic Game Setup
+## Make Targets
 
-In your `main.tl` Love 2D script:
+| Command               | Description                                            |
+| --------------------- | ------------------------------------------------------ |
+| `make run`            | Build and run the game (runs setup automatically)      |
+| `make build`          | Compile without running                                |
+| `make clean`          | Remove build artifacts                                 |
+| `make reset`          | Clean everything, including dependencies and Love2D    |
+| `make love12`         | Re-download Love2D 12                                  |
 
-```lua
-local tecs2d = require("tecs2d")
+## Managing Dependencies
 
-function love.run(): function(): string | number
-    return tecs2d.run(1 / 60, gamePlugin)
-end
+```bash
+# Add a package
+luarocks install --tree=src/vendor --lua-version=5.1 penlight
+
+# Add a specific version
+luarocks install --tree=src/vendor --lua-version=5.1 penlight 1.14.0
 ```
 
-In `game.tl`, implement the game setup and systems:
+## Next Steps
 
-```lua
-local tecs = require("tecs")
-local tecs2d = require("tecs2d")
-
-return function(world: tecs.World)
-    -- Register components
-    local Position = tecs.newComponent({
-        name = "Position",
-        constructor = function(x, y)
-            return {x = x, y = y}
-        end
-    })
-
-    -- Add a system to quit
-    world:addSystem({
-        phase = tecs.phases.Update,
-        run = function()
-            if tecs2d.input.isKeyPressed("escape") then
-                love.event.quit()
-            end
-        end
-    })
-
-    -- Create queries outside systems
-    local positionQuery = world:query({include = {Position}})
-
-    world:addSystem({
-        phase = tecs.phases.Render,
-        run = function()
-            for _, entity in positionQuery do
-                local pos = entity[Position]
-                love.graphics.circle("fill", pos.x, pos.y, 10)
-            end
-        end
-    })
-
-    -- Spawn initial entities on startup
-    world:addSystem({
-        phase = tecs.phases.Startup,
-        run = function()
-            world:spawn(
-                Position.new(400, 300)
-            )
-        end
-    })
-end
-```
+- [Tecs Quickstart](/tecs/) - Learn ECS concepts and build your first system
+- [Love2D Integration](/tecs2d/love2d) - Game loop, events, and Love2D phase mapping
+- [Rendering](/tecs2d/rendering/) - Camera, sprites, shapes, lighting
+- [Input & Controls](/tecs2d/input/) - Keyboard, mouse, gamepad

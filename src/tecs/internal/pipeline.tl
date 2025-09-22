@@ -1,28 +1,38 @@
-local types = require("tecs.types")
-local phases = require("tecs.internal.phases")
-local compat = require("tecs.internal.utils.compat")
-local EMPTY = require("tecs.internal.utils.pool").EMPTY
+local types <const> = require("tecs.types")
+local phases <const> = require("tecs.internal.phases")
+local EMPTY <const> = require("tecs.utils.pool").EMPTY
 
-local table_new = compat.new
+local table_new <const> = require("table.new") as function(integer, integer): {any}
 
 local type World = types.World
 local type System = types.System
-local type RunAfter = function(world: World)
 local type Pipeline = types.Pipeline
 local type Phase = types.Phase
 local type SystemConfig = types.SystemConfig
 
+-- `jit.zone` has no Teal type declarations; go through an opaque require.
+local function loadUntyped(modName: string): any
+    return require(modName)
+end
+local zone = loadUntyped("jit.zone") as function(?string): string
+
+--- Flattened parallel arrays for a group of systems.
+--- Avoids per-system hash reads in the hot loop.
+local record FlatGroup
+    runs: {System}
+    runIfs: {function(number, World, string): boolean}
+    ids: {string}
+    names: {string}
+    count: integer
+end
+
 --- Pipeline for executing ECS systems in dependency order.
----
---- Executes in three phases: BeforeFixed -> FixedLoop -> AfterFixed.
---- Optimized for hot path performance with flattened execution, cached ranges, and lazy rebuilding.
 local record pipeline
     --- Creates a new pipeline with optimized execution paths.
     ---
     --- @param fixedTimestep Fixed timestep for physics/game logic (defaults to 1/60 = 60 FPS)
-    --- @param runAfter Callback executed after each system (typically for committing changes)
     --- @return Optimized pipeline instance
-    new: function(fixedTimestep: number, runAfter: RunAfter): Pipeline
+    new: function(fixedTimestep: number): Pipeline
 end
 
 --- Private implementation of the pipeline.
@@ -42,31 +52,37 @@ local record PipelineImpl is Pipeline
     --- Accumulator for fixed update loop.
     fixedAccumulator: number
 
-    --- Commits any changes to the world after each system.
-    runAfter: RunAfter
-
     --- The number of systems in the pipeline.
     count: integer
 
-    -- The computed flattened list of sorted systems.
-    flatSystems: {SystemConfig}
+    --- Flattened parallel arrays for the three update regions.
+    beforeFixedGroup: FlatGroup
+    fixedGroup: FlatGroup
+    afterFixedGroup: FlatGroup
 
-    -- These systems are the ordered section of systems run before the fixed update loop.
-    beforeFixedSystems: {integer, integer}
+    --- Per-phase flat caches for run(phase). Indexed by phase position.
+    --- Group phases contain the concatenated flat lists of their children.
+    phaseGroups: {integer: FlatGroup}
 
-    -- These are the fixed update systems.
-    fixedSystems: {integer, integer}
+    --- Global registry of system names to their phase position for O(1) removal.
+    systemNameRegistry: {string: integer}
 
-    -- These are the systems called after the update system, including rendering systems.
-    afterFixedSystems: {integer, integer}
+    --- Counter for assigning unique IDs to anonymous systems.
+    anonymousSystemCount: integer
 end
-
-local ALWAYS_RUN <const> = function(_dt: number, _world: World): boolean return true end
-local NO_OP_RUN_AFTER <const>: RunAfter = function(_world: World) end
 
 -- The maximum number of iterations for the fixed update loop.
 -- This is used to prevent infinite loops, death spirals, and to provide predictable performance.
 local MAX_ITERATIONS <const> = 10
+
+-- Empty flat group singleton for phases with no systems.
+local EMPTY_GROUP <const>: FlatGroup = {
+    runs = {},
+    runIfs = {},
+    ids = {},
+    names = {},
+    count = 0,
+}
 
 -- The list of phases for each span of flatSystems.
 local BEFORE_FIXED_PHASES <const> = {phases.First, phases.PreUpdate}
@@ -74,15 +90,20 @@ local FIXED_PHASES <const> = phases.FixedUpdateGroup.children
 local AFTER_FIXED_PHASES <const> = {phases.Update, phases.PostUpdate, phases.RenderFirst,
     phases.PreRender, phases.Render, phases.PostRender, phases.RenderLast, phases.Last}
 
-function pipeline.new(fixedTimestep: number, runAfter: RunAfter): Pipeline
+function pipeline.new(fixedTimestep: number): Pipeline
     local result: PipelineImpl = setmetatable({
         dirty = true,
         systems = {},
         phaseStates = table_new(#phases.index, 0) as {boolean},
         fixedTimestep = fixedTimestep or (1 / 60), -- Default to 60 FPS if not provided
         fixedAccumulator = 0,
-        runAfter = runAfter or NO_OP_RUN_AFTER,
-        count = 0
+        count = 0,
+        beforeFixedGroup = EMPTY_GROUP,
+        fixedGroup = EMPTY_GROUP,
+        afterFixedGroup = EMPTY_GROUP,
+        phaseGroups = {},
+        systemNameRegistry = {},
+        anonymousSystemCount = 0,
     }, { __index = PipelineImpl })
 
     -- Initialize each phase.
@@ -125,12 +146,11 @@ local function topologicalSort(systems: {SystemConfig}): {SystemConfig}
             for j = 1, #config.before do
                 local beforeSystem = config.before[j]
                 local beforeMapping = systemNameMap[beforeSystem]
-                if not beforeMapping then
-                    error("System " .. beforeSystem .. " does not exist in phase " .. config.phase.name)
+                if beforeMapping then
+                    -- beforeMapping must run after config.run
+                    dependents[config.run] = dependents[config.run] or {}
+                    dependents[config.run][#dependents[config.run] + 1] = beforeMapping.run
                 end
-                -- beforeMapping must run after config.run
-                dependents[config.run] = dependents[config.run] or {}
-                table.insert(dependents[config.run], beforeMapping.run)
             end
         end
     end
@@ -148,15 +168,14 @@ local function topologicalSort(systems: {SystemConfig}): {SystemConfig}
                 for i = 1, #config.after do
                     local afterSystem = config.after[i]
                     local afterMapping = systemNameMap[afterSystem]
-                    if not afterMapping then
-                        error("System " .. afterSystem .. " does not exist in phase " .. config.phase.name)
+                    if afterMapping then
+                        visit(afterMapping.run)
                     end
-                    visit(afterMapping.run)
                 end
             end
 
             -- Add current system to sorted list
-            table.insert(sorted, config)
+            sorted[#sorted + 1] = config
 
             -- Visit all systems that depend on this one (from "before" constraints)
             local deps = dependents[system]
@@ -182,29 +201,53 @@ local function topologicalSort(systems: {SystemConfig}): {SystemConfig}
     return sorted
 end
 
--- Helper function to add systems from a phase to the flat list
-local function addPhaseSystems(
-    self: PipelineImpl,
-    phaseList: {Phase},
-    flatList: {SystemConfig}
-): {integer, integer}
-    local startIndex = #flatList + 1
-    local systemCount = 0
+--- Build a FlatGroup from a list of SystemConfigs.
+local function buildFlatGroup(configs: {SystemConfig}): FlatGroup
+    local n = #configs
+    if n == 0 then return EMPTY_GROUP end
 
-    for _, phase in ipairs(phaseList) do
-        -- Skip disabled phases
+    local runs: {System} = table_new(n, 0) as {System}
+    local runIfs: {function(number, World, string): boolean} = table_new(n, 0) as {function(number, World, string): boolean}
+    local ids: {string} = table_new(n, 0) as {string}
+    local names: {string} = table_new(n, 0) as {string}
+
+    for i = 1, n do
+        local config = configs[i]
+        runs[i] = config.run
+        runIfs[i] = config.runIf
+        ids[i] = config.id
+        names[i] = config.name
+    end
+
+    return {
+        runs = runs,
+        runIfs = runIfs,
+        ids = ids,
+        names = names,
+        count = n,
+    }
+end
+
+--- Collect systems from a list of phases into one flat SystemConfig list.
+local function collectPhaseSystems(
+    self: PipelineImpl,
+    phaseList: {Phase}
+): {SystemConfig}
+    local result: {SystemConfig} = {}
+    local n = 0
+    for i = 1, #phaseList do
+        local phase = phaseList[i]
         if self.phaseStates[phase.position] then
             local phaseSystems = self.systems[phase.position]
-            if phaseSystems and #phaseSystems > 0 then
-                for _, config in ipairs(phaseSystems) do
-                    table.insert(flatList, config)
-                    systemCount = systemCount + 1
+            if phaseSystems then
+                for j = 1, #phaseSystems do
+                    n = n + 1
+                    result[n] = phaseSystems[j]
                 end
             end
         end
     end
-
-    return {startIndex, #flatList}
+    return result
 end
 
 local function recreatePipeline(self: PipelineImpl)
@@ -219,48 +262,61 @@ local function recreatePipeline(self: PipelineImpl)
     end
     self.count = count
 
-    -- Recreate the flattened list of systems and compute indices.
-    local flatSystems = {}
-    self.beforeFixedSystems = addPhaseSystems(self, BEFORE_FIXED_PHASES, flatSystems)
-    self.fixedSystems = addPhaseSystems(self, FIXED_PHASES, flatSystems)
-    self.afterFixedSystems = addPhaseSystems(self, AFTER_FIXED_PHASES, flatSystems)
-    self.flatSystems = flatSystems
+    -- Build flat groups for the three update regions.
+    self.beforeFixedGroup = buildFlatGroup(collectPhaseSystems(self, BEFORE_FIXED_PHASES))
+    self.fixedGroup = buildFlatGroup(collectPhaseSystems(self, FIXED_PHASES))
+    self.afterFixedGroup = buildFlatGroup(collectPhaseSystems(self, AFTER_FIXED_PHASES))
+
+    -- Build per-phase flat caches for run(phase).
+    self.phaseGroups = {}
+    for i = 1, #phases.index do
+        local systems = self.systems[i]
+        if systems and #systems > 0 then
+            self.phaseGroups[i] = buildFlatGroup(systems)
+        else
+            self.phaseGroups[i] = EMPTY_GROUP
+        end
+    end
 
     self.dirty = false
 end
 
---- Execute a range of systems from the pre-flattened array.
---- - Cache table lookups (flatSystems, runAfter) outside the loop
---- - Use numeric range iteration for maximum performance
---- - Avoid phase lookup overhead by using pre-computed indices
-local function runFlattenedSystems(self: PipelineImpl, systemRange: {integer, integer}, dt: number, world: World)
-    local flatSystems = self.flatSystems
-    local runAfter = self.runAfter
-    for i = systemRange[1], systemRange[2] do
-        local config = flatSystems[i]
-        if config.runIf(dt, world) then
-            config.run(dt, world)
-            runAfter(world)
-        end
-    end
-end
+--- Execute a flat group of systems. Each system runs inside its own jit.zone
+--- so the LuaJIT sampling profiler can attribute samples to the system's id
+--- (e.g. "Update:Physics"). Zone push/pop is JIT-compiled and free when no
+--- profiler is attached.
+---
+--- Does not commit the world — the caller is responsible for draining the
+--- transaction at phase (or sub-phase) boundaries. Per-system commit is
+--- structural drain work that multiplies with system count and is almost
+--- never necessary; a system that needs same-frame visibility into changes
+--- made earlier in the same phase can call `world:commit()` explicitly.
+local function runGroup(group: FlatGroup, dt: number, world: World)
+    local n = group.count
+    if n == 0 then return end
 
-local function runSystems(self: PipelineImpl, phase: Phase, dt: number, world: World)
-    local systems <const> = self.systems[phase.position]
-    if systems then
-        local runAfter <const> = self.runAfter
-        for i = 1, #systems do
-            local config = systems[i]
-            if config.runIf(dt, world) then
-                config.run(dt, world)
-                runAfter(world)
-            end
+    local runs = group.runs
+    local runIfArr = group.runIfs
+    local idArr = group.ids
+    local nameArr = group.names
+
+    for i = 1, n do
+        local runIf = runIfArr[i]
+        if not runIf or runIf(dt, world, nameArr[i]) then
+            zone(idArr[i])
+            runs[i](dt, world)
+            zone()
         end
     end
 end
 
 --- Execute fixed timestep systems with death spiral protection.
 --- Uses accumulator pattern for frame-rate independent physics.
+---
+--- Commits once per fixed iteration rather than once per system. Each
+--- fixed-timestep step therefore sees the committed effects of the prior
+--- step, preserving the deterministic single-step-at-a-time semantic that
+--- physics systems rely on during catch-up.
 local function runFixedLoop(self: PipelineImpl, dt: number, world: World)
     local fixedTimestep = self.fixedTimestep
     self.fixedAccumulator = self.fixedAccumulator + dt
@@ -270,12 +326,15 @@ local function runFixedLoop(self: PipelineImpl, dt: number, world: World)
         return
     end
 
-    local fixedSystems = self.fixedSystems
+    local fixedGroup = self.fixedGroup
+    local hasWork = fixedGroup.count > 0
     local iterations = 0
 
     repeat
         iterations = iterations + 1
-        runFlattenedSystems(self, fixedSystems, fixedTimestep, world)
+        if hasWork then
+            runGroup(fixedGroup, fixedTimestep, world)
+        end
         self.fixedAccumulator = self.fixedAccumulator - fixedTimestep
         if self.fixedAccumulator < fixedTimestep or iterations >= MAX_ITERATIONS then
             break
@@ -294,9 +353,21 @@ function PipelineImpl:update(dt: number, world: World)
         recreatePipeline(self)
     end
 
-    runFlattenedSystems(self, self.beforeFixedSystems, dt, world)
+    zone("beforeFixed")
+    if self.beforeFixedGroup.count > 0 then
+        runGroup(self.beforeFixedGroup, dt, world)
+    end
+    zone()
+
+    zone("fixedLoop")
     runFixedLoop(self, dt, world)
-    runFlattenedSystems(self, self.afterFixedSystems, dt, world)
+    zone()
+
+    zone("afterFixed")
+    if self.afterFixedGroup.count > 0 then
+        runGroup(self.afterFixedGroup, dt, world)
+    end
+    zone()
 end
 
 function PipelineImpl:enablePhase(phase: Phase)
@@ -329,15 +400,23 @@ function PipelineImpl:disablePhase(phase: Phase)
     self.dirty = true
 end
 
-function PipelineImpl:removeSystem(phase: Phase, system: System | string)
-    local phaseSystems <const> = self.systems[phase.position]
+function PipelineImpl:removeSystem(systemName: string)
+    -- Look up which phase this system is in
+    local phasePosition = self.systemNameRegistry[systemName]
+    if not phasePosition then
+        error("System '" .. systemName .. "' not found in pipeline")
+    end
+
+    -- Remove from the phase's systems array
+    local phaseSystems <const> = self.systems[phasePosition]
     if phaseSystems then
         for i = 1, #phaseSystems do
-            local phaseSystem = phaseSystems[i]
-            if phaseSystem.run == system or phaseSystem.name == system then
+            if phaseSystems[i].name == systemName then
                 table.remove(phaseSystems, i)
                 self.count = self.count - 1
                 self.dirty = true
+                -- Remove from name registry
+                self.systemNameRegistry[systemName] = nil
                 return
             end
         end
@@ -353,29 +432,82 @@ function PipelineImpl:addSystem(config: SystemConfig)
     if self.phaseStates[phase.position] == nil then
         error("Phase is not registered in the pipeline: " .. (phase.name or tostring(phase)))
     end
-    config.runIf = config.runIf or ALWAYS_RUN
+
+    -- Synthesize a name for unnamed systems so self-removing runIf predicates
+    -- (e.g. runIf.after) always have a handle to pass back to removeSystem.
+    local name = config.name
+    if not name then
+        self.anonymousSystemCount = self.anonymousSystemCount + 1
+        name = "_anonymousSystem" .. self.anonymousSystemCount
+        config.name = name
+    end
+
+    if self.systemNameRegistry[name] then
+        error("System with name '" .. name .. "' already exists in the pipeline")
+    end
+    self.systemNameRegistry[name] = phase.position
+
+    local phaseName = phase.name or "Unknown"
+    config.id = phaseName .. ":" .. name
+    -- runIf left nil when absent; dispatch loops use a nil check instead of calling ALWAYS_RUN
     config.before = config.before or EMPTY as {string}
     config.after = config.after or EMPTY as {string}
-    table.insert(self.systems[phase.position], config)
+    self.systems[phase.position][#self.systems[phase.position] + 1] = config
+    self.count = self.count + 1
     self.dirty = true
-    -- Don't update count here, it will be updated when recreatePipeline is called
 end
 
-function PipelineImpl:run(phase: Phase, dt: number, world: World)
-    -- Always run the given phase first.
-    runSystems(self, phase, dt, world)
-
-    -- Run children that are enabled.
-    if phase.children then
+--- Recursive phase dispatch that does NOT commit. Used internally so that
+--- a group phase containing nested child phases produces exactly one commit
+--- at the outer boundary instead of one per leaf. The public `:run` wraps
+--- this with a single trailing `runAfter` call.
+local function runPhaseNoCommit(self: PipelineImpl, phase: Phase, dt: number, world: World)
+    if not phase.children then
+        -- Leaf phase: use cached flat group
+        local group = self.phaseGroups[phase.position]
+        if group then
+            runGroup(group, dt, world)
+        end
+    else
+        -- Group phase: run each child's flat cache in order
         for i = 1, #phase.children do
             local child = phase.children[i]
-            if child.position and child.position > 0 then
-                if self.phaseStates[child.position] then
-                    self:run(child, dt, world)
+            if child.position and child.position > 0 and self.phaseStates[child.position] then
+                if child.children then
+                    runPhaseNoCommit(self, child, dt, world)
+                else
+                    local group = self.phaseGroups[child.position]
+                    if group then
+                        runGroup(group, dt, world)
+                    end
                 end
             end
         end
     end
+end
+
+function PipelineImpl:run(phase: Phase, dt: number, world: World)
+    if self.dirty then
+        recreatePipeline(self)
+    end
+
+    runPhaseNoCommit(self, phase, dt, world)
+end
+
+function PipelineImpl:registerPhase(phase: Phase)
+    -- Assign position if not already assigned
+    if not phase.position then
+        phases.index[#phases.index + 1] = phase
+        phase.position = #phases.index
+    end
+
+    -- Initialize systems array and phase state for this phase
+    if not self.systems[phase.position] then
+        self.systems[phase.position] = {}
+        self.phaseStates[phase.position] = true
+    end
+
+    self.dirty = true
 end
 
 return pipeline

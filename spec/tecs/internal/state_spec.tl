@@ -5,373 +5,189 @@ local describe <const> = describe
 local it <const> = it
 local before_each <const> = before_each
 
-describe("State", function()
+describe("State Stack", function()
     local world: tecs.World
 
     before_each(function()
         world = tecs.newWorld()
     end)
 
-    describe("Basic state operations", function()
-        local record TestState is tecs.States<TestState.Value>
-            enum Value
-                "idle"
-                "running"
-                "stopped"
-            end
-        end
-
-        it("should get nil for unset state", function()
-            local value = world:getState(TestState)
-            luassert.is_nil(value)
+    describe("createState", function()
+        it("should create a state and return a component", function()
+            local comp = world:createState("game")
+            luassert.is_not_nil(comp)
         end)
 
-        it("should set and get state", function()
-            world:setState(TestState, "idle")
-            local value = world:getState(TestState)
-            luassert.is_equal("idle", value)
-        end)
-
-        it("should check if in state", function()
-            world:setState(TestState, "running")
-            luassert.is_true(world:inState(TestState, "running"))
-            luassert.is_false(world:inState(TestState, "idle"))
-            luassert.is_false(world:inState(TestState, "stopped"))
-        end)
-
-        it("should transition between states", function()
-            world:setState(TestState, "idle")
-            luassert.is_equal("idle", world:getState(TestState))
-
-            world:setState(TestState, "running")
-            luassert.is_equal("running", world:getState(TestState))
-
-            world:setState(TestState, "stopped")
-            luassert.is_equal("stopped", world:getState(TestState))
+        it("should error if state already exists", function()
+            world:createState("game")
+            luassert.error_matches(function()
+                world:createState("game")
+            end, "already exists")
         end)
     end)
 
-    describe("State with defaults", function()
-        local record DefaultState is tecs.DefaultedStates<DefaultState.Value>
-            enum Value
-                "alpha"
-                "beta"
-                "gamma"
-            end
-            default: DefaultState.Value
-        end
-        DefaultState.default = "alpha"
-
-        it("should return default value when unset", function()
-            local value = world:getState(DefaultState)
-            luassert.is_equal("alpha", value)
+    describe("pushState / popState / peekState", function()
+        it("should return nil when stack is empty", function()
+            luassert.is_nil(world:peekState())
         end)
 
-        it("should override default when set", function()
-            world:setState(DefaultState, "beta")
-            local value = world:getState(DefaultState)
-            luassert.is_equal("beta", value)
-        end)
-    end)
-
-    describe("State change callbacks", function()
-        local record GameState is tecs.States<GameState.Value>
-            enum Value
-                "menu"
-                "play"
-                "paused"
-                "gameover"
-            end
-        end
-
-        it("should call onEnterState callback", function()
-            local called = false
-            local callbackValue: string
-
-            world:onEnterState(GameState, "play", function()
-                called = true
-                callbackValue = "play"
-            end)
-
-            world:setState(GameState, "play")
-
-            luassert.is_true(called)
-            luassert.is_equal("play", callbackValue)
+        it("should push and peek state", function()
+            world:createState("game")
+            world:pushState("game")
+            luassert.is_equal("game", world:peekState())
         end)
 
-        it("should call onExitState callback", function()
-            local called = false
-            local callbackValue: string
-
-            world:setState(GameState, "menu")
-
-            world:onExitState(GameState, "menu", function()
-                called = true
-                callbackValue = "menu"
-            end)
-
-            world:setState(GameState, "play")
-
-            luassert.is_true(called)
-            luassert.is_equal("menu", callbackValue)
+        it("should error when pushing unknown state", function()
+            luassert.error_matches(function()
+                world:pushState("unknown")
+            end, "not found")
         end)
 
-        it("should call onTransitionState callback", function()
-            local called = false
-            local fromValue: string
-            local toValue: string
-
-            world:setState(GameState, "play")
-
-            world:onTransitionState(GameState, "play", "paused", function()
-                called = true
-                fromValue = "play"
-                toValue = "paused"
-            end)
-
-            world:setState(GameState, "paused")
-
-            luassert.is_true(called)
-            luassert.is_equal("play", fromValue)
-            luassert.is_equal("paused", toValue)
+        it("should pop state and return to previous", function()
+            world:createState("game")
+            world:createState("paused")
+            world:pushState("game")
+            world:pushState("paused")
+            luassert.is_equal("paused", world:peekState())
+            world:popState()
+            luassert.is_equal("game", world:peekState())
         end)
 
-        it("should not call onExitState for nil initial state", function()
-            local called = false
-
-            world:onExitState(GameState, "menu", function()
-                called = true
-            end)
-
-            -- Transitioning from nil to "play" should not trigger exit callback for "menu"
-            world:setState(GameState, "play")
-
-            luassert.is_false(called)
-        end)
-
-        it("should call callbacks in correct order", function()
-            local order: {string} = {}
-
-            world:setState(GameState, "play")
-
-            world:onExitState(GameState, "play", function()
-                table.insert(order, "exit_play")
-            end)
-
-            world:onTransitionState(GameState, "play", "paused", function()
-                table.insert(order, "transition_play_to_paused")
-            end)
-
-            world:onEnterState(GameState, "paused", function()
-                table.insert(order, "enter_paused")
-            end)
-
-            world:setState(GameState, "paused")
-
-            luassert.are_same({"exit_play", "transition_play_to_paused", "enter_paused"}, order)
-        end)
-
-        it("should support multiple callbacks for same state", function()
-            local count = 0
-
-            world:onEnterState(GameState, "play", function()
-                count = count + 1
-            end)
-
-            world:onEnterState(GameState, "play", function()
-                count = count + 10
-            end)
-
-            world:onEnterState(GameState, "play", function()
-                count = count + 100
-            end)
-
-            world:setState(GameState, "play")
-
-            luassert.is_equal(111, count)
-        end)
-
-        it("should not call callbacks when setting same state", function()
-            local exitCalled = false
-            local enterCalled = false
-
-            world:setState(GameState, "menu")
-
-            world:onExitState(GameState, "menu", function()
-                exitCalled = true
-            end)
-
-            world:onEnterState(GameState, "menu", function()
-                enterCalled = true
-            end)
-
-            -- Setting the same state should not trigger callbacks
-            world:setState(GameState, "menu")
-
-            luassert.is_false(exitCalled)
-            luassert.is_false(enterCalled)
-        end)
-
-        it("should handle complex state transitions", function()
-            local transitions: {string} = {}
-
-            -- Set up callbacks for all transitions
-            world:onExitState(GameState, "menu", function()
-                table.insert(transitions, "exit_menu")
-            end)
-
-            world:onExitState(GameState, "play", function()
-                table.insert(transitions, "exit_play")
-            end)
-
-            world:onExitState(GameState, "paused", function()
-                table.insert(transitions, "exit_paused")
-            end)
-
-            world:onEnterState(GameState, "menu", function()
-                table.insert(transitions, "enter_menu")
-            end)
-
-            world:onEnterState(GameState, "play", function()
-                table.insert(transitions, "enter_play")
-            end)
-
-            world:onEnterState(GameState, "paused", function()
-                table.insert(transitions, "enter_paused")
-            end)
-
-            world:onEnterState(GameState, "gameover", function()
-                table.insert(transitions, "enter_gameover")
-            end)
-
-            world:onTransitionState(GameState, "menu", "play", function()
-                table.insert(transitions, "menu_to_play")
-            end)
-
-            world:onTransitionState(GameState, "play", "paused", function()
-                table.insert(transitions, "play_to_paused")
-            end)
-
-            world:onTransitionState(GameState, "paused", "play", function()
-                table.insert(transitions, "paused_to_play")
-            end)
-
-            world:onTransitionState(GameState, "play", "gameover", function()
-                table.insert(transitions, "play_to_gameover")
-            end)
-
-            -- Perform state transitions
-            world:setState(GameState, "menu")
-            luassert.are_same({"enter_menu"}, transitions)
-
-            transitions = {}
-            world:setState(GameState, "play")
-            luassert.are_same({"exit_menu", "menu_to_play", "enter_play"}, transitions)
-
-            transitions = {}
-            world:setState(GameState, "paused")
-            luassert.are_same({"exit_play", "play_to_paused", "enter_paused"}, transitions)
-
-            transitions = {}
-            world:setState(GameState, "play")
-            luassert.are_same({"exit_paused", "paused_to_play", "enter_play"}, transitions)
-
-            transitions = {}
-            world:setState(GameState, "gameover")
-            luassert.are_same({"exit_play", "play_to_gameover", "enter_gameover"}, transitions)
+        it("should error when popping empty stack", function()
+            luassert.error_matches(function()
+                world:popState()
+            end, "empty")
         end)
     end)
 
-    describe("Multiple state types", function()
-        local record StateA is tecs.States<StateA.Value>
-            enum Value
-                "a1"
-                "a2"
-            end
-        end
-
-        local record StateB is tecs.States<StateB.Value>
-            enum Value
-                "b1"
-                "b2"
-            end
-        end
-
-        it("should manage multiple state types independently", function()
-            world:setState(StateA, "a1")
-            world:setState(StateB, "b1")
-
-            luassert.is_equal("a1", world:getState(StateA))
-            luassert.is_equal("b1", world:getState(StateB))
-
-            world:setState(StateA, "a2")
-            luassert.is_equal("a2", world:getState(StateA))
-            luassert.is_equal("b1", world:getState(StateB))
-
-            world:setState(StateB, "b2")
-            luassert.is_equal("a2", world:getState(StateA))
-            luassert.is_equal("b2", world:getState(StateB))
+    describe("State events", function()
+        it("should emit StateEnter on push", function()
+            world:createState("game")
+            local entered: string = nil
+            world:observe(0, tecs.builtins.StateEnter, function(e: tecs.builtins.StateEnter)
+                entered = e.state
+            end)
+            world:pushState("game")
+            luassert.is_equal("game", entered)
         end)
 
-        it("should handle callbacks for multiple state types", function()
-            local aEntered = false
-            local bEntered = false
-
-            world:onEnterState(StateA, "a1", function()
-                aEntered = true
+        it("should emit StateExit on pop", function()
+            world:createState("game")
+            world:pushState("game")
+            local exited: string = nil
+            world:observe(0, tecs.builtins.StateExit, function(e: tecs.builtins.StateExit)
+                exited = e.state
             end)
+            world:popState()
+            luassert.is_equal("game", exited)
+        end)
 
-            world:onEnterState(StateB, "b1", function()
-                bEntered = true
+        it("should emit StateBlur when pushing on top", function()
+            world:createState("game")
+            world:createState("paused")
+            world:pushState("game")
+            local blurred: string = nil
+            local pushed: string = nil
+            world:observe(0, tecs.builtins.StateBlur, function(e: tecs.builtins.StateBlur)
+                blurred = e.state
+                pushed = e.pushed
             end)
+            world:pushState("paused")
+            luassert.is_equal("game", blurred)
+            luassert.is_equal("paused", pushed)
+        end)
 
-            world:setState(StateA, "a1")
-            luassert.is_true(aEntered)
-            luassert.is_false(bEntered)
-
-            world:setState(StateB, "b1")
-            luassert.is_true(aEntered)
-            luassert.is_true(bEntered)
+        it("should emit StateFocus when state above is popped", function()
+            world:createState("game")
+            world:createState("paused")
+            world:pushState("game")
+            world:pushState("paused")
+            local focused: string = nil
+            local popped: string = nil
+            world:observe(0, tecs.builtins.StateFocus, function(e: tecs.builtins.StateFocus)
+                focused = e.state
+                popped = e.popped
+            end)
+            world:popState()
+            luassert.is_equal("game", focused)
+            luassert.is_equal("paused", popped)
         end)
     end)
 
-    describe("System integration", function()
-        local record AppState is tecs.States<AppState.Value>
-            enum Value
-                "loading"
-                "running"
-                "stopped"
-            end
-        end
+    describe("Auto-tagging", function()
+        it("should auto-tag entities spawned during a state", function()
+            local gameComponent = world:createState("game")
+            world:pushState("game")
+            local entity = world:spawn(tecs.builtins.Transform(0, 0))
+            world:commit()
+            local stateTag = world:get(entity, gameComponent)
+            luassert.is_not_nil(stateTag)
+        end)
 
-        it("should work with system runIf conditions", function()
-            local systemRan = false
+        it("should not auto-tag entities spawned before any state", function()
+            local gameComponent = world:createState("game")
+            local entity = world:spawn(tecs.builtins.Transform(0, 0))
+            world:commit()
+            local stateTag = world:get(entity, gameComponent)
+            luassert.is_nil(stateTag)
+        end)
+    end)
 
-            world:addSystem({
-                name = "TestSystem",
-                phase = tecs.phases.Update,
-                run = function()
-                    systemRan = true
-                end,
-                runIf = function(_: number, w: tecs.World): boolean
-                    return w:inState(AppState, "running")
+    describe("Policies", function()
+        it("should despawn entities on exit by default", function()
+            world:createState("game")
+            world:pushState("game")
+            local entity = world:spawn(tecs.builtins.Transform(0, 0))
+            world:commit()
+            luassert.is_true(world:isAlive(entity))
+            world:popState()
+            world:commit()
+            luassert.is_false(world:isAlive(entity))
+        end)
+
+        it("should pause entities on blur with pause policy", function()
+            world:createState("game", {
+                onBlur = "pause",
+                onFocus = "resume",
+            })
+            world:createState("paused")
+            world:pushState("game")
+            local entity = world:spawn(tecs.builtins.Transform(0, 0))
+            world:commit()
+            -- Push paused state, game.onBlur should add Paused
+            world:pushState("paused")
+            world:commit()
+            local paused = world:get(entity, tecs.builtins.Paused)
+            luassert.is_not_nil(paused)
+        end)
+
+        it("should resume entities on focus with resume policy", function()
+            world:createState("game", {
+                onBlur = "pause",
+                onFocus = "resume",
+            })
+            world:createState("paused")
+            world:pushState("game")
+            local entity = world:spawn(tecs.builtins.Transform(0, 0))
+            world:commit()
+            world:pushState("paused")
+            world:commit()
+            -- Pop paused, game.onFocus should remove Paused
+            world:popState()
+            world:commit()
+            local paused = world:get(entity, tecs.builtins.Paused)
+            luassert.is_nil(paused)
+        end)
+
+        it("should call custom function policy", function()
+            local called = false
+            world:createState("game", {
+                onEnter = function(_w: tecs.World)
+                    called = true
                 end
             })
-
-            -- System should not run when not in "running" state
-            world:update(0.016)
-            luassert.is_false(systemRan)
-
-            -- System should run when in "running" state
-            world:setState(AppState, "running")
-            world:update(0.016)
-            luassert.is_true(systemRan)
-
-            -- System should not run when no longer in "running" state
-            systemRan = false
-            world:setState(AppState, "stopped")
-            world:update(0.016)
-            luassert.is_false(systemRan)
+            world:pushState("game")
+            luassert.is_true(called)
         end)
     end)
 end)

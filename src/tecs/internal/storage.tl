@@ -1,62 +1,56 @@
 local types <const> = require("tecs.types")
-local compat <const> = require("tecs.internal.utils.compat")
-local logging = require("tecs.internal.utils.logging")
 
-local table_clear, table_new <const> = compat.clear, compat.new
-local bor, bnot, lshift, band, rshift <const> = compat.bor, compat.bnot, compat.lshift, compat.band, compat.rshift
+local table_clear <const> = require("table.clear")
+local table_new <const> = require("table.new")
 
-local type Storage = types.Storage
-local type Component = types.Component
-
-local DEFAULT_RECYCLE_SIZE <const> = 64
-local SMALL_ARRAY_THRESHOLD <const> = 1024  -- 2x growth threshold for small arrays
-local LOGGER <const> = logging.getLogger("tecs.internal.storage")
+local type Component = types.components.Component
+local type ComponentAllocator = types.components.ComponentAllocator
 
 local record storage
+    --- Storage kind discriminator. Internal: components carry this on
+    --- `ComponentInternal.storageType` to pick zero-branch hot paths.
+    enum StorageType
+        "tag"
+        "ffi"
+        "table"
+        "scalar"
+    end
+
+    --- Storage interface — pluggable per-component column backend. Internal
+    --- only; users pick a component kind via the `newX` factories and never
+    --- implement Storage themselves. Lives here rather than in
+    --- `internal/types.tl` because the FFI and Archetype modules need to
+    --- reference it, and internal/types.tl can't import them (cycle).
+    interface Storage
+        storageType: StorageType
+        createColumn: function(self, size: integer): {Component}
+        clear: function(self, column: {Component})
+        ensureCapacity: function(self, column: {Component}, needed: integer): {Component}
+        adjustCapacity: function(self, column: {Component}, usedCount: integer): {Component} | nil
+        createComponent: function(self, container: Component): ComponentAllocator<Component>
+    end
+
     --- Basic table storage with automatic growth.
     newTableStorage: function(): Storage
 
-    --- Compact bitset storage for tag components (boolean presence only).
-    newBitsetStorage: function(): Storage
+    --- Scalar storage: column values are raw Lua scalars.
+    newScalarStorage: function(kind: string, defaultValue: any): Storage
+
+    --- Tag storage. Presence is archetype-defined (no per-row state);
+    --- reads return the container for any row, writes are no-ops.
+    --- @param container The component to return on any read.
+    newBitsetStorage: function(container: Component): Storage
 
     --- High-performance FFI storage with automatic fallback to table storage.
     --- @param def Configuration including fields, recycling options
     newFFIStorage: function(def: {string:any}): Storage
 
-    --- Power-of-two capacity calculation for optimal memory allocation.
-    --- @param needed Required capacity
-    --- @param currentCapacity Current capacity
-    --- @return Optimal new capacity
-    calculateOptimalCapacity: function(needed: integer, currentCapacity: integer): integer
+    --- Propagate hooks from a component container to FFI storage metadataFields.
+    --- No-op if storage is not FFI-based.
+    propagateHooksToFFI: function(s: Storage, container: Component)
 end
 
--- Calculate optimal capacity for storage allocation
--- Uses power-of-two sizing with padding for better memory alignment
-function storage.calculateOptimalCapacity(needed: integer, currentCapacity: integer): integer
-    -- Add 25% padding for growth headroom
-    local paddedNeeded = math.floor(needed * 1.25)
-
-    -- Round up to next power of two for better memory alignment
-    -- This is good for memory allocators and reduces fragmentation
-    if paddedNeeded > 0 then
-        -- Bit trick: round up to next power of 2
-        paddedNeeded = paddedNeeded - 1
-        paddedNeeded = bor(paddedNeeded, rshift(paddedNeeded, 1))
-        paddedNeeded = bor(paddedNeeded, rshift(paddedNeeded, 2))
-        paddedNeeded = bor(paddedNeeded, rshift(paddedNeeded, 4))
-        paddedNeeded = bor(paddedNeeded, rshift(paddedNeeded, 8))
-        paddedNeeded = bor(paddedNeeded, rshift(paddedNeeded, 16))
-        paddedNeeded = paddedNeeded + 1
-    end
-
-    -- Ensure minimum growth (at least 2x for small arrays)
-    if currentCapacity > 0 and currentCapacity < SMALL_ARRAY_THRESHOLD and paddedNeeded < currentCapacity * 2 then
-        paddedNeeded = currentCapacity * 2
-    end
-
-    -- Ensure we have at least the needed capacity
-    return math.max(needed, paddedNeeded)
-end
+local type Storage = storage.Storage
 
 -- Initialize component with optional table argument copying
 local function initializeComponentFromArgs<C is Component>(component: C, ...: any): C
@@ -73,275 +67,151 @@ end
 
 -- Generic table-based component constructor
 -- This is used when a table-based component is created but doesn't provide a custom constructor.
-local function createTableComponentConstructor(): function(...: any): types.Component
-    return function(...: any): types.Component
+local function createTableComponentConstructor(): function(...: any): Component
+    return function(...: any): Component
         return initializeComponentFromArgs({}, ...)
     end
 end
 
 -- Table storage implementation
 local TABLE_STORAGE <const>: Storage = {
-    new = function(_self: Storage, size: integer): {Component}
+    storageType = "table",
+    createColumn = function(_self: Storage, size: integer): {Component}
         return table_new(size, 0) as {Component}
     end,
-
     clear = function(_self: Storage, column: {Component})
         table_clear(column)
     end,
-
-    ensureCapacity = function(
-        _self: Storage,
-        column: {Component},
-        _needed: integer
-    ): {Component}
+    ensureCapacity = function(_self: Storage, column: {Component}, _needed: integer): {Component}
         -- Lua tables grow automatically, so just return the same column
         return column
     end,
-
-    commitBatch = function(
-        _self: types.Storage,
-        column: {types.Component},
-        startIndex: integer,
-        componentList: {integer:types.Component}
-    ): {types.Component}
-        -- Simple assignment for table storage (handle sparse array)
-        for i, component in pairs(componentList) do
-            column[startIndex + i - 1] = component
-        end
-        return column
-    end,
-
-    postCommit = function(_self: types.Storage, _dt: number)
-        -- Nothing to clean up for table storage
-    end,
-
-    recycle = function(_self: types.Storage, _component: types.Component)
-        -- Basic table storage doesn't support recycling - no-op
-    end,
-
-    swap = function(_self: types.Storage, column: {types.Component}, indexA: integer, indexB: integer)
-        -- Simple table swap (using 1-based indexing)
-        local temp = (column as {any})[indexA]
-        (column as {any})[indexA] = (column as {any})[indexB];
-        (column as {any})[indexB] = temp
-    end
+    createComponent = createTableComponentConstructor
+        as function(_self: Storage, _container: Component): ComponentAllocator<Component>
 }
 
 function storage.newTableStorage(): Storage
-    -- Create a copy of table storage and add createComponent method
-    local enhancedStorage: Storage = {
-        new = TABLE_STORAGE.new,
-        clear = TABLE_STORAGE.clear,
-        ensureCapacity = TABLE_STORAGE.ensureCapacity,
-        commitBatch = TABLE_STORAGE.commitBatch,
-        postCommit = TABLE_STORAGE.postCommit,
-        recycle = TABLE_STORAGE.recycle,
-        swap = TABLE_STORAGE.swap
-    }
-
-    -- Add createComponent method (cast to bypass type checking)
-    local storageAny = enhancedStorage as {string: any}
-    storageAny.createComponent = function(
-        _self: types.Storage,
-        _container: types.Component
-    ): function(...: any): types.Component
-        return createTableComponentConstructor()
-    end
-
-    return enhancedStorage
+    return TABLE_STORAGE
 end
 
---- Create table storage with object pooling for reduced allocations.
---- Useful for components that are frequently created/destroyed.
---- @param poolSize Maximum pool size (defaults to 64)
---- @param clearFn Custom function to clear component fields (optional)
-function storage.newPooledTableStorage(poolSize?: integer, clearFn?: function(Component)): Storage
-    poolSize = poolSize or DEFAULT_RECYCLE_SIZE
-    local pool: {Component} = {}
-    local poolCount = 0
-    local maxPoolSize = poolSize
-
-    local pooledStorage: Storage = {
-        new = function(_self: Storage, size: integer): {Component}
+function storage.newScalarStorage(kind: string, defaultValue: any): Storage
+    if kind ~= "number" and kind ~= "boolean" and kind ~= "string" then
+        error("newScalarStorage: kind must be one of 'number', 'boolean', or 'string'")
+    end
+    if type(defaultValue) ~= kind then
+        error("newScalarStorage: defaultValue type must match kind '" .. kind .. "'")
+    end
+    return {
+        storageType = "scalar",
+        createColumn = function(_self: Storage, size: integer): {Component}
             return table_new(size, 0) as {Component}
         end,
-
         clear = function(_self: Storage, column: {Component})
-            -- Return components to pool before clearing
-            for i = 1, #column do
-                local component = column[i]
-                if component and poolCount < maxPoolSize then
-                    -- Clear the component if a clear function is provided
-                    if clearFn then
-                        clearFn(component)
-                    else
-                        -- Default: clear all fields to nil
-                        for k in pairs(component as {string:any}) do
-                            (component as {string:any})[k] = nil
-                        end
-                    end
-                    poolCount = poolCount + 1
-                    pool[poolCount] = component
-                end
-            end
             table_clear(column)
         end,
+        ensureCapacity = function(_self: Storage, column: {Component}, _needed: integer): {Component}
+            return column
+        end,
+        createComponent = function(_self: Storage, _container: Component): ComponentAllocator<Component>
+            return function(value?: any): Component
+                if value == nil then
+                    return defaultValue as Component
+                end
+                if type(value) ~= kind then
+                    error("scalar component value type must match kind '" .. kind .. "'")
+                end
+                return value as Component
+            end
+        end,
+        _scalarKind = kind,
+        _scalarDefault = defaultValue,
+    } as Storage
+end
 
-        ensureCapacity = function(
-            _self: Storage,
-            column: {Component},
-            _needed: integer
-        ): {Component}
-            return column  -- Lua tables grow automatically
+-- Tag storage: no per-row state. Presence is archetype-defined (the
+-- archetype either has the column or it doesn't). Reads return the
+-- container so `world:get(e, Tag)` yields the tag instance for live
+-- rows. Writes are no-ops because there is nothing to store.
+local function tagIndex(t: {Component}, _index: integer): Component
+    return (t as table).__container as Component
+end
+local function tagNewIndex() end
+local TAG_MT <const>: metatable<{Component}> = {
+    __index = tagIndex,
+    __newindex = tagNewIndex,
+}
+
+function storage.newBitsetStorage(container: Component): Storage
+    return {
+        storageType = "tag",
+
+        createColumn = function(_self: Storage, _size: integer): {Component}
+            local data = {__container = container}
+            return setmetatable(data as {Component}, TAG_MT)
         end,
 
-        commitBatch = function(
-            _self: types.Storage,
-            column: {types.Component},
-            startIndex: integer,
-            componentList: {integer:types.Component}
-        ): {types.Component}
-            for i, component in pairs(componentList) do
-                column[startIndex + i - 1] = component
-            end
+        clear = function(_self: Storage, _column: {Component}) end,
+
+        ensureCapacity = function(_self: Storage, column: {Component}, _needed: integer): {Component}
             return column
         end,
 
-        postCommit = function(_self: types.Storage, _dt: number)
-            -- Nothing to clean up
-        end
+        createComponent = function(_self: Storage, _container: Component): ComponentAllocator<Component>
+            return function(): Component
+                return container
+            end
+        end,
     }
-
-    -- Add createComponent method that uses pooling
-    local storageAny = pooledStorage as {string: any}
-    storageAny.createComponent = function(
-        _self: types.Storage,
-        _container: types.Component
-    ): function(...: any): types.Component
-        return function(...: any): types.Component
-            local component: Component
-            if poolCount > 0 then
-                -- Reuse from pool
-                component = pool[poolCount]
-                poolCount = poolCount - 1
-            else
-                component = {}
-            end
-            return initializeComponentFromArgs(component, ...)
-        end
-    end
-
-    -- Add recycle method for explicit recycling
-    storageAny.recycle = function(_self: types.Storage, component: types.Component)
-        if poolCount < maxPoolSize then
-            if clearFn then
-                clearFn(component)
-            else
-                for k in pairs(component as {string:any}) do
-                    (component as {string:any})[k] = nil
-                end
-            end
-            poolCount = poolCount + 1
-            pool[poolCount] = component
-        end
-    end
-
-    -- Add swap method
-    storageAny.swap = function(_self: types.Storage, column: {types.Component}, indexA: integer, indexB: integer)
-        -- Simple table swap (using 1-based indexing)
-        local temp = (column as {any})[indexA]
-        (column as {any})[indexA] = (column as {any})[indexB];
-        (column as {any})[indexB] = temp
-    end
-
-    return pooledStorage
 end
 
---- Bitset storage implementation for tag components.
---- Uses bit manipulation for extremely compact boolean storage.
---- 32 components per integer, automatic growth.
-local BITSET_STORAGE: Storage = {
-    new = function(_self: Storage, _size: integer): {Component}
-        local bitsets: {integer} = {}
-        local bits_per_int <const> = 32
-        local data = {__bitsets = bitsets, __max_index = 0}
-
-        return setmetatable(data as {Component}, {
-            __index = function(_t: {Component}, index: integer): boolean
-                local chunk = math.floor((index - 1) / bits_per_int) + 1
-                local bit_pos = (index - 1) % bits_per_int
-                return band(bitsets[chunk] or 0, lshift(1, bit_pos)) ~= 0
-            end,
-
-            __newindex = function(_t: {Component}, index: integer, value: boolean)
-                local chunk = math.floor((index - 1) / bits_per_int) + 1
-                local bit_pos = (index - 1) % bits_per_int
-
-                if value then
-                    -- Ensure bitset array is large enough
-                    while #bitsets < chunk do
-                        bitsets[#bitsets + 1] = 0
-                    end
-
-                    bitsets[chunk] = bor(bitsets[chunk], lshift(1, bit_pos))
-                    if index > data.__max_index then
-                        data.__max_index = index
-                    end
-                elseif bitsets[chunk] then
-                    bitsets[chunk] = band(bitsets[chunk], bnot(lshift(1, bit_pos)))
-                end
-            end,
-
-            __len = function(_t: {Component}): integer
-                return data.__max_index
-            end
-        })
-    end,
-
-    clear = function(_self: Storage, column: {Component})
-        local data = column as table
-        table_clear(data.__bitsets as table)
-        data.__max_index = 0
-    end,
-
-    ensureCapacity = function(
-        _self: Storage,
-        column: {Component},
-        _needed: integer
-    ): {Component}
-        -- Bitsets grow automatically when accessed, so just return the same column
-        return column
-    end,
-
-}
-
-function storage.newBitsetStorage(): Storage
-    return BITSET_STORAGE
-end
-
---- FFI storage factory with automatic graceful fallback.
---- Attempts to create high-performance FFI storage, falls back to table storage if FFI unavailable.
---- Fallback chain: FFI → Pooled Table (if recycling) → Basic Table
+--- FFI storage factory.
 function storage.newFFIStorage(def: {string:any}): Storage
     local ffi = require("tecs.internal.ffi" as string) as {string:any}
-    local isFFIAvailable = ffi.isFFIAvailable as function(): boolean
+    return (ffi.newFFIStorage as function({string:any}): Storage)(def)
+end
 
-    if isFFIAvailable() then
-        local newFFIStorage = ffi.newFFIStorage as function({string:any}): Storage
-        return newFFIStorage(def)
+--- Propagate hooks and relationship fields from a component container to FFI storage metadataFields.
+--- FFI instances access fields via __index into metadataFields, so these must be copied there.
+function storage.propagateHooksToFFI(s: Storage, container: Component)
+    local storageAny = s as {string:any}
+    if not storageAny.setMetadata then
+        return
     end
-
-    -- Graceful fallback to table storage
-    local componentName = (def as {string:any}).name as string or "unknown"
-    LOGGER:debug("FFI not available for component '%s'. Fallback to table storage.", componentName)
-    local recycle = (def as {string:any}).recycle as boolean
-
-    if recycle then
-        local recyclePoolSize = (def as {string:any}).recyclePoolSize as integer
-        return storage.newPooledTableStorage(recyclePoolSize or DEFAULT_RECYCLE_SIZE)
+    local setMetadata = storageAny.setMetadata as function(Storage, string, any)
+    setMetadata(s, "relationshipType", container)
+    -- Instances read via metatype → metadataFields; the container is a
+    -- Lua table with no wildcardContainer field, so container-side reads
+    -- stay nil while instance-side reads resolve to the container.
+    setMetadata(s, "wildcardContainer", container)
+    -- Set on the FFI metatype so cdata instances of a sparse relationship
+    -- report `isSparseInstance == true` via __index, while the container
+    -- (a plain Lua table) keeps it nil. Canonical single-flag branch for
+    -- `WorldImpl:has` / `:get`.
+    if (container as {string:any}).isSparse then
+        setMetadata(s, "isSparseInstance", true)
     end
+    -- exclusiveRelationship is needed for `is types.components.Relationship` checks on FFI instances
+    local containerAny = container as {string:any}
+    if containerAny.exclusiveRelationship ~= nil then
+        setMetadata(s, "exclusiveRelationship", containerAny.exclusiveRelationship)
+    end
+    -- FFI instances need storage for archetype column creation
+    -- Use the FFI storage itself (s), not the container's storage which may be bitset
+    setMetadata(s, "storage", s)
+    setMetadata(s, "storageType", s.storageType)
 
-    return storage.newTableStorage()
+    -- Behavior-hook plumbing: cdata instances read `_hasDeferSet` etc.
+    -- and `deferSet` etc. via metatype → metadataFields. The container
+    -- carries the canonical values; mirror them here.
+    for _, key in ipairs({
+        "_hasDeferSet", "_hasDeferRemove", "_hasOnRemove", "_hasOnDespawn",
+        "_mustDeferSet", "_mustDeferRemove", "_noBulkBatch",
+        "deferSet", "deferRemove", "onRemove", "onDespawn",
+    }) do
+        if containerAny[key] ~= nil then
+            setMetadata(s, key, containerAny[key])
+        end
+    end
 end
 
 return storage

@@ -4,10 +4,10 @@ outline: deep
 
 # Stats plugin
 
-The Tecs2D `stats` module provides a debug overlay that displays real-time performance metrics and system information,
+The Tecs `stats` module provides a debug overlay that displays real-time performance metrics and system information,
 helping you monitor and optimize your game's performance. You install the plugin, and hit F1 to see the debug info.
 
-<img src="../images/debug-overlay.png" alt="Debug overlay"/>
+<img src="/images/debug-overlay.jpeg" alt="Debug overlay"/>
 
 ## Overview
 
@@ -25,19 +25,18 @@ Add the stats plugin to your world to enable the debug overlay:
 ```lua
 local tecs = require("tecs")
 local tecs2d = require("tecs2d")
+local stats = require("tecs2d.stats")
 
 -- In your game plugin....
 function gamePlugin(world)
     -- Add the stats plugin with default settings
-    world:addPlugin(tecs2d.stats.newStatsPlugin())
+    world:addPlugin(stats.newStatsPlugin())
 
     -- Your game systems...
 end
 
 -- Use with tecs2d.run
-function love.run(): function(): string | number
-    return tecs2d.run(1 / 60, gamePlugin)
-end
+love.run = tecs2d.run({ fps = 60, game = gamePlugin })
 ```
 
 ## Basic usage
@@ -54,8 +53,9 @@ Press **F1** (the default binding) to toggle between these modes.
 Customize the stats plugin behavior with a configuration table:
 
 ```lua
-local tecs2d = require("tecs2d")
-local statsPlugin = tecs2d.stats.newStatsPlugin({
+local stats = require("tecs2d.stats")
+
+local statsPlugin = stats.newStatsPlugin({
     -- Custom font for the overlay
     font = love.graphics.newFont(12),
 
@@ -65,8 +65,8 @@ local statsPlugin = tecs2d.stats.newStatsPlugin({
     -- Key to show/hide archetype breakdown (default: "f2")
     archetypeBinding = "f2",
 
-    -- How often to update memory stats in seconds (default: 2)
-    sampleFrequency = 2,
+    -- How often to update memory stats in seconds (default: 1)
+    sampleFrequency = 1,
 
     -- How often to run garbage collection in seconds (default: 8)
     gcFrequency = 8
@@ -87,6 +87,7 @@ The overlay displays the following information:
 #### Memory usage
 - **Lua Memory**: Current Lua heap memory usage in MB
 - **Texture Memory**: GPU texture memory usage in MB
+- **Buffer Memory**: GPU buffer memory usage in MB and buffer count
 
 #### Rendering statistics
 - **Draws**: Number of draw calls this frame
@@ -105,11 +106,6 @@ The overlay displays the following information:
 Press **F2** (default) to toggle the archetype breakdown view, which shows:
 - Each active archetype's component composition
 - Number of entities in each archetype
-
-This helps identify:
-- Unexpected archetype fragmentation
-- Component combination patterns
-- Entity distribution across archetypes
 
 ## Debug states
 

@@ -3,18 +3,15 @@
 
 local types <const> = require("tecs.types")
 local storage <const> = require("tecs.internal.storage")
-local libffi = require("tecs.internal.ffi.libffi")
+local componentIds <const> = require("tecs.internal.componentIds")
+local C <const> = require("ffi")
+local schema <const> = require("tecs.internal.ffi.schema")
 
--- Check FFI availability first
-local ffiAvailable <const> = libffi.isFFIAvailable()
-local ffi_native = ffiAvailable and libffi.getFFI() or nil
+local type Storage = storage.Storage
+
 local max <const> = math.max
-
-local ffi_new = ffiAvailable and ffi_native.new or nil
-local ffi_copy = ffiAvailable and ffi_native.copy or nil
-local ffi_fill = ffiAvailable and ffi_native.fill or nil
-local ffi_sizeof = ffiAvailable and ffi_native.sizeof or nil
-local ffi_typeof = ffiAvailable and ffi_native.typeof or nil
+local min <const> = math.min
+local select <const> = select
 
 -- Module definition
 local record FFIStorage
@@ -26,26 +23,47 @@ local record FFIStorage
         fields: {{string, string}}
         --- Size of the struct in bytes
         sizeof: integer
-        --- Enable struct recycling to reuse components
-        recycle: boolean
-        --- Size of the recycle pool (defaults to 64 if not specified)
-        recyclePoolSize: integer
+        --- Optional metatable to apply to instances (for instance methods)
+        metatable: {any:any}
+        --- If true, each instance is its own component type (for dense relationships)
+        perEntityComponent: boolean
     end
 
-    new: function(def: StructDefinition): types.Storage
+    new: function(def: StructDefinition): Storage
+
+    --- Define a C struct from a (name, fields) pair, cdef it with FFI
+    --- (idempotent on same layout), and return the resolved ctype + size
+    --- in bytes. Used by snapshot migration to materialise saved-schema
+    --- structs at load time without going through the full storage setup.
+    defineStruct: function(name: string, fields: {{string, string}}): any, integer
 end
 
 -- Growth constants for component storage
 local INITIAL_CAPACITY <const> = 64
 
--- Keep track of defined structs to avoid redefinition
-local definedStructs: {string: boolean} = {}
+-- Keep track of defined structs with their definitions to detect collisions
+local definedStructs: {string: string} = {}
 
 -- Counter for auto-generated struct names
 local structCounter = 0
 
--- Cache for FFI array types
+-- Cache for FFI array ctypes (actual ctype objects, not strings)
 local arrayTypeCache: {string: any} = {}
+
+local record FieldInfo
+    name: string
+    isArray: boolean
+    arraySize: integer
+end
+
+local record StructRegistryEntry
+    cdef: string
+    metadataFields: {string:any}
+    instanceIds: {any: integer}
+    metatypeInstalled: boolean
+end
+
+local structRegistry: {string: StructRegistryEntry} = {}
 
 -- Metadata record for component storage arrays
 local record StorageMeta
@@ -56,15 +74,18 @@ local record StorageMeta
 end
 
 -- Global metadata table for component storage arrays
-local storageMetadata: {any: StorageMeta} = {}
+-- Weak keys allow GC to clean up old FFI cdata references
+local storageMetadata: {any: StorageMeta} = setmetatable({}, {__mode = "k"})
 
 
 -- Generate C struct definition from field tuples
 local function generateStructDef(name: string, fieldTuples: {{string, string}}): string, {string}
-    local cdef = "typedef struct { "
+    local parts: {string} = {"typedef struct { "}
     local fieldNames: {string} = {}
+    local nFields = #fieldTuples
 
-    for _, tuple in ipairs(fieldTuples) do
+    for i = 1, nFields do
+        local tuple = fieldTuples[i]
         local fieldName = tuple[1]
         local fieldType = tuple[2]
 
@@ -73,30 +94,85 @@ local function generateStructDef(name: string, fieldTuples: {{string, string}}):
 
         -- Add to C definition
         if baseType and arraySize then
-            -- Fixed-size array
-            cdef = cdef .. baseType .. " " .. fieldName .. "[" .. arraySize .. "]; "
+            parts[#parts + 1] = baseType .. " " .. fieldName .. "[" .. arraySize .. "]; "
         else
-            -- Regular field
-            cdef = cdef .. fieldType .. " " .. fieldName .. "; "
+            parts[#parts + 1] = fieldType .. " " .. fieldName .. "; "
         end
 
-        -- Track field name
-        table.insert(fieldNames, fieldName)
+        fieldNames[i] = fieldName
     end
 
-    cdef = cdef .. "} " .. name .. ";"
-    return cdef, fieldNames
+    parts[#parts + 1] = "} " .. name .. ";"
+    return table.concat(parts), fieldNames
 end
 
-function FFIStorage.new(def: FFIStorage.StructDefinition): types.Storage
-    if not ffiAvailable then
-        error("FFI storage requires FFI support - cannot create FFI storage when FFI is not available")
+local function buildFieldInfo(fieldTuples: {{string, string}}): {FieldInfo}
+    local infos: {FieldInfo} = {}
+    for i = 1, #fieldTuples do
+        local tuple = fieldTuples[i]
+        local baseType, arraySize = tuple[2]:match("^([^%[]+)%[(%d+)%]$")
+        infos[i] = {
+            name = tuple[1],
+            isArray = baseType ~= nil,
+            arraySize = arraySize and (tonumber(arraySize) as integer) or 0,
+        }
     end
+    return infos
+end
 
+local function copyArrayField(dst: any, fieldInfo: FieldInfo, value: any)
+    local field = (dst as {string:any})[fieldInfo.name] as {integer: any}
+    for i = 0, fieldInfo.arraySize - 1 do
+        local item = (value as {integer: any})[i]
+        if item == nil then
+            item = (value as {integer: any})[i + 1]
+        end
+        if item == nil then
+            break
+        end
+        field[i] = item
+    end
+end
+
+local function serializeArrayField(src: any, fieldInfo: FieldInfo): {any}
+    local out: {any} = {}
+    local field = (src as {string:any})[fieldInfo.name] as {integer: any}
+    for i = 0, fieldInfo.arraySize - 1 do
+        out[i + 1] = field[i]
+    end
+    return out
+end
+
+function FFIStorage.defineStruct(name: string, fields: {{string, string}}): any, integer
+    local cdef = generateStructDef(name, fields)
+    local entry = structRegistry[name]
+    if entry then
+        if entry.cdef ~= cdef then
+            error("FFI struct name collision: '" .. name .. "' already defined with a different layout")
+        end
+    else
+        C.cdef(cdef)
+        entry = {
+            cdef = cdef,
+            metadataFields = {},
+            instanceIds = nil,
+            metatypeInstalled = false,
+        }
+        structRegistry[name] = entry
+        definedStructs[name] = cdef
+    end
+    local structType = C.typeof(name)
+    local size = C.sizeof(structType) as integer
+    return structType, size
+end
+
+function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
     -- Fields must be in tuple format
     assert(def.fields, "FFI storage requires 'fields' array")
     assert(#def.fields > 0, "FFI storage requires at least one field")
     assert(type(def.fields[1]) == "table", "FFI storage fields must be in tuple format: {{name, type}, ...}")
+
+    schema.validateFields(def.fields as {schema.FieldDef})
 
     -- Use provided name or generate one
     local structName = def.name
@@ -107,106 +183,233 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): types.Storage
 
     -- Generate struct definition from tuples
     local cdef, fieldNames = generateStructDef(structName, def.fields as {{string, string}})
+    local nFields <const> = #fieldNames
+    local fieldInfo = buildFieldInfo(def.fields as {{string, string}})
 
-    -- Define the struct if not already defined
-    if not definedStructs[structName] then
-        ffi_native.cdef(cdef)
-        definedStructs[structName] = true
+    -- Canonical schema fingerprint: "name1:type1,name2:type2|sizeBytes".
+    -- Used by snapshot to detect schema drift across save/load. Computed once
+    -- here at registration; consumers compare via interned string equality.
+    local schemaParts: {string} = {}
+    for i = 1, #def.fields do
+        local f = def.fields[i] as {string}
+        schemaParts[i] = f[1] .. ":" .. f[2]
+    end
+
+    local registryEntry = structRegistry[structName]
+    if registryEntry then
+        if registryEntry.cdef ~= cdef then
+            error("FFI struct name collision: '" .. structName .. "' already defined with a different layout")
+        end
+    else
+        C.cdef(cdef)
+        registryEntry = {
+            cdef = cdef,
+            metadataFields = {},
+            instanceIds = nil,
+            metatypeInstalled = false,
+        }
+        structRegistry[structName] = registryEntry
+        definedStructs[structName] = cdef
+    end
+
+    local metadataFields = registryEntry.metadataFields
+
+    -- For per-entity components, each instance needs unique componentId
+    -- Use a weak-keyed table to map instances to their unique IDs
+    if def.perEntityComponent and not registryEntry.instanceIds then
+        registryEntry.instanceIds = setmetatable({}, {__mode = "k"})
+    end
+    local instanceIds = registryEntry.instanceIds
+
+    -- Define the metatype if not already defined
+    if not registryEntry.metatypeInstalled then
+        -- Construct metatable for the struct type
+        -- For per-entity components (dense relationships), instance IS the component type
+        local indexFn: function(any, any): any
+        local tostringFn: function(any): string
+        if def.perEntityComponent then
+            -- Per-entity components need unique componentId per target
+            -- The first field is the target (either "target" or "entityTarget")
+            local targetField = fieldNames[1]
+            indexFn = function(self: any, key: any): any
+                if key == "componentType" then
+                    return self
+                elseif key == "componentId" then
+                    return instanceIds[self]
+                end
+                return (metadataFields as {any:any})[key]
+            end
+
+            tostringFn = function(self: any): string
+                local target = (self as {string:integer})[targetField]
+                return structName .. "(" .. target .. ")"
+            end
+        else
+            indexFn = function(_self: any, key: any): any
+                return (metadataFields as {any:any})[key]
+            end
+
+            tostringFn = function(_self: any): string
+                return structName
+            end
+        end
+
+        local mt: {any:any} = {
+            __tostring = tostringFn,
+            __index = indexFn
+        }
+
+        -- Merge user-provided metatable if present
+        if def.metatable then
+            for k, v in pairs(def.metatable as {any:any}) do
+                if k == "__index" then
+                    -- Merge __index tables
+                    if type(v) == "table" then
+                        for method, impl in pairs(v as {any:any}) do
+                            (metadataFields as {any:any})[method] = impl
+                        end
+                    end
+                else
+                    -- Other metamethods replace defaults
+                    mt[k] = v
+                end
+            end
+        end
+
+        C.metatype(structName, mt as metatable<any>)
+        registryEntry.metatypeInstalled = true
     end
 
     -- Get struct size
-    local structSize = def.sizeof or ffi_sizeof(structName)
+    local structSize = def.sizeof or C.sizeof(structName)
 
-    -- Cache array type for fast allocation
+    -- Cache array ctype for fast allocation
     local arrayTypeName = structName .. "[?]"
     local arrayType = arrayTypeCache[arrayTypeName]
     if not arrayType then
-        -- Create the array type string directly for ffi.new
-        arrayType = arrayTypeName
+        arrayType = C.typeof(arrayTypeName)
         arrayTypeCache[arrayTypeName] = arrayType
     end
 
     -- Cache struct type for fast instantiation
-    local structType = ffi_typeof(structName)
-
-
-    -- Create shared metadata table for fast lookup
-    local metadataFields: {string:any} = {}
-
-    -- Recycling pool for FFI components
-    local recyclePoolSize = def.recyclePoolSize or 64  -- Default to 64 if not specified
-    local recyclePool: {any} = nil
-    local recycleCount = 0
-    local recycleEnabled = def.recycle or false
-    local recycleMaxSize = recyclePoolSize  -- Track max size for dynamic growth
-
-    -- Initialize recycle pool if enabled
-    if recycleEnabled then
-        recyclePool = {}
-        -- Pre-allocate the pool
-        for i = 1, recyclePoolSize do
-            recyclePool[i] = ffi_new(structName)
-        end
-        recycleCount = recyclePoolSize
-    end
-
-    -- metatable for the struct type
-    ffi_native.metatype(structName, {
-        __tostring = function(_self: any): string
-            return structName
-        end,
-        __index = metadataFields
-    })
+    local structType = C.typeof(structName)
 
     -- Create constructor function for this struct type
-    local function createInstance(_storageInstance: any, ...: any): types.Component
-        local instance: any
+    local function createInstance(...: any): types.components.Component
+        local instance: any = C.new(structType)
 
-        -- Check if we can use a recycled instance
-        if recycleEnabled and recycleCount > 0 then
-            instance = recyclePool[recycleCount]
-            recycleCount = recycleCount - 1
-        else
-            -- Allocate a new instance (FFI automatically zero-initializes)
-            instance = ffi_new(structName)
-        end
-
-        local args = {...}
         local nargs = select('#', ...)
 
         if nargs == 0 then
             -- No arguments, FFI zero-initialization is sufficient
-            -- Do nothing - instance is already properly initialized
-        elseif nargs == 1 and type(args[1]) == "table" then
-            -- Table argument - apply provided values to zero-initialized instance
-            local value = args[1] as {string:any}
-            for k, v in pairs(value) do
-                (instance as {string:any})[k] = v
+        elseif nargs == 1 and type(select(1, ...)) == "table" then
+            -- Table argument - copy only known fields
+            local value = select(1, ...) as {string:any}
+            for i = 1, nFields do
+                local info = fieldInfo[i]
+                local k = info.name
+                local v = value[k]
+                if v ~= nil then
+                    if info.isArray then
+                        copyArrayField(instance as {string:any}, info, v)
+                    else
+                        (instance as {string:any})[k] = v
+                    end
+                end
             end
         else
-            -- Positional arguments - apply to zero-initialized instance
-            for i = 1, math.min(nargs, #fieldNames) do
-                local fieldName = fieldNames[i]
-                (instance as {string:any})[fieldName] = args[i]
+            -- Positional arguments - apply to zero-initialized instance.
+            --
+            -- Hardcode 1..4 field unrolls instead of a `for i=1,count do select(i, ...) end` loop.
+            -- `select(i, ...)` with a variable index is NYI on LuaJIT traces.
+            local inst = instance as {string:any}
+            if nFields == 1 then
+                local a = ...
+                if nargs >= 1 and a ~= nil then
+                    local info = fieldInfo[1]
+                    if info.isArray then copyArrayField(inst, info, a) else inst[info.name] = a end
+                end
+            elseif nFields == 2 then
+                local a, b = ...
+                if nargs >= 1 and a ~= nil then
+                    local info = fieldInfo[1]
+                    if info.isArray then copyArrayField(inst, info, a) else inst[info.name] = a end
+                end
+                if nargs >= 2 and b ~= nil then
+                    local info = fieldInfo[2]
+                    if info.isArray then copyArrayField(inst, info, b) else inst[info.name] = b end
+                end
+            elseif nFields == 3 then
+                local a, b, c = ...
+                if nargs >= 1 and a ~= nil then
+                    local info = fieldInfo[1]
+                    if info.isArray then copyArrayField(inst, info, a) else inst[info.name] = a end
+                end
+                if nargs >= 2 and b ~= nil then
+                    local info = fieldInfo[2]
+                    if info.isArray then copyArrayField(inst, info, b) else inst[info.name] = b end
+                end
+                if nargs >= 3 and c ~= nil then
+                    local info = fieldInfo[3]
+                    if info.isArray then copyArrayField(inst, info, c) else inst[info.name] = c end
+                end
+            elseif nFields == 4 then
+                local a, b, c, d = ...
+                if nargs >= 1 and a ~= nil then
+                    local info = fieldInfo[1]
+                    if info.isArray then copyArrayField(inst, info, a) else inst[info.name] = a end
+                end
+                if nargs >= 2 and b ~= nil then
+                    local info = fieldInfo[2]
+                    if info.isArray then copyArrayField(inst, info, b) else inst[info.name] = b end
+                end
+                if nargs >= 3 and c ~= nil then
+                    local info = fieldInfo[3]
+                    if info.isArray then copyArrayField(inst, info, c) else inst[info.name] = c end
+                end
+                if nargs >= 4 and d ~= nil then
+                    local info = fieldInfo[4]
+                    if info.isArray then copyArrayField(inst, info, d) else inst[info.name] = d end
+                end
+            else
+                -- Fallback for 5+ fields: collect varargs into a table (one alloc) and index by loop index.
+                -- Still traceable because `args[i]` has static-type semantics unlike `select(i, ...)`.
+                local args = {...}
+                local count = min(nargs, nFields)
+                for i = 1, count do
+                    local value = args[i]
+                    if value ~= nil then
+                        local info = fieldInfo[i]
+                        if info.isArray then
+                            copyArrayField(inst, info, value)
+                        else
+                            inst[info.name] = value
+                        end
+                    end
+                end
             end
         end
 
-        return instance as types.Component
+        -- For per-entity components, allocate unique ID
+        if instanceIds then
+            local componentId = componentIds.allocate()
+            instanceIds[instance] = componentId
+        end
+
+        return instance as types.components.Component
     end
 
     -- Fast array growth function
-    local function growArray<T>(oldArray: libffi.CData, usedCount: integer, neededCapacity: integer): T
-        -- neededCapacity is already the calculated optimal capacity, don't recalculate
+    local function growArray<T>(oldArray: C.CData, usedCount: integer, neededCapacity: integer): T
         local newCapacity = neededCapacity
         -- Allocate new array with padding at index 0
-        local newArray = ffi_new(arrayType as string, newCapacity + 1)
+        local newArray = C.new(arrayType as C.CType, newCapacity + 1)
 
         -- Copy old data if exists
         if oldArray and usedCount > 0 then
             -- Copy only used data including padding at index 0
-            -- Make sure we don't copy more than what actually exists
-            local copyCount = math.min(usedCount, newCapacity)
-            ffi_copy(newArray, oldArray, (copyCount + 1) * structSize)
+            local copyCount = min(usedCount, newCapacity)
+            C.copy(newArray, oldArray, (copyCount + 1) * structSize)
         end
 
         -- Update metadata
@@ -226,10 +429,12 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): types.Storage
     end
 
     return {
-        new = function(_self: types.Storage, size: integer): {types.Component}
+        storageType = "ffi",
+
+        createColumn = function(_self: Storage, size: integer): {types.components.Component}
             -- Allocate FFI array with aggressive initial sizing
             local capacity = max(INITIAL_CAPACITY, size * 2)
-            local data = ffi_new(arrayType as string, capacity + 1)  -- +1 for padding at index 0
+            local data = C.new(arrayType as C.CType, capacity + 1)  -- +1 for padding at index 0
 
             -- Store metadata
             storageMetadata[data] = {
@@ -239,160 +444,128 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): types.Storage
                 structType = structType
             }
 
-            return data as {types.Component}
+            return data as {types.components.Component}
         end,
 
-        clear = function(_self: types.Storage, column: {types.Component})
+        clear = function(_self: Storage, column: {types.components.Component})
             -- Zero out the array for consistency
             local meta = storageMetadata[column]
             if meta then
-                ffi_fill(column as libffi.CData, (meta.capacity + 1) * meta.structSize, 0)
+                C.fill(column as C.CData, (meta.capacity + 1) * meta.structSize, 0)
             end
         end,
 
-        -- Ensure capacity function for explicit growth
+        -- Grow the column to EXACTLY the requested capacity. Any over-
+        -- allocation policy (geometric, power-of-two padding, etc.) is
+        -- applied at the Archetype layer in reserveCapacity, which calls
+        -- us with the already-batched target size. Duplicating the grow
+        -- factor here would waste memory.
         ensureCapacity = function(
-            _self: types.Storage,
-            column: {types.Component},
+            _self: Storage,
+            column: {types.components.Component},
             needed: integer
-        ): {types.Component}
+        ): {types.components.Component}
             local meta = storageMetadata[column]
             if meta and needed > meta.capacity then
-                local newCapacity = storage.calculateOptimalCapacity(needed, meta.capacity)
-                -- For dense arrays in archetypes, we preserve data that was actually written
-                -- In staging archetypes, elements are filled sequentially, so we preserve
-                -- up to the current write position (which is needed - 1 in 1-indexed arrays)
-                local usedCount = math.min(needed - 1, meta.capacity)
-                return growArray(column as libffi.CData, usedCount, newCapacity)
+                local usedCount = min(needed - 1, meta.capacity)
+                return growArray(column as C.CData, usedCount, needed)
             end
             return column
         end,
 
+        -- Shrink an over-allocated column. Only fires when the column is
+        -- big enough to be worth shrinking AND usage fell below a fraction
+        -- of capacity — avoids thrashing for workloads that grow and drop
+        -- a handful of entities. Thresholds mirror `ffi.adjustCapacityDouble`.
+        adjustCapacity = function(
+            _self: Storage,
+            column: {types.components.Component},
+            usedCount: integer
+        ): {types.components.Component}
+            local meta = storageMetadata[column]
+            if meta and meta.capacity >= 2048 and usedCount <= meta.capacity / 8 then
+                local newCapacity = max(512, usedCount * 2)
+                return growArray(column as C.CData, usedCount, newCapacity)
+            end
+            return column
+        end,
 
         -- Provide a constructor that will be used by newComponent
-        createComponent = function(
-            self: types.Storage,
-            container: types.Component
-        ): function(...: any): types.Component
-            -- Store container reference for FFI instances (prevents GC)
-            -- Container is stored in metadataFields instead
+        createComponent = function(_self: Storage,container: types.components.Component): function(...: any): types.components.Component
+            -- Populate the metadata table with component info
             if container then
-                -- Populate the metadata table with component info
                 metadataFields.componentType = container
                 metadataFields.componentName = structName
                 metadataFields.componentId = (container as {string:any}).componentId
-                metadataFields.componentHash = (container as {string:any}).componentHash
-                metadataFields.getStorage = (container as {string:any}).getStorage
+                metadataFields.storage = (container as {string:any}).storage
+                metadataFields.storageType = (container as {string:any}).storageType
             end
-            -- Create a closure that captures the storage instance
-            return function(...: any): types.Component
-                return createInstance(self, ...)
-            end
-        end,
-
-        -- Recycle function to return components to the pool
-        recycle = function(_self: types.Storage, component: types.Component)
-            if recycleEnabled and recycleCount < recycleMaxSize then
-                -- Clear the component by zero-filling its memory
-                ffi_fill(component as libffi.CData, structSize, 0)
-
-                -- Add to pool
-                recycleCount = recycleCount + 1
-                recyclePool[recycleCount] = component
+            return function(...: any): types.components.Component
+                return createInstance(...)
             end
         end,
 
-        -- Batch commit components to archetype column
-        commitBatch = function(
-            _self: types.Storage,
-            column: {types.Component},
-            startIndex: integer,
-            componentList: {integer: types.Component}
-        ): {types.Component}
-            -- Count actual components (sparse array)
-            local count = 0
-            for _ in pairs(componentList) do
-                count = count + 1
-            end
-
-            -- Ensure capacity
-            local needed = startIndex + count - 1
-            local meta = storageMetadata[column]
-
-            if not meta then
-                -- Initial allocation
-                local newCapacity = storage.calculateOptimalCapacity(needed, 0)
-                column = growArray(nil, 0, newCapacity)
-                meta = storageMetadata[column]
-            elseif needed > meta.capacity then
-                local newCapacity = storage.calculateOptimalCapacity(needed, meta.capacity)
-                local usedCount = startIndex - 1
-                column = growArray(column as libffi.CData, usedCount, newCapacity)
-                meta = storageMetadata[column]
-            end
-
-            -- Copy components directly to column
-            -- componentList is a sparse array with entity IDs as keys
-            local destIndex = startIndex
-            for _, component in pairs(componentList) do
-                -- Component is already an FFI struct instance
-                local dest = column[destIndex]
-                ffi_copy(dest as libffi.CData, component as libffi.CData, meta.structSize)
-                destIndex = destIndex + 1
-            end
-
-            return column
-        end,
-
-        postCommit = function(_self: types.Storage, _dt: number)
-            -- Nothing to do
-        end,
-
-        -- Bulk copy from arena pages to column
-        bulkCopy = function(
-            _self: types.Storage,
-            column: {types.Component},
-            destOffset: integer,
-            srcData: any,  -- FFI array
-            srcOffset: integer,
-            count: integer
-        )
-            local meta = storageMetadata[column]
-            if not meta then
-                return
-            end
-
-            -- destOffset and srcOffset are 0-based
-            -- column uses 1-based indexing with padding at 0
-            -- Copy element by element since pointer arithmetic doesn't work directly
-            for i = 0, count - 1 do
-                local src = (srcData as {integer: any})[1 + srcOffset + i]
-                local dest = column[1 + destOffset + i]
-                ffi_copy(dest as libffi.CData, src as libffi.CData, meta.structSize)
-            end
-        end,
-
-        swap = function(_self: types.Storage, column: {types.Component}, indexA: integer, indexB: integer)
-            -- FFI swap using the unused index 0 as temporary storage for the swap.
-            local meta = assert(storageMetadata[column], "Missing storage metadata")
-            if indexA == indexB then return end
-            assert(indexA > 0 and indexB > 0, "index 0 is reserved for swap temp")
-            local itemA, itemB = column[indexA] as libffi.CData, column[indexB] as libffi.CData
-            local temp = column[0] as libffi.CData
-            ffi_copy(temp, itemA, meta.structSize)
-            ffi_copy(itemA, itemB, meta.structSize)
-            ffi_copy(itemB, temp, meta.structSize)
-        end,
-
-        -- Store struct type for fast instantiation
-        _structType = structType,
-        _structName = structName,  -- Store the name for Arena creation
         _sizeof = structSize,
+        -- Store field names for introspection (public for MCP/debugging)
+        fieldNames = fieldNames,
         -- Marker for FFI storage detection in ecs.tl
         _ffiConstructor = true,
-        -- Marker for recycle support
-        _recycleEnabled = recycleEnabled
-    } as types.Storage
+        -- Canonical schema fingerprint, copied to the container by
+        -- `registerComponent`. Snapshot uses this to detect schema drift.
+        _fingerprint = table.concat(schemaParts, ",") .. "|" .. structSize,
+        _structSize = structSize,
+
+        -- Set metadata on FFI instances (for lifecycle hooks like onAdd/onRemove)
+        setMetadata = function(_self: Storage, key: string, value: any)
+            metadataFields[key] = value
+        end,
+
+        -- Serialization: convert FFI instance to plain table
+        serialize = function(_self: Storage, instance: types.components.Component): {string: any}
+            local data: {string: any} = {}
+            for i = 1, nFields do
+                local info = fieldInfo[i]
+                if info.isArray then
+                    data[info.name] = serializeArrayField(instance as {string: any}, info)
+                else
+                    data[info.name] = (instance as {string: any})[info.name]
+                end
+            end
+            return data
+        end,
+
+        -- Deserialization: create FFI instance from plain table
+        deserialize = function(_self: Storage, data: {string: any}): types.components.Component
+            return createInstance(data)
+        end,
+
+        -- Buffer-direct raw serialize: append the struct's bytes straight
+        -- into a LuaJIT `string.buffer` via `buf:putcdata`. No intermediate
+        -- Lua-string allocation, no per-field boxing. POD structs only;
+        -- portable across LuaJIT on the same architecture.
+        serializeRaw = function(_self: Storage, instance: types.components.Component, buf: any)
+            local put <const> = (buf as {string: function}).putcdata as function(any, any, integer)
+            put(buf, instance, structSize)
+        end,
+
+        -- Buffer-direct raw deserialize: allocate a blank instance of the
+        -- struct type and blit the next `structSize` bytes from the buffer
+        -- into it. Uses `buf:ref()` + `buf:skip()` so no Lua string is
+        -- materialised on the read path either.
+        deserializeRaw = function(_self: Storage, buf: any): types.components.Component
+            local instance: any = C.new(structType)
+            local ref <const> = (buf as {string: function}).ref as function(any): any
+            local skip <const> = (buf as {string: function}).skip as function(any, integer)
+            local ptr = ref(buf)
+            C.copy(instance, ptr as C.CData, structSize)
+            skip(buf, structSize)
+            if instanceIds then
+                local componentId = componentIds.allocate()
+                instanceIds[instance] = componentId
+            end
+            return instance as types.components.Component
+        end
+    } as Storage
 end
 
 return FFIStorage

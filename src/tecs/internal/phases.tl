@@ -4,7 +4,7 @@ local type Phase = types.Phase
 
 --- Defines the predefined ECS phases, or lifecycle states, of the game and event loop.
 ---
---- Tecs provides these standard phases but also supports custom pipelines via WorldConfig.pipelineFactory.
+--- Tecs provides these standard phases but also supports custom pipelines via World.Config.pipelineFactory.
 local record phases
 
     --- Contains all phases that make up the ECS lifecycle.
@@ -84,6 +84,11 @@ local record phases
 
     --- Main rendering phase (e.g., drawing sprites, meshes, UI).
     record Render is Phase end
+
+    --- Custom CPU draw calls that participate in world-space lighting and depth sorting.
+    --- Invoked during G-buffer rendering (inside Render), not as a sequential phase.
+    --- Use pipeline:worldShader():at(...):attach() before drawing, detachWorldShader() after.
+    record Draw is Phase end
 
     --- Runs just after rendering (e.g., post-processing effects, screen transitions).
     record PostRender is Phase end
@@ -193,5 +198,8 @@ addPhases(phases.AllGroups)
 
 -- Set phase names after all positions are assigned
 setPhaseNames()
+
+-- Draw is not in any group (invoked programmatically during Render), so set name manually
+phases.Draw.name = "Draw"
 
 return phases

@@ -235,6 +235,7 @@ global type love = record
 		isEffectsSupported: function(): boolean
 		newQueueableSource: function(samplerate: number, bitdepth: number, channels: number, buffercount: number): Source
 		newSource: function(filename: string, type: SourceType): Source
+		newSource: function(filename: string, type: SourceType, streamType: string): Source
 		newSource: function(file: filesystem.File, type: SourceType): Source
 		newSource: function(decoder: sound.Decoder, type: SourceType): Source
 		newSource: function(data: filesystem.FileData, type: SourceType): Source
@@ -288,6 +289,11 @@ global type love = record
 		end
 
 		type ByteData = record
+			--- Returns FFI pointer for direct memory access (requires LuaJIT FFI)
+			getFFIPointer: function(self: ByteData): any
+			getPointer: function(self: ByteData): any
+			getSize: function(self: ByteData): integer
+			getString: function(self: ByteData): string
 		end
 
 		type CompressedData = record
@@ -650,6 +656,16 @@ global type love = record
 			newImageData: function(self: Canvas): image.ImageData
 			newImageData: function(self: Canvas, slice: number, mipmap: number, x: number, y: number, width: number, height: number): image.ImageData
 			renderTo: function(func: function())
+			--- Methods inherited from Texture
+			getDimensions: function(self: Canvas): number, number
+			getFilter: function(self: Canvas): FilterMode, FilterMode, number
+			getFormat: function(self: Canvas): image.PixelFormat
+			getHeight: function(self: Canvas): number
+			getWidth: function(self: Canvas): number
+			getWrap: function(self: Canvas): WrapMode, WrapMode
+			setFilter: function(self: Canvas, min: FilterMode, mag: FilterMode, anisotropy: number)
+			setFilter: function(self: Canvas, min: FilterMode, mag: FilterMode)
+			setWrap: function(self: Canvas, horiz: WrapMode, vert: WrapMode)
 		end
 
 		type Drawable = record
@@ -678,6 +694,17 @@ global type love = record
 		type Image = record
 			isCompressed: function(self: Image): boolean
 			replacePixels: function(self: Image, data: image.ImageData, slice: number, mipmap: number, x: number, y: number, reloadmipmaps: boolean)
+			--- Methods inherited from Texture
+			getDPIScale: function(self: Image): number
+			getDimensions: function(self: Image): number, number
+			getFilter: function(self: Image): FilterMode, FilterMode, number
+			getFormat: function(self: Image): image.PixelFormat
+			getHeight: function(self: Image): number
+			getWidth: function(self: Image): number
+			getWrap: function(self: Image): WrapMode, WrapMode
+			setFilter: function(self: Image, min: FilterMode, mag: FilterMode, anisotropy: number)
+			setFilter: function(self: Image, min: FilterMode, mag: FilterMode)
+			setWrap: function(self: Image, horiz: WrapMode, vert: WrapMode)
 		end
 
 		type Mesh = record
@@ -792,12 +819,57 @@ global type love = record
 			send: function(self: Shader, name: string, ...: table)
 			send: function(self: Shader, name: string, ...: {{number}})
 			send: function(self: Shader, name: string, texture: Texture)
+			send: function(self: Shader, name: string, canvas: Canvas)
+			send: function(self: Shader, name: string, image: Image)
 			send: function(self: Shader, name: string, ...: boolean)
 			send: function(self: Shader, name: string, matrixLayout: math.MatrixLayout, ...: {{number}})
 			send: function(self: Shader, name: string, data: love.Data, offset: number, size: number)
 			send: function(self: Shader, name: string, data: love.Data, matrixlayout: math.MatrixLayout, offset: number, size: number)
 			send: function(self: Shader, name: string, matrixlayout: math.MatrixLayout, data: love.Data, offset: number, size: number)
+			send: function(self: Shader, name: string, transform: math.Transform)
+			send: function(self: Shader, name: string, buffer: Buffer)
 			sendColor: function(self: Shader, name: string, ...: table)
+		end
+
+		--- Love2D 12+ Buffer for SSBOs (Shader Storage Buffer Objects)
+		type Buffer = record
+			--- Get the size of each element in bytes
+			getElementSize: function(self: Buffer): number
+			--- Get the number of elements
+			getElementCount: function(self: Buffer): number
+			--- Set buffer data from array (1-indexed)
+			setArrayData: function(self: Buffer, data: love.data.ByteData, destIndex: integer, srcIndex: integer, count: integer)
+			--- Set buffer data from array (simple form)
+			setArrayData: function(self: Buffer, data: love.data.ByteData)
+		end
+
+		--- Love2D 12+ Compute shader type
+		type ComputeShader = record
+			getWarnings: function(self: ComputeShader): string
+			hasUniform: function(self: ComputeShader, name: string): boolean
+			send: function(self: ComputeShader, name: string, ...: number)
+			send: function(self: ComputeShader, name: string, ...: table)
+			send: function(self: ComputeShader, name: string, ...: {{number}})
+			send: function(self: ComputeShader, name: string, texture: Texture)
+			send: function(self: ComputeShader, name: string, ...: boolean)
+			send: function(self: ComputeShader, name: string, buffer: Buffer)
+			send: function(self: ComputeShader, name: string, data: love.Data, offset: number, size: number)
+			sendColor: function(self: ComputeShader, name: string, ...: table)
+		end
+
+		--- Love2D 12+ Buffer format element
+		type BufferFormatElement = record
+			format: string
+		end
+
+		--- Love2D 12+ Buffer format specification
+		type BufferFormat = {BufferFormatElement}
+
+		--- Love2D 12+ Buffer settings
+		type BufferSettings = record
+			usage: string
+			shaderstorage: boolean
+			indirectarguments: boolean
 		end
 
 		type SpriteBatch = record
@@ -952,6 +1024,8 @@ global type love = record
 		draw: function(texture: Texture, quad: Quad, x: number, y: number, r: number, sx: number, sy: number, ox: number, oy: number, kx: number, ky: number)
 		draw: function(drawable: Drawable, transform: math.Transform)
 		draw: function(texture: Texture, quad: Quad, transform: math.Transform)
+		draw: function(canvas: Canvas, x: number, y: number, r: number, sx: number, sy: number, ox: number, oy: number, kx: number, ky: number)
+		draw: function(image: Image, x: number, y: number, r: number, sx: number, sy: number, ox: number, oy: number, kx: number, ky: number)
 		drawInstanced: function(mesh: Mesh, instancecount: number, x: number, y: number, r: number, sx: number, sy: number, ox: number, oy: number, kx: number, ky: number)
 		drawInstanced: function(mesh: Mesh, instancecount: number, transform: math.Transform)
 		drawLayer: function(texture: Texture, layerindex: number, x: number, y: number, r: number, sx: number, sy: number, ox: number, oy: number, kx: number, ky: number)
@@ -1013,6 +1087,7 @@ global type love = record
 		newFont: function(filename: string, size: number, hinting: font.HintingMode, dpiscale: number): Font
 		newFont: function(filename: string, imagefilename: string): Font
 		newFont: function(size: number, hinting: font.HintingMode, dpiscale: number): Font
+		newFont: function(filename: string, settings: {string: any}): Font
 		newImage: function(filename: string, settings: ImageSetting): Image
 		newImage: function(fileData: filesystem.FileData, settings: ImageSetting): Image
 		newImage: function(imageData: image.ImageData, settings: ImageSetting): Image
@@ -1030,6 +1105,18 @@ global type love = record
 		newQuad: function(x: number, y: number, width: number, height: number, sw: number, sh: number): Quad
 		newShader: function(code: string): Shader
 		newShader: function(pixelcode: string, vertexcode: string): Shader
+		--- Love2D 12+: Create a new compute shader
+		newComputeShader: function(code: string): ComputeShader
+		--- Love2D 12+: Create a new GPU buffer (SSBO)
+		newBuffer: function(format: BufferFormat, capacity: integer, settings: BufferSettings): Buffer
+		newBuffer: function(format: BufferFormat, capacity: integer, settings: table): Buffer
+		--- Love2D 12+: Dispatch compute shader thread groups
+		dispatchThreadgroups: function(shader: ComputeShader, x: integer, y: integer, z: integer)
+		--- Love2D 12+: Draw mesh using indirect buffer for arguments
+		drawIndirect: function(mesh: Mesh, indirectBuffer: Buffer, start: integer, count: integer)
+		--- Love2D 12+: Draw from shader with indirect buffer (no mesh, vertices generated in shader)
+		drawFromShaderIndirect: function(drawmode: MeshDrawMode, argumentsBuffer: Buffer, argumentsIndex?: integer, mainTexture?: Texture)
+		drawFromShaderIndirect: function(indexBuffer: Buffer, argumentsBuffer: Buffer, argumentsIndex?: integer, mainTexture?: Texture)
 		newSpriteBatch: function(image: Image, maxsprites: number): SpriteBatch
 		newSpriteBatch: function(image: Image, maxsprites: number, usage: SpriteBatchUsage): SpriteBatch
 		newSpriteBatch: function(texture: Texture, maxsprites: number, usage: SpriteBatchUsage): SpriteBatch
@@ -1067,6 +1154,11 @@ global type love = record
 		push: function(stack: StackType)
 		rectangle: function(mode: DrawMode, x: number, y: number, width: number, height: number)
 		rectangle: function(mode: DrawMode, x: number, y: number, width: number, height: number, rx: number, ry: number, segments: number)
+		--- Love2D 12+: Read back texture data to ImageData (replaces Texture:newImageData)
+		readbackTexture: function(texture: Texture): image.ImageData
+		readbackTexture: function(texture: Texture, slice: number, mipmap: number, x: number, y: number, width: number, height: number): image.ImageData
+		readbackTexture: function(canvas: Canvas): image.ImageData
+		readbackTexture: function(canvas: Canvas, slice: number, mipmap: number, x: number, y: number, width: number, height: number): image.ImageData
 		replaceTransform: function(transform: math.Transform)
 		reset: function()
 		rotate: function(angle: number)
@@ -1308,6 +1400,11 @@ global type love = record
 			"axis"
 			"button"
 			"hat"
+		end
+
+		type SensorType = enum
+			"accelerometer"
+			"gyroscope"
 		end
 
 		type Joystick = record
@@ -1788,6 +1885,14 @@ global type love = record
 		noise: function(x: number, y: number): number
 		noise: function(x: number, y: number, z: number): number
 		noise: function(x: number, y: number, z: number, w: number): number
+		perlinNoise: function(x: number): number
+		perlinNoise: function(x: number, y: number): number
+		perlinNoise: function(x: number, y: number, z: number): number
+		perlinNoise: function(x: number, y: number, z: number, w: number): number
+		simplexNoise: function(x: number): number
+		simplexNoise: function(x: number, y: number): number
+		simplexNoise: function(x: number, y: number, z: number): number
+		simplexNoise: function(x: number, y: number, z: number, w: number): number
 		random: function(): number
 		random: function(max: number): number
 		random: function(min: number, max: number): number
@@ -1814,6 +1919,11 @@ global type love = record
 			"sizeall"
 			"no"
 			"hand"
+		end
+
+		type WheelDirection = enum
+			"standard"
+			"flipped"
 		end
 
 		type Cursor = record
@@ -1947,9 +2057,41 @@ global type love = record
 			setPreviousVertex: function(self: ChainShape, x: number, y: number)
 		end
 
-		type CircleShape = record
+		interface Shape
+			computeAABB: function(self: Shape, tx: number, ty: number, tr: number, childIndex?: number): number, number, number, number
+			computeMass: function(self: Shape, density: number): number, number, number, number
+			destroy: function(self: Shape)
+			getBody: function(self: Shape): Body
+			getBoundingBox: function(self: Shape, index: number): number, number, number, number
+			getCategory: function(self: Shape): number, number
+			getChildCount: function(self: Shape): number
+			getDensity: function(self: Shape): number
+			getFilterData: function(self: Shape): number, number, number
+			getFriction: function(self: Shape): number
+			getGroupIndex: function(self: Shape): number
+			getMask: function(self: Shape): number, number
+			getMassData: function(self: Shape): number, number, number, number
+			getRadius: function(self: Shape): number
+			getRestitution: function(self: Shape): number
+			getType: function(self: Shape): ShapeType
+			getUserData: function(self: Shape): any
+			isDestroyed: function(self: Shape): boolean
+			isSensor: function(self: Shape): boolean
+			rayCast: function(self: Shape, x1: number, y1: number, x2: number, y2: number, maxFraction: number, tx: number, ty: number, tr: number, childIndex: number): number, number, number
+			setCategory: function(self: Shape, ...: number)
+			setDensity: function(self: Shape, density: number)
+			setFilterData: function(self: Shape, categories: number, mask: number, group: number)
+			setFriction: function(self: Shape, friction: number)
+			setGroupIndex: function(self: Shape, group: number)
+			setMask: function(self: Shape, ...: number)
+			setRestitution: function(self: Shape, restitution: number)
+			setSensor: function(self: Shape, sensor: boolean)
+			setUserData: function(self: Shape, value: any)
+			testPoint: function(self: Shape, tx: number, ty: number, tr: number, x: number, y: number): boolean
+		end
+
+		type CircleShape = record is Shape
 			getPoint: function(self: CircleShape): number, number
-			getRadius: function(self: CircleShape): number
 			setPoint: function(self: CircleShape, x: number, y: number)
 			setRadius: function(self: CircleShape, radius: number)
 		end
@@ -2060,7 +2202,7 @@ global type love = record
 			setTarget: function(self: MouseJoint, x: number, y: number)
 		end
 
-		type PolygonShape = record
+		type PolygonShape = record is Shape
 			getPoints: function(self: PolygonShape): number, number, number, number
 		end
 
@@ -2125,16 +2267,6 @@ global type love = record
 			setMaxLength: function(self: RopeJoint, maxLength: number)
 		end
 
-		type Shape = record
-			computeAABB: function(self: Shape, tx: number, ty: number, tr: number, childIndex?: number): number, number, number, number
-			computeMass: function(self: Shape, density: number): number, number, number, number
-			getChildCount: function(self: Shape): number
-			getRadius: function(self: Shape): number
-			getType: function(self: Shape): ShapeType
-			rayCast: function(self: Shape, x1: number, y1: number, x2: number, y2: number, maxFraction: number, tx: number, ty: number, tr: number, childIndex: number): number, number, number
-			testPoint: function(self: Shape, tx: number, ty: number, tr: number, x: number, y: number): boolean
-		end
-
 		type WeldJoint = record
 			getDampingRatio: function(self: WeldJoint): number
 			getFrequency: function(self: WeldJoint): number
@@ -2195,6 +2327,7 @@ global type love = record
 		newChainShape: function(loop: boolean, points: {number}): ChainShape
 		newCircleShape: function(radius: number): CircleShape
 		newCircleShape: function(x: number, y: number, radius: number): CircleShape
+		newCircleShape: function(body: Body, x: number, y: number, radius: number): CircleShape
 		newDistanceJoint: function(body1: Body, body2: Body, x1: number, y1: number, x2: number, y2: number, collideConnected: boolean): DistanceJoint
 		newEdgeShape: function(x1: number, y1: number, x2: number, y2: number): EdgeShape
 		newFixture: function(body: Body, shape: Shape, density: number): Fixture
@@ -2212,6 +2345,7 @@ global type love = record
 		newPulleyJoint: function(body1: Body, body2: Body, gx1: number, gy1: number, gx2: number, gy2: number, x1: number, y1: number, x2: number, y2: number, ratio: number, collideConnected: boolean): PulleyJoint
 		newRectangleShape: function(width: number, height: number): PolygonShape
 		newRectangleShape: function(x: number, y: number, width: number, height: number, angle: number): PolygonShape
+		newRectangleShape: function(body: Body, x: number, y: number, width: number, height: number, angle: number): PolygonShape
 		newRevoluteJoint: function(body1: Body, body2: Body, x: number, y: number, collideConnected: boolean): RevoluteJoint
 		newRevoluteJoint: function(body1: Body, body2: Body, x1: number, y1: number, x2: number, y2: number, collideConnected: boolean, referenceAngle: number): RevoluteJoint
 		newRopeJoint: function(body1: Body, body2: Body, x1: number, y1: number, x2: number, y2: number, maxLength: number, collideConnected: boolean): RopeJoint
@@ -2253,6 +2387,19 @@ global type love = record
 		newSoundData: function(file: filesystem.File): SoundData
 		newSoundData: function(decoder: Decoder): SoundData
 		newSoundData: function(samples: number, rate: number, bits: number, channels: number): SoundData
+
+	end
+	type sensor = record
+		type SensorType = enum
+			"accelerometer"
+			"gyroscope"
+		end
+
+		hasSensor: function(sensorType: SensorType): boolean
+		isEnabled: function(sensorType: SensorType): boolean
+		setEnabled: function(sensorType: SensorType, enabled: boolean)
+		getData: function(sensorType: SensorType): number, number, number
+		getName: function(sensorType: SensorType): string
 
 	end
 	type system = record
@@ -2313,6 +2460,11 @@ global type love = record
 
 	end
 	type touch = record
+		type TouchDeviceType = enum
+			"touchscreen"
+			"touchpad"
+		end
+
 		getPosition: function(id: any): number, number
 		getPressure: function(id: any): number
 		getTouches: function(): {any}
