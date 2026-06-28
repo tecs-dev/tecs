@@ -10,6 +10,9 @@ components. They provide:
 - **Consistent entity creation**: define once, spawn anywhere
 - **Default values**: optional components can have default factories
 - **Required components**: mark components that must be supplied at spawn time
+- **Performance**: each bundle compiles a specialized spawn routine that caches
+  its target archetype and writes straight into component columns, so repeat
+  spawns skip the archetype walk and deferred bursts batch through a single drain
 
 ## Creating a Bundle
 

@@ -2,6 +2,7 @@
 import { h } from 'vue'
 import type { Theme } from 'vitepress'
 import DefaultTheme from 'vitepress/theme'
+import NavMarkdownLink from './NavMarkdownLink.vue'
 import './style.css'
 
 export default {
@@ -9,6 +10,7 @@ export default {
   Layout: () => {
     return h(DefaultTheme.Layout, null, {
       // https://vitepress.dev/guide/extending-default-theme#layout-slots
+      'nav-bar-content-after': () => h(NavMarkdownLink)
     })
   },
   enhanceApp({ app, router, siteData }) {

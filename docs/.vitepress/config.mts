@@ -1,6 +1,18 @@
 import { defineConfig } from 'vitepress'
 import llmstxt from 'vitepress-plugin-llms'
 
+// Map a page's source path to the generated LLM-friendly Markdown URL.
+// "tecs/index.md" -> "/tecs.md", "tecs/world.md" -> "/tecs/world.md".
+// Returns null for the site homepage (no per-page Markdown is emitted).
+function mdSourceUrl(relativePath: string): string | null {
+  if (relativePath === 'index.md') return null
+  const clean = relativePath
+    .replace(/(^|\/)index\.md$/, '$1')
+    .replace(/\.md$/, '')
+    .replace(/\/$/, '')
+  return `/${clean}.md`
+}
+
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
   title: "Tecs",
@@ -28,6 +40,12 @@ export default defineConfig({
     ['link', { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' }],
     ['link', { href: 'https://fonts.googleapis.com/css2?family=Jersey+15&display=swap', rel: 'stylesheet' }]
   ],
+  // Advertise the LLM-friendly Markdown source of each page.
+  transformHead({ pageData }) {
+    const href = mdSourceUrl(pageData.relativePath)
+    if (!href) return
+    return [['link', { rel: 'alternate', type: 'text/markdown', href }]]
+  },
   themeConfig: {
     // https://vitepress.dev/reference/default-theme-config
 

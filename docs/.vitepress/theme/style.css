@@ -216,6 +216,10 @@
       padding: 1px 4px;
       color: var(--vp-c-text-2);
     }
+
+    :is(h1, h2, h3, h4, h5) code:not(pre code) {
+      font-size: 1em !important;
+    }
   }
 }
 
@@ -322,6 +326,11 @@
   .vp-doc th {
     background-color: var(--tecs-c-purple);
   }
+
+  /* Softer zebra striping: closer to the page background. */
+  .vp-doc tr:nth-child(2n) {
+    background-color: #18160f;
+  }
 }
 
 /**
@@ -378,4 +387,26 @@
 
 .VPDocFooter .pager-link {
   border-radius: 0 !important;
+}
+
+/**
+ * Nav-bar Markdown link — sit just left of the appearance switch.
+ * The slot renders after appearance/social in the DOM, so reorder via flex.
+ * -------------------------------------------------------------------------- */
+
+.VPNavBar .content-body .VPNavBarMarkdown {
+  order: 1;
+  margin-right: 8px;
+}
+
+.VPNavBar .content-body .appearance {
+  order: 2;
+}
+
+.VPNavBar .content-body .social-links {
+  order: 3;
+}
+
+.VPNavBar .content-body .extra {
+  order: 4;
 }

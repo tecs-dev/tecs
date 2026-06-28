@@ -142,14 +142,6 @@ for archetype, len, entities in query:iter() do
 end
 ```
 
-Reads stay current: `world:get`, `world:has`, and archetype-column indexing see pre-drain state for the whole
-iteration. Staged writes only become visible after the enclosing loop exits (or the outermost loop exits, for
-nested iteration).
-
-For mutations made outside a query iteration (for example, a system that edits many unrelated entities without
-walking a query), wrap your work in `world:defer()` / `world:commit()` to get the same semantics. Outside any
-scope, mutations apply immediately.
-
 #### Breaking out early
 
 Normal exhaustion of `for … in query:iter()` drains staged mutations automatically. An early `break` does not; the
@@ -250,16 +242,3 @@ local allPositionQuery = world:query({
     include = {Position, tecs.builtins.Disabled}
 })
 ```
-
-## Reacting to entity changes
-
-To run code when entities begin or stop matching a query (e.g. registering a physics body when `Transform` and
-`Collider` appear, releasing a GPU slot when a sprite is removed), attach `onEntitiesAdded` / `onEntitiesRemoved`
-callbacks to the query. See [Query callbacks](/tecs/queries/callbacks) for the full API and the deferred-scope
-rules that apply inside callbacks.
-
-## Grouping archetypes
-
-To iterate archetypes in a deterministic order grouped by an integer key (e.g. blend mode, render layer, material),
-use the `groupBy` option with the `groups()` / `group()` / `getGroup()` / `getGroupCount()` methods. See
-[Query grouping](/tecs/queries/grouping) for the full API.

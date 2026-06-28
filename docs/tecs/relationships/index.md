@@ -8,13 +8,7 @@ Relationships in Tecs provide a way to model connections between entities. They 
 like parent-child hierarchies, following behaviors, targeting systems, etc. Tecs automatically manages the
 lifecycle of relationships, ensuring referential integrity when entities are despawned.
 
-## Overview
-
-A relationship is a special type of component that references another entity. This enables you to build complex entity
-graphs and hierarchies. Shared construction rules still live in
-[Component Construction](/tecs/components/construction); this section focuses on relationship-specific semantics.
-
-Relationship features in Tecs include:
+## Relationship features
 
 - **Automatic cleanup**: When you despawn a target entity, Tecs automatically removes all relationships pointing to it
 - **Type safety**: Relationships are strongly typed in Teal, providing compile-time guarantees
@@ -23,16 +17,13 @@ Relationship features in Tecs include:
 - **Sparse storage**: Relationships can opt into sparse storage to avoid per-target archetype fragmentation
 - **Cascade delete**: Declarative cascade deletion for hierarchies like parent-child
 
-## Choose a relationship kind
+## Kinds of relationships
 
 Pick the relationship flavor based on whether the edge carries data and how you want that data stored:
 
-- [Tag Relationships](/tecs/relationships/tag): target only, no payload fields
-- plain `newRelationship(...)`: target plus plain Lua payload fields
-- [FFI Relationships](/tecs/relationships/ffi): target plus FFI-backed typed payload fields
-
-This overview page stays focused on semantics shared across all three: target handling, exclusivity, sparse storage,
-reverse indexes, wildcard queries, and hierarchy traversal.
+- [Tag Relationships](/tecs/relationships/tag): the relationship carries no additional data
+- [FFI Relationships](/tecs/relationships/ffi): the relationship carries data backed by FFI structs
+- plain `newRelationship(...)`: the relationship carries data backed by a Lua table
 
 ## Creating simple relationships
 
