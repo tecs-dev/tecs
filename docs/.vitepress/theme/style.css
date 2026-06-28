@@ -250,13 +250,44 @@
   --vp-code-block-bg: #16141b;
 
   .vp-doc h1 {
+    position: relative;
     color: var(--tecs-c-lavender) !important;
     font-size: 2.2rem !important;
-    border: 4px solid var(--tecs-c-lavender);
-    border-radius: 26px;
+    background: #222;
     padding: 2px 12px;
     margin-left: -12px;
-    display: inline-block;
+    display: block;
+    overflow: hidden;
+  }
+
+  .vp-doc h1::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 2px;
+    width: 130px;
+    background: linear-gradient(
+      to right,
+      transparent 0 46px,
+      #333 46px 50px,
+      transparent 50px 56px,
+      #333 56px 60px,
+      transparent 60px 66px,
+      #333 66px 70px,
+      transparent 70px 76px,
+      #333 76px 80px,
+      transparent 80px 86px,
+      #333 86px 90px,
+      transparent 90px 96px,
+      #333 96px 100px,
+      transparent 100px 106px,
+      #333 106px 110px,
+      transparent 110px 116px,
+      #333 116px 120px,
+      transparent 120px
+    );
+    pointer-events: none;
   }
 
   .VPNavBarTitle .title span {
@@ -281,7 +312,7 @@
   }
 
   .VPSidebar {
-    background: linear-gradient(to bottom right, #272727, #110f0d) !important;
+    background: #1d1d1d !important;
   }
 
   .VPNavBarTitle.has-sidebar .title {
@@ -332,4 +363,19 @@
 
 .VPDocAsideOutline .outline-title {
   font-family: "Jersey 15", sans-serif;
+}
+
+/**
+ * Square Code Blocks & Admonitions
+ * -------------------------------------------------------------------------- */
+
+.vp-doc div[class*="language-"],
+.vp-doc [class*="language-"] pre,
+.vp-doc [class*="language-"] code,
+.custom-block {
+  border-radius: 0 !important;
+}
+
+.VPDocFooter .pager-link {
+  border-radius: 0 !important;
 }

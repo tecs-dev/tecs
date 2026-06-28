@@ -1,9 +1,20 @@
 import { defineConfig } from 'vitepress'
+import llmstxt from 'vitepress-plugin-llms'
 
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
   title: "Tecs",
   description: "Typed entity component system and game framework for Lua.",
+  vite: {
+    plugins: [
+      llmstxt({
+        description: "Typed entity component system and game framework for Lua.",
+        details: "Tecs is a high-performance, typed Entity Component System for LuaJIT. " +
+          "The core tecs module is renderer-agnostic; tecs2d layers on LÖVE2D " +
+          "integration, GPU-driven rendering, input, audio, UI, tiled maps, and MCP tooling."
+      })
+    ]
+  },
   markdown: {
     theme: {
       light: 'github-light',
@@ -211,7 +222,8 @@ export default defineConfig({
     ],
 
     footer: {
-      message: 'Released under the <a href="https://github.com/tecs-dev/tecs/blob/main/LICENSE">MIT License</a>.',
+      message: 'Released under the <a href="https://github.com/tecs-dev/tecs/blob/main/LICENSE">MIT License</a>. ' +
+        'For LLMs: <a href="/llms.txt">llms.txt</a> · <a href="/llms-full.txt">llms-full.txt</a>.',
       copyright: 'Copyright © <a href="https://github.com/mtdowling">Michael Dowling</a>'
     }
   }
