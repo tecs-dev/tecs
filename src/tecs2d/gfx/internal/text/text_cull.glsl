@@ -120,10 +120,11 @@ layout(std430) writeonly buffer MaterialParamsOutput {
 
 // ---------- Component-presence mask ----------
 
+// Canonical bits — must match modifier_binding.MASK (gpu/modifier_binding.tl).
 const uint COMP_COLOR        = 0x01u;
 const uint COMP_CLIPBOUNDS   = 0x02u;
-const uint COMP_MATERIAL     = 0x08u;
-const uint COMP_TEXTEFFECTS  = 0x10u;
+const uint COMP_MATERIAL     = 0x10u;
+const uint COMP_TEXTEFFECTS  = 0x800u;
 
 uniform uint ComponentMask;
 uniform uint ArchetypeRowCount;

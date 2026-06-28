@@ -188,10 +188,13 @@ local function showcasePlugin(world: tecs.World)
                 elseif SHAPE == "line" then
                     local s = shapes[i] as gfx.Line
                     local len = math.random(30, 120)
-                    s.x1 = -len * 0.5
-                    s.y1 = 0
-                    s.x2 = len * 0.5
-                    s.y2 = 0
+                    local ang = math.random() * math.pi * 2
+                    local hx = math.cos(ang) * len * 0.5
+                    local hy = math.sin(ang) * len * 0.5
+                    s.x1 = -hx
+                    s.y1 = -hy
+                    s.x2 = hx
+                    s.y2 = hy
                     s.width = math.random(2, 6)
                 elseif SHAPE == "mesh" then
                     -- Geometry is per-definition; vary only the per-row

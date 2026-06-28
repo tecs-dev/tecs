@@ -1,10 +1,8 @@
 local tecs <const> = require("tecs")
 local types <const> = require("tecs2d.gfx.types")
-local gpuTypes <const> = require("tecs2d.gfx.internal.gpu.types")
 local shaderUtils <const> = require("tecs2d.gfx.internal.gpu.shaders")
 local material_compiler <const> = require("tecs2d.gfx.internal.material_compiler")
-local shadow_plugin <const> = require("tecs2d.gfx.internal.gpu.shadow_plugin")
-local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
+local defineShape <const> = require("tecs2d.gfx.internal.gpu.define_shape")
 
 local ColorComponent <const> = require("tecs2d.gfx.internal.Color")
 local ClipBounds <const> = require("tecs2d.gfx.internal.ClipBounds")
@@ -67,48 +65,14 @@ tecs.newFFIComponent({
 })
 
 function arc.plugin(world: tecs.World)
-    shadow_plugin.register(world, {
-        prefix = "Arc",
-        plural = "Arcs",
-        materialShapeName = "arc",
-        sizeHintKey = "arcs",
-        registryName = "arc.shadows",
-        renderStateSystemName = "arc.ShadowRenderState",
-        uploadSystemName = "arc.ShadowUpload",
-
-        primary = Arc as tecs.Component,
-        primaryLayout = std430.layouts.Arc,
-        primaryInputName = "ArcInput",
-
-        optional = {
-            {component = ColorComponent, layout = std430.layouts.Color,       mask = 0x1,  ssboName = "ColorInput"},
-            {component = ClipBounds,     layout = std430.layouts.ClipBounds,  mask = 0x2,  ssboName = "ClipBoundsInput"},
-            {component = Material,       layout = std430.layouts.Material,    mask = 0x8,  ssboName = "MaterialInput"},
-            {component = Pivot,          layout = std430.layouts.Pivot,       mask = 0x10, ssboName = "PivotInput"},
-        },
-
-        tagFlags = {
-            {component = Unlit, flag = gpuTypes.FLAG_UNLIT},
-        },
-
-        cullShader = cullShader,
-        renderShader = renderShader,
-        shadowMaskShader = nil,
-        outputFormat = gpuTypes.ARC_FORMAT,
-        outputName = "ArcOutput",
-        shadowOutputName = "",
-
-        stub = {
-            transformFormat = gpuTypes.ARC_TRANSFORM_FORMAT,
-            transformCtype = gpuTypes.ARC_TRANSFORM_CTYPE,
-            metadataFormat = gpuTypes.ARC_METADATA_FORMAT,
-            metadataCtype = gpuTypes.ARC_METADATA_CTYPE,
-            inputFormat = gpuTypes.ARC_FORMAT,
-            inputCtype = gpuTypes.ARC_CTYPE,
-        },
-
-        hasShadow = false,
-        hasAlphaBlendFilter = false,
+    defineShape.register(world, {
+        name = "Arc",
+        component = Arc as tecs.Component,
+        render = renderShader,
+        cull = cullShader,
+        modifiers = {ColorComponent, ClipBounds, Material, Pivot},
+        tags = {Unlit},
+        alphaBlendFilter = false,
     })
 end
 

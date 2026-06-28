@@ -1,9 +1,7 @@
 local tecs <const> = require("tecs")
-local gpuTypes <const> = require("tecs2d.gfx.internal.gpu.types")
 local shaderUtils <const> = require("tecs2d.gfx.internal.gpu.shaders")
 local material_compiler <const> = require("tecs2d.gfx.internal.material_compiler")
-local shadow_plugin <const> = require("tecs2d.gfx.internal.gpu.shadow_plugin")
-local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
+local defineShape <const> = require("tecs2d.gfx.internal.gpu.define_shape")
 
 local ColorComponent <const> = require("tecs2d.gfx.internal.Color")
 local ClipBounds <const> = require("tecs2d.gfx.internal.ClipBounds")
@@ -53,47 +51,14 @@ tecs.newFFIComponent({
 })
 
 function line.plugin(world: tecs.World)
-    shadow_plugin.register(world, {
-        prefix = "Line",
-        plural = "Lines",
-        materialShapeName = "line",
-        sizeHintKey = "lines",
-        registryName = "line.shadows",
-        renderStateSystemName = "line.ShadowRenderState",
-        uploadSystemName = "line.ShadowUpload",
-
-        primary = Line as tecs.Component,
-        primaryLayout = std430.layouts.Line,
-        primaryInputName = "LineInput",
-
-        optional = {
-            {component = ColorComponent, layout = std430.layouts.Color,       mask = 0x1, ssboName = "ColorInput"},
-            {component = ClipBounds,     layout = std430.layouts.ClipBounds,  mask = 0x2, ssboName = "ClipBoundsInput"},
-            {component = Material,       layout = std430.layouts.Material,    mask = 0x8, ssboName = "MaterialInput"},
-        },
-
-        tagFlags = {
-            {component = Unlit, flag = gpuTypes.FLAG_UNLIT},
-        },
-
-        cullShader = cullShader,
-        renderShader = renderShader,
-        shadowMaskShader = nil,
-        outputFormat = gpuTypes.LINE_FORMAT,
-        outputName = "LineOutput",
-        shadowOutputName = "",
-
-        stub = {
-            transformFormat = gpuTypes.LINE_TRANSFORM_FORMAT,
-            transformCtype = gpuTypes.LINE_TRANSFORM_CTYPE,
-            metadataFormat = gpuTypes.LINE_METADATA_FORMAT,
-            metadataCtype = gpuTypes.LINE_METADATA_CTYPE,
-            inputFormat = gpuTypes.LINE_FORMAT,
-            inputCtype = gpuTypes.LINE_CTYPE,
-        },
-
-        hasShadow = false,
-        hasAlphaBlendFilter = false,
+    defineShape.register(world, {
+        name = "Line",
+        component = Line as tecs.Component,
+        render = renderShader,
+        cull = cullShader,
+        modifiers = {ColorComponent, ClipBounds, Material},
+        tags = {Unlit},
+        alphaBlendFilter = false,
     })
 end
 

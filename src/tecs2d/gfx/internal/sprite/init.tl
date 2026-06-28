@@ -24,7 +24,7 @@ local floor <const> = math.floor
 -- Shadow-pipeline modules for the renderer-owned shadow-column path.
 local shadow_setup <const> = require("tecs2d.gfx.internal.sprite.shadow_setup")
 local shadow_dispatch <const> = require("tecs2d.gfx.internal.sprite.shadow_dispatch")
-local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
+local modifier_binding <const> = require("tecs2d.gfx.internal.gpu.modifier_binding")
 local ClipBoundsComponent <const> = require("tecs2d.gfx.internal.ClipBounds")
 local Unlit <const> = require("tecs2d.gfx.internal.Unlit")
 local PivotComponent <const> = require("tecs2d.gfx.internal.Pivot")
@@ -1144,16 +1144,16 @@ function sprite.plugin(renderPipeline: types.Pipeline): function(world: tecs.Wor
                 "Tiny", "Small", "Medium", "Large", "XL", "XXL",
             }
 
-            local optional: {shadow_setup.OptionalBinding} = {
-                {component = ColorComponent as tecs.Component,        layout = std430.layouts.Color,          mask = 0x01, ssboName = "ColorInput"},
-                {component = ClipBoundsComponent as tecs.Component,   layout = std430.layouts.ClipBounds,     mask = 0x02, ssboName = "ClipBoundsInput"},
-                {component = MaterialComponent as tecs.Component,     layout = std430.layouts.Material,       mask = 0x08, ssboName = "MaterialInput"},
-                {component = PivotComponent as tecs.Component,        layout = std430.layouts.Pivot,          mask = 0x10, ssboName = "PivotInput"},
-                {component = OccluderComponent as tecs.Component,     layout = std430.layouts.Occluder,       mask = 0x20, ssboName = "OccluderInput"},
-                {component = DropShadowComponent as tecs.Component,   layout = std430.layouts.DropShadow,     mask = 0x40, ssboName = "DropShadowInput"},
-                {component = RepeatedSprite as tecs.Component,        layout = std430.layouts.RepeatedSprite, mask = 0x80, ssboName = "RepeatedSpriteInput"},
-                {component = SpriteData as tecs.Component,            layout = std430.layouts.SpriteData,     mask = 0x100, ssboName = "SpriteDataInput"},
-            }
+            local optional <const> = modifier_binding.bind({
+                ColorComponent as tecs.Component,
+                ClipBoundsComponent as tecs.Component,
+                MaterialComponent as tecs.Component,
+                PivotComponent as tecs.Component,
+                OccluderComponent as tecs.Component,
+                DropShadowComponent as tecs.Component,
+                RepeatedSprite as tecs.Component,
+                SpriteData as tecs.Component,
+            }) as {shadow_setup.OptionalBinding}
 
             local tagFlags: {shadow_dispatch.TagFlagBinding} = {
                 {component = Unlit, flag = gpuTypes.FLAG_UNLIT},

@@ -26,7 +26,7 @@ local shaderUtils <const> = require("tecs2d.gfx.internal.gpu.shaders")
 local material_compiler <const> = require("tecs2d.gfx.internal.material_compiler")
 local shadow_setup <const> = require("tecs2d.gfx.internal.text.shadow_setup")
 local shadow_dispatch <const> = require("tecs2d.gfx.internal.text.shadow_dispatch")
-local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
+local modifier_binding <const> = require("tecs2d.gfx.internal.gpu.modifier_binding")
 
 local lg <const> = love.graphics
 local TEXT_SHADERS <const> = "tecs2d/gfx/internal/text/"
@@ -323,12 +323,12 @@ function text_sync.plugin(_world: tecs.World, renderer: gpuTypes.Renderer, TextC
 
         local syncSystem = text_sync.new(w, registerFont, glyphBuffer, textQuery, TextComponent)
 
-        local optional: {shadow_setup.OptionalBinding} = {
-            {component = ColorComponent,                          layout = std430.layouts.Color,       mask = 0x01, ssboName = "ColorInput"},
-            {component = ClipBoundsComponent as tecs.Component,   layout = std430.layouts.ClipBounds,  mask = 0x02, ssboName = "ClipBoundsInput"},
-            {component = MaterialComponent as tecs.Component,     layout = std430.layouts.Material,    mask = 0x08, ssboName = "MaterialInput"},
-            {component = TextEffectsComponent as tecs.Component,  layout = std430.layouts.TextEffects, mask = 0x10, ssboName = "TextEffectsInput"},
-        }
+        local optional <const> = modifier_binding.bind({
+            ColorComponent,
+            ClipBoundsComponent as tecs.Component,
+            MaterialComponent as tecs.Component,
+            TextEffectsComponent as tecs.Component,
+        }) as {shadow_setup.OptionalBinding}
 
         local tagFlags: {shadow_dispatch.TagFlagBinding} = {
             {component = Unlit, flag = gpuTypes.FLAG_UNLIT},

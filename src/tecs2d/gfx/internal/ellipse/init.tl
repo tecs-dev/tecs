@@ -1,10 +1,8 @@
 local tecs <const> = require("tecs")
 local types <const> = require("tecs2d.gfx.types")
-local gpuTypes <const> = require("tecs2d.gfx.internal.gpu.types")
 local shaderUtils <const> = require("tecs2d.gfx.internal.gpu.shaders")
 local material_compiler <const> = require("tecs2d.gfx.internal.material_compiler")
-local shadow_plugin <const> = require("tecs2d.gfx.internal.gpu.shadow_plugin")
-local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
+local defineShape <const> = require("tecs2d.gfx.internal.gpu.define_shape")
 
 local ColorComponent <const> = require("tecs2d.gfx.internal.Color")
 local ClipBounds <const> = require("tecs2d.gfx.internal.ClipBounds")
@@ -63,48 +61,14 @@ tecs.newFFIComponent({
 })
 
 function ellipse.plugin(world: tecs.World)
-    shadow_plugin.register(world, {
-        prefix = "Ellipse",
-        plural = "Ellipses",
-        materialShapeName = "ellipse",
-        sizeHintKey = "ellipses",
-        registryName = "ellipse.shadows",
-        renderStateSystemName = "ellipse.ShadowRenderState",
-        uploadSystemName = "ellipse.ShadowUpload",
-
-        primary = Ellipse as tecs.Component,
-        primaryLayout = std430.layouts.Ellipse,
-        primaryInputName = "EllipseInput",
-
-        optional = {
-            {component = ColorComponent, layout = std430.layouts.Color,       mask = 0x1,  ssboName = "ColorInput"},
-            {component = ClipBounds,     layout = std430.layouts.ClipBounds,  mask = 0x2,  ssboName = "ClipBoundsInput"},
-            {component = Material,       layout = std430.layouts.Material,    mask = 0x8,  ssboName = "MaterialInput"},
-            {component = Pivot,          layout = std430.layouts.Pivot,       mask = 0x10, ssboName = "PivotInput"},
-        },
-
-        tagFlags = {
-            {component = Unlit, flag = gpuTypes.FLAG_UNLIT},
-        },
-
-        cullShader = cullShader,
-        renderShader = renderShader,
-        shadowMaskShader = nil,
-        outputFormat = gpuTypes.ELLIPSE_FORMAT,
-        outputName = "EllipseOutput",
-        shadowOutputName = "",
-
-        stub = {
-            transformFormat = gpuTypes.ELLIPSE_TRANSFORM_FORMAT,
-            transformCtype = gpuTypes.ELLIPSE_TRANSFORM_CTYPE,
-            metadataFormat = gpuTypes.ELLIPSE_METADATA_FORMAT,
-            metadataCtype = gpuTypes.ELLIPSE_METADATA_CTYPE,
-            inputFormat = gpuTypes.ELLIPSE_FORMAT,
-            inputCtype = gpuTypes.ELLIPSE_CTYPE,
-        },
-
-        hasShadow = false,
-        hasAlphaBlendFilter = false,
+    defineShape.register(world, {
+        name = "Ellipse",
+        component = Ellipse as tecs.Component,
+        render = renderShader,
+        cull = cullShader,
+        modifiers = {ColorComponent, ClipBounds, Material, Pivot},
+        tags = {Unlit},
+        alphaBlendFilter = false,
     })
 end
 

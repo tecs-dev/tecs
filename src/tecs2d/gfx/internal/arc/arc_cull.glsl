@@ -75,10 +75,11 @@ layout(std430) writeonly buffer MaterialParamsOutput {
 
 // ---------- Component-presence mask ----------
 
+// Canonical component-mask bits (shared across all shapes; 0x4 reserved).
 const uint COMP_COLOR        = 0x1u;
 const uint COMP_CLIPBOUNDS   = 0x2u;
-const uint COMP_MATERIAL     = 0x8u;
-const uint COMP_PIVOT        = 0x10u;
+const uint COMP_MATERIAL     = 0x10u;
+const uint COMP_PIVOT        = 0x40u;
 
 uniform uint ComponentMask;
 uniform uint ArchetypeRowCount;

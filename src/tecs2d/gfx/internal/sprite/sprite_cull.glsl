@@ -155,13 +155,14 @@ layout(std430) readonly buffer SliceGenerations {
 
 // ---------- Component-presence mask + uniforms ----------
 
+// Canonical bits — must match modifier_binding.MASK (gpu/modifier_binding.tl).
 const uint COMP_COLOR          = 0x01u;
 const uint COMP_CLIPBOUNDS     = 0x02u;
-const uint COMP_MATERIAL       = 0x08u;
-const uint COMP_PIVOT          = 0x10u;
-const uint COMP_OCCLUDER       = 0x20u;
-const uint COMP_DROPSHADOW     = 0x40u;
-const uint COMP_REPEATEDSPRITE = 0x80u;
+const uint COMP_OCCLUDER       = 0x08u;
+const uint COMP_MATERIAL       = 0x10u;
+const uint COMP_PIVOT          = 0x40u;
+const uint COMP_DROPSHADOW     = 0x100u;
+const uint COMP_REPEATEDSPRITE = 0x200u;
 
 uniform uint ComponentMask;
 uniform uint ArchetypeRowCount;

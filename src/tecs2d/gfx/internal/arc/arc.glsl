@@ -154,20 +154,25 @@ void effect() {
         float lineWidthNorm = vLineWidth / avgRadius;
         float innerEdge = max(1.0 - lineWidthNorm, 0.0);
 
+        // Opaque with a 50%-coverage discard (see filled note below): no
+        // partial-alpha stroke edge for the deferred composite to rim.
         if (antiAliased) {
             float outerAlpha = 1.0 - smoothstep(1.0, 1.0 + edgeWidth, dist);
             float innerAlpha = smoothstep(innerEdge - edgeWidth, innerEdge, dist);
-            alpha = outerAlpha * innerAlpha;
-            if (alpha < 0.01) discard;
+            float cov = outerAlpha * innerAlpha;
+            if (cov < 0.5) discard;
         } else {
             // Hard cutoff (rough mode)
             if (dist > 1.0 || dist < innerEdge) discard;
         }
     } else {
-        // Filled mode (pie slice)
+        // Filled mode (pie slice). Opaque with a 50%-coverage discard: the
+        // edge lands on the SDF half-coverage contour (sub-pixel accurate,
+        // crisp) and every drawn pixel writes full alpha, so the deferred
+        // composite has no partial-alpha edge to darken into a rim.
         if (antiAliased) {
-            alpha = 1.0 - smoothstep(1.0, 1.0 + edgeWidth, dist);
-            if (alpha < 0.01) discard;
+            float cov = 1.0 - smoothstep(1.0, 1.0 + edgeWidth, dist);
+            if (cov < 0.5) discard;
         } else {
             // Hard cutoff (rough mode)
             if (dist > 1.0) discard;

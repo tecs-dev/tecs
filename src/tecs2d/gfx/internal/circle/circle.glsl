@@ -114,10 +114,10 @@ void effect() {
     float alpha = 1.0;
 
     // Stable edge width from linear varying derivatives (constant per-triangle).
-    // Using fwidth(vLocalPos) instead of fwidth(dist) eliminates directional variation.
-    // Factor 1.2 widens the transition to ~3.4 pixels, reducing per-frame alpha change
-    // from sub-pixel camera shifts (mimics the gradual transitions of texture filtering).
-    float edgeWidth = min(length(fwidth(vLocalPos)) * 1.2, 0.25);
+    // Using fwidth(vLocalPos) instead of fwidth(dist) eliminates directional
+    // variation. Kept tight (~1px, no widening) for a crisp edge; the older
+    // 1.2x widen + 0.25 clamp produced a visibly fuzzy halo on small shapes.
+    float edgeWidth = min(length(fwidth(vLocalPos)), 0.05);
 
     // Handle outline vs filled mode. Antialiased edges are placed
     // entirely outside the geometric boundary (smoothstep low = the
@@ -130,20 +130,25 @@ void effect() {
         float lineWidthNorm = vLineWidth / vRadius;
         float innerEdge = max(1.0 - lineWidthNorm, 0.0);  // Clamp to prevent negative
 
+        // Opaque with a 50%-coverage discard (matches filled mode): no
+        // partial-alpha stroke edge for the deferred composite to rim.
         if (antiAliased) {
             float outerAlpha = 1.0 - smoothstep(1.0, 1.0 + edgeWidth, dist);
             float innerAlpha = smoothstep(innerEdge - edgeWidth, innerEdge, dist);
-            alpha = outerAlpha * innerAlpha;
-            if (alpha < 0.01) discard;
+            float cov = outerAlpha * innerAlpha;
+            if (cov < 0.5) discard;
         } else {
             // Hard cutoff (rough mode)
             if (dist > 1.0 || dist < innerEdge) discard;
         }
     } else {
-        // Filled mode
+        // Filled mode. Opaque with a 50%-coverage discard: the edge lands
+        // on the SDF half-coverage contour (sub-pixel accurate, crisp) and
+        // every drawn pixel writes full alpha, so the deferred composite
+        // has no partial-alpha edge to darken into a rim.
         if (antiAliased) {
-            alpha = 1.0 - smoothstep(1.0, 1.0 + edgeWidth, dist);
-            if (alpha < 0.01) discard;
+            float cov = 1.0 - smoothstep(1.0, 1.0 + edgeWidth, dist);
+            if (cov < 0.5) discard;
         } else {
             // Hard cutoff (rough mode)
             if (dist > 1.0) discard;
