@@ -10,9 +10,9 @@ tags in a per-archetype bitset rather than allocating a value per entity, so mem
 If you need a refresher on the shared component model first, start with
 [Component Construction](/tecs/components/construction). For the broader component taxonomy, see the
 [Components overview](/tecs/components/). If you want the same presence-only idea but scoped to a
-relationship target, see [Tag Relationships](/tecs/relationships/tag),
-[Relationships](/tecs/relationships/), and
-[FFI Relationships](/tecs/relationships/ffi).
+relationship target, see [Relationships](/tecs/relationships/) (a
+`newRelationship` with just a name is the presence-only,
+target-only form) and [FFI Relationships](/tecs/relationships/ffi).
 
 Use tags for flags, markers, and classification: "this entity is `Selected`", "this mob is `Stunned`",
 "this node is a `SpawnPoint`". Anything that reduces to "is this entity part of group X?" is a good fit.

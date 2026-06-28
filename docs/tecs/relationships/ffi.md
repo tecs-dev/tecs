@@ -4,14 +4,19 @@ outline: deep
 
 # FFI Relationships
 
-FFI-backed relationships provide high-performance storage for relationship data using LuaJIT's FFI (Foreign Function
-Interface). This page covers FFI-specific relationship features. For general relationship concepts, see the
-[Relationships](/tecs/relationships/) documentation.
+FFI-backed relationships store relationship data in a LuaJIT FFI struct for compact, high-performance
+storage. This page covers only the FFI-specific storage side. For general relationship concepts (targets,
+`exclusive`, `sparse`, traversal) see [Relationships](/tecs/relationships/); for the shared constructor
+model see [Component Construction](/tecs/components/construction). If you only need a target with no extra
+payload, a [target-only relationship](/tecs/relationships/#creating-simple-relationships) (`newRelationship`
+with just a name) is FFI-backed automatically.
 
-FFI relationships use the same shared constructor model documented in
-[Component Construction](/tecs/components/construction). This page only covers
-the FFI-specific storage side. If you only need a target with no extra payload,
-see [Tag Relationships](/tecs/relationships/tag).
+FFI relationships provide:
+
+- **High performance**: data lives in an FFI struct, avoiding per-instance table allocation
+- **Compact memory**: tightly packed fields with no per-field boxing
+- **Type safety**: strongly typed fields with compile-time guarantees
+- **Full feature set**: works with `sparse`, `reverseIndex`, and `cascadeDelete`
 
 ## FFI relationships with data
 
@@ -49,10 +54,10 @@ definition. Positional arguments are mapped to fields in order with `target`
 always first; the table form takes `target` as a key:
 
 ```lua
--- Positional __call — target first, then fields in order
+-- Positional __call: target first, then fields in order
 world:set(follower, FastFollows(targetEntity, 0.3, 50.0))
 
--- Table form — target is a key alongside the data
+-- Table form: target is a key alongside the data
 world:set(follower, FastFollows.new({
     target = targetEntity,
     delay = 0.3,
@@ -64,12 +69,6 @@ See [Component Construction](/tecs/components/construction) for the shared
 `fields` / `defaults` / `init` / `.new` rules, and
 [Relationships](/tecs/relationships/) for target/exclusive/sparse
 semantics.
-
-FFI relationships provide:
-- **High performance**: FFI struct storage with zero-copy operations
-- **Memory efficiency**: Compact memory layout
-- **Type safety**: Strongly typed fields with compile-time guarantees
-- **Full features**: Support for `sparse`, `reverseIndex`, and `cascadeDelete`
 
 Note that the `target` field is automatically included in the FFI struct; you only need to specify additional data
 fields.
@@ -87,7 +86,7 @@ The `tecs.newFFIRelationship` function accepts a configuration table with these 
 | `sparse`        | Use entity-indexed storage instead of per-target archetype components (default: `false`)      |
 | `reverseIndex`  | Maintain an inverse index for `world:targets()`, `world:traverse()`, and `world:walkUp()`     |
 | `cascadeDelete` | Despawning the target despawns all source entities. Requires `exclusive` and `reverseIndex`    |
-| `init`          | Validation and initialization hook (positional args only — `.new` unpacks before calling)      |
+| `init`          | Validation and initialization hook (positional args only; `.new` unpacks before calling)       |
 | `new`           | Override the auto-codegenned `.new(data)` table-form constructor (optional)                   |
 
 ::: info Positional shape is auto-generated
@@ -118,9 +117,14 @@ The `fields` array supports standard FFI types:
 FFI relationships support `init` hooks for validation and derived state:
 
 ```lua
+local record SafeFollows is tecs.Relationship
+    delay: number
+    maxDistance: number
+end
+
 local SafeFollows = tecs.newFFIRelationship({
     name = "SafeFollows",
-    container = FollowsType,
+    container = SafeFollows,
     fields = {
         {"delay", "float"},
         {"maxDistance", "float"}
@@ -131,10 +135,8 @@ local SafeFollows = tecs.newFFIRelationship({
         delay: number,
         maxDistance: number
     )
-        delay = math.max(0.1, delay)
-        maxDistance = math.max(1, maxDistance)
-        instance.delay = delay
-        instance.maxDistance = maxDistance
+        instance.delay = math.max(0.1, delay)
+        instance.maxDistance = math.max(1, maxDistance)
     end,
 })
 ```

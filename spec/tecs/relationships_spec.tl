@@ -602,4 +602,61 @@ describe("relationships", function()
                 "should return one of the relationship targets")
         end)
     end)
+
+    describe("high-generation targets (int32 -> double)", function()
+        -- Recycle a single slot until its generation pushes the packed id past
+        -- the signed-int32 boundary (2^31). The packed id is
+        -- slot + generation * 2^22, so generation must climb past ~512. An
+        -- int32 target field truncates here; a double round-trips exactly.
+        local function churnHighGenEntity(): integer
+            local id: integer
+            for i = 1, 600 do
+                id = world:spawn()
+                if i < 600 then
+                    world:despawn(id)
+                    world:update(0)
+                end
+            end
+            return id
+        end
+
+        it("round-trips a relationship target past the int32 boundary", function()
+            local Likes = tecs.newTagRelationship({ name = "LikesHighGen" })
+
+            local target = churnHighGenEntity()
+            luassert.is_true(target > 2 ^ 31,
+                "churn should drive the target id past the int32 boundary")
+
+            local liker = world:spawn(Likes(target) as tecs.Component)
+            world:update(0)
+
+            local rel = world:getFirstRelationship(liker, Likes)
+            luassert.is_not_nil(rel, "should return a relationship instance")
+            luassert.equals(target, rel.target,
+                "target must round-trip without int32 truncation")
+        end)
+
+        it("cascade-deletes children of a high-generation parent", function()
+            local ChildOf = tecs.newTagRelationship({
+                name = "ChildOfHighGen",
+                exclusive = true,
+                sparse = true,
+                reverseIndex = true,
+                cascadeDelete = true,
+            })
+
+            local parent = churnHighGenEntity()
+            luassert.is_true(parent > 2 ^ 31,
+                "churn should drive the parent id past the int32 boundary")
+
+            local child = world:spawn(ChildOf(parent) as tecs.Component)
+            world:update(0)
+            luassert.is_true(world:isAlive(child), "child should be alive")
+
+            world:despawn(parent)
+            world:update(0)
+            luassert.is_false(world:isAlive(child),
+                "child of a high-gen parent should cascade delete")
+        end)
+    end)
 end)

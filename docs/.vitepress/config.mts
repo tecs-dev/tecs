@@ -94,7 +94,6 @@ export default defineConfig({
             collapsed: true,
             items: [
               { text: 'Overview', link: '/tecs/relationships/' },
-              { text: 'Tag Relationships', link: '/tecs/relationships/tag' },
               { text: 'FFI Relationships', link: '/tecs/relationships/ffi' },
             ]
           },

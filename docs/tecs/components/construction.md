@@ -21,8 +21,7 @@ This page documents the shared component model. For backend and category-specifi
 [FFI Components](/tecs/components/ffi),
 [Scalar Components](/tecs/components/scalar-components),
 [Tag Components](/tecs/components/tag-components),
-[Relationships](/tecs/relationships/),
-[Tag Relationships](/tecs/relationships/tag), and
+[Relationships](/tecs/relationships/), and
 [FFI Relationships](/tecs/relationships/ffi).
 
 ## Positional construction
@@ -96,8 +95,7 @@ fields = {
 Relationships follow the same rule, except the relationship target is always
 the first positional argument and is not included in the public `fields` list.
 For relationship-specific construction and target semantics, see
-[Relationships](/tecs/relationships/),
-[Tag Relationships](/tecs/relationships/tag), and
+[Relationships](/tecs/relationships/) and
 [FFI Relationships](/tecs/relationships/ffi).
 
 ## `defaults`
@@ -126,7 +124,7 @@ default remain zero-initialized by the allocator.
 For examples of defaults on plain Lua payloads versus FFI-backed payloads, see
 [Table Components](/tecs/components/table-components),
 [FFI Components](/tecs/components/ffi), and
-[Tag Relationships](/tecs/relationships/tag) plus
+[Relationships](/tecs/relationships/) plus
 [FFI Relationships](/tecs/relationships/ffi).
 
 ## `init(instance, ...)`
@@ -168,7 +166,6 @@ would have no clear way to implement `.new(data)`.
 concrete usage patterns, compare [Table Components](/tecs/components/table-components),
 [FFI Components](/tecs/components/ffi),
 [Relationships](/tecs/relationships/), and
-[Tag Relationships](/tecs/relationships/tag) plus
 [FFI Relationships](/tecs/relationships/ffi). Scalar and tag
 components have narrower creation APIs; see
 [Scalar Components](/tecs/components/scalar-components) and

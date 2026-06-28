@@ -928,8 +928,10 @@ function components.newFFIRelationship<R is Relationship>(config: FFIRelationshi
     local container = assert(cfg.container, "Missing FFI relationship container")
     local fields = assert(cfg.fields, "Missing FFI relationship fields")
 
-    -- Ensure target field is included in the FFI struct
-    local allFields = {{"target", "int32_t"}}
+    -- Ensure target field is included in the FFI struct. `target` holds a
+    -- packed entity id (22-bit slot + 31-bit generation, up to 2^53), so it
+    -- needs a double: an int32 truncates targets once generation passes ~512.
+    local allFields = {{"target", "double"}}
     for i = 1, #fields do
         table.insert(allFields, fields[i])
     end

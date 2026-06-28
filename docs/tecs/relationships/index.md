@@ -4,9 +4,9 @@ outline: deep
 
 # Relationships
 
-Relationships in Tecs provide a way to model connections between entities. They allow you to express relationships
-like parent-child hierarchies, following behaviors, targeting systems, etc. Tecs automatically manages the
-lifecycle of relationships, ensuring referential integrity when entities are despawned.
+Relationships model directed connections between entities, such as parent-child hierarchies, following
+behaviors, or targeting. Tecs manages their lifecycle automatically, preserving referential integrity
+when entities are despawned.
 
 ## Relationship features
 
@@ -19,41 +19,52 @@ lifecycle of relationships, ensuring referential integrity when entities are des
 
 ## Kinds of relationships
 
-Pick the relationship flavor based on whether the edge carries data and how you want that data stored:
+`newRelationship` is the single entry point. What you pass decides the storage:
 
-- [Tag Relationships](/tecs/relationships/tag): the relationship carries no additional data
-- [FFI Relationships](/tecs/relationships/ffi): the relationship carries data backed by FFI structs
-- plain `newRelationship(...)`: the relationship carries data backed by a Lua table
+- **Target-only** (`newRelationship({name = "..."})`, no `fields`): the edge carries nothing but
+  the target id. Backed by a compact FFI struct automatically.
+- **Data-bearing, Lua payload** (`newRelationship` with a `container` and `fields`): the edge
+  carries fields stored in a Lua table, so they can hold any Lua value.
+- **Data-bearing, FFI payload** ([`newFFIRelationship`](/tecs/relationships/ffi)): the edge carries
+  fields packed into an FFI struct for tight, cache-friendly storage.
 
 ## Creating simple relationships
 
-Simple relationships store only the reference to the target entity. Create them by calling `newRelationship`
-without a `container`:
+A _simple relationship_ stores only the target entity id, with no extra data on the edge. Create
+one by calling `newRelationship` with just a `name`:
 
 ```lua
 local tecs = require("tecs")
 
--- Creates a simple relationship
+-- "entity A Likes entity B": nothing is recorded but the target.
 local Likes: tecs.Relationship = tecs.newRelationship({name = "Likes"})
-local Follows: tecs.Relationship = tecs.newRelationship({name = "Follows", exclusive = true})
-local TargetOf: tecs.Relationship = tecs.newRelationship({name = "TargetOf"})
+
+-- Same target-only shape, but exclusive: one target at a time, so setting a
+-- new target replaces the old one.
+local Targets: tecs.Relationship = tecs.newRelationship({
+    name = "Targets",
+    exclusive = true
+})
 ```
 
-These relationships track which entity is related to which target entity. If you want that same target-only shape plus
-relationship flags like `exclusive`, `sparse`, `reverseIndex`, or `cascadeDelete`, use
-[Tag Relationships](/tecs/relationships/tag).
+A target-only relationship is backed by a compact FFI struct. Behavior flags still apply:
+`exclusive`, `sparse`, `reverseIndex`, and `cascadeDelete` all work here (see
+[Exclusive](#exclusive-relationships), [Sparse](#sparse-relationships), and
+[Cascade delete](#cascade-delete) below). Once the edge needs to carry data (a delay, a weight),
+add a `container` with `fields` as shown next, or use
+[FFI Relationships](/tecs/relationships/ffi).
 
 ## Applying relationships
 
 Apply relationships like any other component, because they are components!
 
 ```lua
--- Entity A likes Entity B and C
+-- Entity A likes entities B and C (multiple targets)
 world:set(entityA, Likes(entityB))
 world:set(entityA, Likes(entityC))
 
--- Entity C follows Entity D
-world:set(entityC, Follows(entityD))
+-- Entity A targets a single enemy (exclusive: one target at a time)
+world:set(entityA, Targets(enemy))
 ```
 
 ## Creating relationships with data
@@ -79,7 +90,7 @@ local record Follows is tecs.Relationship
 end
 ```
 
-Then create the relationship component. Tecs writes `target` onto the returned instance for you —
+Then create the relationship component. Tecs writes `target` onto the returned instance for you;
 you don't store it in `fields`.
 
 Use `fields` (with optional `defaults`) to declare the data fields. The first positional argument
@@ -123,19 +134,18 @@ Setting the same target again replaces the value for that target:
 world:set(entity, Likes(entityA))  -- replaces the previous Likes(entityA)
 ```
 
-Some relationships are marked as exclusive, meaning an entity can only have one target at a time.
-The `ChildOf` relationship is exclusive because an entity can only have one parent:
+Some relationships are marked as exclusive, meaning an entity can only have one target at a time. A
+combat AI that `Targets` a single enemy is a natural fit:
 
 ```lua
-local ChildOf: tecs.Relationship = tecs.newTagRelationship({
-    name = "ChildOf",
+local Targets: tecs.Relationship = tecs.newRelationship({
+    name = "Targets",
     exclusive = true
 })
 ```
 
 When an exclusive relationship is set, any existing target is automatically replaced.
-Setting `ChildOf(parent2)` on an entity that already has `ChildOf(parent1)` will
-replace it automatically.
+Setting `Targets(enemy2)` on an entity that already has `Targets(enemy1)` replaces it.
 
 ## Sparse relationships
 
@@ -147,7 +157,7 @@ The `sparse` flag stores relationship data in entity-indexed side storage instea
 with the same sparse relationship share the same archetype regardless of their target:
 
 ```lua
-local ChildOf: tecs.Relationship = tecs.newTagRelationship({
+local ChildOf: tecs.Relationship = tecs.newRelationship({
     name = "ChildOf",
     exclusive = true,
     sparse = true,
@@ -163,7 +173,7 @@ query uses the same row-indexed pattern as dense columns:
 ```lua
 local query: tecs.Query = world:query({include = {ChildOf, Transform}})
 
-for archetype: tecs.Archetype, len: integer in query:iter() do
+for archetype, len in query:iter() do
     local children = archetype:get(ChildOf)      -- row-indexed proxy
     local transforms = archetype:get(Transform)  -- dense column
     for row = 1, len do
@@ -186,12 +196,6 @@ end
 -- Check a specific target.
 local rel: ChildOf = world:get(entity, ChildOf(someParent))
 ```
-
-::: tip When to use sparse
-Use `sparse = true` for relationships where the number of distinct targets is large or unbounded (UI hierarchies,
-scene graphs, tweens targeting entities). Use dense (the default) when you need to query for entities targeting
-a specific entity via `:targeting()` and archetype-level filtering.
-:::
 
 ## Querying relationships
 
@@ -247,7 +251,7 @@ local query: tecs.Query = world:query({
     include = {Sprite, Transform, ChildOf}
 })
 
-for archetype: tecs.Archetype, len: integer, entities: tecs.DoubleArray in query:iter() do
+for archetype, len, entities in query:iter() do
     local sprites = archetype:get(Sprite)
     local transforms = archetype:get(Transform)
     local parents = archetype:get(ChildOf)  -- works for both sparse and dense
@@ -261,7 +265,7 @@ for archetype: tecs.Archetype, len: integer, entities: tecs.DoubleArray in query
 end
 ```
 
-This is the most efficient way to iterate entities with both components and relationships — the wildcard tag on
+This is the most efficient way to iterate entities with both components and relationships: the wildcard tag on
 the archetype narrows iteration to matching entities, and column-bound access avoids per-entity lookups.
 
 **Example: filter to a specific target (dense relationships)**
@@ -280,7 +284,7 @@ For sparse relationships, this isn't supported (no per-target archetypes). Filte
 ```lua
 local query: tecs.Query = world:query({include = {Sprite, ChildOf}})
 
-for archetype: tecs.Archetype, len: integer in query:iter() do
+for archetype, len in query:iter() do
     local sprites = archetype:get(Sprite)
     local parents = archetype:get(ChildOf)
     for row = 1, len do
@@ -311,7 +315,7 @@ local query: tecs.Query = world:query({
 For dense relationships, access relationship data from each archetype:
 
 ```lua
-for archetype: tecs.Archetype, len: integer, entities: tecs.DoubleArray in query:iter() do
+for archetype, len, entities in query:iter() do
     for row = 1, len do
         archetype:forEachRelationship(Follows, row, function(follow: Follows)
             print(string.format("Entity %d follows %d", entities[row], follow.target))
@@ -323,7 +327,7 @@ end
 For sparse relationships, use the row-indexed column proxy:
 
 ```lua
-for archetype: tecs.Archetype, len: integer in query:iter() do
+for archetype, len in query:iter() do
     local children = archetype:get(ChildOf)
     for row = 1, len do
         local childOf: ChildOf = children[row]
@@ -341,7 +345,7 @@ This is how `ChildOf` implements parent-child hierarchies: despawning a parent a
 (and grandchildren, recursively).
 
 ```lua
-local ChildOf: tecs.Relationship = tecs.newTagRelationship({
+local ChildOf: tecs.Relationship = tecs.newRelationship({
     name = "ChildOf",
     exclusive = true,
     sparse = true,
@@ -376,7 +380,7 @@ relationships.
 ## Hierarchy traversal
 
 Relationships with `reverseIndex = true` maintain an inverse index that enables efficient reverse lookups.
-This works for both sparse and dense relationships — the only difference is where forward data is stored.
+This works for both sparse and dense relationships; the only difference is where forward data is stored.
 
 ### world:targets
 
@@ -406,7 +410,7 @@ visitorCtx.count = 0
 world:targets(parent, ChildOf, countChild, visitorCtx)
 ```
 
-Callbacks declared with a single parameter (`function(childId: integer)`) also work — Lua
+Callbacks declared with a single parameter (`function(childId: integer)`) also work; Lua
 silently drops the extra `context` argument when the callback doesn't declare it.
 
 ### world:traverse
@@ -415,7 +419,7 @@ Depth-first traversal over the full subtree of an entity:
 
 ```lua
 -- Walk the entire hierarchy under root.
-for depth: integer, entityId: integer in world:traverse(root, ChildOf) do
+for depth, entityId in world:traverse(root, ChildOf) do
     local indent: string = string.rep("  ", depth)
     print(indent .. "Entity:", entityId)
 end
@@ -452,7 +456,7 @@ world:walkUp(entity, ChildOf, sumOffset, accum)
 
 The callback may return `false` to stop the walk early; any other return value (including
 `nil` or no return) continues. The optional `maxDepth` parameter (default 100) is a safety
-cap — exceeding it raises an error so accidental cycles surface immediately rather than
+cap; exceeding it raises an error so accidental cycles surface immediately rather than
 silently truncating.
 
 All three methods require a relationship with `reverseIndex = true` (sparse or dense).
@@ -514,7 +518,7 @@ World methods for relationships with `reverseIndex = true`:
 
 ### Data fields and initialization
 
-Relationships follow the same positional-plus-table pattern as regular components — see
+Relationships follow the same positional-plus-table pattern as regular components. See
 [Component Construction](/tecs/components/construction) for the full shared
 rules (`fields` / `defaults` / `init` / `new`, validation, and when to reach
 for each). A few details are relationship-specific:
@@ -523,26 +527,23 @@ for each). A few details are relationship-specific:
   onto the instance by Tecs. In the positional form it's the first argument
   (`Rel(targetId, ...)`); in the table form it's the `target` key
   (`Rel.new({ target = id, ... })`).
-- **`fields` lists data fields only.** Don't include `"target"` — it's implicit and
+- **`fields` lists data fields only.** Don't include `"target"`; it's implicit and
   set by the framework. Positional args after the target map to `fields` in order.
-- **`init` signature starts with `instance, id`.** `function(instance, targetId, field1, field2, ...)`.
+- **`init` signature starts with `instance, targetId`.** `function(instance, targetId, field1, field2, ...)`.
   When paired with `fields`, it refines the allocated instance while `fields` drives
   the base positional mapping and `.new`.
 
-```lua
-tecs.newRelationship({
-    name = "Follows",
-    container = Follows,
-    fields = {"delay", "maxDistance"},
-    defaults = {0.5, 100},
-})
+Reusing the `Follows` relationship from
+[Creating relationships with data](#creating-relationships-with-data) (`fields = {"delay", "maxDistance"}`,
+`defaults = {0.5, 100}`), positional arguments fill `fields` left to right and `defaults` cover any omitted:
 
--- Positional __call — target is the first arg:
+```lua
+-- Positional: target first, then fields in order
 Follows(target)          -- {delay = 0.5, maxDistance = 100, target = …}
 Follows(target, 0.2)     -- {delay = 0.2, maxDistance = 100, target = …}
 Follows(target, 0.2, 50) -- {delay = 0.2, maxDistance = 50, target = …}
 
--- Table form — target is a key in the config:
+-- Table form names them instead
 Follows.new({ target = target, delay = 0.2, maxDistance = 50 })
 ```
 
@@ -581,4 +582,4 @@ with `cascadeDelete`, source entities are also despawned recursively.
 
 For dense relationships, when a target entity is despawned, Tecs removes the relationship components from all
 source entities. To run cleanup logic, attach `onEntitiesRemoved` to a query whose `include` contains the
-relationship (or its wildcard container) — the callback fires for each archetype that loses members.
+relationship (or its wildcard container); the callback fires for each archetype that loses members.
