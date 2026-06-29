@@ -41,19 +41,35 @@ throughput. That crossover is real and belongs next to the number.
 
 ## Per-frame update (identical in every engine)
 
-Let `t` be seconds since the app started. For sprite `i` (0-based) with grid base
-position `(bx_i, by_i)`:
+Each sprite `i` (0-based) orbits its grid base position `(bx_i, by_i)` on a
+radius-16 circle at angular rate `OMEGA = 2.0`, with a per-sprite phase offset
+`phase_i = i * 0.001`. Its position at time `t` is:
 
 ```
-phase_i     = i * 0.001
-x_i         = bx_i + sin(2.0 * t + phase_i) * 16
-y_i         = by_i + cos(2.0 * t + phase_i) * 16
+x_i         = bx_i + sin(OMEGA * t + phase_i) * 16
+y_i         = by_i + cos(OMEGA * t + phase_i) * 16
 animFrame_i = floor(t * 10 + i * 0.137) mod 8
 ```
 
 Every sprite's transform changes every frame, which defeats any static-scene
 dirty-skip fast path. Animation advances at 10 fps with a per-sprite phase
 offset.
+
+Because every sprite shares the same angular rate, the canonical implementation
+advances the orbit by **incremental rotation** rather than calling `sin`/`cos`
+per sprite per frame. Each sprite stores its offset vector, initialized to
+`(sin(phase_i), cos(phase_i)) * 16`. Each frame computes the shared rotation once
+(`c = cos(OMEGA * dt)`, `s = sin(OMEGA * dt)`) and rotates every offset by it:
+
+```
+ofx, ofy = ofx*c + ofy*s,  ofy*c - ofx*s
+x_i, y_i = bx_i + ofx,      by_i + ofy
+```
+
+This reproduces the closed form exactly (modulo slow float drift, negligible over
+a measure window) and keeps the per-sprite cost to a few multiplies, so the
+movement loop does not become a transcendental-function benchmark. All three
+implementations use it.
 
 Animation is applied each engine's idiomatic way. Tecs animates on the GPU from a
 time uniform with no per-sprite CPU cost. Defold plays an engine-driven looping

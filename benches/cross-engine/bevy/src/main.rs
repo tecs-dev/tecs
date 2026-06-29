@@ -18,7 +18,8 @@ const CULL_OFFSET: f32 = 1.0e7; // parks the culled half off-screen
 struct Base {
     x: f32,
     y: f32,
-    phase: f32,
+    ofx: f32,
+    ofy: f32,
     anim_off: f32,
 }
 
@@ -137,7 +138,8 @@ fn setup(
             Base {
                 x: bx,
                 y: by,
-                phase: i as f32 * 0.001,
+                ofx: (i as f32 * 0.001).sin() * AMP,
+                ofy: (i as f32 * 0.001).cos() * AMP,
                 anim_off: i as f32 * 0.137,
             },
         )
@@ -148,16 +150,23 @@ fn setup(
 fn move_sprites(
     time: Res<Time<Real>>,
     cfg: Res<Cfg>,
-    mut q: Query<(&mut Transform, &Base)>,
+    mut q: Query<(&mut Transform, &mut Base)>,
 ) {
     if !cfg.moving {
         return;
     }
-    let t = time.elapsed_secs();
-    let wt = OMEGA * t;
-    for (mut tr, base) in q.iter_mut() {
-        tr.translation.x = base.x + (wt + base.phase).sin() * AMP;
-        tr.translation.y = base.y + (wt + base.phase).cos() * AMP;
+    // Every sprite orbits at the same angular rate, so the per-frame rotation
+    // is shared: compute it once, then rotate each sprite's stored offset.
+    let a = OMEGA * time.delta_secs();
+    let (s, c) = a.sin_cos();
+    for (mut tr, mut base) in q.iter_mut() {
+        let (ox, oy) = (base.ofx, base.ofy);
+        let nx = ox * c + oy * s;
+        let ny = oy * c - ox * s;
+        base.ofx = nx;
+        base.ofy = ny;
+        tr.translation.x = base.x + nx;
+        tr.translation.y = base.y + ny;
     }
 }
 

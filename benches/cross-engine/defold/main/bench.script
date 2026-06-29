@@ -50,6 +50,8 @@ function init(self)
     self.ids = {}
     self.bx = {}
     self.by = {}
+    self.ofx = {}
+    self.ofy = {}
     for i = 0, self.count - 1 do
         local x, y
         if i < vis then
@@ -68,6 +70,9 @@ function init(self)
         self.ids[n] = factory.create("#factory", vmath.vector3(x, y, 0))
         self.bx[n] = x
         self.by[n] = y
+        local ph = i * 0.001
+        self.ofx[n] = math.sin(ph) * AMP
+        self.ofy[n] = math.cos(ph) * AMP
     end
 
     self.t = 0.0
@@ -85,15 +90,21 @@ function update(self, dt)
     local t = self.t
 
     if self.moving then
-        local wt = OMEGA * t
-        local ids, bx, by = self.ids, self.bx, self.by
+        -- Every sprite orbits at the same angular rate, so the per-frame
+        -- rotation is shared: compute it once, then rotate each stored offset.
+        local a = OMEGA * dt
+        local c, s = math.cos(a), math.sin(a)
+        local ids, bx, by, ofx, ofy = self.ids, self.bx, self.by, self.ofx, self.ofy
         local v = self.scratch
         local set_position = go.set_position
-        local sin, cos = math.sin, math.cos
         for n = 1, self.count do
-            local ph = (n - 1) * 0.001
-            v.x = bx[n] + sin(wt + ph) * AMP
-            v.y = by[n] + cos(wt + ph) * AMP
+            local ox, oy = ofx[n], ofy[n]
+            local nx = ox * c + oy * s
+            local ny = oy * c - ox * s
+            ofx[n] = nx
+            ofy[n] = ny
+            v.x = bx[n] + nx
+            v.y = by[n] + ny
             v.z = 0
             set_position(v, ids[n])
         end
