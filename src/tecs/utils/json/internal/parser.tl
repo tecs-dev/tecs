@@ -556,7 +556,10 @@ function parseValue(ptr: Ptr, len: integer, pos: integer, depth: integer): any, 
     end
 end
 
-local LC_NUMERIC <const> = 1
+-- LC_NUMERIC's integer value differs by C library: glibc (and musl) number it
+-- 1, while macOS/BSD and the Windows CRT use 4 (where 1 is LC_COLLATE). Pick by
+-- OS so the locale guard below targets the real numeric category.
+local LC_NUMERIC <const> = (C.os == "Linux") and 1 or 4
 local _setlocale <const> = C.C.setlocale as function(...: any): C.CData
 
 --[[ withCLocale!(result, pos = parseValue(ptr, len, 0, 0)) expands to:
