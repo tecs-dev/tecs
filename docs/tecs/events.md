@@ -209,3 +209,20 @@ That path checks for observers first and allocates from the emitting world's lea
 FFI events cannot contain Lua objects, userdata, functions, or anything incompatible with LuaJIT FFI. Use
 `tecs.newEvent` for events that need Lua values and prefer `world:emit(address, EventType, ...)` for the optimized path.
 :::
+
+## MessageBus
+
+`world:observe` / `world:emit` delegate to the world's `MessageBus`, the address-keyed router that
+holds observers and dispatches events. Each world owns one. `tecs.newMessageBus()` creates a
+standalone bus if you want routing without a world.
+
+| Method | Description |
+|--------|-------------|
+| `bus:observe(address, EventType, callback, id?)` | Subscribe to an event type at an address. Optional `id` lets you unsubscribe by name. |
+| `bus:observeOnce(address, EventType, callback)` | Subscribe; the observer is removed after it fires once. |
+| `bus:stopObserving(address, EventType, callbackOrId)` | Unsubscribe a callback (or `id`) from an event type at an address. |
+| `bus:emit(address, EventType, ...)` | Construct and dispatch an event to observers at the address. Skips construction when there are none. |
+| `bus:hasObservers(address, EventType)` | Whether any observer exists for that event type at the address. |
+| `bus:clearAddress(address)` | Remove every observer at one address. Used when an entity despawns. |
+| `bus:clearEntityObservers()` | Remove every per-entity observer (all addresses except global `0`), preserving global subscriptions. Used by `world:clearEntities`. |
+| `bus:reset()` | Remove all observers, global ones included. Full teardown. |

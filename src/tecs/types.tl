@@ -1300,6 +1300,11 @@ local record types
             --- Clear all observers for an address (used on entity despawn).
             clearAddress: function(self: MessageBus, address: integer)
 
+            --- Clear per-entity observers (every address except the global
+            --- address 0), preserving global subscriptions. Used by
+            --- world:clearEntities so query infrastructure stays subscribed.
+            clearEntityObservers: function(self: MessageBus)
+
             --- Reset the entire message bus.
             reset: function(self: MessageBus)
         end

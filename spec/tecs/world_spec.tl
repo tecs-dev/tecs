@@ -1104,4 +1104,35 @@ describe("WorldImpl", function()
             luassert.is_true(count >= 2, "should visit at least 2 archetypes, got " .. count)
         end)
     end)
+
+    describe("clearEntities", function()
+        local function queryCount(q: tecs.Query): integer
+            local total = 0
+            for _, len in q:iter() do total = total + len end
+            return total
+        end
+
+        it("keeps queries matching archetypes created after the clear", function()
+            local q = w:query({include = {PosComponent}})
+            w:spawn(PosComponent(1, 1))
+            w:spawn(PosComponent(2, 2))
+            luassert.equals(2, queryCount(q))
+
+            w:clearEntities()
+            luassert.equals(0, queryCount(q))
+
+            -- A (Pos, Vel) archetype that did not exist before the clear. The
+            -- query's global ArchetypeCreated subscription must survive
+            -- clearEntities, or new archetypes are silently missed until the
+            -- query is rebuilt.
+            w:spawn(PosComponent(3, 3), VelComponent() as tecs.Component)
+            w:spawn(PosComponent(4, 4), VelComponent() as tecs.Component)
+            luassert.equals(2, queryCount(q),
+                "query must match a new archetype after clearEntities")
+
+            -- The pre-existing Pos-only archetype keeps working too.
+            w:spawn(PosComponent(5, 5))
+            luassert.equals(3, queryCount(q))
+        end)
+    end)
 end)

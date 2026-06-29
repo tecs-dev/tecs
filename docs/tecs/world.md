@@ -473,12 +473,16 @@ function World:clearEntities()
 - All entities (entity index + archetype rows).
 - Pending transaction state (queued spawns, mutations, despawns, sparse
   relationship writes).
-- Queued messages.
+- Queued events and per-entity event observers, i.e. those registered on an
+  entity's address via `world:observe(entityId, ...)`. Their entities are gone.
 
 **Preserves:**
 
 - Registered systems and the pipeline they run in.
-- Queries and their observer callbacks.
+- Queries, including the global subscription each one uses to track
+  archetypes. A query keeps matching entities spawned after the clear, even
+  into archetypes that did not exist before it, with no rebuild.
+- Global (address `0`) event observers registered via `world:observe(0, ...)`.
 - Archetype columns (chunks stay allocated, the next batch doesn't pay
   the re-grow-from-zero cost).
 - Bundle registrations.
@@ -489,11 +493,14 @@ function World:clearEntities()
 ```lua
 -- In a test or bench, reset the state between iterations without
 -- rebuilding the pipeline or re-registering queries.
+local q = world:query({include = {Position}})
 for _ = 1, iterations do
     world:clearEntities()
     world:spawn(Position(10, 10))
     world:commit()
-    assert(world:query({include = {Position}}):count() == 1)
+    local n = 0
+    for _arch, len in q:iter() do n = n + len end
+    assert(n == 1)
 end
 ```
 

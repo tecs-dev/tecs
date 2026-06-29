@@ -596,13 +596,23 @@ function WorldImpl:clearEntities()
         if arch then arch:clearEntities() end
     end
 
-    self.messages:reset()
+    self.messages:clearEntityObservers()
     if self._ffiSliceId ~= 0 then
         GLOBAL_FFI_EVENTS:clearSlice(self._ffiSliceId)
     end
     self._eventPool:clear()
     table_clear(self._targetRefCounts)
     table_clear(self.relationshipStores)
+    -- Release the pooled sparse-relationship arrays and reset the staging map,
+    -- mirroring the drain cleanup. Without this, any sparse values still staged
+    -- in `sparseSets` at clear time would survive into a later drain. Symmetric
+    -- with the relationshipStores wipe above.
+    local sparsePool = self._sparseArraysPool
+    for slot, list in pairs(self.sparseSets) do
+        self.sparseSets[slot] = nil
+        sparsePool:release(list)
+    end
+    self.sparseSetCount = 0
     table_clear(self._dirtyArchetypes)
 end
 

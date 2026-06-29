@@ -103,6 +103,10 @@ local record events
         --- Clear all observers for an address (used on entity despawn).
         clearAddress: function(self: MessageBus, address: integer)
 
+        --- Clear per-entity observers (all addresses except global 0),
+        --- preserving global subscriptions like queries' ArchetypeCreated hook.
+        clearEntityObservers: function(self: MessageBus)
+
         --- Reset the entire message bus.
         reset: function(self: MessageBus)
     end
@@ -448,6 +452,26 @@ function MessageBus:clearAddress(address: integer)
         self._byAddressPool:release(byAddress)
         self._observers[address] = nil
         self._totalObservers = self._totalObservers - removed
+    end
+end
+
+-- Clear per-entity observers (every address except the global address 0),
+-- preserving global subscriptions. world:clearEntities uses this so the query
+-- infrastructure (each query's ArchetypeCreated subscription at address 0) and
+-- global user observers survive the clear; a full reset() would unsubscribe
+-- them, leaving queries unable to match archetypes created after the clear.
+function MessageBus:clearEntityObservers()
+    if self._totalObservers == 0 then return end
+    local addresses: {integer} = {}
+    local n = 0
+    for address in pairs(self._observers) do
+        if address ~= 0 then
+            n = n + 1
+            addresses[n] = address
+        end
+    end
+    for i = 1, n do
+        self:clearAddress(addresses[i])
     end
 end
 
