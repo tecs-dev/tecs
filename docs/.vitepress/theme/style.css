@@ -259,7 +259,7 @@
     position: relative;
     color: var(--tecs-c-lavender) !important;
     font-size: 2.2rem !important;
-    background: #222;
+    border: 1px solid #222;
     padding: 2px 12px;
     margin-left: -12px;
     display: block;
@@ -276,21 +276,21 @@
     background: linear-gradient(
       to right,
       transparent 0 46px,
-      #333 46px 50px,
+      #222 46px 50px,
       transparent 50px 56px,
-      #333 56px 60px,
+      #222 56px 60px,
       transparent 60px 66px,
-      #333 66px 70px,
+      #222 66px 70px,
       transparent 70px 76px,
-      #333 76px 80px,
+      #222 76px 80px,
       transparent 80px 86px,
-      #333 86px 90px,
+      #222 86px 90px,
       transparent 90px 96px,
-      #333 96px 100px,
+      #222 96px 100px,
       transparent 100px 106px,
-      #333 106px 110px,
+      #222 106px 110px,
       transparent 110px 116px,
-      #333 116px 120px,
+      #222 116px 120px,
       transparent 120px
     );
     pointer-events: none;
