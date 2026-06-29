@@ -3,7 +3,7 @@ local tecs <const> = require("tecs")
 local luassert <const> = require("luassert")
 
 -- Dense tag relationship: no sparse flag, creates per-target archetype columns.
-local Follows = tecs.newTagRelationship({
+local Follows = tecs.newRelationship({
     name = "CompactTestFollows",
     reverseIndex = true,
 })

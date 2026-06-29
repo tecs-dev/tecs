@@ -17,7 +17,7 @@ describe("Dense Relationships with reverseIndex", function()
 
     describe("registration", function()
         it("should create a dense relationship with reverseIndex", function()
-            local Follows = tecs.newTagRelationship({
+            local Follows = tecs.newRelationship({
                 name = "DenseRevIdx1",
                 exclusive = true,
                 reverseIndex = true,
@@ -30,7 +30,7 @@ describe("Dense Relationships with reverseIndex", function()
             -- Same regression as the sparse case: dense reverse indexes used to live on the
             -- relationship container as a module-level singleton, leaking entity links across
             -- worlds. The unified RelationshipStore makes both sparse and dense per-world.
-            local Follows = tecs.newTagRelationship({
+            local Follows = tecs.newRelationship({
                 name = "DenseRevIdxIsolation",
                 exclusive = true,
                 reverseIndex = true,
@@ -60,7 +60,7 @@ describe("Dense Relationships with reverseIndex", function()
 
     describe("world:targets", function()
         it("should return source entities targeting an entity", function()
-            local Follows = tecs.newTagRelationship({
+            local Follows = tecs.newRelationship({
                 name = "DenseTargets1",
                 exclusive = true,
                 reverseIndex = true,
@@ -80,7 +80,7 @@ describe("Dense Relationships with reverseIndex", function()
         end)
 
         it("should update inverse on relationship removal", function()
-            local Follows = tecs.newTagRelationship({
+            local Follows = tecs.newRelationship({
                 name = "DenseTargets2",
                 exclusive = true,
                 reverseIndex = true,
@@ -103,7 +103,7 @@ describe("Dense Relationships with reverseIndex", function()
         end)
 
         it("should update inverse on exclusive replace", function()
-            local Follows = tecs.newTagRelationship({
+            local Follows = tecs.newRelationship({
                 name = "DenseTargets3",
                 exclusive = true,
                 reverseIndex = true,
@@ -128,7 +128,7 @@ describe("Dense Relationships with reverseIndex", function()
         end)
 
         it("should update inverse when source entity is despawned", function()
-            local Follows = tecs.newTagRelationship({
+            local Follows = tecs.newRelationship({
                 name = "DenseTargets4",
                 exclusive = true,
                 reverseIndex = true,
@@ -147,7 +147,7 @@ describe("Dense Relationships with reverseIndex", function()
         end)
 
         it("should remove relationship instances when target is despawned", function()
-            local Follows = tecs.newTagRelationship({
+            local Follows = tecs.newRelationship({
                 name = "DenseTargets5",
                 exclusive = true,
                 reverseIndex = true,
@@ -168,7 +168,7 @@ describe("Dense Relationships with reverseIndex", function()
 
     describe("world:traverse", function()
         it("should DFS traverse a dense hierarchy", function()
-            local OwnedBy = tecs.newTagRelationship({
+            local OwnedBy = tecs.newRelationship({
                 name = "DenseTraverse1",
                 exclusive = true,
                 reverseIndex = true,
@@ -193,7 +193,7 @@ describe("Dense Relationships with reverseIndex", function()
 
     describe("cascade delete with dense", function()
         it("should despawn sources when target is despawned (cascadeDelete)", function()
-            local OwnedBy = tecs.newTagRelationship({
+            local OwnedBy = tecs.newRelationship({
                 name = "DenseCascade1",
                 exclusive = true,
                 reverseIndex = true,
@@ -213,7 +213,7 @@ describe("Dense Relationships with reverseIndex", function()
         end)
 
         it("should cascade recursively through dense hierarchy", function()
-            local OwnedBy = tecs.newTagRelationship({
+            local OwnedBy = tecs.newRelationship({
                 name = "DenseCascadeDeep1",
                 exclusive = true,
                 reverseIndex = true,
@@ -242,7 +242,7 @@ describe("Dense Relationships with reverseIndex", function()
         end
 
         it("eager set then eager remove zeroes the reverse index", function()
-            local Follows = tecs.newTagRelationship({
+            local Follows = tecs.newRelationship({
                 name = "RevIdx_SetRemove",
                 exclusive = true, reverseIndex = true,
             })
@@ -255,7 +255,7 @@ describe("Dense Relationships with reverseIndex", function()
         end)
 
         it("deferred set then deferred remove yields the same terminal state", function()
-            local Follows = tecs.newTagRelationship({
+            local Follows = tecs.newRelationship({
                 name = "RevIdx_DeferredRoundtrip",
                 exclusive = true, reverseIndex = true,
             })
@@ -274,7 +274,7 @@ describe("Dense Relationships with reverseIndex", function()
 
         it("instant and deferred mutation sequences converge to identical state (committed entities)", function()
             local function build_world(deferred: boolean): (integer, integer, integer, tecs.World, tecs.Component)
-                local Follows = tecs.newTagRelationship({
+                local Follows = tecs.newRelationship({
                     name = "RevIdx_Parity_" .. (deferred and "Deferred" or "Instant"),
                     exclusive = true, reverseIndex = true,
                 })
@@ -312,7 +312,7 @@ describe("Dense Relationships with reverseIndex", function()
             -- -effects block and was unreachable when the entity was still
             -- in STATE_SPAWN. Phase 4 fires the hook at the dispatcher
             -- regardless of state, so both paths work.
-            local Follows = tecs.newTagRelationship({
+            local Follows = tecs.newRelationship({
                 name = "RevIdx_SpawnReparent",
                 exclusive = true, reverseIndex = true,
             })
@@ -330,7 +330,7 @@ describe("Dense Relationships with reverseIndex", function()
         end)
 
         it("exclusive replace unlinks old target before linking new", function()
-            local Follows = tecs.newTagRelationship({
+            local Follows = tecs.newRelationship({
                 name = "RevIdx_ExclusiveReplace",
                 exclusive = true, reverseIndex = true,
             })
@@ -345,7 +345,7 @@ describe("Dense Relationships with reverseIndex", function()
         end)
 
         it("many-to-one reverse index stays correct across interleaved ops", function()
-            local Follows = tecs.newTagRelationship({
+            local Follows = tecs.newRelationship({
                 name = "RevIdx_ManyToOne",
                 exclusive = true, reverseIndex = true,
             })
@@ -370,7 +370,7 @@ describe("Dense Relationships with reverseIndex", function()
         -- nil for the old target and skips the unlink — leaving stale entries
         -- in the inverse. This test catches that regression directly.
         it("onDespawn hook reads old column value before row teardown", function()
-            local Follows = tecs.newTagRelationship({
+            local Follows = tecs.newRelationship({
                 name = "RevIdx_Ordering_OnDespawn",
                 exclusive = true, reverseIndex = true,
             })

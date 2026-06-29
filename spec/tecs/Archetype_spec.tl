@@ -4,7 +4,12 @@ local Archetype <const> = require("tecs.internal.Archetype")
 local ffi <const> = require("tecs.internal.ffi")
 local luassert <const> = require("luassert")
 
-local TestRel <const> = tecs.newRelationship({name = "TestRel"})
+-- Carries a field so it uses table-backed dense columns with per-target
+-- registered instances, which is the representation this white-box archetype
+-- test pokes directly. (A name-only relationship folds to FFI storage, whose
+-- instances aren't registered per-target; that path is covered end-to-end via
+-- ChildOf in relationships_spec.)
+local TestRel <const> = tecs.newRelationship({name = "TestRel", fields = {"weight"}})
 
 describe("Archetype tests", function()
     describe("creation", function()

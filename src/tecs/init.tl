@@ -30,7 +30,6 @@ local record tecs
     type ScalarComponentOptions<T> = types.components.ScalarComponentOptions<T>
     type TagComponentOptions = types.components.TagComponentOptions
     type RelationshipOptions<R is Relationship> = types.components.RelationshipOptions<R>
-    type TagRelationshipOptions = types.components.TagRelationshipOptions
     type FFIRelationshipOptions<R is Relationship> = types.components.FFIRelationshipOptions<R>
     type Relationship = types.components.Relationship
     type Query = types.Query
@@ -78,11 +77,11 @@ local record tecs
     newTagComponent: function(options: TagComponentOptions): Component
 
     --- Creates and registers a new relationship component. See the relationship
-    --- docs for target/exclusive/sparse semantics.
+    --- docs for target/exclusive/sparse semantics. A target-only relationship
+    --- (name plus flags, no `container`/`fields`) is backed by a compact FFI
+    --- struct automatically; add `container`/`fields` for relationships that
+    --- carry data.
     newRelationship: function<R is Relationship>(config: RelationshipOptions<R>): R
-
-    --- Create a tag relationship with efficient FFI storage.
-    newTagRelationship: function(config: TagRelationshipOptions): Relationship
 
     --- Create an FFI relationship with data fields for high performance.
     newFFIRelationship: function<R is Relationship>(config: FFIRelationshipOptions<R>): R
@@ -138,8 +137,6 @@ tecs.newFFIComponent = components.newFFIComponent
     as function<C is types.components.Component>(options: types.components.FFIComponentOptions<C>): C
 tecs.newRelationship = components.newRelationship
     as function<R is types.components.Relationship>(config: types.components.RelationshipOptions<R>): R
-tecs.newTagRelationship = components.newTagRelationship
-    as function(config: types.components.TagRelationshipOptions): types.components.Relationship
 tecs.newFFIRelationship = components.newFFIRelationship
     as function<R is types.components.Relationship>(config: types.components.FFIRelationshipOptions<R>): R
 tecs.getComponentById = function(id: integer): types.components.Component

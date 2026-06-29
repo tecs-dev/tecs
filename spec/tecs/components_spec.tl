@@ -909,7 +909,7 @@ describe("components", function()
             local record Follows is tecs.Relationship
                 metamethod __call: function(self, target: integer): Follows
             end
-            local FollowsContainer: Follows = tecs.newTagRelationship({
+            local FollowsContainer: Follows = tecs.newRelationship({
                 name = "SerFollows",
                 exclusive = false,
             }) as Follows
@@ -927,7 +927,7 @@ describe("components", function()
             local record Parent is tecs.Relationship
                 metamethod __call: function(self, target: integer): Parent
             end
-            local ParentOf: Parent = tecs.newTagRelationship({
+            local ParentOf: Parent = tecs.newRelationship({
                 name = "SerParentOf",
                 exclusive = true,
                 sparse = true,

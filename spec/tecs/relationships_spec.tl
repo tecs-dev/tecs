@@ -11,7 +11,7 @@ describe("relationships", function()
 
     describe("relationship teardown (cascade)", function()
         it("should cascade delete when parent is despawned", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "ChildOfCascadeTest",
                 exclusive = true,
                 sparse = true,
@@ -71,7 +71,7 @@ describe("relationships", function()
                 container = Tint,
                 fields = {"r", "g", "b"},
             })
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "CascadeChildOf" .. math.random(1, 1000000),
                 exclusive = true,
                 sparse = true,
@@ -178,9 +178,9 @@ describe("relationships", function()
         local types = require("tecs.types")
         local type Relationship = types.components.Relationship
 
-        describe("newTagRelationship", function()
-            it("should create a basic tag relationship", function()
-                local TagFollows = components.newTagRelationship({
+        describe("newRelationship", function()
+            it("should create a basic target-only relationship", function()
+                local TagFollows = components.newRelationship({
                     name = "TagFollows"
                 })
 
@@ -190,8 +190,21 @@ describe("relationships", function()
                 luassert.is_not_nil(TagFollows.exclusiveRelationship)
             end)
 
+            it("backs a target-only relationship with an FFI instance", function()
+                -- A name-only relationship carries no data beyond the target,
+                -- so it folds onto the compact FFI layout: instances are cdata,
+                -- not Lua tables.
+                local Likes = components.newRelationship({ name = "FoldedLikes" })
+                local target = world:spawn()
+                local instance = Likes(target)
+
+                luassert.is_equal("cdata", type(instance),
+                    "target-only instance should be FFI cdata")
+                luassert.is_equal(target, (instance as Relationship).target)
+            end)
+
             it("should support exclusive option", function()
-                local ExclusiveTag = components.newTagRelationship({
+                local ExclusiveTag = components.newRelationship({
                     name = "ExclusiveTag",
                     exclusive = true
                 })
@@ -200,7 +213,7 @@ describe("relationships", function()
             end)
 
             it("should work with targeting method", function()
-                local TagFollows2 = components.newTagRelationship({
+                local TagFollows2 = components.newRelationship({
                     name = "TagFollows2"
                 })
 
@@ -312,7 +325,7 @@ describe("relationships", function()
 
         describe("Integration test", function()
             it("should create both types without conflicts", function()
-                local TagRel = components.newTagRelationship({
+                local TagRel = components.newRelationship({
                     name = "PerfTagRel"
                 })
 
@@ -401,7 +414,7 @@ describe("relationships", function()
         it("should work with FFI tag relationships and componentHash propagation", function()
             local components = require("tecs.internal.components")
 
-            local ChildOf = components.newTagRelationship({
+            local ChildOf = components.newRelationship({
                 name = "ChildOfHashTest"
             })
 
@@ -429,7 +442,7 @@ describe("relationships", function()
         it("should give per-entity FFI relationships unique componentId", function()
             local components = require("tecs.internal.components")
 
-            local ChildOf = components.newTagRelationship({
+            local ChildOf = components.newRelationship({
                 name = "ChildOfUniqueIdTest"
             })
 
@@ -451,7 +464,7 @@ describe("relationships", function()
         it("should correctly group entities with different relationship targets", function()
             local components = require("tecs.internal.components")
 
-            local ChildOf = components.newTagRelationship({
+            local ChildOf = components.newRelationship({
                 name = "ChildOfGroupingTest"
             })
 
@@ -480,7 +493,7 @@ describe("relationships", function()
 
     describe("world:getFirstRelationship", function()
         it("should return the relationship instance with correct target", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "ChildOfGetFirstTest",
                 exclusive = true
             })
@@ -495,7 +508,7 @@ describe("relationships", function()
         end)
 
         it("last exclusive sibling wins when multiple passed to spawn", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "ChildOfExclusiveSpawnTest",
                 exclusive = true
             })
@@ -518,11 +531,11 @@ describe("relationships", function()
         end)
 
         it("interleaved exclusive containers resolve independently in spawn", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "ChildOfInterleavedTest",
                 exclusive = true
             })
-            local MemberOf = tecs.newTagRelationship({
+            local MemberOf = tecs.newRelationship({
                 name = "MemberOfInterleavedTest",
                 exclusive = true
             })
@@ -552,7 +565,7 @@ describe("relationships", function()
         end)
 
         it("should return nil for entities without the relationship", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "ChildOfGetFirstNilTest",
                 exclusive = true
             })
@@ -565,7 +578,7 @@ describe("relationships", function()
         end)
 
         it("should return correct target after reparenting", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "ChildOfGetFirstReparentTest",
                 exclusive = true
             })
@@ -585,7 +598,7 @@ describe("relationships", function()
         end)
 
         it("should work with non-exclusive relationships", function()
-            local Likes = tecs.newTagRelationship({
+            local Likes = tecs.newRelationship({
                 name = "LikesGetFirstTest"
             })
 
@@ -621,7 +634,7 @@ describe("relationships", function()
         end
 
         it("round-trips a relationship target past the int32 boundary", function()
-            local Likes = tecs.newTagRelationship({ name = "LikesHighGen" })
+            local Likes = tecs.newRelationship({ name = "LikesHighGen" })
 
             local target = churnHighGenEntity()
             luassert.is_true(target > 2 ^ 31,
@@ -637,7 +650,7 @@ describe("relationships", function()
         end)
 
         it("cascade-deletes children of a high-generation parent", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "ChildOfHighGen",
                 exclusive = true,
                 sparse = true,

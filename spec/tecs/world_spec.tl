@@ -81,7 +81,7 @@ describe("WorldImpl", function()
         end)
 
         it("rejects stale handles after slot reuse", function()
-            local parentRel = tecs.newTagRelationship({
+            local parentRel = tecs.newRelationship({
                 name = "WorldStaleParent_" .. tostring(testId),
                 exclusive = true,
             })
@@ -209,7 +209,7 @@ describe("WorldImpl", function()
         end)
 
         it("returns true/false for a sparse relationship container", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "HasSpecSparseChildOf",
                 exclusive = true,
                 sparse = true,
@@ -227,7 +227,7 @@ describe("WorldImpl", function()
         end)
 
         it("routes sparse-instance checks through the relationship store", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "HasSpecSparseChildOfInstance",
                 exclusive = true,
                 sparse = true,
@@ -257,7 +257,7 @@ describe("WorldImpl", function()
         end)
 
         it("reflects removal of a sparse relationship", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "HasSpecSparseChildOfRemove",
                 exclusive = true,
                 sparse = true,
@@ -280,7 +280,7 @@ describe("WorldImpl", function()
             -- `:has` branch. Pin it so accidental propagation (e.g. to
             -- dense instances or containers) is caught early.
             local DenseRel = tecs.newRelationship({name = "HasSpecFlagDense"})
-            local SparseRel = tecs.newTagRelationship({
+            local SparseRel = tecs.newRelationship({
                 name = "HasSpecFlagSparse",
                 exclusive = true,
                 sparse = true,
@@ -708,7 +708,7 @@ describe("WorldImpl", function()
         end)
 
         it("should cascade delete children when parent with cascadeDelete relationship is despawned", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "ChildOfAliveTest",
                 exclusive = true,
                 sparse = true,
@@ -849,7 +849,7 @@ describe("WorldImpl", function()
 
 
         it("supports sparse relationship components in the signature", function()
-            local SparseRel = tecs.newTagRelationship({
+            local SparseRel = tecs.newRelationship({
                 name = "BatchSparse" .. testId,
                 exclusive = true,
                 sparse = true,
@@ -1056,7 +1056,7 @@ describe("WorldImpl", function()
         end)
 
         it("cascades sparse relationships via the slow path", function()
-            local SparseRel = tecs.newTagRelationship({
+            local SparseRel = tecs.newRelationship({
                 name = "BatchDespawnRel" .. testId,
                 exclusive = true,
                 sparse = true,

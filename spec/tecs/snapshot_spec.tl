@@ -372,7 +372,7 @@ describe("snapshot save/load", function()
             end,
         })
 
-        local SparseTagRel = tecs.newTagRelationship({
+        local SparseTagRel = tecs.newRelationship({
             name = "SparseSnapDeserialize" .. testId,
             sparse = true,
             exclusive = true,
@@ -399,7 +399,7 @@ describe("snapshot save/load", function()
     it("binary sparse row-major snapshots handle missing sparse values per entity", function()
         local testId = math.random(1, 1000000)
 
-        local SparseMaybeRel = tecs.newTagRelationship({
+        local SparseMaybeRel = tecs.newRelationship({
             name = "SparseSnapMissingValue" .. testId,
             sparse = true,
             exclusive = true,

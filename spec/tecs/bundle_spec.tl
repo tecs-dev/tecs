@@ -608,7 +608,7 @@ describe("bundle", function()
         end)
 
         it("routes sparse relationships through setSparse", function()
-            local SparseRel = tecs.newTagRelationship({
+            local SparseRel = tecs.newRelationship({
                 name = "DeferChildOf",
                 exclusive = true,
                 sparse = true,

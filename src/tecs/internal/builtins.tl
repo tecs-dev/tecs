@@ -270,7 +270,7 @@ end
 --- Setup relationships
 -------------------------------------------------------------------------------
 
-builtins.ChildOf = components.newTagRelationship({
+builtins.ChildOf = components.newRelationship({
     name = "ChildOf",
     exclusive = true,
     sparse = true,

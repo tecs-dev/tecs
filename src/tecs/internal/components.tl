@@ -19,7 +19,6 @@ local type TagComponentOptions = types.components.TagComponentOptions
 local type FFIComponentOptions<C is Component> = types.components.FFIComponentOptions<C>
 local type ScalarComponentOptions<T> = types.components.ScalarComponentOptions<T>
 local type RelationshipOptions<R is Relationship> = types.components.RelationshipOptions<R>
-local type TagRelationshipOptions = types.components.TagRelationshipOptions
 local type FFIRelationshipOptions<R is Relationship> = types.components.FFIRelationshipOptions<R>
 
 --- The components module defines ECS components and methods for creating them.
@@ -61,12 +60,6 @@ local record components
     --- @param config The configuration for the relationship component including name and options.
     --- @return the created relationship component.
     newRelationship: function<R is Relationship>(config: RelationshipOptions<R>): R
-
-    --- Create a new relationship component that stores no additional data.
-    ---
-    --- @param config The configuration for the relationship component including name and options.
-    --- @return the created relationship component.
-    newTagRelationship: function(config: TagRelationshipOptions): Relationship
 
     --- Create a new relationship component that stores additional data in FFI structs.
     ---
@@ -507,7 +500,7 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
     local cfgAny = cfg as {string:any}
     if cfgAny.storage ~= nil and cfgAny.__internalStorageToken ~= INTERNAL_STORAGE_TOKEN then
         error("Relationship " .. name .. ": `storage` is not a user option. "
-            .. "Use newRelationship / newTagRelationship / newFFIRelationship "
+            .. "Use newRelationship / newFFIRelationship "
             .. "to pick a relationship layout.")
     end
 
@@ -515,6 +508,22 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
     -- unpack a table into positional args. Match the behavior of newComponent.
     if cfg.init and not cfg.fields and not cfg.new then
         error("Relationship " .. name .. ": `init` requires either `fields` (auto-codegens `.new`) or an explicit `new`")
+    end
+
+    -- Target-only edge (name plus flags, no data): the only datum is the
+    -- target id, so route to the compact FFI layout instead of a Lua table
+    -- per instance. Data-carrying relationships (with `container`/`fields`,
+    -- a custom `new`, or internal `storage`) fall through to the paths below.
+    if not cfg.container and not cfg.fields and cfgAny.new == nil and cfgAny.storage == nil then
+        return components.newFFIRelationship({
+            name = name,
+            container = {},
+            fields = {},
+            exclusive = cfg.exclusive,
+            sparse = cfg.sparse,
+            reverseIndex = cfg.reverseIndex,
+            cascadeDelete = cfg.cascadeDelete,
+        }) as R
     end
 
     -- `storage` is an internal options field (see newComponent). Cast.
@@ -907,19 +916,6 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
     components.registerComponent(relContainer)
     storage.propagateHooksToFFI(relationshipStorage, relContainer)
     return relContainer
-end
-
-function components.newTagRelationship(config: TagRelationshipOptions): Relationship
-    local cfg = assert(config, "Missing tag relationship config")
-    return components.newFFIRelationship({
-        name = cfg.name,
-        container = {},
-        fields = {},
-        exclusive = cfg.exclusive,
-        sparse = cfg.sparse,
-        reverseIndex = cfg.reverseIndex,
-        cascadeDelete = cfg.cascadeDelete,
-    })
 end
 
 function components.newFFIRelationship<R is Relationship>(config: FFIRelationshipOptions<R>): R

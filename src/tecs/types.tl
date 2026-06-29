@@ -229,9 +229,6 @@ local record types
         --- Relationship component configuration.
         interface RelationshipOptions<R is Relationship> is BaseRelationshipOptions<R>, ComponentOptions<R> end
 
-        --- Tag relationship component configuration.
-        interface TagRelationshipOptions is RelationshipOptions<Relationship> end
-
         --- FFI relationship component configuration.
         interface FFIRelationshipOptions<R is Relationship> is BaseRelationshipOptions<R>, FFIComponentOptions<R> end
     end

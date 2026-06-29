@@ -17,7 +17,7 @@ describe("Sparse Relationships", function()
 
     describe("registration", function()
         it("should create a sparse relationship with reverseIndex and cascadeDelete", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "SparseReg1",
                 exclusive = true,
                 sparse = true,
@@ -31,7 +31,7 @@ describe("Sparse Relationships", function()
 
         it("should error if cascadeDelete without reverseIndex", function()
             luassert.error_matches(function()
-                tecs.newTagRelationship({
+                tecs.newRelationship({
                     name = "SparseRegBad1",
                     exclusive = true,
                     sparse = true,
@@ -42,7 +42,7 @@ describe("Sparse Relationships", function()
 
         it("should error if cascadeDelete without exclusive", function()
             luassert.error_matches(function()
-                tecs.newTagRelationship({
+                tecs.newRelationship({
                     name = "SparseRegBad2",
                     sparse = true,
                     reverseIndex = true,
@@ -52,7 +52,7 @@ describe("Sparse Relationships", function()
         end)
 
         it("should allow reverseIndex on dense relationships", function()
-            local Dense = tecs.newTagRelationship({
+            local Dense = tecs.newRelationship({
                 name = "SparseRegDense",
                 exclusive = true,
                 reverseIndex = true,
@@ -65,7 +65,7 @@ describe("Sparse Relationships", function()
             -- Regression: previously the SparseStore lived on the relationship container
             -- (module-level), so creating a fresh world after using one would inherit the
             -- prior world's sparse entries. With per-world stores, each world starts empty.
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "SparseWorldIsolation",
                 exclusive = true,
                 sparse = true,
@@ -93,7 +93,7 @@ describe("Sparse Relationships", function()
 
     describe("world:get and world:set", function()
         it("should set and get a sparse relationship", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "SparseGet1",
                 exclusive = true,
                 sparse = true,
@@ -110,7 +110,7 @@ describe("Sparse Relationships", function()
         end)
 
         it("should get sparse relationship by target instance", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "SparseGetTarget1",
                 exclusive = true,
                 sparse = true,
@@ -127,7 +127,7 @@ describe("Sparse Relationships", function()
         end)
 
         it("should return nil for non-existent target", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "SparseGetNil1",
                 exclusive = true,
                 sparse = true,
@@ -144,7 +144,7 @@ describe("Sparse Relationships", function()
         end)
 
         it("should not read pending sparse value inside a defer scope", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "SparsePending1",
                 exclusive = true,
                 sparse = true,
@@ -164,7 +164,7 @@ describe("Sparse Relationships", function()
         end)
 
         it("should replace exclusive sparse relationship on set", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "SparseReplace1",
                 exclusive = true,
                 sparse = true,
@@ -188,7 +188,7 @@ describe("Sparse Relationships", function()
 
     describe("world:remove", function()
         it("should remove all targets with container removal", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "SparseRemoveAll1",
                 exclusive = true,
                 sparse = true,
@@ -207,7 +207,7 @@ describe("Sparse Relationships", function()
         end)
 
         it("should remove specific target with instance removal", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "SparseRemoveOne1",
                 exclusive = true,
                 sparse = true,
@@ -226,7 +226,7 @@ describe("Sparse Relationships", function()
         end)
 
         it("should remove wildcard from archetype when no entries remain", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "SparseRemoveWild1",
                 exclusive = true,
                 sparse = true,
@@ -263,7 +263,7 @@ describe("Sparse Relationships", function()
 
     describe("wildcard queries", function()
         it("should match entities with sparse relationships in queries", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "SparseQuery1",
                 exclusive = true,
                 sparse = true,
@@ -293,7 +293,7 @@ describe("Sparse Relationships", function()
 
     describe("archetype column proxy", function()
         it("should allow row-indexed access to sparse data", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "SparseProxy1",
                 exclusive = true,
                 sparse = true,
@@ -318,7 +318,7 @@ describe("Sparse Relationships", function()
 
     describe("world:targets", function()
         it("should return children of an entity", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "SparseTargets1",
                 exclusive = true,
                 sparse = true,
@@ -340,7 +340,7 @@ describe("Sparse Relationships", function()
         end)
 
         it("should call nothing for entity with no children", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "SparseTargetsEmpty1",
                 exclusive = true,
                 sparse = true,
@@ -360,7 +360,7 @@ describe("Sparse Relationships", function()
 
     describe("world:walkUp", function()
         it("should walk up the parent chain calling the callback per ancestor", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "SparseWalkUp1",
                 exclusive = true,
                 sparse = true,
@@ -388,7 +388,7 @@ describe("Sparse Relationships", function()
         end)
 
         it("should stop early when callback returns false", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "SparseWalkUp2",
                 exclusive = true,
                 sparse = true,
@@ -411,7 +411,7 @@ describe("Sparse Relationships", function()
         end)
 
         it("should pass through the context argument", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "SparseWalkUp3",
                 exclusive = true,
                 sparse = true,
@@ -433,7 +433,7 @@ describe("Sparse Relationships", function()
         end)
 
         it("should be a no-op for entities with no parent", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "SparseWalkUp4",
                 exclusive = true,
                 sparse = true,
@@ -455,7 +455,7 @@ describe("Sparse Relationships", function()
         it("should error when maxDepth is exceeded (cycle)", function()
             -- A real cycle is hard to construct since ChildOf is exclusive,
             -- but a low maxDepth on a legitimate deep chain proves the guard.
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "SparseWalkUp5",
                 exclusive = true,
                 sparse = true,
@@ -478,7 +478,7 @@ describe("Sparse Relationships", function()
 
     describe("world:traverse", function()
         it("should DFS traverse a hierarchy", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "SparseTraverse1",
                 exclusive = true,
                 sparse = true,
@@ -516,7 +516,7 @@ describe("Sparse Relationships", function()
 
     describe("cascade delete", function()
         it("should despawn children when parent is despawned", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "SparseCascade1",
                 exclusive = true,
                 sparse = true,
@@ -538,7 +538,7 @@ describe("Sparse Relationships", function()
         end)
 
         it("should cascade delete recursively through hierarchy", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "SparseCascadeDeep1",
                 exclusive = true,
                 sparse = true,
@@ -560,7 +560,7 @@ describe("Sparse Relationships", function()
         end)
 
         it("should not cascade when relationship is removed (not parent despawned)", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "SparseCascadeNoOrphan1",
                 exclusive = true,
                 sparse = true,
@@ -581,7 +581,7 @@ describe("Sparse Relationships", function()
         end)
 
         it("should not despawn unrelated entities", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "SparseCascadeUnrelated1",
                 exclusive = true,
                 sparse = true,
@@ -604,7 +604,7 @@ describe("Sparse Relationships", function()
 
     describe("archetype fragmentation", function()
         it("should not create per-target archetypes for sparse relationships", function()
-            local ChildOf = tecs.newTagRelationship({
+            local ChildOf = tecs.newRelationship({
                 name = "SparseNoFrag1",
                 exclusive = true,
                 sparse = true,
