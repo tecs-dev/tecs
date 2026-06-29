@@ -21,7 +21,7 @@ features:
     details: Tecs is a fast, <a href="/tecs/">archetype-based ECS</a> with easy to create LuaJIT FFI components, handling 4M entities at 200 FPS.<sup>[1]</sup>
     icon: ⚡
   - title: "LÖVE2D on the GPU"
-    details: Tecs2D provides GPU-driven culling, cameres, materials, lighting, and <a href="https://www.love2d.org/wiki/12.0">indirect rendering</a> for absurd on-screen scale.
+    details: Tecs2D provides GPU-driven culling, cameras, materials, lighting, and <a href="https://www.love2d.org/wiki/12.0">indirect rendering</a> for absurd on-screen scale.
     icon:
       src: /images/love2d-logo.svg
   - title: Static typing
@@ -73,7 +73,7 @@ local query = world:query({include = {Position, Velocity}})
 world:addSystem({
     phase = tecs.phases.Update,
     run = function(dt: number, _world: tecs.World)
-        for archetype: tecs.Archetype, len: integer in query:iter() do
+        for archetype, len in query:iter() do
             local positions = archetype:getMut(Position)
             local velocities = archetype:get(Velocity)
             for row = 1, len do
@@ -165,7 +165,7 @@ love.run = tecs2d.run({
         world:addSystem({
             phase = tecs.phases.Render,
             run = function(_dt: number, _world: tecs.World)
-                for arch: tecs.Archetype, len: integer in query:iter() do
+                for arch, len in query:iter() do
                     local positions = arch:get(Position)
                     local sprites = arch:get(Sprite)
                     for row = 1, len do
