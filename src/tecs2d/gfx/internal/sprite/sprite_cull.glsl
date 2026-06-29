@@ -21,8 +21,9 @@
 // ---------- Source-component SSBOs ----------
 
 struct Std430Transform {
-    vec4 xyzLayer;       // x, y, z, layerFloat
-    vec4 rotScalePad;    // rotation, scaleX, scaleY, _pad0
+    float x, y, z;
+    int layerInt;
+    float rotation, scaleX, scaleY;
 };
 layout(std430) readonly buffer TransformInput {
     Std430Transform transforms[];
@@ -294,12 +295,12 @@ void computemain() {
 
     float w = sd.width;
     float h = sd.height;
-    float scaleX = t.rotScalePad.y;
-    float scaleY = t.rotScalePad.z;
-    float x = t.xyzLayer.x;
-    float y = t.xyzLayer.y;
-    float z = t.xyzLayer.z;
-    float layer = t.xyzLayer.w;
+    float scaleX = t.scaleX;
+    float scaleY = t.scaleY;
+    float x = t.x;
+    float y = t.y;
+    float z = t.z;
+    float layer = float(t.layerInt);
     if (!isCameraLayerVisible(layer)) return;
 
     bool isScreenSpace     = isScreenSpaceLayer(layer);
@@ -421,7 +422,7 @@ void computemain() {
     vec4 outDepthLayerGrid = vec4(depthWithTie, layer, sd.animColumnCount, sd.animFrameHeight);
     vec4 outUvRect = vec4(sd.uvX, sd.uvY, outUvW, outUvH);
     vec4 outAnimData = vec4(frameIndex, sd.animTotalDuration, float(animFrameCount), sd.animFrameWidth);
-    vec4 outRotScale = vec4(t.rotScalePad.x, scaleX, scaleY, float(sliceIndex));
+    vec4 outRotScale = vec4(t.rotation, scaleX, scaleY, float(sliceIndex));
     vec4 outPivot = vec4(pivotX, pivotY, float(flags), screenSpaceAndBlend);
 
     spritesOut[outIdx].posSize = outPosSize;

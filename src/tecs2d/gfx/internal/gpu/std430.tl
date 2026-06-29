@@ -20,11 +20,14 @@ end
 -- std430 stride rule (struct stride = max-member alignment, rounded up to
 -- vec4 if any member is vec4-aligned). Per-row sizes are commented inline.
 C.cdef[[
-    // Transform: 32 bytes. canonical is 28 bytes (3 float + int32 + 3 float),
-    // pad to vec4 alignment and convert layer int→float for shader uniformity.
+    // Transform: 28 bytes, byte-identical to CanonicalTransform so the upload
+    // uses the identity bulk-memcpy path instead of a per-row field repack.
+    // layer stays int32 (matching the component); the cull shaders cast it to
+    // float at the few sites that need it.
     typedef struct {
-        float x, y, z, layerFloat;  // vec4
-        float rotation, scaleX, scaleY, _pad0;  // vec4
+        float x, y, z;
+        int32_t layer;
+        float rotation, scaleX, scaleY;
     } Std430Transform;
 
     // Color: 16 bytes. Canonical (4 float) already matches std430 vec4.
@@ -195,19 +198,9 @@ C.cdef[[
 ]]
 
 -- Teal records matching the FFI structs above. Used to give field-typed
--- access through `cast(...) as {integer: Record}` indexing — same pattern
+-- access through `cast(...) as {integer: Record}` indexing, same pattern
 -- as `circle/sync.tl:165`. Declared as `record` (not type alias) so the
 -- field types are visible to the type checker.
-local record Std430TransformR
-    x: number
-    y: number
-    z: number
-    layerFloat: number
-    rotation: number
-    scaleX: number
-    scaleY: number
-    _pad0: number
-end
 
 local record Std430MaterialR
     materialId: integer
@@ -400,15 +393,6 @@ C.cdef[[
     } CanonicalMesh;
 ]]
 
-local record CanonicalTransformR
-    x: number
-    y: number
-    z: number
-    layer: integer
-    rotation: number
-    scaleX: number
-    scaleY: number
-end
 
 local record CanonicalMaterialR
     materialId: integer
@@ -471,22 +455,8 @@ local MESH_STD_SIZE             <const> = sizeof("Std430Mesh") as integer
 -- Row index 0 is reserved padding (matches the FFI column convention).
 -------------------------------------------------------------------------------
 
-local function translateTransform(canonicalRaw: C.CData, shadowRaw: C.CData, firstRow: integer, lastRow: integer)
-    local can = cast("CanonicalTransform*", canonicalRaw) as {integer: CanonicalTransformR}
-    local sha = cast("Std430Transform*", shadowRaw) as {integer: Std430TransformR}
-    for r = firstRow, lastRow do
-        local c = can[r]
-        local s = sha[r]
-        s.x = c.x
-        s.y = c.y
-        s.z = c.z
-        s.layerFloat = c.layer  -- int32 → float (lossy beyond 2^24, fine for layers)
-        s.rotation = c.rotation
-        s.scaleX = c.scaleX
-        s.scaleY = c.scaleY
-        s._pad0 = 0
-    end
-end
+-- Transform uses the identity bulk-memcpy path (defined below); its std430
+-- layout matches CanonicalTransform byte-for-byte.
 
 -- Identity-layout translates: canonical bytes already match std430. Use a
 -- single bulk memcpy instead of per-row field copies. Caller passes raw
@@ -511,6 +481,7 @@ local function translateIdentity(elementSize: integer): function(C.CData, C.CDat
     end
 end
 
+local translateTransform   <const> = translateIdentity(TRANSFORM_STD_SIZE)
 local translateColor       <const> = translateIdentity(COLOR_STD_SIZE)
 local translateClipBounds  <const> = translateIdentity(CLIPBOUNDS_STD_SIZE)
 local translateOccluder    <const> = translateIdentity(OCCLUDER_STD_SIZE)
@@ -649,8 +620,13 @@ end
 -------------------------------------------------------------------------------
 
 local TRANSFORM_FORMAT: love.graphics.BufferFormat = {
-    {format = "floatvec4"},  -- x, y, z, layerFloat
-    {format = "floatvec4"},  -- rotation, scaleX, scaleY, _pad
+    {format = "float"},   -- x
+    {format = "float"},   -- y
+    {format = "float"},   -- z
+    {format = "int32"},   -- layer
+    {format = "float"},   -- rotation
+    {format = "float"},   -- scaleX
+    {format = "float"},   -- scaleY
 }
 
 local COLOR_FORMAT: love.graphics.BufferFormat = {

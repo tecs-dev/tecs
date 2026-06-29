@@ -19,8 +19,9 @@
 // are written as zero by the CPU translator and are read but unused.
 
 struct Std430Transform {
-    vec4 xyzLayer;       // x, y, z, layerFloat
-    vec4 rotScalePad;    // rotation, scaleX, scaleY, _pad0
+    float x, y, z;
+    int layerInt;
+    float rotation, scaleX, scaleY;
 };
 layout(std430) readonly buffer TransformInput {
     Std430Transform transforms[];
@@ -177,14 +178,14 @@ void computemain() {
     Std430Transform t = transforms[row];
     Std430Circle c = circles[row];
 
-    float x = t.xyzLayer.x;
-    float y = t.xyzLayer.y;
-    float z = t.xyzLayer.z;
-    float layer = t.xyzLayer.w;
+    float x = t.x;
+    float y = t.y;
+    float z = t.z;
+    float layer = float(t.layerInt);
     if (!isCameraLayerVisible(layer)) return;
 
-    float scaleX = t.rotScalePad.y;
-    float scaleY = t.rotScalePad.z;
+    float scaleX = t.scaleX;
+    float scaleY = t.scaleY;
     float uniformScale = (scaleX + scaleY) * 0.5;
     float r = c.radiusLineWidth.x * uniformScale;
     float lineWidth = c.radiusLineWidth.y;

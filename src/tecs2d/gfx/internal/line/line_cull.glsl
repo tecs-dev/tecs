@@ -9,8 +9,9 @@
 // ---------- Source-component SSBOs ----------
 
 struct Std430Transform {
-    vec4 xyzLayer;       // x, y, z, layerFloat
-    vec4 rotScalePad;    // rotation, scaleX, scaleY, _pad0
+    float x, y, z;
+    int layerInt;
+    float rotation, scaleX, scaleY;
 };
 layout(std430) readonly buffer TransformInput {
     Std430Transform transforms[];
@@ -128,15 +129,15 @@ void computemain() {
     Std430Transform t = transforms[row];
     Std430Line ln = linesIn[row];
 
-    float tx = t.xyzLayer.x;
-    float ty = t.xyzLayer.y;
-    float z = t.xyzLayer.z;
-    float layer = t.xyzLayer.w;
+    float tx = t.x;
+    float ty = t.y;
+    float z = t.z;
+    float layer = float(t.layerInt);
     if (!isCameraLayerVisible(layer)) return;
 
-    float rotation = t.rotScalePad.x;
-    float scaleX = t.rotScalePad.y;
-    float scaleY = t.rotScalePad.z;
+    float rotation = t.rotation;
+    float scaleX = t.scaleX;
+    float scaleY = t.scaleY;
 
     // World endpoints: entity position + local endpoint * scale.
     // Mirrors the legacy CPU sync (line/sync.tl:177-180).
