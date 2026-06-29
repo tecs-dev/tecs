@@ -52,7 +52,7 @@ Add this to your project's `.mcp.json`:
 If you used a custom port, update the URL to match. The game must be running before Claude Code can connect.
 If you restart the game, use `/mcp` in Claude Code to reconnect.
 
-## Component Serialization
+## Component serialization
 
 For `spawn`, `query`, and `spawn_bundle` to work, components need serialization support. Most components work
 automatically:

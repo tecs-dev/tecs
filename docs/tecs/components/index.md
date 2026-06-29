@@ -11,13 +11,13 @@ or health, and are the building blocks of game state.
 
 Tecs provides several component kinds for different use cases.
 
-* [Table component](/tecs/components/table-components): a structural component backed by a Lua table. Use this when
-  structural components have data that can't fit into FFI structures.
-* [Tag component](/tecs/components/tag-components): a component that has no data.
-* [FFI component](/tecs/components/ffi): a structural component backed by FFI structs. Use this when structural
-  components can fit into FFI structs.
-* [Scalar component](/tecs/components/scalar-components): a component that has a single scalar string, number, or
-  boolean value. Use this when a component is really just a single value (e.g., Health).
+* [Table component](/tecs/components/table-components): backed by a Lua table. Use this when the data can't fit a
+  fixed C struct: strings, nested tables, Love2D handles, or any value needing Lua reference semantics.
+* [Tag component](/tecs/components/tag-components): carries no data; presence is the whole signal.
+* [FFI component](/tecs/components/ffi): backed by an FFI struct. Use this for numeric and primitive data that
+  maps cleanly to fixed-size C fields.
+* [Scalar component](/tecs/components/scalar-components): a single string, number, or boolean value. Use this
+  when a component is really just one value (e.g., `Health`).
 
 ## Getting components
 
@@ -70,7 +70,7 @@ world:addSystem({
     name = "Movement",
     phase = tecs.phases.Update,
     run = function(dt: number, _world: tecs.World)
-        for archetype: tecs.Archetype, length: integer in query:iter() do
+        for archetype, length in query:iter() do
             local positions = archetype:getMut(Position)  -- bind column, mark dirty
             local velocities = archetype:get(Velocity)        -- read-only column
             for row = 1, length do
@@ -129,7 +129,7 @@ assert(world:get(entity, Position) ~= nil)
 ```
 
 For lifecycle reactions ("run code when an entity gains or loses this component"), use
-[query callbacks](/tecs/queries/callbacks) — `onEntitiesAdded` and `onEntitiesRemoved` on
+[query callbacks](/tecs/queries/callbacks): `onEntitiesAdded` and `onEntitiesRemoved` on
 `world:query(...)`.
 
 See [Serialization](/tecs/components/serialization) for how components round-trip through save games, networking,

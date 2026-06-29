@@ -1,3 +1,7 @@
+---
+outline: deep
+---
+
 # Phases
 
 Tecs divides its game loop into _phases_. Add [systems](/tecs/systems) to phases to run game logic at
@@ -51,7 +55,7 @@ One-time cleanup phases run when `world:shutdown()` is called.
 
 - **Fixed timestep phases** (`FixedUpdate` and related): used for physics, game logic, AI, and anything affecting
   gameplay that should feel consistent regardless of speed of the computer.
-- **Variable timestep phases** (`Update` and related) - used for visual presentation, animations, camera smoothing,
+- **Variable timestep phases** (`Update` and related): used for visual presentation, animations, camera smoothing,
   UI effects, and generally anything else that looks or feels better the faster the computer.
 
 ## Using phases

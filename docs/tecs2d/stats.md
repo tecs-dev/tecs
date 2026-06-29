@@ -97,7 +97,7 @@ The overlay displays the following information:
 
 #### ECS statistics
 - **E**: Total number of entities
-- **C**: Total number of component instances
+- **C**: Number of registered component types in use
 - **S**: Total number of systems
 - **A**: Number of unique archetypes
 
@@ -107,17 +107,8 @@ Press **F2** (default) to toggle the archetype breakdown view, which shows:
 - Each active archetype's component composition
 - Number of entities in each archetype
 
-## Debug states
+## Toggling the overlay
 
-The stats system uses Tecs's built-in Debug state with two values:
-
-```lua
-local tecs = require("tecs")
-
--- Check current debug state
-local debugState = world:getState(tecs.builtins.Debug)
-
--- Programmatically set debug state
-world:setState(tecs.builtins.Debug, "on")  -- Enable stats
-world:setState(tecs.builtins.Debug, "off") -- Disable stats
-```
+The overlay is toggled at runtime by the configured keys: `keyBinding` (F1 by default) shows or hides the
+stats, and `archetypeBinding` (F2 by default) toggles the archetype breakdown. The enabled state is held
+internally by the plugin; there is no separate programmatic API to read or set it.

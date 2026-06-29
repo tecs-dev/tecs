@@ -1,3 +1,7 @@
+---
+outline: deep
+---
+
 # State Stack
 
 The state stack manages game states (play, pause, menus) with automatic entity lifecycle. Push a state to enter it,

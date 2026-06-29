@@ -1,3 +1,7 @@
+---
+outline: deep
+---
+
 # Systems
 
 A system is a function that runs game logic in specific [phases](/tecs/phases) of the
@@ -245,11 +249,11 @@ world:addSystem({
 ## Removing systems
 
 Call `world:removeSystem(name)` to pull a system out of the pipeline. The system must have been registered
-with an explicit `name` — auto-named systems aren't removable from user code.
+with an explicit `name`; auto-named systems aren't removable from user code.
 
 ```lua
 world:removeSystem("MyUpdateSystem")
 ```
 
-`runIf.after(delay)` takes advantage of this to clean itself up after firing: the predicate calls
+`tecs.runif.after(delay)` takes advantage of this to clean itself up after firing: the predicate calls
 `removeSystem` internally once the delay elapses.

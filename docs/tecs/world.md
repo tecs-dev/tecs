@@ -1,3 +1,7 @@
+---
+outline: deep
+---
+
 # World
 
 The `World` is the core of the Tecs entity component system. It manages entities, components, systems, and
@@ -31,7 +35,7 @@ local world = tecs.newWorld({
 | ------------------- | ------------------------------------------------------ | ---------- | ---------- | -------------------------------------------------- |
 | `timestep`          | `number`                                               | No         | 1/60       | The fixed timestep of the game in seconds          |
 | `pipelineFactory`   | `function(number, function): Pipeline`                 | No         | Built-in   | Custom factory for creating the system pipeline    |
-| `maxEntities`       | `integer`                                              | No         | 2^20 (~1M) | Allocated arena slots per world. Must be a power of 2, at most about 2M. Slot 0 is reserved, so the maximum live entity count is `maxEntities - 1`. The entity arena is preallocated to this size: ~16 bytes/slot (~16MB at default). Raise if your world exceeds ~1M concurrent entities; lower to shrink per-world memory. |
+| `maxEntities`       | `integer`                                              | No         | 2^20 (~1M) | Allocated arena slots per world. A positive integer, at most `2^22` (~4M, the packed-id format ceiling). Slot 0 is reserved, so the maximum live entity count is `maxEntities - 1`. The entity arena is preallocated to this size: ~16 bytes/slot (~16MB at default). Raise if your world exceeds ~1M concurrent entities; lower to shrink per-world memory. |
 
 ## World Lifecycle
 
@@ -83,7 +87,7 @@ function World:shutdown()
 ### Entity IDs
 
 Entity IDs in Tecs are packed numeric handles that encode both a **slot** (22 bits) and a **generation**
-counter (31 bits). The id fits in 53 bits total — the full integer precision of a double — so LuaJIT
+counter (31 bits). The id fits in 53 bits total (the full integer precision of a double), so LuaJIT
 stores and passes it as a normal Lua number without loss.
 
 ```
@@ -104,7 +108,7 @@ world:isAlive(a)        -- false: generation mismatch
 world:isAlive(b)        -- true
 ```
 
-Treat the id as an opaque handle. Don't inspect or unpack its bits with `bit.*` — packed ids can exceed
+Treat the id as an opaque handle. Don't inspect or unpack its bits with `bit.*`; packed ids can exceed
 int32 range, and `bit.band` would silently truncate. If you need to extract slot or generation for
 tooling, use plain arithmetic (`id % 2^22` for slot, `math.floor(id / 2^22)` for generation).
 
@@ -116,7 +120,7 @@ the ceiling and the per-world memory footprint (~16 bytes per allocated slot).
 
 **Generation limits.** The packed id has 31 generation bits (~2.1B values). The FFI slot struct also
 stores 31 bits; the counter wraps at `2^31` on recycle, but at one despawn per nanosecond that's about 68
-years before a single slot wraps — not a practical concern. To react to an entity disappearing, listen
+years before a single slot wraps, not a practical concern. To react to an entity disappearing, listen
 for [`OnDespawn`](/tecs/builtins#ondespawn-event) rather than polling `isAlive`.
 
 ### spawn
@@ -137,7 +141,7 @@ function World:spawn(...: Component): integer
 
 **Notes:**
 
-- The returned ID is usable immediately regardless of whether the spawn applies instantly or stages — see
+- The returned ID is usable immediately regardless of whether the spawn applies instantly or stages; see
   [Deferred Operations](#deferred-operations) for when each happens.
 - You can follow up with `world:set`, `world:remove`, or `world:despawn` on the returned ID. Inside a scope
   those calls stage in order and apply at scope close; a staged `despawn` cancels a staged spawn entirely.
@@ -237,7 +241,7 @@ assert(world:isAlive(firstId + 999))
 Lenient counterpart to `batchSpawn`. Allocates as many contiguous fresh slots
 as possible, then tops up the remainder from the LIFO free stack. Errors only
 when the allocator is fully exhausted. Returns the list of spawned ids in
-allocation order (fresh first, then free) — iterate it explicitly since
+allocation order (fresh first, then free); iterate it explicitly since
 the contiguous-id guarantee no longer holds.
 
 ```lua
@@ -285,7 +289,7 @@ See [Save games](/tecs/save-games) for a complete walkthrough.
 ### forEachArchetype
 
 Iterate every archetype in the world. Intended for debugging and save-game
-tools — use `query` for gameplay-level iteration.
+tools; use `query` for gameplay-level iteration.
 
 ```lua
 function World:forEachArchetype(callback: function(Archetype))
@@ -296,7 +300,7 @@ function World:forEachArchetype(callback: function(Archetype))
 Removes an entity from the World.
 
 ```lua
-function World:despawn(entity: Id)
+function World:despawn(entity: integer)
 ```
 
 **Parameters:**
@@ -346,14 +350,14 @@ function World:batchDespawn(query: Query)
 
 - `query`: A `Query` object built via `world:query(...)`. Both persistent and
   `temp = true` queries are accepted. `batchDespawn` does not accept raw
-  component arrays or descriptors — build the query once outside your hot
+  component arrays or descriptors; build the query once outside your hot
   loop and reuse it.
 
 ::: info Deferred teardown
 `batchDespawn` is deferred: the matched archetypes are enqueued at call
 time and the actual removal, `OnDespawn` events, and observer callbacks
 all run at the next commit. This matches `world:despawn` and makes
-`batchDespawn` safe to call mid-iteration — no bulk clear happens until
+`batchDespawn` safe to call mid-iteration; no bulk clear happens until
 the batch queues drain at commit time.
 :::
 
@@ -385,7 +389,7 @@ world:batchDespawn(bullets)
 
 Bulk-set a component on every entity matching a query. Two forms:
 
-- **Constant form** — write a shared instance to every matched row:
+- **Constant form**: write a shared instance to every matched row:
   ```lua
   world:batchSet(query, Stunned)
   world:batchSet(query, Position(0, 0))
@@ -393,7 +397,7 @@ Bulk-set a component on every entity matching a query. Two forms:
   If an archetype in the query lacks the component, entities are bulk-moved
   to the archetype reached by adding it, then the new column is filled.
 
-- **Callback form** — ensure the component is present, then let the caller
+- **Callback form**: ensure the component is present, then let the caller
   write the column directly:
   ```lua
   world:batchSet(query, Position, function(arch, firstRow, lastRow, count)
@@ -450,12 +454,12 @@ function World:compact(): integer, integer
 - `archetypesCompacted`: Number of surviving archetypes whose column
   storage was shrunk.
 
-Call `compact` on level transitions or other natural "quiet points" — it's
+Call `compact` on level transitions or other natural "quiet points"; it's
 cheap to skip and expensive if called every frame while entities churn.
 
 ### clearEntities
 
-Wipes all entity data from the world while preserving structural state —
+Wipes all entity data from the world while preserving structural state:
 the pipeline, registered systems, queries (and their observers), bundles,
 and archetype column capacity all survive. Useful for per-test reuse,
 benchmark setup, and save/load "clear before load" flows.
@@ -475,7 +479,7 @@ function World:clearEntities()
 
 - Registered systems and the pipeline they run in.
 - Queries and their observer callbacks.
-- Archetype columns (chunks stay allocated — the next batch doesn't pay
+- Archetype columns (chunks stay allocated, the next batch doesn't pay
   the re-grow-from-zero cost).
 - Bundle registrations.
 - Global component registrations.
@@ -495,7 +499,7 @@ end
 
 ::: tip When you want a fully-fresh world
 If you need to drop systems and queries too (the "post-construction"
-state), just call `tecs.newWorld()` — it's the same code path and makes
+state), just call `tecs.newWorld()`; it's the same code path and makes
 the intent obvious at the call site.
 :::
 
@@ -725,7 +729,7 @@ local playerBundle = world:newBundle("Player", {
 
 Spawns an entity from a registered bundle by name. Required components
 are passed positionally in the order they were declared via `:require`.
-Optional components always use their registered factory — they can't be
+Optional components always use their registered factory; they can't be
 overridden at spawn time.
 
 ```lua
@@ -885,12 +889,12 @@ three traversal methods. See
 [Relationships → Hierarchy traversal](/tecs/relationships/#hierarchy-traversal)
 for full signatures, semantics, and the context-passing performance pattern.
 
-- **`world:targets(entity, relationship, callback, context?)`** — invokes `callback(sourceId, context)`
+- **`world:targets(entity, relationship, callback, context?)`**: invokes `callback(sourceId, context)`
   for each direct source entity targeting the given entity. Use this to iterate a parent's
   direct children, an entity's followers, etc.
-- **`world:traverse(root, relationship)`** — DFS iterator yielding `(depth, entityId)` for the
+- **`world:traverse(root, relationship)`**: DFS iterator yielding `(depth, entityId)` for the
   full subtree under `root`.
-- **`world:walkUp(entity, relationship, callback, context?, maxDepth?)`** — invokes
+- **`world:walkUp(entity, relationship, callback, context?, maxDepth?)`**: invokes
   `callback(ancestorId, depth, context)` for each ancestor up the parent chain. Return `false`
   from the callback to stop early. `maxDepth` defaults to 100 and errors if exceeded.
 
@@ -919,7 +923,7 @@ You can also open and close scopes explicitly with `world:defer()` and `world:co
 
 ::: info Systems do not auto-commit between each other
 `world:update` calls `world:commit()` once at the start of the frame to flush anything still pending from the
-previous tick, then dispatches the pipeline. Phases do **not** insert a commit between individual systems —
+previous tick, then dispatches the pipeline. Phases do **not** insert a commit between individual systems:
 iterating a query inside a system opens and closes a scope inline, but two consecutive plain
 `world:set(id, …)` statements in different systems each apply instantly on their own. If one system needs to
 see changes another system staged earlier in the same phase, it has to call `world:commit()` itself.
@@ -935,7 +939,7 @@ counter is above zero.
 function World:defer()
 ```
 
-Use `defer` when you want a block of mutations to appear atomically — for example, if a helper wants to
+Use `defer` when you want a block of mutations to appear atomically; for example, if a helper wants to
 avoid partial archetype transitions being visible to observers mid-block.
 
 ```lua
@@ -951,7 +955,7 @@ end
 ### commit
 
 Closes one deferred scope level. When the scope counter reaches zero and the world has pending staged
-mutations, the transaction drains — spawns are placed, component moves execute, query observers fire, and
+mutations, the transaction drains: spawns are placed, component moves execute, query observers fire, and
 sparse relationship writes apply.
 
 ```lua
@@ -963,7 +967,7 @@ function World:commit()
 - `commit` is the matching counterpart to `defer`; calls nest symmetrically.
 - `world:update(dt)` calls `commit` once at the very start as a safety net for any mutations left pending
   by prior host-code paths. It does **not** call `commit` between individual systems in the pipeline.
-- Outside any scope, `world:commit()` is harmless — the depth is already zero and there's nothing to drain.
+- Outside any scope, `world:commit()` is harmless; the depth is already zero and there's nothing to drain.
 - `commit` never discards staged work. If you open an explicit scope, closing it always applies the pending
   mutations once the outermost scope finishes.
 
@@ -1318,24 +1322,24 @@ end)
 Emits an event to all observers at a specific address.
 
 ```lua
-function World:emit<E is Event>(address: integer, event: E)
+function World:emit(address: integer, eventOrType: Event, ...: any)
 ```
 
 **Parameters:**
 
 - `address`: The address to emit to (`0` for world-level, entity ID for entity events)
-- `eventOrType`: The event instance to emit, or an event type followed by constructor args
+- `eventOrType`: An event instance to emit, or an event type followed by constructor args
+- `...`: Constructor args, when `eventOrType` is an event type
 
 **Example:**
 
 ```lua
--- World-level event
+-- World-level event (no payload)
 world:emit(0, MyCustomEvent)
 
--- Entity-level event
-world:emit(entityId, DamageReceived, 15)
-
--- Optimized form: check listeners and construct lazily
+-- Entity-level event, passing the type plus constructor args: the world
+-- checks for observers before constructing, so this allocates nothing
+-- when no one is listening.
 world:emit(entityId, DamageReceived, 15)
 ```
 

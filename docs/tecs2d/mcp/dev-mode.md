@@ -1,3 +1,7 @@
+---
+outline: deep
+---
+
 # Dev-Mode Restart
 
 The `restart` tool supports automatic code reloading for development. When you call `restart`:

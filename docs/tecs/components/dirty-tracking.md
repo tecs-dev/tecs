@@ -45,9 +45,9 @@ after every system has run.
 
 Two access primitives, distinguished by intent:
 
-- **`archetype:get(Foo)`** — returns the column reference (or nil if
+- **`archetype:get(Foo)`**: returns the column reference (or nil if
   the archetype doesn't carry `Foo`). Does NOT mark dirty.
-- **`archetype:getMut(Foo)`** — same return; also marks `Foo`
+- **`archetype:getMut(Foo)`**: same return; also marks `Foo`
   dirty on the archetype. Idempotent.
 
 Use `:get` for read sites and `:getMut` at every site you intend to
@@ -57,7 +57,7 @@ machinery cannot observe direct cdata writes; the `:getMut` call is
 the contract that tells consumers "this column may have changed."
 
 ```lua
-for archetype: tecs.Archetype, len: integer in query:iter() do
+for archetype, len in query:iter() do
     local transforms = archetype:getMut(Transform)
     local velocities = archetype:get(Velocity)  -- read-only
     for row = 1, len do
@@ -70,16 +70,16 @@ end
 ```
 
 Both `:get` and `:getMut` return the same underlying column, so
-mixing them in one loop is safe — only the dirty marks differ.
+mixing them in one loop is safe; only the dirty marks differ.
 
 ## Checking dirty state
 
-- **`archetype:isComponentDirty(Foo)`** — true when `Foo` was marked
+- **`archetype:isComponentDirty(Foo)`**: true when `Foo` was marked
   dirty on this archetype since the last frame.
-- **`archetype:anyComponentDirty()`** — true when any component on this
+- **`archetype:anyComponentDirty()`**: true when any component on this
   archetype is currently dirty. Useful for bulk re-sync paths that
   don't need per-component granularity.
-- **`world:dirtyArchetypes()`** — iterator over archetypes with at
+- **`world:dirtyArchetypes()`**: iterator over archetypes with at
   least one component dirty. Drains naturally at frame end.
 
 ```lua
@@ -98,10 +98,10 @@ currently dirty on a single archetype.
 When a write happens through a path the framework can't see, call the
 explicit marker:
 
-- **`archetype:markComponentDirty(Foo)`** — single component.
-- **`archetype:markAllComponentsDirty()`** — every component on the
+- **`archetype:markComponentDirty(Foo)`**: single component.
+- **`archetype:markAllComponentsDirty()`**: every component on the
   archetype (used internally for spawn/move-in/swap-pop).
-- **`world:markComponentDirty(entity, Foo)`** — entity-shaped wrapper
+- **`world:markComponentDirty(entity, Foo)`**: entity-shaped wrapper
   for cases where you only have the entity id.
 
 `archetype:set(row, value)` and the `world:set` family all mark

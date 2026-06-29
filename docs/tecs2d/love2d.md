@@ -1,8 +1,12 @@
+---
+outline: deep
+---
+
 # Love2D Integration
 
 The `tecs2d` module integrates Tecs with Love2D, providing the game loop and event handling.
 
-## Getting Started
+## Getting started
 
 ```lua
 -- main.tl
@@ -83,14 +87,14 @@ cause the function that called it to immediately exit.
 | ------------ | --------------------- | ----------------------------------------------------- |
 | `exitCode`   | `number` (optional)   | The exit code to return (defaults to 0 for success)   |
 
-#### Usage Notes
+#### Usage notes
 
 - The default exit code is 0 (success)
 - Non-zero exit codes typically indicate an error condition
 
-## Integration Features
+## Integration features
 
-### Automatic Phase Mapping
+### Automatic phase mapping
 
 The game loop automatically integrates Love2D's rendering pipeline with Tecs phases:
 
@@ -104,7 +108,7 @@ The game loop automatically integrates Love2D's rendering pipeline with Tecs pha
 | `tecs.phases.Render`      | Calls `love.draw()` if defined                     |
 | `tecs.phases.RenderLast`  | Presents rendered frame                            |
 
-### Input Resource
+### Input resource
 
 Input is available through the [input module](/tecs2d/input/):
 
@@ -133,7 +137,7 @@ tracks when keys are released or pressed in a way that _just works_ across fixed
 [input documentation](/tecs2d/input/#input-philosophy-in-tecs) for more information.
 :::
 
-### Event Observation
+### Event observation
 
 Love2D events are translated into Tecs events and can be observed like any other Tecs event.
 See [Love2D Events](/tecs2d/events) for all available event types.
@@ -176,7 +180,7 @@ plugins that don't have to hijack `love.*` callback methods. Any number of Tecs 
 events and react to them.
 :::
 
-## Basic Game Setup
+## Basic game setup
 
 In your `main.tl` Love 2D script:
 

@@ -68,8 +68,10 @@ The full set of fields accepted by `world:query()`:
 
 ## Iterating over queries
 
-Use a query directly in a generic `for` loop. Each step returns `(archetype, length, entities)` for the next
-non-empty archetype. Only non-empty archetypes are visited.
+Iterate a query by calling `query:iter()` in a generic `for` loop. Each step returns
+`(archetype, length, entities)` for the next non-empty archetype (empty archetypes are skipped).
+`query:iter()` returns a plain iterator function, so the loop runs as a tight call in LuaJIT with no
+metamethod indirection.
 
 Consider the following query:
 
@@ -85,7 +87,7 @@ local query = world:query({
 })
 ```
 
-Iterate it directly:
+Iterate it:
 
 ```lua:line-numbers
 for archetype, len, entities in query:iter() do
@@ -106,19 +108,6 @@ end
 * Line `4`: iterates over the entities in the archetype. Each value is the entity's "row", which you use to
   index into component columns.
 * Line `5` and `6`: grab components for an entity by indexing into the columns.
-
-### Explicit iterator form
-
-`query:iter()` returns a plain iterator function that LuaJIT can compile
-as a `ITERC` bytecode without a metamethod hop:
-
-```lua
-for archetype, len, entities in query:iter() do
-    -- ...
-end
-```
-
-Queries iterate explicitly via `:iter()`. Prefer that form everywhere, especially in inner render or update loops.
 
 ### Mutations during iteration
 
@@ -151,7 +140,7 @@ deferred scope stays open, and your staged writes stay invisible until the next 
 ```lua
 for archetype, len, entities in query:iter() do
     if shouldStop then
-        world:set(entities[0], SomeFlag)
+        world:set(entities[1], SomeFlag)  -- entities are 1-indexed
         break
     end
 end

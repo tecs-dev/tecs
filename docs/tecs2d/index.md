@@ -47,7 +47,7 @@ make run
 
 You should see a demo with a movable player.
 
-## What's Included
+## What's included
 
 The starter template comes pre-configured with:
 
@@ -56,7 +56,7 @@ The starter template comes pre-configured with:
 - **Type definitions** - Downloaded automatically for Love2D, LuaJIT FFI, etc.
 - **Demo game** - Simple player movement with camera follow
 
-### Project Structure
+### Project structure
 
 ```
 my-game/
@@ -100,7 +100,7 @@ The pure-ECS pieces (`World`, components, queries, systems) come from [Tecs](/te
 adds the engine layer: rendering, audio, input, etc. Install `tecs2d` when you want the full
 engine layer; it depends on `tecs` automatically.
 
-## Make Targets
+## Make targets
 
 | Command               | Description                                            |
 | --------------------- | ------------------------------------------------------ |
@@ -110,7 +110,7 @@ engine layer; it depends on `tecs` automatically.
 | `make reset`          | Clean everything, including dependencies and Love2D    |
 | `make love12`         | Re-download Love2D 12                                  |
 
-## Managing Dependencies
+## Managing dependencies
 
 ```bash
 # Add a package
@@ -120,7 +120,7 @@ luarocks install --tree=src/vendor --lua-version=5.1 penlight
 luarocks install --tree=src/vendor --lua-version=5.1 penlight 1.14.0
 ```
 
-## Next Steps
+## Next steps
 
 - [Tecs Quickstart](/tecs/) - Learn ECS concepts and build your first system
 - [Love2D Integration](/tecs2d/love2d) - Game loop, events, and Love2D phase mapping

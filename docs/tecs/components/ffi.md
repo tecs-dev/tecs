@@ -1,3 +1,7 @@
+---
+outline: deep
+---
+
 # FFI Components
 
 FFI (Foreign Function Interface) components leverage LuaJIT's FFI capabilities to provide high-performance,
@@ -8,7 +12,7 @@ table-based components.
 Shared constructor rules live in [Component Construction](/tecs/components/construction). This page focuses on
 FFI-specific storage behavior and field types.
 
-## Basic Usage
+## Basic usage
 
 Define FFI components using `tecs.newFFIComponent`:
 
@@ -30,31 +34,31 @@ tecs.newFFIComponent({
 })
 ```
 
-## Field Types
+## Field types
 
 FFI components support all standard C types:
 
-### Numeric Types
+### Numeric types
 
 - **Integers**: `int8_t`, `int16_t`, `int32_t`, `int64_t`, `uint8_t`, `uint16_t`, `uint32_t`, `uint64_t`
 - **Floating Point**: `float`, `double`, `long double`
 - **Standard C**: `char`, `short`, `int`, `long`, `size_t`, `ptrdiff_t`
 - **Boolean**: `bool`, `_Bool`
 
-### Pointer Types
+### Pointer types
 
 - **Generic**: `void*`
 - **String**: `char*`, `const char*`
 - **Numeric**: `int*`, `float*`, `double*`
 
-### Fixed-Size Arrays
+### Fixed-size arrays
 
 You can define fixed-size arrays by appending `[size]` to any type:
 - **Numeric Arrays**: `float[16]`, `int32_t[4]`, `uint8_t[256]`
 - **Matrix/Vector**: `float[3]` for vec3, `float[16]` for mat4
 - **Buffers**: `char[256]` for string buffers
 
-## Constructor Support
+## Constructor support
 
 FFI components use the same `__call(...)` / `.new(data)` / `fields` / `defaults` /
 `init` model as table components. The FFI-specific difference is that the base
@@ -84,7 +88,7 @@ local pos1: Position = Position(10, 20)      -- z defaults to 0
 local pos2: Position = Position(10, 20, 30)  -- all values provided
 ```
 
-### Default Values
+### Default values
 
 FFI components support explicit `defaults`, just like table components:
 
@@ -109,7 +113,7 @@ That means omitted values fall back to the underlying FFI zero value:
 - Booleans: `false`
 - See https://luajit.org/ext_ffi_semantics.html#init_table
 
-## API Compatibility
+## API compatibility
 
 FFI components share the same API as table-based components. Field access, construction, and mutation work
 identically regardless of the underlying storage:
@@ -126,7 +130,7 @@ For more details on LuaJIT FFI limitations and semantics, see the
 [official LuaJIT FFI documentation](https://luajit.org/ext_ffi.html) and
 [FFI semantics](https://luajit.org/ext_ffi_semantics.html).
 
-## API Reference
+## API reference
 
 ### tecs.newFFIComponent(options)
 
@@ -180,7 +184,7 @@ tecs.newFFIComponent({
 })
 ```
 
-### Init Hooks
+### Init hooks
 
 FFI components can include an optional `init` hook for validation and derived state:
 
@@ -190,7 +194,7 @@ init = function(instance: Component, ...: any)
 
 The init hook receives the allocated instance plus the **positional** arguments. When a caller uses
 `Component.new({...})`, the framework unpacks the table by field name into positional args *before* calling
-`init` — so the hook never sees a table in its first slot and doesn't need a `type(x) == "table"` fork.
+`init`, so the hook never sees a table in its first slot and doesn't need a `type(x) == "table"` fork.
 
 ### Custom `__call`
 

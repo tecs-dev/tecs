@@ -14,7 +14,7 @@ changes archetypes.
 * **Rows**: The position of an entity within an archetype. Component operations use the row index, not the entity ID.
   Rows are **1-based**: the first entity in the archetype is at row 1, matching column array indexing.
 * **Columns**: Each component has its own "column", an array containing component data for all entities in the
-  archetype. Access columns by component type and index by row position. This layout is a _structure of arrays_, or SOA.
+  archetype. Access columns by component type and index by row position. This layout is a _structure of arrays_, or SoA.
 
 This design enables high-performance iteration over entities with the same component structure, as component data is
 stored in contiguous memory blocks.
@@ -35,7 +35,7 @@ Per-component columns are accessed via `archetype:get(Component)` (read-only) or
 ### set
 
 Replaces a component value at a row and marks the component dirty on the archetype. No archetype transition
-happens — the row stays where it is. The component **must** already be present on the archetype.
+happens; the row stays where it is. The component **must** already be present on the archetype.
 
 ```lua
 function Archetype:set<C is Component>(row: integer, value: C)
@@ -49,7 +49,7 @@ function Archetype:set<C is Component>(row: integer, value: C)
 **Example:**
 
 ```lua
-for archetype: tecs.Archetype, len: integer in query:iter() do
+for archetype, len in query:iter() do
     for row = 1, len do
         -- Replace the component and mark dirty in one call.
         archetype:set(row, Color(1, 0, 0, 1))
@@ -132,7 +132,7 @@ Use it at every site you intend to write into the column, including
 direct FFI cdata field writes that the framework can't observe.
 
 ```lua
-for archetype: tecs.Archetype, len: integer in query:iter() do
+for archetype, len in query:iter() do
     local transforms = archetype:getMut(Transform)
     local velocities = archetype:get(Velocity)  -- read-only
     for row = 1, len do

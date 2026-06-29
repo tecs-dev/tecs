@@ -86,9 +86,9 @@ type checker accepts at call sites.
 :::
 
 :::details Teal metamethods
-Teal records and interfaces define Lua metatable methods using `metamethod`. The `__call` metamethod lets you invoke
-the record like a function -- `Position(10, 20)` -- while the `new` method is a regular static field
--- `Position.new({x = 10})`.
+Teal records and interfaces define Lua metatable methods using `metamethod`. The `__call` metamethod lets you
+invoke the record like a function, as in `Position(10, 20)`, while the `new` method is a regular static field
+accessed as `Position.new({x = 10})`.
 :::
 
 ## Using `init`

@@ -1,3 +1,7 @@
+---
+outline: deep
+---
+
 # Tools
 
 The MCP server provides the following tools for AI assistants to interact with your game.
@@ -8,7 +12,7 @@ Check if the game is running.
 
 **Input:** None
 
-**Response:** `Game is running (time: 123.45s)`
+**Response:** `Game is running (port: 19999, time: 123.45s)`
 
 ## screenshot
 
@@ -252,6 +256,33 @@ to access the ECS world.
 **Response:** `Code queued for execution`
 
 Errors are logged without crashing the game.
+
+## snapshot_save
+
+Capture a snapshot of the world. Returns the serialized snapshot inline, or writes it to a file under
+Love2D's save directory when `save_to` is provided. See [Save games](/tecs/save-games) for the snapshot model.
+
+| Parameter   | Type       | Required   | Description                                                                                  |
+| ----------- | ---------- | ---------- | -------------------------------------------------------------------------------------------- |
+| `format`    | string     | No         | `"json"` (default, human-readable) or `"luajit"` (compact `string.buffer` binary)            |
+| `save_to`   | string     | No         | Filename inside Love2D's save directory. When set, the snapshot is written to disk and the path is returned instead of the payload. |
+| `pretty`    | boolean    | No         | Pretty-print JSON output (`json` format only; default: false)                                |
+| `layers`    | number[]   | No         | Allow-list of `Transform.layer` values (0..31); only entities on those layers are saved      |
+
+**Response:** The serialized snapshot (JSON text, or base64-encoded binary for `luajit`), or the file path when `save_to` is set.
+
+## snapshot_load
+
+Restore a world snapshot, replacing the current world state. Accepts an inline payload or a filename in
+Love2D's save directory. The `format` must match how the snapshot was saved.
+
+| Parameter   | Type     | Required   | Description                                                                            |
+| ----------- | -------- | ---------- | ------------------------------------------------------------------------------------- |
+| `format`    | string   | No         | `"json"` (default) or `"luajit"`. Must match the format the snapshot was saved with.  |
+| `payload`   | string   | No*        | Inline snapshot payload. JSON is passed as-is; `luajit` binary payloads must be base64-encoded. |
+| `load_from` | string   | No*        | Filename inside Love2D's save directory to read from. Ignored when `payload` is supplied. |
+
+*Provide either `payload` or `load_from`.
 
 ## restart
 

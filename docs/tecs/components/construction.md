@@ -112,7 +112,7 @@ That means:
 - field 2 defaults to `0`
 - field 3 defaults to `1`
 
-Use `nil` for “no default”.
+Use `nil` for "no default".
 
 ```lua
 defaults = {nil, nil, 1}

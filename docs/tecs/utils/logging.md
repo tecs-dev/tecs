@@ -1,3 +1,7 @@
+---
+outline: deep
+---
+
 # Logging module
 
 Tecs provides a lightweight and fast logging module with a no-op disabled path. Disabled log levels are

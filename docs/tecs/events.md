@@ -118,41 +118,24 @@ local damageEvent: PlayerDamaged = PlayerDamaged(10, "fire")
 world:emit(0, PlayerDamaged, 10, "fire")
 ```
 
-### Constructor vs Emit
+### Constructor vs emit
 
-Direct constructors always allocate a fresh instance:
+The two construction paths differ in allocation:
 
-```lua
-local record SensorReading is tecs.Event
-    x: number
-    y: number
-    z: number
-
-    metamethod __call: function(self, x: number, y: number, z: number): self
-end
-
--- Enable pooling for zero-allocation emissions
-SensorReading.init = function(e: SensorReading, x: number, y: number, z: number)
-    e.x, e.y, e.z = x, y, z
-end
-tecs.newEvent(SensorReading)
-
-local a = SensorReading(1, 2, 3)
-local b = SensorReading(4, 5, 6)
-assert(a ~= b)
-```
-
-For the fast path, emit the event type plus constructor args:
+- **Direct constructor** (`PlayerDamaged(10, "fire")`): always allocates a fresh, independent instance. Use it
+  when you need to hold onto the event past the current emit.
+- **`world:emit(address, EventType, ...)`**: the fast path. It checks for observers before constructing
+  anything, then reuses world-local backing storage across repeated emissions of the same type, so a hot
+  emission loop allocates nothing.
 
 ```lua
-world:emit(0, SensorReading, 1, 2, 3)
+world:emit(0, PlayerDamaged, 10, "fire")
 ```
 
-In that form, the world:
-- checks for observers before constructing anything
-- reuses world-local backing storage for repeated emissions
-
-Do not retain references to instances received from `world:emit(address, EventType, ...)` across later emits of the same type on that world.
+::: warning
+Don't retain a reference to the instance an observer receives from `world:emit` past that callback; the
+world reuses the backing storage on the next emit of the same type.
+:::
 
 ### tecs.newFFIEvent
 

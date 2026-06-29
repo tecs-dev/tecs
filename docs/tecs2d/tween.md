@@ -23,7 +23,7 @@ Interpolators are reusable function references that tween a single numeric field
 The target value is passed separately to `:to()`, so the same interpolator can be used with
 different targets without creating new closures.
 
-### Canned Interpolators
+### Canned interpolators
 
 Pre-built interpolator references for common Transform and Color fields. These are created once
 at module load time and shared everywhere.
@@ -142,7 +142,7 @@ tween.timeline()
     :apply(world, missileEntity)
 ```
 
-### Custom Interpolators
+### Custom interpolators
 
 For advanced use cases, you can write a custom interpolator. An interpolator is a record with
 two methods: `init` captures starting state, `apply` writes the interpolated value each frame.
@@ -204,7 +204,7 @@ tween.timeline()
     :apply(world, entity)
 ```
 
-## Timeline Builder
+## Timeline builder
 
 Timelines are created with `tween.timeline()` and built using a fluent API. Timelines essentially act as animation
 templates that are applied to entities.
@@ -469,7 +469,7 @@ tween.timeline()
     :apply(world, entity)
 ```
 
-## TimelineBuilder Finalizers
+## TimelineBuilder finalizers
 
 Finalizers freeze the builder and return a reusable `Timeline`. Further `:to()` calls on a
 finalized builder will error.
@@ -499,9 +499,9 @@ Like `loop()` but reverses direction each cycle. `pingPong()` with no argument l
 function TimelineBuilder:pingPong(self, count?: integer): Timeline
 ```
 
-## Applying Timelines
+## Applying timelines
 
-After a timeline is [finalized](#finalizers) using `:once`, `:loop`, or `:pingPong`, it can be applied to an entity
+After a timeline is [finalized](#timelinebuilder-finalizers) using `:once`, `:loop`, or `:pingPong`, it can be applied to an entity
 using `:apply`.
 
 ### `Timeline:apply`
@@ -552,7 +552,7 @@ for i = 0, 4 do
 end
 ```
 
-## Tween Handles
+## Tween handles
 
 [Applying a tween](#applying-timelines) returns a handle. You can pause, resume, and cancel a tween from this handle.
 
@@ -624,7 +624,7 @@ Get the current playback direction: `1` for forward, `-1` for reverse.
 function TweenHandle:getDirection(self): integer
 ```
 
-### Self-Modifying Tweens
+### Self-modifying tweens
 
 Step callbacks and `onComplete` receive the handle as a third argument. This enables tweens
 that react to game state without capturing external variables.
@@ -651,7 +651,7 @@ Timelines are automatically removed when:
 - The timeline finishes (finite timelines)
 - The target entity is no longer alive (checked each frame)
 
-## Easing Functions
+## Easing functions
 
 All easing functions live directly on `tween` and have the signature `function(t: number): number`
 where `f(0) = 0` and `f(1) = 1`.

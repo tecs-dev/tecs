@@ -1,3 +1,7 @@
+---
+outline: deep
+---
+
 # Tecs JSON
 
 Tecs JSON is a high-performance JSON parser and serializer optimized for [LuaJIT](https://luajit.org/).
@@ -11,7 +15,7 @@ Tecs JSON is a high-performance JSON parser and serializer optimized for [LuaJIT
 
 Tecs JSON is included as part of the tecs package. See the [Tecs Quickstart](/tecs/) for project setup.
 
-## Quick Start
+## Quick start
 
 ```lua
 local json = require("tecs.utils.json")
@@ -21,12 +25,12 @@ local data = json.parse('{"name": "Player", "health": 100}')
 print(data.name)    -- "Player"
 print(data.health)  -- 100
 
--- Serialize to JSON
+-- Serialize to JSON (key order is unspecified without sortKeys)
 local str = json.serialize({name = "Enemy", health = 50})
-print(str)  -- {"name":"Enemy","health":50}
+print(str)  -- e.g. {"name":"Enemy","health":50}
 ```
 
-## API Reference
+## API reference
 
 ### parse
 
@@ -95,10 +99,11 @@ function json.serialize(value: any, sortKeys?: boolean): string
 **Example:**
 
 ```lua
+-- Without sortKeys, object key order is unspecified.
 local str = json.serialize({name = "Enemy", health = 50})
-print(str)  -- {"health":50,"name":"Enemy"}
+print(str)  -- e.g. {"name":"Enemy","health":50}
 
--- With sorted keys for deterministic output
+-- Pass sortKeys = true for deterministic, alphabetically-ordered output.
 local str = json.serialize({b = 2, a = 1}, true)
 print(str)  -- {"a":1,"b":2}
 ```
@@ -134,7 +139,7 @@ print(json.serializePretty(data))
 -- }
 ```
 
-## Sentinel Values
+## Sentinel values
 
 ### json.NULL
 

@@ -2,7 +2,7 @@
 outline: deep
 ---
 
-# Component serialization
+# Component Serialization
 
 Components can be serialized and deserialized, enabling [save games](/tecs/save-games), networking, and AI
 integration via the [MCP server](/tecs2d/mcp/). Tecs handles most components automatically; you only provide
@@ -144,4 +144,4 @@ saves ~500× faster on the bulk path than the per-entity path.
 | ------------- | --------------------------------------------------------------------------- |
 | `serialize`   | `function(instance: Component): {string: any}`. Convert a component to a plain table. Return `nil` to omit the component from the snapshot entirely. |
 | `deserialize` | `function(world: tecs.World, data: {string: any}): Component`. Reconstruct a component from a plain table. Receives the world for cross-entity lookups. Defaults to `Component.new(data)`. |
-| `new`         | `function(data: {string: any}): Component`. Table-form constructor invoked by `Component.new({...})` and the default deserialize. See [Component Construction](/tecs/components/construction#named-construction-with-newdata). |
+| `new`         | `function(data: {string: any}): Component`. Table-form constructor invoked by `Component.new({...})` and the default deserialize. See [Component Construction](/tecs/components/construction#table-construction). |

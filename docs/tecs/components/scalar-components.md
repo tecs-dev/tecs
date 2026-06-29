@@ -145,7 +145,7 @@ On deserialize, missing `value` falls back to the scalar default.
   [Tag Components](/tecs/components/tag-components).
 
 ::: tip Don't overdo scalar components
-Scalar components are usually faster than table or FFI components for their narrow use case. But don’t over-apply
+Scalar components are usually faster than table or FFI components for their narrow use case. But don't over-apply
 them and lose abstraction. For example, in most code, a single `Position` component with `x` and `y` is preferable to
 splitting into separate `PositionX` and `PositionY` components.
 :::

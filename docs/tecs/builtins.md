@@ -176,6 +176,8 @@ This component:
 - `rotation`: The rotation offset in radians from the parent (default: 0)
 - `scaleX`: The x scale multiplier relative to the parent (default: 1)
 - `scaleY`: The y scale multiplier relative to the parent (default: 1)
+- `originX`: Origin as a fraction (0-1) of the entity's width; 0 = left, 0.5 = center, 1 = right (default: 0)
+- `originY`: Origin as a fraction (0-1) of the entity's height; 0 = top, 0.5 = center, 1 = bottom (default: 0)
 
 **Teal type:**
 
@@ -187,15 +189,21 @@ record RelativeTransform is components.Component
     rotation: number
     scaleX: number
     scaleY: number
+    --- Origin as a fraction (0-1) of the entity's width: 0 = left, 0.5 = center, 1 = right.
+    originX: number
+    --- Origin as a fraction (0-1) of the entity's height: 0 = top, 0.5 = center, 1 = bottom.
+    originY: number
 
     metamethod __call: function(
         self,
-        x: number,
-        y: number,
-        z: number,
-        rotation: number,
-        scaleX: number,
-        scaleY: number
+        x?: number,
+        y?: number,
+        z?: number,
+        rotation?: number,
+        scaleX?: number,
+        scaleY?: number,
+        originX?: number,
+        originY?: number
     ): RelativeTransform
 end
 ```
@@ -215,13 +223,13 @@ local child = world:spawn(
 )
 ```
 
-The child's world-space position will be automatically calculated as (150, 130), and updated each frame when the
+The child's world-space position is automatically calculated as (150, 130) and updated each frame as the
 parent moves.
 
 ### TTL component
 
-Automatically despawns an entity when the TTL, or "time to live" reaches zero. Tecs automatically
-adds a sytem that tracks entities with a TTL and despawns them.
+Automatically despawns an entity when the TTL, or "time to live", reaches zero. Tecs automatically
+adds a system that tracks entities with a TTL and despawns them.
 
 **Teal type:**
 
@@ -276,7 +284,7 @@ See *[Disabled entities](/tecs/queries/#disabled-entities)* for more on how disa
 ### Paused component
 
 A tag component that marks an entity as paused. Unlike `Disabled`, `Paused` is **not** auto-excluded from queries.
-Paused entities should still render — only gameplay systems that need to skip them should use `exclude = {Paused}`.
+Paused entities should still render; only gameplay systems that need to skip them should use `exclude = {Paused}`.
 
 This is typically managed automatically by the [state stack](/tecs/states) when a state's `onBlur` policy
 is set to `"pause"`. You can also add it manually:

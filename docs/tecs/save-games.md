@@ -1,3 +1,7 @@
+---
+outline: deep
+---
+
 # Save games
 
 Tecs provides a snapshot system for save games, checkpoints, and state restoration. Plugins and game code can
@@ -49,7 +53,7 @@ custom data.
 | Field           | Type                                    | Purpose |
 | ----------------| ----------------------------------------| ------- |
 | `format`        | `"binary" \| "table"`                   | Output format. Defaults to `"binary"`. |
-| `buffer`        | `string.buffer`                         | Reuse an existing buffer instead of allocating a fresh one. The buffer is `:reset()` first; see [Reusing a buffer across saves](#reusing-a-buffer-across-saves). |
+| `buffer`        | `string.buffer`                         | Reuse an existing buffer instead of allocating a fresh one. The buffer is `:reset()` first; see [Reusing a buffer across saves](#buffer). |
 | `path`          | `string`                                | Optional binary output file path. Writes the bytes to disk and still returns the tagged result. |
 | `filterQuery`   | [`QueryDescriptor`](/tecs/queries/) | Only save entities matching this query (`include` / `includeAny` / `exclude`). Composes freely with `layers`. |
 | `layers`        | `{integer}`                             | Allow-list of `Transform.layer` values (0..31). Filters Transform-bearing entities by layer; entities without a `Transform` pass through unchanged. |
@@ -378,7 +382,7 @@ sprites holding GPU handles, sparse relationships), expect per-entity costs abov
   (e.g., a component changed in a game update): slower per-entity load.
 - **Bulk entity IDs**: the entity ID array writes via one `putcdata` per archetype; loads via one `ffi.copy` into a
   freshly-allocated `double[count]`. Doubles let packed `(slot, generation)` ids up to 2^53 survive round-trip
-  without truncation — the packed id format uses 22 bits for slot and 31 bits for generation.
+  without truncation; the packed id format uses 22 bits for slot and 31 bits for generation.
 
 Components with custom `serialize` / `deserialize` (e.g. `gfx.Text`, which holds non-portable glyph slab pointers) opt
 out of the bulk path automatically and round-trip per entity through their structured codec.
@@ -456,7 +460,7 @@ Each entity row is a positional array, `{id, comp1_data, comp2_data, ...}`, alig
 
 ## See also
 
-- [`examples/save-game/`](https://github.com/your-org/tecs/tree/main/examples/save-game): runnable paint demo using table snapshots
+- [`examples/save-game/`](https://github.com/tecs-dev/tecs/tree/main/examples/save-game): runnable paint demo using table snapshots
 - [World reference](/tecs/world): `spawnAt` (restore entity at a specific packed id)
 - [Components](/tecs/components/serialization): custom `serialize` / `deserialize`
 - [JSON module](/tecs/utils/json): fast JSON for persistence
