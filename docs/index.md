@@ -3,7 +3,7 @@
 layout: home
 
 hero:
-  name: "Blazing-fast 2D Lua"
+  name: "Blazing-fast 2D LuaJIT"
   text: "Use Tecs as an ECS, or full LÖVE game engine"
   image:
     src: /images/tecs.png

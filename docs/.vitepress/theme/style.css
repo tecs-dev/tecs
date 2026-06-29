@@ -136,7 +136,9 @@
 
   .VPHero .name {
     font-family: "Jersey 15", sans-serif !important;
-    font-size: 60pt !important;
+    /* Responsive: fits "Blazing-fast 2D LuaJIT" on one line on desktop,
+       scales down on narrow viewports instead of overflowing. */
+    font-size: clamp(2rem, 6vw, 44pt) !important;
     font-weight: 600 !important;
     font-style: normal !important;
   }
