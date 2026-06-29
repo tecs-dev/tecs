@@ -40,11 +40,113 @@ jobs:
 
     - name: Build project
       run: |
+        eval "$(luarocks path)"
         make clean
         make compile
 
     - name: Run tests
       run: |
+        eval "$(luarocks path)"
+        make test
+
+  # Windows runs through MSYS2/MinGW64, which provides a coherent POSIX shell
+  # plus LuaJIT, LuaRocks, GNU make, and a C toolchain (needed to build
+  # busted's C-extension dependencies). The leafo LuaRocks action can't install
+  # on Windows (it builds from source via ./configure, absent on Windows).
+  test-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup MSYS2 (MinGW64)
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+        update: true
+        install: >-
+          git
+          make
+          curl
+          wget
+          unzip
+          zip
+          mingw-w64-x86_64-gcc
+          mingw-w64-x86_64-7zip
+          mingw-w64-x86_64-luajit
+
+    # MSYS2 has no luarocks package for MinGW64, but its POSIX shell + gcc can
+    # build it from source (the Windows binary tarball lacks ./configure, which
+    # is what broke the leafo action). Point it at the MinGW64 LuaJIT.
+    - name: Install LuaRocks from source
+      run: |
+        ver=3.12.2
+        curl -L -o luarocks.tar.gz "https://luarocks.org/releases/luarocks-${ver}.tar.gz"
+        tar xzf luarocks.tar.gz
+        cd "luarocks-${ver}"
+        ./configure --prefix=/mingw64 --lua-version=5.1 \
+          --with-lua-interpreter=luajit \
+          --with-lua=/mingw64 \
+          --with-lua-include=/mingw64/include/luajit-2.1
+        make
+        make install
+
+    - name: Cache LuaRocks dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.luarocks
+        key: windows-luarocks-3.12.2-${{ env.TL_REF }}-v1
+
+    - name: Install dependencies
+      run: |
+        # MinGW LuaJIT makes LuaRocks use its win32 filesystem backend, which
+        # extracts rocks via SEVENZ and copies with Windows-style globs.
+        mkdir -p "$HOME/bin"
+        printf '%s\n' \
+          '#!/usr/bin/env bash' \
+          'a=()' \
+          'for x in "$@"; do' \
+          '  x="${x//\\//}"' \
+          '  if [[ "$x" == */\*.\* ]]; then x="${x%/*.*}/."; fi' \
+          '  a+=("$x")' \
+          'done' \
+          'exec /usr/bin/cp "${a[@]}"' > "$HOME/bin/cp-luarocks"
+        chmod +x "$HOME/bin/cp-luarocks"
+        luarocks config --scope user variables.SEVENZ /mingw64/bin/7z
+        luarocks config --scope user variables.CP "$(cygpath -m /usr/bin/bash.exe) $(cygpath -m "$HOME/bin/cp-luarocks")"
+        if [ ! -f "$HOME/.luarocks/bin/tl.bat" ] || \
+           [ ! -f "$HOME/.luarocks/bin/busted.bat" ] || \
+           [ ! -f "$HOME/.luarocks/bin/luacov.bat" ]; then
+          luarocks install busted
+          luarocks install luacov
+          git clone https://github.com/teal-language/tl.git tl-dev
+          cd tl-dev && git checkout "$TL_REF"
+          luarocks make tl-dev-1.rockspec
+          cd ..
+        fi
+        for exe in tl busted luacov; do
+          printf '%s\n' \
+            '#!/usr/bin/env bash' \
+            'bat="$HOME/.luarocks/bin/'"$exe"'.bat"' \
+            'exec cmd //C call "$(cygpath -w "$bat")" "$@"' > "$HOME/bin/$exe"
+          chmod +x "$HOME/bin/$exe"
+        done
+
+    - name: Build project
+      run: |
+        export PATH="$HOME/bin:$HOME/.luarocks/bin:$PATH"
+        export LUA_PATH="$(luarocks path --lr-path);;"
+        export LUA_CPATH="$(luarocks path --lr-cpath);;"
+        make clean
+        make compile
+
+    - name: Run tests
+      run: |
+        export PATH="$HOME/bin:$HOME/.luarocks/bin:$PATH"
+        export LUA_PATH="$(luarocks path --lr-path);;"
+        export LUA_CPATH="$(luarocks path --lr-cpath);;"
         make test
 
   lint:

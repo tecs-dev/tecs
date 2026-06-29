@@ -1,7 +1,9 @@
 local profile <const> = require("tecs.utils.profile")
 
 local zone = (function(name: string): any return require(name) end)("jit.zone") as any
+local IS_WINDOWS <const> = package.config:sub(1, 1) == "\\"
 
+if not IS_WINDOWS then
 describe("profile.sample", function()
 
     describe("session lifecycle", function()
@@ -142,6 +144,7 @@ describe("profile.sample", function()
         end)
     end)
 end)
+end
 
 describe("profile.trace", function()
 
@@ -185,16 +188,18 @@ describe("profile.trace", function()
             assert.has_error(function() s:resume() end)
         end)
 
-        it("can run alongside a sample session (independent channels)", function()
-            local sampleSess = profile.sample()
-            local traceSess = profile.trace()
-            zone("both")
-            zone()
-            local report = traceSess:stop()
-            local text = sampleSess:stop()
-            assert.is_table(report)
-            assert.is_string(text)
-        end)
+        if not IS_WINDOWS then
+            it("can run alongside a sample session (independent channels)", function()
+                local sampleSess = profile.sample()
+                local traceSess = profile.trace()
+                zone("both")
+                zone()
+                local report = traceSess:stop()
+                local text = sampleSess:stop()
+                assert.is_table(report)
+                assert.is_string(text)
+            end)
+        end
     end)
 
     describe("report formatting", function()
@@ -233,6 +238,7 @@ describe("profile.trace", function()
     end)
 end)
 
+if not IS_WINDOWS then
 describe("profile zone refcounting", function()
 
     it("zones stay enabled while either session is live", function()
@@ -255,3 +261,4 @@ describe("profile zone refcounting", function()
         zone()
     end)
 end)
+end
