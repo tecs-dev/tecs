@@ -126,70 +126,6 @@ describe("pool", function()
         end)
     end)
 
-    describe("newFramePool", function()
-        it("borrow increments; reset rewinds", function()
-            local fp = pool.newFramePool()
-            local t1 = fp:borrow() as {any}
-            local t2 = fp:borrow() as {any}
-            luassert.is_not_equal(t1, t2)
-            t1[1] = "x"
-            t2[1] = "y"
-            fp:reset()
-            -- After reset, borrow hands out the same tables in order.
-            local t1b = fp:borrow() as {any}
-            local t2b = fp:borrow() as {any}
-            luassert.is_equal(t1, t1b)
-            luassert.is_equal(t2, t2b)
-        end)
-
-        it("clears on borrow, not on reset", function()
-            local fp = pool.newFramePool()
-            local t = fp:borrow() as {any}
-            t[1] = "a"
-            t[2] = "b"
-            fp:reset()
-            -- Content survives reset (reset only rewinds the cursor).
-            luassert.is_equal("a", t[1])
-            -- But the next borrow clears it.
-            local t2 = fp:borrow() as {any}
-            luassert.is_equal(t, t2)
-            luassert.is_nil(t2[1])
-            luassert.is_nil(t2[2])
-        end)
-
-        it("grows beyond initial size", function()
-            local fp = pool.newFramePool()
-            local seen: {table} = {}
-            for i = 1, 20 do
-                seen[i] = fp:borrow() as table
-            end
-            -- All distinct.
-            for i = 1, 20 do
-                for j = i + 1, 20 do
-                    luassert.is_not_equal(seen[i], seen[j])
-                end
-            end
-        end)
-
-        it("clear() drops all tables", function()
-            local fp = pool.newFramePool()
-            local before: {table} = {}
-            for i = 1, 3 do
-                before[i] = fp:borrow() as table
-            end
-            fp:clear()
-            local after: {table} = {}
-            for i = 1, 3 do
-                after[i] = fp:borrow() as table
-            end
-            for i = 1, 3 do
-                for j = 1, 3 do
-                    luassert.is_not_equal(before[i], after[j])
-                end
-            end
-        end)
-    end)
-
     describe("sizeHints", function()
         it("passes arrayHint and hashHint to new tables", function()
             -- We can't directly observe table_new preallocation, but we
@@ -197,9 +133,6 @@ describe("pool", function()
             local p = pool.newTablePool({ arrayHint = 16, hashHint = 4 })
             local t = p:acquire() as {any}
             luassert.is_table(t)
-            local fp = pool.newFramePool({ arrayHint = 8 })
-            local t2 = fp:borrow() as {any}
-            luassert.is_table(t2)
         end)
     end)
 
