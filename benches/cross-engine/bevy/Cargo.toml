@@ -1,0 +1,19 @@
+[package]
+name = "sprite-throughput-bevy"
+version = "0.1.0"
+edition = "2021"
+
+# Cross-engine 2D sprite throughput benchmark, Bevy implementation.
+# See ../SPEC.md for the scene contract.
+#
+# Pinned to Bevy 0.15. If you bump Bevy, the Sprite/TextureAtlas and
+# OrthographicProjection APIs may have shifted; adjust src/main.rs to match.
+
+[dependencies]
+bevy = "0.15"
+
+# Optimized build so the comparison is against release-grade Bevy.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

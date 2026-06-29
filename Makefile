@@ -324,6 +324,9 @@ example-shape-bench: build $(LOVE12_BIN)
 example-sprite-bench: build $(LOVE12_BIN)
 	@cd examples/sprite-bench && TECS_BENCHMARK=1 $(TEAL_ENV) tl run shared/run.tl $(ENTITIES)
 
+example-sprite-throughput: build $(LOVE12_BIN)
+	@cd examples/sprite-throughput && TECS_BENCHMARK=1 $(TEAL_ENV) tl run shared/run.tl $(ENTITIES)
+
 example-sprite-onloop: build $(LOVE12_BIN)
 	@cd examples/sprite-onloop && $(TEAL_ENV) tl run shared/run.tl
 

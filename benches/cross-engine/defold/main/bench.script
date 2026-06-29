@@ -1,0 +1,125 @@
+-- Cross-engine 2D sprite throughput benchmark, Defold implementation.
+-- See ../SPEC.md for the scene contract.
+--
+-- Defold's idiomatic model is one game object (plus sprite) per entity, driven
+-- from Lua. It does not scale to the high end of the sweep, so the harness uses
+-- a reduced count set for Defold (documented in the README). Animation is the
+-- engine's looping flipbook; movement is a per-instance go.set_position each
+-- frame.
+
+local SPACING = 40
+local AMP = 16.0
+local OMEGA = 2.0
+local FRAMES = 8
+local CULL_OFFSET = 1.0e7 -- parks the culled half off-screen
+
+-- Note: Defold does not frustum-cull sprites, so the off-screen half is still
+-- submitted to the renderer (it just isn't visible). Tecs and Bevy both cull
+-- it. That difference is part of what the split scene reveals.
+
+local function cfg_num(key, default)
+    local v = sys.get_config(key)
+    if v == nil or v == "" then return default end
+    return tonumber(v) or default
+end
+
+function init(self)
+    self.count = math.floor(cfg_num("bench.count", 10000))
+    self.warmup = cfg_num("bench.warmup", 2)
+    self.measure = cfg_num("bench.measure", 5)
+    self.moving = cfg_num("bench.move", 1) ~= 0
+
+    -- Split: first `vis` sprites form a viewport-filling grid (drawn), the
+    -- rest sit far off-screen at +CULL_OFFSET. One run exercises both paths.
+    local vis = math.floor(self.count / 2)
+    local cul = self.count - vis
+    local grid_v = math.ceil(math.sqrt(math.max(vis, 1)))
+    local grid_c = math.ceil(math.sqrt(math.max(cul, 1)))
+    local gw_v = (grid_v - 1) * SPACING
+    local gw_c = (grid_c - 1) * SPACING
+
+    -- Camera: centered on the visible grid, zoomed so it fills 90% of the
+    -- height. orthographic_zoom z shows display_height/z world units, so to
+    -- show gw_v units in 90% of the height: z = 0.9 * 720 / gw_v.
+    msg.post("#camera", "acquire_camera_focus")
+    local zoom = gw_v > 0 and (648.0 / gw_v) or 1.0
+    go.set("#camera", "orthographic_zoom", zoom)
+
+    -- Spawn one game object per sprite; the sprite auto-plays its looping
+    -- "run" flipbook (engine-driven animation).
+    self.ids = {}
+    self.bx = {}
+    self.by = {}
+    for i = 0, self.count - 1 do
+        local x, y
+        if i < vis then
+            local row = math.floor(i / grid_v)
+            local col = i % grid_v
+            x = -(gw_v / 2) + col * SPACING
+            y = -(gw_v / 2) + row * SPACING
+        else
+            local j = i - vis
+            local row = math.floor(j / grid_c)
+            local col = j % grid_c
+            x = CULL_OFFSET - gw_c / 2 + col * SPACING
+            y = -(gw_c / 2) + row * SPACING
+        end
+        local n = i + 1
+        self.ids[n] = factory.create("#factory", vmath.vector3(x, y, 0))
+        self.bx[n] = x
+        self.by[n] = y
+    end
+
+    self.t = 0.0
+    self.measure_t = -1.0
+    self.samples = {}
+    self.sum = 0.0
+    self.frames = 0
+    self.done = false
+    self.scratch = vmath.vector3()
+end
+
+function update(self, dt)
+    if self.done then return end
+    self.t = self.t + dt
+    local t = self.t
+
+    if self.moving then
+        local wt = OMEGA * t
+        local ids, bx, by = self.ids, self.bx, self.by
+        local v = self.scratch
+        local set_position = go.set_position
+        local sin, cos = math.sin, math.cos
+        for n = 1, self.count do
+            local ph = (n - 1) * 0.001
+            v.x = bx[n] + sin(wt + ph) * AMP
+            v.y = by[n] + cos(wt + ph) * AMP
+            v.z = 0
+            set_position(v, ids[n])
+        end
+    end
+
+    if t < self.warmup then return end
+    if self.measure_t < 0 then
+        self.measure_t = t
+        return
+    end
+    self.samples[#self.samples + 1] = dt
+    self.sum = self.sum + dt
+    self.frames = self.frames + 1
+
+    if t - self.measure_t >= self.measure then
+        local frames = math.max(self.frames, 1)
+        local mean_ms = (self.sum / frames) * 1000.0
+        table.sort(self.samples)
+        local n = math.max(#self.samples, 1)
+        local p99i = math.max(1, math.min(n, math.ceil(0.99 * n)))
+        local p99_ms = self.samples[p99i] * 1000.0
+        local fps = mean_ms > 0 and 1000.0 / mean_ms or 0
+        local low1 = p99_ms > 0 and 1000.0 / p99_ms or 0
+        print(string.format("RESULT,defold,%d,%d,%.4f,%.2f,%.2f",
+            self.count, frames, mean_ms, fps, low1))
+        self.done = true
+        msg.post("@system:", "exit", { code = 0 })
+    end
+end
