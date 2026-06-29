@@ -4,9 +4,19 @@ outline: deep
 
 # Save games
 
-Tecs provides a snapshot system for save games, checkpoints, and state restoration. Plugins and game code can
+Tecs provides a fast snapshot system for save games, checkpoints, and state restoration. Plugins and game code can
 attach arbitrary metadata alongside ECS data so snapshots stay self-contained (e.g., player profile,
 physics state, RNG seeds, etc).
+
+```lua
+-- Save the world to a string.buffer
+local buf = world:saveSnapshot().buffer
+
+-- Load the world from the buffer
+world:loadSnapshot(buf)
+```
+
+## Save formats
 
 Tecs provides two save formats out of the box:
 
@@ -14,18 +24,6 @@ Tecs provides two save formats out of the box:
 | ------ | -------------------------------------------------- | -------- |
 | Binary | `world:saveSnapshot()`, `world:loadSnapshot(...)` | High-performance [LuaJIT-based](https://luajit.org/ext_buffer.html#serialize) binary format. This should be the default choice for production saves. |
 | Table  | `world:saveSnapshot({format=\"table\"})`, `world:loadSnapshot(...)` | Programmatic inspection, in-memory round-trips, and custom tooling (e.g. JSON via `tecs.json`). |
-
-## Quick start
-
-The minimum save / load:
-
-```lua
--- Save to a string.buffer
-local buf = world:saveSnapshot().buffer
-
--- Load from the buffer
-world:loadSnapshot(buf)
-```
 
 ## World:saveSnapshot
 
