@@ -15,8 +15,25 @@ ffi.cdef([[
     typedef int64_t time_t;
     time_t time(time_t *t);
 ]])
-local C_time <const> = ffi.C.time as function(any): integer
 local TIME_NULL <const> = ffi.cast("time_t*", 0)
+
+-- Prefer C.time (trace-compilable), falling back to os.time when the symbol is
+-- unavailable: some Windows CRTs don't export a plain `time` (it inlines to
+-- `_time64`) or use a 32-bit time_t that mismatches the int64_t cdef above.
+local C_time: function(any): integer
+do
+    local osFallback = function(_: any): integer return os.time() end
+    local ok, fn = pcall(function(): any return ffi.C.time end)
+    if ok and fn then
+        local candidate = fn as function(any): integer
+        -- Validate against os.time: catches a resolved-but-wrong-width symbol.
+        local valOk, cv = pcall(candidate, TIME_NULL)
+        local diff = valOk and (tonumber(cv) - os.time()) or math.huge
+        C_time = (diff > -2 and diff < 2) and candidate or osFallback
+    else
+        C_time = osFallback
+    end
+end
 
 local record logging
     --- Log level severity, from most to least verbose. "OFF" disables all output.
