@@ -41,6 +41,11 @@ VENDOR_CLIB=$(CURDIR)/vendor/lib/lua/5.1
 # Love executable - default to Love2D 12 for GPU rendering
 LOVE := $(LOVE12_BIN)
 
+# Pinned Teal compiler commit (kept in sync with .github/workflows/ci.yml).
+# tl HEAD past ed9ff687 (2026-05-21) rejects our `goto ::continue::` idiom; this
+# is the parent commit, just before that check. Bump deliberately, not by HEAD.
+TL_REF ?= 4b97e8d4c743795cb148c898fb19e14b6f3b8f2d
+
 # Environment for running tl - use local vendor tree, fall back to system paths
 TEAL_LUA_PATH := $(VENDOR_LUA)/?.lua;$(VENDOR_LUA)/?/init.lua;;
 TEAL_LUA_CPATH := $(VENDOR_CLIB)/?.so;;
@@ -69,9 +74,9 @@ build: compile
 
 dev:
 	@echo "Installing development dependencies..."
-	@echo "Installing tl (dev, from git source)..."
-	@rm -rf /tmp/tl-dev && git clone --depth 1 https://github.com/teal-language/tl.git /tmp/tl-dev
-	@cd /tmp/tl-dev && luarocks make --tree=$(shell pwd)/vendor --lua-version=5.1 tl-dev-1.rockspec
+	@echo "Installing tl (dev, pinned to $(TL_REF))..."
+	@rm -rf /tmp/tl-dev && git clone https://github.com/teal-language/tl.git /tmp/tl-dev
+	@cd /tmp/tl-dev && git checkout $(TL_REF) && luarocks make --tree=$(shell pwd)/vendor --lua-version=5.1 tl-dev-1.rockspec
 	luarocks install --tree=vendor --lua-version=5.1 busted
 	luarocks install --tree=vendor --lua-version=5.1 luacov
 	luarocks install --tree=vendor --lua-version=5.1 luacov-cobertura
