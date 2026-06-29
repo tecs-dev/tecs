@@ -14,6 +14,9 @@ local record LayoutDescriptor
     shadowCtype: string
     format: love.graphics.BufferFormat
     translate: function(C.CData, C.CData, integer, integer)
+    --- True when the canonical column layout is byte-identical to std430,
+    --- so the column can be uploaded straight to the SSBO with no repack.
+    identity: boolean
 end
 
 -- All std430 layouts are vec4-aligned so that arrays-of-structs follow the
@@ -472,13 +475,19 @@ do
     ffi_offset_ptr = fn as function(C.CData, integer): C.CData
 end
 
+-- Functions produced by `translateIdentity` are tagged here so `makeLayout`
+-- can mark the layout `identity` without each call site repeating the flag.
+local identityTranslates <const> = setmetatable({}, {__mode = "k"}) as {any: boolean}
+
 local function translateIdentity(elementSize: integer): function(C.CData, C.CData, integer, integer)
-    return function(canonicalRaw: C.CData, shadowRaw: C.CData, firstRow: integer, lastRow: integer)
+    local fn = function(canonicalRaw: C.CData, shadowRaw: C.CData, firstRow: integer, lastRow: integer)
         if lastRow < firstRow then return end
         local count = lastRow - firstRow + 1
         local offset = firstRow * elementSize
         copy(ffi_offset_ptr(shadowRaw, offset), ffi_offset_ptr(canonicalRaw, offset), count * elementSize)
     end
+    identityTranslates[fn] = true
+    return fn
 end
 
 local translateTransform   <const> = translateIdentity(TRANSFORM_STD_SIZE)
@@ -818,6 +827,7 @@ local function makeLayout(
         shadowCtype = shadowCtype,
         format = format,
         translate = translate,
+        identity = identityTranslates[translate] == true,
     }
 end
 

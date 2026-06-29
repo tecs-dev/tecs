@@ -7,8 +7,9 @@ local C <const> = require("ffi")
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
 
 describe("std430 translations", function()
-    it("translates Transform with int→float layer conversion and pad zero", function()
+    it("translates Transform via identity memcpy (int32 layer, no pad)", function()
         local cfg = std430.layouts.Transform
+        assert.is_true(cfg.identity)
 
         local canonical = C.new("CanonicalTransform[?]", 4)
         local shadow = C.new("Std430Transform[?]", 4)
@@ -34,14 +35,13 @@ describe("std430 translations", function()
         assert.equals(10.0, shadow[1].x)
         assert.equals(20.0, shadow[1].y)
         assert.equals(30.0, shadow[1].z)
-        assert.equals(7.0, shadow[1].layerFloat)
+        assert.equals(7, shadow[1].layer)
         assert.equals(1.5, shadow[1].rotation)
         assert.equals(2.0, shadow[1].scaleX)
         assert.equals(3.0, shadow[1].scaleY)
-        assert.equals(0.0, shadow[1]._pad0)
 
         assert.equals(-1.5, shadow[2].x)
-        assert.equals(1.0, shadow[2].layerFloat)
+        assert.equals(1, shadow[2].layer)
     end)
 
     it("translates Color via identity memcpy", function()
@@ -185,8 +185,10 @@ describe("std430 translations", function()
         assert.equals(0.5,  shadow[1].alphaThreshold)
     end)
 
-    it("std430 element sizes match expected vec4-aligned bytes", function()
-        assert.equals(32, std430.sizes.Transform)
+    it("std430 element sizes match expected bytes", function()
+        -- Transform is 28 bytes (7 scalars), byte-identical to the canonical
+        -- column so the upload uses the identity bulk-memcpy path.
+        assert.equals(28, std430.sizes.Transform)
         assert.equals(16, std430.sizes.Color)
         assert.equals(16, std430.sizes.ClipBounds)
         assert.equals(32, std430.sizes.Material)

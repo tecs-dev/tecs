@@ -21,6 +21,7 @@ local C <const> = require("ffi")
 local tecs <const> = require("tecs")
 local shadow_buffer <const> = require("tecs2d.gfx.internal.gpu.shadow_buffer")
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
+local FFIStorage <const> = require("tecs.internal.ffi.FFIStorage") as {string:any}
 
 local type LayoutDescriptor = std430.Descriptor
 local type ShadowBuffer = shadow_buffer.ShadowBuffer
@@ -165,7 +166,15 @@ function ShadowSet:flush()
         -- component's column hasn't changed this frame. Pointer drift
         -- forces an upload to repopulate the new GPU buffer.
         if drifted or archetype:isComponentDirty(e.component) then
-            e.buffer:flushRange(canonical as C.CData, rowCount)
+            local holder = (FFIStorage.getColumnByteData as function(any): any)(canonical)
+            if holder ~= nil and e.layout.identity then
+                -- Direct upload: the column's backing ByteData is already in
+                -- std430 layout (identity), so skip the staging translate and
+                -- push it straight to the SSBO.
+                e.buffer.gpuBuffer:setArrayData(holder as love.data.ByteData, 2, 1, rowCount)
+            else
+                e.buffer:flushRange(canonical as C.CData, rowCount)
+            end
         end
     end
 end

@@ -13,6 +13,12 @@ local max <const> = math.max
 local min <const> = math.min
 local select <const> = select
 
+-- Maps a column pointer to the opaque holder that owns its backing memory
+-- (set only for columns allocated through a per-storage allocator, see
+-- `setColumnAllocator`). Weak keys so the entry, and the backing, drop when the
+-- column pointer is no longer referenced.
+local byteDataByColumn <const> = setmetatable({}, {__mode = "k"}) as {any: any}
+
 -- Module definition
 local record FFIStorage
     --- Configuration options for FFI storage.
@@ -36,6 +42,11 @@ local record FFIStorage
     --- in bytes. Used by snapshot migration to materialise saved-schema
     --- structs at load time without going through the full storage setup.
     defineStruct: function(name: string, fields: {{string, string}}): any, integer
+
+    --- The opaque holder owning a column pointer's backing memory, or nil if
+    --- the column was allocated through the default `C.new` path. Used by the
+    --- renderer to upload a column's backing straight to its SSBO.
+    getColumnByteData: function(column: any): any
 end
 
 -- Growth constants for component storage
@@ -173,6 +184,12 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
     assert(type(def.fields[1]) == "table", "FFI storage fields must be in tuple format: {{name, type}, ...}")
 
     schema.validateFields(def.fields as {schema.FieldDef})
+
+    -- Per-storage column allocator. When the renderer marks this component's
+    -- storage GPU-uploadable (via the storage's `setColumnAllocator`), columns
+    -- are allocated through this `fn(byteCount, structName) -> (ptr, holder)`
+    -- so their backing can be a love.data.ByteData. Default nil keeps `C.new`.
+    local columnAllocator: function(integer, string): (any, any) = nil
 
     -- Use provided name or generate one
     local structName = def.name
@@ -403,7 +420,14 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
     local function growArray<T>(oldArray: C.CData, usedCount: integer, neededCapacity: integer): T
         local newCapacity = neededCapacity
         -- Allocate new array with padding at index 0
-        local newArray = C.new(arrayType as C.CType, newCapacity + 1)
+        local newArray: C.CData
+        if columnAllocator then
+            local ptr, holder = columnAllocator((newCapacity + 1) * structSize, structName)
+            byteDataByColumn[ptr] = holder
+            newArray = ptr as C.CData
+        else
+            newArray = C.new(arrayType as C.CType, newCapacity + 1)
+        end
 
         -- Copy old data if exists
         if oldArray and usedCount > 0 then
@@ -434,7 +458,14 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
         createColumn = function(_self: Storage, size: integer): {types.components.Component}
             -- Allocate FFI array with aggressive initial sizing
             local capacity = max(INITIAL_CAPACITY, size * 2)
-            local data = C.new(arrayType as C.CType, capacity + 1)  -- +1 for padding at index 0
+            local data: C.CData
+            if columnAllocator then
+                local ptr, holder = columnAllocator((capacity + 1) * structSize, structName)
+                byteDataByColumn[ptr] = holder
+                data = ptr as C.CData
+            else
+                data = C.new(arrayType as C.CType, capacity + 1)  -- +1 for padding at index 0
+            end
 
             -- Store metadata
             storageMetadata[data] = {
@@ -488,6 +519,15 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
                 return growArray(column as C.CData, usedCount, newCapacity)
             end
             return column
+        end,
+
+        -- Route this storage's column allocation through `fn`, so its columns
+        -- can be backed by GPU-uploadable memory (see `byteDataByColumn` /
+        -- `getColumnByteData`). Set by the renderer for GPU-mirrored
+        -- components. Columns created before this is set keep their backing
+        -- until they next grow.
+        setColumnAllocator = function(_self: Storage, fn: function(integer, string): (any, any))
+            columnAllocator = fn
         end,
 
         -- Provide a constructor that will be used by newComponent
@@ -566,6 +606,10 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
             return instance as types.components.Component
         end
     } as Storage
+end
+
+function FFIStorage.getColumnByteData(column: any): any
+    return byteDataByColumn[column]
 end
 
 return FFIStorage

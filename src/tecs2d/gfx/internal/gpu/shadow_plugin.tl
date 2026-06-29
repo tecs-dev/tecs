@@ -29,6 +29,7 @@ local shadow_state <const> = require("tecs2d.gfx.internal.gpu.shadow_state")
 local shadow_render_state <const> = require("tecs2d.gfx.internal.gpu.shadow_render_state")
 local shadow_dispatch <const> = require("tecs2d.gfx.internal.gpu.shadow_dispatch")
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
+local gpu_backing <const> = require("tecs2d.gfx.internal.gpu.gpu_backing")
 local Material <const> = require("tecs2d.gfx.internal.Material")
 
 local lg <const> = love.graphics
@@ -111,6 +112,17 @@ function shadow_plugin.register(world: tecs.World, descriptor: shadow_plugin.Sha
         return
     end
     local gpuRenderer = renderer as gpuTypes.Renderer
+
+    -- Back identity-layout component storages with ByteData so the shadow path
+    -- uploads them straight to their SSBO with no staging copy. Runs at install
+    -- (before the game plugin spawns), so the columns are ByteData from the
+    -- start. Non-identity layouts and non-FFI storages are skipped.
+    gpu_backing.enable(Transform, std430.layouts.Transform as {string:any})
+    gpu_backing.enable(descriptor.primary, descriptor.primaryLayout as {string:any})
+    for i = 1, #descriptor.optional do
+        local b = descriptor.optional[i]
+        gpu_backing.enable(b.component, b.layout as {string:any})
+    end
 
     local DEFAULT_CAPACITY <const> = 4096
     local initialCapacity = gpuRenderer.config.sizeHints[descriptor.sizeHintKey] or DEFAULT_CAPACITY

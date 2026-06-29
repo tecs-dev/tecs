@@ -23,6 +23,7 @@ local archetype_registry <const> = require("tecs2d.gfx.internal.archetype_regist
 local shadow_state <const> = require("tecs2d.gfx.internal.gpu.shadow_state")
 local shadow_render_state <const> = require("tecs2d.gfx.internal.gpu.shadow_render_state")
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
+local gpu_backing <const> = require("tecs2d.gfx.internal.gpu.gpu_backing")
 local Material <const> = require("tecs2d.gfx.internal.Material")
 
 local Transform <const> = tecs.builtins.Transform
@@ -87,6 +88,12 @@ function shadow_setup.register(world: tecs.World, config: shadow_setup.Config): 
 
     local text <const> = config.text
     local specs <const> = buildSpecs(text, config.optional)
+
+    -- Back identity-layout columns (Transform, ...) with ByteData so the shadow
+    -- path uploads them straight to their SSBO. Install-time, before spawn.
+    for comp, layout in pairs(specs) do
+        gpu_backing.enable(comp, layout as {string:any})
+    end
 
     local shadowRegistry = archetype_registry.new(world, {
         name = config.registryName,
