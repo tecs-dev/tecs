@@ -7,12 +7,38 @@ Does it in well under a second by keeping the Teal compiler loaded.
 ]]
 
 local tl = require("tl")
+local ok_lfs, lfs = pcall(require, "lfs")
 
 local SPEC_DIR = "spec"
 local OUT_PREFIX = "build/test_deps"
 
+local function path_join(a, b)
+    if a == "" then return b end
+    return a .. "/" .. b
+end
+
+local function find_spec_files_lfs(root, files)
+    for name in lfs.dir(root) do
+        if name ~= "." and name ~= ".." then
+            local path = path_join(root, name)
+            local mode = lfs.attributes(path, "mode")
+            if mode == "directory" then
+                find_spec_files_lfs(path, files)
+            elseif mode == "file" and path:match("%.tl$") then
+                files[#files + 1] = path
+            end
+        end
+    end
+end
+
 local function find_spec_files()
     local files = {}
+    if ok_lfs then
+        find_spec_files_lfs(SPEC_DIR, files)
+        table.sort(files)
+        return files
+    end
+
     local handle = io.popen("find " .. SPEC_DIR .. " -name '*.tl' 2>/dev/null")
     if not handle then return files end
     for line in handle:lines() do
@@ -36,7 +62,17 @@ end
 local function write_file(path, content)
     local dir = path:match("(.+)/[^/]+$")
     if dir then
-        os.execute("mkdir -p '" .. dir .. "'")
+        if ok_lfs then
+            local current = ""
+            for part in dir:gmatch("[^/]+") do
+                current = path_join(current, part)
+                if lfs.attributes(current, "mode") ~= "directory" then
+                    assert(lfs.mkdir(current))
+                end
+            end
+        else
+            os.execute("mkdir -p '" .. dir .. "'")
+        end
     end
     local fh, err = io.open(path, "w")
     if not fh then error(err) end
@@ -49,6 +85,10 @@ local function output_path_for(input)
 end
 
 local function file_mtime(path)
+    if ok_lfs then
+        return lfs.attributes(path, "modification") or 0
+    end
+
     local handle = io.popen("stat -f %m '" .. path .. "' 2>/dev/null || stat -c %Y '" .. path .. "' 2>/dev/null")
     if not handle then return 0 end
     local result = handle:read("*a")
