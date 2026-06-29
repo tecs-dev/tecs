@@ -416,13 +416,18 @@ function SpriteBucketSync:sync(_dt: number)
                 end
             end
 
-            -- Dirty path: resolve sprite-instance derived metadata
-            -- (UV / pivot / animation params / textureSlice) and write
-            -- it to the SpriteData column for the shadow cull shader
-            -- to read. Component-dirty granularity drives a full
-            -- archetype walk when any component changed since the
-            -- last frame.
-            if archetype:anyComponentDirty() then
+            -- Dirty path: resolve sprite-instance derived metadata (UV,
+            -- pivot, animation params, textureSlice) into the SpriteData
+            -- column for the cull shader. Gate on the components this
+            -- metadata derives from, not anyComponentDirty(): a transform
+            -- change (movement) must not trigger this full per-row walk,
+            -- since no output depends on position/rotation/scale (scale is
+            -- applied in the cull shader). The bulk transform mirror still
+            -- re-uploads.
+            if archetype:isComponentDirty(spriteComponent)
+                or archetype:isComponentDirty(bucketComponent)
+                or (repeatedSpriteComponent ~= nil
+                    and archetype:isComponentDirty(repeatedSpriteComponent)) then
                 local sprites = archetype:get(spriteComponent) as {SpriteData}
                 local spriteDatas = archetype:getMut(self.spriteDataComponent) as {SpriteDataFFI}
 
