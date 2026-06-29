@@ -50,10 +50,6 @@ local SPAWN_COUNT <const> = getSpawnCount()
 local WARMUP <const> = envNum("BENCH_WARMUP", 2.0)
 local MEASURE <const> = envNum("BENCH_MEASURE", 5.0)
 local MOVE <const> = envNum("BENCH_MOVE", 1) ~= 0
--- Profiling: "full" writes the transform column (dirty -> GPU upload);
--- "scratch" runs the same math into a throwaway array (loop cost only, no
--- upload); "touch" marks the column dirty without recomputing (upload only).
-local MOVEMODE <const> = os.getenv("BENCH_MOVEMODE") or "full"
 
 -- Split: first VIS sprites are visible, the rest are parked off-screen.
 -- BENCH_SPLIT=0 puts all sprites in the visible grid (no culled half).
@@ -91,8 +87,12 @@ local function benchPlugin(world: tecs.World)
     local SpriteComponent <const> = Sprite.Sprite
 
     -- Per-sprite base position, precomputed once (1-indexed, by column row).
+    -- ofsX/ofsY hold the orbit offset vector (used by the incremental-rotation
+    -- movement path; see BENCH_INCREMENTAL).
     local baseX: {number} = {}
     local baseY: {number} = {}
+    local ofsX: {number} = {}
+    local ofsY: {number} = {}
 
     world:batchSpawn(SPAWN_COUNT,
         {Transform as tecs.Component, SpriteComponent as tecs.Component},
@@ -104,6 +104,9 @@ local function benchPlugin(world: tecs.World)
                 local bx, by = baseFor(idx)
                 baseX[i] = bx
                 baseY[i] = by
+                local ph = idx * 0.001
+                ofsX[i] = sin(ph) * AMP
+                ofsY[i] = cos(ph) * AMP
                 local t = transforms[i]
                 t.x = bx
                 t.y = by
@@ -136,43 +139,30 @@ local function benchPlugin(world: tecs.World)
     end
     cam:setZoom(zoom)
 
-    -- Movement: every sprite's transform changes every frame (defeats any
-    -- static-scene dirty-skip). Animation is automatic (GPU, time-driven).
+    -- Movement: every sprite's transform changes every frame, which defeats
+    -- the static-scene dirty-skip. Animation is automatic (GPU, time-driven).
     if MOVE then
-        local scratchX: {number} = {}
-        local scratchY: {number} = {}
         local benchQuery = world:query({include = {SpriteComponent}})
         world:addSystem({
             name = "bench.Move",
             phase = tecs.phases.Update,
-            run = function()
-                local t = love.timer.getTime()
-                local wt = OMEGA * t
-                if MOVEMODE == "scratch" then
-                    -- Same math, throwaway destination: no getMut, no dirty,
-                    -- no GPU upload. Isolates the LuaJIT loop cost.
-                    for i = 1, SPAWN_COUNT do
-                        local ph = (i - 1) * 0.001
-                        scratchX[i] = baseX[i] + sin(wt + ph) * AMP
-                        scratchY[i] = baseY[i] + cos(wt + ph) * AMP
-                    end
-                    return
-                end
-                if MOVEMODE == "touch" then
-                    -- Mark the column dirty (forces full upload) without
-                    -- recomputing. Isolates the upload cost.
-                    for archetype in benchQuery:iter() do
-                        archetype:getMut(Transform)
-                    end
-                    return
-                end
+            run = function(dt: number)
+                -- Every sprite orbits at the same angular rate, so the
+                -- per-frame rotation is shared: compute it once, then rotate
+                -- each sprite's stored offset (no per-sprite trig).
+                local a = OMEGA * dt
+                local c, s = cos(a), sin(a)
                 for archetype, len in benchQuery:iter() do
                     local transforms = archetype:getMut(Transform)
                     for i = 1, len do
-                        local ph = (i - 1) * 0.001
+                        local ox, oy = ofsX[i], ofsY[i]
+                        local nx = ox * c + oy * s
+                        local ny = oy * c - ox * s
+                        ofsX[i] = nx
+                        ofsY[i] = ny
                         local tr = transforms[i]
-                        tr.x = baseX[i] + sin(wt + ph) * AMP
-                        tr.y = baseY[i] + cos(wt + ph) * AMP
+                        tr.x = baseX[i] + nx
+                        tr.y = baseY[i] + ny
                     end
                 end
             end
@@ -180,37 +170,27 @@ local function benchPlugin(world: tecs.World)
     end
 
     -- Timing: warm up, measure a fixed window, print one RESULT line, exit.
+    -- Frame time is the dt the run loop passes (love_timer_step), summed into
+    -- the warmup and measure windows.
     local samples: {number} = {}
     local sumDt = 0.0
     local frames = 0
-    local t0 = -1.0
-    local prev = 0.0
-    local measureStart = -1.0
+    local elapsed = 0.0
+    local measured = 0.0
 
     world:addSystem({
         name = "bench.Timing",
         phase = tecs.phases.Last,
-        run = function()
-            local now = love.timer.getTime()
-            if t0 < 0 then
-                t0 = now
-                prev = now
-                return
-            end
-            local dt = now - prev
-            prev = now
-            local elapsed = now - t0
+        run = function(dt: number)
+            elapsed = elapsed + dt
             if elapsed < WARMUP then
-                return
-            end
-            if measureStart < 0 then
-                measureStart = now
                 return
             end
             samples[#samples + 1] = dt
             sumDt = sumDt + dt
             frames = frames + 1
-            if now - measureStart >= MEASURE then
+            measured = measured + dt
+            if measured >= MEASURE then
                 local meanMs = (sumDt / frames) * 1000.0
                 table.sort(samples)
                 local p99Idx = ceil(0.99 * #samples)
