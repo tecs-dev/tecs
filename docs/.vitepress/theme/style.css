@@ -96,6 +96,28 @@
 }
 
 /**
+ * Hero image: keep the TV inside its column.
+ *
+ * VitePress sizes the hero image at a fixed 320px and nudges it 32px left at
+ * >=960px. In the cramped band just before the layout stacks the image column
+ * is narrower than that, so the TV spilled left under the hero name. Scale the
+ * image to its column and drop the horizontal nudge in the narrow band.
+ * -------------------------------------------------------------------------- */
+
+@media (min-width: 960px) {
+  .VPHero .image-src,
+  .VPHero .image-bg {
+    max-width: 100%;
+  }
+}
+
+@media (min-width: 960px) and (max-width: 1150px) {
+  .VPHero .image-container {
+    transform: translateY(-32px);
+  }
+}
+
+/**
  * Component: Custom Block
  * -------------------------------------------------------------------------- */
 
@@ -152,17 +174,24 @@
     width: auto;
   }
 
+  /* Plain text wordmark: NES-style two-tone red — lighter on top, hard switch
+     to a darker shade ~55% down (like the old TV logo) — plus purple underline. */
   .VPNavBarTitle .title {
-    background: repeating-linear-gradient(
+    background: linear-gradient(
       to bottom,
-      var(--vp-c-brand-1) 0px,
-      var(--vp-c-brand-1) 3px,
-      color-mix(in srgb, var(--vp-c-brand-1) 90%, black) 3px,
-      color-mix(in srgb, var(--vp-c-brand-1) 90%, black) 5px
+      #da6f66 0%,
+      #da6f66 55%,
+      #b1554d 55%,
+      #b1554d 100%
     );
     -webkit-background-clip: text;
     background-clip: text;
+    color: transparent;
     -webkit-text-fill-color: transparent;
+    text-decoration: underline;
+    text-decoration-color: var(--vp-c-brand-1);
+    text-decoration-thickness: 3px;
+    text-underline-offset: 5px;
   }
 
   .title {
@@ -294,23 +323,6 @@
       transparent 120px
     );
     pointer-events: none;
-  }
-
-  .VPNavBarTitle .title span {
-    color: var(--tecs-c-crimson) !important;
-  }
-
-  .VPNavBarTitle .title {
-    background: repeating-linear-gradient(
-      to bottom,
-      var(--tecs-c-crimson) 0px,
-      var(--tecs-c-crimson) 3px,
-      color-mix(in srgb, var(--tecs-c-crimson) 85%, black) 3px,
-      color-mix(in srgb, var(--tecs-c-crimson) 85%, black) 5px
-    );
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
   }
 
   .outline-marker {

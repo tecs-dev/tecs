@@ -55,8 +55,7 @@ export default defineConfig({
   themeConfig: {
     // https://vitepress.dev/reference/default-theme-config
 
-    logo: '/images/logo.svg',
-    siteTitle: false,
+    siteTitle: 'Tecs',
 
     search: {
       provider: 'local'
