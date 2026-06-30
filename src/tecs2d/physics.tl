@@ -764,7 +764,8 @@ function physics.new(config: physics.Config): tecs.Plugin
                             local rb = rigidBodies[i]
                             local entityId = entities[i]
 
-                            local body = love.physics.newBody(physicsWorld, t.x, t.y, "dynamic")
+                            local bodyType = (rb.bodyType or "dynamic") as love.physics.BodyType
+                            local body = love.physics.newBody(physicsWorld, t.x, t.y, bodyType)
 
                             body:setLinearDamping(rb.drag)
                             body:setAngularDamping(rb.angularDrag)
