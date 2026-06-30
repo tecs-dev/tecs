@@ -307,6 +307,18 @@ function gfx.newPipeline(config: pipeline.RenderConfig): types.Pipeline
     config.world:addPlugin(BlendMode.plugin)
     config.world:addPlugin(lightMod.plugin)
     config.world:addPlugin(tileChunkMod.plugin)
+
+    -- Warm every loaded sprite sheet's GPU texture bucket once, before the first
+    -- frame renders, so the first sprite using a sheet doesn't hitch while its
+    -- texture array is built. Runs automatically; games don't call preloadAll.
+    config.world:addSystem({
+        name = "tecs2d.PreloadSpriteBuckets",
+        phase = tecs.phases.PostStartup,
+        run = function()
+            sprite_sheet.SpriteSheet.preloadAll()
+        end,
+    })
+
     return result
 end
 

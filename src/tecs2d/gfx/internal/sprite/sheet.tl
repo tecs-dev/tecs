@@ -2,6 +2,7 @@
 --- Parses Aseprite JSON format for frame data, tags, and slices.
 local json <const> = require("tecs.utils.json")
 local C <const> = require("ffi")
+local bucket_manager <const> = require("tecs2d.gfx.internal.sprite.bucket_manager")
 
 -- FFI struct for pre-computed UV coordinates (16 bytes, cache-friendly)
 C.cdef[[
@@ -199,6 +200,12 @@ local record sprite_sheet
         --- @param id The sheet ID
         --- @return The SpriteSheet, or nil if not found
         getById: function(id: integer): SpriteSheet
+
+        --- Allocate the GPU texture bucket for every loaded sheet up front,
+        --- so the first sprite using a sheet doesn't hitch while its texture
+        --- array is created. Call once at startup (e.g. a PostStartup system)
+        --- after the render pipeline exists. Idempotent.
+        preloadAll: function()
 
         --- Create a new sheet from Love2D image and data.
         --- @param image The Love2D image
@@ -608,6 +615,20 @@ end
 -- Module-level function to get sheet by ID
 function SpriteSheet.getById(id: integer): sprite_sheet.SpriteSheet
     return sheetRegistry[id]
+end
+
+function SpriteSheet.preloadAll()
+    local mgr <const> = bucket_manager.get()
+    if not mgr then return end
+    for _, sheet in pairs(sheetRegistry) do
+        mgr:allocate(
+            sheet:getId(),
+            sheet:getImage(),
+            sheet:getNormalImage(),
+            sheet:getEmissionImage(),
+            sheet:getORMImage()
+        )
+    end
 end
 
 function SpriteSheet:getAnimationFrame(tag: string, timeElapsed: number): integer, number
