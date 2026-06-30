@@ -7,6 +7,10 @@ outline: deep
 Tecs is a typed, archetype-based ECS for [LuaJIT](https://luajit.org) and [Teal](https://teal-language.org).
 Tecs is the core of [Tecs2D](/tecs2d/), a Love2D engine.
 
+::: warning Tecs is in preview
+Tecs is not yet stable and may change as development progresses.
+:::
+
 ## Installation
 
 Tecs targets LuaJIT. Install it via [LuaRocks](https://luarocks.org):

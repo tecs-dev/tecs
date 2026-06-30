@@ -1,0 +1,32 @@
+name: Publish dev rock
+
+# Keeps luarocks.org's stored dev rockspecs in sync with the repo. The dev
+# rocks track `main` HEAD at install time, so this only needs to run when a
+# rockspec file itself changes (deps, build config), not on every code change.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '*.rockspec'
+      - '.github/workflows/publish-rock.yml'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: leafo/gh-actions-lua@v11
+        with:
+          luaVersion: "luajit"
+      - uses: leafo/gh-actions-luarocks@v4
+        with:
+          luarocksVersion: "3.12.2"
+      - name: Upload dev rockspecs
+        env:
+          LUAROCKS_API_KEY: ${{ secrets.LUAROCKS_API_KEY }}
+        run: |
+          # --skip-pack: dev rocks resolve the git source at install time, so
+          # we publish only the rockspec. --force overwrites the existing dev-1.
+          luarocks upload --force --skip-pack --api-key="$LUAROCKS_API_KEY" tecs-dev-1.rockspec
+          luarocks upload --force --skip-pack --api-key="$LUAROCKS_API_KEY" tecs2d-dev-1.rockspec
