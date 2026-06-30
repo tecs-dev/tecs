@@ -65,7 +65,7 @@ export default defineConfig({
     sidebar: [
       {
         text: 'Tecs',
-        collapsed: true,
+        collapsed: false,
         items: [
           { text: 'Getting Started', link: '/tecs/' },
           { text: 'World', link: '/tecs/world' },
@@ -121,7 +121,7 @@ export default defineConfig({
       },
       {
         text: 'Tecs2D',
-        collapsed: true,
+        collapsed: false,
         items: [
           { text: 'Getting Started', link: '/tecs2d/' },
           { text: 'Love2D Integration', link: '/tecs2d/love2d' },
