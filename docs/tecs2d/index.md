@@ -14,9 +14,10 @@ The fastest way to start is the [starter template](https://github.com/tecs-dev/t
 
 You will need to install these tools to use Tecs2D:
 
+* **Lua**: Runs the starter build script
 * **LuaRocks**: Lua package manager - [Installation](https://github.com/luarocks/luarocks/blob/main/docs/download.md)
 * **Teal**: Typed Lua compiler - [Download](https://teal-language.org/#download)
-* **[LÖVE 12](https://love2d.org)**: Game runtime. LÖVE 12 is not yet a stable release, so Tecs2D targets [nightly builds](https://nightly.link/love2d/love/workflows/main/main)
+* **[LÖVE 12](https://love2d.org)**: Game runtime. LÖVE 12 is not yet a stable release, so Tecs2D targets [nightly builds](https://nightly.link/love2d/love/workflows/main/main). The starter downloads this automatically.
 
 Next, install Tecs2D (and Tecs) into your project using a single command:
 
@@ -24,7 +25,7 @@ Next, install Tecs2D (and Tecs) into your project using a single command:
 luarocks install --dev --tree=src/vendor --lua-version=5.1 tecs2d
 ```
 
-*While Tecs2D is in preview, `--dev` is required. There are no tagged release yet.*
+*While Tecs2D is in preview, `--dev` is required. There are no tagged releases yet.*
 
 ## Starter template
 
@@ -33,39 +34,41 @@ luarocks install --dev --tree=src/vendor --lua-version=5.1 tecs2d
 ```bash [Git Clone]
 git clone https://github.com/tecs-dev/tecs-starter.git my-game
 cd my-game
-make run
+./tecs run
 ```
 
 ```bash [GitHub CLI]
 gh repo create my-game --template tecs-dev/tecs-starter --clone
 cd my-game
-make run
+./tecs run
 ```
 
 :::
 
-You should see a demo with a movable player.
+You should see the scrolling shooter demo.
 
 ### What's included
 
 The starter template comes pre-configured with:
 
-- **Makefile** - Incremental builds, asset copying, dependency management
+- **`tecs` CLI** - Cross-platform setup, checking, builds, asset copying, dependency management, and launching
 - **tlconfig.lua** - Teal compiler configuration
 - **Type definitions** - Downloaded automatically for Love2D, LuaJIT FFI, etc.
-- **Demo game** - Simple player movement with camera follow
+- **Demo game** - A small fixed-camera scrolling shooter built from focused plugins and state systems
 
 ### Project structure
 
 ```
 my-game/
-├── Makefile              # Build orchestration
+├── tecs                  # Cross-platform build orchestration
 ├── tlconfig.lua          # Teal configuration
 ├── src/
 │   ├── main.tl           # Game entry point
 │   ├── conf.tl           # Love2D configuration
 │   └── plugins/
-│       └── game.tl       # Game logic
+│       ├── game.tl       # Game setup and shared systems
+│       ├── shared.tl     # Components, constants, and asset preload
+│       └── states/       # Focused state/gameplay plugins
 ├── assets/               # Images, sounds, fonts
 ├── types/                # Type definitions (generated)
 ├── build/                # Compiled output (generated)
@@ -98,15 +101,17 @@ The pure-ECS pieces (`World`, components, queries, systems) come from [Tecs](/te
 adds the engine layer: rendering, audio, input, etc. Install `tecs2d` when you want the full
 engine layer; it depends on `tecs` automatically.
 
-### Make targets
+### Build targets
 
 | Command               | Description                                            |
 | --------------------- | ------------------------------------------------------ |
-| `make run`            | Build and run the game (runs setup automatically)      |
-| `make build`          | Compile without running                                |
-| `make clean`          | Remove build artifacts                                 |
-| `make reset`          | Clean everything, including dependencies and Love2D    |
-| `make love12`         | Re-download Love2D 12                                  |
+| `./tecs run`          | Build and run the game (runs setup automatically)      |
+| `./tecs build`        | Compile without running                                |
+| `./tecs check`        | Typecheck without compiling                            |
+| `./tecs clean`        | Remove build artifacts                                 |
+| `./tecs love12`       | Download or refresh the local Love2D 12 runtime        |
+
+On Windows, use `lua tecs <target>` instead of `./tecs <target>`.
 
 ### Managing dependencies
 

@@ -50,13 +50,15 @@ Install Tecs via [LuaRocks](https://luarocks.org). For typical gamedev, you'll w
 luarocks install --dev --tree=vendor --lua-version=5.1 tecs
 ```
 
-*While Tecs is in preview, `--dev` is required. There are no tagged release yet.*
+*While Tecs is in preview, `--dev` is required. There are no tagged releases yet.*
 
 Require Tecs in your code:
 
 ```teal
 local tecs = require("tecs")
 ```
+
+If you are building a Love2D game and want the engine layer as well, install `tecs2d` instead. It depends on `tecs` automatically and provides rendering, audio, input, physics, UI, and the Love2D loop integration. See [Tecs2D Getting Started](/tecs2d/) for the starter template and build commands.
 
 ## Tecs in a nutshell
 
