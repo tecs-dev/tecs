@@ -49,6 +49,40 @@ jobs:
         eval "$(luarocks path)"
         make test
 
+  test-macos:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup LuaJIT
+      uses: leafo/gh-actions-lua@v11
+      with:
+        luaVersion: "luajit"
+
+    - name: Setup LuaRocks
+      uses: leafo/gh-actions-luarocks@v4
+      with:
+        luarocksVersion: "3.12.2"
+
+    - name: Install dependencies
+      run: |
+        luarocks install busted
+        luarocks install luacov
+        git clone https://github.com/teal-language/tl.git /tmp/tl-dev
+        cd /tmp/tl-dev && git checkout "$TL_REF"
+        luarocks make tl-dev-1.rockspec
+
+    - name: Build project
+      run: |
+        eval "$(luarocks path)"
+        make clean
+        make compile
+
+    - name: Run tests
+      run: |
+        eval "$(luarocks path)"
+        make test
+
   # Windows runs through MSYS2/MinGW64, which provides a coherent POSIX shell
   # plus LuaJIT, LuaRocks, GNU make, and a C toolchain (needed to build
   # busted's C-extension dependencies). The leafo LuaRocks action can't install
