@@ -16,16 +16,21 @@ You will need to install these tools to use Tecs2D:
 
 | Tool           | Description            | Link                                                                              |
 | -------------- | ---------------------- | --------------------------------------------------------------------------------- |
+| **LÖVE 12**    | Game runtime           | [love2d.org](https://love2d.org)                                                  |
 | **LuaRocks**   | Lua package manager    | [Installation](https://github.com/luarocks/luarocks/blob/main/docs/download.md)   |
 | **Teal**       | Typed Lua compiler     | [Download](https://teal-language.org/#download)                                   |
 
-And install Tecs2D into your project:
+LÖVE 12 is not yet a stable release, so Tecs2D targets the nightly builds. You don't need to install it yourself
+when using the starter template path: `make run` (and the starter's `make love12` target) downloads the configured
+LÖVE 12 nightly automatically.
+
+And install Tecs2D (and Tecs) into your project using a single command:
 
 ```bash
-luarocks install --tree=vendor --lua-version=5.1 tecs2d
+luarocks install --dev --tree=src/vendor --lua-version=5.1 tecs2d
 ```
 
-This installs the `tecs2d` rock and pulls in the core `tecs` rock as a dependency.
+*While Tecs2D is in preview, `--dev` is required. There are no tagged release yet.*
 
 ## Installation
 
@@ -80,7 +85,6 @@ my-game/
 ```teal
 local tecs <const> = require("tecs")
 local tecs2d <const> = require("tecs2d")
-local gfx <const> = require("tecs2d.gfx")
 
 local function game(world: tecs.World)
     -- register components, spawn entities, add systems
@@ -89,10 +93,10 @@ end
 love.run = tecs2d.run({
     fps = 60,
     game = game,
-    render = gfx.newRenderConfig({
+    render = {
         virtualWidth = 800,
         virtualHeight = 600,
-    }),
+    },
 })
 ```
 

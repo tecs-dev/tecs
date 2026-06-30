@@ -13,22 +13,46 @@ Tecs is not yet stable and may change as development progresses.
 
 ## Installation
 
-Tecs targets LuaJIT. Install it via [LuaRocks](https://luarocks.org):
+First, install LuaJIT and LuaRocks if you haven't already:
 
-```bash
-luarocks install tecs
+::: code-group
+
+```bash [macOS]
+brew install luajit luarocks
 ```
 
-For typical gamedev, you'll want a self-contained build:
-
-```bash
-luarocks install --tree=vendor --lua-version=5.1 tecs
+```bash [Debian/Ubuntu]
+sudo apt install luajit libluajit-5.1-dev luarocks
 ```
 
-If you want the LÖVE2D engine layer as well, install `tecs2d` instead. That rock depends on `tecs`
-and provides `require("tecs2d")`, `require("tecs2d.gfx")`, and the other engine modules.
+```bash [Arch]
+sudo pacman -S luajit luarocks
+```
 
-Require it in your code:
+```powershell [Windows]
+scoop install luajit luarocks
+```
+
+```bash [Source]
+# LuaJIT build guide: https://luajit.org/install.html
+git clone https://github.com/LuaJIT/LuaJIT.git
+cd LuaJIT && make && sudo make install
+
+# Then install LuaRocks:
+# https://github.com/luarocks/luarocks/blob/main/docs/download.md
+```
+
+:::
+
+Install Tecs via [LuaRocks](https://luarocks.org). For typical gamedev, you'll want a self-contained build:
+
+```bash
+luarocks install --dev --tree=vendor --lua-version=5.1 tecs
+```
+
+*While Tecs is in preview, `--dev` is required. There are no tagged release yet.*
+
+Require Tecs in your code:
 
 ```teal
 local tecs = require("tecs")
