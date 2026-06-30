@@ -31,33 +31,12 @@ make dev             # Install LuaRocks dev deps, docs deps, then run an initial
 make docs-dev        # Run the VitePress docs dev server
 make check-examples  # Type-check the example projects
 make build-examples  # Build the example projects
+make help            # List all targets, including every example
 ```
 
-Examples are usually run via `make example-<name>`. The current Makefile includes targets such as:
-
-- `make example-audio`
-- `make example-ball-bench`
-- `make example-camera-multi`
-- `make example-camera-target`
-- `make example-circles`
-- `make example-layer-fx`
-- `make example-lighting`
-- `make example-material-demo`
-- `make example-mesh-demo`
-- `make example-msdf-text`
-- `make example-orbiting-shapes`
-- `make example-physics`
-- `make example-save-game`
-- `make example-shape-bench`
-- `make example-sprite-collision`
-- `make example-sprite-onloop`
-- `make example-text-bench`
-- `make example-tiled`
-- `make example-transform-demo`
-- `make example-tween-demo`
-- `make example-ui`
-
-If a target needs GPU features, the Makefile auto-downloads the configured LÖVE 12 nightly into `bin/love2d/`.
+Examples run via `make example-<name>` (e.g. `make example-lighting`, `make example-tiled`). Run `make help` for
+the full, current list. If a target needs GPU features, the Makefile auto-downloads the configured LÖVE 12 nightly
+into `bin/love2d/`.
 
 ## Project Structure
 
@@ -71,12 +50,16 @@ tecs/
 │   │   └── utils/
 │   └── tecs2d/            # LÖVE2D/game-engine layer
 │       ├── init.tl
-│       ├── gfx/
+│       ├── assets/
 │       ├── audio/
 │       ├── controller.tl
+│       ├── events.tl
+│       ├── gfx/
 │       ├── input.tl
+│       ├── internal/
 │       ├── mcp/
 │       ├── physics.tl
+│       ├── stats.tl
 │       ├── tiled/
 │       ├── tween.tl
 │       └── ui/

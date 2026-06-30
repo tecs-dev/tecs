@@ -11,9 +11,9 @@ description = {
     summary = "LÖVE2D game-engine layer for the Tecs ECS framework",
     detailed = [[
 Tecs2D is the LÖVE2D-facing game-engine layer built on top of the Tecs ECS core.
-It provides a GPU-driven render pipeline (LÖVE 12), input, audio, tweens, a
-controller plugin, tiled-map support, a UI plugin, and MCP tooling for
-introspection and live editing.
+It provides a GPU-driven render pipeline (LÖVE 12) with deferred lighting and
+shadows, input, audio, physics, tweens, a controller plugin, tiled-map support,
+a UI plugin, and MCP tooling for introspection and live editing.
 
 The renderer-agnostic ECS core is shipped separately in the `tecs` rock and is
 declared as a dependency.

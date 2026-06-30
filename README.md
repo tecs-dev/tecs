@@ -87,7 +87,7 @@ local query: tecs.Query = world:query({include = {Position, Velocity}})
 world:addSystem({
     phase = tecs.phases.Update,
     run = function(dt: number)
-        for archetype: tecs.Archetype, len: integer in query:iter() do
+        for archetype, len in query:iter() do
             local positions = archetype[Position]
             local velocities = archetype[Velocity]
             for row = 1, len do
