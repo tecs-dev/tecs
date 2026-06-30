@@ -104,14 +104,12 @@
  * image to its column and drop the horizontal nudge in the narrow band.
  * -------------------------------------------------------------------------- */
 
-@media (min-width: 960px) {
+@media (min-width: 960px) and (max-width: 1150px) {
   .VPHero .image-src,
   .VPHero .image-bg {
     max-width: 100%;
   }
-}
 
-@media (min-width: 960px) and (max-width: 1150px) {
   .VPHero .image-container {
     transform: translateY(-32px);
   }
