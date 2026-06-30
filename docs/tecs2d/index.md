@@ -14,17 +14,11 @@ The fastest way to start is the [starter template](https://github.com/tecs-dev/t
 
 You will need to install these tools to use Tecs2D:
 
-| Tool           | Description            | Link                                                                              |
-| -------------- | ---------------------- | --------------------------------------------------------------------------------- |
-| **LÖVE 12**    | Game runtime           | [love2d.org](https://love2d.org)                                                  |
-| **LuaRocks**   | Lua package manager    | [Installation](https://github.com/luarocks/luarocks/blob/main/docs/download.md)   |
-| **Teal**       | Typed Lua compiler     | [Download](https://teal-language.org/#download)                                   |
+* **LuaRocks**: Lua package manager - [Installation](https://github.com/luarocks/luarocks/blob/main/docs/download.md)
+* **Teal**: Typed Lua compiler - [Download](https://teal-language.org/#download)
+* **[LÖVE 12](https://love2d.org)**: Game runtime. LÖVE 12 is not yet a stable release, so Tecs2D targets [nightly builds](https://nightly.link/love2d/love/workflows/main/main)
 
-LÖVE 12 is not yet a stable release, so Tecs2D targets the nightly builds. You don't need to install it yourself
-when using the starter template path: `make run` (and the starter's `make love12` target) downloads the configured
-LÖVE 12 nightly automatically.
-
-And install Tecs2D (and Tecs) into your project using a single command:
+Next, install Tecs2D (and Tecs) into your project using a single command:
 
 ```bash
 luarocks install --dev --tree=src/vendor --lua-version=5.1 tecs2d
@@ -32,7 +26,7 @@ luarocks install --dev --tree=src/vendor --lua-version=5.1 tecs2d
 
 *While Tecs2D is in preview, `--dev` is required. There are no tagged release yet.*
 
-## Installation
+## Starter template
 
 ::: code-group
 
@@ -52,7 +46,7 @@ make run
 
 You should see a demo with a movable player.
 
-## What's included
+### What's included
 
 The starter template comes pre-configured with:
 
@@ -78,7 +72,7 @@ my-game/
 └── src/vendor/           # Dependencies (generated)
 ```
 
-## Wiring up Tecs2D
+### Wiring up Tecs2D
 
 `tecs2d.run` configures the world, render pipeline, and game plugin, then takes over Love2D's main loop:
 
@@ -104,7 +98,7 @@ The pure-ECS pieces (`World`, components, queries, systems) come from [Tecs](/te
 adds the engine layer: rendering, audio, input, etc. Install `tecs2d` when you want the full
 engine layer; it depends on `tecs` automatically.
 
-## Make targets
+### Make targets
 
 | Command               | Description                                            |
 | --------------------- | ------------------------------------------------------ |
@@ -114,7 +108,7 @@ engine layer; it depends on `tecs` automatically.
 | `make reset`          | Clean everything, including dependencies and Love2D    |
 | `make love12`         | Re-download Love2D 12                                  |
 
-## Managing dependencies
+### Managing dependencies
 
 ```bash
 # Add a package
