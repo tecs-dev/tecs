@@ -8,7 +8,7 @@
 
 Converts world coordinates to tile coordinates.
 
-```lua
+```teal
 local tileX, tileY = tilemapData:worldToTile(worldX, worldY)
 ```
 
@@ -23,7 +23,7 @@ local tileX, tileY = tilemapData:worldToTile(worldX, worldY)
 
 Converts tile coordinates to world coordinates (top-left corner of tile).
 
-```lua
+```teal
 local worldX, worldY = tilemapData:tileToWorld(tileX, tileY)
 ```
 
@@ -40,7 +40,7 @@ local worldX, worldY = tilemapData:tileToWorld(tileX, tileY)
 
 Gets the tile GID at a world position.
 
-```lua
+```teal
 local gid = tilemapData:getTileAt(layerIndex, worldX, worldY)
 ```
 
@@ -56,7 +56,7 @@ local gid = tilemapData:getTileAt(layerIndex, worldX, worldY)
 
 Gets the tile GID at tile coordinates.
 
-```lua
+```teal
 local gid = tilemapData:getTile(layerIndex, tileX, tileY)
 ```
 
@@ -72,7 +72,7 @@ local gid = tilemapData:getTile(layerIndex, tileX, tileY)
 
 Sets a tile at world coordinates. Automatically marks the containing chunk as dirty.
 
-```lua
+```teal
 tilemapData:setTileAt(layerIndex, worldX, worldY, gid)
 ```
 
@@ -87,7 +87,7 @@ tilemapData:setTileAt(layerIndex, worldX, worldY, gid)
 
 Sets a tile at tile coordinates. Automatically marks the containing chunk as dirty.
 
-```lua
+```teal
 tilemapData:setTile(layerIndex, tileX, tileY, gid)
 ```
 
@@ -108,7 +108,7 @@ When you modify a tile, only the containing chunk is marked dirty. The chunk reb
 
 Gets a layer by name.
 
-```lua
+```teal
 local layer = tilemapData:getLayer("Ground")
 ```
 
@@ -122,7 +122,7 @@ local layer = tilemapData:getLayer("Ground")
 
 Gets custom properties for a layer.
 
-```lua
+```teal
 local props = tilemapData:getLayerProperties(layerIndex)
 if props.scrollSpeed then
     -- Use custom property
@@ -139,7 +139,7 @@ end
 
 Gets tile data including custom properties for a specific tile.
 
-```lua
+```teal
 local tileData = tilemapData:getTileProperties(layerIndex, tileX, tileY)
 if tileData and tileData.properties then
     local damage = tileData.properties.damage
@@ -158,7 +158,7 @@ end
 
 ### Layer Types
 
-```lua
+```teal
 for i, layer in ipairs(tilemap.data.layers) do
     if layer.type == "tilelayer" then
         -- Has layer.data (tile GIDs)
@@ -174,7 +174,7 @@ end
 
 ### Collision Check
 
-```lua
+```teal
 local SOLID_TILES = { [1] = true, [2] = true, [3] = true }
 
 local function isSolid(data, worldX, worldY)
@@ -185,7 +185,7 @@ end
 
 ### Remove Tile on Click
 
-```lua
+```teal
 local screenX, screenY = love.mouse.getPosition()
 local worldX, worldY = camera:toWorld(screenX, screenY)
 tilemapData:setTileAt(1, worldX, worldY, 0)
@@ -197,7 +197,7 @@ tilemapData:setTileAt(1, worldX, worldY, 0)
 
 Exports the tilemap to Tiled-compatible JSON.
 
-```lua
+```teal
 local json = tilemapData:toJSON(pretty)
 ```
 
@@ -207,7 +207,7 @@ local json = tilemapData:toJSON(pretty)
 
 **Returns:** `string` - JSON string compatible with Tiled editor
 
-```lua
+```teal
 -- Save modified map
 local json = tilemapData:toJSON(true)
 love.filesystem.write("saved_map.tmj", json)

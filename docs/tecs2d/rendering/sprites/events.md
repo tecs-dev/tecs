@@ -24,13 +24,13 @@ world's event system.
 
 ### Examples
 
-```lua
+```teal
 world:observe(entityId, gfx.ChangeTag, function(event)
     print("Entity", event.entity, "changed from", event.oldTag, "to", event.newTag)
 end)
 ```
 
-```lua
+```teal
 world:observe(entityId, gfx.ChangeTag, function(event)
     if event.newTag == "death" then
         world:remove(entityId, PlayerController)
@@ -38,7 +38,7 @@ world:observe(entityId, gfx.ChangeTag, function(event)
 end)
 ```
 
-```lua
+```teal
 local sounds = {
     walk = love.audio.newSource("sounds/footsteps.ogg", "static"),
     attack = love.audio.newSource("sounds/sword.ogg", "static"),
@@ -59,7 +59,7 @@ Direct constructors such as `gfx.ChangeTag(...)` allocate a fresh event instance
 `world:emit(entityId, gfx.ChangeTag, ...)`, which reuses world-local storage and should be treated as callback-local. Do
 not store references to event objects received from observers.
 
-```lua
+```teal
 local lastTag = ""
 
 world:observe(entityId, gfx.ChangeTag, function(event)

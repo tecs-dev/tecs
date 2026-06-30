@@ -11,7 +11,7 @@ Utility functions for common layout patterns.
 
 Position children in a vertical stack:
 
-```lua
+```teal
 local ui = require("tecs2d.ui")
 
 -- Stack with 10px spacing, starting at Y=0
@@ -28,7 +28,7 @@ Children must have `RelativeTransform` and optionally `LayoutBox` components. Th
 
 Position children in a horizontal row:
 
-```lua
+```teal
 -- Row with 10px spacing, starting at X=0
 ui.stackHorizontal(world, {child1, child2, child3}, 10)
 
@@ -40,7 +40,7 @@ ui.stackHorizontal(world, children, 10, 20)
 
 Calculate the bounding box of children:
 
-```lua
+```teal
 local width, height = ui.measureContent(world, children)
 ```
 

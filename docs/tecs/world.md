@@ -11,19 +11,19 @@ the game loop, acting as the central hub for your Tecs application.
 
 Interact with `World` through the `tecs` module.
 
-```lua
+```teal
 local tecs = require("tecs")
 ```
 
 Create a World that by default updates at 60 FPS using default configuration:
 
-```lua
+```teal
 local world = tecs.newWorld()
 ```
 
 Create a World that updates at 30 FPS:
 
-```lua
+```teal
 local world = tecs.newWorld({
     timestep = 1 / 30
 })
@@ -48,7 +48,7 @@ When using `tecs2d`, the game loop calls `update` and all world lifecycle method
 Runs all phases of the game loop. Call this each frame with the time elapsed since the last update.
 Any pending changes are committed before the frame begins.
 
-```lua
+```teal
 function World:update(dt: number)
 ```
 
@@ -58,7 +58,7 @@ function World:update(dt: number)
 
 **Example:**
 
-```lua
+```teal
 -- In a custom game loop
 while running do
     local dt = computeDeltaTime()
@@ -70,7 +70,7 @@ end
 
 Runs all systems in the Startup phase group. Call this once before the main game loop begins.
 
-```lua
+```teal
 function World:startup()
 ```
 
@@ -78,7 +78,7 @@ function World:startup()
 
 Runs all systems in the Shutdown phase group. Call this when the game is exiting.
 
-```lua
+```teal
 function World:shutdown()
 ```
 
@@ -99,7 +99,7 @@ The slot indexes into a preallocated per-world allocator that stores each entity
 row. The generation counter bumps every time a slot is despawned and recycled, so a stored id becomes
 stale the moment its slot is reused.
 
-```lua
+```teal
 local a: integer = world:spawn()
 world:despawn(a)
 local b: integer = world:spawn() -- reuses the slot, but with a new generation
@@ -127,7 +127,7 @@ for [`OnDespawn`](/tecs/builtins#ondespawn-event) rather than polling `isAlive`.
 
 Creates a new entity in the World.
 
-```lua
+```teal
 function World:spawn(...: Component): integer
 ```
 
@@ -150,7 +150,7 @@ function World:spawn(...: Component): integer
 
 **Example:**
 
-```lua
+```teal
 -- Spawn an entity with no components:
 local id = world:spawn()
 
@@ -175,7 +175,7 @@ hands you a callback with direct column access to fill in the data. The
 callback itself (placement and observer notifications) are deferred until the
 next commit.
 
-```lua
+```teal
 function World:batchSpawn(
     count: integer,
     componentTypes: {Component},
@@ -218,7 +218,7 @@ either inside the callback or any time before commit. The staged sparse sets dra
 
 **Example:**
 
-```lua
+```teal
 -- Reserve 1000 particles. The callback runs at commit.
 local firstId = world:batchSpawn(1000, {Position, Velocity},
     function(arch, firstRow, lastRow, _count)
@@ -244,7 +244,7 @@ when the allocator is fully exhausted. Returns the list of spawned ids in
 allocation order (fresh first, then free); iterate it explicitly since
 the contiguous-id guarantee no longer holds.
 
-```lua
+```teal
 function World:batchSpawnBestEffort(
     count: integer,
     componentTypes: {Component},
@@ -262,7 +262,7 @@ Like `batchSpawn`, but uses the supplied entity IDs instead of allocating a new
 contiguous range. Intended for snapshot loads where each restored entity keeps
 its original ID.
 
-```lua
+```teal
 function World:batchSpawnAt(
     ids: {integer},
     componentTypes: {Component},
@@ -280,7 +280,7 @@ id carries both the arena slot and the generation counter, so relationship
 targets resolve to the same entity across a save/load cycle. The caller is
 responsible for ensuring the id's slot is not already live.
 
-```lua
+```teal
 function World:spawnAt(id: integer, ...: Component)
 ```
 
@@ -291,7 +291,7 @@ See [Save games](/tecs/save-games) for a complete walkthrough.
 Iterate every archetype in the world. Intended for debugging and save-game
 tools; use `query` for gameplay-level iteration.
 
-```lua
+```teal
 function World:forEachArchetype(callback: function(Archetype))
 ```
 
@@ -299,7 +299,7 @@ function World:forEachArchetype(callback: function(Archetype))
 
 Removes an entity from the World.
 
-```lua
+```teal
 function World:despawn(entity: integer)
 ```
 
@@ -324,7 +324,7 @@ To react to a component leaving an entity, attach
 
 **Example:**
 
-```lua
+```teal
 -- Listen for despawn events
 world:observe(entity, tecs.builtins.OnDespawn, function(e: tecs.builtins.OnDespawn)
     print("Entity " .. e.entity .. " is being despawned")
@@ -342,7 +342,7 @@ archetypes have dense relationships or entities that are targets of
 reverse-indexed relationships, the entire archetype's entity data is wiped in
 one pass instead of processing each entity individually.
 
-```lua
+```teal
 function World:batchDespawn(query: Query)
 ```
 
@@ -375,7 +375,7 @@ the batch queues drain at commit time.
 
 **Example:**
 
-```lua
+```teal
 -- Build a persistent query once, reuse it for repeated bulk passes.
 local dead = world:query({include = {Health, DeadTag}})
 world:batchDespawn(dead)
@@ -390,7 +390,7 @@ world:batchDespawn(bullets)
 Bulk-set a component on every entity matching a query. Two forms:
 
 - **Constant form**: write a shared instance to every matched row:
-  ```lua
+  ```teal
   world:batchSet(query, Stunned)
   world:batchSet(query, Position(0, 0))
   ```
@@ -399,7 +399,7 @@ Bulk-set a component on every entity matching a query. Two forms:
 
 - **Callback form**: ensure the component is present, then let the caller
   write the column directly:
-  ```lua
+  ```teal
   world:batchSet(query, Position, function(arch, firstRow, lastRow, count)
       local positions = arch:getMut(Position)
       for row = firstRow, lastRow do
@@ -408,7 +408,7 @@ Bulk-set a component on every entity matching a query. Two forms:
   end)
   ```
 
-```lua
+```teal
 function World:batchSet(
     query: Query,
     componentOrInstance: Component,
@@ -427,7 +427,7 @@ Bulk-remove a component from every entity matching `query` whose archetype
 currently carries it. Archetypes in the query that lack the component are
 skipped silently (no-op).
 
-```lua
+```teal
 function World:batchRemove(query: Query, componentType: Component)
 ```
 
@@ -444,7 +444,7 @@ been despawned) and shrink overallocated archetype storage. Must be called
 on a quiet world (no pending mutations); call `world:commit()` first if
 unsure.
 
-```lua
+```teal
 function World:compact(): integer, integer
 ```
 
@@ -464,7 +464,7 @@ the pipeline, registered systems, queries (and their observers), bundles,
 and archetype column capacity all survive. Useful for per-test reuse,
 benchmark setup, and save/load "clear before load" flows.
 
-```lua
+```teal
 function World:clearEntities()
 ```
 
@@ -490,7 +490,7 @@ function World:clearEntities()
 
 **Example:**
 
-```lua
+```teal
 -- In a test or bench, reset the state between iterations without
 -- rebuilding the pipeline or re-registering queries.
 local q = world:query({include = {Position}})
@@ -514,7 +514,7 @@ the intent obvious at the call site.
 
 Checks if an entity is alive.
 
-```lua
+```teal
 function World:isAlive(entity: integer): boolean
 ```
 
@@ -532,7 +532,7 @@ When an entity begins despawning, `isAlive` still returns `true` since the despa
 
 **Example:**
 
-```lua
+```teal
 if world:isAlive(entity) then
     world:despawn(entity)
 end
@@ -544,7 +544,7 @@ end
 
 Retrieves a component from an entity.
 
-```lua
+```teal
 function World:get<T is Component>(entity: integer, component: T): T
 ```
 
@@ -559,7 +559,7 @@ function World:get<T is Component>(entity: integer, component: T): T
 
 **Example:**
 
-```lua
+```teal
 -- Get the Position component from an entity.
 local position = world:get(entity, Position)
 
@@ -580,7 +580,7 @@ dirty on the entity's archetype so dirty-gated consumers (shadow pipeline,
 change observers, snapshots) re-process the row after subsequent cdata
 writes.
 
-```lua
+```teal
 function World:getMut<T is Component>(entity: integer, component: T): T
 ```
 
@@ -603,7 +603,7 @@ not at read call sites.
 
 **Example:**
 
-```lua
+```teal
 -- Move an entity in-place: getMut so the renderer flushes Transform.
 local t = world:getMut(entity, tecs.builtins.Transform)
 if t then
@@ -616,7 +616,7 @@ end
 
 Checks whether an entity currently has a component.
 
-```lua
+```teal
 function World:has(entity: integer, component: Component): boolean
 ```
 
@@ -624,7 +624,7 @@ For sparse relationships, passing the relationship container checks whether
 the entity has **any** target for that relationship; passing a relationship
 instance checks for that specific target.
 
-```lua
+```teal
 world:has(entity, Health)                -- any component
 world:has(entity, ChildOf)               -- any parent (sparse relationship)
 world:has(entity, ChildOf(specificParent))  -- that specific parent
@@ -634,7 +634,7 @@ world:has(entity, ChildOf(specificParent))  -- that specific parent
 
 Attaches a component to an entity.
 
-```lua
+```teal
 function World:set(entity: integer, component: Component)
 ```
 
@@ -653,7 +653,7 @@ function World:set(entity: integer, component: Component)
 
 **Example:**
 
-```lua
+```teal
 -- Add a transform component to an entity
 world:set(entity, tecs.builtins.Transform(100, 200))
 ```
@@ -662,7 +662,7 @@ world:set(entity, tecs.builtins.Transform(100, 200))
 
 Removes a component from an entity.
 
-```lua
+```teal
 function World:remove(entity: integer, component: Component)
 ```
 
@@ -672,7 +672,7 @@ function World:remove(entity: integer, component: Component)
 - `component`: The component **type** to remove.
 
 **Example:**
-```lua
+```teal
 -- Remove the Velocity component from an entity
 world:remove(entity, Velocity)
 ```
@@ -686,7 +686,7 @@ read and the dirty mark. Reach for `markComponentDirty` only when you
 already have a column reference from another path (e.g. iterated via a
 query) and need to flag the row dirty without re-fetching.
 
-```lua
+```teal
 function World:markComponentDirty(entity: integer, component: Component)
 ```
 
@@ -707,7 +707,7 @@ Bundles are reusable templates for spawning entities with predefined components.
 
 Creates and registers a bundle for spawning entities with a predefined set of components.
 
-```lua
+```teal
 function World:newBundle(name: string, def?: BundleDef): Bundle
 ```
 
@@ -722,7 +722,7 @@ function World:newBundle(name: string, def?: BundleDef): Bundle
 
 **Example:**
 
-```lua
+```teal
 local playerBundle = world:newBundle("Player", {
     required = { Transform, Health },
     with = {
@@ -739,7 +739,7 @@ are passed positionally in the order they were declared via `:require`.
 Optional components always use their registered factory; they can't be
 overridden at spawn time.
 
-```lua
+```teal
 function World:spawnBundle(name: string, ...: Component): integer
 ```
 
@@ -754,7 +754,7 @@ function World:spawnBundle(name: string, ...: Component): integer
 
 **Example:**
 
-```lua
+```teal
 local entityId = world:spawnBundle("Player",
     Transform(100, 200),
     Health(100)
@@ -765,7 +765,7 @@ local entityId = world:spawnBundle("Player",
 
 Returns a registered bundle by name.
 
-```lua
+```teal
 function World:getBundle(name: string): Bundle
 ```
 
@@ -779,7 +779,7 @@ function World:getBundle(name: string): Bundle
 
 **Example:**
 
-```lua
+```teal
 local playerBundle = world:getBundle("Player")
 
 -- Spawn 1000 entities from the bundle.
@@ -792,7 +792,7 @@ end
 
 Returns all registered bundles as a map.
 
-```lua
+```teal
 function World:getBundles(): {string: Bundle}
 ```
 
@@ -802,7 +802,7 @@ function World:getBundles(): {string: Bundle}
 
 **Example:**
 
-```lua
+```teal
 local bundles = world:getBundles()
 for name, bundle in pairs(bundles) do
     print(name, bundle.required, bundle.defaulted)
@@ -815,7 +815,7 @@ end
 
 Creates a query to find entities with specific components.
 
-```lua
+```teal
 function World:query(descriptor: queries.QueryDescriptor): Query
 ```
 
@@ -829,7 +829,7 @@ function World:query(descriptor: queries.QueryDescriptor): Query
 
 **Example:**
 
-```lua
+```teal
 -- Query for entities with both Transform and Name components
 local query = world:query({
     include = {
@@ -859,7 +859,7 @@ end
 Finds all archetypes that have a specific component, returning an iterator over the matching archetypes.
 This O(1), garbage-free operation works well for ad-hoc queries targeting a single component.
 
-```lua
+```teal
 function World:findArchetypes(component: Component): function(): (Archetype, integer, {integer})
 ```
 
@@ -873,7 +873,7 @@ function World:findArchetypes(component: Component): function(): (Archetype, int
 
 **Example:**
 
-```lua
+```teal
 -- Iterate over all archetypes containing the Name component
 for archetype, len, entities in world:findArchetypes(tecs.builtins.Name) do
     -- Grab component columns.
@@ -942,14 +942,14 @@ Opens a deferred scope. All subsequent mutations stage instead of applying insta
 [`commit`](#commit) closes it. Calls nest: each `defer` increments a depth counter; mutations stage while the
 counter is above zero.
 
-```lua
+```teal
 function World:defer()
 ```
 
 Use `defer` when you want a block of mutations to appear atomically; for example, if a helper wants to
 avoid partial archetype transitions being visible to observers mid-block.
 
-```lua
+```teal
 local function killEntity(world: tecs.World, entity: integer)
     world:defer()
     world:set(entity, HitPoints(0))
@@ -965,7 +965,7 @@ Closes one deferred scope level. When the scope counter reaches zero and the wor
 mutations, the transaction drains: spawns are placed, component moves execute, query observers fire, and
 sparse relationship writes apply.
 
-```lua
+```teal
 function World:commit()
 ```
 
@@ -980,7 +980,7 @@ function World:commit()
 
 **Example:**
 
-```lua
+```teal
 -- Force pending changes to be applied.
 local id: integer = world:spawn(Transform(10, 20))
 world:commit()
@@ -992,7 +992,7 @@ world:commit()
 
 Adds a system to the World.
 
-```lua
+```teal
 function World:addSystem(config: SystemConfig)
 ```
 
@@ -1015,7 +1015,7 @@ function World:addSystem(config: SystemConfig)
 
 Add a system that processes a query to move entities.
 
-```lua
+```teal
 local movableQuery = world:query({
     include = {
         tecs.builtins.Transform,
@@ -1044,7 +1044,7 @@ world:addSystem({
 
 Add a system with conditional execution.
 
-```lua
+```teal
 world:addSystem({
     name = "AmbientSoundSystem",
     phase = tecs.phases.FixedUpdate,
@@ -1060,7 +1060,7 @@ world:addSystem({
 
 Add a system with ordering constraints.
 
-```lua
+```teal
 world:addSystem({
     name = "CollisionSystem",
     phase = tecs.phases.FixedUpdate,
@@ -1078,7 +1078,7 @@ world:addSystem({
 
 Removes a system from the world by name.
 
-```lua
+```teal
 function World:removeSystem(systemName: string)
 ```
 
@@ -1088,7 +1088,7 @@ function World:removeSystem(systemName: string)
 
 **Example:**
 
-```lua
+```teal
 world:removeSystem("StartupSystem")
 ```
 
@@ -1106,7 +1106,7 @@ Use plugins to add systems, components, states, and more to a `World`. Tecs buil
 
 Adds a plugin to the world.
 
-```lua
+```teal
 function World:addPlugin(plugin: function(world: World))
 ```
 
@@ -1116,7 +1116,7 @@ function World:addPlugin(plugin: function(world: World))
 
 **Example:**
 
-```lua
+```teal
 local PHYSICS: tecs.Key<PhysicsConfig> = tecs.newKey()
 
 -- Define a plugin
@@ -1142,7 +1142,7 @@ world:addPlugin(physicsPlugin)
 
 Resources store globally shared data that systems and plugins can access.
 
-```lua
+```teal
 -- Define a resource type
 local record GameSettings
     difficulty: string
@@ -1168,7 +1168,7 @@ print("Difficulty:", settings.difficulty)
 
 You can define resource keys for numbers, strings, and any other type too.
 
-```lua
+```teal
 local GAME_UUID: tecs.Key<string> = tecs.newKey()
 world.resources[GAME_UUID] = "abc"
 ```
@@ -1179,7 +1179,7 @@ world.resources[GAME_UUID] = "abc"
 
 Enable or disable specific phases of the game loop.
 
-```lua
+```teal
 function World:enablePhase(phase: Phase)
 function World:disablePhase(phase: Phase)
 ```
@@ -1190,7 +1190,7 @@ function World:disablePhase(phase: Phase)
 
 **Example:**
 
-```lua
+```teal
 -- Disable all rendering.
 world:disablePhase(tecs.phases.RenderGroup)
 
@@ -1202,7 +1202,7 @@ world:enablePhase(tecs.phases.RenderGroup)
 
 Registers a custom phase with the world's pipeline. This allows external modules to define their own phases.
 
-```lua
+```teal
 function World:registerPhase(phase: Phase)
 ```
 
@@ -1222,7 +1222,7 @@ documentation.
 Creates a named state with an optional lifecycle policy. Returns a tag component
 that is auto-added to entities spawned while this state is on top of the stack.
 
-```lua
+```teal
 function World:createState(name: string, policy?: StatePolicy): Component
 ```
 
@@ -1237,7 +1237,7 @@ function World:createState(name: string, policy?: StatePolicy): Component
 
 **Example:**
 
-```lua
+```teal
 local GameState = world:createState("game", {
     onBlur = "pause",
     onFocus = "resume",
@@ -1250,7 +1250,7 @@ Pushes a state onto the state stack. Fires the previous top state's `onBlur`
 policy and the new state's `onEnter` policy. Entities spawned after this call
 automatically receive the state's tag component.
 
-```lua
+```teal
 function World:pushState(name: string)
 ```
 
@@ -1263,7 +1263,7 @@ function World:pushState(name: string)
 Pops the current state from the state stack. Fires the current state's `onExit`
 policy and the new top state's `onFocus` policy.
 
-```lua
+```teal
 function World:popState()
 ```
 
@@ -1271,13 +1271,13 @@ function World:popState()
 
 Returns the name of the current top state, or `nil` if the stack is empty.
 
-```lua
+```teal
 function World:peekState(): string
 ```
 
 **Example:**
 
-```lua
+```teal
 local current = world:peekState()
 if current == "game" then
     -- in game state
@@ -1294,7 +1294,7 @@ The World provides a centralized event system with address-based routing. Events
 
 Registers an observer for an event at a specific address.
 
-```lua
+```teal
 function World:observe<E is Event>(
     address: integer,
     eventType: E,
@@ -1312,7 +1312,7 @@ function World:observe<E is Event>(
 
 **Example:**
 
-```lua
+```teal
 -- World-level event
 world:observe(0, MyCustomEvent, function(e: MyCustomEvent)
     print("Got MyCustomEvent")
@@ -1328,7 +1328,7 @@ end)
 
 Emits an event to all observers at a specific address.
 
-```lua
+```teal
 function World:emit(address: integer, eventOrType: Event, ...: any)
 ```
 
@@ -1340,7 +1340,7 @@ function World:emit(address: integer, eventOrType: Event, ...: any)
 
 **Example:**
 
-```lua
+```teal
 -- World-level event (no payload)
 world:emit(0, MyCustomEvent)
 
@@ -1355,13 +1355,13 @@ world:emit(entityId, DamageReceived, 15)
 Checks if any observers exist for an event at an address. This is still useful when upstream work is expensive, but you
 usually do not need it just to avoid event construction if you use `world:emit(address, EventType, ...)`.
 
-```lua
+```teal
 function World:hasObservers<E is Event>(address: integer, eventType: E): boolean
 ```
 
 **Example:**
 
-```lua
+```teal
 if world:hasObservers(entityId, DamageReceived) then
     -- Only useful if computing the payload itself is expensive.
     world:emit(entityId, DamageReceived, 15)
@@ -1372,7 +1372,7 @@ end
 
 Stops observing an event at an address.
 
-```lua
+```teal
 function World:stopObserving<E is Event>(
     address: integer,
     eventType: E,
@@ -1388,7 +1388,7 @@ function World:stopObserving<E is Event>(
 
 **Example:**
 
-```lua
+```teal
 -- By callback reference
 world:stopObserving(0, MyEvent, myCallback)
 
@@ -1400,7 +1400,7 @@ world:stopObserving(entityId, OnDespawn, "cleanup-handler")
 
 Clears all observers for an address. This is called automatically when an entity is despawned.
 
-```lua
+```teal
 function World:clearObservers(address: integer)
 ```
 
@@ -1412,7 +1412,7 @@ function World:clearObservers(address: integer)
 
 Get statistics about the World.
 
-```lua
+```teal
 function World:getStats(fill?: world.Stats): world.Stats
 ```
 
@@ -1433,7 +1433,7 @@ function World:getStats(fill?: world.Stats): world.Stats
 
 **Example:**
 
-```lua
+```teal
 -- Create a new stats table
 local stats = world:getStats()
 print("Entities:", stats.entities)

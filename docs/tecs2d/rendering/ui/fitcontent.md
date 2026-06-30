@@ -4,7 +4,7 @@ Auto-sizes a container to fit its children with optional padding.
 
 ## Basic Usage
 
-```lua
+```teal
 local ui = require("tecs2d.ui")
 local FitContent = ui.FitContent
 local LayoutBox = ui.LayoutBox
@@ -39,7 +39,7 @@ world:spawn(
 
 ## Constructor
 
-```lua
+```teal
 -- Uniform padding, no render adjustment
 FitContent(10)
 
@@ -67,7 +67,7 @@ Each frame, FitContent:
 
 FitContent **requires** a LayoutBox component on the same entity. Children must also have LayoutBox for measurement.
 
-```lua
+```teal
 -- This works
 world:spawn(
     Transform(0, 0),
@@ -89,7 +89,7 @@ world:spawn(
 
 FitContent recalculates every frame, so containers automatically resize when children change:
 
-```lua
+```teal
 -- Text changes → container resizes automatically
 local text = world:get(textEntity, Text)
 text:setText("Longer text content!")

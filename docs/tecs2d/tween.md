@@ -7,7 +7,7 @@ outline: deep
 `tecs2d.tween` is an animation system for Tecs. It provides typed interpolators, timeline composition, and easing
 functions for smooth entity animations. The tween plugin is automatically registered by `tecs2d`.
 
-```lua
+```teal
 local tween = require("tecs2d.tween")
 
 -- Move an entity to x=200 over 0.5 seconds
@@ -43,7 +43,7 @@ at module load time and shared everywhere.
 
 You can tween the X and Y position of an entity using `tween.translateXY`.
 
-```lua
+```teal
 tween.timeline()
     :to(0.5, tween.quadOut, tween.translateXY, 200, 100)
     :once()
@@ -52,7 +52,7 @@ tween.timeline()
 
 To tween multiple fields, use a parallel group:
 
-```lua
+```teal
 -- Move and scale simultaneously
 tween.timeline()
     :to(0.5, tween.quadOut, tween.translateXY, 200, 100)
@@ -63,7 +63,7 @@ tween.timeline()
 
 `tween.color` makes it easy to tween the color of an entity to a target color.
 
-```lua
+```teal
 tween.timeline()
     :to(0.5, tween.linear, tween.color, 1, 0, 0, 1) -- tween to red
     :once()
@@ -75,13 +75,13 @@ tween.timeline()
 Creates a reusable interpolator for a single numeric field. Uses state slots `s1` (start) and
 `d1` (delta).
 
-```lua
+```teal
 function tween.field(component: Component, fieldName: string): Interpolator
 ```
 
 **Example:**
 
-```lua
+```teal
 local tweenHealth = tween.field(HealthBar, "fill")
 
 -- Reuse the same interpolator with different targets
@@ -98,13 +98,13 @@ tween.timeline()
 Creates a reusable interpolator for two numeric fields on the same component. Uses state slots
 `s1`, `s2` (starts) and `d1`, `d2` (deltas). Accepts two target values via `:to()`.
 
-```lua
+```teal
 function tween.field2(component: Component, fieldA: string, fieldB: string): Interpolator
 ```
 
 **Example:**
 
-```lua
+```teal
 local tweenSize = tween.field2(MyWidget, "width", "height")
 
 tween.timeline()
@@ -119,7 +119,7 @@ Wraps any interpolator to dynamically track a moving target each frame instead o
 fixed value. The `getTargetFn` returns up to 4 target values; the wrapper recalculates deltas
 from the captured starting state every frame.
 
-```lua
+```teal
 function tween.track(base: Interpolator, getTargetFn: TrackTargetFn): Interpolator
 ```
 
@@ -129,7 +129,7 @@ the underlying interpolator.
 
 **Example: homing projectile**
 
-```lua
+```teal
 local follow = tween.track(tween.translateXY, function(world: tecs.World, _entity: integer)
     local p = world:get(playerEntity, Transform)
     if p then return p.x, p.y end
@@ -173,7 +173,7 @@ Called every frame. `s1`-`s4` are starting values, `d1`-`d4` are deltas.
 | `s1`-`s4`  | `number`  | Starting values captured by `init`                  |
 | `d1`-`d4`  | `number`  | Deltas computed by `init`                           |
 
-```lua
+```teal
 local tweenInnerRadius: tween.Interpolator = {
     init = function(
         world: tecs.World, entity: integer, relative: boolean, t1: number
@@ -215,7 +215,7 @@ Adds an interpolation to the current parallel group. The interpolator is a reusa
 reference and `t1`-`t4` are the target values. Multiple `:to()` calls without a `:step()`
 between them run simultaneously.
 
-```lua
+```teal
 function TimelineBuilder:to(
     self,
     duration: number,
@@ -227,7 +227,7 @@ function TimelineBuilder:to(
 
 **Example:**
 
-```lua
+```teal
 -- These two run in parallel (same start time)
 tween.timeline()
     :to(0.5, tween.quadOut, tween.translateX, 200)
@@ -240,7 +240,7 @@ tween.timeline()
 Like `:to()`, but relative: the values are added to the current values rather than replacing
 them. Uses the same interpolators and participates in parallel groups the same way.
 
-```lua
+```teal
 function TimelineBuilder:adjust(
     self,
     duration: number,
@@ -252,7 +252,7 @@ function TimelineBuilder:adjust(
 
 **Example:**
 
-```lua
+```teal
 -- Move 100 units right from wherever the entity currently is
 tween.timeline()
     :adjust(0.5, tween.quadOut, tween.translateX, 100)
@@ -277,13 +277,13 @@ Without `:step()`, multiple `:to()` calls run simultaneously. With it, they run 
 
 `step` can be called with no arguments.
 
-```lua
+```teal
 function TimelineBuilder:step(self): TimelineBuilder
 ```
 
 **Example:**
 
-```lua
+```teal
 -- Move right, THEN move down (sequential)
 tween.timeline()
     :to(0.5, tween.quadOut, tween.translateX, 200)
@@ -296,13 +296,13 @@ tween.timeline()
 
 You can provide an optional delay in seconds to wait between groups.
 
-```lua
+```teal
 function TimelineBuilder:step(self, delay: number): TimelineBuilder
 ```
 
 **Example:**
 
-```lua
+```teal
 -- Move right, wait 0.2s, then fade out
 tween.timeline()
     :to(0.5, tween.quadOut, tween.translateX, 200)
@@ -317,7 +317,7 @@ You can provide an optional notification callback `function(world, entity)` that
 boundary. This can be useful for triggering sounds, spawning particles, or changing animation frames at transition
 points.
 
-```lua
+```teal
 function TimelineBuilder:step(
     self,
     notify: function(world: tecs.World, entity: integer, handle: tween.TweenHandle)
@@ -326,7 +326,7 @@ function TimelineBuilder:step(
 
 **Example:**
 
-```lua
+```teal
 tween.timeline()
     :to(0.5, tween.quadOut, tween.translateX, 200)
     :step(function(world: tecs.World, entity: integer, handle: tween.TweenHandle)
@@ -340,7 +340,7 @@ tween.timeline()
 
 Pause and callback can be combined.
 
-```lua
+```teal
 function TimelineBuilder:step(
     self,
     delay: number,
@@ -350,7 +350,7 @@ function TimelineBuilder:step(
 
 **Example:**
 
-```lua
+```teal
 tween.timeline()
     :to(0.5, tween.quadOut, tween.translateX, 200)
     :step(0.2, function(world: tecs.World, entity: integer, handle: tween.TweenHandle)
@@ -366,13 +366,13 @@ Inlines another timeline at the current time offset. The sub-timeline's full beh
 preserved: its entries, looping, and pingPong all run as defined. Sub-timelines can themselves
 contain `:run()` calls, enabling arbitrary nesting.
 
-```lua
+```teal
 function TimelineBuilder:run(self, schedule: Timeline, count?: integer): TimelineBuilder
 ```
 
 **Example:**
 
-```lua
+```teal
 -- Define a reusable movement pattern
 local moveRight = tween.timeline()
     :to(0.5, tween.quadOut, tween.translateX, 200)
@@ -391,7 +391,7 @@ local handle = moveRightThenDown:apply(world, entity)
 The optional `count` parameter overrides how many cycles the sub-timeline plays. This is
 required for infinite sub-timelines, since their duration is unbounded (that is, timelines that loops or ping pongs).
 
-```lua
+```teal
 -- An infinite pulse
 local pulse = tween.timeline()
     :to(0.8, tween.sineInOut, tween.scaleX, 1.5)
@@ -415,13 +415,13 @@ Timelines may optionally declare a channel. Applying a timeline with a channel c
 the same entity and channel, then starts the new playback. Timelines without a channel never automatically cancel
 other tweens.
 
-```lua
+```teal
 function TimelineBuilder:channel(self, name: string): TimelineBuilder
 ```
 
 **Example:**
 
-```lua
+```teal
 local moveRight = tween.timeline()
     :channel("movement")
     :to(0.5, tween.quadOut, tween.translateX, 200)
@@ -451,7 +451,7 @@ Sets a callback for when the entire timeline finishes (after all repeats). Recei
 This is distinct from a trailing `:step(fn)`, which fires at the end of *every* cycle
 in a looping timeline.
 
-```lua
+```teal
 function TimelineBuilder:onComplete(
     self, fn: function(world: World, entity: integer, handle: TweenHandle)
 ): TimelineBuilder
@@ -459,7 +459,7 @@ function TimelineBuilder:onComplete(
 
 **Example:**
 
-```lua
+```teal
 tween.timeline()
     :to(0.5, tween.quadOut, tween.translateX, 200)
     :onComplete(function(world: tecs.World, entity: integer, handle: tween.TweenHandle)
@@ -478,7 +478,7 @@ finalized builder will error.
 
 Play through once.
 
-```lua
+```teal
 function TimelineBuilder:once(self): Timeline
 ```
 
@@ -487,7 +487,7 @@ function TimelineBuilder:once(self): Timeline
 Loop the timeline. `count` is the number of additional plays, so `loop(2)` plays 3 times total.
 `loop()` with no argument loops infinitely.
 
-```lua
+```teal
 function TimelineBuilder:loop(self, count?: integer): Timeline
 ```
 
@@ -495,7 +495,7 @@ function TimelineBuilder:loop(self, count?: integer): Timeline
 
 Like `loop()` but reverses direction each cycle. `pingPong()` with no argument loops infinitely.
 
-```lua
+```teal
 function TimelineBuilder:pingPong(self, count?: integer): Timeline
 ```
 
@@ -509,7 +509,7 @@ using `:apply`.
 Clones the frozen definition into a live timeline targeting a specific entity. Returns a handle
 for cancellation. The same definition can be applied to multiple entities independently.
 
-```lua
+```teal
 function Timeline:apply(
     self,
     world: World,
@@ -525,7 +525,7 @@ double speed, `0.5` for half speed.
 The optional `delay` parameter postpones the start of playback by the given number of seconds.
 This is useful for staggering animations across multiple entities while sharing the same schedule.
 
-```lua
+```teal
 local fadeOut = tween.timeline()
     :to(0.5, tween.linear, tween.alpha, 0)
     :once()
@@ -560,13 +560,13 @@ end
 
 Removes the timeline from the active list, stopping the tween immediately.
 
-```lua
+```teal
 function TweenHandle:cancel(self)
 ```
 
 **Example:**
 
-```lua
+```teal
 local handle = pulse:apply(world, entity)
 -- Later...
 handle:cancel()
@@ -576,13 +576,13 @@ handle:cancel()
 
 Pauses playback. While paused, the timeline doesn't advance but remains in the active list.
 
-```lua
+```teal
 function TweenHandle:pause(self)
 ```
 
 **Example:**
 
-```lua
+```teal
 local handle = tween.timeline()
     :to(1.0, tween.quadOut, tween.translateX, 200)
     :once()
@@ -596,7 +596,7 @@ handle:resume()  -- continues from where it left off
 
 Resumes playback.
 
-```lua
+```teal
 function TweenHandle:resume(self)
 ```
 
@@ -604,7 +604,7 @@ function TweenHandle:resume(self)
 
 Returns the total elapsed play time of the tween in seconds.
 
-```lua
+```teal
 function TweenHandle:getElapsed(self): number
 ```
 
@@ -612,7 +612,7 @@ function TweenHandle:getElapsed(self): number
 
 Gets the rate, or speed modifier, of the tween.
 
-```lua
+```teal
 function TweenHandle:getRate(self): number
 ```
 
@@ -620,7 +620,7 @@ function TweenHandle:getRate(self): number
 
 Get the current playback direction: `1` for forward, `-1` for reverse.
 
-```lua
+```teal
 function TweenHandle:getDirection(self): integer
 ```
 
@@ -629,7 +629,7 @@ function TweenHandle:getDirection(self): integer
 Step callbacks and `onComplete` receive the handle as a third argument. This enables tweens
 that react to game state without capturing external variables.
 
-```lua
+```teal
 tween.timeline()
     :to(0.5, tween.quadOut, tween.translateX, 200)
     :step(function(world: tecs.World, entity: integer, handle: tween.TweenHandle)

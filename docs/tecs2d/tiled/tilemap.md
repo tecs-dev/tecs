@@ -4,7 +4,7 @@ The `Tilemap` component loads and renders a Tiled map.
 
 ## Basic Usage
 
-```lua
+```teal
 world:spawn(
     tiled.Tilemap.new({ path = "maps/level1.tmj" }),
     tecs.builtins.Transform.new({ x = 0, y = 0 })
@@ -35,7 +35,7 @@ Each Tiled layer renders at an incrementing layer number starting from `Transfor
 
 After loading, `tilemap.data` contains:
 
-```lua
+```teal
 record TilemapData
     width: integer           -- Map width in tiles
     height: integer          -- Map height in tiles

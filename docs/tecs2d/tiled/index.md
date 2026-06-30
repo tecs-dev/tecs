@@ -15,7 +15,7 @@ format (.tmj), renders tilemaps using the `tecs2d.gfx` pipeline, and spawns enti
 
 ## Quick Start
 
-```lua
+```teal
 local tecs = require("tecs")
 local tecs2d = require("tecs2d")
 local tiled = require("tecs2d.tiled")
@@ -43,7 +43,7 @@ love.run = tecs2d.run({
 The [Tilemap Component](./tilemap) component loads and renders a Tiled map. It requires a `Transform` component for
 positioning and render layer.
 
-```lua
+```teal
 world:spawn(
     tiled.Tilemap.new({ path = "maps/level1.tmj" }),
     tecs.builtins.Transform.new({ x = 0, y = 0, layer = 1 })
@@ -53,7 +53,7 @@ world:spawn(
 ::: tip Async Loading
 For non-blocking map loading, use the asset manager's [`loadTiledMap`](/tecs2d/assets/api#loadtiledmap) method:
 
-```lua
+```teal
 local assets = require("tecs2d.assets")
 local manager = world.resources[assets]
 
@@ -95,7 +95,7 @@ Layer parallax from Tiled (`parallaxx`/`parallaxy`) is automatically applied to 
 
 For quick object visualization, use the [debug plugin](./debug-plugin):
 
-```lua
+```teal
 -- Register the debug plugin
 world:addPlugin(tiled.debugPlugin)
 
@@ -107,7 +107,7 @@ world:emit(0, tiled.DebugToggle)
 
 Access and modify tiles at runtime using `TilemapData`:
 
-```lua
+```teal
 -- Get tile at world position
 local gid = tilemapData:getTileAt(layerIndex, worldX, worldY)
 
@@ -127,7 +127,7 @@ Tiles with animation defined in Tiled are automatically spawned as individual Sp
 included in TileChunks. Each animated tile sprite includes a [TileSource](./tile-source) component that provides
 access to the tile's properties.
 
-```lua
+```teal
 local tiled = require("tecs2d.tiled")
 local TileSource = tiled.TileSource
 

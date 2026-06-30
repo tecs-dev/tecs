@@ -6,7 +6,7 @@ performance.
 
 ## Quick Start
 
-```lua
+```teal
 local assets = require("tecs2d.assets")
 local manager = world.resources[assets]
 
@@ -26,7 +26,7 @@ world:spawn(
 
 Use [`loadSpriteSheet`](/tecs2d/assets/api#loadspritesheet) for async loading with automatic caching.
 
-```lua
+```teal
 local assets = require("tecs2d.assets")
 local manager = world.resources[assets]
 
@@ -47,7 +47,7 @@ world:spawn(
 
 For static images without animation, use [`loadStaticSheet`](/tecs2d/assets/api#loadstaticsheet):
 
-```lua
+```teal
 local bgHandle = manager:loadStaticSheet("background.png")
 world:spawn(
     tecs.builtins.Transform(0, 0),
@@ -59,7 +59,7 @@ world:spawn(
 
 `fromAseprite` combines loading and sprite creation in one call. Useful for prototyping, but blocks the main thread:
 
-```lua
+```teal
 -- Loads sheet synchronously and creates sprite
 gfx.Sprite.fromAseprite("player.png", "walk")
 
@@ -74,7 +74,7 @@ gfx.Sprite.fromAseprite("player.png", "attack", {
 
 For loading a sheet once and creating multiple sprites:
 
-```lua
+```teal
 -- Load sheet synchronously (blocks main thread)
 local sheet = gfx.SpriteSheet.fromFile("enemies.png")
 
@@ -87,7 +87,7 @@ local orc = gfx.Sprite.fromSheet(sheet, "orc_idle")
 
 For simple textures without animation:
 
-```lua
+```teal
 local texture = love.graphics.newImage("bullet.png")
 gfx.Sprite.fromTexture(texture)
 ```
@@ -103,7 +103,7 @@ gfx.Sprite.fromTexture(texture)
 
 ## Sprite Methods
 
-```lua
+```teal
 local sprite = world:get(entityId, gfx.Sprite)
 
 -- Animation control
@@ -136,7 +136,7 @@ Sprites work with [styling components](../styling):
 | [`Pivot`](../styling#pivot)             | Custom origin point (overrides `pivotSlice` option)    |
 | [`Material`](../materials)              | Per-entity GPU shader effects (dissolve, glow, etc.)   |
 
-```lua
+```teal
 local sheet = manager:loadSpriteSheet("player.png").value
 
 world:spawn(
@@ -174,7 +174,7 @@ This architecture enables:
 
 Textures larger than 2048×2048 cannot use the bucket system. Use the `DirectSprite` component for these:
 
-```lua
+```teal
 world:spawn(
     tecs.builtins.Transform(0, 0),
     gfx.Sprite.fromTexture(hugeBackgroundTexture),

@@ -5,7 +5,7 @@ correct viewport dimensions based on the entity's layer coordinate space (screen
 
 ## Basic Usage
 
-```lua
+```teal
 local ui = require("tecs2d.ui")
 local Anchor = ui.Anchor
 
@@ -44,7 +44,7 @@ world:spawn(
 
 ## Constructor
 
-```lua
+```teal
 Anchor(anchorX, anchorY)              -- No offset
 Anchor(anchorX, anchorY, offsetX, offsetY)  -- With offset
 ```
@@ -74,7 +74,7 @@ automatically.
 
 Anchor works well with `ChildOf` + `RelativeTransform` to create groups of elements anchored together:
 
-```lua
+```teal
 -- Parent anchored to bottom-left
 local hudRoot = world:spawn(
     Transform(0, 0, 0, HUD_LAYER),

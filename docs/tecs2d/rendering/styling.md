@@ -7,7 +7,7 @@ with sprites, shapes, and text.
 
 The `Color` component applies RGBA tinting to sprites, shapes, and text.
 
-```lua
+```teal
 gfx.Color(r?, g?, b?, a?)
 ```
 
@@ -22,7 +22,7 @@ gfx.Color(r?, g?, b?, a?)
 
 **Examples:**
 
-```lua
+```teal
 local gfx = require("tecs2d.gfx")
 
 -- Red tint
@@ -55,7 +55,7 @@ Tecs syncs color changes only when the `Color` component is detected as dirty. S
 
 This is preferred if you have the archetype and row.
 
-```lua
+```teal
 archetype:set(row, Color(r, g, b, a))
 ```
 
@@ -63,7 +63,7 @@ archetype:set(row, Color(r, g, b, a))
 
 This is useful if you just have the entity ID.
 
-```lua
+```teal
 world:set(entityId, Color(r, g, b, a))
 ```
 
@@ -71,7 +71,7 @@ world:set(entityId, Color(r, g, b, a))
 
 If you have an archetype and row:
 
-```lua
+```teal
 local colors = archetype:getMut(Color)
 local color = colors[row]
 color.r = 0.5
@@ -83,7 +83,7 @@ color.a = 1.0
 `getMut` flags `Color` dirty on the archetype, so the renderer
 re-uploads it next frame. If you have just the entity ID:
 
-```lua
+```teal
 world:markComponentDirty(entityId, Color)
 ```
 
@@ -94,7 +94,7 @@ separate tag component. Entities without a blend component use normal alpha blen
 
 Blend mode components are stored in `tecs2d.gfx.blend`:
 
-```lua
+```teal
 local gfx = require("tecs2d.gfx")
 local blend = gfx.blend
 ```
@@ -129,7 +129,7 @@ component from the entity.
 
 **Adding a blend mode** when spawning:
 
-```lua
+```teal
 world:spawn(
     tecs.builtins.Transform(100, 100),
     gfx.Circle(30),
@@ -140,13 +140,13 @@ world:spawn(
 
 **Changing a blend mode** on an existing entity (the old blend component is removed automatically):
 
-```lua
+```teal
 world:set(id, blend.MultiplyBlend())
 ```
 
 **Removing a blend mode** to return to normal alpha blending:
 
-```lua
+```teal
 world:remove(id, blend.MultiplyBlend)
 ```
 
@@ -163,7 +163,7 @@ The `Unlit` tag component opts an entity out of dynamic lighting. Entities with
 light. Use it for UI elements, light emitters that already encode their own
 brightness in their color, and any entity where shading would be wrong.
 
-```lua
+```teal
 world:spawn(
     tecs.builtins.Transform(10, 10),
     gfx.Rectangle(200, 50),
@@ -174,7 +174,7 @@ world:spawn(
 
 `Unlit` carries no data, so adding it is a single argument. To toggle at runtime:
 
-```lua
+```teal
 world:add(entityId, gfx.Unlit)     -- make unlit
 world:remove(entityId, gfx.Unlit)  -- restore normal lighting
 ```
@@ -190,7 +190,7 @@ anti-aliased edges by default. The pipeline-level `roughGeometry` flag flips
 the entire scene to hard pixel cutoffs, suitable for pixel-art aesthetics
 where AA gradients would soften the look.
 
-```lua
+```teal
 local pipeline = gfx.newPipeline({
     world = world,
     roughGeometry = true,  -- hard pixel edges
@@ -199,7 +199,7 @@ local pipeline = gfx.newPipeline({
 
 Toggle at runtime:
 
-```lua
+```teal
 pipeline:setRoughGeometry(true)
 local rough = pipeline:getRoughGeometry()
 ```
@@ -211,7 +211,7 @@ Combine them for retro pixel-art, or use either alone.
 
 The `Pivot` component controls the origin point for rendering and rotation. Values are normalized (0-1 range).
 
-```lua
+```teal
 gfx.Pivot(x?, y?)
 ```
 
@@ -224,7 +224,7 @@ gfx.Pivot(x?, y?)
 
 **Examples:**
 
-```lua
+```teal
 -- Rectangle anchored at top-left
 world:spawn(
     tecs.builtins.Transform(0, 0),
@@ -253,7 +253,7 @@ override the Pivot component.
 
 Styling components can be combined freely:
 
-```lua
+```teal
 -- Glowing additive circle
 world:spawn(
     tecs.builtins.Transform(100, 100),

@@ -22,7 +22,7 @@ The stats system shows performance data including:
 
 Add the stats plugin to your world to enable the debug overlay:
 
-```lua
+```teal
 local tecs = require("tecs")
 local tecs2d = require("tecs2d")
 local stats = require("tecs2d.stats")
@@ -52,7 +52,7 @@ Press **F1** (the default binding) to toggle between these modes.
 
 Customize the stats plugin behavior with a configuration table:
 
-```lua
+```teal
 local stats = require("tecs2d.stats")
 
 local statsPlugin = stats.newStatsPlugin({

@@ -23,7 +23,7 @@ and contacts, so you can build whatever physics behavior you need.
 
 Create a Box2D world and add the physics plugin:
 
-```lua
+```teal
 local tecs = require("tecs")
 local tecs2d = require("tecs2d")
 local physics = require("tecs2d.physics")
@@ -58,7 +58,7 @@ entities only collide with other entities on the same layer. To override this be
 
 Get the physics state to access the Box2D world or runtime settings:
 
-```lua
+```teal
 local state = world.resources[physics]
 
 -- Access Box2D world directly
@@ -82,7 +82,7 @@ print(state.smoothing)
 Physics debug drawing is handled by a separate plugin in the rendering module, _not_ by the physics plugin itself.
 To enable it:
 
-```lua
+```teal
 local gfx = require("tecs2d.gfx")
 
 -- Add the debug drawing plugin (after both physics and render plugins)
@@ -91,7 +91,7 @@ world:addPlugin(gfx.physicsDebug.new())
 
 Toggle debug drawing at runtime by emitting the `PhysicsDebugToggle` event:
 
-```lua
+```teal
 -- Toggle on/off
 world:emit(0, gfx.PhysicsDebugToggle)
 ```
@@ -99,7 +99,7 @@ world:emit(0, gfx.PhysicsDebugToggle)
 Debug shapes are drawn on layer 15 and appear on top of game graphics. The debug plugin accepts optional RGBA color
 configuration:
 
-```lua
+```teal
 world:addPlugin(gfx.physicsDebug.new({
     r = 1.0,
     g = 0.0,

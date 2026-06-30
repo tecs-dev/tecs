@@ -9,7 +9,7 @@ standard Love2D drawing calls.
 The `Draw` phase lets you make custom love.graphics draw calls that participate in the world's
 [lighting](/tecs2d/rendering/lighting) and depth sorting alongside GPU-rendered entities.
 
-```lua
+```teal
 local tecs = require("tecs")
 local gfx = require("tecs2d.gfx")
 
@@ -45,7 +45,7 @@ Chain methods to set depth sorting, lighting mode, and optional shader/normal ma
 
 Draw with light with a position and layer:
 
-```lua
+```teal
 pipeline:worldShader()
     :at(layer, z, x, bottomY)
     :attach()
@@ -53,7 +53,7 @@ pipeline:worldShader()
 
 Unlit draw (full brightness, no lighting):
 
-```lua
+```teal
 pipeline:worldShader()
     :at(layer)
     :unlit()
@@ -62,7 +62,7 @@ pipeline:worldShader()
 
 Draw with custom shader and normal map:
 
-```lua
+```teal
 pipeline:worldShader()
     :at(layer, z, x, bottomY)
     :shader(s)
@@ -72,7 +72,7 @@ pipeline:worldShader()
 
 Always detach after drawing:
 
-```lua
+```teal
 pipeline:detachWorldShader()
 ```
 
@@ -172,7 +172,7 @@ When you call `:attach()` without `:shader()`, the built-in world shader is used
 
 For draws that should ignore lighting (full brightness):
 
-```lua
+```teal
 pipeline:worldShader()
     :at(layer, z, x, bottomY)
     :unlit()
@@ -186,7 +186,7 @@ pipeline:detachWorldShader()
 
 For performance, cull draws outside the visible area using the camera's `isVisible` method:
 
-```lua
+```teal
 local cam = pipeline:getCamera()
 
 world:addSystem({
@@ -212,7 +212,7 @@ world:addSystem({
 Use `PostRender` for screen-space overlays that render after the entire GPU pipeline (no lighting, no depth sorting
 with world entities).
 
-```lua
+```teal
 world:addSystem({
     name = "ui.Overlay",
     phase = tecs.phases.PostRender,
@@ -229,7 +229,7 @@ world:addSystem({
 For UI that should use the [layer system](/tecs2d/rendering/layers) but not receive lighting, configure a layer as virtual
 space and unlit:
 
-```lua
+```teal
 pipeline:configureLayer(15, {
     name = "ui",
     space = "virtual",
@@ -259,7 +259,7 @@ world:addSystem({
 
 The pipeline computes depth using a consistent formula for both GPU and CPU draws:
 
-```lua
+```teal
 local depth = pipeline:computeDepth(layer, z, x, bottomY)
 ```
 
@@ -274,7 +274,7 @@ Lower depth values render in front of higher values. The formula depends on the 
 
 During `Draw`, access camera state if needed:
 
-```lua
+```teal
 local camX = pipeline.drawCamX
 local camY = pipeline.drawCamY
 local zoom = pipeline.drawZoom

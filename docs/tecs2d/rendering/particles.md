@@ -4,7 +4,7 @@ The `ParticleEmitter` component creates particle effects using Love2D's particle
 
 ## Quick Start
 
-```lua
+```teal
 local gfx = require("tecs2d.gfx")
 
 -- Define emitter configuration
@@ -53,7 +53,7 @@ world:spawn(
 
 ## Emitter Control
 
-```lua
+```teal
 local emitter = world:get(entityId, gfx.ParticleEmitter)
 local ps = emitter.system
 

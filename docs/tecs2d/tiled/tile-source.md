@@ -24,7 +24,7 @@ its Tiled origin.
 
 ## Basic Usage
 
-```lua
+```teal
 local tiled = require("tecs2d.tiled")
 local TileSource = tiled.TileSource
 local Transform = tecs.builtins.Transform
@@ -47,7 +47,7 @@ end
 Custom properties defined on tiles in Tiled are available via `source.properties`. Use `onEntitiesAdded` to
 react when animated tile entities are spawned:
 
-```lua
+```teal
 local tiled = require("tecs2d.tiled")
 local gfx = require("tecs2d.gfx")
 local TileSource = tiled.TileSource
@@ -80,7 +80,7 @@ world:query({
 
 Use the `class` property to filter specific tile types:
 
-```lua
+```teal
 -- Find all animated tiles with class "hazard" and add damage zones
 world:query({
     include = { TileSource },
@@ -98,7 +98,7 @@ world:query({
 
 ### Function Signature
 
-```lua
+```teal
 tiled.tileSourceFromGid(map: TilemapData, gid: integer): TileSource | nil
 ```
 

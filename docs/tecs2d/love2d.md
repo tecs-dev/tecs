@@ -8,7 +8,7 @@ The `tecs2d` module integrates Tecs with Love2D, providing the game loop and eve
 
 ## Getting started
 
-```lua
+```teal
 -- main.tl
 local tecs2d = require("tecs2d")
 
@@ -25,7 +25,7 @@ Creates a `love.run` function integrated with Tecs's world and phase system. Thi
 Love2D run loop with one that manages a Tecs world, handles fixed timestep updates, and integrates all Love2D events
 with Tecs.
 
-```lua
+```teal
 love.run = tecs2d.run({
     fps = 60,
     game = gamePlugin,
@@ -62,7 +62,7 @@ A function suitable for assigning to `love.run`.
 
 Triggers a quit event to exit the application cleanly. This is the recommended way to exit a Tecs application.
 
-```lua
+```teal
 local input = require("tecs2d.input")
 
 -- Exit on escape key
@@ -112,7 +112,7 @@ The game loop automatically integrates Love2D's rendering pipeline with Tecs pha
 
 Input is available through the [input module](/tecs2d/input/):
 
-```lua
+```teal
 local input = require("tecs2d.input")
 
 -- Check keyboard state
@@ -142,7 +142,7 @@ tracks when keys are released or pressed in a way that _just works_ across fixed
 Love2D events are translated into Tecs events and can be observed like any other Tecs event.
 See [Love2D Events](/tecs2d/events) for all available event types.
 
-```lua
+```teal
 local tecs2d = require("tecs2d")
 
 world:observe(0, tecs2d.MousePressed, function(e: tecs2d.MousePressed)
@@ -156,7 +156,7 @@ end)
 
 Standard Love2D callbacks continue to work alongside Tecs:
 
-```lua
+```teal
 -- Both approaches work simultaneously
 function love.keypressed(key)
     if key == "escape" then
@@ -184,7 +184,7 @@ events and react to them.
 
 In your `main.tl` Love 2D script:
 
-```lua
+```teal
 local tecs2d = require("tecs2d")
 local game = require("game")
 
@@ -196,7 +196,7 @@ love.run = tecs2d.run({
 
 In `game.tl`, implement the game setup and systems:
 
-```lua
+```teal
 local tecs = require("tecs")
 local tecs2d = require("tecs2d")
 local input = require("tecs2d.input")

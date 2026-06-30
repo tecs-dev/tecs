@@ -7,7 +7,7 @@ Layers are rendered from 1 (back) to 16 (front).
 
 Entities are assigned to layers via the `Transform` component's `layer` field:
 
-```lua
+```teal
 local tecs <const> = require("tecs")
 local gfx <const> = require("tecs2d.gfx")
 
@@ -35,7 +35,7 @@ world:spawn(
 
 Configure layers with `pipeline:configureLayer()`:
 
-```lua
+```teal
 local gfx = require("tecs2d.gfx")
 
 -- Configure layers in tecs2d.run
@@ -80,7 +80,7 @@ Layers can use different coordinate spaces:
 
 Entities move with the camera. Use for game objects.
 
-```lua
+```teal
 pipeline:configureLayer(5, { space = "world" })
 ```
 
@@ -93,7 +93,7 @@ pipeline:configureLayer(5, { space = "world" })
 
 Entities are fixed to the virtual resolution. Use for HUD elements.
 
-```lua
+```teal
 pipeline:configureLayer(15, { space = "virtual" })
 ```
 
@@ -107,7 +107,7 @@ pipeline:configureLayer(15, { space = "virtual" })
 
 Entities are fixed to screen pixels. Use for overlays that shouldn't scale.
 
-```lua
+```teal
 pipeline:configureLayer(16, { space = "screen" })
 ```
 
@@ -125,7 +125,7 @@ pipeline:configureLayer(16, { space = "screen" })
 
 Toggle layer visibility at runtime:
 
-```lua
+```teal
 -- Hide a layer
 pipeline:setLayerVisibility(1, false)
 pipeline:setLayerVisibility("background", false)  -- By name
@@ -148,7 +148,7 @@ end
 
 Control whether a layer is unlit (skips lighting effects):
 
-```lua
+```teal
 -- Disable lighting on UI layer (entities render at full brightness)
 pipeline:setLayerUnlit(15, true)
 
@@ -163,7 +163,7 @@ end
 
 You can also set this via configuration:
 
-```lua
+```teal
 pipeline:configureLayer(15, { unlit = true })
 ```
 
@@ -189,7 +189,7 @@ within the layer.
 The default mode uses Z-index as the primary sort and Y-position as a secondary tiebreaker, giving natural depth
 ordering in 3/4 view (oblique top-down) games.
 
-```lua
+```teal
 pipeline:configureLayer(5, { sortMode = "topdown" })
 ```
 
@@ -197,7 +197,7 @@ pipeline:configureLayer(5, { sortMode = "topdown" })
 
 Use `"z"` mode when you want explicit control over draw order without Y-sorting:
 
-```lua
+```teal
 pipeline:configureLayer(15, {
     name = "ui",
     space = "virtual",
@@ -209,7 +209,7 @@ pipeline:configureLayer(15, {
 
 Use `"isometric"` mode for diamond-grid isometric games where depth depends on both X and Y:
 
-```lua
+```teal
 pipeline:configureLayer(5, {
     name = "isometric",
     sortMode = "isometric"  -- X + Y + Z sorting
@@ -220,7 +220,7 @@ pipeline:configureLayer(5, {
 
 You can change sort mode at runtime:
 
-```lua
+```teal
 pipeline:setLayerSortMode(5, "isometric")
 pipeline:setLayerSortMode("entities", "topdown")  -- By name
 
@@ -231,7 +231,7 @@ local mode = pipeline:getLayerSortMode(5)  -- Returns "topdown", "z", or "isomet
 
 Configure parallax to make layers scroll at different rates relative to the camera:
 
-```lua
+```teal
 -- Background scrolls at 10% of camera speed
 pipeline:configureLayer(1, {
     name = "background",
@@ -252,7 +252,7 @@ pipeline:configureLayer(3, { name = "foreground" })
 
 You can also update parallax at runtime:
 
-```lua
+```teal
 pipeline:setLayerParallax(1, 0.2, 0.2)
 local px, py = pipeline:getLayerParallax(1)
 ```
@@ -291,7 +291,7 @@ for per-entity use.
 
 Use `pipeline:setLayerEffect()` to apply a shader effect to a layer:
 
-```lua
+```teal
 -- Single-pass effect (e.g., color inversion)
 pipeline:setLayerEffect(layerNum, invertShader, nil, { singleLayer = true })
 
@@ -307,14 +307,14 @@ pipeline:setLayerEffect("entities", invertShader)
 
 Clear an effect with `pipeline:clearLayerEffect()`:
 
-```lua
+```teal
 pipeline:clearLayerEffect(layerNum)
 pipeline:clearLayerEffect("entities")  -- By name
 ```
 
 ### API Reference
 
-```lua
+```teal
 pipeline:setLayerEffect(
     layer,      -- integer (1-16) or string (layer name)
     shader,     -- A single Shader or a list of Shaders for multi-pass
@@ -333,7 +333,7 @@ The `singleLayer` option controls what the effect applies to:
 
 The effect applies only to the specified layer. Other layers are unaffected.
 
-```lua
+```teal
 pipeline:setLayerEffect(3, blurShader, { radius = 4.0 }, { singleLayer = true })
 ```
 
@@ -342,7 +342,7 @@ pipeline:setLayerEffect(3, blurShader, { radius = 4.0 }, { singleLayer = true })
 The effect applies to the specified layer **and all layers below it**. This is useful for effects like heat haze that
 should distort everything underneath.
 
-```lua
+```teal
 -- Blur layer 3 and everything below it (layers 1, 2, 3)
 pipeline:setLayerEffect(3, blurShader, { radius = 4.0 })
 ```
@@ -425,7 +425,7 @@ Multiple effects on different layers create more groups. Each effect boundary sp
 Some effects require multiple shader passes. For example, a Gaussian blur is faster as two separable passes (horizontal
 then vertical) than a single 2D pass. Pass a list of shaders to `setLayerEffect`:
 
-```lua
+```teal
 local BLUR_SHADER <const> = [[
 extern vec2 direction;
 extern number radius;
@@ -473,7 +473,7 @@ alternating between two canvases.
 You can combine multiple effects on a single layer by passing all their shaders as one list. Effects are applied in
 order:
 
-```lua
+```teal
 -- Blur, then invert, then desaturate (all on layer 2)
 local allShaders = {blurH, blurV, invertShader, desatShader}
 local allUniforms = { radius = 8.0, strength = 1.0 }

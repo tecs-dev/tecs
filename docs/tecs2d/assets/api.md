@@ -2,7 +2,7 @@
 
 Access the assets module:
 
-```lua
+```teal
 local assets = require("tecs2d.assets")
 ```
 
@@ -12,14 +12,14 @@ local assets = require("tecs2d.assets")
 
 Event type emitted when the initial asset load completes.
 
-```lua
+```teal
 assets.InitialLoadComplete: Event
 ```
 
 This event is emitted on the first call to `update()` when there are no loading operations. This ensures that listeners
 have time to register before the event is emitted. The event is only emitted once per AssetManager instance.
 
-```lua
+```teal
 -- Register listener before any update calls
 world:observe(0, assets.InitialLoadComplete, function(_e: assets.InitialLoadComplete)
     print("Initial loading complete!")
@@ -33,7 +33,7 @@ end)
 
 Creates a new asset manager with the specified root directory.
 
-```lua
+```teal
 function assets.new(root: string): AssetManager
 ```
 
@@ -47,7 +47,7 @@ function assets.new(root: string): AssetManager
 
 **Example:**
 
-```lua
+```teal
 local manager = assets.new("assets")
 ```
 
@@ -55,7 +55,7 @@ local manager = assets.new("assets")
 
 Creates a new asset handler for custom asset types.
 
-```lua
+```teal
 function assets.newAssetHandler<T>(): AssetHandler<T>
 ```
 
@@ -65,7 +65,7 @@ function assets.newAssetHandler<T>(): AssetHandler<T>
 
 **Example:**
 
-```lua
+```teal
 local LEVEL_DATA_HANDLER <const>: AssetHandler<LevelData> = assets.newAssetHandler()
 
 -- Register the handler
@@ -80,7 +80,7 @@ end)
 
 Statistics returned by `AssetManager:getStats()`.
 
-```lua
+```teal
 type AssetStats = {
     completedCount: integer
     runningCount: integer
@@ -101,7 +101,7 @@ type AssetStats = {
 
 Configuration for loading TrueType fonts.
 
-```lua
+```teal
 type FontConfig = {
     size?: number
     hinting?: HintingMode
@@ -119,7 +119,7 @@ type FontConfig = {
 
 Configuration for loading bitmap/image fonts.
 
-```lua
+```teal
 type ImageFontConfig = {
     glyphs?: string
     extraSpacing?: number
@@ -139,7 +139,7 @@ The main asset loading and management class.
 
 Loads a text file and returns its contents as a string.
 
-```lua
+```teal
 function AssetManager:loadFile(path: string): Handle<string>
 ```
 
@@ -153,7 +153,7 @@ function AssetManager:loadFile(path: string): Handle<string>
 
 **Example:**
 
-```lua
+```teal
 local configHandle = manager:loadFile("config.json")
 -- Later...
 local configText = configHandle.value  -- Blocks if needed
@@ -163,7 +163,7 @@ local configText = configHandle.value  -- Blocks if needed
 
 Loads a file as binary data.
 
-```lua
+```teal
 function AssetManager:loadFileData(path: string): Handle<FileData>
 ```
 
@@ -179,7 +179,7 @@ function AssetManager:loadFileData(path: string): Handle<FileData>
 
 Loads an image file.
 
-```lua
+```teal
 function AssetManager:loadImage(path: string): Handle<Image>
 ```
 
@@ -193,7 +193,7 @@ function AssetManager:loadImage(path: string): Handle<Image>
 
 **Example:**
 
-```lua
+```teal
 local playerSprite = manager:loadImage("sprites/player.png")
 playerSprite:pin()  -- Keep in memory
 ```
@@ -202,7 +202,7 @@ playerSprite:pin()  -- Keep in memory
 
 Loads a TrueType font.
 
-```lua
+```teal
 function AssetManager:loadFont(
     path: string,
     config?: FontConfig
@@ -220,7 +220,7 @@ function AssetManager:loadFont(
 
 **Example:**
 
-```lua
+```teal
 local uiFont = manager:loadFont("fonts/ui.ttf", {
     size = 16,
     hinting = "normal"
@@ -231,7 +231,7 @@ local uiFont = manager:loadFont("fonts/ui.ttf", {
 
 Loads a bitmap/image font.
 
-```lua
+```teal
 function AssetManager:loadImageFont(
     path: string,
     config?: ImageFontConfig
@@ -251,7 +251,7 @@ function AssetManager:loadImageFont(
 
 Loads an audio file.
 
-```lua
+```teal
 function AssetManager:loadAudio(
     path: string,
     sourceType: SourceType,
@@ -271,7 +271,7 @@ function AssetManager:loadAudio(
 
 **Example:**
 
-```lua
+```teal
 local jumpSound = manager:loadAudio("sounds/jump.wav", "static")
 local bgMusic = manager:loadAudio("music/theme.ogg", "stream")
 ```
@@ -280,7 +280,7 @@ local bgMusic = manager:loadAudio("music/theme.ogg", "stream")
 
 Loads a GLSL shader file.
 
-```lua
+```teal
 function AssetManager:loadShader(path: string): Handle<Shader>
 ```
 
@@ -296,7 +296,7 @@ function AssetManager:loadShader(path: string): Handle<Shader>
 
 Loads a video file for playback.
 
-```lua
+```teal
 function AssetManager:loadVideo(path: string): Handle<Video>
 ```
 
@@ -310,7 +310,7 @@ function AssetManager:loadVideo(path: string): Handle<Video>
 
 **Example:**
 
-```lua
+```teal
 local intro = manager:loadVideo("cutscenes/intro.ogv")
 
 -- Later, when you want to play it
@@ -323,7 +323,7 @@ love.graphics.draw(video, 0, 0)
 
 Loads compressed image data without converting to a regular Image.
 
-```lua
+```teal
 function AssetManager:loadCompressedImage(path: string): Handle<CompressedImageData>
 ```
 
@@ -338,7 +338,7 @@ CompressedImageData](https://love2d.org/wiki/CompressedImageData)
 
 **Example:**
 
-```lua
+```teal
 local compressedTexture = manager:loadCompressedImage("textures/terrain.dds")
 
 -- Use with shaders or create regular image
@@ -350,7 +350,7 @@ local image = love.graphics.newImage(imageData)
 
 Loads and parses a JSON file asynchronously.
 
-```lua
+```teal
 function AssetManager:loadJson(path: string): Handle<any>
 ```
 
@@ -364,7 +364,7 @@ function AssetManager:loadJson(path: string): Handle<any>
 
 **Example:**
 
-```lua
+```teal
 local configHandle = manager:loadJson("config.json")
 
 -- Later, when you need the data
@@ -381,7 +381,7 @@ This method uses the `tecs.json` library for parsing, a high-performance JSON pa
 Loads a sprite sheet from an Aseprite export (image + JSON file). See [Sprite Sheets](/tecs2d/rendering/sprites/sheets) for
 full documentation on sprite sheet features, material maps, and the builder API.
 
-```lua
+```teal
 function AssetManager:loadSpriteSheet(
     path: string,
     options?: SpriteSheetLoadOptions
@@ -403,7 +403,7 @@ function AssetManager:loadSpriteSheet(
 
 **Example:**
 
-```lua
+```teal
 local playerHandle = manager:loadSpriteSheet("sprites/player.png")
 
 -- With auto-generated normal maps (for sync loading only)
@@ -427,7 +427,7 @@ Loads a single-image sprite sheet (no JSON required). See [Sprite
 Sheets](/tecs2d/rendering/sprites/sheets#static-sheets-no-json)
 for more details.
 
-```lua
+```teal
 function AssetManager:loadStaticSheet(
     path: string,
     options?: SpriteSheetLoadOptions
@@ -445,7 +445,7 @@ function AssetManager:loadStaticSheet(
 
 **Example:**
 
-```lua
+```teal
 -- Load a static image as a sprite sheet
 local backgroundHandle = manager:loadStaticSheet("backgrounds/forest.png")
 
@@ -458,7 +458,7 @@ local torchHandle = manager:loadStaticSheet("props/torch.png")
 Loads a BMFont from a `.fnt` or `.json` file. See [Text](/tecs2d/rendering/text) for full documentation on bitmap font
 rendering.
 
-```lua
+```teal
 function AssetManager:loadBMFont(path: string): Handle<BMFont>
 ```
 
@@ -472,7 +472,7 @@ function AssetManager:loadBMFont(path: string): Handle<BMFont>
 
 **Example:**
 
-```lua
+```teal
 local fontHandle = manager:loadBMFont("fonts/pixel.fnt")
 
 -- JSON format from msdf-bmfont is also supported
@@ -492,7 +492,7 @@ The atlas image path is read from the font file and loaded automatically.
 Loads a Tiled map from a `.tmj` or `.json` file. See [Tiled Integration](/tecs2d/tiled/) for full documentation on tilemap
 features.
 
-```lua
+```teal
 function AssetManager:loadTiledMap(path: string): Handle<TilemapData>
 ```
 
@@ -506,7 +506,7 @@ function AssetManager:loadTiledMap(path: string): Handle<TilemapData>
 
 **Example:**
 
-```lua
+```teal
 local mapHandle = manager:loadTiledMap("maps/level1.tmj")
 
 -- Spawn the tilemap when loaded
@@ -532,14 +532,14 @@ This method automatically loads:
 
 Returns a previously loaded font handle by path.
 
-```lua
+```teal
 function AssetManager:getFont(path: string): Handle<Font>
 ```
 
 This method is particularly useful for fonts since they often require configuration (size, hinting, DPI scale) that you
 don't want to repeat everywhere. Load the font once with your desired settings, then retrieve it by path anywhere else:
 
-```lua
+```teal
 -- Initial load with configuration
 manager:loadFont("fonts/ui.ttf", {
     size = 16,
@@ -573,7 +573,7 @@ path alone.
 
 Processes completed load operations.
 
-```lua
+```teal
 function AssetManager:update(): boolean
 ```
 
@@ -583,7 +583,7 @@ function AssetManager:update(): boolean
 
 **Example:**
 
-```lua
+```teal
 while manager:update() do
     -- Still loading...
 end
@@ -593,7 +593,7 @@ end
 
 Checks if any operations are currently loading.
 
-```lua
+```teal
 function AssetManager:isLoading(): boolean
 ```
 
@@ -605,7 +605,7 @@ function AssetManager:isLoading(): boolean
 
 Blocks until all operations complete or timeout.
 
-```lua
+```teal
 function AssetManager:wait(timeout?: number): {string}
 ```
 
@@ -619,7 +619,7 @@ function AssetManager:wait(timeout?: number): {string}
 
 **Example:**
 
-```lua
+```teal
 local errors = manager:wait(5.0)  -- Wait up to 5 seconds
 if #errors > 0 then
     for _, err in ipairs(errors) do
@@ -632,7 +632,7 @@ end
 
 Returns detailed loading statistics.
 
-```lua
+```teal
 function AssetManager:getStats(): AssetStats
 ```
 
@@ -646,7 +646,7 @@ An `AssetStats` table containing:
 
 **Example:**
 
-```lua
+```teal
 local stats = manager:getStats()
 print(string.format("Loaded: %d/%d", stats.completedCount,
                     stats.completedCount + stats.runningCount))
@@ -658,7 +658,7 @@ print(string.format("Cached: %d (Pinned: %d)",
 
 Generic asset loading method using custom handlers.
 
-```lua
+```teal
 function AssetManager:load<T>(handler: AssetHandler<T>, path: string): Handle<T>
 ```
 
@@ -680,7 +680,7 @@ function AssetManager:load<T>(handler: AssetHandler<T>, path: string): Handle<T>
 Registers a custom asset handler for a specific handler type. Custom loaders should compose existing asset loaders
 using `map()` to leverage caching and background threading.
 
-```lua
+```teal
 function AssetManager:registerAssetHandler<T>(
     handler: AssetHandler<T>,
     loader: function(string): Handle<T>
@@ -694,7 +694,7 @@ function AssetManager:registerAssetHandler<T>(
 
 **Example:**
 
-```lua
+```teal
 -- Create and register a custom CSV loader
 local CSV_HANDLER <const> = assets.newAssetHandler<{{string}}>()
 manager:registerAssetHandler(CSV_HANDLER, function(path: string): Handle<{{string}}>
@@ -710,7 +710,7 @@ end)
 
 Changes the root directory for all asset paths.
 
-```lua
+```teal
 function AssetManager:setRoot(root: string)
 ```
 
@@ -720,7 +720,7 @@ function AssetManager:setRoot(root: string)
 
 **Example:**
 
-```lua
+```teal
 manager:setRoot("game-assets")
 ```
 
@@ -728,7 +728,7 @@ manager:setRoot("game-assets")
 
 Returns the current root directory.
 
-```lua
+```teal
 function AssetManager:getRoot(): string
 ```
 
@@ -740,7 +740,7 @@ function AssetManager:getRoot(): string
 
 Resolves a path relative to the root directory.
 
-```lua
+```teal
 function AssetManager:resolvePath(...: string): string
 ```
 
@@ -754,7 +754,7 @@ function AssetManager:resolvePath(...: string): string
 
 **Example:**
 
-```lua
+```teal
 local fullPath = manager:resolvePath("sprites", "player.png")
 -- Returns "assets/sprites/player.png" (if root is "assets")
 ```
@@ -763,7 +763,7 @@ local fullPath = manager:resolvePath("sprites", "player.png")
 
 Stops all worker threads and cancels pending operations.
 
-```lua
+```teal
 function AssetManager:shutdown()
 ```
 
@@ -771,7 +771,7 @@ function AssetManager:shutdown()
 
 Waits for multiple handles to complete, then transforms their values. Fails if any handle fails.
 
-```lua
+```teal
 function AssetManager:handleAll<T, U>(handles: {Handle<T>}, fn: function({T}): U): Handle<U>
 ```
 
@@ -787,7 +787,7 @@ function AssetManager:handleAll<T, U>(handles: {Handle<T>}, fn: function({T}): U
 
 **Example:**
 
-```lua
+```teal
 local imageHandle = manager:loadImage("player.png")
 local normalHandle = manager:loadImage("player_n.png")
 local specularHandle = manager:loadImage("player_s.png")
@@ -802,7 +802,7 @@ local spriteHandle = manager:handleAll(
 
 For mixed types, use `any`:
 
-```lua
+```teal
 local imageHandle = manager:loadImage("player.png")
 local dataHandle = manager:loadJson("player.json")
 
@@ -830,7 +830,7 @@ A handle to an asset being loaded or already loaded.
 
 Registers a callback for when the operation completes.
 
-```lua
+```teal
 function Handle:observe(listener: function(Handle<T>))
 ```
 
@@ -840,7 +840,7 @@ function Handle:observe(listener: function(Handle<T>))
 
 **Example:**
 
-```lua
+```teal
 imageHandle:observe(function(h: assets.Handle<love.graphics.Image>)
     if h.err then
         print("Failed:", h.err)
@@ -854,13 +854,13 @@ end)
 
 Prevents this handle from being garbage collected.
 
-```lua
+```teal
 function Handle:pin()
 ```
 
 **Example:**
 
-```lua
+```teal
 -- Keep essential assets in memory
 manager:loadImage("player.png"):pin()
 manager:loadFont("ui.ttf", { size = 16 }):pin()
@@ -873,7 +873,7 @@ Transforms this handle's value when it completes successfully, returning a new h
 **Important:** The transform function is only called on success. If the original handle fails, the error propagates
 automatically to the mapped handle without calling the transform.
 
-```lua
+```teal
 function Handle:map<U>(transform: function(T): U): Handle<U>
 ```
 
@@ -887,7 +887,7 @@ function Handle:map<U>(transform: function(T): U): Handle<U>
 
 **Example:**
 
-```lua
+```teal
 local parsedHandle = manager
     :loadFile("settings.txt")
     :map(function(text: string): Config return parseConfig(text) end)
@@ -902,7 +902,7 @@ your transform function needs to load additional assets based on the first resul
 **Important:** The transform function is only called on success. If the original handle fails, the error propagates
 automatically without calling the transform.
 
-```lua
+```teal
 function Handle:flatMap<U>(transform: function(T): Handle<U>): Handle<U>
 ```
 
@@ -916,7 +916,7 @@ function Handle:flatMap<U>(transform: function(T): Handle<U>): Handle<U>
 
 **Example:**
 
-```lua
+```teal
 -- Load a manifest, then load the texture it references
 local textureHandle = manager
     :loadJson("manifest.json")
@@ -929,7 +929,7 @@ local textureHandle = manager
 Use `map` when your transform returns a plain value. Use `flatMap` when your transform returns another `Handle` and you
 want to avoid nested handles (`Handle<Handle<T>>`).
 
-```lua
+```teal
 -- map: T -> U, wraps result in Handle
 handle:map(function(x: number): number return x + 1 end)  -- Handle<number>
 
@@ -947,7 +947,7 @@ always called with both the value and error (one will be nil).
 
 Use this to recover from errors or transform results with error awareness.
 
-```lua
+```teal
 function Handle:handle<U>(fn: function(T, any): U): Handle<U>
 ```
 
@@ -962,7 +962,7 @@ result and `err` is nil. If it failed, `value` is nil and `err` contains the err
 
 **Example:**
 
-```lua
+```teal
 -- Recover from error with a default value
 local configHandle = manager:loadJson("config.json")
     :handle(function(config: any, err: any): Config

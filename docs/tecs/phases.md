@@ -62,7 +62,7 @@ One-time cleanup phases run when `world:shutdown()` is called.
 
 Access phases through `tecs.phases`:
 
-```lua
+```teal
 local tecs = require("tecs")
 
 -- Add a system to the Update phase
@@ -84,7 +84,7 @@ world:addSystem({
 
 You can dynamically enable and disable phases to control which systems run:
 
-```lua
+```teal
 -- Disable a phase (and all its systems)
 world:disablePhase(tecs.phases.RenderGroup)  -- Disable all rendering
 
@@ -103,7 +103,7 @@ Disabling a parent phase (like `RenderGroup`) also disables all its children pha
 
 You can explicitly run a specific phase using `world:runPhase()`:
 
-```lua
+```teal
 -- Run only the Render phase
 world:runPhase(tecs.phases.Render)
 
@@ -118,7 +118,7 @@ When you disable a phase:
 - If you disable a parent phase, its child phases remain disabled even when you explicitly run the parent
 :::
 
-```lua
+```teal
 -- Disable all rendering
 world:disablePhase(tecs.phases.RenderGroup)
 

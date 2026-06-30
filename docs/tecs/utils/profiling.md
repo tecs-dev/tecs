@@ -34,7 +34,7 @@ Agent:  *starts profiler*
 Start a session, schedule a one-shot system to stop it after a delay. `tecs.runif.after` fires once and removes itself
 from the pipeline. Pass a path to `:stop()` to write the collapsed-stack text directly.
 
-```lua
+```teal
 local profile = require("tecs.utils.profile")
 
 local session = profile.sample()
@@ -50,7 +50,7 @@ world:addSystem({
 
 ::: details Saving in Love2D
 In a LOVE game, get a path inside the save directory with:
-```lua
+```teal
 local filename = love.filesystem.getSaveDirectory() .. "/tecs.collapsed"
 ```
 :::
@@ -59,7 +59,7 @@ local filename = love.filesystem.getSaveDirectory() .. "/tecs.collapsed"
 
 Push a `jit.zone("name")` to tag any region you want samples attributed to:
 
-```lua
+```teal
 local zone = require("jit.zone")
 
 world:addSystem({
@@ -104,7 +104,7 @@ as slow, but won't tell you the JIT gave up on it.
 
 Start a session, do something with the report when you stop it:
 
-```lua
+```teal
 local profile = require("tecs.utils.profile")
 
 local session = profile.trace()
@@ -115,13 +115,13 @@ print(report)
 
 Or pass a path to write the formatted report to disk:
 
-```lua
+```teal
 session:stop("/tmp/aborts.txt")
 ```
 
 Periodic reporting via a system, restarting after each report:
 
-```lua
+```teal
 local session = profile.trace()
 
 world:addSystem({
@@ -157,7 +157,7 @@ actionable rows are at the top.
 The top-level `durationSec`, `totalAborts`, and `blacklisted` summary values live on the returned
 `TraceReport` object (not in the CSV). Read them directly:
 
-```lua
+```teal
 local report = session:stop("/tmp/aborts.csv")
 print(string.format("%ds, %d aborts, %d blacklisted",
     report.durationSec, report.totalAborts, report.blacklisted))
@@ -167,7 +167,7 @@ print(string.format("%ds, %d aborts, %d blacklisted",
 
 ### `profile.sample(opts?)`
 
-```lua
+```teal
 function profile.sample(opts?: SampleOptions): SampleSession
 ```
 
@@ -185,13 +185,13 @@ Leaf frames always carry a `_[N]`/`_[I]`/`_[C]`/`_[G]`/`_[J]` marker reflecting 
 
 You can start a sample with no options:
 
-```lua
+```teal
 local session = profile.sample()
 ```
 
 Or pass options to make sampling coarser or restrict to a single zone subtree:
 
-```lua
+```teal
 local session = profile.sample({
     intervalMs = 5,
     zone = "afterFixed/Render",
@@ -200,7 +200,7 @@ local session = profile.sample({
 
 ### `SampleSession:stop(filename?)`
 
-```lua
+```teal
 function SampleSession:stop(filename?: string): string
 ```
 
@@ -209,7 +209,7 @@ path as a side effect. Errors if called twice or if the file cannot be written.
 
 Stop and inspect the text in memory:
 
-```lua
+```teal
 local session = profile.sample()
 -- ...later...
 local text = session:stop()
@@ -218,13 +218,13 @@ local text = session:stop()
 Stop and write the text to disk in one call (still returned, so you can also
 inspect it):
 
-```lua
+```teal
 local text = session:stop("/tmp/tecs.collapsed")
 ```
 
 ### `SampleSession:pause()` / `SampleSession:resume()`
 
-```lua
+```teal
 function SampleSession:pause()
 function SampleSession:resume()
 ```
@@ -232,7 +232,7 @@ function SampleSession:resume()
 Use `:pause()` and `:resume()` to skip recording samples. For example, this might be useful for excluding
 setup / teardown from a benchmark harness. Both methods are idempotent and error if the session has been stopped.
 
-```lua
+```teal
 local s = profile.sample()
 for _, case in ipairs(cases) do
     setupCase(case)
@@ -246,7 +246,7 @@ local text = s:stop()
 
 ### `profile.trace(opts?)`
 
-```lua
+```teal
 function profile.trace(opts?: TraceOptions): TraceSession
 ```
 
@@ -260,20 +260,20 @@ Starts a trace abort tracker and returns a handle. Errors if a trace session is 
 
 You can start a trace with no options:
 
-```lua
+```teal
 local session = profile.trace()
 ```
 
 Or include the benign trace-formation events that are filtered out by default, useful when investigating why a trace
 failed to form:
 
-```lua
+```teal
 local session = profile.trace({includeBenign = true})
 ```
 
 ### `TraceSession:stop(filename?)`
 
-```lua
+```teal
 function TraceSession:stop(filename?: string): TraceReport
 ```
 
@@ -285,7 +285,7 @@ The on-disk format is the same CSV you'd get from `tostring(report)`.
 
 ### `TraceSession:pause()` / `TraceSession:resume()`
 
-```lua
+```teal
 function TraceSession:pause()
 function TraceSession:resume()
 ```
@@ -296,7 +296,7 @@ session has been stopped.
 
 You can stop and inspect the report:
 
-```lua
+```teal
 local session = profile.trace()
 -- ...later...
 local report = session:stop()
@@ -307,7 +307,7 @@ end
 
 You can stop and write the formatted report to disk in one call (the report is still returned):
 
-```lua
+```teal
 local report = session:stop("/tmp/aborts.txt")
 ```
 

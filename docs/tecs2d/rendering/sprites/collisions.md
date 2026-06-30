@@ -5,7 +5,7 @@ visually and have them applied to physics bodies.
 
 ## Quick Start
 
-```lua
+```teal
 local tecs = require("tecs")
 local physics = require("tecs2d.physics")
 local gfx = require("tecs2d.gfx")
@@ -51,7 +51,7 @@ catching on platforms.
 
 ## SpriteCollision Component
 
-```lua
+```teal
 gfx.SpriteCollision.new({
     bodyType = "dynamic",  -- or "static"
     fixedRotation = true,  -- dynamic only; defaults to true
@@ -84,7 +84,7 @@ instead of full configs.
 
 ### Registering Templates
 
-```lua
+```teal
 -- Register at startup
 gfx.SpriteCollision.addTemplate("PLAYER", {
     shape = "circle",
@@ -118,7 +118,7 @@ gfx.SpriteCollision.addTemplate("TRIGGER", {
 
 ### Retrieving Templates
 
-```lua
+```teal
 local template = gfx.SpriteCollision.getTemplate("PLAYER")
 ```
 
@@ -126,7 +126,7 @@ local template = gfx.SpriteCollision.getTemplate("PLAYER")
 
 Instead of templates, define collision properties inline:
 
-```lua
+```teal
 gfx.SpriteCollision.new({
     bodyType = "dynamic",
     slices = {
@@ -143,7 +143,7 @@ gfx.SpriteCollision.new({
 
 Define multiple shapes from different slices:
 
-```lua
+```teal
 gfx.SpriteCollision.addTemplate("BODY", {
     shape = "circle",
     restitution = 0.0,
@@ -193,7 +193,7 @@ A slice centered on the sprite has offset (0, 0). A slice at the sprite's feet h
 
 Sensors detect overlaps without causing physical collision:
 
-```lua
+```teal
 gfx.SpriteCollision.addTemplate("PICKUP_ZONE", {
     shape = "circle",
     sensor = true,
@@ -218,7 +218,7 @@ gfx.SpriteCollision.addTemplate("PICKUP_ZONE", {
 When physics is available, `SpriteCollision` auto-attaches a default `physics.Collider` plus either
 `physics.RigidBody` or `physics.StaticBody` based on `bodyType`.
 
-```lua
+```teal
 world:spawn(
     tecs.builtins.Transform(x, y),
     gfx.Sprite.fromAseprite("player.png", "idle"),
@@ -234,7 +234,7 @@ world:spawn(
 
 Handle collision events using the physics event system:
 
-```lua
+```teal
 world:observe(playerId, physics.BeginContact, function(event: physics.BeginContact)
     print("Collided with:", event.other)
     -- Access slice name via shape user data
@@ -257,7 +257,7 @@ manually.
 
 ## Example: Platformer Character
 
-```lua
+```teal
 gfx.SpriteCollision.addTemplate("PLAYER_BODY", {
     shape = "circle",
     restitution = 0.0,

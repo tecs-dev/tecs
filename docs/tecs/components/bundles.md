@@ -18,7 +18,7 @@ components. They provide:
 
 Create bundles through the world with a declarative definition:
 
-```lua
+```teal
 local playerBundle: tecs.Bundle = world:newBundle("Player", {
     required = { Transform, Health },
     with = {
@@ -41,7 +41,7 @@ Components listed in `required` must be supplied by the caller at spawn time.
 They are strictly **positional**: the order in the `required` array determines
 the argument order at `bundle:spawn(...)`.
 
-```lua
+```teal
 local enemyBundle: tecs.Bundle = world:newBundle("Enemy", {
     required = { Transform, Health, Damage },
 })
@@ -66,7 +66,7 @@ constructor.
 
 **With a factory:**
 
-```lua
+```teal
 local bulletBundle: tecs.Bundle = world:newBundle("Bullet", {
     required = { Transform },
     with = {
@@ -81,7 +81,7 @@ with-default components need specific initial values.
 
 **With `true` (default constructor):**
 
-```lua
+```teal
 local treeBundle: tecs.Bundle = world:newBundle("Tree", {
     required = { Transform },
     with = {
@@ -104,7 +104,7 @@ There are two ways to spawn from a bundle:
 
 ### Via the bundle object
 
-```lua
+```teal
 -- Required components in the order they were declared.
 local entityId: integer = playerBundle:spawn(
     Transform(100, 200),
@@ -114,7 +114,7 @@ local entityId: integer = playerBundle:spawn(
 
 ### Via the world by name
 
-```lua
+```teal
 local entityId: integer = world:spawnBundle("Player",
     Transform(100, 200),
     Health(100)
@@ -128,7 +128,7 @@ inside a scope (query iteration, `world:defer()`, a batch op callback) the
 entity is staged and applies when the scope closes. The returned id is usable
 immediately in either case.
 
-```lua
+```teal
 -- Outside a scope: placed right away.
 local id: integer = playerBundle:spawn(Transform(0, 0), Health(100))
 assert(world:isAlive(id))
@@ -144,13 +144,13 @@ end
 
 Get a single bundle by name:
 
-```lua
+```teal
 local bundle: tecs.Bundle = world:getBundle("Player")
 ```
 
 Get all registered bundles:
 
-```lua
+```teal
 local bundles: {string: tecs.Bundle} = world:getBundles()
 
 for name, bundle in pairs(bundles) do

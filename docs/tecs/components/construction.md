@@ -28,7 +28,7 @@ This page documents the shared component model. For backend and category-specifi
 
 Call the component container directly to construct an instance:
 
-```lua
+```teal
 local record Health is tecs.Component
     current: integer
     maximum: integer
@@ -55,7 +55,7 @@ For the concrete table-backed and FFI-backed forms of this pattern, see
 
 Every component also exposes `.new(data)`:
 
-```lua
+```teal
 local h: Health = Health.new({
     current = 80,
     maximum = 120,
@@ -78,13 +78,13 @@ This named construction path matters most for [table components](/tecs/component
 
 Table components use:
 
-```lua
+```teal
 fields = {"x", "y", "z"}
 ```
 
 FFI components use:
 
-```lua
+```teal
 fields = {
     {"x", "float"},
     {"y", "float"},
@@ -102,7 +102,7 @@ For relationship-specific construction and target semantics, see
 
 `defaults` are positional and line up with `fields`.
 
-```lua
+```teal
 defaults = {0, 0, 1}
 ```
 
@@ -114,7 +114,7 @@ That means:
 
 Use `nil` for "no default".
 
-```lua
+```teal
 defaults = {nil, nil, 1}
 ```
 
@@ -138,7 +138,7 @@ The split is:
 
 Example:
 
-```lua
+```teal
 tecs.newFFIComponent({
     name = "Transform",
     container = Transform,
@@ -186,7 +186,7 @@ On this path, Tecs:
 That last point is intentional: if you want to share logic, call
 `Component.init(instance, ...)` explicitly from the custom `__call`.
 
-```lua
+```teal
 tecs.newFFIComponent({
     name = "Text",
     container = Text,

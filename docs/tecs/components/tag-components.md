@@ -21,7 +21,7 @@ Use tags for flags, markers, and classification: "this entity is `Selected`", "t
 
 Create a tag with `tecs.newTagComponent`:
 
-```lua
+```teal
 local Selected = tecs.newTagComponent({name = "Selected"})
 local Stunned = tecs.newTagComponent({name = "Stunned"})
 ```
@@ -38,7 +38,7 @@ local Stunned = tecs.newTagComponent({name = "Stunned"})
 
 Tags use the standard component API:
 
-```lua
+```teal
 world:set(entityId, Selected)        -- add
 world:remove(entityId, Disabled)     -- remove
 world:has(entityId, Selected)        -- presence check (boolean)
@@ -46,7 +46,7 @@ world:has(entityId, Selected)        -- presence check (boolean)
 
 You can also spawn an entity directly with tags:
 
-```lua
+```teal
 world:spawn(Position(0, 0), Enemy, Hostile)
 ```
 
@@ -54,7 +54,7 @@ world:spawn(Position(0, 0), Enemy, Hostile)
 
 Tags slot into query descriptors like any other component:
 
-```lua
+```teal
 -- All selected enemies:
 world:query({include = {Enemy, Selected}})
 
@@ -65,7 +65,7 @@ world:query({include = {Enemy}, exclude = {Stunned}})
 Because tags have no column, there's nothing useful to bind inside the archetype loop. Filter on presence via
 `include` / `exclude` in the query descriptor, then iterate the components that do carry data:
 
-```lua
+```teal
 for archetype, len, entities in query:iter() do
     local positions = archetype:get(Position)
     -- archetype:get(Selected) returns nil: tag has no data column
@@ -91,7 +91,7 @@ Two performance properties worth knowing:
   entities shuffles them all into new archetypes. For bulk paths use `world:batchSet` /
   `world:batchRemove` against a query rather than a per-entity loop:
 
-  ```lua
+  ```teal
   local enemiesInBlast = world:query({
       include = {Enemy, InBlastRadius},
       temp = true

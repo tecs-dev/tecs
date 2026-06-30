@@ -6,7 +6,7 @@ Controller provides comprehensive gamepad support with automatic input mapping a
 
 Controllers can be created with different auto-assignment modes:
 
-```lua
+```teal
 local bindings = {
     controls = {
         jump = {"key:space", "button:a"},
@@ -31,7 +31,7 @@ local controller2 = controlManager:addController(bindings, {
 
 Manually assigning a specific gamepad:
 
-```lua
+```teal
 local controller4 = controlManager:addController(bindings, {
     -- Assign the first connected gamepad
     joystick = love.joystick.getJoysticks()[1],
@@ -54,7 +54,7 @@ Controller provides automatic gamepad assignment to simplify setup:
 - Prioritizes controllers with activity
 - Reassigns to any available gamepad when disconnected
 
-```lua
+```teal
 -- Player 1 gets first available gamepad (or active one if detected)
 local player1 = controlManager:addController(bindings, {auto = true})
 
@@ -66,7 +66,7 @@ local player2 = controlManager:addController(bindings, {auto = true})
 
 The `resetJoystick()` method allows changing controller assignments at runtime:
 
-```lua
+```teal
 -- Enable auto-assignment
 controller:resetJoystick({auto = true})
 
@@ -87,7 +87,7 @@ controller:resetJoystick(nil)
 
 You can directly set a controller's joystick using the `setJoystick` method:
 
-```lua
+```teal
 -- Assign a specific joystick
 local joystick = love.joystick.getJoysticks()[1]
 controller:setJoystick(joystick)
@@ -103,7 +103,7 @@ their controller.
 
 You can monitor when a controller's joystick changes by setting an `onJoystickChanged` callback:
 
-```lua
+```teal
 -- Set a callback to be notified of joystick changes
 controller.onJoystickChanged = function(
     ctrl: controller.Controller,
@@ -128,7 +128,7 @@ This callback is triggered whenever:
 
 ## Vibration/Rumble
 
-```lua
+```teal
 -- Add rumble feedback on hit
 if controller:isPressed("attack") and enemy:wasHit() then
     local joystick = controller.joystick
@@ -141,7 +141,7 @@ end
 
 ## Analog Triggers
 
-```lua
+```teal
 local bindings = {
     controls = {
         accelerate = {"key:up", "axis:triggerright+"},

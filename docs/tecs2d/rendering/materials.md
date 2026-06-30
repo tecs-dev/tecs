@@ -7,7 +7,7 @@ custom shading.
 
 Register a material, then attach it to entities as a component:
 
-```lua
+```teal
 local gfx = require("tecs2d.gfx")
 
 -- Register a material from a fragment shader file
@@ -166,7 +166,7 @@ entity's transform.
 Register a material with a vertex function. The fragment is optional; if omitted it defaults to
 `standardMaterial(i)`:
 
-```lua
+```teal
 local windSway = gfx.newMaterial("wind_sway", {
     vertex = "shaders/wind_sway_vert.glsl",
 })
@@ -198,7 +198,7 @@ scale but before screen-space conversion, so the offset is in world units.
 
 Each entity can pass 4 float parameters (p0-p3) to its material via `withParams()`:
 
-```lua
+```teal
 -- All entities share the "dissolve" material but each has its own threshold
 local dissolve = gfx.newMaterial("dissolve", {
     fragment = "shaders/dissolve.glsl"
@@ -242,7 +242,7 @@ MaterialOutput material(MaterialInput i) {
 
 To animate parameters at runtime, get the component and set the fields:
 
-```lua
+```teal
 local mat = world:get(entityId, gfx.Material)
 mat.p0 = newThreshold
 world:markComponentDirty(entityId, gfx.Material)  -- Trigger GPU re-sync
@@ -252,7 +252,7 @@ world:markComponentDirty(entityId, gfx.Material)  -- Trigger GPU re-sync
 
 Materials can bind up to 4 custom textures:
 
-```lua
+```teal
 local frost = gfx.newMaterial("frost", {
     fragment = "shaders/frost.glsl",
     textures = {
@@ -302,7 +302,7 @@ alternative but won't behave identically to additive blending.
 
 ::: code-group
 
-```lua [Usage]
+```teal [Usage]
 local dissolve = gfx.newMaterial("dissolve", {
     fragment = "shaders/dissolve.glsl"
 })
@@ -336,7 +336,7 @@ MaterialOutput material(MaterialInput i) {
 
 ::: code-group
 
-```lua [Usage]
+```teal [Usage]
 local flash = gfx.newMaterial("flash", {
     fragment = "shaders/flash.glsl"
 })
@@ -364,7 +364,7 @@ MaterialOutput material(MaterialInput i) {
 
 ::: code-group
 
-```lua [Usage]
+```teal [Usage]
 -- Vertex-only material (fragment defaults to standardMaterial)
 local windGrass = gfx.newMaterial("wind_grass", {
     vertex = "shaders/wind_vert.glsl",
@@ -416,7 +416,7 @@ Returns a new `Material` value with the same `materialId` but different paramete
 | `p2`        | `number`   | Third parameter (accessed as `i.params.z`). Default: 0       |
 | `p3`        | `number`   | Fourth parameter (accessed as `i.params.w`). Default: 0      |
 
-```lua
+```teal
 local dissolve = gfx.newMaterial("dissolve", {
     fragment = "shaders/dissolve.glsl"
 })
@@ -458,7 +458,7 @@ a different base shader that the material function is injected into.
 Variants are compiled on first use, which can cause a brief hitch on the first frame a material appears. To avoid
 this, call `precompileMaterials()` during a loading screen:
 
-```lua
+```teal
 local gfx = require("tecs2d.gfx")
 
 -- Register materials

@@ -7,7 +7,7 @@ Debug shapes are toggled on and off at runtime via the `DebugToggle` event.
 
 ## Usage
 
-```lua
+```teal
 local tiled = require("tecs2d.tiled")
 
 -- Register the debug plugin (no shapes are spawned yet)
@@ -25,7 +25,7 @@ loaded tilemaps.
 
 ### Custom Configuration
 
-```lua
+```teal
 world:addPlugin(tiled.createDebugPlugin({
     renderLayer = 15,
     color = {1, 0, 0, 1},
@@ -43,7 +43,7 @@ The debug plugin observes `DebugToggle` events emitted to address 0 (world-level
 
 This makes it easy to bind to a key press:
 
-```lua
+```teal
 local input = require("tecs2d.input")
 local tiled = require("tecs2d.tiled")
 
@@ -83,7 +83,7 @@ All fields are optional. Pass a `DebugConfig` table to `createDebugPlugin` to cu
 
 ### `tiled.debugPlugin`
 
-```lua
+```teal
 world:addPlugin(tiled.debugPlugin)
 ```
 
@@ -91,7 +91,7 @@ Plugin function with default configuration. Equivalent to `tiled.createDebugPlug
 
 ### `tiled.createDebugPlugin`
 
-```lua
+```teal
 local plugin = tiled.createDebugPlugin(config?: DebugConfig)
 world:addPlugin(plugin)
 ```
@@ -100,7 +100,7 @@ Creates a debug plugin with custom configuration. Returns a plugin function.
 
 ### `tiled.DebugToggle`
 
-```lua
+```teal
 world:emit(0, tiled.DebugToggle)
 ```
 

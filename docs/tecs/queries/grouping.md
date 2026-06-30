@@ -14,7 +14,7 @@ The `groupBy` function receives an archetype and returns an integer. Archetypes 
 so archetypes with the same key are iterated together. The sort is efficient and happens as archetypes match
 the query.
 
-```lua
+```teal
 local BlendMode <const> = { Alpha = 1, Additive = 2, Multiply = 3 }
 
 local blendQuery = world:query({
@@ -35,7 +35,7 @@ Use `groups()` to iterate active group IDs in sorted order, and `group(id)` to i
 a specific group. This pattern lets you switch render state once per group rather than checking on every
 archetype:
 
-```lua
+```teal
 for blendMode in blendQuery:groups() do
     love.graphics.setBlendMode(blendModeToLove[blendMode])
     for archetype, len, entities in blendQuery:group(blendMode) do
@@ -51,7 +51,7 @@ end
 
 Use `getGroup(archetype)` to retrieve the cached group ID for an archetype:
 
-```lua
+```teal
 for archetype, len, entities in blendQuery:iter() do
     local blendMode = blendQuery:getGroup(archetype)
     -- blendMode is the integer returned by groupBy for this archetype
@@ -63,7 +63,7 @@ end
 Use `getGroupCount(groupId)` to get the total number of entities in a group without iterating.
 This is useful for pre-allocating buffers or computing memory layouts:
 
-```lua
+```teal
 -- Pre-calculate buffer offsets for each group
 local offsets = {}
 local currentOffset = 0

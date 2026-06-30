@@ -2,7 +2,7 @@
 
 ## Module: tecs2d.audio
 
-```lua
+```teal
 local audio = require("tecs2d.audio")
 ```
 
@@ -45,7 +45,7 @@ See [Audio Components](./components) for detailed documentation on:
 
 #### setGroupVolume
 
-```lua
+```teal
 audio:setGroupVolume(name, volume)
 ```
 
@@ -53,7 +53,7 @@ Set volume for a sound group. Volume is clamped to 0-1.
 
 #### getGroupVolume
 
-```lua
+```teal
 audio:getGroupVolume(name) --> number
 ```
 
@@ -61,7 +61,7 @@ Get current volume for a group. Returns 1.0 for unknown groups.
 
 #### muteGroup
 
-```lua
+```teal
 audio:muteGroup(name, muted)
 ```
 
@@ -69,7 +69,7 @@ Mute or unmute a sound group.
 
 #### isGroupMuted
 
-```lua
+```teal
 audio:isGroupMuted(name) --> boolean
 ```
 
@@ -79,7 +79,7 @@ Check if a group is muted.
 
 #### setVoiceLimit
 
-```lua
+```teal
 audio:setVoiceLimit(key, maxVoices)
 ```
 
@@ -89,7 +89,7 @@ Set maximum concurrent voices for a sound key. Set to 0 for unlimited.
 
 #### setCooldown
 
-```lua
+```teal
 audio:setCooldown(key, seconds)
 ```
 
@@ -97,7 +97,7 @@ Set minimum time between plays for a sound key.
 
 #### isOnCooldown
 
-```lua
+```teal
 audio:isOnCooldown(key) --> boolean
 ```
 
@@ -107,7 +107,7 @@ Check if a sound key is currently on cooldown.
 
 #### play
 
-```lua
+```teal
 audio:play(handle, options) --> Source or nil
 ```
 
@@ -115,7 +115,7 @@ Play a non-positional (2D) sound. Returns the playing source, or nil if blocked 
 
 #### playAt
 
-```lua
+```teal
 audio:playAt(handle, x, y, z, options) --> Source or nil
 ```
 
@@ -125,7 +125,7 @@ Play a positional (3D) sound at the specified coordinates.
 
 #### stop
 
-```lua
+```teal
 audio:stop(source, fadeDuration?)
 ```
 
@@ -133,7 +133,7 @@ Stop a specific source. Optional fade duration in seconds.
 
 #### stopGroup
 
-```lua
+```teal
 audio:stopGroup(name, fadeDuration?)
 ```
 
@@ -141,7 +141,7 @@ Stop all sounds in a group. Optional fade duration.
 
 #### stopAll
 
-```lua
+```teal
 audio:stopAll(fadeDuration?)
 ```
 
@@ -149,7 +149,7 @@ Stop all sounds. Optional fade duration.
 
 #### pause
 
-```lua
+```teal
 audio:pause(source, fadeDuration?)
 ```
 
@@ -157,7 +157,7 @@ Pause a specific source. Optional fade duration.
 
 #### resume
 
-```lua
+```teal
 audio:resume(source, fadeDuration?)
 ```
 
@@ -165,7 +165,7 @@ Resume a paused source. Optional fade duration.
 
 #### pauseGroup
 
-```lua
+```teal
 audio:pauseGroup(name, fadeDuration?)
 ```
 
@@ -173,7 +173,7 @@ Pause all sounds in a group. Optional fade duration.
 
 #### resumeGroup
 
-```lua
+```teal
 audio:resumeGroup(name, fadeDuration?)
 ```
 
@@ -181,7 +181,7 @@ Resume all paused sounds in a group. Optional fade duration.
 
 #### isGroupPaused
 
-```lua
+```teal
 audio:isGroupPaused(name) --> boolean
 ```
 
@@ -191,7 +191,7 @@ Check if a group is paused.
 
 #### setGroupEffect
 
-```lua
+```teal
 audio:setGroupEffect(groupName, effectType, settings)
 ```
 
@@ -205,7 +205,7 @@ sources added to the group.
 - `settings` - Table of effect-specific parameters
 
 **Example:**
-```lua
+```teal
 -- Add reverb to all SFX
 audio:setGroupEffect("sfx", "reverb", {
     decaytime = 4.0,
@@ -226,7 +226,7 @@ See [LÖVE Audio Effects](https://love2d.org/wiki/EffectType) for available para
 
 #### removeGroupEffect
 
-```lua
+```teal
 audio:removeGroupEffect(groupName, effectType)
 ```
 

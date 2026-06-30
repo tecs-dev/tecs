@@ -9,7 +9,7 @@ minimaps, split-screen, and render-to-texture.
 Camera settings are provided via the `render` table in `tecs2d.run`. These configure the **primary camera**,
 which renders fullscreen by default.
 
-```lua
+```teal
 local tecs2d = require("tecs2d")
 
 -- Retro pixel art game (integer-scaled, no pixel crawl)
@@ -35,7 +35,7 @@ love.run = tecs2d.run({
 
 All camera settings are optional. Additional options include:
 
-```lua
+```teal
 render = {
     cameraPosition = {0, 0},   -- Initial position (default: {0, 0})
     zoom = 1.0,                -- Initial zoom level (default: 1.0)
@@ -50,7 +50,7 @@ render = {
 
 Access the primary camera through the pipeline resource:
 
-```lua
+```teal
 local gfx = require("tecs2d.gfx")
 
 local pipeline = world.resources[gfx.PIPELINE]
@@ -68,7 +68,7 @@ The `pixelMode` boolean controls how rendering is scaled to the screen:
 | `false` | Smooth full-resolution rendering (default)                                                            |
 | `true`  | Integer-scaled low-res canvas with nearest-neighbor filtering. Eliminates pixel crawl via blit-shift. |
 
-```lua
+```teal
 -- Change pixel mode at runtime
 pipeline:setPixelMode(true)   -- enable retro
 pipeline:setPixelMode(false)  -- disable retro
@@ -114,7 +114,7 @@ mouse coordinates always convert to the correct world positions.
 
 The camera uses **center-based positioning**: the position represents the center of the camera's view.
 
-```lua
+```teal
 local cam = pipeline:getCamera()
 
 -- Set position immediately (ignores lerping)
@@ -135,7 +135,7 @@ local x, y = cam:getPosition()
 Zoom controls how much of the world is visible. Values greater than 1 zoom in (less visible area); values less
 than 1 zoom out (more visible area).
 
-```lua
+```teal
 -- Set zoom level (1 = normal, 2 = 2x zoom in, 0.5 = 2x zoom out)
 cam:setZoom(0.5)
 
@@ -147,7 +147,7 @@ local zoom = cam:getZoom()
 
 When lerping is enabled, calls to `move()` and `nudge()` smoothly interpolate to the target position.
 
-```lua
+```teal
 -- Enable/disable smooth movement
 cam:setLerpingEnabled(true)
 cam:setLerpingEnabled(false)
@@ -159,7 +159,7 @@ cam:setLerpSpeed(4.0)   -- Very smooth but slower
 
 **Input-driven camera movement:**
 
-```lua
+```teal
 local input = require("tecs2d.input")
 local cam = pipeline:getCamera()
 local speed = 200
@@ -180,14 +180,14 @@ world:addSystem({
 
 Clamp the camera so it cannot scroll past the edges of the world:
 
-```lua
+```teal
 cam:setWorldBounds(0, 0, 3200, 2400)
 cam:setClamp(true)
 ```
 
 ### Rotation
 
-```lua
+```teal
 -- Set rotation in radians (uses lerp if enabled)
 cam:setRotation(math.pi / 4)
 
@@ -202,7 +202,7 @@ intensity is proportional to trauma squared (`trauma^2`). Perlin noise produces 
 both translational and rotational shake. The shake offsets are applied to the rendered position without
 affecting the camera's logical position.
 
-```lua
+```teal
 local cam = pipeline:getCamera()
 
 -- Trigger screenshake (e.g., on hit or explosion)
@@ -226,7 +226,7 @@ screen edges from popping in and out as the shake decays.
 
 Convert between world and screen coordinates:
 
-```lua
+```teal
 -- Convert screen coordinates to world coordinates (e.g., for mouse input)
 local worldX, worldY = cam:toWorld(love.mouse.getPosition())
 
@@ -238,7 +238,7 @@ local screenX, screenY = cam:toScreen(entity.x, entity.y)
 
 Query the camera's visible area:
 
-```lua
+```teal
 -- Get visible world bounds
 local left, top, right, bottom = cam:getVisibleCorners()
 
@@ -256,7 +256,7 @@ end
 The `CameraTarget` component makes the primary camera automatically follow an entity. Add it to any entity
 with a Transform.
 
-```lua
+```teal
 local gfx = require("tecs2d.gfx")
 
 -- Make the player the camera target
@@ -281,7 +281,7 @@ The camera uses its lerping settings to smoothly follow the target.
 | `lookAheadX`   | number    | 0         | Horizontal look-ahead factor (0 = disabled)                    |
 | `lookAheadY`   | number    | 0         | Vertical look-ahead factor (0 = disabled)                      |
 
-```lua
+```teal
 -- Camera focuses above and to the right of the entity
 gfx.CameraTarget({ offsetX = 20, offsetY = -30 })
 
@@ -298,7 +298,7 @@ reduces camera motion for small movements, making gameplay feel smoother.
 **Look-ahead** shifts the camera in the direction the target is moving, giving the player more visibility
 ahead. The look-ahead offset is smoothed with framerate-independent exponential decay.
 
-```lua
+```teal
 -- Dead zone: camera stays still for small movements
 gfx.CameraTarget({
     deadZoneW = 40,   -- 40 world units half-width
@@ -327,7 +327,7 @@ gfx.CameraTarget({
 
 Toggle `active` to pause or resume camera following:
 
-```lua
+```teal
 -- Pause following (e.g., during cutscene)
 local target = world:get(playerId, gfx.CameraTarget)
 target.active = false
@@ -372,7 +372,7 @@ When creating a camera with `pipeline:newCamera()`, you can pass an optional con
 A minimap camera renders the entire world to a small off-screen texture. Pass a `canvas` to render off-screen
 without blitting to the display, then draw that canvas wherever you want (screen overlay, in-game TV, etc.).
 
-```lua
+```teal
 local MINIMAP_W, MINIMAP_H = 200, 150
 local WORLD_W, WORLD_H = 3200, 2400
 local VIRTUAL_HEIGHT = 360
@@ -391,7 +391,7 @@ local minimapCam = pipeline:newCamera("minimap", {
 
 Draw the minimap as a screen overlay in PostRender:
 
-```lua
+```teal
 world:addSystem({
     name = "MinimapOverlay",
     phase = tecs.phases.PostRender,
@@ -421,7 +421,7 @@ world:addSystem({
 
 Draw the minimap as an in-game TV in the Draw phase (world coordinates):
 
-```lua
+```teal
 world:addSystem({
     name = "TVDraw",
     phase = tecs.phases.Draw,
@@ -439,7 +439,7 @@ world:addSystem({
 
 A split-screen setup uses `viewport` to assign each camera a portion of the screen:
 
-```lua
+```teal
 local screenW = love.graphics.getWidth()
 local screenH = love.graphics.getHeight()
 local halfW = math.floor(screenW / 2) - 1
@@ -471,7 +471,7 @@ rightCam:setClamp(true)
 
 Each camera can be controlled independently:
 
-```lua
+```teal
 -- Left camera: WASD
 if input.isKeyDown("w") then leftCam:nudge(0, -speed * dt) end
 if input.isKeyDown("a") then leftCam:nudge(-speed * dt, 0) end
@@ -483,7 +483,7 @@ if input.isKeyDown("left") then rightCam:nudge(-speed * dt, 0) end
 
 Draw a divider between viewports in PostRender:
 
-```lua
+```teal
 world:addSystem({
     name = "Divider",
     phase = tecs.phases.PostRender,
@@ -504,7 +504,7 @@ See the `multi-cam` example for a complete implementation that combines minimap,
 
 Get a camera by name. Called with no arguments, returns the primary camera.
 
-```lua
+```teal
 function Pipeline:getCamera(name?: string): Camera
 ```
 
@@ -518,7 +518,7 @@ function Pipeline:getCamera(name?: string): Camera
 
 **Example:**
 
-```lua
+```teal
 local cam = pipeline:getCamera()            -- primary camera
 local mini = pipeline:getCamera("minimap")  -- named camera
 ```
@@ -527,7 +527,7 @@ local mini = pipeline:getCamera("minimap")  -- named camera
 
 Create and register a new camera.
 
-```lua
+```teal
 function Pipeline:newCamera(name: string, config?: CameraConfig): Camera
 ```
 
@@ -548,7 +548,7 @@ function Pipeline:newCamera(name: string, config?: CameraConfig): Camera
 
 **Example:**
 
-```lua
+```teal
 local minimapCam = pipeline:newCamera("minimap", {
     canvas = love.graphics.newCanvas(200, 150),
     position = {1600, 1200},
@@ -559,7 +559,7 @@ local minimapCam = pipeline:newCamera("minimap", {
 
 Remove a registered camera by name.
 
-```lua
+```teal
 function Pipeline:removeCamera(name: string)
 ```
 
@@ -578,7 +578,7 @@ function Pipeline:removeCamera(name: string)
 
 Set the camera position immediately, bypassing lerp interpolation. Both the current and target positions are updated.
 
-```lua
+```teal
 function Camera:setPosition(x: number, y: number)
 ```
 
@@ -592,7 +592,7 @@ function Camera:setPosition(x: number, y: number)
 Move the camera to a target position. If lerping is enabled, the camera smoothly interpolates to the target.
 Otherwise, the position is set immediately.
 
-```lua
+```teal
 function Camera:move(x: number, y: number)
 ```
 
@@ -605,7 +605,7 @@ function Camera:move(x: number, y: number)
 
 Move the camera by a delta amount relative to its current target position. Useful for input-driven movement.
 
-```lua
+```teal
 function Camera:nudge(dx: number, dy: number)
 ```
 
@@ -616,7 +616,7 @@ function Camera:nudge(dx: number, dy: number)
 
 **Example:**
 
-```lua
+```teal
 -- Move camera right at 200 units/sec
 cam:nudge(200 * dt, 0)
 ```
@@ -625,7 +625,7 @@ cam:nudge(200 * dt, 0)
 
 Get the current interpolated camera position.
 
-```lua
+```teal
 function Camera:getPosition(): number, number
 ```
 
@@ -638,7 +638,7 @@ function Camera:getPosition(): number, number
 
 Set the camera zoom level. Values greater than 1 zoom in; values less than 1 zoom out. Clamped to a minimum of 0.001.
 
-```lua
+```teal
 function Camera:setZoom(zoom: number)
 ```
 
@@ -654,7 +654,7 @@ function Camera:setZoom(zoom: number)
 
 Get the current zoom level.
 
-```lua
+```teal
 function Camera:getZoom(): number
 ```
 
@@ -666,7 +666,7 @@ function Camera:getZoom(): number
 
 Set the camera rotation. If lerping is enabled, the rotation smoothly interpolates via the shortest angular path.
 
-```lua
+```teal
 function Camera:setRotation(rotation: number)
 ```
 
@@ -678,7 +678,7 @@ function Camera:setRotation(rotation: number)
 
 Get the current camera rotation.
 
-```lua
+```teal
 function Camera:getRotation(): number
 ```
 
@@ -690,7 +690,7 @@ function Camera:getRotation(): number
 
 Enable or disable smooth camera interpolation. When disabled, the camera snaps to its target position immediately.
 
-```lua
+```teal
 function Camera:setLerpingEnabled(enabled: boolean)
 ```
 
@@ -706,7 +706,7 @@ function Camera:setLerpingEnabled(enabled: boolean)
 
 Set the lerp speed factor. Higher values produce snappier movement; lower values produce smoother, slower tracking.
 
-```lua
+```teal
 function Camera:setLerpSpeed(speed: number)
 ```
 
@@ -718,7 +718,7 @@ function Camera:setLerpSpeed(speed: number)
 
 Enable or disable clamping the camera position to world bounds.
 
-```lua
+```teal
 function Camera:setClamp(enabled: boolean)
 ```
 
@@ -730,7 +730,7 @@ function Camera:setClamp(enabled: boolean)
 
 Set the world bounds used for clamping. The camera will not scroll past these edges when clamping is enabled.
 
-```lua
+```teal
 function Camera:setWorldBounds(minX: number, minY: number, maxX: number, maxY: number)
 ```
 
@@ -745,7 +745,7 @@ function Camera:setWorldBounds(minX: number, minY: number, maxX: number, maxY: n
 
 Convert screen-space coordinates to world-space coordinates, accounting for camera position, zoom, and rotation.
 
-```lua
+```teal
 function Camera:toWorld(screenX: number, screenY: number): number, number
 ```
 
@@ -761,7 +761,7 @@ function Camera:toWorld(screenX: number, screenY: number): number, number
 
 **Example:**
 
-```lua
+```teal
 local wx, wy = cam:toWorld(love.mouse.getPosition())
 ```
 
@@ -769,7 +769,7 @@ local wx, wy = cam:toWorld(love.mouse.getPosition())
 
 Convert world-space coordinates to screen-space coordinates.
 
-```lua
+```teal
 function Camera:toScreen(worldX: number, worldY: number): number, number
 ```
 
@@ -787,7 +787,7 @@ function Camera:toScreen(worldX: number, worldY: number): number, number
 
 Get the world-space bounding box of the camera's visible area.
 
-```lua
+```teal
 function Camera:getVisibleCorners(): number, number, number, number
 ```
 
@@ -807,7 +807,7 @@ function Camera:getVisibleCorners(): number, number, number, number
 
 Get the width and height of the camera's visible area in world units.
 
-```lua
+```teal
 function Camera:getVisibleDimensions(): number, number
 ```
 
@@ -820,7 +820,7 @@ function Camera:getVisibleDimensions(): number, number
 
 Check if a world-space rectangle is within the camera's visible area. Useful for culling expensive draw calls.
 
-```lua
+```teal
 function Camera:isVisible(x: number, y: number, w: number, h: number): boolean
 ```
 
@@ -839,7 +839,7 @@ function Camera:isVisible(x: number, y: number, w: number, h: number): boolean
 
 Enable or disable this camera. Inactive cameras are skipped during rendering.
 
-```lua
+```teal
 function Camera:setActive(active: boolean)
 ```
 
@@ -851,7 +851,7 @@ function Camera:setActive(active: boolean)
 
 Check if this camera is currently active.
 
-```lua
+```teal
 function Camera:isActive(): boolean
 ```
 
@@ -864,7 +864,7 @@ function Camera:isActive(): boolean
 Set the screen-space viewport rectangle. This also updates the camera's internal screen dimensions to match the
 viewport aspect ratio.
 
-```lua
+```teal
 function Camera:setViewport(x: number, y: number, w: number, h: number)
 ```
 
@@ -883,7 +883,7 @@ function Camera:setViewport(x: number, y: number, w: number, h: number)
 
 Get the current viewport rectangle.
 
-```lua
+```teal
 function Camera:getViewport(): number, number, number, number
 ```
 
@@ -896,7 +896,7 @@ function Camera:getViewport(): number, number, number, number
 Set the 16-bit layer visibility bitmask. Bit N-1 corresponds to layer N. For example, `0x0003` makes layers 1 and 2
 visible.
 
-```lua
+```teal
 function Camera:setLayerMask(mask: integer)
 ```
 
@@ -908,7 +908,7 @@ function Camera:setLayerMask(mask: integer)
 
 Get the current layer visibility bitmask.
 
-```lua
+```teal
 function Camera:getLayerMask(): integer
 ```
 
@@ -920,7 +920,7 @@ function Camera:getLayerMask(): integer
 
 Set visible layers from a list of layer numbers. Replaces the current mask.
 
-```lua
+```teal
 function Camera:setLayers(layers: {integer})
 ```
 
@@ -930,7 +930,7 @@ function Camera:setLayers(layers: {integer})
 
 **Example:**
 
-```lua
+```teal
 cam:setLayers({1, 2, 5})  -- Only layers 1, 2, and 5 visible
 ```
 
@@ -938,7 +938,7 @@ cam:setLayers({1, 2, 5})  -- Only layers 1, 2, and 5 visible
 
 Set visible layers from a contiguous range. Replaces the current mask.
 
-```lua
+```teal
 function Camera:setLayerRange(minLayer: integer, maxLayer: integer)
 ```
 
@@ -951,7 +951,7 @@ function Camera:setLayerRange(minLayer: integer, maxLayer: integer)
 
 Toggle visibility of a single layer without affecting other layers.
 
-```lua
+```teal
 function Camera:setLayer(layer: integer, enabled: boolean)
 ```
 
@@ -964,7 +964,7 @@ function Camera:setLayer(layer: integer, enabled: boolean)
 
 Check if a specific layer is visible to this camera.
 
-```lua
+```teal
 function Camera:isLayerVisible(layer: integer): boolean
 ```
 
@@ -981,7 +981,7 @@ function Camera:isLayerVisible(layer: integer): boolean
 Enable or disable the CPU Draw phase for this camera. When enabled, systems registered in `tecs.phases.Draw` will run
 during this camera's render pass with the camera's transform applied.
 
-```lua
+```teal
 function Camera:setRunDrawPhase(enabled: boolean)
 ```
 
@@ -998,7 +998,7 @@ function Camera:setRunDrawPhase(enabled: boolean)
 
 Check if the CPU Draw phase is enabled for this camera.
 
-```lua
+```teal
 function Camera:getRunDrawPhase(): boolean
 ```
 
@@ -1010,7 +1010,7 @@ function Camera:getRunDrawPhase(): boolean
 
 Get the camera's name as set during creation.
 
-```lua
+```teal
 function Camera:getName(): string
 ```
 
@@ -1022,7 +1022,7 @@ function Camera:getName(): string
 
 Get the rendered canvas for render-to-texture cameras (created with `canvas`).
 
-```lua
+```teal
 function Camera:getCanvas(): love.graphics.Canvas
 ```
 
@@ -1040,7 +1040,7 @@ function Camera:getCanvas(): love.graphics.Canvas
 
 Add trauma to trigger screenshake. Stacks with existing trauma, clamped to 0-1.
 
-```lua
+```teal
 function Camera:shake(amount: number)
 ```
 
@@ -1050,7 +1050,7 @@ function Camera:shake(amount: number)
 
 **Example:**
 
-```lua
+```teal
 cam:shake(0.5)   -- Medium shake
 cam:shake(1.0)   -- Maximum shake
 ```
@@ -1059,7 +1059,7 @@ cam:shake(1.0)   -- Maximum shake
 
 Set the maximum pixel offset at full trauma (trauma = 1).
 
-```lua
+```teal
 function Camera:setShakeIntensity(intensity: number)
 ```
 
@@ -1071,7 +1071,7 @@ function Camera:setShakeIntensity(intensity: number)
 
 Set the maximum rotational shake in radians at full trauma.
 
-```lua
+```teal
 function Camera:setShakeRotation(maxAngle: number)
 ```
 
@@ -1083,7 +1083,7 @@ function Camera:setShakeRotation(maxAngle: number)
 
 Set the trauma decay rate.
 
-```lua
+```teal
 function Camera:setTraumaDecay(decay: number)
 ```
 
@@ -1095,7 +1095,7 @@ function Camera:setTraumaDecay(decay: number)
 
 Get the current trauma level.
 
-```lua
+```teal
 function Camera:getTrauma(): number
 ```
 
@@ -1107,7 +1107,7 @@ function Camera:getTrauma(): number
 
 Update the camera's screen dimensions. Called automatically by the pipeline on window resize.
 
-```lua
+```teal
 function Camera:setScreenSize(sw: integer, sh: integer, vh: integer)
 ```
 

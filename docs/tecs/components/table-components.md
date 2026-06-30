@@ -40,7 +40,7 @@ codegen both the positional `__call` *and* the `.new` table form. Optional
 `defaults` fill in static defaults for any field the caller omits; use `nil` for
 fields that have no default.
 
-```lua
+```teal
 local record Health is tecs.Component
     value: number
     max: number
@@ -64,7 +64,7 @@ local b: Health = Health.new({ value = 80, max = 100 })
 `function(data: {string: any}): self`. Override it with a nested config record when you want
 field-by-field type checking on callers:
 
-```lua
+```teal
 local record Health is tecs.Component
     value: number
     max: number
@@ -104,7 +104,7 @@ Registering an `init` without one of those errors immediately: the broken-`.new`
 The common case: `fields` alongside an `init` hook that adds validation or derived fields. `fields` defines
 the base shape and `.new` unpacking; your `init` refines the allocated instance.
 
-```lua
+```teal
 local record Sprite is tecs.Component
     texture: love.graphics.Texture
     metamethod __call: function(self, texture: love.graphics.Texture): Sprite
@@ -140,7 +140,7 @@ Supply `new` when you want callers to have an ergonomic `Component.new({...})` f
 defaults. You'll typically pair it with a custom `init` so both shapes share the same defaults and
 validation.
 
-```lua
+```teal
 local record Light is tecs.Component
     radius: number
     intensity: number
@@ -196,7 +196,7 @@ offer component hooks that fire when a component is added, removed, or replaced 
    behavior.
 3. **`onReplace` style hooks are incompatible with the mutation model.**
    Tecs components are mutable in place (both table and FFI). The hot write pattern is direct column access:
-   ```lua
+   ```teal
    positions[row].x = positions[row].x + velocities[row].vx * dt
    ```
 

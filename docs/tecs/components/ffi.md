@@ -16,7 +16,7 @@ FFI-specific storage behavior and field types.
 
 Define FFI components using `tecs.newFFIComponent`:
 
-```lua
+```teal
 local tecs = require("tecs")
 
 local record Velocity is tecs.Component
@@ -64,7 +64,7 @@ FFI components use the same `__call(...)` / `.new(data)` / `fields` / `defaults`
 `init` model as table components. The FFI-specific difference is that the base
 instance is an FFI struct instead of a Lua table.
 
-```lua
+```teal
 -- Define component
 local record Position is tecs.Component
     x: number
@@ -92,7 +92,7 @@ local pos2: Position = Position(10, 20, 30)  -- all values provided
 
 FFI components support explicit `defaults`, just like table components:
 
-```lua
+```teal
 tecs.newFFIComponent({
     name = "Position",
     container = Position,
@@ -118,7 +118,7 @@ That means omitted values fall back to the underlying FFI zero value:
 FFI components share the same API as table-based components. Field access, construction, and mutation work
 identically regardless of the underlying storage:
 
-```lua
+```teal
 local vel: Velocity = Velocity(10, 20)
 vel.x = vel.x + 5
 print(vel.x, vel.y)  -- 15, 20
@@ -166,7 +166,7 @@ To run code when the component is added to or removed from an entity, attach
 
 **Example:**
 
-```lua
+```teal
 local record Velocity is tecs.Component
     x: number
     y: number
@@ -188,7 +188,7 @@ tecs.newFFIComponent({
 
 FFI components can include an optional `init` hook for validation and derived state:
 
-```lua
+```teal
 init = function(instance: Component, ...: any)
 ```
 
@@ -207,7 +207,7 @@ explicitly if you want to reuse init logic.
 
 For example:
 
-```lua
+```teal
 local record Health is tecs.Component
     current: integer
     maximum: integer

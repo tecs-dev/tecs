@@ -77,7 +77,7 @@ my-game/
 
 `tecs2d.run` configures the world, render pipeline, and game plugin, then takes over Love2D's main loop:
 
-```lua
+```teal
 local tecs <const> = require("tecs")
 local tecs2d <const> = require("tecs2d")
 local gfx <const> = require("tecs2d.gfx")

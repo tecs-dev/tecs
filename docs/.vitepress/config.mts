@@ -1,5 +1,8 @@
 import { defineConfig } from 'vitepress'
 import llmstxt from 'vitepress-plugin-llms'
+// Local Teal TextMate grammar (teal-language/vscode-teal). Bundled into the
+// build; registering it here adds `teal`/`tl` highlighting with no upstream PR.
+import tealGrammar from './teal.tmLanguage.json'
 
 // Map a page's source path to the generated LLM-friendly Markdown URL.
 // "tecs/index.md" -> "/tecs.md", "tecs/world.md" -> "/tecs/world.md".
@@ -32,7 +35,10 @@ export default defineConfig({
       light: 'github-light',
       // 'andromeeda' | 'aurora-x' | 'ayu-dark' | 'catppuccin-frappe' | 'catppuccin-latte' | 'catppuccin-macchiato' | 'catppuccin-mocha' | 'dark-plus' | 'dracula' | 'dracula-soft' | 'everforest-dark' | 'everforest-light' | 'github-dark' | 'github-dark-default' | 'github-dark-dimmed' | 'github-dark-high-contrast' | 'github-light' | 'github-light-default' | 'github-light-high-contrast' | 'houston' | 'kanagawa-dragon' | 'kanagawa-lotus' | 'kanagawa-wave' | 'laserwave' | 'light-plus' | 'material-theme' | 'material-theme-darker' | 'material-theme-lighter' | 'material-theme-ocean' | 'material-theme-palenight' | 'min-dark' | 'min-light' | 'monokai' | 'night-owl' | 'nord' | 'one-dark-pro' | 'one-light' | 'plastic' | 'poimandres' | 'red' | 'rose-pine' | 'rose-pine-dawn' | 'rose-pine-moon' | 'slack-dark' | 'slack-ochin' | 'snazzy-light' | 'solarized-dark' | 'solarized-light' | 'synthwave-84' | 'tokyo-night' | 'vesper' | 'vitesse-black' | 'vitesse-dark' | 'vitesse-light'
       dark: 'tokyo-night'
-    }
+    },
+    languages: [
+      { ...(tealGrammar as any), name: 'teal', aliases: ['tl'] }
+    ]
   },
   head: [
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/images/logo.svg' }],

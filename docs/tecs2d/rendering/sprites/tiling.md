@@ -7,7 +7,7 @@ or patterns.
 
 ## Quick Start
 
-```lua
+```teal
 local gfx = require("tecs2d.gfx")
 
 -- Create a tiled ground texture
@@ -45,7 +45,7 @@ world:spawn(
 
 `RepeatedSprite` works with [animated sprites](./animation):
 
-```lua
+```teal
 -- Animated water tiles
 world:spawn(
     tecs.builtins.Transform(0, waterY),
@@ -66,7 +66,7 @@ All tiles share the same animation state.
 Rotation and scale from `Transform` apply to the entire tiled rectangle as a unit. The geometry (quad) is
 transformed around the pivot point; the individual tiles inside remain axis-aligned relative to each other.
 
-```lua
+```teal
 world:spawn(
     tecs.builtins.Transform(400, 300, 1, 1, {
         rotation = math.pi / 6,  -- 30 degree rotation
@@ -88,7 +88,7 @@ world:spawn(
 You can update the RepeatedSprite at runtime, just be sure to [mark the `RepeatedSprite` column
 dirty](/tecs/components/dirty-tracking) on the archetype to trigger a resync.
 
-```lua
+```teal
 local repeated = world:get(entityId, gfx.RepeatedSprite)
 repeated.width = newWidth
 repeated.height = newHeight
@@ -100,7 +100,7 @@ world:markComponentDirty(entityId, gfx.RepeatedSprite)  -- Trigger re-sync
 A `RepeatedSprite` entity can be styled with the various [styling components](/tecs2d/rendering/styling) like
 `Color`, `Unlit`, and blend modes.
 
-```lua
+```teal
 world:spawn(
     tecs.builtins.Transform(0, 0, 1),
     gfx.Color(0.2, 0.2, 0.3, 0.5),
@@ -117,7 +117,7 @@ world:spawn(
 
 [Materials](/tecs2d/rendering/materials) can also be applied for custom effects:
 
-```lua
+```teal
 local water = gfx.newMaterial("water", { fragment = "shaders/water.glsl" })
 
 world:spawn(

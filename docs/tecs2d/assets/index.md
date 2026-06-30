@@ -15,7 +15,7 @@ fonts, and shaders in background threads without freezing gameplay.
 
 You can access the asset manager from any system:
 
-```lua
+```teal
 local tecs = require("tecs")
 local assets = require("tecs2d.assets")
 
@@ -42,7 +42,7 @@ world:addSystem({
 The game plugin automatically creates an asset manager with a root assets folder of "./assets". Use `setRoot` to change
 the asset root directory:
 
-```lua
+```teal
 world.resources[assets]:setRoot("game-assets")
 ```
 
@@ -50,7 +50,7 @@ world.resources[assets]:setRoot("game-assets")
 
 All load methods return a `Handle<T>` immediately. Handles are smart references to assets being loaded.
 
-```lua
+```teal
 local handle = manager:loadImage("player.png")
 
 -- You can check if the handle has an error
@@ -66,13 +66,13 @@ end
 
 You can access the handle value directly at any time, blocking until it's fully loaded:
 
-```lua
+```teal
 local image = handle.value -- blocks!
 ```
 
 You can react when the handle is done loaded or has an error:
 
-```lua
+```teal
 -- Listen for completion
 handle:observe(function(h: assets.Handle<T>)
     if h.err then
@@ -86,7 +86,7 @@ end)
 
 You can transform handles into other types using `map()`:
 
-```lua
+```teal
 -- Transform an image handle into a particle system
 local particles = manager
     :loadImage("particle.png")
@@ -116,7 +116,7 @@ When you access `handle.value` for the first time:
 
 Handles are cached in storage using a _weak reference_, allowing automatic garbage collection of unused resources.
 
-```lua
+```teal
 -- Assets are cached automatically
 local handle1 = manager:loadImage("player.png")
 local handle2 = manager:loadImage("player.png")  -- Returns same handle
@@ -132,7 +132,7 @@ local handle3 = manager:loadImage("player.png")  -- New load operation
 
 Use the `pin()` method of a Handle to preload assets or to ensure it's never garbage collected:
 
-```lua
+```teal
 -- This asset won't be garbage collected
 manager:loadImage("player.png"):pin()
 ```
@@ -176,7 +176,7 @@ that integrate with the caching and threading system.
 
 To preload assets during startup, load and pin them in a `Startup` system:
 
-```lua
+```teal
 local tecs = require("tecs")
 local assets = require("tecs2d.assets")
 
@@ -198,7 +198,7 @@ The `InitialLoadComplete` event is emitted on the first call to `update()` when 
 operations. This means all assets queued during startup will have finished loading before the event fires. The
 event is only emitted once per AssetManager instance and is emitted even if nothing was ever loaded.
 
-```lua
+```teal
 world:observe(0, assets.InitialLoadComplete, function()
     print("All startup assets are ready!")
 end)

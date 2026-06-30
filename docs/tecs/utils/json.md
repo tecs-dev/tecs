@@ -17,7 +17,7 @@ Tecs JSON is included as part of the tecs package. See the [Tecs Quickstart](/te
 
 ## Quick start
 
-```lua
+```teal
 local json = require("tecs.utils.json")
 
 -- Parse JSON string
@@ -36,7 +36,7 @@ print(str)  -- e.g. {"name":"Enemy","health":50}
 
 Parse a JSON string into a Lua value.
 
-```lua
+```teal
 function json.parse(str: string): any
 ```
 
@@ -50,7 +50,7 @@ function json.parse(str: string): any
 
 **Example:**
 
-```lua
+```teal
 local data = json.parse('{"name": "Player", "health": 100}')
 print(data.name)  -- "Player"
 ```
@@ -59,7 +59,7 @@ print(data.name)  -- "Player"
 
 Parse JSON directly from an FFI pointer. Useful for parsing Love2D ByteData without string conversion.
 
-```lua
+```teal
 function json.parseCData(data: ffi.CData, length: integer): any
 ```
 
@@ -74,7 +74,7 @@ function json.parseCData(data: ffi.CData, length: integer): any
 
 **Example:**
 
-```lua
+```teal
 local fileData = love.filesystem.read("data", "config.json")
 local config = json.parseCData(fileData:getFFIPointer(), fileData:getSize())
 ```
@@ -83,7 +83,7 @@ local config = json.parseCData(fileData:getFFIPointer(), fileData:getSize())
 
 Serialize a Lua value to a compact JSON string.
 
-```lua
+```teal
 function json.serialize(value: any, sortKeys?: boolean): string
 ```
 
@@ -98,7 +98,7 @@ function json.serialize(value: any, sortKeys?: boolean): string
 
 **Example:**
 
-```lua
+```teal
 -- Without sortKeys, object key order is unspecified.
 local str = json.serialize({name = "Enemy", health = 50})
 print(str)  -- e.g. {"name":"Enemy","health":50}
@@ -112,7 +112,7 @@ print(str)  -- {"a":1,"b":2}
 
 Serialize a Lua value to a formatted JSON string with indentation.
 
-```lua
+```teal
 function json.serializePretty(value: any, sortKeys?: boolean, indent?: string): string
 ```
 
@@ -128,7 +128,7 @@ function json.serializePretty(value: any, sortKeys?: boolean, indent?: string): 
 
 **Example:**
 
-```lua
+```teal
 local data = {name = "Player", stats = {health = 100}}
 print(json.serializePretty(data))
 -- {
@@ -145,7 +145,7 @@ print(json.serializePretty(data))
 
 Represents JSON `null` in Lua. Use this to distinguish explicit null values from missing keys.
 
-```lua
+```teal
 local data = json.parse('[1, null, 3]')
 print(data[2] == json.NULL)  -- true
 
@@ -157,7 +157,7 @@ print(str)  -- {"value":null}
 
 Explicitly serializes as `[]`. This is the default for empty tables, but provided for symmetry.
 
-```lua
+```teal
 local str = json.serialize(json.EMPTY_ARRAY)  -- []
 ```
 
@@ -165,7 +165,7 @@ local str = json.serialize(json.EMPTY_ARRAY)  -- []
 
 Forces an empty table to serialize as `{}` instead of `[]`.
 
-```lua
+```teal
 local str = json.serialize({})                 -- []
 local str = json.serialize(json.EMPTY_OBJECT)  -- {}
 ```

@@ -16,7 +16,7 @@ For the bigger picture of when scalar components fit, start from the
 
 ## Creating a scalar component
 
-```lua
+```teal
 local tecs = require("tecs")
 
 local Health = tecs.newScalarComponent({
@@ -40,7 +40,7 @@ local Health = tecs.newScalarComponent({
 To export a scalar from a module with a precise Teal type, declare the field type on the module record and assign
 the registration result to it:
 
-```lua
+```teal
 local tecs <const> = require("tecs")
 
 local record mymodule
@@ -60,7 +60,7 @@ return mymodule
 
 The 3-arg `world:set(entity, componentType, value)` form is the fast path for scalar writes:
 
-```lua
+```teal
 local id = world:spawn()
 
 world:set(id, Health, 75)
@@ -69,14 +69,14 @@ local hp = world:get(id, Health) -- 75
 
 You can also set a scalar without passing a value to write its default:
 
-```lua
+```teal
 world:set(id, Health)
 local hp = world:get(id, Health) -- 100
 ```
 
 `world:get` always returns the raw scalar value, never a wrapper:
 
-```lua
+```teal
 local hp = world:get(id, Health)
 print(type(hp))       -- "number"
 print(hp == 75)       -- true
@@ -86,7 +86,7 @@ print(hp == 75)       -- true
 
 `Health(75)` produces a scalar instance you can pass directly to `world:spawn` alongside other components. The instance is unwrapped at the spawn boundary, so the column still stores the raw value.
 
-```lua
+```teal
 local id = world:spawn(
     Transform(0, 0),
     Health(75),
@@ -96,7 +96,7 @@ local id = world:spawn(
 
 The 2-arg `world:set(entity, instance)` form works the same way:
 
-```lua
+```teal
 world:set(id, Health(50))
 ```
 
@@ -113,7 +113,7 @@ allocate after the first call with `"Frank"`.
 
 Scalar columns are regular archetype columns, so query iteration is the same pattern as other components.
 
-```lua
+```teal
 local query = world:query({ include = {Health} })
 
 for archetype, len in query:iter() do

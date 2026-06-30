@@ -20,7 +20,7 @@ Pivot points control the origin for positioning and rotation.
 
 By default, sprites are centered on the transform position:
 
-```lua
+```teal
 gfx.Sprite.fromAseprite("player.png", "idle", {
     centered = true  -- Default: sprite center at transform
 })
@@ -30,7 +30,7 @@ gfx.Sprite.fromAseprite("player.png", "idle", {
 
 Use an Aseprite slice as the pivot point:
 
-```lua
+```teal
 gfx.Sprite.fromAseprite("player.png", "attack", {
     pivotSlice = "weapon_origin"  -- Use this slice's pivot
 })
@@ -45,7 +45,7 @@ In Aseprite, set the slice's pivot point:
 
 For classic sprite positioning (origin at top-left):
 
-```lua
+```teal
 gfx.Sprite.fromAseprite("player.png", "idle", {
     centered = false  -- Origin at (0, 0)
 })
@@ -79,7 +79,7 @@ The animation system automatically uses the correct pivot for each frame.
 
 ### Example: Rotating Sword
 
-```lua
+```teal
 -- In Aseprite:
 -- - Create a "sword_pivot" slice
 -- - On frame 1: pivot at sword handle
@@ -97,7 +97,7 @@ world:spawn(
 
 ## Accessing Slice Data
 
-```lua
+```teal
 local sheet = gfx.SpriteSheet.fromFile("player.png")
 
 local slice = sheet:getSlice("hitbox")
@@ -140,7 +140,7 @@ end
 
 Ground-aligned characters with feet at the bottom:
 
-```lua
+```teal
 -- In Aseprite: Create "feet" slice at character's feet with pivot
 
 world:spawn(
@@ -155,7 +155,7 @@ world:spawn(
 
 Attach point for weapons or effects:
 
-```lua
+```teal
 -- In Aseprite: Create "hand" slice at character's hand
 
 -- Get hand position for spawning weapon
@@ -179,7 +179,7 @@ end
 
 Collision regions for combat:
 
-```lua
+```teal
 -- In Aseprite: Create "hitbox" and "hurtbox" slices
 
 -- Read hitbox for current frame
@@ -191,7 +191,7 @@ local hitbox = getSliceForFrame(sheet, "hitbox", sprite:getAbsoluteFrame())
 
 The `Pivot` component overrides slice-based pivots:
 
-```lua
+```teal
 -- This uses the Pivot component, not pivotSlice
 world:spawn(
     tecs.builtins.Transform(100, 100),

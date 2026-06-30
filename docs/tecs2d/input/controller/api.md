@@ -4,7 +4,7 @@
 
 The `JoystickConfig` type defines joystick assignment options:
 
-```lua
+```teal
 type JoystickConfig = {
     joystick?: love.joystick.Joystick,  -- Specific gamepad to use
     auto?: boolean,  -- Enable auto-assignment (default: false)
@@ -24,7 +24,7 @@ type JoystickConfig = {
 
 The `Bindings` type defines the structure for control mappings:
 
-```lua
+```teal
 type Bindings = {
     controls: {string: {string}},  -- Map of control names to binding arrays
     pairs?: {string: {string}}     -- Optional map of pair names to 4 control names
@@ -42,7 +42,7 @@ type Bindings = {
 
 **Example:**
 
-```lua
+```teal
 local bindings: Bindings = {
     controls = {
         jump = {"key:space", "button:a"},
@@ -66,7 +66,7 @@ The `ControlManager` manages multiple controllers for different players in your 
 
 Creates a new control manager.
 
-```lua
+```teal
 function controller.newManager(): ControlManager
 ```
 
@@ -83,7 +83,7 @@ when Tecs registers with Love2D.
 
 Adds a new controller with the specified bindings.
 
-```lua
+```teal
 function ControlManager:addController(
     bindings: Bindings,
     config?: JoystickConfig
@@ -102,7 +102,7 @@ function ControlManager:addController(
 
 **Example:**
 
-```lua
+```teal
 local bindings = {
     controls = {
         jump = {"key:space", "button:a"},
@@ -138,7 +138,7 @@ local controller3 = controlManager:addController(bindings, {
 
 Removes a controller from the manager.
 
-```lua
+```teal
 function ControlManager:removeController(controller: Controller)
 ```
 
@@ -146,7 +146,7 @@ function ControlManager:removeController(controller: Controller)
 
 **Example:**
 
-```lua
+```teal
 controlManager:removeController(player2Controller)
 ```
 
@@ -154,7 +154,7 @@ controlManager:removeController(player2Controller)
 
 Gets a controller by its index.
 
-```lua
+```teal
 function ControlManager:get(index: integer): Controller
 ```
 
@@ -166,7 +166,7 @@ function ControlManager:get(index: integer): Controller
 
 **Example:**
 
-```lua
+```teal
 local player1 = controlManager:get(1)
 local player2 = controlManager:get(2)
 ```
@@ -179,7 +179,7 @@ The `Controller` represents a single player's input device with their control bi
 
 Checks if a button was just pressed this frame.
 
-```lua
+```teal
 function Controller:isPressed(button: string): boolean
 ```
 
@@ -196,7 +196,7 @@ function Controller:isPressed(button: string): boolean
 
 **Example:**
 
-```lua
+```teal
 if controller:isPressed("jump") then
     player:startJump()
 end
@@ -206,7 +206,7 @@ end
 
 Checks if a button is currently being held down.
 
-```lua
+```teal
 function Controller:isDown(button: string): boolean
 ```
 
@@ -223,7 +223,7 @@ function Controller:isDown(button: string): boolean
 
 **Example:**
 
-```lua
+```teal
 if controller:isDown("sprint") then
     player.speed = player.runSpeed
 end
@@ -233,7 +233,7 @@ end
 
 Checks if a button was just released this frame.
 
-```lua
+```teal
 function Controller:isReleased(button: string): boolean
 ```
 
@@ -249,7 +249,7 @@ function Controller:isReleased(button: string): boolean
 
 **Example:**
 
-```lua
+```teal
 if controller:isReleased("charge") then
     player:releaseChargedAttack()
 end
@@ -259,7 +259,7 @@ end
 
 Gets the directional input from a button pair.
 
-```lua
+```teal
 function Controller:getPair(name: string): number, number
 ```
 
@@ -277,7 +277,7 @@ function Controller:getPair(name: string): number, number
 
 **Example:**
 
-```lua
+```teal
 local moveX, moveY = controller:getPair("move")
 velocity.x = moveX * player.speed
 velocity.y = moveY * player.speed
@@ -287,7 +287,7 @@ velocity.y = moveY * player.speed
 
 Gets the directional input from a button pair, normalized to work correctly with diagonal movement.
 
-```lua
+```teal
 function Controller:getPairNormalized(name: string): number, number
 ```
 
@@ -302,7 +302,7 @@ function Controller:getPairNormalized(name: string): number, number
 
 Gets the raw numeric value of a control.
 
-```lua
+```teal
 function Controller:getRaw(button: string): number
 ```
 
@@ -321,7 +321,7 @@ function Controller:getRaw(button: string): number
 
 **Example:**
 
-```lua
+```teal
 local throttle = controller:getRaw("accelerate")
 car.acceleration = throttle * car.maxAcceleration
 ```
@@ -330,7 +330,7 @@ car.acceleration = throttle * car.maxAcceleration
 
 Changes the controller's bindings at runtime.
 
-```lua
+```teal
 function Controller:rebind(bindings: Bindings)
 ```
 
@@ -344,7 +344,7 @@ function Controller:rebind(bindings: Bindings)
 
 **Example:**
 
-```lua
+```teal
 -- In a settings menu: create new bindings with the changed control
 local function remapJumpKey(newKey: string)
     local newBindings = {
@@ -371,7 +371,7 @@ player1Controller:rebind(newBindings)
 
 Triggers rumble feedback on the controller's joystick.
 
-```lua
+```teal
 function Controller:notifyWithRumble(strength?: number, duration?: number)
 ```
 
@@ -384,7 +384,7 @@ function Controller:notifyWithRumble(strength?: number, duration?: number)
 
 **Example:**
 
-```lua
+```teal
 if controller:isPressed("attack") and enemy:wasHit() then
     controller:notifyWithRumble(0.7, 0.3)
 end
@@ -394,7 +394,7 @@ end
 
 Directly sets the joystick for this controller.
 
-```lua
+```teal
 function Controller:setJoystick(joystick?: love.joystick.Joystick)
 ```
 
@@ -408,7 +408,7 @@ function Controller:setJoystick(joystick?: love.joystick.Joystick)
 
 **Example:**
 
-```lua
+```teal
 -- Assign a specific joystick
 local joystick = love.joystick.getJoysticks()[1]
 controller:setJoystick(joystick)
@@ -421,7 +421,7 @@ controller:setJoystick(nil)
 
 Resets or changes the joystick assignment for the controller.
 
-```lua
+```teal
 function Controller:resetJoystick(config?: JoystickConfig)
 ```
 
@@ -438,7 +438,7 @@ function Controller:resetJoystick(config?: JoystickConfig)
 
 **Example:**
 
-```lua
+```teal
 -- Enable auto-assignment
 controller:resetJoystick({auto = true})
 
@@ -462,7 +462,7 @@ controller:resetJoystick(nil)
 
 The current binding configuration. Can be read to inspect bindings or passed to `rebind()`.
 
-```lua
+```teal
 controller.bindings: Bindings
 ```
 
@@ -470,7 +470,7 @@ controller.bindings: Bindings
 
 The currently assigned joystick, or `nil` if no joystick is connected.
 
-```lua
+```teal
 controller.joystick: love.joystick.Joystick
 ```
 
@@ -478,7 +478,7 @@ controller.joystick: love.joystick.Joystick
 
 The axis deadzone threshold (0 to 1). Values below this threshold are treated as 0.
 
-```lua
+```teal
 controller.deadzone: number  -- default: 0.5
 ```
 
@@ -486,7 +486,7 @@ controller.deadzone: number  -- default: 0.5
 
 Whether automatic gamepad assignment is enabled.
 
-```lua
+```teal
 controller.auto: boolean  -- default: false
 ```
 
@@ -494,7 +494,7 @@ controller.auto: boolean  -- default: false
 
 Optional callback function that's called when the controller's joystick changes.
 
-```lua
+```teal
 controller.onJoystickChanged: function(
     controller: Controller,
     newJoystick: love.joystick.Joystick,
@@ -510,7 +510,7 @@ controller.onJoystickChanged: function(
 
 **Example:**
 
-```lua
+```teal
 controller.onJoystickChanged = function(
     ctrl: controller.Controller,
     newJoy: love.joystick.Joystick,

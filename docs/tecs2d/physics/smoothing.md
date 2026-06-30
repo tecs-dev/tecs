@@ -10,7 +10,7 @@ The `smoothing` option on the physics plugin controls how visual positions are c
 Blends between the previous and current physics position. Produces perfectly smooth motion but introduces
 approximately one frame of visual latency (~16ms at 60Hz).
 
-```lua
+```teal
 world:addPlugin(physics.new({
     world = physicsWorld,
     smoothing = "interpolate"
@@ -24,7 +24,7 @@ Best for most games. The latency is imperceptible to most players.
 Predicts position beyond the current physics state using velocity. More responsive (no latency) but can overshoot
 when physics changes suddenly, such as hitting a wall or changing direction.
 
-```lua
+```teal
 world:addPlugin(physics.new({
     world = physicsWorld,
     smoothing = "extrapolate"
@@ -38,7 +38,7 @@ Potentially a good fit for competitive games where input latency matters more th
 No smoothing. Transform is set directly from the physics body position. Objects may visually stutter unless your game
 logic and display run at the exact same rate (e.g., vsync enabled).
 
-```lua
+```teal
 world:addPlugin(physics.new({
     world = physicsWorld,
     smoothing = "disabled"

@@ -4,7 +4,7 @@ A container that provides clipping and scrolling for its children. Requires Layo
 
 ## Basic Usage
 
-```lua
+```teal
 local ui = require("tecs2d.ui")
 local LayoutNode = ui.LayoutNode
 local LayoutBox = ui.LayoutBox
@@ -29,7 +29,7 @@ local container = world:spawn(
 
 ## Constructor
 
-```lua
+```teal
 LayoutNode(scrollX, scrollY, contentWidth, contentHeight)
 ```
 
@@ -39,7 +39,7 @@ All parameters are optional and default to 0.
 
 LayoutNode **requires** a LayoutBox component on the same entity. An error is thrown if LayoutBox is missing:
 
-```lua
+```teal
 -- This works
 world:spawn(
     Transform(0, 0),
@@ -64,7 +64,7 @@ Children of a LayoutNode are clipped to its bounds and offset by the scroll valu
 <em>See the <a href="https://github.com/tecs-dev/tecs/tree/main/examples/tecs-ui">tecs-ui example</a>.</em>
 </p>
 
-```lua
+```teal
 -- Update scroll position
 local layoutNode = world:get(containerId, LayoutNode)
 layoutNode.scrollY = layoutNode.scrollY + 10  -- Scroll down 10 pixels

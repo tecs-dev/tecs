@@ -13,7 +13,7 @@ than being a complete UI framework.
 
 ## Quick Example
 
-```lua
+```teal
 local tecs = require("tecs")
 local tecs2d = require("tecs2d")
 local ui = require("tecs2d.ui")

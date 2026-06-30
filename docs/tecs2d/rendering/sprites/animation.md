@@ -17,7 +17,7 @@ Frame tags are named animation sequences defined in Aseprite (e.g., "idle", "wal
 
 ### Using Tags in Code
 
-```lua
+```teal
 local gfx = require("tecs2d.gfx")
 
 -- Create sprite with initial tag
@@ -35,7 +35,7 @@ sprite:setTag("walk")
 
 Passing an empty string (`""`) plays all frames in order:
 
-```lua
+```teal
 gfx.Sprite.fromAseprite("player.png", "")  -- All frames
 ```
 
@@ -49,7 +49,7 @@ Tags support three playback directions:
 | Reverse     | `1`        | Frames N → 1, loop     |
 | Ping-pong   | `2`        | Frames 1 → N → 1, loop |
 
-```lua
+```teal
 local sheet = gfx.SpriteSheet.fromFile("player.png")
 local tag = sheet:getFrameTag("bounce")
 if tag.direction == 2 then  -- Ping-pong
@@ -61,7 +61,7 @@ end
 
 ### Pause and Resume
 
-```lua
+```teal
 local sprite = world:get(entityId, gfx.Sprite)
 
 -- Pause at current frame
@@ -80,7 +80,7 @@ end
 
 ### Seek to Frame
 
-```lua
+```teal
 -- Jump to first frame and pause
 sprite:pauseAtStart()
 
@@ -93,7 +93,7 @@ sprite:gotoFrame(3)
 
 ### Query Current Frame
 
-```lua
+```teal
 -- Frame index within current tag (0-indexed)
 local frame = sprite:getFrame()
 
@@ -108,7 +108,7 @@ local tag = sprite:getTag()
 
 ### At Creation
 
-```lua
+```teal
 gfx.Sprite.fromAseprite("player.png", "walk", {
     speed = 0.5   -- Half speed (slow motion)
 })
@@ -148,7 +148,7 @@ Tecs respects per-frame durations, enabling effects like:
 
 ### Accessing Timing
 
-```lua
+```teal
 local sheet = gfx.SpriteSheet.fromFile("player.png")
 
 -- Single frame duration
@@ -164,7 +164,7 @@ print(tag.duration)  -- Total duration in seconds
 
 To prevent synchronized animations looking unnatural, use `startTime`:
 
-```lua
+```teal
 -- Spawn crowd with staggered animations
 for i = 1, 20 do
     world:spawn(
@@ -186,7 +186,7 @@ For callbacks when animation tags change, see [Events](./events).
 
 Play an animation once and freeze on the last frame:
 
-```lua
+```teal
 local sprite = world:get(entityId, gfx.Sprite)
 sprite:playOnce("attack")
 ```
@@ -195,7 +195,7 @@ sprite:playOnce("attack")
 
 Play animation once, then switch to idle:
 
-```lua
+```teal
 local sprite = world:get(entityId, gfx.Sprite)
 sprite:playOnce("death", function(anim)
     anim:setTag("idle")

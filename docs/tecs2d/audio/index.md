@@ -13,7 +13,7 @@ Tecs Audio integrates [love.audio](https://love2d.org/wiki/love.audio) into the 
 
 ## Quick Start
 
-```lua
+```teal
 local audio = require("tecs2d.audio")
 local assets = require("tecs2d.assets")
 
@@ -51,7 +51,7 @@ world:spawn(
 
 Control volume for categories of audio independently:
 
-```lua
+```teal
 local audio = require("tecs2d.audio")
 local audioManager = world.resources[audio]
 
@@ -65,7 +65,7 @@ audioManager:setGroupVolume("master", 0.5)  -- Affects all groups
 
 Limit how many instances of the same sound can play concurrently:
 
-```lua
+```teal
 audio:setVoiceLimit("explosion", 3)  -- Max 3 concurrent
 audio:playAt(handle, x, y, 0, { key = "explosion" })  -- Blocked if at limit
 ```
@@ -74,13 +74,13 @@ audio:playAt(handle, x, y, 0, { key = "explosion" })  -- Blocked if at limit
 
 Minimum time between repeated plays:
 
-```lua
+```teal
 audio:setCooldown("footstep", 0.05)  -- 50ms between plays
 ```
 
 ## Direct Play API
 
-```lua
+```teal
 local audio = require("tecs2d.audio")
 local audioManager = world.resources[audio]
 
@@ -95,7 +95,7 @@ local src = audioManager:play(musicHandle, { group = "music", fadeIn = 2.0, loop
 
 Smooth volume transitions on play, pause, and stop:
 
-```lua
+```teal
 -- Fade in when playing
 audio:play(handle, { fadeIn = 1.0 })  -- 1 second fade in
 
@@ -109,7 +109,7 @@ audio:stopAll(2.0)           -- Fade out everything
 
 Pause and resume sounds with optional fading:
 
-```lua
+```teal
 -- Pause/resume individual sources
 audio:pause(source)
 audio:resume(source)
@@ -124,7 +124,7 @@ audio:isGroupPaused("sfx")     -- Check if paused
 
 Apply LÖVE audio effects to groups:
 
-```lua
+```teal
 -- Add reverb to all sfx
 audio:setGroupEffect("sfx", "reverb", {
     decaytime = 1.5,
@@ -142,7 +142,7 @@ Effects are automatically applied to all current and future sounds in the group.
 
 The audio plugin is auto-added by `tecs2d`. Configure the manager directly via the world resource:
 
-```lua
+```teal
 local audio = require("tecs2d.audio")
 local audioManager = world.resources[audio]
 
@@ -160,7 +160,7 @@ When loading audio with [Tecs Assets](/tecs2d/assets/):
 - **`"static"`**: Loads into memory. Best for sound effects. Can play concurrently.
 - **`"stream"`**: Streams from disk. Best for music. Lower memory, single instance only.
 
-```lua
+```teal
 local jumpSound = assets:loadAudio("sounds/jump.wav", "static")
 local bgMusic = assets:loadAudio("music/theme.ogg", "stream")
 ```

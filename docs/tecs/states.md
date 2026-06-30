@@ -13,7 +13,7 @@ when the state is popped.
 Define states with `world:createState()`. Each state gets a tag component that is auto-added to entities spawned
 while the state is active. The returned component can be used in queries.
 
-```lua
+```teal
 local GameState = world:createState("game", {
     onBlur = "pause",    -- pause game entities when another state is pushed on top
     onFocus = "resume",  -- resume game entities when this state becomes top again
@@ -25,7 +25,7 @@ local PausedState = world:createState("paused")
 
 ## Pushing and popping states
 
-```lua
+```teal
 -- Start gameplay
 world:pushState("game")
 -- All entities spawned from here are auto-tagged with the gameState component
@@ -43,7 +43,7 @@ world:popState()
 
 Check the current state with `peekState()`:
 
-```lua
+```teal
 local current = world:peekState()  -- returns "game", "paused", etc. or nil if stack empty
 ```
 
@@ -70,7 +70,7 @@ Each policy can be a string action or a custom function:
 | `"disable"`  | Adds `Disabled` component to those entities                  |
 | function     | Calls the function with the world as argument                |
 
-```lua
+```teal
 world:createState("cutscene", {
     onEnter = function(world)
         -- custom enter logic
@@ -86,7 +86,7 @@ If no policies are specified, the default is `onExit = "despawn"`.
 Entities spawned while a state is active automatically receive that state's tag component. This happens
 transparently in the spawn path.
 
-```lua
+```teal
 world:pushState("game")
 
 -- This entity automatically gets the gameState component
@@ -108,7 +108,7 @@ tag and will persist through all state transitions without needing any special h
 
 The state stack emits events on transitions. Observe them at address 0 (world-level):
 
-```lua
+```teal
 world:observe(0, tecs.builtins.StateEnter, function(e)
     print("Entered state:", e.state)
 end)
@@ -130,7 +130,7 @@ end)
 
 The state component returned by `createState` can be used in queries:
 
-```lua
+```teal
 local GameState = world:createState("game")
 
 -- Find all entities in the "game" state
@@ -141,7 +141,7 @@ local gameEntities = world:query({include = {GameState}})
 
 Use `runIf.inState` to conditionally run systems based on the current state:
 
-```lua
+```teal
 local runIf = tecs.runif
 
 world:addSystem({
@@ -156,7 +156,7 @@ world:addSystem({
 
 ## Example: full game flow
 
-```lua
+```teal
 -- Create states
 local GameState = world:createState("game", {
     onBlur = "pause",

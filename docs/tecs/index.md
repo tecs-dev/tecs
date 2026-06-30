@@ -26,7 +26,7 @@ and provides `require("tecs2d")`, `require("tecs2d.gfx")`, and the other engine 
 
 Require it in your code:
 
-```lua
+```teal
 local tecs = require("tecs")
 ```
 
@@ -36,7 +36,7 @@ local tecs = require("tecs")
 
 A `World` contains all the entities, components, systems, plugins, and resources of a game.
 
-```lua
+```teal
 local world = tecs.newWorld()
 ```
 
@@ -47,7 +47,7 @@ local world = tecs.newWorld()
 A unique ID that represents an object in the game world. Entities themselves have no data or behavior; only the
 components attached to them define what they are.
 
-```lua
+```teal
 -- Create an entity with two components and get the entity ID
 local entityId = world:spawn(
     tecs.builtins.Name("Hello Tecs"),
@@ -59,7 +59,7 @@ local entityId = world:spawn(
 
 Components describe traits like position, velocity, or health, and are the building blocks of game state.
 
-```lua
+```teal
 -- Get the Name component of the entity
 local name = world:get(entityId, tecs.builtins.Name)
 print(name.value)
@@ -74,7 +74,7 @@ of the same type.
 
 You can create a new component by defining a Teal record:
 
-```lua
+```teal
 local record Sprite is tecs.Component
     texture: love.graphics.Texture
     metamethod __call: function(self, love.graphics.Texture): self
@@ -83,7 +83,7 @@ end
 
 Next, pass a configuration table to `tecs.newComponent` to wire up the necessary metatables to make it a component.
 
-```lua
+```teal
 tecs.newComponent({
     name = "Sprite",
     container = Sprite,
@@ -105,7 +105,7 @@ world:set(entityId, Sprite(image))
 A system is a function that runs game logic by operating on entities with specific components. Add behavior
 through systems. Add systems to [phases](/tecs/phases) to run at specific parts of the game loop.
 
-```lua
+```teal
 world:addSystem({
     phase = tecs.phases.Update,
     run = function(dt: number)
@@ -121,7 +121,7 @@ world:addSystem({
 Use plugins to configure the world: add systems, register components, set up resources, and hook
 up event observers. Plugins bundle parts of a game into modular units.
 
-```lua
+```teal
 world:addPlugin(function(world: tecs.World)
     -- register components, systems, spawn entities, add resources, ...
 end)
@@ -138,7 +138,7 @@ Create systems inside plugins. For systems to be useful, they typically use a **
 world. Systems can use zero or more queries. Create queries in plugins outside the system scope, then reuse
 them over the system's lifetime.
 
-```lua
+```teal
 local Transform = tecs.builtins.Transform
 
 local spritePlugin = function(world: tecs.World)
@@ -178,7 +178,7 @@ Every unique combination of components applied to entities forms an _archetype_.
 one archetype. Archetypes give you fast access to entity IDs and components of the entities stored in the archetype.
 You'll interact with archetypes primarily through queries.
 
-```lua
+```teal
 -- Grab "columns" using archetype:get (read) or archetype:getMut (mark dirty)
 local transforms = archetype:get(Transform)
 local sprites = archetype:get(Sprite)
@@ -204,7 +204,7 @@ To progress the game, call `world:update(dt)` with the time since last update. T
 of the Tecs game loop and runs each system in those phases. When you add a system to a world, you specify
 its phase. Access phases with `tecs.phases.<X>`:
 
-```lua
+```teal
 world:addSystem({
     phase = tecs.phases.Startup,
     run = function()
@@ -225,20 +225,20 @@ _Resources_ in Tecs are the built-in way to share variables globally across your
 
 To add resources to a world, you first need to create a strongly typed key.
 
-```lua
+```teal
 local FONT: tecs.Key<love.graphics.Font> = tecs.newKey()
 ```
 
 This tells the Teal type system that `FONT` contains a `love.graphics.Font`.
 Now you can assign a value to the resource:
 
-```lua
+```teal
 world.resources[FONT] = love.graphics.newFont(filename, glyphs)
 ```
 
 You can access the resource using the key too:
 
-```lua
+```teal
 local font = world.resources[FONT]
 ```
 
@@ -246,7 +246,7 @@ local font = world.resources[FONT]
 Store your keys in a module because you need to refer to the exact same key when
 trying to access the resource.
 
-```lua
+```teal
 local record MyModule
     FONT: tecs.Key<love.graphics.Font>
 end

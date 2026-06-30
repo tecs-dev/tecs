@@ -22,7 +22,7 @@ FFI relationships provide:
 
 FFI-backed relationships can store additional data along with the target while maintaining FFI performance benefits.
 
-```lua
+```teal
 local tecs = require("tecs")
 
 -- Define the relationship record
@@ -53,7 +53,7 @@ Both construction forms are generated automatically from the `fields`
 definition. Positional arguments are mapped to fields in order with `target`
 always first; the table form takes `target` as a key:
 
-```lua
+```teal
 -- Positional __call: target first, then fields in order
 world:set(follower, FastFollows(targetEntity, 0.3, 50.0))
 
@@ -116,7 +116,7 @@ The `fields` array supports standard FFI types:
 
 FFI relationships support `init` hooks for validation and derived state:
 
-```lua
+```teal
 local record SafeFollows is tecs.Relationship
     delay: number
     maxDistance: number

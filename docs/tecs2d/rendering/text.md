@@ -7,7 +7,7 @@ with GPU instancing for efficient batching.
 
 ## Quick Start
 
-```lua
+```teal
 local tecs = require("tecs")
 local gfx = require("tecs2d.gfx")
 
@@ -22,7 +22,7 @@ world:spawn(
 
 The `Text` component renders text using a BMFont atlas. It requires a `Transform` component for positioning.
 
-```lua
+```teal
 gfx.Text(fontPath, text, scaleX?, scaleY?)
 ```
 
@@ -37,7 +37,7 @@ gfx.Text(fontPath, text, scaleX?, scaleY?)
 
 **Examples:**
 
-```lua
+```teal
 -- Basic text
 world:spawn(
     tecs.builtins.Transform(100, 100),
@@ -62,14 +62,14 @@ world:spawn(
 
 Use `setText()` to change the displayed text:
 
-```lua
+```teal
 local textComp = world:get(entityId, gfx.Text)
 textComp:setText("New text content")
 ```
 
 Use `setScale()` to change the scale:
 
-```lua
+```teal
 textComp:setScale(1.5)        -- Uniform scale
 textComp:setScale(2.0, 1.0)   -- Different X and Y scale
 ```
@@ -79,7 +79,7 @@ archetype so the GPU buffer is updated.
 
 ### Getting Text Properties
 
-```lua
+```teal
 local textComp = world:get(entityId, gfx.Text)
 
 -- Get current text
@@ -139,7 +139,7 @@ msdf-atlas-gen -font MyFont.ttf -type msdf -format png -size 42 \
 
 The output JSON + PNG pair can be loaded directly with `Text`:
 
-```lua
+```teal
 gfx.Text("fonts/MyFont-msdf.json", "Sharp at any size!", 1.0)
 ```
 
@@ -169,7 +169,7 @@ A larger pxrange requires more padding between glyphs in the atlas, increasing a
 To preload fonts during startup and avoid loading hitches, use the asset manager's
 [`loadBMFont`](/tecs2d/assets/api#loadbmfont) method:
 
-```lua
+```teal
 local tecs = require("tecs")
 local assets = require("tecs2d.assets")
 
@@ -191,7 +191,7 @@ The `TextEffects` component adds outline, glow, and drop shadow effects to MSDF 
 the GPU with no extra draw calls. All effects are composited back-to-front: shadow, then glow, then outline, then the
 text fill.
 
-```lua
+```teal
 gfx.TextEffects(config?)
 ```
 
@@ -209,7 +209,7 @@ gfx.TextEffects(config?)
 
 **Examples:**
 
-```lua
+```teal
 -- Outline
 world:spawn(
     tecs.builtins.Transform(100, 100),
@@ -274,7 +274,7 @@ Text works with these [styling components](/tecs2d/rendering/styling):
 - [Material](/tecs2d/rendering/materials) - Per-entity GPU shader effects
 - [TextEffects](#text-effects-msdf-only) - Outline, glow, drop shadow (MSDF only)
 
-```lua
+```teal
 -- Colored text
 world:spawn(
     tecs.builtins.Transform(x, y),

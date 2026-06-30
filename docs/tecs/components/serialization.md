@@ -24,7 +24,7 @@ Most components work automatically without any configuration.
 routes the data table through `Component.new(data)`, which means any component that registers cleanly (`fields`
 alone, or `init` paired with `fields`/`new`) round-trips automatically.
 
-```lua
+```teal
 -- This component serializes automatically. Its .new unpacks both fields.
 tecs.newComponent({
     name = "Health",
@@ -42,7 +42,7 @@ memcpy'd back on load. There's nothing to configure; the framework reads the fie
 If you are deciding between these two storage backends in the first place, see
 [Table Components](/tecs/components/table-components) and [FFI Components](/tecs/components/ffi).
 
-```lua
+```teal
 tecs.newFFIComponent({
     name = "Velocity",
     container = Velocity,
@@ -61,7 +61,7 @@ tecs.newFFIComponent({
 For components whose runtime state doesn't round-trip naturally (Love2D textures, GPU handles, cached slab pointers,
 derived fields, etc.), provide `serialize` and `deserialize` hooks.
 
-```lua
+```teal
 tecs.newComponent({
     name = "Sprite",
     container = Sprite,
@@ -98,7 +98,7 @@ reconstructing.
 Return `nil` from `serialize` to omit the component from every snapshot. This is the idiomatic way to mark transient
 runtime state (render caches, per-frame scratch, derived indices):
 
-```lua
+```teal
 tecs.newComponent({
     name = "RenderCache",
     container = RenderCache,

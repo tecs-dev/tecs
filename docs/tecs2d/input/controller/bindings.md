@@ -109,7 +109,7 @@ They make it easier to implement directional movement.
 
 A movement pair combines four directional controls into X/Y coordinates:
 
-```lua
+```teal
 local bindings = {
     controls = {
         left = {"key:a", "key:left"},
@@ -132,7 +132,7 @@ local moveX, moveY = controller:getPair("move")
 
 Button pairs must be defined with exactly 4 controls in a specific order:
 
-```lua
+```teal
 pairs = {
     pairName = {
         "left",   -- Negative X direction
@@ -149,7 +149,7 @@ When you call `getPair()`, it returns:
 
 ### Using Pairs for Player Movement
 
-```lua
+```teal
 local playerQuery = world:query({include = {Player, Velocity}})
 
 world:addSystem({
@@ -182,7 +182,7 @@ calculation.
 
 You can define multiple pairs for different types of movement:
 
-```lua
+```teal
 local bindings = {
     controls = {
         -- Movement controls
@@ -212,7 +212,7 @@ local camX, camY = controller:getPair("camera")
 
 Get the raw analog value of a control (useful for triggers and sticks):
 
-```lua
+```teal
 -- For buttons and keys: returns 0 or 1
 local jumpValue = controller:getRaw("jump")
 
@@ -227,7 +227,7 @@ local aimX = controller:getRaw("aimHorizontal")   -- axis:rightx
 
 For smooth analog movement without button pairs, you can directly bind analog axes:
 
-```lua
+```teal
 local bindings = {
     controls = {
         -- Raw analog stick bindings (full -1 to 1 range)
@@ -258,7 +258,7 @@ end
 
 You can also combine analog sticks with keyboard fallback:
 
-```lua
+```teal
 local bindings = {
     controls = {
         -- Keyboard and analog stick support

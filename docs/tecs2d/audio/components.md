@@ -8,7 +8,7 @@ A tag component marking an entity as the audio listener. The listener's position
 perceived (volume falloff, panning). The audio system updates `love.audio.setPosition()` each frame based on the
 listener entity's Transform. All spatial audio attenuation is calculated relative to this position.
 
-```lua
+```teal
 local audio = require("tecs2d.audio")
 
 -- Mark the player as the audio listener
@@ -29,7 +29,7 @@ world:spawn(
 A component for continuous or looping sounds attached to entities. Use this for sounds that should be emitted in world
 space (e.g., footsteps, engines, ambient emitters).
 
-```lua
+```teal
 local audio = require("tecs2d.audio")
 local assets = require("tecs2d.assets")
 
@@ -78,7 +78,7 @@ world:spawn(
 **Positional (default)**: The sound exists in world space. Volume and panning change based on the listener's
 distance and orientation, like hearing a car drive past you.
 
-```lua
+```teal
 -- Engine sound follows a vehicle
 world:spawn(
     tecs.builtins.Transform(vehicleX, vehicleY),
@@ -92,7 +92,7 @@ world:spawn(
 **Relative**: The sound is attached to the listener, like wearing headphones. It plays at full volume regardless
 of where the listener is in the world. Use for background music, UI sounds, or ambient audio.
 
-```lua
+```teal
 -- Background music (plays "in the listener's ears")
 world:spawn(
     audio.AudioSource({
@@ -109,7 +109,7 @@ world:spawn(
 Control how sound volume falls off with distance. Distances are measured in pixels, matching your Transform
 coordinates.
 
-```lua
+```teal
 audio.AudioSource({
     handle = soundHandle,
     refDistance = 50,   -- Full volume within 50px
@@ -123,7 +123,7 @@ The attenuation follows Love2D's default model (inverse distance clamped).
 
 Modify the component to control playback:
 
-```lua
+```teal
 -- Get the component
 local source = world:get(entityId, audio.AudioSource)
 
@@ -144,7 +144,7 @@ source.pitch = 1.2
 
 Add random pitch variance to prevent repetitive sounds:
 
-```lua
+```teal
 audio.AudioSource({
     handle = footstepHandle,
     pitch = 1.0,

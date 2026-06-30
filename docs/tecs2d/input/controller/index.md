@@ -10,7 +10,7 @@ to game actions like "jump" and "attack".
 
 ## Quick Start
 
-```lua
+```teal
 local tecs = require("tecs")
 local tecs2d = require("tecs2d")
 local controller = require("tecs2d.controller")
@@ -63,7 +63,7 @@ end
 
 ## Multiple Players
 
-```lua
+```teal
 -- Define different bindings for each player
 local player1Bindings = {
     controls = {
@@ -95,7 +95,7 @@ local player2 = controlManager:addController(player2Bindings, {
 
 Dead zones prevent analog stick drift from registering as input:
 
-```lua
+```teal
 -- Create controller with custom dead zone (0.0 to 1.0)
 local player = controlManager:addController(bindings, {
     auto = true,
@@ -108,7 +108,7 @@ local player = controlManager:addController(bindings, {
 If you need a custom control manager, you can override the auto-created one by
 setting the resource key directly:
 
-```lua
+```teal
 -- Create custom control manager
 local customManager = controller.newManager()
 

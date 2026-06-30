@@ -37,7 +37,7 @@ Per-component columns are accessed via `archetype:get(Component)` (read-only) or
 Replaces a component value at a row and marks the component dirty on the archetype. No archetype transition
 happens; the row stays where it is. The component **must** already be present on the archetype.
 
-```lua
+```teal
 function Archetype:set<C is Component>(row: integer, value: C)
 ```
 
@@ -48,7 +48,7 @@ function Archetype:set<C is Component>(row: integer, value: C)
 
 **Example:**
 
-```lua
+```teal
 for archetype, len in query:iter() do
     for row = 1, len do
         -- Replace the component and mark dirty in one call.
@@ -62,7 +62,7 @@ end
 Iterates all relationship instances of the given relationship container for an entity. Only concrete
 relationship instances are visited; the container itself is not included.
 
-```lua
+```teal
 function Archetype:forEachRelationship<T is Relationship>(
     relationshipContainer: T,
     row: integer,
@@ -78,7 +78,7 @@ function Archetype:forEachRelationship<T is Relationship>(
 
 **Example:**
 
-```lua
+```teal
 local Likes = tecs.newRelationship({name = "Likes"})
 
 archetype:forEachRelationship(Likes, 5, function(likes: Likes)
@@ -91,7 +91,7 @@ end)
 Gets the first relationship instance of the given relationship container for an entity, if any. For
 exclusive relationships (e.g. `ChildOf`) this is the single instance.
 
-```lua
+```teal
 function Archetype:getFirstRelationship<T is Relationship>(relationshipContainer: T, row: integer): T
 ```
 
@@ -106,7 +106,7 @@ function Archetype:getFirstRelationship<T is Relationship>(relationshipContainer
 
 **Example:**
 
-```lua
+```teal
 local ChildOf = tecs.builtins.ChildOf
 
 local childOf: ChildOf = archetype:getFirstRelationship(ChildOf, 5)
@@ -121,7 +121,7 @@ Read-only or mutating column access. Both return the row-indexed
 column for a component (or nil if the archetype doesn't carry it);
 the difference is dirty marking.
 
-```lua
+```teal
 function Archetype:get<T is Component>(component: T): {T}
 function Archetype:getMut<T is Component>(component: T): {T}
 ```
@@ -131,7 +131,7 @@ incremental-sync consumers (renderer shadow buffers, snapshots) re-upload it.
 Use it at every site you intend to write into the column, including
 direct FFI cdata field writes that the framework can't observe.
 
-```lua
+```teal
 for archetype, len in query:iter() do
     local transforms = archetype:getMut(Transform)
     local velocities = archetype:get(Velocity)  -- read-only
@@ -146,7 +146,7 @@ end
 Explicit dirty markers for cases where mutation happens through a
 path the framework can't intercept.
 
-```lua
+```teal
 function Archetype:markComponentDirty(component: Component)
 function Archetype:markAllComponentsDirty()
 ```
@@ -159,7 +159,7 @@ markers when none of those apply.
 
 Read dirty state.
 
-```lua
+```teal
 function Archetype:isComponentDirty(component: Component): boolean
 function Archetype:anyComponentDirty(): boolean
 function Archetype:dirtyComponents(): function(): Component
@@ -173,7 +173,7 @@ Clear every component-dirty bit on this archetype. The world's
 end-of-update loop calls this for each archetype that touched the
 dirty set during the frame; callers rarely invoke it directly.
 
-```lua
+```teal
 function Archetype:clearDirtyComponents()
 ```
 

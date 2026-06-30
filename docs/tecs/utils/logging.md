@@ -12,20 +12,20 @@ write formatted messages to a configurable sink (defaults to stderr). Timestamps
 
 First, require the logging module:
 
-```lua
+```teal
 local logging <const> = require("tecs.utils.logging")
 ```
 
 Next, create a logger by providing a name. This is typically the name of the module.
 
-```lua
+```teal
 local LOGGER <const> = logging.getLogger("mySystem")
 ```
 
 Now you can log using `debug`, `info`, `warn`, and `error` methods. The first argument is the message, in
 `string.format` syntax, followed by zero or more `string.format` arguments.
 
-```lua
+```teal
 LOGGER:info("system started")
 LOGGER:debug("loaded %d assets from %s", count, path)
 LOGGER:warn("%.1f%% memory used", 85.3)
@@ -62,7 +62,7 @@ Don't worry about ever checking if a log level is enabled because:
 
 ## Changing the log level
 
-```lua
+```teal
 logging.setLevel("DEBUG")   -- enable all levels
 logging.setLevel("WARN")    -- only warnings and errors
 logging.setLevel("OFF")     -- silence everything
@@ -75,7 +75,7 @@ sees the change.
 
 By default, log messages are written to `io.stderr`. You can redirect to any file handle:
 
-```lua
+```teal
 local logFile = io.open("game.log", "a")
 logging.setSink(logFile)
 ```
@@ -106,7 +106,7 @@ create a variable for a logger in each module that needs logging.
 
 You can do this:
 
-```lua
+```teal
 -- These return the same object:
 local a = logging.getLogger("physics")
 local b = logging.getLogger("physics")
@@ -115,7 +115,7 @@ assert(a == b)
 
 But you _should_ do this:
 
-```lua
+```teal
 local LOGGER <const> = logging.getLogger("physics")
 ```
 

@@ -19,7 +19,7 @@ These shapes are stored in the tile's `objectgroup` property and automatically p
 
 Collision is opt-in via the Tilemap component's `collision` config:
 
-```lua
+```teal
 local tiled = require("tecs2d.tiled")
 local physics = require("tecs2d.physics")
 
@@ -63,7 +63,7 @@ The filter function receives:
 
 Return `true` to include the tile's collision, `false` to exclude:
 
-```lua
+```teal
 collision = {
     enabled = true,
     filter = function(tile, gid, tileX, tileY)
@@ -97,7 +97,7 @@ adjacent box colliders.
 
 The created physics bodies are stored on the Tilemap component:
 
-```lua
+```teal
 local tilemap = world:get(entityId, tiled.Tilemap)
 if tilemap.collisionBodies then
     for _, body in ipairs(tilemap.collisionBodies) do
@@ -109,7 +109,7 @@ end
 
 You can also access the physics state via the world resource:
 
-```lua
+```teal
 local physics = require("tecs2d.physics")
 local state = world.resources[physics]
 local physicsWorld = state.world  -- The Box2D world
@@ -120,7 +120,7 @@ local physicsWorld = state.world  -- The Box2D world
 Collision bodies are automatically destroyed when the tilemap entity is despawned. You can also manually destroy
 them:
 
-```lua
+```teal
 local tiled = require("tecs2d.tiled")
 
 if tilemap.collisionBodies then
@@ -133,7 +133,7 @@ end
 
 Tile properties defined in Tiled remain accessible for game-specific logic:
 
-```lua
+```teal
 local tile = tilemap.data:getTileProperties(layerIndex, tileX, tileY)
 if tile and tile.properties then
     local height = tile.properties.h        -- Custom height property
@@ -157,7 +157,7 @@ The collision system doesn't interpret these properties; they're available for y
 To visualize collision shapes, use the `gfx.physicsDebug` plugin. This renders collision shapes through the
 render pipeline so they respect camera zoom and position:
 
-```lua
+```teal
 local gfx = require("tecs2d.gfx")
 local physics = require("tecs2d.physics")
 
@@ -173,14 +173,14 @@ world:addPlugin(gfx.physicsDebug.new())
 
 Toggle debug rendering at runtime:
 
-```lua
+```teal
 local state = world.resources[physics]
 state.debug = not state.debug  -- Toggle on/off
 ```
 
 ## Example
 
-```lua
+```teal
 local tecs = require("tecs")
 local gfx = require("tecs2d.gfx")
 local physics = require("tecs2d.physics")

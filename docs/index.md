@@ -3,7 +3,7 @@
 layout: home
 
 hero:
-  name: "Blazing-fast 2D LuaJIT"
+  name: "Build 2D game with LuaJIT"
   text: "Use Tecs as an ECS, or full LÖVE game engine"
   image:
     src: /images/tecs.png
@@ -38,7 +38,7 @@ features:
 
 ::: code-group
 
-```lua [Basics]
+```teal [Basics]
 local tecs = require("tecs")
 local world = tecs.newWorld()
 
@@ -86,7 +86,7 @@ world:addSystem({
 world:spawn(Position(100, 100), Velocity(10, 0))
 ```
 
-```lua [Relationships]
+```teal [Relationships]
 local tecs = require("tecs")
 local world = tecs.newWorld()
 local ChildOf = tecs.builtins.ChildOf
@@ -118,7 +118,7 @@ end)
 world:despawn(parent)
 ```
 
-```lua [Events]
+```teal [Events]
 local tecs = require("tecs")
 local world = tecs.newWorld()
 
@@ -151,7 +151,7 @@ end)
 world:emit(0, DamageEvent, enemyId, 25)
 ```
 
-```lua [LÖVE2D]
+```teal [LÖVE2D]
 -- main.tl
 local tecs = require("tecs")
 local tecs2d = require("tecs2d")
@@ -192,7 +192,7 @@ love.run = tecs2d.run({
 })
 ```
 
-```lua [Camera]
+```teal [Camera]
 local tecs2d = require("tecs2d")
 local gfx = require("tecs2d.gfx")
 
@@ -223,7 +223,7 @@ love.run = tecs2d.run({
 })
 ```
 
-```lua [Aseprite]
+```teal [Aseprite]
 local tecs = require("tecs")
 local gfx = require("tecs2d.gfx")
 local assets = require("tecs2d.assets")
@@ -251,7 +251,7 @@ world:observe(entity, gfx.ChangeTag, function(e: gfx.ChangeTag)
 end)
 ```
 
-```lua [Controller]
+```teal [Controller]
 local tecs2d = require("tecs2d")
 local controller = require("tecs2d.controller")
 
@@ -286,7 +286,7 @@ local moveX, moveY = player1:getPair("move")
 velocity.x = moveX * speed
 ```
 
-```lua [Tweens]
+```teal [Tweens]
 local tween = require("tecs2d.tween")
 
 -- Simple move

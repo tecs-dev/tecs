@@ -14,7 +14,7 @@ The `onEntitiesAdded` callback fires once per contiguous range of entities when 
 example, a newly-spawned batch of entities, a single spawn, an entity that gained a required component, or lost an
 excluded component. This callback _does not_ fire when an entity moves between archetypes that both match the query.
 
-```lua{3}
+```teal{3}
 world:query({
     include = {tecs.builtins.Transform, MyPhysicsComponent},
     onEntitiesAdded = function(
@@ -42,7 +42,7 @@ The callback receives the archetype and 1-based `firstRow` / `lastRow` (inclusiv
 removing a required component, adding an excluded component, or a despawn. This callback is fired _before_ entities are
 removed from archetypes.
 
-```lua{9}
+```teal{9}
 world:query({
     include = {tecs.builtins.Transform, MyPhysicsComponent},
     onEntitiesRemoved = function(
@@ -80,7 +80,7 @@ just that component. `onEntitiesAdded` fires when the entity first gains the com
 or an archetype transition that pulls it in); `onEntitiesRemoved` fires when the entity loses it (via
 `world:remove`, despawn, or an exclusion flipping).
 
-```lua
+```teal
 -- React when Health appears or goes away, regardless of whatever
 -- other components the entity carries.
 world:query({
@@ -114,7 +114,7 @@ world:query({
 Combine `include` with `exclude` to react to more specific transitions. For example, to fire exactly when
 an entity enters a "stunned" state and again when it leaves:
 
-```lua
+```teal
 world:query({
     include = {Enemy, Stunned},
     onEntitiesAdded = function(

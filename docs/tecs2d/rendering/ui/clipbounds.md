@@ -9,7 +9,7 @@ independently for any rectangular masking.
 
 ## Basic Usage
 
-```lua
+```teal
 local gfx = require("tecs2d.gfx")
 local ClipBounds = gfx.ClipBounds
 
@@ -41,7 +41,7 @@ All values are in **world-space coordinates**.
 
 ## Constructor
 
-```lua
+```teal
 ClipBounds(minX, minY, maxX, maxY)
 ```
 
@@ -52,7 +52,7 @@ All parameters are optional and default to 0.
 ClipBounds lives in the metadata buffer, so you must mark the entity dirty after modifying it. You can either
 modify in-place and mark dirty, or replace the component with `world:set()` (which marks dirty automatically):
 
-```lua
+```teal
 -- Option 1: modify in-place + mark dirty
 local clip = world:get(entityId, ClipBounds)
 clip.minX = newMinX

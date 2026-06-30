@@ -29,7 +29,7 @@ Events are routed through integer addresses:
 Tecs emits a built-in event, `tecs.builtins.OnDespawn`, when you despawn an entity. Listen for this
 event to clean up references to the entity, spawn an explosion animation, play a sound effect, etc.
 
-```lua
+```teal
 local tecs = require("tecs")
 
 -- Spawn an entity and get the entity ID.
@@ -45,7 +45,7 @@ end)
 
 Use address `0` for events that aren't tied to a specific entity:
 
-```lua
+```teal
 -- Observe world-level events
 world:observe(0, MyEvent, function(e: MyEvent)
     print("Got MyEvent")
@@ -59,7 +59,7 @@ world:emit(0, MyEvent, "hi")
 
 Use the entity ID as the address for entity-specific events:
 
-```lua
+```teal
 local entityId: integer = world:spawn()
 
 -- Observe events on this specific entity
@@ -74,7 +74,7 @@ end)
 
 Event management functions are available directly on the `tecs` module:
 
-```lua
+```teal
 local tecs = require("tecs")
 ```
 
@@ -82,7 +82,7 @@ local tecs = require("tecs")
 
 Configures an event to have an appropriate `__call`-based initialization path.
 
-```lua
+```teal
 function tecs.newEvent<E is Event>(event: E)
 ```
 
@@ -93,7 +93,7 @@ function tecs.newEvent<E is Event>(event: E)
 
 **Example:**
 
-```lua
+```teal
 -- Define the PlayerDamaged record as an event.
 local record PlayerDamaged is tecs.Event
     damage: number
@@ -128,7 +128,7 @@ The two construction paths differ in allocation:
   anything, then reuses world-local backing storage across repeated emissions of the same type, so a hot
   emission loop allocates nothing.
 
-```lua
+```teal
 world:emit(0, PlayerDamaged, 10, "fire")
 ```
 
@@ -141,7 +141,7 @@ world reuses the backing storage on the next emit of the same type.
 
 Configures an FFI event with C struct backing and slice-scoped arena allocation for optimized world emission.
 
-```lua
+```teal
 function tecs.newFFIEvent<E is Event>(
     event: E,
     fields: {{string, string}},
@@ -166,7 +166,7 @@ Common FFI field types you can use:
 
 **Example:**
 
-```lua
+```teal
 -- Define an FFI event for high-frequency damage events
 local record DamageEvent is tecs.Event
     damage: number
@@ -199,7 +199,7 @@ local damage: DamageEvent = DamageEvent(15.5, 1234, 2)
 Direct FFI constructors allocate a fresh cdata instance each call. For the optimized path, emit the event type through
 the world:
 
-```lua
+```teal
 world:emit(0, DamageEvent, 15.5, 1234, 2)
 ```
 

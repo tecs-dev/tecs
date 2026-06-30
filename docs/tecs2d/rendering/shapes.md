@@ -7,7 +7,7 @@ meshes. All shapes are rendered using GPU instancing with compute shader culling
 
 All shape components require a `Transform` component for positioning:
 
-```lua
+```teal
 local tecs = require("tecs")
 local gfx = require("tecs2d.gfx")
 
@@ -32,7 +32,7 @@ For advanced visual effects, shapes can also use [Materials](./materials).
 
 Renders filled or outlined circles. The transform position is the center of the circle.
 
-```lua
+```teal
 -- Filled circle (default)
 gfx.Circle(radius)
 
@@ -49,7 +49,7 @@ gfx.Circle(radius, lineWidth)
 
 **Examples:**
 
-```lua
+```teal
 -- Filled red circle
 world:spawn(
     tecs.builtins.Transform(100, 100),
@@ -69,7 +69,7 @@ world:spawn(
 
 Renders filled or outlined ellipses. The transform position is the center of the ellipse.
 
-```lua
+```teal
 -- Filled ellipse (default)
 gfx.Ellipse(radiusX, radiusY)
 
@@ -87,7 +87,7 @@ gfx.Ellipse(radiusX, radiusY, lineWidth)
 
 **Examples:**
 
-```lua
+```teal
 -- Shadow ellipse under a character
 world:spawn(
     tecs.builtins.Transform(x, y + 10),
@@ -101,7 +101,7 @@ world:spawn(
 Renders filled or outlined arc segments (pie slices or arc outlines). Arcs are defined by start and end angles in
 radians.
 
-```lua
+```teal
 -- Filled arc (pie slice)
 gfx.Arc(radiusX, radiusY, startAngle, endAngle)
 
@@ -127,7 +127,7 @@ gfx.Arc(radiusX, radiusY, startAngle, endAngle, lineWidth)
 
 **Examples:**
 
-```lua
+```teal
 -- Pac-man shape
 world:spawn(
     tecs.builtins.Transform(100, 100),
@@ -147,7 +147,7 @@ world:spawn(
 
 Renders filled or outlined rectangles. The transform position is the center of the rectangle.
 
-```lua
+```teal
 -- Filled rectangle (default)
 gfx.Rectangle(width, height)
 
@@ -165,7 +165,7 @@ gfx.Rectangle(width, height, lineWidth)
 
 **Examples:**
 
-```lua
+```teal
 -- Platform
 world:spawn(
     tecs.builtins.Transform(200, 300),
@@ -185,7 +185,7 @@ world:spawn(
 
 Add rounded corners to rectangles with the `RoundedCorners` component:
 
-```lua
+```teal
 -- Uniform corner radius
 world:spawn(
     tecs.builtins.Transform(100, 100),
@@ -209,7 +209,7 @@ world:spawn(
 
 Renders line segments. Endpoints are relative to the transform position.
 
-```lua
+```teal
 gfx.Line(x1, y1, x2, y2, width?)
 ```
 
@@ -225,7 +225,7 @@ gfx.Line(x1, y1, x2, y2, width?)
 
 **Examples:**
 
-```lua
+```teal
 -- Simple line (1px default width)
 world:spawn(
     tecs.builtins.Transform(100, 100),
@@ -263,7 +263,7 @@ built-in primitives.
 
 First, register a mesh definition with a [Love2D Mesh](https://love2d.org/wiki/Mesh):
 
-```lua
+```teal
 local gfx = require("tecs2d.gfx")
 
 -- Create a Love2D mesh (triangle example)
@@ -282,7 +282,7 @@ gfx.MeshDefinition.new("triangle", loveMesh, 1000)  -- name, mesh, capacity
 
 Spawn entities with the `Mesh` component referencing the definition name:
 
-```lua
+```teal
 world:spawn(
     tecs.builtins.Transform(100, 100),
     gfx.Mesh("triangle"),
@@ -300,7 +300,7 @@ world:spawn(
 
 Meshes support all the same styling components as built-in shapes:
 
-```lua
+```teal
 world:spawn(
     tecs.builtins.Transform(100, 100),
     gfx.Mesh("triangle"),
@@ -329,7 +329,7 @@ If you modify `lineWidth` after spawning, fetch the column with
 `archetype:getMut(...)` so the renderer shadow buffer re-uploads the
 changes:
 
-```lua
+```teal
 for archetype, len in query:iter() do
     local circles = archetype:getMut(gfx.Circle)
     for i = 1, len do
@@ -344,7 +344,7 @@ end
 
 All shape components implement the `Rect` interface, which returns bounding box information:
 
-```lua
+```teal
 local circle = world:get(entity, gfx.Circle)
 local offsetX, offsetY, width, height = circle:getRect()
 ```
@@ -356,7 +356,7 @@ The returned values are:
 This is used internally by the rendering pipeline for culling calculations. You can also use it for gameplay logic like
 collision detection, mouse hit-testing, or spatial queries:
 
-```lua
+```teal
 -- Check if a point is within an entity's bounding box
 local function pointInEntity(world, entity, px, py)
     local transform = world:get(entity, tecs.builtins.Transform)

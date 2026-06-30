@@ -5,7 +5,7 @@ render components.
 
 ## Basic Usage
 
-```lua
+```teal
 local ui = require("tecs2d.ui")
 local LayoutBox = ui.LayoutBox
 
@@ -60,7 +60,7 @@ The origin determines where the entity's reference point is:
 The red dots mark the Transform position. With centered origin (top row), the Transform is at the visual center of each
 shape. With top-left origin (bottom row), the Transform is at the top-left corner.
 
-```lua
+```teal
 -- Centered origin (default)
 LayoutBox(100, 50)            -- originX=0.5, originY=0.5
 LayoutBox(Rectangle)          -- originX=0.5, originY=0.5
@@ -85,7 +85,7 @@ LayoutBox can automatically extract dimensions from any component that implement
 <em>See the <a href="https://github.com/tecs-dev/tecs/tree/main/examples/tecs-ui">tecs-ui example</a>.</em>
 </p>
 
-```lua
+```teal
 -- These all work:
 LayoutBox(Rectangle)
 LayoutBox(Circle)

@@ -12,7 +12,7 @@ The physics module provides three components for adding physics to entities: `Co
 Defines the collision shape for an entity. By itself (without RigidBody or StaticBody), creates a kinematic body that
 is moved by Transform, not by physics.
 
-```lua
+```teal
 local Transform = tecs.builtins.Transform
 
 -- Circle collider
@@ -60,7 +60,7 @@ After spawning, the Collider component exposes the Box2D body and shapes:
 | `body`        | [`Body`](https://love2d.org/wiki/Body)            | The Box2D body                                   |
 | `shapeList`   | `{`[`Shape`](https://love2d.org/wiki/Shape)`}`    | List of shapes (for multi-shape colliders)       |
 
-```lua
+```teal
 local c = world:get(entityId, physics.Collider)
 c.body:applyForce(100, 0)
 c.body:applyLinearImpulse(0, -200)
@@ -74,7 +74,7 @@ c.body:setLinearVelocity(100, 0)
 
 Makes an entity a dynamic physics body that responds to forces and collisions.
 
-```lua
+```teal
 world:spawn(
     Transform(100, 100),
     physics.Collider({ shape = "circle", radius = 16 }),
@@ -114,7 +114,7 @@ value after shape creation, preserving the center of mass and inertia computed f
 
 Marks an entity as a static physics body. Static bodies don't move but can be collided with. Takes no arguments.
 
-```lua
+```teal
 -- Ground platform
 world:spawn(
     Transform(400, 550),
@@ -127,7 +127,7 @@ world:spawn(
 
 Create colliders with multiple shapes for complex hitboxes:
 
-```lua
+```teal
 world:spawn(
     Transform(100, 100),
     physics.Collider({
@@ -159,7 +159,7 @@ All shapes share a single Box2D body. Individual shapes are accessible at runtim
 
 Access the Box2D body through the Collider component. Force application should typically run in FixedUpdate:
 
-```lua
+```teal
 world:addSystem({
     phase = tecs.phases.FixedUpdate,
     run = function()

@@ -13,7 +13,7 @@ Create queries with `world:query()`, passing a `QueryDescriptor`.
 
 The `include` property is a list of components an entity must have to match the query.
 
-```lua{3}
+```teal{3}
 -- Find all entities that have the `tecs.builtins.Name` component:
 world:query({
     include = {tecs.builtins.Name}
@@ -22,7 +22,7 @@ world:query({
 
 The `exclude` property is a list of components an entity must not have to match the query.
 
-```lua{5}
+```teal{5}
 -- Find all entities that have the `tecs.builtins.Name` component and
 -- don't have the `tecs.builtins.Ttl` component.
 world:query({
@@ -34,7 +34,7 @@ world:query({
 The `includeAny` property is a list of components where an entity must have at least one to match the query. This
 acts as an OR condition combined with the AND condition of `include`.
 
-```lua{4}
+```teal{4}
 -- Find all entities that have Position AND either Sprite OR Circle
 world:query({
     include = {Position},
@@ -44,7 +44,7 @@ world:query({
 
 You can give queries a name using the `name` property. This makes it easier to identify queries in debug logs.
 
-```lua{2}
+```teal{2}
 world:query({
     name = "NameQuery",
     include = {tecs.builtins.Name}
@@ -75,7 +75,7 @@ metamethod indirection.
 
 Consider the following query:
 
-```lua
+```teal
 local Name <const> = tecs.builtins.Name
 local Transform <const> = tecs.builtins.Transform
 
@@ -89,7 +89,7 @@ local query = world:query({
 
 Iterate it:
 
-```lua:line-numbers
+```teal:line-numbers
 for archetype, len, entities in query:iter() do
     local names = archetype:get(Name)
     local transforms = archetype:get(Transform)
@@ -120,7 +120,7 @@ takes its first step, the world enters a **deferred scope**; `world:set`, `world
 `world:despawn`, and the `batch*` APIs all stage during iteration and apply in a drain phase when the loop exits.
 You can therefore mutate matching entities freely inside the loop body:
 
-```lua
+```teal
 for archetype, len, entities in query:iter() do
     local healths = archetype:get(Health)
     for row = 1, len do
@@ -137,7 +137,7 @@ Normal exhaustion of `for … in query:iter()` drains staged mutations automatic
 deferred scope stays open, and your staged writes stay invisible until the next flush point. Call
 `world:commit()` after the break to drain right away:
 
-```lua
+```teal
 for archetype, len, entities in query:iter() do
     if shouldStop then
         world:set(entities[1], SomeFlag)  -- entities are 1-indexed
@@ -166,7 +166,7 @@ pattern keeps queries efficient: create once, reuse across multiple system updat
 
 The recommended approach is to create queries in a plugin and store them for use by systems:
 
-```lua
+```teal
 -- Create a movement plugin
 local function movementPlugin(world: tecs.World)
     -- Create the query once in the plugin
@@ -206,7 +206,7 @@ By default, queries are persistent: they register as archetype observers and sub
 archetypes. For one-shot iteration where you don't need live updates, use `temp = true` to skip
 observer registration. Temp queries cannot use `onEntitiesAdded` or `onEntitiesRemoved` callbacks.
 
-```lua
+```teal
 for archetype, len in world:query({include = {Health}, temp = true}):iter() do
     -- iterate once and discard query
 end
@@ -218,14 +218,14 @@ By default, all queries automatically exclude entities that have the
 [`tecs.builtins.Disabled`](/tecs/builtins#disabled-component) component. This behavior makes it easy to
 temporarily hide entities without despawning them.
 
-```lua
+```teal
 -- This entity won't appear in queries by default
 world:spawn(tecs.builtins.Disabled)
 ```
 
 To find disabled entities in your queries, explicitly include the `Disabled` component:
 
-```lua
+```teal
 -- Find all entities with Position, including disabled ones
 local allPositionQuery = world:query({
     include = {Position, tecs.builtins.Disabled}

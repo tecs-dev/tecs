@@ -13,7 +13,7 @@ For rebindable game controls (jump, attack, move), see [Controller](/tecs2d/inpu
 
 The input module is globally available and automatically managed by Tecs:
 
-```lua
+```teal
 local tecs = require("tecs")
 local tecs2d = require("tecs2d")
 local input = require("tecs2d.input")
@@ -33,7 +33,7 @@ love.run = tecs2d.run({
 
 Check keyboard state using the input module:
 
-```lua
+```teal
 local tecs2d = require("tecs2d")
 local input = require("tecs2d.input")
 
@@ -61,7 +61,7 @@ end
 For text entry (chat boxes, name fields, etc.), use the `textInput` field which captures actual typed characters with
 proper keyboard layout handling:
 
-```lua
+```teal
 local tecs2d = require("tecs2d")
 local input = require("tecs2d.input")
 
@@ -94,7 +94,7 @@ world:addSystem({
 
 You can get the current mouse X and Y position using `input`:
 
-```lua
+```teal
 local tecs2d = require("tecs2d")
 local input = require("tecs2d.input")
 
@@ -103,7 +103,7 @@ local x, y = input.mouseX, input.mouseY
 
 You can check if the mouse wheel was moved using `getMouseWheelMovement()`:
 
-```lua
+```teal
 local dx, dy = input.getMouseWheelMovement()
 if dy ~= 0 then
     zoom = zoom + dy * 0.1
@@ -112,14 +112,14 @@ end
 
 Or access the wheel movement array directly:
 
-```lua
+```teal
 local wheelX = input.mouseWheelMoved[1]
 local wheelY = input.mouseWheelMoved[2]
 ```
 
 You can check mouse button states:
 
-```lua
+```teal
 if input.isMouseDown(1) then
     -- Button held
 end
@@ -145,7 +145,7 @@ end
 
 Handle gamepad and joystick input for each connected device:
 
-```lua
+```teal
 local tecs2d = require("tecs2d")
 local input = require("tecs2d.input")
 
@@ -185,7 +185,7 @@ end
 
 You can also react to joystick connection/disconnection events:
 
-```lua
+```teal
 local tecs2d = require("tecs2d")
 
 world:addSystem({
@@ -240,7 +240,7 @@ the exact sequence or timing of multiple inputs within a single render frame. If
 combos or input sequences (e.g., a fighting game), you should implement a custom input buffer by consuming the raw
 event stream provided by the [Tecs event system](/tecs2d/events).
 
-```lua
+```teal
 local tecs2d = require("tecs2d")
 
 world:observe(0, tecs2d.KeyPressed, function(e: tecs2d.KeyPressed)

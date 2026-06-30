@@ -6,7 +6,7 @@ lighting calculations.
 
 ## Quick Start
 
-```lua
+```teal
 local tecs = require("tecs")
 local tecs2d = require("tecs2d")
 local gfx = require("tecs2d.gfx")
@@ -133,7 +133,7 @@ fill rate rather than Lua interpreter speed.
 The render pipeline is configured via the `render` table in [`tecs2d.run`](/tecs2d/love2d#run). All fields are optional
 with sensible defaults.
 
-```lua
+```teal
 love.run = tecs2d.run({
     fps = 60,
     game = gamePlugin,

@@ -34,7 +34,7 @@ loaded, the loader will also try to load `player_n.png` (normal), `player_e.png`
 
 ### Synchronous Loading
 
-```lua
+```teal
 local gfx = require("tecs2d.gfx")
 
 local sheet = gfx.SpriteSheet.fromFile("assets/player.png")
@@ -50,7 +50,7 @@ local sheet = gfx.SpriteSheet.fromFile("assets/player.png", {
 Use the asset system for non-blocking loads. See [Assets API](/tecs2d/assets/api#loadspritesheet) for full method
 documentation.
 
-```lua
+```teal
 local assets = require("tecs2d.assets")
 
 local assetManager = world.resources[assets]
@@ -68,7 +68,7 @@ world:spawn(
 If you need to load a texture that doesn't have any animation or an Aseprite JSON file, use
 [`loadStaticSheet`](/tecs2d/assets/api#loadstaticsheet):
 
-```lua
+```teal
 local assets = require("tecs2d.assets")
 
 local assetManager = world.resources[assets]
@@ -123,7 +123,7 @@ Normal maps give sprites depth and respond to lighting direction.
 
 **Auto-generated normal maps:**
 
-```lua
+```teal
 -- Generate from sprite luminance at load time
 local sheet = gfx.SpriteSheet.fromFile("sprite.png", {
     generateNormal = true
@@ -158,7 +158,7 @@ metal, wet surfaces, glass, etc.
 
 ### Loading
 
-```lua
+```teal
 -- From Aseprite file (requires JSON, supports animation)
 local sheet = gfx.SpriteSheet.fromFile("sprite.png")
 local sheet = gfx.SpriteSheet.fromFile("sprite.png", { generateNormal = true })
@@ -178,7 +178,7 @@ local sheet = gfx.SpriteSheet.fromImage(image, jsonData, "sprite.png")
 
 ### Dimensions
 
-```lua
+```teal
 local sheetW, sheetH = sheet:getSheetSize()  -- Total texture size
 local spriteW, spriteH = sheet:getSpriteSize()  -- Individual frame size
 local image = sheet:getImage()  -- Love2D texture
@@ -186,7 +186,7 @@ local image = sheet:getImage()  -- Love2D texture
 
 ### Frame Data
 
-```lua
+```teal
 local frame = sheet:getFrame(1)  -- 1-indexed
 print(frame.x, frame.y)          -- Position in atlas
 print(frame.w, frame.h)          -- Frame dimensions
@@ -195,7 +195,7 @@ print(frame.duration)            -- Duration in seconds
 
 ### Frame Tags
 
-```lua
+```teal
 -- Check if tag exists
 if sheet:hasFrameTag("walk") then
     local tag = sheet:getFrameTag("walk")
@@ -207,7 +207,7 @@ end
 
 ### Slices
 
-```lua
+```teal
 local slice = sheet:getSlice("hitbox")
 if slice then
     print(slice.data)            -- User data string from Aseprite
@@ -224,7 +224,7 @@ end
 
 ### Material Textures
 
-```lua
+```teal
 local normalTex = sheet:getNormalImage()     -- Normal map or nil
 local emissionTex = sheet:getEmissionImage() -- Emission map or nil
 local specularTex = sheet:getSpecularImage() -- Specular map or nil
@@ -235,7 +235,7 @@ sheet:generateNormalMap()
 
 ### Identifiers
 
-```lua
+```teal
 local id = sheet:getId()            -- Unique sheet ID (for caching)
 local path = sheet:getPath()        -- File path (for serialization)
 local tagId = sheet:getTagId("walk")  -- Tag name to ID
@@ -247,7 +247,7 @@ local tagName = sheet:getTagName(1)   -- Tag ID to name
 For non-Aseprite atlas formats (TexturePacker, ShoeBox, custom tools), use the builder API to construct
 sprite sheets programmatically:
 
-```lua
+```teal
 local gfx = require("tecs2d.gfx")
 
 -- Load your atlas image
@@ -297,7 +297,7 @@ world:spawn(
 
 To integrate with other atlas tools, parse their output format and call the builder methods:
 
-```lua
+```teal
 -- Example: parse a simple JSON atlas format
 local json = require("tecs.utils.json")
 local atlasData = json.parse(love.filesystem.read("atlas.json"))

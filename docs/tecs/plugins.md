@@ -11,7 +11,7 @@ systems, resources, states, and any other game logic in a self-contained package
 
 A plugin is simply a function that takes a World as its parameter and configures it with additional functionality:
 
-```lua
+```teal
 type Plugin = function(world: World)
 ```
 
@@ -19,7 +19,7 @@ type Plugin = function(world: World)
 
 Add plugins to your world using the `addPlugin` method:
 
-```lua
+```teal
 local world = tecs.newWorld()
 
 -- Add a plugin
@@ -30,7 +30,7 @@ world:addPlugin(myPlugin)
 
 Here's a simple example of a plugin that adds a health system:
 
-```lua
+```teal
 local function healthPlugin(world: tecs.World)
     -- Define a Health component
     local Health = tecs.newComponent({
@@ -84,7 +84,7 @@ world:addPlugin(healthPlugin)
 
 Create configurable plugins by returning a plugin function from a configuration function:
 
-```lua
+```teal
 local function createMovementPlugin(speed: number): Plugin
     return function(world: tecs.World)
         world:addSystem({
@@ -108,7 +108,7 @@ world:addPlugin(createMovementPlugin(200))  -- Fast speed
 
 Plugins can depend on other plugins using assertions.
 
-```lua
+```teal
 -- This plugin requires you to add the Physics plugin first
 local function collisionPlugin(world: tecs.World)
     local rigidBody = world.resources[RIGID_BODY]
@@ -122,7 +122,7 @@ end
 
 Structure larger plugins as modules:
 
-```lua
+```teal
 -- myproject/plugins/inventory.tl
 local record inventory
     -- Export the plugin function
@@ -165,7 +165,7 @@ Tecs adds the built-in plugin automatically when you create a World, so you don'
 
 Here's a more complete example of an input handling plugin:
 
-```lua
+```teal
 local function inputPlugin(world: tecs.World)
     -- Define input components
     local KeyPressed = tecs.newTagComponent("KeyPressed")
@@ -212,7 +212,7 @@ end
 
 Combine multiple plugins into plugin groups:
 
-```lua
+```teal
 local function gameplayPlugins(world: tecs.World)
     world:addPlugin(physicsPlugin)
     world:addPlugin(inputPlugin)

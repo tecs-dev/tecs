@@ -25,7 +25,7 @@ Here are some example prompts you can use with a coding agent when Tecs MCP is c
 
 Add the MCP plugin to your world:
 
-```lua
+```teal
 local mcp = require("tecs2d.mcp")
 
 world:addPlugin(mcp.new())              -- default port 19999

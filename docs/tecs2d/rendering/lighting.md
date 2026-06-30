@@ -5,7 +5,7 @@ and height-based shadow occlusion.
 
 ## Quick Start
 
-```lua
+```teal
 local gfx = require("tecs2d.gfx")
 local Transform = tecs.builtins.Transform
 
@@ -33,7 +33,7 @@ world:spawn(
 
 The `Light` component creates dynamic light sources. It accepts a configuration table:
 
-```lua
+```teal
 gfx.Light.new({
     radius = 200,
     intensity = 1.0,
@@ -48,7 +48,7 @@ gfx.Light.new({
 
 All fields are optional with sensible defaults. You can also use positional arguments for simple cases:
 
-```lua
+```teal
 -- Positional: radius, intensity, height, r, g, b
 gfx.Light(200, 1.0, 0.3, 1.0, 0.9, 0.8)
 ```
@@ -70,7 +70,7 @@ gfx.Light(200, 1.0, 0.3, 1.0, 0.9, 0.8)
 
 After spawning, you can modify light properties directly:
 
-```lua
+```teal
 local light = world:get(entity, gfx.Light)
 light.radius = 300
 light.intensity = 1.5
@@ -87,7 +87,7 @@ By default, lights are omnidirectional point lights. Setting `coneAngle > 0` con
 
 Point lights emit in all directions:
 
-```lua
+```teal
 world:spawn(
     Transform(x, y),
     gfx.Light.new({ radius = 200, intensity = 1.0, height = 0.3 })
@@ -98,7 +98,7 @@ world:spawn(
 
 Spotlights emit in a directional cone:
 
-```lua
+```teal
 world:spawn(
     Transform(x, y),
     gfx.Light.new({
@@ -129,7 +129,7 @@ The `height` property (0.0 - 1.0, normalized) controls how lights interact with 
 - **Medium height** (0.15-0.5): Balanced lighting
 - **High height** (0.5+): Even, overhead-style lighting
 
-```lua
+```teal
 -- Dramatic torchlight close to the ground
 gfx.Light.new({ radius = 150, intensity = 1.2, height = 0.05, r = 1.0, g = 0.6, b = 0.3 })
 
@@ -172,7 +172,7 @@ Entities with the `Occluder` component cast shadows. Without this component, ent
 
 ### Basic Shadow Casting
 
-```lua
+```teal
 -- Circle that casts shadows
 world:spawn(
     Transform(x, y),
@@ -201,7 +201,7 @@ world:spawn(
 
 The `Occluder` component accepts either a configuration table or positional arguments:
 
-```lua
+```teal
 -- Table style
 gfx.Occluder({
     alphaThreshold = 0.5,   -- for sprites: pixels below this alpha don't cast shadows
@@ -218,7 +218,7 @@ gfx.Occluder(0.5, 0.5)   -- height = 0.5, alphaThreshold = 0.5
 
 The `height` property (0.0 - 1.0) controls perspective-based shadow projection:
 
-```lua
+```teal
 -- Short occluder - casts shorter shadows from high lights
 world:spawn(
     Transform(x, y),
@@ -244,7 +244,7 @@ world:spawn(
 
 For sprites, the alpha channel determines the shadow silhouette:
 
-```lua
+```teal
 -- Tree sprite with alpha-tested shadows
 world:spawn(
     Transform(x, y),
@@ -280,7 +280,7 @@ Tile Properties:
 If a TileChunk contains any occluding tiles, you can customize the shadow behavior by adding an `Occluder` component to
 the chunk entity:
 
-```lua
+```teal
 -- Custom occluder settings for a chunk (via onTilemapLoaded callback)
 world:set(chunkEntity, gfx.Occluder({
     height = 0.3,           -- override default height
@@ -298,7 +298,7 @@ and work well for characters, trees, and other sprites that need ground-contact 
 
 ### Basic Usage
 
-```lua
+```teal
 -- Tree with a drop shadow
 world:spawn(
     Transform(x, y, 0, 2, 0, 3, 3),
@@ -325,7 +325,7 @@ world:spawn(
 
 You can use either table or positional syntax:
 
-```lua
+```teal
 gfx.DropShadow()                  -- defaults (height=0.5, opacity=0.3)
 gfx.DropShadow(0.8)               -- height=0.8, opacity=0.3
 gfx.DropShadow(0.5, 0.4)          -- height=0.5, opacity=0.4
@@ -370,7 +370,7 @@ with no visible quality loss
 
 You can adjust the canvas resolution via `dropShadowScale`:
 
-```lua
+```teal
 love.run = tecs2d.run({
     render = {
         dropShadowScale = 0.5,  -- default; half resolution
@@ -384,7 +384,7 @@ love.run = tecs2d.run({
 
 Set the base illumination for unlit areas:
 
-```lua
+```teal
 -- Dark ambient for dramatic lighting
 pipeline:setAmbientLight(0.1, 0.1, 0.15)
 
@@ -406,7 +406,7 @@ Tecs provides multiple levels of control over lighting: pipeline-wide, per-layer
 
 Configure lighting behavior when creating the pipeline:
 
-```lua
+```teal
 love.run = tecs2d.run({
     fps = 60,
     game = gamePlugin,
@@ -427,7 +427,7 @@ love.run = tecs2d.run({
 
 Toggle lighting at runtime:
 
-```lua
+```teal
 -- Disable lighting (everything renders at full brightness)
 pipeline:disableLighting()
 
@@ -444,7 +444,7 @@ end
 
 Mark entire layers as unlit so all entities on that layer render at full brightness:
 
-```lua
+```teal
 -- Option 1: Configure layer at setup
 pipeline:configureLayer(10, {
     name = "ui",
@@ -470,7 +470,7 @@ This is useful for:
 
 Mark individual entities as unlit with the `Unlit` tag component:
 
-```lua
+```teal
 -- Entity renders at full brightness regardless of lighting
 world:spawn(
     Transform(x, y),
@@ -499,7 +499,7 @@ self-shadow acne while still allowing cross-occluder shadows: ball A's shadow ca
 You can query how much light hits a specific world position, including shadow occlusion. This is useful for stealth
 mechanics, AI awareness, or any gameplay that depends on whether a position is lit or in shadow.
 
-```lua
+```teal
 -- Returns 0-1 luminance (0 = full darkness, 1 = full brightness)
 local brightness = pipeline:queryLightAt(worldX, worldY)
 
@@ -530,7 +530,7 @@ primary performance factor.
 
 Shadow quality can be adjusted via pipeline configuration:
 
-```lua
+```teal
 local config = {
     -- 1.0 = pixel perfect, 0.5 = 4x fewer pixels
     -- Scaling down is the fastest way to improve performance

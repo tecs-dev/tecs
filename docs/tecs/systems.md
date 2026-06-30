@@ -12,7 +12,7 @@ A system is a function that runs game logic in specific [phases](/tecs/phases) o
 Add systems to the world with `world:addSystem()`, passing a configuration table. The `run` function receives
 the current frame delta time and the world.
 
-```lua
+```teal
 world:addSystem({
     phase = tecs.phases.Startup,
     run = function(dt: number, world: tecs.World)
@@ -50,7 +50,7 @@ system apply instantly versus stage.
 You can give systems a name using the `name` property. This makes it easier to debug, and also
 allows other systems to be added relative to the system by referencing the name.
 
-```lua{3}
+```teal{3}
 world:addSystem({
     phase = tecs.phases.Update,
     name = "MyUpdateSystem",
@@ -65,7 +65,7 @@ world:addSystem({
 To conditionally skip a system, provide a `runIf` predicate. It receives the frame delta, the world, and the
 system's name, and returns `true` if the system should run this frame.
 
-```lua
+```teal
 runIf = function(dt: number, world: tecs.World, systemName: string): boolean
     return world:peekState() == "game"
 end
@@ -79,7 +79,7 @@ Tecs provides built-in scheduling helpers that cover the common cases.
 
 Runs a system once after a delay (in seconds), then automatically removes it from the world.
 
-```lua
+```teal
 world:addSystem({
     phase = tecs.phases.Update,
     name = "DelayedMessage",
@@ -94,7 +94,7 @@ world:addSystem({
 
 Runs a system repeatedly at regular intervals.
 
-```lua
+```teal
 world:addSystem({
     phase = tecs.phases.Update,
     name = "PeriodicUpdate",
@@ -112,7 +112,7 @@ Provide optional jitter in the second argument to desynchronize systems using th
 
 Fires immediately on the first update, then suppresses execution for the cooldown duration before firing again.
 
-```lua
+```teal
 world:addSystem({
     phase = tecs.phases.Update,
     name = "HealthRegen",
@@ -128,7 +128,7 @@ world:addSystem({
 
 Runs a system only when the given [state](/tecs/states) is on top of the state stack.
 
-```lua
+```teal
 world:addSystem({
     phase = tecs.phases.Update,
     name = "GameplaySystem",
@@ -143,7 +143,7 @@ world:addSystem({
 
 Inverts another runIf predicate, allowing you to compose conditional logic.
 
-```lua
+```teal
 -- Run when NOT in game state
 world:addSystem({
     phase = tecs.phases.Update,
@@ -159,7 +159,7 @@ world:addSystem({
 
 Combines two runIf predicates with logical AND. The system will only run if both predicates return true.
 
-```lua
+```teal
 world:addSystem({
     phase = tecs.phases.Update,
     name = "PeriodicGameplayUpdate",
@@ -177,7 +177,7 @@ world:addSystem({
 
 Combines two runIf predicates with logical OR. The system will run if either predicate returns true.
 
-```lua
+```teal
 world:addSystem({
     phase = tecs.phases.FixedUpdate,
     name = "AnimateWater",
@@ -195,7 +195,7 @@ world:addSystem({
 
 You can also write your own runIf predicates for more complex logic:
 
-```lua
+```teal
 local health: number = 100
 
 world:addSystem({
@@ -222,7 +222,7 @@ automatically re-sorts to respect the constraint.
 
 Add a system before another named system:
 
-```lua{7}
+```teal{7}
 world:addSystem({
     phase = tecs.phases.Update,
     name = "MyOtherUpdateSystem",
@@ -235,7 +235,7 @@ world:addSystem({
 
 Add a system after another named system:
 
-```lua{7}
+```teal{7}
 world:addSystem({
     phase = tecs.phases.Update,
     name = "YetAnotherUpdateSystem",
@@ -251,7 +251,7 @@ world:addSystem({
 Call `world:removeSystem(name)` to pull a system out of the pipeline. The system must have been registered
 with an explicit `name`; auto-named systems aren't removable from user code.
 
-```lua
+```teal
 world:removeSystem("MyUpdateSystem")
 ```
 

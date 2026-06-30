@@ -23,7 +23,7 @@ Tecs provides several component kinds for different use cases.
 
 Access an entity's components with `world:get`.
 
-```lua
+```teal
 local name = world:get(entityId, tecs.builtins.Name)
 ```
 
@@ -37,13 +37,13 @@ generic over the provided component type. So in the above example, the return va
 
 Set components on entities with `world:set`.
 
-```lua
+```teal
 world:set(entityId, tecs.builtins.Name("Frank"))
 ```
 
 You can also set components when spawning an entity.
 
-```lua
+```teal
 world:spawn(
     tecs.builtins.Name("Frank"),
     tecs.builtins.Position(100, 200)
@@ -54,7 +54,7 @@ world:spawn(
 
 Remove components from entities with `world:remove`.
 
-```lua
+```teal
 world:remove(entityId, tecs.builtins.Name)
 ```
 
@@ -63,7 +63,7 @@ world:remove(entityId, tecs.builtins.Name)
 When iterating entities in a system, the query gives you the archetype directly. You can bind the component's
 column once and then index by row, avoiding per-entity lookups:
 
-```lua
+```teal
 local query: tecs.Query = world:query({include = {Position, Velocity}})
 
 world:addSystem({
@@ -95,7 +95,7 @@ Entries may be either component **types** (the container is called with no args 
 or instance values (shared by every entity that auto-adds the dependency). The closure is transitive: if a
 required component itself declares `requires`, those are pulled in too.
 
-```lua
+```teal
 local record Position is tecs.Component
     x: number
     y: number

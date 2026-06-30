@@ -8,7 +8,7 @@ Tecs provides a fast snapshot system for save games, checkpoints, and state rest
 attach arbitrary metadata alongside ECS data so snapshots stay self-contained (e.g., player profile,
 physics state, RNG seeds, etc).
 
-```lua
+```teal
 -- Save the world to a string.buffer
 local buf = world:saveSnapshot().buffer
 
@@ -29,7 +29,7 @@ Tecs provides two save formats out of the box:
 
 Snapshots the ECS world and allows plugins to inject custom data.
 
-```lua
+```teal
 function world:saveSnapshot(opts?: tecs.SnapshotOptions): tecs.SnapshotOutput
 ```
 
@@ -61,7 +61,7 @@ custom data.
 
 For high-frequency saves (replay buffers, autosave loops), pass `opts.buffer` to reuse one allocation:
 
-```lua
+```teal
 local buffer = require("string.buffer")
 local sharedBuf = buffer.new()
 
@@ -78,7 +78,7 @@ You can restrict the capture to a subset of entities by providing a `filterQuery
 [`QueryDescriptor`](/tecs/queries/) works (`include`, `includeAny`, `exclude`); only matching archetypes are
 walked.
 
-```lua
+```teal
 -- Only entities that carry a Persist component.
 world:saveSnapshot({
     filterQuery = {include = {Persist}},
@@ -92,7 +92,7 @@ an array of `Transform.layer` values (0..31). Entities carrying a `Transform` wi
 are skipped; entities that don't have a `Transform` pass through unchanged (the filter only applies when there's 
 something to filter on).
 
-```lua
+```teal
 -- Only Transform-bearing entities on layer 2 or 3. Non-Transform
 -- entities (e.g. singletons, config entities) still flow through.
 world:saveSnapshot({layers = {2, 3}})
@@ -111,7 +111,7 @@ You can attach keyed metadata (build version, player profile, checkpoint, etc.) 
 becomes a data pair in the snapshot. Values must be `string.buffer`-encodable (numbers, strings, booleans, plain
 tables). See [Snapshot events](#snapshot-events) for how to read the data back on load.
 
-```lua
+```teal
 world:saveSnapshot({
     customData = {
         build     = "v0.1.2-alpha",
@@ -126,7 +126,7 @@ world:saveSnapshot({
 Restores a previously saved snapshot into `world`, replacing the current world state. See
 [Snapshot events](#snapshot-events) for how to hook into the load lifecycle and read back custom data.
 
-```lua
+```teal
 function world:loadSnapshot(source: any): tecs.SnapshotPrelude
 ```
 
@@ -144,7 +144,7 @@ function world:loadSnapshot(source: any): tecs.SnapshotPrelude
 
 Capture the world into a plain Lua snapshot table by requesting table format:
 
-```lua
+```teal
 local out = world:saveSnapshot({format = "table"})
 local snap = out.snapshot
 ```
@@ -171,7 +171,7 @@ get its bytes onto disk.
 
 You can use plain Lua files (though this allocates unnecessary intermediate strings):
 
-```lua
+```teal
 -- Save to a Lua file
 local buf = world:saveSnapshot().buffer
 local f = io.open("save.bin", "wb")
@@ -190,7 +190,7 @@ world:loadSnapshot(data)
 You can use Love2D's `love.filesystem.write` with a string. This is dead simple, but does unnecessary
 string allocations.
 
-```lua
+```teal
 -- Save to disk
 local buf = world:saveSnapshot().buffer
 love.filesystem.write("save.bin", tostring(buf))
@@ -212,7 +212,7 @@ The ideal method for saving and loading goes through Love2D's [ByteData](https:/
 
 For example, to save to disk with no string allocations:
 
-```lua
+```teal
 local ffi = require("ffi")
 
 local buf = world:saveSnapshot().buffer
@@ -224,7 +224,7 @@ love.filesystem.write("save.bin", byteData, len)
 
 To load from disk with no string allocations:
 
-```lua
+```teal
 local buffer = require("string.buffer")
 
 local fileData = love.filesystem.newFileData("save.bin")
@@ -249,7 +249,7 @@ Plugins (or any system) can attach data by listening for `OnSnapshotSave` and ca
 The framework queues these calls during the event and flushes them into the snapshot's data section after the
 archetype data is written, so the ordering is deterministic (per-listener, in call order).
 
-```lua
+```teal
 world:observe(0, tecs.builtins.OnSnapshotSave, function(ev: tecs.builtins.OnSnapshotSave)
     ev:addData("physics.world", physicsSystem:serialize())
     ev:addData("rng.state", rng:getState())
@@ -265,7 +265,7 @@ Plugins that own *derived* state (state that's a projection of some smaller, dur
 components for omission via `ev:exclude(component)`. Entities carrying any excluded component are skipped entirely
 at save time. On load the plugin re-derives them from the source-of-truth components that _are_ saved.
 
-```lua
+```teal
 -- Inside the tiled plugin:
 world:observe(0, tecs.builtins.OnSnapshotSave, function(ev: tecs.builtins.OnSnapshotSave)
     ev:exclude(gfx.TileChunk)         -- GPU instances; re-spawned from Tilemap
@@ -292,7 +292,7 @@ per-key callbacks via `ev:onData(key, callback)`; each callback fires exactly on
 no registered callback are silently skipped. Multiple listeners may register the same key; all fire in registration
 order.
 
-```lua
+```teal
 world:observe(0, tecs.builtins.StartSnapshotLoad, function(ev: tecs.builtins.StartSnapshotLoad)
     ev:onData("physics.world", function(value: any)
         physicsSystem:deserialize(value)
@@ -309,7 +309,7 @@ world:loadSnapshot(buf)
 
 Once every data callback has run, `FinishSnapshotLoad` fires as a natural "load is complete" hook:
 
-```lua
+```teal
 world:observe(0, tecs.builtins.FinishSnapshotLoad, function(ev: tecs.builtins.FinishSnapshotLoad)
     print("restored to version", ev.prelude.version)
 end)
@@ -319,7 +319,7 @@ end)
 
 When you need to inspect or transform the snapshot programmatically, use the table format:
 
-```lua
+```teal
 local snap = world:saveSnapshot({format = "table"}).snapshot
 -- snap is a plain Lua table: mutate, inspect, walk by hand.
 
@@ -329,7 +329,7 @@ world:loadSnapshot(snap)
 It accepts the same `opts` shape as `saveSnapshot` (minus `buffer`). The table is JSON-friendly, so you can feed it
 through `tecs.json.serialize` for human-readable saves:
 
-```lua
+```teal
 local snap = world:saveSnapshot({format = "table"}).snapshot
 love.filesystem.write("save.json", tecs.json.serialize(snap))
 
@@ -429,7 +429,7 @@ data section (sentinel-terminated):
 
 `world:saveSnapshot({format = "table"}).snapshot` returns:
 
-```lua
+```teal
 {
     version = 1,
     nextEntityId = 42,

@@ -13,7 +13,7 @@ collision.
 
 Emitted when two shapes start touching.
 
-```lua
+```teal
 local id = world:spawn(
     Transform(100, 100),
     physics.Collider({ shape = "circle", radius = 16 }),
@@ -39,7 +39,7 @@ end)
 
 Emitted when two shapes stop touching.
 
-```lua
+```teal
 world:observe(id, physics.EndContact, function(e: physics.EndContact)
     print("Stopped touching entity", e.other)
 end)
@@ -58,7 +58,7 @@ end)
 
 Emitted before collision response is calculated. Use this to disable contacts conditionally.
 
-```lua
+```teal
 world:observe(id, physics.PreSolve, function(e: physics.PreSolve)
     -- One-way platform: allow passing through from below
     local _, ny = e.contact:getNormal()
@@ -82,7 +82,7 @@ end)
 Emitted after collision response with impulse data. Use this for damage calculations or sound effects based on impact
 strength.
 
-```lua
+```teal
 world:observe(id, physics.PostSolve, function(e: physics.PostSolve)
     if e.normalImpulse > 100 then
         print("Hard impact!", e.normalImpulse)
@@ -106,7 +106,7 @@ end)
 Use `physics.categories()` to create bitmasks, and set `categories` and `mask` on Colliders to control which objects
 collide:
 
-```lua
+```teal
 local PLAYER = physics.categories(1)
 local ENEMY = physics.categories(2)
 local PROJECTILE = physics.categories(3)
@@ -135,7 +135,7 @@ To override this behavior, provide a custom `contactFilter` in the [plugin confi
 The filter receives both Box2D shapes and their associated `ShapeData`, and returns `true` to allow the collision
 or `false` to reject it:
 
-```lua
+```teal
 world:addPlugin(physics.new({
     world = physicsWorld,
     contactFilter = function(

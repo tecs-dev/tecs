@@ -25,13 +25,13 @@ Provides a name for an entity. Stored as a [scalar component](/tecs/components/s
 
 **Teal type:**
 
-```lua
+```teal
 Name: tecs.ScalarComponent<string>
 ```
 
 **Example:**
 
-```lua
+```teal
 local tecs = require("tecs")
 
 local entity = world:spawn(
@@ -43,7 +43,7 @@ local name = world:get(entity, tecs.builtins.Name) -- "Phreddy"
 
 To update an existing entity's name, prefer the 3-arg form of `world:set`:
 
-```lua
+```teal
 world:set(entity, tecs.builtins.Name, "Greg")
 ```
 
@@ -56,7 +56,7 @@ despawning a parent automatically despawns all children (and grandchildren, recu
 
 **Example:**
 
-```lua
+```teal
 local parent = world:spawn()
 local child = world:spawn(tecs.builtins.ChildOf(parent))
 
@@ -78,7 +78,7 @@ or ignore it if not.
 
 **Teal type:**
 
-```lua
+```teal
 record Transform is components.Component
     --- The x coordinate of the entity.
     x: number
@@ -122,7 +122,7 @@ end
 
 You can create a Transform component using positional arguments. This is ideal for performance:
 
-```lua
+```teal
 local entity = world:spawn(
     tecs.builtins.Transform(10, 11, 1, 2) -- x, y, z, layer
 )
@@ -131,7 +131,7 @@ local entity = world:spawn(
 Alternatively, you can pass a table of named arguments. This generates garbage due to the table input, but it's
 more readable.
 
-```lua
+```teal
 world:spawn(
     tecs.builtins.Transform.new({
         x = 10,
@@ -144,7 +144,7 @@ world:spawn(
 
 After the component is created, you can modify anything inside of it as needed, like rotation and scale.
 
-```lua
+```teal
 local transform = world:get(entity, tecs.builtins.Transform)
 transform.rotation = math.pi / 4  -- Rotate 45 degrees
 transform.scaleX = 2              -- Scale 2x horizontally
@@ -181,7 +181,7 @@ This component:
 
 **Teal type:**
 
-```lua
+```teal
 record RelativeTransform is components.Component
     x: number
     y: number
@@ -212,7 +212,7 @@ end
 
 Create a child entity positioned relative to its parent:
 
-```lua
+```teal
 local parent = world:spawn(
     tecs.builtins.Transform(100, 100, 0)
 )
@@ -233,7 +233,7 @@ adds a system that tracks entities with a TTL and despawns them.
 
 **Teal type:**
 
-```lua
+```teal
 --- Despawns an entity when the TTL reaches zero.
 record TTL is components.Component
     --- The total amount of time the entity had to live.
@@ -255,7 +255,7 @@ end
 
 **Example:**
 
-```lua
+```teal
 world:spawn(
     -- Despawn the entity after 10 seconds.
     tecs.builtins.TTL(10)
@@ -270,7 +270,7 @@ This is useful for temporarily hiding entities without despawning them.
 
 **Usage:**
 
-```lua
+```teal
 -- Spawn a disabled entity (won't appear in queries by default)
 local entity = world:spawn(
     tecs.builtins.Disabled
@@ -289,7 +289,7 @@ Paused entities should still render; only gameplay systems that need to skip the
 This is typically managed automatically by the [state stack](/tecs/states) when a state's `onBlur` policy
 is set to `"pause"`. You can also add it manually:
 
-```lua
+```teal
 -- Pause an entity (excluded from gameplay queries, still renders)
 world:set(entity, tecs.builtins.Paused)
 
@@ -319,7 +319,7 @@ discover new archetypes as entities with new component combinations are spawned.
 
 **Teal type:**
 
-```lua
+```teal
 --- An event emitted when a new archetype is created.
 record ArchetypeCreated is events.Event
     archetype: Archetype
@@ -331,7 +331,7 @@ end
 
 **Usage:**
 
-```lua
+```teal
 world:observe(0, tecs.builtins.ArchetypeCreated, function(event: tecs.builtins.ArchetypeCreated)
     local archetype = event.archetype
     if archetype:get(Position) and archetype:get(Velocity) then
@@ -361,7 +361,7 @@ before the entity is committed:
 
 **Teal type:**
 
-```lua
+```teal
 --- An event emitted when a specific entity is spawned.
 record OnSpawn is events.Event
     entity: integer
@@ -375,7 +375,7 @@ end
 
 Observe globally to react to all spawns:
 
-```lua
+```teal
 world:observe(0, tecs.builtins.OnSpawn, function(event: tecs.builtins.OnSpawn)
     print("Entity spawned: " .. event.entity)
 end)
@@ -397,7 +397,7 @@ physically removed at commit. When this event fires:
 
 **Teal type:**
 
-```lua
+```teal
 --- An event emitted when a specific entity is despawned.
 record OnDespawn is events.Event
     entity: integer
@@ -411,7 +411,7 @@ end
 
 Observe a specific entity:
 
-```lua
+```teal
 world:observe(entityId, tecs.builtins.OnDespawn, function(e: tecs.builtins.OnDespawn)
     -- Entity is no longer "alive" but components are still accessible
     local pos = world:get(e.entity, Position)
@@ -424,7 +424,7 @@ end)
 
 Observe globally to react to all despawns:
 
-```lua
+```teal
 world:observe(0, tecs.builtins.OnDespawn, function(e: tecs.builtins.OnDespawn)
     print("Entity " .. e.entity .. " was despawned")
 end)

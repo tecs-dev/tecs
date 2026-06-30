@@ -19,7 +19,7 @@ See [Events](../tecs/events.md#address-types) for more on address types.
 When an event is emitted from Love2D, Tecs emits the event to the Tecs event system and then emits the event to any
 registered `love.*` function. This means you can use both approaches:
 
-```lua
+```teal
 local tecs2d = require("tecs2d")
 
 -- Tecs events work
@@ -45,7 +45,7 @@ Triggered when the window gains or loses focus. *See [love.focus](https://love2d
 | ----------- | ----------- | ------------------------------------------ |
 | `visible`   | `boolean`   | `true` if the window has focus             |
 
-```lua
+```teal
 world:observe(0, tecs2d.Focus, function(e: tecs2d.Focus)
     if e.visible then
         resumeGame()
@@ -63,7 +63,7 @@ Triggered when the window gains or loses mouse focus. *See [love.mousefocus](htt
 | ---------- | ----------- | ------------------------------------------ |
 | `focus`    | `boolean`   | `true` if the window has mouse focus       |
 
-```lua
+```teal
 world:observe(0, tecs2d.MouseFocus, function(e: tecs2d.MouseFocus)
     if not e.focus then
         stopDragging()
@@ -80,7 +80,7 @@ Triggered when the window is resized. *See [love.resize](https://love2d.org/wiki
 | `width`    | `number`   | New width of the window    |
 | `height`   | `number`   | New height of the window   |
 
-```lua
+```teal
 world:observe(0, tecs2d.Resize, function(e: tecs2d.Resize)
     camera:updateViewport(e.width, e.height)
 end)
@@ -94,7 +94,7 @@ Triggered when the window is shown or hidden. *See [love.visible](https://love2d
 | ----------- | ----------- | ------------------------------------------ |
 | `visible`   | `boolean`   | `true` if the window is visible            |
 
-```lua
+```teal
 world:observe(0, tecs2d.Visible, function(e: tecs2d.Visible)
     if not e.visible then
         audio:pauseMusic()
@@ -129,7 +129,7 @@ Triggered when a key is pressed. *See [love.keypressed](https://love2d.org/wiki/
 | `scancode`   | `love.keyboard.Scancode`      | Hardware scancode for the key                                              |
 | `isrepeat`   | `boolean`                     | Whether this is a repeat event. Delay depends on user's system settings.   |
 
-```lua
+```teal
 world:observe(0, tecs2d.KeyPressed, function(e: tecs2d.KeyPressed)
     if e.key == "escape" then
         pauseGame()
@@ -146,7 +146,7 @@ Triggered when a key is released. *See [love.keyreleased](https://love2d.org/wik
 | `key`        | `love.keyboard.KeyConstant`  | The key that was released                        |
 | `scancode`   | `love.keyboard.Scancode`     | Hardware scancode for the key                    |
 
-```lua
+```teal
 world:observe(0, tecs2d.KeyReleased, function(e: tecs2d.KeyReleased)
     if e.key == "space" then
         endChargeAttack()
@@ -168,7 +168,7 @@ Triggered when a mouse button is pressed. *See [love.mousepressed](https://love2
 | `istouch`   | `boolean`   | `true` if from a touchscreen                            |
 | `presses`   | `number`    | Number of clicks for double/triple-click detection      |
 
-```lua
+```teal
 world:observe(0, tecs2d.MousePressed, function(e: tecs2d.MousePressed)
     if e.button == 1 and e.presses == 2 then
         handleDoubleClick(e.x, e.y)
@@ -188,7 +188,7 @@ Triggered when a mouse button is released. *See [love.mousereleased](https://lov
 | `istouch`   | `boolean`   | `true` if from a touchscreen                            |
 | `presses`   | `number`    | Number of clicks                                        |
 
-```lua
+```teal
 world:observe(0, tecs2d.MouseReleased, function(e: tecs2d.MouseReleased)
     if e.button == 1 then
         endDragOperation(e.x, e.y)
@@ -206,7 +206,7 @@ Triggered when a joystick/gamepad is connected. *See [love.joystickadded](https:
 | ------------ | ---------------------------- | ------------------------------ |
 | `joystick`   | `love.joystick.Joystick`     | The newly connected joystick   |
 
-```lua
+```teal
 world:observe(0, tecs2d.JoystickAdded, function(e: tecs2d.JoystickAdded)
     if e.joystick:isGamepad() then
         setupGamepadMappings(e.joystick)
@@ -223,7 +223,7 @@ Triggered when a joystick/gamepad is disconnected. *See
 | ------------ | ---------------------------- | --------------------------------- |
 | `joystick`   | `love.joystick.Joystick`     | The now-disconnected joystick     |
 
-```lua
+```teal
 world:observe(0, tecs2d.JoystickRemoved, function(e: tecs2d.JoystickRemoved)
     if love.joystick.getJoystickCount() == 0 then
         switchToKeyboardControls()
@@ -244,7 +244,7 @@ Triggered when a directory is dragged and dropped onto the window. *See
 | `x`        | `number`   | X position where the directory was dropped |
 | `y`        | `number`   | Y position where the directory was dropped |
 
-```lua
+```teal
 world:observe(0, tecs2d.DirectoryDropped, function(e: tecs2d.DirectoryDropped)
     love.filesystem.mount(e.path, "dropped")
     loadImagesFromDirectory("dropped")
@@ -262,7 +262,7 @@ Triggered when a file is dragged and dropped onto the window. *See
 | `x`        | `number`                        | X position where the file was dropped  |
 | `y`        | `number`                        | Y position where the file was dropped  |
 
-```lua
+```teal
 world:observe(0, tecs2d.FileDropped, function(e: tecs2d.FileDropped)
     local filename = e.file:getFilename()
     if filename:match("%.png$") or filename:match("%.jpg$") then
@@ -281,7 +281,7 @@ Triggered when the application is about to close. *See [love.quit](https://love2
 | -------------- | ----------- | ------------------ |
 | `exitstatus`   | `integer`   | The exit code      |
 
-```lua
+```teal
 world:observe(0, tecs2d.Quit, function(e: tecs2d.Quit)
     saveGameState()
     cleanupResources()
@@ -302,7 +302,7 @@ Triggered when the system theme changes. *See [love.themechanged](https://love2d
 | ---------- | ---------- | ------------------------------------- |
 | `theme`    | `string`   | The new theme (`"light"` or `"dark"`) |
 
-```lua
+```teal
 world:observe(0, tecs2d.ThemeChanged, function(e: tecs2d.ThemeChanged)
     updateUITheme(e.theme)
 end)
@@ -330,7 +330,7 @@ Triggered when a touch press is detected. *See [love.touchpressed](https://love2
 | `deviceType`   | `love.touch.TouchDeviceType`    | Type of touchscreen or touchpad       |
 | `isMouse`      | `boolean`                       | `true` if from mouse emulation        |
 
-```lua
+```teal
 world:observe(0, tecs2d.TouchPressed, function(e: tecs2d.TouchPressed)
     handleTouch(e.id, e.x, e.y)
 end)
@@ -351,7 +351,7 @@ Triggered when a touch point moves. *See [love.touchmoved](https://love2d.org/wi
 | `deviceType`   | `love.touch.TouchDeviceType`    | Type of touchscreen or touchpad       |
 | `isMouse`      | `boolean`                       | `true` if from mouse emulation        |
 
-```lua
+```teal
 world:observe(0, tecs2d.TouchMoved, function(e: tecs2d.TouchMoved)
     handleTouchDrag(e.id, e.dx, e.dy)
 end)
@@ -370,7 +370,7 @@ Triggered when a touch point is released. *See [love.touchreleased](https://love
 | `deviceType`   | `love.touch.TouchDeviceType`    | Type of touchscreen or touchpad       |
 | `isMouse`      | `boolean`                       | `true` if from mouse emulation        |
 
-```lua
+```teal
 world:observe(0, tecs2d.TouchReleased, function(e: tecs2d.TouchReleased)
     handleTouchRelease(e.id, e.x, e.y)
 end)
@@ -389,7 +389,7 @@ Triggered when a device sensor is updated. *See [love.sensorupdated](https://lov
 | `y`            | `number`                     | Y component of sensor data                          |
 | `z`            | `number`                     | Z component of sensor data                          |
 
-```lua
+```teal
 world:observe(0, tecs2d.SensorUpdated, function(e: tecs2d.SensorUpdated)
     handleSensor(e.sensorType, e.x, e.y, e.z)
 end)
@@ -408,7 +408,7 @@ Triggered when a joystick sensor is updated. *See
 | `y`            | `number`                        | Y component of sensor data                          |
 | `z`            | `number`                        | Z component of sensor data                          |
 
-```lua
+```teal
 world:observe(0, tecs2d.JoystickSensorUpdated, function(e: tecs2d.JoystickSensorUpdated)
     handleJoystickSensor(e.joystick, e.sensorType, e.x, e.y, e.z)
 end)
@@ -425,7 +425,7 @@ Triggered when a drag operation begins over the window.
 | `x`        | `number`   | X position where drag started    |
 | `y`        | `number`   | Y position where drag started    |
 
-```lua
+```teal
 world:observe(0, tecs2d.DropBegan, function(e: tecs2d.DropBegan)
     showDropZone()
 end)
@@ -440,7 +440,7 @@ Triggered when a drag operation moves over the window.
 | `x`        | `number`   | Current drag x position    |
 | `y`        | `number`   | Current drag y position    |
 
-```lua
+```teal
 world:observe(0, tecs2d.DropMoved, function(e: tecs2d.DropMoved)
     updateDropHighlight(e.x, e.y)
 end)
@@ -455,7 +455,7 @@ Triggered when a drag operation is completed over the window.
 | `x`        | `number`   | X position where drop completed        |
 | `y`        | `number`   | Y position where drop completed        |
 
-```lua
+```teal
 world:observe(0, tecs2d.DropCompleted, function(e: tecs2d.DropCompleted)
     hideDropZone()
 end)

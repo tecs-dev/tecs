@@ -56,7 +56,7 @@ table assignment, FFI cdata field writes, or anything else. The dirty
 machinery cannot observe direct cdata writes; the `:getMut` call is
 the contract that tells consumers "this column may have changed."
 
-```lua
+```teal
 for archetype, len in query:iter() do
     local transforms = archetype:getMut(Transform)
     local velocities = archetype:get(Velocity)  -- read-only
@@ -82,7 +82,7 @@ mixing them in one loop is safe; only the dirty marks differ.
 - **`world:dirtyArchetypes()`**: iterator over archetypes with at
   least one component dirty. Drains naturally at frame end.
 
-```lua
+```teal
 for archetype in world:dirtyArchetypes() do
     if archetype:isComponentDirty(Color) then
         -- Color column was rewritten this frame.

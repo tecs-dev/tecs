@@ -11,7 +11,7 @@ Animated tiles are automatically spawned as separate Sprite entities with synced
 
 ## Quick Start
 
-```lua
+```teal
 local gfx = require("tecs2d.gfx")
 
 -- Create a tile chunk
@@ -77,7 +77,7 @@ together for efficient rendering.
 `DirtyTileChunk` is automatically added when spawning. To update tiles at runtime, modify the `tiles` array and add
 `DirtyTileChunk` to trigger a GPU re-sync:
 
-```lua
+```teal
 local chunk = world:get(entityId, gfx.TileChunk)
 chunk.tiles[128] = 5  -- Change a tile
 world:set(entityId, gfx.DirtyTileChunk)  -- Mark for GPU sync
@@ -94,7 +94,7 @@ Adding `DirtyTileChunk` explicitly tells the render system to re-sync this chunk
 Chunks are fixed at 16×16 tiles (256 tiles total). This size is baked into the GPU shaders and buffer layouts and
 cannot be changed. Use `gfx.TILE_CHUNK_SIZE` to reference this constant.
 
-```lua
+```teal
 local CHUNK_SIZE = gfx.TILE_CHUNK_SIZE  -- 16
 local worldX = chunkX * CHUNK_SIZE * tileWidth
 local worldY = chunkY * CHUNK_SIZE * tileHeight
