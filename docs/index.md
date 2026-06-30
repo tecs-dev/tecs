@@ -3,8 +3,8 @@
 layout: home
 
 hero:
-  name: "Build 2D game with LuaJIT"
-  text: "Use Tecs as an ECS, or full LÖVE game engine"
+  name: "Build 2D games with LuaJIT"
+  text: "Tecs is a fast ECS and LÖVE2D game engine."
   image:
     src: /images/tecs.png
     alt: Tecs
