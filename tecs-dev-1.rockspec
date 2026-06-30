@@ -29,16 +29,10 @@ dependencies = {
 
 test_dependencies = {
     "busted",
-    "busted-tl-type == 0.0.1",
-    "luassert-tl-type == 0.0.1",
 }
 
 build_dependencies = {
     "cyan >= 0.4.0",
-    -- Teal type defs for LuaJIT builtins (ffi, string.buffer, table.new/clear).
-    -- love2d, bit, and socket have no compatible type rock and stay vendored
-    -- in types/ (see tlconfig.lua include_dir).
-    "luajit-tl-type == 0.0.1",
 }
 
 test = {

@@ -82,11 +82,6 @@ dev:
 	luarocks install --tree=vendor --lua-version=5.1 luacov-cobertura
 	luarocks install --tree=vendor --lua-version=5.1 luacov-reporter-lcov
 	luarocks install --tree=vendor --lua-version=5.1 luafilesystem
-	@# Teal type defs (build/test deps in the rockspecs). love2d/bit/socket
-	@# have no compatible rock and stay vendored under types/.
-	luarocks install --tree=vendor --lua-version=5.1 luajit-tl-type
-	luarocks install --tree=vendor --lua-version=5.1 busted-tl-type
-	luarocks install --tree=vendor --lua-version=5.1 luassert-tl-type
 	@echo "Installing documentation dependencies..."
 	cd docs && npm install
 	@echo "Development dependencies installed!"
