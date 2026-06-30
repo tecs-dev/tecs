@@ -20,7 +20,7 @@ This rock ships only the renderer-agnostic core. For the LÖVE2D game-engine lay
 companion `tecs2d` rock.
     ]],
     homepage = "https://tecs.dev",
-    license = "MIT"
+    license = "MIT OR Apache-2.0"
 }
 
 dependencies = {

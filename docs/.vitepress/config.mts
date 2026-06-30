@@ -245,7 +245,8 @@ export default defineConfig({
     ],
 
     footer: {
-      message: 'Released under the <a href="https://github.com/tecs-dev/tecs/blob/main/LICENSE">MIT License</a>. ' +
+      message: 'Released under the <a href="https://github.com/tecs-dev/tecs/blob/main/LICENSE-MIT">MIT</a> ' +
+        'or <a href="https://github.com/tecs-dev/tecs/blob/main/LICENSE-APACHE">Apache-2.0</a> license, at your option. ' +
         'For LLMs: <a href="/llms.txt">llms.txt</a> · <a href="/llms-full.txt">llms-full.txt</a>.',
       copyright: 'Copyright © <a href="https://github.com/mtdowling">Michael Dowling</a>'
     }

@@ -19,7 +19,7 @@ The renderer-agnostic ECS core is shipped separately in the `tecs` rock and is
 declared as a dependency.
     ]],
     homepage = "https://tecs.dev",
-    license = "MIT"
+    license = "MIT OR Apache-2.0"
 }
 
 dependencies = {
