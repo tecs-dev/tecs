@@ -51,6 +51,10 @@ local MAX_QUEUED_OP_PASSES <const> = 10
 
 -- Pending screenshot info
 local pendingScreenshotId: number = nil
+-- Handlers that answer from a queued world op (run_lua) send their response a
+-- step after the request handler returns. Keep the client socket open until that
+-- deferred response is sent, mirroring the screenshot keep-alive above.
+local pendingWorldOpResponse: boolean = false
 
 -- Pause/step state
 local paused = false
@@ -804,7 +808,10 @@ toolHandlers["run_lua"] = function(args: {string:any}, id: number)
 
     local fn = loadResult as function(tecs.World)
 
-    -- Run in the queued-op drain and return the chunk's results.
+    -- Run in the queued-op drain and return the chunk's results. Keep the client
+    -- socket open until this deferred response is sent (the request handler returns
+    -- before the queued op runs).
+    pendingWorldOpResponse = true
     enqueueWorldOp(function(w: tecs.World)
         local pcallAny = pcall as function(any, ...: any): boolean, any
         local results = {pcallAny(fn, w)} as {any}
@@ -812,6 +819,7 @@ toolHandlers["run_lua"] = function(args: {string:any}, id: number)
             local errMsg = tostring(results[2])
             log:error("run_lua execution failed: %s", errMsg)
             sendResponse(id, {content = {{type = "text", text = errMsg}}, isError = true})
+            pendingWorldOpResponse = false
             return
         end
         local n = #results
@@ -819,6 +827,7 @@ toolHandlers["run_lua"] = function(args: {string:any}, id: number)
         for i = 2, n do parts[i - 1] = tostring(results[i]) end
         local text = n > 1 and table.concat(parts, "\t") or "(no return value)"
         sendResponse(id, {content = {{type = "text", text = text}}})
+        pendingWorldOpResponse = false
     end)
 end
 
@@ -1775,6 +1784,7 @@ end
 -- Close the current client connection (unless a screenshot is pending)
 local function closeClient()
     if pendingScreenshotId then return end  -- keep connection open for async screenshot
+    if pendingWorldOpResponse then return end  -- keep open for deferred world-op response
     if client then
         pcall(function() client:close() end)
         client = nil
@@ -1787,7 +1797,7 @@ local function processCommands()
 
     -- If a pending screenshot was completed, the callback already sent the response
     -- and cleared pendingScreenshotId. Close that connection now.
-    if client and not pendingScreenshotId then
+    if client and not pendingScreenshotId and not pendingWorldOpResponse then
         pcall(function() client:close() end)
         client = nil
     end
