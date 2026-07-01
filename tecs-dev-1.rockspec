@@ -31,10 +31,6 @@ test_dependencies = {
     "busted",
 }
 
-build_dependencies = {
-    "cyan >= 0.4.0",
-}
-
 test = {
     type = "busted",
     flags = { "--loaders=teal" }
