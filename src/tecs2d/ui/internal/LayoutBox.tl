@@ -211,7 +211,7 @@ function LayoutBox.plugin(world: World)
         end
     })
 
-    -- Origin-aware RelativeTransform system (replaces core's simple version for UI)
+    -- Origin-aware RelativeTransform pass for UI entities.
     local hierarchyQuery = world:query({
         name = "ui.RelativeTransform",
         include = {RelativeTransform, ChildOf, Transform}
@@ -259,7 +259,7 @@ function LayoutBox.plugin(world: World)
     world:addSystem({
         name = "ui.RelativeTransform",
         phase = tecs.phases.PostUpdate,
-        after = {"ui.ComputeLayoutBox", "RelativeTransform"},  -- Run after core system to override
+        after = {"ui.ComputeLayoutBox", "RelativeTransform"},
         run = function()
             -- Iterate the hierarchy until no child transform changes,
             -- which means every parent has been processed before any of

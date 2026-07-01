@@ -18,13 +18,13 @@ local Transform = tecs.builtins.Transform
 -- Circle collider
 world:spawn(
     Transform(100, 100),
-    physics.Collider({ shape = "circle", radius = 16 })
+    physics.Collider.new({ shape = "circle", radius = 16 })
 )
 
 -- Rectangle collider
 world:spawn(
     Transform(200, 100),
-    physics.Collider({ shape = "rectangle", width = 32, height = 48 })
+    physics.Collider.new({ shape = "rectangle", width = 32, height = 48 })
 )
 ```
 
@@ -77,8 +77,8 @@ Makes an entity a dynamic physics body that responds to forces and collisions.
 ```teal
 world:spawn(
     Transform(100, 100),
-    physics.Collider({ shape = "circle", radius = 16 }),
-    physics.RigidBody({ mass = 1, restitution = 0.8 })
+    physics.Collider.new({ shape = "circle", radius = 16 }),
+    physics.RigidBody.new({ mass = 1, restitution = 0.8 })
 )
 ```
 
@@ -118,7 +118,7 @@ Marks an entity as a static physics body. Static bodies don't move but can be co
 -- Ground platform
 world:spawn(
     Transform(400, 550),
-    physics.Collider({ shape = "rectangle", width = 800, height = 20 }),
+    physics.Collider.new({ shape = "rectangle", width = 800, height = 20 }),
     physics.StaticBody()
 )
 ```
@@ -130,13 +130,13 @@ Create colliders with multiple shapes for complex hitboxes:
 ```teal
 world:spawn(
     Transform(100, 100),
-    physics.Collider({
+    physics.Collider.new({
         shapes = {
             { type = "circle", radius = 16, offsetX = 0, offsetY = -20 },  -- Head
             { type = "rectangle", width = 24, height = 40 },               -- Body
         }
     }),
-    physics.RigidBody({ mass = 1 })
+    physics.RigidBody.new({ mass = 1 })
 )
 ```
 

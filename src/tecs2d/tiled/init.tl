@@ -5,13 +5,14 @@
 --- Animated tiles use Sprite entities with globally-synced animations.
 ---
 --- Usage:
----   local tecs2d.tiled = require("tecs2d.tiled")
+---   local tiled = require("tecs2d.tiled")
+---   local Transform = require("tecs").builtins.Transform
 ---   world:addPlugin(tiled.plugin)
 ---
 ---   -- Spawn a tilemap entity
 ---   world:spawn(
 ---       tiled.Tilemap.new({path = "maps/level1.tmj"}),
----       Transform.new({x = 0, y = 0})
+---       Transform(0, 0)
 ---   )
 
 local table_clear <const> = require("table.clear")

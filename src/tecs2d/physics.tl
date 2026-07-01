@@ -4,8 +4,7 @@
 ---
 --- Example usage:
 --- ```
---- local tecs2d = require("tecs2d")
---- local physics = tecs2d.physics
+--- local physics = require("tecs2d.physics")
 ---
 --- love.physics.setMeter(64)
 --- local physicsWorld = love.physics.newWorld(0, 300, true)
@@ -432,8 +431,6 @@ local record physics is tecs.Key<physics.PhysicsState>
         debug: boolean
         smoothing: string
     end
-
-    --- Get physics state from a world's resources.
 
     new: function(config?: Config): tecs.Plugin
 

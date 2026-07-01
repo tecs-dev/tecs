@@ -12,7 +12,7 @@ Bindings of this module are based on baton.lua: https://github.com/tesselode/bat
 
 - Raw axis support: Axes can be used without direction suffixes to get full -1 to 1 range
 - No scancode support: scancodes are unnecessary since controls are rebindable
-]]--
+]]
 
 local tecs <const> = require("tecs")
 local input <const> = require("tecs2d.input")

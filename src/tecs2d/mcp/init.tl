@@ -550,7 +550,7 @@ toolHandlers["query"] = function(args: {string:any}, id: number)
                 local comp = includeComponents[ci]
                 local column = archetype:get(comp)
                 -- Skip non-serializable components (tag components, or
-                -- components without a serialize hook). Without this guard
+                -- components without a serialize callback). Without this guard
                 -- any non-serializable entry in `include` crashes the tool
                 -- instead of returning the serializable fields.
                 if column and comp.componentName and comp.serialize then

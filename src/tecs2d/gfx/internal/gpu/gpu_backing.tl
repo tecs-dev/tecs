@@ -22,7 +22,7 @@ end
 
 --- Enable ByteData backing for `component`'s column storage when `layout` is
 --- an identity layout. No-op otherwise, or if the storage has no custom
---- allocator hook (non-FFI storages). Idempotent.
+--- allocator callback (non-FFI storages). Idempotent.
 function gpu_backing.enable(component: tecs.Component, layout: {string:any})
     if not layout or not layout.identity then return end
     local s = (component as {string:any}).storage as {string:any}

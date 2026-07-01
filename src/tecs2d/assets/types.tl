@@ -154,14 +154,14 @@ local record types
         --- Load a sprite sheet from an Aseprite export (image + JSON).
         --- Automatically loads material maps (_n.png, _e.png, _orm.png) if they exist.
         --- @param path Path to the image file (JSON file must have same base name)
-        --- @param options Optional load options (e.g., { generateNormal = true })
+        --- @param options Optional load options. Async loading does not generate missing normal maps.
         --- @return A handle that loads the sprite sheet with all material maps
         loadSpriteSheet: function(self, path: string, options?: SpriteSheetLoadOptions): Handle<sprite_sheet.SpriteSheet>
 
         --- Load a static sprite sheet from a single image (no JSON required).
         --- Automatically loads material maps (_n.png, _e.png, _orm.png) if they exist.
         --- @param path Path to the image file
-        --- @param options Optional load options (e.g., { generateNormal = true })
+        --- @param options Optional load options. Async loading does not generate missing normal maps.
         --- @return A handle that loads a single-frame sprite sheet with material maps
         loadStaticSheet: function(self, path: string, options?: SpriteSheetLoadOptions): Handle<sprite_sheet.SpriteSheet>
 
@@ -199,13 +199,13 @@ local record types
         pin: function(self)
 
         --- Transform this handle's value when it completes successfully.
-        --- Only called on success; errors propagate automatically without calling the transform.
+        --- Only called on success; errors are carried forward without calling the transform.
         --- @param transform Function to transform the successful result
-        --- @return A new handle with the transformed value, or the propagated error
+        --- @return A new handle with the transformed value, or the original error
         map: function<U>(self, transform: function(T): U): Handle<U>
 
         --- Transform this handle's value into another handle when it completes successfully, flattening the result.
-        --- Only called on success; errors propagate automatically without calling the transform.
+        --- Only called on success; errors are carried forward without calling the transform.
         --- @param transform Function that returns a new handle
         --- @return A new handle that completes when the inner handle completes
         flatMap: function<U>(self, transform: function(T): Handle<U>): Handle<U>
@@ -241,7 +241,7 @@ local record types
 
     --- Options for loading sprite sheets.
     record SpriteSheetLoadOptions
-        --- Auto-generate normal map from luminance if no _n.png exists
+        --- Reserved for synchronous loaders; async asset loading ignores this.
         generateNormal: boolean
     end
 

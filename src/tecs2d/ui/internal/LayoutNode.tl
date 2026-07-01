@@ -143,10 +143,10 @@ function LayoutNode.plugin(world: tecs.World)
         end
     })
 
-    -- Propagate ClipBounds from LayoutNode parents to all descendants
-    -- Run in PostUpdate so changes commit before PreRender GPU sync
+    -- Apply ClipBounds from LayoutNode ancestors to descendants.
+    -- Run in PostUpdate so changes commit before PreRender GPU sync.
     world:addSystem({
-        name = "ui.PropagateClipBounds",
+        name = "ui.ApplyClipBounds",
         phase = tecs.phases.PostUpdate,
         after = {"ui.ApplyScrollOffset"},
         run = function()

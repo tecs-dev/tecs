@@ -16,8 +16,8 @@ Emitted when two shapes start touching.
 ```teal
 local id = world:spawn(
     Transform(100, 100),
-    physics.Collider({ shape = "circle", radius = 16 }),
-    physics.RigidBody({ mass = 1 })
+    physics.Collider.new({ shape = "circle", radius = 16 }),
+    physics.RigidBody.new({ mass = 1 })
 )
 
 world:observe(id, physics.BeginContact, function(e: physics.BeginContact)
@@ -114,13 +114,13 @@ local PROJECTILE = physics.categories(3)
 -- Player collides with enemies but not own projectiles
 world:spawn(
     Transform(100, 100),
-    physics.Collider({
+    physics.Collider.new({
         shape = "circle",
         radius = 16,
         categories = PLAYER,
         mask = ENEMY
     }),
-    physics.RigidBody({ mass = 1 })
+    physics.RigidBody.new({ mass = 1 })
 )
 ```
 

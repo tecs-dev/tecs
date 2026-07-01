@@ -37,12 +37,9 @@ tecs.newFFIComponent({
         instance.rx = rxVal
         instance.ry = ryVal
     end,
-    -- RoundedCorners requires a Rectangle component on the same
-    -- entity by convention; a future declarative `requires` list will
-    -- enforce this at the framework level. The in-hook assertion used
-    -- to check via ChangeView's pending-state view; with committed-
-    -- only reads it can't reliably see same-frame staged Rectangle
-    -- during a spawn.
+    -- RoundedCorners requires a Rectangle component on the same entity.
+    -- The framework does not yet have declarative component requirements,
+    -- so this stays as a convention for now.
 })
 
 return RoundedCorners

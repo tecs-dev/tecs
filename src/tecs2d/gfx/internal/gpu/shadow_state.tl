@@ -8,7 +8,7 @@
 --- - An `archetype_shadow_set` covering whatever components were passed
 ---   in via `specs`. Components not present on the archetype are
 ---   skipped silently; the cull shader reads them via `ComponentMask`.
---- - Observer hooks on the archetype so swap-pop notifications fire.
+--- - An archetype observer so swap-pop notifications fire.
 ---   Dirty signalling itself flows through the per-archetype
 ---   per-component bitset; the observer methods are no-ops.
 ---

@@ -87,7 +87,7 @@ local record tecs2d
     end
 
     --- Creates a Love2D run function from a RunConfig table. Assign directly to `love.run`.
-    --- Auto-installs the render pipeline, tiled plugin, and UI plugin before the game plugin.
+    --- Auto-installs tecs2d's built-in plugins before the game plugin.
     --- @param config RunConfig with fps, game plugin, and render settings.
     --- @return A function suitable for `love.run` that initializes and runs the game loop.
     run: function(config: RunConfig): (function(): function(): string | number)

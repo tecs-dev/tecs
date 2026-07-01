@@ -25,7 +25,7 @@ local record types
         class: string            -- Tiled "type" field (tile class)
         properties: {string: any}
         animation: {Frame}       -- Animation frames if animated (nil if static)
-        objectgroup: types.LayerData -- Collision shapes for physics hook
+        objectgroup: types.LayerData -- Collision shapes for physics integration
     end
 
     --- A loaded tileset with texture and tile metadata.

@@ -9,9 +9,9 @@ local tiled_types <const> = require("tecs2d.tiled.types")
 local LOGGER <const> = require("tecs.utils.logging").getLogger("tecs2d.assets")
 
 
--- Worker code is loaded lazily when AssetManager is first created.
--- The worker.lua must be copied to internal/worker.lua in the game's build directory.
--- See examples/animated-sprite/build.sh for the required setup.
+-- Worker code is loaded lazily when AssetManager is first created. Example
+-- builds symlink build/tecs2d/assets/internal to build/internal so
+-- love.filesystem can read internal/worker.lua at runtime.
 local WORKER_CODE: string = nil
 local WORKER_PATH <const> = "internal/worker.lua"
 
@@ -425,7 +425,7 @@ local function createHandle<T>(self: AssetManager, args: {any}): Handle<T>
         local handleResult = HandleImpl._new(action, path, args, id, channelId, self)
         handleResult._cacheKey = cacheKey
         self._runningTasks[id] = handleResult as Handle<any>
-        local handle = handleResult as Handle<T> -- TODO: [Teal] HandleImpl isa Handle, so why do we need to cast?
+        local handle = handleResult as Handle<T>
         -- Add to the cache (weak table will allow GC when not referenced elsewhere)
         self._cache[cacheKey] = handle as Handle<any>
         return handle

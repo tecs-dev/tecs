@@ -10,7 +10,7 @@ local DEFAULT_MAX_DISTANCE <const> = 1000
 --- A unified audio system for Tecs providing spatial audio, sound groups
 --- with volume control, voice limiting, and cooldowns.
 ---
---- The audio plugin is automatically added by `tecs.love`. Access the audio
+--- `tecs2d.run` installs the audio plugin automatically. Access the audio
 --- manager via world resources:
 ---
 --- ```lua
@@ -229,7 +229,7 @@ function audio.plugin(): tecs.Plugin
         -----------------------------------------------------------------------
         --- Helper: If the component's group or relative flag changed since
         --- last init, tear down and re-initialize. Other mutable fields
-        --- (volume, looping, attenuation) propagate via refreshComponentSource
+        --- (volume, looping, attenuation) flow through refreshComponentSource
         --- each frame and don't require a re-init.
         -----------------------------------------------------------------------
         local function reinitIfStructuralChange(audioSrc: types.AudioSource, isRelative: boolean)
