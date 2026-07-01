@@ -88,6 +88,7 @@ The `tecs.newFFIRelationship` function accepts a configuration table with these 
 | `cascadeDelete` | Despawning the target despawns all source entities. Requires `exclusive` and `reverseIndex`    |
 | `init`          | Validation and initialization hook (positional args only; `.new` unpacks before calling)       |
 | `new`           | Override the auto-codegenned `.new(data)` table-form constructor (optional)                   |
+| `transient`     | If `true`, omit this relationship from snapshots. Mutually exclusive with `serialize`          |
 
 ::: info Positional shape is auto-generated
 FFI relationships generate their positional base constructor from the `fields`

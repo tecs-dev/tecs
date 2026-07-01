@@ -50,6 +50,7 @@ love.run = tecs2d.run({
 | `fps`    | `number`                                   | `60`                           | Target frames per second                                        |
 | `game`   | `function(tecs.World)`                     | *(required)*                   | A plugin function that receives the world and sets up your game |
 | `render` | [`RenderConfig`](/tecs2d/rendering/#renderconfig) | [defaults](/tecs2d/rendering/#fields) | Render pipeline configuration                                   |
+| `hotReload` | `HotReloadConfig`                       | disabled                       | Optional development hot reload using one build stamp file and snapshots |
 
 See [`RenderConfig`](/tecs2d/rendering/#renderconfig) for all available fields and their defaults. The pipeline is accessible
 in your game plugin via `world.resources[gfx.PIPELINE]`.
@@ -179,6 +180,43 @@ You can still use `love.*` events as usual, but using Tecs events allows for bui
 plugins that don't have to hijack `love.*` callback methods. Any number of Tecs plugins can listen to these Love2D
 events and react to them.
 :::
+
+### Hot Reload
+
+`hotReload` is a development workflow for preserving ECS state across a Love2D
+restart. Tecs2D polls a single stamp file; your build tool updates that stamp
+only after a successful rebuild.
+
+```teal
+love.run = tecs2d.run({
+    fps = 60,
+    game = gamePlugin,
+    hotReload = {
+        enabled = true,
+        snapshotPath = ".tecs-hot-reload.snapshot",
+        stampPath = ".tecs-reload-stamp",
+    },
+})
+```
+
+When the stamp changes, Tecs2D saves a binary world snapshot, shuts down the
+world, and returns Love2D's `"restart"` signal. On the next startup it restores
+the snapshot after `Startup` and before `PostStartup`.
+
+Use startup phases with that order in mind:
+
+- `PreStartup` / `Startup`: register systems, observers, plugins, and runtime resources.
+- Snapshot restore: replaces entity data while preserving systems, resources, queries, and global observers.
+- `PostStartup`: rebuild transient or derived entities that are intentionally not snapshotted.
+
+For a project launched from its `build/` directory, the host stamp file is often `build/.tecs-reload-stamp`, while
+the in-game `stampPath` is `.tecs-reload-stamp`.
+
+The following example watches game assets for changes and then triggers a hot reload:
+
+```bash
+watchexec -w src -w assets './tecs build && touch build/.tecs-reload-stamp'
+```
 
 ## Basic game setup
 

@@ -42,6 +42,9 @@ local record types
             --- Relationship components only: The target entity ID (for relationship instances only).
             target: integer
 
+            --- True if this component is runtime-only and omitted from snapshots.
+            transient: boolean
+
             --- Serialize a component instance to a plain table.
             ---
             --- @param instance The component instance to serialize.
@@ -107,6 +110,10 @@ local record types
             --- instance) or INSTANCES (used as-is). Transitive: the
             --- framework walks `requires` of required components too.
             requires: {Component}
+
+            --- If true, this component is runtime-only and is never written
+            --- to snapshots. Mutually exclusive with custom `serialize`.
+            transient: boolean
         end
 
         --- Shared options for creating different components.

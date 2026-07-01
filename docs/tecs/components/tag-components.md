@@ -33,6 +33,7 @@ local Stunned = tecs.newTagComponent({name = "Stunned"})
 | `name`     | (**required**) The component name.                                                            |
 | `requires` | Array of components to auto-add alongside this tag. See [Auto-dependencies](/tecs/components/#auto-dependencies-with-requires). |
 | `container`| Optional pre-declared container to register as the tag. Rarely needed.                        |
+| `transient`| If `true`, omit this tag from snapshots.                                                      |
 
 ## Adding, removing, and testing tags
 

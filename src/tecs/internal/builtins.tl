@@ -145,12 +145,10 @@ local record builtins
     --- BEFORE archetype data is written. Listeners can:
     ---   - Attach arbitrary keyed metadata via `ev:addData(key, value)`
     ---     (queued; flushed into the data section after archetypes).
-    ---   - Mark plugin-derived components for omission via
+    ---   - Mark plugin-derived entities for omission via
     ---     `ev:exclude(component)`. Entities carrying any excluded
     ---     component are skipped entirely; on load the plugin re-derives
-    ---     them from the durable source-of-truth components that ARE
-    ---     saved (e.g., tile chunks excluded, Tilemap saved → chunks
-    ---     re-spawned by the tiled plugin's asset loader).
+    ---     them from durable source-of-truth entities that ARE saved.
     record OnSnapshotSave is types.events.Event
         --- Encode a (key, value) pair into the snapshot's data section.
         --- Keys MUST be strings; values must be `string.buffer`-encodable.

@@ -34,6 +34,7 @@ local Health = tecs.newScalarComponent({
 | `kind`      | `"number" \| "boolean" \| "string"` | yes | Lua type of the value the column holds. |
 | `default`   | `T`                           | no        | Value used when the component is added without a value. If omitted, defaults to the zero value for the kind: `0`, `false`, or `""`. |
 | `requires`  | `{Component}`                 | no        | Declarative auto-dependencies. When this component is added to an entity, any listed components not already present are added in the same archetype transition. Entries may be component TYPES (constructed with no args) or INSTANCES. Transitive. |
+| `transient` | `boolean`                     | no        | If `true`, omit this scalar component from snapshots. |
 
 ### Typed exports
 

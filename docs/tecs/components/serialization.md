@@ -95,19 +95,16 @@ reconstructing.
 
 ## Skipping a component from snapshots
 
-Return `nil` from `serialize` to omit the component from every snapshot. This is the idiomatic way to mark transient
-runtime state (render caches, per-frame scratch, derived indices):
+Set `transient = true` to omit a component from snapshots. This is the idiomatic way to mark runtime state
+that can be recreated after load (render caches, per-frame scratch, derived indices):
 
 ```teal
 tecs.newComponent({
     name = "RenderCache",
     container = RenderCache,
-    serialize = function(_inst: RenderCache): {string: any} return nil end,
+    transient = true,
 })
 ```
-
-The framework doesn't write the component value and doesn't try to reconstruct it on load; the entity still gets
-restored, just without this particular component.
 
 ## Schema fingerprinting & migration
 
@@ -142,6 +139,7 @@ saves ~500× faster on the bulk path than the per-entity path.
 
 | Property      | Description                                                                 |
 | ------------- | --------------------------------------------------------------------------- |
-| `serialize`   | `function(instance: Component): {string: any}`. Convert a component to a plain table. Return `nil` to omit the component from the snapshot entirely. |
+| `serialize`   | `function(instance: Component): {string: any}`. Convert durable component data to a plain table. Mutually exclusive with `transient`. |
 | `deserialize` | `function(world: tecs.World, data: {string: any}): Component`. Reconstruct a component from a plain table. Receives the world for cross-entity lookups. Defaults to `Component.new(data)`. |
 | `new`         | `function(data: {string: any}): Component`. Table-form constructor invoked by `Component.new({...})` and the default deserialize. See [Component Construction](/tecs/components/construction#table-construction). |
+| `transient`   | `boolean`. If `true`, omit the component from snapshots. Mutually exclusive with `serialize`. |

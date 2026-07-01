@@ -48,6 +48,7 @@ function TextureArray.get(arrayIndex: integer): tecs_Component
     if not comp then
         comp = tecs.newTagComponent({
             name = "TextureArray" .. arrayIndex,
+            transient = true,
         })
         components[arrayIndex] = comp
         if arrayIndex > maxArrayIndex then

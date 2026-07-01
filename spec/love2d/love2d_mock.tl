@@ -71,6 +71,7 @@ local record love2d_mock
 
     joystick: JoystickModule
     timer: TimerModule
+    audio: {string: function}
 
     -- Mock joystick registry for testing
     _mockJoysticks: {JoystickModule.Joystick}
@@ -91,6 +92,8 @@ local record love2d_mock
     record EventModule
         poll: function(): string, any, any, any, any, any
         pump: function()
+        quit: function(reason?: string)
+        push: function(name: string, ...: any)
     end
     event: EventModule
 
@@ -98,6 +101,8 @@ local record love2d_mock
     record FilesystemModule
         read: function(path: string): string
         getInfo: function(path: string): any
+        write: function(path: string, contents: string): boolean, string
+        remove: function(path: string): boolean, string
         newFileData: function(contents: string, name: string): love.filesystem.FileData
     end
     filesystem: FilesystemModule
@@ -279,6 +284,12 @@ love.timer.step = function(): number
 end
 love.timer.sleep = function(_duration: number) end
 
+love.audio = {
+    setPosition = function(_x: number, _y: number, _z: number) end,
+    setOrientation = function(...: any) end,
+    setEffect = function(_name: string, _settings: any): boolean return true end,
+}
+
 -- Initialize event module for tecs2d
 love.event = {
     poll = function(): string, any, any, any, any, any
@@ -287,7 +298,9 @@ love.event = {
     end,
     pump = function()
         -- Do nothing for tests
-    end
+    end,
+    quit = function(_reason?: string) end,
+    push = function(_name: string, ...: any) end,
 }
 
 -- Initialize handlers for tecs2d
@@ -309,6 +322,12 @@ love.filesystem = {
     end,
     getInfo = function(_path: string): any
         return nil
+    end,
+    write = function(_path: string, _contents: string): boolean, string
+        return true, nil
+    end,
+    remove = function(_path: string): boolean, string
+        return true, nil
     end,
     newFileData = function(contents: string, name: string): any
         return {

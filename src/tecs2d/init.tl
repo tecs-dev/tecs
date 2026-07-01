@@ -19,10 +19,53 @@ local lg_isActive <const> = love.graphics.isActive
 local lg_getBackgroundColor <const> = love.graphics.getBackgroundColor
 
 local love_timer_step <const> = love.timer.step
+local love_fs <const> = love.filesystem
+local love_fs_any <const> = love.filesystem as {string: any}
+
+local HOT_RELOAD_SNAPSHOT_PATH <const> = ".tecs-hot-reload.snapshot"
+local HOT_RELOAD_STAMP_PATH <const> = "build/.tecs-reload-stamp"
+
+local function captureLoadedModuleBaseline(): {string: boolean}
+    local baseline: {string: boolean} = {}
+    for name, _ in pairs(package.loaded) do
+        baseline[name as string] = true
+    end
+    return baseline
+end
+
+local MODULE_BASELINE <const> = captureLoadedModuleBaseline()
+
+local function clearModuleCache(baseline: {string: boolean})
+    local toRemove: {string} = {}
+    for name, _ in pairs(package.loaded) do
+        local moduleName = name as string
+        if not baseline[moduleName] then
+            toRemove[#toRemove + 1] = moduleName
+        end
+    end
+    for i = 1, #toRemove do
+        package.loaded[toRemove[i]] = nil
+    end
+    LOGGER:info("Cleared %d modules from cache before restart", #toRemove)
+end
 
 --- Love2D integration module for Tecs.
 --- Provides the game loop, Love2D events as ECS events, and application lifecycle.
 local record tecs2d
+    --- Development hot-reload configuration. When enabled, tecs2d.run polls
+    --- one build stamp file and preserves ECS state across Love2D restarts
+    --- through a binary world snapshot.
+    record HotReloadConfig
+        enabled: boolean
+        snapshotPath: string
+        stampPath: string
+        pollInterval: number
+        debounce: number
+        restoreOnStartup: boolean
+        deleteAfterRestore: boolean
+        saveOptions: tecs.SnapshotOptions
+    end
+
     --- Configuration for tecs2d.run.
     record RunConfig
         --- Target frames per second (e.g., 60).
@@ -38,6 +81,9 @@ local record tecs2d
         --- power of 2, at most 2^22. Defaults to 2^20 (~1M). See
         --- `tecs.World.Config.maxEntities`.
         maxEntities: integer
+
+        --- Optional development hot-reload support.
+        hotReload: HotReloadConfig
     end
 
     --- Creates a Love2D run function from a RunConfig table. Assign directly to `love.run`.
@@ -49,6 +95,10 @@ local record tecs2d
     --- Triggers a quit event to exit the application cleanly.
     --- @param exitCode Optional exit code (defaults to 0 for success).
     quit: function(exitCode: number)
+
+    --- Triggers a Love2D restart event. If hotReload is enabled on the run
+    --- loop, the world is snapshotted before the restart is returned.
+    restart: function()
 
     ---------------------------------------------------------------------------
     -- Re-exported Love2D events
@@ -215,9 +265,157 @@ end
 -- tecs2d.run function implementation
 -------------------------------------------------------------------------------
 
+local record HotReloadState
+    enabled: boolean
+    snapshotPath: string
+    stampPath: string
+    pollInterval: number
+    debounce: number
+    restoreOnStartup: boolean
+    deleteAfterRestore: boolean
+    saveOptions: tecs.SnapshotOptions
+    lastStampModtime: number
+    pendingStampModtime: number
+    pollElapsed: number
+    debounceElapsed: number
+end
+
+local function makeHotReloadState(config: tecs2d.RunConfig): HotReloadState
+    local cfg = config.hotReload
+    local enabled = cfg ~= nil and cfg.enabled == true
+    local saveOptions: tecs.SnapshotOptions = nil
+    if cfg and cfg.saveOptions then
+        saveOptions = cfg.saveOptions
+    else
+        saveOptions = {} as tecs.SnapshotOptions
+    end
+
+    return {
+        enabled = enabled,
+        snapshotPath = (cfg and cfg.snapshotPath) or HOT_RELOAD_SNAPSHOT_PATH,
+        stampPath = (cfg and cfg.stampPath) or HOT_RELOAD_STAMP_PATH,
+        pollInterval = (cfg and cfg.pollInterval) or 0.25,
+        debounce = (cfg and cfg.debounce) or 0.25,
+        restoreOnStartup = cfg == nil or cfg.restoreOnStartup ~= false,
+        deleteAfterRestore = cfg == nil or cfg.deleteAfterRestore ~= false,
+        saveOptions = saveOptions,
+        lastStampModtime = nil,
+        pendingStampModtime = nil,
+        pollElapsed = 0,
+        debounceElapsed = 0,
+    } as HotReloadState
+end
+
+local function stampModtime(path: string): number
+    local info = love_fs.getInfo(path)
+    if not info then return nil end
+    return (info as {string: any}).modtime as number
+end
+
+local function restoreHotReloadSnapshot(world: tecs.World, state: HotReloadState)
+    if not state.enabled or not state.restoreOnStartup then return end
+    if not love_fs.getInfo(state.snapshotPath) then return end
+
+    local readResult: {any} = {pcall(function(): string
+        return (love_fs.read as function(string): string)(state.snapshotPath)
+    end)}
+    if not readResult[1] or not readResult[2] then
+        LOGGER:error("Hot reload restore failed reading %s: %s", state.snapshotPath, tostring(readResult[2]))
+        return
+    end
+    local payload = readResult[2] as string
+
+    local loadResult: {any} = {pcall(function()
+        world:loadSnapshot(payload)
+    end)}
+    if not loadResult[1] then
+        LOGGER:error("Hot reload restore failed loading %s: %s", state.snapshotPath, tostring(loadResult[2]))
+        return
+    end
+
+    LOGGER:info("Restored hot reload snapshot from %s", state.snapshotPath)
+    if state.deleteAfterRestore and love_fs_any.remove then
+        local removeResult: {any} = {pcall(function()
+            (love_fs_any.remove as function(string): boolean, string)(state.snapshotPath)
+        end)}
+        if not removeResult[1] then
+            LOGGER:warn("Failed to remove hot reload snapshot %s: %s", state.snapshotPath, tostring(removeResult[2]))
+        end
+    end
+end
+
+local function runStartup(world: tecs.World, hotReload: HotReloadState)
+    world:runPhase(tecs.phases.PreStartup)
+    world:runPhase(tecs.phases.Startup)
+    restoreHotReloadSnapshot(world, hotReload)
+    world:runPhase(tecs.phases.PostStartup)
+end
+
+local function saveHotReloadSnapshot(world: tecs.World, state: HotReloadState): boolean
+    if not state.enabled then return true end
+    if state.saveOptions and state.saveOptions.format == "table" then
+        LOGGER:error("Hot reload snapshots must use binary format; got format=table")
+        return false
+    end
+
+    local result: {any} = {pcall(function()
+        local out = world:saveSnapshot(state.saveOptions)
+        local buf = out.buffer
+        if not buf then
+            error("saveSnapshot returned no binary buffer")
+        end
+        local writeOk, writeErr = (love_fs_any.write as function(string, string): boolean, string)(state.snapshotPath, tostring(buf))
+        if writeOk == false then
+            error(tostring(writeErr))
+        end
+    end)}
+    if not result[1] then
+        LOGGER:error("Hot reload snapshot save failed: %s", tostring(result[2]))
+        return false
+    end
+    LOGGER:info("Saved hot reload snapshot to %s", state.snapshotPath)
+    return true
+end
+
+local function updateHotReloadWatcher(state: HotReloadState, dt: number): boolean
+    state.pollElapsed = state.pollElapsed + dt
+    if state.pollElapsed >= state.pollInterval then
+        state.pollElapsed = 0
+        local modtime = stampModtime(state.stampPath)
+        if modtime ~= state.lastStampModtime then
+            state.lastStampModtime = modtime
+            if modtime ~= nil then
+                state.pendingStampModtime = modtime
+                state.debounceElapsed = 0
+            end
+        end
+    end
+
+    if state.pendingStampModtime ~= nil then
+        state.debounceElapsed = state.debounceElapsed + dt
+        if state.debounceElapsed >= state.debounce then
+            state.pendingStampModtime = nil
+            state.debounceElapsed = 0
+            return true
+        end
+    end
+    return false
+end
+
+local function requestRestart(world: tecs.World, hotReload: HotReloadState, moduleBaseline: {string: boolean}): boolean
+    if not saveHotReloadSnapshot(world, hotReload) then
+        return false
+    else
+        world:shutdown()
+        clearModuleCache(moduleBaseline)
+        return true
+    end
+end
+
 local function runLoop(config: tecs2d.RunConfig): (function(): number | string)
     local timestep <const> = 1 / config.fps
     local benchmarkMode <const> = os.getenv("TECS_BENCHMARK") ~= nil
+    local hotReload <const> = makeHotReloadState(config)
     if (love.load) then
         love.load(love.arg.parseGameArguments(arg), arg)
     end
@@ -249,7 +447,8 @@ local function runLoop(config: tecs2d.RunConfig): (function(): number | string)
     handlers.restartRequested = false
     handlers.quitRequested = false
 
-    world:startup()
+    hotReload.lastStampModtime = stampModtime(hotReload.stampPath)
+    runStartup(world, hotReload)
 
     return function(): integer | string
         local dt = love_timer_step()
@@ -258,8 +457,9 @@ local function runLoop(config: tecs2d.RunConfig): (function(): number | string)
         -- Handle restart request from event poller
         if handlers.restartRequested then
             handlers.restartRequested = false
-            world:shutdown()
-            return "restart"
+            if requestRestart(world, hotReload, MODULE_BASELINE) then
+                return "restart"
+            end
         end
 
         -- Handle quit request from event poller. Checked before world:update
@@ -286,6 +486,13 @@ local function runLoop(config: tecs2d.RunConfig): (function(): number | string)
 
         world:update(scaledDt)
 
+        if hotReload.enabled and updateHotReloadWatcher(hotReload, dt) then
+            LOGGER:info("Hot reload stamp changed: %s", hotReload.stampPath)
+            if requestRestart(world, hotReload, MODULE_BASELINE) then
+                return "restart"
+            end
+        end
+
         -- Sleep 1 ms to reclaim some CPU time, but only if the game can keep up with the target FPS.
         -- Skip sleep in benchmark mode (TECS_BENCHMARK=1) for accurate FPS measurements.
         if not benchmarkMode and timestep - dt > 0 then
@@ -307,6 +514,11 @@ end
 function tecs2d.quit(exitCode: number)
     exitCode = exitCode or 0
     love.event.push("quit", exitCode)
+end
+
+--- Triggers a restart event to reload the application.
+function tecs2d.restart()
+    love.event.quit("restart")
 end
 
 return tecs2d

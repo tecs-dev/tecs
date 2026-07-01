@@ -495,6 +495,7 @@ The `tecs.newRelationship` function accepts a configuration table with these fie
 | `fields`        | Ordered field names for the generated positional base shape.                                                                    |
 | `defaults`      | Default values for `fields`, in matching order (`nil` = no default). Requires `fields`.                                        |
 | `init`          | Optional hook to validate or refine a relationship instance after allocation. Requires `container`, plus `fields` or `new`.    |
+| `transient`     | If `true`, omit this relationship from snapshots. Mutually exclusive with `serialize`.                                         |
 
 To run code when a relationship is added or removed, create a query on the
 relationship (or its wildcard container) and attach

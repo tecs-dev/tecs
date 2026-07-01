@@ -99,6 +99,7 @@ local type SnapshotOutput = types.World.SnapshotOutput
 local table_move <const> = table.move
 
 local SNAPSHOT_VERSION <const> = 1
+local STATE_STACK_DATA_KEY <const> = "__tecs.stateStack"
 
 local record snapshot
     record Prelude
@@ -460,7 +461,9 @@ local function archetypeColumns(arch: Archetype): {Component}, boolean
     for i = 1, arch.columnsCount do
         local comp = arch.componentList[i]
         local emit = false
-        if (comp as ComponentInternal).isSparse and (comp as ComponentInternal).isContainer then
+        if (comp as ComponentInternal).transient then
+            emit = false
+        elseif (comp as ComponentInternal).isSparse and (comp as ComponentInternal).isContainer then
             emit = comp.serialize ~= nil
             if emit then hasSparse = true end
         elseif not (comp as ComponentInternal).isContainer then
@@ -472,6 +475,32 @@ local function archetypeColumns(arch: Archetype): {Component}, boolean
     end
     archetypeColumnsCache[arch] = {cols = cols, hasSparse = hasSparse}
     return cols, hasSparse
+end
+
+local function captureStateStack(world: World): {string}
+    local stack = (world as {string: any})._stateStack as {string}
+    if stack == nil or #stack == 0 then return nil end
+    local out: {string} = {}
+    for i = 1, #stack do
+        out[i] = stack[i]
+    end
+    return out
+end
+
+local function restoreStateStack(world: World, saved: {string})
+    if saved == nil then return end
+    local worldAny = world as {string: any}
+    local states = worldAny._stateComponents as {string: Component}
+    local stack: {string} = {}
+    for i = 1, #saved do
+        local name = saved[i]
+        if states[name] ~= nil then
+            stack[#stack + 1] = name
+        end
+    end
+    worldAny._stateStack = stack
+    local top = stack[#stack]
+    worldAny.autoStateComponent = top and states[top] or nil
 end
 
 -- Build an integer bitmask of allowed `Transform.layer` values from the
@@ -561,12 +590,13 @@ local newTableWriterImpl: function(): snapshot.Writer, function(): SnapshotTable
 -- functions.
 local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: SnapshotOptions)
     -- Fire `OnSnapshotSave` first so plugins can declare which derived
-    -- components to omit (`ev:exclude(comp)`) and queue keyed metadata
+    -- entities to exclude (`ev:exclude(comp)`) and queue keyed metadata
     -- (`ev:addData(k, v)`). Excludes are merged into the filter BEFORE
     -- the archetype walk; addData calls are queued and flushed after
     -- archetypes are written so they land in the data section.
     local pendingDataPairs: {{string, any}} = {}
     local excludedComponents: {Component} = {}
+    local stateStack = captureStateStack(world)
     do
         local saveEvent = builtins.OnSnapshotSave()
         local evAny = saveEvent as {string: any}
@@ -637,6 +667,8 @@ local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: Sna
         if count == 0 then return end
 
         local cols, hasSparse = archetypeColumns(arch)
+        if #cols == 0 then return end
+
         local columnIndices: {integer} = {}
         for i = 1, #cols do
             columnIndices[i] = addComponent(cols[i])
@@ -788,10 +820,14 @@ local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: Sna
         writer:endArchetype()
     end
 
-    -- Data section: opts.customData (map of string→any) is iterated
-    -- first, then any (key, value) pairs queued by `OnSnapshotSave`
+    -- Data section: reserved framework data is written first, then
+    -- opts.customData (map of string→any), then any (key, value) pairs
+    -- queued by `OnSnapshotSave`
     -- listeners earlier in this function are flushed. Each writeData
     -- call writes one pair; writeDataEnd closes with a sentinel.
+    if stateStack ~= nil then
+        writer:writeData(STATE_STACK_DATA_KEY, stateStack)
+    end
     if opts.customData then
         for k, v in pairs(opts.customData) do
             writer:writeData(k, v)
@@ -972,6 +1008,16 @@ local function loadSnapshotImpl(world: World, reader: snapshot.Reader): Snapshot
     -- producing a clean deterministic state.
     IdAllocator.reset((world as {string: any}).allocator as IdAllocator)
 
+    -- Restore recreates entities with exactly their saved components. Suppress
+    -- the active state's auto-tag during the load so restored entities are not
+    -- ALSO tagged with the current top state; otherwise persistent (base-state)
+    -- entities like the player/HUD would inherit e.g. gameState and be despawned
+    -- on the next state transition. restoreStateStack below re-establishes the
+    -- correct autoStateComponent from the saved state stack.
+    local worldForAutoState = world as {string: any}
+    local savedAutoState = worldForAutoState.autoStateComponent
+    worldForAutoState.autoStateComponent = nil
+
     while true do
         local componentTypes, _columnIndices, entityCount, mode = reader:nextArchetype()
         if not componentTypes then break end
@@ -987,6 +1033,8 @@ local function loadSnapshotImpl(world: World, reader: snapshot.Reader): Snapshot
         -- decodes still-unread column bytes as bogus header values.
         world:commit()
     end
+
+    worldForAutoState.autoStateComponent = savedAutoState
     -- Bump the fresh-slot watermark past the highest restored slot so new
     -- spawns don't collide with loaded ids. batchSpawnAt already advances
     -- nextFreshSlot on a per-entity basis; this is a belt-and-braces cap
@@ -1016,12 +1064,17 @@ local function loadSnapshotImpl(world: World, reader: snapshot.Reader): Snapshot
     while true do
         local key, value = reader:nextData()
         if key == nil then break end
+        if key == STATE_STACK_DATA_KEY then
+            restoreStateStack(world, value as {string})
+            goto continue_data
+        end
         local arr = handlers[key]
         if arr then
             for i = 1, #arr do
                 arr[i](value)
             end
         end
+        ::continue_data::
     end
     reader:readEnd()
 

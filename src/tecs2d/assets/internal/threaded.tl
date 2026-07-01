@@ -791,6 +791,8 @@ function AssetManager:loadSpriteSheet(
     path: string,
     options?: types.SpriteSheetLoadOptions
 ): Handle<sprite_sheet.SpriteSheet>
+    local resolvedPath = self:resolvePath(path)
+
     -- Load main image and JSON data concurrently
     local imageHandle = self:loadImage(path)
     local jsonPath = path:gsub("%.[^.]+$", "") .. ".json"
@@ -823,7 +825,7 @@ function AssetManager:loadSpriteSheet(
             local emission = results[4] as love.graphics.Image
             local ormImg = results[5] as love.graphics.Image
 
-            local b = sprite_sheet.SpriteSheet.builderFromImage(image, jsonData, path)
+            local b = sprite_sheet.SpriteSheet.builderFromImage(image, jsonData, resolvedPath)
             if normal then b:normalImage(normal) end
             if emission then b:emissionImage(emission) end
             if ormImg then b:ormImage(ormImg) end
@@ -843,6 +845,8 @@ function AssetManager:loadStaticSheet(
     path: string,
     _options?: types.SpriteSheetLoadOptions
 ): Handle<sprite_sheet.SpriteSheet>
+    local resolvedPath = self:resolvePath(path)
+
     -- Load main image
     local imageHandle = self:loadImage(path)
 
@@ -872,7 +876,7 @@ function AssetManager:loadStaticSheet(
             local ormImg = results[4] as love.graphics.Image
 
             local width, height = image:getDimensions()
-            local b = sprite_sheet.SpriteSheet.builder(image, path)
+            local b = sprite_sheet.SpriteSheet.builder(image, resolvedPath)
                 :frame(0, 0, width, height, 1000000)  -- Static image, long duration
             if normal then b:normalImage(normal) end
             if emission then b:emissionImage(emission) end

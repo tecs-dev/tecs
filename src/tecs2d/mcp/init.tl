@@ -20,7 +20,6 @@ local StringBuffer <const> = require("string.buffer")
 local lg <const> = love.graphics
 local le <const> = love.event
 local lt <const> = love.timer
-
 local log <const> = logging.getLogger("tecs-mcp")
 
 local record mcp
@@ -32,9 +31,6 @@ local record mcp
 end
 
 mcp.DEFAULT_PORT = 19999
-
--- Configuration from environment variables
-local REBUILD_CMD <const> = os.getenv("TECS_MCP_REBUILD_CMD")  -- e.g., "make" or "make compile"
 
 -- JSON-RPC error codes
 local ERR_PARSE <const> = -32700
@@ -103,29 +99,6 @@ local function getDebugFont(size: number): love.graphics.Font
         debugFontCache[size] = f
     end
     return f
-end
-
--- Lua standard library modules to preserve on restart
-local STDLIB <const>: {string: boolean} = {
-    string = true, table = true, math = true, io = true, os = true,
-    debug = true, coroutine = true, package = true, utf8 = true,
-    bit = true, bit32 = true, ffi = true, jit = true,
-    ["jit.util"] = true, ["jit.opt"] = true,
-    _G = true, ["table.new"] = true, ["table.clear"] = true,
-}
-
--- Clear package.loaded for all non-stdlib modules to force reload
-local function clearModuleCache()
-    local toRemove: {string} = {}
-    for name, _ in pairs(package.loaded) do
-        if not STDLIB[name] then
-            table.insert(toRemove, name)
-        end
-    end
-    for i = 1, #toRemove do
-        package.loaded[toRemove[i]] = nil
-    end
-    log:info("Cleared %d modules from cache", #toRemove)
 end
 
 -- HTTP response helpers
@@ -416,33 +389,7 @@ toolHandlers["quit"] = function(_: {string:any}, id: number)
 end
 
 toolHandlers["restart"] = function(_: {string:any}, id: number)
-    -- Run rebuild command if configured (before sending success response)
-    if REBUILD_CMD then
-        log:info("Running rebuild: %s", REBUILD_CMD)
-        local success, exitType, code = os.execute(REBUILD_CMD)
-        if not success then
-            sendError(id, -32000, string.format("Rebuild failed: %s %s", tostring(exitType), tostring(code)))
-            return
-        end
-        log:info("Rebuild completed successfully")
-    end
-
     sendResponse(id, {content = {{type = "text", text = "Restarting game"}}})
-
-    -- Clear module cache to force reload on restart
-    clearModuleCache()
-
-    -- Close sockets before restart so port can rebind
-    if client then
-        pcall(function() client:close() end)
-        client = nil
-    end
-    if server then
-        pcall(function() server:close() end)
-        server = nil
-    end
-    -- Delay before restart to allow TIME_WAIT to start clearing
-    lt.sleep(1.0)
     love.event.quit("restart")
 end
 

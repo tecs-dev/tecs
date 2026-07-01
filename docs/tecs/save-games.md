@@ -155,9 +155,9 @@ It is slower than the binary path; prefer binary for production save games.
 ## Per-component serialization
 
 Most components serialize automatically. Table components round-trip every field, and FFI components memcpy through
-their schema. Components holding non-portable state (Love2D handles, GPU slab pointers, derived fields) can opt out of
-the bulk path with custom `serialize` / `deserialize` hooks, and any component whose `serialize` returns `nil` is
-omitted from the snapshot entirely.
+their schema. Components holding non-portable durable state (Love2D handles, GPU slab pointers, derived fields) can
+opt out of the bulk path with custom `serialize` / `deserialize` hooks. Runtime-only components that should never be
+saved should use `transient = true`.
 
 > See [Component serialization](/tecs/components/serialization) for the full reference, covering when to
 override, schema fingerprinting and migration, performance implications, and examples.
@@ -239,7 +239,7 @@ Three events fire on entity 0 during save/load so plugins and game systems can p
 
 | Event                | When                                                                            | Purpose |
 | -------------------- | ------------------------------------------------------------------------------- | ------- |
-| `OnSnapshotSave`     | At the start of `saveSnapshot`, before archetypes are walked.                   | Attach keyed data via `ev:addData(key, value)` and/or omit plugin-derived components via `ev:exclude(component)`. |
+| `OnSnapshotSave`     | At the start of `saveSnapshot`, before archetypes are walked.                   | Attach keyed data via `ev:addData(key, value)` and/or skip derived entities via `ev:exclude(component)`. |
 | `StartSnapshotLoad`  | During `loadSnapshot`, after the world is restored, before data is dispatched.  | Register per-key callbacks via `ev:onData(key, callback)`. |
 | `FinishSnapshotLoad` | During `loadSnapshot`, after every data callback has run.                       | "Load is complete" hook; `ev.prelude` carries the version/counts. |
 
@@ -259,10 +259,10 @@ end)
 Keys are strings; values are `string.buffer`-encodable. Use namespaced keys (`"tecs2d.physics"`, `"mygame.scoreboard"`)
 to avoid collisions. The framework never inspects keys or values; they're round-tripped verbatim.
 
-### Excluding plugin-derived components
+### Excluding plugin-derived entities
 
 Plugins that own *derived* state (state that's a projection of some smaller, durable input) can mark their derived
-components for omission via `ev:exclude(component)`. Entities carrying any excluded component are skipped entirely
+entities for omission via `ev:exclude(component)`. Entities carrying any excluded component are skipped entirely
 at save time. On load the plugin re-derives them from the source-of-truth components that _are_ saved.
 
 ```teal
@@ -282,6 +282,27 @@ systems derived from an emitter component, etc.
 The contract is symmetric: whatever the plugin omits, the plugin re-creates. The framework only handles the
 omission; re-derivation is plugin code that runs in normal systems (typically watching for the source-of-truth
 component to appear, just like during initial spawn).
+
+### Transient components
+
+Use `transient = true` when the entity is durable but one component on it is renderer-, physics-, audio-, or
+plugin-owned runtime state. The entity is still saved; transient component columns are left out of the saved
+archetype. On load, normal spawn behavior applies, including `requires` defaults for transient components.
+
+```teal
+local SpriteData = tecs.newFFIComponent({
+    name = "SpriteData",
+    container = SpriteData,
+    fields = {
+        {"width", "float"},
+        {"height", "float"},
+    },
+    transient = true,
+})
+```
+
+`transient = true` cannot be combined with a custom `serialize` function. Use one or the other: either declare the
+whole component runtime-only with `transient`, or provide custom serialization for durable data.
 
 `exclude` and `addData` can be combined freely; both happen during the same `OnSnapshotSave` listener.
 

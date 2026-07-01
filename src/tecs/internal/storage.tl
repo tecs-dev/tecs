@@ -199,6 +199,7 @@ function storage.propagateHooksToFFI(s: Storage, container: Component)
     -- Use the FFI storage itself (s), not the container's storage which may be bitset
     setMetadata(s, "storage", s)
     setMetadata(s, "storageType", s.storageType)
+    setMetadata(s, "transient", containerAny.transient == true)
 
     -- Behavior-hook plumbing: cdata instances read `_hasDeferSet` etc.
     -- and `deferSet` etc. via metatype → metadataFields. The container

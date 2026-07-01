@@ -153,8 +153,9 @@ The `options` table supports the following properties:
 | `__call`           | `function`                  | Custom constructor hook. Receives an allocated instance plus the call args after `defaults` are applied. `init` is not auto-run on this path. | No |
 | `new`              | `function(data: {string: any}): Component` | Override the auto-codegenned table-form constructor. Defaults to a field-name unpacker through `__call`. | No |
 | `requires`         | `{Component}`               | Components to auto-add alongside this one (see [Auto-dependencies](/tecs/components/#auto-dependencies-with-requires)) | No |
-| `serialize`        | `function(instance: Component): {string: any}` | Custom serializer; return `nil` to omit the component from snapshots                         | No          |
+| `serialize`        | `function(instance: Component): {string: any}` | Custom serializer for durable data. Mutually exclusive with `transient`.                      | No          |
 | `deserialize`      | `function(world: tecs.World, data: {string: any}): Component`  | Custom deserializer                                                         | No          |
+| `transient`        | `boolean`                   | If `true`, omit this component from snapshots. Mutually exclusive with `serialize`.           | No          |
 
 To run code when the component is added to or removed from an entity, attach
 [query callbacks](/tecs/queries/callbacks) (`onEntitiesAdded` /

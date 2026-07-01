@@ -780,6 +780,28 @@ local SpriteMT <const>: {any:any} = {__index = Sprite}
 -- internally, so without this a snapshot with N sprites all from the same
 -- sheet would parse that sheet N times on load.
 local sheetCacheByPath: {string: sprite_sheet.SpriteSheet} = {}
+local resolvedSpritePathCache: {string: any} = {}
+
+local function resolveDurableSpritePath(path: string): string
+    local cached = resolvedSpritePathCache[path]
+    if cached ~= nil then
+        return cached ~= false and cached as string or nil
+    end
+
+    local fs = love.filesystem as {string: function}
+    local fsInfo = fs.getInfo as function(string): any
+    if not fsInfo then
+        resolvedSpritePathCache[path] = path
+        return path
+    end
+    if fsInfo(path) ~= nil then
+        resolvedSpritePathCache[path] = path
+        return path
+    end
+
+    resolvedSpritePathCache[path] = false
+    return nil
+end
 
 -- Bind early so Sprite can declare `requires = {SpriteData}`. SpriteData's
 -- newFFIComponent (below) populates the container fields; the requires
@@ -839,12 +861,12 @@ tecs.newFFIComponent({
         -- round-trip without this Sprite component; systems that own the
         -- entity (e.g. the tiled plugin) can re-spawn the visual state
         -- from their own durable source on load.
-        local fsInfo = (love.filesystem as {string: function}).getInfo as function(string): any
-        if not fsInfo or fsInfo(path) == nil then
+        local resolvedPath = resolveDurableSpritePath(path)
+        if resolvedPath == nil then
             return nil
         end
         return {
-            path          = path,
+            path          = resolvedPath,
             tag           = sheet:getTagName(inst.tagId),
             speed         = inst.speed,
             centered      = inst.centered,
@@ -864,6 +886,7 @@ tecs.newFFIComponent({
         -- tiled plugin) can re-spawn the visual from their own source.
         if not data then return nil end
         local path = data.path as string
+        path = resolveDurableSpritePath(path) or path
         local sheet = sheetCacheByPath[path]
         if not sheet then
             -- Aseprite sheets need an adjacent .json; plain textures don't.
@@ -924,32 +947,8 @@ local function onSpriteAdded(world: tecs.World, entityId: integer, self: sprite.
         local tier = allocation.tier
         local layerIdx = allocation.layerIndex - 1
         local gen = allocation.generation
-        local bucketComp: tecs.Component
-        if tier == "Tiny" then
-            bucketComp = sprite.TinyTextureBucket as tecs.Component
-        elseif tier == "Small" then
-            bucketComp = sprite.SmallTextureBucket as tecs.Component
-        elseif tier == "Medium" then
-            bucketComp = sprite.MediumTextureBucket as tecs.Component
-        elseif tier == "Large" then
-            bucketComp = sprite.LargeTextureBucket as tecs.Component
-        elseif tier == "XL" then
-            bucketComp = sprite.XLTextureBucket as tecs.Component
-        elseif tier == "XXL" then
-            bucketComp = sprite.XXLTextureBucket as tecs.Component
-        end
 
-        -- Snapshot-restore path: if the entity already has the bucket
-        -- and TextureArray tag (restored from saved archetype bytes),
-        -- Snapshot-restore short-circuit: if the bucket marker and
-        -- TextureArray tag are already present, the lifecycle observer
-        -- will pick up active-count tracking against the existing
-        -- components.
         local taggedArray = TextureArray(allocation.arrayIndex)
-        if bucketComp and world:has(entityId, bucketComp) and world:has(entityId, taggedArray) then
-            return
-        end
-
         world:set(entityId, taggedArray)
 
         if tier == "Tiny" then
@@ -1017,12 +1016,42 @@ local BUCKET_FFI_FIELDS <const> = {
     {"generation", "int16_t"},
 }
 
-tecs.newFFIComponent({ name = "TinyTextureBucket", container = TinyTextureBucket, fields = BUCKET_FFI_FIELDS })
-tecs.newFFIComponent({ name = "SmallTextureBucket", container = SmallTextureBucket, fields = BUCKET_FFI_FIELDS })
-tecs.newFFIComponent({ name = "MediumTextureBucket", container = MediumTextureBucket, fields = BUCKET_FFI_FIELDS })
-tecs.newFFIComponent({ name = "LargeTextureBucket", container = LargeTextureBucket, fields = BUCKET_FFI_FIELDS })
-tecs.newFFIComponent({ name = "XLTextureBucket", container = XLTextureBucket, fields = BUCKET_FFI_FIELDS })
-tecs.newFFIComponent({ name = "XXLTextureBucket", container = XXLTextureBucket, fields = BUCKET_FFI_FIELDS })
+tecs.newFFIComponent({
+    name = "TinyTextureBucket",
+    container = TinyTextureBucket,
+    fields = BUCKET_FFI_FIELDS,
+    transient = true,
+})
+tecs.newFFIComponent({
+    name = "SmallTextureBucket",
+    container = SmallTextureBucket,
+    fields = BUCKET_FFI_FIELDS,
+    transient = true,
+})
+tecs.newFFIComponent({
+    name = "MediumTextureBucket",
+    container = MediumTextureBucket,
+    fields = BUCKET_FFI_FIELDS,
+    transient = true,
+})
+tecs.newFFIComponent({
+    name = "LargeTextureBucket",
+    container = LargeTextureBucket,
+    fields = BUCKET_FFI_FIELDS,
+    transient = true,
+})
+tecs.newFFIComponent({
+    name = "XLTextureBucket",
+    container = XLTextureBucket,
+    fields = BUCKET_FFI_FIELDS,
+    transient = true,
+})
+tecs.newFFIComponent({
+    name = "XXLTextureBucket",
+    container = XXLTextureBucket,
+    fields = BUCKET_FFI_FIELDS,
+    transient = true,
+})
 
 -- SpriteData: renderer-internal derived metadata, populated by sync,
 -- read by the shadow cull shader. 14 floats = 56 bytes, matching
@@ -1033,6 +1062,7 @@ tecs.newFFIComponent({ name = "XXLTextureBucket", container = XXLTextureBucket, 
 tecs.newFFIComponent({
     name = "SpriteData",
     container = SpriteData,
+    transient = true,
     fields = {
         {"pivotX", "float"},
         {"pivotY", "float"},

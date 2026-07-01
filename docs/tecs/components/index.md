@@ -132,5 +132,26 @@ For lifecycle reactions ("run code when an entity gains or loses this component"
 [query callbacks](/tecs/queries/callbacks): `onEntitiesAdded` and `onEntitiesRemoved` on
 `world:query(...)`.
 
+## Transient components
+
+Set `transient = true` on any component or relationship whose value is runtime projection state rather than
+durable world state (e.g., renderer caches, GPU/bucket routing tags, per-frame scratch).
+[Snapshot saves](/tecs/save-games) skips transient component columns while keeping the entity itself.
+
+```teal
+tecs.newFFIComponent({
+    name = "SpriteData",
+    container = SpriteData,
+    transient = true,
+    fields = {
+        {"width", "float"},
+        {"height", "float"},
+    }
+})
+```
+
+`transient = true` is mutually exclusive with `serialize`. The option is accepted by `newComponent`, `newFFIComponent`,
+`newTagComponent`, `newScalarComponent`, `newRelationship`, and `newFFIRelationship`.
+
 See [Serialization](/tecs/components/serialization) for how components round-trip through save games, networking,
 and the MCP server.

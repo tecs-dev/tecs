@@ -280,6 +280,10 @@ local record internal
         --- Used by snapshot to bulk-memcpy whole columns.
         structSize: integer
 
+        --- True iff this component is runtime-only and should not be written
+        --- to snapshots.
+        transient: boolean
+
         --- Fast-path flag: true iff `requires` is non-empty. Set at
         --- registration so dispatch can short-circuit the closure walk.
         _hasRequires: boolean

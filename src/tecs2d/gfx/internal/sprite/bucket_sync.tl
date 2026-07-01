@@ -134,6 +134,8 @@ local record bucket_sync
         blendGroupCount: integer
         -- Set during sync: true if any alpha-blend (blendId == 0) entities exist
         hasAlphaBlend: boolean
+        -- One-shot: request a full resync on the next sync() (set on snapshot load).
+        _forceResync: boolean
 
         sync: function(SpriteBucketSync, dt: number)
         getArraySyncs: function(SpriteBucketSync, tier: string): {integer: ArraySync}
@@ -318,7 +320,7 @@ function bucket_sync.new(
         end,
     })
 
-    return setmetatable({
+    local syncObj: SpriteBucketSync = setmetatable({
         world = world,
         query = query,
         tiers = tiers,
@@ -333,12 +335,28 @@ function bucket_sync.new(
         blendGroups = {},
         blendGroupCount = 0,
         hasAlphaBlend = false,
+        _forceResync = false,
     }, SYNC_MT)
+
+    -- Snapshot restore bulk-loads sprite entities and then commits, which clears
+    -- the per-component dirty flags before this sync runs at render time. Without
+    -- them, sync() skips restored archetypes and their SpriteData (size/UV) stays
+    -- zero-initialised, so every restored sprite renders at zero size (invisible).
+    -- Force one full resync after a load so SpriteData gets repopulated.
+    world:observe(0, tecs.builtins.FinishSnapshotLoad, function()
+        syncObj._forceResync = true
+    end)
+
+    return syncObj
 end
 
 local floor <const> = math.floor
 
 function SpriteBucketSync:sync(_dt: number)
+    -- Consume a one-shot full-resync request (set on snapshot load); when set,
+    -- treat every archetype as dirty so zeroed SpriteData gets rebuilt.
+    local forceResync = self._forceResync
+    self._forceResync = false
     local spriteComponent = self.spriteComponent
     local repeatedSpriteComponent = self.repeatedSpriteComponent
     local bucketMgr = self.bucketManager
@@ -424,7 +442,8 @@ function SpriteBucketSync:sync(_dt: number)
             -- since no output depends on position/rotation/scale (scale is
             -- applied in the cull shader). The bulk transform mirror still
             -- re-uploads.
-            if archetype:isComponentDirty(spriteComponent)
+            if forceResync
+                or archetype:isComponentDirty(spriteComponent)
                 or archetype:isComponentDirty(bucketComponent)
                 or (repeatedSpriteComponent ~= nil
                     and archetype:isComponentDirty(repeatedSpriteComponent)) then

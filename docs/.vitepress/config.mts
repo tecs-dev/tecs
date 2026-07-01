@@ -232,7 +232,6 @@ export default defineConfig({
             items: [
               { text: 'Overview', link: '/tecs2d/mcp/' },
               { text: 'Tools', link: '/tecs2d/mcp/tools' },
-              { text: 'Dev-Mode Restart', link: '/tecs2d/mcp/dev-mode' },
             ]
           },
         ]

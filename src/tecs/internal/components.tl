@@ -206,6 +206,9 @@ function components.newComponent<C is Component>(options: ComponentOptions<C>): 
     if opts.defaults and not opts.fields then
         error("Component " .. name .. ": `defaults` requires `fields`")
     end
+    if opts.transient and opts.serialize then
+        error("Component " .. name .. ": `transient` cannot be combined with `serialize`")
+    end
 
     -- `init` without `fields` or `new` leaves `.new` with no way to
     -- unpack a table into positional args — the fallback would forward the
@@ -228,6 +231,7 @@ function components.newComponent<C is Component>(options: ComponentOptions<C>): 
     container.init = opts.init or NOOP_INIT
     containerI.requires = opts.requires
     containerI._hasRequires = opts.requires ~= nil and #opts.requires > 0
+    containerI.transient = opts.transient == true
     -- `_requiresClosure` is built lazily on first use (first
     -- `world:set` / `world:spawn` that mentions this component) so
     -- late-registered dependencies are captured correctly.
@@ -240,7 +244,9 @@ function components.newComponent<C is Component>(options: ComponentOptions<C>): 
 
     -- Set up serialization functions
     -- Priority: user-provided > storage-provided > default
-    if opts.serialize then
+    if opts.transient then
+        container.serialize = nil
+    elseif opts.serialize then
         container.serialize = opts.serialize
     elseif componentStorage.storageType == "scalar" then
         -- `instance` may be either the raw column value (snapshot writer
@@ -494,6 +500,9 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
     if cfg.defaults and not cfg.fields then
         error("Relationship " .. name .. ": `defaults` requires `fields`")
     end
+    if cfg.transient and cfg.serialize then
+        error("Relationship " .. name .. ": `transient` cannot be combined with `serialize`")
+    end
 
     -- Reject user-supplied `storage` on the public factory (only internal
     -- callers pass it, authenticated via the sentinel token).
@@ -523,6 +532,7 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
             sparse = cfg.sparse,
             reverseIndex = cfg.reverseIndex,
             cascadeDelete = cfg.cascadeDelete,
+            transient = cfg.transient,
         }) as R
     end
 
@@ -544,6 +554,7 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
     relContainerI.isSparse = isSparse
     relContainerI.reverseIndex = hasReverseIndex
     relContainerI.cascadeDelete = isCascadeDelete
+    relContainerI.transient = cfg.transient == true
 
     -- The container (wildcard) uses bitset storage for efficient presence tracking.
     -- Instances use relationshipStorage (which may be FFI, table, etc.)
@@ -619,7 +630,11 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
     -- use it — it knows the field layout. Otherwise iterate plain-table
     -- instances, skipping component metadata.
     local storageAny = relationshipStorage as {string: any}
-    if storageAny.serialize then
+    if cfg.transient then
+        relContainer.serialize = nil
+    elseif cfg.serialize then
+        relContainer.serialize = cfg.serialize
+    elseif storageAny.serialize then
         relContainer.serialize = function(instance: R): {string: any}
             return (storageAny.serialize as function(Storage, R): {string: any})(
                 relationshipStorage, instance)
@@ -711,6 +726,7 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
                     instanceI.isSparseInstance = true
                     instanceI.storage = relationshipStorage
                     instanceI.storageType = relationshipStorage.storageType
+                    instanceI.transient = relContainerI.transient
                     setmetatable(instance, instance_mt)
                     -- NOT registered — sparse instances don't get unique component IDs
                     cache[id] = instance
@@ -725,6 +741,7 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
                     instanceI.isContainer = false  -- shadow the container's true via __index
                     instanceI.storage = relationshipStorage
                     instanceI.storageType = relationshipStorage.storageType
+                    instanceI.transient = relContainerI.transient
                     setmetatable(instance, instance_mt)
                     components.registerComponent(instance)
                     cache[id] = instance
@@ -964,6 +981,7 @@ function components.newFFIRelationship<R is Relationship>(config: FFIRelationshi
         sparse = cfg.sparse,
         reverseIndex = cfg.reverseIndex,
         cascadeDelete = cfg.cascadeDelete,
+        transient = cfg.transient,
         storage = ffiStorage,
         __internalStorageToken = INTERNAL_STORAGE_TOKEN,
     })
@@ -974,6 +992,9 @@ end
 -------------------------------------------------------------------------------
 
 function components.newTagComponent(options: TagComponentOptions): Component
+    if options.transient and (options as {string:any}).serialize then
+        error("Tag component " .. tostring(options.name) .. ": `transient` cannot be combined with `serialize`")
+    end
     local container = options.container or {}
     return (components.newComponent as function(any): Component)({
         name = assert(options.name, "Missing tag component name"),
@@ -981,6 +1002,7 @@ function components.newTagComponent(options: TagComponentOptions): Component
         storage = storage.newBitsetStorage(container),
         __internalStorageToken = INTERNAL_STORAGE_TOKEN,
         requires = options.requires,
+        transient = options.transient,
     })
 end
 
@@ -988,6 +1010,9 @@ function components.newScalarComponent<T>(
     options: ScalarComponentOptions<T>
 ): types.components.ScalarComponent<T>
     local opts = assert(options, "Missing scalar component options")
+    if opts.transient and (opts as {string:any}).serialize then
+        error("Scalar component " .. tostring(opts.name) .. ": `transient` cannot be combined with `serialize`")
+    end
     -- Scalars hold the raw primitive in the column; there's no instance
     -- shape worth exposing, so we always allocate a fresh handle.
     local container = {} as types.components.ScalarComponent<T>
@@ -1019,6 +1044,7 @@ function components.newScalarComponent<T>(
         storage = storage.newScalarStorage(kind, defaultValue),
         __internalStorageToken = INTERNAL_STORAGE_TOKEN,
         requires = opts.requires,
+        transient = opts.transient,
     })) as types.components.ScalarComponent<T>
 
     local cAny = component as {string:any}
@@ -1074,6 +1100,7 @@ function components.newFFIComponent<C is Component>(options: FFIComponentOptions
         deserialize = opts.deserialize,
         new = newFn,
         requires = opts.requires,
+        transient = opts.transient,
     })
 
     -- Expose FFIStorage's buffer-direct raw path on the container. Binary
@@ -1087,7 +1114,7 @@ function components.newFFIComponent<C is Component>(options: FFIComponentOptions
     -- the raw install in that case and let the structured path run.
     local anyStorage = componentStorage as {string: any}
     local componentI = component as ComponentInternal
-    if anyStorage.serializeRaw and not opts.serialize then
+    if anyStorage.serializeRaw and not opts.serialize and not opts.transient then
         componentI.serializeRaw = function(inst: Component, buf: any)
             (anyStorage.serializeRaw as function(Storage, Component, any))(componentStorage, inst, buf)
         end

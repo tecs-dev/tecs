@@ -476,6 +476,218 @@ describe("snapshot save/load", function()
         luassert.equals(2, (seen["plugin.extra"] as {string: integer}).b)
     end)
 
+    it("transient components are omitted without excluding entities", function()
+        local testId = math.random(1, 1000000)
+
+        local record RuntimeData is tecs.Component
+            slot: integer
+            metamethod __call: function(self, slot: integer): RuntimeData
+        end
+
+        local record DurableData is tecs.Component
+            value: integer
+            metamethod __call: function(self, value: integer): DurableData
+        end
+
+        local RuntimeComp = tecs.newComponent({
+            name = "SnapRuntime" .. testId,
+            container = {} as RuntimeData,
+            fields = {"slot"},
+            defaults = {0},
+            transient = true,
+        })
+
+        local DurableComp = tecs.newComponent({
+            name = "SnapDurable" .. testId,
+            container = {} as DurableData,
+            fields = {"value"},
+            requires = {RuntimeComp},
+        })
+
+        local world = tecs.newWorld()
+        local id = world:spawn(DurableComp(42), RuntimeComp(99))
+        world:commit()
+
+        local snap = saveTableSnapshot(world)
+        local componentNames: {string: boolean} = {}
+        for i = 1, #snap.componentTable do
+            componentNames[snap.componentTable[i].name] = true
+        end
+        luassert.is_true(componentNames[DurableComp.componentName])
+        luassert.is_nil(componentNames[RuntimeComp.componentName])
+
+        world:loadSnapshot(snap)
+
+        luassert.is_true(world:isAlive(id))
+        luassert.equals(42, world:get(id, DurableComp).value)
+        luassert.is_true(world:has(id, RuntimeComp))
+        luassert.equals(0, world:get(id, RuntimeComp).slot)
+    end)
+
+    it("transient tag scalar and FFI components are omitted from snapshots", function()
+        local testId = math.random(1, 1000000)
+
+        local TransientTag = tecs.newTagComponent({
+            name = "SnapTransientTag" .. testId,
+            transient = true,
+        })
+
+        local TransientScalar = tecs.newScalarComponent({
+            name = "SnapTransientScalar" .. testId,
+            kind = "number",
+            default = 0,
+            transient = true,
+        })
+
+        local record TransientFFI is tecs.Component
+            value: integer
+            metamethod __call: function(self, value: integer): TransientFFI
+        end
+
+        local TransientFFIComp = tecs.newFFIComponent({
+            name = "SnapTransientFFI" .. testId,
+            container = {} as TransientFFI,
+            fields = {{"value", "int32_t"}},
+            transient = true,
+        })
+
+        local world = tecs.newWorld()
+        local id = world:spawn(
+            PositionComp(1, 1),
+            TransientTag,
+            TransientScalar(12),
+            TransientFFIComp(34)
+        )
+        world:commit()
+
+        local snap = saveTableSnapshot(world)
+        local componentNames: {string: boolean} = {}
+        for i = 1, #snap.componentTable do
+            componentNames[snap.componentTable[i].name] = true
+        end
+        luassert.is_true(componentNames[PositionComp.componentName])
+        luassert.is_nil(componentNames[TransientTag.componentName])
+        luassert.is_nil(componentNames[TransientScalar.componentName])
+        luassert.is_nil(componentNames[TransientFFIComp.componentName])
+
+        world:loadSnapshot(snap)
+        luassert.is_true(world:isAlive(id))
+        luassert.is_false(world:has(id, TransientTag))
+        luassert.is_false(world:has(id, TransientScalar))
+        luassert.is_false(world:has(id, TransientFFIComp))
+    end)
+
+    it("transient relationships are omitted from snapshots", function()
+        local testId = math.random(1, 1000000)
+
+        local record Link is tecs.Relationship
+            weight: integer
+            metamethod __call: function(self, target: integer, weight: integer): Link
+        end
+
+        local LinkRel = tecs.newRelationship({
+            name = "SnapTransientLink" .. testId,
+            container = {} as Link,
+            fields = {"weight"},
+            transient = true,
+        })
+
+        local world = tecs.newWorld()
+        local target = world:spawn(PositionComp(1, 1))
+        local source = world:spawn(PositionComp(2, 2), LinkRel(target, 7))
+        world:commit()
+
+        local snap = saveTableSnapshot(world)
+        local componentNames: {string: boolean} = {}
+        for i = 1, #snap.componentTable do
+            componentNames[snap.componentTable[i].name] = true
+        end
+        luassert.is_nil(componentNames[LinkRel(target).componentName])
+
+        world:loadSnapshot(snap)
+        luassert.is_true(world:isAlive(source))
+        luassert.is_false(world:has(source, LinkRel(target)))
+    end)
+
+    it("rejects transient components that define custom serializers", function()
+        local testId = math.random(1, 1000000)
+
+        local record BadTable is tecs.Component
+            value: integer
+            metamethod __call: function(self, value: integer): BadTable
+        end
+
+        local okTable = pcall(function()
+            tecs.newComponent({
+                name = "BadTransientTable" .. testId,
+                container = {} as BadTable,
+                fields = {"value"},
+                transient = true,
+                serialize = function(_inst: BadTable): {string: any}
+                    return {value = 1}
+                end,
+            })
+        end)
+        luassert.is_false(okTable)
+
+        local record BadFFI is tecs.Component
+            value: integer
+            metamethod __call: function(self, value: integer): BadFFI
+        end
+
+        local okFFI = pcall(function()
+            tecs.newFFIComponent({
+                name = "BadTransientFFI" .. testId,
+                container = {} as BadFFI,
+                fields = {{"value", "int32_t"}},
+                transient = true,
+                serialize = function(_inst: BadFFI): {string: any}
+                    return {value = 1}
+                end,
+            })
+        end)
+        luassert.is_false(okFFI)
+
+        local record BadRel is tecs.Relationship
+            value: integer
+            metamethod __call: function(self, target: integer, value: integer): BadRel
+        end
+
+        local okRel = pcall(function()
+            tecs.newRelationship({
+                name = "BadTransientRel" .. testId,
+                container = {} as BadRel,
+                fields = {"value"},
+                transient = true,
+                serialize = function(_inst: BadRel): {string: any}
+                    return {value = 1}
+                end,
+            })
+        end)
+        luassert.is_false(okRel)
+    end)
+
+    it("restores the state stack", function()
+        local world = tecs.newWorld()
+        world:createState("base")
+        world:createState("ready")
+        world:createState("game")
+        world:pushState("base")
+        world:pushState("game")
+        world:spawn(PositionComp(1, 1))
+        world:commit()
+
+        local snap = saveTableSnapshot(world)
+
+        world:popState()
+        world:pushState("ready")
+        luassert.equals("ready", world:peekState())
+
+        world:loadSnapshot(snap)
+
+        luassert.equals("game", world:peekState())
+    end)
+
     it("FinishSnapshotLoad fires once after the load completes", function()
         local world = tecs.newWorld()
         world:spawn(PositionComp(1, 1))

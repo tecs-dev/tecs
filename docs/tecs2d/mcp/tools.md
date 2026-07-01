@@ -286,7 +286,8 @@ Love2D's save directory. The `format` must match how the snapshot was saved.
 
 ## restart
 
-Restart the game. See [Dev-Mode Restart](./dev-mode) for rebuild configuration.
+Request a Love2D restart. If the game uses `tecs2d.run` with `hotReload` enabled, the run loop handles snapshot
+save/restore around the restart.
 
 **Input:** None
 

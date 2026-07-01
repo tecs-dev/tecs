@@ -32,6 +32,7 @@ world.
 | `new`         | Custom table-form constructor (`function(data: {string: any}): Component`), called via `Component.new({...})`. Defaults to codegen from `fields` when present. |
 | `serialize`   | Custom function to convert the component to a serializable table                                     |
 | `deserialize` | Custom function to reconstruct the component from serialized data (receives `world` and data table)  |
+| `transient`   | If `true`, omit this component from snapshots. Mutually exclusive with `serialize`.                  |
 
 ## Using `fields` and `defaults`
 

@@ -95,6 +95,13 @@ local record physics_components
         prevX: number
         prevY: number
         prevRotation: number
+        -- Snapshot-restored runtime velocity. Box2D bodies are recreated
+        -- after load, so these fields bridge saved body state into
+        -- physics.createBodies.
+        runtimeVx: number
+        runtimeVy: number
+        runtimeAngularVelocity: number
+        hasRuntimeVelocity: boolean
 
         metamethod __call: function(self, config: ColliderConfig): Collider
     end
@@ -157,10 +164,23 @@ tecs.newComponent({
             shapes = config.shapes,
             prevX = 0,
             prevY = 0,
-            prevRotation = 0
+            prevRotation = 0,
+            runtimeVx = (config as {string: number}).runtimeVx or 0,
+            runtimeVy = (config as {string: number}).runtimeVy or 0,
+            runtimeAngularVelocity = (config as {string: number}).runtimeAngularVelocity or 0,
+            hasRuntimeVelocity = ((config as {string: boolean}).hasRuntimeVelocity or false) as boolean,
         } as physics_components.Collider
     end,
     serialize = function(c: physics_components.Collider): {string: any}
+        local vx = c.runtimeVx
+        local vy = c.runtimeVy
+        local av = c.runtimeAngularVelocity
+        local hasRuntimeVelocity = c.hasRuntimeVelocity
+        if c.body then
+            vx, vy = c.body:getLinearVelocity()
+            av = c.body:getAngularVelocity()
+            hasRuntimeVelocity = true
+        end
         return {
             shape      = c.shapeType,
             radius     = c.radius,
@@ -173,6 +193,10 @@ tecs.newComponent({
             restitution = c.restitution,
             friction   = c.friction,
             shapes     = c.shapes,
+            runtimeVx = vx,
+            runtimeVy = vy,
+            runtimeAngularVelocity = av,
+            hasRuntimeVelocity = hasRuntimeVelocity,
         }
     end,
     -- Body teardown on remove is handled by a query observer
@@ -766,6 +790,10 @@ function physics.new(config: physics.Config): tecs.Plugin
 
                             local bodyType = (rb.bodyType or "dynamic") as love.physics.BodyType
                             local body = love.physics.newBody(physicsWorld, t.x, t.y, bodyType)
+                            -- newBody starts at angle 0; carry over the entity's
+                            -- rotation (e.g. restored from a snapshot) so physics
+                            -- doesn't reset it on the next transform sync.
+                            body:setAngle(t.rotation)
 
                             body:setLinearDamping(rb.drag)
                             body:setAngularDamping(rb.angularDrag)
@@ -779,7 +807,10 @@ function physics.new(config: physics.Config): tecs.Plugin
                                 body:setBullet(true)
                             end
 
-                            if rb.initialVx ~= 0 or rb.initialVy ~= 0 then
+                            if c.hasRuntimeVelocity then
+                                body:setLinearVelocity(c.runtimeVx, c.runtimeVy)
+                                body:setAngularVelocity(c.runtimeAngularVelocity)
+                            elseif rb.initialVx ~= 0 or rb.initialVy ~= 0 then
                                 body:setLinearVelocity(rb.initialVx, rb.initialVy)
                             end
 
@@ -809,6 +840,7 @@ function physics.new(config: physics.Config): tecs.Plugin
                             local entityId = entities[i]
 
                             local body = love.physics.newBody(physicsWorld, t.x, t.y, "static")
+                            body:setAngle(t.rotation)
                             setupColliderShapes(body, c, t, entityId, c.restitution, c.friction, 1.0)
                             c.body = body
                             c.prevX = t.x
