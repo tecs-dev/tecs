@@ -15,9 +15,9 @@ local WorldImpl <const> = require("tecs.internal.world")
 
 --- Public API surface.
 ---
---- Support policy: the `tecs` module (this file) is the supported entry point. Anything reachable from it like
---- types, factories, helpers is a stable API. Submodules under `tecs.*` and `tecs.internal.*` are framework internals
---- with NO stability guarantees.
+--- Support policy: values and types exported from `require("tecs")` are the
+--- supported API. Deep modules, especially `tecs.internal.*`, are implementation
+--- details unless re-exported here.
 local record tecs
     type World = types.World
     type System = types.System
@@ -62,7 +62,7 @@ local record tecs
 
     --- Create a new World.
     ---
-    --- @param timestep The fixed timestep of the game (the target FPS of the game).
+    --- @param config Optional world configuration.
     --- @return the created World.
     newWorld: function(config?: types.World.Config): World
 
@@ -83,7 +83,7 @@ local record tecs
     --- carry data.
     newRelationship: function<R is Relationship>(config: RelationshipOptions<R>): R
 
-    --- Create an FFI relationship with data fields for high performance.
+    --- Create an FFI-backed relationship with data fields.
     newFFIRelationship: function<R is Relationship>(config: FFIRelationshipOptions<R>): R
 
     --- Creates and registers an FFI-based component. Same constructor model

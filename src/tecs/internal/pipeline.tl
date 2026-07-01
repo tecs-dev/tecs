@@ -286,7 +286,7 @@ end
 --- (e.g. "Update:Physics"). Zone push/pop is JIT-compiled and free when no
 --- profiler is attached.
 ---
---- Does not commit the world — the caller is responsible for draining the
+--- Does not commit the world -- the caller is responsible for draining the
 --- transaction at phase (or sub-phase) boundaries. Per-system commit is
 --- structural drain work that multiplies with system count and is almost
 --- never necessary; a system that needs same-frame visibility into changes

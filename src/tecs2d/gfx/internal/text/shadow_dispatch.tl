@@ -5,10 +5,10 @@
 ---
 --- Indirect args layout (single shared buffer):
 ---   args[0] = vertex count (host-set, 6 for two triangles)
----   args[1] = instance count (atomic; total visible glyphs — drives the draw)
+---   args[1] = instance count (atomic; total visible glyphs -- drives the draw)
 ---   args[2] = first vertex   (constant 0)
 ---   args[3] = first instance (constant 0)
----   args[4] = entity count   (atomic; total visible entities — header out)
+---   args[4] = entity count   (atomic; total visible entities -- header out)
 ---
 --- The cull shader's `args[1]` and `args[4]` atomicAdd writes match
 --- this layout. `args[0]/[2]/[3]` are written once at construction.

@@ -72,7 +72,7 @@ local function serializeTable(t)
     return "{" .. table.concat(parts, ",") .. "}"
 end
 
--- Test cases — each generates JSON and Lua-table strings ahead of time so the bench
+-- Test cases -- each generates JSON and Lua-table strings ahead of time so the bench
 -- only measures parsing/serialization, not data construction.
 local function makeCase(name, dataOrSetup)
     local data = type(dataOrSetup) == "function" and dataOrSetup() or dataOrSetup

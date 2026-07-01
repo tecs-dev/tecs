@@ -1,4 +1,4 @@
---- JSON serializer using LuaJIT StringBuffer and FFI for maximum performance.
+--- JSON serializer using LuaJIT StringBuffer and FFI.
 ---
 --- Note: The compact and pretty serializers are intentionally duplicated rather than
 --- sharing code paths with conditionals. This avoids branching overhead in hot loops
@@ -61,7 +61,7 @@ local ERR_INVALID_NUMBER <const> = "Invalid number (NaN or Inf)"
 local NEEDS_ESCAPE = C.new("bool[256]") as {boolean}
 NEEDS_ESCAPE[CHAR_QUOTE] = true
 NEEDS_ESCAPE[CHAR_BACKSLASH] = true
--- Mark control characters 0–31
+-- Mark control characters 0--31
 C.fill(C.cast("uint8_t*", NEEDS_ESCAPE) as C.CData, 32, 1)
 
 -- Prebuilt escape fragments
@@ -85,7 +85,7 @@ do
     end
 end
 
--- Reusable buffer and circular reference detection
+-- Reused across calls; public entry points reset both before serializing.
 local BUF: buffer = buffer.new()
 local SEEN: {any: boolean} = {}
 
@@ -121,7 +121,7 @@ local function serializeString(str: string)
         return
     end
 
-    -- Fast path: tight loop to check if any characters need escaping
+    -- Fast path: copy strings directly when no JSON escapes are needed.
     local p = C.cast("const uint8_t*", str) as {integer}
     for i = 0, len - 1 do
         if NEEDS_ESCAPE[p[i]] then
@@ -235,7 +235,7 @@ local function serializeTableCompact(tbl: {any}, sortKeys: boolean)
     end
     SEEN[tbl] = true
 
-    -- Check for EMPTY_OBJECT sentinel
+    -- EMPTY_OBJECT is the one empty table that must serialize as an object.
     if tbl == EMPTY_OBJECT_SENTINEL then
         put(BUF, S_EMPTY_OBJECT)
     elseif rawget(tbl, 1) ~= nil or next(tbl as {any:any}) == nil then
@@ -383,7 +383,7 @@ local function serializeTablePretty(
     end
     SEEN[tbl] = true
 
-    -- Check for EMPTY_OBJECT sentinel
+    -- EMPTY_OBJECT is the one empty table that must serialize as an object.
     if tbl == EMPTY_OBJECT_SENTINEL then
         put(BUF, S_EMPTY_OBJECT)
     elseif rawget(tbl, 1) ~= nil or next(tbl as {any:any}) == nil then

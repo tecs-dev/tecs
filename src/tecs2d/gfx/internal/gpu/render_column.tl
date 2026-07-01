@@ -7,7 +7,7 @@
 ---
 --- Lifecycle is driven by the renderer (typically via archetype-create /
 --- destroy hooks). Unlike `component_shadow`, this module is NOT a
---- ColumnShadow — it is owned by per-shape plugin code, not by tecs core.
+--- ColumnShadow -- it is owned by per-shape plugin code, not by tecs core.
 
 local C <const> = require("ffi")
 local Bitset <const> = require("tecs.utils.Bitset")

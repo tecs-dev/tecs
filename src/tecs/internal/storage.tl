@@ -16,7 +16,7 @@ local record storage
         "scalar"
     end
 
-    --- Storage interface — pluggable per-component column backend. Internal
+    --- Storage interface -- pluggable per-component column backend. Internal
     --- only; users pick a component kind via the `newX` factories and never
     --- implement Storage themselves. Lives here rather than in
     --- `internal/types.tl` because the FFI and Archetype modules need to
@@ -45,9 +45,10 @@ local record storage
     --- @param def Configuration including fields, recycling options
     newFFIStorage: function(def: {string:any}): Storage
 
-    --- Propagate hooks from a component container to FFI storage metadataFields.
-    --- No-op if storage is not FFI-based.
-    propagateHooksToFFI: function(s: Storage, container: Component)
+    --- Install container metadata on FFI storage so cdata instances expose
+    --- the same relationship and hook fields as table-backed instances.
+    --- No-op for non-FFI storage.
+    syncMetadataToFFI: function(s: Storage, container: Component)
 end
 
 local type Storage = storage.Storage
@@ -170,40 +171,36 @@ function storage.newFFIStorage(def: {string:any}): Storage
     return (ffi.newFFIStorage as function({string:any}): Storage)(def)
 end
 
---- Propagate hooks and relationship fields from a component container to FFI storage metadataFields.
---- FFI instances access fields via __index into metadataFields, so these must be copied there.
-function storage.propagateHooksToFFI(s: Storage, container: Component)
+--- Install relationship metadata and behavior hooks on FFI storage. Table-backed
+--- relationship instances carry these fields directly; cdata instances read
+--- them through the storage metatype.
+function storage.syncMetadataToFFI(s: Storage, container: Component)
     local storageAny = s as {string:any}
     if not storageAny.setMetadata then
         return
     end
     local setMetadata = storageAny.setMetadata as function(Storage, string, any)
     setMetadata(s, "relationshipType", container)
-    -- Instances read via metatype → metadataFields; the container is a
-    -- Lua table with no wildcardContainer field, so container-side reads
-    -- stay nil while instance-side reads resolve to the container.
+    -- Keep wildcard presence on instances only. The container itself remains
+    -- the queryable wildcard component.
     setMetadata(s, "wildcardContainer", container)
-    -- Set on the FFI metatype so cdata instances of a sparse relationship
-    -- report `isSparseInstance == true` via __index, while the container
-    -- (a plain Lua table) keeps it nil. Canonical single-flag branch for
-    -- `WorldImpl:has` / `:get`.
+    -- Sparse relationship values live outside archetype columns; this flag is
+    -- the fast discriminator used by `WorldImpl:has` / `:get`.
     if (container as {string:any}).isSparse then
         setMetadata(s, "isSparseInstance", true)
     end
-    -- exclusiveRelationship is needed for `is types.components.Relationship` checks on FFI instances
     local containerAny = container as {string:any}
     if containerAny.exclusiveRelationship ~= nil then
         setMetadata(s, "exclusiveRelationship", containerAny.exclusiveRelationship)
     end
-    -- FFI instances need storage for archetype column creation
-    -- Use the FFI storage itself (s), not the container's storage which may be bitset
+    -- Relationship containers use tag storage for wildcard presence; concrete
+    -- FFI instances must point back to the FFI storage for their data column.
     setMetadata(s, "storage", s)
     setMetadata(s, "storageType", s.storageType)
     setMetadata(s, "transient", containerAny.transient == true)
 
-    -- Behavior-hook plumbing: cdata instances read `_hasDeferSet` etc.
-    -- and `deferSet` etc. via metatype → metadataFields. The container
-    -- carries the canonical values; mirror them here.
+    -- Hooks are attached to the relationship container after construction.
+    -- Mirror only the hooks that exist; plain relationships stay cheap.
     for _, key in ipairs({
         "_hasDeferSet", "_hasDeferRemove", "_hasOnRemove", "_hasOnDespawn",
         "_mustDeferSet", "_mustDeferRemove", "_noBulkBatch",

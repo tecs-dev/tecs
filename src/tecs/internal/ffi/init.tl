@@ -1,5 +1,4 @@
---- FFI utilities for high-performance arrays and component storage.
---- Requires LuaJIT with FFI.
+--- FFI utilities for array-backed ECS internals.
 
 local C <const> = require("ffi")
 local types <const> = require("tecs.types")
@@ -14,9 +13,8 @@ local max <const> = math.max
 local type DoubleArray = types.DoubleArray
 local type Float32Array  = types.Float32Array
 
--- Module definition with all public types and functions
 local record ffi
-    --- Create a new float32 array
+    --- Create a float32 array with length stored at index 0.
     newFloat32: function(capacity: integer): Float32Array
 
     --- Create a new double (float64) array. Entity IDs live in these so
@@ -24,22 +22,22 @@ local record ffi
     --- round-trips without truncation.
     newDouble: function(capacity: integer): DoubleArray
 
-    --- Ensure double array has enough capacity (returns same or new array)
+    --- Ensure capacity, returning the original array or a resized copy.
     ensureCapacityDouble: function(array: DoubleArray, neededCount: integer): DoubleArray
 
-    --- Ensure float32 array has enough capacity (returns same or new array)
+    --- Ensure capacity, returning the original array or a resized copy.
     ensureCapacityFloat32: function(array: Float32Array, neededCount: integer): Float32Array
 
-    --- Adjust double array capacity based on usage (shrink if too large)
+    --- Shrink an over-allocated array when usage is far below capacity.
     adjustCapacityDouble: function(array: DoubleArray, usedCount: integer): DoubleArray
 
-    --- Adjust float32 array capacity based on usage (shrink if too large)
+    --- Shrink an over-allocated array when usage is far below capacity.
     adjustCapacityFloat32: function(array: Float32Array, usedCount: integer): Float32Array
 
-    --- Get the capacity of a double array
+    --- Return the logical capacity tracked for this array.
     getCapacityDouble: function(array: DoubleArray): integer
 
-    --- Get the capacity of a float32 array
+    --- Return the logical capacity tracked for this array.
     getCapacityFloat32: function(array: Float32Array): integer
 
     --- Set the size/length of a double FFI array in slot 0
@@ -48,17 +46,17 @@ local record ffi
     --- Set the size/length of a numeric FFI array in slot 0
     setFloat32ArraySize: function(array: Float32Array, size: integer)
 
-    --- Create a new FFI-based component storage.
+    --- Create FFI-backed component storage.
     --- @param def FFIStorage.StructDefinition
     --- @return Storage (FFI-specific storage interface, but typed as Storage for compatibility)
     newFFIStorage: function(def: FFIStorage.StructDefinition): Storage
 
-    --- Create a new Arena storage for FFI.
+    --- Create an epoch arena for FFI values.
     newArena: function<T>(ffiType: string, initialPageSize?: integer): Arena<T>
 
     FFIStorage: FFIStorage
 
-    --- Check if FFI is available (always true, LuaJIT required)
+    --- Always true in supported runtimes; this module requires LuaJIT FFI.
     isFFIAvailable: function(): boolean
 end
 
@@ -75,21 +73,18 @@ local SHRINK_THRESHOLD <const> = 8          -- Shrink when using less than 1/8 c
 local MIN_SHRINK_SIZE <const> = 512         -- Minimum capacity after shrinking
 local MIN_SHRINK_CHECK_SIZE <const> = 2048  -- Only consider shrinking arrays this size or larger
 
--- Size constants
 local SIZEOF_FLOAT <const> = C.sizeof("float")
 local SIZEOF_DOUBLE <const> = C.sizeof("double")
 
--- Cached array ctypes
 local FLOAT_ARRAY_T <const> = C.typeof("float[?]")
 local DOUBLE_ARRAY_T <const> = C.typeof("double[?]")
 
--- Metadata record for array info (just capacity now)
 local record ArrayMeta
     capacity: integer
 end
 
--- Global metadata table - stores only capacity keyed by FFI cdata
--- Weak keys allow GC to clean up old cdata references
+-- Capacity metadata keyed by cdata array. Weak keys allow old arrays to drop
+-- after resize.
 local arrayMetadata: {any:ArrayMeta} = setmetatable({}, {__mode = "k"})
 
 ffi.newFloat32 = function(capacity: integer): Float32Array
@@ -150,7 +145,6 @@ function ffi.ensureCapacityFloat32(array: Float32Array, neededCount: integer): F
     return array
 end
 
--- Simple assignment functions
 function ffi.setDoubleArraySize(array: DoubleArray, size: integer)
     (array as {integer: number})[0] = size
 end

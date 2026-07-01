@@ -163,7 +163,7 @@ void effect() {
     if (antiAliased) {
         // Anti-aliased edge (stable derivatives from linear vWorldPos varying).
         // Place the transition entirely outside the line's geometric edge so
-        // the interior stays alpha=1 — centering it on the edge mixes the
+        // the interior stays alpha=1 -- centering it on the edge mixes the
         // line color with the background and produces a dark fringe.
         float edgeWidth = length(fwidth(vWorldPos)) * 1.2;
         alpha = 1.0 - smoothstep(halfWidth, halfWidth + edgeWidth, dist);

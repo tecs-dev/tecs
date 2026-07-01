@@ -304,7 +304,7 @@ describe("snapshot save/load", function()
     it("filters entities via opts.filterQuery", function()
         -- The previous "decorate writer to filter" pattern doesn't fit the
         -- column-major data layout cleanly (writeEntity isn't called for
-        -- dense archetypes). Use opts.filterQuery instead — it builds
+        -- dense archetypes). Use opts.filterQuery instead -- it builds
         -- a temp query that limits which archetypes get walked at all.
         local world = tecs.newWorld()
         local keeper = world:spawn(PositionComp(1, 1), HealthComp(10))

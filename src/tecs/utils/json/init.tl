@@ -1,4 +1,4 @@
---- tecs.utils.json: High-performance JSON parser and serializer for LuaJIT.
+--- JSON parser and serializer for LuaJIT.
 
 local type ffi = require("ffi")
 
@@ -6,7 +6,7 @@ local record json
     --- Null sentinel for distinguishing JSON null from Lua nil in arrays.
     NULL: any
 
-    --- Empty array sentinel for explicitly serializing as [].
+    --- Immutable empty table that serializes as [].
     EMPTY_ARRAY: {any}
 
     --- Empty object sentinel for forcing {} instead of [] for empty tables.
@@ -20,7 +20,7 @@ local record json
 
     --- Parse JSON data from a CData pointer and length.
     ---
-    --- This can be used to parse data from things like Love2D's ByteData.
+    --- Useful for buffers such as Love2D ByteData.
     ---
     --- @param data ffi.CData Pointer to the JSON data.
     --- @param length integer Length of the JSON data in bytes.
@@ -56,7 +56,7 @@ json.NULL = setmetatable({}, {
     end
 })
 
---- EMPTY_ARRAY sentinel for explicitly serializing as [].
+--- Immutable empty table that serializes as [].
 json.EMPTY_ARRAY = setmetatable({}, {
     __tostring = function(): string
         return "json.EMPTY_ARRAY"

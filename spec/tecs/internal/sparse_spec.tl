@@ -80,7 +80,7 @@ describe("Sparse Relationships", function()
 
             -- Fresh world reusing the same component definition
             local worldB = tecs.newWorld()
-            -- An entity ID from worldB that matches a worldA entity ID — this is the
+            -- An entity ID from worldB that matches a worldA entity ID -- this is the
             -- exact case that previously corrupted: reused IDs across worlds inherited
             -- the leftover sparse mapping.
             local probe = worldB:spawn()
@@ -632,7 +632,7 @@ describe("Sparse Relationships", function()
             end
             world:update(0)
 
-            -- Count archetypes after — should be at most 1 new archetype (Transform + ChildOf wildcard)
+            -- Count archetypes after -- should be at most 1 new archetype (Transform + ChildOf wildcard)
             local archetypesAfter = 0
             for _ in world:query({include = {Transform}}):iter() do
                 archetypesAfter = archetypesAfter + 1

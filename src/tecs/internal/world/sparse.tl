@@ -7,8 +7,8 @@ to `relationshipStores` by `commitSparseChanges` at the end of `_drain`.
 accurate, and route the wildcard-container cleanup back through
 `deferRemoveRaw` on the staging path.
 
-Contract: these are called from sparse relationship deferSet/deferRemove
-hook bodies, so they carry no `_` prefix.
+Contract: these are called from sparse relationship defer handlers, so they
+carry no `_` prefix.
 ]]
 
 local types <const> = require("tecs.types")
@@ -53,8 +53,8 @@ function WorldImpl:removeSparseRaw(id: integer, container: Component)
     local store = self.relationshipStores[container]
     if store then
         store:remove(id)
-        -- Use deferRemoveRaw to skip hook dispatch — we're already inside
-        -- the sparse hook, don't recurse.
+        -- Use deferRemoveRaw to skip dispatcher recursion; we're already
+        -- inside the sparse defer handler.
         self:deferRemoveRaw(id, container)
     end
     self.isDirty = true
@@ -65,7 +65,7 @@ function WorldImpl:removeSparseOneRaw(id: integer, container: Component, targetI
     if store then
         store:removeOne(id, targetId)
         if not store:has(id) then
-            -- Use deferRemoveRaw to skip hook dispatch.
+            -- Use deferRemoveRaw to skip dispatcher recursion.
             self:deferRemoveRaw(id, container)
         end
     end

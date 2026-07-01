@@ -304,10 +304,10 @@ function WorldImpl:markComponentDirty(id: integer, component: Component)
     end
 end
 
--- Raw set: invoke default set behavior without hook dispatch. Scope-aware
--- — routes to deferSetRaw or instantSetRaw based on current scope depth.
--- Called from inside deferSet/deferRemove hook bodies that want default
--- semantics without recursing through the hook itself.
+-- Raw set: invoke default set behavior without dispatcher recursion.
+-- Scope-aware: routes to deferSetRaw or instantSetRaw based on current
+-- scope depth. Called from component-specific callbacks that want default
+-- semantics without recursing into themselves.
 function WorldImpl:setRaw(id: integer, componentType: Component, value: any)
     if self._scopeDepth > 0 then
         self:deferSetRaw(id, componentType, value)
@@ -325,9 +325,9 @@ function WorldImpl:removeRaw(id: integer, component: Component)
 end
 
 -- Read the current (staging-reconciled) component value for `id`. Returns
--- nil if the entity doesn't carry the component. Contract name — hook
--- bodies call this to capture the old value before invoking removeRaw,
--- satisfying the "value-still-readable" ordering invariant.
+-- nil if the entity doesn't carry the component. Component-specific
+-- callbacks use this before invoking removeRaw, satisfying the
+-- "value-still-readable" ordering invariant.
 function WorldImpl:oldValueOf(id: integer, component: Component): any
     local slot = IdAllocator.slotOf(id)
     local s = self._slots[slot]
@@ -338,8 +338,8 @@ end
 
 -- Return the entity's current archetype as the dispatcher sees it:
 -- pending archetype if one exists (entity is mid-transaction), else the
--- committed archetype. Hook bodies that need to iterate siblings
--- (exclusive-relationship eviction, cascade cleanup) call this.
+-- committed archetype. Component-specific callbacks that need to iterate
+-- siblings (exclusive-relationship eviction, cascade cleanup) call this.
 function WorldImpl:currentArchetype(id: integer): Archetype
     local slot = IdAllocator.slotOf(id)
     -- _slotStamp/_pendingArchArr resolution inlined rather than calling
@@ -372,7 +372,7 @@ function WorldImpl:spawn(...: Component): integer
 end
 
 -- Spawn at a specific packed id. Used by snapshot loading to restore
--- entities at their original (slot, generation). No instant fast path —
+-- entities at their original (slot, generation). No instant fast path --
 -- the id+gen arithmetic + free-stack reconciliation lives on the staged
 -- path, so we self-scope stage + drain (or stage only under a scope).
 function WorldImpl:spawnAt(id: integer, ...: Component)
@@ -415,10 +415,9 @@ function WorldImpl:dirtyArchetypes(): function(): Archetype
     end
 end
 
--- Batch ops: the Transaction provides the staging-queue machinery
--- (applyBatchSet / drainBatchDespawn / batch-spawn drains do the real
--- per-chunk FFI work). Outside a scope we self-drain; inside a scope
--- we stage and let the outer boundary drain.
+-- Batch ops share the staging-queue machinery used by regular deferred
+-- mutations. Outside a scope we self-drain; inside a scope we stage and
+-- let the outer boundary drain.
 function WorldImpl:batchSpawn(
     count: integer,
     componentTypes: {Component},
@@ -500,9 +499,9 @@ local function archetypesOf(world: WorldImpl, query: Query): {Archetype}
         "batch op requires a Query object (built via world:query(...)). " ..
         "Build the query once outside your hot loop and reuse it.")
     local src = items as {Archetype}
-    -- Pooled snapshot: released in Transaction:reset after commit (batch
-    -- ops) or immediately after handoff (batchDespawn). Avoids one
-    -- fresh-table allocation per batch call on the hot path.
+    -- Pooled snapshot: released after commit (batch ops) or immediately
+    -- after handoff (batchDespawn). Avoids one fresh-table allocation per
+    -- batch call on the hot path.
     local snapshot = world._archetypeSnapshotPool:acquire() as {Archetype}
     local n = 0
     for i = 1, #src do
@@ -538,7 +537,7 @@ function WorldImpl:batchSet(query: Query, componentOrInstance: Component, callba
 
     -- Tecs components: the container (type) has `componentType == self`;
     -- an instance has `componentType` pointing AT the container (not
-    -- itself) — so `arg.componentType == arg` disambiguates. Using this
+    -- itself) -- so `arg.componentType == arg` disambiguates. Using this
     -- test we validate the shape matches the call form: callback mode
     -- wants a container, const mode wants an instance (tags are
     -- containers and are accepted in const mode too, since the

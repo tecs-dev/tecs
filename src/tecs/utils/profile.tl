@@ -2,10 +2,10 @@
 ---
 --- Two independent channels share the LuaJIT zone stack for attribution:
 ---
----   * `profile.sample` — statistical (timer-based) sampler. Emits collapsed-stack
+---   * `profile.sample` -- statistical (timer-based) sampler. Emits collapsed-stack
 ---     text consumed by speedscope.app, FlameGraph.pl, inferno, etc. Tells you
 ---     where time is spent.
----   * `profile.trace` — JIT trace event hook. Aggregates trace aborts so you
+---   * `profile.trace` -- JIT trace event hook. Aggregates trace aborts so you
 ---     can spot blacklisted hot code, repeated NYI bailouts, and trace size
 ---     cliffs that silently demote work to the interpreter. Tells you whether
 ---     the JIT is actually compiling your hot code.

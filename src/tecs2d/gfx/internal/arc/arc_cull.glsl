@@ -1,10 +1,10 @@
-// Arc culling compute shader — renderer-owned shadow-column path.
+// Arc culling compute shader -- renderer-owned shadow-column path.
 // Common code is prepended from cull_common.glsl.
 //
 // One dispatch per (archetype, shape). Source-component SSBOs are bound
 // directly; optional components fall back to dummy buffers gated by
 // `ComponentMask`. Output `ArcData` matches the legacy render shader's
-// expected layout — see `arc.glsl`.
+// expected layout -- see `arc.glsl`.
 
 // ---------- Source-component SSBOs ----------
 

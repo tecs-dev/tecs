@@ -5,7 +5,7 @@
 --- methods). Implementations live in `world.tl` and `world/*.tl`; each
 --- file aliases `internal.WorldImpl` and attaches methods via
 --- `function WorldImpl:foo(...)`. This is the only way Teal's type
---- checker accepts cross-file method extension — the concrete record
+--- checker accepts cross-file method extension -- the concrete record
 --- declaration must exist in a module with no cyclic imports.
 
 local types <const> = require("tecs.types")
@@ -43,7 +43,7 @@ local record internal
         --- for tag containers (self), for instances, and for any other
         --- case where the value is shareable across entities. Nil for
         --- data-container entries where each entity needs a fresh
-        --- allocation — `factory` is used in that case.
+        --- allocation -- `factory` is used in that case.
         sharedValue: any
 
         --- When `sharedValue` is nil, this is the container callable
@@ -64,7 +64,7 @@ local record internal
     --- that holds a `types.Archetype`-typed value casts via
     --- `arch as ArchetypeInternal` to reach these fields. The concrete
     --- record in `tecs.internal.Archetype` declares the same set
-    --- directly (it can't `is` this interface — importing this module
+    --- directly (it can't `is` this interface -- importing this module
     --- from Archetype.tl would create a circular require).
     interface ArchetypeInternal is types.Archetype
         onDespawnComponents: {types.components.Component}
@@ -296,10 +296,9 @@ local record internal
         --- first use so late-binding of dependent components works.
         _requiresClosure: {RequireEntry}
 
-        --- Behavior hook slots (all optional). See `components.attachHooks`.
-        --- Set by the factory functions in `components.tl` when a dense
-        --- relationship has `exclusive`/`reverseIndex` or a relationship is
-        --- `sparse`. Never attached by user code.
+        --- Internal behavior callbacks (all optional). See `components.attachHooks`.
+        --- Set by component factories for relationship bookkeeping; never
+        --- attached by user code.
 
         --- Fires when `world:set` runs in a staged scope (or is routed
         --- through the deferred path from `world:set` in instant mode).
@@ -319,8 +318,8 @@ local record internal
         --- INVARIANT: `arch.columns[componentType][row+1]` is live at entry.
         onDespawn: function(world: types.World, id: integer, componentType: types.components.Component, arch: types.Archetype, row: integer)
 
-        --- Hook-present flags. Read at dispatcher entry (hot path); single
-        --- predictable-false compare in the no-hook common case.
+        --- Callback-present flags. Read at dispatcher entry (hot path); single
+        --- predictable-false compare in the common case.
         _hasDeferSet: boolean
         _hasDeferRemove: boolean
         _hasOnRemove: boolean
@@ -328,7 +327,7 @@ local record internal
 
         --- True iff `deferSet` / `deferRemove` MUST route through the
         --- deferred path even when invoked via `world:set` / `world:remove`
-        --- in instant mode. Set for hooks whose side effects are unsafe
+        --- in instant mode. Set for callbacks whose side effects are unsafe
         --- to run eagerly (e.g. sparse staging, which flushes only at drain).
         _mustDeferSet: boolean
         _mustDeferRemove: boolean
@@ -337,9 +336,8 @@ local record internal
         _noBulkBatch: boolean
     end
 
-    --- The concrete world record. All fields live here (no more split
-    --- with a Transaction record); all methods attach via `function
-    --- WorldImpl:foo` across world.tl + world/*.tl.
+    --- The concrete world record. All fields live here; all methods attach
+    --- via `function WorldImpl:foo` across world.tl + world/*.tl.
     record WorldImpl is types.World
         -- ----- Construction / orchestration -----
         pipeline: types.Pipeline
@@ -374,7 +372,7 @@ local record internal
         -- while this is > 0; a drain fires when it returns to 0.
         _scopeDepth: integer
 
-        -- ----- Transaction state (formerly on Transaction.world) -----
+        -- ----- Staging / drain state -----
         -- Dirty-archetype dedupe uses an epoch + per-archetype marker
         -- (`arch.dirtyQueuedEpoch`) instead of a hashset. Bumping
         -- `_dirtyEpoch` on reset is O(1) and renders every archetype's
@@ -389,7 +387,7 @@ local record internal
         -- this epoch the stamp is bumped and the companion field zeroed
         -- (since its stored bytes are stale). Reset bumps
         -- `_transactionEpoch` in O(1); on 32-bit wrap the stamp array is
-        -- cleared (every ~4B transactions — effectively never).
+        -- cleared (every ~4B transactions -- effectively never).
         _stateArr: any                  -- uint8[maxSlotCount+1]
         _pendingArchArr: any            -- uint32[maxSlotCount+1]  -- archetype ids
         _slotStamp: any                 -- uint32[maxSlotCount+1]  -- shared stamp
@@ -413,7 +411,7 @@ local record internal
         autoStateComponent: Component
         emptyArchetype: ArchetypeInternal
 
-        -- Constructor — implemented in world.tl.
+        -- Constructor -- implemented in world.tl.
         new: function(config?: types.World.Config): types.World
 
         -- ----- Public API (mirrors types.World; redeclared for concrete-record resolution) -----
@@ -489,15 +487,16 @@ local record internal
         _deferSpawn: function(self: WorldImpl, ...: Component): integer
         _deferSpawnAt: function(self: WorldImpl, id: integer, ...: Component)
         _deferDespawn: function(self: WorldImpl, id: integer)
-        -- Dispatchers (underscored, core-internal): check for behavior hooks
-        -- and delegate to either the hook or the Raw entry below.
+        -- Dispatchers (underscored, core-internal): run component-specific
+        -- behavior when present, otherwise delegate to the raw entry below.
         _deferSet: function(self: WorldImpl, id: integer, componentType: Component, value: any)
         _deferRemove: function(self: WorldImpl, id: integer, component: Component)
         _instantSet: function(self: WorldImpl, id: integer, componentType: Component, value: any)
         _instantRemove: function(self: WorldImpl, id: integer, component: Component)
 
-        -- Raw entries (no underscore — hook bodies call these to invoke
-        -- default behavior without re-dispatching through hook logic).
+        -- Raw entries (no underscore): component-specific callbacks call
+        -- these to invoke default behavior without re-dispatching into
+        -- themselves.
         deferSetRaw: function(self: WorldImpl, id: integer, componentType: Component, value: any)
         deferRemoveRaw: function(self: WorldImpl, id: integer, component: Component)
         instantSetRaw: function(self: WorldImpl, id: integer, componentType: Component, value: any)
@@ -510,7 +509,8 @@ local record internal
         removeSparseRaw: function(self: WorldImpl, id: integer, container: Component)
         removeSparseOneRaw: function(self: WorldImpl, id: integer, container: Component, targetId: integer)
 
-        -- Pure-mechanism workers; never reached by hooks directly.
+        -- Pure-mechanism workers; component-specific callbacks do not call
+        -- these directly.
         _deferSetSlow: function(self: WorldImpl, id: integer, componentType: Component, value: any)
         _instantSpawn: function(self: WorldImpl, ...: Component): boolean, integer
         _instantDespawn: function(self: WorldImpl, id: integer): boolean

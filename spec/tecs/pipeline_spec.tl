@@ -334,7 +334,7 @@ describe("Pipeline", function()
         -- With eager-by-default mutation semantics, each world:set /
         -- despawn / etc. flushes as it happens (or on query-iteration
         -- exit via auto-defer). The pipeline no longer calls
-        -- world:commit at phase-group boundaries — that would be a
+        -- world:commit at phase-group boundaries -- that would be a
         -- redundant no-op fast-bail.
         local commitCount = 0
         test.world = {

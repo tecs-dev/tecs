@@ -177,9 +177,9 @@ local record builtins
         metamethod __call: function(self): StartSnapshotLoad
     end
 
-    --- An event emitted on entity 0 once `tecs.loadSnapshot` finishes —
+    --- An event emitted on entity 0 once `tecs.loadSnapshot` finishes --
     --- after all entities are restored AND every data callback has run.
-    --- Useful for cleanup or "load is complete" hooks.
+    --- Useful for cleanup or "load is complete" callbacks.
     record FinishSnapshotLoad is types.events.Event
         --- The snapshot prelude (version, counts).
         prelude: any
@@ -189,7 +189,7 @@ local record builtins
     --- Marks an entity as paused.
     ---
     --- Unlike Disabled, Paused is NOT auto-excluded from queries. Paused entities
-    --- should still render — only gameplay systems need to exclude them explicitly
+    --- should still render -- only gameplay systems need to exclude them explicitly
     --- via `exclude = {Paused}` when needed (e.g., TTL, CameraTarget).
     Paused: Component
 

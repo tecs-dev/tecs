@@ -1,4 +1,4 @@
---- Lightweight, branch-free logging module.
+--- Lightweight logging with level-stamped no-op methods.
 local ffi <const> = require("ffi")
 local string_format <const> = string.format
 local os_date <const> = os.date

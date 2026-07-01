@@ -4,7 +4,7 @@
 --- Enables O(1) world:targets() and world:traverse() lookups, and cascade delete via removeTarget() during despawn.
 ---
 --- Internal layout: each target maps to a SET of source entity IDs (a Lua table with `{[sourceId] = true}` entries).
---- This makes link/unlink/membership-check all O(1) and link is idempotent — calling it twice with the same
+--- This makes link/unlink/membership-check all O(1) and link is idempotent -- calling it twice with the same
 --- (source, target) pair is a no-op rather than producing duplicate entries.
 ---
 --- Iteration order is non-deterministic (uses pairs). No "ordered relationship" config exists in the codebase, and
@@ -47,7 +47,7 @@ local record InverseIndex
 
     --- Remove ALL edges from a source entity (used on entity despawn).
     --- Iterates over the source's outgoing edges in caller-provided arg list since
-    --- we don't track them per-source — caller must pass the targets to unlink.
+    --- we don't track them per-source -- caller must pass the targets to unlink.
     --- @param sourceId the source entity ID
     --- @param targets the list of target entity IDs to unlink from the source
     unlinkSourceFromTargets: function(self, sourceId: integer, targets: {integer})

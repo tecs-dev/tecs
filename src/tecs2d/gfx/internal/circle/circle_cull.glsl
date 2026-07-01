@@ -1,10 +1,10 @@
-// Circle culling compute shader — renderer-owned shadow-column path.
+// Circle culling compute shader -- renderer-owned shadow-column path.
 // Common code is prepended from cull_common.glsl.
 //
 // One dispatch per (archetype, shape). Each dispatch binds the source-
 // component SSBOs for that archetype and reads them by archetype-row
 // index (gl_GlobalInvocationID.x is the row-within-archetype, 0-based).
-// Optional components are handled by `ComponentMask` — if a bit is
+// Optional components are handled by `ComponentMask` -- if a bit is
 // clear the corresponding SSBO is bound to a zero-buffer (or its
 // reads are guarded by the bit), so layout-uniform branches stay
 // dispatch-uniform and the GPU treats them as free.
@@ -28,7 +28,7 @@ layout(std430) readonly buffer TransformInput {
 };
 
 struct Std430Circle {
-    // (radius, lineWidth) — packed to match the BufferFormat's
+    // (radius, lineWidth) -- packed to match the BufferFormat's
     // single floatvec2 member. LÖVE 12 enforces struct field count
     // == BufferFormat member count.
     vec2 radiusLineWidth;
@@ -204,7 +204,7 @@ void computemain() {
     // (Transform.x/y at the layout box origin, offset + radius to
     // recenter at the circle's center). Non-UI circles have Transform
     // at the circle center already, so the shift only applies when
-    // LayoutBox is actually on the archetype — gating on COMP_LAYOUTBOX
+    // LayoutBox is actually on the archetype -- gating on COMP_LAYOUTBOX
     // matches the legacy `circle/sync.tl` behavior.
     if ((ComponentMask & COMP_LAYOUTBOX) != 0u) {
         vec2 layoutOffset = readLayoutBoxOffset(row);

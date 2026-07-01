@@ -87,7 +87,7 @@ local record shadow_plugin
         outputName: string              -- e.g. "CircleOutput"
         shadowOutputName: string        -- e.g. "CircleShadowOutput"
 
-        --- Stub formats — `simpleShapePlugin` requires these even
+        --- Stub formats -- `simpleShapePlugin` requires these even
         --- though the shadow cull/upload override means they're
         --- never read by a shader. The renderer reads
         --- `transformBuffer.count` to gate `renderGBuffer`.

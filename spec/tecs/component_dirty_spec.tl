@@ -2,10 +2,10 @@
 --
 -- Replaces row-level `_dirtyBits` / `_allDirty` / `markDirty(row)` with
 -- a per-archetype, per-component dirty bitset. The signal is set by:
---   1. `archetype:getMut(Foo)` — explicit intent at access site
---   2. spawn / archetype move-in / swap-pop — structural changes
---   3. `world:set` / `archetype:set` — value writes
---   4. `archetype:markComponentDirty(Foo)` / `markAllComponentsDirty()` — explicit
+--   1. `archetype:getMut(Foo)` -- explicit intent at access site
+--   2. spawn / archetype move-in / swap-pop -- structural changes
+--   3. `world:set` / `archetype:set` -- value writes
+--   4. `archetype:markComponentDirty(Foo)` / `markAllComponentsDirty()` -- explicit
 --
 -- And cleared by `world:update` at end of frame.
 --
@@ -116,7 +116,7 @@ describe("component-dirty contract", function()
         end)
 
         it("archetype move-in marks every component on the destination dirty", function()
-            -- Spawn into Pos archetype, then add Tag — that's a move-in
+            -- Spawn into Pos archetype, then add Tag -- that's a move-in
             -- to {Pos, Tag} archetype.
             local world = tecs.newWorld()
             local e = world:spawn(Pos(1, 2))

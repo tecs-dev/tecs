@@ -148,7 +148,7 @@ end
 --- Mutable column access. Returns the row-indexed column AND marks
 --- the component dirty on this archetype, signalling incremental-sync
 --- consumers (renderer shadow buffers, snapshot diffs) that this column's
---- bytes are about to change. Idempotent — repeated calls are O(1)
+--- bytes are about to change. Idempotent -- repeated calls are O(1)
 --- after the first.
 function Archetype:getMut<T is Component>(component: T): {T}
     local column = rawget(self.columns, component)
@@ -426,11 +426,11 @@ end
 -- component types, and row indices.
 --
 -- Observer notification contract:
---   notifyAdded(rowStart, count)   — after rows are added to the archetype
---   notifyRemoved(rowStart, count) — before rows are removed from the archetype
---   notifyMove(entity, from, to)   — after an entity's row changes due to compaction
---   notifyActivated()              — when entity count transitions from 0 → non-zero (fired from notifyAdded)
---   notifyDeactivated()            — when entity count transitions from non-zero → 0
+--   notifyAdded(rowStart, count)   -- after rows are added to the archetype
+--   notifyRemoved(rowStart, count) -- before rows are removed from the archetype
+--   notifyMove(entity, from, to)   -- after an entity's row changes due to compaction
+--   notifyActivated()              -- when entity count transitions from 0 → non-zero (fired from notifyAdded)
+--   notifyDeactivated()            -- when entity count transitions from non-zero → 0
 --
 -- Queries depend on activated/deactivated to maintain active archetype lists.
 -------------------------------------------------------------------------------

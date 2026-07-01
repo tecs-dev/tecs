@@ -9,7 +9,7 @@
 -- Labels default to short git SHAs (see bench.lua's BENCH_LOG emission); pass
 -- LABEL=<name> when running a suite to tag runs with something memorable.
 -- Matching rows across the two labels are joined by (suite, case_name, variant)
--- and the newest timestamp per (label, key) wins — so re-running a label
+-- and the newest timestamp per (label, key) wins -- so re-running a label
 -- overwrites its prior entry for this comparison.
 
 local function parseCsvLine(line)
@@ -224,7 +224,7 @@ for _, k in ipairs(keyOrder) do
         local delta = b.p50 - a.p50
         local pct = a.p50 > 0 and (delta / a.p50 * 100) or 0
         -- Significance test: treat the change as real when |Δ| exceeds the sum
-        -- of both CI95 half-widths. Loose but cheap — proper answer would be a
+        -- of both CI95 half-widths. Loose but cheap -- proper answer would be a
         -- Mann-Whitney U or bootstrapped CI on the difference, which we don't
         -- have the raw samples for here.
         local significant = math.abs(delta) > (a.ci95 + b.ci95)

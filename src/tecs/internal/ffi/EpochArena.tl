@@ -21,16 +21,16 @@ local record EpochArena<T>
     --- High-water mark of pages used since last clear (1-based).
     usedPages: integer
 
-    --- Base FFI type name used to create per-page arrays (e.g. "float", "int32_t", "struct MyStruct").
+    --- Base FFI type name used to create per-page arrays.
     ffiType: string
 
     --- Number of elements allocated per page.
     pageAllocSize: integer
 
     record Page<U>
-        --- FFI cdata array for this page. One extra slot is allocated so callers can use 1-based indexing.
-        data: any  -- Actually a cdata array
-        --- Capacity (number of elements) in this page
+        --- FFI cdata array for this page. One extra slot supports 1-based row indexes.
+        data: any
+        --- Capacity in elements.
         capacity: integer
         --- Used element count in this page for the current epoch.
         count: integer
@@ -38,7 +38,7 @@ local record EpochArena<T>
 
     --- Create a new epoch arena.
     ---
-    --- @param ffiType The FFI type string (e.g., "float", "int32_t", "struct MyStruct")
+    --- @param ffiType The FFI type string.
     --- @param initialPageSize Initial page size (defaults to 4096)
     --- @return the created arena.
     new: function<U>(ffiType: string, initialPageSize?: integer): EpochArena<U>

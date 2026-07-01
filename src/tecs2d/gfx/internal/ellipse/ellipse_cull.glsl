@@ -1,10 +1,10 @@
-// Ellipse culling compute shader — renderer-owned shadow-column path.
+// Ellipse culling compute shader -- renderer-owned shadow-column path.
 // Common code is prepended from cull_common.glsl.
 //
 // One dispatch per (archetype, shape). Source-component SSBOs are bound
 // directly; optional components fall back to dummy buffers gated by
 // `ComponentMask`. Output `EllipseData` matches the legacy render
-// shader's expected layout — see `ellipse.glsl`.
+// shader's expected layout -- see `ellipse.glsl`.
 
 // ---------- Source-component SSBOs ----------
 

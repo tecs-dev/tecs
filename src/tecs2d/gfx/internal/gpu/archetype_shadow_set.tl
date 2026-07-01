@@ -45,7 +45,7 @@ local record archetype_shadow_set
         --- Run pointer-drift detection per entry; for each entry,
         --- upload via `flushRange` whenever the entry's component is
         --- marked dirty on the archetype (or pointer drift forced a
-        --- buffer rebuild). Idempotent when no mutation occurred —
+        --- buffer rebuild). Idempotent when no mutation occurred --
         --- world's end-of-update clear leaves every component bit at
         --- 0 until the next frame's writes.
         flush: function(self)

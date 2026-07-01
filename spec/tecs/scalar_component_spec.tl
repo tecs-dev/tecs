@@ -186,7 +186,7 @@ describe("scalar components", function()
     it("exports as a typed module field without a custom container", function()
         -- Recommended pattern: declare the field type on the owning
         -- module record, assign a cast registration result to it. The
-        -- cast is required — Teal does not infer the scalar T from
+        -- cast is required -- Teal does not infer the scalar T from
         -- `default` or `kind` on its own.
         local record fakeModule
             Stamina: tecs.ScalarComponent<number>

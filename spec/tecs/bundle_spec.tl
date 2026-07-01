@@ -668,7 +668,7 @@ describe("bundle", function()
             world:clearEntities()
             luassert.is_false(world:isAlive(id1))
 
-            -- The same bundle handle keeps working — no re-registration needed.
+            -- The same bundle handle keeps working -- no re-registration needed.
             local id2 = bundle:spawn(Comp(42))
             world:commit()
             luassert.is_true(world:isAlive(id2))

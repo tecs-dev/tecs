@@ -179,7 +179,7 @@ describe("world:batchSet()", function()
 
             -- Tag archetype lacks Position; the callback runs against the
             -- destination archetype. For table-storage components, new
-            -- rows are nil until the callback assigns an instance — the
+            -- rows are nil until the callback assigns an instance -- the
             -- in-place `col[r].field = ...` mutation pattern is only
             -- safe for FFI columns (where the struct comes zero-init'd).
             local q = world:query({include = {Tag}})

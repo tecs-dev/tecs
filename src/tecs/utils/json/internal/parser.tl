@@ -1,4 +1,4 @@
---- JSON parser using LuaJIT and FFI
+--- JSON parser using LuaJIT FFI buffers.
 
 local C <const> = require("ffi")
 local buffer <const> = require("string.buffer")
@@ -23,7 +23,7 @@ function parser.setNullSentinel(sentinel: any)
     NULL_SENTINEL = sentinel
 end
 
--- FFI lookup tables for ultra-fast character classification
+-- Byte-indexed lookup tables keep character tests branch-light in parse loops.
 local WHITESPACE_LUT = C.new("bool[256]") as {boolean}
 local DIGIT_LUT = C.new("bool[256]") as {boolean}
 local NUM_FLOAT_LUT = C.new("bool[256]") as {boolean}
@@ -72,10 +72,10 @@ do
     for i = 0, 255 do CH1[i] = string.char(i) end
 end
 
--- Reusable StringBuffer building strings
+-- Reused while decoding escaped strings. Parsing is not reentrant.
 local stringBuffer = buffer.new()
 
--- Reusable 4-byte buffer for UTF-8 encoding (avoids allocating a 4-byte string for each \uXXXX escape).
+-- Scratch space for UTF-8 bytes produced by \uXXXX escapes.
 local u8 = C.new("uint8_t[4]") as {integer}
 
 local function putUtf8Bytes(putcdata: function, cp: integer)
@@ -114,7 +114,7 @@ local CHAR_DOT <const> = 46         -- '.'
 local CHAR_E <const> = 101          -- 'e'
 local CHAR_E_CAP <const> = 69       -- 'E'
 
--- Error messages for JIT hygiene
+-- Shared error strings keep hot parse branches small.
 local ERR_UNTERMINATED_STRING <const> = "Unterminated string"
 local ERR_INVALID_NUMBER <const> = "Invalid number"
 local ERR_INVALID_FRAC <const> = "Invalid frac"
@@ -270,7 +270,7 @@ end
 -- Reusable endptr for strtod
 local STRTOD_ENDPTR = C.new("char *[1]") as {integer}
 
--- Scratch buffer for NUL-terminating number tokens from cdata (bug #3: strtod needs NUL)
+-- strtod needs a NUL-terminated token; cdata input may not provide one.
 local STRTOD_SCRATCH_SIZE = 64
 local strtodScratch = C.new("char[?]", STRTOD_SCRATCH_SIZE) as {integer}
 
@@ -624,7 +624,7 @@ function parser.parse(jsonStr: string): any
     return result
 end
 
---- Parse JSON from FFI cdata pointer (useful for Love2D ByteData or other FFI buffers).
+--- Parse JSON from an FFI cdata pointer and byte length.
 function parser.parseCData(cdataPtr: C.CData, length: integer): any
     if not cdataPtr then
         error(ERR_CDATA_NIL)

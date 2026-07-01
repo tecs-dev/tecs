@@ -1,9 +1,8 @@
--- love2d doesn't bundle the jit/*.lua stdlib files in its release packages
--- (see https://github.com/love2d/love/issues/1752), so require("jit.vmdef") fails inside a love game and trace abort
--- reports lose their human-readable reasons (e.g. "error 5" instead of "blacklisted") and bytecode names
--- (e.g. "op51" instead of "FNEW"). This registers a fallback on package.preload exposing only the fields tecs uses
--- (`traceerr`, `bcnames`); on systems that ship the real file, Lua's loader still resolves to it first
--- (package.loaded is checked before preload, and if a user has already required jit.vmdef, their version is kept).
+-- LOVE release packages may omit LuaJIT's jit/*.lua library files, so
+-- require("jit.vmdef") can fail. Profile trace reports need `traceerr` and
+-- `bcnames` to turn abort codes into readable reasons and bytecode names.
+-- Register only that fallback shape without replacing an already-loaded module
+-- or an existing preload entry.
 --
 -- The tables below are baked from LuaJIT 2.1's jit/vmdef.lua. Regenerate with:
 --   luajit -e 'local v=require"jit.vmdef".traceerr; local i=0; while v[i] do io.write(string.format("[%d] = %q,\n",i,v[i])); i=i+1 end'

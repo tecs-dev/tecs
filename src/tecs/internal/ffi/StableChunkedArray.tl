@@ -1,6 +1,6 @@
 --- Stable-address FFI storage with chunked allocation.
---- Chunks are never moved or freed while the array is alive, so element addresses remain stable even when ids
---- are recycled. Supports ID-based access with free list recycling.
+--- Chunks are never moved while the array is alive, so element addresses stay
+--- stable even when ids are recycled.
 
 local ffi <const> = require("ffi")
 local floor <const> = math.floor
@@ -29,7 +29,7 @@ local ChunkedArrayMT: metatable<ChunkedArray> = {
 }
 
 local record module
-    --- The ChunkedArray type (exported for type annotations)
+    --- ChunkedArray type for annotations.
     type ChunkedArray = ChunkedArray
 
     --- Create a new chunked array for the given base FFI type name.

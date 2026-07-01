@@ -3,11 +3,11 @@
 ---
 --- Two implementations behind one interface:
 ---
----   Sparse — owns BOTH a forward map (entityId → value) and an inverse index.
+---   Sparse -- owns BOTH a forward map (entityId → value) and an inverse index.
 ---     Used for relationships declared with `sparse = true`. The forward map
 ---     is the primary storage for the relationship value.
 ---
----   Dense  — owns ONLY an inverse index. Forward data lives in archetype
+---   Dense  -- owns ONLY an inverse index. Forward data lives in archetype
 ---     columns (one column per (container, target) pair). Used for dense
 ---     relationships with `reverseIndex = true`. Forward storage methods
 ---     (get/set/has/etc) are no-ops on this implementation.
@@ -41,9 +41,10 @@ local record RelationshipStore
     --- if neither sparse nor reverseIndex is set (no store needed).
     create: function(config: RelationshipStoreConfig): RelationshipStore
 
-    --- Inverse index operations — both implementations support these.
-    --- For dense relationships, link/unlink are called by HookProcessor when
-    --- entities are added/removed from archetypes containing the relationship.
+    --- Inverse index operations - both implementations support these.
+    --- For dense relationships, link/unlink are called by component-specific
+    --- callbacks when entities are added/removed from archetypes containing
+    --- the relationship.
     --- For sparse relationships, link/unlink are called internally by set/remove.
     link: function(self, sourceId: integer, targetId: integer)
     unlink: function(self, sourceId: integer, targetId: integer)
@@ -52,12 +53,12 @@ local record RelationshipStore
     --- Remove all entries that target a given entity. Returns a {[sourceId] = true}
     --- map of source entity IDs that were fully cleared (used for cascade-delete).
     --- Iterate with `for sourceId in pairs(...) do`.
-    --- For dense relationships only the inverse index is cleared — the caller
-    --- (DespawnPhase) is responsible for removing the relationship instance
+    --- For dense relationships only the inverse index is cleared - despawn
+    --- cleanup is responsible for removing the relationship instance
     --- components from each source's archetype.
     removeTarget: function(self, targetId: integer): {integer: boolean}
 
-    --- Forward storage operations — only meaningful on the Sparse implementation.
+    --- Forward storage operations - only meaningful on the Sparse implementation.
     --- Dense returns nil/false from these (forward data lives in archetype columns).
     get: function(self, entityId: integer): any
     getTarget: function(self, entityId: integer, targetId: integer): any
@@ -273,7 +274,7 @@ local record DenseImpl
     _inverse: InverseIndex
 end
 
--- Forward storage methods are no-ops for dense — forward data lives in archetype columns.
+-- Forward storage methods are no-ops for dense -- forward data lives in archetype columns.
 function DenseImpl:get(_entityId: integer): any return nil end
 function DenseImpl:getTarget(_entityId: integer, _targetId: integer): any return nil end
 function DenseImpl:set(_entityId: integer, _value: any): any return nil end

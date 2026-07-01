@@ -147,7 +147,7 @@ tecs.newComponent({
         } as tileChunk.TileChunk
     end,
     -- TileChunk always needs DirtyTileChunk on first add so the GPU
-    -- buffer sync picks it up. Declarative via `requires` — the
+    -- buffer sync picks it up. Declarative via `requires` -- the
     -- archetype transition merges both in one move, and re-adding
     -- during snapshot restore is idempotent (the required tag is
     -- skipped when already present).
@@ -225,7 +225,7 @@ function tileChunk.plugin(world: tecs.World)
     --
     -- Tilechunk's per-frame upload signal lives at the ECS level (the
     -- `DirtyTileChunk` tag query). That makes the legacy `GPUBuffer`'s
-    -- per-slot dirty bitmap redundant — there's nothing to gate on
+    -- per-slot dirty bitmap redundant -- there's nothing to gate on
     -- below the tag. So we hold the storage as a plain ByteData +
     -- love.graphics.Buffer pair, with a small slot manager on top for
     -- stable per-chunk indices.

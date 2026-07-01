@@ -41,7 +41,7 @@ local function now()
     return tonumber(_tsBuf.tv_sec) + tonumber(_tsBuf.tv_nsec) / 1e9
 end
 
--- Pre-allocated FFI double array for timing samples — zero table churn, zero GC
+-- Pre-allocated FFI double array for timing samples -- zero table churn, zero GC
 -- pressure. Sized for the max expected iteration count; reused across variants/cases.
 local MAX_TIMING_SAMPLES = 100000
 local _timesBuf = ffi.new("double[?]", MAX_TIMING_SAMPLES)
@@ -53,7 +53,7 @@ local bench = {}
 -- of sample time have accumulated, giving fast cases many more samples
 -- (tighter stats) and slow cases fewer. `maxWall` is the upper bound on total
 -- wall time spent in this call, including setup/teardown/GC between iterations
--- — prevents a case with expensive setup from blocking the whole suite.
+-- -- prevents a case with expensive setup from blocking the whole suite.
 -- Returns stats including a 95% confidence interval on the median.
 local function measure(variant, case, minDuration, maxWall, microIterations, traceSession)
     local setup = variant.setup
@@ -156,7 +156,7 @@ end
 
 -- Approximate display width: counts ASCII as 1 column, 2/3-byte UTF-8 codepoints
 -- (CJK, common symbols) as 1 column, and 4-byte UTF-8 codepoints (supplementary
--- plane — most emoji) as 2 columns. Good enough for our table cells.
+-- plane -- most emoji) as 2 columns. Good enough for our table cells.
 local function displayWidth(s)
     local n = 0
     local i = 1
@@ -185,7 +185,7 @@ local function displayWidth(s)
 end
 
 -- Print a markdown table with auto-aligned columns. The row at separatorRow
--- (default 2) is rendered as dashes regardless of its content — so multi-line
+-- (default 2) is rendered as dashes regardless of its content -- so multi-line
 -- headers can pass separatorRow=3 (or higher) and supply a placeholder row
 -- whose content will be replaced with dashes.
 local function printTable(rows, separatorRow)
@@ -226,7 +226,7 @@ function bench.suite(config)
     -- Fork-per-pair child dispatch: a single main.lua may declare multiple
     -- suites (e.g. benches/json-bench has Parse + Serialize). The child runs
     -- the whole script, so any suite whose name doesn't match the parent's
-    -- target must exit early — otherwise it would emit a second result line
+    -- target must exit early -- otherwise it would emit a second result line
     -- and corrupt the parent's parser.
     if os.getenv("BENCH_CHILD") == "1" then
         local target = os.getenv("BENCH_CHILD_SUITE")
@@ -412,7 +412,7 @@ function bench.suite(config)
     local warmupIterations = config.warmupIterations or 100
     local minDuration = config.minDuration or 0.5
     -- Upper bound on wall time per (case, variant) measurement. Caps total
-    -- time spent iterating even if the sample budget hasn't been reached — a
+    -- time spent iterating even if the sample budget hasn't been reached -- a
     -- case with heavy setup/teardown can easily burn 30s of wall time for 1s
     -- of sample time otherwise. Default generous (20× minDuration or 30s,
     -- whichever is larger) so existing fast suites aren't affected.
@@ -492,7 +492,7 @@ function bench.suite(config)
         local case = cases[1]
         local variant = variants[1]
 
-        -- Warmup runs first (no trace diagnostics attached — warmup is
+        -- Warmup runs first (no trace diagnostics attached -- warmup is
         -- expected to compile traces, and logging every one would drown out
         -- the measurement-phase events the user actually cares about).
         if os.getenv("TRACE") == "dump-all" then
@@ -507,7 +507,7 @@ function bench.suite(config)
 
         -- Optional JIT trace diagnostics, scoped to the measurement phase.
         -- Uses tecs.utils.profile's trace session which aggregates aborts by
-        -- (severity, reason, location, zone) — no repeated "[TRACE 118 start]"
+        -- (severity, reason, location, zone) -- no repeated "[TRACE 118 start]"
         -- spam, just a sorted report of unique abort sites.
         --
         -- TRACE=1: aborts only (severity: blacklist/warn).
@@ -527,7 +527,7 @@ function bench.suite(config)
             require("jit.dump").on(nil, "-")
         end
 
-        -- Normal measurement pass (not profiled — profiler overhead would skew timings)
+        -- Normal measurement pass (not profiled -- profiler overhead would skew timings)
         local r = measure(variant, case, minDuration, maxDuration, microIterations, traceSession)
 
         -- Stop trace diagnostics before the optional profiling pass below so
@@ -631,7 +631,7 @@ function bench.suite(config)
     -- script); else fall back to "luajit" on PATH.
     local luajit = os.getenv("BENCH_LUAJIT") or arg[-1] or "luajit"
 
-    -- Wrap a string in single quotes with embedded-quote escaping — the standard
+    -- Wrap a string in single quotes with embedded-quote escaping -- the standard
     -- POSIX shell idiom: '…' stays literal, '\'' closes/escapes/reopens.
     local function shellEscape(s)
         return "'" .. (tostring(s):gsub("'", "'\\''")) .. "'"
@@ -663,7 +663,7 @@ function bench.suite(config)
             -- TRACE, etc. carry through); we only override the selection vars
             -- and hand off a result path via BENCH_RESULT_FILE. BENCH_CHILD_CASE
             -- (the position in the expanded list) is the authoritative selector
-            -- for the child — the child uses it to pick one expanded case and
+            -- for the child -- the child uses it to pick one expanded case and
             -- skips CASE/PARAMS filtering.
             local resultFile = os.tmpname()
             local totalPairs = #cases * #variants
@@ -824,7 +824,7 @@ function bench.suite(config)
     end
     printTable(rows, 3)
 
-    -- Summary table (geometric mean against baseline) — only meaningful with >1 variant
+    -- Summary table (geometric mean against baseline) -- only meaningful with >1 variant
     if hasMultipleVariants and config.baseline then
         local baselineExists = false
         for _, variant in ipairs(variants) do

@@ -200,7 +200,7 @@ tecs.newComponent({
         }
     end,
     -- Body teardown on remove is handled by a query observer
-    -- registered in `physics.new`'s plugin — see the
+    -- registered in `physics.new`'s plugin -- see the
     -- `physics.ColliderLifecycle` observer below.
 })
 

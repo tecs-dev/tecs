@@ -914,7 +914,7 @@ tecs.newFFIComponent({
 
     -- Sprite setup (bucket assignment + GPU slot allocation) and
     -- teardown (instance ref release) are handled by query observers
-    -- registered in `sprite.plugin` — see the `sprite.SpriteLifecycle`
+    -- registered in `sprite.plugin` -- see the `sprite.SpriteLifecycle`
     -- block below.
 })
 

@@ -121,7 +121,7 @@ layout(std430) writeonly buffer MaterialParamsOutput {
 
 // ---------- Component-presence mask ----------
 
-// Canonical bits — must match modifier_binding.MASK (gpu/modifier_binding.tl).
+// Canonical bits -- must match modifier_binding.MASK (gpu/modifier_binding.tl).
 const uint COMP_COLOR        = 0x01u;
 const uint COMP_CLIPBOUNDS   = 0x02u;
 const uint COMP_MATERIAL     = 0x10u;
@@ -332,7 +332,7 @@ void computemain() {
     uint outIdx = atomicAdd(args[4], 1u);
 
     // Pack the header. Layout MUST match TEXT_HEADER_FORMAT (8 vec4s,
-    // 128 bytes) — see `gfx/internal/gpu/types.tl:TEXT_HEADER_FORMAT`
+    // 128 bytes) -- see `gfx/internal/gpu/types.tl:TEXT_HEADER_FORMAT`
     // and the legacy `text/sync.tl` writer.
     EffectsPack ep = readEffectsPacked(row);
 
@@ -350,7 +350,7 @@ void computemain() {
     // Forward material params per output instance.
     materialParamsOut[outIdx] = readMaterialParams(row);
 
-    // Reserve a contiguous run of glyph output slots — one atomicAdd
+    // Reserve a contiguous run of glyph output slots -- one atomicAdd
     // per entity instead of per glyph. Mirrors the slot path's batch
     // reservation in `text_cull.glsl:atomicAdd(args[1], glyphCount)`.
     uint glyphBase = atomicAdd(args[1], glyphCount);

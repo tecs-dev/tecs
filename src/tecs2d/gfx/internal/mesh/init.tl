@@ -1,4 +1,4 @@
---- GPU-instanced mesh rendering — renderer-owned shadow-column path.
+--- GPU-instanced mesh rendering -- renderer-owned shadow-column path.
 ---
 --- Source columns (Transform / Color / ClipBounds / Pivot / Material
 --- + the Mesh row's `_definitionId`) flow through per-archetype
@@ -42,7 +42,7 @@ local record mesh
     --- The mesh geometry is defined by a MeshDefinition registered via MeshDefinition.new().
     ---
     --- Storage is FFI-backed (`int32_t _definitionId`); the user-facing
-    --- API is unchanged — `Mesh("name")` resolves the definition name to
+    --- API is unchanged -- `Mesh("name")` resolves the definition name to
     --- its id at construction. The string is held only on
     --- MeshDefinition (looked up via `_definitionId` for serialize).
     record Mesh is tecs.Component

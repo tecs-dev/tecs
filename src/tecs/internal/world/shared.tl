@@ -302,7 +302,7 @@ local function applyBatchSet(self: WorldImpl, mut: BatchMutation, srcArch: Arche
     local isTag = mut.isTag
 
     if not fast then
-        -- Slow path: per-entity `_instantSet` for hook/relationship correctness.
+        -- Slow path: per-entity `_instantSet` for non-bulk behavior.
         local value = mut.value
         for i = count, 1, -1 do
             self:_instantSet(entities[i], componentType, value)

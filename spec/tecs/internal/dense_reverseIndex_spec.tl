@@ -367,7 +367,7 @@ describe("Dense Relationships with reverseIndex", function()
 
     describe("ordering invariant", function()
         -- If the reverse-index unlink hook fires AFTER row teardown, it reads
-        -- nil for the old target and skips the unlink — leaving stale entries
+        -- nil for the old target and skips the unlink -- leaving stale entries
         -- in the inverse. This test catches that regression directly.
         it("onDespawn hook reads old column value before row teardown", function()
             local Follows = tecs.newRelationship({

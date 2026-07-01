@@ -1,8 +1,8 @@
 --- Shared modifier-component binding for the shadow-column path.
 ---
 --- Every content type (shapes, sprite, text, ...) that reads optional
---- modifier components — Color, ClipBounds, Material, Pivot, Occluder,
---- etc. — binds them the same way: a `{component, layout, mask, ssboName}`
+--- modifier components -- Color, ClipBounds, Material, Pivot, Occluder,
+--- etc. -- binds them the same way: a `{component, layout, mask, ssboName}`
 --- entry per modifier, where the cull shader gates each read on
 --- `ComponentMask & COMP_<NAME>`.
 ---
@@ -14,7 +14,7 @@
 ---
 --- This module derives all three from the component handle, so callers
 --- pass only a list of handles. The `MASK` table is the single source of
---- truth for the `COMP_<NAME>` bit values — every consuming cull shader
+--- truth for the `COMP_<NAME>` bit values -- every consuming cull shader
 --- must match it. (Bit 0x4 is a historical reserved slot, left unused.)
 
 local tecs <const> = require("tecs")

@@ -1,7 +1,7 @@
 -- Translation correctness for canonical → std430 layouts. Builds a
 -- canonical FFI struct with known values, allocates a std430 shadow
 -- buffer, runs the translate function, and asserts the std430 fields
--- match expectations. No LÖVE required — translates are pure FFI.
+-- match expectations. No LÖVE required -- translates are pure FFI.
 
 local C <const> = require("ffi")
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")

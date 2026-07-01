@@ -1,10 +1,10 @@
-// Rectangle culling compute shader — renderer-owned shadow-column path.
+// Rectangle culling compute shader -- renderer-owned shadow-column path.
 // Common code is prepended from cull_common.glsl.
 //
 // One dispatch per (archetype, shape). Each dispatch binds the source-
 // component SSBOs for that archetype and reads them by archetype-row
 // index (gl_GlobalInvocationID.x is the row-within-archetype, 0-based).
-// Optional components are handled by `ComponentMask` — if a bit is
+// Optional components are handled by `ComponentMask` -- if a bit is
 // clear the corresponding SSBO is bound to a zero-buffer, but the
 // helper functions short-circuit to a hardcoded default.
 //
@@ -333,7 +333,7 @@ void computemain() {
     r.cornerScale = vec4(rx, ry, 1.0, 1.0);
     r.clipBounds = clip;
 
-    // Stable depth tie-breaker — use the archetype row index (matches
+    // Stable depth tie-breaker -- use the archetype row index (matches
     // circle_cull.glsl:257; tie-breaker stability is
     // per-archetype, which is the same constraint the original code
     // had with global slot indices).

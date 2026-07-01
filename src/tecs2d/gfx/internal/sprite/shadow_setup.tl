@@ -5,7 +5,7 @@
 --- markers. Shadow source columns are Transform + Sprite plus every
 --- optional binding the cull cares about (Color, ClipBounds, Unlit,
 --- Material, Pivot, Occluder, DropShadow, RepeatedSprite). The bucket
---- marker itself is NOT shadowed — the cull shader reads layerIndex /
+--- marker itself is NOT shadowed -- the cull shader reads layerIndex /
 --- generation from SpriteData.textureSlice instead.
 ---
 --- Adds the two PreRender systems (render-state pass and upload flush)
@@ -48,7 +48,7 @@ local record shadow_setup
         --- Optional component bindings. A shadow buffer is attached if
         --- the component is present on the archetype; the cull shader
         --- branches via `ComponentMask`.
-        --- Bucket markers are NOT in this list — they're handled
+        --- Bucket markers are NOT in this list -- they're handled
         --- separately because exactly one is present per archetype
         --- and the dispatch module looks the active marker up by
         --- iterating shadow entries.
@@ -78,7 +78,7 @@ local function buildSpecs(
     optional: {shadow_setup.OptionalBinding}
 ): {tecs.Component: std430.Descriptor}
     -- Bucket markers gate archetype matching (must have one of the six
-    -- TextureBucket components) but have NO shadow buffer — the cull shader
+    -- TextureBucket components) but have NO shadow buffer -- the cull shader
     -- reads layerIndex/generation from SpriteData.textureSlice, packed
     -- by sync's dirty path. Skipping the bucket-marker shadow saves
     -- one upload column per sprite archetype.

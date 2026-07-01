@@ -1,4 +1,4 @@
-// Mesh culling compute shader — renderer-owned shadow-column path.
+// Mesh culling compute shader -- renderer-owned shadow-column path.
 // Common code is prepended from cull_common.glsl.
 //
 // One dispatch per (definition, archetype). Each dispatch binds the
@@ -12,7 +12,7 @@
 // shadow column. Saves 16 bytes per row of shadow upload.
 //
 // Output buffers (MeshOutput, IndirectArgs, MaterialParamsOutput) are
-// per-definition — each MeshDefinition has its own output buffer because
+// per-definition -- each MeshDefinition has its own output buffer because
 // each definition draws with its own `love.graphics.Mesh` geometry. The
 // atomicAdd on the indirect counter gives a globally-unique output index
 // for visible entities of this definition across all archetypes that

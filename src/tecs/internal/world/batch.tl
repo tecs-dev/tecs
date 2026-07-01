@@ -9,8 +9,8 @@ enqueue a placement descriptor on its `batchSpawnQueue`. `_drainArchBatchSpawn`
 one `BatchMutation` per call on `world.batchMutations`. `_drainBatchMutations`
 walks the list in enqueue order at commit time.
 
-`_deferBatchDespawn`: walks archetypes eagerly with a per-entity path
-when remove hooks / dense relationships / reverse-index targets apply,
+`_deferBatchDespawn`: walks archetypes eagerly with a per-entity path when
+dense relationships or reverse-index targets need unlink/cascade work,
 otherwise a bulk archetype-truncate path.
 ]]
 
@@ -42,7 +42,7 @@ local applyRequires <const> = shared.applyRequires
 
 local table_clear <const> = require("table.clear")
 
--- batchSpawnQueue layout: each entry is 5 slots — {count, firstSlotOrIdsList,
+-- batchSpawnQueue layout: each entry is 5 slots -- {count, firstSlotOrIdsList,
 -- callback, mode, requiredList}. RANGE uses a scalar `firstSlot` and strict
 -- contiguous ids; LIST uses an `ids` array for best-effort / explicit id sets.
 -- `requiredList` is the entries from `applyRequires` whose default values
@@ -651,10 +651,9 @@ function WorldImpl:_deferBatchDespawn(archetypes: {Archetype})
         local entities = arch.entities as {integer}
         local count = entities[0]
         if count > 0 then
-            -- "Complex" despawn: any archetype with onDespawn hooks (reverse-
-            -- index unlink, cascade) or whose entities are targets of a
-            -- reverse-index relationship needs per-entity dispatch so the
-            -- hooks/cleanup fire. Otherwise bulk-truncate.
+            -- "Complex" despawn: dense relationships or entities targeted by
+            -- reverse-index relationships need per-entity dispatch so unlink
+            -- and cascade cleanup run. Otherwise bulk-truncate.
             local complex = arch.onDespawnCount > 0
             if not complex then
                 for i = 1, count do

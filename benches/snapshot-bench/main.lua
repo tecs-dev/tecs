@@ -4,7 +4,7 @@
 -- Usage: `make snapshot-bench` or `luajit main.lua`
 --
 -- Measures throughput of `saveSnapshot` + `loadSnapshot` against the binary
--- buffer format. FFI components only — no GPU, no Love2D. Case parameter
+-- buffer format. FFI components only -- no GPU, no Love2D. Case parameter
 -- `count` ∈ {1K, 10K, 100K} sweeps entity counts; the bench harness expands
 -- each base case into one runtime case per value.
 --
@@ -120,7 +120,7 @@ local function buildWorld(count)
 end
 
 -------------------------------------------------------------------------------
--- Per-count lazy caches — fork-per-pair isolation means each (case, variant)
+-- Per-count lazy caches -- fork-per-pair isolation means each (case, variant)
 -- runs in its own LuaJIT process. The cache lookup ensures world construction
 -- happens exactly once per child, and only for the count the child is asked
 -- to measure.

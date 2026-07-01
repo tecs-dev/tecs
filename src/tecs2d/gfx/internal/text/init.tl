@@ -329,7 +329,7 @@ tecs.newFFIComponent({
 
     -- Per-entity Text lifecycle (metadata setup on add, slab/block
     -- release on remove) is handled by query observers registered in
-    -- `text.plugin` — see `text.TextLifecycle` below.
+    -- `text.plugin` -- see `text.TextLifecycle` below.
 
     -- Serialization captures the three user-provided inputs (font path,
     -- string, scale). Deserialization reruns the normal construction

@@ -39,7 +39,7 @@ function WorldImpl:_truncateArchetype(arch: Archetype)
     local arena = self.allocator
 
     -- notifyRemoved itself is gated on `hasRemoveObservers` internally
-    -- — no need to repeat the check at the call site.
+    -- -- no need to repeat the check at the call site.
     arch:notifyRemoved(0, archCount, nil)
     for r = 1, archCount do
         IdAllocator.freeSlot(arena, IdAllocator.slotOf(entities[r]))
@@ -283,7 +283,7 @@ local function resetTransaction(self: WorldImpl)
     -- slot-indexed writes during the last transaction stamped the
     -- current epoch; bumping invalidates them without touching the
     -- underlying FFI arrays. Wrap every ~4B transactions clears the
-    -- stamps — negligible amortised cost.
+    -- stamps -- negligible amortised cost.
     bumpTransactionEpoch(self)
     self.entityStateCount = 0
 

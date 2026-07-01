@@ -18,7 +18,7 @@ local record events
 
     --- Configure an event to have an appropriate __call based constructor.
     ---
-    --- The event's `.init` hook is used to configure the state of event instances.
+    --- The event's `.init` callback configures each event instance.
     --- It should not assign a metatable as that's handled by this method automatically.
     ---
     --- @param event The event instance to configure.
@@ -26,7 +26,7 @@ local record events
 
     --- Configure an FFI event to have an appropriate __call based constructor.
     ---
-    --- The event's `.init` hook is used to configure the state of event instances.
+    --- The event's `.init` callback configures each event instance.
     ---
     --- @param event The event type to configure.
     --- @param fields Field definitions in format {{"name", "type"}, ...}
@@ -47,7 +47,7 @@ local record events
         -- Used as a zero-observer fast-path in `hasObservers`: when
         -- no observer has ever been registered (or all have been
         -- removed), we skip the per-address hashmap lookup entirely.
-        -- Single field read + int comparison vs hashmap walk — hot
+        -- Single field read + int comparison vs hashmap walk -- hot
         -- per-entity despawn path reads this on every iteration to
         -- decide whether OnDespawn fan-out is needed.
         _totalObservers: integer
@@ -104,7 +104,7 @@ local record events
         clearAddress: function(self: MessageBus, address: integer)
 
         --- Clear per-entity observers (all addresses except global 0),
-        --- preserving global subscriptions like queries' ArchetypeCreated hook.
+        --- preserving global subscriptions like queries' ArchetypeCreated observer.
         clearEntityObservers: function(self: MessageBus)
 
         --- Reset the entire message bus.

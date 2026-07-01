@@ -1,10 +1,10 @@
-// Line culling compute shader — renderer-owned shadow-column path.
+// Line culling compute shader -- renderer-owned shadow-column path.
 // Common code is prepended from cull_common.glsl.
 //
 // One dispatch per (archetype, shape). Source-component SSBOs are bound
 // directly; optional components fall back to dummy buffers gated by
 // `ComponentMask`. Output `LineData` matches the legacy render shader's
-// expected layout — see `line.glsl`.
+// expected layout -- see `line.glsl`.
 
 // ---------- Source-component SSBOs ----------
 
@@ -202,7 +202,7 @@ void computemain() {
     if (isUnlitLayer(layer)) {
         outFlags = outFlags | 1u;  // FLAG_UNLIT = 0x1
     }
-    // Encode blendId in bits 20-23, materialId in bits 24-31 — matches
+    // Encode blendId in bits 20-23, materialId in bits 24-31 -- matches
     // legacy line_cull.glsl encoding so the render shader keeps working.
     uint materialId = readMaterialId(row);
     outFlags = outFlags | (BlendId << 20u) | (materialId << 24u);
@@ -226,7 +226,7 @@ void computemain() {
     float centerY = (outY1 + outY2) * 0.5;
 
     // centerRot.w carries screen-space encoding (1.0/2.0/4.0 bitmask)
-    // — render shader reads it the same way.
+    // -- render shader reads it the same way.
     float screenSpaceFlag = encodeScreenSpaceFlags(isScreenSpace, ignoresZoom, usesVirtualCoords);
 
     materialParamsOut[outIdx] = readMaterialParams(row);

@@ -1,5 +1,5 @@
---- FFI-based component storage implementation for high performance.
---- Provides zero-copy batch operations and efficient memory management.
+--- FFI-backed component storage. Columns are contiguous cdata arrays, which
+--- enables bulk copies, raw snapshot IO, and optional GPU-uploadable backing.
 
 local types <const> = require("tecs.types")
 local storage <const> = require("tecs.internal.storage")
@@ -19,15 +19,13 @@ local select <const> = select
 -- column pointer is no longer referenced.
 local byteDataByColumn <const> = setmetatable({}, {__mode = "k"}) as {any: any}
 
--- Module definition
 local record FFIStorage
-    --- Configuration options for FFI storage.
     record StructDefinition
         --- Optional struct name (auto-generated if not provided)
         name: string
         --- Field tuples {name, type} where type can include array syntax like "float[16]"
         fields: {{string, string}}
-        --- Size of the struct in bytes
+        --- Optional struct size override.
         sizeof: integer
         --- Optional metatable to apply to instances (for instance methods)
         metatable: {any:any}
@@ -37,10 +35,9 @@ local record FFIStorage
 
     new: function(def: StructDefinition): Storage
 
-    --- Define a C struct from a (name, fields) pair, cdef it with FFI
-    --- (idempotent on same layout), and return the resolved ctype + size
-    --- in bytes. Used by snapshot migration to materialise saved-schema
-    --- structs at load time without going through the full storage setup.
+    --- Define a C struct and return its ctype plus size. Reusing a name is
+    --- allowed only with the same layout. Snapshot migration uses this to
+    --- materialise saved schemas without creating a full storage object.
     defineStruct: function(name: string, fields: {{string, string}}): any, integer
 
     --- The opaque holder owning a column pointer's backing memory, or nil if
@@ -49,11 +46,9 @@ local record FFIStorage
     getColumnByteData: function(column: any): any
 end
 
--- Growth constants for component storage
+-- Minimum logical capacity for a new FFI column. Columns allocate one extra
+-- element at index 0 because archetype rows are 1-based.
 local INITIAL_CAPACITY <const> = 64
-
--- Keep track of defined structs with their definitions to detect collisions
-local definedStructs: {string: string} = {}
 
 -- Counter for auto-generated struct names
 local structCounter = 0
@@ -76,7 +71,6 @@ end
 
 local structRegistry: {string: StructRegistryEntry} = {}
 
--- Metadata record for component storage arrays
 local record StorageMeta
     capacity: integer
     structSize: integer
@@ -84,12 +78,11 @@ local record StorageMeta
     structType: any
 end
 
--- Global metadata table for component storage arrays
--- Weak keys allow GC to clean up old FFI cdata references
+-- Per-column metadata keyed by cdata pointer. Weak keys let resized or dropped
+-- columns disappear without explicit cleanup on every path.
 local storageMetadata: {any: StorageMeta} = setmetatable({}, {__mode = "k"})
 
 
--- Generate C struct definition from field tuples
 local function generateStructDef(name: string, fieldTuples: {{string, string}}): string, {string}
     local parts: {string} = {"typedef struct { "}
     local fieldNames: {string} = {}
@@ -100,10 +93,8 @@ local function generateStructDef(name: string, fieldTuples: {{string, string}}):
         local fieldName = tuple[1]
         local fieldType = tuple[2]
 
-        -- Parse array syntax from the type (e.g., "float[16]" or "int32_t[4]")
         local baseType, arraySize = fieldType:match("^([^%[]+)%[(%d+)%]$")
 
-        -- Add to C definition
         if baseType and arraySize then
             parts[#parts + 1] = baseType .. " " .. fieldName .. "[" .. arraySize .. "]; "
         else
@@ -170,7 +161,6 @@ function FFIStorage.defineStruct(name: string, fields: {{string, string}}): any,
             metatypeInstalled = false,
         }
         structRegistry[name] = entry
-        definedStructs[name] = cdef
     end
     local structType = C.typeof(name)
     local size = C.sizeof(structType) as integer
@@ -191,21 +181,18 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
     -- so their backing can be a love.data.ByteData. Default nil keeps `C.new`.
     local columnAllocator: function(integer, string): (any, any) = nil
 
-    -- Use provided name or generate one
     local structName = def.name
     if not structName then
         structCounter = structCounter + 1
         structName = "FFIComponent" .. structCounter
     end
 
-    -- Generate struct definition from tuples
     local cdef, fieldNames = generateStructDef(structName, def.fields as {{string, string}})
     local nFields <const> = #fieldNames
     local fieldInfo = buildFieldInfo(def.fields as {{string, string}})
 
     -- Canonical schema fingerprint: "name1:type1,name2:type2|sizeBytes".
-    -- Used by snapshot to detect schema drift across save/load. Computed once
-    -- here at registration; consumers compare via interned string equality.
+    -- Snapshot compares this across save/load to detect schema drift.
     local schemaParts: {string} = {}
     for i = 1, #def.fields do
         local f = def.fields[i] as {string}
@@ -226,27 +213,23 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
             metatypeInstalled = false,
         }
         structRegistry[structName] = registryEntry
-        definedStructs[structName] = cdef
     end
 
     local metadataFields = registryEntry.metadataFields
 
-    -- For per-entity components, each instance needs unique componentId
-    -- Use a weak-keyed table to map instances to their unique IDs
+    -- Dense relationship instances are component types, so each cdata value
+    -- needs a stable component id. Weak keys match cdata lifetime.
     if def.perEntityComponent and not registryEntry.instanceIds then
         registryEntry.instanceIds = setmetatable({}, {__mode = "k"})
     end
     local instanceIds = registryEntry.instanceIds
 
-    -- Define the metatype if not already defined
     if not registryEntry.metatypeInstalled then
-        -- Construct metatable for the struct type
-        -- For per-entity components (dense relationships), instance IS the component type
         local indexFn: function(any, any): any
         local tostringFn: function(any): string
         if def.perEntityComponent then
-            -- Per-entity components need unique componentId per target
-            -- The first field is the target (either "target" or "entityTarget")
+            -- Dense relationship instances are their own component type. The
+            -- first field is the relationship target id.
             local targetField = fieldNames[1]
             indexFn = function(self: any, key: any): any
                 if key == "componentType" then
@@ -297,10 +280,8 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
         registryEntry.metatypeInstalled = true
     end
 
-    -- Get struct size
     local structSize = def.sizeof or C.sizeof(structName)
 
-    -- Cache array ctype for fast allocation
     local arrayTypeName = structName .. "[?]"
     local arrayType = arrayTypeCache[arrayTypeName]
     if not arrayType then
@@ -308,19 +289,17 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
         arrayTypeCache[arrayTypeName] = arrayType
     end
 
-    -- Cache struct type for fast instantiation
     local structType = C.typeof(structName)
 
-    -- Create constructor function for this struct type
     local function createInstance(...: any): types.components.Component
         local instance: any = C.new(structType)
 
         local nargs = select('#', ...)
 
         if nargs == 0 then
-            -- No arguments, FFI zero-initialization is sufficient
+            -- FFI zero-initialization is sufficient.
         elseif nargs == 1 and type(select(1, ...)) == "table" then
-            -- Table argument - copy only known fields
+            -- Table form: copy only declared struct fields.
             local value = select(1, ...) as {string:any}
             for i = 1, nFields do
                 local info = fieldInfo[i]
@@ -335,7 +314,7 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
                 end
             end
         else
-            -- Positional arguments - apply to zero-initialized instance.
+            -- Positional form: apply arguments to a zero-initialized instance.
             --
             -- Hardcode 1..4 field unrolls instead of a `for i=1,count do select(i, ...) end` loop.
             -- `select(i, ...)` with a variable index is NYI on LuaJIT traces.
@@ -407,7 +386,6 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
             end
         end
 
-        -- For per-entity components, allocate unique ID
         if instanceIds then
             local componentId = componentIds.allocate()
             instanceIds[instance] = componentId
@@ -416,10 +394,9 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
         return instance as types.components.Component
     end
 
-    -- Fast array growth function
+    -- Allocate a resized column and copy the live prefix, including index 0.
     local function growArray<T>(oldArray: C.CData, usedCount: integer, neededCapacity: integer): T
         local newCapacity = neededCapacity
-        -- Allocate new array with padding at index 0
         local newArray: C.CData
         if columnAllocator then
             local ptr, holder = columnAllocator((newCapacity + 1) * structSize, structName)
@@ -429,14 +406,11 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
             newArray = C.new(arrayType as C.CType, newCapacity + 1)
         end
 
-        -- Copy old data if exists
         if oldArray and usedCount > 0 then
-            -- Copy only used data including padding at index 0
             local copyCount = min(usedCount, newCapacity)
             C.copy(newArray, oldArray, (copyCount + 1) * structSize)
         end
 
-        -- Update metadata
         storageMetadata[newArray] = {
             capacity = newCapacity,
             structSize = structSize,
@@ -444,7 +418,6 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
             structType = structType
         }
 
-        -- Clean up old metadata
         if oldArray then
             storageMetadata[oldArray] = nil
         end
@@ -456,7 +429,6 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
         storageType = "ffi",
 
         createColumn = function(_self: Storage, size: integer): {types.components.Component}
-            -- Allocate FFI array with aggressive initial sizing
             local capacity = max(INITIAL_CAPACITY, size * 2)
             local data: C.CData
             if columnAllocator then
@@ -467,7 +439,6 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
                 data = C.new(arrayType as C.CType, capacity + 1)  -- +1 for padding at index 0
             end
 
-            -- Store metadata
             storageMetadata[data] = {
                 capacity = capacity,
                 structSize = structSize,
@@ -479,7 +450,7 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
         end,
 
         clear = function(_self: Storage, column: {types.components.Component})
-            -- Zero out the array for consistency
+            -- Keep retained capacity but clear stale values.
             local meta = storageMetadata[column]
             if meta then
                 C.fill(column as C.CData, (meta.capacity + 1) * meta.structSize, 0)
@@ -506,7 +477,7 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
 
         -- Shrink an over-allocated column. Only fires when the column is
         -- big enough to be worth shrinking AND usage fell below a fraction
-        -- of capacity — avoids thrashing for workloads that grow and drop
+        -- of capacity. This avoids thrashing for workloads that grow and drop
         -- a handful of entities. Thresholds mirror `ffi.adjustCapacityDouble`.
         adjustCapacity = function(
             _self: Storage,
@@ -530,9 +501,11 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
             columnAllocator = fn
         end,
 
-        -- Provide a constructor that will be used by newComponent
-        createComponent = function(_self: Storage,container: types.components.Component): function(...: any): types.components.Component
-            -- Populate the metadata table with component info
+        createComponent = function(
+            _self: Storage,
+            container: types.components.Component
+        ): function(...: any): types.components.Component
+            -- Shared fields exposed by every instance through the metatype.
             if container then
                 metadataFields.componentType = container
                 metadataFields.componentName = structName
@@ -546,21 +519,21 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
         end,
 
         _sizeof = structSize,
-        -- Store field names for introspection (public for MCP/debugging)
+        -- Field names are used by debug/introspection tooling.
         fieldNames = fieldNames,
-        -- Marker for FFI storage detection in ecs.tl
+        -- Marker for raw cdata copy paths.
         _ffiConstructor = true,
         -- Canonical schema fingerprint, copied to the container by
         -- `registerComponent`. Snapshot uses this to detect schema drift.
         _fingerprint = table.concat(schemaParts, ",") .. "|" .. structSize,
         _structSize = structSize,
 
-        -- Set metadata on FFI instances (for lifecycle hooks like onAdd/onRemove)
+        -- Set shared metadata read by FFI instances through their metatype.
         setMetadata = function(_self: Storage, key: string, value: any)
             metadataFields[key] = value
         end,
 
-        -- Serialization: convert FFI instance to plain table
+        -- Convert an FFI instance to a plain table for JSON-compatible snapshots.
         serialize = function(_self: Storage, instance: types.components.Component): {string: any}
             local data: {string: any} = {}
             for i = 1, nFields do
@@ -574,7 +547,7 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
             return data
         end,
 
-        -- Deserialization: create FFI instance from plain table
+        -- Rebuild an FFI instance from the table form.
         deserialize = function(_self: Storage, data: {string: any}): types.components.Component
             return createInstance(data)
         end,

@@ -309,7 +309,7 @@ end
 -- Batch-op setup helper: 1k tracked (Position, Velocity, Alive) + 4k background
 -- (Health, BenchName, Aggro). The tracked query matches only Position.
 -- The query is cached at module scope because world:query registers as an
--- archetype observer — fresh queries per iteration would leak observers and
+-- archetype observer -- fresh queries per iteration would leak observers and
 -- dominate timing.
 local _batchBenchQuery
 local function setupBatchBenchWorld(case)

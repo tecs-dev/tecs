@@ -28,7 +28,7 @@ local select <const> = select
 -- require deferred semantics. It writes directly into the target
 -- archetype's committed row, skipping the pending-write queue.
 -- Relationship components aren't supported here (no sparse/exclusive
--- logic) — the first one encountered bubbles up `false` so the caller
+-- logic) -- the first one encountered bubbles up `false` so the caller
 -- falls back to the deferred path. The body is split into per-phase
 -- macros so instantSpawn1..4 unroll cleanly (no variable-index
 -- `select(i, ...)` on the hot path) while N>=5 loops.
@@ -132,9 +132,9 @@ local macro instantFinish!()
     ```
 end
 
--- Dispatcher: hook-bearing components either must defer (synthetic scope
--- routes to deferred dispatcher) or run the hook eagerly on the instant
--- path. Flag-free components fall through to the Raw body.
+-- Dispatcher: components with defer handlers either stage under a synthetic
+-- scope or run the handler eagerly on the instant path. Flag-free components
+-- fall through to the raw body.
 function WorldImpl:_instantSet(id: integer, componentType: Component, value: any)
     local ci = componentType as ComponentInternal
     if ci._mustDeferSet then
@@ -155,7 +155,7 @@ function WorldImpl:instantSetRaw(id: integer, componentType: Component, value: a
     local slot = IdAllocator.slotOf(id)
 
     -- Entity mid-transaction (bundle spawn / batch spawn pre-commit,
-    -- etc.) routes through the staging path — it knows how to walk
+    -- etc.) routes through the staging path -- it knows how to walk
     -- the pending-arch state. Unknown entities error there too.
     if getEntityState(self, slot) ~= 0 then
         self._scopeDepth = self._scopeDepth + 1
@@ -169,8 +169,8 @@ function WorldImpl:instantSetRaw(id: integer, componentType: Component, value: a
     local s = slots[slot]
     local srcArch = self.archetypeIndex[s.archetypeId]
     -- Unknown archetype (entity state out of sync): fall back to staged.
-    -- Exclusive-relationship handling migrated to `deferSet` hook — the
-    -- dispatcher fires the hook before reaching this Raw path.
+    -- Exclusive relationship handling lives in the defer-set handler; the
+    -- dispatcher runs that before reaching this raw path.
     if not srcArch then
         self._scopeDepth = self._scopeDepth + 1
         self:_deferSet(id, componentType as Component, value)
@@ -231,9 +231,8 @@ function WorldImpl:instantSetRaw(id: integer, componentType: Component, value: a
     s.archetypeId = dstArch.id
     s.row = newRow
 
-    -- Reverse-index link migrated to `deferSet` hook (Phase 3). Reached
-    -- via the dispatcher above when `_hasDeferSet` is set on the dense
-    -- relationship container. Instant path lands here only when no hook.
+    -- Reverse-index link lives in the defer-set handler. The instant raw path
+    -- reaches this point only for components with no such handler.
 
     dstArch:onRowsAdded(newRow, 1, srcArch)
 
@@ -244,9 +243,9 @@ function WorldImpl:instantSetRaw(id: integer, componentType: Component, value: a
     end
 end
 
--- Dispatcher: hook-bearing components either must defer (synthetic scope
--- routes to deferred dispatcher) or run the hook eagerly on the instant
--- path. Flag-free components fall through to the Raw body.
+-- Dispatcher: components with defer handlers either stage under a synthetic
+-- scope or run the handler eagerly on the instant path. Flag-free components
+-- fall through to the raw body.
 function WorldImpl:_instantRemove(id: integer, component: Component)
     local ci = component as ComponentInternal
     if ci._mustDeferRemove then
@@ -281,9 +280,8 @@ function WorldImpl:instantRemoveRaw(id: integer, component: Component)
     local srcArch = self.archetypeIndex[s.archetypeId]
     if not srcArch then return end
 
-    -- Reverse-index unlink migrated to `deferRemove` hook (Phase 3).
-    -- Instant path lands here only when no hook is attached; plain
-    -- components fall straight through the archetype transition.
+    -- Reverse-index unlink lives in the defer-remove handler. Plain components
+    -- fall straight through the archetype transition.
     if not srcArch.columns[component] then return end
 
     local dstArch = srcArch:withoutComponent(component, self.archetypeIndex)
@@ -373,9 +371,8 @@ function WorldImpl:_instantDespawn(id: integer): boolean
     local s = slots[slot]
     local srcArch = self.archetypeIndex[s.archetypeId]
 
-    -- Archetypes with any onDespawn hook need per-entity dispatch so the
-    -- drain path fires the hooks (reverse-index unlink, etc.). Fall back
-    -- to the deferred despawn path here.
+    -- Archetypes with despawn cleanup need the deferred path so per-component
+    -- cleanup runs before row removal.
     if not srcArch or srcArch.onDespawnCount > 0 then
         return false
     end

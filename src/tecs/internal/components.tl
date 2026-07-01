@@ -43,10 +43,10 @@ local record components
     --- @return The created tag component.
     newTagComponent: function(options: TagComponentOptions): Component
 
-    --- Create an FFI-based component with high performance storage.
+    --- Create an FFI-backed component with contiguous struct-column storage.
     ---
-    --- FFI components use LuaJIT's FFI for efficient memory layout and batch operations.
-    --- They provide zero-copy performance for data-heavy components.
+    --- FFI components use LuaJIT structs for compact layout, bulk column copies,
+    --- and raw binary snapshot paths.
     ---
     --- @param options Configuration including name, container, fields, and optional recycling.
     --- @return The created FFI component.
@@ -69,9 +69,8 @@ local record components
 
     --- Manually register a new component that is already configured with a metatable and construction functions.
     ---
-    --- This method is called by `newComponent` to register the component with the world. It will automatically
-    --- assign an auto-incremented component ID to the component. This method might be useful for totally custom
-    --- component creation, including FFIs, CTypes, etc.
+    --- Used by the component factories after they have installed storage,
+    --- constructors, and metadata. Assigns a component id if needed.
     ---
     --- @container The component container to register.
     --- @return the registered component.
@@ -117,7 +116,7 @@ function components.registerComponent<T is Component>(container: Component): T
     return container
 end
 
--- Hook attachment payload — fields mirror `internal.ComponentInternal`.
+-- Hook attachment payload -- fields mirror `internal.ComponentInternal`.
 -- Module-local: only the built-in factories below (newRelationship sparse
 -- and exclusive/reverseIndex paths) call attachHooks. Not exposed.
 local interface HookSet
@@ -155,18 +154,9 @@ local function attachHooks(container: Component, hooks: HookSet)
     if hooks.noBulkBatch then cAny._noBulkBatch = true end
 end
 
--- Generate a fused `__call` function for field-based table components. The
--- returned function closes over `instance_mt` and, when invoked, allocates
--- a table with literal field assignments and applies the metatable — a
--- single trace-friendly expression LuaJIT can specialize to the exact
--- table shape.
---
--- `componentType` is NOT written on the instance: the instance metatable's
--- `__index = container` fallback resolves `instance.componentType` to
--- `container.componentType` (which is set to the container itself in
--- newComponent). Skipping the write saves one hash slot per instance and
--- cuts one store per spawn — meaningful in hot paths that allocate
--- thousands of instances per frame (bundle spawn, batch spawn, etc).
+-- Table component instances do not store `componentType`; their metatable
+-- resolves it through the container. This keeps each instance one field
+-- smaller while preserving the public shape.
 -- Module-local sentinel: internal factories (`newTagComponent`,
 -- `newFFIComponent`, `newScalarComponent`, and the relationship variants)
 -- pass this as `opts.__internalStorageToken` alongside their chosen
@@ -211,7 +201,7 @@ function components.newComponent<C is Component>(options: ComponentOptions<C>): 
     end
 
     -- `init` without `fields` or `new` leaves `.new` with no way to
-    -- unpack a table into positional args — the fallback would forward the
+    -- unpack a table into positional args -- the fallback would forward the
     -- whole table as arg #1, which is almost never what the author wanted.
     -- Require one of them so `.new(data)` is always well-defined.
     if opts.init and not opts.fields and not opts.new then
@@ -239,11 +229,9 @@ function components.newComponent<C is Component>(options: ComponentOptions<C>): 
     containerI.storage = componentStorage
     containerI.storageType = componentStorage.storageType
 
-    -- Check for storage-provided serialization methods
     local anyStorage = componentStorage as {string:any}
 
-    -- Set up serialization functions
-    -- Priority: user-provided > storage-provided > default
+    -- Serialization priority: user-provided > storage-provided > default.
     if opts.transient then
         container.serialize = nil
     elseif opts.serialize then
@@ -265,7 +253,7 @@ function components.newComponent<C is Component>(options: ComponentOptions<C>): 
             return (anyStorage.serialize as function(Storage, C): {string: any})(componentStorage, instance)
         end
     else
-        -- Default: iterate table fields, skip internal metadata
+        -- Default table form: copy serializable user fields and skip ECS metadata.
         container.serialize = function(instance: C): {string: any}
             local data: {string: any} = {}
             for k, v in pairs(instance as {string: any}) do
@@ -296,7 +284,7 @@ function components.newComponent<C is Component>(options: ComponentOptions<C>): 
         end
     end
     -- Default deserialize (when neither user nor storage provides one) is
-    -- installed below, after `.new` is ready — it routes through `.new(data)`.
+    -- installed below, after `.new` is ready -- it routes through `.new(data)`.
 
     local tostringFn <const> = function(_self: C): string return name end
 
@@ -316,7 +304,7 @@ function components.newComponent<C is Component>(options: ComponentOptions<C>): 
         -- at the spawn/set boundary; internals never see it.
         --
         -- For string scalars we cache wrappers in a weak-valued table: repeated `Name("Frank")` reuses one wrapper
-        -- while unreferenced entries get collected. Numeric/boolean kinds skip the cache — arbitrary float keys
+        -- while unreferenced entries get collected. Numeric/boolean kinds skip the cache -- arbitrary float keys
         -- would grow unbounded, and booleans aren't worth a cache lookup.
         local scalarDefault = (anyStorage._scalarDefault) as any
         local kind = (anyStorage._scalarKind) as string
@@ -380,9 +368,8 @@ function components.newComponent<C is Component>(options: ComponentOptions<C>): 
         -- (and any other container-level fields) resolve via __index = container.
         -- No need to stamp componentType on the instance itself.
         tableInstanceMt = {__index = container, __tostring = tostringFn}
-        -- Priority for __call: `fields` codegen beats storage default.
-        -- `init` can coexist with either path; it runs after the base instance
-        -- has been allocated and populated.
+        -- Fields codegen beats the storage default. `init` runs after the base
+        -- instance has been allocated and populated.
         if customCall then
             local tableFields = opts.fields
             local tableDefaults = opts.defaults
@@ -427,15 +414,9 @@ function components.newComponent<C is Component>(options: ComponentOptions<C>): 
 
     setmetatable(container, {__tostring = tostringFn, __call = callFn} as metatable<C>)
 
-    -- Install `.new(data)` — the table-form constructor.
-    -- * User-provided `opts.new` wins, but for table-storage components the
-    --   framework wraps the return value with the instance metatable so
-    --   `componentType` etc. resolve via `__index = container` (identical to
-    --   what `__call` does).
-    -- * `opts.fields` codegens a table-by-name unpacker that routes through
-    --   `__call` — metatable applied there.
-    -- * Fallback for `init`-only components with no `new`: forward
-    --   the table verbatim via `__call`.
+    -- Install `.new(data)`, the table-form constructor used by deserialize.
+    -- Table-storage components wrap user-provided results with the same
+    -- instance metatable used by `__call`.
     if opts.new then
         local userNew <const> = opts.new
         if tableInstanceMt then
@@ -540,7 +521,7 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
     local relationshipStorage = (cfg as {string:any}).storage as Storage
         or storage.newTableStorage()
 
-    -- Each time a relationship from the container to a target is created, the same relationship container is created.
+    -- Cache one relationship instance per target id.
     local cache: {number: R} = setmetatable({}, {__mode = "v"})
 
     local relContainer = cfg.container or {}
@@ -556,8 +537,8 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
     relContainerI.cascadeDelete = isCascadeDelete
     relContainerI.transient = cfg.transient == true
 
-    -- The container (wildcard) uses bitset storage for efficient presence tracking.
-    -- Instances use relationshipStorage (which may be FFI, table, etc.)
+    -- The container is the wildcard/tag component; concrete relationship
+    -- instances use relationshipStorage for their payload.
     local bitset = storage.newBitsetStorage(relContainer)
     relContainerI.storage = bitset
     relContainerI.storageType = bitset.storageType
@@ -627,7 +608,7 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
     -- the instance constructor.
     --
     -- If the underlying storage has a serialize method (e.g., FFIStorage),
-    -- use it — it knows the field layout. Otherwise iterate plain-table
+    -- use it -- it knows the field layout. Otherwise iterate plain-table
     -- instances, skipping component metadata.
     local storageAny = relationshipStorage as {string: any}
     if cfg.transient then
@@ -658,7 +639,7 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
         end
     end
 
-    -- Install `.new(data)` — the table-form constructor.
+    -- Install `.new(data)` -- the table-form constructor.
     -- `data.target` is mandatory (relationships need a target); field values
     -- come from either `cfg.new` (user override) or unpacked by `cfg.fields`.
     -- Routes through `__call(target, ...)` so instance caching, registration,
@@ -708,13 +689,12 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
                 end
                 local mt = getmetatable(instance)
                 if type(mt) == "string" then
-                    -- FFI cdata returns string metatable names, not tables.
-                    -- For sparse: instance is used as the VALUE in sparse storage, not as an archetype component.
-                    -- For dense: container is already registered, instances share its presence.
+                    -- FFI relationship metadata is installed on the storage
+                    -- metatype, so cdata instances don't need table stamping.
                     cache[id] = instance
                 elseif isSparse then
-                    -- Sparse: don't register per-target component (no unique componentId.
-                    -- The instance is used as the value in sparse storage.
+                    -- Sparse table instances live in sparse storage, not in
+                    -- archetype columns, so they are not registered.
                     local instanceI = instance as ComponentInternal
                     instance.target = id
                     instance.componentName = self.componentName .. "->" .. id
@@ -728,7 +708,6 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
                     instanceI.storageType = relationshipStorage.storageType
                     instanceI.transient = relContainerI.transient
                     setmetatable(instance, instance_mt)
-                    -- NOT registered — sparse instances don't get unique component IDs
                     cache[id] = instance
                 else
                     local instanceI = instance as ComponentInternal
@@ -751,15 +730,15 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
         end,
     })
 
-    -- Add targeting method to the container
+    -- Dense relationships can expose a concrete component type for queries.
     if not isSparse then
         relContainer.targeting = function(self: R, targetId: integer): R
             assert(targetId, "Missing target entity ID")
             if cfg.container then
-                -- Data relationship: return component type for queries
+                -- Data relationship: return component type for queries.
                 return self(targetId).componentType as R
             else
-                -- Basic relationship: return component instance directly
+                -- Target-only relationship: the instance is the component.
                 return self(targetId)
             end
         end
@@ -773,7 +752,7 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
     -- special cases.
     --
     -- mustDefer* = true: sparse staging buffer only flushes at drain, so
-    -- eager instant execution is unsafe — instant routes synthetic-scope.
+    -- eager instant execution is unsafe -- instant routes synthetic-scope.
     -- noBulkBatch = true: per-entity staging state makes bulk column
     -- writes incorrect; batch paths fall back to per-entity routing.
     if isSparse then
@@ -808,7 +787,7 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
     elseif isExclusive or hasReverseIndex then
         -- Dense relationships with behavior hooks for two concerns:
         --
-        --   Exclusive (isExclusive=true): sibling eviction — adding
+        --   Exclusive (isExclusive=true): sibling eviction -- adding
         --     Follows(l2) to an entity that already has Follows(l1) must
         --     first remove Follows(l1). Handled by deferSet hook iterating
         --     siblings BEFORE calling setRaw.
@@ -845,7 +824,7 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
                     local arch = currentArchFn(wImpl, id)
                     if arch then
                         -- Use world:remove (public dispatcher) so the
-                        -- sibling's own hooks fire — e.g. reverse-index
+                        -- sibling's own hooks fire -- e.g. reverse-index
                         -- unlink on Follows(l1) when reparenting to l2.
                         local removeFn = wImpl.remove as function(any, integer, types.components.Component)
                         for existingComp in pairs((arch as ArchetypeInternal).columns as {types.components.Component:any}) do
@@ -931,7 +910,7 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
     end
 
     components.registerComponent(relContainer)
-    storage.propagateHooksToFFI(relationshipStorage, relContainer)
+    storage.syncMetadataToFFI(relationshipStorage, relContainer)
     return relContainer
 end
 
@@ -960,7 +939,7 @@ function components.newFFIRelationship<R is Relationship>(config: FFIRelationshi
 
     -- Convert FFI field tuples to plain names so newRelationship can
     -- codegen `.new` (unpack-by-name into positional args for the ctor).
-    -- `target` is part of the FFI struct but not a user-supplied field —
+    -- `target` is part of the FFI struct but not a user-supplied field --
     -- it's always set by __call, so we skip it in the names list.
     local fieldNames: {string} = {}
     for i = 1, #fields do
@@ -1013,8 +992,8 @@ function components.newScalarComponent<T>(
     if opts.transient and (opts as {string:any}).serialize then
         error("Scalar component " .. tostring(opts.name) .. ": `transient` cannot be combined with `serialize`")
     end
-    -- Scalars hold the raw primitive in the column; there's no instance
-    -- shape worth exposing, so we always allocate a fresh handle.
+    -- Scalar columns store raw primitives. `newComponent` installs the small
+    -- wrapper used only at spawn/set boundaries.
     local container = {} as types.components.ScalarComponent<T>
     local kind = assert(opts.kind, "Missing scalar component kind")
     local defaultValue = opts.default as any
@@ -1037,7 +1016,7 @@ function components.newScalarComponent<T>(
     end
 
     -- `newComponent` provides scalar-specific callFn, `.new`, serialize, and
-    -- deserialize for storageType=="scalar" — no need to forward them here.
+    -- deserialize for storageType=="scalar" -- no need to forward them here.
     local component = ((components.newComponent as function(any): any)({
         name = assert(opts.name, "Missing scalar component name"),
         container = container,
@@ -1063,17 +1042,14 @@ function components.newFFIComponent<C is Component>(options: FFIComponentOptions
     assert(opts.container, "Missing component container")
     assert(opts.fields, "Missing FFI fields definition")
 
-    -- Create FFI storage
     local componentStorage = storage.newFFIStorage({
         name = opts.name,
         fields = opts.fields,
         metatable = opts.metatable
     })
 
-    -- Codegen a default `.new(data)` from `opts.fields` if the caller didn't
-    -- supply one. FFI `opts.fields` is `{{name, ctype}, ...}`; we extract the
-    -- names and route through `__call` so init-managed runtime state
-    -- (GPU slots, etc.) gets freshly allocated on reconstruction.
+    -- Default `.new(data)` unpacks FFI field tuples by name and routes through
+    -- `__call`, so init-managed runtime state is rebuilt on reconstruction.
     local newFn = opts.new
     if not newFn then
         local fieldNames = opts.fields
@@ -1085,8 +1061,8 @@ function components.newFFIComponent<C is Component>(options: FFIComponentOptions
         newFn = ComponentCodegen.createNewFn(container, names) as function(data: {string: any}): C
     end
 
-    -- Create the component. `serialize` / `deserialize` fall through to
-    -- FFIStorage's field-walk pair (used by the JSON/table writer path).
+    -- Structured serialize/deserialize fall through to FFIStorage unless the
+    -- caller provided custom hooks.
     local component = (components.newComponent as function(any): C)({
         name = opts.name,
         container = opts.container,
@@ -1108,10 +1084,9 @@ function components.newFFIComponent<C is Component>(options: FFIComponentOptions
     -- bytes straight into / out of a LuaJIT `string.buffer` with zero
     -- Lua-side allocations per component.
     --
-    -- Callers that supplied their own `serialize` / `deserialize` already
-    -- signalled "my runtime state doesn't survive a raw memcpy" (e.g. `Text`
-    -- needs its init hook to register slab / glyph block state), so skip
-    -- the raw install in that case and let the structured path run.
+    -- Custom serialize/deserialize hooks opt out of the corresponding raw
+    -- path. Runtime state that needs structured reconstruction can still use
+    -- the other raw direction when only one hook is custom.
     local anyStorage = componentStorage as {string: any}
     local componentI = component as ComponentInternal
     if anyStorage.serializeRaw and not opts.serialize and not opts.transient then

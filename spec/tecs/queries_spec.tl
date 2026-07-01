@@ -1158,7 +1158,7 @@ describe("Queries module tests", function()
             luassert.equals(0, #removedCalls)
 
             -- Adding Velocity creates a new archetype that still matches {Position}.
-            -- Both src and dst match — add/remove should be suppressed.
+            -- Both src and dst match -- add/remove should be suppressed.
             world:set(id, Velocity(1, 1))
             world:commit()
 
@@ -1261,7 +1261,7 @@ describe("Queries module tests", function()
 
             -- No duplicate physical placement: each entity id should
             -- appear in exactly one active archetype. Scan via the
-            -- trio of includes we know exist — they cover the full
+            -- trio of includes we know exist -- they cover the full
             -- set of arches entities could legitimately land in.
             local function eachEntityInQuery(q: tecs.Query, fn: function(integer))
                 for _arch, len, entities in q:iter() do

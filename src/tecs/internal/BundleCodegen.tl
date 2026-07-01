@@ -1,6 +1,6 @@
 --[[
 Bundle spawn codegen: generates specialized (spawn, drain) pairs for a
-bundle's fixed component list. Extracted from Transaction.tl.
+bundle's fixed component list.
 ]]
 
 local types <const> = require("tecs.types")
@@ -101,7 +101,7 @@ local function codegenSrc(n: integer, requiredCount: integer, isSparse: {boolean
     -- `rN` for required params, `fN()` for factory-backed components.
     -- Scalar component args are wrapper tables (`{componentType, value}`);
     -- the column wants the raw scalar, so we extract `.value` here at
-    -- the API boundary — internals never see wrappers.
+    -- the API boundary -- internals never see wrappers.
     local function valueExpr(i: integer): string
         local base = i <= requiredCount and ("r" .. i) or ("f" .. i .. "()")
         if isScalar[i] then return "(" .. base .. ").value" end
@@ -159,7 +159,7 @@ local function codegenSrc(n: integer, requiredCount: integer, isSparse: {boolean
     end
 
     -- Two hot paths in the emitted spawn:
-    --   1. `_scopeDepth == 0`: immediate placement — the entity is
+    --   1. `_scopeDepth == 0`: immediate placement -- the entity is
     --      placed directly into the cached target archetype and
     --      observer-notified inline.
     --   2. `_scopeDepth > 0`: enqueue into the bundle-local spawnQueue
@@ -356,7 +356,7 @@ function BundleCodegen.codegenBundleSpawn(
     local packed = {(chunk as function(any...): any...)(table.unpack(args, 1, #args))}
     -- Generated chunk returns `spawn, drain`. `drain` is kept alive via
     -- the `drain = function() ... end` assignment inside the chunk's
-    -- closure — it's the upvalue that `pendingBundleDrains` points at
+    -- closure -- it's the upvalue that `pendingBundleDrains` points at
     -- during deferred bursts. We only need to hand the caller `spawn`.
     return packed[1] as BundleCodegen.SpawnFn
 end

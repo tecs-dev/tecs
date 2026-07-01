@@ -79,7 +79,7 @@ local record blend
     -- groupBy function for queries - returns blend ID for an archetype
     groupBy: function(tecs.Archetype): integer
 
-    -- Explicit mutex setter — removes any other blend tag before
+    -- Explicit mutex setter -- removes any other blend tag before
     -- setting the new one. Use instead of `world:set(id, mode)` when
     -- switching blend modes.
     set: function(world: tecs.World, entityId: integer, mode: tecs.Component)

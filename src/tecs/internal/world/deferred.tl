@@ -50,9 +50,9 @@ end
 -- `select(i, ...)` (trace-hostile) and no per-component function call.
 --
 -- Each expansion reads/writes the outer locals:
---   self, world, archetypeIndex, id  — stable per call
---   arch, vals, valCount             — accumulator state
---   exclusiveByContainer             — lazily-acquired pool table
+--   self, world, archetypeIndex, id  -- stable per call
+--   arch, vals, valCount             -- accumulator state
+--   exclusiveByContainer             -- lazily-acquired pool table
 --
 -- The `do ... end` block scopes the per-component temporaries so that
 -- repeated expansions in the same function don't collide.
@@ -333,7 +333,7 @@ local function deferSpawn4(self: WorldImpl, slot: integer, id: integer,
 end
 
 -- Fallback for N > 4. Falls back to variable-index `select(i, ...)`
--- (trace-hostile on LuaJIT) — the unrolled deferSpawn1..4 are the
+-- (trace-hostile on LuaJIT) -- the unrolled deferSpawn1..4 are the
 -- fast paths that cover the overwhelming majority of real spawns.
 local function deferSpawnN(self: WorldImpl, slot: integer, id: integer, ...: Component)
     local n = select("#", ...)
@@ -427,8 +427,9 @@ function WorldImpl:findOldValue(
     return nil
 end
 
--- Dispatcher: flag-gate hook check, fall through to Raw for default.
--- Underscored — users call `world:set`, not this directly.
+-- Dispatcher: run component-specific defer behavior when present; otherwise
+-- fall through to the raw default behavior.
+-- Underscored -- users call `world:set`, not this directly.
 function WorldImpl:_deferSet(id: integer, componentType: Component, value: any)
     local ci = componentType as ComponentInternal
     if ci._hasDeferSet then
@@ -437,8 +438,8 @@ function WorldImpl:_deferSet(id: integer, componentType: Component, value: any)
     return self:deferSetRaw(id, componentType, value)
 end
 
--- Raw default-behavior entry. Hooks call this to invoke default semantics
--- without re-dispatching (which would recurse into themselves).
+-- Raw default-behavior entry. Defer handlers call this to invoke default
+-- semantics without re-dispatching into themselves.
 function WorldImpl:deferSetRaw(id: integer, componentType: Component, value: any)
     local slot = IdAllocator.slotOf(id)
 
@@ -607,15 +608,9 @@ function WorldImpl:_deferSetSlow(
         return
     end
 
-    -- New component path: dense-relationship structural bookkeeping.
-    -- Reverse-index link (Phase 3) and exclusive sibling eviction (Phase 4)
-    -- both migrated out to `deferSet` hooks. The deferSpawn macro keeps
-    -- both inline because it can't reach into hooks without giving up
-    -- in-place accumulator compaction (Phase 4 Option A).
-    --
-    -- What remains here: wildcard container auto-add for dense relationship
-    -- instances, which is structural (touches archetype membership) rather
-    -- than behavioral, so it stays in the Raw path.
+    -- New component path: wildcard container auto-add for dense relationship
+    -- instances. Reverse-index links and exclusive sibling eviction live in
+    -- defer-set handlers; this raw path keeps only structural membership work.
     local container = (componentType as ComponentInternal).wildcardContainer
     if container then
         local curArch = getPendingArch(self, slot)
@@ -625,7 +620,8 @@ function WorldImpl:_deferSetSlow(
     end
 end
 
--- Dispatcher: flag-gate hook check, fall through to Raw for default.
+-- Dispatcher: run component-specific defer behavior when present; otherwise
+-- fall through to the raw default behavior.
 function WorldImpl:_deferRemove(id: integer, component: Component)
     local ci = component as ComponentInternal
     if ci._hasDeferRemove then
@@ -634,7 +630,7 @@ function WorldImpl:_deferRemove(id: integer, component: Component)
     return self:deferRemoveRaw(id, component)
 end
 
--- Raw default-behavior entry. Hooks call this to invoke default semantics.
+-- Raw default-behavior entry. Defer handlers call this to invoke default semantics.
 function WorldImpl:deferRemoveRaw(id: integer, component: Component)
     local slot = IdAllocator.slotOf(id)
     local st = getEntityState(self, slot)
@@ -699,8 +695,8 @@ function WorldImpl:deferRemoveRaw(id: integer, component: Component)
 
     if st == STATE_DESPAWN then return end
 
-    -- Sparse routing migrated to `deferRemove` hook (Phase 1). Path is
-    -- reached only for components without the hook — no sparse work here.
+    -- Sparse routing lives in the defer-remove handler. This path is reached
+    -- only for components without that handler.
 
     local hadPendingArch = getPendingArch(self, slot) ~= nil
     local prevArch: Archetype = getPendingArch(self, slot)
@@ -717,9 +713,8 @@ function WorldImpl:deferRemoveRaw(id: integer, component: Component)
         return
     end
 
-    -- Reverse-index unlink migrated to `deferRemove` hook (Phase 3).
-    -- Hook reads old value BEFORE invoking deferRemoveRaw so the unlink
-    -- sees the correct target.
+    -- Reverse-index unlink lives in the defer-remove handler. It reads the old
+    -- value before invoking deferRemoveRaw so the unlink sees the correct target.
 
     local newArch = prevArch:withoutComponent(component, self.archetypeIndex)
     if newArch ~= prevArch then
@@ -774,11 +769,10 @@ function WorldImpl:_deferDespawn(id: integer)
 
     local relationshipStores = world.relationshipStores
 
-    -- Fire per-component `onDespawn` hooks. Precomputed fanout list is
-    -- empty for archetypes whose components have no hooks — zero cost
-    -- in the common case. INVARIANT: row is still readable here, before
-    -- any teardown below. Hooks read old column values for side effects
-    -- (e.g. dense relationship reverse-index unlink).
+    -- Run per-component despawn cleanup. The precomputed fanout list is empty
+    -- for archetypes with no cleanup. INVARIANT: row is still readable here,
+    -- before any teardown below; cleanup handlers read old column values for
+    -- side effects such as dense relationship reverse-index unlink.
     if logicalArch and logicalArch.onDespawnCount > 0 then
         local list = logicalArch.onDespawnComponents
         for i = 1, logicalArch.onDespawnCount do

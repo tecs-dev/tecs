@@ -45,7 +45,7 @@ local glyph_block <const> = require("tecs2d.gfx.internal.text.glyph_block")
 local C <const> = require("ffi")
 
 -- Pointer arithmetic helper. `+ offset * 32` because glyph slab entries
--- are 32 bytes and the source/dest are typed glyph pointers — index
+-- are 32 bytes and the source/dest are typed glyph pointers -- index
 -- arithmetic in glyph units.
 local ffi_offset_ptr: function(ptr: C.CData, offset: integer): C.CData
 do

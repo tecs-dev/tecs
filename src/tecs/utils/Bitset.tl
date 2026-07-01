@@ -1,4 +1,4 @@
---- Simple FFI-based bitset.
+--- FFI-backed bitset with zero-based indexes.
 
 local cffi <const> = require("ffi")
 local bit <const> = require("bit")
@@ -21,7 +21,7 @@ local record Bitset
     --- Number of words currently in use (i.e. highest set bit index / 32 + 1)
     usedWordCount: integer
 
-    --- Number of dirty bits set
+    --- Number of set bits.
     count: integer
 
     --- Active resumable scan state

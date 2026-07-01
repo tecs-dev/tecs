@@ -1,6 +1,5 @@
--- Basic Lua compatibility layer
+-- Compatibility shims loaded by the public tecs entry point.
 if not table.unpack then
-    -- Ensure table has an unpack function.
     ((_G as table)["table"] as table).unpack = (_G as table)["unpack"]
 end
 

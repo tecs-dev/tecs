@@ -169,7 +169,7 @@ local record types
             container: Component
         end
 
-        --- Options for creating an FFI-based component with high performance storage.
+        --- Options for creating an FFI-backed component.
         interface FFIComponentOptions<C is Component> is ContainerComponentOptions<C>
             --- FFI field definitions for the backing struct.
             fields: {{string, string}}
@@ -206,7 +206,7 @@ local record types
 
         --- Scalar component configuration. Scalar storage holds the raw
         --- primitive directly in the column, so there is no container shape
-        --- to attach methods or fields to — typed exports are done by
+        --- to attach methods or fields to -- typed exports are done by
         --- declaring the field type on the owning module record (e.g.
         --- `Health: types.components.ScalarComponent<number>`) and assigning the
         --- registration result to it.
@@ -240,11 +240,9 @@ local record types
         interface FFIRelationshipOptions<R is Relationship> is BaseRelationshipOptions<R>, FFIComponentOptions<R> end
     end
 
-    -- Component hooks (onAdd / onRemove / onReplace) have been
-    -- removed. Use query observers (`onEntitiesAdded` /
-    -- `onEntitiesRemoved` in `world:query`) for lifecycle reactions,
-    -- the declarative `requires` list for auto-add dependencies, or
-    -- explicit domain APIs (e.g. `blend.set`) for mutex invariants.
+    -- User component lifecycle hooks are not part of the public component
+    -- model. Use query observers for lifecycle reactions, `requires` for
+    -- auto-add dependencies, and explicit domain APIs for invariants.
 
     --- An archetype is a collection of entities with the same components.
     ---
@@ -267,7 +265,7 @@ local record types
         entities: DoubleArray
 
         --- Components in this archetype, in the order they were passed
-        --- at construction. Finalized at creation — archetypes never
+        --- at construction. Finalized at creation -- archetypes never
         --- add or remove components. Iterate with `#componentList` /
         --- `ipairs` to walk the archetype's signature.
         componentList: {components.Component}
@@ -542,7 +540,7 @@ local record types
             timestep: number
             pipelineFactory: function(number): Pipeline
             --- Maximum number of concurrent entity slots. Must be a power of 2, at most 2^22 (~4M, format cap).
-            --- Defaults to 2^20 (~1M). Arena memory is preallocated to accomodate this size.
+            --- Defaults to 2^20 (~1M). Arena memory is preallocated to accommodate this size.
             maxEntities: integer
         end
 
@@ -657,7 +655,7 @@ local record types
         --- Run every system registered to `phase` (and its enabled
         --- descendants) with the given `dt`. Unlike `update`, this does
         --- NOT pre-commit or clear dirty bits
-        --- — it only dispatches systems. Useful for piecewise phase
+        --- -- it only dispatches systems. Useful for piecewise phase
         --- execution (e.g. custom game loops splitting Update and
         --- Render across distinct ticks).
         runPhase: function(self, phase: Phase, dt?: number)
@@ -704,7 +702,7 @@ local record types
         --- Resolves the target archetype once at call time, allocates a
         --- contiguous ID range, and defers the actual row placement and
         --- `callback` invocation until the next commit. The returned
-        --- `firstId` is valid immediately — you can call `world:set`,
+        --- `firstId` is valid immediately -- you can call `world:set`,
         --- `world:remove`, or `world:despawn` on any of the allocated
         --- IDs before commit and the mutations are ordered correctly.
         ---
@@ -712,17 +710,16 @@ local record types
         --- `firstId + count - 1`.
         ---
         --- At commit time the target archetype's row range is claimed,
-        --- then `callback(archetype, startRow, count)` runs so you can
+        --- then `callback(archetype, firstRow, lastRow, count)` runs so you can
         --- write per-entity data via direct column access
-        --- (`archetype[Component][row] = ...`). `onAdd` hooks fire after
-        --- the callback for every spawned entity, and query observers
-        --- are notified.
+        --- (`archetype[Component][row] = ...`). Query observers are
+        --- notified when the batch drains.
         ---
         --- Relationship components (dense or sparse) are supported in
         --- the signature as either the bare container (e.g. `ChildOf`)
         --- or as a specific-target instance (e.g. `ChildOf(parent)`).
         --- When an instance is passed, its wildcard container is added
-        --- to the archetype automatically — no follow-up `world:set`
+        --- to the archetype automatically -- no follow-up `world:set`
         --- is needed for queries on the bare container to match.
         ---
         --- Sparse relationship columns are row-indexed proxies that
@@ -761,8 +758,8 @@ local record types
         --- Like `batchSpawn`, but uses the supplied entity IDs instead of
         --- allocating a new contiguous range. Intended for snapshot loads
         --- where each restored entity keeps its original ID. The archetype
-        --- resolution, capacity check, and hook sweep happen once per call
-        --- regardless of ID ordering.
+        --- resolution, capacity check, and required-component expansion happen
+        --- once per call regardless of ID ordering.
         ---
         --- @param ids Explicit entity IDs to spawn, in order.
         --- @param componentTypes Array of component types defining the archetype.
@@ -787,11 +784,11 @@ local record types
         --- teardown is deferred until the next commit.
         ---
         --- `query` must be a `Query` object built via `world:query(...)`
-        --- and reused across calls — batch ops do not accept
+        --- and reused across calls -- batch ops do not accept
         --- QueryDescriptors or raw component-type arrays. Build the
         --- query once outside your hot loop.
         ---
-        --- At commit time, events and hooks fire as expected:
+        --- At commit time, events and relationship bookkeeping run as expected:
         ---   * `OnDespawn` events fire for each despawned entity
         ---     (global observers and per-entity observers).
         ---   * Per-entity observer subscriptions are cleared after the
@@ -799,10 +796,9 @@ local record types
         ---   * Query observers receive a single `onEntitiesRemoved` for
         ---     the full range, followed by `onDeactivated` when the
         ---     archetype empties.
-        ---   * Archetypes with remove hooks, dense relationships, or
-        ---     entities that are reverse-index targets fall back to
-        ---     per-entity despawn so cascade-delete, unlink, and
-        ---     `onRemove` run correctly.
+        ---   * Archetypes with dense relationships or entities that are
+        ---     reverse-index targets fall back to per-entity despawn so
+        ---     cascade-delete and reverse-index unlink run correctly.
         ---
         --- @param query Query built via `world:query(...)`.
         batchDespawn: function(self, query: Query)
@@ -823,23 +819,17 @@ local record types
         ---     1-based inclusive row bounds so the caller can write the
         ---     column directly.
         ---
-        --- Fast path runs when the **target component** is "plain": no
-        --- onAdd / onReplace / onRemove hooks, not a dense-relationship
-        --- instance (no wildcard container), and not a sparse
-        --- relationship. Other components in the source archetype and
-        --- their hooks do not matter — bulk moves don't re-fire
-        --- pass-through components' hooks. Fast path does one move
-        --- plan per (src, dst) archetype, bulk column copy, whole-
-        --- archetype truncate. Hook-bearing or relationship-bearing
-        --- components fall back to per-entity `world:set` for
-        --- correctness (const form only — see below).
+        --- Fast path runs when the **target component** is "plain": it has
+        --- no bulk-incompatible behavior flag, is not a dense relationship
+        --- instance (no wildcard container), and is not sparse. Fast path
+        --- does one move plan per (src, dst) archetype, bulk column copy,
+        --- and whole-archetype truncate. Relationship-bearing or otherwise
+        --- non-bulk components fall back to per-entity `world:set` for
+        --- correctness (const form only; see below).
         ---
-        --- Callback form additionally requires the target component to
-        --- be plain: the callback IS the value-write step, so there's
-        --- no clean way to fire `onReplace` around it (no old-value
-        --- snapshot) or `onAdd` (no per-entity value to pass). The
-        --- enqueue call asserts on this. Hook-bearing components must
-        --- use the constant-value form.
+        --- Callback form additionally requires the target component to be
+        --- plain because the callback is the value-write step. Non-bulk
+        --- components must use the constant-value form.
         ---
         --- Sparse relationships always route through the per-entity
         --- path since they live in per-world stores, not archetype
@@ -860,13 +850,13 @@ local record types
         --- query that lack the component are skipped silently (no-op).
         ---
         --- Fast path runs when the **target component** is plain (no
-        --- onRemove hook, no wildcard container, not sparse) — one
-        --- bulk move to `src:withoutComponent(type)` per matched
-        --- archetype, no per-entity dispatch. Hook-bearing or
-        --- relationship-bearing components fall back to per-entity
-        --- `world:remove` so `onRemove`, reverse-index unlink, and
-        --- cascade delete all fire correctly. Other components in the
-        --- source archetype do not affect path selection.
+        --- bulk-incompatible behavior flag, no wildcard container, not
+        --- sparse): one bulk move to `src:withoutComponent(type)` per
+        --- matched archetype, no per-entity dispatch. Relationship-bearing
+        --- or otherwise non-bulk components fall back to per-entity
+        --- `world:remove` so reverse-index unlink and cascade delete run
+        --- correctly. Other components in the source archetype do not
+        --- affect path selection.
         ---
         --- @param query Query built via `world:query(...)`.
         --- @param componentType Component to remove.
@@ -882,7 +872,7 @@ local record types
         --- Preserves: systems, queries, archetype columns, observers.
         ---
         --- If you need post-construction state (systems gone, queries gone),
-        --- just call `tecs.newWorld()` — same path, clearer intent.
+        --- just call `tecs.newWorld()` -- same path, clearer intent.
         clearEntities: function(self)
 
         --- Compact the world: prune dead archetypes whose relationship
@@ -1027,7 +1017,7 @@ local record types
         --- argument so visitors can be hoisted to module scope and read/write
         --- state via the context table without per-call closure allocation.
         --- Context is appended last so existing single-arg callbacks
-        --- (`function(srcId)`) keep working — Lua silently drops extra args.
+        --- (`function(srcId)`) keep working -- Lua silently drops extra args.
         ---
         --- @param entity The target entity ID.
         --- @param relationship The sparse relationship container.
@@ -1238,7 +1228,7 @@ local record types
 
     --- 64-bit double array type used for entity IDs. Uses double so the
     --- 53-bit packed (slot, gen, flag) id survives read/write without
-    --- truncation. Opaque shape — callers treat it like a 1-based
+    --- truncation. Opaque shape -- callers treat it like a 1-based
     --- integer array with length at `[0]`.
     interface DoubleArray is {integer}
         metamethod __len: function(self) = macroexp(self: DoubleArray)

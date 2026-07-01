@@ -3,14 +3,19 @@
 --- Two API layers:
 ---
 --- * Streaming (allocation-lean): `saveSnapshot(world, writer)` walks the
----   world archetype-by-archetype and drives the writer. The writer sees:
+---   world archetype-by-archetype and drives the internal writer. The writer
+---   sees:
 ---
----       writer:writePrelude(prelude)
----       writer:startArchetype(componentNames, entityCount)
----       writer:writeEntity(id, ...components)       -- repeated
+---       writer:writePrelude(version, nextEntityId, counts, componentTable)
+---       writer:startArchetype(columnCount, entityCount, columnIndices, mode)
+---       writer:writeIds(ids, count)                 -- column-major
+---       writer:writeColumnRaw(...) / writeColumnValue(...)
+---       writer:writeEntity(id, components, count)   -- row-major
 ---       writer:endArchetype()
 ---       -- ...more archetypes...
----       writer:finish()
+---       writer:writeData(key, value)
+---       writer:writeDataEnd()
+---       writer:writeEnd()
 ---
 ---   `loadSnapshot(world, reader)` reads the prelude, despawns every existing
 ---   entity, then pulls archetypes via `reader:nextArchetype()` and issues a
@@ -20,17 +25,19 @@
 --- * Table helpers: `saveSnapshotTable` returns a plain Lua snapshot table
 ---   (JSON-compatible); `loadSnapshotTable` consumes one.
 ---
---- Filtering is deliberately a writer concern: decorate a writer to drop
---- entities (or entire archetypes) you don't want captured.
+--- SaveOptions can filter by query and Transform layer. Writers are still
+--- allowed to drop additional entities or archetypes, but built-in filtering
+--- happens before writer calls.
 ---
 --- The table format is:
 ---
 ---     {
 ---         version = 1,
 ---         nextEntityId = integer,
+---         componentTable = {{name = "Position"}, {name = "Health"}},
 ---         archetypes = {
 ---             {
----                 componentNames = {"Position", "Health"},
+---                 columnIndices = {1, 2},
 ---                 entities = {
 ---                     {1, {...Position...}, {...Health...}},
 ---                     {2, {...Position...}, {...Health...}},
@@ -38,13 +45,14 @@
 ---             },
 ---             ...
 ---         },
+---         data = {{key = string, value = any}},
 ---     }
 ---
 --- Entities are stored as positional arrays: `[id, comp1_data, comp2_data, ...]`
---- where each slot aligns with the archetype header's `componentNames`.
+--- where each slot aligns with the archetype header's `columnIndices`.
 --- Dropping the per-entity component keys cuts JSON size substantially and
 --- eliminates per-component hash lookups on the load path (we resolve
---- `componentNames` to Component types once per archetype).
+--- `columnIndices` through `componentTable` once per archetype).
 
 local types <const> = require("tecs.types")
 local internal <const> = require("tecs.internal.types")
@@ -120,7 +128,7 @@ local record snapshot
         --- Canonical field-layout fingerprint for FFI components. The
         --- binary format embeds it to detect schema drift and route to
         --- per-entity migration when saved and current layouts differ.
-        --- The table/JSON format omits it entirely — loads there go
+        --- The table/JSON format omits it entirely -- loads there go
         --- through per-component `deserialize`, which is field-name-keyed
         --- and migrates naturally.
         fingerprint: string | nil
@@ -154,7 +162,7 @@ local record snapshot
 
         --- Column-major mode only: bulk-write a whole FFI column.
         --- `colIdx` is the 1-based position within the archetype frame
-        --- (matches `columnIndices`). Optional method — present only on
+        --- (matches `columnIndices`). Optional method -- present only on
         --- writers that can handle raw bytes (BufferWriter). saveSnapshot
         --- calls this for FFI dense columns when the writer supports it.
         writeColumnRaw: function(self: Writer, colIdx: integer, srcPtr: any, byteCount: integer)
@@ -183,7 +191,7 @@ local record snapshot
         writeDataEnd: function(self: Writer)
 
         --- Called after the data section is closed, before `saveSnapshot`
-        --- returns. Use this hook to flush or emit trailing content.
+        --- returns. Writers can flush or emit trailing content here.
         writeEnd: function(self: Writer)
     end
 
@@ -290,7 +298,7 @@ local record snapshot
         --- Allow-list of `Transform.layer` values (must fit in 0..31).
         --- Entities carrying a `Transform` whose `layer` is NOT in this
         --- set are skipped. Entities without a `Transform` pass through
-        --- unaffected — `layers` is a filter on Transform-bearing
+        --- unaffected -- `layers` is a filter on Transform-bearing
         --- entities, not a hard gate.
         layers: {integer}
         --- Ad-hoc keyed metadata to attach to this snapshot. Each `(key,
@@ -313,13 +321,13 @@ local record snapshot
     --- place. Returns the snapshot prelude (version, counts).
     ---
     --- Custom metadata flows through events on entity 0:
-    ---   - `StartSnapshotLoad` — listeners register per-key callbacks
+    ---   - `StartSnapshotLoad` -- listeners register per-key callbacks
     ---     via `ev:onData(key, function(value) ... end)`
-    ---   - `FinishSnapshotLoad(prelude)` — fires once after every data
+    ---   - `FinishSnapshotLoad(prelude)` -- fires once after every data
     ---     callback has run
     loadSnapshot: function(world: World, source: any): SnapshotPrelude
 
-    --- Build an in-memory `Snapshot` table — JSON-friendly, useful for
+    --- Build an in-memory `Snapshot` table -- JSON-friendly, useful for
     --- programmatic inspection / migration. Slower than the buffer path.
     --- Accepts the same options as `saveSnapshot`.
     saveSnapshotTable: function(world: World, opts: SnapshotOptions): SnapshotTable
@@ -442,7 +450,7 @@ end
 -- Streaming save
 -------------------------------------------------------------------------------
 
--- Per-archetype cache of (cols, hasSparse) — emit-eligible components in
+-- Per-archetype cache of (cols, hasSparse) -- emit-eligible components in
 -- archetype.componentList order, plus a flag if any are sparse-container
 -- (which routes the archetype through the row-major emit). Component sets
 -- are immutable per archetype, so this cache never needs invalidation.
@@ -586,7 +594,7 @@ local newTableWriterImpl: function(): snapshot.Writer, function(): SnapshotTable
 
 -- Shared orchestration for both `saveSnapshot` (binary buffer destination)
 -- and `saveSnapshotTable` (in-memory Lua table). The writer abstraction is
--- internal — users only see the public `saveSnapshot` / `saveSnapshotTable`
+-- internal -- users only see the public `saveSnapshot` / `saveSnapshotTable`
 -- functions.
 local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: SnapshotOptions)
     -- Fire `OnSnapshotSave` first so plugins can declare which derived
@@ -927,7 +935,7 @@ local function loadColumnMajor(
     if entityCount == 0 then return end
 
     -- Bulk-read ids into an FFI double[] and hand the pointer straight
-    -- to `batchSpawnAtRaw` — no per-entity copy to a Lua table. Only the
+    -- to `batchSpawnAtRaw` -- no per-entity copy to a Lua table. Only the
     -- binary reader reaches this path (TableReader always reports row
     -- mode), so `ids` is guaranteed to be cdata.
     local ids = reader:readIds(entityCount)
@@ -960,7 +968,7 @@ local function loadColumnMajor(
                     -- A nil value means the component's serialize returned
                     -- nil at save time (transient state, synthetic paths,
                     -- etc.) and the framework skipped its deserialize. For
-                    -- FFI columns we MUST NOT assign nil — LuaJIT raises a
+                    -- FFI columns we MUST NOT assign nil -- LuaJIT raises a
                     -- conversion error that corrupts the unwinder. Leave
                     -- the slot at its zero-initialized default; downstream
                     -- systems already check for sentinel values like
@@ -1123,9 +1131,9 @@ end
 -------------------------------------------------------------------------------
 
 -- Build a positional entry `{id, data_1, data_2, ..., data_N}` where each
--- `data_i` comes from the i-th component's `serialize` hook. Callers
+-- `data_i` comes from the i-th component's `serialize` callback. Callers
 -- guarantee the component order matches the archetype header's
--- `componentNames`, so the reader can deserialize by position.
+-- `columnIndices`, so the reader can deserialize by position.
 local function buildEntry(id: integer, comps: {Component}, count: integer): {any}
     local entry: {any} = {}
     entry[1] = id
@@ -1204,7 +1212,6 @@ end
 local record TableWriterImpl is snapshot.Writer
     _snap: SnapshotTable
     _currentArch: snapshot.ArchetypeEntry
-    _currentColumns: {Component}     -- resolved from columnIndices for column-major mode
     _columnBuffers: {{any}}           -- one array per column, filled by writeColumnValue
 end
 
@@ -1238,17 +1245,6 @@ function TableWriterImpl:startArchetype(
     _entityCount: integer,
     columnIndices: {integer},
     _mode: integer)
-    -- Resolve component types from indices for use in writeColumnValue
-    -- (we need to call comp.serialize on each value).
-    local componentTable = self._snap.componentTable
-    local cols: {Component} = {}
-    for i = 1, #columnIndices do
-        local entry = componentTable[columnIndices[i]]
-        cols[i] = entry as Component  -- store name/schema for bookkeeping; real lookup below
-    end
-    -- componentTable doesn't hold component refs directly, so we need a name->comp lookup.
-    -- TableWriter just stores serialized blobs; it doesn't need the real Component
-    -- here as long as the column has a serialize hook. We resolve at write time.
     local entry: snapshot.ArchetypeEntry = {
         columnIndices = columnIndices,
         entities = {},
@@ -1321,7 +1317,6 @@ function TableWriterImpl:endArchetype()
     -- round-tripped back on load).
     arch._pendingIds = nil
     self._currentArch = nil
-    self._currentColumns = nil
     self._columnBuffers = nil
 end
 
@@ -1341,7 +1336,7 @@ function newTableWriterImpl(): snapshot.Writer, function(): SnapshotTable
 end
 
 -- TableReader: walks an in-memory `Snapshot`. Always reports mode=1 (row
--- shape) regardless of how the writer ingested the data — the table format
+-- shape) regardless of how the writer ingested the data -- the table format
 -- normalises everything to per-entity rows in `entities[i] = {id, c1, c2, ...}`.
 local record TableReaderImpl is snapshot.Reader
     _snap: SnapshotTable

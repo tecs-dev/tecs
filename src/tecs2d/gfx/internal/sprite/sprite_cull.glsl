@@ -8,7 +8,7 @@
 //
 // Inputs are addressed by archetype row (`gl_GlobalInvocationID.x`),
 // not by stable slot. The legacy per-frame transform copy that
-// `bucket_sync.tl` did is gone — Transform / Sprite / SpriteData /
+// `bucket_sync.tl` did is gone -- Transform / Sprite / SpriteData /
 // optional component columns are shadowed straight to GPU.
 //
 // Outputs (per-bucket, shared across all archetypes routed to this
@@ -156,7 +156,7 @@ layout(std430) readonly buffer SliceGenerations {
 
 // ---------- Component-presence mask + uniforms ----------
 
-// Canonical bits — must match modifier_binding.MASK (gpu/modifier_binding.tl).
+// Canonical bits -- must match modifier_binding.MASK (gpu/modifier_binding.tl).
 const uint COMP_COLOR          = 0x01u;
 const uint COMP_CLIPBOUNDS     = 0x02u;
 const uint COMP_OCCLUDER       = 0x08u;
