@@ -131,6 +131,26 @@ local function sendError(id: number | nil, code: number, message: string)
     sendHttpResponse(200, "OK", body)
 end
 
+local function sendToolJSON(id: number, payload: {string: any}, isError: boolean)
+    sendResponse(id, {content = {{type = "text", text = json.serialize(payload)}}, isError = isError})
+end
+
+local function sendToolOK(id: number, result: any, meta?: {string: any})
+    local payload: {string: any} = {ok = true, result = result}
+    if meta then
+        payload.meta = meta
+    end
+    sendToolJSON(id, payload, false)
+end
+
+local function sendToolError(id: number, code: string, message: string, details?: {string: any})
+    local err: {string: any} = {code = code, message = message}
+    if details then
+        err.details = details
+    end
+    sendToolJSON(id, {ok = false, error = err}, true)
+end
+
 local function enqueueWorldOp(op: function(tecs.World))
     queuedWorldOps[#queuedWorldOps + 1] = op
 end
@@ -152,9 +172,11 @@ end
 local toolHandlers: {string: function(args: {string:any}, id: number)} = {}
 
 toolHandlers["ping"] = function(_: {string:any}, id: number)
-    local text = string.format("Game is running (port: %d, time: %.1fs)",
-        (boundPort or 0) as integer, lt.getTime())
-    sendResponse(id, {content = {{type = "text", text = text}}})
+    sendToolOK(id, {
+        running = true,
+        port = (boundPort or 0) as integer,
+        time = lt.getTime()
+    }, nil)
 end
 
 toolHandlers["screenshot"] = function(args: {string:any}, id: number)
@@ -188,7 +210,7 @@ end
 toolHandlers["send_love_event"] = function(args: {string:any}, id: number)
     local eventName = args.event as string
     if not eventName then
-        sendResponse(id, {content = {{type = "text", text = "Error: missing event name"}}, isError = true})
+        sendToolError(id, "missing_parameter", "Missing 'event' parameter", nil)
         return
     end
     -- Accept mixed-type payloads (numbers, booleans, strings). LÖVE events
@@ -201,36 +223,38 @@ toolHandlers["send_love_event"] = function(args: {string:any}, id: number)
     else
         le.push(eventName)
     end
-    sendResponse(id, {content = {{type = "text", text = "OK"}}})
+    sendToolOK(id, {event = eventName, args = eventArgs or {}}, nil)
 end
 
 toolHandlers["get_window_size"] = function(_: {string:any}, id: number)
     local w, h = lg.getDimensions()
-    sendResponse(id, {content = {{type = "text", text = w .. "x" .. h}}})
+    sendToolOK(id, {width = w, height = h}, nil)
 end
 
 toolHandlers["get_fps"] = function(_: {string:any}, id: number)
-    sendResponse(id, {content = {{type = "text", text = "FPS: " .. lt.getFPS()}}})
+    sendToolOK(id, {fps = lt.getFPS()}, nil)
 end
 
 toolHandlers["get_stats"] = function(_: {string:any}, id: number)
     if not world then
-        sendResponse(id, {content = {{type = "text", text = "World not initialized"}}, isError = true})
+        sendToolError(id, "world_unavailable", "World not initialized", nil)
         return
     end
     local stats = world:getStats()
     local memoryKB = collectgarbage("count")
-    local memoryMB = memoryKB / 1024
-    local text = string.format(
-        "Entities: %d\nArchetypes: %d\nComponents: %d\nSystems: %d\nMemory: %.1f MB",
-        stats.entities, stats.archetypes, stats.components, stats.systems, memoryMB
-    )
-    sendResponse(id, {content = {{type = "text", text = text}}})
+    sendToolOK(id, {
+        entities = stats.entities,
+        archetypes = stats.archetypes,
+        components = stats.components,
+        systems = stats.systems,
+        memoryKB = memoryKB,
+        memoryMB = memoryKB / 1024
+    }, nil)
 end
 
 toolHandlers["get_components"] = function(_: {string:any}, id: number)
     if not world then
-        sendResponse(id, {content = {{type = "text", text = "World not initialized"}}, isError = true})
+        sendToolError(id, "world_unavailable", "World not initialized", nil)
         return
     end
     -- Access internal archetypeIndex (not on public interface)
@@ -258,49 +282,49 @@ toolHandlers["get_components"] = function(_: {string:any}, id: number)
         table.insert(names, name)
     end
     table.sort(names)
-    local lines: {string} = {}
+    local components: {{string: any}} = {}
     for i = 1, #names do
         local name = names[i]
-        table.insert(lines, string.format("%s (id=%d, entities=%d)", name, componentIds[name], componentCounts[name]))
+        table.insert(components, {
+            name = name,
+            id = componentIds[name],
+            entities = componentCounts[name]
+        })
     end
-    sendResponse(id, {content = {{type = "text", text = table.concat(lines, "\n")}}})
+    sendToolOK(id, {count = #components, components = components}, nil)
 end
 
 toolHandlers["get_systems"] = function(_: {string:any}, id: number)
     if not world then
-        sendResponse(id, {content = {{type = "text", text = "World not initialized"}}, isError = true})
+        sendToolError(id, "world_unavailable", "World not initialized", nil)
         return
     end
     local pipeline = (world as {string:any}).pipeline as {string:any}
     local pipelineSystems = pipeline.systems as {{tecs.SystemConfig}}
 
     -- Systems are already organized by phase position in pipelineSystems array
-    local lines: {string} = {}
+    local systems: {{string: any}} = {}
     for i = 1, #pipelineSystems do
         local phaseSystems = pipelineSystems[i]
         for j = 1, #phaseSystems do
             local config = phaseSystems[j]
             local name = config.name or "(anonymous)"
             local phaseName = config.phase and config.phase.name or "(unknown)"
-            table.insert(lines, string.format("[%s] %s", phaseName, name))
+            table.insert(systems, {name = name, phase = phaseName})
         end
     end
 
-    if #lines == 0 then
-        sendResponse(id, {content = {{type = "text", text = "No systems registered"}}})
-    else
-        sendResponse(id, {content = {{type = "text", text = table.concat(lines, "\n")}}})
-    end
+    sendToolOK(id, {count = #systems, systems = systems}, nil)
 end
 
 toolHandlers["get_resources"] = function(_: {string:any}, id: number)
     if not world then
-        sendResponse(id, {content = {{type = "text", text = "World not initialized"}}, isError = true})
+        sendToolError(id, "world_unavailable", "World not initialized", nil)
         return
     end
 
     local resources = world.resources as {any: any}
-    local lines: {string} = {}
+    local result: {{string: any}} = {}
 
     for key, value in pairs(resources) do
         local keyStr: string
@@ -329,21 +353,19 @@ toolHandlers["get_resources"] = function(_: {string:any}, id: number)
             valueType = type(value)
         end
 
-        table.insert(lines, string.format("%s: %s", keyStr, valueType))
+        table.insert(result, {key = keyStr, type = valueType})
     end
 
-    table.sort(lines)
+    table.sort(result, function(a: {string: any}, b: {string: any}): boolean
+        return (a.key as string) < (b.key as string)
+    end)
 
-    if #lines == 0 then
-        sendResponse(id, {content = {{type = "text", text = "No resources registered"}}})
-    else
-        sendResponse(id, {content = {{type = "text", text = table.concat(lines, "\n")}}})
-    end
+    sendToolOK(id, {count = #result, resources = result}, nil)
 end
 
 toolHandlers["despawn"] = function(args: {string:any}, id: number)
     if not world then
-        sendResponse(id, {content = {{type = "text", text = "World not initialized"}}, isError = true})
+        sendToolError(id, "world_unavailable", "World not initialized", nil)
         return
     end
 
@@ -357,39 +379,38 @@ toolHandlers["despawn"] = function(args: {string:any}, id: number)
     elseif args.id then
         table.insert(entityIds, args.id as integer)
     else
-        local err = "Missing entity ID(s) - provide 'id' or 'ids'"
-        sendResponse(id, {content = {{type = "text", text = err}}, isError = true})
+        sendToolError(id, "missing_parameter", "Missing entity ID(s) - provide 'id' or 'ids'", nil)
         return
     end
 
     -- Despawn all entities
     local succeeded: {integer} = {}
-    local failed: {{integer, string}} = {}
+    local failed: {{string: any}} = {}
     for i = 1, #entityIds do
         local entityId = entityIds[i]
         local results = {pcall(world.despawn, world, entityId)}
         if results[1] then
             table.insert(succeeded, entityId)
         else
-            table.insert(failed, {entityId, tostring(results[2])})
+            table.insert(failed, {id = entityId, error = tostring(results[2])})
         end
     end
 
-    -- Build response
-    local msg = "Despawned " .. #succeeded .. " entities"
-    if #failed > 0 then
-        msg = msg .. ", " .. #failed .. " failed"
-    end
-    sendResponse(id, {content = {{type = "text", text = msg}}})
+    sendToolOK(id, {
+        despawned = #succeeded,
+        failed = #failed,
+        ids = succeeded,
+        errors = failed
+    }, nil)
 end
 
 toolHandlers["quit"] = function(_: {string:any}, id: number)
-    sendResponse(id, {content = {{type = "text", text = "Quitting game"}}})
+    sendToolOK(id, {quitting = true}, nil)
     le.push("quit")
 end
 
 toolHandlers["restart"] = function(_: {string:any}, id: number)
-    sendResponse(id, {content = {{type = "text", text = "Restarting game"}}})
+    sendToolOK(id, {restarting = true}, nil)
     love.event.quit("restart")
 end
 
@@ -427,18 +448,18 @@ end
 
 toolHandlers["get_entity"] = function(args: {string:any}, id: number)
     if not world then
-        sendResponse(id, {content = {{type = "text", text = "World not initialized"}}, isError = true})
+        sendToolError(id, "world_unavailable", "World not initialized", nil)
         return
     end
 
     local entityId = args.id as integer
     if not entityId then
-        sendResponse(id, {content = {{type = "text", text = "Missing 'id' parameter"}}, isError = true})
+        sendToolError(id, "missing_parameter", "Missing 'id' parameter", nil)
         return
     end
 
     if not world:isAlive(entityId) then
-        sendResponse(id, {content = {{type = "text", text = "Entity " .. entityId .. " not found"}}, isError = true})
+        sendToolError(id, "entity_not_found", "Entity not found", {id = entityId})
         return
     end
 
@@ -451,7 +472,7 @@ toolHandlers["get_entity"] = function(args: {string:any}, id: number)
     local s = (allocator.slots as {integer: {string: integer}})[slot]
     local archetype = archetypeIndex[s.archetypeId]
     if archetype == nil then
-        sendResponse(id, {content = {{type = "text", text = "Entity " .. entityId .. " not committed yet"}}, isError = true})
+        sendToolError(id, "entity_not_committed", "Entity not committed yet", {id = entityId})
         return
     end
     local row = s.row
@@ -479,18 +500,18 @@ toolHandlers["get_entity"] = function(args: {string:any}, id: number)
         archetypeComponents = getArchetypeSignature(archetype),
         components = components
     }
-    sendResponse(id, {content = {{type = "text", text = json.serialize(result)}}})
+    sendToolOK(id, result, nil)
 end
 
 toolHandlers["query"] = function(args: {string:any}, id: number)
     if not world then
-        sendResponse(id, {content = {{type = "text", text = "World not initialized"}}, isError = true})
+        sendToolError(id, "world_unavailable", "World not initialized", nil)
         return
     end
 
     local includeNames = args.include as {string}
     if not includeNames or #includeNames == 0 then
-        sendResponse(id, {content = {{type = "text", text = "Missing 'include' parameter"}}, isError = true})
+        sendToolError(id, "missing_parameter", "Missing 'include' parameter", nil)
         return
     end
 
@@ -506,7 +527,7 @@ toolHandlers["query"] = function(args: {string:any}, id: number)
         local name = includeNames[i]
         local comp = componentMap[name]
         if not comp then
-            sendResponse(id, {content = {{type = "text", text = "Unknown component: " .. name}}, isError = true})
+            sendToolError(id, "unknown_component", "Unknown component", {component = name})
             return
         end
         table.insert(includeComponents, comp)
@@ -516,7 +537,7 @@ toolHandlers["query"] = function(args: {string:any}, id: number)
         local name = excludeNames[i]
         local comp = componentMap[name]
         if not comp then
-            sendResponse(id, {content = {{type = "text", text = "Unknown component: " .. name}}, isError = true})
+            sendToolError(id, "unknown_component", "Unknown component", {component = name})
             return
         end
         table.insert(excludeComponents, comp)
@@ -571,12 +592,12 @@ toolHandlers["query"] = function(args: {string:any}, id: number)
     end
 
     local response = {count = count, entities = results}
-    sendResponse(id, {content = {{type = "text", text = json.serialize(response)}}})
+    sendToolOK(id, response, {limit = limit, truncated = count >= limit})
 end
 
 toolHandlers["get_archetypes"] = function(_: {string:any}, id: number)
     if not world then
-        sendResponse(id, {content = {{type = "text", text = "World not initialized"}}, isError = true})
+        sendToolError(id, "world_unavailable", "World not initialized", nil)
         return
     end
 
@@ -604,19 +625,18 @@ toolHandlers["get_archetypes"] = function(_: {string:any}, id: number)
         })
     end
 
-    local response = json.serialize({count = #archetypes, archetypes = archetypes})
-    sendResponse(id, {content = {{type = "text", text = response}}})
+    sendToolOK(id, {count = #archetypes, archetypes = archetypes}, nil)
 end
 
 toolHandlers["spawn"] = function(args: {string:any}, id: number)
     if not world then
-        sendResponse(id, {content = {{type = "text", text = "World not initialized"}}, isError = true})
+        sendToolError(id, "world_unavailable", "World not initialized", nil)
         return
     end
 
     local componentsData = args.components as {string: {string: any}}
     if not componentsData then
-        sendResponse(id, {content = {{type = "text", text = "Missing 'components' parameter"}}, isError = true})
+        sendToolError(id, "missing_parameter", "Missing 'components' parameter", nil)
         return
     end
 
@@ -626,7 +646,7 @@ toolHandlers["spawn"] = function(args: {string:any}, id: number)
     for compName, compData in pairs(componentsData) do
         local comp = componentMap[compName]
         if not comp then
-            sendResponse(id, {content = {{type = "text", text = "Unknown component: " .. compName}}, isError = true})
+            sendToolError(id, "unknown_component", "Unknown component", {component = compName})
             return
         end
 
@@ -635,8 +655,10 @@ toolHandlers["spawn"] = function(args: {string:any}, id: number)
             return comp.deserialize(world, compData)
         end)
         if not ok then
-            local err = "Failed to create " .. compName .. ": " .. tostring(instance)
-            sendResponse(id, {content = {{type = "text", text = err}}, isError = true})
+            sendToolError(id, "component_deserialize_failed", "Failed to create component", {
+                component = compName,
+                error = tostring(instance)
+            })
             return
         end
         table.insert(instances, instance)
@@ -647,15 +669,15 @@ toolHandlers["spawn"] = function(args: {string:any}, id: number)
         return world:spawn(table.unpack(instances))
     end)
     if ok then
-        sendResponse(id, {content = {{type = "text", text = json.serialize({id = result})}}})
+        sendToolOK(id, {id = result}, nil)
     else
-        sendResponse(id, {content = {{type = "text", text = "Spawn failed: " .. tostring(result)}}, isError = true})
+        sendToolError(id, "spawn_failed", "Spawn failed", {error = tostring(result)})
     end
 end
 
 toolHandlers["get_bundles"] = function(_: {string:any}, id: number)
     if not world then
-        sendResponse(id, {content = {{type = "text", text = "World not initialized"}}, isError = true})
+        sendToolError(id, "world_unavailable", "World not initialized", nil)
         return
     end
 
@@ -670,18 +692,18 @@ toolHandlers["get_bundles"] = function(_: {string:any}, id: number)
         }
     end
 
-    sendResponse(id, {content = {{type = "text", text = json.serialize({bundles = result})}}})
+    sendToolOK(id, {bundles = result}, nil)
 end
 
 toolHandlers["spawn_bundle"] = function(args: {string:any}, id: number)
     if not world then
-        sendResponse(id, {content = {{type = "text", text = "World not initialized"}}, isError = true})
+        sendToolError(id, "world_unavailable", "World not initialized", nil)
         return
     end
 
     local bundleName = args.bundle as string
     if not bundleName then
-        sendResponse(id, {content = {{type = "text", text = "Missing 'bundle' parameter"}}, isError = true})
+        sendToolError(id, "missing_parameter", "Missing 'bundle' parameter", nil)
         return
     end
 
@@ -692,7 +714,7 @@ toolHandlers["spawn_bundle"] = function(args: {string:any}, id: number)
     for compName, compData in pairs(componentsData) do
         local comp = componentMap[compName]
         if not comp then
-            sendResponse(id, {content = {{type = "text", text = "Unknown component: " .. compName}}, isError = true})
+            sendToolError(id, "unknown_component", "Unknown component", {component = compName})
             return
         end
 
@@ -700,8 +722,10 @@ toolHandlers["spawn_bundle"] = function(args: {string:any}, id: number)
             return comp.deserialize(world, compData)
         end)
         if not ok then
-            local err = "Failed to create " .. compName .. ": " .. tostring(instance)
-            sendResponse(id, {content = {{type = "text", text = err}}, isError = true})
+            sendToolError(id, "component_deserialize_failed", "Failed to create component", {
+                component = compName,
+                error = tostring(instance)
+            })
             return
         end
         table.insert(instances, instance)
@@ -711,22 +735,21 @@ toolHandlers["spawn_bundle"] = function(args: {string:any}, id: number)
         return world:spawnBundle(bundleName, table.unpack(instances))
     end)
     if ok then
-        sendResponse(id, {content = {{type = "text", text = json.serialize({id = result})}}})
+        sendToolOK(id, {id = result}, nil)
     else
-        local err = "Spawn bundle failed: " .. tostring(result)
-        sendResponse(id, {content = {{type = "text", text = err}}, isError = true})
+        sendToolError(id, "spawn_bundle_failed", "Spawn bundle failed", {error = tostring(result)})
     end
 end
 
 toolHandlers["run_lua"] = function(args: {string:any}, id: number)
     if not world then
-        sendResponse(id, {content = {{type = "text", text = "World not initialized"}}, isError = true})
+        sendToolError(id, "world_unavailable", "World not initialized", nil)
         return
     end
 
     local code = args.code as string
     if not code then
-        sendResponse(id, {content = {{type = "text", text = "Missing 'code' parameter"}}, isError = true})
+        sendToolError(id, "missing_parameter", "Missing 'code' parameter", nil)
         return
     end
 
@@ -749,7 +772,7 @@ toolHandlers["run_lua"] = function(args: {string:any}, id: number)
     if not loadOk then
         local errMsg = tostring(loadResult)
         log:error("run_lua load failed: %s", errMsg)
-        sendResponse(id, {content = {{type = "text", text = errMsg}}, isError = true})
+        sendToolError(id, "lua_load_failed", "Lua load failed", {error = errMsg})
         return
     end
 
@@ -765,22 +788,24 @@ toolHandlers["run_lua"] = function(args: {string:any}, id: number)
         if not results[1] then
             local errMsg = tostring(results[2])
             log:error("run_lua execution failed: %s", errMsg)
-            sendResponse(id, {content = {{type = "text", text = errMsg}}, isError = true})
+            sendToolError(id, "lua_execution_failed", "Lua execution failed", {error = errMsg})
             pendingWorldOpResponse = false
             return
         end
         local n = #results
-        local parts: {string} = {}
-        for i = 2, n do parts[i - 1] = tostring(results[i]) end
-        local text = n > 1 and table.concat(parts, "\t") or "(no return value)"
-        sendResponse(id, {content = {{type = "text", text = text}}})
+        local values: {string} = {}
+        for i = 2, n do values[i - 1] = tostring(results[i]) end
+        sendToolOK(id, {
+            returned = n - 1,
+            values = values
+        }, nil)
         pendingWorldOpResponse = false
     end)
 end
 
 toolHandlers["patch_entities"] = function(args: {string:any}, id: number)
     if not world then
-        sendResponse(id, {content = {{type = "text", text = "World not initialized"}}, isError = true})
+        sendToolError(id, "world_unavailable", "World not initialized", nil)
         return
     end
 
@@ -794,8 +819,7 @@ toolHandlers["patch_entities"] = function(args: {string:any}, id: number)
     elseif args.id then
         table.insert(entityIds, args.id as integer)
     else
-        local err = "Missing entity ID(s) - provide 'id' or 'ids'"
-        sendResponse(id, {content = {{type = "text", text = err}}, isError = true})
+        sendToolError(id, "missing_parameter", "Missing entity ID(s) - provide 'id' or 'ids'", nil)
         return
     end
 
@@ -806,14 +830,13 @@ toolHandlers["patch_entities"] = function(args: {string:any}, id: number)
     -- Validate components exist before making changes
     for compName in pairs(setData) do
         if not componentMap[compName] then
-            sendResponse(id, {content = {{type = "text", text = "Unknown component: " .. compName}}, isError = true})
+            sendToolError(id, "unknown_component", "Unknown component", {component = compName})
             return
         end
     end
     for i = 1, #removeNames do
         if not componentMap[removeNames[i]] then
-            local err = "Unknown component: " .. removeNames[i]
-            sendResponse(id, {content = {{type = "text", text = err}}, isError = true})
+            sendToolError(id, "unknown_component", "Unknown component", {component = removeNames[i]})
             return
         end
     end
@@ -865,19 +888,19 @@ toolHandlers["patch_entities"] = function(args: {string:any}, id: number)
         log:info(msg)
     end)
 
-    sendResponse(id, {content = {{type = "text", text = "Patch queued for " .. #entityIds .. " entities"}}})
+    sendToolOK(id, {queued = true, entities = #entityIds, ids = entityIds}, nil)
 end
 
 toolHandlers["screen_to_world"] = function(args: {string:any}, id: number)
     if not world then
-        sendResponse(id, {content = {{type = "text", text = "World not initialized"}}, isError = true})
+        sendToolError(id, "world_unavailable", "World not initialized", nil)
         return
     end
 
     local screenX = args.x as number
     local screenY = args.y as number
     if not screenX or not screenY then
-        sendResponse(id, {content = {{type = "text", text = "Missing x or y coordinate"}}, isError = true})
+        sendToolError(id, "missing_parameter", "Missing x or y coordinate", nil)
         return
     end
 
@@ -902,22 +925,21 @@ toolHandlers["screen_to_world"] = function(args: {string:any}, id: number)
     end
 
     if not camera then
-        sendResponse(id, {content = {{type = "text", text = "No camera found in resources"}}, isError = true})
+        sendToolError(id, "camera_not_found", "No camera found in resources", nil)
         return
     end
 
     local toWorldFn = (camera as {string: any}).toWorld as function(any, number, number): (number, number)
     local worldX, worldY = toWorldFn(camera, screenX, screenY)
-    local result = json.serialize({
+    sendToolOK(id, {
         screen = {x = screenX, y = screenY},
         world = {x = worldX, y = worldY}
-    })
-    sendResponse(id, {content = {{type = "text", text = result}}})
+    }, nil)
 end
 
 toolHandlers["query_in_bounds"] = function(args: {string:any}, id: number)
     if not world then
-        sendResponse(id, {content = {{type = "text", text = "World not initialized"}}, isError = true})
+        sendToolError(id, "world_unavailable", "World not initialized", nil)
         return
     end
 
@@ -926,8 +948,7 @@ toolHandlers["query_in_bounds"] = function(args: {string:any}, id: number)
     local boundsW = args.width as number
     local boundsH = args.height as number
     if not boundsX or not boundsY or not boundsW or not boundsH then
-        local err = "Missing bounds parameters (x, y, width, height)"
-        sendResponse(id, {content = {{type = "text", text = err}}, isError = true})
+        sendToolError(id, "missing_parameter", "Missing bounds parameters (x, y, width, height)", nil)
         return
     end
 
@@ -946,9 +967,8 @@ toolHandlers["query_in_bounds"] = function(args: {string:any}, id: number)
         positionName = "Transform"
     end
     if not positionComp then
-        sendResponse(id, {content = {{type = "text",
-            text = "Neither Position nor Transform component is registered; cannot run query_in_bounds."
-        }}, isError = true})
+        sendToolError(id, "spatial_component_not_found",
+            "Neither Position nor Transform component is registered; cannot run query_in_bounds.", nil)
         return
     end
 
@@ -959,7 +979,7 @@ toolHandlers["query_in_bounds"] = function(args: {string:any}, id: number)
         if name ~= positionName then
             local comp = componentMap[name]
             if not comp then
-                sendResponse(id, {content = {{type = "text", text = "Unknown component: " .. name}}, isError = true})
+                sendToolError(id, "unknown_component", "Unknown component", {component = name})
                 return
             end
             table.insert(includeComponents, comp)
@@ -1019,7 +1039,7 @@ toolHandlers["query_in_bounds"] = function(args: {string:any}, id: number)
         count = count, entities = results,
         bounds = {x = boundsX, y = boundsY, width = boundsW, height = boundsH}
     }
-    sendResponse(id, {content = {{type = "text", text = json.serialize(response)}}})
+    sendToolOK(id, response, {limit = limit, truncated = count >= limit})
 end
 
 -- Track disabled systems for toggle_system
@@ -1027,18 +1047,18 @@ local disabledSystems: {string: boolean} = {}
 
 toolHandlers["toggle_system"] = function(args: {string:any}, id: number)
     if not world then
-        sendResponse(id, {content = {{type = "text", text = "World not initialized"}}, isError = true})
+        sendToolError(id, "world_unavailable", "World not initialized", nil)
         return
     end
 
     local systemName = args.name as string
     local isEnabled = args.enabled as boolean
     if not systemName then
-        sendResponse(id, {content = {{type = "text", text = "Missing 'name' parameter"}}, isError = true})
+        sendToolError(id, "missing_parameter", "Missing 'name' parameter", nil)
         return
     end
     if isEnabled == nil then
-        sendResponse(id, {content = {{type = "text", text = "Missing 'enabled' parameter"}}, isError = true})
+        sendToolError(id, "missing_parameter", "Missing 'enabled' parameter", nil)
         return
     end
 
@@ -1046,8 +1066,7 @@ toolHandlers["toggle_system"] = function(args: {string:any}, id: number)
     local pipeline = (world as {string:any}).pipeline as {string: any}
     local registry = pipeline.systemNameRegistry as {string: integer}
     if not registry[systemName] then
-        local err = "System '" .. systemName .. "' not found"
-        sendResponse(id, {content = {{type = "text", text = err}}, isError = true})
+        sendToolError(id, "system_not_found", "System not found", {system = systemName})
         return
     end
 
@@ -1071,7 +1090,7 @@ toolHandlers["toggle_system"] = function(args: {string:any}, id: number)
                         (config as {string:any})._originalRunIf = nil
                     end
                 end
-                sendResponse(id, {content = {{type = "text", text = "System '" .. systemName .. "' enabled"}}})
+                sendToolOK(id, {system = systemName, enabled = true}, nil)
             else
                 -- Store original runIf and replace with disabled check
                 if not disabledSystems[systemName] then
@@ -1088,25 +1107,24 @@ toolHandlers["toggle_system"] = function(args: {string:any}, id: number)
                         return originalRunIf(_dt, _world, name)
                     end
                 end
-                sendResponse(id, {content = {{type = "text", text = "System '" .. systemName .. "' disabled"}}})
+                sendToolOK(id, {system = systemName, enabled = false}, nil)
             end
             return
         end
     end
 
-    local err = "System '" .. systemName .. "' not found in phase"
-    sendResponse(id, {content = {{type = "text", text = err}}, isError = true})
+    sendToolError(id, "system_not_found", "System not found in phase", {system = systemName})
 end
 
 toolHandlers["set_time_scale"] = function(args: {string:any}, id: number)
     if not world then
-        sendResponse(id, {content = {{type = "text", text = "World not initialized"}}, isError = true})
+        sendToolError(id, "world_unavailable", "World not initialized", nil)
         return
     end
 
     local scale = args.scale as number
     if not scale then
-        sendResponse(id, {content = {{type = "text", text = "Missing 'scale' parameter"}}, isError = true})
+        sendToolError(id, "missing_parameter", "Missing 'scale' parameter", nil)
         return
     end
 
@@ -1116,7 +1134,7 @@ toolHandlers["set_time_scale"] = function(args: {string:any}, id: number)
     -- Get the render pipeline from resources (not world.pipeline which is the system scheduler)
     local renderPipeline = world.resources[pipeline_key.PIPELINE] as {string: any}
     if not renderPipeline then
-        sendResponse(id, {content = {{type = "text", text = "Render pipeline not found"}}, isError = true})
+        sendToolError(id, "render_pipeline_not_found", "Render pipeline not found", nil)
         return
     end
 
@@ -1128,8 +1146,7 @@ toolHandlers["set_time_scale"] = function(args: {string:any}, id: number)
         renderPipeline.timeScale = scale
     end
 
-    local resp = json.serialize({scale = scale, gameTime = renderPipeline.gameTime or 0})
-    sendResponse(id, {content = {{type = "text", text = resp}}})
+    sendToolOK(id, {scale = scale, gameTime = renderPipeline.gameTime or 0}, nil)
 end
 
 -- Helpers to disable/enable gameplay phases for pause/step
@@ -1172,11 +1189,11 @@ end
 
 toolHandlers["pause"] = function(_: {string:any}, id: number)
     if not world then
-        sendResponse(id, {content = {{type = "text", text = "World not initialized"}}, isError = true})
+        sendToolError(id, "world_unavailable", "World not initialized", nil)
         return
     end
     if paused then
-        sendResponse(id, {content = {{type = "text", text = "Already paused"}}})
+        sendToolOK(id, {paused = true, alreadyPaused = true}, nil)
         return
     end
 
@@ -1186,19 +1203,20 @@ toolHandlers["pause"] = function(_: {string:any}, id: number)
     paused = true
     stepsRemaining = 0
 
-    sendResponse(id, {content = {{type = "text", text = "Game paused"}}})
+    sendToolOK(id, {paused = true, savedTimeScale = savedTimeScale}, nil)
 end
 
 toolHandlers["resume"] = function(_: {string:any}, id: number)
     if not world then
-        sendResponse(id, {content = {{type = "text", text = "World not initialized"}}, isError = true})
+        sendToolError(id, "world_unavailable", "World not initialized", nil)
         return
     end
     if not paused then
-        sendResponse(id, {content = {{type = "text", text = "Not paused"}}})
+        sendToolOK(id, {paused = false, alreadyResumed = true}, nil)
         return
     end
 
+    local restoredTimeScale = savedTimeScale
     if savedTimeScale then
         setRenderTimeScale(savedTimeScale)
     end
@@ -1207,16 +1225,16 @@ toolHandlers["resume"] = function(_: {string:any}, id: number)
     paused = false
     stepsRemaining = 0
 
-    sendResponse(id, {content = {{type = "text", text = "Game resumed"}}})
+    sendToolOK(id, {paused = false, restoredTimeScale = restoredTimeScale}, nil)
 end
 
 toolHandlers["step"] = function(args: {string:any}, id: number)
     if not world then
-        sendResponse(id, {content = {{type = "text", text = "World not initialized"}}, isError = true})
+        sendToolError(id, "world_unavailable", "World not initialized", nil)
         return
     end
     if not paused then
-        sendResponse(id, {content = {{type = "text", text = "Must be paused to step"}}, isError = true})
+        sendToolError(id, "not_paused", "Must be paused to step", nil)
         return
     end
 
@@ -1230,7 +1248,7 @@ toolHandlers["step"] = function(args: {string:any}, id: number)
     enableGameplayPhases()
     stepsRemaining = frames
 
-    sendResponse(id, {content = {{type = "text", text = "Stepping " .. frames .. " frame(s)"}}})
+    sendToolOK(id, {stepping = true, frames = frames}, nil)
 end
 
 local DEFAULT_COLOR <const>: {number} = {1, 1, 0, 0.8}
@@ -1238,7 +1256,7 @@ local DEFAULT_COLOR <const>: {number} = {1, 1, 0, 0.8}
 toolHandlers["debug_draw"] = function(args: {string:any}, id: number)
     local drawType = args.type as DebugDrawType
     if not drawType then
-        sendResponse(id, {content = {{type = "text", text = "Missing 'type' (rect, circle, text, line)"}}, isError = true})
+        sendToolError(id, "missing_parameter", "Missing 'type' (rect, circle, text, line)", nil)
         return
     end
 
@@ -1272,7 +1290,7 @@ toolHandlers["debug_draw"] = function(args: {string:any}, id: number)
     nextDebugDrawId = nextDebugDrawId + 1
 
     table.insert(debugDrawCommands, cmd)
-    sendResponse(id, {content = {{type = "text", text = "Created debug draw " .. cmd.id}}})
+    sendToolOK(id, {id = cmd.id, type = cmd.type, tag = cmd.tag}, nil)
 end
 
 toolHandlers["clear_debug_draw"] = function(args: {string:any}, id: number)
@@ -1282,7 +1300,7 @@ toolHandlers["clear_debug_draw"] = function(args: {string:any}, id: number)
     if not tag and not clearId then
         local count = #debugDrawCommands
         debugDrawCommands = {}
-        sendResponse(id, {content = {{type = "text", text = "Cleared " .. count .. " debug draw command(s)"}}})
+        sendToolOK(id, {cleared = count}, nil)
         return
     end
 
@@ -1294,7 +1312,7 @@ toolHandlers["clear_debug_draw"] = function(args: {string:any}, id: number)
             removed = removed + 1
         end
     end
-    sendResponse(id, {content = {{type = "text", text = "Cleared " .. removed .. " debug draw command(s)"}}})
+    sendToolOK(id, {cleared = removed, id = clearId, tag = tag}, nil)
 end
 
 -- Profiler: thin pass-through over tecs.utils.profile.sample.
@@ -1315,20 +1333,19 @@ end
 
 local function emitResult(id: number, result: string, saveTo: string)
     if saveTo then
-        sendResponse(id, {content = {{type = "text", text = "Saved to " .. result}}})
+        sendToolOK(id, {path = result}, nil)
     else
-        sendResponse(id, {content = {{type = "text", text = result}}})
+        sendToolOK(id, {format = "collapsed-stack", payload = result, bytes = #result}, nil)
     end
 end
 
 toolHandlers["profiler_start"] = function(args: {string:any}, id: number)
     if not world then
-        sendResponse(id, {content = {{type = "text", text = "World not initialized"}}, isError = true})
+        sendToolError(id, "world_unavailable", "World not initialized", nil)
         return
     end
     if sampleSession then
-        sendResponse(id, {content = {{type = "text",
-            text = "Profiler is already running; call profiler_stop first"}}, isError = true})
+        sendToolError(id, "profiler_already_running", "Profiler is already running; call profiler_stop first", nil)
         return
     end
 
@@ -1361,10 +1378,12 @@ toolHandlers["profiler_start"] = function(args: {string:any}, id: number)
         })
     end
 
-    local desc = seconds and string.format("%.1fs duration", seconds) or "recording until stopped"
-    sendResponse(id, {content = {{type = "text",
-        text = "Profiler started: " .. desc
-    }}})
+    sendToolOK(id, {
+        running = true,
+        seconds = seconds,
+        intervalMs = args.interval_ms as integer,
+        zone = args.zone as string
+    }, nil)
 end
 
 toolHandlers["profiler_stop"] = function(args: {string:any}, id: number)
@@ -1375,8 +1394,10 @@ toolHandlers["profiler_stop"] = function(args: {string:any}, id: number)
         if saveTo then
             local f, openErr = io.open(saveTo, "w")
             if not f then
-                sendResponse(id, {content = {{type = "text",
-                    text = "Failed to write '" .. saveTo .. "': " .. (openErr or "unknown")}}, isError = true})
+                sendToolError(id, "write_failed", "Failed to write profiler output", {
+                    path = saveTo,
+                    error = openErr or "unknown"
+                })
                 return
             end
             f:write(text)
@@ -1388,8 +1409,7 @@ toolHandlers["profiler_stop"] = function(args: {string:any}, id: number)
         return
     end
     if not sampleSession then
-        sendResponse(id, {content = {{type = "text",
-            text = "Profiler is not running"}}, isError = true})
+        sendToolError(id, "profiler_not_running", "Profiler is not running", nil)
         return
     end
     local result = sampleSession:stop(saveTo)
@@ -1404,7 +1424,7 @@ end
 
 toolHandlers["snapshot_save"] = function(args: {string:any}, id: number)
     if not world then
-        sendError(id, -32000, "No world available")
+        sendToolError(id, "world_unavailable", "No world available", nil)
         return
     end
 
@@ -1446,19 +1466,34 @@ toolHandlers["snapshot_save"] = function(args: {string:any}, id: number)
         if saveTo then
             local ok, err = love.filesystem.write(saveTo, payload)
             if not ok then
-                sendResponse(id, {content = {{type = "text", text = "Failed to write: " .. tostring(err)}}, isError = true})
+                sendToolError(id, "write_failed", "Failed to write snapshot", {
+                    path = saveTo,
+                    error = tostring(err)
+                })
                 return
             end
             local destPath = love.filesystem.getSaveDirectory() .. "/" .. saveTo
             log:info("snapshot_save: format=json entities=%d archetypes=%d bytes=%d dest=%s elapsed=%.2fms",
                 entityCount, archCount, #payload, destPath, elapsedMs)
-            sendResponse(id, {content = {{type = "text",
-                text = string.format("Saved JSON snapshot: %d entities across %d archetypes, %d bytes, %.2fms -> %s",
-                    entityCount, archCount, #payload, elapsedMs, destPath)}}})
+            sendToolOK(id, {
+                format = "json",
+                path = destPath,
+                entities = entityCount,
+                archetypes = archCount,
+                bytes = #payload,
+                elapsedMs = elapsedMs
+            }, nil)
         else
             log:info("snapshot_save: format=json entities=%d archetypes=%d bytes=%d dest=inline elapsed=%.2fms",
                 entityCount, archCount, #payload, elapsedMs)
-            sendResponse(id, {content = {{type = "text", text = payload}}})
+            sendToolOK(id, {
+                format = "json",
+                snapshot = snap,
+                entities = entityCount,
+                archetypes = archCount,
+                bytes = #payload,
+                elapsedMs = elapsedMs
+            }, nil)
         end
     elseif format == "luajit" then
         local buf = StringBuffer.new()
@@ -1501,29 +1536,46 @@ toolHandlers["snapshot_save"] = function(args: {string:any}, id: number)
         if saveTo then
             local writeOk, writeErr = love.filesystem.write(saveTo, binary)
             if not writeOk then
-                sendResponse(id, {content = {{type = "text", text = "Failed to write: " .. tostring(writeErr)}}, isError = true})
+                sendToolError(id, "write_failed", "Failed to write snapshot", {
+                    path = saveTo,
+                    error = tostring(writeErr)
+                })
                 return
             end
             local destPath = love.filesystem.getSaveDirectory() .. "/" .. saveTo
             log:info("snapshot_save: format=luajit entities=%d archetypes=%d bytes=%d dest=%s elapsed=%.2fms",
                 entityCount, archCount, #binary, destPath, elapsedMs)
-            sendResponse(id, {content = {{type = "text",
-                text = string.format("Saved LuaJIT snapshot: %d entities across %d archetypes, %d bytes, %.2fms -> %s",
-                    entityCount, archCount, #binary, elapsedMs, destPath)}}})
+            sendToolOK(id, {
+                format = "luajit",
+                path = destPath,
+                entities = entityCount,
+                archetypes = archCount,
+                bytes = #binary,
+                elapsedMs = elapsedMs
+            }, nil)
         else
             local encoded = love.data.encode("string", "base64", binary) as string
             log:info("snapshot_save: format=luajit entities=%d archetypes=%d bytes=%d dest=inline-base64 elapsed=%.2fms",
                 entityCount, archCount, #binary, elapsedMs)
-            sendResponse(id, {content = {{type = "text", text = encoded}}})
+            sendToolOK(id, {
+                format = "luajit",
+                encoding = "base64",
+                payload = encoded,
+                entities = entityCount,
+                archetypes = archCount,
+                bytes = #binary,
+                elapsedMs = elapsedMs
+            }, nil)
         end
     else
-        sendError(id, -32602, "Unknown format: " .. tostring(format) .. " (expected 'json' or 'luajit')")
+        sendToolError(id, "unknown_format",
+            "Unknown format: " .. tostring(format) .. " (expected 'json' or 'luajit')", nil)
     end
 end
 
 toolHandlers["snapshot_load"] = function(args: {string:any}, id: number)
     if not world then
-        sendError(id, -32000, "No world available")
+        sendToolError(id, "world_unavailable", "No world available", nil)
         return
     end
 
@@ -1535,12 +1587,12 @@ toolHandlers["snapshot_load"] = function(args: {string:any}, id: number)
 
     if not payload and loadFrom then
         if not love.filesystem.getInfo(loadFrom) then
-            sendError(id, -32000, "File not found: " .. loadFrom)
+            sendToolError(id, "file_not_found", "File not found", {path = loadFrom})
             return
         end
         payload = love.filesystem.read(loadFrom)
         if not payload then
-            sendError(id, -32000, "Failed to read file: " .. loadFrom)
+            sendToolError(id, "read_failed", "Failed to read file", {path = loadFrom})
             return
         end
         source = love.filesystem.getSaveDirectory() .. "/" .. loadFrom
@@ -1549,7 +1601,7 @@ toolHandlers["snapshot_load"] = function(args: {string:any}, id: number)
     end
 
     if not payload then
-        sendError(id, -32602, "Either 'payload' or 'load_from' is required")
+        sendToolError(id, "missing_parameter", "Either 'payload' or 'load_from' is required", nil)
         return
     end
     payloadBytes = #payload
@@ -1571,7 +1623,7 @@ toolHandlers["snapshot_load"] = function(args: {string:any}, id: number)
     if format == "json" then
         local okParse, parsed = pcall(json.parse, payload)
         if not okParse then
-            sendError(id, -32000, "JSON parse failed: " .. tostring(parsed))
+            sendToolError(id, "json_parse_failed", "JSON parse failed", {error = tostring(parsed)})
             return
         end
         local ok, err = pcall(function(): boolean
@@ -1579,16 +1631,21 @@ toolHandlers["snapshot_load"] = function(args: {string:any}, id: number)
             return true
         end)
         if not ok then
-            sendError(id, -32000, "Load failed: " .. tostring(err))
+            sendToolError(id, "load_failed", "Load failed", {error = tostring(err)})
             return
         end
         local elapsedMs = (love.timer.getTime() - tStart) * 1000
         local entityCount, archCount = countEntities()
         log:info("snapshot_load: format=json source=%s bytes=%d entities=%d archetypes=%d elapsed=%.2fms",
             source, payloadBytes, entityCount, archCount, elapsedMs)
-        sendResponse(id, {content = {{type = "text",
-            text = string.format("Restored JSON snapshot: %d entities across %d archetypes, %.2fms from %s",
-                entityCount, archCount, elapsedMs, source)}}})
+        sendToolOK(id, {
+            format = "json",
+            source = source,
+            bytes = payloadBytes,
+            entities = entityCount,
+            archetypes = archCount,
+            elapsedMs = elapsedMs
+        }, nil)
     elseif format == "luajit" then
         local binary = payload
         -- Inline luajit payloads arrive base64-encoded; file reads are raw bytes.
@@ -1597,7 +1654,7 @@ toolHandlers["snapshot_load"] = function(args: {string:any}, id: number)
                 return love.data.decode("string", "base64", payload) as string
             end)
             if not decodedOk then
-                sendError(id, -32000, "Base64 decode failed: " .. tostring(decoded))
+                sendToolError(id, "base64_decode_failed", "Base64 decode failed", {error = tostring(decoded)})
                 return
             end
             binary = decoded as string
@@ -1610,18 +1667,24 @@ toolHandlers["snapshot_load"] = function(args: {string:any}, id: number)
             return true
         end)
         if not ok then
-            sendError(id, -32000, "Load failed: " .. tostring(err))
+            sendToolError(id, "load_failed", "Load failed", {error = tostring(err)})
             return
         end
         local elapsedMs = (love.timer.getTime() - tStart) * 1000
         local entityCount, archCount = countEntities()
         log:info("snapshot_load: format=luajit source=%s bytes=%d entities=%d archetypes=%d elapsed=%.2fms",
             source, payloadBytes, entityCount, archCount, elapsedMs)
-        sendResponse(id, {content = {{type = "text",
-            text = string.format("Restored LuaJIT snapshot: %d entities across %d archetypes, %.2fms from %s",
-                entityCount, archCount, elapsedMs, source)}}})
+        sendToolOK(id, {
+            format = "luajit",
+            source = source,
+            bytes = payloadBytes,
+            entities = entityCount,
+            archetypes = archCount,
+            elapsedMs = elapsedMs
+        }, nil)
     else
-        sendError(id, -32602, "Unknown format: " .. tostring(format) .. " (expected 'json' or 'luajit')")
+        sendToolError(id, "unknown_format",
+            "Unknown format: " .. tostring(format) .. " (expected 'json' or 'luajit')", nil)
     end
 end
 

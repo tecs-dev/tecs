@@ -27,15 +27,17 @@ local EMPTY_SCHEMA: tools.Schema = {
     additionalProperties = false
 }
 
+local JSON_TEXT_RESPONSE <const> = " Returns compact JSON text envelope."
+
 tools.list = {
     {
         name = "ping",
-        description = "Check if the game is running",
+        description = "Check if the game is running." .. JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
         name = "screenshot",
-        description = "Capture a screenshot of the game window",
+        description = "Capture a screenshot of the game window. Returns MCP image content.",
         inputSchema = {
             type = "object",
             properties = {
@@ -49,7 +51,7 @@ tools.list = {
     },
     {
         name = "send_love_event",
-        description = "Send a Love2D event to the game",
+        description = "Send a Love2D event to the game." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {
@@ -73,37 +75,37 @@ tools.list = {
     },
     {
         name = "get_window_size",
-        description = "Get the game window dimensions",
+        description = "Get the game window dimensions." .. JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
         name = "get_fps",
-        description = "Get the current frames per second",
+        description = "Get the current frames per second." .. JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
         name = "get_stats",
-        description = "Get ECS world stats (entities, archetypes, components, systems, memory)",
+        description = "Get ECS world stats (entities, archetypes, components, systems, memory)." .. JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
         name = "get_components",
-        description = "Get list of all component types used in the game",
+        description = "Get list of all component types used in the game." .. JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
         name = "get_systems",
-        description = "Get list of all systems and their phases",
+        description = "Get list of all systems and their phases." .. JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
         name = "get_resources",
-        description = "Get list of all world resources (keys and type names)",
+        description = "Get list of all world resources (keys and type names)." .. JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
         name = "despawn",
-        description = "Despawn entities by ID",
+        description = "Despawn entities by ID." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {
@@ -115,17 +117,17 @@ tools.list = {
     },
     {
         name = "quit",
-        description = "Quit the game",
+        description = "Quit the game." .. JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
         name = "restart",
-        description = "Restart the game",
+        description = "Restart the game." .. JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
         name = "get_entity",
-        description = "Get a single entity by ID with all its components",
+        description = "Get a single entity by ID with all serializable components." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {
@@ -137,7 +139,8 @@ tools.list = {
     },
     {
         name = "query",
-        description = "Query entities by component composition and return their component data as JSON",
+        description = "Query entities by component composition and return serializable included components." ..
+            JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {
@@ -157,12 +160,13 @@ tools.list = {
     },
     {
         name = "get_archetypes",
-        description = "Get list of all archetypes with their component composition and entity counts",
+        description = "Get list of all archetypes with their component composition and entity counts." ..
+            JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
         name = "spawn",
-        description = "Spawn an entity with the specified components",
+        description = "Spawn an entity with the specified components." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {
@@ -174,12 +178,12 @@ tools.list = {
     },
     {
         name = "get_bundles",
-        description = "Get registered bundles as a map of name to component requirements",
+        description = "Get registered bundles as a map of name to component requirements." .. JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
         name = "spawn_bundle",
-        description = "Spawn entity from a registered bundle",
+        description = "Spawn entity from a registered bundle." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {
@@ -194,7 +198,7 @@ tools.list = {
         name = "run_lua",
         description = "Run Lua code in the game. " ..
             "Code is wrapped in function(world) ... end automatically. " ..
-            "Use 'world' directly to access the ECS world.",
+            "Use 'world' directly to access the ECS world." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {
@@ -206,7 +210,8 @@ tools.list = {
     },
     {
         name = "patch_entities",
-        description = "Update components on existing entities. Each patch can set (add/update) or remove components.",
+        description = "Update components on existing entities. Each patch can set (add/update) or remove components." ..
+            JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {
@@ -223,7 +228,7 @@ tools.list = {
     },
     {
         name = "screen_to_world",
-        description = "Convert screen coordinates to world coordinates using the active camera.",
+        description = "Convert screen coordinates to world coordinates using the active camera." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {
@@ -237,7 +242,7 @@ tools.list = {
     {
         name = "query_in_bounds",
         description = "Query entities within a world-space bounding box. " ..
-            "Uses the Position component if registered, otherwise falls back to Transform.",
+            "Uses the Position component if registered, otherwise falls back to Transform." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {
@@ -258,7 +263,8 @@ tools.list = {
     },
     {
         name = "toggle_system",
-        description = "Enable or disable a system by name. Disabled systems are skipped during update.",
+        description = "Enable or disable a system by name. Disabled systems are skipped during update." ..
+            JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {
@@ -271,7 +277,8 @@ tools.list = {
     },
     {
         name = "set_time_scale",
-        description = "Set the time scale for the game. 1.0 is normal speed, 0.5 is half speed, 2.0 is double speed.",
+        description = "Set the time scale for the game. 1.0 is normal speed, 0.5 is half speed, 2.0 is double speed." ..
+            JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {
@@ -284,17 +291,17 @@ tools.list = {
     {
         name = "pause",
         description = "Hard pause: disable all gameplay/physics systems while rendering continues. " ..
-            "Different from set_time_scale(0) which still ticks systems with zero dt.",
+            "Different from set_time_scale(0) which still ticks systems with zero dt." .. JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
         name = "resume",
-        description = "Resume gameplay after a pause, restoring the previous time scale.",
+        description = "Resume gameplay after a pause, restoring the previous time scale." .. JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
         name = "step",
-        description = "Advance N frames while paused, then pause again. Must be paused first.",
+        description = "Advance N frames while paused, then pause again. Must be paused first." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {
@@ -306,7 +313,7 @@ tools.list = {
     {
         name = "debug_draw",
         description = "Draw a debug overlay shape in world space. Renders on top of the game, works while paused. " ..
-            "Returns the command ID for later clearing.",
+            "Returns the command ID for later clearing." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {
@@ -331,7 +338,8 @@ tools.list = {
     },
     {
         name = "clear_debug_draw",
-        description = "Clear debug draw commands. No args = clear all. Specify tag or id to clear selectively.",
+        description = "Clear debug draw commands. No args = clear all. Specify tag or id to clear selectively." ..
+            JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {
@@ -345,7 +353,7 @@ tools.list = {
         name = "profiler_start",
         description = "Start the LuaJIT sampling profiler. Auto-stops after `seconds` elapses; " ..
             "omit `seconds` to record until profiler_stop is called. Filtering and interval " ..
-            "are fixed at start; you cannot change them at stop time.",
+            "are fixed at start; you cannot change them at stop time." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {
@@ -359,10 +367,10 @@ tools.list = {
     },
     {
         name = "profiler_stop",
-        description = "Stop the profiler and return collapsed-stack text. " ..
-            "Drag into speedscope.app or pipe to flamegraph.pl. " ..
+        description = "Stop the profiler. Inline results include collapsed-stack text in result.payload; " ..
+            "save_to results include result.path. " ..
             "If profiler_start was called with `seconds` and the auto-stop has already fired, " ..
-            "the captured recording is returned here.",
+            "the captured recording is returned here." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {
@@ -373,7 +381,9 @@ tools.list = {
     },
     {
         name = "snapshot_save",
-        description = "Capture a snapshot of the world. Returns the serialised snapshot, or writes it to a file under LOVE's save directory when `save_to` is provided. The `format` picks between human-readable JSON and compact LuaJIT `string.buffer` binary (returned base64-encoded when inline).",
+        description = "Capture a snapshot of the world. Inline results include result.snapshot for JSON or " ..
+            "base64 result.payload for LuaJIT; save_to results include result.path. " ..
+            "The format picks between JSON and compact LuaJIT string.buffer binary." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {
@@ -391,7 +401,8 @@ tools.list = {
     },
     {
         name = "snapshot_load",
-        description = "Restore a world snapshot. Accepts either an inline payload or a filename in LOVE's save directory. Set `format` to match how the snapshot was produced.",
+        description = "Restore a world snapshot. Accepts either an inline payload or a filename in LOVE's save " ..
+            "directory. Set format to match how the snapshot was produced." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {
