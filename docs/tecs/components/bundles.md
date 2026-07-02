@@ -10,9 +10,8 @@ components. They provide:
 - **Consistent entity creation**: define once, spawn anywhere
 - **Default values**: optional components can have default factories
 - **Required components**: mark components that must be supplied at spawn time
-- **Performance**: each bundle compiles a specialized spawn routine that caches
-  its target archetype and writes straight into component columns, so repeat
-  spawns skip the archetype walk and deferred bursts batch through a single drain
+- **Cached spawn path**: each bundle compiles a spawn routine for its target
+  component set, so repeated spawns avoid rebuilding the same component list
 
 ## Creating a Bundle
 
@@ -97,6 +96,80 @@ desired default.
 
 With-default components cannot be overridden at spawn time. If you need a
 spawn-time value, move the component to `required` instead.
+
+## World methods
+
+These methods are available on every `World`.
+
+| Method | Description |
+| ------ | ----------- |
+| [`world:newBundle`](#world-new-bundle) | Create and register a bundle. |
+| [`world:spawnBundle`](#world-spawn-bundle) | Spawn an entity from a registered bundle by name. |
+| [`world:getBundle`](#world-get-bundle) | Return one registered bundle by name. |
+| [`world:getBundles`](#world-get-bundles) | Return all registered bundles. |
+
+### world:newBundle {#world-new-bundle}
+
+Creates and registers a bundle for spawning entities with a predefined set of components.
+
+```teal
+function World:newBundle(name: string, def?: BundleDef): Bundle
+```
+
+**Parameters:**
+
+- `name`: Unique bundle name.
+- `def`: Optional bundle definition with `required` and `with` fields.
+
+**Returns:**
+
+- The registered bundle.
+
+### world:spawnBundle {#world-spawn-bundle}
+
+Spawns an entity from a registered bundle by name. Required components are passed positionally in the order declared in
+the bundle. Components from `with` use their registered factory and cannot be overridden at spawn time.
+
+```teal
+function World:spawnBundle(name: string, ...: Component): integer
+```
+
+**Parameters:**
+
+- `name`: Bundle name.
+- `...`: Required components, in declaration order.
+
+**Returns:**
+
+- The entity ID.
+
+### world:getBundle {#world-get-bundle}
+
+Returns a registered bundle by name.
+
+```teal
+function World:getBundle(name: string): Bundle
+```
+
+**Parameters:**
+
+- `name`: Bundle name.
+
+**Returns:**
+
+- The bundle, or `nil` if not found.
+
+### world:getBundles {#world-get-bundles}
+
+Returns all registered bundles as a map keyed by bundle name.
+
+```teal
+function World:getBundles(): {string: Bundle}
+```
+
+**Returns:**
+
+- Map of bundle name to bundle.
 
 ## Spawning from a Bundle
 

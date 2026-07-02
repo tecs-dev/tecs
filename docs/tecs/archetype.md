@@ -4,38 +4,81 @@ outline: deep
 
 # Archetypes
 
-Archetypes organize entities by their component composition for efficient querying and iteration.
-Each entity in Tecs belongs to exactly one archetype. When a component is added or removed from an entity, the entity
-changes archetypes.
+An archetype is a storage group for entities with the same component signature. Each entity belongs to exactly one
+archetype at a time. When an entity gains or loses a component, it moves to another archetype.
+
+Most code reaches archetypes through [queries](/tecs/queries/). A query finds the archetypes whose signatures
+match its descriptor, then each loop step gives you an archetype, a row count, and the entity IDs for those rows.
 
 ## Entities, rows, and columns
 
-* **Entities**: Unique IDs stored in the archetype's `entities` array. Their index in this array is their "row".
-* **Rows**: The position of an entity within an archetype. Component operations use the row index, not the entity ID.
-  Rows are **1-based**: the first entity in the archetype is at row 1, matching column array indexing.
-* **Columns**: Each component has its own "column", an array containing component data for all entities in the
-  archetype. Access columns by component type and index by row position. This layout is a _structure of arrays_, or SoA.
+Archetypes store entities by row. The same row index addresses the entity ID and each of that entity's component
+values:
 
-This design enables high-performance iteration over entities with the same component structure, as component data is
-stored in contiguous memory blocks.
+* **Entity IDs** live in `archetype.entities`. The array is 1-based, and `entities[0]` stores the current length.
+* **Rows** are the current positions inside an archetype. Use rows while iterating; don't cache them as stable
+  identifiers because despawns and archetype moves can reorder rows.
+* **Columns** store component values for every row in the archetype. Bind columns with
+  `archetype:get(Component)` for reads or `archetype:getMut(Component)` before writes, then index them by row.
+
+This row/column layout is why query loops bind columns once per archetype:
+
+```teal
+for archetype, len, entities in query:iter() do
+    local transforms = archetype:get(Transform)
+    local sprites = archetype:get(Sprite)
+
+    for row = 1, len do
+        local entity = entities[row]
+        local transform = transforms[row]
+        local sprite = sprites[row]
+        -- ...
+    end
+end
+```
 
 ## Archetype properties
 
-| Name            | Type          | Description                                                                                                |
-| --------------- | ------------- | ---------------------------------------------------------------------------------------------------------- |
-| `id`            | `integer`     | Unique identifier of the archetype.                                                                        |
-| `entities`      | `DoubleArray` | 1-based array of entity IDs that belong in this archetype (`entities[0]` is the length).                   |
-| `componentList` | `{Component}` | 1-based array of component types in this archetype, in construction order. Use `#componentList` for size. |
-
-Per-component columns are accessed via `archetype:get(Component)` (read-only) or
-`archetype:getMut(Component)` (read + dirty mark); see "get / getMut" below.
+| Name            | Type                               | Description                                                                                                        |
+| --------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `id`            | `integer`                          | Unique identifier of the archetype.                                                                                |
+| `entities`      | `DoubleArray`                      | Entity IDs by row. `entities[0]` is the length; valid rows are `1..entities[0]`.                                    |
+| `componentList` | `{Component}`                      | Component types in this archetype's fixed signature. Use `#componentList` / `ipairs` to inspect the signature.      |
+| `columns`       | `{Component: {Component}}`         | Raw data columns. Treat as read-only; prefer `get` / `getMut` so sparse relationship proxies and dirty marking work correctly. |
 
 ## Archetype methods
+
+### get / getMut
+
+Column access by component type. Both methods return the row-indexed column for a component when one exists. The
+difference is dirty marking.
+
+```teal
+function Archetype:get<T is Component>(component: T): {T}
+function Archetype:getMut<T is Component>(component: T): {T}
+```
+
+Use `get` when you only read values. Use `getMut` when you will mutate values through the returned column. `getMut`
+marks the component dirty on the archetype so incremental-sync consumers such as renderer shadow buffers and
+snapshots can resync.
+
+`get` does not protect the column from writes; it simply does not mark the component dirty.
+
+```teal
+for archetype, len in query:iter() do
+    local transforms = archetype:getMut(Transform)
+    local velocities = archetype:get(Velocity)  -- read-only
+    for row = 1, len do
+        transforms[row].x = transforms[row].x + velocities[row].x * dt
+    end
+end
+```
 
 ### set
 
 Replaces a component value at a row and marks the component dirty on the archetype. No archetype transition
-happens; the row stays where it is. The component **must** already be present on the archetype.
+happens; the row stays where it is. The component **must** already be present on the archetype. Use `world:set`
+when you need to add a component to an entity or move it to another archetype.
 
 ```teal
 function Archetype:set<C is Component>(row: integer, value: C)
@@ -112,32 +155,6 @@ local ChildOf = tecs.builtins.ChildOf
 local childOf: ChildOf = archetype:getFirstRelationship(ChildOf, 5)
 if childOf then
     print("parent id:", childOf.target)
-end
-```
-
-### get / getMut
-
-Read-only or mutating column access. Both return the row-indexed
-column for a component (or nil if the archetype doesn't carry it);
-the difference is dirty marking.
-
-```teal
-function Archetype:get<T is Component>(component: T): {T}
-function Archetype:getMut<T is Component>(component: T): {T}
-```
-
-`getMut` flags the component dirty on the archetype so
-incremental-sync consumers (renderer shadow buffers, snapshots) re-upload it.
-Use it at every site you intend to write into the column, including
-direct FFI cdata field writes that the framework can't observe.
-
-```teal
-for archetype, len in query:iter() do
-    local transforms = archetype:getMut(Transform)
-    local velocities = archetype:get(Velocity)  -- read-only
-    for row = 1, len do
-        transforms[row].x = transforms[row].x + velocities[row].x * dt
-    end
 end
 ```
 

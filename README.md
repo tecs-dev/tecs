@@ -88,8 +88,8 @@ world:addSystem({
     phase = tecs.phases.Update,
     run = function(dt: number)
         for archetype, len in query:iter() do
-            local positions = archetype[Position]
-            local velocities = archetype[Velocity]
+            local positions = archetype:getMut(Position)
+            local velocities = archetype:get(Velocity)
             for row = 1, len do
                 local pos = positions[row]
                 local vel = velocities[row]

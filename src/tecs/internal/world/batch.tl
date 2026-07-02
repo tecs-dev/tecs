@@ -41,6 +41,7 @@ local applyBatchRemove <const> = shared.applyBatchRemove
 local applyRequires <const> = shared.applyRequires
 
 local table_clear <const> = require("table.clear")
+local floor <const> = math.floor
 
 -- batchSpawnQueue layout: each entry is 5 slots -- {count, firstSlotOrIdsList,
 -- callback, mode, requiredList}. RANGE uses a scalar `firstSlot` and strict
@@ -58,6 +59,12 @@ local BATCH_SPAWN_MODE_LIST <const> = 2
 -- the entries from `applyRequires` whose default values must be written
 -- into each spawned row at drain time (or nil).
 local BATCH_SPAWN_AT_SLOTS <const> = 4
+
+local function validateBatchCount(name: string, count: integer)
+    if count < 1 or count ~= floor(count) then
+        error(name .. ": count must be a positive integer, got " .. tostring(count))
+    end
+end
 
 -- Pre-stake pending spawn-at ids: marks each slot as pending spawn onto
 -- `archetype` (without row placement) so mid-frame mutations against
@@ -170,7 +177,13 @@ function WorldImpl:_deferBatchSpawn(
     count: integer,
     componentTypes: {Component},
     callback: function(Archetype, integer, integer, integer)
-): integer
+): integer | nil, {integer} | nil
+    validateBatchCount("World:batchSpawn", count)
+
+    if self.allocator.nextFreshSlot + count > self.allocator.maxSlotCount then
+        return nil, self:_deferBatchSpawnList(count, componentTypes, callback)
+    end
+
     local archetype, requiredList = resolveBatchSpawnArchetype(self, componentTypes)
 
     -- Strict contiguous: draw exclusively from the fresh range. Callers
@@ -202,14 +215,16 @@ function WorldImpl:_deferBatchSpawn(
     ensureDirty!(archetype)
     self.isDirty = true
 
-    return firstSlot
+    return firstSlot, nil
 end
 
-function WorldImpl:_deferBatchSpawnBestEffort(
+function WorldImpl:_deferBatchSpawnList(
     count: integer,
     componentTypes: {Component},
     callback: function(Archetype, integer, integer, integer)
 ): {integer}
+    validateBatchCount("World:batchSpawn", count)
+
     local archetype, requiredList = resolveBatchSpawnArchetype(self, componentTypes)
 
     local allocator = self.allocator
@@ -219,6 +234,11 @@ function WorldImpl:_deferBatchSpawnBestEffort(
     local epoch = self._transactionEpoch
     local archId = archetype.id
     local freshAvail = allocator.maxSlotCount - allocator.nextFreshSlot
+    local totalAvail = freshAvail + allocator.freeCount
+    if count > totalAvail then
+        error("entity slot exhaustion: maxSlotCount (" .. allocator.maxSlotCount .. ") reached")
+    end
+
     local idsList: {integer} = {}
     local n = 0
 
@@ -226,26 +246,28 @@ function WorldImpl:_deferBatchSpawnBestEffort(
         local takeFresh = freshAvail < count and freshAvail or count
         local firstFresh = IdAllocator.allocContiguousSlots(allocator, takeFresh)
         for i = 0, takeFresh - 1 do
-            local id = firstFresh + i
+            local slot = firstFresh + i
+            local id = slot
             n = n + 1
             idsList[n] = id
-            if slotStamp[id] ~= epoch then
-                slotStamp[id] = epoch
-                stateArr[id] = 0
+            if slotStamp[slot] ~= epoch then
+                slotStamp[slot] = epoch
+                stateArr[slot] = 0
             end
-            pendingArr[id] = archId
+            pendingArr[slot] = archId
         end
     end
 
     while n < count do
-        local id = IdAllocator.allocSlot(allocator)
+        local slot = IdAllocator.allocSlot(allocator)
+        local id = IdAllocator.encodeId(slot, allocator.slots[slot].generation)
         n = n + 1
         idsList[n] = id
-        if slotStamp[id] ~= epoch then
-            slotStamp[id] = epoch
-            stateArr[id] = 0
+        if slotStamp[slot] ~= epoch then
+            slotStamp[slot] = epoch
+            stateArr[slot] = 0
         end
-        pendingArr[id] = archId
+        pendingArr[slot] = archId
     end
 
     local c = archetype.batchSpawnQueueCount
@@ -328,24 +350,26 @@ function WorldImpl:_drainArchBatchSpawn(archetype: Archetype)
             if stateCount == 0 then
                 for j = 1, count do
                     local entityId = ids[j]
+                    local slot = IdAllocator.slotOf(entityId)
                     local row = currentCount + placed
                     entitiesArr[row + 1] = entityId
-                    local es = slots[entityId]
+                    local es = slots[slot]
                     es.archetypeId = archId
                     es.row = row
                     placed = placed + 1
-                    slotStamp[entityId] = 0
+                    slotStamp[slot] = 0
                 end
             else
                 for j = 1, count do
                     local entityId = ids[j]
-                    local st = (slotStamp[entityId] == epoch and stateArr[entityId] or 0)
+                    local slot = IdAllocator.slotOf(entityId)
+                    local st = (slotStamp[slot] == epoch and stateArr[slot] or 0)
                     if st == STATE_DESPAWN then
-                        slotStamp[entityId] = 0
+                        slotStamp[slot] = 0
                     elseif st == STATE_MUTATE then
                         local row = currentCount + placed
                         entitiesArr[row + 1] = entityId
-                        local es = slots[entityId]
+                        local es = slots[slot]
                         es.archetypeId = archId
                         es.row = row
                         placed = placed + 1
@@ -353,11 +377,11 @@ function WorldImpl:_drainArchBatchSpawn(archetype: Archetype)
                     else
                         local row = currentCount + placed
                         entitiesArr[row + 1] = entityId
-                        local es = slots[entityId]
+                        local es = slots[slot]
                         es.archetypeId = archId
                         es.row = row
                         placed = placed + 1
-                        slotStamp[entityId] = 0
+                        slotStamp[slot] = 0
                     end
                 end
             end

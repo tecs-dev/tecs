@@ -4,15 +4,15 @@ outline: deep
 
 # Query grouping
 
-Use the `groupBy` option to group archetypes by an integer key. Archetypes with the same group are iterated
-contiguously, enabling efficient batch processing without per-frame sorting. This is useful when you need to
-process entities in groups. For example, Tecs uses this internally to efficiently group draws by blend mode.
+Use the `groupBy` option to group matching archetypes by an integer key. Archetypes with the same group are iterated
+contiguously, so systems can switch state once per group and process a whole batch before moving to the next one.
+For example, a renderer can draw all alpha-blended sprites, then all additive sprites, without sorting entities
+every frame.
 
 ## Basic usage
 
-The `groupBy` function receives an archetype and returns an integer. Archetypes are sorted by this value,
-so archetypes with the same key are iterated together. The sort is efficient and happens as archetypes match
-the query.
+The `groupBy` function receives an archetype and returns an integer. Tecs stores that key with the archetype as it
+matches the query, so iteration can keep same-key archetypes together.
 
 ```teal
 local BlendMode <const> = { Alpha = 1, Additive = 2, Multiply = 3 }
@@ -31,9 +31,8 @@ local blendQuery = world:query({
 
 ## Iterating by group
 
-Use `groups()` to iterate active group IDs in sorted order, and `group(id)` to iterate archetypes within
-a specific group. This pattern lets you switch render state once per group rather than checking on every
-archetype:
+Use `groups()` to iterate active group IDs in sorted order, and `group(id)` to iterate archetypes within a specific
+group. This pattern keeps per-group setup outside the inner entity loop:
 
 ```teal
 for blendMode in blendQuery:groups() do
@@ -82,8 +81,7 @@ for groupId in query:groups() do
 end
 ```
 
-This two-pass pattern enables O(groups) offset calculation followed by O(entities) streaming,
-which is much faster than sorting or random-access writes.
+This two-pass pattern calculates offsets per group, then streams each group's contiguous run of entities in order.
 
 Note that `groups()`, `group()`, `getGroup()`, and `getGroupCount()` return `nil`, empty iterators,
 or 0 when `groupBy` is not specified on the query.

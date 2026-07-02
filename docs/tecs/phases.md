@@ -80,6 +80,15 @@ world:addSystem({
 
 ## Managing phases
 
+These methods are available on every `World`.
+
+| Method | Description |
+| ------ | ----------- |
+| [`world:enablePhase`](#world-enable-phase) | Enable a phase or phase group. |
+| [`world:disablePhase`](#world-disable-phase) | Disable a phase or phase group. |
+| [`world:registerPhase`](#world-register-phase) | Register a custom phase with the world's pipeline. |
+| [`world:runPhase`](#world-run-phase) | Run a phase or phase group explicitly. |
+
 ### Enabling and disabling phases
 
 You can dynamically enable and disable phases to control which systems run:
@@ -128,3 +137,55 @@ world:runPhase(tecs.phases.RenderGroup)
 -- To run a specific child phase when parent is disabled:
 world:runPhase(tecs.phases.Render)  -- This works even though RenderGroup is disabled
 ```
+
+### world:enablePhase {#world-enable-phase}
+
+Enables a phase or phase group so it runs during normal pipeline execution.
+
+```teal
+function World:enablePhase(phase: Phase)
+```
+
+**Parameters:**
+
+- `phase`: Phase or phase group to enable.
+
+### world:disablePhase {#world-disable-phase}
+
+Disables a phase or phase group during normal pipeline execution. Disabling a parent phase also disables its child
+phases.
+
+```teal
+function World:disablePhase(phase: Phase)
+```
+
+**Parameters:**
+
+- `phase`: Phase or phase group to disable.
+
+### world:registerPhase {#world-register-phase}
+
+Registers a custom phase with the world's pipeline. Use this when an extension or custom pipeline adds phases outside
+the built-in `tecs.phases` tree.
+
+```teal
+function World:registerPhase(phase: Phase)
+```
+
+**Parameters:**
+
+- `phase`: Phase to register.
+
+### world:runPhase {#world-run-phase}
+
+Runs a phase or phase group immediately. Disabled child phases are still skipped when running a disabled parent group;
+run a child phase directly if you need to bypass the parent.
+
+```teal
+function World:runPhase(phase: Phase, dt?: number)
+```
+
+**Parameters:**
+
+- `phase`: Phase or phase group to run.
+- `dt`: Optional delta time passed to systems in that phase. Defaults to `0`.

@@ -435,7 +435,8 @@ local record types
 
         --- Explicit iterator protocol form.
         --- Returns (archetype, length, entities) for each matching archetype.
-        --- Use archetype[Component] to retrieve component data.
+        --- Use `archetype:get(Component)` or `archetype:getMut(Component)`
+        --- to retrieve component data.
         ---
         --- Usage: `for archetype, length, entities in query:iter() do ... end`
         iter: function(self): (IterFn, Query, any)
@@ -699,21 +700,26 @@ local record types
         dirtyArchetypes: function(self): function(): Archetype
 
         --- Bulk-spawn `count` entities sharing one component signature.
-        --- Resolves the target archetype once at call time, allocates a
-        --- contiguous ID range, and defers the actual row placement and
-        --- `callback` invocation until the next commit. The returned
-        --- `firstId` is valid immediately -- you can call `world:set`,
-        --- `world:remove`, or `world:despawn` on any of the allocated
-        --- IDs before commit and the mutations are ordered correctly.
+        --- Resolves the target archetype once at call time and defers the
+        --- actual row placement and `callback` invocation until the next
+        --- commit.
         ---
-        --- Entity IDs are contiguous: `firstId`, `firstId + 1`, ...,
+        --- Returns `(firstId, nil)` when it can allocate a contiguous ID
+        --- range. In that case IDs are `firstId`, `firstId + 1`, ...,
         --- `firstId + count - 1`.
+        ---
+        --- Returns `(nil, ids)` when it falls back to recycled,
+        --- non-contiguous IDs. In that case iterate the returned `ids`
+        --- list explicitly.
+        ---
+        --- Returned IDs are valid immediately -- you can call
+        --- `world:set`, `world:remove`, or `world:despawn` on them before
+        --- commit and the mutations are ordered correctly.
         ---
         --- At commit time the target archetype's row range is claimed,
         --- then `callback(archetype, firstRow, lastRow, count)` runs so you can
-        --- write per-entity data via direct column access
-        --- (`archetype[Component][row] = ...`). Query observers are
-        --- notified when the batch drains.
+        --- write per-entity data via mutable column access
+        --- (`archetype:getMut(Component)[row] = ...`).
         ---
         --- Relationship components (dense or sparse) are supported in
         --- the signature as either the bare container (e.g. `ChildOf`)
@@ -724,36 +730,20 @@ local record types
         ---
         --- Sparse relationship columns are row-indexed proxies that
         --- error on direct writes from the `callback`. For per-entity
-        --- *varying* target values, call
-        --- `world:set(firstId + i, SparseRel(target))` either inside
-        --- the callback or any time before commit. The staged sparse
-        --- sets drain alongside the batchSpawn placement.
+        --- *varying* target values, call `world:set(spawnedId,
+        --- SparseRel(target))` either inside the callback or any time
+        --- before commit. Use `firstId + i` only when the return was
+        --- contiguous; otherwise use the explicit `ids` list. The staged
+        --- sparse sets drain alongside the batchSpawn placement.
         ---
         --- @param count Number of entities to spawn.
         --- @param componentTypes Array of component types defining the archetype.
         --- @param callback Called at commit with `(archetype, firstRow, lastRow, count)`.
         ---   Iterate rows with `for i = firstRow, lastRow do ... end`.
-        --- @return The first entity ID in the contiguous allocation.
+        --- @return firstId First entity ID when the allocation is contiguous, otherwise nil.
+        --- @return ids Explicit entity ID list when fallback uses non-contiguous IDs, otherwise nil.
         batchSpawn: function(self, count: integer, componentTypes: {components.Component},
-            callback: function(Archetype, integer, integer, integer)): integer
-
-        --- Lenient counterpart to `batchSpawn`: allocates as many
-        --- contiguous fresh slots as possible, then tops up the remainder
-        --- from the LIFO free stack. Use this when you want to succeed
-        --- despite fragmentation, at the cost of losing the `firstId + i`
-        --- contiguous-id guarantee. Errors only when the allocator is
-        --- fully exhausted.
-        ---
-        --- Returned ids are in allocation order (fresh first, then free).
-        --- Iterate the returned list explicitly instead of using
-        --- arithmetic on the first id.
-        ---
-        --- @param count Number of entities to spawn.
-        --- @param componentTypes Array of component types defining the archetype.
-        --- @param callback Called at commit with `(archetype, firstRow, lastRow, count)`.
-        --- @return The list of spawned entity IDs (non-contiguous).
-        batchSpawnBestEffort: function(self, count: integer, componentTypes: {components.Component},
-            callback: function(Archetype, integer, integer, integer)): {integer}
+            callback: function(Archetype, integer, integer, integer)): integer | nil, {integer} | nil
 
         --- Like `batchSpawn`, but uses the supplied entity IDs instead of
         --- allocating a new contiguous range. Intended for snapshot loads

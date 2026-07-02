@@ -4,8 +4,33 @@ outline: deep
 
 # Queries
 
-Use queries to find entities with specific [components](/tecs/components/). Create queries inside
-[plugins](/tecs/plugins) and use them in [systems](/tecs/systems) to update entities every frame.
+Use queries to find entities with specific [components](/tecs/components/). Most game logic creates queries inside
+[plugins](/tecs/plugins), then reuses them from [systems](/tecs/systems).
+
+## World methods
+
+These methods are available on every `World`.
+
+| Method | Description |
+| ------ | ----------- |
+| [`world:query`](#world-query) | Create a persistent or temporary query from a descriptor. |
+| [`world:findArchetypes`](#world-find-archetypes) | Iterate archetypes that contain one component. |
+
+### world:query {#world-query}
+
+Creates a query to find entities with specific components.
+
+```teal
+function World:query(descriptor: queries.QueryDescriptor): Query
+```
+
+**Parameters:**
+
+- `descriptor`: Description of the components to query for.
+
+**Returns:**
+
+- A query object you can iterate to access matching entities.
 
 ## Creating queries
 
@@ -70,8 +95,7 @@ The full set of fields accepted by `world:query()`:
 
 Iterate a query by calling `query:iter()` in a generic `for` loop. Each step returns
 `(archetype, length, entities)` for the next non-empty archetype (empty archetypes are skipped).
-`query:iter()` returns a plain iterator function, so the loop runs as a tight call in LuaJIT with no
-metamethod indirection.
+Inside the loop, bind component columns once per archetype and index them by row.
 
 Consider the following query:
 
@@ -102,23 +126,47 @@ end
 ```
 
 * Line `1`: gets each non-empty archetype, the number of entities in the archetype, and an array of entity IDs.
-* Line `2` and `3`: bind component columns with `archetype:get(Component)` (read-only) or
-  `archetype:getMut(Component)` (mark the column dirty so renderer shadow buffers and other consumers re-sync).
-  Teal types `names` as `{Name}`.
+* Line `2` and `3`: bind component columns with `archetype:get(Component)`. Teal types `names` as `{Name}`.
 * Line `4`: iterates over the entities in the archetype. Each value is the entity's "row", which you use to
   index into component columns.
 * Line `5` and `6`: grab components for an entity by indexing into the columns.
 
+### Mutating component columns
+
+Use `archetype:get(Component)` when you only read a column. Use `archetype:getMut(Component)` when you will mutate
+values through the returned column. `getMut` returns the same row-indexed column and marks that component dirty on
+the archetype, so dirty-tracked consumers such as rendering and snapshots can resync.
+
+```teal
+local movementQuery = world:query({
+    include = {Position, Velocity}
+})
+
+for archetype, len in movementQuery:iter() do
+    local positions = archetype:getMut(Position) -- mutated below
+    local velocities = archetype:get(Velocity)   -- read-only
+
+    for row = 1, len do
+        positions[row].x = positions[row].x + velocities[row].x * dt
+        positions[row].y = positions[row].y + velocities[row].y * dt
+    end
+end
+```
+
+`get` does not protect the column from writes; it simply does not mark the component dirty. Treat `getMut` as the
+write-intent API for direct field changes. Use `world:set` when you need to replace a component value or add a
+component to an entity.
+
 ### Mutations during iteration
 
-Mutating an entity while iterating a query is unsafe. `world:set`, `world:remove`, and other mutating methods
-can move an entity to a different archetype, or cause an archetype column to resize, which changes memory and
-shuffles the entities out from under the loop.
+Structural changes while iterating a query need special handling. `world:set`, `world:remove`, `world:spawn`,
+`world:despawn`, and the `batch*` APIs can move entities between archetypes or resize columns, which would otherwise
+invalidate the loop.
 
 To make this safe, Tecs defers mutations issued inside a query loop. When `for … in query:iter()`
 takes its first step, the world enters a **deferred scope**; `world:set`, `world:remove`, `world:spawn`,
 `world:despawn`, and the `batch*` APIs all stage during iteration and apply in a drain phase when the loop exits.
-You can therefore mutate matching entities freely inside the loop body:
+You can therefore stage structural changes inside the loop body:
 
 ```teal
 for archetype, len, entities in query:iter() do
@@ -159,12 +207,11 @@ wave model that applies to any deferred region.
 
 ## Using queries with systems
 
-Create queries outside of systems (in plugins), then use them within systems to process entities. This
-pattern keeps queries efficient: create once, reuse across multiple system updates.
+Create queries outside of systems (usually in plugins), then use them within systems to process entities.
 
 ### Creating queries in plugins
 
-The recommended approach is to create queries in a plugin and store them for use by systems:
+Create the query once in a plugin and close over it from systems:
 
 ```teal
 -- Create a movement plugin
@@ -230,4 +277,34 @@ To find disabled entities in your queries, explicitly include the `Disabled` com
 local allPositionQuery = world:query({
     include = {Position, tecs.builtins.Disabled}
 })
+```
+
+## Ad-hoc archetype lookup
+
+Use `world:findArchetypes(component)` for simple one-component scans when you do not need a persistent query object.
+It uses the world's component-to-archetype index and returns an iterator over matching archetypes.
+
+### world:findArchetypes {#world-find-archetypes}
+
+Finds all archetypes that have a specific component.
+
+```teal
+function World:findArchetypes(component: Component): function(): (Archetype, integer, {integer})
+```
+
+**Parameters:**
+
+- `component`: Component to find.
+
+**Returns:**
+
+- An iterator over matching archetypes.
+
+```teal
+for archetype, len, entities in world:findArchetypes(tecs.builtins.Name) do
+    local names = archetype:get(tecs.builtins.Name)
+    for row = 1, len do
+        print(entities[row] .. " has name " .. names[row].value)
+    end
+end
 ```

@@ -27,6 +27,43 @@ can be installed together with a single `world:addPlugin(...)` call. `addSystem`
 world reference, but plugins keep related code localized.
 :::
 
+## World methods
+
+These methods are available on every `World`.
+
+| Method | Description |
+| ------ | ----------- |
+| [`world:addSystem`](#world-add-system) | Add a system to the world's pipeline. |
+| [`world:removeSystem`](#world-remove-system) | Remove a named system from the world's pipeline. |
+
+### world:addSystem {#world-add-system}
+
+Adds a system to the world's pipeline.
+
+```teal
+function World:addSystem(config: SystemConfig)
+```
+
+**Parameters:**
+
+- `config`: System configuration.
+
+### world:removeSystem {#world-remove-system}
+
+Removes a named system from the world's pipeline.
+
+```teal
+function World:removeSystem(systemName: string)
+```
+
+**Parameters:**
+
+- `systemName`: Name of the system to remove.
+
+::: warning
+Systems need an explicit `name` to be removable. Auto-named systems cannot be removed from user code.
+:::
+
 ## System configuration settings
 
 | Field    | Type                                                          | Required | Description                                                            |

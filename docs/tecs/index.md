@@ -226,10 +226,10 @@ end
 
 > See the [Archetype reference](/tecs/archetype) for more information
 
-::: tip Archetypes make Tecs fast!
-Archetypes organize entities into groups based on their components. To find entities matching a query,
-Tecs finds the matching archetypes. This dramatically outperforms iterating every entity, and enables
-contiguous-column iteration over scalar and FFI component layouts.
+::: tip Archetypes and queries
+Archetypes organize entities into groups based on their components. Queries find matching archetypes, then iterate
+their component columns by row. This is why query examples bind columns once per archetype instead of fetching
+components one entity at a time.
 :::
 
 ### Phases

@@ -422,30 +422,15 @@ function WorldImpl:batchSpawn(
     count: integer,
     componentTypes: {Component},
     callback: function(Archetype, integer, integer, integer)
-): integer
+): integer | nil, {integer} | nil
     if self._scopeDepth > 0 then
         return self:_deferBatchSpawn(count, componentTypes, callback)
     end
     self._scopeDepth = 1
-    local id = self:_deferBatchSpawn(count, componentTypes, callback)
+    local firstId, ids = self:_deferBatchSpawn(count, componentTypes, callback)
     self:_drain()
     self._scopeDepth = 0
-    return id
-end
-
-function WorldImpl:batchSpawnBestEffort(
-    count: integer,
-    componentTypes: {Component},
-    callback: function(Archetype, integer, integer, integer)
-): {integer}
-    if self._scopeDepth > 0 then
-        return self:_deferBatchSpawnBestEffort(count, componentTypes, callback)
-    end
-    self._scopeDepth = 1
-    local ids = self:_deferBatchSpawnBestEffort(count, componentTypes, callback)
-    self:_drain()
-    self._scopeDepth = 0
-    return ids
+    return firstId, ids
 end
 
 function WorldImpl:batchSpawnAt(

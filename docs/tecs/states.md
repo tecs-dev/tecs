@@ -8,6 +8,65 @@ The state stack manages game states (play, pause, menus) with automatic entity l
 pop to leave. Entities spawned during a state are automatically tagged with that state's component and cleaned up
 when the state is popped.
 
+## World methods
+
+These methods are available on every `World`.
+
+| Method | Description |
+| ------ | ----------- |
+| [`world:createState`](#world-create-state) | Create a named state and return its tag component. |
+| [`world:pushState`](#world-push-state) | Push a state onto the stack. |
+| [`world:popState`](#world-pop-state) | Pop the current state from the stack. |
+| [`world:peekState`](#world-peek-state) | Return the current top state name. |
+
+### world:createState {#world-create-state}
+
+Creates a named state with an optional lifecycle policy. Returns a tag component that is auto-added to entities spawned
+while this state is on top of the stack.
+
+```teal
+function World:createState(name: string, policy?: StatePolicy): Component
+```
+
+**Parameters:**
+
+- `name`: State name.
+- `policy`: Optional lifecycle policy for state transitions.
+
+**Returns:**
+
+- The tag component for this state.
+
+### world:pushState {#world-push-state}
+
+Pushes a state onto the state stack. Fires the previous top state's `onBlur` policy and the new state's `onEnter`
+policy. Entities spawned after this call automatically receive the state's tag component.
+
+```teal
+function World:pushState(name: string)
+```
+
+**Parameters:**
+
+- `name`: State name, previously created with `world:createState`.
+
+### world:popState {#world-pop-state}
+
+Pops the current state from the state stack. Fires the current state's `onExit` policy and the new top state's
+`onFocus` policy.
+
+```teal
+function World:popState()
+```
+
+### world:peekState {#world-peek-state}
+
+Returns the name of the current top state, or `nil` if the stack is empty.
+
+```teal
+function World:peekState(): string
+```
+
 ## Creating states
 
 Define states with `world:createState()`. Each state gets a tag component that is auto-added to entities spawned

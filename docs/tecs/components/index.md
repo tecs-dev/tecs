@@ -19,6 +19,141 @@ Tecs provides several component kinds for different use cases.
 * [Scalar component](/tecs/components/scalar-components): a single string, number, or boolean value. Use this
   when a component is really just one value (e.g., `Health`).
 
+## World methods
+
+These methods are available on every `World`.
+
+| Method | Description |
+| ------ | ----------- |
+| [`world:get`](#world-get) | Return one component from an entity. |
+| [`world:getMut`](#world-get-mut) | Return a component for in-place mutation and mark its column dirty. |
+| [`world:getFirstRelationship`](#world-get-first-relationship) | Return the first relationship instance for a relationship container. |
+| [`world:has`](#world-has) | Check whether an entity has a component or relationship target. |
+| [`world:set`](#world-set) | Attach or replace a component on an entity. |
+| [`world:remove`](#world-remove) | Remove a component from an entity. |
+| [`world:markComponentDirty`](#world-mark-component-dirty) | Mark a component column dirty for one entity's archetype. |
+
+### world:get {#world-get}
+
+Retrieves a component from an entity.
+
+```teal
+function World:get<T is Component>(entity: integer, component: T): T
+```
+
+**Parameters:**
+
+- `entity`: Entity ID.
+- `component`: Component type or relationship instance to retrieve.
+
+**Returns:**
+
+- The component instance, or `nil` if not found.
+
+### world:getMut {#world-get-mut}
+
+Mutable counterpart to `world:get`. It returns the component and marks that component dirty on the entity's archetype.
+Use this whenever you intend to mutate the returned reference in place.
+
+```teal
+function World:getMut<T is Component>(entity: integer, component: T): T
+```
+
+**Parameters:**
+
+- `entity`: Entity ID.
+- `component`: Component type or relationship instance to get and mark dirty.
+
+**Returns:**
+
+- The component instance, or `nil` if not found.
+
+See [Dirty tracking](/tecs/components/dirty-tracking) for when dirty marks are needed.
+
+### world:getFirstRelationship {#world-get-first-relationship}
+
+Returns the first relationship instance for a relationship container on an entity. For exclusive relationships, this is
+the single instance.
+
+```teal
+function World:getFirstRelationship<T is Relationship>(entity: integer, relationship: T): T
+```
+
+**Parameters:**
+
+- `entity`: Entity ID.
+- `relationship`: Relationship container type.
+
+**Returns:**
+
+- The relationship instance, or `nil` if not found.
+
+### world:has {#world-has}
+
+Checks whether an entity currently has a component.
+
+```teal
+function World:has(entity: integer, component: Component): boolean
+```
+
+For sparse relationships, passing the relationship container checks whether the entity has any target for that
+relationship; passing a relationship instance checks for that specific target.
+
+```teal
+world:has(entity, Health)
+world:has(entity, ChildOf)
+world:has(entity, ChildOf(specificParent))
+```
+
+### world:set {#world-set}
+
+Attaches or replaces a component on an entity.
+
+```teal
+function World:set(entity: integer, component: Component, value?: any)
+```
+
+**Parameters:**
+
+- `entity`: Entity ID.
+- `component`: Component instance to attach, or a component type when using the optional scalar value form.
+- `value`: Optional raw value for scalar component writes.
+
+This is a [deferred operation](/tecs/world#deferred-operations) inside query iteration, callbacks, explicit defer
+scopes, and batch callbacks.
+
+### world:remove {#world-remove}
+
+Removes a component from an entity.
+
+```teal
+function World:remove(entity: integer, component: Component)
+```
+
+**Parameters:**
+
+- `entity`: Entity ID.
+- `component`: Component type or relationship instance to remove.
+
+This is a [deferred operation](/tecs/world#deferred-operations) inside query iteration, callbacks, explicit defer
+scopes, and batch callbacks.
+
+### world:markComponentDirty {#world-mark-component-dirty}
+
+Marks a component dirty on the entity's archetype. Prefer `world:getMut(entity, component)` when you are fetching and
+then mutating the component; use this when you already have a reference from another path.
+
+```teal
+function World:markComponentDirty(entity: integer, component: Component)
+```
+
+**Parameters:**
+
+- `entity`: Entity ID.
+- `component`: Component type whose column was mutated.
+
+See [Dirty tracking](/tecs/components/dirty-tracking) for the full dirty-bit model.
+
 ## Getting components
 
 Access an entity's components with `world:get`.

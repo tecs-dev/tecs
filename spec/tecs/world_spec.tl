@@ -14,6 +14,12 @@ describe("WorldImpl", function()
     local VelComponent: TestHelpers.Vel
     local DeadComponent: TestHelpers.Dead
 
+    local function expectContiguous(firstId: integer | nil, ids: {integer} | nil): integer
+        luassert.is_not_nil(firstId)
+        luassert.is_nil(ids)
+        return firstId as integer
+    end
+
     before_each(function()
         w = WorldImpl.new() as WorldImpl
         testId = testId + 1
@@ -769,7 +775,7 @@ describe("WorldImpl", function()
     describe("batchSpawn", function()
         it("should spawn entities with correct data", function()
             local count = 100
-            local firstId = w:batchSpawn(count, {PosComponent, VelComponent},
+            local firstIdMaybe, ids = w:batchSpawn(count, {PosComponent, VelComponent},
                 function(arch: tecs.Archetype, startRow: integer, lastRow: integer, n: integer)
                     local positions = arch:getMut(PosComponent)
                     local velocities = arch:getMut(VelComponent)
@@ -778,6 +784,7 @@ describe("WorldImpl", function()
                         velocities[i] = VelComponent(1, 2)
                     end
                 end)
+            local firstId = expectContiguous(firstIdMaybe, ids)
             w:commit()
 
             luassert.equals(count, firstId + count - 1 - firstId + 1)
@@ -794,17 +801,49 @@ describe("WorldImpl", function()
         end)
 
         it("should return contiguous entity IDs", function()
-            local firstId = w:batchSpawn(5, {PosComponent},
+            local firstIdMaybe, ids = w:batchSpawn(5, {PosComponent},
                 function(arch: tecs.Archetype, startRow: integer, lastRow: integer, n: integer)
                     local positions = arch:getMut(PosComponent)
                     for i = startRow, lastRow do
                         positions[i] = PosComponent(i, i)
                     end
                 end)
+            local firstId = expectContiguous(firstIdMaybe, ids)
             w:commit()
 
             for i = 0, 4 do
                 luassert.is_true(w:isAlive(firstId + i))
+            end
+        end)
+
+        it("falls back to explicit IDs when a contiguous range is unavailable", function()
+            local small = WorldImpl.new({maxEntities = 6}) as WorldImpl
+            local spawned: {integer} = {}
+            for i = 1, 5 do
+                spawned[i] = small:spawn()
+            end
+            small:commit()
+
+            small:despawn(spawned[2])
+            small:despawn(spawned[4])
+            small:commit()
+
+            local firstId, ids = small:batchSpawn(2, {PosComponent},
+                function(arch: tecs.Archetype, startRow: integer, lastRow: integer, n: integer)
+                    local positions = arch:getMut(PosComponent)
+                    for row = startRow, lastRow do
+                        positions[row] = PosComponent(row, row)
+                    end
+                end)
+            luassert.is_nil(firstId)
+            luassert.is_not_nil(ids)
+            local list = ids as {integer}
+            luassert.equals(2, #list)
+
+            small:commit()
+            for i = 1, #list do
+                luassert.is_true(small:isAlive(list[i]))
+                luassert.is_not_nil(small:get(list[i], PosComponent))
             end
         end)
 
@@ -858,13 +897,14 @@ describe("WorldImpl", function()
             local parent = w:spawn(PosComponent(0, 0))
             w:commit()
 
-            local firstId = w:batchSpawn(5, {PosComponent, SparseRel as tecs.Component},
+            local firstIdMaybe, ids = w:batchSpawn(5, {PosComponent, SparseRel as tecs.Component},
                 function(arch: tecs.Archetype, startRow: integer, lastRow: integer, n: integer)
                     local positions = arch:getMut(PosComponent)
                     for i = startRow, lastRow do
                         positions[i] = PosComponent(i, i)
                     end
                 end)
+            local firstId = expectContiguous(firstIdMaybe, ids)
             -- Attach per-entity sparse targets before commit. The staged
             -- sparse sets drain after the batchSpawn placement but before
             -- the ledger walker, so targets land in the RelationshipStore
@@ -913,13 +953,14 @@ describe("WorldImpl", function()
 
         it("allows mid-frame world:set on a batch-spawned id", function()
             local Tag = tecs.newTagComponent({name = "BatchMidSet" .. testId})
-            local firstId = w:batchSpawn(3, {PosComponent},
+            local firstIdMaybe, ids = w:batchSpawn(3, {PosComponent},
                 function(arch: tecs.Archetype, startRow: integer, lastRow: integer, n: integer)
                     local positions = arch:getMut(PosComponent)
                     for i = startRow, lastRow do
                         positions[i] = PosComponent(i, i)
                     end
                 end)
+            local firstId = expectContiguous(firstIdMaybe, ids)
             -- Mutate before commit. This transitions the entities into a
             -- new archetype via the ledger path (entityPendingArch is the
             -- starting point).
@@ -932,13 +973,14 @@ describe("WorldImpl", function()
         end)
 
         it("allows mid-frame world:despawn on a batch-spawned id", function()
-            local firstId = w:batchSpawn(3, {PosComponent},
+            local firstIdMaybe, ids = w:batchSpawn(3, {PosComponent},
                 function(arch: tecs.Archetype, startRow: integer, lastRow: integer, n: integer)
                     local positions = arch:getMut(PosComponent)
                     for i = startRow, lastRow do
                         positions[i] = PosComponent(i, i)
                     end
                 end)
+            local firstId = expectContiguous(firstIdMaybe, ids)
             w:despawn(firstId + 1)  -- despawn middle id before commit
             w:commit()
 

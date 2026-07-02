@@ -70,6 +70,116 @@ end)
 -- When the entity is despawned, all observers on its address are automatically cleaned up
 ```
 
+## World methods
+
+These methods are available on every `World`.
+
+| Method | Description |
+| ------ | ----------- |
+| [`world:observe`](#world-observe) | Subscribe to an event at a world or entity address. |
+| [`world:emit`](#world-emit) | Emit an event instance or construct-and-emit an event type. |
+| [`world:hasObservers`](#world-has-observers) | Check whether any observer exists for an address and event type. |
+| [`world:stopObserving`](#world-stop-observing) | Remove a callback or named observer. |
+| [`world:clearObservers`](#world-clear-observers) | Remove all observers at one address. |
+
+### world:observe {#world-observe}
+
+Registers an observer for an event at a specific address.
+
+```teal
+function World:observe<E is Event>(
+    address: integer,
+    eventType: E,
+    observer: function(E),
+    id?: string
+)
+```
+
+**Parameters:**
+
+- `address`: Address to observe (`0` for world-level events, entity ID for entity events).
+- `eventType`: Event type to observe.
+- `observer`: Callback called when the event is emitted.
+- `id`: Optional string ID for later removal.
+
+```teal
+world:observe(0, MyCustomEvent, function(e: MyCustomEvent)
+    print("Got MyCustomEvent")
+end)
+
+world:observe(entityId, tecs.builtins.OnDespawn, function(e: tecs.builtins.OnDespawn)
+    print("Entity despawned: " .. e.entity)
+end)
+```
+
+### world:emit {#world-emit}
+
+Emits an event to all observers at a specific address.
+
+```teal
+function World:emit(address: integer, eventOrType: Event, ...: any)
+```
+
+**Parameters:**
+
+- `address`: Address to emit to (`0` for world-level events, entity ID for entity events).
+- `eventOrType`: Event instance to emit, or an event type followed by constructor args.
+- `...`: Constructor args, when `eventOrType` is an event type.
+
+```teal
+world:emit(0, MyCustomEvent)
+
+-- Passing the type plus constructor args lets the world skip construction
+-- when no observers are registered.
+world:emit(entityId, DamageReceived, 15)
+```
+
+### world:hasObservers {#world-has-observers}
+
+Checks if any observers exist for an event at an address. This is useful when computing the payload is expensive; you
+usually do not need it just to avoid event construction if you use `world:emit(address, EventType, ...)`.
+
+```teal
+function World:hasObservers<E is Event>(address: integer, eventType: E): boolean
+```
+
+```teal
+if world:hasObservers(entityId, DamageReceived) then
+    world:emit(entityId, DamageReceived, expensiveDamagePayload())
+end
+```
+
+### world:stopObserving {#world-stop-observing}
+
+Stops observing an event at an address.
+
+```teal
+function World:stopObserving<E is Event>(
+    address: integer,
+    eventType: E,
+    observer: function(E) | string
+)
+```
+
+**Parameters:**
+
+- `address`: Address to stop observing.
+- `eventType`: Event type.
+- `observer`: Callback function or string ID provided to `world:observe`.
+
+```teal
+world:stopObserving(0, MyEvent, myCallback)
+world:stopObserving(entityId, tecs.builtins.OnDespawn, "cleanup-handler")
+```
+
+### world:clearObservers {#world-clear-observers}
+
+Clears all observers for an address. Entity-address observers are cleared automatically when that entity despawns.
+
+```teal
+function World:clearObservers(address: integer)
+```
+
 ## Event functions
 
 Event management functions are available directly on the `tecs` module:

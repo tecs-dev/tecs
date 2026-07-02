@@ -35,7 +35,7 @@ local world = tecs.newWorld({
 | ------------------- | ------------------------------------------------------ | ---------- | ---------- | -------------------------------------------------- |
 | `timestep`          | `number`                                               | No         | 1/60       | The fixed timestep of the game in seconds          |
 | `pipelineFactory`   | `function(number, function): Pipeline`                 | No         | Built-in   | Custom factory for creating the system pipeline    |
-| `maxEntities`       | `integer`                                              | No         | 2^20 (~1M) | Allocated arena slots per world. A positive integer, at most `2^22` (~4M, the packed-id format ceiling). Slot 0 is reserved, so the maximum live entity count is `maxEntities - 1`. The entity arena is preallocated to this size: ~16 bytes/slot (~16MB at default). Raise if your world exceeds ~1M concurrent entities; lower to shrink per-world memory. |
+| `maxEntities`       | `integer`                                              | No         | 2^20 (~1M) | Maximum allocated entity slots for the world. Must be positive and at most `2^22` (~4M). The allocator is preallocated, so raise it only when you need more concurrent entities. |
 
 ## World Lifecycle
 
@@ -86,42 +86,35 @@ function World:shutdown()
 
 ### Entity IDs
 
-Entity IDs in Tecs are packed numeric handles that encode both a **slot** (22 bits) and a **generation**
-counter (31 bits). The id fits in 53 bits total (the full integer precision of a double), so LuaJIT
-stores and passes it as a normal Lua number without loss.
+Entity IDs are numeric handles returned by `world:spawn` and accepted by entity APIs such as `world:get`,
+`world:set`, `world:despawn`, and `world:observe`. Treat them as opaque values: store them, compare them, and pass
+them back to the world, but don't derive gameplay meaning from the number itself.
 
-```
-id = slot + generation * 2^22
-       [0..2^22-1]      [0..2^31-1]
-```
-
-The slot indexes into a preallocated per-world allocator that stores each entity's current archetype and
-row. The generation counter bumps every time a slot is despawned and recycled, so a stored id becomes
-stale the moment its slot is reused.
+Tecs encodes a slot and generation into each ID so it can detect stale handles after a despawned slot is reused:
 
 ```teal
 local a: integer = world:spawn()
 world:despawn(a)
-local b: integer = world:spawn() -- reuses the slot, but with a new generation
+local b: integer = world:spawn() -- may reuse storage, but gets a distinct ID
 
-world:isAlive(a)        -- false: generation mismatch
+world:isAlive(a)        -- false
 world:isAlive(b)        -- true
 ```
 
-Treat the id as an opaque handle. Don't inspect or unpack its bits with `bit.*`; packed ids can exceed
-int32 range, and `bit.band` would silently truncate. If you need to extract slot or generation for
-tooling, use plain arithmetic (`id % 2^22` for slot, `math.floor(id / 2^22)` for generation).
+The packed layout reserves 22 bits for the slot and 31 bits for the generation. That means a world can be configured
+for at most `2^22` allocated slots (~4M), and each slot has `2^31` generation values before wrapping. The default
+`maxEntities` is lower (`2^20`, roughly one million slots) to keep the preallocated entity table smaller.
 
-**Capacity.** The allocator defaults to `2^20` slots (~1M), with slot `0` reserved as a null sentinel, so
-the default world can hold up to `2^20 - 1` live entities at once. Raise or lower this via
-[`WorldConfig.maxEntities`](#newworld); it must be a positive integer and at most `2^22`
-(~4M, the packed-id format ceiling). The allocator is preallocated at world creation, so this sets both
-the ceiling and the per-world memory footprint (~16 bytes per allocated slot).
+Don't inspect or unpack IDs with `bit.*`; packed IDs can exceed 32-bit range, and LuaJIT bit operations truncate to
+32 bits. If tooling needs the slot or generation, use the arithmetic layout:
 
-**Generation limits.** The packed id has 31 generation bits (~2.1B values). The FFI slot struct also
-stores 31 bits; the counter wraps at `2^31` on recycle, but at one despawn per nanosecond that's about 68
-years before a single slot wraps, not a practical concern. To react to an entity disappearing, listen
-for [`OnDespawn`](/tecs/builtins#ondespawn-event) rather than polling `isAlive`.
+```teal
+local slot = id % 2^22
+local generation = math.floor(id / 2^22)
+```
+
+Configure [`maxEntities`](#creating-a-world) if you need a different entity ceiling. To react when an entity
+disappears, listen for [`OnDespawn`](/tecs/builtins#ondespawn-event) rather than polling `isAlive`.
 
 ### spawn
 
@@ -168,19 +161,20 @@ end)
 
 ### batchSpawn
 
-Bulk-creates `count` entities sharing the same component signature. Instead of
-calling the constructor for each component per entity, `batchSpawn` resolves
-the target archetype once at call time, allocates a contiguous ID range, and
-hands you a callback with direct column access to fill in the data. The
-callback itself (placement and observer notifications) are deferred until the
-next commit.
+Bulk-creates `count` entities sharing the same component signature. Instead of calling the constructor for each
+component per entity, `batchSpawn` resolves the target archetype once at call time and hands you a callback with
+direct column access to fill in the data.
+
+When possible, `batchSpawn` returns a contiguous packed-ID range as `(firstId, nil)`. If a contiguous range is
+unavailable but recycled IDs can satisfy the request, it falls back and returns `(nil, ids)` where `ids` is the
+explicit spawned packed-ID list.
 
 ```teal
 function World:batchSpawn(
     count: integer,
     componentTypes: {Component},
     callback: function(Archetype, integer, integer, integer)
-): integer
+): integer | nil, {integer} | nil
 ```
 
 **Parameters:**
@@ -192,69 +186,77 @@ function World:batchSpawn(
 
 **Returns:**
 
-- The first entity ID. Entity IDs are contiguous: `firstId`, `firstId + 1`, ..., `firstId + count - 1`.
-
-::: info Deferred placement
-`batchSpawn` is deferred: the ID range is reserved synchronously so the returned `firstId` is usable right away,
-but row placement, the user `callback`, and query-observer notifications all run at the next commit. You can
-safely call `world:set`, `world:remove`, or `world:despawn` on any of the returned IDs between `batchSpawn`
-and `commit`. Those mutations stage against the target archetype and commit in the right order.
-:::
-
-::: info Sparse relationships
-You can pass sparse relationship components in `componentTypes`. The archetype edge walk adds their wildcard container
-so queries match. You can't write per-entity target values through the `callback` (sparse columns are row-indexed
-proxies that error on direct writes), so attach them instead via `world:set(firstId + i, SparseRel(target))`
-either inside the callback or any time before commit. The staged sparse sets drain alongside the batchSpawn placement.
-:::
-
-**Notes:**
-
-- The `callback` fires at commit time with `(archetype, firstRow, lastRow, count)`. You fill in per-entity data
-  there by writing directly to the columns.
-- Query observers are notified via `onActivated` (on the first entity in an empty archetype) and a single
-  `onEntitiesAdded(archetype, firstRow, lastRow, count)` for the whole range. Spawn marks every component on
-  the destination archetype dirty, so renderer shadow buffers and reactive systems see the new rows.
+- `firstId, nil` when IDs are contiguous: `firstId`, `firstId + 1`, ..., `firstId + count - 1`.
+- `nil, ids` when fallback uses recycled, non-contiguous packed IDs. Iterate `ids` directly.
 
 **Example:**
 
 ```teal
--- Reserve 1000 particles. The callback runs at commit.
-local firstId = world:batchSpawn(1000, {Position, Velocity},
+-- Reserve 1000 particles and fill their columns in one batch.
+local cols = {Position, Velocity}
+local firstId, ids = world:batchSpawn(1000, cols, function(arch, firstRow, lastRow)
+    -- getMut marks the written columns dirty for downstream sync.
+    local positions = arch:getMut(Position)
+    local velocities = arch:getMut(Velocity)
+    -- Iterate over the provided row range and mutate columns in place.
+    for i = firstRow, lastRow do
+        positions[i] = Position(math.random(0, 800), math.random(0, 600))
+        velocities[i] = Velocity(math.random(-50, 50), math.random(-50, 50))
+    end
+end)
+
+-- Outside an open deferred scope, all 1000 entities are placed and queryable.
+if firstId then
+    -- Contiguous path: IDs are firstId, firstId + 1, ...
+    assert(world:isAlive(firstId))
+    assert(world:isAlive(firstId + 999))
+else
+    -- Fallback path: IDs are returned explicitly.
+    local list = ids as {integer}
+    assert(world:isAlive(list[1]))
+    assert(world:isAlive(list[1000]))
+end
+```
+
+**Notes:**
+
+- This is a [deferred operation](#deferred-operations).
+- IDs are reserved immediately and can be passed to `world:set`, `world:remove`, or `world:despawn` before the
+  operation drains.
+
+**Sparse relationships**
+
+You can pass sparse relationship components in `componentTypes`. The archetype edge walk adds their wildcard container
+so queries match. You can't write per-entity target values through the `callback` because sparse columns are
+row-indexed read proxies. Attach targets with `world:set(spawnedId, SparseRel(target))`; inside a deferred scope, those
+sets drain alongside the batch spawn placement.
+
+```teal
+local firstId, ids = world:batchSpawn(5, {Position, ChildOf},
     function(arch, firstRow, lastRow, _count)
+        -- Sparse relationship targets are attached below with world:set.
         local positions = arch:getMut(Position)
-        local velocities = arch:getMut(Velocity)
-        for i = firstRow, lastRow do
-            positions[i] = Position(math.random(0, 800), math.random(0, 600))
-            velocities[i] = Velocity(math.random(-50, 50), math.random(-50, 50))
+        for row = firstRow, lastRow do
+            local index = row - firstRow + 1
+            positions[row] = Position(index * 16, 0)
         end
     end)
 
--- After commit, all 1000 entities are placed and queryable.
-world:commit()
-assert(world:isAlive(firstId))
-assert(world:isAlive(firstId + 999))
+local function spawnedId(index: integer): integer
+    if firstId then
+        -- Contiguous path: reconstruct the ID arithmetically.
+        return firstId + index - 1
+    end
+    -- Fallback path: use the explicit packed ID list.
+    local list = ids as {integer}
+    return list[index]
+end
+
+for i = 1, 5 do
+    -- Attach relationship targets to the reserved IDs.
+    world:set(spawnedId(i), ChildOf(parentId))
+end
 ```
-
-### batchSpawnBestEffort
-
-Lenient counterpart to `batchSpawn`. Allocates as many contiguous fresh slots
-as possible, then tops up the remainder from the LIFO free stack. Errors only
-when the allocator is fully exhausted. Returns the list of spawned ids in
-allocation order (fresh first, then free); iterate it explicitly since
-the contiguous-id guarantee no longer holds.
-
-```teal
-function World:batchSpawnBestEffort(
-    count: integer,
-    componentTypes: {Component},
-    callback: function(Archetype, integer, integer, integer)
-): {integer}
-```
-
-Use this when you want the bulk-placement speedup but can tolerate
-non-contiguous ids (e.g. after heavy despawn churn has fragmented the
-allocator).
 
 ### batchSpawnAt
 
@@ -273,12 +275,15 @@ function World:batchSpawnAt(
 The archetype resolution, capacity check, and notification fan-out happen once
 per call regardless of how the ids are ordered.
 
+**Notes:**
+
+- This is a [deferred operation](#deferred-operations).
+
 ### spawnAt
 
-Spawn an entity at a specific packed id rather than auto-allocating. The
-id carries both the arena slot and the generation counter, so relationship
-targets resolve to the same entity across a save/load cycle. The caller is
-responsible for ensuring the id's slot is not already live.
+Spawn an entity at a specific packed ID rather than auto-allocating one. This is mainly for snapshot loading, where
+relationship targets need to resolve to the same restored entity IDs. The caller is responsible for ensuring the ID is
+not already live.
 
 ```teal
 function World:spawnAt(id: integer, ...: Component)
@@ -316,7 +321,7 @@ When you call `world:despawn(entity)`, the following happens inline:
 4. Notifies query observers via `onEntitiesRemoved` on the entity's current archetype
 
 The physical removal of the entity from its archetype (the swap-pop and column
-writes) is deferred until the next commit.
+writes) is a [deferred operation](#deferred-operations).
 
 To react to a component leaving an entity, attach
 [`onEntitiesRemoved`](/tecs/queries/callbacks) to a query that includes that component.
@@ -353,18 +358,11 @@ function World:batchDespawn(query: Query)
   component arrays or descriptors; build the query once outside your hot
   loop and reuse it.
 
-::: info Deferred teardown
-`batchDespawn` is deferred: the matched archetypes are enqueued at call
-time and the actual removal, `OnDespawn` events, and observer callbacks
-all run at the next commit. This matches `world:despawn` and makes
-`batchDespawn` safe to call mid-iteration; no bulk clear happens until
-the batch queues drain at commit time.
-:::
-
 **Notes:**
 
+- This is a [deferred operation](#deferred-operations).
 - `OnDespawn` events fire for every despawned entity (global and per-entity
-  observers) at commit time.
+  observers).
 - Per-entity observer subscriptions are cleared after the event fans out.
 - Query observers receive a single `onEntitiesRemoved(archetype, 1, count,
   count)` for the whole range, followed by `onDeactivated` once the
@@ -416,10 +414,9 @@ function World:batchSet(
 )
 ```
 
-The fast path runs when the target component is "plain": no wildcard
-container (not a dense-relationship instance) and not a sparse
-relationship. Sparse relationships always route through the per-entity
-path since they live in per-world stores rather than archetype columns.
+**Notes:**
+
+- This is a [deferred operation](#deferred-operations).
 
 ### batchRemove
 
@@ -431,11 +428,9 @@ skipped silently (no-op).
 function World:batchRemove(query: Query, componentType: Component)
 ```
 
-Fast path runs when the target component is plain (no wildcard container,
-not sparse). Relationship-bearing components fall back to per-entity
-`world:remove` so reverse-index unlink and cascade delete still fire
-correctly. Other components in the source archetype don't affect path
-selection.
+**Notes:**
+
+- This is a [deferred operation](#deferred-operations).
 
 ### compact
 
@@ -540,350 +535,41 @@ end
 
 ## Component Management
 
-### get
+World component methods read, write, and remove components on individual entities. See [Components](/tecs/components/)
+for component kinds and access patterns, and [Dirty tracking](/tecs/components/dirty-tracking) for `getMut` and
+explicit dirty marking.
 
-Retrieves a component from an entity.
-
-```teal
-function World:get<T is Component>(entity: integer, component: T): T
-```
-
-**Parameters:**
-
-- `entity`: Entity ID.
-- `component`: The component type to retrieve.
-
-**Returns:**
-
-- The component instance, or `nil` if not found.
-
-**Example:**
-
-```teal
--- Get the Position component from an entity.
-local position = world:get(entity, Position)
-
-if position then
-    print("Entity position:", position.x, position.y)
-end
-```
-
-:::tip Get components from archetypes
-Whenever possible, prefer getting entity components from [queries](/tecs/queries/) and
-[archetypes](/tecs/archetype) rather than directly from the World.
-:::
-
-### getMut
-
-Mutable counterpart to `get`. Returns the component **and** marks it
-dirty on the entity's archetype so dirty-gated consumers (shadow pipeline,
-change observers, snapshots) re-process the row after subsequent cdata
-writes.
-
-```teal
-function World:getMut<T is Component>(entity: integer, component: T): T
-```
-
-**Parameters:**
-
-- `entity`: Entity ID.
-- `component`: The component type to get-and-mark-dirty.
-
-**Returns:**
-
-- The component instance, or `nil` if not found.
-
-**When to use:**
-
-Use `:getMut` whenever you intend to mutate the component through the
-returned reference. `:get` followed by cdata writes silently bypasses
-dirty tracking and leaves stale state downstream. The two have the same
-return value; pay the small cost of marking dirty at write call sites,
-not at read call sites.
-
-**Example:**
-
-```teal
--- Move an entity in-place: getMut so the renderer flushes Transform.
-local t = world:getMut(entity, tecs.builtins.Transform)
-if t then
-    t.x = t.x + dx
-    t.y = t.y + dy
-end
-```
-
-### has
-
-Checks whether an entity currently has a component.
-
-```teal
-function World:has(entity: integer, component: Component): boolean
-```
-
-For sparse relationships, passing the relationship container checks whether
-the entity has **any** target for that relationship; passing a relationship
-instance checks for that specific target.
-
-```teal
-world:has(entity, Health)                -- any component
-world:has(entity, ChildOf)               -- any parent (sparse relationship)
-world:has(entity, ChildOf(specificParent))  -- that specific parent
-```
-
-### set
-
-Attaches a component to an entity.
-
-```teal
-function World:set(entity: integer, component: Component)
-```
-
-**Parameters:**
-
-- `entity`: Entity ID.
-- `component`: The component **instance** to attach.
-
-**Notes:**
-
-- Outside any deferred scope, `set` applies immediately. If the entity already has this component type,
-  the value is replaced in place; otherwise the entity moves to the archetype with the component added.
-  `world:get` sees the new value right away.
-- Inside a deferred scope the call stages; the archetype transition and value write happen at the next
-  scope close. See [Deferred Operations](#deferred-operations).
-
-**Example:**
-
-```teal
--- Add a transform component to an entity
-world:set(entity, tecs.builtins.Transform(100, 200))
-```
-
-### remove
-
-Removes a component from an entity.
-
-```teal
-function World:remove(entity: integer, component: Component)
-```
-
-**Parameters:**
-
-- `entity`: Entity ID.
-- `component`: The component **type** to remove.
-
-**Example:**
-```teal
--- Remove the Velocity component from an entity
-world:remove(entity, Velocity)
-```
-
-### markComponentDirty
-
-Marks a component dirty on the entity's archetype so that incremental
-sync systems (renderer shadow buffers, snapshots) re-upload it next frame. In
-most cases prefer `world:getMut(entity, component)`, which combines the
-read and the dirty mark. Reach for `markComponentDirty` only when you
-already have a column reference from another path (e.g. iterated via a
-query) and need to flag the row dirty without re-fetching.
-
-```teal
-function World:markComponentDirty(entity: integer, component: Component)
-```
-
-**Parameters:**
-
-- `entity`: Entity ID.
-- `component`: The component type whose column was mutated.
-
-> See [Dirty tracking](/tecs/components/dirty-tracking) and the
-> [Components](/tecs/components/) reference for more information.
+| Method | Description |
+| ------ | ----------- |
+| [`world:get`](/tecs/components/#world-get) | Return one component from an entity. |
+| [`world:getMut`](/tecs/components/#world-get-mut) | Return a component for in-place mutation and mark its column dirty. |
+| [`world:getFirstRelationship`](/tecs/components/#world-get-first-relationship) | Return the first relationship instance for a relationship container. |
+| [`world:has`](/tecs/components/#world-has) | Check whether an entity has a component or relationship target. |
+| [`world:set`](/tecs/components/#world-set) | Attach or replace a component on an entity. |
+| [`world:remove`](/tecs/components/#world-remove) | Remove a component from an entity. |
+| [`world:markComponentDirty`](/tecs/components/#world-mark-component-dirty) | Mark a component column dirty for one entity's archetype. |
 
 ## Bundles
 
 Bundles are reusable templates for spawning entities with predefined components. See
 [Component bundles](/tecs/components/bundles) for full documentation.
 
-### newBundle
-
-Creates and registers a bundle for spawning entities with a predefined set of components.
-
-```teal
-function World:newBundle(name: string, def?: BundleDef): Bundle
-```
-
-**Parameters:**
-
-- `name`: Unique name for the bundle.
-- `def`: Optional bundle definition with `required` and `with` fields.
-
-**Returns:**
-
-- The registered bundle.
-
-**Example:**
-
-```teal
-local playerBundle = world:newBundle("Player", {
-    required = { Transform, Health },
-    with = {
-        [Velocity] = function() return Velocity(0, 0) end,
-        [PlayerTag] = true,
-    },
-})
-```
-
-### spawnBundle
-
-Spawns an entity from a registered bundle by name. Required components
-are passed positionally in the order they were declared via `:require`.
-Optional components always use their registered factory; they can't be
-overridden at spawn time.
-
-```teal
-function World:spawnBundle(name: string, ...: Component): integer
-```
-
-**Parameters:**
-
-- `name`: The bundle name.
-- `...`: Required components, in declaration order.
-
-**Returns:**
-
-- The entity ID.
-
-**Example:**
-
-```teal
-local entityId = world:spawnBundle("Player",
-    Transform(100, 200),
-    Health(100)
-)
-```
-
-### getBundle
-
-Returns a registered bundle by name.
-
-```teal
-function World:getBundle(name: string): Bundle
-```
-
-**Parameters:**
-
-- `name`: The bundle name.
-
-**Returns:**
-
-- The bundle, or `nil` if not found.
-
-**Example:**
-
-```teal
-local playerBundle = world:getBundle("Player")
-
--- Spawn 1000 entities from the bundle.
-for i = 1, 1000 do
-    playerBundle:spawn(Transform(i * 10, 0), Health(100))
-end
-```
-
-### getBundles
-
-Returns all registered bundles as a map.
-
-```teal
-function World:getBundles(): {string: Bundle}
-```
-
-**Returns:**
-
-- Map of bundle name to bundle.
-
-**Example:**
-
-```teal
-local bundles = world:getBundles()
-for name, bundle in pairs(bundles) do
-    print(name, bundle.required, bundle.defaulted)
-end
-```
+| Method | Description |
+| ------ | ----------- |
+| [`world:newBundle`](/tecs/components/bundles#world-new-bundle) | Create and register a bundle. |
+| [`world:spawnBundle`](/tecs/components/bundles#world-spawn-bundle) | Spawn an entity from a registered bundle by name. |
+| [`world:getBundle`](/tecs/components/bundles#world-get-bundle) | Return one registered bundle by name. |
+| [`world:getBundles`](/tecs/components/bundles#world-get-bundles) | Return all registered bundles. |
 
 ## Queries
 
-### query
+World query methods find matching archetypes and entities. See [Queries](/tecs/queries/) for descriptors, iteration,
+grouping, callbacks, and mutation rules.
 
-Creates a query to find entities with specific components.
-
-```teal
-function World:query(descriptor: queries.QueryDescriptor): Query
-```
-
-**Parameters:**
-
-- `descriptor`: Description of the components to query for
-
-**Returns:**
-
-- A query object you can iterate to access matching entities
-
-**Example:**
-
-```teal
--- Query for entities with both Transform and Name components
-local query = world:query({
-    include = {
-        tecs.builtins.Transform,
-        tecs.builtins.Name
-    }
-})
-
--- Iterate over the matching archetypes.
-for archetype, len, entities in query:iter() do
-    -- Grab component columns.
-    local names = archetype:get(tecs.builtins.Name)
-    local transforms = archetype:get(tecs.builtins.Transform)
-    -- Iterate over the entities in the archetype.
-    for row = 1, len do
-        local xf = transforms[row]
-        local name = names[row]
-        love.graphics.print(name.value, xf.x, xf.y)
-    end
-end
-```
-
-> See the [Queries](/tecs/queries/) reference for more information.
-
-### findArchetypes
-
-Finds all archetypes that have a specific component, returning an iterator over the matching archetypes.
-This O(1), garbage-free operation works well for ad-hoc queries targeting a single component.
-
-```teal
-function World:findArchetypes(component: Component): function(): (Archetype, integer, {integer})
-```
-
-**Parameters:**
-
-- `component`: The component to find.
-
-**Returns:**
-
-- An iterator over the archetypes that have the component
-
-**Example:**
-
-```teal
--- Iterate over all archetypes containing the Name component
-for archetype, len, entities in world:findArchetypes(tecs.builtins.Name) do
-    -- Grab component columns.
-    local names = archetype:get(tecs.builtins.Name)
-    -- Iterate over the entities in the archetype.
-    for i = 1, len do
-        print(entities[i] .. " has name " .. names[i].value)
-    end
-end
-```
+| Method | Description |
+| ------ | ----------- |
+| [`world:query`](/tecs/queries/#world-query) | Create a persistent or temporary query from a descriptor. |
+| [`world:findArchetypes`](/tecs/queries/#world-find-archetypes) | Iterate archetypes that contain one component. |
 
 ## Hierarchy Traversal
 
@@ -912,7 +598,7 @@ Tecs uses a **scope depth** counter to decide whether mutations apply instantly 
 When the depth is zero and you call a mutating API, the change applies before the call returns:
 
 - `set` / `remove` / `spawn` / `despawn` go through a fast instant path.
-- `batchSpawn` / `batchSpawnBestEffort` / `batchSpawnAt` / `batchDespawn` / `batchSet` / `batchRemove`
+- `batchSpawn` / `batchSpawnAt` / `batchDespawn` / `batchSet` / `batchRemove`
   internally open a scope, stage their work, and drain before returning.
 
 When the depth is greater than zero, every one of those calls stages into a pending transaction and applies
@@ -988,115 +674,13 @@ world:commit()
 
 ## Systems Management
 
-### addSystem
+World system methods add and remove work from the pipeline. See [Systems](/tecs/systems) for system configuration,
+ordering, conditional execution, and removal rules.
 
-Adds a system to the World.
-
-```teal
-function World:addSystem(config: SystemConfig)
-```
-
-**Parameters:**
-
-- `config`: Configuration for the system.
-
-**SystemConfig Fields:**
-
-| Field            | Required   | Type                                   | Description                                                     |
-| ---------------- | ---------- | -------------------------------------- | --------------------------------------------------------------- |
-| `phase`          | **Yes**    | `Phase`                                | The [phase](/tecs/phases) when the system should run       |
-| `run`            | **Yes**    | `function(dt, world)`                  | The system function to call on each update                      |
-| `name`           | No         | `string`                               | Name of the system (useful for debugging and ordering)          |
-| `runIf`          | No         | `function(dt, world, name): boolean`   | Optional function that determines if the system should run      |
-| `before`         | No         | `{string}`                             | Optional list of system names this should run before            |
-| `after`          | No         | `{string}`                             | Optional list of system names this should run after             |
-
-**Example:**
-
-Add a system that processes a query to move entities.
-
-```teal
-local movableQuery = world:query({
-    include = {
-        tecs.builtins.Transform,
-        Velocity
-    }
-})
-
--- Add a simple movement system
-world:addSystem({
-    name = "MovementSystem",
-    phase = tecs.phases.FixedUpdate,
-    run = function(dt: number, w: tecs.World)
-        for archetype, len in movableQuery:iter() do
-            local transforms = archetype:getMut(tecs.builtins.Transform)
-            local velocities = archetype:get(Velocity)
-            for row = 1, len do
-                local xf = transforms[row]
-                local vel = velocities[row]
-                xf.x = xf.x + (vel.x * dt)
-                xf.y = xf.y + (vel.y * dt)
-            end
-        end
-    end
-})
-```
-
-Add a system with conditional execution.
-
-```teal
-world:addSystem({
-    name = "AmbientSoundSystem",
-    phase = tecs.phases.FixedUpdate,
-    runIf = function(dt: number, world: tecs.World, systemName: string): boolean
-        -- Only run this system occasionally
-        return math.random() < 0.01
-    end,
-    run = function(dt: number, world: tecs.World)
-        playAmbientSound()
-    end
-})
-```
-
-Add a system with ordering constraints.
-
-```teal
-world:addSystem({
-    name = "CollisionSystem",
-    phase = tecs.phases.FixedUpdate,
-    after = { "MovementSystem" }, -- Run after movement
-    before = { "EnemyAI" }, -- Run before enemy AI
-    run = function(dt: number, world: tecs.World)
-        -- Check for collisions
-    end
-})
-```
-
-> See the [Systems](/tecs/systems) reference for more information.
-
-### removeSystem
-
-Removes a system from the world by name.
-
-```teal
-function World:removeSystem(systemName: string)
-```
-
-**Parameters:**
-
-- `systemName`: The name of the system to remove.
-
-**Example:**
-
-```teal
-world:removeSystem("StartupSystem")
-```
-
-::: warning
-Systems need a name to be removable. You cannot remove unnamed systems after adding them.
-:::
-
-> See the [Systems](/tecs/systems) reference for more information.
+| Method | Description |
+| ------ | ----------- |
+| [`world:addSystem`](/tecs/systems#world-add-system) | Add a system to the world's pipeline. |
+| [`world:removeSystem`](/tecs/systems#world-remove-system) | Remove a named system from the world's pipeline. |
 
 ## Plugins
 
@@ -1175,236 +759,40 @@ world.resources[GAME_UUID] = "abc"
 
 ## Phase Management
 
-### enablePhase / disablePhase
+World phase methods control the pipeline's phase tree. See [Phases](/tecs/phases) for phase groups, fixed vs
+variable timing, custom phases, and examples.
 
-Enable or disable specific phases of the game loop.
-
-```teal
-function World:enablePhase(phase: Phase)
-function World:disablePhase(phase: Phase)
-```
-
-**Parameters:**
-
-- `phase`: The phase to enable or disable.
-
-**Example:**
-
-```teal
--- Disable all rendering.
-world:disablePhase(tecs.phases.RenderGroup)
-
--- Enable rendering.
-world:enablePhase(tecs.phases.RenderGroup)
-```
-
-### registerPhase
-
-Registers a custom phase with the world's pipeline. This allows external modules to define their own phases.
-
-```teal
-function World:registerPhase(phase: Phase)
-```
-
-**Parameters:**
-
-- `phase`: The phase to register.
-
-> See the [Phases](/tecs/phases) reference for more information.
+| Method | Description |
+| ------ | ----------- |
+| [`world:enablePhase`](/tecs/phases#world-enable-phase) | Enable a phase or phase group. |
+| [`world:disablePhase`](/tecs/phases#world-disable-phase) | Disable a phase or phase group. |
+| [`world:registerPhase`](/tecs/phases#world-register-phase) | Register a custom phase with the world's pipeline. |
+| [`world:runPhase`](/tecs/phases#world-run-phase) | Run a phase or phase group explicitly. |
 
 ## State Management
 
 The state stack manages game states with automatic entity lifecycle. See [States](/tecs/states) for full
 documentation.
 
-### createState
-
-Creates a named state with an optional lifecycle policy. Returns a tag component
-that is auto-added to entities spawned while this state is on top of the stack.
-
-```teal
-function World:createState(name: string, policy?: StatePolicy): Component
-```
-
-**Parameters:**
-
-- `name`: The name of the state.
-- `policy`: Optional lifecycle policy for state transitions.
-
-**Returns:**
-
-- The tag component for this state.
-
-**Example:**
-
-```teal
-local GameState = world:createState("game", {
-    onBlur = "pause",
-    onFocus = "resume",
-})
-```
-
-### pushState
-
-Pushes a state onto the state stack. Fires the previous top state's `onBlur`
-policy and the new state's `onEnter` policy. Entities spawned after this call
-automatically receive the state's tag component.
-
-```teal
-function World:pushState(name: string)
-```
-
-**Parameters:**
-
-- `name`: The state name (must have been created with `createState`).
-
-### popState
-
-Pops the current state from the state stack. Fires the current state's `onExit`
-policy and the new top state's `onFocus` policy.
-
-```teal
-function World:popState()
-```
-
-### peekState
-
-Returns the name of the current top state, or `nil` if the stack is empty.
-
-```teal
-function World:peekState(): string
-```
-
-**Example:**
-
-```teal
-local current = world:peekState()
-if current == "game" then
-    -- in game state
-end
-```
+| Method | Description |
+| ------ | ----------- |
+| [`world:createState`](/tecs/states#world-create-state) | Create a named state and return its tag component. |
+| [`world:pushState`](/tecs/states#world-push-state) | Push a state onto the stack. |
+| [`world:popState`](/tecs/states#world-pop-state) | Pop the current state from the stack. |
+| [`world:peekState`](/tecs/states#world-peek-state) | Return the current top state name. |
 
 ## Events
 
-The World provides a centralized event system with address-based routing. Events can be sent to:
-- **World-level** (address `0`): Global events for cross-system communication
-- **Entity-level** (entity ID): Events specific to a single entity
+World event methods use the address-based event system. See [Events](/tecs/events) for event types, addresses,
+constructor behavior, and MessageBus details.
 
-### observe
-
-Registers an observer for an event at a specific address.
-
-```teal
-function World:observe<E is Event>(
-    address: integer,
-    eventType: E,
-    observer: function(E),
-    id?: string
-)
-```
-
-**Parameters:**
-
-- `address`: The address to observe (`0` for world-level, entity ID for entity events)
-- `eventType`: The event type to observe
-- `observer`: Callback function called when the event is emitted
-- `id`: Optional string ID for later removal
-
-**Example:**
-
-```teal
--- World-level event
-world:observe(0, MyCustomEvent, function(e: MyCustomEvent)
-    print("Got MyCustomEvent")
-end)
-
--- Entity-level event
-world:observe(entityId, tecs.builtins.OnDespawn, function(e: tecs.builtins.OnDespawn)
-    print("Entity despawned: " .. e.entity)
-end)
-```
-
-### emit
-
-Emits an event to all observers at a specific address.
-
-```teal
-function World:emit(address: integer, eventOrType: Event, ...: any)
-```
-
-**Parameters:**
-
-- `address`: The address to emit to (`0` for world-level, entity ID for entity events)
-- `eventOrType`: An event instance to emit, or an event type followed by constructor args
-- `...`: Constructor args, when `eventOrType` is an event type
-
-**Example:**
-
-```teal
--- World-level event (no payload)
-world:emit(0, MyCustomEvent)
-
--- Entity-level event, passing the type plus constructor args: the world
--- checks for observers before constructing, so this allocates nothing
--- when no one is listening.
-world:emit(entityId, DamageReceived, 15)
-```
-
-### hasObservers
-
-Checks if any observers exist for an event at an address. This is still useful when upstream work is expensive, but you
-usually do not need it just to avoid event construction if you use `world:emit(address, EventType, ...)`.
-
-```teal
-function World:hasObservers<E is Event>(address: integer, eventType: E): boolean
-```
-
-**Example:**
-
-```teal
-if world:hasObservers(entityId, DamageReceived) then
-    -- Only useful if computing the payload itself is expensive.
-    world:emit(entityId, DamageReceived, 15)
-end
-```
-
-### stopObserving
-
-Stops observing an event at an address.
-
-```teal
-function World:stopObserving<E is Event>(
-    address: integer,
-    eventType: E,
-    observer: function(E) | string
-)
-```
-
-**Parameters:**
-
-- `address`: The address to stop observing
-- `eventType`: The event type
-- `observer`: The callback function or the string ID provided when observing
-
-**Example:**
-
-```teal
--- By callback reference
-world:stopObserving(0, MyEvent, myCallback)
-
--- By ID
-world:stopObserving(entityId, OnDespawn, "cleanup-handler")
-```
-
-### clearObservers
-
-Clears all observers for an address. This is called automatically when an entity is despawned.
-
-```teal
-function World:clearObservers(address: integer)
-```
-
-> See the [Events](/tecs/events) reference for more information.
+| Method | Description |
+| ------ | ----------- |
+| [`world:observe`](/tecs/events#world-observe) | Subscribe to an event at a world or entity address. |
+| [`world:emit`](/tecs/events#world-emit) | Emit an event instance or construct-and-emit an event type. |
+| [`world:hasObservers`](/tecs/events#world-has-observers) | Check whether any observer exists for an address and event type. |
+| [`world:stopObserving`](/tecs/events#world-stop-observing) | Remove a callback or named observer. |
+| [`world:clearObservers`](/tecs/events#world-clear-observers) | Remove all observers at one address. |
 
 ## Stats
 

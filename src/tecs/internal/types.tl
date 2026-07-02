@@ -427,9 +427,7 @@ local record internal
         forEachArchetype: function(self: WorldImpl, callback: function(ArchetypeInternal))
         dirtyArchetypes: function(self: WorldImpl): function(): ArchetypeInternal
         batchSpawn: function(self: WorldImpl, count: integer, componentTypes: {Component},
-            callback: function(ArchetypeInternal, integer, integer, integer)): integer
-        batchSpawnBestEffort: function(self: WorldImpl, count: integer, componentTypes: {Component},
-            callback: function(ArchetypeInternal, integer, integer, integer)): {integer}
+            callback: function(ArchetypeInternal, integer, integer, integer)): integer | nil, {integer} | nil
         batchSpawnAt: function(self: WorldImpl, ids: {integer}, componentTypes: {Component},
             callback: function(ArchetypeInternal, integer, integer, integer))
         batchSpawnAtRaw: function(self: WorldImpl, ids: any, count: integer, componentTypes: {Component},
@@ -515,8 +513,8 @@ local record internal
         _instantSpawn: function(self: WorldImpl, ...: Component): boolean, integer
         _instantDespawn: function(self: WorldImpl, id: integer): boolean
         _deferBatchSpawn: function(self: WorldImpl, count: integer, componentTypes: {Component},
-            callback: function(ArchetypeInternal, integer, integer, integer)): integer
-        _deferBatchSpawnBestEffort: function(self: WorldImpl, count: integer, componentTypes: {Component},
+            callback: function(ArchetypeInternal, integer, integer, integer)): integer | nil, {integer} | nil
+        _deferBatchSpawnList: function(self: WorldImpl, count: integer, componentTypes: {Component},
             callback: function(ArchetypeInternal, integer, integer, integer)): {integer}
         _deferBatchSpawnAt: function(self: WorldImpl, ids: {integer}, componentTypes: {Component},
             callback: function(ArchetypeInternal, integer, integer, integer))
