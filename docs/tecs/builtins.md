@@ -58,8 +58,10 @@ Provides a durable, developer-assigned lookup key for an entity. Keys are unique
 a `Key` already claimed by another live entity raises an error. Keys are saved in snapshots and the key index is
 rebuilt on load.
 
+::: tip
 Use `Key` for hot-reload rebinding, authored scene references, tooling, and save-compatible lookups. Use
 [`Name`](#name-component) for human-readable labels.
+:::
 
 **Teal type:**
 
@@ -78,6 +80,8 @@ local player = world:spawn(
 assert(world:byKey("player") == player)
 local samePlayer = world:requireKey("player")
 ```
+
+For the save/load handle-rebinding pattern, see [Save games: runtime handles after load](/tecs/save-games#runtime-handles-after-load).
 
 When an entity despawns, its key is removed from the index and can be reused by another entity.
 

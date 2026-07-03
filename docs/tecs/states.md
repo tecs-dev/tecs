@@ -196,6 +196,30 @@ local GameState = world:createState("game")
 local gameEntities = world:query({include = {GameState}})
 ```
 
+## Save/load and hot reload
+
+Snapshots preserve the state stack and the state tags on entities. Loading a snapshot restores which state is on top,
+which paused/disabled tags were present, and which entities belong to each state.
+
+Runtime handles still need the same treatment as the rest of the snapshot system:
+
+- Use state queries when you need to find all entities owned by a state after load.
+- Use [`Key`](/tecs/builtins#key-component) only for stable anchors you need to rediscover directly, such as the
+  player, active camera, or a singleton HUD root.
+- Rebuild local variables and runtime indexes in `FinishSnapshotLoad` or, for Tecs2D hot reload, `PostStartup`.
+- Do not key every state-owned entity just because it is saved; most groups should be found by querying the state tag
+  plus the component you care about.
+
+```teal
+local GameState = world:createState("game")
+local enemies = world:query({include = {GameState, Enemy}})
+
+world:observe(0, tecs.builtins.FinishSnapshotLoad, function()
+    playerId = world:requireKey("player")
+    rebuildEnemyIndex(enemies)
+end)
+```
+
 ## Conditional systems
 
 Use `runIf.inState` to conditionally run systems based on the current state:

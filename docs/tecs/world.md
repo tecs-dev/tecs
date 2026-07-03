@@ -118,8 +118,9 @@ disappears, listen for [`OnDespawn`](/tecs/builtins#ondespawn-event) rather than
 
 ### Entity keys
 
-Entity IDs are the real ECS identity and are preserved by snapshots. For runtime code that needs to rediscover an
-important entity after hot reload or startup, add the builtin [`Key`](/tecs/builtins#key-component):
+Entity IDs are the real ECS identity and snapshots preserve them so relationships and component data can round-trip.
+For important singleton or authored entities that runtime code needs to rediscover, add the builtin
+[`Key`](/tecs/builtins#key-component):
 
 ```teal
 world:spawn(
@@ -133,6 +134,9 @@ local player = world:requireKey("player")
 Keys are unique among live entities. `world:byKey(key)` returns the entity or `nil`; `world:requireKey(key)` returns
 the entity or errors. Despawning the entity removes the key from the index. `Name` remains a non-unique human/debug
 label.
+
+After `loadSnapshot` or hot reload, rebuild runtime-held entity IDs from `Key` or saved components. See
+[Save games: runtime handles after load](/tecs/save-games#runtime-handles-after-load).
 
 ### spawn
 

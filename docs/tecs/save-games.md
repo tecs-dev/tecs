@@ -25,6 +25,20 @@ Tecs provides two save formats out of the box:
 | Binary | `world:saveSnapshot()`, `world:loadSnapshot(...)` | High-performance [LuaJIT-based](https://luajit.org/ext_buffer.html#serialize) binary format. This should be the default choice for production saves. |
 | Table  | `world:saveSnapshot({format=\"table\"})`, `world:loadSnapshot(...)` | Programmatic inspection, in-memory round-trips, and custom tooling (e.g. JSON via `tecs.json`). |
 
+## What belongs in snapshots
+
+Snapshots should contain durable gameplay state: entities, components, relationships, state stack, inventory,
+positions, health, authored scene references, saved settings, and other data that should mean the same thing after
+the process restarts.
+
+Do not snapshot process-local runtime handles. Renderer handles, GPU buffers, physics bodies, audio sources, active
+voices, controller edge state, caches, open file handles, thread workers, and derived lookup tables should be marked
+`transient`, omitted with `ev:exclude(...)`, saved as smaller source-of-truth components, or rebuilt during the load
+lifecycle.
+
+The practical rule is: snapshot the data you would write in a save file; rebuild the objects you would create during
+startup.
+
 ## World:saveSnapshot
 
 Snapshots the ECS world and allows plugins to inject custom data.
@@ -140,6 +154,39 @@ function world:loadSnapshot(source: any): tecs.SnapshotPrelude
 
 - `SnapshotPrelude` with `version`, `nextEntityId`, `entityCount`, `archetypeCount`, and `componentTable`.
 
+### Runtime handles after load
+
+Snapshots restore durable ECS state. They do not restore application handles stored in Lua locals, resources, plugin
+caches, UI selections, or other runtime-only structures. If a runtime variable points at an entity that must survive
+save/load or hot reload, give that entity a [`Key`](/tecs/builtins#key-component) and rebind after loading:
+
+```teal
+local playerId = world:spawn(
+    tecs.builtins.Key("player"),
+    Player()
+)
+
+-- Later:
+world:loadSnapshot(saveBuffer)
+playerId = world:requireKey("player")
+```
+
+For collections, rebuild the runtime index from saved components:
+
+```teal
+cellByPos = {}
+for archetype, len in cellQuery:iter() do
+    local entities = archetype.entities
+    local cells = archetype:get(Cell)
+    for i = 1, len do
+        cellByPos[cellKey(cells[i].col, cells[i].row)] = entities[i]
+    end
+end
+```
+
+The snapshot lifecycle is designed for this. `StartSnapshotLoad` lets plugins read custom data, and
+`FinishSnapshotLoad` is the right place to refresh runtime handles that depend on the fully restored world.
+
 ## Table snapshots
 
 Capture the world into a plain Lua snapshot table by requesting table format:
@@ -243,6 +290,46 @@ Three events fire on entity 0 during save/load so plugins and game systems can p
 | `StartSnapshotLoad`  | During `loadSnapshot`, after the world is restored, before data is dispatched.  | Register per-key callbacks via `ev:onData(key, callback)`. |
 | `FinishSnapshotLoad` | During `loadSnapshot`, after every data callback has run.                       | "Load is complete" hook; `ev.prelude` carries the version/counts. |
 
+### Load lifecycle example
+
+This example shows the intended shape for save-compatible runtime state:
+
+- durable ECS state lives in components and relationships
+- non-ECS runtime state is attached as custom data
+- keyed entity handles are rebound after load
+- transient/plugin-owned resources are recreated from durable components
+
+```teal
+local playerId = 0
+local rng = MyRng.new()
+local physicsWorld = MyPhysicsWorld.new()
+
+world:observe(0, tecs.builtins.OnSnapshotSave, function(ev: tecs.builtins.OnSnapshotSave)
+    ev:addData("mygame.rng", rng:save())
+    ev:addData("mygame.physics", physicsWorld:saveSettings())
+end)
+
+world:observe(0, tecs.builtins.StartSnapshotLoad, function(ev: tecs.builtins.StartSnapshotLoad)
+    ev:onData("mygame.rng", function(value: any)
+        rng:load(value)
+    end)
+    ev:onData("mygame.physics", function(value: any)
+        physicsWorld:loadSettings(value)
+    end)
+end)
+
+world:observe(0, tecs.builtins.FinishSnapshotLoad, function(_ev: tecs.builtins.FinishSnapshotLoad)
+    playerId = world:requireKey("player")
+    rebuildCellIndexFromComponents()
+    recreatePhysicsBodiesFromRigidBodyComponents()
+    recreateAudioVoicesFromAudioSourceComponents()
+end)
+```
+
+`StartSnapshotLoad` is for reading custom data from the snapshot's data section. `FinishSnapshotLoad` is for anything
+that needs the final restored world: rebinding `Key` handles, rebuilding lookup tables, and recreating transient
+renderer/physics/audio resources.
+
 ### Attaching data during save
 
 Plugins (or any system) can attach data by listening for `OnSnapshotSave` and calling `ev:addData(key, value)`.
@@ -305,6 +392,19 @@ local SpriteData = tecs.newFFIComponent({
 whole component runtime-only with `transient`, or provide custom serialization for durable data.
 
 `exclude` and `addData` can be combined freely; both happen during the same `OnSnapshotSave` listener.
+
+### Plugin snapshot checklist
+
+For each plugin or subsystem that participates in saves:
+
+- Save durable source-of-truth components, relationships, and custom data.
+- Mark process-local backing components `transient = true` when the entity itself is durable.
+- Use `ev:exclude(component)` for fully derived entities that should not appear in saves.
+- Rebuild derived entities, resources, and caches during normal systems or `FinishSnapshotLoad`.
+- Use `Key` only for stable anchors the application needs to rediscover, such as `"player"` or `"camera.main"`.
+- Prefer queries or rebuilt indexes for groups of state-owned entities instead of assigning a key to every entity.
+- Keep renderer handles, physics bodies, audio voices, controller state, open files, worker threads, and caches out of
+  the snapshot unless they are converted into portable durable data.
 
 ### Reading data back during load
 

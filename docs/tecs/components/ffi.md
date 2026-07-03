@@ -155,7 +155,7 @@ The `options` table supports the following properties:
 | `requires`         | `{Component}`               | Components to auto-add alongside this one (see [Auto-dependencies](/tecs/components/#auto-dependencies-with-requires)) | No |
 | `serialize`        | `function(instance: Component): {string: any}` | Custom serializer for durable data. Mutually exclusive with `transient`.                      | No          |
 | `deserialize`      | `function(world: tecs.World, data: {string: any}): Component`  | Custom deserializer                                                         | No          |
-| `transient`        | `boolean`                   | If `true`, omit this component from snapshots. Mutually exclusive with `serialize`.           | No          |
+| `transient`        | `boolean`                   | If `true`, omit this component from snapshots. Use for runtime-only backing state such as GPU slots, physics handles, or caches. Mutually exclusive with `serialize`. | No |
 
 To run code when the component is added to or removed from an entity, attach
 [query callbacks](/tecs/queries/callbacks) (`onEntitiesAdded` /

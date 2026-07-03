@@ -95,16 +95,28 @@ reconstructing.
 
 ## Skipping a component from snapshots
 
-Set `transient = true` to omit a component from snapshots. This is the idiomatic way to mark runtime state
-that can be recreated after load (render caches, per-frame scratch, derived indices):
+Set `transient = true` to omit a component from snapshots. This is the idiomatic way to mark runtime-only state
+that can be recreated after load: render caches, GPU buffer slots, physics body handles, active audio voice handles,
+controller edge state, per-frame scratch, and derived indices.
 
 ```teal
+-- Durable: enough information to recreate the physics body.
 tecs.newComponent({
-    name = "RenderCache",
-    container = RenderCache,
+    name = "RigidBody",
+    container = RigidBody,
+    fields = {"shape", "mass"},
+})
+
+-- Runtime-only: process-local physics engine handle.
+tecs.newComponent({
+    name = "PhysicsBodyHandle",
+    container = PhysicsBodyHandle,
     transient = true,
 })
 ```
+
+The same shape applies to rendering and audio: save `Sprite`, `Material`, or `AudioSource` data, then recreate
+transient renderer buckets, GPU slots, physics bodies, or audio playback handles in systems or `FinishSnapshotLoad`.
 
 ## Schema fingerprinting & migration
 

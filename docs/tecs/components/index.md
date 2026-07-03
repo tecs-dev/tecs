@@ -270,8 +270,11 @@ For lifecycle reactions ("run code when an entity gains or loses this component"
 ## Transient components
 
 Set `transient = true` on any component or relationship whose value is runtime projection state rather than
-durable world state (e.g., renderer caches, GPU/bucket routing tags, per-frame scratch).
-[Snapshot saves](/tecs/save-games) skips transient component columns while keeping the entity itself.
+durable world state.
+
+[Snapshot saves](/tecs/save-games) skips transient component columns while keeping the entity itself. After load,
+recreate the transient component from durable source-of-truth components during normal systems or
+`FinishSnapshotLoad`.
 
 ```teal
 tecs.newFFIComponent({
@@ -288,5 +291,5 @@ tecs.newFFIComponent({
 `transient = true` is mutually exclusive with `serialize`. The option is accepted by `newComponent`, `newFFIComponent`,
 `newTagComponent`, `newScalarComponent`, `newRelationship`, and `newFFIRelationship`.
 
-See [Serialization](/tecs/components/serialization) for how components round-trip through save games, networking,
-and the MCP server.
+See [Serialization](/tecs/components/serialization#skipping-a-component-from-snapshots) for examples and save/load
+guidance.

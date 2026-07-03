@@ -207,7 +207,21 @@ Use startup phases with that order in mind:
 
 - `PreStartup` / `Startup`: register systems, observers, plugins, and runtime resources.
 - Snapshot restore: replaces entity data while preserving systems, resources, queries, and global observers.
-- `PostStartup`: rebuild transient or derived entities that are intentionally not snapshotted.
+- `PostStartup`: rebuild transient or derived entities that are intentionally not snapshotted, and rebind runtime
+  entity handles from [`Key`](/tecs/builtins#key-component) or saved components.
+
+For example, refresh keyed handles in `PostStartup`:
+
+```teal
+local playerId = 0
+
+world:addSystem({
+    phase = tecs.phases.PostStartup,
+    run = function()
+        playerId = world:requireKey("player")
+    end,
+})
+```
 
 For a project launched from its `build/` directory, the host stamp file is often `build/.tecs-reload-stamp`, while
 the in-game `stampPath` is `.tecs-reload-stamp`.
