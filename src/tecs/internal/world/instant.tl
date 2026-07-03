@@ -39,6 +39,7 @@ local macro instantBegin!()
     return ```
         local target = self.emptyArchetype as Archetype
         local requiredList: {internal.RequireEntry}
+        local pendingKey: string
     ```
 end
 
@@ -51,6 +52,11 @@ local macro instantResolveOne!(compExpr: Expression)
             local ct = comp.componentType as ComponentInternal
             if ct.relationshipType ~= nil then
                 return false, 0
+            elseif ct == (builtins.Key as Component) then
+                if pendingKey ~= nil then
+                    error("spawn: entity cannot have more than one Key")
+                end
+                pendingKey = (comp as {string:any}).value as string
             end
             target = target:withComponent(ct, self.archetypeIndex)
             if ct._hasRequires then
@@ -85,6 +91,9 @@ local macro instantMiddle!()
         local slots = self.allocator.slots as {integer: EntitySlot}
         local sSlot = slots[slot]
         local id = IdAllocator.encodeId(slot, sSlot.generation)
+        if pendingKey ~= nil then
+            self:_claimKey(id, pendingKey)
+        end
 
         local newRow = (target.entities as {integer})[0] as integer
         if newRow + 1 > target.capacity then
@@ -283,7 +292,6 @@ function WorldImpl:instantRemoveRaw(id: integer, component: Component)
     -- Reverse-index unlink lives in the defer-remove handler. Plain components
     -- fall straight through the archetype transition.
     if not srcArch.columns[component] then return end
-
     local dstArch = srcArch:withoutComponent(component, self.archetypeIndex)
     if dstArch == srcArch then return end
 

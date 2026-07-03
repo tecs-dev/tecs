@@ -116,6 +116,24 @@ local generation = math.floor(id / 2^22)
 Configure [`maxEntities`](#creating-a-world) if you need a different entity ceiling. To react when an entity
 disappears, listen for [`OnDespawn`](/tecs/builtins#ondespawn-event) rather than polling `isAlive`.
 
+### Entity keys
+
+Entity IDs are the real ECS identity and are preserved by snapshots. For runtime code that needs to rediscover an
+important entity after hot reload or startup, add the builtin [`Key`](/tecs/builtins#key-component):
+
+```teal
+world:spawn(
+    tecs.builtins.Key("player"),
+    tecs.builtins.Name("Player ship")
+)
+
+local player = world:requireKey("player")
+```
+
+Keys are unique among live entities. `world:byKey(key)` returns the entity or `nil`; `world:requireKey(key)` returns
+the entity or errors. Despawning the entity removes the key from the index. `Name` remains a non-unique human/debug
+label.
+
 ### spawn
 
 Creates a new entity in the World.
@@ -223,6 +241,8 @@ end
 - This is a [deferred operation](#deferred-operations).
 - IDs are reserved immediately and can be passed to `world:set`, `world:remove`, or `world:despawn` before the
   operation drains.
+- `batchSpawn` does not support `tecs.builtins.Key`; keys must be claimed per entity before the entity becomes
+  visible. Spawn keyed entities individually or add `Key` with `world:set` per entity.
 
 **Sparse relationships**
 
@@ -278,6 +298,8 @@ per call regardless of how the ids are ordered.
 **Notes:**
 
 - This is a [deferred operation](#deferred-operations).
+- `batchSpawnAt` does not support `tecs.builtins.Key`; keys must be claimed per entity before the entity becomes
+  visible. Spawn keyed entities individually or add `Key` with `world:set` per entity.
 
 ### spawnAt
 

@@ -113,9 +113,12 @@ save embeds each component's fingerprint in the snapshot prelude; on load the fr
 current registration.
 
 - **Match** → the bulk memcpy fast path runs (one `memcpy` per column).
-- **Mismatch** → the load errors. Per-entity schema migration is a future addition; today you need to either bump your
-  game's own save version and translate offline, or switch the component to a custom `serialize` / `deserialize` pair
-  (which opts out of the bulk path and lets you reshape the data yourself).
+- **Mismatch** → the loader falls back to per-entity migration. It reads each saved struct using the saved layout,
+  constructs the current component type, and copies same-named fields across. Added fields keep their zero/default
+  values, removed fields are discarded, and incompatible type conversions still surface as load errors.
+
+Use a custom `serialize` / `deserialize` pair when a field rename, semantic migration, or non-portable runtime field
+needs more control than same-name field copying.
 
 Non-FFI components aren't fingerprinted; they round-trip through their declared `serialize` / `deserialize` every time.
 That includes ordinary [table components](/tecs/components/table-components),
@@ -127,6 +130,7 @@ That includes ordinary [table components](/tecs/components/table-components),
 | Path                                      | Cost per entity | When it runs                                                              |
 | ----------------------------------------- | --------------- | ------------------------------------------------------------------------- |
 | Bulk FFI memcpy                           | ~zero           | FFI component, no custom `serialize`, schema matches on load, binary format. |
+| FFI schema migration                      | small           | FFI component, no custom `serialize`, saved schema differs from current schema. |
 | Per-entity structured codec               | small           | FFI component with custom `serialize`, OR non-FFI table component.        |
 | Row-major fallback (sparse relationships) | moderate        | Archetype contains a sparse container component.                          |
 

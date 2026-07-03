@@ -106,7 +106,7 @@ local record BatchMutation
     op: integer
     archetypes: {Archetype}
     componentType: Component
-    value: Component         -- BATCH_OP_SET_CONST only
+    value: any               -- BATCH_OP_SET_CONST only
     callback: function(Archetype, integer, integer, integer)  -- BATCH_OP_SET_CALLBACK only
     -- Hoisted component invariants, computed once at enqueue.
     isTag: boolean

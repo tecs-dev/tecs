@@ -18,6 +18,11 @@ local record builtins
     --- returns a string directly.
     Name: types.components.ScalarComponent<string>
 
+    --- Provides a durable, unique lookup key for an entity. Unlike `Name`,
+    --- `Key` is intended for save/load, hot reload, tooling, and authored
+    --- references. A world rejects duplicate live keys.
+    Key: types.components.ScalarComponent<string>
+
     --- Provides the coordinates and transform of an entity.
     record Transform is Component
         --- The x coordinate of the entity.
@@ -338,6 +343,37 @@ builtins.Name = components.newScalarComponent({
     name = "Name",
     kind = "string",
 }) as types.components.ScalarComponent<string>
+
+builtins.Key = components.newScalarComponent({
+    name = "Key",
+    kind = "string",
+}) as types.components.ScalarComponent<string>
+
+do
+    local Key <const> = builtins.Key as Component
+    components.attachHooks(Key, {
+        deferSet = function(world: types.World, id: integer, componentType: Component, value: any)
+            local w = world as {string:any}
+            local claimKey = w._claimKey as function(any, integer, string)
+            local setRaw = w.setRaw as function(any, integer, Component, any)
+            claimKey(w, id, value as string)
+            setRaw(w, id, componentType, value)
+        end,
+        deferRemove = function(world: types.World, id: integer, componentType: Component)
+            local w = world as {string:any}
+            local releaseKey = w._releaseKeyForEntity as function(any, integer)
+            local removeRaw = w.removeRaw as function(any, integer, Component)
+            releaseKey(w, id)
+            removeRaw(w, id, componentType)
+        end,
+        onDespawn = function(world: types.World, id: integer, _componentType: Component, _arch: types.Archetype, _row: integer)
+            local w = world as {string:any}
+            local releaseKey = w._releaseKeyForEntity as function(any, integer)
+            releaseKey(w, id)
+        end,
+        noBulkBatch = true,
+    })
+end
 
 components.newFFIComponent({
     name = "Transform",

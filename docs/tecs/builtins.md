@@ -12,6 +12,7 @@ Tecs provides various builtin plugins, components, and events. These builtins ar
 | Component                                           | Description                                         |
 | --------------------------------------------------- | --------------------------------------------------- |
 | [Name](#name-component)                             | Provides a name for an entity                       |
+| [Key](#key-component)                               | Provides a durable unique lookup key                |
 | [ChildOf](#childof-relationship-component)          | Parent/child relationship between entities          |
 | [Transform](#transform-component)                   | Position, rotation, scale, and layer                |
 | [RelativeTransform](#relativetransform-component)   | Transform relative to parent entity                 |
@@ -21,7 +22,11 @@ Tecs provides various builtin plugins, components, and events. These builtins ar
 
 ### Name component
 
-Provides a name for an entity. Stored as a [scalar component](/tecs/components/scalar-components) of kind `string`, so the column holds the raw string and `world:get(id, Name)` returns a string directly.
+Provides a human/debug label for an entity. Stored as a [scalar component](/tecs/components/scalar-components) of
+kind `string`, so the column holds the raw string and `world:get(id, Name)` returns a string directly.
+
+`Name` is not unique. Use [`Key`](#key-component) when runtime code, tooling, or hot-reload startup needs a durable
+address for an entity.
 
 **Teal type:**
 
@@ -46,6 +51,35 @@ To update an existing entity's name, prefer the 3-arg form of `world:set`:
 ```teal
 world:set(entity, tecs.builtins.Name, "Greg")
 ```
+
+### Key component
+
+Provides a durable, developer-assigned lookup key for an entity. Keys are unique within a world: spawning or setting
+a `Key` already claimed by another live entity raises an error. Keys are saved in snapshots and the key index is
+rebuilt on load.
+
+Use `Key` for hot-reload rebinding, authored scene references, tooling, and save-compatible lookups. Use
+[`Name`](#name-component) for human-readable labels.
+
+**Teal type:**
+
+```teal
+Key: tecs.ScalarComponent<string>
+```
+
+**Example:**
+
+```teal
+local player = world:spawn(
+    tecs.builtins.Key("player"),
+    tecs.builtins.Name("Player ship")
+)
+
+assert(world:byKey("player") == player)
+local samePlayer = world:requireKey("player")
+```
+
+When an entity despawns, its key is removed from the index and can be reused by another entity.
 
 ### ChildOf relationship component
 

@@ -688,6 +688,27 @@ describe("snapshot save/load", function()
         luassert.equals("game", world:peekState())
     end)
 
+    it("rebuilds the Key index after loading a snapshot", function()
+        local world = tecs.newWorld()
+        local player = world:spawn(tecs.builtins.Key("player"), PositionComp(1, 1))
+        world:commit()
+
+        local snap = saveTableSnapshot(world)
+
+        world:clearEntities()
+        luassert.is_nil(world:byKey("player"))
+
+        local finishSawPlayer = false
+        world:observe(0, tecs.builtins.FinishSnapshotLoad, function(_ev: tecs.builtins.FinishSnapshotLoad)
+            finishSawPlayer = world:requireKey("player") == player
+        end)
+
+        world:loadSnapshot(snap)
+        luassert.equals(player, world:byKey("player"))
+        luassert.equals(player, world:requireKey("player"))
+        luassert.is_true(finishSawPlayer)
+    end)
+
     it("FinishSnapshotLoad fires once after the load completes", function()
         local world = tecs.newWorld()
         world:spawn(PositionComp(1, 1))

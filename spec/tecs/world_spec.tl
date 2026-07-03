@@ -1,4 +1,5 @@
 require("busted")
+local ffi <const> = require("ffi")
 local WorldImpl <const> = require("tecs.internal.world")
 local luassert <const> = require("luassert")
 local spy <const> = require("luassert.spy")
@@ -1117,6 +1118,96 @@ describe("WorldImpl", function()
             luassert.is_false(w:isAlive(parent2))
             luassert.is_false(w:isAlive(kid1), "child should cascade-delete with parent")
             luassert.is_false(w:isAlive(kid2))
+        end)
+
+        it("indexes builtin Key and rejects duplicate live keys", function()
+            local a = w:spawn(tecs.builtins.Key("player"), PosComponent(1, 2))
+            w:commit()
+
+            luassert.equals(a, w:byKey("player"))
+            luassert.equals(a, w:requireKey("player"))
+
+            local ok = pcall(function()
+                w:spawn(tecs.builtins.Key("player"), PosComponent(3, 4))
+            end)
+            luassert.is_false(ok)
+        end)
+
+        it("reaps builtin Key when an entity despawns", function()
+            local a = w:spawn(tecs.builtins.Key("player"), PosComponent(1, 2))
+            w:commit()
+
+            w:despawn(a)
+            w:commit()
+
+            luassert.is_nil(w:byKey("player"))
+            local b = w:spawn(tecs.builtins.Key("player"), PosComponent(3, 4))
+            w:commit()
+            luassert.equals(b, w:byKey("player"))
+        end)
+
+        it("updates builtin Key when set or removed", function()
+            local a = w:spawn(PosComponent(1, 2))
+            w:commit()
+
+            w:set(a, tecs.builtins.Key("first"))
+            w:commit()
+            luassert.equals(a, w:byKey("first"))
+
+            w:set(a, tecs.builtins.Key("second"))
+            w:commit()
+            luassert.is_nil(w:byKey("first"))
+            luassert.equals(a, w:byKey("second"))
+
+            w:remove(a, tecs.builtins.Key)
+            w:commit()
+            luassert.is_nil(w:byKey("second"))
+        end)
+
+        it("keeps the Key index correct through batch set and remove", function()
+            local a = w:spawn(PosComponent(1, 2))
+            w:commit()
+
+            local q = w:query({include = {PosComponent}})
+            w:batchSet(q, tecs.builtins.Key("player"))
+            w:commit()
+            luassert.equals(a, w:byKey("player"))
+
+            w:batchRemove(q, tecs.builtins.Key)
+            w:commit()
+            luassert.is_nil(w:byKey("player"))
+
+            local b = w:spawn(tecs.builtins.Key("player"), PosComponent(3, 4))
+            w:commit()
+            luassert.equals(b, w:byKey("player"))
+        end)
+
+        it("rejects duplicate keys through batch set", function()
+            w:spawn(PosComponent(1, 2))
+            w:spawn(PosComponent(3, 4))
+            w:commit()
+
+            local q = w:query({include = {PosComponent}})
+            local ok = pcall(function()
+                w:batchSet(q, tecs.builtins.Key("player"))
+            end)
+            luassert.is_false(ok)
+        end)
+
+        it("rejects batch spawning entities with builtin Key", function()
+            local ok = pcall(function()
+                w:batchSpawn(2, {tecs.builtins.Key}, function(_arch, _first, _last, _count) end)
+            end)
+            luassert.is_false(ok)
+        end)
+
+        it("rebuilds the Key index after raw batch spawn", function()
+            local ids = ffi.new("uint32_t[1]", 1001)
+            w:batchSpawnAtRaw(ids, 1, {tecs.builtins.Key, PosComponent}, function(arch, rowStart, _rowEnd, _count)
+                (arch.columns[tecs.builtins.Key] as {string})[rowStart] = "player"
+                (arch.columns[PosComponent] as {PosComponent})[rowStart] = PosComponent(1, 2)
+            end)
+            luassert.equals(1001, w:byKey("player"))
         end)
     end)
 

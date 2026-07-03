@@ -114,6 +114,7 @@ function WorldImpl.new(config?: types.World.Config): World
         _stateStack = {},
         _stateComponents = {},
         _statePolicies = {},
+        _keyIndex = {},
         _archetypeSnapshotPool = pool.newTablePool({ clearOn = "release" }),
         _scopeDepth = 0,
 
@@ -255,6 +256,49 @@ function WorldImpl:getFirstRelationship<T is Relationship>(id: integer, relation
         if archetype then
             return archetype:getFirstRelationship(relationship, s.row + 1)
         end
+    end
+end
+
+-------------------------------------------------------------------------------
+-- Key index
+-------------------------------------------------------------------------------
+
+local function validateKey(key: string)
+    if key == nil or key == "" then
+        error("Key must be a non-empty string")
+    end
+end
+
+function WorldImpl:byKey(key: string): integer | nil
+    return self._keyIndex[key]
+end
+
+function WorldImpl:requireKey(key: string): integer
+    local id = self._keyIndex[key]
+    if id == nil then
+        error("No entity with Key '" .. tostring(key) .. "'")
+    end
+    return id
+end
+
+function WorldImpl:_claimKey(id: integer, key: string)
+    validateKey(key)
+    local current = self._keyIndex[key]
+    if current ~= nil and current ~= id then
+        error("Key '" .. key .. "' is already claimed by entity " .. tostring(current))
+    end
+
+    local old = self:oldValueOf(id, builtins.Key)
+    if old ~= nil and old ~= key then
+        self._keyIndex[old as string] = nil
+    end
+    self._keyIndex[key] = id
+end
+
+function WorldImpl:_releaseKeyForEntity(id: integer)
+    local old = self:oldValueOf(id, builtins.Key)
+    if old ~= nil and self._keyIndex[old as string] == id then
+        self._keyIndex[old as string] = nil
     end
 end
 
@@ -415,6 +459,23 @@ function WorldImpl:dirtyArchetypes(): function(): Archetype
     end
 end
 
+local function hasKeyBatch(componentTypes: {Component}): boolean
+    local Key <const> = builtins.Key
+    for i = 1, #componentTypes do
+        if componentTypes[i] == Key then
+            return true
+        end
+    end
+    return false
+end
+
+local function assertNoKeyBatch(componentTypes: {Component}, op: string)
+    if hasKeyBatch(componentTypes) then
+        error(op .. " does not support Key because keys must be claimed per entity. " ..
+            "Use world:spawn/world:spawnAt or add Key with world:set per entity.")
+    end
+end
+
 -- Batch ops share the staging-queue machinery used by regular deferred
 -- mutations. Outside a scope we self-drain; inside a scope we stage and
 -- let the outer boundary drain.
@@ -423,6 +484,7 @@ function WorldImpl:batchSpawn(
     componentTypes: {Component},
     callback: function(Archetype, integer, integer, integer)
 ): integer | nil, {integer} | nil
+    assertNoKeyBatch(componentTypes, "batchSpawn")
     if self._scopeDepth > 0 then
         return self:_deferBatchSpawn(count, componentTypes, callback)
     end
@@ -438,6 +500,7 @@ function WorldImpl:batchSpawnAt(
     componentTypes: {Component},
     callback: function(Archetype, integer, integer, integer)
 )
+    assertNoKeyBatch(componentTypes, "batchSpawnAt")
     if self._scopeDepth > 0 then
         self:_deferBatchSpawnAt(ids, componentTypes, callback)
         return
@@ -454,7 +517,11 @@ function WorldImpl:batchSpawnAtRaw(
     componentTypes: {Component},
     callback: function(Archetype, integer, integer, integer)
 )
+    local hasKey = hasKeyBatch(componentTypes)
     if self._scopeDepth > 0 then
+        if hasKey then
+            error("batchSpawnAtRaw with Key is only supported as a self-draining snapshot load operation")
+        end
         self:_deferBatchSpawnAtRaw(ids, count, componentTypes, callback)
         return
     end
@@ -462,6 +529,9 @@ function WorldImpl:batchSpawnAtRaw(
     self:_deferBatchSpawnAtRaw(ids, count, componentTypes, callback)
     self:_drain()
     self._scopeDepth = 0
+    if hasKey then
+        self:_rebuildKeyIndex()
+    end
 end
 
 function WorldImpl:despawn(id: integer)
@@ -587,6 +657,7 @@ function WorldImpl:clearEntities()
     self._eventPool:clear()
     table_clear(self._targetRefCounts)
     table_clear(self.relationshipStores)
+    table_clear(self._keyIndex)
     -- Release the pooled sparse-relationship arrays and reset the staging map,
     -- mirroring the drain cleanup. Without this, any sparse values still staged
     -- in `sparseSets` at clear time would survive into a later drain. Symmetric
@@ -1205,7 +1276,33 @@ function WorldImpl:saveSnapshot(opts?: types.World.SnapshotOptions): types.World
 end
 
 function WorldImpl:loadSnapshot(source: any): types.World.SnapshotPrelude
-    return snapshotModule.loadSnapshot(self, source) as types.World.SnapshotPrelude
+    local prelude = snapshotModule.loadSnapshot(self, source) as types.World.SnapshotPrelude
+    self:_rebuildKeyIndex()
+    return prelude
+end
+
+function WorldImpl:_rebuildKeyIndex()
+    local nextIndex: {string: integer} = {}
+    local Key <const> = builtins.Key
+    self:forEachArchetype(function(arch: Archetype)
+        local col = arch.columns[Key] as {string}
+        if col then
+            local entities = arch.entities as {integer}
+            for row = 1, entities[0] do
+                local key = col[row]
+                validateKey(key)
+                local owner = nextIndex[key]
+                if owner ~= nil and owner ~= entities[row] then
+                    error("Key '" .. key .. "' is already claimed by entity " .. tostring(owner))
+                end
+                nextIndex[key] = entities[row]
+            end
+        end
+    end)
+    table_clear(self._keyIndex)
+    for key, id in pairs(nextIndex) do
+        self._keyIndex[key] = id
+    end
 end
 
 -- Side-effect module loads attach implementations onto `WorldImpl`.

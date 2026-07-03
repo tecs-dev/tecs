@@ -747,14 +747,23 @@ function WorldImpl:_deferBatchSet(
     value: Component
 )
     if #archetypes == 0 then return end
+    local ci = componentType as ComponentInternal
+    local storedValue: any = value
+    if ci.storageType == "scalar" then
+        if value == componentType then
+            storedValue = (componentType as types.components.ScalarComponent<any>).scalarDefault
+        else
+            storedValue = (value as {string:any}).value
+        end
+    end
     local c = self.batchMutationCount + 1
     local mut = batchMutationSlot(self, c)
     mut.op = BATCH_OP_SET_CONST
     mut.archetypes = archetypes
     mut.componentType = componentType
-    mut.value = value
+    mut.value = storedValue
     mut.callback = nil  -- clear inactive union slot
-    mut.isTag = (componentType as ComponentInternal).storageType == "tag"
+    mut.isTag = ci.storageType == "tag"
     mut.canBulk = canBulkBatchComponent(componentType)
     self.batchMutationCount = c
     self.isDirty = true

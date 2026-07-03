@@ -359,6 +359,7 @@ local record internal
         _stateStack: {string}
         _stateComponents: {string: Component}
         _statePolicies: {string: StatePolicy}
+        _keyIndex: {string: integer}
 
         relationshipStores: {Component: RelationshipStore}
         _targetRefCounts: {integer: integer}
@@ -503,6 +504,9 @@ local record internal
         removeRaw: function(self: WorldImpl, id: integer, component: Component)
         oldValueOf: function(self: WorldImpl, id: integer, component: Component): any
         currentArchetype: function(self: WorldImpl, id: integer): ArchetypeInternal
+        _claimKey: function(self: WorldImpl, id: integer, key: string)
+        _releaseKeyForEntity: function(self: WorldImpl, id: integer)
+        _rebuildKeyIndex: function(self: WorldImpl)
         setSparseRaw: function(self: WorldImpl, id: integer, value: any)
         removeSparseRaw: function(self: WorldImpl, id: integer, container: Component)
         removeSparseOneRaw: function(self: WorldImpl, id: integer, container: Component, targetId: integer)

@@ -29,6 +29,7 @@ local setPendingArch <const> = shared.setPendingArch
 
 local OnSpawn <const> = builtins.OnSpawn
 local OnDespawn <const> = builtins.OnDespawn
+local Key <const> = builtins.Key as Component
 
 local pairs <const> = pairs
 local select <const> = select
@@ -76,6 +77,13 @@ local macro deferOne!(compExpr: Expression)
                 comp = relType
             end
 
+            if ct == Key then
+                if pendingKey ~= nil then
+                    error("spawn: entity cannot have more than one Key")
+                end
+                pendingKey = (comp as {string:any}).value as string
+            end
+
             -- Non-nil only for dense relationship instances.
             local container = ct.wildcardContainer
 
@@ -118,7 +126,13 @@ local macro deferOne!(compExpr: Expression)
             -- Scalars can't be relationships so the wildcard / exclusive
             -- bookkeeping below is unreachable for this branch.
             if ct.storageType == "scalar" then
-                stageScalar(self, arch, slot, ct as Component, (comp as {string:any}).value)
+                if scalarTypes == nil then
+                    scalarTypes = borrowVals(self) as {Component}
+                    scalarValues = borrowVals(self)
+                end
+                scalarCount = scalarCount + 1
+                scalarTypes[scalarCount] = ct as Component
+                scalarValues[scalarCount] = (comp as {string:any}).value
             else
                 valCount = valCount + 1
                 vals[valCount] = comp
@@ -162,7 +176,13 @@ local macro deferOne!(compExpr: Expression)
                             v = (entry.factory as function(...: any): Component)()
                         end
                         if (rType as ComponentInternal).storageType == "scalar" then
-                            stageScalar(self, arch, slot, rType, (v as {string:any}).value)
+                            if scalarTypes == nil then
+                                scalarTypes = borrowVals(self) as {Component}
+                                scalarValues = borrowVals(self)
+                            end
+                            scalarCount = scalarCount + 1
+                            scalarTypes[scalarCount] = rType
+                            scalarValues[scalarCount] = (v as {string:any}).value
                         else
                             valCount = valCount + 1
                             vals[valCount] = v
@@ -258,6 +278,10 @@ local macro deferBegin!()
         local arch = self.emptyArchetype as Archetype
         local vals: {any} = borrowVals(self)
         local valCount = 0
+        local pendingKey: string
+        local scalarTypes: {Component}
+        local scalarValues: {any}
+        local scalarCount = 0
         -- Lazily acquired on the first exclusive-relationship hit.
         local exclusiveByContainer: {Component: integer} = nil
     ```
@@ -276,10 +300,17 @@ local macro deferFinish!()
             vals[valCount] = autoState
         end
 
+        if pendingKey ~= nil then
+            self:_claimKey(id, pendingKey)
+        end
+
         setPendingArch(self, slot, arch)
         arch.pendingWrites = arch.pendingWrites + 1
         for i = 1, valCount do
             appendPendingValue(self, arch, slot, vals[i])
+        end
+        for i = 1, scalarCount do
+            stageScalar(self, arch, slot, scalarTypes[i], scalarValues[i])
         end
 
         local c = arch.pendingSpawnCount + 1
@@ -712,9 +743,6 @@ function WorldImpl:deferRemoveRaw(id: integer, component: Component)
     if prevArch.columns[component] == nil then
         return
     end
-
-    -- Reverse-index unlink lives in the defer-remove handler. It reads the old
-    -- value before invoking deferRemoveRaw so the unlink sees the correct target.
 
     local newArch = prevArch:withoutComponent(component, self.archetypeIndex)
     if newArch ~= prevArch then

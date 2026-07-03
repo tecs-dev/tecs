@@ -1052,6 +1052,13 @@ local function loadSnapshotImpl(world: World, reader: snapshot.Reader): Snapshot
         allocator.nextFreshSlot = prelude.nextEntityId
     end
 
+    do
+        local rebuildKeyIndex = (world as {string:any})._rebuildKeyIndex as function(any)
+        if rebuildKeyIndex then
+            rebuildKeyIndex(world)
+        end
+    end
+
     -- Data section: emit `StartSnapshotLoad` first so listeners can
     -- register per-key callbacks via `ev:onData(key, cb)`. Then read each
     -- (key, value) pair and dispatch to the registered handlers. Finally

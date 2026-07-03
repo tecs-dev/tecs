@@ -21,6 +21,18 @@ local type ScalarComponentOptions<T> = types.components.ScalarComponentOptions<T
 local type RelationshipOptions<R is Relationship> = types.components.RelationshipOptions<R>
 local type FFIRelationshipOptions<R is Relationship> = types.components.FFIRelationshipOptions<R>
 
+-- Hook attachment payload -- fields mirror `internal.ComponentInternal`.
+-- Internal only. Not exposed through `require("tecs")`.
+local interface HookSet
+    deferSet: function(world: types.World, id: integer, componentType: Component, value: any)
+    deferRemove: function(world: types.World, id: integer, componentType: Component)
+    onRemove: function(world: types.World, id: integer, componentType: Component, arch: types.Archetype, row: integer)
+    onDespawn: function(world: types.World, id: integer, componentType: Component, arch: types.Archetype, row: integer)
+    mustDeferSet: boolean
+    mustDeferRemove: boolean
+    noBulkBatch: boolean
+end
+
 --- The components module defines ECS components and methods for creating them.
 local record components
     --- Create a new component.
@@ -76,6 +88,9 @@ local record components
     --- @return the registered component.
     registerComponent: function<T is Component>(container: Component): T
 
+    --- Attach framework-internal component mutation hooks.
+    attachHooks: function(container: Component, hooks: HookSet)
+
     --- The globally registered components.
     ---
     --- Don't modify this. It's used to detect conflicts between component names.
@@ -116,20 +131,7 @@ function components.registerComponent<T is Component>(container: Component): T
     return container
 end
 
--- Hook attachment payload -- fields mirror `internal.ComponentInternal`.
--- Module-local: only the built-in factories below (newRelationship sparse
--- and exclusive/reverseIndex paths) call attachHooks. Not exposed.
-local interface HookSet
-    deferSet: function(world: types.World, id: integer, componentType: Component, value: any)
-    deferRemove: function(world: types.World, id: integer, componentType: Component)
-    onRemove: function(world: types.World, id: integer, componentType: Component, arch: types.Archetype, row: integer)
-    onDespawn: function(world: types.World, id: integer, componentType: Component, arch: types.Archetype, row: integer)
-    mustDeferSet: boolean
-    mustDeferRemove: boolean
-    noBulkBatch: boolean
-end
-
-local function attachHooks(container: Component, hooks: HookSet)
+function components.attachHooks(container: Component, hooks: HookSet)
     assert(container, "attachHooks: container is required")
     assert(hooks, "attachHooks: hooks is required")
     local cAny = container as {string:any}
@@ -757,7 +759,7 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
     -- writes incorrect; batch paths fall back to per-entity routing.
     if isSparse then
         local relContainerC = relContainer as types.components.Component
-        attachHooks(relContainerC, {
+        components.attachHooks(relContainerC, {
             deferSet = function(world: types.World, id: integer, _ct: types.components.Component, value: any)
                 local wImpl = world as {string:any}
                 local setSparse = wImpl.setSparseRaw as function(any, integer, any)
@@ -810,7 +812,7 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
         -- noBulkBatch = true: batch set/remove can't invoke per-entity hooks,
         -- so route through the per-entity path.
         local storeKey = relContainer as types.components.Component
-        attachHooks(storeKey, {
+        components.attachHooks(storeKey, {
             deferSet = function(
                 world: types.World, id: integer, componentType: types.components.Component, value: any
             )
