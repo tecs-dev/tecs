@@ -234,7 +234,7 @@ local function orbitingShapesPlugin(world: tecs.World)
             -- Move center circle with mouse
             local worldX, worldY = cam:toWorld(input.mouseX, input.mouseY)
 
-            local centerTransform = world:get(state.centerCircle, Transform)
+            local centerTransform = world:getMut(state.centerCircle, Transform)
             if centerTransform then
                 centerTransform.x = worldX
                 centerTransform.y = worldY
@@ -246,7 +246,7 @@ local function orbitingShapesPlugin(world: tecs.World)
         name = "RotateAndScaleParent",
         phase = tecs.phases.Update,
         run = function(dt: number)
-            local centerTransform = world:get(state.centerCircle, Transform)
+            local centerTransform = world:getMut(state.centerCircle, Transform)
             if centerTransform then
                 -- Rotate parent with R key
                 if input.isKeyDown("r") then
