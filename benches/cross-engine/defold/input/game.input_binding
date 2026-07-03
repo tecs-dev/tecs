@@ -1,4 +1,0 @@
-key_trigger {
-  input: KEY_ESC
-  action: "quit"
-}

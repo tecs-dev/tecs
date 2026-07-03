@@ -3,8 +3,7 @@
 # See SPEC.md for the scene contract.
 #
 # Runs the sweep against each available engine and aggregates RESULT lines
-# into results.csv. Tecs and Bevy run automatically; Defold runs only if a
-# bob.jar is provided (BENCH_DEFOLD_BOB=/path/to/bob.jar) since it has no CLI.
+# into results.csv.
 #
 # Usage:
 #   ./run.sh                       # default sweep, all available engines
@@ -17,9 +16,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 
 COUNTS="${COUNTS:-10000 50000 100000 250000 500000 1000000 2000000}"
-# Defold's game-object-per-sprite model does not scale to the high end.
-DEFOLD_COUNTS="${DEFOLD_COUNTS:-1000 5000 10000 25000 50000}"
-ENGINES="${ENGINES:-tecs bevy defold}"
+ENGINES="${ENGINES:-tecs bevy}"
 
 export BENCH_WARMUP="${BENCH_WARMUP:-2.0}"
 export BENCH_MEASURE="${BENCH_MEASURE:-5.0}"
@@ -30,8 +27,6 @@ echo "engine,count,frames,mean_ms,fps,low1_fps" > "$OUT"
 echo "Writing results to $OUT"
 echo "warmup=${BENCH_WARMUP}s measure=${BENCH_MEASURE}s move=${BENCH_MOVE}"
 echo
-
-have() { command -v "$1" >/dev/null 2>&1; }
 
 run_one() { # engine count cmd...
     local engine="$1" count="$2"; shift 2
@@ -69,29 +64,6 @@ if [[ " $ENGINES " == *" bevy "* ]]; then
         done
     else
         echo ">>> bevy binary missing; skipping (see README for rustc 1.88+ requirement)"
-    fi
-fi
-
-# ---------- Defold ----------
-if [[ " $ENGINES " == *" defold "* ]]; then
-    if [ -n "${BENCH_DEFOLD_BOB:-}" ] && [ -f "${BENCH_DEFOLD_BOB}" ] && have java; then
-        DEF="$HERE/defold"
-        echo ">>> bundling defold once (bob.jar)…"
-        ( cd "$DEF" && java -jar "$BENCH_DEFOLD_BOB" --platform x86_64-macos resolve build bundle >/dev/null 2>&1 )
-        APP="$(find "$DEF/build" -maxdepth 3 -name '*.app' 2>/dev/null | head -1)"
-        BIN=""
-        [ -n "$APP" ] && BIN="$(find "$APP/Contents/MacOS" -maxdepth 1 -type f 2>/dev/null | head -1)"
-        if [ -n "$BIN" ] && [ -x "$BIN" ]; then
-            for n in $DEFOLD_COUNTS; do
-                # bob bundles config from game.project; override count per run.
-                run_one defold "$n" "$BIN" --config=bench.count="$n"
-            done
-        else
-            echo ">>> defold bundle not produced; run it from the editor instead (see README)"
-        fi
-    else
-        echo ">>> defold skipped (set BENCH_DEFOLD_BOB=/path/to/bob.jar and install java to automate;"
-        echo "    otherwise open benches/cross-engine/defold in the Defold editor, see README)"
     fi
 fi
 

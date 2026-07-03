@@ -1,6 +1,6 @@
 # Cross-engine 2D sprite throughput, benchmark spec
 
-One scene, three engines (Tecs, Bevy, Defold), identical workload. The goal is a
+One scene, two engines (Tecs and Bevy), identical workload. The goal is a
 single comparable number: frame time for N moving, animated sprites, swept across
 N. This file is the contract. If an implementation deviates, that is a bug in the
 implementation.
@@ -31,9 +31,7 @@ The split exercises both paths in one run. The visible half is a viewport-fillin
 grid that is actually rasterized, with total on-screen coverage held roughly
 constant across N so fillrate stays fixed and per-sprite draw cost is isolated.
 The culled half exercises each engine's visibility path on `N/2` instances per
-frame. The engines differ here on purpose: Tecs and Bevy frustum-cull the
-off-screen half, Defold does not cull sprites and submits them anyway, which is a
-finding rather than a defect.
+frame.
 
 Above roughly 250k visible sprites the visible half itself crosses into sub-pixel
 territory. When it does, a sub-pixel-culling engine reports closer to its cull
@@ -68,15 +66,14 @@ x_i, y_i = bx_i + ofx,      by_i + ofy
 
 This reproduces the closed form exactly (modulo slow float drift, negligible over
 a measure window) and keeps the per-sprite cost to a few multiplies, so the
-movement loop does not become a transcendental-function benchmark. All three
+movement loop does not become a transcendental-function benchmark. Both
 implementations use it.
 
 Animation is applied each engine's idiomatic way. Tecs animates on the GPU from a
-time uniform with no per-sprite CPU cost. Defold plays an engine-driven looping
-flipbook, also free per sprite. Bevy core has no built-in sprite animation, so it
-advances the atlas index on the CPU per sprite per frame. This asymmetry is part
-of what is measured, and the dominant cost at scale is the transform update plus
-upload plus draw, which all three pay.
+time uniform with no per-sprite CPU cost. Bevy core has no built-in sprite
+animation, so it advances the atlas index on the CPU per sprite per frame. This
+asymmetry is part of what is measured, and the dominant cost at scale is the
+transform update plus upload plus draw, which both pay.
 
 `BENCH_MOVE=0` skips the movement write (sprites animate in place) to expose each
 engine's static-scene fast path. Default is moving.
@@ -94,8 +91,7 @@ engine's static-scene fast path. Default is moving.
    RESULT,<engine>,<count>,<frames>,<mean_ms>,<fps>,<low1_fps>
    ```
 
-   `<engine>` is `tecs`, `bevy`, or `defold`. The harness reads lines matching
-   `^RESULT,`.
+   `<engine>` is `tecs` or `bevy`. The harness reads lines matching `^RESULT,`.
 
 ## Sweep
 
@@ -105,11 +101,7 @@ Default counts:
 10000 50000 100000 250000 500000 1000000 2000000
 ```
 
-Defold's game-object-per-sprite model does not scale to the high end, so the
-harness uses a reduced set for it. That ceiling is itself a finding.
-
 ## Out of scope
 
-Lighting, shadows, and post-processing (Defold has no built-in deferred
-lighting, so the comparison is sprites only). Spawn time, asset loading, and CPU
-game logic beyond the fixed update above.
+Lighting, shadows, and post-processing. Spawn time, asset loading, and CPU game
+logic beyond the fixed update above.

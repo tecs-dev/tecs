@@ -1,6 +1,6 @@
 # Cross-engine 2D sprite throughput benchmark
 
-One scene, three engines: Tecs, Bevy, Defold. The question is narrow: how many
+One scene, two engines: Tecs and Bevy. The question is narrow: how many
 moving, animated sprites can each engine push per frame?
 
 The scene contract is in [SPEC.md](./SPEC.md). Read it first, because the
@@ -26,12 +26,12 @@ benches/cross-engine/
   assets/            the shared sprite sheet
   tecs/              symlink to examples/sprite-throughput (see note)
   bevy/              Cargo project (Bevy 0.15)
-  defold/            Defold project
 ```
 
 The Tecs implementation lives at `examples/sprite-throughput/` so it can reuse
 the example build tooling and asset symlinks. It runs via
-`make example-sprite-throughput`. The other two are self-contained here.
+`make example-sprite-throughput`. The Bevy implementation is self-contained
+here.
 
 ## Running
 
@@ -43,8 +43,6 @@ cd benches/cross-engine
 ```
 
 This sweeps Tecs and Bevy across the default counts and writes `results.csv`.
-Defold runs automatically only if you point it at a `bob.jar` (see below),
-otherwise it is skipped with a note.
 
 Knobs (environment variables):
 
@@ -83,24 +81,6 @@ cargo run --release -- 1000000
 `BEVY_ASSET_ROOT` to the project dir so `assets/running.png` resolves:
 `BEVY_ASSET_ROOT=$PWD ./target/release/sprite-throughput-bevy 1000000`.
 
-### Defold only
-
-Defold has no headless CLI in the box, so run it one of two ways.
-
-Editor: open `benches/cross-engine/defold/` in the Defold editor and press play.
-Set the count in `game.project` under `[bench] count`. Watch the console for the
-`RESULT,defold,...` line. The app exits itself when the measure window ends.
-
-Headless via bob (lets `run.sh` sweep it): download `bob.jar` from the Defold
-releases, then
-
-```bash
-BENCH_DEFOLD_BOB=/path/to/bob.jar ./run.sh
-```
-
-The harness bundles once and overrides `bench.count` per run via
-`--config=bench.count=N`.
-
 ## Reading the output
 
 `results.csv`:
@@ -118,19 +98,14 @@ out of memory, or no sustained window). That is a data point, so record it.
 
 Read these before quoting a number.
 
-The all-moving sweep measures engine plus host language together. All three move
-every sprite every frame in their host language: Tecs and Defold in Lua (LuaJIT
-for Tecs), Bevy in Rust. Run `BENCH_MOVE=0` for the render-bound number that
-isolates the renderer. Report both.
+The all-moving sweep measures engine plus host language together. Both engines
+move every sprite every frame in their host language: Tecs in LuaJIT and Bevy in
+Rust. Run `BENCH_MOVE=0` for the render-bound number that isolates the renderer.
+Report both.
 
 Animation is each engine's idiom. Tecs animates on the GPU from a time uniform
-with no per-sprite CPU cost. Defold plays an engine-driven looping flipbook, also
-free per sprite. Bevy core has no built-in sprite animation, so it advances the
-atlas index on the CPU per sprite per frame.
-
-Defold does not scale to the high end. One game object per sprite plus
-per-instance `go.set_position` from Lua caps out in the tens of thousands, so the
-harness sweeps Defold over a reduced count set.
+with no per-sprite CPU cost. Bevy core has no built-in sprite animation, so it
+advances the atlas index on the CPU per sprite per frame.
 
 Camera zoom matters a lot. The fit-to-visible camera puts the whole visible grid
 in the frustum, so the renderer processes far more sprites per frame than a
