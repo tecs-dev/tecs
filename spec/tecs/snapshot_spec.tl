@@ -688,7 +688,7 @@ describe("snapshot save/load", function()
         luassert.equals("game", world:peekState())
     end)
 
-    it("rebuilds the Key index after loading a snapshot", function()
+    it("rebuilds runtime entity handles from Key after loading a snapshot", function()
         local world = tecs.newWorld()
         local player = world:spawn(tecs.builtins.Key("player"), PositionComp(1, 1))
         world:commit()
@@ -698,15 +698,33 @@ describe("snapshot save/load", function()
         world:clearEntities()
         luassert.is_nil(world:byKey("player"))
 
+        local playerHandle = 0
         local finishSawPlayer = false
         world:observe(0, tecs.builtins.FinishSnapshotLoad, function(_ev: tecs.builtins.FinishSnapshotLoad)
-            finishSawPlayer = world:requireKey("player") == player
+            playerHandle = world:requireKey("player")
+            finishSawPlayer = playerHandle == player
         end)
 
         world:loadSnapshot(snap)
         luassert.equals(player, world:byKey("player"))
         luassert.equals(player, world:requireKey("player"))
+        luassert.equals(player, playerHandle)
         luassert.is_true(finishSawPlayer)
+    end)
+
+    it("rebuilds the Key index after binary snapshot load", function()
+        local world = tecs.newWorld()
+        local player = world:spawn(tecs.builtins.Key("player"), PositionComp(1, 1))
+        world:commit()
+
+        local bytes = tostring(saveBinarySnapshot(world))
+
+        world:clearEntities()
+        luassert.is_nil(world:byKey("player"))
+
+        world:loadSnapshot(bytes)
+        luassert.equals(player, world:byKey("player"))
+        luassert.equals(player, world:requireKey("player"))
     end)
 
     it("FinishSnapshotLoad fires once after the load completes", function()

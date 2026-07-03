@@ -971,6 +971,11 @@ function tween.plugin(world: World)
     world.resources[ACTIVE_TWEENS] = {}
     world.resources[CHANNEL_MAP] = {}
 
+    world:observe(0, tecs.builtins.FinishSnapshotLoad, function()
+        world.resources[ACTIVE_TWEENS] = {}
+        world.resources[CHANNEL_MAP] = {}
+    end)
+
     world:addSystem({
         name = "tween.Update",
         phase = tecs.phases.Update,

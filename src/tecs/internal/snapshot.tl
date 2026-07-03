@@ -940,45 +940,49 @@ local function loadColumnMajor(
     -- mode), so `ids` is guaranteed to be cdata.
     local ids = reader:readIds(entityCount)
 
-    world:batchSpawnAtRaw(ids, entityCount, componentTypes, function(arch: Archetype, rowStart: integer, _rowEnd: integer, count: integer)
-        for col = 1, #componentTypes do
-            local comp = componentTypes[col]
-            if not comp then
-                error("loadSnapshot: unknown component in saved archetype")
-            end
-            local structSize = (comp as {string: any}).structSize as integer
-            local archColumn = arch.columns[comp] as any
-            -- Match save-side bulk eligibility: FFI struct + raw codec +
-            -- not a container + saved schema matches current. Schema drift
-            -- forces the per-entity migration path; the reader's migrator
-            -- handles byte-level remapping into the current layout.
-            local bulkEligible = structSize and (comp as ComponentInternal).deserializeRaw
-                and not (comp as ComponentInternal).isContainer and reader.readColumnRawInto
-                and reader:schemaMatchesForColumn(col)
-            if bulkEligible then
-                -- FAST PATH: bulk memcpy buffer → archetype column.
-                reader:readColumnRawInto(archColumn, rowStart * structSize, structSize * count)
-            else
-                -- SLOW PATH: per-entity decode (custom serialize, containers,
-                -- non-FFI, schema-mismatched FFI, or readers without bulk
-                -- capability). Reader internally routes through the migrator
-                -- when appropriate.
-                for k = 0, count - 1 do
-                    local val = reader:readColumnValue(col, world)
-                    -- A nil value means the component's serialize returned
-                    -- nil at save time (transient state, synthetic paths,
-                    -- etc.) and the framework skipped its deserialize. For
-                    -- FFI columns we MUST NOT assign nil -- LuaJIT raises a
-                    -- conversion error that corrupts the unwinder. Leave
-                    -- the slot at its zero-initialized default; downstream
-                    -- systems already check for sentinel values like
-                    -- `spriteId == 0` or `gpuSlot == -1`.
-                    if val ~= nil then
-                        (archColumn as {Component})[rowStart + k] = val
+    world:batchSpawnAtRaw(ids, entityCount, componentTypes,
+        function(arch: Archetype, rowStart: integer, _rowEnd: integer, count: integer)
+            for col = 1, #componentTypes do
+                local comp = assert(
+                    componentTypes[col],
+                    "loadSnapshot: unknown component in saved archetype"
+                ) as ComponentInternal
+                local structSize = (comp as {string: any}).structSize as integer
+                local archColumn = arch.columns[comp] as any
+
+                -- Match save-side bulk eligibility: FFI struct + raw codec + not a container
+                -- + saved schema matches current. Schema drift forces the per-entity
+                -- migration path; the reader's migrator handles byte-level remapping into
+                -- the current layout.
+                local bulkEligible = structSize
+                    and comp.deserializeRaw
+                    and not comp.isContainer
+                    and reader.readColumnRawInto
+                    and reader:schemaMatchesForColumn(col)
+                if bulkEligible then
+                    -- FAST PATH: bulk memcpy buffer → archetype column.
+                    reader:readColumnRawInto(archColumn, rowStart * structSize, structSize * count)
+                else
+                    -- SLOW PATH: per-entity decode (custom serialize, containers, non-FFI,
+                    -- schema-mismatched FFI, or readers without bulk capability). Reader
+                    -- internally routes through the migrator when appropriate.
+                    for k = 0, count - 1 do
+                        local val = reader:readColumnValue(col, world) as any
+                        -- A nil value means the component's serialize returned nil at save time
+                        -- (transient state, synthetic paths, etc.) and the framework skipped its
+                        -- deserialize. For FFI columns we MUST NOT assign nil -- LuaJIT raises a
+                        -- conversion error that corrupts the unwinder. Leave the slot at its
+                        -- zero-initialized default; downstream systems already check for sentinel
+                        -- values like ``spriteId == 0` or `gpuSlot == -1`.
+                        if val ~= nil then
+                            if comp.storageType == "scalar" and type(val) == "table" then
+                                val = (val as {string:any}).value
+                            end
+                            (archColumn as {any})[rowStart + k] = val
+                        end
                     end
                 end
             end
-        end
     end)
 end
 

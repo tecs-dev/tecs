@@ -155,7 +155,7 @@ describe("tecs2d.run hotReload", function()
 
     it("restores hot reload snapshots between Startup and PostStartup", function()
         local snapshotWorld = tecs.newWorld()
-        snapshotWorld:spawn(RunTest(9))
+        snapshotWorld:spawn(tecs.builtins.Key("run-spec.subject"), RunTest(9))
         snapshotWorld:commit()
         files[".tecs-hot-reload.snapshot"] = tostring(snapshotWorld:saveSnapshot().buffer)
         modtimes[".tecs-hot-reload.snapshot"] = 10
@@ -164,6 +164,7 @@ describe("tecs2d.run hotReload", function()
         local order: {string} = {}
         local postCount = 0
         local postValue = 0
+        local reboundId = 0
 
         local tecs2d = require("tecs2d")
         local runner = tecs2d.run({
@@ -194,6 +195,7 @@ describe("tecs2d.run hotReload", function()
                     phase = tecs.phases.PostStartup,
                     run = function()
                         order[#order + 1] = "post"
+                        reboundId = world:requireKey("run-spec.subject")
                         postCount, postValue = countRunTest(world)
                     end,
                 })
@@ -206,7 +208,10 @@ describe("tecs2d.run hotReload", function()
         luassert.same({"pre", "startup", "post"}, order)
         luassert.equals(1, postCount)
         luassert.equals(0, postValue)
+        luassert.is_true(reboundId ~= 0)
         luassert.is_not_nil(observedWorld)
+        luassert.equals(reboundId, observedWorld:requireKey("run-spec.subject"))
+        luassert.is_true(observedWorld:isAlive(reboundId))
         luassert.is_nil(files[".tecs-hot-reload.snapshot"])
     end)
 

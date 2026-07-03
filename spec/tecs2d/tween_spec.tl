@@ -477,6 +477,30 @@ describe("builder", function()
 
 
 
+    it("clears active playbacks after snapshot load", function()
+        local world = makeWorld()
+        local entity = world:spawn(Transform(0, 0))
+        tick(world, 0)
+
+        local snap = world:saveSnapshot()
+
+        tween.timeline()
+            :to(1.0, tween.linear, tween.translateX, 100)
+            :loop()
+            :apply(world, entity)
+
+        tick(world, 0.5)
+        luassert.is_near(50, world:get(entity, Transform).x, 2)
+
+        world:loadSnapshot(snap)
+        luassert.is_near(0, world:get(entity, Transform).x, 1e-6)
+
+        tick(world, 0.5)
+        luassert.is_near(0, world:get(entity, Transform).x, 1e-6)
+
+        world:shutdown()
+    end)
+
     it("apply speed parameter multiplies playback rate", function()
         local world = makeWorld()
         local entity = world:spawn(Transform(0, 0))
