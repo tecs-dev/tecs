@@ -257,10 +257,6 @@ local record internal
         --- avoiding the chained `isSparse and componentType ~= self`.
         isSparseInstance: boolean
 
-        --- Wildcard container to attach alongside dense relationship
-        --- instances. Set only on relationship instances (nil elsewhere).
-        wildcardContainer: types.components.Component
-
         --- Write the component's raw bytes directly into a LuaJIT
         --- `string.buffer`. Optional; auto-installed for FFI components.
         --- Used by the binary snapshot writer to skip the field-table
@@ -296,44 +292,12 @@ local record internal
         --- first use so late-binding of dependent components works.
         _requiresClosure: {RequireEntry}
 
-        --- Internal behavior callbacks (all optional). See `components.attachHooks`.
-        --- Set by component factories for relationship bookkeeping; never
-        --- attached by user code.
+        --- Closed framework behavior id. Nil means no framework-owned
+        --- mutation behavior.
+        frameworkBehavior: integer
 
-        --- Fires when `world:set` runs in a staged scope (or is routed
-        --- through the deferred path from `world:set` in instant mode).
-        deferSet: function(world: types.World, id: integer, componentType: types.components.Component, value: any)
-
-        --- Fires when `world:remove` runs in a staged scope (or is routed
-        --- through the deferred path from `world:remove` in instant mode).
-        deferRemove: function(world: types.World, id: integer, componentType: types.components.Component)
-
-        --- Fires while the component is still readable on `arch[row]`,
-        --- before the archetype transition that drops it. Entity persists.
-        --- INVARIANT: `arch.columns[componentType][row+1]` is live at entry.
-        onRemove: function(world: types.World, id: integer, componentType: types.components.Component, arch: types.Archetype, row: integer)
-
-        --- Fires while the component is still readable on `arch[row]`,
-        --- before the entity is despawned.
-        --- INVARIANT: `arch.columns[componentType][row+1]` is live at entry.
-        onDespawn: function(world: types.World, id: integer, componentType: types.components.Component, arch: types.Archetype, row: integer)
-
-        --- Callback-present flags. Read at dispatcher entry (hot path); single
-        --- predictable-false compare in the common case.
-        _hasDeferSet: boolean
-        _hasDeferRemove: boolean
-        _hasOnRemove: boolean
-        _hasOnDespawn: boolean
-
-        --- True iff `deferSet` / `deferRemove` MUST route through the
-        --- deferred path even when invoked via `world:set` / `world:remove`
-        --- in instant mode. Set for callbacks whose side effects are unsafe
-        --- to run eagerly (e.g. sparse staging, which flushes only at drain).
-        _mustDeferSet: boolean
-        _mustDeferRemove: boolean
-
-        --- True iff this component refuses the bulk batch path.
-        _noBulkBatch: boolean
+        --- Bitmask describing which mutation paths the behavior needs.
+        frameworkBehaviorBits: integer
     end
 
     --- The concrete world record. All fields live here; all methods attach

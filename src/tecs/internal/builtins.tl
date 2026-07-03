@@ -1,5 +1,6 @@
 local components <const> = require("tecs.internal.components")
 local events <const> = require("tecs.internal.events")
+local frameworkBehavior <const> = require("tecs.internal.frameworkBehavior")
 local phases <const> = require("tecs.internal.phases")
 local types <const> = require("tecs.types")
 local table_clear <const> = require("table.clear")
@@ -351,28 +352,9 @@ builtins.Key = components.newScalarComponent({
 
 do
     local Key <const> = builtins.Key as Component
-    components.attachHooks(Key, {
-        deferSet = function(world: types.World, id: integer, componentType: Component, value: any)
-            local w = world as {string:any}
-            local claimKey = w._claimKey as function(any, integer, string)
-            local setRaw = w.setRaw as function(any, integer, Component, any)
-            claimKey(w, id, value as string)
-            setRaw(w, id, componentType, value)
-        end,
-        deferRemove = function(world: types.World, id: integer, componentType: Component)
-            local w = world as {string:any}
-            local releaseKey = w._releaseKeyForEntity as function(any, integer)
-            local removeRaw = w.removeRaw as function(any, integer, Component)
-            releaseKey(w, id)
-            removeRaw(w, id, componentType)
-        end,
-        onDespawn = function(world: types.World, id: integer, _componentType: Component, _arch: types.Archetype, _row: integer)
-            local w = world as {string:any}
-            local releaseKey = w._releaseKeyForEntity as function(any, integer)
-            releaseKey(w, id)
-        end,
-        noBulkBatch = true,
-    })
+    local keyI = Key as {string:any}
+    keyI.frameworkBehavior = frameworkBehavior.Key
+    keyI.frameworkBehaviorBits = frameworkBehavior.keyBits()
 end
 
 components.newFFIComponent({

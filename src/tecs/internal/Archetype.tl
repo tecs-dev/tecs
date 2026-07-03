@@ -1,5 +1,6 @@
 local types <const> = require("tecs.types")
 local internal <const> = require("tecs.internal.types")
+local frameworkBehavior <const> = require("tecs.internal.frameworkBehavior")
 local ffi <const> = require("tecs.internal.ffi")
 local Bitset <const> = require("tecs.utils.Bitset")
 local RelationshipStore <const> = require("tecs.internal.RelationshipStore")
@@ -28,8 +29,6 @@ local AUTO_ID = 0
 local record Archetype is ArchetypeInternal
     onDespawnComponents: {Component}
     onDespawnCount: integer
-    _onRemoveComponents: {Component}
-    _onRemoveCount: integer
 
     withComponent: function(self, component: Component, archetypeIndex: ArchetypeIndexInternal): ArchetypeInternal
     withoutComponent: function(self, component: Component, archetypeIndex: ArchetypeIndexInternal): ArchetypeInternal
@@ -788,8 +787,6 @@ function Archetype.new(
 
     local onDespawnComponents: {Component} = {}
     local onDespawnCount = 0
-    local onRemoveComponents: {Component} = {}
-    local onRemoveCount = 0
 
     local nextDataIdx = 1
     local nextTagIdx = dataColumnsCount + 1
@@ -813,13 +810,9 @@ function Archetype.new(
         signatureWordBits:set(signatureWordIndex)
 
         if comp.target ~= nil then isEphemeral = true end
-        if compI._hasOnDespawn then
+        if frameworkBehavior.hasBits(comp, frameworkBehavior.NeedsDespawn) then
             onDespawnCount = onDespawnCount + 1
             onDespawnComponents[onDespawnCount] = comp
-        end
-        if compI._hasOnRemove then
-            onRemoveCount = onRemoveCount + 1
-            onRemoveComponents[onRemoveCount] = comp
         end
     end
 
@@ -842,8 +835,6 @@ function Archetype.new(
         isEphemeral = isEphemeral,
         onDespawnComponents = onDespawnComponents,
         onDespawnCount = onDespawnCount,
-        _onRemoveComponents = onRemoveComponents,
-        _onRemoveCount = onRemoveCount,
         addEdges = {},
         removeEdges = {},
         movePlansOut = {},

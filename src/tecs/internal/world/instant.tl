@@ -8,7 +8,9 @@ local internal <const> = require("tecs.internal.types")
 local events <const> = require("tecs.internal.events")
 local IdAllocator <const> = require("tecs.internal.IdAllocator")
 local builtins <const> = require("tecs.internal.builtins")
+local frameworkBehavior <const> = require("tecs.internal.frameworkBehavior")
 local shared <const> = require("tecs.internal.world.shared")
+local bit <const> = require("bit")
 
 local type Component = types.components.Component
 local type Archetype = internal.ArchetypeInternal
@@ -21,6 +23,7 @@ local applyRequires <const> = shared.applyRequires
 local writeRequired <const> = shared.writeRequired
 local getEntityState <const> = shared.getEntityState
 local OnDespawn <const> = builtins.OnDespawn
+local band <const> = bit.band
 
 local select <const> = select
 
@@ -145,16 +148,16 @@ end
 -- scope or run the handler eagerly on the instant path. Flag-free components
 -- fall through to the raw body.
 function WorldImpl:_instantSet(id: integer, componentType: Component, value: any)
-    local ci = componentType as ComponentInternal
-    if ci._mustDeferSet then
+    local behaviorBits = (componentType as ComponentInternal).frameworkBehaviorBits or 0
+    if band(behaviorBits, frameworkBehavior.MustDeferSet) ~= 0 then
         self._scopeDepth = self._scopeDepth + 1
         self:_deferSet(id, componentType, value)
         self._scopeDepth = self._scopeDepth - 1
         if self._scopeDepth == 0 and self.isDirty then self:_drain() end
         return
     end
-    if ci._hasDeferSet then
-        return ci.deferSet(self, id, componentType, value)
+    if band(behaviorBits, frameworkBehavior.NeedsSet) ~= 0 then
+        return frameworkBehavior.set(self, id, componentType, value)
     end
     return self:instantSetRaw(id, componentType, value)
 end
@@ -256,16 +259,16 @@ end
 -- scope or run the handler eagerly on the instant path. Flag-free components
 -- fall through to the raw body.
 function WorldImpl:_instantRemove(id: integer, component: Component)
-    local ci = component as ComponentInternal
-    if ci._mustDeferRemove then
+    local behaviorBits = (component as ComponentInternal).frameworkBehaviorBits or 0
+    if band(behaviorBits, frameworkBehavior.MustDeferRemove) ~= 0 then
         self._scopeDepth = self._scopeDepth + 1
         self:_deferRemove(id, component)
         self._scopeDepth = self._scopeDepth - 1
         if self._scopeDepth == 0 and self.isDirty then self:_drain() end
         return
     end
-    if ci._hasDeferRemove then
-        return ci.deferRemove(self, id, component)
+    if band(behaviorBits, frameworkBehavior.NeedsRemove) ~= 0 then
+        return frameworkBehavior.remove(self, id, component)
     end
     return self:instantRemoveRaw(id, component)
 end

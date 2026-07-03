@@ -3,6 +3,7 @@ local internal <const> = require("tecs.internal.types")
 local storage <const> = require("tecs.internal.storage")
 local ComponentCodegen <const> = require("tecs.internal.ComponentCodegen")
 local componentIds <const> = require("tecs.internal.componentIds")
+local frameworkBehavior <const> = require("tecs.internal.frameworkBehavior")
 local bit <const> = require("bit")
 
 local assert, table_concat <const> = assert, table.concat
@@ -11,7 +12,6 @@ local rshift <const> = bit.rshift
 local type Relationship = types.components.Relationship
 local type Component = types.components.Component
 local type ComponentInternal = internal.ComponentInternal
-local type ArchetypeInternal = internal.ArchetypeInternal
 local type Storage = storage.Storage
 local type ComponentAllocator = types.components.ComponentAllocator
 local type ComponentOptions<C is Component> = types.components.ComponentOptions<C>
@@ -20,18 +20,6 @@ local type FFIComponentOptions<C is Component> = types.components.FFIComponentOp
 local type ScalarComponentOptions<T> = types.components.ScalarComponentOptions<T>
 local type RelationshipOptions<R is Relationship> = types.components.RelationshipOptions<R>
 local type FFIRelationshipOptions<R is Relationship> = types.components.FFIRelationshipOptions<R>
-
--- Hook attachment payload -- fields mirror `internal.ComponentInternal`.
--- Internal only. Not exposed through `require("tecs")`.
-local interface HookSet
-    deferSet: function(world: types.World, id: integer, componentType: Component, value: any)
-    deferRemove: function(world: types.World, id: integer, componentType: Component)
-    onRemove: function(world: types.World, id: integer, componentType: Component, arch: types.Archetype, row: integer)
-    onDespawn: function(world: types.World, id: integer, componentType: Component, arch: types.Archetype, row: integer)
-    mustDeferSet: boolean
-    mustDeferRemove: boolean
-    noBulkBatch: boolean
-end
 
 --- The components module defines ECS components and methods for creating them.
 local record components
@@ -88,9 +76,6 @@ local record components
     --- @return the registered component.
     registerComponent: function<T is Component>(container: Component): T
 
-    --- Attach framework-internal component mutation hooks.
-    attachHooks: function(container: Component, hooks: HookSet)
-
     --- The globally registered components.
     ---
     --- Don't modify this. It's used to detect conflicts between component names.
@@ -129,31 +114,6 @@ function components.registerComponent<T is Component>(container: Component): T
     components.registeredComponents[container.componentName] = container
     rawset(components.componentsById, container.componentId, container)
     return container
-end
-
-function components.attachHooks(container: Component, hooks: HookSet)
-    assert(container, "attachHooks: container is required")
-    assert(hooks, "attachHooks: hooks is required")
-    local cAny = container as {string:any}
-    if hooks.deferSet then
-        cAny.deferSet = hooks.deferSet
-        cAny._hasDeferSet = true
-    end
-    if hooks.deferRemove then
-        cAny.deferRemove = hooks.deferRemove
-        cAny._hasDeferRemove = true
-    end
-    if hooks.onRemove then
-        cAny.onRemove = hooks.onRemove
-        cAny._hasOnRemove = true
-    end
-    if hooks.onDespawn then
-        cAny.onDespawn = hooks.onDespawn
-        cAny._hasOnDespawn = true
-    end
-    if hooks.mustDeferSet then cAny._mustDeferSet = true end
-    if hooks.mustDeferRemove then cAny._mustDeferRemove = true end
-    if hooks.noBulkBatch then cAny._noBulkBatch = true end
 end
 
 -- Table component instances do not store `componentType`; their metatable
@@ -746,169 +706,18 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
         end
     end
 
-    -- Sparse relationships carry their per-entity payload outside the
-    -- archetype (in `world.sparseSets` → flushed to `relationshipStores`
-    -- at drain). The archetype only records presence via the wildcard
-    -- container as a tag. Both set and remove route through dedicated
-    -- behavior hooks so the core defer/instant paths stay free of sparse
-    -- special cases.
-    --
-    -- mustDefer* = true: sparse staging buffer only flushes at drain, so
-    -- eager instant execution is unsafe -- instant routes synthetic-scope.
-    -- noBulkBatch = true: per-entity staging state makes bulk column
-    -- writes incorrect; batch paths fall back to per-entity routing.
     if isSparse then
-        local relContainerC = relContainer as types.components.Component
-        components.attachHooks(relContainerC, {
-            deferSet = function(world: types.World, id: integer, _ct: types.components.Component, value: any)
-                local wImpl = world as {string:any}
-                local setSparse = wImpl.setSparseRaw as function(any, integer, any)
-                local deferSetRawFn = wImpl.deferSetRaw as function(any, integer, types.components.Component, any)
-                -- The wildcard container itself is dense-only presence
-                -- state. Only concrete sparse instances (which carry a
-                -- target) belong in the sparse store.
-                if (value as {string:any}).target ~= nil then
-                    setSparse(wImpl, id, value)
-                end
-                deferSetRawFn(wImpl, id, relContainerC, relContainer)
-            end,
-            deferRemove = function(world: types.World, id: integer, component: types.components.Component)
-                local wImpl = world as {string:any}
-                if component == relContainer then
-                    local removeAll = wImpl.removeSparseRaw as function(any, integer, types.components.Component)
-                    removeAll(wImpl, id, relContainerC)
-                else
-                    local removeOne = wImpl.removeSparseOneRaw as function(any, integer, types.components.Component, integer)
-                    removeOne(wImpl, id, relContainerC, component.target)
-                end
-            end,
-            mustDeferSet = true,
-            mustDeferRemove = true,
-            noBulkBatch = true,
-        })
+        relContainerI.frameworkBehavior = frameworkBehavior.SparseRelationship
+        relContainerI.frameworkBehaviorBits = frameworkBehavior.sparseRelationshipBits()
     elseif isExclusive or hasReverseIndex then
-        -- Dense relationships with behavior hooks for two concerns:
-        --
-        --   Exclusive (isExclusive=true): sibling eviction -- adding
-        --     Follows(l2) to an entity that already has Follows(l1) must
-        --     first remove Follows(l1). Handled by deferSet hook iterating
-        --     siblings BEFORE calling setRaw.
-        --
-        --   ReverseIndex (hasReverseIndex=true): per-container inverse-index
-        --     store kept in sync with forward archetype state across all four
-        --     mutation kinds.
-        --       deferSet → link(id, new.target)       after default set runs
-        --       deferRemove → unlink(id, old.target)  read before default remove
-        --       onRemove → unlink(id, old.target)     column transition (e.g.
-        --                                              exclusive sibling evict)
-        --       onDespawn → unlink(id, old.target)    entity going away
-        --
-        -- INVARIANT for the unlink-before-teardown paths: the old column
-        -- value carrying the target must still be readable when the hook
-        -- fires. deferRemove reads it via oldValueOf BEFORE invoking the
-        -- Raw call. onRemove/onDespawn are dispatched by the drain path
-        -- before the row is torn down.
-        --
-        -- noBulkBatch = true: batch set/remove can't invoke per-entity hooks,
-        -- so route through the per-entity path.
-        local storeKey = relContainer as types.components.Component
-        components.attachHooks(storeKey, {
-            deferSet = function(
-                world: types.World, id: integer, componentType: types.components.Component, value: any
-            )
-                local wImpl = world as {string:any}
-                -- Exclusive sibling eviction: read current archetype and
-                -- remove any existing relationship in the same container.
-                -- Runs BEFORE setRaw so the archetype transition adds to a
-                -- clean slate.
-                if isExclusive then
-                    local currentArchFn = wImpl.currentArchetype as function(any, integer): types.Archetype
-                    local arch = currentArchFn(wImpl, id)
-                    if arch then
-                        -- Use world:remove (public dispatcher) so the
-                        -- sibling's own hooks fire -- e.g. reverse-index
-                        -- unlink on Follows(l1) when reparenting to l2.
-                        local removeFn = wImpl.remove as function(any, integer, types.components.Component)
-                        for existingComp in pairs((arch as ArchetypeInternal).columns as {types.components.Component:any}) do
-                            local existContainer = (existingComp as ComponentInternal).wildcardContainer
-                            if existContainer == storeKey and existingComp ~= componentType then
-                                removeFn(wImpl, id, existingComp)
-                            end
-                        end
-                    end
-                end
-                -- setRaw picks defer/instant Raw based on current scope depth
-                -- so the hook behaves correctly whether called from _deferSet
-                -- or the instant-path dispatcher.
-                local setRawFn = wImpl.setRaw as function(any, integer, types.components.Component, any)
-                setRawFn(wImpl, id, componentType, value)
-                if hasReverseIndex then
-                    local stores = wImpl.relationshipStores as {types.components.Component: {string:any}}
-                    local store = stores[storeKey]
-                    if store then
-                        local linkFn = store.link as function(any, integer, integer)
-                        linkFn(store, id, (value as {string:integer}).target)
-                    end
-                end
-            end,
-            deferRemove = function(
-                world: types.World, id: integer, component: types.components.Component
-            )
-                local wImpl = world as {string:any}
-                if hasReverseIndex then
-                    -- Ordering invariant: read old target BEFORE the Raw call
-                    -- mutates state, so the unlink sees the correct target.
-                    local oldValueFn = wImpl.oldValueOf as function(any, integer, types.components.Component): any
-                    local oldValue = oldValueFn(wImpl, id, component)
-                    local removeRawFn = wImpl.removeRaw as function(any, integer, types.components.Component)
-                    removeRawFn(wImpl, id, component)
-                    if oldValue ~= nil then
-                        local stores = wImpl.relationshipStores as {types.components.Component: {string:any}}
-                        local store = stores[storeKey]
-                        if store then
-                            local unlinkFn = store.unlink as function(any, integer, integer)
-                            unlinkFn(store, id, (oldValue as {string:integer}).target)
-                        end
-                    end
-                else
-                    local removeRawFn = wImpl.removeRaw as function(any, integer, types.components.Component)
-                    removeRawFn(wImpl, id, component)
-                end
-            end,
-            onRemove = hasReverseIndex and function(
-                world: types.World, id: integer, componentType: types.components.Component,
-                arch: types.Archetype, row: integer
-            )
-                local col = (arch as ArchetypeInternal).columns[componentType] as {any}
-                if col == nil then return end
-                local oldValue = col[row + 1]
-                if oldValue == nil then return end
-                local wImpl = world as {string:any}
-                local stores = wImpl.relationshipStores as {types.components.Component: {string:any}}
-                local store = stores[storeKey]
-                if store then
-                    local unlinkFn = store.unlink as function(any, integer, integer)
-                    unlinkFn(store, id, (oldValue as {string:integer}).target)
-                end
-            end or nil,
-            onDespawn = hasReverseIndex and function(
-                world: types.World, id: integer, componentType: types.components.Component,
-                arch: types.Archetype, row: integer
-            )
-                local col = (arch as ArchetypeInternal).columns[componentType] as {any}
-                if col == nil then return end
-                local oldValue = col[row + 1]
-                if oldValue == nil then return end
-                local wImpl = world as {string:any}
-                local stores = wImpl.relationshipStores as {types.components.Component: {string:any}}
-                local store = stores[storeKey]
-                if store then
-                    local unlinkFn = store.unlink as function(any, integer, integer)
-                    unlinkFn(store, id, (oldValue as {string:integer}).target)
-                end
-            end or nil,
-            noBulkBatch = true,
-        })
+        relContainerI.frameworkBehavior = frameworkBehavior.DenseRelationship
+        if hasReverseIndex then
+            relContainerI.frameworkBehaviorBits = frameworkBehavior.denseReverseIndexRelationshipBits()
+        else
+            relContainerI.frameworkBehaviorBits = frameworkBehavior.denseExclusiveRelationshipBits()
+        end
+    elseif not isSparse then
+        relContainerI.frameworkBehaviorBits = frameworkBehavior.NoBulkBatch
     end
 
     components.registerComponent(relContainer)

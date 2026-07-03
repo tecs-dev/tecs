@@ -18,6 +18,7 @@ local types <const> = require("tecs.types")
 local internal <const> = require("tecs.internal.types")
 local IdAllocator <const> = require("tecs.internal.IdAllocator")
 local builtins <const> = require("tecs.internal.builtins")
+local frameworkBehavior <const> = require("tecs.internal.frameworkBehavior")
 local shared <const> = require("tecs.internal.world.shared")
 
 local type Component = types.components.Component
@@ -715,20 +716,7 @@ function WorldImpl:_deferBatchDespawn(archetypes: {Archetype})
 end
 
 local function canBulkBatchComponent(componentType: Component): boolean
-    -- Hook flag: any component that registered a behavior incompatible
-    -- with bulk column writes (e.g. sparse relationships whose per-entity
-    -- staging state makes bulk unsafe) opts out here. Set via
-    -- `components.attachHooks({ noBulkBatch = true, ... })`.
-    if (componentType as ComponentInternal)._noBulkBatch then
-        return false
-    end
-    -- Dense-relationship instances drag the wildcard container along
-    -- and may participate in reverse-index link/unlink. Per-entity
-    -- addComponent/removeComponent does that bookkeeping for us.
-    if (componentType as ComponentInternal).wildcardContainer ~= nil then
-        return false
-    end
-    return true
+    return not frameworkBehavior.hasBits(componentType, frameworkBehavior.NoBulkBatch)
 end
 
 local function batchMutationSlot(self: WorldImpl, c: integer): BatchMutation
@@ -776,8 +764,7 @@ function WorldImpl:_deferBatchSetCallback(
 )
     if #archetypes == 0 then return end
     assert(canBulkBatchComponent(componentType),
-        "batchSet callback form requires a plain component (no wildcard container, " ..
-        "no sparse relationship). Use the constant-value form " ..
+        "batchSet callback form requires a bulk-safe component. Use the constant-value form " ..
         "`world:batchSet(query, instance)` for relationship components.")
     local c = self.batchMutationCount + 1
     local mut = batchMutationSlot(self, c)

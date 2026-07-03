@@ -39,6 +39,10 @@ local record types
             --- For containers, this equals self. For instances, it points to the container.
             relationshipType: Component
 
+            --- Relationship instance wildcard container (nil for non-relationships and containers).
+            --- For `Rel(target)` dense instances, this points back to `Rel`.
+            wildcardContainer: Component
+
             --- Relationship components only: The target entity ID (for relationship instances only).
             target: integer
 

@@ -199,12 +199,10 @@ function storage.syncMetadataToFFI(s: Storage, container: Component)
     setMetadata(s, "storageType", s.storageType)
     setMetadata(s, "transient", containerAny.transient == true)
 
-    -- Hooks are attached to the relationship container after construction.
-    -- Mirror only the hooks that exist; plain relationships stay cheap.
+    -- Closed framework behavior metadata is attached to relationship
+    -- containers after construction. Mirror only the typed metadata fields.
     for _, key in ipairs({
-        "_hasDeferSet", "_hasDeferRemove", "_hasOnRemove", "_hasOnDespawn",
-        "_mustDeferSet", "_mustDeferRemove", "_noBulkBatch",
-        "deferSet", "deferRemove", "onRemove", "onDespawn",
+        "frameworkBehavior", "frameworkBehaviorBits",
     }) do
         if containerAny[key] ~= nil then
             setMetadata(s, key, containerAny[key])

@@ -1,6 +1,7 @@
 require("busted")
 local tecs <const> = require("tecs")
 local internal <const> = require("tecs.internal.types")
+local frameworkBehavior <const> = require("tecs.internal.frameworkBehavior")
 local luassert <const> = require("luassert")
 local describe <const> = describe
 local it <const> = it
@@ -24,6 +25,19 @@ describe("Dense Relationships with reverseIndex", function()
             })
             luassert.is_false((Follows as ComponentInternal).isSparse)
             luassert.is_true((Follows as ComponentInternal).reverseIndex)
+        end)
+
+        it("resolves framework behavior from dense instances to their container", function()
+            local Follows = tecs.newRelationship({
+                name = "DenseRevIdxBehaviorOwner",
+                exclusive = true,
+                reverseIndex = true,
+            })
+            local instance = Follows(123) as tecs.Component
+
+            luassert.is_equal(Follows, frameworkBehavior.behaviorOwner(instance))
+            luassert.is_true(frameworkBehavior.hasBits(instance, frameworkBehavior.NeedsSet))
+            luassert.is_true(frameworkBehavior.hasBits(instance, frameworkBehavior.NoBulkBatch))
         end)
 
         it("should isolate dense reverse-index data between worlds reusing the same relationship", function()

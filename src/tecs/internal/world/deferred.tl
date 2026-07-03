@@ -7,6 +7,7 @@ local types <const> = require("tecs.types")
 local internal <const> = require("tecs.internal.types")
 local IdAllocator <const> = require("tecs.internal.IdAllocator")
 local builtins <const> = require("tecs.internal.builtins")
+local frameworkBehavior <const> = require("tecs.internal.frameworkBehavior")
 local table_clear <const> = require("table.clear")
 local shared <const> = require("tecs.internal.world.shared")
 
@@ -462,9 +463,8 @@ end
 -- fall through to the raw default behavior.
 -- Underscored -- users call `world:set`, not this directly.
 function WorldImpl:_deferSet(id: integer, componentType: Component, value: any)
-    local ci = componentType as ComponentInternal
-    if ci._hasDeferSet then
-        return ci.deferSet(self, id, componentType, value)
+    if frameworkBehavior.hasBits(componentType, frameworkBehavior.NeedsSet) then
+        return frameworkBehavior.set(self, id, componentType, value)
     end
     return self:deferSetRaw(id, componentType, value)
 end
@@ -642,7 +642,7 @@ function WorldImpl:_deferSetSlow(
     -- New component path: wildcard container auto-add for dense relationship
     -- instances. Reverse-index links and exclusive sibling eviction live in
     -- defer-set handlers; this raw path keeps only structural membership work.
-    local container = (componentType as ComponentInternal).wildcardContainer
+    local container = componentType.wildcardContainer
     if container then
         local curArch = getPendingArch(self, slot)
         if curArch.columns[container] == nil then
@@ -654,9 +654,8 @@ end
 -- Dispatcher: run component-specific defer behavior when present; otherwise
 -- fall through to the raw default behavior.
 function WorldImpl:_deferRemove(id: integer, component: Component)
-    local ci = component as ComponentInternal
-    if ci._hasDeferRemove then
-        return ci.deferRemove(self, id, component)
+    if frameworkBehavior.hasBits(component, frameworkBehavior.NeedsRemove) then
+        return frameworkBehavior.remove(self, id, component)
     end
     return self:deferRemoveRaw(id, component)
 end
@@ -804,8 +803,8 @@ function WorldImpl:_deferDespawn(id: integer)
     if logicalArch and logicalArch.onDespawnCount > 0 then
         local list = logicalArch.onDespawnComponents
         for i = 1, logicalArch.onDespawnCount do
-            local comp = list[i] as ComponentInternal
-            comp.onDespawn(world, id, comp, logicalArch, sourceRow)
+            local comp = list[i]
+            frameworkBehavior.despawn(world, id, comp, logicalArch, sourceRow)
         end
     end
 
