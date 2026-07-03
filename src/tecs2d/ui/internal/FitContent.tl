@@ -87,7 +87,8 @@ tecs.newComponent({
         "adjustComponentId"
     },
     defaults = {0, 0, 0, 0, 0, 0},
-    init = function(instance: FitContent, _padding?: number, adjustComponent?: Component)
+    __call = function(instance: FitContent, padding?: number, adjustComponent?: Component)
+        instance.padding = padding or 0
         instance.adjustComponentId = resolveAdjustId(adjustComponent)
     end,
     new = function(data: {string: any}): FitContent

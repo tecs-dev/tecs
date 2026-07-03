@@ -79,7 +79,7 @@ tecs.newFFIComponent({
         {"originY", "float"},
         {"sourceComponentId", "int32_t"}
     },
-    init = function(
+    __call = function(
         instance: LayoutBox,
         widthOrComponent: number | Component,
         height: number,
