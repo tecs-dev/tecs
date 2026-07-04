@@ -295,16 +295,20 @@ tween.timeline()
     :once()
     :apply(world, entity)
 
--- Sequence with step callbacks
+-- Sequence with a serializable named event
 tween.timeline()
     :channel("movement")
     :to(0.5, tween.quadOut, tween.translateXY, 200, 100)
-    :step(function(world, entity, handle)
-        playSound("whoosh")
-    end)
+    :emit("whoosh")
     :to(0.3, tween.linear, tween.color, 1, 0, 0, 1)
     :once()
     :apply(world, entity)
+
+world:observe(0, tween.TweenEvent, function(ev)
+    if ev.name == "whoosh" then
+        playSound("whoosh")
+    end
+end)
 
 -- Reusable timeline with stagger
 local pulse = tween.timeline()

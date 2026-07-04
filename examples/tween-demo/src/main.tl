@@ -62,8 +62,6 @@ local function tweenDemoPlugin(world: tecs.World)
         gfx.Color(0.3, 0.6, 1.0, 1)
     )
 
-    local activeHandle: tween.TweenHandle = nil
-
     ---------------------------------------------------------------------------
     -- State
     ---------------------------------------------------------------------------
@@ -109,10 +107,8 @@ local function tweenDemoPlugin(world: tecs.World)
     local lastAction: function() = nil
 
     local function applyTween(def: tween.Timeline)
-        if activeHandle then
-            activeHandle:cancel()
-        end
-        activeHandle = def:apply(world, target)
+        tween.cancel(world, target, "demo")
+        def:apply(world, target)
     end
 
     local function updateLabel()
@@ -164,6 +160,7 @@ local function tweenDemoPlugin(world: tecs.World)
             local function doMove()
                 resetTarget()
                 applyTween(tween.timeline()
+                    :channel("demo")
                     :to(0.7, getEasing(), tween.translateX, 250)
                     :step()
                     :to(1.0, getEasing(), tween.translateX, -250)
@@ -175,6 +172,7 @@ local function tweenDemoPlugin(world: tecs.World)
             local function doRotate()
                 resetTarget()
                 applyTween(tween.timeline()
+                    :channel("demo")
                     :to(1.5, getEasing(), tween.rotation, math.pi * 2)
                     :once())
             end
@@ -183,6 +181,7 @@ local function tweenDemoPlugin(world: tecs.World)
                 resetTarget()
                 local Color <const> = gfx.Color
                 applyTween(tween.timeline()
+                    :channel("demo")
                     :to(0.6, getEasing(), tween.field(Color, "r"), 1.0)
                     :to(0.6, getEasing(), tween.field(Color, "g"), 0.2)
                     :to(0.6, getEasing(), tween.field(Color, "b"), 0.3)
@@ -204,6 +203,7 @@ local function tweenDemoPlugin(world: tecs.World)
             local function doPulse()
                 resetTarget()
                 applyTween(tween.timeline()
+                    :channel("demo")
                     :to(0.6, getEasing(), tween.scaleX, 3)
                     :to(0.6, getEasing(), tween.scaleY, 3)
                     :pingPong())
@@ -245,6 +245,7 @@ local function tweenDemoPlugin(world: tecs.World)
             local function doOrbit()
                 resetTarget()
                 applyTween(tween.timeline()
+                    :channel("demo")
                     :to(0.4, getEasing(), tween.translateX, 150)
                     :to(0.4, getEasing(), tween.translateY, -150)
                     :to(0.4, getEasing(), tween.rotation, math.pi / 2)
@@ -273,10 +274,7 @@ local function tweenDemoPlugin(world: tecs.World)
             -- (2) reset: snap back to center
             if input.isKeyPressed("2") then
                 lastAction = nil
-                if activeHandle then
-                    activeHandle:cancel()
-                    activeHandle = nil
-                end
+                tween.cancel(world, target, "demo")
                 resetTarget()
             end
         end

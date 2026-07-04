@@ -1,16 +1,13 @@
 local tecs <const> = require("tecs")
 local ffi <const> = require("ffi")
+local components <const> = require("tecs.internal.components")
 
 local math_pi, math_sin, math_cos, math_pow <const> = math.pi, math.sin, math.cos, math.pow
 
 local type World = tecs.World
 local type Component = tecs.Component
+local type ControlSelector = string | Timeline
 
-local type EasingFunction = function(t: number): number
-local type StepCallback = function(world: World, entity: integer, handle: TweenHandle)
-local type TrackTargetFn = function(world: World, entity: integer): number, number, number, number
-
---- FFI struct for per-slot tween state.
 ffi.cdef[[
     typedef struct {
         double init;
@@ -37,15 +34,20 @@ local record TweenSlotState
     d4: number
 end
 
---- Interpolator interface: init captures starting state, apply writes the interpolated value.
-local record Interpolator
-    --- Called once on first tick. Returns s1-s4 (start values) and d1-d4 (deltas).
+local type EasingFunction = function(t: number): number
+
+local record Target
+    id: string
+    component: Component
+    componentName: string
+    fields: {string}
+    mode: string
+
     init: function(
         world: World, entity: integer, relative: boolean,
         t1: number, t2: number, t3: number, t4: number
     ): number, number, number, number, number, number, number, number
 
-    --- Called every frame. s1-s4 are start values, d1-d4 are deltas.
     apply: function(
         world: World, entity: integer, t: number,
         s1: number, s2: number, s3: number, s4: number,
@@ -53,9 +55,21 @@ local record Interpolator
     )
 end
 
---- A single tween interpolation positioned on the schedule.
-local record TweenSlot
-    interpolator: Interpolator
+local record TrackSource
+    kind: string
+    key: string
+    relationship: Component
+    relationshipName: string
+    component: Component
+    componentName: string
+    fields: {string}
+end
+
+local record Slot
+    kind: string
+    target: Target
+    source: TrackSource
+    easingName: string
     easing: EasingFunction
     t1: number
     t2: number
@@ -65,184 +79,219 @@ local record TweenSlot
     startTime: number
     endTime: number
     duration: number
-    stateIndex: integer  -- 0-based index into the FFI TweenSlotState array
+    stateIndex: integer
 end
 
---- A nested sub-schedule positioned on the parent schedule.
+local record EmitSlot
+    time: number
+    name: string
+end
+
 local record RunSlot
-    schedule: Timeline
+    timeline: Timeline
+    timelineId: integer
     startTime: number
     effectiveDuration: number
     repeatCount: integer
     pingPong: boolean
 end
 
---- Immutable schedule: the template produced by the builder. Shared across all entities.
 local record Timeline
-    slots: {TweenSlot}
+    slots: {Slot}
     runs: {RunSlot}
-    callbacks: {{number, StepCallback}}
+    emits: {EmitSlot}
     totalDuration: number
     effectiveDuration: number
-    stateSize: integer      -- number of TweenSlotState structs needed
+    stateSize: integer
     repeatCount: integer
     pingPong: boolean
     channel: string
-    onComplete: function(world: World, entity: integer, handle: TweenHandle)
+    presetName: string
+    pinned: boolean
 
-    apply: function(self: Timeline, world: World, entity: integer, speed?: number, delay?: number): TweenHandle
+    apply: function(self: Timeline, world: World, entity: integer, speed?: number, delay?: number)
+    play: function(self: Timeline, world: World, entity: integer, speed?: number, delay?: number)
 end
 
---- Public handle interface returned by apply().
-local interface TweenHandle
-    cancel: function(self: TweenHandle)
-    pause: function(self: TweenHandle)
-    resume: function(self: TweenHandle)
-    getElapsed: function(self: TweenHandle): number
-    getRate: function(self: TweenHandle): number
-    getDirection: function(self: TweenHandle): integer
-end
-
---- Unified mutable playback state. Used for both root timelines and nested runs.
---- Root playbacks implement TweenHandle.
-local record Playback is TweenHandle
+local record Cursor
     target: integer
-    schedule: Timeline
-    state: {TweenSlotState}  -- FFI TweenSlotState[?] array
-    children: {Playback}    -- per-run playback (nil if no runs)
+    timelineId: integer
+    stateSize: integer
+    state: {TweenSlotState}
+    children: {Cursor}
     elapsed: number
     direction: integer
-    repeatCount: integer    -- mutable copy (decrements)
-    nextCallback: integer
-    rate: number            -- only used on root
-    paused: boolean         -- when true, playback doesn't advance
-    delay: number           -- seconds to wait before starting
-    completed: boolean      -- true after onComplete has fired (for nested runs)
+    repeatCount: integer
+    nextEmit: integer
+    rate: number
+    paused: boolean
+    delay: number
+    completed: boolean
+    cancelled: boolean
+    _lastCycleIndex: integer
+end
 
-    cancelled: boolean      -- flag for deferred removal by the system
-    _lastCycleIndex: integer -- tracks cycle boundary crossings for nested runs
+local record TweenPlayback is tecs.Component
+    cursors: {Cursor}
+end
+
+local record TrackingTarget is tecs.Component
+    entity: integer
+    key: string
+end
+
+local record TweenEvent is tecs.Event
+    entity: integer
+    name: string
+    channel: string
+    timelineId: integer
+
+    init: function(self: TweenEvent, entity: integer, name: string, channel: string, timelineId: integer)
+end
+
+local record TweenComplete is tecs.Event
+    entity: integer
+    channel: string
+    timelineId: integer
+
+    init: function(self: TweenComplete, entity: integer, channel: string, timelineId: integer)
+end
+
+function TweenEvent.init(e: TweenEvent, entity: integer, name: string, channel: string, timelineId: integer)
+    e.entity = entity
+    e.name = name
+    e.channel = channel
+    e.timelineId = timelineId
+end
+
+function TweenComplete.init(e: TweenComplete, entity: integer, channel: string, timelineId: integer)
+    e.entity = entity
+    e.channel = channel
+    e.timelineId = timelineId
+end
+
+local record Registry
+    nextId: integer
+    byId: {integer: Timeline}
+    refcounts: {integer: integer}
+    objectIds: {Timeline: integer}
+    named: {string: integer}
 end
 
 local record TimelineBuilder
-    _slots: {TweenSlot}
+    _slots: {Slot}
     _runs: {RunSlot}
-    _callbacks: {{number, StepCallback}}
+    _emits: {EmitSlot}
     _currentOffset: number
     _currentGroupMaxEnd: number
     _frozen: boolean
     _channel: string
-    _onComplete: function(world: World, entity: integer, handle: TweenHandle)
 
     channel: function(self: TimelineBuilder, name: string): TimelineBuilder
-
-    to: function(
-        self: TimelineBuilder,
-        duration: number,
-        easingFn: EasingFunction,
-        interpolator: Interpolator,
-        t1?: number, t2?: number, t3?: number, t4?: number
-    ): TimelineBuilder
-
-    adjust: function(
-        self: TimelineBuilder,
-        duration: number,
-        easingFn: EasingFunction,
-        interpolator: Interpolator,
-        t1: number, t2?: number, t3?: number, t4?: number
-    ): TimelineBuilder
-
-    step: function(self: TimelineBuilder, pauseOrCallback?: number | StepCallback, callback?: StepCallback): TimelineBuilder
-    run: function(self: TimelineBuilder, schedule: Timeline, count?: integer): TimelineBuilder
-    onComplete: function(self: TimelineBuilder, fn: function(world: World, entity: integer, handle: TweenHandle)): TimelineBuilder
+    to: function(self: TimelineBuilder, duration: number, easingFn: EasingFunction, target: Target, t1?: number, t2?: number, t3?: number, t4?: number): TimelineBuilder
+    adjust: function(self: TimelineBuilder, duration: number, easingFn: EasingFunction, target: Target, t1: number, t2?: number, t3?: number, t4?: number): TimelineBuilder
+    track: function(self: TimelineBuilder, duration: number, easingFn: EasingFunction, target: Target, source: TrackSource): TimelineBuilder
+    step: function(self: TimelineBuilder, pause?: number): TimelineBuilder
+    emit: function(self: TimelineBuilder, name: string): TimelineBuilder
+    run: function(self: TimelineBuilder, timeline: Timeline, count?: integer): TimelineBuilder
     once: function(self: TimelineBuilder): Timeline
     loop: function(self: TimelineBuilder, count?: integer): Timeline
     pingPong: function(self: TimelineBuilder, count?: integer): Timeline
 end
 
-local ACTIVE_TWEENS <const>: tecs.Key<{Playback}> = tecs.newKey()
-local CHANNEL_MAP <const>: tecs.Key<{integer: {string: Playback}}> = tecs.newKey()
+local REGISTRY <const>: tecs.Key<Registry> = tecs.newKey()
+local SNAPSHOT_DATA_KEY <const> = "tecs2d.tween.registry"
 
 local record tween
-    type Interpolator = Interpolator
-    type TweenHandle = TweenHandle
+    type Target = Target
+    type TrackSource = TrackSource
     type Timeline = Timeline
     type TimelineBuilder = TimelineBuilder
-    type Playback = Playback
+    TweenPlayback: TweenPlayback
+    TrackingTarget: TrackingTarget
+    TweenEvent: TweenEvent
+    TweenComplete: TweenComplete
 
     linear: EasingFunction
-
     quadIn: EasingFunction
     quadOut: EasingFunction
     quadInOut: EasingFunction
     quadOutIn: EasingFunction
-
     cubicIn: EasingFunction
     cubicOut: EasingFunction
     cubicInOut: EasingFunction
     cubicOutIn: EasingFunction
-
     quartIn: EasingFunction
     quartOut: EasingFunction
     quartInOut: EasingFunction
     quartOutIn: EasingFunction
-
     quintIn: EasingFunction
     quintOut: EasingFunction
     quintInOut: EasingFunction
     quintOutIn: EasingFunction
-
     sineIn: EasingFunction
     sineOut: EasingFunction
     sineInOut: EasingFunction
     sineOutIn: EasingFunction
-
     expoIn: EasingFunction
     expoOut: EasingFunction
     expoInOut: EasingFunction
     expoOutIn: EasingFunction
-
     backIn: EasingFunction
     backOut: EasingFunction
     backInOut: EasingFunction
     backOutIn: EasingFunction
-
     elasticIn: EasingFunction
     elasticOut: EasingFunction
     elasticInOut: EasingFunction
     elasticOutIn: EasingFunction
-
     bounceIn: EasingFunction
     bounceOut: EasingFunction
     bounceInOut: EasingFunction
     bounceOutIn: EasingFunction
 
-    field: function(component: Component, fieldName: string): Interpolator
-    field2: function(component: Component, fieldA: string, fieldB: string): Interpolator
-    angle: function(component: Component, fieldName: string): Interpolator
-    track: function(base: Interpolator, getTargetFn: TrackTargetFn): Interpolator
+    field: function(component: Component, fieldName: string): Target
+    field2: function(component: Component, fieldA: string, fieldB: string): Target
+    angle: function(component: Component, fieldName: string): Target
+    target: function(component: Component, field: string | {string}): Target
+    sourceSelf: function(component: Component, field: string | {string}): TrackSource
+    sourceKey: function(key: string, component: Component, field: string | {string}): TrackSource
+    sourceTrackingTarget: function(component: Component, field: string | {string}): TrackSource
+    sourceRelationship: function(relationship: Component, component: Component, field: string | {string}): TrackSource
 
-    translateX: Interpolator
-    translateY: Interpolator
-    translateXY: Interpolator
-    rotation: Interpolator
-    rotationShortest: Interpolator
-    scaleX: Interpolator
-    scaleY: Interpolator
-    scaleXY: Interpolator
-
-    alpha: Interpolator
-    color: Interpolator
+    translateX: Target
+    translateY: Target
+    translateXY: Target
+    rotation: Target
+    rotationShortest: Target
+    scaleX: Target
+    scaleY: Target
+    scaleXY: Target
+    alpha: Target
+    color: Target
 
     timeline: function(): TimelineBuilder
-
+    registerPreset: function(name: string, timeline: Timeline): Timeline
+    play: function(world: World, entity: integer, timelineOrName: Timeline | string, speed?: number, delay?: number)
+    cancel: function(world: World, entity: integer, selector?: ControlSelector)
+    pause: function(world: World, entity: integer, selector?: ControlSelector)
+    resume: function(world: World, entity: integer, selector?: ControlSelector)
     plugin: function(world: World)
 end
 
 -------------------------------------------------------------------------------
--- Easing functions
+-- Easing
 -------------------------------------------------------------------------------
 
 function tween.linear(t: number): number return t end
+
+local EASING_NAMES: {EasingFunction: string} = {}
+local EASINGS: {string: EasingFunction} = {}
+
+local function registerEasing(name: string, fn: EasingFunction)
+    EASING_NAMES[fn] = name
+    EASINGS[name] = fn
+end
 
 local function makeVariants(name: string, inFn: EasingFunction)
     local tw = tween as {string: EasingFunction}
@@ -298,278 +347,707 @@ do
     end
 end
 
--------------------------------------------------------------------------------
--- Playback methods (Handle interface)
--------------------------------------------------------------------------------
-
-local PLAYBACK_MT <const>: metatable<Playback> = { __index = Playback }
-
-function Playback:pause()
-    self.paused = true
-end
-
-function Playback:resume()
-    self.paused = false
-end
-
-function Playback:getElapsed(): number
-    return self.elapsed
-end
-
-function Playback:getRate(): number
-    return self.rate
-end
-
-function Playback:getDirection(): integer
-    return self.direction
-end
-
-function Playback:cancel()
-    self.cancelled = true
+do
+    local names <const> = {
+        "linear",
+        "quadIn", "quadOut", "quadInOut", "quadOutIn",
+        "cubicIn", "cubicOut", "cubicInOut", "cubicOutIn",
+        "quartIn", "quartOut", "quartInOut", "quartOutIn",
+        "quintIn", "quintOut", "quintInOut", "quintOutIn",
+        "sineIn", "sineOut", "sineInOut", "sineOutIn",
+        "expoIn", "expoOut", "expoInOut", "expoOutIn",
+        "backIn", "backOut", "backInOut", "backOutIn",
+        "elasticIn", "elasticOut", "elasticInOut", "elasticOutIn",
+        "bounceIn", "bounceOut", "bounceInOut", "bounceOutIn",
+    }
+    local tw = tween as {string: EasingFunction}
+    for i = 1, #names do
+        registerEasing(names[i], tw[names[i]])
+    end
 end
 
 -------------------------------------------------------------------------------
--- Timeline (apply)
+-- Components and events
 -------------------------------------------------------------------------------
 
---- Create a Playback from a Timeline, recursively for nested runs.
-local function createPlayback(sched: Timeline, target: integer, rate: number, delay: number): Playback
-    local state = ffi.new("TweenSlotState[?]", sched.stateSize) as {TweenSlotState}
+local function serializeState(state: {TweenSlotState}, count: integer): {{number}}
+    local out: {{number}} = {}
+    for i = 0, count - 1 do
+        local s <const> = state[i]
+        out[i + 1] = {s.init, s.s1, s.s2, s.s3, s.s4, s.d1, s.d2, s.d3, s.d4}
+    end
+    return out
+end
 
-    local children: {Playback} = nil
-    if sched.runs and #sched.runs > 0 then
+local function deserializeState(rows: {{number}}): {TweenSlotState}
+    local count = rows and #rows or 0
+    local state = ffi.new("TweenSlotState[?]", count) as {TweenSlotState}
+    for i = 1, count do
+        local row <const> = rows[i]
+        local s <const> = state[i - 1]
+        s.init = row[1] or 0
+        s.s1 = row[2] or 0
+        s.s2 = row[3] or 0
+        s.s3 = row[4] or 0
+        s.s4 = row[5] or 0
+        s.d1 = row[6] or 0
+        s.d2 = row[7] or 0
+        s.d3 = row[8] or 0
+        s.d4 = row[9] or 0
+    end
+    return state
+end
+
+local function serializeCursor(c: Cursor): {string:any}
+    local children: {{string:any}} = nil
+    if c.children then
         children = {}
-        for i = 1, #sched.runs do
-            local runSlot <const> = sched.runs[i]
-            children[i] = createPlayback(runSlot.schedule, target, 1, 0)
-            children[i].repeatCount = runSlot.repeatCount
+        for i = 1, #c.children do
+            children[i] = serializeCursor(c.children[i])
         end
     end
+    local data: {string:any} = {
+        timelineId = c.timelineId,
+        elapsed = c.elapsed,
+        direction = c.direction,
+        repeatCount = c.repeatCount,
+        nextEmit = c.nextEmit,
+        rate = c.rate,
+        paused = c.paused,
+        delay = c.delay,
+        completed = c.completed,
+        cancelled = c.cancelled,
+        lastCycleIndex = c._lastCycleIndex,
+        stateSize = c.stateSize,
+        state = serializeState(c.state, c.stateSize),
+        children = children,
+    }
+    return data
+end
 
+local function deserializeCursor(data: {string:any}): Cursor
+    local children: {Cursor} = nil
+    local savedChildren = data.children as {{string:any}}
+    if savedChildren then
+        children = {}
+        for i = 1, #savedChildren do
+            children[i] = deserializeCursor(savedChildren[i])
+        end
+    end
+    return {
+        timelineId = data.timelineId as integer,
+        stateSize = (data.stateSize as integer) or #(data.state as {{number}} or {}),
+        state = deserializeState(data.state as {{number}}),
+        children = children,
+        elapsed = (data.elapsed as number) or 0,
+        direction = (data.direction as integer) or 1,
+        repeatCount = (data.repeatCount as integer) or 0,
+        nextEmit = (data.nextEmit as integer) or 1,
+        rate = (data.rate as number) or 1,
+        paused = data.paused == true,
+        delay = (data.delay as number) or 0,
+        completed = data.completed == true,
+        cancelled = data.cancelled == true,
+        _lastCycleIndex = (data.lastCycleIndex as integer) or 0,
+    }
+end
+
+tween.TweenPlayback = tecs.newComponent({
+    name = "TweenPlayback",
+    container = TweenPlayback,
+    new = function(data: {string:any}): TweenPlayback
+        local cursors: {Cursor} = {}
+        local saved = data and (data.cursors as {{string:any}})
+        if saved then
+            for i = 1, #saved do
+                cursors[i] = deserializeCursor(saved[i])
+            end
+        end
+        return { cursors = cursors } as TweenPlayback
+    end,
+    serialize = function(instance: TweenPlayback): {string:any}
+        local cursors: {{string:any}} = {}
+        for i = 1, #(instance.cursors or {}) do
+            cursors[i] = serializeCursor(instance.cursors[i])
+        end
+        return { cursors = cursors }
+    end,
+})
+
+tween.TrackingTarget = tecs.newComponent({
+    name = "TweenTrackingTarget",
+    container = TrackingTarget,
+    fields = {"entity", "key"},
+    defaults = {0, ""},
+})
+
+tween.TweenEvent = TweenEvent
+tween.TweenComplete = TweenComplete
+tecs.newEvent(TweenEvent)
+tecs.newEvent(TweenComplete)
+
+-------------------------------------------------------------------------------
+-- Targets and tracking sources
+-------------------------------------------------------------------------------
+
+local TARGET_MT <const>: metatable<Target> = { __index = Target }
+local targetInit: function(
+    Target, World, integer, boolean, number, number, number, number
+): (number, number, number, number, number, number, number, number)
+local targetApply: function(
+    Target, World, integer, number, number, number, number, number, number, number, number, number
+)
+
+local function fieldsFrom(field: string | {string}): {string}
+    if field is string then
+        return { field }
+    end
+    return field as {string}
+end
+
+local function componentByName(name: string): Component
+    return assert(components.registeredComponents[name], "Unknown tween component " .. name)
+end
+
+local function resolveTarget(t: Target): Target
+    if not t.component and t.componentName then
+        t.component = componentByName(t.componentName)
+    end
+    return t
+end
+
+local function newTarget(component: Component, fields: {string}, mode?: string, id?: string): Target
+    local parts = component.componentName
+    for i = 1, #fields do
+        parts = parts .. "." .. fields[i]
+    end
+    local t: Target = setmetatable({
+        id = id or parts,
+        component = component,
+        componentName = component.componentName,
+        fields = fields,
+        mode = mode or (#fields == 2 and "field2" or "field"),
+    }, TARGET_MT)
+    t.init = function(
+        world: World, entity: integer, relative: boolean,
+        t1: number, t2: number, t3: number, t4: number
+    ): (number, number, number, number, number, number, number, number)
+        return targetInit(t, world, entity, relative, t1, t2, t3, t4)
+    end
+    t.apply = function(world: World, entity: integer, tv: number, s1: number, s2: number, s3: number, s4: number, d1: number, d2: number, d3: number, d4: number)
+        targetApply(t, world, entity, tv, s1, s2, s3, s4, d1, d2, d3, d4)
+    end
+    return t
+end
+
+targetInit = function(self: Target,
+    world: World, entity: integer, relative: boolean,
+    t1: number, t2: number, t3: number, t4: number
+): number, number, number, number, number, number, number, number
+    resolveTarget(self)
+    local c = world:get(entity, self.component)
+    if not c then
+        return 0, 0, 0, 0, 0, 0, 0, 0
+    end
+    local cany = c as {string:number}
+    local f <const> = self.fields
+    local mode <const> = self.mode
+    if mode == "color" then
+        local r, g, b, a <const> = cany[f[1]], cany[f[2]], cany[f[3]], cany[f[4]]
+        if relative then return r, g, b, a, t1, t2, t3, t4 end
+        return r, g, b, a, t1 - r, t2 - g, t3 - b, t4 - a
+    elseif mode == "field2" then
+        local a, b <const> = cany[f[1]], cany[f[2]]
+        if relative then return a, b, 0, 0, t1, t2, 0, 0 end
+        return a, b, 0, 0, t1 - a, t2 - b, 0, 0
+    elseif mode == "angle" then
+        local startVal <const> = cany[f[1]]
+        local delta: number
+        if relative then
+            delta = t1
+        else
+            local twoPi <const> = math_pi * 2
+            local diff <const> = (t1 - startVal) % twoPi
+            delta = 2 * diff % twoPi - diff
+        end
+        return startVal, 0, 0, 0, delta, 0, 0, 0
+    end
+    local startVal <const> = cany[f[1]]
+    local delta <const> = relative and t1 or (t1 - startVal)
+    return startVal, 0, 0, 0, delta, 0, 0, 0
+end
+
+targetApply = function(self: Target,
+    world: World, entity: integer, t: number,
+    s1: number, s2: number, s3: number, s4: number,
+    d1: number, d2: number, d3: number, d4: number
+)
+    resolveTarget(self)
+    local c = world:get(entity, self.component)
+    if not c then return end
+    local cany = c as {string:number}
+    local f <const> = self.fields
+    local mode <const> = self.mode
+    cany[f[1]] = s1 + d1 * t
+    if mode == "field2" or mode == "color" then
+        cany[f[2]] = s2 + d2 * t
+    end
+    if mode == "color" then
+        cany[f[3]] = s3 + d3 * t
+        cany[f[4]] = s4 + d4 * t
+    end
+    world:markComponentDirty(entity, self.component)
+end
+
+function tween.field(component: Component, fieldName: string): Target
+    return newTarget(component, {fieldName}, "field")
+end
+
+function tween.field2(component: Component, fieldA: string, fieldB: string): Target
+    return newTarget(component, {fieldA, fieldB}, "field2")
+end
+
+function tween.angle(component: Component, fieldName: string): Target
+    return newTarget(component, {fieldName}, "angle")
+end
+
+function tween.target(component: Component, field: string | {string}): Target
+    local fields <const> = fieldsFrom(field)
+    assert(#fields >= 1 and #fields <= 2, "tween.target supports one or two fields")
+    return newTarget(component, fields)
+end
+
+local function source(kind: string, component: Component, field: string | {string}, key?: string, relationship?: Component): TrackSource
+    return {
+        kind = kind,
+        key = key,
+        relationship = relationship,
+        relationshipName = relationship and relationship.componentName or nil,
+        component = component,
+        componentName = component.componentName,
+        fields = fieldsFrom(field),
+    }
+end
+
+function tween.sourceSelf(component: Component, field: string | {string}): TrackSource
+    return source("self", component, field)
+end
+
+function tween.sourceKey(key: string, component: Component, field: string | {string}): TrackSource
+    return source("key", component, field, key)
+end
+
+function tween.sourceTrackingTarget(component: Component, field: string | {string}): TrackSource
+    return source("trackingTarget", component, field)
+end
+
+function tween.sourceRelationship(relationship: Component, component: Component, field: string | {string}): TrackSource
+    return source("relationship", component, field, nil, relationship)
+end
+
+local Transform <const> = tecs.builtins.Transform
+tween.translateX = newTarget(Transform, {"x"}, "field", "transform.x")
+tween.translateY = newTarget(Transform, {"y"}, "field", "transform.y")
+tween.translateXY = newTarget(Transform, {"x", "y"}, "field2", "transform.xy")
+tween.rotation = newTarget(Transform, {"rotation"}, "field", "transform.rotation")
+tween.rotationShortest = newTarget(Transform, {"rotation"}, "angle", "transform.rotationShortest")
+tween.scaleX = newTarget(Transform, {"scaleX"}, "field", "transform.scaleX")
+tween.scaleY = newTarget(Transform, {"scaleY"}, "field", "transform.scaleY")
+tween.scaleXY = newTarget(Transform, {"scaleX", "scaleY"}, "field2", "transform.scaleXY")
+
+do
+    local colorComponent: Component = nil
+    local function color(): Component
+        if not colorComponent then
+            local ok, mod = pcall(require, "tecs2d.gfx.internal.Color")
+            assert(ok, "tween.alpha/color requires tecs2d.gfx (Color component)")
+            colorComponent = mod as Component
+        end
+        return colorComponent
+    end
+    tween.alpha = newTarget(color(), {"a"}, "field", "color.a")
+    tween.color = newTarget(colorComponent, {"r", "g", "b", "a"}, "color", "color.rgba")
+end
+
+local BUILTIN_TARGETS: {string: Target} = {
+    ["transform.x"] = tween.translateX,
+    ["transform.y"] = tween.translateY,
+    ["transform.xy"] = tween.translateXY,
+    ["transform.rotation"] = tween.rotation,
+    ["transform.rotationShortest"] = tween.rotationShortest,
+    ["transform.scaleX"] = tween.scaleX,
+    ["transform.scaleY"] = tween.scaleY,
+    ["transform.scaleXY"] = tween.scaleXY,
+    ["color.a"] = tween.alpha,
+    ["color.rgba"] = tween.color,
+}
+
+-------------------------------------------------------------------------------
+-- Template serialization
+-------------------------------------------------------------------------------
+
+local function serializeTarget(t: Target): {string:any}
+    return {
+        id = t.id,
+        component = t.componentName or (t.component and t.component.componentName),
+        fields = t.fields,
+        mode = t.mode,
+    }
+end
+
+local function deserializeTarget(data: {string:any}): Target
+    local id = data.id as string
+    local builtin = id and BUILTIN_TARGETS[id]
+    if builtin then return builtin end
+    return newTarget(
+        componentByName(data.component as string),
+        data.fields as {string},
+        (data.mode as string) or "field",
+        id
+    )
+end
+
+local function serializeSource(s: TrackSource): {string:any}
+    if not s then return nil end
+    return {
+        kind = s.kind,
+        key = s.key,
+        relationship = s.relationshipName or (s.relationship and s.relationship.componentName),
+        component = s.componentName or (s.component and s.component.componentName),
+        fields = s.fields,
+    }
+end
+
+local function deserializeSource(data: {string:any}): TrackSource
+    if not data then return nil end
+    local relName = data.relationship as string
+    return {
+        kind = data.kind as string,
+        key = data.key as string,
+        relationshipName = relName,
+        relationship = relName and componentByName(relName) or nil,
+        componentName = data.component as string,
+        component = componentByName(data.component as string),
+        fields = data.fields as {string},
+    }
+end
+
+local function serializeTimeline(tl: Timeline): {string:any}
+    local slots: {{string:any}} = {}
+    for i = 1, #(tl.slots or {}) do
+        local s <const> = tl.slots[i]
+        slots[i] = {
+            kind = s.kind,
+            target = serializeTarget(s.target),
+            source = serializeSource(s.source),
+            easing = s.easingName,
+            t1 = s.t1, t2 = s.t2, t3 = s.t3, t4 = s.t4,
+            relative = s.relative,
+            startTime = s.startTime,
+            endTime = s.endTime,
+            duration = s.duration,
+            stateIndex = s.stateIndex,
+        }
+    end
+    local runs: {{string:any}} = nil
+    if tl.runs then
+        runs = {}
+        for i = 1, #tl.runs do
+            local r <const> = tl.runs[i]
+            runs[i] = {
+                timelineId = r.timelineId,
+                timeline = r.timeline and serializeTimeline(r.timeline) or nil,
+                startTime = r.startTime,
+                effectiveDuration = r.effectiveDuration,
+                repeatCount = r.repeatCount,
+                pingPong = r.pingPong,
+            }
+        end
+    end
+    return {
+        slots = slots,
+        runs = runs,
+        emits = tl.emits,
+        totalDuration = tl.totalDuration,
+        effectiveDuration = tl.effectiveDuration,
+        stateSize = tl.stateSize,
+        repeatCount = tl.repeatCount,
+        pingPong = tl.pingPong,
+        channel = tl.channel,
+        presetName = tl.presetName,
+        pinned = tl.pinned,
+    }
+end
+
+local TIMELINE_MT <const>: metatable<Timeline> = { __index = Timeline }
+
+local function deserializeTimeline(data: {string:any}): Timeline
+    local slots: {Slot} = {}
+    local savedSlots = data.slots as {{string:any}}
+    for i = 1, #(savedSlots or {}) do
+        local s <const> = savedSlots[i]
+        local easingName <const> = s.easing as string
+        slots[i] = {
+            kind = (s.kind as string) or "to",
+            target = deserializeTarget(s.target as {string:any}),
+            source = deserializeSource(s.source as {string:any}),
+            easingName = easingName,
+            easing = assert(EASINGS[easingName], "Unknown tween easing " .. tostring(easingName)),
+            t1 = (s.t1 as number) or 0,
+            t2 = (s.t2 as number) or 0,
+            t3 = (s.t3 as number) or 0,
+            t4 = (s.t4 as number) or 0,
+            relative = s.relative == true,
+            startTime = (s.startTime as number) or 0,
+            endTime = (s.endTime as number) or 0,
+            duration = (s.duration as number) or 0,
+            stateIndex = (s.stateIndex as integer) or (i - 1),
+        }
+    end
+    local runs: {RunSlot} = nil
+    local savedRuns = data.runs as {{string:any}}
+    if savedRuns then
+        runs = {}
+        for i = 1, #savedRuns do
+            local r <const> = savedRuns[i]
+            runs[i] = {
+                timeline = r.timeline and deserializeTimeline(r.timeline as {string:any}) or nil,
+                timelineId = (r.timelineId as integer) or 0,
+                startTime = (r.startTime as number) or 0,
+                effectiveDuration = (r.effectiveDuration as number) or 0,
+                repeatCount = (r.repeatCount as integer) or 0,
+                pingPong = r.pingPong == true,
+            }
+        end
+    end
     return setmetatable({
+        slots = slots,
+        runs = runs,
+        emits = data.emits as {EmitSlot},
+        totalDuration = (data.totalDuration as number) or 0,
+        effectiveDuration = (data.effectiveDuration as number) or 0,
+        stateSize = (data.stateSize as integer) or #slots,
+        repeatCount = (data.repeatCount as integer) or 0,
+        pingPong = data.pingPong == true,
+        channel = data.channel as string,
+        presetName = data.presetName as string,
+        pinned = data.pinned == true,
+    }, TIMELINE_MT)
+end
+
+-------------------------------------------------------------------------------
+-- Registry
+-------------------------------------------------------------------------------
+
+local function newRegistry(): Registry
+    return {
+        nextId = 1,
+        byId = {},
+        refcounts = {},
+        objectIds = setmetatable({} as {Timeline: integer}, { __mode = "k" }),
+        named = {},
+    }
+end
+
+local function registry(world: World): Registry
+    local r = world.resources[REGISTRY]
+    if not r then
+        r = newRegistry()
+        world.resources[REGISTRY] = r
+    end
+    return r
+end
+
+local function internTimeline(world: World, tl: Timeline): integer
+    local reg <const> = registry(world)
+    local existing = reg.objectIds[tl]
+    if existing then return existing end
+    if tl.presetName then
+        local named = reg.named[tl.presetName]
+        if named then
+            reg.objectIds[tl] = named
+            return named
+        end
+    end
+    local id <const> = reg.nextId
+    reg.nextId = id + 1
+    reg.byId[id] = tl
+    reg.objectIds[tl] = id
+    reg.refcounts[id] = 0
+    if tl.presetName then
+        reg.named[tl.presetName] = id
+        tl.pinned = true
+    end
+    if tl.runs then
+        for i = 1, #tl.runs do
+            tl.runs[i].timelineId = internTimeline(world, tl.runs[i].timeline)
+        end
+    end
+    return id
+end
+
+local function incRef(reg: Registry, id: integer)
+    reg.refcounts[id] = (reg.refcounts[id] or 0) + 1
+end
+
+local function decRef(reg: Registry, id: integer)
+    local tl = reg.byId[id]
+    if not tl then return end
+    local n = (reg.refcounts[id] or 0) - 1
+    if n > 0 then
+        reg.refcounts[id] = n
+        return
+    end
+    reg.refcounts[id] = 0
+    if tl.pinned then return end
+    reg.byId[id] = nil
+    reg.objectIds[tl] = nil
+    reg.refcounts[id] = nil
+end
+
+local function restoreRegistry(world: World, data: {string:any})
+    local reg = newRegistry()
+    local maxId = 0
+    local templates = data and (data.templates as {{string:any}})
+    if templates then
+        for i = 1, #templates do
+            local item <const> = templates[i]
+            local id <const> = item.id as integer
+            local tl <const> = deserializeTimeline(item.timeline as {string:any})
+            reg.byId[id] = tl
+            reg.refcounts[id] = 0
+            if tl.presetName then reg.named[tl.presetName] = id end
+            if id > maxId then maxId = id end
+        end
+    end
+    reg.nextId = maxId + 1
+    world.resources[REGISTRY] = reg
+end
+
+-------------------------------------------------------------------------------
+-- Cursor methods and playback creation
+-------------------------------------------------------------------------------
+
+local function createCursor(world: World, tl: Timeline, target: integer, rate: number, delay: number): Cursor
+    local id <const> = internTimeline(world, tl)
+    local state = ffi.new("TweenSlotState[?]", tl.stateSize) as {TweenSlotState}
+    local children: {Cursor} = nil
+    if tl.runs then
+        children = {}
+        for i = 1, #tl.runs do
+            children[i] = createCursor(world, tl.runs[i].timeline, target, 1, 0)
+            children[i].repeatCount = tl.runs[i].repeatCount
+        end
+    end
+    incRef(registry(world), id)
+    return {
         target = target,
-        schedule = sched,
+        timelineId = id,
+        stateSize = tl.stateSize,
         state = state,
         children = children,
         elapsed = 0,
         direction = 1,
-        repeatCount = sched.repeatCount,
-        nextCallback = 1,
+        repeatCount = tl.repeatCount,
+        nextEmit = 1,
         rate = rate,
         delay = delay or 0,
         _lastCycleIndex = 0,
-    }, PLAYBACK_MT)
+    }
 end
 
-function Timeline:apply(world: World, entity: integer, speed?: number, delay?: number): TweenHandle
-    local activeTweens = world.resources[ACTIVE_TWEENS]
-    assert(activeTweens, "Tween plugin not added. Call world:addPlugin(tween.plugin)")
+local function playbackFor(world: World, entity: integer): TweenPlayback
+    local pb = world:getMut(entity, TweenPlayback)
+    if pb then return pb end
+    world:set(entity, TweenPlayback.new({}))
+    return world:getMut(entity, TweenPlayback)
+end
 
-    -- Cancel existing tween on same entity+channel
-    if self.channel then
-        local channels = world.resources[CHANNEL_MAP]
-        local entityChannels = channels[entity]
-        if entityChannels then
-            local existing = entityChannels[self.channel]
-            if existing then
+local function cursorTimeline(world: World, c: Cursor): Timeline
+    return registry(world).byId[c.timelineId]
+end
+
+local function addCursor(world: World, entity: integer, tl: Timeline, speed?: number, delay?: number): Cursor
+    local pb <const> = playbackFor(world, entity)
+    if tl.channel then
+        for i = 1, #(pb.cursors or {}) do
+            local existing <const> = pb.cursors[i]
+            local etl <const> = cursorTimeline(world, existing)
+            if etl and etl.channel == tl.channel then
                 existing.cancelled = true
             end
-        else
-            entityChannels = {}
-            channels[entity] = entityChannels
-        end
-        local pb <const> = createPlayback(self, entity, speed or 1, delay or 0)
-        entityChannels[self.channel] = pb
-        activeTweens[#activeTweens + 1] = pb
-        return pb
-    end
-
-    local pb <const> = createPlayback(self, entity, speed or 1, delay or 0)
-    activeTweens[#activeTweens + 1] = pb
-    return pb
-end
-
--------------------------------------------------------------------------------
--- Interpolator factories
--------------------------------------------------------------------------------
-
-function tween.field(component: Component, fieldName: string): Interpolator
-    return {
-        init = function(
-            world: World, entity: integer, relative: boolean, t1: number
-        ): number, number, number, number, number, number, number, number
-            local c = world:get(entity, component)
-            if c then
-                local cany = c as {string: number}
-                local startVal <const> = cany[fieldName]
-                local delta <const> = relative and t1 or (t1 - startVal)
-                return startVal, 0, 0, 0, delta, 0, 0, 0
-            end
-            return 0, 0, 0, 0, 0, 0, 0, 0
-        end,
-        apply = function(world: World, entity: integer, t: number, s1: number, _s2: number, _s3: number, _s4: number, d1: number)
-            local c = world:get(entity, component)
-            if c then
-                (c as {string: number})[fieldName] = s1 + d1 * t
-                world:markComponentDirty(entity, component)
-            end
-        end
-    }
-end
-
-function tween.angle(component: Component, fieldName: string): Interpolator
-    local TWO_PI <const> = math_pi * 2
-    return {
-        init = function(
-            world: World, entity: integer, relative: boolean, t1: number
-        ): number, number, number, number, number, number, number, number
-            local c = world:get(entity, component)
-            if c then
-                local cany = c as {string: number}
-                local startVal <const> = cany[fieldName]
-                local delta: number
-                if relative then
-                    delta = t1
-                else
-                    local diff <const> = (t1 - startVal) % TWO_PI
-                    delta = 2 * diff % TWO_PI - diff
-                end
-                return startVal, 0, 0, 0, delta, 0, 0, 0
-            end
-            return 0, 0, 0, 0, 0, 0, 0, 0
-        end,
-        apply = function(
-            world: World, entity: integer, t: number, s1: number, _s2: number, _s3: number, _s4: number, d1: number
-        )
-            local c = world:get(entity, component)
-            if c then
-                (c as {string: number})[fieldName] = s1 + d1 * t
-                world:markComponentDirty(entity, component)
-            end
-        end
-    }
-end
-
-function tween.field2(component: Component, fieldA: string, fieldB: string): Interpolator
-    return {
-        init = function(
-            world: World, entity: integer, relative: boolean, t1: number, t2: number
-        ): number, number, number, number, number, number, number, number
-            local c = world:get(entity, component)
-            if c then
-                local cany = c as {string: number}
-                local a <const> = cany[fieldA]
-                local b <const> = cany[fieldB]
-                if relative then
-                    return a, b, 0, 0, t1, t2, 0, 0
-                else
-                    return a, b, 0, 0, t1 - a, t2 - b, 0, 0
-                end
-            end
-            return 0, 0, 0, 0, 0, 0, 0, 0
-        end,
-        apply = function(world: World, entity: integer, t: number, s1: number, s2: number,
-                _s3: number, _s4: number, d1: number, d2: number)
-            local c = world:get(entity, component)
-            if c then
-                local cany = c as {string: number}
-                cany[fieldA] = s1 + d1 * t
-                cany[fieldB] = s2 + d2 * t
-                world:markComponentDirty(entity, component)
-            end
-        end
-    }
-end
-
-local Transform <const> = tecs.builtins.Transform
-
-tween.translateX = tween.field(Transform, "x")
-tween.translateY = tween.field(Transform, "y")
-tween.translateXY = tween.field2(Transform, "x", "y")
-tween.rotation = tween.field(Transform, "rotation")
-tween.rotationShortest = tween.angle(Transform, "rotation")
-tween.scaleX = tween.field(Transform, "scaleX")
-tween.scaleY = tween.field(Transform, "scaleY")
-tween.scaleXY = tween.field2(Transform, "scaleX", "scaleY")
-
-do
-    local _resolved = false
-    local _alpha: Interpolator = nil
-    local _colorComponent: Component = nil
-    local function resolveColor()
-        if not _resolved then
-            _resolved = true
-            local ok, mod = pcall(require, "tecs2d.gfx.internal.Color")
-            assert(ok, "tween.alpha/color requires tecs2d.gfx (Color component)")
-            _colorComponent = mod as Component
-            _alpha = tween.field(_colorComponent, "a")
         end
     end
-    tween.alpha = {
-        init = function(
-            world: World, entity: integer, relative: boolean, t1: number, t2: number, t3: number, t4: number
-        ): number, number, number, number, number, number, number, number
-            resolveColor()
-            return _alpha.init(world, entity, relative, t1, t2, t3, t4)
-        end,
-        apply = function(world: World, entity: integer, t: number,
-                s1: number, s2: number, s3: number, s4: number, d1: number, d2: number, d3: number, d4: number)
-            _alpha.apply(world, entity, t, s1, s2, s3, s4, d1, d2, d3, d4)
-        end
-    }
-
-    tween.color = {
-        init = function(
-            world: World, entity: integer, relative: boolean, t1: number, t2: number, t3: number, t4: number
-        ): number, number, number, number, number, number, number, number
-            resolveColor()
-            local c = world:get(entity, _colorComponent)
-            if c then
-                local cany = c as {string: number}
-                local r, g, b, a = cany.r, cany.g, cany.b, cany.a
-                if relative then
-                    return r, g, b, a, t1, t2, t3, t4
-                else
-                    return r, g, b, a, t1 - r, t2 - g, t3 - b, t4 - a
-                end
-            end
-            return 0, 0, 0, 0, 0, 0, 0, 0
-        end,
-        apply = function(world: World, entity: integer, t: number,
-                s1: number, s2: number, s3: number, s4: number, d1: number, d2: number, d3: number, d4: number)
-            local c = world:get(entity, _colorComponent)
-            if c then
-                local cany = c as {string: number}
-                cany.r = s1 + d1 * t
-                cany.g = s2 + d2 * t
-                cany.b = s3 + d3 * t
-                cany.a = s4 + d4 * t
-                world:markComponentDirty(entity, _colorComponent)
-            end
-        end
-    }
+    local c <const> = createCursor(world, tl, entity, speed or 1, delay or 0)
+    pb.cursors[#pb.cursors + 1] = c
+    return c
 end
 
-function tween.track(base: Interpolator, getTargetFn: TrackTargetFn): Interpolator
-    return {
-        init = function(
-            world: World, entity: integer, _relative: boolean, _t1: number, _t2: number, _t3: number, _t4: number
-        ): number, number, number, number, number, number, number, number
-            return base.init(world, entity, false, 0, 0, 0, 0)
-        end,
-        apply = function(
-            world: World, entity: integer, t: number,
-            s1: number, s2: number, s3: number, s4: number,
-            d1: number, d2: number, d3: number, d4: number
-        )
-            local t1, t2, t3, t4 = getTargetFn(world, entity)
-            local nd1 = t1 and (t1 - s1) or d1
-            local nd2 = t2 and (t2 - s2) or d2
-            local nd3 = t3 and (t3 - s3) or d3
-            local nd4 = t4 and (t4 - s4) or d4
-            base.apply(world, entity, t, s1, s2, s3, s4, nd1, nd2, nd3, nd4)
+function Timeline:play(world: World, entity: integer, speed?: number, delay?: number)
+    addCursor(world, entity, self, speed, delay)
+end
+
+function Timeline:apply(world: World, entity: integer, speed?: number, delay?: number)
+    self:play(world, entity, speed, delay)
+end
+
+function tween.play(world: World, entity: integer, timelineOrName: Timeline | string, speed?: number, delay?: number)
+    if timelineOrName is string then
+        local id = registry(world).named[timelineOrName]
+        assert(id, "Unknown tween preset " .. timelineOrName)
+        addCursor(world, entity, registry(world).byId[id], speed, delay)
+        return
+    end
+    (timelineOrName as Timeline):play(world, entity, speed, delay)
+end
+
+local function selectorTimelineId(world: World, selector: Timeline): integer
+    local reg <const> = registry(world)
+    local id = reg.objectIds[selector]
+    if id then return id end
+    if selector.presetName then return reg.named[selector.presetName] end
+    return nil
+end
+
+local function matchesCursor(world: World, c: Cursor, selector?: ControlSelector): boolean
+    if not selector then return true end
+    local tl = cursorTimeline(world, c)
+    if not tl then return false end
+    if selector is string then
+        return tl.channel == selector or tl.presetName == selector
+    end
+    local id = selectorTimelineId(world, selector as Timeline)
+    return id ~= nil and c.timelineId == id
+end
+
+function tween.cancel(world: World, entity: integer, selector?: ControlSelector)
+    local pb = world:getMut(entity, TweenPlayback)
+    if not pb then return end
+    for i = 1, #(pb.cursors or {}) do
+        if matchesCursor(world, pb.cursors[i], selector) then
+            pb.cursors[i].cancelled = true
         end
-    }
+    end
+end
+
+function tween.pause(world: World, entity: integer, selector?: ControlSelector)
+    local pb = world:getMut(entity, TweenPlayback)
+    if not pb then return end
+    for i = 1, #(pb.cursors or {}) do
+        if matchesCursor(world, pb.cursors[i], selector) then
+            pb.cursors[i].paused = true
+        end
+    end
+end
+
+function tween.resume(world: World, entity: integer, selector?: ControlSelector)
+    local pb = world:getMut(entity, TweenPlayback)
+    if not pb then return end
+    for i = 1, #(pb.cursors or {}) do
+        if matchesCursor(world, pb.cursors[i], selector) then
+            pb.cursors[i].paused = false
+        end
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -582,134 +1060,94 @@ function tween.timeline(): TimelineBuilder
     return setmetatable({
         _slots = {},
         _runs = {},
-        _callbacks = {},
+        _emits = {},
         _currentOffset = 0,
         _currentGroupMaxEnd = 0,
-        _frozen = false
+        _frozen = false,
     }, BUILDER_MT)
 end
 
-function TimelineBuilder:to(
-    duration: number,
-    easingFn: EasingFunction,
-    interpolator: Interpolator,
-    t1?: number, t2?: number, t3?: number, t4?: number
-): TimelineBuilder
-    assert(not self._frozen, "Cannot add entries to a finalized timeline")
+local function addSlot(builder: TimelineBuilder, kind: string, duration: number, easingFn: EasingFunction, target: Target, trackSource: TrackSource, relative: boolean, t1?: number, t2?: number, t3?: number, t4?: number): TimelineBuilder
+    assert(not builder._frozen, "Cannot add entries to a finalized timeline")
     assert(duration > 0, "Tween duration must be greater than 0")
-
-    local startTime <const> = self._currentOffset
+    local easingName <const> = assert(EASING_NAMES[easingFn], "Tween easing must be one of tecs2d.tween's built-in easing values")
+    local startTime <const> = builder._currentOffset
     local endTime <const> = startTime + duration
-
-    self._slots[#self._slots + 1] = {
-        interpolator = interpolator,
+    builder._slots[#builder._slots + 1] = {
+        kind = kind,
+        target = target,
+        source = trackSource,
+        easingName = easingName,
         easing = easingFn,
-        t1 = t1, t2 = t2 or 0, t3 = t3 or 0, t4 = t4 or 0,
+        t1 = t1 or 0, t2 = t2 or 0, t3 = t3 or 0, t4 = t4 or 0,
+        relative = relative,
         startTime = startTime,
         endTime = endTime,
         duration = duration,
-        stateIndex = 0  -- computed in finalize
+        stateIndex = 0,
     }
-
-    if endTime > self._currentGroupMaxEnd then
-        self._currentGroupMaxEnd = endTime
+    if endTime > builder._currentGroupMaxEnd then
+        builder._currentGroupMaxEnd = endTime
     end
-
-    return self
+    return builder
 end
 
-function TimelineBuilder:adjust(
-    duration: number,
-    easingFn: EasingFunction,
-    interpolator: Interpolator,
-    t1: number, t2?: number, t3?: number, t4?: number
-): TimelineBuilder
-    assert(not self._frozen, "Cannot add entries to a finalized timeline")
-    assert(duration > 0, "Tween duration must be greater than 0")
-
-    local startTime <const> = self._currentOffset
-    local endTime <const> = startTime + duration
-
-    self._slots[#self._slots + 1] = {
-        interpolator = interpolator,
-        easing = easingFn,
-        t1 = t1, t2 = t2 or 0, t3 = t3 or 0, t4 = t4 or 0,
-        relative = true,
-        startTime = startTime,
-        endTime = endTime,
-        duration = duration,
-        stateIndex = 0  -- computed in finalize
-    }
-
-    if endTime > self._currentGroupMaxEnd then
-        self._currentGroupMaxEnd = endTime
-    end
-
-    return self
+function TimelineBuilder:to(duration: number, easingFn: EasingFunction, target: Target, t1?: number, t2?: number, t3?: number, t4?: number): TimelineBuilder
+    return addSlot(self, "to", duration, easingFn, target, nil, false, t1, t2, t3, t4)
 end
 
-function TimelineBuilder:step(pauseOrCallback?: number | StepCallback, callback?: StepCallback): TimelineBuilder
+function TimelineBuilder:adjust(duration: number, easingFn: EasingFunction, target: Target, t1: number, t2?: number, t3?: number, t4?: number): TimelineBuilder
+    return addSlot(self, "to", duration, easingFn, target, nil, true, t1, t2, t3, t4)
+end
+
+function TimelineBuilder:track(duration: number, easingFn: EasingFunction, target: Target, trackSource: TrackSource): TimelineBuilder
+    return addSlot(self, "track", duration, easingFn, target, trackSource, false, 0, 0, 0, 0)
+end
+
+function TimelineBuilder:step(pause?: number): TimelineBuilder
     assert(not self._frozen, "Cannot add entries to a finalized timeline")
-
-    local pause: number = 0
-    local cb: StepCallback = nil
-
-    if pauseOrCallback is number then
-        pause = pauseOrCallback
-        cb = callback
-    elseif pauseOrCallback then
-        cb = pauseOrCallback as StepCallback
-    end
-
-    if cb then
-        self._callbacks[#self._callbacks + 1] = {self._currentGroupMaxEnd, cb}
-    end
-
-    self._currentOffset = self._currentGroupMaxEnd + pause
+    self._currentOffset = self._currentGroupMaxEnd + (pause or 0)
     self._currentGroupMaxEnd = self._currentOffset
     return self
 end
 
-function TimelineBuilder:run(schedule: Timeline, count?: integer): TimelineBuilder
+function TimelineBuilder:emit(name: string): TimelineBuilder
     assert(not self._frozen, "Cannot add entries to a finalized timeline")
+    self._emits[#self._emits + 1] = { time = self._currentGroupMaxEnd, name = name }
+    return self
+end
 
+function TimelineBuilder:run(timeline: Timeline, count?: integer): TimelineBuilder
+    assert(not self._frozen, "Cannot add entries to a finalized timeline")
     local effectiveDuration: number
-    local repeatCount <const> = schedule.repeatCount
-    local isPingPong <const> = schedule.pingPong
-
-    if schedule.effectiveDuration == -1 then
+    if timeline.effectiveDuration == -1 then
         assert(count, "run() with infinite timeline requires a count parameter")
-        effectiveDuration = schedule.totalDuration * count
+        effectiveDuration = timeline.totalDuration * count
     elseif count then
-        effectiveDuration = schedule.totalDuration * count
+        effectiveDuration = timeline.totalDuration * count
     else
-        effectiveDuration = schedule.effectiveDuration
+        effectiveDuration = timeline.effectiveDuration
     end
-
     local runRepeatCount: integer
     if count then
         runRepeatCount = count - 1
-    elseif repeatCount == -1 then
+    elseif timeline.repeatCount == -1 then
         error("run() with infinite timeline requires a count parameter")
     else
-        runRepeatCount = repeatCount
+        runRepeatCount = timeline.repeatCount
     end
-
     local startTime <const> = self._currentOffset
     local endTime <const> = startTime + effectiveDuration
-
     self._runs[#self._runs + 1] = {
-        schedule = schedule,
+        timeline = timeline,
         startTime = startTime,
         effectiveDuration = effectiveDuration,
         repeatCount = runRepeatCount,
-        pingPong = isPingPong
+        pingPong = timeline.pingPong,
     }
-
     if endTime > self._currentGroupMaxEnd then
         self._currentGroupMaxEnd = endTime
     end
-
     return self
 end
 
@@ -719,24 +1157,16 @@ function TimelineBuilder:channel(name: string): TimelineBuilder
     return self
 end
 
-function TimelineBuilder:onComplete(fn: function(world: World, entity: integer, handle: TweenHandle)): TimelineBuilder
-    assert(not self._frozen, "Cannot modify a finalized timeline")
-    self._onComplete = fn
-    return self
-end
-
-local TIMELINE_MT <const>: metatable<Timeline> = { __index = Timeline }
-
 local function finalize(builder: TimelineBuilder, repeatCount: integer, isPingPong: boolean): Timeline
     assert(not builder._frozen, "Timeline already finalized")
     builder._frozen = true
-
-    -- Compute state offsets for each slot
-    local slots <const> = builder._slots
-    for i = 1, #slots do
-        slots[i].stateIndex = i - 1
+    for i = 1, #builder._slots do
+        builder._slots[i].stateIndex = i - 1
     end
-
+    local runs: {RunSlot} = nil
+    if #builder._runs > 0 then runs = builder._runs end
+    local emits: {EmitSlot} = nil
+    if #builder._emits > 0 then emits = builder._emits end
     local totalDuration <const> = builder._currentGroupMaxEnd
     local effectiveDuration: number
     if repeatCount == -1 then
@@ -744,28 +1174,16 @@ local function finalize(builder: TimelineBuilder, repeatCount: integer, isPingPo
     else
         effectiveDuration = totalDuration * (repeatCount + 1)
     end
-
-    local runs: {RunSlot} = nil
-    if #builder._runs > 0 then
-        runs = builder._runs
-    end
-
-    local callbacks: {{number, StepCallback}} = nil
-    if #builder._callbacks > 0 then
-        callbacks = builder._callbacks
-    end
-
     return setmetatable({
-        slots = slots,
+        slots = builder._slots,
         runs = runs,
-        callbacks = callbacks,
+        emits = emits,
         totalDuration = totalDuration,
         effectiveDuration = effectiveDuration,
-        stateSize = #slots,
+        stateSize = #builder._slots,
         repeatCount = repeatCount,
         pingPong = isPingPong,
         channel = builder._channel,
-        onComplete = builder._onComplete
     }, TIMELINE_MT)
 end
 
@@ -783,229 +1201,332 @@ function TimelineBuilder:pingPong(count?: integer): Timeline
     return finalize(self, -1, true)
 end
 
+function tween.registerPreset(name: string, timeline: Timeline): Timeline
+    timeline.presetName = name
+    timeline.pinned = true
+    return timeline
+end
+
 -------------------------------------------------------------------------------
--- System
+-- Evaluation
 -------------------------------------------------------------------------------
 
---- Evaluate all tween slots at the given elapsed time.
-local function evaluateSlots(
-    slots: {TweenSlot},
-    state: {TweenSlotState},
-    world: World,
-    target: integer,
-    elapsed: number
-)
-    for i = 1, #slots do
+local function targetValuesFromSource(world: World, entity: integer, src: TrackSource): number, number, number, number
+    if not src then return 0, 0, 0, 0 end
+    if not src.component and src.componentName then
+        src.component = componentByName(src.componentName)
+    end
+    local sourceEntity = entity
+    if src.kind == "key" then
+        sourceEntity = world:requireKey(src.key)
+    elseif src.kind == "trackingTarget" then
+        local tt = world:get(entity, TrackingTarget)
+        if not tt then return 0, 0, 0, 0 end
+        if tt.entity and tt.entity ~= 0 then
+            sourceEntity = tt.entity
+        elseif tt.key and tt.key ~= "" then
+            sourceEntity = world:requireKey(tt.key)
+        else
+            return 0, 0, 0, 0
+        end
+    elseif src.kind == "relationship" then
+        if not src.relationship and src.relationshipName then
+            src.relationship = componentByName(src.relationshipName)
+        end
+        local rel = world:get(entity, src.relationship)
+        if not rel then return 0, 0, 0, 0 end
+        sourceEntity = (rel as {string:any}).target as integer
+    end
+    local c = world:get(sourceEntity, src.component)
+    if not c then return 0, 0, 0, 0 end
+    local cany = c as {string:number}
+    local f <const> = src.fields
+    return cany[f[1]] or 0, cany[f[2]] or 0, cany[f[3]] or 0, cany[f[4]] or 0
+end
+
+local function evaluateSlots(slots: {Slot}, state: {TweenSlotState}, world: World, target: integer, elapsed: number)
+    for i = 1, #(slots or {}) do
         local slot <const> = slots[i]
         local ss <const> = state[slot.stateIndex]
         if elapsed >= slot.startTime and elapsed <= slot.endTime then
             if ss.init == 0 then
+                local t1, t2, t3, t4 = slot.t1, slot.t2, slot.t3, slot.t4
+                if slot.kind == "track" then
+                    t1, t2, t3, t4 = targetValuesFromSource(world, target, slot.source)
+                end
                 ss.s1, ss.s2, ss.s3, ss.s4, ss.d1, ss.d2, ss.d3, ss.d4 =
-                    slot.interpolator.init(world, target, slot.relative, slot.t1, slot.t2, slot.t3, slot.t4)
+                    slot.target.init(world, target, slot.relative, t1, t2, t3, t4)
                 ss.init = 1
             end
             local localT = (elapsed - slot.startTime) / slot.duration
             if localT < 0 then localT = 0 end
             if localT > 1 then localT = 1 end
-            local easedT <const> = slot.easing(localT)
-            slot.interpolator.apply(world, target, easedT, ss.s1, ss.s2, ss.s3, ss.s4, ss.d1, ss.d2, ss.d3, ss.d4)
+            if slot.kind == "track" then
+                local t1, t2, t3, t4 = targetValuesFromSource(world, target, slot.source)
+                ss.d1 = t1 - ss.s1
+                ss.d2 = t2 - ss.s2
+                ss.d3 = t3 - ss.s3
+                ss.d4 = t4 - ss.s4
+            end
+            slot.target.apply(world, target, slot.easing(localT), ss.s1, ss.s2, ss.s3, ss.s4, ss.d1, ss.d2, ss.d3, ss.d4)
         elseif elapsed > slot.endTime then
             if ss.init == 0 then
+                local t1, t2, t3, t4 = slot.t1, slot.t2, slot.t3, slot.t4
+                if slot.kind == "track" then
+                    t1, t2, t3, t4 = targetValuesFromSource(world, target, slot.source)
+                end
                 ss.s1, ss.s2, ss.s3, ss.s4, ss.d1, ss.d2, ss.d3, ss.d4 =
-                    slot.interpolator.init(world, target, slot.relative, slot.t1, slot.t2, slot.t3, slot.t4)
+                    slot.target.init(world, target, slot.relative, t1, t2, t3, t4)
                 ss.init = 1
             end
-            slot.interpolator.apply(world, target, slot.easing(1), ss.s1, ss.s2, ss.s3, ss.s4, ss.d1, ss.d2, ss.d3, ss.d4)
+            if slot.kind == "track" then
+                local t1, t2, t3, t4 = targetValuesFromSource(world, target, slot.source)
+                ss.d1 = t1 - ss.s1
+                ss.d2 = t2 - ss.s2
+                ss.d3 = t3 - ss.s3
+                ss.d4 = t4 - ss.s4
+            end
+            slot.target.apply(world, target, slot.easing(1), ss.s1, ss.s2, ss.s3, ss.s4, ss.d1, ss.d2, ss.d3, ss.d4)
         elseif elapsed < slot.startTime and ss.init ~= 0 then
-            slot.interpolator.apply(world, target, slot.easing(0), ss.s1, ss.s2, ss.s3, ss.s4, ss.d1, ss.d2, ss.d3, ss.d4)
+            slot.target.apply(world, target, slot.easing(0), ss.s1, ss.s2, ss.s3, ss.s4, ss.d1, ss.d2, ss.d3, ss.d4)
         end
     end
 end
 
---- Fire step callbacks that have been reached.
-local function fireCallbacks(pb: Playback, world: World, target: integer, elapsed: number)
-    local cbs <const> = pb.schedule.callbacks
-    if not cbs then return end
-    while pb.nextCallback <= #cbs do
-        local sc <const> = cbs[pb.nextCallback]
-        if elapsed >= sc[1] then
-            pb.nextCallback = pb.nextCallback + 1
-            sc[2](world, target, pb as TweenHandle)
+local function fireEmits(c: Cursor, tl: Timeline, world: World, target: integer, elapsed: number)
+    local emits <const> = tl.emits
+    if not emits then return end
+    while c.nextEmit <= #emits do
+        local evDef <const> = emits[c.nextEmit]
+        if elapsed >= evDef.time then
+            c.nextEmit = c.nextEmit + 1
+            world:emit(0, TweenEvent, target, evDef.name, tl.channel, c.timelineId)
         else
             break
         end
     end
 end
 
---- Evaluate a playback at its current elapsed time (shared by root and nested runs).
-local function evaluatePlayback(pb: Playback, world: World, target: integer)
-    local sched <const> = pb.schedule
+local evaluateCursor: function(Cursor, World, integer)
 
-    -- Evaluate tween slots
-    evaluateSlots(sched.slots, pb.state, world, target, pb.elapsed)
-
-    -- Fire step callbacks
-    fireCallbacks(pb, world, target, pb.elapsed)
-
-    -- Evaluate nested runs
-    if sched.runs and pb.children then
-        for i = 1, #sched.runs do
-            local runSlot <const> = sched.runs[i]
-            local child <const> = pb.children[i]
+evaluateCursor = function(c: Cursor, world: World, target: integer)
+    local tl <const> = cursorTimeline(world, c)
+    if not tl then return end
+    evaluateSlots(tl.slots, c.state, world, target, c.elapsed)
+    fireEmits(c, tl, world, target, c.elapsed)
+    if tl.runs and c.children then
+        for i = 1, #tl.runs do
+            local runSlot <const> = tl.runs[i]
+            local child <const> = c.children[i]
             local runStart <const> = runSlot.startTime
             local runEnd <const> = runStart + runSlot.effectiveDuration
-
-            if pb.elapsed >= runStart and pb.elapsed <= runEnd then
-                local localElapsed = pb.elapsed - runStart
-                local cycleDuration <const> = child.schedule.totalDuration
+            local childTl <const> = cursorTimeline(world, child)
+            if childTl and c.elapsed >= runStart and c.elapsed <= runEnd then
+                local localElapsed = c.elapsed - runStart
+                local cycleDuration <const> = childTl.totalDuration
                 if cycleDuration > 0 then
                     local cyclePos = localElapsed % cycleDuration
                     local cycleIndex = math.floor(localElapsed / cycleDuration)
-
-                    -- Reset child state on cycle boundary crossing
                     if child._lastCycleIndex ~= cycleIndex then
-                        ffi.fill(child.state as ffi.CData, ffi.sizeof("TweenSlotState") * child.schedule.stateSize, 0)
-                        child.nextCallback = 1
+                        ffi.fill(child.state as ffi.CData, ffi.sizeof("TweenSlotState") * childTl.stateSize, 0)
+                        child.nextEmit = 1
                         child._lastCycleIndex = cycleIndex
                     end
-
                     if cycleIndex > child.repeatCount and child.repeatCount >= 0 then
                         cyclePos = cycleDuration
                     elseif runSlot.pingPong and cycleIndex % 2 == 1 then
                         cyclePos = cycleDuration - cyclePos
                     end
                     child.elapsed = cyclePos
-                    evaluatePlayback(child, world, target)
+                    evaluateCursor(child, world, target)
                 end
-            elseif pb.elapsed > runEnd then
-                -- Run completed: clamp to final state (once)
-                if not child.completed then
-                    if runSlot.pingPong and child.repeatCount % 2 == 0 then
-                        child.elapsed = 0
-                    else
-                        child.elapsed = child.schedule.totalDuration
-                    end
-                    evaluatePlayback(child, world, target)
-                    if child.schedule.onComplete then
-                        child.schedule.onComplete(world, target, child as TweenHandle)
-                    end
-                    child.completed = true
-                end
+            elseif childTl and c.elapsed > runEnd and not child.completed then
+                child.elapsed = childTl.totalDuration
+                evaluateCursor(child, world, target)
+                child.completed = true
             end
         end
     end
 end
 
---- Returns true if the playback is finished and should be removed.
-local function advancePlayback(pb: Playback, dt: number, world: World): boolean
-    if pb.paused then return false end
-
-    if pb.delay > 0 then
-        pb.delay = pb.delay - dt
-        if pb.delay > 0 then return false end
-        dt = -pb.delay
-        pb.delay = 0
+local function advanceCursor(c: Cursor, dt: number, world: World, target: integer): boolean
+    if c.paused then return false end
+    local tl <const> = cursorTimeline(world, c)
+    if not tl then return true end
+    if c.delay > 0 then
+        c.delay = c.delay - dt
+        if c.delay > 0 then return false end
+        dt = -c.delay
+        c.delay = 0
     end
-
-    local target <const> = pb.target
-    pb.elapsed = pb.elapsed + dt * pb.direction * pb.rate
-
-    evaluatePlayback(pb, world, target)
-
-    -- Check cycle completion
-    local totalDuration <const> = pb.schedule.totalDuration
-    local cycleComplete = false
-    if pb.direction == 1 and pb.elapsed >= totalDuration then
-        cycleComplete = true
-    elseif pb.direction == -1 and pb.elapsed <= 0 then
-        cycleComplete = true
-    end
-
+    c.elapsed = c.elapsed + dt * c.direction * c.rate
+    evaluateCursor(c, world, target)
+    local totalDuration <const> = tl.totalDuration
+    local cycleComplete = (c.direction == 1 and c.elapsed >= totalDuration) or (c.direction == -1 and c.elapsed <= 0)
     if cycleComplete then
-        if pb.repeatCount == -1 or pb.repeatCount > 0 then
-            if pb.repeatCount > 0 then
-                pb.repeatCount = pb.repeatCount - 1
-            end
-
-            if pb.schedule.pingPong then
-                pb.direction = -pb.direction
-                if pb.direction == 1 then
-                    -- Flipping back to forward: reset state for fresh capture
-                    ffi.fill(pb.state as ffi.CData, ffi.sizeof("TweenSlotState") * pb.schedule.stateSize, 0)
-                    pb.nextCallback = 1
-                    pb.elapsed = -pb.elapsed
+        if c.repeatCount == -1 or c.repeatCount > 0 then
+            if c.repeatCount > 0 then c.repeatCount = c.repeatCount - 1 end
+            if tl.pingPong then
+                c.direction = -c.direction
+                if c.direction == 1 then
+                    ffi.fill(c.state as ffi.CData, ffi.sizeof("TweenSlotState") * tl.stateSize, 0)
+                    c.nextEmit = 1
+                    c.elapsed = -c.elapsed
                 else
-                    pb.elapsed = totalDuration - (pb.elapsed - totalDuration)
+                    c.elapsed = totalDuration - (c.elapsed - totalDuration)
                 end
             else
-                -- Non-pingPong loop: reset state for fresh init on next cycle
-                ffi.fill(pb.state as ffi.CData, ffi.sizeof("TweenSlotState") * pb.schedule.stateSize, 0)
-                pb.nextCallback = 1
-                pb.elapsed = pb.elapsed - totalDuration
+                ffi.fill(c.state as ffi.CData, ffi.sizeof("TweenSlotState") * tl.stateSize, 0)
+                c.nextEmit = 1
+                c.elapsed = c.elapsed - totalDuration
             end
         else
-            -- Final clamp
-            if pb.direction == 1 then
-                pb.elapsed = totalDuration
-            else
-                pb.elapsed = 0
-            end
-            evaluatePlayback(pb, world, target)
-
-            if pb.schedule.onComplete then
-                pb.schedule.onComplete(world, target, pb as TweenHandle)
-            end
-            return true  -- finished
+            c.elapsed = c.direction == 1 and totalDuration or 0
+            evaluateCursor(c, world, target)
+            world:emit(0, TweenComplete, target, tl.channel, c.timelineId)
+            return true
         end
     end
-
     return false
 end
 
+local function releaseCursor(reg: Registry, c: Cursor)
+    if c.children then
+        for i = 1, #c.children do
+            releaseCursor(reg, c.children[i])
+        end
+    end
+    decRef(reg, c.timelineId)
+end
+
 -------------------------------------------------------------------------------
--- Plugin
+-- Snapshot registry and plugin
 -------------------------------------------------------------------------------
+
+local function collectLiveTemplateIds(world: World, playbackQuery: tecs.Query): {integer:boolean}
+    local live: {integer:boolean} = {}
+    for archetype, len in playbackQuery:iter() do
+        local playbacks = archetype:get(TweenPlayback)
+        for i = 1, len do
+            local pb = playbacks[i]
+            for j = 1, #(pb.cursors or {}) do
+                local function mark(c: Cursor)
+                    live[c.timelineId] = true
+                    if c.children then
+                        for k = 1, #c.children do mark(c.children[k]) end
+                    end
+                end
+                mark(pb.cursors[j])
+            end
+        end
+    end
+    local reg = registry(world)
+    for id, tl in pairs(reg.byId) do
+        if tl.pinned and (reg.refcounts[id] or 0) > 0 then
+            live[id] = true
+        end
+    end
+    return live
+end
 
 function tween.plugin(world: World)
-    if world.resources[ACTIVE_TWEENS] then return end
-    world.resources[ACTIVE_TWEENS] = {}
-    world.resources[CHANNEL_MAP] = {}
+    if world.resources[REGISTRY] then return end
+    world.resources[REGISTRY] = newRegistry()
+
+    local playbackQuery = world:query({
+        name = "tween.Playbacks",
+        include = {TweenPlayback},
+        onEntitiesRemoved = function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer, _count: integer)
+            local reg = registry(world)
+            local playbacks = archetype:get(TweenPlayback)
+            for row = firstRow, lastRow do
+                local pb = playbacks[row]
+                if pb then
+                    for i = 1, #(pb.cursors or {}) do
+                        releaseCursor(reg, pb.cursors[i])
+                    end
+                end
+            end
+        end
+    })
+
+    world:observe(0, tecs.builtins.OnSnapshotSave, function(ev: tecs.builtins.OnSnapshotSave)
+        local reg <const> = registry(world)
+        local live <const> = collectLiveTemplateIds(world, playbackQuery)
+        local templates: {{string:any}} = {}
+        for id, _ in pairs(live) do
+            local tl = reg.byId[id]
+            if tl then
+                templates[#templates + 1] = { id = id, timeline = serializeTimeline(tl) }
+            end
+        end
+        ev:addData(SNAPSHOT_DATA_KEY, {
+            nextId = reg.nextId,
+            templates = templates,
+        })
+    end)
+
+    world:observe(0, tecs.builtins.StartSnapshotLoad, function(ev: tecs.builtins.StartSnapshotLoad)
+        ev:onData(SNAPSHOT_DATA_KEY, function(value: any)
+            restoreRegistry(world, value as {string:any})
+        end)
+    end)
 
     world:observe(0, tecs.builtins.FinishSnapshotLoad, function()
-        world.resources[ACTIVE_TWEENS] = {}
-        world.resources[CHANNEL_MAP] = {}
+        local reg <const> = registry(world)
+        reg.refcounts = {}
+        for archetype, len in playbackQuery:iter() do
+            local playbacks = archetype:getMut(TweenPlayback)
+            for i = 1, len do
+                local pb = playbacks[i]
+                for j = 1, #(pb.cursors or {}) do
+                    local function rebuild(c: Cursor)
+                        incRef(reg, c.timelineId)
+                        if c.children then
+                            for k = 1, #c.children do rebuild(c.children[k]) end
+                        end
+                    end
+                    rebuild(pb.cursors[j])
+                end
+            end
+        end
     end)
 
     world:addSystem({
         name = "tween.Update",
         phase = tecs.phases.Update,
         run = function(dt: number)
-            local activeTweens <const> = world.resources[ACTIVE_TWEENS]
-            local channels <const> = world.resources[CHANNEL_MAP]
-            for i = #activeTweens, 1, -1 do
-                local pb <const> = activeTweens[i]
-                local remove = false
-
-                if pb.cancelled or not world:isAlive(pb.target) then
-                    remove = true
-                elseif advancePlayback(pb, dt, world) then
-                    remove = true
-                end
-
-                if remove then
-                    local ch <const> = pb.schedule.channel
-                    if ch then
-                        local ec = channels[pb.target]
-                        if ec and ec[ch] == pb then
-                            ec[ch] = nil
+            local reg <const> = registry(world)
+            local emptyEntities: {integer} = {}
+            for archetype, len, entities in playbackQuery:iter() do
+                local playbacks = archetype:getMut(TweenPlayback)
+                for i = 1, len do
+                    local entity <const> = entities[i]
+                    local pb = playbacks[i]
+                    local cursors = pb.cursors
+                    for cidx = #cursors, 1, -1 do
+                        local c = cursors[cidx]
+                        local remove = c.cancelled or not world:isAlive(entity)
+                        if not remove then
+                            remove = advanceCursor(c, dt, world, entity)
+                        end
+                        if remove then
+                            releaseCursor(reg, c)
+                            table.remove(cursors, cidx)
                         end
                     end
-                    table.remove(activeTweens, i)
+                    if #cursors == 0 then
+                        emptyEntities[#emptyEntities + 1] = entity
+                    end
+                end
+            end
+            for i = 1, #emptyEntities do
+                if world:isAlive(emptyEntities[i]) then
+                    world:remove(emptyEntities[i], TweenPlayback)
                 end
             end
         end
     })
-
 end
 
 return tween
