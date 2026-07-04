@@ -333,11 +333,6 @@ local function meshDemoPlugin(world: tecs.World)
                 end
             end
 
-            -- Quit
-            if input.isKeyReleased("escape") then
-                love.event.quit()
-            end
-
             -- Update HUD text
             local zoom = cam:getZoom()
             local text = world:get(s.zoomTextEntity, Text)
@@ -351,6 +346,7 @@ end
 
 love.run = tecs2d.run({
     fps = 60,
+    quitOnEscape = true,
     game = function(world: tecs.World)
         meshDemoPlugin(world)
     end,

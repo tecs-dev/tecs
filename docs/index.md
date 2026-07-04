@@ -155,7 +155,6 @@ world:emit(0, DamageEvent, enemyId, 25)
 -- main.tl
 local tecs = require("tecs")
 local tecs2d = require("tecs2d")
-local input = require("tecs2d.input")
 
 love.run = tecs2d.run({
     fps = 60,
@@ -179,16 +178,8 @@ love.run = tecs2d.run({
             end
         })
 
-        -- Input handling inside a system for per-frame checks
-        world:addSystem({
-            phase = tecs.phases.First,
-            run = function(_dt: number, _world: tecs.World)
-                if input.isKeyPressed("escape") then
-                    love.event.quit()
-                end
-            end
-        })
     end,
+    quitOnEscape = true,
 })
 ```
 

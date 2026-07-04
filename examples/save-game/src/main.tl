@@ -503,9 +503,7 @@ local function plugin(world: tecs.World)
         name = "KeyboardInput",
         phase = tecs.phases.First,
         run = function()
-            if input.isKeyPressed("escape") then
-                love.event.quit()
-            elseif input.isKeyPressed("u") then
+            if input.isKeyPressed("u") then
                 undo()
             elseif input.isKeyPressed("c") then
                 eraseAll()
@@ -568,6 +566,7 @@ end
 
 love.run = tecs2d.run({
     fps = 60,
+    quitOnEscape = true,
     game = plugin,
     render = {
         virtualHeight = WINDOW_HEIGHT,

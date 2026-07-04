@@ -162,10 +162,6 @@ local function examplePlugin(world: tecs.World)
                 return
             end
 
-            if input.isKeyPressed("escape") then
-                love.event.quit()
-            end
-
             local dt = love.timer.getDelta()
             local cam = pipeline:getCamera()
 
@@ -271,6 +267,7 @@ end
 
 love.run = tecs2d.run({
     fps = 60,
+    quitOnEscape = true,
     render = {
         lightingMode = "none",
         layers = {

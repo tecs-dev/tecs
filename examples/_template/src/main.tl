@@ -52,20 +52,11 @@ local function examplePlugin(world: tecs.World)
         end
     })
 
-    -- Input system
-    world:addSystem({
-        name = "HandleInput",
-        phase = tecs.phases.First,
-        run = function()
-            if input.isKeyPressed("escape") then
-                love.event.quit()
-            end
-        end
-    })
 end
 
 love.run = tecs2d.run({
     fps = 60,
+    quitOnEscape = true,
     game = function(world: tecs.World)
         examplePlugin(world)
     end,

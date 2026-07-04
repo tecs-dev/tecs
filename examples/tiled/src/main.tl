@@ -196,10 +196,6 @@ local function demoPlugin(world: tecs.World)
                 pipeline:getCamera():move(playerTransform.x, playerTransform.y)
             end
 
-            if input.isKeyPressed("escape") then
-                tecs2d.quit(0)
-            end
-
             -- Toggle physics debug with P
             if input.isKeyPressed("p") then
                 world:emit(0, gfx.PhysicsDebugToggle())
@@ -255,6 +251,7 @@ end
 
 love.run = tecs2d.run({
     fps = 60,
+    quitOnEscape = true,
     game = function(world: tecs.World)
         world:addPlugin(demoPlugin)
     end,

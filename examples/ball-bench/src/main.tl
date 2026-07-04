@@ -68,7 +68,6 @@ local function ballBenchPlugin(world: tecs.World)
     local ballTexture = createBallTexture()
     local ballSheet = SpriteSheet.fromTexture(ballTexture)
 
-    local input = require("tecs2d.input")
     local spawnedCount = 0
 
     -- Movement query
@@ -83,11 +82,6 @@ local function ballBenchPlugin(world: tecs.World)
         name = "Spawn",
         phase = tecs.phases.Update,
         run = function()
-            if input.isKeyReleased("escape") then
-                tecs2d.quit(0)
-                return
-            end
-
             if spawnedCount < maxEntities then
                 local toSpawn = min(SPAWN_BATCH_SIZE, maxEntities - spawnedCount)
                 world:batchSpawn(toSpawn,
@@ -127,6 +121,7 @@ end
 
 love.run = tecs2d.run({
     fps = 60,
+    quitOnEscape = true,
     game = function(world: tecs.World)
         world:addPlugin(mcp.new())
         world:addPlugin(ballBenchPlugin)

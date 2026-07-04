@@ -129,10 +129,6 @@ local function tweenDemoPlugin(world: tecs.World)
         name = "TweenInput",
         phase = tecs.phases.PreUpdate,
         run = function()
-            if input.isKeyPressed("escape") then
-                love.event.quit()
-            end
-
             -- Easing selection
             if input.isKeyPressed("left") then
                 selectedEasing = selectedEasing - 1
@@ -283,6 +279,7 @@ end
 
 love.run = tecs2d.run({
     fps = 60,
+    quitOnEscape = true,
     game = tweenDemoPlugin,
     render = {
         virtualHeight = VIRTUAL_H,

@@ -110,19 +110,12 @@ function GamepadDemoPlugin:init(world: tecs.World)
         print("Joystick removed event received: " .. event.joystick:getName())
     end)
 
-    local input = require("tecs2d.input")
     local demo = self
 
     world:addSystem({
         name = "InputSystem",
         phase = tecs.phases.Update,
         run = function()
-            -- Quit the application when the escape key is released
-            if input.isKeyReleased("escape") then
-                tecs2d.quit(0)
-                return
-            end
-
             -- Look for joystick button presses and update binding states
             for _, name in ipairs(demo.bindingNames) do
                 demo.bindingStates[name] = demo.controller:isDown(name)
@@ -240,6 +233,7 @@ end
 -- Set up Tecs so that it runs the game loop
 love.run = tecs2d.run({
     fps = 60,
+    quitOnEscape = true,
     game = function(world: tecs.World)
         local demo = GamepadDemoPlugin.new()
         demo:init(world)

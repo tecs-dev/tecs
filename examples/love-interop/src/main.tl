@@ -14,7 +14,6 @@ local lg <const> = love.graphics
 local sin <const> = math.sin
 local cos <const> = math.cos
 local pi <const> = math.pi
-local input <const> = require("tecs2d.input")
 
 -- Enable MCP server
 
@@ -236,22 +235,13 @@ local function loveInteropPlugin(world: tecs.World)
     })
 
     -- Input handling
-    world:addSystem({
-        name = "HandleInput",
-        phase = tecs.phases.First,
-        run = function()
-            if input.isKeyPressed("escape") then
-                love.event.quit()
-            end
-        end
-    })
-
     -- Center camera
     pipeline:getCamera():setPosition(centerX, centerY)
 end
 
 love.run = tecs2d.run({
     fps = 60,
+    quitOnEscape = true,
     game = function(world: tecs.World)
         loveInteropPlugin(world)
     end,

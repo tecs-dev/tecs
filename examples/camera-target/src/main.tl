@@ -174,9 +174,6 @@ local function cameraTargetPlugin(world: tecs.World)
                 cam:shake(1.0)
             end
 
-            if input.isKeyReleased("escape") then
-                tecs2d.quit(0)
-            end
         end,
     })
 
@@ -204,6 +201,7 @@ end
 
 love.run = tecs2d.run({
     fps = 60,
+    quitOnEscape = true,
     game = cameraTargetPlugin,
     render = {
         virtualHeight = VIRTUAL_HEIGHT,

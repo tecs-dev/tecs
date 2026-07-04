@@ -208,9 +208,6 @@ local function demoPlugin(world: tecs.World)
                 s.dissolveDirection = -s.dissolveDirection
             end
 
-            if input.isKeyReleased("escape") then
-                tecs2d.quit(0)
-            end
         end
     })
 
@@ -243,6 +240,7 @@ end
 
 love.run = tecs2d.run({
     fps = 60,
+    quitOnEscape = true,
     game = function(world: tecs.World)
         world:addPlugin(demoPlugin)
     end,

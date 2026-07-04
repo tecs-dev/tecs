@@ -172,9 +172,6 @@ local function box2dExamplePlugin(w: tecs.World)
                 sceneEntities[#sceneEntities + 1] = id
             end
 
-            if input.isKeyPressed("escape") then
-                love.event.quit()
-            end
         end,
     })
 
@@ -218,6 +215,7 @@ end
 
 love.run = tecs2d.run({
     fps = 60,
+    quitOnEscape = true,
     game = box2dExamplePlugin,
     render = {
         virtualHeight = WINDOW_HEIGHT,

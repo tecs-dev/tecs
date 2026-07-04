@@ -19,7 +19,14 @@ local RunTest: RunTestComp = tecs.newComponent({
 
 local function installTecs2dStubs()
     package.loaded["tecs2d"] = nil
+    local escapePressed = false
     package.loaded["tecs2d.input"] = {
+        setEscapePressed = function(value: boolean)
+            escapePressed = value
+        end,
+        isKeyPressed = function(key: string): boolean
+            return key == "escape" and escapePressed
+        end,
         update = function() end,
         enterFixedPhase = function() end,
         exitFixedPhase = function() end,
@@ -309,5 +316,42 @@ describe("tecs2d.run hotReload", function()
         luassert.is_nil(loop())
         luassert.is_nil(loop())
         luassert.is_false(shutdownCalled)
+    end)
+
+    it("quits with exit code 0 when quitOnEscape is enabled and escape is pressed", function()
+        local queuedEvents: {{any}} = {}
+        love2d_mock.event.push = function(name: string, ...: any)
+            queuedEvents[#queuedEvents + 1] = {name, ...}
+        end
+        love2d_mock.event.poll = function(): function(): string, any, any, any, any, any
+            return function(): string, any, any, any, any, any
+                local event = table.remove(queuedEvents, 1)
+                if not event then return nil end
+                return event[1] as string, event[2], event[3], event[4], event[5], event[6]
+            end
+        end
+        local inputStub = package.loaded["tecs2d.input"] as {string: any}
+        inputStub.setEscapePressed(true)
+
+        local shutdownCalled = false
+        local tecs2d = require("tecs2d")
+        local runner = tecs2d.run({
+            fps = 60,
+            quitOnEscape = true,
+            game = function(world: tecs.World)
+                world:addSystem({
+                    name = "run-spec.quit-on-escape-shutdown",
+                    phase = tecs.phases.Shutdown,
+                    run = function() shutdownCalled = true end,
+                })
+            end,
+            render = {},
+        })
+        local loop = runner()
+
+        luassert.is_nil(loop())
+        inputStub.setEscapePressed(false)
+        luassert.equals(0, loop())
+        luassert.is_true(shutdownCalled)
     end)
 end)

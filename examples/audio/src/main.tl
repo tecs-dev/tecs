@@ -193,8 +193,6 @@ local input <const> = require("tecs2d.input")
         name = "HandleInput",
         phase = tecs.phases.First,
         run = function()
-            if input.isKeyPressed("escape") then love.event.quit() end
-
             -- Mute toggle
             if input.isKeyPressed("m") then
                 isMuted = not isMuted
@@ -323,6 +321,7 @@ end
 
 love.run = tecs2d.run({
     fps = 60,
+    quitOnEscape = true,
     game = function(world: tecs.World)
         world:addPlugin(mcp.new())
         local audioManager = world.resources[audio]

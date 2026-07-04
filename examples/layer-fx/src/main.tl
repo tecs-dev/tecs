@@ -384,10 +384,6 @@ local function layerFxPlugin(world: tecs.World)
         name = "HandleInput",
         phase = tecs.phases.First,
         run = function(dt: number)
-            if input.isKeyPressed("escape") then
-                love.event.quit()
-            end
-
             local hudChanged = false
 
             -- Layer selection (up/down)
@@ -454,6 +450,7 @@ end
 
 love.run = tecs2d.run({
     fps = 60,
+    quitOnEscape = true,
     game = layerFxPlugin,
     render = {
         virtualHeight = VIRTUAL_HEIGHT,

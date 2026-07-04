@@ -289,9 +289,7 @@ local function showcasePlugin(world: tecs.World)
                 cam:setZoom(currentZoom * 0.9)
             end
 
-            if input.isKeyReleased("escape") then
-                tecs2d.quit(0)
-            elseif input.isKeyReleased("f") then
+            if input.isKeyReleased("f") then
                 s.fullscreen = not s.fullscreen
                 love.window.setFullscreen(s.fullscreen, "desktop")
             elseif input.isKeyReleased("c") then
@@ -311,6 +309,7 @@ end
 
 love.run = tecs2d.run({
     fps = 60,
+    quitOnEscape = true,
     maxEntities = MAX_ENTITIES,
     game = function(world: tecs.World)
         world:addPlugin(showcasePlugin)

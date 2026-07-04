@@ -170,9 +170,6 @@ local function particlesPlugin(world: tecs.World)
                 end
             end
 
-            if input.isKeyDown("escape") then
-                tecs2d.quit(0)
-            end
         end
     })
 
@@ -203,6 +200,7 @@ end
 
 love.run = tecs2d.run({
     fps = 60,
+    quitOnEscape = true,
     game = function(world: tecs.World)
         world:addPlugin(particlesPlugin)
     end,

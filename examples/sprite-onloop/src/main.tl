@@ -6,7 +6,6 @@ local tecs2d <const> = require("tecs2d")
 local gfx <const> = require("tecs2d.gfx")
 local SpriteSheet <const> = require("tecs2d.gfx.internal.sprite.sheet").SpriteSheet
 local sprite_module <const> = require("tecs2d.gfx.internal.sprite")
-local input <const> = require("tecs2d.input")
 local mcp <const> = require("tecs2d.mcp")
 
 local Text <const> = gfx.Text
@@ -81,20 +80,11 @@ local function examplePlugin(w: tecs.World)
         end
     })
 
-    -- Input handling
-    w:addSystem({
-        name = "HandleInput",
-        phase = tecs.phases.First,
-        run = function()
-            if input.isKeyPressed("escape") then
-                love.event.quit()
-            end
-        end
-    })
 end
 
 love.run = tecs2d.run({
     fps = 60,
+    quitOnEscape = true,
     game = examplePlugin,
     render = {
         virtualHeight = WINDOW_HEIGHT,

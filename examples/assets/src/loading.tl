@@ -1,5 +1,4 @@
 local tecs <const> = require("tecs")
-local tecs2d <const> = require("tecs2d")
 local assets <const> = require("tecs2d.assets")
 local GameState <const> = require("game_state")
 
@@ -42,20 +41,12 @@ function LoadingScreenPlugin:init(world: tecs.World)
     world:createState(GameState.PLAYING)
     world:pushState(GameState.LOADING)
 
-    local input = require("tecs2d.input")
-
-    -- Add system to check for loading completion and handle escape
+    -- Add system to check for loading completion.
     world:addSystem({
         name = "LoadingScreenUpdate",
         phase = tecs.phases.Update,
         runIf = tecs.runif.inState(GameState.LOADING),
         run = function()
-            -- Check if escape is pressed
-            if input.isKeyReleased("escape") then
-                tecs2d.quit(0)
-                return
-            end
-
             -- Start loading after first frame
             if not self.hasStartedLoading then
                 self.hasStartedLoading = true

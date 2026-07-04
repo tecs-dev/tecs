@@ -141,9 +141,7 @@ local function benchPlugin(world: tecs.World)
                 cam:setZoom(currentZoom * 0.95)
             end
 
-            if input.isKeyReleased("escape") then
-                tecs2d.quit(0)
-            elseif input.isKeyReleased("f") then
+            if input.isKeyReleased("f") then
                 local fullscreen = love.window.getFullscreen()
                 love.window.setFullscreen(not fullscreen, "desktop")
             elseif input.isKeyReleased("space") then
@@ -175,6 +173,7 @@ end
 
 love.run = tecs2d.run({
     fps = 60,
+    quitOnEscape = true,
     game = function(world: tecs.World)
         world:addPlugin(benchPlugin)
     end,

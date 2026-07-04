@@ -339,9 +339,6 @@ local function multiCamPlugin(world: tecs.World)
                 end
             end
 
-            if input.isKeyReleased("escape") then
-                tecs2d.quit(0)
-            end
         end
     })
 
@@ -407,6 +404,7 @@ end
 
 love.run = tecs2d.run({
     fps = 60,
+    quitOnEscape = true,
     game = multiCamPlugin,
     render = {
         virtualHeight = VIRTUAL_HEIGHT,

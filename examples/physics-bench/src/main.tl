@@ -211,9 +211,7 @@ local function physicsBenchPlugin(world: tecs.World)
             local s = world.resources[STATE_KEY]
             if not s then return end
 
-            if input.isKeyReleased("escape") then
-                tecs2d.quit(0)
-            elseif input.isKeyReleased("f") then
+            if input.isKeyReleased("f") then
                 s.fullscreen = not s.fullscreen
                 love.window.setFullscreen(s.fullscreen, "desktop")
             elseif input.isKeyReleased("p") then
@@ -252,6 +250,7 @@ end
 
 love.run = tecs2d.run({
     fps = 60,
+    quitOnEscape = true,
     game = function(world: tecs.World)
         world:addPlugin(physicsBenchPlugin)
     end,

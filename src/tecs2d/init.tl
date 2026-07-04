@@ -82,6 +82,10 @@ local record tecs2d
         --- `tecs.World.Config.maxEntities`.
         maxEntities: integer
 
+        --- Optional. When true, pressing Escape requests a clean quit with
+        --- exit code 0.
+        quitOnEscape: boolean
+
         --- Optional development hot-reload support.
         hotReload: HotReloadConfig
     end
@@ -265,6 +269,18 @@ end
 -- tecs2d.run function implementation
 -------------------------------------------------------------------------------
 
+local function installQuitOnEscape(world: tecs.World)
+    world:addSystem({
+        name = "love.QuitOnEscape",
+        phase = tecs.phases.First,
+        run = function()
+            if input.isKeyPressed("escape") then
+                tecs2d.quit(0)
+            end
+        end
+    })
+end
+
 local record HotReloadState
     enabled: boolean
     snapshotPath: string
@@ -425,6 +441,10 @@ local function runLoop(config: tecs2d.RunConfig): (function(): number | string)
         maxEntities = config.maxEntities,
     })
     world:addPlugin(gamePlugin)
+
+    if config.quitOnEscape == true then
+        installQuitOnEscape(world)
+    end
 
     -- Auto-install render pipeline
     local renderConfig = config.render or {} as gfx.RenderConfig

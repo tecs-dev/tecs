@@ -5,6 +5,7 @@ local GameplayPlugin <const> = require("gameplay")
 
 love.run = tecs2d.run({
     fps = 60,
+    quitOnEscape = true,
     game = function(world: tecs.World)
         world:addPlugin(LoadingScreenPlugin.plugin())
         world:addPlugin(GameplayPlugin.plugin())

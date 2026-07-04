@@ -118,9 +118,6 @@ local function benchPlugin(world: tecs.World)
                 cam:nudge(0, -cameraPanSpeed * dt)
             end
 
-            if input.isKeyDown("escape") then
-                tecs2d.quit(0)
-            end
         end
     })
 
@@ -160,6 +157,7 @@ end
 
 love.run = tecs2d.run({
     fps = 60,
+    quitOnEscape = true,
     -- Default world cap is ~1M slots. Bump it so the bench can spawn
     -- past 1M sprites; ABSOLUTE_MAX_SLOT_COUNT in IdAllocator is 4M
     -- (the id format's hard ceiling). The +1024 covers HUD text and

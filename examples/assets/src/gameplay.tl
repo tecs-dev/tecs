@@ -1,5 +1,4 @@
 local tecs <const> = require("tecs")
-local tecs2d <const> = require("tecs2d")
 local assets <const> = require("tecs2d.assets")
 local GameState <const> = require("game_state")
 
@@ -35,9 +34,7 @@ function GameplayPlugin:init(world: tecs.World)
         runIf = tecs.runif.inState(GameState.PLAYING),
         run = function()
             self:update()
-            if input.isKeyReleased("escape") then
-                tecs2d.quit(0)
-            elseif input.isKeyReleased("return") then
+            if input.isKeyReleased("return") then
                 self.messages = {}
                 -- Force garbage collection to free memory
                 collectgarbage("collect")

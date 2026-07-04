@@ -207,10 +207,6 @@ local function orbitingShapesPlugin(world: tecs.World)
         name = "HandleInput",
         phase = tecs.phases.First,
         run = function()
-            if input.isKeyPressed("escape") then
-                love.event.quit()
-            end
-
             if input.isKeyDown("up") then
                 if state.numSatellites < MAX_SATELLITES then
                     addSatellites(world, state, SPAWN_BATCH_SIZE)
@@ -287,6 +283,7 @@ end
 
 love.run = tecs2d.run({
     fps = 60,
+    quitOnEscape = true,
     game = orbitingShapesPlugin,
     render = {
         virtualHeight = WINDOW_HEIGHT,

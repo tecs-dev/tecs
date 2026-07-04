@@ -202,9 +202,6 @@ local function examplePlugin(w: tecs.World)
                 end
             end
 
-            if input.isKeyPressed("escape") then
-                love.event.quit()
-            end
         end,
     })
 
@@ -226,6 +223,7 @@ end
 
 love.run = tecs2d.run({
     fps = 60,
+    quitOnEscape = true,
     game = examplePlugin,
     render = {
         virtualHeight = WINDOW_HEIGHT,

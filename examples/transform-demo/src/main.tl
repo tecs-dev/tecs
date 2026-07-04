@@ -567,10 +567,6 @@ local function transformDemoPlugin(world: tecs.World)
         name = "HandleInput",
         phase = tecs.phases.First,
         run = function()
-            if input.isKeyPressed("escape") then
-                love.event.quit()
-            end
-
             -- Manual zoom with +/- or mouse wheel
             if input.isKeyDown("=") then
                 targetZoom = targetZoom * 1.02
@@ -712,6 +708,7 @@ end
 
 love.run = tecs2d.run({
     fps = 60,
+    quitOnEscape = true,
     game = transformDemoPlugin,
     render = {
         virtualHeight = 800,
