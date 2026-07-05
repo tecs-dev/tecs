@@ -103,7 +103,7 @@ world:saveSnapshot({
 
 Some games are logically laid out by layer. You can serialize just specific layers by providing `layers`,
 an array of `Transform.layer` values (0..31). Entities carrying a `Transform` with a layer outside the allow-list
-are skipped; entities that don't have a `Transform` pass through unchanged (the filter only applies when there's 
+are skipped; entities that don't have a `Transform` pass through unchanged (the filter only applies when there's
 something to filter on).
 
 ```teal
@@ -171,21 +171,55 @@ world:loadSnapshot(saveBuffer)
 playerId = world:requireKey("player")
 ```
 
-For collections, rebuild the runtime index from saved components:
-
-```teal
-cellByPos = {}
-for archetype, len in cellQuery:iter() do
-    local entities = archetype.entities
-    local cells = archetype:get(Cell)
-    for i = 1, len do
-        cellByPos[cellKey(cells[i].col, cells[i].row)] = entities[i]
-    end
-end
-```
-
 The snapshot lifecycle is designed for this. `StartSnapshotLoad` lets plugins read custom data, and
 `FinishSnapshotLoad` is the right place to refresh runtime handles that depend on the fully restored world.
+
+### Observers and runtime callbacks
+
+Snapshots do not serialize Lua callbacks or closures. Global observers registered at address `0` survive only a
+same-world `loadSnapshot`, because the existing world, systems, and message bus remain installed. If the process
+exits and a save is loaded into a new world, plugins must register their global observers again during normal setup.
+Entity-address observers do not survive either case: loading a snapshot replaces the current entity set, and
+despawning an entity clears observers registered on that entity's address.
+
+When an entity needs durable behavior, save the intent as ECS data and let a query or system install the runtime
+callback. For example, instead of hand-registering a one-off `OnDespawn` callback for each entity that should make
+an effect, store a component:
+
+```teal
+local record DespawnEffect is tecs.Component
+    name: string
+    metamethod __call: function(self, name: string): DespawnEffect
+end
+
+tecs.newComponent({
+    name = "DespawnEffect",
+    container = DespawnEffect,
+    fields = {"name"},
+})
+```
+
+Then let plugin setup react to matching entities and install the runtime entity observer:
+
+```teal
+local despawnEffectQuery = world:query({
+    include = {DespawnEffect, tecs.builtins.Transform},
+    onEntitiesAdded = function(archetype, firstRow, lastRow)
+        local entities = archetype.entities
+        for row = firstRow, lastRow do
+            local entity = entities[row]
+            world:observe(entity, tecs.builtins.OnDespawn, function(ev: tecs.builtins.OnDespawn)
+                -- spawn the effect here...
+            end, "despawn-effect")
+        end
+    end,
+})
+```
+
+The dynamic part is still dynamic: gameplay can add or remove `DespawnEffect("poof")` at any time. The durable
+part is no longer the observer closure; it is component data that snapshots and loads cleanly. After loading, the
+plugin's query sees the restored matching entities and installs fresh entity-address observers from the restored
+component state.
 
 ## Table snapshots
 
@@ -401,6 +435,8 @@ For each plugin or subsystem that participates in saves:
 - Mark process-local backing components `transient = true` when the entity itself is durable.
 - Use `ev:exclude(component)` for fully derived entities that should not appear in saves.
 - Rebuild derived entities, resources, and caches during normal systems or `FinishSnapshotLoad`.
+- Store durable per-entity behavior as components/relationships interpreted by global observers or systems, not as
+  entity-address callback registrations.
 - Use `Key` only for stable anchors the application needs to rediscover, such as `"player"` or `"camera.main"`.
 - Prefer queries or rebuilt indexes for groups of state-owned entities instead of assigning a key to every entity.
 - Keep renderer handles, physics bodies, audio voices, controller state, open files, worker threads, and caches out of
