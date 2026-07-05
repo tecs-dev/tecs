@@ -443,6 +443,7 @@ local record internal
         getStats: function(self: WorldImpl, fill?: types.World.Stats): types.World.Stats
         saveSnapshot: function(self: WorldImpl, opts?: types.World.SnapshotOptions): types.World.SnapshotOutput
         loadSnapshot: function(self: WorldImpl, source: any): types.World.SnapshotPrelude
+        addSnapshotHandler: function(self: WorldImpl, handler: types.World.SnapshotHandler)
 
         -- ----- Internal staging / drain / batch / sparse methods -----
         findOldValue: function(self: WorldImpl, slot: integer, componentType: Component,

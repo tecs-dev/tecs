@@ -497,6 +497,77 @@ describe("snapshot save/load", function()
         luassert.equals(2, (seen["plugin.extra"] as {string: integer}).b)
     end)
 
+    it("addSnapshotHandler saves loads and finishes named data", function()
+        local world = tecs.newWorld()
+        world:spawn(PositionComp(1, 1))
+        world:commit()
+
+        local sourceValue = 7
+        local loadedValue = 0
+        local order: {string} = {}
+        local finishPrelude: tecs.SnapshotPrelude | nil
+
+        world:addSnapshotHandler({
+            name = "spec.snapshotHandler",
+            save = function(_world: tecs.World): any
+                table.insert(order, "save")
+                return {value = sourceValue}
+            end,
+            load = function(_world: tecs.World, value: any)
+                table.insert(order, "load")
+                loadedValue = (value as {string: integer}).value
+            end,
+            finish = function(_world: tecs.World, prelude: tecs.SnapshotPrelude)
+                table.insert(order, "finish")
+                finishPrelude = prelude
+            end,
+        })
+
+        local snap = saveTableSnapshot(world)
+        sourceValue = 99
+        world:loadSnapshot(snap)
+
+        luassert.equals(7, loadedValue)
+        luassert.equals("save", order[1])
+        luassert.equals("load", order[2])
+        luassert.equals("finish", order[3])
+        luassert.is_not_nil(finishPrelude)
+        luassert.equals(1, (finishPrelude as tecs.SnapshotPrelude).version)
+    end)
+
+    it("addSnapshotHandler omits nil save results", function()
+        local world = tecs.newWorld()
+        world:spawn(PositionComp(1, 1))
+        world:commit()
+
+        local loaded = false
+        world:addSnapshotHandler({
+            name = "spec.nilSnapshotHandler",
+            save = function(_world: tecs.World): any
+                return nil
+            end,
+            load = function(_world: tecs.World, _value: any)
+                loaded = true
+            end,
+        })
+
+        world:loadSnapshot(saveTableSnapshot(world))
+        luassert.is_false(loaded)
+    end)
+
+    it("addSnapshotHandler requires a non-empty name", function()
+        local world = tecs.newWorld()
+
+        luassert.has_error(function()
+            world:addSnapshotHandler({
+                name = "",
+                save = function(_world: tecs.World): any
+                    return true
+                end,
+            })
+        end, "snapshot handler requires a non-empty name")
+    end)
+
     it("transient components are omitted without excluding entities", function()
         local testId = math.random(1, 1000000)
 

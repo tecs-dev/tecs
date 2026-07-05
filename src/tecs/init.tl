@@ -54,6 +54,7 @@ local record tecs
     type SnapshotComponentTableEntry = types.World.SnapshotComponentTableEntry
     type SnapshotOptions = types.World.SnapshotOptions
     type SnapshotOutput = types.World.SnapshotOutput
+    type SnapshotHandler = types.World.SnapshotHandler
 
     json: json
     phases: phases

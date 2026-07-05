@@ -1138,6 +1138,41 @@ function WorldImpl:clearObservers(address: integer)
     self.messages:clearAddress(IdAllocator.slotOf(address))
 end
 
+function WorldImpl:addSnapshotHandler(handler: types.World.SnapshotHandler)
+    if handler.name == nil or handler.name == "" then
+        error("snapshot handler requires a non-empty name", 2)
+    end
+
+    local key <const> = handler.name
+    local save <const> = handler.save
+    if save then
+        self:observe(0, builtins.OnSnapshotSave, function(ev: builtins.OnSnapshotSave)
+            local value = save(self)
+            if value ~= nil then
+                ev:addData(key, value)
+            end
+        end)
+    end
+
+    local loadHandler <const> = handler.load
+    if loadHandler then
+        local loadFn <const> = loadHandler as function(types.World, any)
+        self:observe(0, builtins.StartSnapshotLoad, function(ev: builtins.StartSnapshotLoad)
+            ev:onData(key, function(value: any)
+                loadFn(self, value)
+            end)
+        end)
+    end
+
+    local finish <const> = handler.finish
+    if finish then
+        local finishFn <const> = finish as function(types.World, types.World.SnapshotPrelude)
+        self:observe(0, builtins.FinishSnapshotLoad, function(ev: builtins.FinishSnapshotLoad)
+            finishFn(self, ev.prelude as types.World.SnapshotPrelude)
+        end)
+    end
+end
+
 -------------------------------------------------------------------------------
 -- Phase methods
 -------------------------------------------------------------------------------

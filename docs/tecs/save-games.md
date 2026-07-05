@@ -69,7 +69,7 @@ custom data.
 | `path`          | `string`                                | Optional binary output file path. Writes the bytes to disk and still returns the tagged result. |
 | `filterQuery`   | [`QueryDescriptor`](/tecs/queries/) | Only save entities matching this query (`include` / `includeAny` / `exclude`). Composes freely with `layers`. |
 | `layers`        | `{integer}`                             | Allow-list of `Transform.layer` values (0..31). Filters Transform-bearing entities by layer; entities without a `Transform` pass through unchanged. |
-| `customData`    | `{string: any}`                         | Keyed metadata attached to the snapshot's data section. Values must be `string.buffer`-encodable. See [Snapshot events](#snapshot-events) for how to read it back. |
+| `customData`    | `{string: any}`                         | Keyed metadata attached to the snapshot's data section. Values must be `string.buffer`-encodable. See [Snapshot handlers](#snapshot-handlers) for how to read it back. |
 
 ### buffer
 
@@ -123,7 +123,7 @@ world:saveSnapshot({
 
 You can attach keyed metadata (build version, player profile, checkpoint, etc.) by providing `customData`. Each entry
 becomes a data pair in the snapshot. Values must be `string.buffer`-encodable (numbers, strings, booleans, plain
-tables). See [Snapshot events](#snapshot-events) for how to read the data back on load.
+tables). See [Snapshot handlers](#snapshot-handlers) for how to read the data back on load.
 
 ```teal
 world:saveSnapshot({
@@ -138,7 +138,7 @@ world:saveSnapshot({
 ## World:loadSnapshot
 
 Restores a previously saved snapshot into `world`, replacing the current world state. See
-[Snapshot events](#snapshot-events) for how to hook into the load lifecycle and read back custom data.
+[Snapshot handlers](#snapshot-handlers) for how to hook into the load lifecycle and read back custom data.
 
 ```teal
 function world:loadSnapshot(source: any): tecs.SnapshotPrelude
@@ -314,9 +314,35 @@ loadBuf:putcdata(fileData:getPointer(), fileData:getSize())
 world:loadSnapshot(loadBuf)
 ```
 
+## Snapshot handlers
+
+For most plugin and game state that lives outside components, register a named snapshot handler:
+
+```teal
+world:addSnapshotHandler({
+    name = "mygame.rng",
+    save = function(_world: tecs.World): any
+        return rng:save()
+    end,
+    load = function(_world: tecs.World, value: any)
+        rng:load(value)
+    end,
+    finish = function(world: tecs.World, _prelude: tecs.SnapshotPrelude)
+        playerId = world:requireKey("player")
+    end,
+})
+```
+
+`save` writes one value into the snapshot data section under `name` when it returns non-nil. `load` receives that
+value after the ECS world has been restored. `finish` runs after all snapshot data callbacks have completed, so it is
+the right place to rebind `Key` handles and rebuild runtime indexes or resources that need the final restored world.
+
+Values must be `string.buffer`-encodable. Use namespaced keys (`"tecs2d.physics"`, `"mygame.rng"`) to avoid
+collisions.
+
 ## Snapshot events
 
-Three events fire on entity 0 during save/load so plugins and game systems can participate in the snapshot lifecycle:
+`addSnapshotHandler` is built from three lower-level events that fire on entity 0 during save/load:
 
 | Event                | When                                                                            | Purpose |
 | -------------------- | ------------------------------------------------------------------------------- | ------- |
@@ -338,47 +364,61 @@ local playerId = 0
 local rng = MyRng.new()
 local physicsWorld = MyPhysicsWorld.new()
 
-world:observe(0, tecs.builtins.OnSnapshotSave, function(ev: tecs.builtins.OnSnapshotSave)
-    ev:addData("mygame.rng", rng:save())
-    ev:addData("mygame.physics", physicsWorld:saveSettings())
-end)
-
-world:observe(0, tecs.builtins.StartSnapshotLoad, function(ev: tecs.builtins.StartSnapshotLoad)
-    ev:onData("mygame.rng", function(value: any)
-        rng:load(value)
-    end)
-    ev:onData("mygame.physics", function(value: any)
-        physicsWorld:loadSettings(value)
-    end)
-end)
-
-world:observe(0, tecs.builtins.FinishSnapshotLoad, function(_ev: tecs.builtins.FinishSnapshotLoad)
-    playerId = world:requireKey("player")
-    rebuildCellIndexFromComponents()
-    recreatePhysicsBodiesFromRigidBodyComponents()
-    recreateAudioVoicesFromAudioSourceComponents()
-end)
+world:addSnapshotHandler({
+    name = "mygame.runtime",
+    save = function(_world: tecs.World): any
+        return {
+            rng = rng:save(),
+            physics = physicsWorld:saveSettings(),
+        }
+    end,
+    load = function(_world: tecs.World, value: any)
+        local data = value as {string: any}
+        rng:load(data.rng)
+        physicsWorld:loadSettings(data.physics)
+    end,
+    finish = function(world: tecs.World, _prelude: tecs.SnapshotPrelude)
+        playerId = world:requireKey("player")
+        rebuildCellIndexFromComponents()
+        recreatePhysicsBodiesFromRigidBodyComponents()
+        recreateAudioVoicesFromAudioSourceComponents()
+    end,
+})
 ```
 
 `StartSnapshotLoad` is for reading custom data from the snapshot's data section. `FinishSnapshotLoad` is for anything
 that needs the final restored world: rebinding `Key` handles, rebuilding lookup tables, and recreating transient
-renderer/physics/audio resources.
+renderer/physics/audio resources. `addSnapshotHandler` wires both phases for you.
 
 ### Attaching data during save
 
-Plugins (or any system) can attach data by listening for `OnSnapshotSave` and calling `ev:addData(key, value)`.
-The framework queues these calls during the event and flushes them into the snapshot's data section after the
-archetype data is written, so the ordering is deterministic (per-listener, in call order).
+Use `addSnapshotHandler` for ordinary custom data:
+
+```teal
+world:addSnapshotHandler({
+    name = "physics.world",
+    save = function(_world: tecs.World): any
+        return physicsSystem:serialize()
+    end,
+    load = function(_world: tecs.World, value: any)
+        physicsSystem:deserialize(value)
+    end,
+})
+```
+
+The lower-level form is available when a plugin needs direct access to `OnSnapshotSave`:
 
 ```teal
 world:observe(0, tecs.builtins.OnSnapshotSave, function(ev: tecs.builtins.OnSnapshotSave)
-    ev:addData("physics.world", physicsSystem:serialize())
     ev:addData("rng.state", rng:getState())
 end)
 ```
 
-Keys are strings; values are `string.buffer`-encodable. Use namespaced keys (`"tecs2d.physics"`, `"mygame.scoreboard"`)
-to avoid collisions. The framework never inspects keys or values; they're round-tripped verbatim.
+The framework queues data written during the event and flushes it into the snapshot's data section after the
+archetype data is written, so the ordering is deterministic (per-listener, in call order).
+
+Keys are strings; values are `string.buffer`-encodable. The framework never inspects keys or values; they're
+round-tripped verbatim.
 
 ### Excluding plugin-derived entities
 
@@ -432,6 +472,7 @@ whole component runtime-only with `transient`, or provide custom serialization f
 For each plugin or subsystem that participates in saves:
 
 - Save durable source-of-truth components, relationships, and custom data.
+- Use `world:addSnapshotHandler(...)` for ordinary non-component custom data and load-finalization work.
 - Mark process-local backing components `transient = true` when the entity itself is durable.
 - Use `ev:exclude(component)` for fully derived entities that should not appear in saves.
 - Rebuild derived entities, resources, and caches during normal systems or `FinishSnapshotLoad`.
@@ -455,7 +496,7 @@ world:observe(0, tecs.builtins.StartSnapshotLoad, function(ev: tecs.builtins.Sta
         physicsSystem:deserialize(value)
     end)
     ev:onData("rng.state", function(value: any)
-        rng:setState(value)
+        rng:load(value)
     end)
 end)
 

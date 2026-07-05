@@ -612,6 +612,18 @@ local record types
             snapshot: Snapshot | nil
         end
 
+        --- Named snapshot participant for custom non-component data.
+        ---
+        --- `save` writes one keyed value into the snapshot data section when it
+        --- returns non-nil. `load` receives that value after the ECS world has
+        --- been restored. `finish` runs after every data callback has completed.
+        interface SnapshotHandler
+            name: string
+            save: function(world: World): any | nil
+            load: function(world: World, value: any) | nil
+            finish: function(world: World, prelude: SnapshotPrelude) | nil
+        end
+
         --- Resources stored in the world.
         resources: Context
 
@@ -1155,6 +1167,14 @@ local record types
         --- a snapshot table previously returned by `saveSnapshot` with
         --- `format = "table"` (or parsed from JSON).
         loadSnapshot: function(self, source: any): SnapshotPrelude
+
+        --- Register named save/load callbacks for custom snapshot data.
+        ---
+        --- This is a convenience wrapper over `OnSnapshotSave`,
+        --- `StartSnapshotLoad`, and `FinishSnapshotLoad`. Use the raw
+        --- snapshot events when you need lower-level behavior such as
+        --- excluding derived entities.
+        addSnapshotHandler: function(self, handler: SnapshotHandler)
 
         -------------------------------------------------------------------------------
         -- Bundle methods
