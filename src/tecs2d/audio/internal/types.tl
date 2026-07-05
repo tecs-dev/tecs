@@ -225,6 +225,19 @@ local record types
         --- @param y Y position.
         --- @param z Z position.
         setListenerPosition: function(self, x: number, y: number, z: number)
+
+        --- Capture durable mixer state (per-group volume/mute/pause and
+        --- listener position) as a plain table for snapshotting. Voice
+        --- limits, cooldowns, and effects are treated as startup config,
+        --- not gameplay state, so they are not included.
+        --- @return A `string.buffer`-encodable mixer-state table.
+        serializeMixer: function(self): {string:any}
+
+        --- Restore mixer state produced by `serializeMixer`. Re-applies the
+        --- restored group volumes and mute flags to any sources already
+        --- registered on this manager.
+        --- @param data The mixer-state table.
+        restoreMixer: function(self, data: {string:any})
     end
 
     --- Configuration for the AudioSource component.

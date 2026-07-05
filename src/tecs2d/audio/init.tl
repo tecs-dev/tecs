@@ -154,6 +154,22 @@ function audio.plugin(): tecs.Plugin
         local audioManager = manager.new()
         world.resources[audio] = audioManager
 
+        -- The audio manager is a world resource, so its mixer state (group
+        -- volumes, mutes, pauses, listener position) lives outside the ECS
+        -- and is not captured by the core snapshot. Persist it explicitly.
+        -- Component sources themselves round-trip via AudioSource; they get
+        -- recreated by the lifecycle observers below, and restoreMixer
+        -- re-applies the restored group levels to them.
+        world:addSnapshotHandler({
+            name = "tecs2d.audio.mixer",
+            save = function(_world: tecs.World): any
+                return audioManager:serializeMixer()
+            end,
+            load = function(_world: tecs.World, value: any)
+                audioManager:restoreMixer(value as {string:any})
+            end,
+        })
+
         -- Set up listener orientation for 2D games with screen coordinates (+X right, +Y down).
         -- Forward faces +Z (into the screen), up is +Y. This ensures +X maps to right speaker.
         love.audio.setOrientation(0, 0, 1, 0, 1, 0)

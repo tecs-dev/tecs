@@ -440,6 +440,55 @@ describe("tecs2d.audio", function()
 
         end)
 
+        describe("Snapshot", function()
+
+            it("round-trips group volumes, mutes, pauses, and listener", function()
+                local src = manager.new()
+                src:setGroupVolume("music", 0.25)
+                src:setGroupVolume("custom", 0.6)
+                src:muteGroup("sfx", true)
+                src:pauseGroup("ui")
+                src:setListenerPosition(5, 6, 7)
+
+                local data = src:serializeMixer()
+
+                local dst = manager.new()
+                dst:restoreMixer(data)
+
+                luassert.equals(0.25, dst:getGroupVolume("music"))
+                luassert.equals(0.6, dst:getGroupVolume("custom"))
+                luassert.is_true(dst:isGroupMuted("sfx"))
+                luassert.is_true(dst:isGroupPaused("ui"))
+                luassert.equals(5, listenerX)
+                luassert.equals(6, listenerY)
+                luassert.equals(7, listenerZ)
+            end)
+
+            it("re-applies restored group volume to already-registered sources", function()
+                -- Emulate the load ordering: an AudioSource-backed source is
+                -- registered against default group volumes BEFORE the mixer
+                -- state is restored. restoreMixer must re-level it.
+                local dst = manager.new()
+                local source = createMockSource()
+                dst:registerComponentSource(
+                    source as love.audio.Source, "sfx", 1.0)
+                luassert.equals(1.0, (source as MockSource):getVolume())
+
+                local src = manager.new()
+                src:setGroupVolume("sfx", 0.5)
+                dst:restoreMixer(src:serializeMixer())
+
+                luassert.equals(0.5, (source as MockSource):getVolume())
+            end)
+
+            it("tolerates nil data", function()
+                local audio = manager.new()
+                audio:restoreMixer(nil)
+                luassert.equals(1.0, audio:getGroupVolume("master"))
+            end)
+
+        end)
+
         describe("Pause/Resume", function()
 
             it("should pause and resume a group", function()

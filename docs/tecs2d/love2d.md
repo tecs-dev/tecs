@@ -212,6 +212,13 @@ Use startup phases with that order in mind:
 - `PostStartup`: rebuild transient or derived entities that are intentionally not snapshotted, and rebind runtime
   entity handles from [`Key`](/tecs/builtins#key-component) or saved components.
 
+Snapshots do not capture `world.resources` (see [World resources are not
+saved](/tecs/save-games#world-resources-are-not-saved)). Built-in plugins persist their own resource state where it
+matters: the audio plugin restores its mixer (group volumes, mutes, pauses, and listener position). The render
+pipeline's camera is the one deliberate gap. Its position, zoom, rotation, and projection are not snapshotted, so a
+camera driven manually resets on reload. A camera that follows an entity through `CameraTarget` re-derives its position
+after restore; persist a manual camera with your own [snapshot handler](/tecs/save-games#snapshot-handlers).
+
 For example, refresh keyed handles in `PostStartup`:
 
 ```teal

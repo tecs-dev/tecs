@@ -737,6 +737,53 @@ function AudioManagerImpl:setListenerPosition(x: number, y: number, z: number)
 end
 
 -------------------------------------------------------------------------------
+--- Snapshot
+-------------------------------------------------------------------------------
+
+function AudioManagerImpl:serializeMixer(): {string:any}
+    local groups: {string: {string:any}} = {}
+    for name, g in pairs(self._groups) do
+        groups[name] = {
+            volume = g.volume,
+            muted = g.muted,
+            paused = g.paused,
+        }
+    end
+    return {
+        groups = groups,
+        listenerX = self._listenerX,
+        listenerY = self._listenerY,
+        listenerZ = self._listenerZ,
+    }
+end
+
+function AudioManagerImpl:restoreMixer(data: {string:any})
+    if not data then return end
+
+    local groups = data.groups as {string: {string:any}}
+    if groups then
+        for name, g in pairs(groups) do
+            -- Raw-set `paused` so we don't fade/pause live sources; restored
+            -- component sources check the flag when the play systems run.
+            local group = ensureGroup(self, name)
+            group.paused = g.paused == true
+            -- setGroupVolume/muteGroup re-apply the restored levels to any
+            -- sources the load-time lifecycle observers already registered
+            -- (they were registered against the pre-restore group volumes).
+            self:setGroupVolume(name, (g.volume as number) or group.volume)
+            self:muteGroup(name, g.muted == true)
+        end
+    end
+
+    local lx = data.listenerX as number
+    local ly = data.listenerY as number
+    local lz = data.listenerZ as number
+    if lx ~= nil and ly ~= nil and lz ~= nil then
+        self:setListenerPosition(lx, ly, lz)
+    end
+end
+
+-------------------------------------------------------------------------------
 --- Module
 -------------------------------------------------------------------------------
 

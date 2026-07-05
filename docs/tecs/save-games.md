@@ -174,6 +174,32 @@ playerId = world:requireKey("player")
 The snapshot lifecycle is designed for this. `StartSnapshotLoad` lets plugins read custom data, and
 `FinishSnapshotLoad` is the right place to refresh runtime handles that depend on the fully restored world.
 
+### World resources are not saved
+
+A snapshot captures entities, components, the state stack, and the pipeline's runtime state (fixed-step accumulator
+and phase enable flags). It does **not** capture `world.resources`. Anything you store there, an RNG, a scoreboard, a
+config object, a network session, is runtime state outside the ECS and is lost on load unless you persist it yourself.
+
+Register a [snapshot handler](#snapshot-handlers) for each resource that holds durable state:
+
+```teal
+world:addSnapshotHandler({
+    name = "mygame.rng",
+    save = function(_world: tecs.World): any
+        return rng:save()
+    end,
+    load = function(_world: tecs.World, value: any)
+        rng:load(value)
+    end,
+})
+```
+
+Tecs2D plugins persist their own resource state this way. The audio plugin, for example, saves and restores its mixer
+(group volumes, mutes, pauses, and listener position) automatically. One deliberate exception is the render pipeline's
+camera: camera position, zoom, rotation, projection, and any runtime-added named cameras live on the pipeline resource
+and are not snapshotted. If a camera follows an entity through `CameraTarget`, its position re-derives after load. To
+persist a manually driven camera, save its transform in your own snapshot handler.
+
 ### Observers and runtime callbacks
 
 Snapshots do not serialize Lua callbacks or closures. Global observers registered at address `0` survive only a
@@ -473,6 +499,7 @@ For each plugin or subsystem that participates in saves:
 
 - Save durable source-of-truth components, relationships, and custom data.
 - Use `world:addSnapshotHandler(...)` for ordinary non-component custom data and load-finalization work.
+- Persist any durable state a plugin keeps in `world.resources` through a snapshot handler; resources are not saved.
 - Mark process-local backing components `transient = true` when the entity itself is durable.
 - Use `ev:exclude(component)` for fully derived entities that should not appear in saves.
 - Rebuild derived entities, resources, and caches during normal systems or `FinishSnapshotLoad`.
