@@ -320,6 +320,27 @@ describe("snapshot save/load", function()
         luassert.is_false(world:isAlive(skipper))
     end)
 
+    it("does not mutate opts.filterQuery descriptors", function()
+        local world = tecs.newWorld()
+        world:spawn(PositionComp(1, 1), HealthComp(10))
+        world:commit()
+
+        world:observe(0, tecs.builtins.OnSnapshotSave, function(ev: tecs.builtins.OnSnapshotSave)
+            ev:exclude(HealthComp)
+        end)
+
+        local descriptor: tecs.Query.Descriptor = {
+            include = {PositionComp},
+        }
+
+        local _snap = saveTableSnapshot(world, {
+            filterQuery = descriptor,
+        })
+
+        luassert.is_nil(descriptor.temp, "saveSnapshot should not set temp on the caller descriptor")
+        luassert.is_nil(descriptor.exclude, "saveSnapshot should not append excludes to the caller descriptor")
+    end)
+
     it("round-trips through a LuaJIT string.buffer", function()
         local buffer = require("string.buffer")
         local world = tecs.newWorld()
@@ -686,6 +707,39 @@ describe("snapshot save/load", function()
         world:loadSnapshot(snap)
 
         luassert.equals("game", world:peekState())
+    end)
+
+    it("errors when a saved state stack references an unregistered state", function()
+        local world = tecs.newWorld()
+        world:createState("game")
+        world:pushState("game")
+        world:spawn(PositionComp(1, 1))
+        world:commit()
+
+        local snap = saveTableSnapshot(world)
+        local fresh = tecs.newWorld()
+
+        luassert.error_matches(function()
+            fresh:loadSnapshot(snap)
+        end, "saved state 'game' is not registered")
+    end)
+
+    it("restores pipeline accumulator and phase enabled state", function()
+        local world = tecs.newWorld({timestep = 0.1})
+        world:disablePhase(tecs.phases.Update)
+        world:update(0.05)
+
+        local savedAccumulator = world.pipeline.fixedAccumulator
+        local snap = saveTableSnapshot(world)
+
+        world:enablePhase(tecs.phases.Update)
+        (world.pipeline as {string:any}).fixedAccumulator = 0
+
+        world:loadSnapshot(snap)
+
+        luassert.is_near(savedAccumulator, world.pipeline.fixedAccumulator, 1e-9)
+        local phaseStates = (world.pipeline as {string:any}).phaseStates as {boolean}
+        luassert.is_false(phaseStates[tecs.phases.Update.position])
     end)
 
     it("rebuilds runtime entity handles from Key after loading a snapshot", function()

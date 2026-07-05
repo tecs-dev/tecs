@@ -108,6 +108,7 @@ local table_move <const> = table.move
 
 local SNAPSHOT_VERSION <const> = 1
 local STATE_STACK_DATA_KEY <const> = "__tecs.stateStack"
+local PIPELINE_DATA_KEY <const> = "__tecs.pipeline"
 
 local record snapshot
     record Prelude
@@ -502,13 +503,77 @@ local function restoreStateStack(world: World, saved: {string})
     local stack: {string} = {}
     for i = 1, #saved do
         local name = saved[i]
-        if states[name] ~= nil then
-            stack[#stack + 1] = name
+        if states[name] == nil then
+            error("loadSnapshot: saved state '" .. tostring(name) ..
+                "' is not registered in this world; call world:createState('" ..
+                tostring(name) .. "') before loading")
         end
+        stack[#stack + 1] = name
     end
     worldAny._stateStack = stack
     local top = stack[#stack]
     worldAny.autoStateComponent = top and states[top] or nil
+end
+
+local function capturePipelineState(world: World): {string:any}
+    local pipeline = (world as {string:any}).pipeline as {string:any}
+    if not pipeline then return nil end
+    if pipeline.fixedAccumulator == nil and pipeline.phaseStates == nil then return nil end
+
+    local out: {string:any} = {}
+    if pipeline.fixedAccumulator ~= nil then
+        out.fixedAccumulator = pipeline.fixedAccumulator
+    end
+
+    local phaseStates = pipeline.phaseStates as {boolean}
+    if phaseStates then
+        local states: {boolean} = {}
+        for i = 1, #phaseStates do
+            states[i] = phaseStates[i] == true
+        end
+        out.phaseStates = states
+    end
+    return out
+end
+
+local function restorePipelineState(world: World, saved: {string:any})
+    if saved == nil then return end
+    local pipeline = (world as {string:any}).pipeline as {string:any}
+    if not pipeline then return end
+
+    if saved.fixedAccumulator ~= nil and pipeline.fixedAccumulator ~= nil then
+        pipeline.fixedAccumulator = saved.fixedAccumulator
+    end
+
+    local savedPhaseStates = saved.phaseStates as {boolean}
+    local phaseStates = pipeline.phaseStates as {boolean}
+    if savedPhaseStates and phaseStates then
+        for i = 1, #savedPhaseStates do
+            if phaseStates[i] ~= nil then
+                phaseStates[i] = savedPhaseStates[i] == true
+            end
+        end
+        pipeline.dirty = true
+    end
+end
+
+local function cloneComponentList(list: {Component}): {Component}
+    if not list then return nil end
+    local out: {Component} = {}
+    for i = 1, #list do out[i] = list[i] end
+    return out
+end
+
+local function cloneQueryDescriptor(d: types.Query.Descriptor): types.Query.Descriptor
+    if not d then return nil end
+    local out: types.Query.Descriptor = {}
+    for k, v in pairs(d as {string:any}) do
+        (out as {string:any})[k] = v
+    end
+    out.include = cloneComponentList(d.include)
+    out.includeAny = cloneComponentList(d.includeAny)
+    out.exclude = cloneComponentList(d.exclude)
+    return out
 end
 
 -- Build an integer bitmask of allowed `Transform.layer` values from the
@@ -539,7 +604,7 @@ local function resolveSaveFilters(world: World, opts: SnapshotOptions): types.Qu
 
     local query: types.Query
     if opts.filterQuery then
-        local d: types.Query.Descriptor = opts.filterQuery
+        local d: types.Query.Descriptor = cloneQueryDescriptor(opts.filterQuery)
         d.temp = true
         query = world:query(d)
     end
@@ -605,6 +670,7 @@ local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: Sna
     local pendingDataPairs: {{string, any}} = {}
     local excludedComponents: {Component} = {}
     local stateStack = captureStateStack(world)
+    local pipelineState = capturePipelineState(world)
     do
         local saveEvent = builtins.OnSnapshotSave()
         local evAny = saveEvent as {string: any}
@@ -617,10 +683,10 @@ local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: Sna
         world:emit(0, saveEvent as types.events.Event)
     end
 
-    -- Merge any plugin-declared excludes into opts.filterQuery. Build a
-    -- fresh descriptor if needed; mutate the user's only when we have to.
+    -- Merge any plugin-declared excludes into a cloned filter descriptor so
+    -- saveSnapshot never mutates caller-owned query tables.
     if #excludedComponents > 0 then
-        local d: types.Query.Descriptor = opts.filterQuery or {}
+        local d: types.Query.Descriptor = cloneQueryDescriptor(opts.filterQuery) or {}
         local exclude = d.exclude
         if not exclude then
             exclude = {}
@@ -835,6 +901,9 @@ local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: Sna
     -- call writes one pair; writeDataEnd closes with a sentinel.
     if stateStack ~= nil then
         writer:writeData(STATE_STACK_DATA_KEY, stateStack)
+    end
+    if pipelineState ~= nil then
+        writer:writeData(PIPELINE_DATA_KEY, pipelineState)
     end
     if opts.customData then
         for k, v in pairs(opts.customData) do
@@ -1085,6 +1154,10 @@ local function loadSnapshotImpl(world: World, reader: snapshot.Reader): Snapshot
         if key == nil then break end
         if key == STATE_STACK_DATA_KEY then
             restoreStateStack(world, value as {string})
+            goto continue_data
+        end
+        if key == PIPELINE_DATA_KEY then
+            restorePipelineState(world, value as {string:any})
             goto continue_data
         end
         local arr = handlers[key]
