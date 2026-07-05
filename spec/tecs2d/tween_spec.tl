@@ -585,6 +585,36 @@ describe("builder", function()
         world:shutdown()
     end)
 
+    it("serializes nested run templates across snapshot load", function()
+        local world = makeWorld()
+        local entity = world:spawn(Transform(0, 0))
+        tick(world, 0)
+
+        local child <const> = tween.timeline()
+            :to(1.0, tween.linear, tween.translateY, 100)
+            :once()
+
+        local parent <const> = tween.timeline()
+            :to(0.5, tween.linear, tween.translateX, 50)
+            :step()
+            :run(child)
+            :once()
+
+        parent:apply(world, entity)
+        tick(world, 0.75)
+        luassert.is_near(50, world:get(entity, Transform).x, 2)
+        luassert.is_near(25, world:get(entity, Transform).y, 2)
+
+        local snap = world:saveSnapshot({format = "table"})
+        world:loadSnapshot(snap)
+        tick(world, 0.25)
+
+        luassert.is_near(50, world:get(entity, Transform).x, 2)
+        luassert.is_near(50, world:get(entity, Transform).y, 2)
+
+        world:shutdown()
+    end)
+
     it("serializes active custom field2 targets", function()
         local world = makeWorld()
         local PairComp = tecs.newComponent({
@@ -722,6 +752,34 @@ describe("builder", function()
         tick(world, 0.25)
         luassert.is_near(150, world:get(missile, Transform).x, 3)
         luassert.is_near(75, world:get(missile, Transform).y, 3)
+
+        world:shutdown()
+    end)
+
+    it("tracks a target resolved from sourceRelationship", function()
+        local world = makeWorld()
+        local parent = world:spawn(Transform(100, 50))
+        local child = world:spawn(Transform(0, 0), tecs.builtins.ChildOf(parent) as tecs.Component)
+        tick(world, 0)
+
+        tween.timeline()
+            :track(1.0, tween.linear, tween.translateXY,
+                tween.sourceRelationship(tecs.builtins.ChildOf, Transform, {"x", "y"}))
+            :loop()
+            :apply(world, child)
+
+        tick(world, 0.5)
+        luassert.is_near(50, world:get(child, Transform).x, 2)
+        luassert.is_near(25, world:get(child, Transform).y, 2)
+
+        local pt = world:getMut(parent, Transform)
+        pt.x = 200
+        pt.y = 100
+        world:markComponentDirty(parent, Transform as tecs.Component)
+
+        tick(world, 0.25)
+        luassert.is_near(150, world:get(child, Transform).x, 3)
+        luassert.is_near(75, world:get(child, Transform).y, 3)
 
         world:shutdown()
     end)
