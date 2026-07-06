@@ -578,10 +578,11 @@ per archetype:
             putcdata(column, structSize * entityCount) -- FFI bulk
             OR per k: encode(serialized value)         -- non-FFI / custom
 
-    mode == 1 (row-major, sparse-bearing archetype):
+    mode == 1 (row-major, sparse-bearing archetype, <= 52 columns):
         per entity:
             encode(id)
-            per component j: serializeRaw OR encode(serialize(value)) OR encode(nil)
+            encode(presenceMask)         -- bit (i-1) set = column i present
+            per present column i: serializeRaw OR encode(serialize(value))
 
 data section (sentinel-terminated):
     repeat: encode(true); encode(key); encode(value)
@@ -594,7 +595,7 @@ data section (sentinel-terminated):
 
 ```teal
 {
-    version = 1,
+    version = 2,
     nextEntityId = 42,
     componentTable = {
         {name = "Position"},
