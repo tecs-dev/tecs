@@ -761,8 +761,8 @@ function WorldImpl:deferRemoveRaw(id: integer, component: Component)
     -- Sparse routing lives in the defer-remove handler. This path is reached
     -- only for components without that handler.
 
-    local hadPendingArch = getPendingArch(self, slot) ~= nil
     local prevArch: Archetype = getPendingArch(self, slot)
+    local hadPendingArch = prevArch ~= nil
     if not prevArch then
         local slots = self.allocator.slots as {integer: EntitySlot}
         -- Stale or dead handle: removal is a no-op.

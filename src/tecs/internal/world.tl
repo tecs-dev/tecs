@@ -555,9 +555,10 @@ end
 -- onActivated/onDeactivated during batch drains.
 local function archetypesOf(world: WorldImpl, query: Query): {Archetype}
     local items = (query as {string: any})._activeItems
-    assert(items,
-        "batch op requires a Query object (built via world:query(...)). " ..
-        "Build the query once outside your hot loop and reuse it.")
+    if not items then
+        error("batch op requires a Query object (built via world:query(...)). " ..
+            "Build the query once outside your hot loop and reuse it.")
+    end
     local src = items as {Archetype}
     -- Pooled snapshot: released after commit (batch ops) or immediately
     -- after handoff (batchDespawn). Avoids one fresh-table allocation per
@@ -605,17 +606,19 @@ function WorldImpl:batchSet(query: Query, componentOrInstance: Component, callba
     local asAny = componentOrInstance as {string: any}
     local componentType = asAny.componentType as Component
     local isContainer = componentType == componentOrInstance
-    assert(componentType,
-        "batchSet: second argument must be a component (container or instance with " ..
-        "a `componentType` field)")
+    if not componentType then
+        error("batchSet: second argument must be a component (container or instance with " ..
+            "a `componentType` field)")
+    end
 
     local inScope = self._scopeDepth > 0
     if not inScope then self._scopeDepth = 1 end
     if callback then
         -- Callback form requires a component type.
-        assert(isContainer,
-            "batchSet callback form requires the component type (container), not an " ..
-            "instance. Pass `MyComponent` rather than `MyComponent(...)`.")
+        if not isContainer then
+            error("batchSet callback form requires the component type (container), not an " ..
+                "instance. Pass `MyComponent` rather than `MyComponent(...)`.")
+        end
         self:_deferBatchSetCallback(targetArchetypes, componentOrInstance, callback)
     else
         -- Constant form accepts instance or tag container.

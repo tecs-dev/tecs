@@ -804,9 +804,10 @@ function WorldImpl:_deferBatchSetCallback(
     callback: function(Archetype, integer, integer, integer)
 )
     if #archetypes == 0 then return end
-    assert(canBulkBatchComponent(componentType),
-        "batchSet callback form requires a bulk-safe component. Use the constant-value form " ..
-        "`world:batchSet(query, instance)` for relationship components.")
+    if not canBulkBatchComponent(componentType) then
+        error("batchSet callback form requires a bulk-safe component. Use the constant-value form " ..
+            "`world:batchSet(query, instance)` for relationship components.")
+    end
     local c = self.batchMutationCount + 1
     local mut = batchMutationSlot(self, c)
     mut.op = BATCH_OP_SET_CALLBACK

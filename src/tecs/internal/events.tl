@@ -193,9 +193,12 @@ function events.newFFIEvent<E is Event>(
         eventAny.init = init
     end
 
+    -- Resolve the ctype once; per-construction C.new(name) re-parses the
+    -- struct name on every call.
+    local eventCtype = C.typeof(resolvedStructName as string) as function(): any
     setmetatable(event, {
         __call = function(_self: E, ...: any): E
-            local instance = C.new(resolvedStructName as string) as {string:any}
+            local instance = eventCtype() as {string:any}
             instance.eventId = id
             instance.typeId = ffiTypeId
             init(instance as E, ...)

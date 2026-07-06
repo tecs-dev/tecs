@@ -459,7 +459,10 @@ local record ArchetypeColumnsCache
     cols: {Component}
     hasSparse: boolean
 end
-local archetypeColumnsCache: {Archetype: ArchetypeColumnsCache} = {}
+-- Weak keys: destroyed archetypes (compact, discarded worlds) must not be
+-- pinned for the process lifetime by this module-global cache.
+local archetypeColumnsCache: {Archetype: ArchetypeColumnsCache} =
+    setmetatable({}, {__mode = "k"})
 
 local function archetypeColumns(arch: Archetype): {Component}, boolean
     local cached = archetypeColumnsCache[arch]

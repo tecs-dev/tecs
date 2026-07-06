@@ -521,9 +521,9 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
                 metadataFields.storage = (container as {string:any}).storage
                 metadataFields.storageType = (container as {string:any}).storageType
             end
-            return function(...: any): types.components.Component
-                return createInstance(...)
-            end
+            -- The allocator is called for every FFI construction; hand out
+            -- createInstance directly instead of a vararg forwarder.
+            return createInstance
         end,
 
         _sizeof = structSize,
