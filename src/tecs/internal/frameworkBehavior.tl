@@ -169,7 +169,11 @@ function frameworkBehavior.set(world: WorldImpl, id: integer, componentType: Com
     if (owner as types.components.Relationship).exclusiveRelationship then
         local arch = world:currentArchetype(id)
         if arch then
-            for existingComp in pairs(arch.columns as {Component:any}) do
+            -- Numeric walk over the dense component list instead of a
+            -- pairs() hash iteration over the columns map.
+            local list = arch.componentList
+            for i = 1, arch.columnsCount do
+                local existingComp = list[i]
                 local existOwner = existingComp.wildcardContainer
                 if existOwner == owner and existingComp ~= componentType then
                     world:remove(id, existingComp)
