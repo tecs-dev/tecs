@@ -232,25 +232,25 @@ end
 
 -- Common populators.
 local function fillPosition(arch, startRow, lastRow)
-    local ps = arch[Position]
+    local ps = arch:getMut(Position)
     for i = startRow, lastRow do ps[i] = Position(i, i) end
 end
 local function fillPositionVelocity(arch, startRow, lastRow)
-    local ps = arch[Position]
-    local vs = arch[Velocity]
+    local ps = arch:getMut(Position)
+    local vs = arch:getMut(Velocity)
     for i = startRow, lastRow do
         ps[i] = {x = i, y = i}
         vs[i] = {vx = 1, vy = 1}
     end
 end
 local function fillFFIPosition(arch, startRow, lastRow)
-    local ps = arch[FFIPosition]
+    local ps = arch:getMut(FFIPosition)
     for i = startRow, lastRow do
         ps[i].x = i; ps[i].y = i
     end
 end
 local function fillFFIPositionVelocity(arch, startRow, lastRow)
-    local ps = arch[FFIPosition]; local vs = arch[FFIVelocity]
+    local ps = arch:getMut(FFIPosition); local vs = arch:getMut(FFIVelocity)
     for i = startRow, lastRow do
         ps[i].x = i; ps[i].y = i
         vs[i].vx = 1; vs[i].vy = 1
@@ -267,10 +267,10 @@ local function populateQueryBuildTecsWorld(world, count)
         if arch % 6 == 0 then components[#components + 1] = Aggro end
 
         world:batchSpawn(count, components, function(archetype, startRow, lastRow)
-            local ps = archetype[Position]
-            local vs = archetype[Velocity]
-            local hs = archetype[Health]
-            local ds = archetype[Damage]
+            local ps = archetype:getMut(Position)
+            local vs = archetype:getMut(Velocity)
+            local hs = archetype:getMut(Health)
+            local ds = archetype:getMut(Damage)
 
             for i = startRow, lastRow do
                 ps[i] = Position(i, i)
@@ -316,14 +316,14 @@ local function setupBatchBenchWorld(case)
     local world = freshTecsWorld()
     local n = case.params.count
     world:batchSpawn(n * 4, {Health, BenchName, Aggro}, function(arch, startRow, lastRow)
-        local hs = arch[Health]; local ns = arch[BenchName]
+        local hs = arch:getMut(Health); local ns = arch:getMut(BenchName)
         for i = startRow, lastRow do
             hs[i] = Health(100)
             ns[i] = BenchName("bg")
         end
     end)
     local firstId = world:batchSpawn(n, {Position, Velocity, Alive}, function(arch, startRow, lastRow)
-        local ps = arch[Position]; local vs = arch[Velocity]
+        local ps = arch:getMut(Position); local vs = arch:getMut(Velocity)
         for i = startRow, lastRow do
             ps[i] = Position(i, i); vs[i] = Velocity(1, 1)
         end
@@ -438,8 +438,8 @@ tecsScenarios.batchSpawn4FFI = {
         world:batchSpawn(case.params.count,
             {FFIPosition, FFIVelocity, FFIHealth, FFIDamage},
             function(arch, startRow, lastRow)
-                local ps = arch[FFIPosition]; local vs = arch[FFIVelocity]
-                local hs = arch[FFIHealth]; local ds = arch[FFIDamage]
+                local ps = arch:getMut(FFIPosition); local vs = arch:getMut(FFIVelocity)
+                local hs = arch:getMut(FFIHealth); local ds = arch:getMut(FFIDamage)
                 for i = startRow, lastRow do
                     ps[i].x = i; ps[i].y = i
                     vs[i].vx = 1; vs[i].vy = 1
@@ -540,7 +540,7 @@ tecsScenarios.valueUpdateHook = {
     setup = function(case)
         local world = freshTecsWorld()
         local entities = populateBatch(world, case.params.count, {Counter}, function(arch, startRow, lastRow)
-            local cs = arch[Counter]
+            local cs = arch:getMut(Counter)
             for i = startRow, lastRow do cs[i] = Counter(i) end
         end)
         return {world = world, entities = entities}
@@ -588,7 +588,7 @@ tecsScenarios.churn = {
         for arch = 1, 20 do
             local tag = ArchTags[arch]
             local firstId = world:batchSpawn(case.params.count, {Position, tag}, function(a, startRow, lastRow)
-                local ps = a[Position]
+                local ps = a:getMut(Position)
                 for i = startRow, lastRow do ps[i] = Position(i, i) end
             end)
             for i = 0, case.params.count - 1 do
@@ -644,7 +644,7 @@ tecsScenarios.queryIter = {
     run = function(state)
         local sum = 0
         for archetype, len in state.query:iter() do
-            local ps = archetype[Position]
+            local ps = archetype:get(Position)
             for i = 1, len do sum = sum + ps[i].x end
         end
         return sum
@@ -655,7 +655,7 @@ tecsScenarios.queryIterScalar = {
     setup = cachedSetup(function(case)
         local world = freshTecsWorld()
         world:batchSpawn(case.params.count, {ScalarPosX}, function(arch, startRow, lastRow)
-            local xs = arch[ScalarPosX]
+            local xs = arch:getMut(ScalarPosX)
             for i = startRow, lastRow do xs[i] = i end
         end)
         world:commit()
@@ -664,7 +664,7 @@ tecsScenarios.queryIterScalar = {
     run = function(state)
         local sum = 0
         for archetype, len in state.query:iter() do
-            local xs = archetype[ScalarPosX]
+            local xs = archetype:get(ScalarPosX)
             for i = 1, len do sum = sum + xs[i] end
         end
         return sum
@@ -681,7 +681,7 @@ tecsScenarios.queryIterFFI = {
     run = function(state)
         local sum = 0
         for archetype, len in state.query:iter() do
-            local ps = archetype[FFIPosition]
+            local ps = archetype:get(FFIPosition)
             for i = 1, len do sum = sum + ps[i].x end
         end
         return sum
@@ -695,7 +695,7 @@ tecsScenarios.queryMulti = {
         for arch = 1, 20 do
             local tag = ArchTags[arch]
             world:batchSpawn(case.params.count, {Position, tag}, function(a, startRow, lastRow)
-                local ps = a[Position]
+                local ps = a:getMut(Position)
                 for i = startRow, lastRow do ps[i] = Position(i, i) end
             end)
         end
@@ -705,7 +705,7 @@ tecsScenarios.queryMulti = {
     run = function(state)
         local sum = 0
         for archetype, len in state.query:iter() do
-            local ps = archetype[Position]
+            local ps = archetype:get(Position)
             for i = 1, len do sum = sum + ps[i].x end
         end
         return sum
@@ -743,7 +743,7 @@ tecsScenarios.sysUpdate = {
     end),
     run = function(state)
         for archetype, len in state.query:iter() do
-            local ps = archetype[Position]; local vs = archetype[Velocity]
+            local ps = archetype:getMut(Position); local vs = archetype:getMut(Velocity)
             for i = 1, len do
                 local p = ps[i]; local v = vs[i]
                 p.x = p.x + v.vx; p.y = p.y + v.vy
@@ -756,8 +756,8 @@ tecsScenarios.sysUpdateScalar = {
     setup = cachedSetup(function(case)
         local world = freshTecsWorld()
         world:batchSpawn(case.params.count, {ScalarPosX, ScalarVelX}, function(arch, startRow, lastRow)
-            local xs = arch[ScalarPosX]
-            local vxs = arch[ScalarVelX]
+            local xs = arch:getMut(ScalarPosX)
+            local vxs = arch:getMut(ScalarVelX)
             for i = startRow, lastRow do
                 xs[i] = i
                 vxs[i] = 1
@@ -768,8 +768,8 @@ tecsScenarios.sysUpdateScalar = {
     end),
     run = function(state)
         for archetype, len in state.query:iter() do
-            local xs = archetype[ScalarPosX]
-            local vxs = archetype[ScalarVelX]
+            local xs = archetype:getMut(ScalarPosX)
+            local vxs = archetype:getMut(ScalarVelX)
             for i = 1, len do
                 xs[i] = xs[i] + vxs[i]
             end
@@ -786,7 +786,7 @@ tecsScenarios.sysUpdateFFI = {
     end),
     run = function(state)
         for archetype, len in state.query:iter() do
-            local ps = archetype[FFIPosition]; local vs = archetype[FFIVelocity]
+            local ps = archetype:getMut(FFIPosition); local vs = archetype:getMut(FFIVelocity)
             for i = 1, len do
                 local p = ps[i]; local v = vs[i]
                 p.x = p.x + v.vx; p.y = p.y + v.vy
@@ -853,11 +853,11 @@ tecsScenarios.createWithComponents = {
         local world = freshTecsWorld()
         local n = case.params.count
         world:batchSpawn(n * 4, {Health, BenchName, Aggro}, function(arch, startRow, lastRow)
-            local hs = arch[Health]; local ns = arch[BenchName]
+            local hs = arch:getMut(Health); local ns = arch:getMut(BenchName)
             for i = startRow, lastRow do hs[i] = Health(100); ns[i] = BenchName("bg") end
         end)
         world:batchSpawn(n, {Position, Velocity, Alive}, function(arch, startRow, lastRow)
-            local ps = arch[Position]; local vs = arch[Velocity]
+            local ps = arch:getMut(Position); local vs = arch:getMut(Velocity)
             for i = startRow, lastRow do ps[i] = Position(i, i); vs[i] = Velocity(1, 1) end
         end)
         world:commit()
