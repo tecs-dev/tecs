@@ -81,9 +81,9 @@ local function buildWorld(count)
 
     world:batchSpawn(third, {Position, Velocity, Health},
         function(arch, startRow, n)
-            local positions = arch[Position]
-            local velocities = arch[Velocity]
-            local healths = arch[Health]
+            local positions = arch:getMut(Position)
+            local velocities = arch:getMut(Velocity)
+            local healths = arch:getMut(Health)
             for i = startRow, startRow + n - 1 do
                 positions[i].x = i * 1.5
                 positions[i].y = i * 2.5
@@ -96,8 +96,8 @@ local function buildWorld(count)
 
     world:batchSpawn(third, {Position, Velocity},
         function(arch, startRow, n)
-            local positions = arch[Position]
-            local velocities = arch[Velocity]
+            local positions = arch:getMut(Position)
+            local velocities = arch:getMut(Velocity)
             for i = startRow, startRow + n - 1 do
                 positions[i].x = i * 3.5
                 positions[i].y = i * 4.5
@@ -108,7 +108,7 @@ local function buildWorld(count)
 
     world:batchSpawn(rest, {Position},
         function(arch, startRow, n)
-            local positions = arch[Position]
+            local positions = arch:getMut(Position)
             for i = startRow, startRow + n - 1 do
                 positions[i].x = i * 5.5
                 positions[i].y = i * 6.5
