@@ -1780,14 +1780,18 @@ function BufferReaderImpl:readPrelude(): snapshot.Prelude
         local match = (fingerprint == currentSchema)
         local migrate: function(any): any = nil
         if not match and fingerprint ~= "" then
-            if currentSchema == "" then
+            if (comp as ComponentInternal).deserializeRaw then
+                -- Default-hook FFI component: the saved column holds raw
+                -- struct bytes in the old layout. Build a per-entity
+                -- migrator so the load path projects them field by field.
+                migrate = buildMigrator(comp, fingerprint)
+            elseif currentSchema == "" then
                 error("loadSnapshot: component '" .. name ..
                     "' was saved as an FFI struct but is now registered without one; cannot migrate", 0)
             end
-            -- FFI component whose saved layout differs from the current
-            -- registration. Build a per-entity migrator now so the load
-            -- path can route each entity through it.
-            migrate = buildMigrator(comp, fingerprint)
+            -- Custom-hook components save structured payloads; their own
+            -- deserialize receives the old payload directly, which is the
+            -- manual-migration path.
         end
         resolved[i] = {
             comp = comp,

@@ -1163,6 +1163,69 @@ describe("snapshot save/load", function()
         -- component; migrator silently drops it.
     end)
 
+    it("FFI schema drift with custom hooks routes payloads to deserialize", function()
+        local testId = math.random(1, 1000000)
+        local compName = "SchemaDriftCustom" .. testId
+
+        -- Current schema has two fields, the crafted save claims one.
+        -- Custom hooks mean the saved column holds STRUCTURED payloads,
+        -- so the byte migrator must not engage; the deserialize hook is
+        -- the manual-migration path and fills the new field itself.
+        local record CV is tecs.Component
+            a: number
+            b: number
+            metamethod __call: function(self, a: number, b: number): CV
+        end
+        local seenPayload: {string: any} = nil
+        local Comp: CV
+        Comp = tecs.newFFIComponent({
+            name = compName,
+            container = {} as CV,
+            fields = {{"a", "double"}, {"b", "double"}},
+            serialize = function(value: CV): {string: any}
+                return {a = value.a}
+            end,
+            deserialize = function(_world: tecs.World, data: {string: any}): CV
+                seenPayload = data
+                return Comp(data.a as number, 42)
+            end,
+        })
+
+        local buffer = require("string.buffer")
+        local ffi = require("ffi")
+        local buf = buffer.new()
+        buf:encode(1)                            -- version
+        buf:encode(2)                            -- nextEntityId
+        buf:encode(1)                            -- entityCount
+        buf:encode(1)                            -- archetypeCount
+        buf:encode(1)                            -- componentCount
+        buf:encode(compName)
+        buf:encode("a:double|8")                 -- SAVED schema (1 field)
+        -- Archetype frame
+        buf:encode(1)                            -- columnCount
+        buf:encode(1)                            -- entityCount
+        buf:encode(1)                            -- columnIndex
+        buf:encode(0)                            -- column-major mode
+        local idsRaw = ffi.new("double[?]", 1)
+        local ids = idsRaw as {number}
+        ids[0] = 1
+        buf:putcdata(idsRaw, 8)
+        -- Column value: the structured payload a custom serialize wrote.
+        buf:encode({a = 3.5})
+        -- Data section: empty
+        buf:encode(nil)
+
+        local world = tecs.newWorld()
+        world:loadSnapshot(buf)
+
+        luassert.is_true(world:isAlive(1))
+        luassert.is_not_nil(seenPayload, "the custom deserialize must receive the old payload")
+        luassert.equals(3.5, seenPayload.a as number)
+        local v = world:get(1, Comp)
+        luassert.equals(3.5, v.a)
+        luassert.equals(42, v.b, "the deserialize hook owns migration of new fields")
+    end)
+
     it("componentTable in saveSnapshotTable lists each component once", function()
         -- The pre-pass deduplicates components into Snapshot.componentTable;
         -- per-archetype frames reference entries by 1-based index.
