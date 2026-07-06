@@ -249,6 +249,56 @@ describe("WorldImpl", function()
                 "stale despawn must not destroy the slot's new entity")
         end)
 
+        it("spawnAt removes the revived slot from the free stack", function()
+            local w2 = tecs.newWorld()
+            local a = w2:spawn(PosComponent(1, 1))
+            w2:commit()
+            w2:despawn(a)
+            w2:commit()
+
+            -- Revive the exact handle; its slot must leave the free stack
+            -- or the next spawn aliases it.
+            w2:spawnAt(a, PosComponent(9, 9))
+            w2:commit()
+
+            local b = w2:spawn(PosComponent(2, 2))
+            w2:commit()
+
+            luassert.not_equals(a % 2 ^ 22, b % 2 ^ 22,
+                "spawn must not hand out the revived slot")
+            luassert.is_true(w2:isAlive(a))
+            luassert.is_true(w2:isAlive(b))
+            luassert.equals(9, (w2:get(a, PosComponent) as TestHelpers.Pos).x)
+            luassert.equals(2, (w2:get(b, PosComponent) as TestHelpers.Pos).x)
+        end)
+
+        it("batchSpawnAt removes revived slots from the free stack", function()
+            local w2 = tecs.newWorld()
+            local a = w2:spawn(PosComponent(1, 1))
+            w2:commit()
+            w2:despawn(a)
+            w2:commit()
+
+            w2:batchSpawnAt({a}, {PosComponent},
+                function(arch: tecs.Archetype, startRow: integer, lastRow: integer, _n: integer)
+                    local ps = arch:getMut(PosComponent)
+                    for i = startRow, lastRow do
+                        ps[i] = PosComponent(9, 9)
+                    end
+                end)
+            w2:commit()
+
+            local b = w2:spawn(PosComponent(2, 2))
+            w2:commit()
+
+            luassert.not_equals(a % 2 ^ 22, b % 2 ^ 22,
+                "spawn must not hand out the revived slot")
+            luassert.is_true(w2:isAlive(a))
+            luassert.is_true(w2:isAlive(b))
+            luassert.equals(9, (w2:get(a, PosComponent) as TestHelpers.Pos).x)
+            luassert.equals(2, (w2:get(b, PosComponent) as TestHelpers.Pos).x)
+        end)
+
         it("despawns entities and emits event", function()
             local w2 = tecs.newWorld()
 

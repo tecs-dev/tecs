@@ -78,6 +78,7 @@ local record IdAllocator
     allocSlot: function(allocator: IdAllocator): integer
     allocContiguousSlots: function(allocator: IdAllocator, count: integer): integer
     freeSlot: function(allocator: IdAllocator, slot: integer)
+    unfree: function(allocator: IdAllocator, slot: integer)
 
     -- ----- Pack/unpack macroexps -----
     -- Declared as `macroexp` so every callsite inlines the arithmetic
@@ -201,6 +202,22 @@ function IdAllocator.freeSlot(allocator: IdAllocator, slot: integer)
     local freeCount = allocator.freeCount
     allocator.freeStack[freeCount] = slot
     allocator.freeCount = freeCount + 1
+end
+
+--- Remove `slot` from the free stack if present. spawnAt-style staking
+--- revives specific slots; leaving one on the stack lets a later
+--- allocSlot hand it out again and alias two live entities. O(freeCount)
+--- scan; callers skip it for fresh-range slots, which are never stacked.
+function IdAllocator.unfree(allocator: IdAllocator, slot: integer)
+    local stack = allocator.freeStack
+    local n = allocator.freeCount
+    for i = 0, n - 1 do
+        if stack[i] == slot then
+            stack[i] = stack[n - 1]
+            allocator.freeCount = n - 1
+            return
+        end
+    end
 end
 
 function IdAllocator.reset(allocator: IdAllocator)

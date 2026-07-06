@@ -415,6 +415,10 @@ function WorldImpl:_deferSpawnAt(id: integer, ...: Component)
     end
     if slot >= allocator.nextFreshSlot then
         allocator.nextFreshSlot = slot + 1
+    elseif allocator.freeCount > 0 then
+        -- A previously despawned slot may sit on the free stack; a later
+        -- allocSlot would alias the revived entity.
+        IdAllocator.unfree(allocator, slot)
     end
     (allocator.slots as {integer: EntitySlot})[slot].generation = generation
     deferSpawn(self, slot, id, ...)

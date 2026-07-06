@@ -92,6 +92,10 @@ local function stakePendingSpawnAt(
         local slot = IdAllocator.slotOf(id)
         if slot >= arena.nextFreshSlot then
             arena.nextFreshSlot = slot + 1
+        elseif arena.freeCount > 0 then
+            -- A previously despawned slot may sit on the free stack; a
+            -- later allocSlot would alias the revived entity.
+            IdAllocator.unfree(arena, slot)
         end
         slots[slot].generation = IdAllocator.generationOfWithSlot(id, slot)
         if slotStamp[slot] ~= epoch then
