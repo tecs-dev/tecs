@@ -61,35 +61,158 @@ vec2 getParallaxFactor(float layer) {
     return vec2(px[col][row], py[col][row]);
 }
 
-// Compute parallax-adjusted camera viewport for a layer
-// For parallax > 1 (foreground), the effective camera position increases
-// For parallax < 1 (background), the effective camera position decreases
-// Formula: adjustedCam = cam * parallax
-vec4 getParallaxViewport(float layer, vec2 halfSize) {
-    vec2 parallax = getParallaxFactor(layer);
-    vec2 adjustedCam = CameraPos * parallax;
-    return vec4(
-        adjustedCam.x - halfSize.x,
-        adjustedCam.y - halfSize.y,
-        adjustedCam.x + halfSize.x,
-        adjustedCam.y + halfSize.y
-    );
-}
-
 // Get the cull bounds for screen-space layers based on virtualCoords setting
 vec2 getScreenSpaceCullSize(bool usesVirtualCoords) {
     return usesVirtualCoords ? VirtualSize : ScreenSize;
-}
-
-// Encode screen-space flags for render shader
-// Returns: 1.0 = screenSpace, 2.0 = ignoreZoom, 4.0 = virtualCoords (can be combined)
-float encodeScreenSpaceFlags(bool isScreenSpace, bool ignoresZoom, bool usesVirtualCoords) {
-    return (isScreenSpace ? 1.0 : 0.0) + (ignoresZoom ? 2.0 : 0.0) + (usesVirtualCoords ? 4.0 : 0.0);
 }
 
 // Encode screen-space flags as uint for shaders that use integer flags
 // Returns: bit 16 = screenSpace, bit 17 = ignoreZoom, bit 18 = virtualCoords
 uint encodeScreenSpaceFlagsUint(bool isScreenSpace, bool ignoresZoom, bool usesVirtualCoords) {
     return (isScreenSpace ? 0x10000u : 0u) | (ignoresZoom ? 0x20000u : 0u) | (usesVirtualCoords ? 0x40000u : 0u);
+}
+
+// ---------- Shared source-component SSBOs ----------
+// std430 layouts mirror the cdefs in gpu/std430.tl. Every shape cull
+// binds Transform plus these optional components; when a component is
+// absent from the archetype the host binds a dummy buffer and leaves
+// the ComponentMask bit clear, so the reads stay dispatch-uniform.
+
+struct Std430Transform {
+    float x, y, z;
+    int layerInt;
+    float rotation, scaleX, scaleY;
+};
+layout(std430) readonly buffer TransformInput {
+    Std430Transform transforms[];
+};
+
+struct Std430Color {
+    vec4 rgba;
+};
+layout(std430) readonly buffer ColorInput {
+    Std430Color colors[];
+};
+
+struct Std430ClipBounds {
+    vec4 minMaxXY;       // minX, minY, maxX, maxY
+};
+layout(std430) readonly buffer ClipBoundsInput {
+    Std430ClipBounds clipBoundsIn[];
+};
+
+struct Std430Material {
+    // (materialId-bits-as-float, p0, p1, p2). Use floatBitsToUint on
+    // .x to recover the materialId.
+    vec4 idP012;
+    // (p3, _pad, _pad, _pad).
+    vec4 p3Pad;
+};
+layout(std430) readonly buffer MaterialInput {
+    Std430Material materials[];
+};
+
+// Per-visible-instance material params, written in output order.
+layout(std430) writeonly buffer MaterialParamsOutput {
+    vec4 materialParamsOut[];
+};
+
+// ---------- Component-presence mask ----------
+// Canonical bits; must match modifier_binding.MASK (gpu/modifier_binding.tl).
+const uint COMP_COLOR          = 0x1u;
+const uint COMP_CLIPBOUNDS     = 0x2u;
+const uint COMP_OCCLUDER       = 0x8u;
+const uint COMP_MATERIAL       = 0x10u;
+const uint COMP_LAYOUTBOX      = 0x20u;
+const uint COMP_PIVOT          = 0x40u;
+const uint COMP_ROUNDEDCORNERS = 0x80u;
+const uint COMP_DROPSHADOW     = 0x100u;
+const uint COMP_REPEATEDSPRITE = 0x200u;
+const uint COMP_TEXTEFFECTS    = 0x800u;
+
+// ---------- Shared flag bits (must match types.tl) ----------
+const uint FLAG_UNLIT    = 0x1u;
+const uint FLAG_OCCLUDER = 0x100u;
+
+// ---------- Per-dispatch uniforms ----------
+uniform uint ComponentMask;
+uniform uint ArchetypeRowCount;
+// BlendId is dispatch-uniform: every entity in an archetype shares the
+// same blend mode (archetype identity = blend identity). The host sets
+// it from blend.groupBy(archetype) before each dispatch.
+uniform uint BlendId;
+// StaticFlags: per-archetype OR of bits whose tag components are
+// present (e.g. FLAG_UNLIT for the Unlit tag).
+uniform uint StaticFlags;
+
+// ---------- Optional-component readers ----------
+
+vec4 readColor(uint row) {
+    if ((ComponentMask & COMP_COLOR) != 0u) {
+        return colors[row].rgba;
+    }
+    return vec4(1.0, 1.0, 1.0, 1.0);
+}
+
+vec4 readClipBounds(uint row) {
+    if ((ComponentMask & COMP_CLIPBOUNDS) != 0u) {
+        return clipBoundsIn[row].minMaxXY;
+    }
+    return vec4(-3.4e38, -3.4e38, 3.4e38, 3.4e38);  // unbounded
+}
+
+uint readMaterialId(uint row) {
+    if ((ComponentMask & COMP_MATERIAL) != 0u) {
+        return floatBitsToUint(materials[row].idP012.x);
+    }
+    return 0u;
+}
+
+vec4 readMaterialParams(uint row) {
+    if ((ComponentMask & COMP_MATERIAL) != 0u) {
+        Std430Material m = materials[row];
+        return vec4(m.idP012.y, m.idP012.z, m.idP012.w, m.p3Pad.x);
+    }
+    return vec4(0.0);
+}
+
+// ---------- Shared cull helpers ----------
+
+// Camera-relative offset a layer's parallax factor applies to world
+// positions. Zero when the parallax factor is 1.
+vec2 getParallaxOffset(float layer) {
+    vec2 parallax = getParallaxFactor(layer);
+    return CameraPos * (vec2(1.0) - parallax);
+}
+
+// AABB-vs-viewport test shared by every shape cull. bounds is
+// (left, top, right, bottom) in world space; parallaxOff is the
+// getParallaxOffset result for world-space layers and vec2(0) for
+// screen-space layers.
+bool cullBoundsVisible(vec4 bounds, bool isScreenSpace, bool usesVirtualCoords, vec2 parallaxOff) {
+    if (isScreenSpace) {
+        vec2 cullSize = getScreenSpaceCullSize(usesVirtualCoords);
+        return (bounds.z > 0.0) && (bounds.x < cullSize.x) &&
+               (bounds.w > 0.0) && (bounds.y < cullSize.y);
+    }
+    return (bounds.z + parallaxOff.x > CameraViewport.x) &&
+           (bounds.x + parallaxOff.x < CameraViewport.z) &&
+           (bounds.w + parallaxOff.y > CameraViewport.y) &&
+           (bounds.y + parallaxOff.y < CameraViewport.w);
+}
+
+// Canonical packed render-flags layout, shared by every shape:
+//   bits 0-15  shape flags (FLAG_UNLIT etc.)
+//   bits 16-18 screen-space class (encodeScreenSpaceFlagsUint)
+//   bits 20-23 blend id
+//   bits 24-31 material id
+// Store the result bit-exact (uintBitsToFloat for float lanes); a
+// float() conversion rounds integers above 2^24 and corrupts the low
+// flag bits.
+uint packRenderFlags(uint flags, bool isScreenSpace, bool ignoresZoom, bool usesVirtualCoords, uint blendId, uint materialId) {
+    return flags
+        | encodeScreenSpaceFlagsUint(isScreenSpace, ignoresZoom, usesVirtualCoords)
+        | (blendId << 20u)
+        | (materialId << 24u);
 }
 

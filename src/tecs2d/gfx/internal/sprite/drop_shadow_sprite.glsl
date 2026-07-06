@@ -18,7 +18,7 @@ struct SpriteData {
     vec4 uvRect;        // uvX (base), uvY, uvW (single frame), uvH
     vec4 animData;      // frameIndex (computed by cull), totalDuration, frameCount, frameWidth
     vec4 rotScale;      // rotation, scaleX, scaleY, textureSlice
-    vec4 pivot;         // pivotX, pivotY, flags, screenSpaceFlags
+    vec4 pivot;         // pivotX, pivotY, spare, packed flags (uint bits)
 };
 
 layout(std430) readonly buffer DropShadowSpriteOutput {
@@ -32,14 +32,9 @@ varying vec2 vTexCoord;
 varying float vTextureSlice;
 
 #ifdef VERTEX
-// Quad vertex positions (2 triangles, CCW winding)
-const vec2 QUAD_POSITIONS[6] = vec2[6](
-    vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(1.0, 1.0),  // First triangle
-    vec2(0.0, 0.0), vec2(1.0, 1.0), vec2(0.0, 1.0)   // Second triangle
-);
 
 vec4 position(mat4 transform_projection, vec4 vertex_position) {
-    vec2 quadPos = QUAD_POSITIONS[love_VertexID];
+    vec2 quadPos = QUAD_POSITIONS_UNIT[love_VertexID];
 
     int instanceID = love_InstanceID;
     SpriteData s = sprites[instanceID];
@@ -57,12 +52,11 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
     float scaleY = s.rotScale.z;
     vec2 pivot = s.pivot.xy;
 
-    // Screen-space flags
-    int packedPivotW = int(s.pivot.w);
-    int screenSpaceFlags = packedPivotW & 0x7;
-    bool isScreenSpace = (screenSpaceFlags & 1) != 0;
-    bool ignoresZoom = (screenSpaceFlags & 2) != 0;
-    bool usesVirtualCoords = (screenSpaceFlags & 4) != 0;
+    // Screen-space flags (canonical packed layout, stored as uint bits)
+    uint packed = floatBitsToUint(s.pivot.w);
+    bool isScreenSpace = (packed & FLAG_SCREEN_SPACE) != 0u;
+    bool ignoresZoom = (packed & FLAG_IGNORE_ZOOM) != 0u;
+    bool usesVirtualCoords = (packed & FLAG_VIRTUAL_COORDS) != 0u;
 
     // Transform unit quad with scale and rotation around pivot point
     vec2 local = quadPos - pivot;

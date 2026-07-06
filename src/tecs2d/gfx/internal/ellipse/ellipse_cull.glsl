@@ -1,21 +1,17 @@
 // Ellipse culling compute shader -- renderer-owned shadow-column path.
-// Common code is prepended from cull_common.glsl.
+// Shared structs, component readers, uniforms, and cull helpers are
+// prepended from cull_common.glsl.
 //
 // One dispatch per (archetype, shape). Source-component SSBOs are bound
 // directly; optional components fall back to dummy buffers gated by
-// `ComponentMask`. Output `EllipseData` matches the legacy render
-// shader's expected layout -- see `ellipse.glsl`.
+// `ComponentMask`. Output `EllipseData` matches the render shader's
+// expected layout -- see `ellipse.glsl`.
+//
+// Ellipse blend modes route through per-blend batch buffers (see
+// shape_utils renderGBufferBlend), not in-shader blend filtering, so
+// the packed flags carry blend id 0.
 
-// ---------- Source-component SSBOs ----------
-
-struct Std430Transform {
-    float x, y, z;
-    int layerInt;
-    float rotation, scaleX, scaleY;
-};
-layout(std430) readonly buffer TransformInput {
-    Std430Transform transforms[];
-};
+// ---------- Shape-specific source SSBOs ----------
 
 struct Std430Ellipse {
     float radiusX;
@@ -24,28 +20,6 @@ struct Std430Ellipse {
 };
 layout(std430) readonly buffer EllipseInput {
     Std430Ellipse ellipsesIn[];
-};
-
-struct Std430Color {
-    vec4 rgba;
-};
-layout(std430) readonly buffer ColorInput {
-    Std430Color colors[];
-};
-
-struct Std430ClipBounds {
-    vec4 minMaxXY;       // minX, minY, maxX, maxY
-};
-layout(std430) readonly buffer ClipBoundsInput {
-    Std430ClipBounds clipBoundsArr[];
-};
-
-struct Std430Material {
-    vec4 idP012;
-    vec4 p3Pad;
-};
-layout(std430) readonly buffer MaterialInput {
-    Std430Material materials[];
 };
 
 struct Std430Pivot {
@@ -60,62 +34,15 @@ layout(std430) readonly buffer PivotInput {
 struct EllipseOut {
     vec4 posRadii;
     vec4 color;
-    vec4 depthLayerLineFlags;
+    vec4 depthLayerLineFlags;    // depth, layer, lineWidth, spare
     vec4 clipBounds;
-    vec4 pivot;            // pivotX, pivotY, rotation, screenSpaceAndMaterial
+    vec4 pivot;                  // pivotX, pivotY, rotation, packed flags (uint bits)
 };
 layout(std430) writeonly buffer EllipseOutput {
     EllipseOut ellipsesOut[];
 };
-layout(std430) writeonly buffer MaterialParamsOutput {
-    vec4 materialParamsOut[];
-};
 
-// ---------- Component-presence mask ----------
-
-// Canonical component-mask bits (shared across all shapes; 0x4 reserved).
-const uint COMP_COLOR        = 0x1u;
-const uint COMP_CLIPBOUNDS   = 0x2u;
-const uint COMP_MATERIAL     = 0x10u;
-const uint COMP_PIVOT        = 0x40u;
-
-uniform uint ComponentMask;
-uniform uint ArchetypeRowCount;
-uniform uint BlendId;
-// StaticFlags: per-archetype OR of bits whose tag components are
-// present (e.g. FLAG_UNLIT for the Unlit tag).
-uniform uint StaticFlags;
-
-// ---------- Helpers ----------
-
-vec4 readColor(uint row) {
-    if ((ComponentMask & COMP_COLOR) != 0u) {
-        return colors[row].rgba;
-    }
-    return vec4(1.0, 1.0, 1.0, 1.0);
-}
-
-vec4 readClipBounds(uint row) {
-    if ((ComponentMask & COMP_CLIPBOUNDS) != 0u) {
-        return clipBoundsArr[row].minMaxXY;
-    }
-    return vec4(-3.4e38, -3.4e38, 3.4e38, 3.4e38);
-}
-
-uint readMaterialId(uint row) {
-    if ((ComponentMask & COMP_MATERIAL) != 0u) {
-        return floatBitsToUint(materials[row].idP012.x);
-    }
-    return 0u;
-}
-
-vec4 readMaterialParams(uint row) {
-    if ((ComponentMask & COMP_MATERIAL) != 0u) {
-        Std430Material m = materials[row];
-        return vec4(m.idP012.y, m.idP012.z, m.idP012.w, m.p3Pad.x);
-    }
-    return vec4(0.0);
-}
+// ---------- Shape-specific component readers ----------
 
 vec2 readPivot(uint row) {
     if ((ComponentMask & COMP_PIVOT) != 0u) {
@@ -162,66 +89,35 @@ void computemain() {
 
     // Conservative bounding circle = max(rx, ry).
     float maxRadius = max(rx, ry);
-    float left = x - maxRadius;
-    float right = x + maxRadius;
-    float top = y - maxRadius;
-    float bottom = y + maxRadius;
+    vec4 bounds = vec4(x - maxRadius, y - maxRadius, x + maxRadius, y + maxRadius);
 
-    bool visible;
-    if (isScreenSpace) {
-        vec2 cullSize = getScreenSpaceCullSize(usesVirtualCoords);
-        visible = (rx > 0.0) && (ry > 0.0) &&
-                  (right > 0.0) && (left < cullSize.x) &&
-                  (bottom > 0.0) && (top < cullSize.y);
-    } else {
-        vec2 parallax = getParallaxFactor(layer);
-        float parallaxOffsetX = CameraPos.x * (1.0 - parallax.x);
-        float parallaxOffsetY = CameraPos.y * (1.0 - parallax.y);
-        float adjLeft = left + parallaxOffsetX;
-        float adjRight = right + parallaxOffsetX;
-        float adjTop = top + parallaxOffsetY;
-        float adjBottom = bottom + parallaxOffsetY;
-
-        float screenW = rx * 2.0 * CameraZoom;
-        float screenH = ry * 2.0 * CameraZoom;
-        visible = (rx > 0.0) && (ry > 0.0) &&
-                  (screenW >= 1.0 || screenH >= 1.0) &&
-                  (adjRight > CameraViewport.x) && (adjLeft < CameraViewport.z) &&
-                  (adjBottom > CameraViewport.y) && (adjTop < CameraViewport.w);
+    vec2 pOff = isScreenSpace ? vec2(0.0) : getParallaxOffset(layer);
+    bool sizeOK = (rx > 0.0) && (ry > 0.0);
+    if (!isScreenSpace) {
+        sizeOK = sizeOK && (rx * 2.0 * CameraZoom >= 1.0 || ry * 2.0 * CameraZoom >= 1.0);
     }
-
-    if (!visible) return;
+    if (!sizeOK || !cullBoundsVisible(bounds, isScreenSpace, usesVirtualCoords, pOff)) return;
 
     uint outIdx = atomicAdd(args[1], 1u);
 
     float bottomY = y + ry;
     float depth = computeDepth(layer, z, x, bottomY, row);
 
-    float outFlags = float(flags);
     if (isUnlitLayer(layer)) {
-        outFlags = float(uint(outFlags) | 1u);  // FLAG_UNLIT = 0x1
+        flags = flags | FLAG_UNLIT;
     }
 
-    float outX = x;
-    float outY = y;
-    if (!isScreenSpace) {
-        vec2 parallax = getParallaxFactor(layer);
-        outX += CameraPos.x * (1.0 - parallax.x);
-        outY += CameraPos.y * (1.0 - parallax.y);
-    }
-
-    // pivot.w packs screen-space flags + materialId, matching the
-    // legacy ellipse_cull.glsl encoding so the render shader keeps
-    // working unchanged.
-    uint screenSpaceFlags = encodeScreenSpaceFlagsUint(isScreenSpace, ignoresZoom, usesVirtualCoords);
     uint materialId = readMaterialId(row);
-    float screenSpaceAndMaterial = float(screenSpaceFlags | (materialId << 8u));
+    uint packed = packRenderFlags(flags, isScreenSpace, ignoresZoom, usesVirtualCoords, 0u, materialId);
+
+    float outX = x + pOff.x;
+    float outY = y + pOff.y;
 
     materialParamsOut[outIdx] = readMaterialParams(row);
 
     ellipsesOut[outIdx].posRadii = vec4(outX, outY, rx, ry);
     ellipsesOut[outIdx].color = color;
-    ellipsesOut[outIdx].depthLayerLineFlags = vec4(depth, layer, lineWidth, outFlags);
+    ellipsesOut[outIdx].depthLayerLineFlags = vec4(depth, layer, lineWidth, 0.0);
     ellipsesOut[outIdx].clipBounds = clip;
-    ellipsesOut[outIdx].pivot = vec4(pivot.x, pivot.y, rotation, screenSpaceAndMaterial);
+    ellipsesOut[outIdx].pivot = vec4(pivot.x, pivot.y, rotation, uintBitsToFloat(packed));
 }

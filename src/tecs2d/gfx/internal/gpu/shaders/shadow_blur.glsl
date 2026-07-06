@@ -21,16 +21,16 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
     const float w[5] = float[5](0.2416, 0.1872, 0.1218, 0.0540, 0.0162);
 
     vec2 step = BlurDirection * TexelSize * BlurRadius;
-    float heightSum = Texel(tex, uv).r * w[0];
+    vec4 center = Texel(tex, uv);
+    float heightSum = center.r * w[0];
     for (int i = 1; i <= 4; i++) {
         vec2 offset = float(i) * step;
         heightSum += Texel(tex, uv + offset).r * w[i];
         heightSum += Texel(tex, uv - offset).r * w[i];
     }
 
-    // Preserve G (occluder flag) from center pixel so the lighting shader
-    // can distinguish actual occluder pixels from blur-halo pixels.
-    float centerG = Texel(tex, uv).g;
-    return vec4(heightSum, centerG, 0.0, 1.0);
+    // Preserve G (occluder flag) from the center pixel so the lighting
+    // shader can distinguish actual occluder pixels from blur-halo pixels.
+    return vec4(heightSum, center.g, 0.0, 1.0);
 }
 #endif

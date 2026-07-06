@@ -1,5 +1,6 @@
 // Sprite culling compute shader (renderer-owned shadow-column path).
-// Common code is prepended from cull_common.glsl.
+// Shared structs, component readers, uniforms, and cull helpers are
+// prepended from cull_common.glsl.
 //
 // One dispatch per (sprite archetype × bucket). The dispatch closure
 // in `sprite/shadow_dispatch.tl` binds the archetype's shadow source
@@ -7,9 +8,8 @@
 // per visible entity.
 //
 // Inputs are addressed by archetype row (`gl_GlobalInvocationID.x`),
-// not by stable slot. The legacy per-frame transform copy that
-// `bucket_sync.tl` did is gone -- Transform / Sprite / SpriteData /
-// optional component columns are shadowed straight to GPU.
+// not by stable slot. Transform / Sprite / SpriteData / optional
+// component columns are shadowed straight to GPU.
 //
 // Outputs (per-bucket, shared across all archetypes routed to this
 // bucket via atomicAdd):
@@ -18,16 +18,7 @@
 //   - DropShadowOutput: per-light fan-out for drop-shadow AO pass
 //   - MaterialParamsOutput: per-instance material params (output-order)
 
-// ---------- Source-component SSBOs ----------
-
-struct Std430Transform {
-    float x, y, z;
-    int layerInt;
-    float rotation, scaleX, scaleY;
-};
-layout(std430) readonly buffer TransformInput {
-    Std430Transform transforms[];
-};
+// ---------- Shape-specific source SSBOs ----------
 
 struct Std430Sprite {
     int   spriteId;
@@ -68,19 +59,6 @@ layout(std430) readonly buffer SpriteDataInput {
 // doesn't read it directly because SpriteData.textureSlice already
 // carries the packed layer index + generation.)
 
-// Optional source bindings.
-struct Std430Color { vec4 rgba; };
-layout(std430) readonly buffer ColorInput { Std430Color colors[]; };
-
-struct Std430ClipBounds { vec4 minMaxXY; };
-layout(std430) readonly buffer ClipBoundsInput { Std430ClipBounds clipBounds[]; };
-
-struct Std430Material {
-    vec4 idP012;     // (materialId-bits-as-float, p0, p1, p2)
-    vec4 p3Pad;      // (p3, _pad, _pad, _pad)
-};
-layout(std430) readonly buffer MaterialInput { Std430Material materials[]; };
-
 struct Std430Pivot { vec4 xyPad; };  // (x, y, _pad, _pad)
 layout(std430) readonly buffer PivotInput { Std430Pivot pivots[]; };
 
@@ -112,7 +90,7 @@ struct SpriteOut {
     vec4 uvRect;
     vec4 animData;        // frameIndex, totalDuration, frameCount, frameWidth
     vec4 rotScale;        // rotation, scaleX, scaleY, textureSlice
-    vec4 pivot;           // pivotX, pivotY, flags, screenSpaceFlags
+    vec4 pivot;           // pivotX, pivotY, slice-or-spare, packed flags (uint bits)
 };
 layout(std430) writeonly buffer SpriteOutput {
     SpriteOut spritesOut[];
@@ -125,11 +103,8 @@ layout(std430) writeonly buffer DropShadowOutput {
 };
 layout(std430) buffer ShadowIndirectArgs { uint shadowArgs[]; };
 layout(std430) buffer DropShadowIndirectArgs { uint dropShadowArgs[]; };
-layout(std430) writeonly buffer MaterialParamsOutput {
-    vec4 materialParamsOut[];
-};
 
-// ---------- Frame-timing + lighting (legacy globals reused) ----------
+// ---------- Frame-timing + lighting (shared globals) ----------
 
 layout(std430) readonly buffer FrameTimings {
     float cumulativeTimes[];
@@ -154,67 +129,22 @@ layout(std430) readonly buffer SliceGenerations {
     float sliceGens[];
 };
 
-// ---------- Component-presence mask + uniforms ----------
+// ---------- Shape uniforms ----------
 
-// Canonical bits -- must match modifier_binding.MASK (gpu/modifier_binding.tl).
-const uint COMP_COLOR          = 0x01u;
-const uint COMP_CLIPBOUNDS     = 0x02u;
-const uint COMP_OCCLUDER       = 0x08u;
-const uint COMP_MATERIAL       = 0x10u;
-const uint COMP_PIVOT          = 0x40u;
-const uint COMP_DROPSHADOW     = 0x100u;
-const uint COMP_REPEATEDSPRITE = 0x200u;
-
-uniform uint ComponentMask;
-uniform uint ArchetypeRowCount;
-uniform uint BlendId;
-// StaticFlags: per-archetype OR of bits whose tag components are
-// present (e.g. FLAG_UNLIT for the Unlit tag).
-uniform uint StaticFlags;
 uniform float GlobalTime;
 uniform int   SlicePackingBits;
 uniform float ShadowMargin;
 uniform uint  MaxDropShadows;
 
-// ---------- Flag constants ----------
+// ---------- Shape flag constants ----------
 
-const uint FLAG_OCCLUDER       = 0x100u;
 const uint FLAG_DROP_SHADOW    = 0x200u;
-// REPEAT_X / REPEAT_Y are packed into the same bits the render shader
-// reads from `pivot.z`. sprite.glsl uses 0x2 / 0x4; keep these in sync.
+// REPEAT_X / REPEAT_Y live in the low flag bits the render shader
+// unpacks. sprite.glsl uses 0x2 / 0x4; keep these in sync.
 const uint FLAG_REPEAT_X       = 0x2u;
 const uint FLAG_REPEAT_Y       = 0x4u;
 
-// ---------- Helpers for optional components ----------
-
-vec4 readColor(uint row) {
-    if ((ComponentMask & COMP_COLOR) != 0u) {
-        return colors[row].rgba;
-    }
-    return vec4(1.0, 1.0, 1.0, 1.0);
-}
-
-vec4 readClipBounds(uint row) {
-    if ((ComponentMask & COMP_CLIPBOUNDS) != 0u) {
-        return clipBounds[row].minMaxXY;
-    }
-    return vec4(-3.4e38, -3.4e38, 3.4e38, 3.4e38);
-}
-
-uint readMaterialId(uint row) {
-    if ((ComponentMask & COMP_MATERIAL) != 0u) {
-        return floatBitsToUint(materials[row].idP012.x);
-    }
-    return 0u;
-}
-
-vec4 readMaterialParams(uint row) {
-    if ((ComponentMask & COMP_MATERIAL) != 0u) {
-        Std430Material m = materials[row];
-        return vec4(m.idP012.y, m.idP012.z, m.idP012.w, m.p3Pad.x);
-    }
-    return vec4(0.0);
-}
+// ---------- Shape-specific component readers ----------
 
 vec2 readPivot(uint row, vec2 fallback) {
     if ((ComponentMask & COMP_PIVOT) != 0u) {
@@ -279,8 +209,13 @@ void computemain() {
     uint row = gl_GlobalInvocationID.x;
     if (row >= ArchetypeRowCount) return;
 
-    Std430Transform t  = transforms[row];
-    Std430Sprite    sp = sprites[row];
+    // Layer check first: it needs only the Transform, so rows on
+    // invisible layers (e.g. all world sprites during the screen-phase
+    // cull) exit before touching the Sprite/SpriteData columns.
+    Std430Transform t = transforms[row];
+    float layer = float(t.layerInt);
+    if (!isCameraLayerVisible(layer)) return;
+
     Std430SpriteData sd = spriteData[row];
 
     // Generation check: if the texture slice was evicted since this
@@ -300,8 +235,6 @@ void computemain() {
     float x = t.x;
     float y = t.y;
     float z = t.z;
-    float layer = float(t.layerInt);
-    if (!isCameraLayerVisible(layer)) return;
 
     bool isScreenSpace     = isScreenSpaceLayer(layer);
     bool ignoresZoom       = isIgnoreZoomLayer(layer);
@@ -313,9 +246,8 @@ void computemain() {
 
     float bottomY = y + h * scaleY * (1.0 - pivotY);
 
-    // Flags: combine user RenderFlags with renderer-internal markers
-    // (occluder / drop-shadow presence). Replaces what bucket_sync used
-    // to bake into Transform.rotScale.w.
+    // Flags: combine per-archetype tag bits with renderer-internal
+    // markers (occluder / drop-shadow presence).
     uint flags = StaticFlags;
     if ((ComponentMask & COMP_OCCLUDER) != 0u) {
         flags = flags | FLAG_OCCLUDER;
@@ -338,36 +270,21 @@ void computemain() {
         halfDiag += ShadowMargin;
     }
 
-    float left   = centerX - halfDiag;
-    float right  = centerX + halfDiag;
-    float top    = centerY - halfDiag;
-    float bottom = centerY + halfDiag;
+    vec4 bounds = vec4(centerX - halfDiag, centerY - halfDiag,
+                       centerX + halfDiag, centerY + halfDiag);
 
-    bool visible;
-    if (isScreenSpace) {
-        vec2 cullSize = getScreenSpaceCullSize(usesVirtualCoords);
-        visible = (w > 0.0) && (h > 0.0)
-               && (right > 0.0) && (left < cullSize.x)
-               && (bottom > 0.0) && (top < cullSize.y);
-    } else {
-        vec2 parallax = getParallaxFactor(layer);
-        float parallaxOffsetX = CameraPos.x * (1.0 - parallax.x);
-        float parallaxOffsetY = CameraPos.y * (1.0 - parallax.y);
-        float adjLeft   = left   + parallaxOffsetX;
-        float adjRight  = right  + parallaxOffsetX;
-        float adjTop    = top    + parallaxOffsetY;
-        float adjBottom = bottom + parallaxOffsetY;
-        float screenW = scaledW * CameraZoom;
-        float screenH = scaledH * CameraZoom;
-        visible = (w > 0.0) && (h > 0.0)
-               && (screenW >= 1.0 || screenH >= 1.0)
-               && (adjRight > CameraViewport.x) && (adjLeft < CameraViewport.z)
-               && (adjBottom > CameraViewport.y) && (adjTop < CameraViewport.w);
+    vec2 pOff = isScreenSpace ? vec2(0.0) : getParallaxOffset(layer);
+    bool sizeOK = (w > 0.0) && (h > 0.0);
+    if (!isScreenSpace) {
+        sizeOK = sizeOK && (scaledW * CameraZoom >= 1.0 || scaledH * CameraZoom >= 1.0);
     }
-
-    if (!visible) return;
+    if (!sizeOK || !cullBoundsVisible(bounds, isScreenSpace, usesVirtualCoords, pOff)) return;
 
     uint outIdx = atomicAdd(args[1], 1u);
+
+    // Anim state is only needed for visible rows; load it after the
+    // visibility test.
+    Std430Sprite sp = sprites[row];
 
     // Compute current animation frame.
     int   animFrameCount   = int(sd.animFrameCount);
@@ -397,24 +314,16 @@ void computemain() {
     float outUvW = repeatPack.y;
     float outUvH = repeatPack.z;
 
-    // OR in UNLIT layer flag.
     if (isUnlitLayer(layer)) {
-        flags = flags | 1u;
+        flags = flags | FLAG_UNLIT;
     }
 
-    // Pack screen-space + blend + material id (matches legacy encoding
-    // so the render shader's unpacking continues to work).
-    uint screenSpaceFlags = encodeScreenSpaceFlagsUint(isScreenSpace, ignoresZoom, usesVirtualCoords);
     uint materialId = readMaterialId(row);
-    float screenSpaceAndBlend = float(screenSpaceFlags | (BlendId << 4u) | (materialId << 8u));
+    uint packed = packRenderFlags(flags, isScreenSpace, ignoresZoom, usesVirtualCoords, BlendId, materialId);
+    float packedBits = uintBitsToFloat(packed);
 
-    float outX = x;
-    float outY = y;
-    if (!isScreenSpace) {
-        vec2 parallax = getParallaxFactor(layer);
-        outX += CameraPos.x * (1.0 - parallax.x);
-        outY += CameraPos.y * (1.0 - parallax.y);
-    }
+    float outX = x + pOff.x;
+    float outY = y + pOff.y;
 
     vec4 outColor = readColor(row);
     vec4 outClipBounds = readClipBounds(row);
@@ -423,7 +332,6 @@ void computemain() {
     vec4 outUvRect = vec4(sd.uvX, sd.uvY, outUvW, outUvH);
     vec4 outAnimData = vec4(frameIndex, sd.animTotalDuration, float(animFrameCount), sd.animFrameWidth);
     vec4 outRotScale = vec4(t.rotation, scaleX, scaleY, float(sliceIndex));
-    vec4 outPivot = vec4(pivotX, pivotY, float(flags), screenSpaceAndBlend);
 
     spritesOut[outIdx].posSize = outPosSize;
     spritesOut[outIdx].color = outColor;
@@ -432,12 +340,12 @@ void computemain() {
     spritesOut[outIdx].uvRect = outUvRect;
     spritesOut[outIdx].animData = outAnimData;
     spritesOut[outIdx].rotScale = outRotScale;
-    spritesOut[outIdx].pivot = outPivot;
+    spritesOut[outIdx].pivot = vec4(pivotX, pivotY, 0.0, packedBits);
 
     materialParamsOut[outIdx] = readMaterialParams(row);
 
     // Occluder dual-write (shadow-mask shader reads occluderHeight in
-    // .color.a and textureSlice in .pivot.z; mirror legacy encoding).
+    // .color.a and textureSlice in .pivot.z).
     if ((flags & FLAG_OCCLUDER) != 0u) {
         uint shadowIdx = atomicAdd(shadowArgs[1], 1u);
         spritesShadowOut[shadowIdx].posSize = outPosSize;
@@ -447,7 +355,7 @@ void computemain() {
         spritesShadowOut[shadowIdx].uvRect = outUvRect;
         spritesShadowOut[shadowIdx].animData = outAnimData;
         spritesShadowOut[shadowIdx].rotScale = vec4(outRotScale.xyz, 0.0);
-        spritesShadowOut[shadowIdx].pivot = vec4(pivotX, pivotY, float(sliceIndex), screenSpaceAndBlend);
+        spritesShadowOut[shadowIdx].pivot = vec4(pivotX, pivotY, float(sliceIndex), packedBits);
     }
 
     // Drop-shadow per-light fan-out.
@@ -513,7 +421,7 @@ void computemain() {
             spritesDropShadowOut[dsIdx].uvRect = dsUvRect;
             spritesDropShadowOut[dsIdx].animData = outAnimData;
             spritesDropShadowOut[dsIdx].rotScale = vec4(dsRotation, abs(scaleX), dsScaleY, float(sliceIndex));
-            spritesDropShadowOut[dsIdx].pivot = vec4(0.5, 0.0, float(flags), screenSpaceAndBlend);
+            spritesDropShadowOut[dsIdx].pivot = vec4(0.5, 0.0, 0.0, packedBits);
         }
     }
 }

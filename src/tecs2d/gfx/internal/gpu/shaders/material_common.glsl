@@ -26,7 +26,7 @@ MaterialOutput defaultMaterial(MaterialInput i) {
     o.albedo = i.color;
     o.normal = vec3(0.5, 0.5, 1.0);  // flat up
     o.lit = 1.0;
-    o.orm = vec4(1.0, 0.5, 0.0, 1.0);
+    o.orm = DEFAULT_ORM;
     o.emission = vec4(0.0);
     return o;
 }

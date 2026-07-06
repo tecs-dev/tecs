@@ -105,10 +105,12 @@ function mesh.plugin(world: tecs.World)
     local shadowCtx = shadow_setup.register(world, {
         meshComponent = Mesh as tecs.Component,
         optional = {
-            {component = ColorComponent,    layout = std430.layouts.Color,      mask = 0x1, ssboName = "ColorInput"},
-            {component = ClipBounds,        layout = std430.layouts.ClipBounds, mask = 0x2, ssboName = "ClipBoundsInput"},
-            {component = Pivot,             layout = std430.layouts.Pivot,      mask = 0x4, ssboName = "PivotInput"},
-            {component = Material,          layout = std430.layouts.Material,   mask = 0x8, ssboName = "MaterialInput"},
+            -- Canonical mask bits; must match modifier_binding.MASK and
+            -- the COMP_* constants in cull_common.glsl.
+            {component = ColorComponent,    layout = std430.layouts.Color,      mask = 0x1,  ssboName = "ColorInput"},
+            {component = ClipBounds,        layout = std430.layouts.ClipBounds, mask = 0x2,  ssboName = "ClipBoundsInput"},
+            {component = Pivot,             layout = std430.layouts.Pivot,      mask = 0x40, ssboName = "PivotInput"},
+            {component = Material,          layout = std430.layouts.Material,   mask = 0x10, ssboName = "MaterialInput"},
         },
         registryName = "mesh.shadows",
         renderStateSystemName = "mesh.ShadowRenderState",
@@ -124,10 +126,12 @@ function mesh.plugin(world: tecs.World)
         registry = shadowCtx.registry,
         meshComponent = Mesh as tecs.Component,
         optional = {
-            {component = ColorComponent,    layout = std430.layouts.Color,      mask = 0x1, ssboName = "ColorInput"},
-            {component = ClipBounds,        layout = std430.layouts.ClipBounds, mask = 0x2, ssboName = "ClipBoundsInput"},
-            {component = Pivot,             layout = std430.layouts.Pivot,      mask = 0x4, ssboName = "PivotInput"},
-            {component = Material,          layout = std430.layouts.Material,   mask = 0x8, ssboName = "MaterialInput"},
+            -- Canonical mask bits; must match modifier_binding.MASK and
+            -- the COMP_* constants in cull_common.glsl.
+            {component = ColorComponent,    layout = std430.layouts.Color,      mask = 0x1,  ssboName = "ColorInput"},
+            {component = ClipBounds,        layout = std430.layouts.ClipBounds, mask = 0x2,  ssboName = "ClipBoundsInput"},
+            {component = Pivot,             layout = std430.layouts.Pivot,      mask = 0x40, ssboName = "PivotInput"},
+            {component = Material,          layout = std430.layouts.Material,   mask = 0x10, ssboName = "MaterialInput"},
         },
         tagFlags = {
             {component = Unlit, flag = gpuTypes.FLAG_UNLIT},

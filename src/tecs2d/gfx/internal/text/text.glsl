@@ -16,7 +16,7 @@ struct TextHeader {
     vec4 color;          // r, g, b, a
     vec4 clipBounds;     // minX, minY, maxX, maxY
     vec4 fontMeta;       // fontLayer, glyphStartIdx, glyphCount, textWidth
-    vec4 extraMeta;      // textHeight, pivotOffsetX, pivotOffsetY, blendId
+    vec4 extraMeta;      // textHeight, pivotOffsetX, pivotOffsetY, packed blend+material (uint bits)
     vec4 effects1;       // outlineColor, glowColor, shadowColor, shadowOffset (packed)
     vec4 effects2;       // outlineWidth, glowRadius, shadowBlur, spare
 };
@@ -33,12 +33,9 @@ struct VisibleGlyph {
     uint glyphIndex;
 };
 
-// Flag constants (must match gpu/types.tl)
-const uint FLAG_UNLIT = 0x1u;
+// FLAG_UNLIT and the screen-space flag constants come from
+// render_common.glsl, along with the pass uniforms and filters.
 const uint FLAG_MSDF = 0x10u;  // MSDF/SDF font rendering
-const uint FLAG_SCREEN_SPACE = 0x10000u;  // 65536 - Screen-space positioning
-const uint FLAG_IGNORE_ZOOM = 0x20000u;   // 131072 - Ignore camera zoom
-const uint FLAG_VIRTUAL_COORDS = 0x40000u; // 262144 - Use virtual coordinates
 
 layout(std430) readonly buffer TextHeaderBuffer {
     TextHeader headers[];
@@ -52,8 +49,6 @@ layout(std430) readonly buffer VisibleGlyphBuffer {
     VisibleGlyph visibleGlyphs[];
 };
 
-uniform int MaterialPass;
-uniform int BlendModePass; // -1 = render all, 0 = non-blend only, 1+ = specific blend ID
 uniform int ShadowPass;   // 0 = normal (fill+outline+glow), 1 = shadow pass
 uniform ArrayImage SDFAtlas;
 uniform float PxRange;
@@ -63,23 +58,17 @@ varying vec2 vWorldPos;
 varying vec4 vClipBounds;
 varying vec3 vTexCoord;  // xy = UV, z = font layer
 varying float vFlags;
-varying float vIsScreenSpace;
 varying vec4 vEffects1;  // packed colors + shadow offset
 varying vec4 vEffects2;  // scalars (outlineWidth, glowRadius, shadowBlur, spare)
 varying vec2 vQuadPos;   // 0-1 position within glyph quad (for edge fading)
 varying vec4 vUVBounds;  // atlas cell bounds: minU, minV, maxU, maxV (for texel clamping)
 
 #ifdef VERTEX
-// Quad vertex positions (2 triangles, CCW winding)
-const vec2 QUAD_POSITIONS[6] = vec2[6](
-    vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(1.0, 1.0),  // First triangle
-    vec2(0.0, 0.0), vec2(1.0, 1.0), vec2(0.0, 1.0)   // Second triangle
-);
 
 vec4 position(mat4 transform_projection, vec4 vertex_position) {
     // Generate vertex position from VertexID (for drawFromShaderIndirect)
     // love_VertexID is 0-5 for each instance when vertexCount=6 in indirect buffer
-    vec2 quadPos = QUAD_POSITIONS[love_VertexID];
+    vec2 quadPos = QUAD_POSITIONS_UNIT[love_VertexID];
 
     int instanceID = love_InstanceID;
 
@@ -100,23 +89,11 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
         return vec4(2.0, 2.0, 2.0, 1.0);
     }
 
-    // Material pass filtering: extract materialId and blendId from packed field
-    int packed = int(h.extraMeta.w);
-    int matId = (packed >> 4) & 0xFF;
-    int blendId = packed & 0xF;
-    if (MaterialPass < 0) {
-        // Default pass: skip entities that have a material
-        if (matId != 0) return vec4(2.0, 2.0, 2.0, 1.0);
-    } else if (MaterialPass > 0) {
-        // Material variant pass: only render entities with matching materialId
-        if (matId != MaterialPass) return vec4(2.0, 2.0, 2.0, 1.0);
-    }
-
-    // Blend mode pass filtering
-    if (BlendModePass >= 0) {
-        if (blendId != BlendModePass) {
-            return vec4(2.0, 2.0, 2.0, 1.0);
-        }
+    // Blend / material pass filtering (canonical packed layout in
+    // extraMeta.w, stored as uint bits).
+    uint packed = floatBitsToUint(h.extraMeta.w);
+    if (blendPassFiltered(packed) || materialPassFiltered(packed)) {
+        return vec4(2.0, 2.0, 2.0, 1.0);
     }
 
     float rotation = h.rotScaleFlags.x;
@@ -214,7 +191,6 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
     vWorldPos = worldPos;
     vClipBounds = clipBounds;
     vFlags = outFlags;
-    vIsScreenSpace = isScreenSpace ? 1.0 : 0.0;
     vEffects1 = h.effects1;
     vEffects2 = h.effects2;
     vQuadPos = quadPos;
@@ -354,7 +330,7 @@ void effect() {
     // G-Buffer outputs
     love_Canvases[0] = finalColor;                       // Albedo
     love_Canvases[1] = vec4(0.5, 0.5, 1.0, litMarker);   // Normal (flat up) + unlit marker
-    love_Canvases[2] = vec4(1.0, 0.5, 0.0, 1.0);          // ORM default (AO=1, roughness=0.5, metallic=0)
+    love_Canvases[2] = DEFAULT_ORM;
     love_Canvases[3] = vec4(0.0);                        // No emission for text
     // -- MATERIAL_END --
 }

@@ -3,13 +3,13 @@
 struct LineData {
     vec4 points;              // x1, y1, x2, y2
     vec4 color;               // r, g, b, a
-    vec4 depthLayerLineFlags; // depth, layer, lineWidth, flags (as float)
+    vec4 depthLayerLineFlags; // depth, layer, lineWidth, packed flags (uint bits)
     vec4 centerRot;           // centerX, centerY, rotation, pad
     vec4 clipBounds;          // minX, minY, maxX, maxY (world coords)
 };
 
-// Flag constants (must match types.tl)
-const uint FLAG_UNLIT = 0x1u;   // Skip lighting
+// Flag constants, pass uniforms, and pass-filter helpers come from
+// render_common.glsl.
 
 // 0.0 = smooth SDF edges, 1.0 = hard pixel cutoff. Set per-frame from
 // pipeline.roughGeometry.
@@ -19,9 +19,6 @@ layout(std430) readonly buffer LineOutput {
     LineData lines[];
 };
 
-uniform int BlendModePass;    // Current blend mode pass (-1 = render all, 0+ = render only matching blend ID)
-uniform int MaterialPass;     // -1 = default pass (materialId=0 only), 0+ = specific material
-
 varying vec4 vColor;
 varying vec2 vWorldPos;
 varying vec4 vClipBounds;
@@ -29,14 +26,8 @@ varying vec2 vP1;             // Line start in world coords
 varying vec2 vP2;             // Line end in world coords
 varying float vLineWidth;
 varying float vFlags;
-varying float vIsScreenSpace; // For fragment shader clip bounds handling
 
 #ifdef VERTEX
-// Quad vertex positions for line shapes (2 triangles, CCW winding, -1 to 1 range)
-const vec2 QUAD_POSITIONS[6] = vec2[6](
-    vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(1.0, 1.0),  // First triangle
-    vec2(-1.0, -1.0), vec2(1.0, 1.0), vec2(-1.0, 1.0)   // Second triangle
-);
 
 // Rotate point around center
 vec2 rotatePoint(vec2 p, vec2 center, float angle) {
@@ -49,7 +40,7 @@ vec2 rotatePoint(vec2 p, vec2 center, float angle) {
 vec4 position(mat4 transform_projection, vec4 vertex_position) {
     // Generate vertex position from VertexID (for drawFromShaderIndirect)
     // love_VertexID is 0-5 for each instance when vertexCount=6 in indirect buffer
-    vec2 quadPos = QUAD_POSITIONS[love_VertexID];
+    vec2 quadPos = QUAD_POSITIONS_CENTERED[love_VertexID];
 
     int instanceID = love_InstanceID;
     LineData l = lines[instanceID];
@@ -60,37 +51,19 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
         return vec4(2.0, 2.0, 2.0, 1.0);
     }
 
-    // Blend mode pass filtering: skip lines that don't match current blend pass
-    // flags contain blendId in bits 20-23, materialId in bits 24-31
-    if (BlendModePass >= 0) {
-        uint flagBits = uint(l.depthLayerLineFlags.w);
-        int lineBlendId = int((flagBits >> 20u) & 0xFu);
-        if (lineBlendId != BlendModePass) {
-            return vec4(2.0, 2.0, 2.0, 1.0);
-        }
-    }
-
-    // Material pass filtering
-    {
-        uint flagBits = uint(l.depthLayerLineFlags.w);
-        uint matId = (flagBits >> 24u) & 0xFFu;
-        if (MaterialPass < 0) {
-            if (matId != 0u) return vec4(2.0, 2.0, 2.0, 1.0);
-        } else {
-            if (int(matId) != MaterialPass) return vec4(2.0, 2.0, 2.0, 1.0);
-        }
+    // Blend / material pass filtering (canonical packed layout).
+    uint flagBits = floatBitsToUint(l.depthLayerLineFlags.w);
+    if (blendPassFiltered(flagBits) || materialPassFiltered(flagBits)) {
+        return vec4(2.0, 2.0, 2.0, 1.0);
     }
 
     vec2 p1 = l.points.xy;
     vec2 p2 = l.points.zw;
     vec2 center = l.centerRot.xy;
     float rotation = l.centerRot.z;
-    // Screen-space flags encoded in centerRot.w by cull shader: 1.0 = screenSpace, 2.0 = ignoreZoom, 4.0 = virtualCoords
-    float screenSpaceFlag = l.centerRot.w;
-    int flagInt = int(screenSpaceFlag);
-    bool isScreenSpace = (flagInt & 1) != 0;
-    bool ignoresZoom = (flagInt & 2) != 0;
-    bool usesVirtualCoords = (flagInt & 4) != 0;
+    bool isScreenSpace = (flagBits & FLAG_SCREEN_SPACE) != 0u;
+    bool ignoresZoom = (flagBits & FLAG_IGNORE_ZOOM) != 0u;
+    bool usesVirtualCoords = (flagBits & FLAG_VIRTUAL_COORDS) != 0u;
 
     float lineWidth = l.depthLayerLineFlags.z;
     if (lineWidth <= 0.0) lineWidth = 1.0;
@@ -136,8 +109,9 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
     vP1 = p1;
     vP2 = p2;
     vLineWidth = lineWidth;
-    vFlags = l.depthLayerLineFlags.w;
-    vIsScreenSpace = isScreenSpace ? 1.0 : 0.0;
+    // Fragment only needs the low flag bits (FLAG_UNLIT); the full packed
+    // value exceeds float's 24-bit exact integer range once materialId is set.
+    vFlags = float(flagBits & 0xFFFFu);
     return result;
 }
 #endif
@@ -158,16 +132,15 @@ void effect() {
     float dist = length(vWorldPos - closest);
 
     float halfWidth = vLineWidth * 0.5;
-    float alpha = 1.0;
 
     if (antiAliased) {
-        // Anti-aliased edge (stable derivatives from linear vWorldPos varying).
-        // Place the transition entirely outside the line's geometric edge so
-        // the interior stays alpha=1 -- centering it on the edge mixes the
-        // line color with the background and produces a dark fringe.
+        // Opaque with a 50%-coverage discard: the edge lands on the SDF
+        // half-coverage contour (sub-pixel accurate, crisp) and every
+        // drawn pixel writes full alpha, so the deferred composite has
+        // no partial-alpha edge to darken into a rim.
         float edgeWidth = length(fwidth(vWorldPos)) * 1.2;
-        alpha = 1.0 - smoothstep(halfWidth, halfWidth + edgeWidth, dist);
-        if (alpha < 0.01) discard;
+        float cov = 1.0 - smoothstep(halfWidth, halfWidth + edgeWidth, dist);
+        if (cov < 0.5) discard;
     } else {
         // Hard cutoff
         if (dist > halfWidth) discard;
@@ -181,9 +154,9 @@ void effect() {
     float litMarker = isUnlit ? 0.0 : 1.0;
 
     // -- MATERIAL_BEGIN --
-    love_Canvases[0] = vec4(vColor.rgb, vColor.a * alpha);
+    love_Canvases[0] = vColor;
     love_Canvases[1] = vec4(normal * 0.5 + 0.5, litMarker);
-    love_Canvases[2] = vec4(1.0, 0.5, 0.0, 1.0);  // ORM default (AO=1, roughness=0.5, metallic=0)
+    love_Canvases[2] = DEFAULT_ORM;
     love_Canvases[3] = vec4(0.0);  // No emission for shapes
     // -- MATERIAL_END --
 }

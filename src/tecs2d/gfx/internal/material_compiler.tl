@@ -58,7 +58,7 @@ end
 -- shape's standard G-buffer values so custom materials can build on them.
 local CALL_SITE <const>: {string: string} = {
     rectangle = [[
-    mi.color = vec4(vColor.rgb, vColor.a * alpha);
+    mi.color = vColor;
     mi.uv = (vLocalPos / vHalfSize) * 0.5 + 0.5;
     mi.worldPos = vWorldPos;
     mi.localPos = (vLocalPos / vHalfSize) * 0.5 + 0.5;
@@ -66,11 +66,11 @@ local CALL_SITE <const>: {string: string} = {
     _std.albedo = mi.color;
     _std.normal = vec3(0.5, 0.5, 1.0);
     _std.lit = litMarker;
-    _std.orm = vec4(1.0, 0.5, 0.0, 1.0);
+    _std.orm = DEFAULT_ORM;
     _std.emission = vec4(0.0);
 ]],
     circle = [[
-    mi.color = vec4(vColor.rgb, vColor.a * alpha);
+    mi.color = vColor;
     mi.uv = (vLocalPos + 1.0) * 0.5;
     mi.worldPos = vWorldPos;
     mi.localPos = (vLocalPos + 1.0) * 0.5;
@@ -78,11 +78,11 @@ local CALL_SITE <const>: {string: string} = {
     _std.albedo = mi.color;
     _std.normal = normal * 0.5 + 0.5;
     _std.lit = litMarker;
-    _std.orm = vec4(1.0, 0.5, 0.0, 1.0);
+    _std.orm = DEFAULT_ORM;
     _std.emission = vec4(0.0);
 ]],
     ellipse = [[
-    mi.color = vec4(vColor.rgb, vColor.a * alpha);
+    mi.color = vColor;
     mi.uv = (vLocalPos + 1.0) * 0.5;
     mi.worldPos = vWorldPos;
     mi.localPos = (vLocalPos + 1.0) * 0.5;
@@ -90,11 +90,11 @@ local CALL_SITE <const>: {string: string} = {
     _std.albedo = mi.color;
     _std.normal = normal * 0.5 + 0.5;
     _std.lit = litMarker;
-    _std.orm = vec4(1.0, 0.5, 0.0, 1.0);
+    _std.orm = DEFAULT_ORM;
     _std.emission = vec4(0.0);
 ]],
     arc = [[
-    mi.color = vec4(vColor.rgb, vColor.a * alpha);
+    mi.color = vColor;
     mi.uv = (vLocalPos + 1.0) * 0.5;
     mi.worldPos = vWorldPos;
     mi.localPos = (vLocalPos + 1.0) * 0.5;
@@ -102,11 +102,11 @@ local CALL_SITE <const>: {string: string} = {
     _std.albedo = mi.color;
     _std.normal = normal * 0.5 + 0.5;
     _std.lit = litMarker;
-    _std.orm = vec4(1.0, 0.5, 0.0, 1.0);
+    _std.orm = DEFAULT_ORM;
     _std.emission = vec4(0.0);
 ]],
     line = [[
-    mi.color = vec4(vColor.rgb, vColor.a * alpha);
+    mi.color = vColor;
     vec2 pa_m = vWorldPos - vP1;
     vec2 ba_m = vP2 - vP1;
     float len2_m = dot(ba_m, ba_m);
@@ -118,7 +118,7 @@ local CALL_SITE <const>: {string: string} = {
     _std.albedo = mi.color;
     _std.normal = vec3(0.5, 0.5, 1.0);
     _std.lit = litMarker;
-    _std.orm = vec4(1.0, 0.5, 0.0, 1.0);
+    _std.orm = DEFAULT_ORM;
     _std.emission = vec4(0.0);
 ]],
     sprite = [[
@@ -142,7 +142,7 @@ local CALL_SITE <const>: {string: string} = {
     _std.albedo = finalColor;
     _std.normal = vec3(0.5, 0.5, 1.0);
     _std.lit = litMarker;
-    _std.orm = vec4(1.0, 0.5, 0.0, 1.0);
+    _std.orm = DEFAULT_ORM;
     _std.emission = vec4(0.0);
 ]],
 }

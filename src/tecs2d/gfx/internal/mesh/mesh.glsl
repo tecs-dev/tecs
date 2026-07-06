@@ -4,24 +4,18 @@
 struct MeshInstance {
     vec4 posLayer;         // x, y, z, layerFloat
     vec4 color;            // r, g, b, a
-    vec4 scaleRotFlags;    // scaleX, scaleY, rotation, flags
+    vec4 scaleRotFlags;    // scaleX, scaleY, rotation, spare
     vec4 pivot;            // pivotX, pivotY, _pad, _pad
     vec4 clipBounds;       // minX, minY, maxX, maxY
-    uvec4 flags;           // flagBits, depthBits, _pad, _pad
+    uvec4 flags;           // packed flags, depthBits, _pad, _pad
 };
 
-// Flag constants (must match types.tl)
-const uint FLAG_UNLIT = 0x1u;
-const uint FLAG_SCREEN_SPACE = 0x10000u;
-const uint FLAG_IGNORE_ZOOM = 0x20000u;
-const uint FLAG_VIRTUAL_COORDS = 0x40000u;
+// Flag constants, pass uniforms, and pass-filter helpers come from
+// render_common.glsl.
 
 layout(std430) readonly buffer MeshOutput {
     MeshInstance instances[];
 };
-
-uniform int BlendModePass;    // -1 = render all, 0+ = render only matching blend ID
-uniform int MaterialPass;     // -1 = default pass (materialId=0 only), 0+ = specific material
 
 varying vec4 vColor;
 varying vec2 vTexCoord;
@@ -40,22 +34,10 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
         return vec4(2.0, 2.0, 2.0, 1.0);
     }
 
-    // Blend / material pass filtering. Cull packs blendId in bits 20-23
-    // and materialId in bits 24-31 of `flags.x`.
-    uint packedFlags = inst.flags.x;
-    if (BlendModePass >= 0) {
-        int blendId = int((packedFlags >> 20) & 0xFu);
-        if (blendId != BlendModePass) {
-            return vec4(2.0, 2.0, 2.0, 1.0);
-        }
-    }
-    {
-        int matId = int((packedFlags >> 24) & 0xFFu);
-        if (MaterialPass < 0) {
-            if (matId != 0) return vec4(2.0, 2.0, 2.0, 1.0);
-        } else {
-            if (matId != MaterialPass) return vec4(2.0, 2.0, 2.0, 1.0);
-        }
+    // Blend / material pass filtering (canonical packed layout).
+    uint flagBits = inst.flags.x;
+    if (blendPassFiltered(flagBits) || materialPassFiltered(flagBits)) {
+        return vec4(2.0, 2.0, 2.0, 1.0);
     }
 
     // Extract transform data
@@ -65,7 +47,6 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
     float rotation = inst.scaleRotFlags.z;
 
     // Check screen-space flags
-    uint flagBits = inst.flags.x;
     bool isScreenSpace = (flagBits & FLAG_SCREEN_SPACE) != 0u;
     bool ignoresZoom = (flagBits & FLAG_IGNORE_ZOOM) != 0u;
     bool usesVirtualCoords = (flagBits & FLAG_VIRTUAL_COORDS) != 0u;
@@ -92,7 +73,9 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
     vTexCoord = VertexTexCoord.xy;
     vWorldPos = worldPos;
     vClipBounds = inst.clipBounds;
-    vFlags = float(flagBits);
+    // Fragment only needs the low flag bits (FLAG_UNLIT); the full packed
+    // value exceeds float's 24-bit exact integer range once materialId is set.
+    vFlags = float(flagBits & 0xFFFFu);
 
     return result;
 }
@@ -121,7 +104,7 @@ void effect() {
     // G-buffer output
     love_Canvases[0] = finalColor;  // Albedo
     love_Canvases[1] = vec4(0.5, 0.5, 1.0, litMarker);  // Flat normal + unlit flag
-    love_Canvases[2] = vec4(1.0, 0.5, 0.0, 1.0);  // ORM default (AO=1, roughness=0.5, metallic=0)
+    love_Canvases[2] = DEFAULT_ORM;
     love_Canvases[3] = vec4(0.0);  // No emission for meshes
 }
 #endif

@@ -3,14 +3,15 @@
 struct ArcData {
     vec4 posRadii;            // x, y, radiusX, radiusY
     vec4 color;               // r, g, b, a
-    vec4 depthLayerLineFlags; // depth, layer, lineWidth, flags (as float)
+    vec4 depthLayerLineFlags; // depth, layer, lineWidth, spare
     vec4 angles;              // startAngle, endAngle, rotation, pad
     vec4 clipBounds;          // minX, minY, maxX, maxY (world coords)
-    vec4 pivot;               // pivotX, pivotY, pad, screenSpaceFlags
+    vec4 pivot;               // pivotX, pivotY, pad, packed flags (uint bits)
 };
 
-// Flag constants (must match types.tl)
-const uint FLAG_UNLIT = 0x1u;   // Skip lighting
+// Flag constants, pass uniforms, and pass-filter helpers come from
+// render_common.glsl. Arc blend modes route through per-blend batch
+// buffers, so only the material pass filters here.
 
 // 0.0 = smooth SDF edges, 1.0 = hard pixel cutoff. Set per-frame from
 // pipeline.roughGeometry.
@@ -19,8 +20,6 @@ uniform float RoughGeometry;
 layout(std430) readonly buffer ArcOutput {
     ArcData arcs[];
 };
-
-uniform int MaterialPass;     // -1 = default pass (materialId=0 only), 0+ = specific material
 
 varying vec4 vColor;
 varying vec2 vLocalPos;
@@ -31,19 +30,13 @@ varying vec2 vAngles;         // startAngle, endAngle
 varying float vRotation;      // transform rotation
 varying vec2 vWorldPos;
 varying vec4 vClipBounds;
-varying float vIsScreenSpace; // For fragment shader clip bounds handling
 
 #ifdef VERTEX
-// Quad vertex positions for SDF shapes (2 triangles, CCW winding, -1 to 1 range)
-const vec2 QUAD_POSITIONS[6] = vec2[6](
-    vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(1.0, 1.0),  // First triangle
-    vec2(-1.0, -1.0), vec2(1.0, 1.0), vec2(-1.0, 1.0)   // Second triangle
-);
 
 vec4 position(mat4 transform_projection, vec4 vertex_position) {
     // Generate vertex position from VertexID (for drawFromShaderIndirect)
     // love_VertexID is 0-5 for each instance when vertexCount=6 in indirect buffer
-    vec2 quadPos = QUAD_POSITIONS[love_VertexID];
+    vec2 quadPos = QUAD_POSITIONS_CENTERED[love_VertexID];
 
     int instanceID = love_InstanceID;
     ArcData a = arcs[instanceID];
@@ -54,25 +47,17 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
         return vec4(2.0, 2.0, 2.0, 1.0);
     }
 
-    // Material pass filtering: materialId packed in bits 8-15 of pivot.w alongside screenSpaceFlags
-    {
-        int packedPivotW = int(a.pivot.w);
-        int matId = (packedPivotW >> 8) & 0xFF;
-        if (MaterialPass < 0) {
-            if (matId != 0) return vec4(2.0, 2.0, 2.0, 1.0);
-        } else {
-            if (matId != MaterialPass) return vec4(2.0, 2.0, 2.0, 1.0);
-        }
+    // Material pass filtering (canonical packed layout).
+    uint packed = floatBitsToUint(a.pivot.w);
+    if (materialPassFiltered(packed)) {
+        return vec4(2.0, 2.0, 2.0, 1.0);
     }
 
     vec2 center = a.posRadii.xy;
     vec2 radii = a.posRadii.zw;  // radiusX, radiusY
-    // Screen-space flags encoded in pivot.w by cull shader: 1.0 = screenSpace, 2.0 = ignoreZoom, 4.0 = virtualCoords
-    float screenSpaceFlag = a.pivot.w;
-    int flagInt = int(screenSpaceFlag);
-    bool isScreenSpace = (flagInt & 1) != 0;
-    bool ignoresZoom = (flagInt & 2) != 0;
-    bool usesVirtualCoords = (flagInt & 4) != 0;
+    bool isScreenSpace = (packed & FLAG_SCREEN_SPACE) != 0u;
+    bool ignoresZoom = (packed & FLAG_IGNORE_ZOOM) != 0u;
+    bool usesVirtualCoords = (packed & FLAG_VIRTUAL_COORDS) != 0u;
 
     // Unit quad spans -1 to 1, scale by radii
     vec2 localPos = quadPos;
@@ -88,12 +73,12 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
     vLocalPos = localPos;
     vRadii = radii;
     vLineWidth = a.depthLayerLineFlags.z;
-    vFlags = a.depthLayerLineFlags.w;
+    // Fragment only needs the low flag bits; they fit a float exactly.
+    vFlags = float(packed & 0xFFFFu);
     vAngles = a.angles.xy;
     vRotation = a.angles.z;
     vWorldPos = worldPos;
     vClipBounds = a.clipBounds;
-    vIsScreenSpace = isScreenSpace ? 1.0 : 0.0;
     return result;
 }
 #endif
@@ -140,11 +125,10 @@ void effect() {
         discard;
     }
 
-    float alpha = 1.0;
-
     // Stable edge width from linear varying derivatives (constant per-triangle).
-    // Factor 1.2 widens the transition to reduce sub-pixel crawl artifacts.
-    float edgeWidth = min(length(fwidth(vLocalPos)) * 1.2, 0.25);
+    // Kept tight (~1px, no widening) for a crisp edge, matching circle
+    // and ellipse.
+    float edgeWidth = min(length(fwidth(vLocalPos)), 0.05);
 
     // Handle outline vs filled mode
     if (vLineWidth > 0.0) {
@@ -192,9 +176,9 @@ void effect() {
     float litMarker = isUnlit ? 0.0 : 1.0;
 
     // -- MATERIAL_BEGIN --
-    love_Canvases[0] = vec4(vColor.rgb, vColor.a * alpha);
+    love_Canvases[0] = vColor;
     love_Canvases[1] = vec4(normal * 0.5 + 0.5, litMarker);
-    love_Canvases[2] = vec4(1.0, 0.5, 0.0, 1.0);  // ORM default (AO=1, roughness=0.5, metallic=0)
+    love_Canvases[2] = DEFAULT_ORM;
     love_Canvases[3] = vec4(0.0);  // No emission for shapes
     // -- MATERIAL_END --
 }

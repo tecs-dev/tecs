@@ -43,6 +43,47 @@ layout(std430) readonly buffer RenderParams {
 // When x = 0 and y = 65535, all layers are rendered (default/no filtering)
 uniform vec2 LayerRange;
 
+// Canonical packed render-flags layout, written by cull shaders via
+// packRenderFlags: bits 0-15 shape flags, bits 16-18 screen-space
+// class, bits 20-23 blend id, bits 24-31 material id. Packed lanes in
+// float fields carry raw bits; decode with floatBitsToUint.
+const uint FLAG_UNLIT          = 0x1u;
+const uint FLAG_SCREEN_SPACE   = 0x10000u;
+const uint FLAG_IGNORE_ZOOM    = 0x20000u;
+const uint FLAG_VIRTUAL_COORDS = 0x40000u;
+
+uniform int BlendModePass;    // -1 = render all; 0+ = only instances with this blend id
+uniform int MaterialPass;     // -1 = default pass (material id 0 only); 0+ = only this material
+
+// True when the current material pass should skip this instance.
+bool materialPassFiltered(uint packed) {
+    uint matId = (packed >> 24u) & 0xFFu;
+    if (MaterialPass < 0) return matId != 0u;
+    return int(matId) != MaterialPass;
+}
+
+// True when the current blend pass should skip this instance.
+bool blendPassFiltered(uint packed) {
+    return BlendModePass >= 0 && int((packed >> 20u) & 0xFu) != BlendModePass;
+}
+
+// Instanced-quad vertex positions (two triangles, CCW winding), indexed
+// by love_VertexID with vertexCount=6 indirect draws. Unit variant
+// spans 0..1 (pivot-based shapes); centered variant spans -1..1 (SDF
+// shapes).
+const vec2 QUAD_POSITIONS_UNIT[6] = vec2[6](
+    vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(1.0, 1.0),
+    vec2(0.0, 0.0), vec2(1.0, 1.0), vec2(0.0, 1.0)
+);
+const vec2 QUAD_POSITIONS_CENTERED[6] = vec2[6](
+    vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(1.0, 1.0),
+    vec2(-1.0, -1.0), vec2(1.0, 1.0), vec2(-1.0, 1.0)
+);
+
+// Default ORM G-buffer output for content without material maps
+// (AO = 1, roughness = 0.5, metallic = 0).
+const vec4 DEFAULT_ORM = vec4(1.0, 0.5, 0.0, 1.0);
+
 vec2 worldToScreen(vec2 worldPos, bool isScreenSpace, bool ignoresZoom, bool usesVirtualCoords) {
     if (isScreenSpace) {
         vec2 sourceSize = usesVirtualCoords ? VirtualSize : ScreenSize;

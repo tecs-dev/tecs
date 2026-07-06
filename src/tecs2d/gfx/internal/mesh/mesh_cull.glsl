@@ -1,5 +1,6 @@
 // Mesh culling compute shader -- renderer-owned shadow-column path.
-// Common code is prepended from cull_common.glsl.
+// Shared structs, component readers, uniforms, and cull helpers are
+// prepended from cull_common.glsl.
 //
 // One dispatch per (definition, archetype). Each dispatch binds the
 // archetype's source-component shadow SSBOs and reads them by archetype-
@@ -18,36 +19,13 @@
 // for visible entities of this definition across all archetypes that
 // host them.
 
-// ---------- Source-component SSBOs ----------
-
-struct Std430Transform {
-    float x, y, z;
-    int layerInt;
-    float rotation, scaleX, scaleY;
-};
-layout(std430) readonly buffer TransformInput {
-    Std430Transform transforms[];
-};
+// ---------- Shape-specific source SSBOs ----------
 
 struct Std430Mesh {
     uint definitionId;
 };
 layout(std430) readonly buffer MeshInput {
     Std430Mesh meshes[];
-};
-
-struct Std430Color {
-    vec4 rgba;
-};
-layout(std430) readonly buffer ColorInput {
-    Std430Color colors[];
-};
-
-struct Std430ClipBounds {
-    vec4 minMaxXY;       // minX, minY, maxX, maxY
-};
-layout(std430) readonly buffer ClipBoundsInput {
-    Std430ClipBounds clipBounds[];
 };
 
 struct Std430Pivot {
@@ -57,71 +35,31 @@ layout(std430) readonly buffer PivotInput {
     Std430Pivot pivots[];
 };
 
-struct Std430Material {
-    vec4 idP012;         // materialId(bits as float), p0, p1, p2
-    vec4 p3Pad;          // p3, _pad, _pad, _pad
-};
-layout(std430) readonly buffer MaterialInput {
-    Std430Material materials[];
-};
-
 // ---------- Output buffers (per-definition; shared across archetypes
 // routed to this definition) ----------
 
 struct MeshOut {
     vec4 posLayer;         // x, y, z, layerFloat
     vec4 color;            // r, g, b, a
-    vec4 scaleRotFlags;    // scaleX, scaleY, rotation, flags-as-float
+    vec4 scaleRotFlags;    // scaleX, scaleY, rotation, spare
     vec4 pivot;            // pivotX, pivotY, _pad, _pad
     vec4 clipBounds;       // minX, minY, maxX, maxY
-    uvec4 flags;           // flagBits, depthBits, _pad, _pad
+    uvec4 flags;           // packed flags, depthBits, _pad, _pad
 };
 // IndirectArgs (uint args[]) is declared in cull_common.glsl which is
 // prepended by shaders.loadCullShader; we use `args[]` directly.
 layout(std430) writeonly buffer MeshOutput {
     MeshOut meshesOut[];
 };
-layout(std430) writeonly buffer MaterialParamsOutput {
-    vec4 materialParamsOut[];
-};
 
-// ---------- Component-presence mask ----------
-
-const uint COMP_COLOR        = 0x1u;
-const uint COMP_CLIPBOUNDS   = 0x2u;
-const uint COMP_PIVOT        = 0x4u;
-const uint COMP_MATERIAL     = 0x8u;
-
-uniform uint ComponentMask;
-uniform uint ArchetypeRowCount;
 // TargetDefinitionId: dispatch-uniform. Rows whose `_definitionId`
 // doesn't match are skipped.
 uniform uint TargetDefinitionId;
 // MeshBounds: definition-constant bounds (centerX, centerY, halfW,
 // halfH). Set once per dispatch.
 uniform vec4 MeshBounds;
-// StaticFlags: per-archetype OR of bits whose tag components are
-// present (e.g. FLAG_UNLIT for the Unlit tag).
-uniform uint StaticFlags;
-// BlendId is dispatch-uniform: every entity in this archetype shares
-// the same blend mode (archetype identity = blend identity).
-uniform uint BlendId;
 
-// ---------- Helpers for optional components ----------
-
-vec4 readColor(uint row) {
-    if ((ComponentMask & COMP_COLOR) != 0u) {
-        return colors[row].rgba;
-    }
-    return vec4(1.0, 1.0, 1.0, 1.0);
-}
-
-vec4 readClipBounds(uint row) {
-    if ((ComponentMask & COMP_CLIPBOUNDS) != 0u) {
-        return clipBounds[row].minMaxXY;
-    }
-    return vec4(-3.4e38, -3.4e38, 3.4e38, 3.4e38);  // unbounded
-}
+// ---------- Shape-specific component readers ----------
 
 vec2 readPivot(uint row) {
     if ((ComponentMask & COMP_PIVOT) != 0u) {
@@ -130,34 +68,17 @@ vec2 readPivot(uint row) {
     return vec2(0.0, 0.0);
 }
 
-uint readMaterialId(uint row) {
-    if ((ComponentMask & COMP_MATERIAL) != 0u) {
-        return floatBitsToUint(materials[row].idP012.x);
-    }
-    return 0u;
-}
-
-vec4 readMaterialParams(uint row) {
-    if ((ComponentMask & COMP_MATERIAL) != 0u) {
-        Std430Material m = materials[row];
-        return vec4(m.idP012.y, m.idP012.z, m.idP012.w, m.p3Pad.x);
-    }
-    return vec4(0.0);
-}
-
 // ---------- Cull main ----------
 
 void computemain() {
     uint row = gl_GlobalInvocationID.x;
     if (row >= ArchetypeRowCount) return;
 
-    // Definition filter: skip rows whose mesh definition doesn't
-    // match this dispatch's target. id=0 means "unresolved" and is
-    // also skipped (the host could log this; for now treat as not-
-    // visible).
+    // Definition filter: skip rows whose mesh definition doesn't match
+    // this dispatch's target. id=0 means "unresolved" and never matches
+    // a real target (definition ids start at 1).
     Std430Mesh m = meshes[row];
     if (m.definitionId != TargetDefinitionId) return;
-    if (m.definitionId == 0u) return;
 
     Std430Transform t = transforms[row];
 
@@ -190,46 +111,21 @@ void computemain() {
     // Conservative bounding circle for rotated bounds.
     float halfDiag = sqrt(scaledHalfW * scaledHalfW + scaledHalfH * scaledHalfH);
 
-    float left = centerX - halfDiag;
-    float top = centerY - halfDiag;
-    float right = centerX + halfDiag;
-    float bottom = centerY + halfDiag;
+    vec4 bounds = vec4(centerX - halfDiag, centerY - halfDiag,
+                       centerX + halfDiag, centerY + halfDiag);
 
-    bool visible;
-    if (isScreenSpace) {
-        vec2 cullSize = getScreenSpaceCullSize(usesVirtualCoords);
-        visible = (scaledHalfW > 0.0 || scaledHalfH > 0.0) &&
-                  (right > 0.0) && (left < cullSize.x) &&
-                  (bottom > 0.0) && (top < cullSize.y);
-    } else {
-        vec2 parallax = getParallaxFactor(layer);
-        float parallaxOffsetX = CameraPos.x * (1.0 - parallax.x);
-        float parallaxOffsetY = CameraPos.y * (1.0 - parallax.y);
-        float adjLeft = left + parallaxOffsetX;
-        float adjRight = right + parallaxOffsetX;
-        float adjTop = top + parallaxOffsetY;
-        float adjBottom = bottom + parallaxOffsetY;
-
-        float screenW = scaledHalfW * 2.0 * CameraZoom;
-        float screenH = scaledHalfH * 2.0 * CameraZoom;
-        visible = (scaledHalfW > 0.0 || scaledHalfH > 0.0) &&
-                  (screenW >= 1.0 || screenH >= 1.0) &&
-                  (adjRight > CameraViewport.x) && (adjLeft < CameraViewport.z) &&
-                  (adjBottom > CameraViewport.y) && (adjTop < CameraViewport.w);
+    vec2 pOff = isScreenSpace ? vec2(0.0) : getParallaxOffset(layer);
+    bool sizeOK = (scaledHalfW > 0.0 || scaledHalfH > 0.0);
+    if (!isScreenSpace) {
+        sizeOK = sizeOK && (scaledHalfW * 2.0 * CameraZoom >= 1.0 || scaledHalfH * 2.0 * CameraZoom >= 1.0);
     }
-
-    if (!visible) return;
+    if (!sizeOK || !cullBoundsVisible(bounds, isScreenSpace, usesVirtualCoords, pOff)) return;
 
     uint outIdx = atomicAdd(args[1], 1u);
 
     // Apply parallax offset to output position (for rendering).
-    float outX = x;
-    float outY = y;
-    if (!isScreenSpace) {
-        vec2 parallax = getParallaxFactor(layer);
-        outX += CameraPos.x * (1.0 - parallax.x);
-        outY += CameraPos.y * (1.0 - parallax.y);
-    }
+    float outX = x + pOff.x;
+    float outY = y + pOff.y;
 
     // Stable depth tie-breaker: archetype row index (matches the
     // simple-shape convention).
@@ -238,12 +134,11 @@ void computemain() {
 
     uint flags = StaticFlags;
     if (isUnlitLayer(layer)) {
-        flags = flags | 1u;  // FLAG_UNLIT = 0x1
+        flags = flags | FLAG_UNLIT;
     }
 
-    uint screenSpaceFlags = encodeScreenSpaceFlagsUint(isScreenSpace, ignoresZoom, usesVirtualCoords);
     uint materialId = readMaterialId(row);
-    uint packedFlags = flags | screenSpaceFlags | (BlendId << 20u) | (materialId << 24u);
+    uint packed = packRenderFlags(flags, isScreenSpace, ignoresZoom, usesVirtualCoords, BlendId, materialId);
 
     vec2 pivot = readPivot(row);
     vec4 color = readColor(row);
@@ -252,10 +147,10 @@ void computemain() {
     MeshOut mo;
     mo.posLayer = vec4(outX, outY, z, layer);
     mo.color = color;
-    mo.scaleRotFlags = vec4(scaleX, scaleY, rotation, uintBitsToFloat(packedFlags));
+    mo.scaleRotFlags = vec4(scaleX, scaleY, rotation, 0.0);
     mo.pivot = vec4(pivot.x, pivot.y, 0.0, 0.0);
     mo.clipBounds = clip;
-    mo.flags = uvec4(packedFlags, floatBitsToUint(depth), 0u, 0u);
+    mo.flags = uvec4(packed, floatBitsToUint(depth), 0u, 0u);
 
     meshesOut[outIdx] = mo;
 
