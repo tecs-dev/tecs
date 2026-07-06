@@ -44,6 +44,9 @@ local record Archetype is ArchetypeInternal
     -- True once markAllComponentsDirty ran this frame; cleared with the
     -- dirty bits so repeat calls short-circuit.
     _allDirty: boolean
+    -- Dense relationship instance components keyed by container; nil when
+    -- the archetype carries none. Built once at construction.
+    _relInstancesByContainer: {Component: {Component}}
 
     _dirtySet: {Archetype: boolean}
 
@@ -282,42 +285,27 @@ end
 -- Relationships
 -------------------------------------------------------------------------------
 
-local function forEachRelationshipColumn(
-    self: Archetype,
-    relContainer: Relationship,
-    callback: function(Component, {Component}): boolean
-): boolean
-    if not self.columns[relContainer] then
-        return false
-    end
-
-    local columns = self.columns
-    for columnKey, columnValue in pairs(columns) do
-        local columnMeta = columnKey as {string:any}
-        if columnMeta.relationshipType == relContainer and columnMeta.componentType ~= relContainer then
-            if callback(columnKey, columnValue) then
-                return true
-            end
-        end
-    end
-
-    return true
-end
+-- Lookups walk the construction-time instance list and resolve columns
+-- per call: bulk moves and FFI growth swap column identities, so column
+-- references must not be cached.
 
 function Archetype:forEachRelationship<T is Relationship>(relContainer: T, row: integer, callback: function(T))
-    forEachRelationshipColumn(self, relContainer, function(_columnKey: Component, columnValue: {Component}): boolean
-        callback(columnValue[row] as T)
-        return false
-    end)
+    local instances = self._relInstancesByContainer
+    local list = instances and instances[relContainer as Component]
+    if not list then return end
+    local columns = self.columns
+    for i = 1, #list do
+        local col = columns[list[i]] as {Component}
+        callback(col[row] as T)
+    end
 end
 
 function Archetype:getFirstRelationship<T is Relationship>(relContainer: T, row: integer): T
-    local found: T = nil
-    forEachRelationshipColumn(self, relContainer, function(_columnKey: Component, columnValue: {Component}): boolean
-        found = columnValue[row] as T
-        return true
-    end)
-    return found
+    local instances = self._relInstancesByContainer
+    local list = instances and instances[relContainer as Component]
+    if not list then return nil end
+    local col = self.columns[list[1]] as {Component}
+    return col[row] as T
 end
 
 -------------------------------------------------------------------------------
@@ -801,6 +789,7 @@ function Archetype.new(
 
     local onDespawnComponents: {Component} = {}
     local onDespawnCount = 0
+    local relInstancesByContainer: {Component: {Component}} = nil
 
     local nextDataIdx = 1
     local nextTagIdx = dataColumnsCount + 1
@@ -827,6 +816,22 @@ function Archetype.new(
         if frameworkBehavior.hasBits(comp, frameworkBehavior.NeedsDespawn) then
             onDespawnCount = onDespawnCount + 1
             onDespawnComponents[onDespawnCount] = comp
+        end
+
+        -- Dense relationship instance columns per container, so lookups
+        -- avoid a pairs() scan of every column. The column SET is
+        -- immutable, so this is build-once.
+        local rc = compI.relationshipType
+        if rc ~= nil and (rc as Component) ~= comp then
+            if relInstancesByContainer == nil then
+                relInstancesByContainer = {}
+            end
+            local list = relInstancesByContainer[rc as Component]
+            if not list then
+                list = {}
+                relInstancesByContainer[rc as Component] = list
+            end
+            list[#list + 1] = comp
         end
     end
 
@@ -876,6 +881,7 @@ function Archetype.new(
         batchSpawnAtQueueCount = 0,
         _observers = {},
         _allDirty = false,
+        _relInstancesByContainer = relInstancesByContainer,
         _componentDirty = Bitset.new(columnsCount + 1),
         _dirtySet = dirtySet as {Archetype: boolean},
         dirtyQueuedEpoch = 0,
