@@ -41,6 +41,9 @@ local record Archetype is ArchetypeInternal
     -- or explicit `markComponentDirty`. Cleared by `world:update` at
     -- end of frame via `clearDirtyComponents`.
     _componentDirty: Bitset
+    -- True once markAllComponentsDirty ran this frame; cleared with the
+    -- dirty bits so repeat calls short-circuit.
+    _allDirty: boolean
 
     _dirtySet: {Archetype: boolean}
 
@@ -688,6 +691,11 @@ end
 --- archetype move-in, and swap-pop, where every column's bytes have
 --- changed for at least one row.
 function Archetype:markAllComponentsDirty()
+    -- Runs per swap-pop and per move-in; after the first call in a frame
+    -- every later call is a guaranteed no-op, so short-circuit on a flag
+    -- instead of re-walking the bitset per entity.
+    if self._allDirty then return end
+    self._allDirty = true
     local bits = self._componentDirty
     local n = self.columnsCount
     for i = 1, n do
@@ -699,6 +707,7 @@ end
 --- Clear every component-dirty bit. Called by `world:update` at end
 --- of frame for each archetype in the dirty set.
 function Archetype:clearDirtyComponents()
+    self._allDirty = false
     self._componentDirty:clearAll()
 end
 
@@ -866,6 +875,7 @@ function Archetype.new(
         batchSpawnAtQueue = {},
         batchSpawnAtQueueCount = 0,
         _observers = {},
+        _allDirty = false,
         _componentDirty = Bitset.new(columnsCount + 1),
         _dirtySet = dirtySet as {Archetype: boolean},
         dirtyQueuedEpoch = 0,
