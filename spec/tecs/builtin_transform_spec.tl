@@ -185,3 +185,76 @@ describe("Built-in Transform spawn/respawn", function()
         end
     end)
 end)
+
+describe("RelativeTransform hierarchy", function()
+    local ChildOf <const> = tecs.builtins.ChildOf
+    local RelativeTransform <const> = tecs.builtins.RelativeTransform
+    local WorldImpl <const> = require("tecs.internal.world")
+
+    -- Records, per update, whether the child's archetype had a dirty
+    -- component column when the frame ended (the relative-transform
+    -- system marks Transform when it recomputes).
+    local function addDirtyProbe(w: tecs.World, child: integer): {boolean}
+        local seen: {boolean} = {}
+        w:addSystem({
+            name = "TransformDirtyProbe",
+            phase = tecs.phases.Last,
+            run = function()
+                local arch = (w as WorldImpl):currentArchetype(child)
+                local found = false
+                for darch in w:dirtyArchetypes() do
+                    if darch == arch then
+                        found = true
+                        break
+                    end
+                end
+                seen[#seen + 1] = found
+            end,
+        })
+        return seen
+    end
+
+    it("recomputes children when the parent moves and marks Transform dirty", function()
+        local w = tecs.newWorld()
+        local parent = w:spawn(Transform(100, 200, 0))
+        local child = w:spawn(Transform(0, 0, 0), RelativeTransform(10, 20, 0),
+            ChildOf(parent) as tecs.Component)
+        w:commit()
+
+        local seen = addDirtyProbe(w, child)
+
+        w:update(1 / 60)
+        luassert.equals(110, w:get(child, Transform).x)
+        luassert.equals(220, w:get(child, Transform).y)
+
+        w:update(1 / 60)
+        luassert.is_false(seen[2], "an idle frame must skip the hierarchy walk")
+
+        w:set(parent, Transform(500, 600, 0))
+        w:update(1 / 60)
+        luassert.equals(510, w:get(child, Transform).x)
+        luassert.equals(620, w:get(child, Transform).y)
+        luassert.is_true(seen[3],
+            "a parent move must leave the child's Transform column dirty")
+    end)
+
+    it("recomputes children when ChildOf retargets", function()
+        local w = tecs.newWorld()
+        local parent1 = w:spawn(Transform(100, 0, 0))
+        local parent2 = w:spawn(Transform(1000, 0, 0))
+        local child = w:spawn(Transform(0, 0, 0), RelativeTransform(5, 0, 0),
+            ChildOf(parent1) as tecs.Component)
+        w:commit()
+
+        w:update(1 / 60)
+        luassert.equals(105, w:get(child, Transform).x)
+
+        w:update(1 / 60)
+
+        -- Sparse retarget: no structural change, but the commit-time
+        -- container mark must reopen the dirty gate.
+        w:set(child, ChildOf(parent2) as tecs.Component)
+        w:update(1 / 60)
+        luassert.equals(1005, w:get(child, Transform).x)
+    end)
+end)

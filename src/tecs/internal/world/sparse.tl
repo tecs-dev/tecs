@@ -102,6 +102,14 @@ function WorldImpl:removeSparseOneRaw(id: integer, container: Component, targetI
         if not stagedForContainer and not store:has(id) then
             -- Use deferRemoveRaw to skip dispatcher recursion.
             self:deferRemoveRaw(id, container)
+        else
+            -- Partial removal keeps the container; mark it dirty so
+            -- dirty-gated consumers see the store change.
+            local arch = self.archetypeIndex[
+                (self.allocator.slots as {integer: IdAllocator.EntitySlot})[slot].archetypeId]
+            if arch then
+                arch:markComponentDirty(container)
+            end
         end
     end
     self.isDirty = true

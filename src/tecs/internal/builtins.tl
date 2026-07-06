@@ -530,8 +530,27 @@ function builtins.plugin(w: types.World)
             name = "RelativeTransform",
             phase = phases.PostUpdate,
             run = function()
+                -- Dirty-skip: recompute only when an archetype carrying
+                -- hierarchy state changed this frame. Sparse ChildOf
+                -- retargets mark the container column at commit, so they
+                -- open this gate too.
+                local dirty = false
+                for arch in w:dirtyArchetypes() do
+                    local cols = arch.columns
+                    if cols[Transform] or cols[RelativeTransform] or cols[ChildOf] then
+                        dirty = true
+                        break
+                    end
+                end
+                if not dirty then
+                    return
+                end
+
                 table_clear(worldTransformCache)
-                for _, len, entities in hierarchyQuery:iter() do
+                for archetype, len, entities in hierarchyQuery:iter() do
+                    -- Children get their world transform written in place;
+                    -- dirty-gated consumers must re-upload the column.
+                    archetype:markComponentDirty(Transform)
                     for row = 1, len do
                         -- Access triggers __index, which recursively resolves the parent chain
                         local _ = worldTransformCache[entities[row]]

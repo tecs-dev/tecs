@@ -360,6 +360,7 @@ local function commitSparseChanges(self: WorldImpl)
         if not IdAllocator.isStale(slots, stagedId, slot)
             and not (slotStamp[slot] == epoch and stateArr[slot] == STATE_DESPAWN)
         then
+            local arch = self.archetypeIndex[slots[slot].archetypeId]
             for si = 1, #sets do
                 local value = sets[si]
                 local rel = value as types.components.Relationship
@@ -367,6 +368,12 @@ local function commitSparseChanges(self: WorldImpl)
                 local store = stores[container]
                 if store then
                     store:set(stagedId, value)
+                    -- Sparse writes join the dirty model: dirty-gated
+                    -- consumers (e.g. the relative-transform system) see
+                    -- the container column change.
+                    if arch then
+                        arch:markComponentDirty(container)
+                    end
                 end
             end
         end
