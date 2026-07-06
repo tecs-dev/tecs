@@ -142,6 +142,28 @@ describe("deferred staging", function()
             assertSettled(w)
         end)
 
+        it("tolerates repeated sets on a batch-staged id", function()
+            local w = tecs.newWorld()
+            w:defer()
+            local firstId = w:batchSpawn(5, {Shared},
+                function(arch: tecs.Archetype, first: integer, last: integer, _count: integer)
+                    local col = arch:getMut(Shared)
+                    for r = first, last do
+                        col[r] = Shared(r)
+                    end
+                end)
+            local id = firstId as integer
+            -- The second set promotes the staged id through the pending-arch
+            -- branch, which has no committed source archetype.
+            w:set(id, Extra(1))
+            w:set(id, Extra(2))
+            w:commit()
+
+            luassert.is_true(w:isAlive(id))
+            luassert.is_not_nil(w:get(id, Shared))
+            assertSettled(w)
+        end)
+
         it("settles across repeated spawn scopes into one archetype", function()
             local w = tecs.newWorld()
             for _ = 1, 5 do

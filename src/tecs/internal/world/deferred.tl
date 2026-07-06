@@ -593,7 +593,12 @@ function WorldImpl:_deferSetSlow(
                         stageScalar(self, srcArch, slot, componentType, value)
                     end
                 elseif not isTag then
-                    appendPendingValue(self, srcArch as Archetype, slot, value)
+                    -- Batch-staged rows (no committed source archetype)
+                    -- take their values from the batch callback; pending
+                    -- values have no consumer for them.
+                    if srcArch then
+                        appendPendingValue(self, srcArch, slot, value)
+                    end
                 end
             end
 
