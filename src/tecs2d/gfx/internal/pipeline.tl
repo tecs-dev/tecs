@@ -541,6 +541,34 @@ function pipeline.newPipeline(config: pipeline.RenderConfig): Pipeline
     -- Register pipeline with world
     w.resources[pipeline._contextKey] = pipelineInstance
 
+    -- Persist camera view state (position, zoom, rotation, bounds) across
+    -- snapshots. The camera is a pipeline resource, so it lives outside the
+    -- ECS and the core snapshot never sees it. Cameras are matched by name on
+    -- restore: the primary and any cameras recreated during setup get their
+    -- state written back; a camera created dynamically at runtime that no
+    -- longer exists on a fresh-process load is skipped.
+    w:addSnapshotHandler({
+        name = "tecs2d.render.cameras",
+        save = function(_world: tecs.World): any
+            local cams: {{string: any}} = {}
+            for i = 1, #self._cameras do
+                cams[i] = self._cameras[i]:captureState()
+            end
+            return { cameras = cams }
+        end,
+        load = function(_world: tecs.World, value: any)
+            local data = value as {string: any}
+            local cams = data.cameras as {{string: any}}
+            if not cams then return end
+            for i = 1, #cams do
+                local cs = cams[i]
+                local name = cs.name as string
+                local namedCam = name and self._camerasByName[name]
+                if namedCam then namedCam:applyState(cs) end
+            end
+        end,
+    })
+
     -- Camera lerp update: delegates to Camera:update(dt) for all cameras
     w:addSystem({
         name = "CameraLerpUpdate",
