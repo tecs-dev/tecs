@@ -1214,7 +1214,9 @@ function WorldImpl:update(dt: number)
     end
     self.pipeline:update(dt, self)
 
-    -- Clear component-dirty bits after the pipeline + final commit.
+    -- Clear component-dirty bits after the pipeline finishes; systems
+    -- drained their own scopes, and the next update's leading commit
+    -- picks up anything still staged.
     for archetype in pairs(self._dirtyArchetypes) do
         archetype:clearDirtyComponents()
     end

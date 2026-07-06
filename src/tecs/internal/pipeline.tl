@@ -323,10 +323,10 @@ end
 --- Execute fixed timestep systems with death spiral protection.
 --- Uses accumulator pattern for frame-rate independent physics.
 ---
---- Commits once per fixed iteration rather than once per system. Each
---- fixed-timestep step therefore sees the committed effects of the prior
---- step, preserving the deterministic single-step-at-a-time semantic that
---- physics systems rely on during catch-up.
+--- Does not commit between iterations; systems that need same-step
+--- visibility into staged changes call `world:commit()` themselves.
+--- Structural changes otherwise drain at query-scope boundaries and at
+--- the next `world:update()`.
 local function runFixedLoop(self: PipelineImpl, dt: number, world: World)
     local fixedTimestep = self.fixedTimestep
     self.fixedAccumulator = self.fixedAccumulator + dt
@@ -467,10 +467,9 @@ function PipelineImpl:addSystem(config: SystemConfig)
     self.dirty = true
 end
 
---- Recursive phase dispatch that does NOT commit. Used internally so that
---- a group phase containing nested child phases produces exactly one commit
---- at the outer boundary instead of one per leaf. The public `:run` wraps
---- this with a single trailing `runAfter` call.
+--- Recursive phase dispatch. Never commits: systems stage through query
+--- scopes and drain at those boundaries; a caller that needs the staged
+--- work applied right after a phase calls `world:commit()` itself.
 local function runPhaseNoCommit(self: PipelineImpl, phase: Phase, dt: number, world: World)
     if not phase.children then
         -- Leaf phase: use cached flat group, honoring the phase state like
