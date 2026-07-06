@@ -1056,14 +1056,18 @@ local function loadColumnMajor(
 end
 
 -- Row-major fallback for sparse-bearing archetypes. Per-entity spawnAt
--- so setSparse fires correctly.
+-- so setSparse fires correctly. readEntity consumes buffer bytes
+-- eagerly, so the whole archetype stages under one scope and drains
+-- once instead of paying a full transaction per entity.
 local function loadRowMajor(world: World, reader: snapshot.Reader)
     local function applyOne(id: integer, ...: Component): boolean
         if id == nil then return false end
         world:spawnAt(id, ...)
         return true
     end
+    world:defer()
     while applyOne(reader:readEntity()) do end
+    world:commit()
 end
 
 -- Forward decls for internal Reader constructors.
