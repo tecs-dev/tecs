@@ -678,10 +678,11 @@ function WorldImpl:_deferBatchDespawn(archetypes: {Archetype})
     local OnDespawnBuiltin <const> = builtins.OnDespawn
     local despawnEventId <const> = OnDespawnBuiltin.eventId
     local hasGlobalObs <const> = world:hasObservers(0, OnDespawnBuiltin)
+    local messagesAny = (world as {string:any}).messages as {string:any}
+    local entityObsCount <const> = messagesAny._entityObserverCount as integer
+    local busObservers = messagesAny._observers as {integer: {integer: {any}}}
     local anyPerEntityObs = false
-    do
-        local busObservers = ((world as {string:any}).messages as {string:any})._observers
-            as {integer: {integer: {any}}}
+    if entityObsCount > 0 then
         for addr, byEvent in pairs(busObservers) do
             if addr ~= 0 and byEvent[despawnEventId] then
                 anyPerEntityObs = true
@@ -689,6 +690,9 @@ function WorldImpl:_deferBatchDespawn(archetypes: {Archetype})
             end
         end
     end
+    -- Archetypes bulk-cleared below; their observer addresses are swept in
+    -- one pass at the end of the call.
+    local clearedArchIds: {integer: boolean} = nil
 
     for a = 1, #archetypes do
         local arch = archetypes[a]
@@ -717,16 +721,30 @@ function WorldImpl:_deferBatchDespawn(archetypes: {Archetype})
                 if hasGlobalObs or anyPerEntityObs then
                     for i = 1, count do
                         local id = entities[i]
-                        local hasPerEnt = anyPerEntityObs and world:hasObservers(id, OnDespawnBuiltin)
-                        if hasGlobalObs or hasPerEnt then
-                            if hasPerEnt then world:emit(id, OnDespawnBuiltin, id) end
-                            if hasGlobalObs then world:emit(0, OnDespawnBuiltin, id) end
-                            world:clearObservers(id)
+                        if anyPerEntityObs and world:hasObservers(id, OnDespawnBuiltin) then
+                            world:emit(id, OnDespawnBuiltin, id)
                         end
+                        if hasGlobalObs then world:emit(0, OnDespawnBuiltin, id) end
                     end
+                end
+                if entityObsCount > 0 then
+                    if not clearedArchIds then clearedArchIds = {} end
+                    clearedArchIds[arch.id] = true
                 end
                 arch.pendingClear = true
                 markDirty!(arch, hasPendingDespawns)
+            end
+        end
+    end
+
+    -- One pass over the bus's non-zero addresses clears observers owned by
+    -- the bulk-cleared archetypes: addresses are slots, so membership is
+    -- one sidecar read. Runs only when per-entity observers exist.
+    if clearedArchIds then
+        local slots = self.allocator.slots as {integer: EntitySlot}
+        for addr in pairs(busObservers) do
+            if addr ~= 0 and clearedArchIds[slots[addr].archetypeId] then
+                world:clearObservers(addr)
             end
         end
     end

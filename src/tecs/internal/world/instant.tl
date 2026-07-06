@@ -398,9 +398,12 @@ function WorldImpl:_instantDespawn(id: integer): boolean
     if (messages._totalObservers as integer) > 0 then
         local hasGlobalObs = self:hasObservers(0, OnDespawn)
         local hasObs = self:hasObservers(id, OnDespawn)
-        if hasGlobalObs or hasObs then
-            if hasObs then self:emit(id, OnDespawn, id) end
-            if hasGlobalObs then self:emit(0, OnDespawn, id) end
+        if hasObs then self:emit(id, OnDespawn, id) end
+        if hasGlobalObs then self:emit(0, OnDespawn, id) end
+        -- Clear the slot's address whenever any per-entity observers
+        -- exist: observers for other events must not survive into the
+        -- slot's next entity.
+        if (messages._entityObserverCount as integer) > 0 then
             self:clearObservers(id)
         end
     end

@@ -850,10 +850,12 @@ function WorldImpl:_deferDespawn(id: integer)
         store:remove(id)
     end
 
-    -- Emit OnDespawn and clear per-entity observers.
-    if hasGlobalObs or hasObs then
-        if hasObs then world:emit(id, OnDespawn, id) end
-        if hasGlobalObs then world:emit(0, OnDespawn, id) end
+    -- Emit OnDespawn, then clear the slot's address whenever any
+    -- per-entity observers exist: observers for other events must not
+    -- survive into the slot's next entity.
+    if hasObs then world:emit(id, OnDespawn, id) end
+    if hasGlobalObs then world:emit(0, OnDespawn, id) end
+    if (((world.messages as {string: any})._entityObserverCount) as integer) > 0 then
         world:clearObservers(id)
     end
 

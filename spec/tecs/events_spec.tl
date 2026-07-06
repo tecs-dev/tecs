@@ -526,4 +526,48 @@ describe("MessageBus", function()
             luassert.same({"fresh"}, seen)
         end)
     end)
+
+    describe("observer cleanup on despawn", function()
+        local LeakTag = tecs.newTagComponent({name = "ObserverLeakTag"})
+
+        -- Observer addresses are slots; a despawn must clear the address
+        -- even when no OnDespawn observer exists, or the slot's next
+        -- entity inherits the old entity's observers.
+        local function assertNoLeak(world: tecs.World, despawn: function(integer))
+            local e1 = world:spawn(LeakTag())
+            world:commit()
+
+            local heard = 0
+            world:observe(e1, Greet, function(_g: Greet) heard = heard + 1 end)
+            world:emit(e1, Greet, "live")
+            luassert.equals(1, heard, "observer fires while the entity lives")
+
+            despawn(e1)
+            world:commit()
+
+            local e2 = world:spawn()
+            world:commit()
+            world:emit(e2, Greet, "recycled")
+            luassert.equals(1, heard, "stale observer must not fire for the recycled slot")
+        end
+
+        it("clears per-entity observers on instant despawn", function()
+            local world = tecs.newWorld()
+            assertNoLeak(world, function(id: integer) world:despawn(id) end)
+        end)
+
+        it("clears per-entity observers on deferred despawn", function()
+            local world = tecs.newWorld()
+            assertNoLeak(world, function(id: integer)
+                world:defer()
+                world:despawn(id)
+            end)
+        end)
+
+        it("clears per-entity observers on batch despawn", function()
+            local world = tecs.newWorld()
+            local q = world:query({include = {LeakTag}})
+            assertNoLeak(world, function(_id: integer) world:batchDespawn(q) end)
+        end)
+    end)
 end)

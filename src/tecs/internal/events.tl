@@ -51,6 +51,10 @@ local record events
         -- per-entity despawn path reads this on every iteration to
         -- decide whether OnDespawn fan-out is needed.
         _totalObservers: integer
+        -- Live observer count at non-zero addresses. Despawn paths read
+        -- this to skip per-entity observer cleanup when only global
+        -- observers exist.
+        _entityObserverCount: integer
         -- Reentrant emit depth counter.
         _emitDepth: integer
         -- lazy, staggered: {address, eventId, idOrCb, address, eventId, idOrCb, ...}
@@ -214,6 +218,7 @@ function MessageBus.new(): events.MessageBus
     local bus: events.MessageBus = {
         _observers = {},
         _totalObservers = 0,
+        _entityObserverCount = 0,
         _emitDepth = 0,
         _callbacksPool = pool.newTablePool({ clearOn = "release" }),
         _byAddressPool = pool.newTablePool({ clearOn = "acquire" }),
@@ -242,6 +247,9 @@ function MessageBus:observe<E is Event>(address: integer, eventType: E, observer
     callbacks[n + 2] = observer
     callbacks[0] = n + 2
     self._totalObservers = self._totalObservers + 1
+    if address ~= 0 then
+        self._entityObserverCount = self._entityObserverCount + 1
+    end
 end
 
 function MessageBus:observeOnce<E is Event>(address: integer, eventType: E, observer: function(E))
@@ -323,7 +331,11 @@ function MessageBus:stopObserving<E is Event>(address: integer, eventType: E, ob
 
     callbacks[0] = size
     -- Size is observers × 2 (interleaved id+cb).
-    self._totalObservers = self._totalObservers - math.floor((originalSize - size) / 2)
+    local removed = math.floor((originalSize - size) / 2)
+    self._totalObservers = self._totalObservers - removed
+    if address ~= 0 then
+        self._entityObserverCount = self._entityObserverCount - removed
+    end
 
     if size == 0 then
         self._callbacksPool:release(callbacks)
@@ -381,7 +393,11 @@ local function processDeferredUnsubscribes(self: events.MessageBus)
                         end
                     end
                     callbacks[0] = size
-                    self._totalObservers = self._totalObservers - math.floor((originalSize - size) / 2)
+                    local removed = math.floor((originalSize - size) / 2)
+                    self._totalObservers = self._totalObservers - removed
+                    if address ~= 0 then
+                        self._entityObserverCount = self._entityObserverCount - removed
+                    end
                     if size == 0 then
                         self._callbacksPool:release(callbacks)
                         byAddress[eventId] = nil
@@ -460,6 +476,9 @@ function MessageBus:clearAddress(address: integer)
         end
         self._observers[address] = nil
         self._totalObservers = self._totalObservers - removed
+        if address ~= 0 then
+            self._entityObserverCount = self._entityObserverCount - removed
+        end
     end
 end
 
@@ -496,6 +515,7 @@ function MessageBus:reset()
         end
         table_clear(self._observers)
         self._totalObservers = 0
+        self._entityObserverCount = 0
     end
 
     self._emitDepth = 0
