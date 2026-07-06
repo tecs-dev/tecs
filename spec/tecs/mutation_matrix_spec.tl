@@ -1,6 +1,13 @@
 require("busted")
 local tecs <const> = require("tecs")
 local luassert <const> = require("luassert")
+local WorldImpl <const> = require("tecs.internal.world")
+
+-- Structural integrity check on the committed world; errors on violation.
+local function validate(w: tecs.World)
+    local wi = w as WorldImpl
+    wi:_validateIntegrity()
+end
 
 --[[
 Mutation mode matrix: every mutation execution path must converge on the
@@ -106,6 +113,7 @@ local function forEachMode(
         mode.run(w, function(world: tecs.World)
             ops(world, e)
         end)
+        validate(w)
         verify(w, e, mode.name)
     end
 end
@@ -206,6 +214,19 @@ describe("mutation mode matrix", function()
         )
     end)
 
+    it("explicit values for required components win over defaults in every mode", function()
+        for i = 1, #modes do
+            local mode = modes[i]
+            local w = tecs.newWorld()
+            local id: integer = nil
+            mode.run(w, function(world: tecs.World)
+                id = world:spawn(MatArmor(5), MatHealth(50))
+            end)
+            luassert.equals(50, w:get(id, MatHealth).hp, "mode: " .. mode.name)
+            luassert.equals(5, w:get(id, MatArmor).ar, "mode: " .. mode.name)
+        end
+    end)
+
     it("bundle spawn converges in every mode", function()
         for i = 1, #modes do
             local mode = modes[i]
@@ -232,6 +253,7 @@ describe("batchSet requires closure", function()
         luassert.equals(2, w:get(e, MatArmor).ar)
         luassert.is_true(w:has(e, MatHealth))
         luassert.equals(100, w:get(e, MatHealth).hp)
+        validate(w)
     end)
 
     it("callback form pulls required components into the transition", function()
@@ -247,6 +269,39 @@ describe("batchSet requires closure", function()
         luassert.equals(9, w:get(e, MatArmor).ar)
         luassert.is_true(w:has(e, MatHealth))
         luassert.equals(100, w:get(e, MatHealth).hp)
+        validate(w)
+    end)
+end)
+
+describe("required-default ordering", function()
+    it("batch spawn callback values win over required defaults", function()
+        local w = tecs.newWorld()
+        local firstId = w:batchSpawn(2, {MatArmor, MatHealth},
+            function(arch: tecs.Archetype, firstRow: integer, lastRow: integer, _count: integer)
+                local armor = arch:getMut(MatArmor)
+                local health = arch:getMut(MatHealth)
+                for r = firstRow, lastRow do
+                    armor[r] = MatArmor(5)
+                    health[r] = MatHealth(50)
+                end
+            end)
+        luassert.equals(50, w:get(firstId, MatHealth).hp)
+        luassert.equals(50, w:get(firstId + 1, MatHealth).hp)
+        validate(w)
+    end)
+
+    it("bundle values win over required defaults, instant and staged", function()
+        local w = tecs.newWorld()
+        w:newBundle("matrixReqOrder", { required = {MatArmor, MatHealth} })
+
+        local id = w:spawnBundle("matrixReqOrder", MatArmor(5), MatHealth(50))
+        luassert.equals(50, w:get(id, MatHealth).hp)
+
+        w:defer()
+        local id2 = w:spawnBundle("matrixReqOrder", MatArmor(6), MatHealth(60))
+        w:commit()
+        luassert.equals(60, w:get(id2, MatHealth).hp)
+        validate(w)
     end)
 end)
 
@@ -269,6 +324,7 @@ describe("bundle spawn parity", function()
         luassert.is_nil(w:byKey("matrixHero"))
         local id2 = w:spawnBundle("matrixKeyed", tecs.builtins.Key("matrixHero"), MatPos(5))
         luassert.equals(id2, w:byKey("matrixHero"))
+        validate(w)
     end)
 
     it("emits OnSpawn with staged-entity semantics on the instant path", function()
@@ -291,6 +347,7 @@ describe("bundle spawn parity", function()
         luassert.is_true(w:isAlive(id), "committed after the call returns")
         luassert.equals(1, w:get(id, MatPos).x)
         luassert.equals(7, w:get(id, MatVel).dx, "observer-staged set applied")
+        validate(w)
     end)
 
     it("emits OnSpawn at stage time inside a scope", function()
@@ -309,5 +366,6 @@ describe("bundle spawn parity", function()
         w:commit()
         luassert.is_true(w:isAlive(id))
         luassert.equals(2, w:get(id, MatPos).x)
+        validate(w)
     end)
 end)

@@ -511,6 +511,7 @@ local record internal
             requiredCount: integer): function(any, ...: Component): integer
         _drain: function(self: WorldImpl)
         _resetTxn: function(self: WorldImpl)
+        _validateIntegrity: function(self: WorldImpl)
     end
 end
 

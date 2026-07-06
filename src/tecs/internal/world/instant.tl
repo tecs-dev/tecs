@@ -109,6 +109,10 @@ local macro instantMiddle!()
 
         sSlot.archetypeId = target.id
         sSlot.row = newRow
+
+        -- Required-closure defaults go in before the user's writes so
+        -- explicitly passed values win on overlap.
+        writeRequired(requiredList, target, dstLuaRow)
     ```
 end
 
@@ -132,16 +136,29 @@ local macro instantWriteOne!(compExpr: Expression)
     ```
 end
 
--- Common finalization: write required-closure values, fire observers,
--- return (true, id).
+-- Common finalization: fire observers, return (true, id).
 local macro instantFinish!()
     return ```
-        writeRequired(requiredList, target, dstLuaRow)
-
         target:onRowsAdded(newRow, 1, nil)
 
         return true, id
     ```
+end
+
+-- Cold fallbacks: run the deferred handler under a synthetic scope and
+-- drain when this call owns the outermost scope.
+local function deferSetScoped(self: WorldImpl, id: integer, componentType: Component, value: any)
+    self._scopeDepth = self._scopeDepth + 1
+    self:_deferSet(id, componentType, value)
+    self._scopeDepth = self._scopeDepth - 1
+    if self._scopeDepth == 0 and self.isDirty then self:_drain() end
+end
+
+local function deferRemoveScoped(self: WorldImpl, id: integer, component: Component)
+    self._scopeDepth = self._scopeDepth + 1
+    self:_deferRemove(id, component)
+    self._scopeDepth = self._scopeDepth - 1
+    if self._scopeDepth == 0 and self.isDirty then self:_drain() end
 end
 
 -- Dispatcher: components with defer handlers either stage under a synthetic
@@ -150,11 +167,7 @@ end
 function WorldImpl:_instantSet(id: integer, componentType: Component, value: any)
     local behaviorBits = (componentType as ComponentInternal).frameworkBehaviorBits or 0
     if band(behaviorBits, frameworkBehavior.MustDeferSet) ~= 0 then
-        self._scopeDepth = self._scopeDepth + 1
-        self:_deferSet(id, componentType, value)
-        self._scopeDepth = self._scopeDepth - 1
-        if self._scopeDepth == 0 and self.isDirty then self:_drain() end
-        return
+        return deferSetScoped(self, id, componentType, value)
     end
     if band(behaviorBits, frameworkBehavior.NeedsSet) ~= 0 then
         return frameworkBehavior.set(self, id, componentType, value)
@@ -170,11 +183,7 @@ function WorldImpl:instantSetRaw(id: integer, componentType: Component, value: a
     -- etc.) routes through the staging path -- it knows how to walk
     -- the pending-arch state. Unknown entities error there too.
     if getEntityState(self, slot) ~= 0 then
-        self._scopeDepth = self._scopeDepth + 1
-        self:_deferSet(id, componentType as Component, value)
-        self._scopeDepth = self._scopeDepth - 1
-        if self._scopeDepth == 0 and self.isDirty then self:_drain() end
-        return
+        return deferSetScoped(self, id, componentType as Component, value)
     end
 
     local slots = self.allocator.slots as {integer: EntitySlot}
@@ -189,11 +198,7 @@ function WorldImpl:instantSetRaw(id: integer, componentType: Component, value: a
     -- Exclusive relationship handling lives in the defer-set handler; the
     -- dispatcher runs that before reaching this raw path.
     if not srcArch then
-        self._scopeDepth = self._scopeDepth + 1
-        self:_deferSet(id, componentType as Component, value)
-        self._scopeDepth = self._scopeDepth - 1
-        if self._scopeDepth == 0 and self.isDirty then self:_drain() end
-        return
+        return deferSetScoped(self, id, componentType as Component, value)
     end
 
     local srcRow = s.row
@@ -266,11 +271,7 @@ end
 function WorldImpl:_instantRemove(id: integer, component: Component)
     local behaviorBits = (component as ComponentInternal).frameworkBehaviorBits or 0
     if band(behaviorBits, frameworkBehavior.MustDeferRemove) ~= 0 then
-        self._scopeDepth = self._scopeDepth + 1
-        self:_deferRemove(id, component)
-        self._scopeDepth = self._scopeDepth - 1
-        if self._scopeDepth == 0 and self.isDirty then self:_drain() end
-        return
+        return deferRemoveScoped(self, id, component)
     end
     if band(behaviorBits, frameworkBehavior.NeedsRemove) ~= 0 then
         return frameworkBehavior.remove(self, id, component)
@@ -285,11 +286,7 @@ function WorldImpl:instantRemoveRaw(id: integer, component: Component)
     -- Entity mid-transaction routes through staging for the same
     -- reasons as `_instantSet` (bundle/batch spawn pre-commit, etc.).
     if getEntityState(self, slot) ~= 0 then
-        self._scopeDepth = self._scopeDepth + 1
-        self:_deferRemove(id, component)
-        self._scopeDepth = self._scopeDepth - 1
-        if self._scopeDepth == 0 and self.isDirty then self:_drain() end
-        return
+        return deferRemoveScoped(self, id, component)
     end
 
     local slots = self.allocator.slots as {integer: EntitySlot}

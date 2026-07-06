@@ -140,6 +140,65 @@ local macro markDirty!(archExpr: Expression, flagField: Expression)
     ```
 end
 
+-- Shared placement body for every batch spawn drain loop. Reads/writes
+-- the caller's locals (slots, stateArr, slotStamp, epoch, archId,
+-- entitiesArr, currentCount, placed, archetype, self); `$slotExpr` may
+-- reference the freshly-bound `entityId`. Resolves the slot's
+-- transaction state: despawned slots skip placement, mutated slots keep
+-- their stamp so the move drain relocates them, everything else commits
+-- in place. The `do ... end` scopes temporaries so repeated expansions
+-- don't collide, and each expansion stays a single monomorphic loop
+-- body.
+local macro placeStakedRow!(idExpr: Expression, slotExpr: Expression)
+    return ```
+        do
+            local entityId = $idExpr
+            local entSlot = $slotExpr
+            local st = (slotStamp[entSlot] == epoch and stateArr[entSlot] or 0)
+            if st == STATE_DESPAWN then
+                slotStamp[entSlot] = 0
+            else
+                local row = currentCount + placed
+                entitiesArr[row + 1] = entityId
+                local es = slots[entSlot]
+                es.archetypeId = archId
+                es.row = row
+                placed = placed + 1
+                if st == STATE_MUTATE then
+                    -- Inlined markDirty! body (macros don't compose).
+                    archetype.hasPendingMoveOut = true
+                    if archetype.dirtyQueuedEpoch ~= self._dirtyEpoch then
+                        archetype.dirtyQueuedEpoch = self._dirtyEpoch
+                        local __c = self.dirtyArchetypeCount + 1
+                        self.dirtyArchetypeList[__c] = archetype
+                        self.dirtyArchetypeCount = __c
+                    end
+                else
+                    slotStamp[entSlot] = 0
+                end
+            end
+        end
+    ```
+end
+
+-- Fast placement when the transaction holds no per-slot state at all:
+-- no state checks, every id places.
+local macro placeFreshRow!(idExpr: Expression, slotExpr: Expression)
+    return ```
+        do
+            local entityId = $idExpr
+            local entSlot = $slotExpr
+            local row = currentCount + placed
+            entitiesArr[row + 1] = entityId
+            local es = slots[entSlot]
+            es.archetypeId = archId
+            es.row = row
+            placed = placed + 1
+            slotStamp[entSlot] = 0
+        end
+    ```
+end
+
 local function resolveBatchSpawnArchetype(
     self: WorldImpl,
     componentTypes: {Component}
@@ -334,93 +393,35 @@ function WorldImpl:_drainArchBatchSpawn(archetype: Archetype)
             local firstSlot = IdAllocator.slotOf(firstId)
             if stateCount == 0 then
                 for j = 0, count - 1 do
-                    local entityId = firstId + j
-                    local slot = firstSlot + j
-                    local row = currentCount + placed
-                    entitiesArr[row + 1] = entityId
-                    local es = slots[slot]
-                    es.archetypeId = archId
-                    es.row = row
-                    placed = placed + 1
-                    slotStamp[slot] = 0
+                    placeFreshRow!(firstId + j, firstSlot + j)
                 end
             else
                 for j = 0, count - 1 do
-                    local entityId = firstId + j
-                    local slot = firstSlot + j
-                    local st = (slotStamp[slot] == epoch and stateArr[slot] or 0)
-                    if st == STATE_DESPAWN then
-                        slotStamp[slot] = 0
-                    elseif st == STATE_MUTATE then
-                        local row = currentCount + placed
-                        entitiesArr[row + 1] = entityId
-                        local es = slots[slot]
-                        es.archetypeId = archId
-                        es.row = row
-                        placed = placed + 1
-                        markDirty!(archetype, hasPendingMoveOut)
-                    else
-                        local row = currentCount + placed
-                        entitiesArr[row + 1] = entityId
-                        local es = slots[slot]
-                        es.archetypeId = archId
-                        es.row = row
-                        placed = placed + 1
-                        slotStamp[slot] = 0
-                    end
+                    placeStakedRow!(firstId + j, firstSlot + j)
                 end
             end
         else
             local ids = idsOrFirst as {integer}
             if stateCount == 0 then
                 for j = 1, count do
-                    local entityId = ids[j]
-                    local slot = IdAllocator.slotOf(entityId)
-                    local row = currentCount + placed
-                    entitiesArr[row + 1] = entityId
-                    local es = slots[slot]
-                    es.archetypeId = archId
-                    es.row = row
-                    placed = placed + 1
-                    slotStamp[slot] = 0
+                    placeFreshRow!(ids[j], IdAllocator.slotOf(entityId))
                 end
             else
                 for j = 1, count do
-                    local entityId = ids[j]
-                    local slot = IdAllocator.slotOf(entityId)
-                    local st = (slotStamp[slot] == epoch and stateArr[slot] or 0)
-                    if st == STATE_DESPAWN then
-                        slotStamp[slot] = 0
-                    elseif st == STATE_MUTATE then
-                        local row = currentCount + placed
-                        entitiesArr[row + 1] = entityId
-                        local es = slots[slot]
-                        es.archetypeId = archId
-                        es.row = row
-                        placed = placed + 1
-                        markDirty!(archetype, hasPendingMoveOut)
-                    else
-                        local row = currentCount + placed
-                        entitiesArr[row + 1] = entityId
-                        local es = slots[slot]
-                        es.archetypeId = archId
-                        es.row = row
-                        placed = placed + 1
-                        slotStamp[slot] = 0
-                    end
+                    placeStakedRow!(ids[j], IdAllocator.slotOf(entityId))
                 end
             end
         end
         entitiesArr[0] = currentCount + placed
 
         if placed > 0 then
-            callback(archetype, currentCount + 1, currentCount + placed, placed)
-            -- Write `requires`-supplied defaults into the spawned rows.
-            -- Skipped when nil (no `requires` declared on any of the
-            -- caller's component types).
+            -- `requires`-supplied defaults go in before the user callback
+            -- so callback writes win on overlap. Skipped when nil (no
+            -- `requires` declared on any of the caller's component types).
             if requiredList then
                 writeRequiredRange(archetype, requiredList, currentCount + 1, currentCount + placed)
             end
+            callback(archetype, currentCount + 1, currentCount + placed, placed)
         end
 
         archetype:onRowsAdded(currentCount, placed, nil)
@@ -537,8 +538,8 @@ function WorldImpl:_drainArchBatchSpawnAt(archetype: Archetype)
         local requiredList = q[i + 3] as {RequireEntry}
 
         archetype:reserveCapacity((archetype.entities[0] as integer) + n)
-        local entities = archetype.entities as {integer}
-        local currentCount = entities[0] as integer
+        local entitiesArr = archetype.entities as {integer}
+        local currentCount = entitiesArr[0] as integer
 
         -- `ids` is either a Lua array (1-based) or an FFI int32_t* (0-based).
         -- Branch once per queue entry so each placement loop is monomorphic.
@@ -547,62 +548,20 @@ function WorldImpl:_drainArchBatchSpawnAt(archetype: Archetype)
         local isCdata = type(ids) == "cdata"
         if isCdata then
             for j = 0, n - 1 do
-                local entityId = idsRaw[j]
-                local entSlot = IdAllocator.slotOf(entityId)
-                local st = (slotStamp[entSlot] == epoch and stateArr[entSlot] or 0)
-                if st == STATE_DESPAWN then
-                    slotStamp[entSlot] = 0
-                elseif st == STATE_MUTATE then
-                    local row = currentCount + placed
-                    entities[row + 1] = entityId
-                    local es = slots[entSlot]
-                    es.archetypeId = archId
-                    es.row = row
-                    placed = placed + 1
-                    markDirty!(archetype, hasPendingMoveOut)
-                else
-                    local row = currentCount + placed
-                    entities[row + 1] = entityId
-                    local es = slots[entSlot]
-                    es.archetypeId = archId
-                    es.row = row
-                    placed = placed + 1
-                    slotStamp[entSlot] = 0
-                end
+                placeStakedRow!(idsRaw[j], IdAllocator.slotOf(entityId))
             end
         else
             for j = 1, n do
-                local entityId = idsRaw[j]
-                local entSlot = IdAllocator.slotOf(entityId)
-                local st = (slotStamp[entSlot] == epoch and stateArr[entSlot] or 0)
-                if st == STATE_DESPAWN then
-                    slotStamp[entSlot] = 0
-                elseif st == STATE_MUTATE then
-                    local row = currentCount + placed
-                    entities[row + 1] = entityId
-                    local es = slots[entSlot]
-                    es.archetypeId = archId
-                    es.row = row
-                    placed = placed + 1
-                    markDirty!(archetype, hasPendingMoveOut)
-                else
-                    local row = currentCount + placed
-                    entities[row + 1] = entityId
-                    local es = slots[entSlot]
-                    es.archetypeId = archId
-                    es.row = row
-                    placed = placed + 1
-                    slotStamp[entSlot] = 0
-                end
+                placeStakedRow!(idsRaw[j], IdAllocator.slotOf(entityId))
             end
         end
-        entities[0] = currentCount + placed
+        entitiesArr[0] = currentCount + placed
 
         if placed > 0 then
-            callback(archetype, currentCount + 1, currentCount + placed, placed)
             if requiredList then
                 writeRequiredRange(archetype, requiredList, currentCount + 1, currentCount + placed)
             end
+            callback(archetype, currentCount + 1, currentCount + placed, placed)
         end
 
         archetype:onRowsAdded(currentCount, placed, nil)

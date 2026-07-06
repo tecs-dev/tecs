@@ -321,8 +321,8 @@ __FETCH_COLS_GROW_IMMEDIATE__
     es.archetypeId = a.id
     es.row = row - 1
 
-__COLUMN_WRITES_IMMEDIATE__
     if requiredList then writeRequired(a, row) end
+__COLUMN_WRITES_IMMEDIATE__
 
     a:onRowsAdded(row - 1, 1, nil)
 
@@ -365,8 +365,8 @@ __FETCH_COLS_GROW__
             entities[row] = id
             entities[0] = row
 
-__DRAIN_COLUMN_WRITES__
             if requiredList then writeRequired(a, row) end
+__DRAIN_COLUMN_WRITES__
 
             a:onRowsAdded(row - 1, 1, nil)
         end

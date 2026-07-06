@@ -182,6 +182,15 @@ function WorldImpl:_drainPendingMoves(srcArch: Archetype)
                 dstArch.pendingWrites = 0
             end
             local dstEntities = dstArch.entities as {integer}
+            -- Moves staged without a reservation (sets on bundle- or
+            -- batch-staked entities carry no pendingWrites) still need
+            -- room; a fresh destination archetype has capacity 0.
+            if (dstEntities[0] as integer) + 1 > dstArch.capacity then
+                dstArch:reserveCapacity((dstEntities[0] as integer) + 1)
+                dstEntities = dstArch.entities as {integer}
+                -- Growth can swap columns; drop the cached move plan.
+                lastPlanDst = nil
+            end
 
             if dstArch ~= lastPlanDst then
                 plan = getMovePlanTo(srcArch, dstArch) as internal.MovePlan

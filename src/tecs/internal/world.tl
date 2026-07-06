@@ -1357,5 +1357,6 @@ require("tecs.internal.world.deferred")
 require("tecs.internal.world.batch")
 require("tecs.internal.world.drain")
 require("tecs.internal.world.sparse")
+require("tecs.internal.world.validate")
 
 return WorldImpl
