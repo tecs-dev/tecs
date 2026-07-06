@@ -675,4 +675,76 @@ describe("bundle", function()
             luassert.is_equal((world:get(id2, Comp) as DC5).v, 42)
         end)
     end)
+
+    describe("column cache invalidation", function()
+        local record GenComp is tecs.Component
+            x: number
+        end
+
+        local GC = tecs.newFFIComponent({
+            name = "BundleGenCacheComp",
+            container = GenComp,
+            fields = {{"x", "float"}},
+        })
+
+        local function newCountingBundle(name: string): Bundle, function(): number
+            local nextVal = 0
+            local bundle = world:newBundle(name, {
+                with = {
+                    [GC] = function(): GenComp
+                        nextVal = nextVal + 1
+                        return GC(nextVal)
+                    end,
+                },
+            }) as Bundle
+            return bundle, function(): number return nextVal end
+        end
+
+        local function getX(id: integer): number
+            return (world:get(id, GC) as GenComp).x
+        end
+
+        it("immediate spawn survives external archetype growth", function()
+            local bundle = newCountingBundle("GenCacheImmediate")
+
+            local first = bundle:spawn()
+            -- Grow the same archetype through the plain spawn path so its
+            -- columns reallocate behind the bundle's cache.
+            local others: {integer} = {}
+            for i = 1, 300 do
+                others[i] = world:spawn(GC(1000 + i))
+            end
+            world:commit()
+
+            local second = bundle:spawn()
+            world:commit()
+
+            luassert.equals(1, getX(first))
+            luassert.equals(2, getX(second))
+            for i = 1, 300 do
+                luassert.equals(1000 + i, getX(others[i]))
+            end
+        end)
+
+        it("deferred drain survives external archetype growth", function()
+            local bundle = newCountingBundle("GenCacheDrain")
+
+            local first = bundle:spawn()
+            local others: {integer} = {}
+            for i = 1, 300 do
+                others[i] = world:spawn(GC(1000 + i))
+            end
+            world:commit()
+
+            world:defer()
+            local second = bundle:spawn()
+            world:commit()
+
+            luassert.equals(1, getX(first))
+            luassert.equals(2, getX(second))
+            for i = 1, 300 do
+                luassert.equals(1000 + i, getX(others[i]))
+            end
+        end)
+    end)
 end)

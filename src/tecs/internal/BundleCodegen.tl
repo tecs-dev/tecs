@@ -171,6 +171,7 @@ local __UPVALUES__ = ...
 
 local cachedArch = nil
 local cachedAutoState = nil
+local cachedGen = -1
 __CACHED_COL_DECLS__
 
 local spawnQueue = {}
@@ -186,6 +187,7 @@ __WALK_CHAIN__
     if autoState then a = a:withComponent(autoState, archIdx) end
     cachedArch = a
     cachedAutoState = autoState
+    cachedGen = a.generation
 __FETCH_COLS_RESOLVE__
     return a
 end
@@ -237,6 +239,11 @@ __ENQUEUE_PUSHES__
     if row > a.capacity then
         a:reserveCapacity(row)
         entities = a.entities
+        cachedGen = a.generation
+__FETCH_COLS_GROW_IMMEDIATE__
+    elseif a.generation ~= cachedGen then
+        -- Another spawn path grew the archetype and swapped its columns.
+        cachedGen = a.generation
 __FETCH_COLS_GROW_IMMEDIATE__
     end
     entities[row] = id
@@ -255,6 +262,10 @@ drain = function()
     local a = cachedArch
     if a == nil or world.autoStateComponent ~= cachedAutoState then
         a = resolveArch()
+    elseif a.generation ~= cachedGen then
+        -- Another spawn path grew the archetype and swapped its columns.
+        cachedGen = a.generation
+__FETCH_COLS_RESOLVE__
     end
 
     local slots = world.allocator.slots
@@ -270,6 +281,7 @@ drain = function()
         if row > a.capacity then
             a:reserveCapacity(row)
             entities = a.entities
+            cachedGen = a.generation
 __FETCH_COLS_GROW__
         end
         local es = slots[slot]
