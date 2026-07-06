@@ -196,19 +196,27 @@ end
 
 function IdAllocator.reset(allocator: IdAllocator)
     -- Full wipe for clearEntities. Invalidate every touched slot by
-    -- bumping generation, then clear placement metadata.
+    -- raising every generation past the prefix maximum, then clear
+    -- placement metadata. The uniform value keeps the recycled prefix
+    -- single-generation, so contiguous batch handles only need to check
+    -- the range ends against each other.
     local usedLimit = allocator.nextFreshSlot - 1
     if usedLimit > 0 then
         local slots = allocator.slots
+        local maxGen = 0
+        for slot = 1, usedLimit do
+            local g = slots[slot].generation
+            if g > maxGen then maxGen = g end
+        end
+        local newGen = maxGen + 1
+        if newGen >= GEN_COUNT then
+            newGen = 0
+        end
         for slot = 1, usedLimit do
             local s = slots[slot]
             s.archetypeId = 0
             s.row = 0
-            local g = s.generation + 1
-            if g == GEN_COUNT then
-                g = 0
-            end
-            s.generation = g
+            s.generation = newGen
         end
     end
     allocator.nextFreshSlot = 1

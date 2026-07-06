@@ -421,3 +421,56 @@ describe("bulk archetype swap capacity", function()
         end
     end)
 end)
+
+describe("world:batchSpawn() handle generations", function()
+    local function fill(arch: tecs.Archetype, s: integer, l: integer, _c: integer)
+        local ps = arch:getMut(Position)
+        for i = s, l do ps[i] = Position(i, i) end
+    end
+
+    it("returns valid handles after clearEntities", function()
+        local world = tecs.newWorld()
+        world:batchSpawn(10, {Position}, fill)
+        world:commit()
+        world:clearEntities()
+
+        -- The fresh range restarts inside the recycled prefix; handles
+        -- must carry the bumped generation.
+        local firstId = world:batchSpawn(10, {Position}, fill)
+        world:commit()
+        luassert.is_not_nil(firstId, "uniform recycled range keeps contiguous handles")
+
+        for i = 0, 9 do
+            local id = (firstId as integer) + i
+            luassert.is_true(world:isAlive(id))
+            luassert.is_not_nil(world:get(id, Position))
+            world:set(id, Velocity(1, 2))
+        end
+        world:commit()
+        for i = 0, 9 do
+            luassert.equals(1, world:get((firstId as integer) + i, Velocity).vx)
+        end
+    end)
+
+    it("falls back to per-id handles when the range spans generations", function()
+        local world = tecs.newWorld()
+        for i = 1, 5 do
+            world:spawn(Position(i, i))
+        end
+        world:commit()
+        world:clearEntities()
+
+        -- Slots 1..5 carry a bumped generation, 6..10 are virgin; a
+        -- contiguous base id cannot represent both.
+        local firstId, ids = world:batchSpawn(10, {Position}, fill)
+        world:commit()
+
+        luassert.is_nil(firstId, "straddling range must fall back to the id list")
+        local list = ids as {integer}
+        luassert.equals(10, #list)
+        for i = 1, 10 do
+            luassert.is_true(world:isAlive(list[i]))
+            luassert.is_not_nil(world:get(list[i], Position))
+        end
+    end)
+end)

@@ -185,6 +185,17 @@ function WorldImpl:_deferBatchSpawn(
         return nil, self:_deferBatchSpawnList(count, componentTypes, callback)
     end
 
+    -- Contiguous `firstId + i` handles need one generation across the
+    -- whole range. After clearEntities the fresh range restarts inside the
+    -- recycled (nonzero-generation) prefix; a range straddling the prefix
+    -- boundary spans two generations, so it falls back to per-id handles.
+    local genSlots = self.allocator.slots as {integer: EntitySlot}
+    local nextFresh = self.allocator.nextFreshSlot
+    local rangeGen = genSlots[nextFresh].generation as integer
+    if genSlots[nextFresh + count - 1].generation ~= rangeGen then
+        return nil, self:_deferBatchSpawnList(count, componentTypes, callback)
+    end
+
     local archetype, requiredList = resolveBatchSpawnArchetype(self, componentTypes)
 
     -- Strict contiguous: draw exclusively from the fresh range. Callers
@@ -205,10 +216,14 @@ function WorldImpl:_deferBatchSpawn(
         pendingArr[s] = archId
     end
 
+    -- Handles carry the range's generation; `firstId + i` stays contiguous
+    -- because the generation bits are constant across the range.
+    local firstId = IdAllocator.encodeId(firstSlot, rangeGen)
+
     local c = archetype.batchSpawnQueueCount
     local q = archetype.batchSpawnQueue
     q[c + 1] = count
-    q[c + 2] = firstSlot
+    q[c + 2] = firstId
     q[c + 3] = callback
     q[c + 4] = BATCH_SPAWN_MODE_RANGE
     q[c + 5] = requiredList
@@ -216,7 +231,7 @@ function WorldImpl:_deferBatchSpawn(
     ensureDirty!(archetype)
     self.isDirty = true
 
-    return firstSlot, nil
+    return firstId, nil
 end
 
 function WorldImpl:_deferBatchSpawnList(
@@ -246,7 +261,8 @@ function WorldImpl:_deferBatchSpawnList(
         local firstFresh = IdAllocator.allocContiguousSlots(allocator, takeFresh)
         for i = 0, takeFresh - 1 do
             local slot = firstFresh + i
-            local id = slot
+            -- Fresh slots carry a nonzero generation after clearEntities.
+            local id = IdAllocator.encodeId(slot, allocator.slots[slot].generation)
             n = n + 1
             idsList[n] = id
             if slotStamp[slot] ~= epoch then
@@ -307,28 +323,33 @@ function WorldImpl:_drainArchBatchSpawn(archetype: Archetype)
         local placed = 0
         local stateCount = self.entityStateCount
         if mode == BATCH_SPAWN_MODE_RANGE then
+            -- `firstId` carries the range's generation; slot arithmetic
+            -- runs on the decoded base.
             local firstId = idsOrFirst as integer
+            local firstSlot = IdAllocator.slotOf(firstId)
             if stateCount == 0 then
                 for j = 0, count - 1 do
                     local entityId = firstId + j
+                    local slot = firstSlot + j
                     local row = currentCount + placed
                     entitiesArr[row + 1] = entityId
-                    local es = slots[entityId]
+                    local es = slots[slot]
                     es.archetypeId = archId
                     es.row = row
                     placed = placed + 1
-                    slotStamp[entityId] = 0
+                    slotStamp[slot] = 0
                 end
             else
                 for j = 0, count - 1 do
                     local entityId = firstId + j
-                    local st = (slotStamp[entityId] == epoch and stateArr[entityId] or 0)
+                    local slot = firstSlot + j
+                    local st = (slotStamp[slot] == epoch and stateArr[slot] or 0)
                     if st == STATE_DESPAWN then
-                        slotStamp[entityId] = 0
+                        slotStamp[slot] = 0
                     elseif st == STATE_MUTATE then
                         local row = currentCount + placed
                         entitiesArr[row + 1] = entityId
-                        local es = slots[entityId]
+                        local es = slots[slot]
                         es.archetypeId = archId
                         es.row = row
                         placed = placed + 1
@@ -336,11 +357,11 @@ function WorldImpl:_drainArchBatchSpawn(archetype: Archetype)
                     else
                         local row = currentCount + placed
                         entitiesArr[row + 1] = entityId
-                        local es = slots[entityId]
+                        local es = slots[slot]
                         es.archetypeId = archId
                         es.row = row
                         placed = placed + 1
-                        slotStamp[entityId] = 0
+                        slotStamp[slot] = 0
                     end
                 end
             end
