@@ -449,4 +449,27 @@ describe("Pipeline", function()
         test.pipeline:run(tecs.phases.Update, FPS, test.world)
         luassert.equals(1, ran, "re-enabled phase runs again")
     end)
+
+    it("a phase registered on another pipeline does not break this one", function()
+        local ran = 0
+        test.pipeline:addSystem({
+            phase = tecs.phases.Update,
+            name = "crossPipelineProbe",
+            run = function(_dt: number, _world: tecs.World) ran = ran + 1 end,
+        })
+
+        local other = pipeline.new(FPS)
+        local custom = {name = "CrossPipelineCustom"} as tecs.Phase
+        other:registerPhase(custom)
+        other:addSystem({
+            phase = custom,
+            name = "crossPipelineCustomSystem",
+            run = function(_dt: number, _world: tecs.World) end,
+        })
+
+        -- Rebuild iterates the shared phase index; the position registered
+        -- only on `other` must be tolerated.
+        test.pipeline:update(FPS, test.world)
+        luassert.equals(1, ran)
+    end)
 end)

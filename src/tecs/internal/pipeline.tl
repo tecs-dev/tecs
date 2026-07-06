@@ -257,13 +257,17 @@ local function collectPhaseSystems(
 end
 
 local function recreatePipeline(self: PipelineImpl)
-    -- Topologically sort the systems in each phase.
+    -- Topologically sort the systems in each phase. `phases.index` is shared
+    -- across pipelines; positions registered only on another pipeline have no
+    -- local systems array and are skipped.
     local count = 0
     for i = 1, #phases.index do
         local systems = self.systems[i]
-        count = count + #systems
-        if systems and #systems > 0 then
-            self.systems[i] = topologicalSort(systems)
+        if systems then
+            count = count + #systems
+            if #systems > 0 then
+                self.systems[i] = topologicalSort(systems)
+            end
         end
     end
     self.count = count
