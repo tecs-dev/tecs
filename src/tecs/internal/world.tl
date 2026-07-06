@@ -303,6 +303,12 @@ function WorldImpl:_releaseKeyForEntity(id: integer)
 end
 
 function WorldImpl:set(id: integer, component: Component, value?: any)
+    -- Stale-handle guard: one inlined generation compare at the API
+    -- boundary, the same check the read paths perform.
+    if IdAllocator.isStale(self._slots, id, IdAllocator.slotOf(id)) then
+        error("Entity ID not found: " .. id)
+    end
+
     local componentType: Component = component.componentType as Component
 
     if value == nil then
@@ -329,6 +335,12 @@ function WorldImpl:set(id: integer, component: Component, value?: any)
 end
 
 function WorldImpl:remove(id: integer, component: Component)
+    -- Stale or dead handle: removing from a nonexistent entity is a no-op,
+    -- matching the instant path's handling of missing archetypes.
+    if IdAllocator.isStale(self._slots, id, IdAllocator.slotOf(id)) then
+        return
+    end
+
     if self._scopeDepth > 0 then
         self:_deferRemove(id, component)
     else
@@ -539,6 +551,12 @@ function WorldImpl:batchSpawnAtRaw(
 end
 
 function WorldImpl:despawn(id: integer)
+    -- Stale or dead handle: despawning a nonexistent entity is a no-op;
+    -- without this check a recycled slot would destroy the wrong entity.
+    if IdAllocator.isStale(self._slots, id, IdAllocator.slotOf(id)) then
+        return
+    end
+
     if self._scopeDepth > 0 then
         self:_deferDespawn(id)
     elseif not self:_instantDespawn(id) then

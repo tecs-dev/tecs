@@ -108,6 +108,15 @@ local record IdAllocator
         return (id - slot) / 2^22
     end
 
+    --- True when a packed id's generation does not match the slot's
+    --- sidecar generation: the handle is stale (slot recycled) or dead
+    --- (slot freed). Mutation-path guards inline this to one compare;
+    --- the floor form keeps each macroexp argument single-use.
+    isStale: function(slots: {integer: EntitySlot}, id: integer, slot: integer): boolean
+        = macroexp(slots: {integer: EntitySlot}, id: integer, slot: integer): boolean
+            return math.floor(id / 2^22) ~= slots[slot].generation
+        end
+
     reset: function(allocator: IdAllocator)
 end
 

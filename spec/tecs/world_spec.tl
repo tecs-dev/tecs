@@ -220,6 +220,35 @@ describe("WorldImpl", function()
             luassert.equals(id, despawnSeen, "OnDespawn payload must not truncate the id")
         end)
 
+        it("rejects mutations through stale handles", function()
+            local w2 = tecs.newWorld()
+            local stale = w2:spawn(PosComponent(1, 1))
+            w2:commit()
+            w2:despawn(stale)
+            w2:commit()
+
+            -- Recycles the slot under a new generation.
+            local fresh = w2:spawn(PosComponent(5, 5))
+            w2:commit()
+            luassert.not_equals(stale, fresh)
+
+            luassert.has_error(function()
+                w2:set(stale, PosComponent(9, 9))
+            end, "Entity ID not found: " .. stale)
+            luassert.equals(5, (w2:get(fresh, PosComponent) as TestHelpers.Pos).x,
+                "stale set must not mutate the slot's new entity")
+
+            w2:remove(stale, PosComponent)
+            w2:commit()
+            luassert.is_not_nil(w2:get(fresh, PosComponent),
+                "stale remove must be a no-op")
+
+            w2:despawn(stale)
+            w2:commit()
+            luassert.is_true(w2:isAlive(fresh),
+                "stale despawn must not destroy the slot's new entity")
+        end)
+
         it("despawns entities and emits event", function()
             local w2 = tecs.newWorld()
 
