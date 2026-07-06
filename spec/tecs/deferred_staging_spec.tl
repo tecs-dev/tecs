@@ -264,5 +264,38 @@ describe("deferred staging", function()
             luassert.is_true(w:isAlive(ids[2]))
         end)
 
+        it("batch mutations staged by one-shot-phase observers still apply", function()
+            local w = tecs.newWorld()
+            local e1 = w:spawn(Shared(1))
+            local s1 = w:spawn(Absent(1))
+            w:commit()
+
+            local sharedQuery = w:query({include = {Shared}})
+            local absentQuery = w:query({include = {Absent}})
+            local staged = false
+            w:query({
+                name = "OneShotBatchWatcher",
+                include = {Extra},
+                onEntitiesAdded = function(_arch: tecs.Archetype, _first: integer, _last: integer, _count: integer)
+                    if not staged then
+                        staged = true
+                        -- Targets an archetype untouched by the running
+                        -- mutation, so the snapshot is stable.
+                        w:batchSet(absentQuery, Absent(77))
+                    end
+                end,
+            })
+
+            w:defer()
+            -- Applied in the one-shot phase; its onEntitiesAdded stages a
+            -- second batch mutation that must run in a later round.
+            w:batchSet(sharedQuery, Extra(5))
+            w:commit()
+
+            luassert.is_true(staged)
+            luassert.equals(5, w:get(e1, Extra).e)
+            luassert.equals(77, w:get(s1, Absent).a,
+                "the observer-staged batch mutation must not be dropped")
+        end)
     end)
 end)

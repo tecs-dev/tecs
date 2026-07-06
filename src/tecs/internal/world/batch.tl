@@ -861,6 +861,24 @@ function WorldImpl:_drainBatchMutations()
             self:_drainPendingMoves(arch)
         end
     end
+
+    -- Consume the processed entries: `_drain` re-enters this phase for
+    -- mutations staged by observers, which append past `count`.
+    local snapshotPool = self._archetypeSnapshotPool
+    for i = 1, count do
+        local mut = queue[i]
+        snapshotPool:release(mut.archetypes as {any})
+        mut.archetypes = nil
+    end
+    local total = self.batchMutationCount
+    if total > count then
+        for i = 1, total - count do
+            queue[i], queue[count + i] = queue[count + i], nil
+        end
+        self.batchMutationCount = total - count
+    else
+        self.batchMutationCount = 0
+    end
 end
 
 

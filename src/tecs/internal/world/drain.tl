@@ -351,6 +351,7 @@ local function commitSparseChanges(self: WorldImpl)
     local slotStamp = self._slotStamp as {integer:integer}
     local epoch = self._transactionEpoch
     local slots = self.allocator.slots as {integer: EntitySlot}
+    local sparsePool = self._sparseArraysPool
     for slot, sets in pairs(self.sparseSets) do
         if not (slotStamp[slot] == epoch and stateArr[slot] == STATE_DESPAWN) then
             local packedId = IdAllocator.encodeId(slot, slots[slot].generation)
@@ -364,7 +365,12 @@ local function commitSparseChanges(self: WorldImpl)
                 end
             end
         end
+        -- Consume the entry: `_drain` re-enters this phase for values
+        -- staged by observers in later waves.
+        self.sparseSets[slot] = nil
+        sparsePool:release(sets)
     end
+    self.sparseSetCount = 0
 end
 
 -- Safety valve for observer-cascade loops.
@@ -382,10 +388,11 @@ function WorldImpl:_drain()
     local dirtyList = self.dirtyArchetypeList
     local processed = 0
     local iterations = 0
-    local oneShotDone = false
 
-    -- Fixed-point loop over dirty archetype waves + one-shot phases.
-    while processed < self.dirtyArchetypeCount or not oneShotDone do
+    -- Fixed-point loop over dirty archetype waves + one-shot phases. The
+    -- one-shot phases re-run when observers in later waves stage new batch
+    -- mutations or sparse values; MAX_DRAIN_ITERATIONS bounds cascades.
+    while true do
         iterations = iterations + 1
         if iterations > MAX_DRAIN_ITERATIONS then
             error("_drain exceeded MAX_DRAIN_ITERATIONS — likely an observer cascade with no fixed point")
@@ -440,15 +447,17 @@ function WorldImpl:_drain()
             end
 
             processed = count
-        else
-            -- Fire one-shot phases; they may enqueue new dirty arches.
+        elseif self.batchMutationCount > 0 or self.sparseSetCount > 0 then
+            -- Fire one-shot phases; they consume their queues and may
+            -- enqueue new dirty arches or fresh one-shot work.
             if self.batchMutationCount > 0 then
                 self:_drainBatchMutations()
             end
             if self.sparseSetCount > 0 then
                 commitSparseChanges(self)
             end
-            oneShotDone = true
+        else
+            break
         end
     end
 
