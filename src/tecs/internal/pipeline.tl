@@ -469,10 +469,13 @@ end
 --- this with a single trailing `runAfter` call.
 local function runPhaseNoCommit(self: PipelineImpl, phase: Phase, dt: number, world: World)
     if not phase.children then
-        -- Leaf phase: use cached flat group
-        local group = self.phaseGroups[phase.position]
-        if group then
-            runGroup(group, dt, world)
+        -- Leaf phase: use cached flat group, honoring the phase state like
+        -- group dispatch does.
+        if self.phaseStates[phase.position] then
+            local group = self.phaseGroups[phase.position]
+            if group then
+                runGroup(group, dt, world)
+            end
         end
     else
         -- Group phase: run each child's flat cache in order

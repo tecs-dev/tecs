@@ -432,4 +432,21 @@ describe("Pipeline", function()
             luassert.equals(2, runs, "both registrations must execute")
         end)
     end)
+
+    it("run() on a disabled leaf phase executes nothing", function()
+        local ran = 0
+        test.pipeline:addSystem({
+            phase = tecs.phases.Update,
+            name = "disabledLeafProbe",
+            run = function(_dt: number, _world: tecs.World) ran = ran + 1 end,
+        })
+
+        test.pipeline:disablePhase(tecs.phases.Update)
+        test.pipeline:run(tecs.phases.Update, FPS, test.world)
+        luassert.equals(0, ran, "disabled leaf phase must not run directly")
+
+        test.pipeline:enablePhase(tecs.phases.Update)
+        test.pipeline:run(tecs.phases.Update, FPS, test.world)
+        luassert.equals(1, ran, "re-enabled phase runs again")
+    end)
 end)
