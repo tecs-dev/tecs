@@ -112,7 +112,19 @@ local type SnapshotOptions = types.World.SnapshotOptions
 local type SnapshotOutput = types.World.SnapshotOutput
 local table_move <const> = table.move
 
-local SNAPSHOT_VERSION <const> = 1
+local SNAPSHOT_VERSION <const> = 2
+
+-- Row-major presence masks use exact double arithmetic (LuaJIT's bit
+-- library is 32-bit); powers of two up to 2^51 keep every mask integral.
+local ROW_MASK_MAX_COLUMNS <const> = 52
+local POW2 <const>: {number} = {}
+do
+    local p = 1
+    for i = 1, ROW_MASK_MAX_COLUMNS do
+        POW2[i] = p
+        p = p * 2
+    end
+end
 local STATE_STACK_DATA_KEY <const> = "__tecs.stateStack"
 local PIPELINE_DATA_KEY <const> = "__tecs.pipeline"
 
@@ -1665,15 +1677,22 @@ end
 
 function BufferWriterImpl:writeEntity(id: integer, comps: {Component}, count: integer)
     -- Row-major fallback (sparse archetypes). Emit a per-row presence
-    -- bitmap, then only the present values in archetype-column order.
+    -- bitmask (bit i-1 = column i present), then only the present values
+    -- in archetype-column order. One number instead of a boolean table:
+    -- no per-entity allocation on either side.
+    if count > ROW_MASK_MAX_COLUMNS then
+        error("snapshot: row-major archetype exceeds " .. ROW_MASK_MAX_COLUMNS .. " columns")
+    end
     local buf = self._buf
     local encode <const> = BUF_ENCODE
     encode(buf, id as any)
-    local presence: {boolean} = {}
+    local mask: number = 0
     for i = 1, count do
-        presence[i] = comps[i] ~= nil
+        if comps[i] ~= nil then
+            mask = mask + POW2[i]
+        end
     end
-    encode(buf, presence as any)
+    encode(buf, mask as any)
     for i = 1, count do
         local inst = comps[i]
         if inst ~= nil then
@@ -1902,13 +1921,14 @@ function BufferReaderImpl:readEntity(): integer, Component...
     local buf = self._buf
     local decode <const> = BUF_DECODE
     local id = decode(buf) as integer
-    local presence = decode(buf) as {integer: boolean}
+    local mask = decode(buf) as number
     local compTypes = self._currentTypes
     local width = #compTypes
     local comps = self._compsScratch
     if not comps then comps = {}; self._compsScratch = comps end
     for i = 1, width do
-        if presence[i] then
+        local p = POW2[i]
+        if mask % (p + p) >= p then
             comps[i] = self:_decodeOne(i, self._world)
         else
             comps[i] = nil

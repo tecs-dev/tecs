@@ -64,7 +64,7 @@ describe("snapshot save/load", function()
         world:commit()
 
         local snap = saveTableSnapshot(world)
-        luassert.equals(1, snap.version)
+        luassert.equals(2, snap.version)
         luassert.is_table(snap.archetypes)
 
         world:loadSnapshot(snap)
@@ -672,7 +672,7 @@ describe("snapshot save/load", function()
         luassert.equals("load", order[2])
         luassert.equals("finish", order[3])
         luassert.is_not_nil(finishPrelude)
-        luassert.equals(1, (finishPrelude as tecs.SnapshotPrelude).version)
+        luassert.equals(2, (finishPrelude as tecs.SnapshotPrelude).version)
     end)
 
     it("addSnapshotHandler omits nil save results", function()
@@ -1009,7 +1009,7 @@ describe("snapshot save/load", function()
         world:loadSnapshot(buf)
         luassert.equals(1, fired)
         luassert.is_not_nil(seenPrelude)
-        luassert.equals(1, (seenPrelude as {string: integer}).version)
+        luassert.equals(2, (seenPrelude as {string: integer}).version)
     end)
 
     it("handles nil customData (no user metadata)", function()
@@ -1026,7 +1026,7 @@ describe("snapshot save/load", function()
 
         local prelude = world:loadSnapshot(buf)
         luassert.equals(0, fired, "no data entries should fire any onData callback")
-        luassert.equals(1, prelude.version)
+        luassert.equals(2, prelude.version)
     end)
 
     it("reuses an existing buffer when opts.buffer is provided", function()
@@ -1074,7 +1074,7 @@ describe("snapshot save/load", function()
         local buffer = require("string.buffer")
         local ffi = require("ffi")
         local buf = buffer.new()
-        buf:encode(1)                            -- version
+        buf:encode(2)                            -- version
         buf:encode(2)                            -- nextEntityId
         buf:encode(1)                            -- entityCount
         buf:encode(1)                            -- archetypeCount
@@ -1131,7 +1131,7 @@ describe("snapshot save/load", function()
         local buffer = require("string.buffer")
         local ffi = require("ffi")
         local buf = buffer.new()
-        buf:encode(1)
+        buf:encode(2)
         buf:encode(2)
         buf:encode(1)
         buf:encode(1)
@@ -1194,7 +1194,7 @@ describe("snapshot save/load", function()
         local buffer = require("string.buffer")
         local ffi = require("ffi")
         local buf = buffer.new()
-        buf:encode(1)                            -- version
+        buf:encode(2)                            -- version
         buf:encode(2)                            -- nextEntityId
         buf:encode(1)                            -- entityCount
         buf:encode(1)                            -- archetypeCount
