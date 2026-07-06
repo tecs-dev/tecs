@@ -259,10 +259,12 @@ function tileChunk.plugin(world: tecs.World)
     local indirectBuffer = lg.newBuffer({{format = "uint32"}}, 4, {usage = "dynamic", shaderstorage = true, indirectarguments = true})
     local shadowIndirectBuffer = lg.newBuffer({{format = "uint32"}}, 4, {usage = "dynamic", shaderstorage = true, indirectarguments = true})
 
-    -- Growable output buffers (replaced on growth, shared via stable table ref)
+    -- Growable output buffers (replaced on growth, shared via stable table ref).
+    -- The cull writes compact TileChunkVis records; render passes read
+    -- tile data from the input buffer via srcIndex.
     local growable: tilechunk_plugin.TileChunkGrowable = {
-        outputBuffer = lg.newBuffer(gpuTypes.TILECHUNK_FORMAT, initialCapacity, {usage = "dynamic", shaderstorage = true}),
-        shadowOutputBuffer = lg.newBuffer(gpuTypes.TILECHUNK_FORMAT, initialCapacity, {usage = "dynamic", shaderstorage = true}),
+        outputBuffer = lg.newBuffer(gpuTypes.TILECHUNK_VIS_FORMAT, initialCapacity, {usage = "dynamic", shaderstorage = true}),
+        shadowOutputBuffer = lg.newBuffer(gpuTypes.TILECHUNK_VIS_FORMAT, initialCapacity, {usage = "dynamic", shaderstorage = true}),
         textureSize = {1, 1},
         activeCount = 0,
     }
@@ -290,8 +292,8 @@ function tileChunk.plugin(world: tecs.World)
         capacity = newCap
 
         -- Output / shadow output buffers must keep pace with the input.
-        growable.outputBuffer = lg.newBuffer(gpuTypes.TILECHUNK_FORMAT, newCap, {usage = "dynamic", shaderstorage = true})
-        growable.shadowOutputBuffer = lg.newBuffer(gpuTypes.TILECHUNK_FORMAT, newCap, {usage = "dynamic", shaderstorage = true})
+        growable.outputBuffer = lg.newBuffer(gpuTypes.TILECHUNK_VIS_FORMAT, newCap, {usage = "dynamic", shaderstorage = true})
+        growable.shadowOutputBuffer = lg.newBuffer(gpuTypes.TILECHUNK_VIS_FORMAT, newCap, {usage = "dynamic", shaderstorage = true})
     end
 
     -- Tileset registry state (plugin-owned, moved from asset_registry)

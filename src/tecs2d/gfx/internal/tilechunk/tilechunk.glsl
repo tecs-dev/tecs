@@ -1,9 +1,12 @@
 #pragma language glsl4
 
-// TileChunkData struct and getTileGroup() are provided by tile_common.glsl
+// TileChunkData, TileChunkInput, TileChunkVis, and getTileGroup() are
+// provided by tile_common.glsl. The cull pass writes compact
+// TileChunkVis records; tile data and chunk header fields are read
+// from TileChunkInput via srcIndex.
 
 layout(std430) readonly buffer TileChunkOutput {
-    TileChunkData chunks[];
+    TileChunkVis chunks[];
 };
 
 uniform vec2 TilesetSize;     // Tileset texture dimensions in pixels
@@ -16,16 +19,11 @@ varying float vTileId;        // For discarding empty tiles (id == 0)
 varying float vLitMarker;     // 1.0 = receives lighting, 0.0 = unlit
 
 #ifdef VERTEX
-// Quad vertex positions (2 triangles, CCW winding)
-const vec2 QUAD_POSITIONS[6] = vec2[6](
-    vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(1.0, 1.0),  // First triangle
-    vec2(0.0, 0.0), vec2(1.0, 1.0), vec2(0.0, 1.0)   // Second triangle
-);
 
 vec4 position(mat4 transform_projection, vec4 vertex_position) {
     // Generate vertex position from VertexID (for drawFromShaderIndirect)
     // love_VertexID is 0-5 for each instance when vertexCount=6 in indirect buffer
-    vec2 quadPos = QUAD_POSITIONS[love_VertexID];
+    vec2 quadPos = QUAD_POSITIONS_UNIT[love_VertexID];
 
     // love_InstanceID encodes both chunk index and local tile index
     // We use gl_BaseInstance (chunk index) + local tile (0-255)
@@ -36,10 +34,12 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
     int chunkIndex = instanceID / 256;
     int localTile = instanceID % 256;
 
-    TileChunkData chunk = chunks[chunkIndex];
+    TileChunkVis vis = chunks[chunkIndex];
+    uint srcIdx = vis.srcIndex.x;
+    vec4 layerInfo = chunksIn[srcIdx].layerInfo;
 
     // Layer range filtering for multi-pass effects
-    if (chunk.layerInfo.x < LayerRange.x || chunk.layerInfo.x > LayerRange.y) {
+    if (layerInfo.x < LayerRange.x || layerInfo.x > LayerRange.y) {
         return vec4(2.0, 2.0, 2.0, 1.0);
     }
 
@@ -47,7 +47,7 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
     // Each uvec4 holds 4 tile IDs (as 4 uints)
     int uvec4Index = localTile / 4;
     int componentIndex = localTile % 4;
-    uvec4 tileGroup = getTileGroup(chunk, uvec4Index);
+    uvec4 tileGroup = getTileGroup(srcIdx, uvec4Index);
     uint tileId = tileGroup[componentIndex];
 
     // Pass tile ID to fragment shader for discard check
@@ -63,12 +63,12 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
     int tileX = localTile % 16;
     int tileY = localTile / 16;
 
-    float tw = chunk.posSize.z;  // tile width
-    float th = chunk.posSize.w;  // tile height
-    float columns = chunk.layerInfo.z;  // tileset columns
+    float tw = vis.posSize.z;  // tile width
+    float th = vis.posSize.w;  // tile height
+    float columns = layerInfo.z;  // tileset columns
 
-    // Calculate world position of this tile
-    vec2 chunkPos = chunk.posSize.xy;
+    // Calculate world position of this tile (posSize is parallax-adjusted)
+    vec2 chunkPos = vis.posSize.xy;
     vec2 tileOffset = vec2(float(tileX) * tw, float(tileY) * th);
 
     // Unit quad (0,0 to 1,1) scaled to tile size
@@ -87,7 +87,7 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
     vec2 uv = uvBase + localPos * uvTileSize;
 
     // Pass texture array layer from chunk data
-    float textureLayer = chunk.layerInfo.w;
+    float textureLayer = layerInfo.w;
     vTexCoord = vec3(uv, textureLayer);
 
     // World to screen transform
@@ -96,13 +96,13 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
     vec4 result = transform_projection * vec4(screenPos, 0.0, 1.0);
 
     // Compute depth for z-ordering (shared function from depth_common.glsl)
-    float layer = chunk.layerInfo.x;
-    float z = chunk.layerInfo.y;
-    float bottomY = worldPos.y + chunk.posSize.w;  // Bottom of tile for Y-sorting
+    float layer = layerInfo.x;
+    float z = layerInfo.y;
+    float bottomY = worldPos.y + th;  // Bottom of tile for Y-sorting
     float depth = computeDepth(layer, z, worldPos.x, bottomY, 0u);
     result.z = depth * result.w;
 
-    vColor = chunk.color;
+    vColor = chunksIn[srcIdx].color;
     vWorldPos = worldPos;
     // Set lit marker based on layer (0.0 = unlit, 1.0 = lit)
     vLitMarker = isUnlitLayer(layer) ? 0.0 : 1.0;

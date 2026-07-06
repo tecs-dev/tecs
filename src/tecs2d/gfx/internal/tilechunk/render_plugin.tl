@@ -105,6 +105,8 @@ function tilechunk_plugin.create(config: tilechunk_plugin.TileChunkPluginConfig)
             shader:send("RenderParams", renderParamsBuffer)
             shader:send("TilesetSize", growable.textureSize)
             shader:send("TileChunkOutput", growable.outputBuffer)
+            -- Compact vis records reference rows in the input buffer.
+            shader:send("TileChunkInput", inputBuffer.handle)
 
             local tex = growable.textureArray
             shader:send("MainTex", tex)
@@ -146,6 +148,8 @@ function tilechunk_plugin.create(config: tilechunk_plugin.TileChunkPluginConfig)
             shader:send("HeightLookupSize", {heightW, heightH})
 
             shader:send("TileChunkShadowOutput", growable.shadowOutputBuffer)
+            -- Compact vis records reference rows in the input buffer.
+            shader:send("TileChunkInput", inputBuffer.handle)
             lg.drawFromShaderIndirect("triangles", shadowIndirectBuffer, 1)
         end
     end

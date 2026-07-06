@@ -4,10 +4,13 @@
 // Reads from shadow-only buffer populated by tilechunk cull shader's dual-write.
 // Renders tile silhouettes to shadow mask, looking up per-tile occluder heights.
 
-// TileChunkData struct and getTileGroup() are provided by tile_common.glsl
+// TileChunkData, TileChunkInput, TileChunkVis, and getTileGroup() are
+// provided by tile_common.glsl. The cull pass writes compact
+// TileChunkVis records; tile data and chunk header fields are read
+// from TileChunkInput via srcIndex.
 
 layout(std430) readonly buffer TileChunkShadowOutput {
-    TileChunkData chunks[];
+    TileChunkVis chunks[];
 };
 
 uniform mat4 ShadowViewProj;
@@ -38,12 +41,13 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
     int chunkIndex = instanceID / 256;
     int localTile = instanceID % 256;
 
-    TileChunkData chunk = chunks[chunkIndex];
+    TileChunkVis vis = chunks[chunkIndex];
+    uint srcIdx = vis.srcIndex.x;
 
     // Get tile ID
     int uvec4Index = localTile / 4;
     int componentIndex = localTile % 4;
-    uvec4 tileGroup = getTileGroup(chunk, uvec4Index);
+    uvec4 tileGroup = getTileGroup(srcIdx, uvec4Index);
     uint tileId = tileGroup[componentIndex];
 
     vTileId = float(tileId);
@@ -55,7 +59,7 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
     }
 
     // Get texture layer index for height lookup
-    float textureIndex = chunk.layerInfo.w;
+    float textureIndex = chunksIn[srcIdx].layerInfo.w;
 
     // Look up occluder height from 2D texture
     // Row = textureIndex (tileset layer), Col = local tile ID (tileId - 1, since tile IDs are 1-based)
@@ -78,12 +82,12 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
     int tileX = localTile % 16;
     int tileY = localTile / 16;
 
-    float tw = chunk.posSize.z;
-    float th = chunk.posSize.w;
-    float columns = chunk.layerInfo.z;
+    float tw = vis.posSize.z;
+    float th = vis.posSize.w;
+    float columns = chunksIn[srcIdx].layerInfo.z;
 
-    // Calculate world position of this tile
-    vec2 chunkPos = chunk.posSize.xy;
+    // Calculate world position of this tile (posSize is parallax-adjusted)
+    vec2 chunkPos = vis.posSize.xy;
     vec2 tileOffset = vec2(float(tileX) * tw, float(tileY) * th);
     vec2 worldPos = chunkPos + tileOffset + quadPos * vec2(tw, th);
 

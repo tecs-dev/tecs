@@ -754,6 +754,7 @@ local record types
 
     --- Buffer format for tile chunks (matches GPUTileChunkInstance)
     TILECHUNK_FORMAT: love.graphics.BufferFormat
+    TILECHUNK_VIS_FORMAT: love.graphics.BufferFormat
 
     --- Buffer format for text glyphs (matches GPUTextGlyphInstance)
     TEXT_GLYPH_FORMAT: love.graphics.BufferFormat
@@ -1033,6 +1034,13 @@ types.MATERIAL_PARAMS_FORMAT = {
 
 types.INDIRECT_FORMAT = {
     {format = "uint32"},
+}
+
+-- Compact visible-chunk record written by the tilechunk cull pass.
+-- Must match TileChunkVis in tile_common.glsl / tilechunk_cull.glsl.
+types.TILECHUNK_VIS_FORMAT = {
+    {format = "floatvec4"},   -- posSize (parallax-adjusted x, y, tileWidth, tileHeight)
+    {format = "uint32vec4"},  -- srcIndex (x = row in TileChunkInput; yzw unused)
 }
 
 -- TileChunk buffer format: 4 vec4s for header + 64 uvec4s for 256 tile IDs
