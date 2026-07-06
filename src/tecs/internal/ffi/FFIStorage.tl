@@ -507,6 +507,14 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
         ): function(...: any): types.components.Component
             -- Shared fields exposed by every instance through the metatype.
             if container then
+                -- The metatype is shared per struct name; a second
+                -- component binding it would silently hijack the first's
+                -- instances (world:set routes by instance.componentType).
+                local bound = metadataFields.componentType as types.components.Component
+                if bound ~= nil and bound ~= container then
+                    error("FFI struct '" .. structName .. "' is already bound to component '" ..
+                        tostring(bound.componentName) .. "'; use a distinct struct name", 0)
+                end
                 metadataFields.componentType = container
                 metadataFields.componentName = structName
                 metadataFields.componentId = (container as {string:any}).componentId
