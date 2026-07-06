@@ -131,6 +131,22 @@ end
   index into component columns.
 * Line `5` and `6`: grab components for an entity by indexing into the columns.
 
+### Nested iteration
+
+Iteration is re-entrant: each `for … in query:iter()` loop tracks its own position, so the same query can
+be iterated from inside its own loop. This makes pairwise patterns direct:
+
+```teal
+for archA, lenA, entitiesA in colliders:iter() do
+    for archB, lenB, entitiesB in colliders:iter() do
+        -- compare every archetype pair, including archA against itself
+    end
+end
+```
+
+The same holds for `query:groups()` and `query:group(id)`. Deferred scopes nest with the loops; staged
+mutations drain when the outermost loop finishes.
+
 ### Mutating component columns
 
 Use `archetype:get(Component)` when you only read a column. Use `archetype:getMut(Component)` when you will mutate
