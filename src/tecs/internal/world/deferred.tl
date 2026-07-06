@@ -478,7 +478,13 @@ function WorldImpl:deferSetRaw(id: integer, componentType: Component, value: any
 
     -- Fast path: committed entity, plain component, no staged state.
     if getEntityState(self, slot) == 0 then
-        local s = (self.allocator.slots as {integer: EntitySlot})[slot]
+        local slots = self.allocator.slots as {integer: EntitySlot}
+        -- Stale-handle guard on the already-loaded sidecar: a recycled
+        -- slot must not accept writes through an old handle.
+        if IdAllocator.isStale(slots, id, slot) then
+            error("Entity ID not found: " .. id)
+        end
+        local s = slots[slot]
         local archetype = self.archetypeIndex[s.archetypeId]
         if archetype then
             local row = s.row
@@ -530,6 +536,12 @@ function WorldImpl:_deferSetSlow(
     local slot = IdAllocator.slotOf(id)
     local st = getEntityState(self, slot)
     if st == STATE_DESPAWN then return end
+
+    -- Stale-handle guard: staged entities carry matching generations, so
+    -- one compare rejects recycled-slot handles on every slow-path set.
+    if IdAllocator.isStale(self.allocator.slots as {integer: EntitySlot}, id, slot) then
+        error("Entity ID not found: " .. id)
+    end
 
     -- Tags carry no per-row payload; avoid appending/allocating tag values.
     local ctI = componentType as ComponentInternal
@@ -679,7 +691,10 @@ function WorldImpl:deferRemoveRaw(id: integer, component: Component)
     -- Fast path: plain component.
     if component.relationshipType == nil then
         if st == 0 then
-            local s = (self.allocator.slots as {integer: EntitySlot})[slot]
+            local slots = self.allocator.slots as {integer: EntitySlot}
+            -- Stale or dead handle: removal is a no-op.
+            if IdAllocator.isStale(slots, id, slot) then return end
+            local s = slots[slot]
             local archetype = self.archetypeIndex[s.archetypeId]
             if archetype then
                 if archetype.columns[component] == nil then
@@ -740,12 +755,19 @@ function WorldImpl:deferRemoveRaw(id: integer, component: Component)
     local hadPendingArch = getPendingArch(self, slot) ~= nil
     local prevArch: Archetype = getPendingArch(self, slot)
     if not prevArch then
-        local s = (self.allocator.slots as {integer: EntitySlot})[slot]
+        local slots = self.allocator.slots as {integer: EntitySlot}
+        -- Stale or dead handle: removal is a no-op.
+        if IdAllocator.isStale(slots, id, slot) then return end
         if st == STATE_SPAWN then
             prevArch = self.emptyArchetype
         else
-            prevArch = self.archetypeIndex[s.archetypeId]
+            prevArch = self.archetypeIndex[slots[slot].archetypeId]
         end
+    end
+
+    -- Never-allocated id (or state out of sync): nothing to remove from.
+    if not prevArch then
+        return
     end
 
     if prevArch.columns[component] == nil then
@@ -789,12 +811,18 @@ function WorldImpl:_deferDespawn(id: integer)
     end
 
     local world = self
-    local s = (self.allocator.slots as {integer: EntitySlot})[slot]
+    local slots = self.allocator.slots as {integer: EntitySlot}
+    -- Stale or dead handle: a recycled slot's new entity is not ours to
+    -- despawn and a freed slot has nothing to despawn.
+    if IdAllocator.isStale(slots, id, slot) then
+        return
+    end
+    local s = slots[slot]
     local sourceArch = self.archetypeIndex[s.archetypeId]
     local pendingArch = getPendingArch(self, slot)
 
-    -- Dead id: nothing committed and nothing staged. Match the instant
-    -- path's silent no-op instead of emitting OnDespawn for a ghost.
+    -- Never-allocated id: nothing committed and nothing staged. Match the
+    -- instant path's silent no-op instead of emitting OnDespawn for a ghost.
     if not sourceArch and not pendingArch and st == 0 then
         return
     end

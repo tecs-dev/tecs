@@ -179,6 +179,11 @@ function WorldImpl:instantSetRaw(id: integer, componentType: Component, value: a
 
     local slots = self.allocator.slots as {integer: EntitySlot}
     local s = slots[slot]
+    -- Stale-handle guard on the already-loaded slot record: a recycled
+    -- slot must not accept writes through an old handle.
+    if IdAllocator.isStale(slots, id, slot) then
+        error("Entity ID not found: " .. id)
+    end
     local srcArch = self.archetypeIndex[s.archetypeId]
     -- Unknown archetype (entity state out of sync): fall back to staged.
     -- Exclusive relationship handling lives in the defer-set handler; the
@@ -289,6 +294,8 @@ function WorldImpl:instantRemoveRaw(id: integer, component: Component)
 
     local slots = self.allocator.slots as {integer: EntitySlot}
     local s = slots[slot]
+    -- Stale or dead handle: removing from a nonexistent entity is a no-op.
+    if IdAllocator.isStale(slots, id, slot) then return end
     local srcArch = self.archetypeIndex[s.archetypeId]
     if not srcArch then return end
 
@@ -380,6 +387,11 @@ function WorldImpl:_instantDespawn(id: integer): boolean
     local slot = IdAllocator.slotOf(id)
     local slots = self.allocator.slots
     local s = slots[slot]
+    -- Stale or dead handle: a recycled slot must not despawn its new
+    -- entity, a freed slot has nothing to despawn. Report handled.
+    if IdAllocator.isStale(slots, id, slot) then
+        return true
+    end
     local srcArch = self.archetypeIndex[s.archetypeId]
 
     -- Archetypes with despawn cleanup need the deferred path so per-component
