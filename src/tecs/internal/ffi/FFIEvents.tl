@@ -26,6 +26,10 @@ local record FFIEvents
         nextSliceId: integer
         freeSlices: {integer}
         freeSliceCount: integer
+        -- sliceId -> arenas that slice has allocated. clearSlice runs per
+        -- world per frame; walking this list touches only what the slice
+        -- used instead of every registered event type.
+        arenasPerSlice: {integer: {Arena<any>}}
     end
 
     new: function(): Manager
@@ -62,11 +66,21 @@ local function generateStructDef(name: string, fields: {{string, string}}): stri
     return table.concat(parts)
 end
 
-local function ensureSliceArena(registration: FFIEvents.EventRegistration, sliceId: integer): Arena<any>
+local function ensureSliceArena(
+    manager: FFIEvents.Manager,
+    registration: FFIEvents.EventRegistration,
+    sliceId: integer
+): Arena<any>
     local arena = registration.arenasBySlice[sliceId]
     if not arena then
         arena = Arena.new(registration.structName, DEFAULT_ARENA_PAGE_SIZE) as Arena<any>
         registration.arenasBySlice[sliceId] = arena
+        local list = manager.arenasPerSlice[sliceId]
+        if not list then
+            list = {}
+            manager.arenasPerSlice[sliceId] = list
+        end
+        list[#list + 1] = arena
     end
     return arena
 end
@@ -81,6 +95,7 @@ function FFIEvents.new(): FFIEvents.Manager
         nextSliceId = 1,
         freeSlices = {},
         freeSliceCount = 0,
+        arenasPerSlice = {},
     }
     return setmetatable(manager, FFI_EVENTS_MANAGER_MT)
 end
@@ -144,11 +159,10 @@ function FFIEvents.Manager:acquireSlice(): integer
 end
 
 function FFIEvents.Manager:clearSlice(sliceId: integer)
-    for _, registration in pairs(self.registrationsById) do
-        local arena = registration.arenasBySlice[sliceId]
-        if arena then
-            arena:clear()
-        end
+    local list = self.arenasPerSlice[sliceId]
+    if not list then return end
+    for i = 1, #list do
+        list[i]:clear()
     end
 end
 
@@ -165,7 +179,7 @@ function FFIEvents.Manager:vendEvent<T>(sliceId: integer, eventType: T): T
         error("Event type not registered for FFI events")
     end
 
-    local arena = ensureSliceArena(registration, sliceId)
+    local arena = ensureSliceArena(self, registration, sliceId)
     local data, index = arena:allocate()
     local event = (data as {integer: any})[index]
     C.fill(event as C.CData, registration.size, 0)
