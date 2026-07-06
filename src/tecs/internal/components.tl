@@ -479,6 +479,9 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
             reverseIndex = cfg.reverseIndex,
             cascadeDelete = cfg.cascadeDelete,
             transient = cfg.transient,
+            serialize = (cfgAny.serialize as function(R): {string: any}),
+            deserialize = (cfgAny.deserialize as function(types.World, {string: any}): R),
+            __call = (cfgAny.__call as function(R, ...: any)),
         }) as R
     end
 
@@ -629,8 +632,12 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
         end
     end
 
-    relContainer.deserialize = function(_world: types.World, data: {string: any}): R
-        return relContainer.new(data)
+    if (cfg as {string: any}).deserialize then
+        relContainer.deserialize = (cfg as {string: any}).deserialize as function(types.World, {string: any}): R
+    else
+        relContainer.deserialize = function(_world: types.World, data: {string: any}): R
+            return relContainer.new(data)
+        end
     end
 
     local instance_mt <const> = {
@@ -775,6 +782,8 @@ function components.newFFIRelationship<R is Relationship>(config: FFIRelationshi
         reverseIndex = cfg.reverseIndex,
         cascadeDelete = cfg.cascadeDelete,
         transient = cfg.transient,
+        serialize = (cfg as {string:any}).serialize,
+        deserialize = (cfg as {string:any}).deserialize,
         storage = ffiStorage,
         __internalStorageToken = INTERNAL_STORAGE_TOKEN,
     })

@@ -731,4 +731,26 @@ describe("relationships", function()
             luassert.is_nil(seen[e2])
         end)
     end)
+
+    describe("target-only relationship options", function()
+        it("forwards serialize and deserialize through the FFI redirect", function()
+            local testId = math.random(1, 1000000)
+            local myS = function(value: any): {string: any}
+                return {target = (value as {string: any}).target as integer}
+            end
+            local myD = function(_w: tecs.World, data: {string: any}): any
+                return data
+            end
+            local Rel = tecs.newRelationship({
+                name = "RedirectForward" .. testId,
+                serialize = (myS as any),
+                deserialize = (myD as any),
+            })
+
+            luassert.equals(myS, (Rel as {string: any}).serialize,
+                "target-only redirect must not drop a custom serialize")
+            luassert.equals(myD, (Rel as {string: any}).deserialize,
+                "target-only redirect must not drop a custom deserialize")
+        end)
+    end)
 end)
