@@ -358,3 +358,66 @@ describe("batchSet argument validation", function()
         end)
     end)
 end)
+
+describe("bulk archetype swap capacity", function()
+    local WorldImpl <const> = require("tecs.internal.world")
+
+    local record SwapPos is tecs.Component
+        x: number
+    end
+    local record SwapExtra is tecs.Component
+        e: number
+    end
+
+    local Pos = tecs.newFFIComponent({
+        name = "BatchSwapCapPos",
+        container = SwapPos,
+        fields = {{"x", "float"}},
+    })
+    local Extra = tecs.newFFIComponent({
+        name = "BatchSwapCapExtra",
+        container = SwapExtra,
+        fields = {{"e", "float"}},
+    })
+
+    it("keeps capacity within every column after a swap fast path", function()
+        local world = tecs.newWorld() as WorldImpl
+        local ids: {integer} = {}
+        for i = 1, 100 do
+            ids[i] = world:spawn(Pos(i))
+        end
+        world:commit()
+
+        -- Inflate the source archetype far beyond its occupancy so the
+        -- swap hands the destination oversized shared columns.
+        local srcArch = world:currentArchetype(ids[1])
+        srcArch:reserveCapacity(4096)
+
+        local q = world:query({include = {Pos}})
+        world:batchSet(q, Extra(0.5))
+        world:commit()
+
+        -- The destination's Extra column was sized for ~100 rows; its
+        -- capacity must not claim the source's inflated 4096.
+        local dstArch = world:currentArchetype(ids[1])
+        luassert.is_true(dstArch.capacity < 4096,
+            "capacity " .. dstArch.capacity .. " exceeds the unshared column")
+
+        -- Growing past the clamped capacity must stay consistent.
+        for i = 101, 400 do
+            ids[i] = world:spawn(Pos(i), Extra(i + 0.5))
+        end
+        world:commit()
+
+        for i = 1, 400 do
+            local p = world:get(ids[i], Pos) as SwapPos
+            luassert.equals(i, p.x)
+            local x = world:get(ids[i], Extra) as SwapExtra
+            if i <= 100 then
+                luassert.equals(0.5, x.e)
+            else
+                luassert.equals(i + 0.5, x.e)
+            end
+        end
+    end)
+end)

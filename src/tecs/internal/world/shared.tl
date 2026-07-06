@@ -215,7 +215,16 @@ local function bulkMoveEntireArchetype(
         srcEntities[0] = count        -- now dst's length pad
         dstEntities[0] = 0            -- now src's length pad
 
-        srcArch.capacity, dstArch.capacity = dstArch.capacity, srcArch.capacity
+        -- Only plan (shared) columns swapped sides; a column present on one
+        -- side only keeps its pre-swap size. Clamp both capacities to the
+        -- smaller side so neither claims rows its shortest column lacks;
+        -- per-column storage metadata lets a later reserveCapacity regrow
+        -- only the short columns.
+        local srcCap = srcArch.capacity
+        local dstCap = dstArch.capacity
+        local minCap = srcCap < dstCap and srcCap or dstCap
+        srcArch.capacity = minCap
+        dstArch.capacity = minCap
 
         local slots = self.allocator.slots as {integer: EntitySlot}
         -- Per-entity update; contiguous slot ranges are not row-ordered.
