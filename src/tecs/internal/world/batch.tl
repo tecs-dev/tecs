@@ -838,6 +838,13 @@ function WorldImpl:_deferBatchRemove(
     self.isDirty = true
 end
 
+-- Shared spawn-archetype resolution for codegen'd bundle spawns: applies
+-- `requires`, wildcard containers, and the active auto-state component,
+-- matching every other spawn path.
+function WorldImpl:_resolveSpawnArchetype(componentTypes: {Component}): Archetype, {RequireEntry}
+    return resolveBatchSpawnArchetype(self, componentTypes)
+end
+
 function WorldImpl:_drainBatchMutations()
     local count = self.batchMutationCount
     if count == 0 then return end

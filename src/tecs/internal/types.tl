@@ -473,8 +473,10 @@ local record internal
         _releaseKeyForEntity: function(self: WorldImpl, id: integer)
         _rebuildKeyIndex: function(self: WorldImpl)
         setSparseRaw: function(self: WorldImpl, id: integer, value: any)
+        applySparseRaw: function(self: WorldImpl, id: integer, value: any)
         removeSparseRaw: function(self: WorldImpl, id: integer, container: Component)
         removeSparseOneRaw: function(self: WorldImpl, id: integer, container: Component, targetId: integer)
+        _resolveSpawnArchetype: function(self: WorldImpl, componentTypes: {Component}): ArchetypeInternal, {RequireEntry}
 
         -- Pure-mechanism workers; component-specific callbacks do not call
         -- these directly.

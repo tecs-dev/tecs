@@ -747,4 +747,134 @@ describe("bundle", function()
             end
         end)
     end)
+
+    describe("spawn-path parity", function()
+        it("expands requires like other spawn paths", function()
+            local record ReqBase is tecs.Component
+                v: number
+            end
+            local Base = tecs.newComponent({
+                name = "BundleReqBase",
+                container = ReqBase,
+                fields = {"v"},
+                defaults = {41},
+            })
+            local record ReqTop is tecs.Component
+                t: number
+            end
+            local Top = tecs.newComponent({
+                name = "BundleReqTop",
+                container = ReqTop,
+                fields = {"t"},
+                defaults = {0},
+                requires = {Base},
+            })
+
+            local bundle = world:newBundle("RequiresBundle", {
+                with = {
+                    [Top] = function(): ReqTop return Top(7) end,
+                },
+            }) as Bundle
+
+            -- Immediate path.
+            local e1 = bundle:spawn()
+            world:commit()
+            luassert.equals(7, (world:get(e1, Top) as ReqTop).t)
+            luassert.is_not_nil(world:get(e1, Base), "requires must add the base component")
+            luassert.equals(41, (world:get(e1, Base) as ReqBase).v, "requires default must be written")
+
+            -- Deferred path.
+            world:defer()
+            local e2 = bundle:spawn()
+            world:commit()
+            luassert.equals(7, (world:get(e2, Top) as ReqTop).t)
+            luassert.equals(41, (world:get(e2, Base) as ReqBase).v)
+        end)
+
+        it("adds the wildcard container for dense relationship instances", function()
+            local Owes = tecs.newRelationship({
+                name = "BundleWildcardOwes",
+            })
+            local target = world:spawn()
+            world:commit()
+            local instance = Owes(target) as tecs.Component
+
+            local bundle = world:newBundle("WildcardBundle", {
+                with = {
+                    [instance] = function(): tecs.Component return instance end,
+                },
+            }) as Bundle
+
+            local e = bundle:spawn()
+            world:commit()
+
+            -- Wildcard queries match through the container marker.
+            local q = world:query({include = {Owes as tecs.Component}, temp = true})
+            local found = false
+            for _, len, entities in q:iter() do
+                for r = 1, len do
+                    if entities[r] == e then found = true end
+                end
+            end
+            luassert.is_true(found, "bundle spawn must add the wildcard container")
+        end)
+
+        it("a despawn staged before commit wins over the bundle drain", function()
+            local Tag = tecs.newTagComponent({name = "BundleDespawnWinsTag"})
+            local bundle = world:newBundle("DespawnWinsBundle", {
+                with = {[Tag] = true},
+            }) as Bundle
+
+            world:defer()
+            local id = bundle:spawn()
+            world:despawn(id)
+            world:commit()
+
+            luassert.is_false(world:isAlive(id),
+                "the bundle drain must not resurrect a despawned entity")
+        end)
+
+        it("applies sparse relationship values immediately at scope depth 0", function()
+            local Follows = tecs.newRelationship({
+                name = "BundleSparseFollows",
+                sparse = true,
+                exclusive = true,
+            })
+            local target = world:spawn()
+            world:commit()
+
+            local bundle = world:newBundle("SparseBundle", {
+                with = {
+                    [Follows as tecs.Component] = function(): tecs.Component
+                        return Follows(target) as tecs.Component
+                    end,
+                },
+            }) as Bundle
+
+            local e = bundle:spawn()
+            local rel = world:getFirstRelationship(e, Follows)
+            luassert.is_not_nil(rel, "immediate bundle spawn must commit sparse values")
+            luassert.equals(target, rel.target)
+        end)
+
+        it("places each burst into its enqueue-time state archetype", function()
+            local Tag = tecs.newTagComponent({name = "BundleStateMixTag"})
+            local stateA = world:createState("BundleStateA")
+            local stateB = world:createState("BundleStateB")
+            local bundle = world:newBundle("StateMixBundle", {
+                with = {[Tag] = true},
+            }) as Bundle
+
+            world:pushState("BundleStateA")
+            world:defer()
+            local e1 = bundle:spawn()
+            world:pushState("BundleStateB")
+            local e2 = bundle:spawn()
+            world:commit()
+
+            luassert.is_not_nil(world:get(e1, stateA), "first burst keeps state A")
+            luassert.is_nil(world:get(e1, stateB))
+            luassert.is_not_nil(world:get(e2, stateB), "second burst takes state B")
+        end)
+    end)
 end)

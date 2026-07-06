@@ -39,6 +39,24 @@ function WorldImpl:setSparseRaw(id: integer, value: any)
     self.isDirty = true
 end
 
+-- Immediate-path sparse write for codegen'd bundle spawns: the entity is
+-- already placed, so the value applies to the store now instead of
+-- staging for a commit that only a later transaction would run.
+function WorldImpl:applySparseRaw(id: integer, value: any)
+    local rel = value as types.components.Relationship
+    local container = rel.relationshipType as Component
+    local store = self.relationshipStores[container]
+    if store then
+        store:set(id, value)
+        local slot = IdAllocator.slotOf(id)
+        local arch = self.archetypeIndex[
+            (self.allocator.slots as {integer: IdAllocator.EntitySlot})[slot].archetypeId]
+        if arch then
+            arch:markComponentDirty(container)
+        end
+    end
+end
+
 function WorldImpl:removeSparseRaw(id: integer, container: Component)
     local slot = IdAllocator.slotOf(id)
     local sets = self.sparseSets[slot]

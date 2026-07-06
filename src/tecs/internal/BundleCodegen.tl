@@ -6,6 +6,7 @@ bundle's fixed component list.
 local types <const> = require("tecs.types")
 local internal <const> = require("tecs.internal.types")
 local IdAllocator <const> = require("tecs.internal.IdAllocator")
+local shared <const> = require("tecs.internal.world.shared")
 
 local type Component = types.components.Component
 local type ComponentInternal = internal.ComponentInternal
@@ -21,17 +22,6 @@ local record BundleCodegen
         factoryArray: {function(): Component},
         requiredCount: integer
     ): SpawnFn
-end
-
--- Build newline-joined repetitions of a template with %d replaced by
--- each index from `lo..hi`.
-local function lines(template: string, lo: integer, hi: integer): string
-    if hi < lo then return "" end
-    local parts: {string} = {}
-    for i = lo, hi do
-        parts[#parts + 1] = (template:gsub("%%d", tostring(i)))
-    end
-    return table.concat(parts, "\n")
 end
 
 -- Build comma-separated "v1, v2, ..., vN" list from lo..hi.
@@ -55,7 +45,7 @@ local function codegenSrc(n: integer, requiredCount: integer, isSparse: {boolean
             queueSlot[i] = nonSparseCount
         end
     end
-    local stride = 1 + nonSparseCount  -- slot + non-sparse values
+    local stride = 2 + nonSparseCount  -- target arch id + slot + non-sparse values
 
     -- Upvalues: world, allocSlot, plus component types (T1..Tn) and
     -- factories for the non-required suffix.
@@ -69,7 +59,7 @@ local function codegenSrc(n: integer, requiredCount: integer, isSparse: {boolean
     local paramList = seq("r", 1, requiredCount, ", ")
     if paramList ~= "" then paramList = ", " .. paramList end
 
-    local walkChain = lines("    a = a:withComponent(T%d, archIdx)", 1, n)
+    local typeList = seq("T", 1, n, ", ")
 
     local cachedColDecls: string do
         local parts: {string} = {}
@@ -108,14 +98,13 @@ local function codegenSrc(n: integer, requiredCount: integer, isSparse: {boolean
         return base
     end
 
-    -- Immediate path column/sparse writes.
+    -- Immediate path column/sparse writes. The entity is already placed,
+    -- so sparse values apply to the store now instead of staging.
     local columnWritesImmediate: string do
         local parts: {string} = {}
         for i = 1, n do
             if isSparse[i] then
-                -- The packed handle: staging records it for commit-time
-                -- generation validation.
-                parts[#parts + 1] = "    world:setSparseRaw(id, " .. valueExpr(i) .. ")"
+                parts[#parts + 1] = "    world:applySparseRaw(id, " .. valueExpr(i) .. ")"
             else
                 parts[#parts + 1] = "    col" .. i .. "[row] = " .. valueExpr(i)
             end
@@ -123,28 +112,29 @@ local function codegenSrc(n: integer, requiredCount: integer, isSparse: {boolean
         columnWritesImmediate = table.concat(parts, "\n")
     end
 
-    -- Deferred path: push value into bundle's own queue at offset
-    -- queueSlot[i]; sparse goes to world's per-entity store.
+    -- Deferred path: record = {target arch id, slot, non-sparse values};
+    -- sparse goes to the world's staging buffer under the packed handle.
     local enqueuePushes: string do
         local parts: {string} = {}
-        parts[#parts + 1] = "        spawnQueue[c + 1] = slot"
+        parts[#parts + 1] = "        spawnQueue[c + 1] = a.id"
+        parts[#parts + 1] = "        spawnQueue[c + 2] = slot"
         for i = 1, n do
             if isSparse[i] then
                 parts[#parts + 1] = "        world:setSparseRaw(id, " .. valueExpr(i) .. ")"
             else
-                parts[#parts + 1] = "        spawnQueue[c + " .. (queueSlot[i] + 1) .. "] = " .. valueExpr(i)
+                parts[#parts + 1] = "        spawnQueue[c + " .. (queueSlot[i] + 2) .. "] = " .. valueExpr(i)
             end
         end
         enqueuePushes = table.concat(parts, "\n")
     end
 
     -- Deferred drain column writes: read value back from queue at the
-    -- per-component offset and write into the dest column.
+    -- per-component offset (`i` points at the record's arch id).
     local drainColumnWrites: string do
         local parts: {string} = {}
         for i = 1, n do
             if not isSparse[i] then
-                parts[#parts + 1] = "        col" .. i .. "[row] = spawnQueue[i + " .. queueSlot[i] .. "]"
+                parts[#parts + 1] = "            col" .. i .. "[row] = spawnQueue[i + " .. (queueSlot[i] + 1) .. "]"
             end
         end
         drainColumnWrites = table.concat(parts, "\n")
@@ -174,6 +164,7 @@ local __UPVALUES__ = ...
 local cachedArch = nil
 local cachedAutoState = nil
 local cachedGen = -1
+local requiredList = nil
 __CACHED_COL_DECLS__
 
 local spawnQueue = {}
@@ -181,17 +172,40 @@ local spawnQueueCount = 0
 local pendingDrain = false
 local drain  -- forward ref
 
+local componentTypes = { __TYPE_LIST__ }
+
 local function resolveArch()
-    local archIdx = world.archetypeIndex
-    local a = world.emptyArchetype
-__WALK_CHAIN__
-    local autoState = world.autoStateComponent
-    if autoState then a = a:withComponent(autoState, archIdx) end
+    -- Shared spawn resolution: requires expansion, wildcard containers,
+    -- and the active auto-state component.
+    local a, reqs = world:_resolveSpawnArchetype(componentTypes)
+    requiredList = reqs
     cachedArch = a
-    cachedAutoState = autoState
+    cachedAutoState = world.autoStateComponent
     cachedGen = a.generation
 __FETCH_COLS_RESOLVE__
     return a
+end
+
+-- Write `requires`-supplied defaults into a spawned row. Mirrors the
+-- batch drain's fan-out semantics: table storage gets a fresh factory
+-- value per row, everything else the shared value (scalars unwrapped).
+local function writeRequired(a, row)
+    for ri = 1, #requiredList do
+        local entry = requiredList[ri]
+        local rcol = a.columns[entry.type]
+        if rcol then
+            local storage = entry.type.storageType
+            local v
+            if storage == "table" then
+                v = entry.factory()
+            else
+                v = entry.sharedValue
+                if v == nil then v = entry.factory() end
+                if storage == "scalar" then v = v.value end
+            end
+            rcol[row] = v
+        end
+    end
 end
 
 local function spawn(_self__PARAM_LIST__)
@@ -254,6 +268,7 @@ __FETCH_COLS_GROW_IMMEDIATE__
     es.row = row - 1
 
 __COLUMN_WRITES_IMMEDIATE__
+    if requiredList then writeRequired(a, row) end
 
     a:onRowsAdded(row - 1, 1, nil)
 
@@ -261,47 +276,54 @@ __COLUMN_WRITES_IMMEDIATE__
 end
 
 drain = function()
-    local a = cachedArch
-    if a == nil or world.autoStateComponent ~= cachedAutoState then
-        a = resolveArch()
-    elseif a.generation ~= cachedGen then
-        -- Another spawn path grew the archetype and swapped its columns.
-        cachedGen = a.generation
-__FETCH_COLS_RESOLVE__
-    end
-
     local slots = world.allocator.slots
-    local archId = a.id
-    local GEN_STRIDE = __GEN_STRIDE__
+    local slotStamp = world._slotStamp
+    local stateArr = world._stateArr
+    local epoch = world._transactionEpoch
+    local archIndex = world.archetypeIndex
+    local a = nil
+    local currentArchId = 0
 
     local i = 1
     while i <= spawnQueueCount do
-        local slot = spawnQueue[i]
-
-        local entities = a.entities
-        local row = entities[0] + 1
-        if row > a.capacity then
-            a:reserveCapacity(row)
-            entities = a.entities
-            cachedGen = a.generation
+        local entryArchId = spawnQueue[i]
+        local slot = spawnQueue[i + 1]
+        -- A despawn staged before commit wins; skip placement.
+        if not (slotStamp[slot] == epoch and stateArr[slot] == __STATE_DESPAWN__) then
+            if entryArchId ~= currentArchId then
+                -- Entries carry their enqueue-time target so a mid-scope
+                -- state change places each burst correctly.
+                a = archIndex[entryArchId]
+                currentArchId = entryArchId
 __FETCH_COLS_GROW__
-        end
-        local es = slots[slot]
-        es.archetypeId = archId
-        es.row = row - 1
-        local id = slot + es.generation * GEN_STRIDE
-        entities[row] = id
-        entities[0] = row
+            end
+            local entities = a.entities
+            local row = entities[0] + 1
+            if row > a.capacity then
+                a:reserveCapacity(row)
+                entities = a.entities
+__FETCH_COLS_GROW__
+            end
+            local es = slots[slot]
+            es.archetypeId = entryArchId
+            es.row = row - 1
+            local id = slot + es.generation * __GEN_STRIDE__
+            entities[row] = id
+            entities[0] = row
 
 __DRAIN_COLUMN_WRITES__
+            if requiredList then writeRequired(a, row) end
 
-        a:onRowsAdded(row - 1, 1, nil)
-
+            a:onRowsAdded(row - 1, 1, nil)
+        end
         i = i + __STRIDE__
     end
 
     spawnQueueCount = 0
     pendingDrain = false
+    -- Entries may have targeted several archetypes; the shared column
+    -- upvalues now belong to the last one. Force a re-resolve.
+    cachedArch = nil
 end
 
 return spawn, drain
@@ -320,7 +342,8 @@ return spawn, drain
     src = src:gsub("__UPVALUES__", upvalueList)
     src = src:gsub("__PARAM_LIST__", paramList)
     src = src:gsub("__REQUIRED_CHECKS__", requiredChecks)
-    src = src:gsub("__WALK_CHAIN__", walkChain)
+    src = src:gsub("__TYPE_LIST__", typeList)
+    src = src:gsub("__STATE_DESPAWN__", tostring(shared.STATE_DESPAWN))
     src = src:gsub("__CACHED_COL_DECLS__", cachedColDecls)
     src = src:gsub("__FETCH_COLS_RESOLVE__", fetchColsResolve)
     src = src:gsub("__FETCH_COLS_GROW_IMMEDIATE__", fetchColsGrowImmediate)
