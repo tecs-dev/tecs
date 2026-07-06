@@ -370,4 +370,66 @@ describe("Pipeline", function()
         luassert.equals(0, commitCount,
             "idle update() should not commit")
     end)
+
+    describe("dependency sort", function()
+        it("honors before when the target system registered first", function()
+            local order: {string} = {}
+            test.pipeline:addSystem({
+                phase = tecs.phases.Update,
+                name = "beforeTargetB",
+                run = function(_dt: number, _world: tecs.World) order[#order + 1] = "B" end,
+            })
+            test.pipeline:addSystem({
+                phase = tecs.phases.Update,
+                name = "beforeSourceA",
+                run = function(_dt: number, _world: tecs.World) order[#order + 1] = "A" end,
+                before = {"beforeTargetB"},
+            })
+
+            test.pipeline:update(FPS, test.world)
+
+            luassert.same({"A", "B"}, order,
+                "before constraint must hold regardless of registration order")
+        end)
+
+        it("accepts a redundant consistent constraint pair", function()
+            local order: {string} = {}
+            test.pipeline:addSystem({
+                phase = tecs.phases.Update,
+                name = "redundantA",
+                run = function(_dt: number, _world: tecs.World) order[#order + 1] = "A" end,
+                before = {"redundantB"},
+            })
+            test.pipeline:addSystem({
+                phase = tecs.phases.Update,
+                name = "redundantB",
+                run = function(_dt: number, _world: tecs.World) order[#order + 1] = "B" end,
+                after = {"redundantA"},
+            })
+
+            test.pipeline:update(FPS, test.world)
+
+            luassert.same({"A", "B"}, order,
+                "A before B plus B after A describe one edge, not a cycle")
+        end)
+
+        it("runs two systems sharing one run function", function()
+            local runs = 0
+            local shared = function(_dt: number, _world: tecs.World) runs = runs + 1 end
+            test.pipeline:addSystem({
+                phase = tecs.phases.Update,
+                name = "sharedFn1",
+                run = shared,
+            })
+            test.pipeline:addSystem({
+                phase = tecs.phases.Update,
+                name = "sharedFn2",
+                run = shared,
+            })
+
+            test.pipeline:update(FPS, test.world)
+
+            luassert.equals(2, runs, "both registrations must execute")
+        end)
+    end)
 end)

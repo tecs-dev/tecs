@@ -115,86 +115,92 @@ function pipeline.new(fixedTimestep: number): Pipeline
     return result
 end
 
--- Perform a topological sort on the systems based on their dependencies.
+-- Perform a stable topological sort on the systems based on their
+-- before/after constraints. Keyed by config so two systems sharing one run
+-- function stay distinct; unconstrained systems keep registration order.
 local function topologicalSort(systems: {SystemConfig}): {SystemConfig}
-    local sorted = {}
-    local visited = {}
+    local n = #systems
+    if n < 2 then return systems end
 
-    -- This mark is used to detect cycles by setting the mark before recursing and clearing it after.
-    local tempMark = {}
-
-    -- Create a map of system names to their configurations.
     local systemNameMap: {string: SystemConfig} = {}
-    local systemConfigMap: {System: SystemConfig} = {}
-
-    -- Build adjacency list for "before" constraints
-    local dependents: {System: {System}} = {}
-
-    for i = 1, #systems do
-        local config = systems[i]
-        systemConfigMap[config.run] = config
-        local name = config.name
+    for i = 1, n do
+        local name = systems[i].name
         if name then
-            systemNameMap[name] = config
+            systemNameMap[name] = systems[i]
         end
     end
 
-    -- Process "before" constraints to build reverse dependencies
-    for i = 1, #systems do
+    -- Normalize before/after into forward edges (first runs before second),
+    -- deduplicated so a redundant pair ("A before B" plus "B after A")
+    -- counts once instead of reading as a cycle.
+    local succs: {SystemConfig: {SystemConfig}} = {}
+    local edgeSeen: {SystemConfig: {SystemConfig: boolean}} = {}
+    local indegree: {SystemConfig: integer} = {}
+    for i = 1, n do
+        indegree[systems[i]] = 0
+    end
+
+    local function addEdge(first: SystemConfig, second: SystemConfig)
+        if first == second then return end
+        local seen = edgeSeen[first]
+        if not seen then
+            seen = {}
+            edgeSeen[first] = seen
+        end
+        if seen[second] then return end
+        seen[second] = true
+        local list = succs[first]
+        if not list then
+            list = {}
+            succs[first] = list
+        end
+        list[#list + 1] = second
+        indegree[second] = indegree[second] + 1
+    end
+
+    for i = 1, n do
         local config = systems[i]
-        if config.before then
-            for j = 1, #config.before do
-                local beforeSystem = config.before[j]
-                local beforeMapping = systemNameMap[beforeSystem]
-                if beforeMapping then
-                    -- beforeMapping must run after config.run
-                    dependents[config.run] = dependents[config.run] or {}
-                    dependents[config.run][#dependents[config.run] + 1] = beforeMapping.run
-                end
+        local after = config.after
+        if after then
+            for j = 1, #after do
+                local dep = systemNameMap[after[j]]
+                if dep then addEdge(dep, config) end
+            end
+        end
+        local before = config.before
+        if before then
+            for j = 1, #before do
+                local target = systemNameMap[before[j]]
+                if target then addEdge(config, target) end
             end
         end
     end
 
-    --- Visit a system and its dependencies recursively.
-    local function visit(system: System)
-        if tempMark[system] then
-            error("Cycle detected in system dependencies")
-        elseif not visited[system] then
-            tempMark[system] = true
-            local config = systemConfigMap[system]
-
-            -- Visit all systems that the current system depends on ("after" list)
-            if config.after then
-                for i = 1, #config.after do
-                    local afterSystem = config.after[i]
-                    local afterMapping = systemNameMap[afterSystem]
-                    if afterMapping then
-                        visit(afterMapping.run)
+    -- Kahn's algorithm; each pass emits ready systems in registration
+    -- order, independent of which side declared the constraint.
+    local sorted: {SystemConfig} = table_new(n, 0) as {SystemConfig}
+    local emitted: {SystemConfig: boolean} = {}
+    local sortedCount = 0
+    while sortedCount < n do
+        local progressed = false
+        for i = 1, n do
+            local config = systems[i]
+            if not emitted[config] and indegree[config] == 0 then
+                emitted[config] = true
+                progressed = true
+                sortedCount = sortedCount + 1
+                sorted[sortedCount] = config
+                local list = succs[config]
+                if list then
+                    for j = 1, #list do
+                        local succ = list[j]
+                        indegree[succ] = indegree[succ] - 1
                     end
                 end
             end
-
-            -- Add current system to sorted list
-            sorted[#sorted + 1] = config
-
-            -- Visit all systems that depend on this one (from "before" constraints)
-            local deps = dependents[system]
-            if deps then
-                for i = 1, #deps do
-                    visit(deps[i])
-                end
-            end
-
-            visited[system] = true
-            tempMark[system] = nil
         end
-    end
-
-    -- Visit each system in the list.
-    for i = 1, #systems do
-        local system = systems[i].run
-        if not visited[system] then
-            visit(system)
+        if not progressed then
+            error("Cycle detected in system dependencies")
         end
     end
 
