@@ -596,15 +596,15 @@ end
 -- applied per-archetype inside the main loop: archetypes that don't have
 -- Transform pass through unconditionally; archetypes that do get their
 -- entities filtered by layer.
-local function resolveSaveFilters(world: World, opts: SnapshotOptions): types.Query, integer
+local function resolveSaveFilters(world: World, opts: SnapshotOptions, filterQuery: types.Query.Descriptor): types.Query, integer
     local layerMask: integer = nil
     if opts.layers then
         layerMask = buildLayerMask(opts.layers)
     end
 
     local query: types.Query
-    if opts.filterQuery then
-        local d: types.Query.Descriptor = cloneQueryDescriptor(opts.filterQuery)
+    if filterQuery then
+        local d: types.Query.Descriptor = cloneQueryDescriptor(filterQuery)
         d.temp = true
         query = world:query(d)
     end
@@ -683,10 +683,12 @@ local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: Sna
         world:emit(0, saveEvent as types.events.Event)
     end
 
-    -- Merge any plugin-declared excludes into a cloned filter descriptor so
-    -- saveSnapshot never mutates caller-owned query tables.
+    -- Merge any plugin-declared excludes into a cloned filter descriptor;
+    -- the caller-owned opts table stays untouched so a reused opts table
+    -- does not accumulate excludes across saves.
+    local filterQuery = opts.filterQuery
     if #excludedComponents > 0 then
-        local d: types.Query.Descriptor = cloneQueryDescriptor(opts.filterQuery) or {}
+        local d: types.Query.Descriptor = cloneQueryDescriptor(filterQuery) or {}
         local exclude = d.exclude
         if not exclude then
             exclude = {}
@@ -695,10 +697,10 @@ local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: Sna
         for i = 1, #excludedComponents do
             exclude[#exclude + 1] = excludedComponents[i]
         end
-        opts.filterQuery = d
+        filterQuery = d
     end
 
-    local query, layerMask = resolveSaveFilters(world, opts)
+    local query, layerMask = resolveSaveFilters(world, opts, filterQuery)
 
     -- Pre-pass: walk all matched archetypes once. Three jobs in one loop:
     --   1. Count total entities + archetypes for the prelude metadata.
@@ -1124,6 +1126,10 @@ local function loadSnapshotImpl(world: World, reader: snapshot.Reader): Snapshot
     if prelude.nextEntityId > allocator.nextFreshSlot then
         allocator.nextFreshSlot = prelude.nextEntityId
     end
+    -- Rebuild the free stack: slots that were dead at save time sit below
+    -- the watermark but in no archetype. Without this sweep they are
+    -- stranded and fresh spawns exhaust the id space early.
+    IdAllocator.rebuildFreeStack(allocator)
 
     do
         local rebuildKeyIndex = (world as {string:any})._rebuildKeyIndex as function(any)
@@ -1297,6 +1303,7 @@ local record TableWriterImpl is snapshot.Writer
     _snap: SnapshotTable
     _currentArch: snapshot.ArchetypeEntry
     _columnBuffers: {{any}}           -- one array per column, filled by writeColumnValue
+    _columnCounts: {integer}          -- per-column write cursor; keeps nil serializations aligned
 end
 
 local TABLE_WRITER_MT <const>: metatable<TableWriterImpl> = {__index = TableWriterImpl}
@@ -1335,7 +1342,11 @@ function TableWriterImpl:startArchetype(
     }
     self._currentArch = entry
     self._columnBuffers = {}
-    for i = 1, #columnIndices do self._columnBuffers[i] = {} end
+    self._columnCounts = {}
+    for i = 1, #columnIndices do
+        self._columnBuffers[i] = {}
+        self._columnCounts[i] = 0
+    end
     local archs = self._snap.archetypes as {snapshot.ArchetypeEntry}
     archs[#archs + 1] = entry
 end
@@ -1362,13 +1373,13 @@ end
 -- (per-entity comp.serialize) instead.
 
 function TableWriterImpl:writeColumnValue(colIdx: integer, value: Component, comp: Component)
-    -- saveSnapshot calls this once per (column, entity). Append serialized
-    -- value into the column buffer; endArchetype transposes to entity rows.
-    local buf = self._columnBuffers[colIdx]
+    -- saveSnapshot calls this once per (column, entity). Write at an
+    -- explicit per-column index so a serialize hook returning nil leaves
+    -- an aligned hole instead of shifting every later entity's value.
+    local k = self._columnCounts[colIdx] + 1
+    self._columnCounts[colIdx] = k
     if comp.serialize then
-        buf[#buf + 1] = comp.serialize(value)
-    else
-        buf[#buf + 1] = nil
+        self._columnBuffers[colIdx][k] = comp.serialize(value)
     end
 end
 
@@ -1758,13 +1769,21 @@ function BufferReaderImpl:readPrelude(): snapshot.Prelude
         local fingerprint = decode(buf) as string
         componentTable[i] = {name = name, fingerprint = fingerprint}
         local comp = self._byName[name]
-        local match = false
-        if comp then
-            local currentSchema = (comp as {string: any}).fingerprint as string or ""
-            match = (fingerprint == currentSchema)
+        -- Binary frames have no per-column skip markers, so an unknown
+        -- component makes the rest of the stream unreadable. Fail here,
+        -- before the loader clears the world.
+        if not comp then
+            error("loadSnapshot: snapshot references component '" .. name ..
+                "' which is not registered in this world; register it before loading", 0)
         end
+        local currentSchema = (comp as {string: any}).fingerprint as string or ""
+        local match = (fingerprint == currentSchema)
         local migrate: function(any): any = nil
-        if comp and not match and fingerprint ~= "" then
+        if not match and fingerprint ~= "" then
+            if currentSchema == "" then
+                error("loadSnapshot: component '" .. name ..
+                    "' was saved as an FFI struct but is now registered without one; cannot migrate", 0)
+            end
             -- FFI component whose saved layout differs from the current
             -- registration. Build a per-entity migrator now so the load
             -- path can route each entity through it.

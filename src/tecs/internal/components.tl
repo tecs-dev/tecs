@@ -898,17 +898,19 @@ function components.newFFIComponent<C is Component>(options: FFIComponentOptions
     -- bytes straight into / out of a LuaJIT `string.buffer` with zero
     -- Lua-side allocations per component.
     --
-    -- Custom serialize/deserialize hooks opt out of the corresponding raw
-    -- path. Runtime state that needs structured reconstruction can still use
-    -- the other raw direction when only one hook is custom.
+    -- The raw pair is all-or-nothing: snapshot's save side selects the
+    -- column encoding by `serializeRaw` presence and its load side by
+    -- `deserializeRaw` presence, so a component with only one custom hook
+    -- must fall back to structured encoding in BOTH directions or the
+    -- binary stream desyncs.
     local anyStorage = componentStorage as {string: any}
     local componentI = component as ComponentInternal
-    if anyStorage.serializeRaw and not opts.serialize and not opts.transient then
+    if anyStorage.serializeRaw and anyStorage.deserializeRaw
+        and not opts.serialize and not opts.deserialize and not opts.transient
+    then
         componentI.serializeRaw = function(inst: Component, buf: any)
             (anyStorage.serializeRaw as function(Storage, Component, any))(componentStorage, inst, buf)
         end
-    end
-    if anyStorage.deserializeRaw and not opts.deserialize then
         componentI.deserializeRaw = function(buf: any): Component
             return (anyStorage.deserializeRaw as function(Storage, any): Component)(componentStorage, buf)
         end

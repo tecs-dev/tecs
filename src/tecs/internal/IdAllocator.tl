@@ -79,6 +79,7 @@ local record IdAllocator
     allocContiguousSlots: function(allocator: IdAllocator, count: integer): integer
     freeSlot: function(allocator: IdAllocator, slot: integer)
     unfree: function(allocator: IdAllocator, slot: integer)
+    rebuildFreeStack: function(allocator: IdAllocator)
 
     -- ----- Pack/unpack macroexps -----
     -- Declared as `macroexp` so every callsite inlines the arithmetic
@@ -202,6 +203,22 @@ function IdAllocator.freeSlot(allocator: IdAllocator, slot: integer)
     local freeCount = allocator.freeCount
     allocator.freeStack[freeCount] = slot
     allocator.freeCount = freeCount + 1
+end
+
+--- Rebuild the free stack from slot liveness. Snapshot loads restore
+--- entities at their saved slots; every dead slot below the watermark
+--- must return to the stack or its id range is stranded.
+function IdAllocator.rebuildFreeStack(allocator: IdAllocator)
+    local slots = allocator.slots
+    local stack = allocator.freeStack
+    local n = 0
+    for slot = 1, allocator.nextFreshSlot - 1 do
+        if slots[slot].archetypeId == 0 then
+            stack[n] = slot
+            n = n + 1
+        end
+    end
+    allocator.freeCount = n
 end
 
 --- Remove `slot` from the free stack if present. spawnAt-style staking

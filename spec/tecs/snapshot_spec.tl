@@ -341,6 +341,146 @@ describe("snapshot save/load", function()
         luassert.is_nil(descriptor.exclude, "saveSnapshot should not append excludes to the caller descriptor")
     end)
 
+    it("leaves a reused opts table untouched across saves", function()
+        local world = tecs.newWorld()
+        world:spawn(PositionComp(1, 1), HealthComp(10))
+        world:commit()
+
+        world:observe(0, tecs.builtins.OnSnapshotSave, function(ev: tecs.builtins.OnSnapshotSave)
+            ev:exclude(HealthComp)
+        end)
+
+        local descriptor: tecs.Query.Descriptor = {
+            include = {PositionComp},
+        }
+        local opts: tecs.SnapshotOptions = {
+            format = "table",
+            filterQuery = descriptor,
+        }
+
+        saveTableSnapshot(world, opts)
+        saveTableSnapshot(world, opts)
+
+        luassert.equals(descriptor, opts.filterQuery,
+            "opts.filterQuery must keep the caller's descriptor reference")
+        luassert.is_nil(descriptor.exclude,
+            "repeated saves must not accumulate excludes")
+    end)
+
+    it("keeps table columns aligned when a serialize hook returns nil", function()
+        local testId = math.random(1, 1000000)
+        local record Skippy is tecs.Component
+            v: number
+            skip: number
+        end
+        local SkippyComp: Skippy
+        SkippyComp = tecs.newComponent({
+            name = "SnapSkippy" .. testId,
+            container = {} as Skippy,
+            fields = {"v", "skip"},
+            serialize = function(value: Skippy): {string: any}
+                if value.skip == 1 then
+                    return nil
+                end
+                return {v = value.v, skip = value.skip}
+            end,
+            deserialize = function(_world: tecs.World, data: {string: any}): Skippy
+                return SkippyComp(data.v as number, data.skip as number)
+            end,
+        })
+
+        local world = tecs.newWorld()
+        local e1 = world:spawn(SkippyComp(111, 1), HealthComp(10))
+        local e2 = world:spawn(SkippyComp(222, 0), HealthComp(20))
+        world:commit()
+
+        local snap = saveTableSnapshot(world)
+        world:loadSnapshot(snap)
+
+        local s2 = world:get(e2, SkippyComp) as Skippy
+        luassert.is_not_nil(s2)
+        luassert.equals(222, s2.v, "the nil hole must not shift later entities' values")
+        local s1 = world:get(e1, SkippyComp) as Skippy
+        if s1 then
+            luassert.not_equals(222, s1.v, "e1 must not inherit e2's serialized value")
+        end
+        luassert.equals(10, (world:get(e1, HealthComp) as Health).hp)
+        luassert.equals(20, (world:get(e2, HealthComp) as Health).hp)
+    end)
+
+    it("round-trips a binary snapshot with a custom-serialize-only FFI component", function()
+        local testId = math.random(1, 1000000)
+        local record HalfCustom is tecs.Component
+            a: number
+            metamethod __call: function(self, a: number): HalfCustom
+        end
+        local HalfCustomComp: HalfCustom = tecs.newFFIComponent({
+            name = "SnapHalfCustom" .. testId,
+            container = {} as HalfCustom,
+            fields = {{"a", "float"}},
+            -- Custom serialize only: the raw byte codec must disengage in
+            -- BOTH directions or the binary stream desyncs.
+            serialize = function(value: HalfCustom): {string: any}
+                return {a = value.a}
+            end,
+        })
+        local record PlainFFI is tecs.Component
+            b: number
+            metamethod __call: function(self, b: number): PlainFFI
+        end
+        local PlainFFIComp: PlainFFI = tecs.newFFIComponent({
+            name = "SnapPlainFFI" .. testId,
+            container = {} as PlainFFI,
+            fields = {{"b", "float"}},
+        })
+
+        local world = tecs.newWorld()
+        local ids: {integer} = {}
+        for i = 1, 8 do
+            ids[i] = world:spawn(HalfCustomComp(i), PlainFFIComp(i * 100))
+        end
+        world:commit()
+
+        local buffer = saveBinarySnapshot(world)
+        world:loadSnapshot(buffer)
+
+        for i = 1, 8 do
+            luassert.equals(i, (world:get(ids[i], HalfCustomComp) as HalfCustom).a)
+            luassert.equals(i * 100, (world:get(ids[i], PlainFFIComp) as PlainFFI).b)
+        end
+    end)
+
+    it("rebuilds the allocator free stack on load", function()
+        local world = tecs.newWorld()
+        local ids: {integer} = {}
+        for i = 1, 20 do
+            ids[i] = world:spawn(PositionComp(i, i))
+        end
+        world:commit()
+        local maxSlot = 0
+        for i = 1, 20 do
+            local slot = ids[i] % 2 ^ 22
+            if slot > maxSlot then maxSlot = slot end
+        end
+        for i = 1, 10 do
+            world:despawn(ids[i])
+        end
+        world:commit()
+
+        local buffer = saveBinarySnapshot(world)
+        world:loadSnapshot(buffer)
+
+        -- The ten dead slots must be reusable; a fresh spawn draws from
+        -- the recycled range instead of pushing the watermark.
+        local fresh = world:spawn(PositionComp(99, 99))
+        world:commit()
+        luassert.is_true(fresh % 2 ^ 22 <= maxSlot,
+            "post-load spawns must reuse slots that were dead at save time")
+        for i = 11, 20 do
+            luassert.is_true(world:isAlive(ids[i]))
+        end
+    end)
+
     it("round-trips through a LuaJIT string.buffer", function()
         local buffer = require("string.buffer")
         local world = tecs.newWorld()
