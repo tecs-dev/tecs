@@ -141,7 +141,7 @@ local function getLoadResources(count)
     local r = loadCache[count]
     if not r then
         local srcWorld = buildWorld(count)
-        local srcBuf = tecs.saveSnapshot(srcWorld)
+        local srcBuf = srcWorld:saveSnapshot().buffer
         -- loadSnapshot despawns existing entities before refilling, so the
         -- same world ping-pongs full → empty → full across iterations. This
         -- matches the realistic "save game" pattern.
@@ -163,10 +163,10 @@ bench.suite({
     minDuration = 2.0,
     variants = {
         {
-            name = "tecs.saveSnapshot",
+            name = "world:saveSnapshot",
             setup = function(case) return getSaveResources(case.params.count) end,
             run = function(state)
-                tecs.saveSnapshot(state.world, {buffer = state.buf})
+                state.world:saveSnapshot({buffer = state.buf})
             end,
         },
     },
@@ -185,12 +185,12 @@ bench.suite({
     minDuration = 2.0,
     variants = {
         {
-            name = "tecs.loadSnapshot",
+            name = "world:loadSnapshot",
             setup = function(case) return getLoadResources(case.params.count) end,
             run = function(state)
                 -- Pass bytes (Lua string) directly; loadSnapshot handles
                 -- the buffer creation + put internally.
-                tecs.loadSnapshot(state.world, state.bytes)
+                state.world:loadSnapshot(state.bytes)
             end,
         },
     },
