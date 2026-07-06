@@ -122,11 +122,13 @@ end
 
 local function copyArrayField(dst: any, fieldInfo: FieldInfo, value: any)
     local field = (dst as {string:any})[fieldInfo.name] as {integer: any}
+    local src = value as {integer: any}
+    -- Sources are 0-based (FFI arrays) or 1-based (Lua tables, including
+    -- serializeArrayField output). Pick the base once; probing per index
+    -- shifts elements when a 1-based source is read at both bases.
+    local base = src[0] == nil and 1 or 0
     for i = 0, fieldInfo.arraySize - 1 do
-        local item = (value as {integer: any})[i]
-        if item == nil then
-            item = (value as {integer: any})[i + 1]
-        end
+        local item = src[i + base]
         if item == nil then
             break
         end
