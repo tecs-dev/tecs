@@ -183,13 +183,22 @@ function events.newFFIEvent<E is Event>(
 
     local init = eventAny.init as EventInit<E>
     if not init then
-        init = function(instance: E, ...: any)
-            local anyInstance = instance as {string:any}
-            local args = {...}
-            for i = 1, #args do
-                anyInstance[fieldNames[i]] = args[i]
-            end
+        -- Codegen an unrolled positional init: a `{...}` fallback would
+        -- allocate a table on every emit, and variable-index select() is
+        -- NYI on LuaJIT traces.
+        local n = #fieldNames
+        local parts: {string} = {"return function(instance"}
+        for i = 1, n do
+            parts[#parts + 1] = ", a" .. i
         end
+        parts[#parts + 1] = ")\n"
+        for i = 1, n do
+            parts[#parts + 1] = string.format(
+                "    if a%d ~= nil then instance.%s = a%d end\n", i, fieldNames[i], i)
+        end
+        parts[#parts + 1] = "end"
+        local chunk = assert(load(table.concat(parts), "=ffi_event_init", "t"))
+        init = chunk() as EventInit<E>
         eventAny.init = init
     end
 
