@@ -50,9 +50,6 @@ local function generateStructDef(name: string, fields: {{string, string}}): stri
         local tuple = fields[i]
         local fieldName = tuple[1]
         local fieldType = tuple[2]
-        if fieldName == "typeId" then
-            error("Field name 'typeId' is reserved and must not be specified in event fields")
-        end
         local baseType, arraySize = fieldType:match("^([^%[]+)%[(%d+)%]$")
         if baseType and arraySize then
             parts[#parts + 1] = baseType .. " " .. fieldName .. "[" .. arraySize .. "]; "

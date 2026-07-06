@@ -79,9 +79,6 @@ local record IdAllocator
     allocContiguousSlots: function(allocator: IdAllocator, count: integer): integer
     freeSlot: function(allocator: IdAllocator, slot: integer)
 
-    --- Read the current generation for a slot. Used by isAlive.
-    generationOf: function(allocator: IdAllocator, slot: integer): integer
-
     -- ----- Pack/unpack macroexps -----
     -- Declared as `macroexp` so every callsite inlines the arithmetic
     -- with the stride baked in as a KNUM. No function dispatch.
@@ -195,13 +192,6 @@ function IdAllocator.freeSlot(allocator: IdAllocator, slot: integer)
     local freeCount = allocator.freeCount
     allocator.freeStack[freeCount] = slot
     allocator.freeCount = freeCount + 1
-end
-
-function IdAllocator.generationOf(allocator: IdAllocator, slot: integer): integer
-    if slot <= 0 or slot >= allocator.nextFreshSlot then
-        return 0
-    end
-    return allocator.slots[slot].generation
 end
 
 function IdAllocator.reset(allocator: IdAllocator)

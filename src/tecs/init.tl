@@ -46,7 +46,6 @@ local record tecs
     type Phase = types.Phase
     type SystemConfig = types.SystemConfig
     type DoubleArray = types.DoubleArray
-    type Float32Array = types.Float32Array
     type Bundle = types.Bundle
     type BundleDef = types.Bundle.Definition
     type Snapshot = types.World.Snapshot

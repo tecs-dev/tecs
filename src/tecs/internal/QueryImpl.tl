@@ -270,7 +270,7 @@ local function archetypeMatches(query: QueryImpl, archetype: Archetype): boolean
         return false
     end
     if not query._excludeWordBits:isEmpty() and not signatureWordBits:disjoint(query._excludeWordBits)
-        and not query._excludeBits:isEmpty() and signatureBits:overlaps(query._excludeBits)
+        and signatureBits:overlaps(query._excludeBits)
     then
         return false
     end

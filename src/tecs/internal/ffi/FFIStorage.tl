@@ -25,8 +25,6 @@ local record FFIStorage
         name: string
         --- Field tuples {name, type} where type can include array syntax like "float[16]"
         fields: {{string, string}}
-        --- Optional struct size override.
-        sizeof: integer
         --- Optional metatable to apply to instances (for instance methods)
         metatable: {any:any}
         --- If true, each instance is its own component type (for dense relationships)
@@ -280,7 +278,7 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
         registryEntry.metatypeInstalled = true
     end
 
-    local structSize = def.sizeof or C.sizeof(structName)
+    local structSize = C.sizeof(structName) as integer
 
     local arrayTypeName = structName .. "[?]"
     local arrayType = arrayTypeCache[arrayTypeName]

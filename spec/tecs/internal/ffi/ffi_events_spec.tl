@@ -36,13 +36,6 @@ describe("FFIEvents", function()
             assert.equals(2, mgr.nextTypeId) -- only incremented once
         end)
 
-        it("errors on reserved field name typeId", function()
-            local mgr = FFIEvents.new()
-            assert.has_error(function()
-                mgr:registerEvent({}, {{"typeId", "int32_t"}})
-            end)
-        end)
-
         it("accepts custom struct name", function()
             local mgr = FFIEvents.new()
             local event = {}

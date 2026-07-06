@@ -328,7 +328,7 @@ function ArchetypeIndex:destroy(archetype: Archetype)
     t.pendingBundleDrains = nil
     t.batchSpawnQueue = nil
     t.batchSpawnAtQueue = nil
-    t._dirtyBits = nil
+    t._componentDirty = nil
     t.entities = nil
     archetype.id = 0
 end

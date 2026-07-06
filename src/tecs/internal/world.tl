@@ -375,7 +375,6 @@ end
 function WorldImpl:oldValueOf(id: integer, component: Component): any
     local slot = IdAllocator.slotOf(id)
     local s = self._slots[slot]
-    if not s then return nil end
     local srcArch = self.archetypeIndex[s.archetypeId]
     return self:findOldValue(slot, component, srcArch, s.row)
 end
@@ -393,8 +392,7 @@ function WorldImpl:currentArchetype(id: integer): Archetype
         if pid ~= 0 then return self.archetypeIndex[pid] end
     end
     local s = self._slots[slot]
-    if s then return self.archetypeIndex[s.archetypeId] end
-    return nil
+    return self.archetypeIndex[s.archetypeId]
 end
 
 -------------------------------------------------------------------------------

@@ -1258,13 +1258,6 @@ local record types
         end
     end
 
-    --- 32-bit float array type (opaque -- could be FFI or table internally)
-    interface Float32Array is {number}
-        metamethod __len: function(self) = macroexp(self: Float32Array)
-            return self[0]
-        end
-    end
-
     --- Event-specific helper types.
     record events
         --- An event that can be emitted.

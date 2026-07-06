@@ -129,7 +129,7 @@ local INTERNAL_STORAGE_TOKEN <const> = {} as any
 local NOOP_INIT <const> = function(_instance: any) end
 
 local function applyPositionalDefaults(instance: {string:any}, fields: {string}, defaults: {any})
-    if not defaults or not fields then
+    if not defaults then
         return
     end
     for i = 1, #fields do

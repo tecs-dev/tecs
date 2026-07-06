@@ -50,9 +50,9 @@ describe("IdAllocator", function()
         it("bumps generation in the sidecar on free", function()
             local allocator = IdAllocator.new()
             local s = IdAllocator.allocSlot(allocator)
-            local before = IdAllocator.generationOf(allocator, s)
+            local before = allocator.slots[s].generation
             IdAllocator.freeSlot(allocator, s)
-            local after = IdAllocator.generationOf(allocator, s)
+            local after = allocator.slots[s].generation
             assert.equals(before + 1, after)
         end)
     end)

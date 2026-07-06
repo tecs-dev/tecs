@@ -224,8 +224,6 @@ function WorldImpl:_deferBatchSpawnList(
     componentTypes: {Component},
     callback: function(Archetype, integer, integer, integer)
 ): {integer}
-    validateBatchCount("World:batchSpawn", count)
-
     local archetype, requiredList = resolveBatchSpawnArchetype(self, componentTypes)
 
     local allocator = self.allocator

@@ -395,7 +395,6 @@ local function processDeferredUnsubscribes(self: events.MessageBus)
         end
     end
 
-    deferred[0] = 0
     table_clear(deferred)
 end
 
@@ -489,7 +488,6 @@ function MessageBus:reset()
 
     self._emitDepth = 0
     if self._deferredUnsubscribes then
-        self._deferredUnsubscribes[0] = 0
         table_clear(self._deferredUnsubscribes)
     end
 end

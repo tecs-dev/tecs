@@ -96,12 +96,11 @@ function frameworkBehavior.behaviorOwner(component: Component): ComponentInterna
 end
 
 function frameworkBehavior.hasOwnerBits(owner: ComponentInternal, bits: integer): boolean
-    return owner ~= nil and band(owner.frameworkBehaviorBits or 0, bits) ~= 0
+    return band(owner.frameworkBehaviorBits or 0, bits) ~= 0
 end
 
 function frameworkBehavior.hasBits(component: Component, bits: integer): boolean
-    local owner = frameworkBehavior.behaviorOwner(component)
-    return owner ~= nil and frameworkBehavior.hasOwnerBits(owner, bits)
+    return frameworkBehavior.hasOwnerBits(frameworkBehavior.behaviorOwner(component), bits)
 end
 
 function frameworkBehavior.keyBits(): integer

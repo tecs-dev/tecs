@@ -87,9 +87,6 @@ function ChunkedArray:get(id: integer): any
     local zero = id - 1
     local chunkIndex = floor(zero / self.chunkSize) + 1
     local chunk = self.chunks[chunkIndex]
-    if not chunk then
-        return nil
-    end
     local slot = zero % self.chunkSize
     return (chunk as {integer: any})[slot]
 end
