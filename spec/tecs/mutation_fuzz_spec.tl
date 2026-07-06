@@ -14,7 +14,14 @@ Composite ops stage several mutations in ONE scope on the staged world
 while the instant world applies them back to back; these hunt for
 staging bugs that single ops cannot reach (remove-then-set self-moves,
 despawn cancellation, staged-spawn mutation).
+
+Soak knobs: TECS_FUZZ_SEEDS and TECS_FUZZ_OPS deepen the run without
+changing the fast defaults `make test` uses, e.g.
+`TECS_FUZZ_SEEDS=100 TECS_FUZZ_OPS=1000 make test`.
 ]]
+
+local FUZZ_SEEDS <const> = (tonumber(os.getenv("TECS_FUZZ_SEEDS")) or 5) as integer
+local FUZZ_OPS <const> = (tonumber(os.getenv("TECS_FUZZ_OPS")) or 200) as integer
 
 -- Fuzz components: one numeric field each so canonical state is cheap.
 local FzA = tecs.newComponent({
@@ -106,7 +113,7 @@ end
 
 describe("mutation differential fuzz", function()
     it("instant and staged execution converge over random op sequences", function()
-        for seed = 1, 5 do
+        for seed = 1, FUZZ_SEEDS do
             local rng = newRng(seed * 7919)
             local wa = tecs.newWorld()
             local wb = tecs.newWorld()
@@ -123,7 +130,7 @@ describe("mutation differential fuzz", function()
                 alive[#alive] = nil
             end
 
-            for step = 1, 200 do
+            for step = 1, FUZZ_OPS do
                 local roll = rng(100)
                 if #alive == 0 or roll <= 20 then
                     -- spawn
