@@ -161,7 +161,8 @@ function World:spawn(...: Component): integer
 - You can follow up with `world:set`, `world:remove`, or `world:despawn` on the returned ID. Inside a scope
   those calls stage in order and apply at scope close; a staged `despawn` cancels a staged spawn entirely.
 - For spawn notifications, observe the `OnSpawn` event at address 0 (world-level). `OnSpawn` fires inline during the
-  `world:spawn` call.
+  `world:spawn` call, while the entity is still staged; see the
+  [Mutation model](/tecs/mutation-model#event-timing) for exact timing.
 
 **Example:**
 
@@ -247,6 +248,8 @@ end
   operation drains.
 - `batchSpawn` does not support `tecs.builtins.Key`; keys must be claimed per entity before the entity becomes
   visible. Spawn keyed entities individually or add `Key` with `world:set` per entity.
+- `batchSpawn` does not emit `OnSpawn` per entity; write initial data in the `callback` or react with a
+  query's [`onEntitiesAdded`](/tecs/queries/callbacks).
 
 **Sparse relationships**
 
@@ -304,6 +307,7 @@ per call regardless of how the ids are ordered.
 - This is a [deferred operation](#deferred-operations).
 - `batchSpawnAt` does not support `tecs.builtins.Key`; keys must be claimed per entity before the entity becomes
   visible. Spawn keyed entities individually or add `Key` with `world:set` per entity.
+- Like `batchSpawn`, `batchSpawnAt` does not emit `OnSpawn` per entity.
 
 ### spawnAt
 
@@ -344,10 +348,11 @@ When you call `world:despawn(entity)`, the following happens inline:
 1. Cleans up relationships targeting this entity (cascade-delete, reverse-index unlink)
 2. Emits an [`OnDespawn` event](/tecs/builtins#ondespawn-event) to the entity's and world's address
 3. Clears all observers registered on the entity's address
-4. Notifies query observers via `onEntitiesRemoved` on the entity's current archetype
 
 The physical removal of the entity from its archetype (the swap-pop and column
-writes) is a [deferred operation](#deferred-operations).
+writes) is a [deferred operation](#deferred-operations); query observers receive
+`onEntitiesRemoved` when the row is removed. See the
+[Mutation model](/tecs/mutation-model#event-timing).
 
 To react to a component leaving an entity, attach
 [`onEntitiesRemoved`](/tecs/queries/callbacks) to a query that includes that component.
@@ -628,8 +633,12 @@ When the depth is zero and you call a mutating API, the change applies before th
   internally open a scope, stage their work, and drain before returning.
 
 When the depth is greater than zero, every one of those calls stages into a pending transaction and applies
-only after the scope closes. From the caller's perspective, the rule is simply: *outside a scope a mutation
-is visible as soon as the call returns; inside a scope it isn't*.
+only after the scope closes. From the caller's perspective, the rule is: *outside a scope a mutation is
+visible as soon as the call returns; inside a scope, structural changes (spawns, despawns, component adds and
+removes) stay invisible until the scope closes*. Value updates to a component an entity already carries write
+through immediately at any depth, unless the entity already has staged structural changes. The full contract,
+including drain ordering and visibility guarantees, is specified in the
+[Mutation model](/tecs/mutation-model).
 
 Scopes are opened automatically by:
 
@@ -674,8 +683,10 @@ end
 ### commit
 
 Closes one deferred scope level. When the scope counter reaches zero and the world has pending staged
-mutations, the transaction drains: spawns are placed, component moves execute, query observers fire, and
-sparse relationship writes apply.
+mutations, the transaction drains: staged despawns apply first, then spawns are placed, then component moves
+execute, with query observers firing along the way; batch mutations and sparse relationship writes apply
+after the structural passes. See the
+[Mutation model](/tecs/mutation-model#the-commit-drain) for the full ordering contract.
 
 ```teal
 function World:commit()

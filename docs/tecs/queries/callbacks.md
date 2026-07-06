@@ -139,20 +139,23 @@ world:query({
 ## Deferred scope
 
 Query callbacks run inside the world's **drain**, the phase that commits staged mutations after a system or
-batch finishes. The drain proceeds in **waves**: a wave snapshots the currently-dirty archetype list, applies
-despawns, spawns, and moves across those archetypes, and fires matching callbacks along the way. If a callback
-stages more mutations, the newly-dirtied archetypes form the next wave. The drain loops until no archetypes are
-dirty.
+batch finishes. The drain proceeds in **waves**: a wave walks the currently-dirty archetype list and applies
+despawns, then spawns, then moves, firing matching callbacks along the way. If a callback stages more
+mutations, the newly-dirtied archetypes form the next wave; batch mutations and sparse relationship writes
+apply between waves. The full ordering contract lives in the
+[Mutation model](/tecs/mutation-model#the-commit-drain).
 
 Inside a callback:
 
-- `world:set`, `world:remove`, `world:spawn`, `world:despawn`, and the `batch*` APIs all stage; they apply in
-  the next wave, not immediately.
-- `world:get` and `world:has` still see the **pre-callback** archetype state. Your staged writes are invisible
-  until the drain finishes.
+- `world:set`, `world:remove`, `world:spawn`, `world:despawn`, and the `batch*` APIs all stage structural
+  changes; they apply in the next wave, not immediately.
+- `world:get`, `world:has`, and queries see committed **structure** only: staged adds, removes, spawns, and
+  despawns stay invisible until the drain applies them. Value-only `world:set` calls on entities with no
+  staged structural change write through immediately. See
+  [Visibility inside a scope](/tecs/mutation-model#visibility-inside-a-scope).
 - Reading the passed `archetype`'s columns is safe and reflects the current state of the entities in the range.
   Don't add or remove components on entities you're iterating within the callback; if you must, read all the
   data you need out of the archetype first, then stage the mutations.
 
 Finite cascades settle automatically. Unbounded cascades (hook A adds a component that fires hook B which
-re-adds what hook A removed, etc.) trip a wave-count safety cap and raise an error.
+re-adds what hook A removed, etc.) stop with an error after 64 waves.
