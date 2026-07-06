@@ -257,14 +257,14 @@
  * -------------------------------------------------------------------------- */
 
 .dark {
-  --vp-c-brand-1: var(--tecs-c-lavender);
-  --vp-c-brand-2: #a192b1;
+  --vp-c-brand-1: #a192b1;
+  --vp-c-brand-2: #b5a6c5;
   --vp-c-brand-3: var(--vp-c-brand-1);
   --vp-c-brand-soft: #86779529;
 
-  --vp-c-text-1: #c8c2b4;
-  --vp-c-text-2: #9a9386;
-  --vp-c-text-3: #6a6458;
+  --vp-c-text-1: #d9d2c3;
+  --vp-c-text-2: #b6ad9e;
+  --vp-c-text-3: #8f8677;
 
   --vp-c-bg: var(--tecs-c-near-black);
   --vp-c-bg-alt: var(--vp-c-bg);
@@ -284,7 +284,7 @@
 
   .vp-doc h1 {
     position: relative;
-    color: var(--tecs-c-lavender) !important;
+    color: var(--vp-c-brand-1) !important;
     font-size: 2.2rem !important;
     border: 1px solid #222;
     padding: 2px 12px;
@@ -337,6 +337,10 @@
 
   .vp-doc th {
     background-color: var(--tecs-c-purple);
+  }
+
+  .vp-doc a {
+    color: #c2a875;
   }
 
   /* Softer zebra striping: closer to the page background. */
