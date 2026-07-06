@@ -11,7 +11,7 @@ local table_clear <const> = require("table.clear")
 local table_move <const> = table.move
 
 local table_insert, table_concat <const> = table.insert, table.concat
-local rawget, pairs <const> = rawget, pairs
+local rawget <const> = rawget
 local ensureCapacityDouble, setDoubleArraySize <const> = ffi.ensureCapacityDouble, ffi.setDoubleArraySize
 local rshift <const> = bit.rshift
 
