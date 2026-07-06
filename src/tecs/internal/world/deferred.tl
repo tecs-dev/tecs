@@ -827,6 +827,13 @@ function WorldImpl:_deferDespawn(id: integer)
         return
     end
 
+    -- Record despawn state before any observer-visible work runs so
+    -- re-entrant despawns of this id hit the double-despawn guard above
+    -- instead of enqueueing the entity twice.
+    if st == 0 then self.entityStateCount = self.entityStateCount + 1 end
+    setEntityState(self, slot, STATE_DESPAWN)
+    self.isDirty = true
+
     -- Emit OnDespawn only when observers exist.
     local hasGlobalObs <const> = world:hasObservers(0, OnDespawn)
     local hasObs <const> = world:hasObservers(id, OnDespawn)
@@ -893,15 +900,13 @@ function WorldImpl:_deferDespawn(id: integer)
         pendingArch.pendingWrites = pendingArch.pendingWrites - 1
     end
     if sourceArch then
+        -- Queue the slot, not the row: rows shift under swap-removals
+        -- before the despawn drain resolves them.
         local c = sourceArch.pendingDespawnCount + 1
         sourceArch.pendingDespawnCount = c
-        sourceArch.pendingDespawn[c] = sourceRow + 1
+        sourceArch.pendingDespawn[c] = slot
         markDirty!(sourceArch, hasPendingDespawns)
     end
-
-    if st == 0 then self.entityStateCount = self.entityStateCount + 1 end
-    setEntityState(self, slot, STATE_DESPAWN)
-    self.isDirty = true
 end
 
 return {}

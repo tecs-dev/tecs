@@ -163,4 +163,106 @@ describe("deferred staging", function()
             assertSettled(w)
         end)
     end)
+
+    describe("drain ordering", function()
+        it("re-entrant despawn from a deferred OnDespawn observer despawns once", function()
+            local w = tecs.newWorld()
+            local ids: {integer} = {}
+            for i = 1, 4 do ids[i] = w:spawn(Shared(i)) end
+            w:commit()
+
+            w:observe(0, tecs.builtins.OnDespawn, function(e: tecs.builtins.OnDespawn)
+                w:despawn(e.entity)
+            end)
+
+            w:defer()
+            w:despawn(ids[2])
+            w:commit()
+
+            luassert.is_false(w:isAlive(ids[2]))
+            luassert.is_true(w:isAlive(ids[1]))
+            luassert.is_true(w:isAlive(ids[3]))
+            luassert.is_true(w:isAlive(ids[4]))
+        end)
+
+        it("re-entrant despawn during a top-level despawn despawns once", function()
+            local w = tecs.newWorld()
+            local a = w:spawn(Shared(1))
+            local b = w:spawn(Shared(2))
+            local c = w:spawn(Shared(3))
+            w:commit()
+
+            w:observe(0, tecs.builtins.OnDespawn, function(e: tecs.builtins.OnDespawn)
+                w:despawn(e.entity)
+            end)
+
+            w:despawn(a)
+
+            luassert.is_false(w:isAlive(a))
+            luassert.is_true(w:isAlive(b))
+            luassert.is_true(w:isAlive(c))
+            luassert.equals(2, w:get(b, Shared).v)
+            luassert.equals(3, w:get(c, Shared).v)
+        end)
+
+        it("a despawn staged during drain cancels the entity's staged move", function()
+            local w = tecs.newWorld()
+            local e1 = w:spawn(Shared(1))
+            local e2 = w:spawn(Shared(2))
+            w:commit()
+
+            -- Fires during the spawn phase of the drain, before the move
+            -- phase relocates e1's staged move.
+            local fired = false
+            w:query({
+                name = "DrainMoveCancelWatcher",
+                include = {Extra},
+                onEntitiesAdded = function(_arch: tecs.Archetype, _first: integer, _last: integer, _count: integer)
+                    if not fired then
+                        fired = true
+                        w:despawn(e1)
+                    end
+                end,
+            })
+
+            w:defer()
+            w:set(e1, Extra(1))
+            w:spawn(Shared(9), Extra(9))
+            w:commit()
+
+            luassert.is_true(fired)
+            luassert.is_false(w:isAlive(e1), "the drain-staged despawn must win")
+            luassert.is_true(w:isAlive(e2), "an unrelated entity must survive")
+            luassert.equals(2, w:get(e2, Shared).v)
+        end)
+
+        it("despawns staged while draining despawns still apply", function()
+            local w = tecs.newWorld()
+            local ids: {integer} = {}
+            for i = 1, 3 do ids[i] = w:spawn(Shared(i)) end
+            w:commit()
+
+            local cascaded = false
+            w:query({
+                name = "DespawnCascadeWatcher",
+                include = {Shared},
+                onEntitiesRemoved = function(_arch: tecs.Archetype, _first: integer, _last: integer, _count: integer)
+                    if not cascaded then
+                        cascaded = true
+                        w:despawn(ids[3])
+                    end
+                end,
+            })
+
+            w:defer()
+            w:despawn(ids[1])
+            w:commit()
+
+            luassert.is_true(cascaded)
+            luassert.is_false(w:isAlive(ids[1]))
+            luassert.is_false(w:isAlive(ids[3]), "observer-staged despawn must not be discarded")
+            luassert.is_true(w:isAlive(ids[2]))
+        end)
+
+    end)
 end)

@@ -408,10 +408,12 @@ function WorldImpl:_instantDespawn(id: integer): boolean
 
     local messages = self.messages as events.MessageBus
     if (messages._totalObservers as integer) > 0 then
-        local hasGlobalObs = self:hasObservers(0, OnDespawn)
-        local hasObs = self:hasObservers(id, OnDespawn)
-        if hasObs then self:emit(id, OnDespawn, id) end
-        if hasGlobalObs then self:emit(0, OnDespawn, id) end
+        -- OnDespawn observers can despawn or mutate mid-dispatch; the
+        -- staged path records despawn state before emitting, which keeps
+        -- re-entrant despawns and row moves safe.
+        if self:hasObservers(0, OnDespawn) or self:hasObservers(id, OnDespawn) then
+            return false
+        end
         -- Clear the slot's address whenever any per-entity observers
         -- exist: observers for other events must not survive into the
         -- slot's next entity.

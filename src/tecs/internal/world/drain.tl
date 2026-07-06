@@ -24,12 +24,7 @@ local applyPendingVals <const> = shared.applyPendingVals
 local applyPendingScalars <const> = shared.applyPendingScalars
 local bumpTransactionEpoch <const> = shared.bumpTransactionEpoch
 
-local COMPARE_DESC <const> = function(a: integer, b: integer): boolean
-    return a > b
-end
-
 local pairs <const> = pairs
-local table_sort <const> = table.sort
 
 function WorldImpl:_truncateArchetype(arch: Archetype)
     local entities = arch.entities as {integer}
@@ -119,6 +114,7 @@ function WorldImpl:_drainPendingMoves(srcArch: Archetype)
 
     local slots = self.allocator.slots as {integer: EntitySlot}
     local pendingArchArr = self._pendingArchArr as {integer:integer}
+    local stateArr = self._stateArr as {integer:integer}
     local slotStamp = self._slotStamp as {integer:integer}
     local epoch = self._transactionEpoch
     local archIndex = self.archetypeIndex
@@ -140,7 +136,9 @@ function WorldImpl:_drainPendingMoves(srcArch: Archetype)
         local entId = srcEntities[r]
         local entSlot = IdAllocator.slotOf(entId)
         local dstArch: Archetype = nil
-        if slotStamp[entSlot] == epoch then
+        -- Despawned entities keep their staged pending arch; the despawn
+        -- drain owns their row, so the move must not relocate it.
+        if slotStamp[entSlot] == epoch and stateArr[entSlot] ~= STATE_DESPAWN then
             local archId = pendingArchArr[entSlot]
             if archId ~= 0 then dstArch = archIndex[archId] end
         end
@@ -247,15 +245,15 @@ function WorldImpl:_drainPendingDespawns(arch: Archetype)
 
             if removeCount >= archCount then
                 self:_truncateArchetype(arch)
+                -- Truncation removed every row; entries staged by its
+                -- observers refer to freed rows of this archetype.
+                arch.pendingDespawnCount = 0
             else
-                -- Reused queue; clear stale tail before sorting.
-                for i = removeCount + 1, #list do
-                    list[i] = nil
-                end
-                table_sort(list, COMPARE_DESC)
+                -- Entries are slots; resolve each row at removal time so
+                -- earlier swap-removals cannot stale the queue.
                 for i = 1, removeCount do
-                    local row = list[i]
-                    local slotOfRow = IdAllocator.slotOf(entities[row])
+                    local slotOfRow = list[i]
+                    local row = slots[slotOfRow].row + 1
                     local movedEntId = arch:removeEntity(row - 1, nil)
                     IdAllocator.freeSlot(arena, slotOfRow)
                     if movedEntId ~= 0 then
@@ -263,9 +261,17 @@ function WorldImpl:_drainPendingDespawns(arch: Archetype)
                     end
                     list[i] = nil
                 end
+                -- removeEntity observers may stage more despawns on this
+                -- archetype; compact them down and loop again.
+                local staged = arch.pendingDespawnCount - removeCount
+                if staged > 0 then
+                    for i = 1, staged do
+                        list[i] = list[removeCount + i]
+                        list[removeCount + i] = nil
+                    end
+                end
+                arch.pendingDespawnCount = staged
             end
-
-            arch.pendingDespawnCount = 0
         until arch.pendingDespawnCount == 0
     end
 end
