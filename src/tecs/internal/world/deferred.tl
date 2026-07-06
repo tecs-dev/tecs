@@ -793,6 +793,12 @@ function WorldImpl:_deferDespawn(id: integer)
     local sourceArch = self.archetypeIndex[s.archetypeId]
     local pendingArch = getPendingArch(self, slot)
 
+    -- Dead id: nothing committed and nothing staged. Match the instant
+    -- path's silent no-op instead of emitting OnDespawn for a ghost.
+    if not sourceArch and not pendingArch and st == 0 then
+        return
+    end
+
     -- Emit OnDespawn only when observers exist.
     local hasGlobalObs <const> = world:hasObservers(0, OnDespawn)
     local hasObs <const> = world:hasObservers(id, OnDespawn)

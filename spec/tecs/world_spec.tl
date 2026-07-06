@@ -172,6 +172,25 @@ describe("WorldImpl", function()
                 "observer component must not be clobbered by spawn staging")
         end)
 
+        it("does not emit OnDespawn for an already-dead id", function()
+            local w2 = tecs.newWorld()
+            local id = w2:spawn(PosComponent(1, 1))
+            w2:commit()
+
+            local fired = 0
+            w2:observe(0, tecs.builtins.OnDespawn, function(_e: tecs.builtins.OnDespawn)
+                fired = fired + 1
+            end)
+
+            w2:despawn(id)
+            w2:commit()
+            luassert.equals(1, fired)
+
+            w2:despawn(id)
+            w2:commit()
+            luassert.equals(1, fired, "a dead id despawn is a no-op, not a second event")
+        end)
+
         it("despawns entities and emits event", function()
             local w2 = tecs.newWorld()
 
