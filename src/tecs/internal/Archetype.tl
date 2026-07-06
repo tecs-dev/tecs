@@ -569,6 +569,7 @@ function Archetype:compact()
 end
 
 function Archetype:resetPending()
+    self.pendingWrites = 0
     self.hasPendingDespawns = false
     self.pendingDespawnCount = 0
     table_clear(self.pendingDespawn)

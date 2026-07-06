@@ -306,7 +306,6 @@ local macro deferFinish!()
         end
 
         setPendingArch(self, slot, arch)
-        arch.pendingWrites = arch.pendingWrites + 1
         for i = 1, valCount do
             appendPendingValue(self, arch, slot, vals[i])
         end
@@ -561,10 +560,12 @@ function WorldImpl:_deferSetSlow(
                 local srcSlot = (self.allocator.slots as {integer: EntitySlot})[slot]
                 local srcArch = self.archetypeIndex[srcSlot.archetypeId]
                 if newArch ~= pendingArch then
-                    pendingArch.pendingWrites = pendingArch.pendingWrites - 1
-                    newArch.pendingWrites = newArch.pendingWrites + 1
-                    -- Ensure moves pass sees this source archetype.
+                    -- Move the reservation only for committed entities;
+                    -- batch-staged slots never incremented pendingWrites.
                     if srcArch then
+                        pendingArch.pendingWrites = pendingArch.pendingWrites - 1
+                        newArch.pendingWrites = newArch.pendingWrites + 1
+                        -- Ensure moves pass sees this source archetype.
                         markDirty!(srcArch, hasPendingMoveOut)
                     end
                 end
@@ -585,6 +586,7 @@ function WorldImpl:_deferSetSlow(
         -- No pending arch yet: derive start archetype from state.
         local srcSlot = (self.allocator.slots as {integer: EntitySlot})[slot]
         local startArch: Archetype
+        local committedMove = false
         if st == STATE_SPAWN then
             startArch = self.archetypeIndex[srcSlot.archetypeId] or self.emptyArchetype
         else
@@ -594,11 +596,17 @@ function WorldImpl:_deferSetSlow(
                 if not startArch then
                     error("Entity ID not found: " .. id)
                 end
+                committedMove = true
             end
         end
 
         local newArch = startArch:withComponent(componentType, self.archetypeIndex)
-        newArch.pendingWrites = newArch.pendingWrites + 1
+        -- pendingWrites counts staged moves of committed entities only; the
+        -- move drain consumes it to reserve destination capacity. Spawns and
+        -- batch-staged slots reserve capacity in their own drains.
+        if committedMove then
+            newArch.pendingWrites = newArch.pendingWrites + 1
+        end
         setPendingArch(self, slot, newArch)
         if st == 0 then
             setEntityState(self, slot, STATE_MUTATE)
@@ -708,9 +716,11 @@ function WorldImpl:deferRemoveRaw(id: integer, component: Component)
                         (newArch.pendingSpawnIds as {integer})[c] = id
                         markDirty!(newArch, hasPendingSpawns)
                         migratePending(pendingArch, newArch, slot)
+                    elseif (self.allocator.slots as {integer: EntitySlot})[slot].archetypeId ~= 0 then
+                        -- Committed move: relocate the reservation.
+                        pendingArch.pendingWrites = pendingArch.pendingWrites - 1
+                        newArch.pendingWrites = newArch.pendingWrites + 1
                     end
-                    pendingArch.pendingWrites = pendingArch.pendingWrites - 1
-                    newArch.pendingWrites = newArch.pendingWrites + 1
                 end
                 setPendingArch(self, slot, newArch)
                 self.isDirty = true
@@ -750,12 +760,15 @@ function WorldImpl:deferRemoveRaw(id: integer, component: Component)
         else
             local s = (self.allocator.slots as {integer: EntitySlot})[slot]
             local srcArch = self.archetypeIndex[s.archetypeId]
-            markDirty!(srcArch, hasPendingMoveOut)
+            if srcArch then
+                -- Committed move: track the reservation for the move drain.
+                markDirty!(srcArch, hasPendingMoveOut)
+                if hadPendingArch then
+                    prevArch.pendingWrites = prevArch.pendingWrites - 1
+                end
+                newArch.pendingWrites = newArch.pendingWrites + 1
+            end
         end
-        if hadPendingArch then
-            prevArch.pendingWrites = prevArch.pendingWrites - 1
-        end
-        newArch.pendingWrites = newArch.pendingWrites + 1
     end
     setPendingArch(self, slot, newArch)
     if st == 0 then
@@ -835,8 +848,9 @@ function WorldImpl:_deferDespawn(id: integer)
         world:clearObservers(id)
     end
 
-    -- Physical row removal is deferred to `drainPendingDespawns`.
-    if pendingArch then
+    -- Physical row removal is deferred to `drainPendingDespawns`. Only a
+    -- committed entity with a staged move holds a pendingWrites reservation.
+    if pendingArch and sourceArch then
         pendingArch.pendingWrites = pendingArch.pendingWrites - 1
     end
     if sourceArch then
