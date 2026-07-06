@@ -6,6 +6,14 @@ local storage <const> = require("tecs.internal.storage")
 local componentIds <const> = require("tecs.internal.componentIds")
 local C <const> = require("ffi")
 local schema <const> = require("tecs.internal.ffi.schema")
+local StringBuffer <const> = require("string.buffer")
+
+-- string.buffer methods live on one shared metatable; bind them once so
+-- the raw per-instance codec paths skip a method fetch per call.
+local BUF_PROBE <const> = StringBuffer.new()
+local BUF_PUTCDATA <const> = (BUF_PROBE as {string: function}).putcdata as function(any, any, integer)
+local BUF_REF <const> = (BUF_PROBE as {string: function}).ref as function(any): any
+local BUF_SKIP <const> = (BUF_PROBE as {string: function}).skip as function(any, integer)
 
 local type Storage = storage.Storage
 
@@ -565,8 +573,7 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
         -- Lua-string allocation, no per-field boxing. POD structs only;
         -- portable across LuaJIT on the same architecture.
         serializeRaw = function(_self: Storage, instance: types.components.Component, buf: any)
-            local put <const> = (buf as {string: function}).putcdata as function(any, any, integer)
-            put(buf, instance, structSize)
+            BUF_PUTCDATA(buf, instance, structSize)
         end,
 
         -- Buffer-direct raw deserialize: allocate a blank instance of the
@@ -575,11 +582,9 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
         -- materialised on the read path either.
         deserializeRaw = function(_self: Storage, buf: any): types.components.Component
             local instance: any = C.new(structType)
-            local ref <const> = (buf as {string: function}).ref as function(any): any
-            local skip <const> = (buf as {string: function}).skip as function(any, integer)
-            local ptr = ref(buf)
+            local ptr = BUF_REF(buf)
             C.copy(instance, ptr as C.CData, structSize)
-            skip(buf, structSize)
+            BUF_SKIP(buf, structSize)
             if instanceIds then
                 local componentId = componentIds.allocate()
                 instanceIds[instance] = componentId

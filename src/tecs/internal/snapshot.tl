@@ -63,6 +63,12 @@ local IdAllocator <const> = require("tecs.internal.IdAllocator")
 local bit <const> = require("bit")
 local StringBuffer <const> = require("string.buffer")
 
+-- string.buffer methods live on one shared metatable; bind them once so
+-- per-value writer/reader paths skip a method fetch per call.
+local BUF_PROBE <const> = StringBuffer.new()
+local BUF_ENCODE <const> = (BUF_PROBE as {string: function}).encode as function(any, any)
+local BUF_DECODE <const> = (BUF_PROBE as {string: function}).decode as function(any): any
+
 -- FFI helpers wrap LuaJIT's `ffi` module as untyped (`any`) operations,
 -- since LuaJIT's pointer arithmetic and CType juggling don't fit Teal's
 -- strict type system. Each helper returns `any` so downstream operations
@@ -1651,11 +1657,9 @@ function BufferWriterImpl:writeColumnValue(_colIdx: integer, value: Component, c
     if compI.serializeRaw then
         compI.serializeRaw(value, buf)
     elseif comp.serialize then
-        local encode <const> = (buf as {string: function}).encode as function(any, any)
-        encode(buf, comp.serialize(value) as any)
+        BUF_ENCODE(buf, comp.serialize(value) as any)
     else
-        local encode <const> = (buf as {string: function}).encode as function(any, any)
-        encode(buf, nil as any)
+        BUF_ENCODE(buf, nil as any)
     end
 end
 
@@ -1663,7 +1667,7 @@ function BufferWriterImpl:writeEntity(id: integer, comps: {Component}, count: in
     -- Row-major fallback (sparse archetypes). Emit a per-row presence
     -- bitmap, then only the present values in archetype-column order.
     local buf = self._buf
-    local encode <const> = (buf as {string: function}).encode as function(any, any)
+    local encode <const> = BUF_ENCODE
     encode(buf, id as any)
     local presence: {boolean} = {}
     for i = 1, count do
@@ -1874,8 +1878,7 @@ function BufferReaderImpl:_decodeOne(colIdx: integer, world: World): Component
     if ct and ctI.deserializeRaw then
         return ctI.deserializeRaw(buf)
     elseif ct and ct.deserialize then
-        local decode <const> = (buf as {string: function}).decode as function(any): any
-        local payload = decode(buf) as {string: any}
+        local payload = BUF_DECODE(buf) as {string: any}
         -- Serialize was allowed to return nil for components that can't
         -- round-trip (synthetic paths, transient runtime state). The
         -- encoded stream carries nil in that slot; skip deserialize
@@ -1884,8 +1887,7 @@ function BufferReaderImpl:_decodeOne(colIdx: integer, world: World): Component
         if payload == nil then return nil end
         return ct.deserialize(world, payload)
     else
-        local decode <const> = (buf as {string: function}).decode as function(any): any
-        decode(buf)
+        BUF_DECODE(buf)
         return nil
     end
 end
@@ -1898,7 +1900,7 @@ function BufferReaderImpl:readEntity(): integer, Component...
     if self._archRemaining <= 0 then return nil end
     self._archRemaining = self._archRemaining - 1
     local buf = self._buf
-    local decode <const> = (buf as {string: function}).decode as function(any): any
+    local decode <const> = BUF_DECODE
     local id = decode(buf) as integer
     local presence = decode(buf) as {integer: boolean}
     local compTypes = self._currentTypes
