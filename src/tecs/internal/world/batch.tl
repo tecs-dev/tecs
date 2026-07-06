@@ -67,28 +67,10 @@ local function validateBatchCount(name: string, count: integer)
     end
 end
 
--- Pre-stake pending spawn-at ids: marks each slot as pending spawn onto
--- `archetype` (without row placement) so mid-frame mutations against
--- any of the ids see them as valid. Actual placement runs at commit in
--- `_drainArchBatchSpawnAt`.
-local function stakePendingSpawnAt(
-    self: WorldImpl,
-    archetype: Archetype,
-    count: integer,
-    readId: function(integer): integer
-)
-    local arena = self.allocator
-    local slots = arena.slots as {integer: EntitySlot}
-    -- Cache FFI arrays + epoch. Hot-loop inline reads/writes trace
-    -- better than per-iter helper dispatch.
-    local pendingArr = self._pendingArchArr as {integer:integer}
-    local stateArr = self._stateArr as {integer:integer}
-    local slotStamp = self._slotStamp as {integer:integer}
-    local epoch = self._transactionEpoch
-    local archId = archetype.id
-    local stateCount = self.entityStateCount
-    for i = 0, count - 1 do
-        local id = readId(i)
+-- One staked slot; expects the caller's cached locals in scope.
+local macro stakeSlotAt!(idExpr: Expression)
+    return ```
+        local id = $idExpr
         local slot = IdAllocator.slotOf(id)
         if slot >= arena.nextFreshSlot then
             arena.nextFreshSlot = slot + 1
@@ -109,6 +91,40 @@ local function stakePendingSpawnAt(
                 stateArr[slot] = STATE_SPAWN
                 stateCount = stateCount + 1
             end
+        end
+    ```
+end
+
+-- Pre-stake pending spawn-at ids: marks each slot as pending spawn onto
+-- `archetype` (without row placement) so mid-frame mutations against
+-- any of the ids see them as valid. Actual placement runs at commit in
+-- `_drainArchBatchSpawnAt`. Exactly one of `luaIds` (1-based array) or
+-- `rawIds` (0-based cdata view) is set; two monomorphic loops keep the
+-- id reads on-trace instead of dispatching a per-iteration closure.
+local function stakePendingSpawnAt(
+    self: WorldImpl,
+    archetype: Archetype,
+    count: integer,
+    luaIds: {integer},
+    rawIds: {integer: integer}
+)
+    local arena = self.allocator
+    local slots = arena.slots as {integer: EntitySlot}
+    -- Cache FFI arrays + epoch. Hot-loop inline reads/writes trace
+    -- better than per-iter helper dispatch.
+    local pendingArr = self._pendingArchArr as {integer:integer}
+    local stateArr = self._stateArr as {integer:integer}
+    local slotStamp = self._slotStamp as {integer:integer}
+    local epoch = self._transactionEpoch
+    local archId = archetype.id
+    local stateCount = self.entityStateCount
+    if luaIds then
+        for i = 1, count do
+            stakeSlotAt!(luaIds[i])
+        end
+    else
+        for i = 0, count - 1 do
+            stakeSlotAt!(rawIds[i])
         end
     end
     self.entityStateCount = stateCount
@@ -510,9 +526,7 @@ function WorldImpl:_deferBatchSpawnAt(
     if n == 0 then return end
 
     local archetype, requiredList = resolveBatchArchetype(self, componentTypes)
-    stakePendingSpawnAt(self, archetype, n, function(i: integer): integer
-        return ids[i + 1]
-    end)
+    stakePendingSpawnAt(self, archetype, n, ids, nil)
 
     local c = archetype.batchSpawnAtQueueCount
     local q = archetype.batchSpawnAtQueue
@@ -535,9 +549,7 @@ function WorldImpl:_deferBatchSpawnAtRaw(
 
     local archetype, requiredList = resolveBatchArchetype(self, componentTypes)
     local idsArr = ids as {integer: integer}
-    stakePendingSpawnAt(self, archetype, count, function(i: integer): integer
-        return idsArr[i]
-    end)
+    stakePendingSpawnAt(self, archetype, count, nil, idsArr)
 
     local c = archetype.batchSpawnAtQueueCount
     local q = archetype.batchSpawnAtQueue
