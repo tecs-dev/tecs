@@ -235,19 +235,16 @@ describe("tecs2d.gfx Pipeline", function()
     end)
 
     describe("G-buffer auto-uniforms", function()
-        it("should have depth canvas fields on the renderer", function()
+        it("should have G-buffer canvas fields on the renderer", function()
             local renderer = pipeline:getRenderer()
             luassert.is_not_nil(renderer)
-            -- Verify the gBufferDepth and pixelDepth fields exist
             -- These are created during resize() and should be valid canvases
-            luassert.is_not_nil(renderer.gBufferDepth)
-            luassert.is_not_nil(renderer.pixelDepth)
             luassert.is_not_nil(renderer.gBufferNormal)
             luassert.is_not_nil(renderer.gBufferEmission)
         end)
 
         it("should set layer effect without errors when using auto-uniform names", function()
-            -- Create a mock shader that declares tecs_Depth, tecs_Normal, tecs_Emission
+            -- Create a mock shader that declares tecs_Normal, tecs_Emission
             local mockShader = love.graphics.newShader("", "")
 
             -- Setting a layer effect should not error

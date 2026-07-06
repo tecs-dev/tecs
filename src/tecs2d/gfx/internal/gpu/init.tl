@@ -163,7 +163,6 @@ function RendererMethods:resize(width: integer, height: integer)
     self.gBufferNormal = lg.newCanvas(scaledW, scaledH, {format = "rgba8"})
     self.gBufferORM = lg.newCanvas(scaledW, scaledH, {format = "rgba8"})
     self.gBufferEmission = lg.newCanvas(scaledW, scaledH, {format = "rgba8"})
-    self.gBufferDepth = lg.newCanvas(scaledW, scaledH, {format = "rgba8"})
     -- Drop shadow AO canvas (1.0 = no occlusion, 0.0 = full shadow)
     local dsW = math.max(1, math.floor(scaledW * dsScale)) as integer
     local dsH = math.max(1, math.floor(scaledH * dsScale)) as integer
@@ -190,7 +189,6 @@ function RendererMethods:resize(width: integer, height: integer)
     self.screenNormal = nil
     self.screenORM = nil
     self.screenEmission = nil
-    self.screenDepth = nil
     self.screenDropShadowAO = nil
     self.screenShadowMask = nil
 
@@ -201,12 +199,10 @@ function RendererMethods:resize(width: integer, height: integer)
     self.pixelNormal = lg.newCanvas(pixelW, pixelH, {format = "rgba8"})
     self.pixelORM = lg.newCanvas(pixelW, pixelH, {format = "rgba8"})
     self.pixelEmission = lg.newCanvas(pixelW, pixelH, {format = "rgba8"})
-    self.pixelDepth = lg.newCanvas(pixelW, pixelH, {format = "rgba8"})
     local pixelDsW = math.max(1, math.floor(pixelW * dsScale)) as integer
     local pixelDsH = math.max(1, math.floor(pixelH * dsScale)) as integer
     self.pixelDropShadowAO = lg.newCanvas(pixelDsW, pixelDsH, {format = "rgba8"})
     self.pixelDropShadowAO:setFilter("linear", "linear")
-    self.pixelDepth:setFilter("nearest", "nearest")
     local pixelMaskW = math.max(1, math.floor(pixelW * scale)) as integer
     local pixelMaskH = math.max(1, math.floor(pixelH * scale)) as integer
     self.pixelShadowMask = lg.newCanvas(pixelMaskW, pixelMaskH, {format = "rgba8"})
@@ -417,25 +413,21 @@ function RendererMethods:renderGBuffer(cameraX: number, cameraY: number, cameraZ
     local normal: love.graphics.Canvas
     local orm: love.graphics.Canvas
     local emission: love.graphics.Canvas
-    local depth: love.graphics.Canvas
     if self._renderPhase == "screen" then
         albedo = self.screenAlbedo or self.gBufferAlbedo
         normal = self.screenNormal or self.gBufferNormal
         orm = self.screenORM or self.gBufferORM
         emission = self.screenEmission or self.gBufferEmission
-        depth = self.screenDepth or self.gBufferDepth
     elseif useLowRes then
         albedo = self.pixelAlbedo
         normal = self.pixelNormal
         orm = self.pixelORM
         emission = self.pixelEmission
-        depth = self.pixelDepth
     else
         albedo = self.gBufferAlbedo
         normal = self.gBufferNormal
         orm = self.gBufferORM
         emission = self.gBufferEmission
-        depth = self.gBufferDepth
     end
     local rw = albedo:getWidth()
     local rh = albedo:getHeight()
@@ -449,8 +441,8 @@ function RendererMethods:renderGBuffer(cameraX: number, cameraY: number, cameraZ
     local renderParamsBuffer <const> = self.renderParamsBuffer
 
     zone("clear")
-    lg.setCanvas({albedo, normal, orm, emission, depth, depthstencil = true} as love.graphics.CanvasSetup)
-    lg.clear({0, 0, 0, 0}, {0, 0, 0, 0}, {1, 0.5, 0, 1}, {0, 0, 0, 0}, {1, 1, 1, 1}, true, true)
+    lg.setCanvas({albedo, normal, orm, emission, depthstencil = true} as love.graphics.CanvasSetup)
+    lg.clear({0, 0, 0, 0}, {0, 0, 0, 0}, {1, 0.5, 0, 1}, {0, 0, 0, 0}, true, true)
     lg.setColor(1, 1, 1, 1)  -- Ensure full brightness for instanced draws
     zone()
 

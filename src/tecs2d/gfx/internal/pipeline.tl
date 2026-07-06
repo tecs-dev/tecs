@@ -1427,7 +1427,6 @@ function PipelineImpl:renderWithLayerEffects(camX: number, camY: number, renderZ
     local mgr = self.layerEffectsManager
 
     -- G-buffer textures for effect auto-uniforms (resolution matches render target)
-    local depthBuf = useLowRes and self.renderer.pixelDepth or self.renderer.gBufferDepth
     local normalBuf = useLowRes and self.renderer.pixelNormal or self.renderer.gBufferNormal
     local emissionBuf = useLowRes and self.renderer.pixelEmission or self.renderer.gBufferEmission
 
@@ -1522,9 +1521,6 @@ function PipelineImpl:renderWithLayerEffects(camX: number, camY: number, renderZ
                     if s:hasUniform("tecs_PassIndex") then
                         s:send("tecs_PassIndex", i - 1)
                     end
-                    if s:hasUniform("tecs_Depth") then
-                        s:send("tecs_Depth", depthBuf)
-                    end
                     if s:hasUniform("tecs_Normal") then
                         s:send("tecs_Normal", normalBuf)
                     end
@@ -1576,9 +1572,6 @@ function PipelineImpl:renderWithLayerEffects(camX: number, camY: number, renderZ
                     end
                     if s:hasUniform("tecs_PassIndex") then
                         s:send("tecs_PassIndex", i - 1)
-                    end
-                    if s:hasUniform("tecs_Depth") then
-                        s:send("tecs_Depth", depthBuf)
                     end
                     if s:hasUniform("tecs_Normal") then
                         s:send("tecs_Normal", normalBuf)

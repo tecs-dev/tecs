@@ -488,13 +488,12 @@ shader are silently skipped.
 
 The pipeline automatically sends these uniforms to effect shaders if they are declared:
 
-| Uniform             | Type      | Description                                                                                                                         |
-| ------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `tecs_PassIndex`    | int       | Zero-based index of the current pass in a multi-pass effect                                                                         |
-| `tecs_SceneBelow`   | Image     | Texture of all layers composited below the current group                                                                            |
-| `tecs_Depth`        | Image     | G-buffer depth texture (RGBA8). R channel holds `gl_FragCoord.z` (0.0 = near, 1.0 = far). Pixels with no geometry have depth = 1.0. |
-| `tecs_Normal`       | Image     | G-buffer normal texture (RGBA8). RGB = world normal (encoded as `n * 0.5 + 0.5`), A = lit marker.                                   |
-| `tecs_Emission`     | Image     | G-buffer emission texture (RGBA8). RGB = emission color, applied additively after lighting.                                         |
+| Uniform             | Type      | Description                                                                                       |
+| ------------------- | --------- | ------------------------------------------------------------------------------------------------- |
+| `tecs_PassIndex`    | int       | Zero-based index of the current pass in a multi-pass effect                                       |
+| `tecs_SceneBelow`   | Image     | Texture of all layers composited below the current group                                          |
+| `tecs_Normal`       | Image     | G-buffer normal texture (RGBA8). RGB = world normal (encoded as `n * 0.5 + 0.5`), A = lit marker. |
+| `tecs_Emission`     | Image     | G-buffer emission texture (RGBA8). RGB = emission color, applied additively after lighting.       |
 
 Use `tecs_SceneBelow` for effects that need to reference the scene underneath, such as distortion or refraction:
 
@@ -511,24 +510,10 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
 }
 ```
 
-Use `tecs_Depth` for depth-based post-processing like fog:
-
-```glsl
-extern Image tecs_Depth;
-
-vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
-    vec4 pixel = Texel(tex, tc);
-    float depth = Texel(tecs_Depth, tc).r;
-    vec3 fogColor = vec3(0.5, 0.6, 0.8);
-    float fogAmount = smoothstep(0.3, 0.9, depth);
-    return vec4(mix(pixel.rgb, fogColor, fogAmount), pixel.a) * color;
-}
-```
-
 ::: info G-Buffer Limitations
 Forward blend shapes (particles, translucent entities) render after lighting and are not written to the G-buffer. Their
-depth, normal, and emission values will be the clear defaults (depth = 1.0, normal = flat up, emission = black). Custom
-draws via the G-buffer callback also use clear defaults.
+normal and emission values will be the clear defaults (normal = flat up, emission = black). Custom draws via the
+G-buffer callback also use clear defaults.
 :::
 
 ### Writing Effect Shaders

@@ -517,7 +517,6 @@ local record types
         gBufferNormal: love.graphics.Canvas
         gBufferORM: love.graphics.Canvas
         gBufferEmission: love.graphics.Canvas
-        gBufferDepth: love.graphics.Canvas
         shadowMask: love.graphics.Canvas
 
         -- Drop shadow AO canvas (R8, screen res)
@@ -528,7 +527,6 @@ local record types
         pixelNormal: love.graphics.Canvas
         pixelORM: love.graphics.Canvas
         pixelEmission: love.graphics.Canvas
-        pixelDepth: love.graphics.Canvas
         pixelShadowMask: love.graphics.Canvas
         pixelCanvas: love.graphics.Canvas
 
@@ -558,7 +556,6 @@ local record types
         screenNormal: love.graphics.Canvas
         screenORM: love.graphics.Canvas
         screenEmission: love.graphics.Canvas
-        screenDepth: love.graphics.Canvas
         screenShadowMask: love.graphics.Canvas
         screenDropShadowAO: love.graphics.Canvas
 

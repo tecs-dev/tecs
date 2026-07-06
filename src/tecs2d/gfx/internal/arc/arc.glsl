@@ -196,7 +196,6 @@ void effect() {
     love_Canvases[1] = vec4(normal * 0.5 + 0.5, litMarker);
     love_Canvases[2] = vec4(1.0, 0.5, 0.0, 1.0);  // ORM default (AO=1, roughness=0.5, metallic=0)
     love_Canvases[3] = vec4(0.0);  // No emission for shapes
-    love_Canvases[4] = vec4(floor(gl_FragCoord.z * 255.0) / 255.0, fract(gl_FragCoord.z * 255.0), 0.0, 1.0); // Depth (16-bit RG)
     // -- MATERIAL_END --
 }
 #endif

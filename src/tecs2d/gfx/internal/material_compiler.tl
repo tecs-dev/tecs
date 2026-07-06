@@ -164,7 +164,6 @@ local CALL_SITE_TAIL <const> = [[
     love_Canvases[1] = vec4(mo.normal, mo.lit);
     love_Canvases[2] = mo.orm;
     love_Canvases[3] = mo.emission;
-    love_Canvases[4] = vec4(floor(gl_FragCoord.z * 255.0) / 255.0, fract(gl_FragCoord.z * 255.0), 0.0, 1.0); // Depth (16-bit RG)
 ]]
 
 -- Unlit material wrapper: injects user fragment source into a forced-unlit material() function

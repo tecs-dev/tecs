@@ -52,7 +52,5 @@ void effect() {
     love_Canvases[2] = vec4(1.0, 0.5, 0.0, 1.0);
     // Canvas 3: Emission (added after lighting)
     love_Canvases[3] = vec4(0.0);
-    // Canvas 4: Depth
-    love_Canvases[4] = vec4(floor(gl_FragCoord.z * 255.0) / 255.0, fract(gl_FragCoord.z * 255.0), 0.0, 1.0); // Depth (16-bit RG)
 }
 #endif
