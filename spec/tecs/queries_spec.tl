@@ -1279,4 +1279,77 @@ describe("Queries module tests", function()
             end
         end)
     end)
+
+    describe("re-entrant iteration", function()
+        it("nested iteration of the same query sees all archetypes", function()
+            -- Two matching archetypes: {Position} and {Position, Velocity}.
+            world:spawn(Position(1, 1))
+            world:spawn(Position(2, 2), Velocity(0, 0))
+            world:update(0)
+
+            local q = world:query({include = {Position}})
+
+            local outer = 0
+            local inner = 0
+            for _ in q:iter() do
+                outer = outer + 1
+                for _ in q:iter() do
+                    inner = inner + 1
+                end
+            end
+
+            luassert.equals(2, outer, "outer loop must see both archetypes")
+            luassert.equals(4, inner, "each outer step runs a full inner pass")
+        end)
+
+        it("nested iteration of the same grouped query sees all archetypes", function()
+            world:spawn(Position(1, 1))
+            world:spawn(Position(2, 2), Velocity(0, 0))
+            world:update(0)
+
+            local q = world:query({
+                include = {Position},
+                groupBy = function(archetype: tecs.Archetype): integer
+                    return archetype:get(Velocity) and 2 or 1
+                end,
+            })
+
+            local outer = 0
+            local inner = 0
+            for _ in q:iter() do
+                outer = outer + 1
+                for _ in q:iter() do
+                    inner = inner + 1
+                end
+            end
+
+            luassert.equals(2, outer)
+            luassert.equals(4, inner)
+        end)
+
+        it("nested groups() and group() iteration stays correct", function()
+            world:spawn(Position(1, 1))
+            world:spawn(Position(2, 2), Velocity(0, 0))
+            world:update(0)
+
+            local q = world:query({
+                include = {Position},
+                groupBy = function(archetype: tecs.Archetype): integer
+                    return archetype:get(Velocity) and 2 or 1
+                end,
+            })
+
+            local groupsSeen: {integer} = {}
+            local archsSeen = 0
+            for groupId in q:groups() do
+                groupsSeen[#groupsSeen + 1] = groupId
+                for _ in q:group(groupId) do
+                    archsSeen = archsSeen + 1
+                end
+            end
+
+            luassert.equals(2, #groupsSeen)
+            luassert.equals(2, archsSeen)
+        end)
+    end)
 end)

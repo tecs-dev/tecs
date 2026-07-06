@@ -46,13 +46,10 @@ local record QueryImpl is Query, ArchetypeEntityObserver
     _activeGroupList: {integer}
     _activeGroupListIndices: {integer: integer}
 
-    -- State for iteration APIs.
-    _iterIndex: integer
-    _iterGroupIndex: integer
-    _iterGroupArchIndex: integer
-    _iterGroupsListIndex: integer
+    -- Start state for group() iteration; the group id only exists at the
+    -- group() call, so the first step reads it from here. Resume steps
+    -- derive their position from the loop control variable instead.
     _iterGroupSelected: {Archetype}
-    _iterGroupItemIndex: integer
 
     _groupBy: function(Archetype): integer
 end
@@ -63,15 +60,20 @@ local QUERY_MT <const>: metatable<QueryImpl> = {__index = QueryImpl}
 -- Iteration
 -------------------------------------------------------------------------------
 
+-- Iterator steps derive their resume position from the loop control
+-- variable (the current archetype or group id) through the active reverse
+-- indices, so nested or interleaved iteration of one query stays correct.
+-- The lookups are stable mid-loop: iteration holds a query scope, so
+-- structural changes stay deferred until the scope pops.
+
 local function simpleIterStep(self: QueryImpl, var: any): (Archetype, integer, any)
     local idx: integer
     if var == nil then
         idx = 1
         self._world:_pushQueryScope()
     else
-        idx = self._iterIndex + 1
+        idx = self._activeIndices[var as Archetype] + 1
     end
-    self._iterIndex = idx
     local archetype = self._activeItems[idx]
     if not archetype then
         self._world:_popQueryScope()
@@ -88,22 +90,21 @@ local function groupedIterStep(self: QueryImpl, var: any): (Archetype, integer, 
         gi, ai = 1, 1
         self._world:_pushQueryScope()
     else
-        gi = self._iterGroupIndex
-        ai = self._iterGroupArchIndex + 1
+        local arch = var as Archetype
+        local groupId = self._archetypeGroups[arch]
+        gi = self._activeGroupListIndices[groupId]
+        ai = self._activeGroupIndices[groupId][arch] + 1
     end
 
     while gi <= #groupList do
         local items = groupItems[groupList[gi]]
         if items and ai <= #items then
-            self._iterGroupIndex = gi
-            self._iterGroupArchIndex = ai
             local archetype = items[ai]
             return archetype, archetype.entities[0] as integer, archetype.entities
         end
         gi = gi + 1
         ai = 1
     end
-    self._iterGroupIndex = gi
     self._world:_popQueryScope()
 end
 
@@ -194,9 +195,13 @@ function QueryImpl:getGroup(archetype: Archetype): integer
 end
 
 local function groupsNext(self: QueryImpl, prev: any): integer
-    local i = self._iterGroupsListIndex + 1
-    self._iterGroupsListIndex = i
-    if prev == nil then self._world:_pushQueryScope() end
+    local i: integer
+    if prev == nil then
+        i = 1
+        self._world:_pushQueryScope()
+    else
+        i = self._activeGroupListIndices[prev as integer] + 1
+    end
     local list = self._activeGroupList
     if i <= #list then return list[i] end
     self._world:_popQueryScope()
@@ -204,20 +209,26 @@ local function groupsNext(self: QueryImpl, prev: any): integer
 end
 
 local function groupNext(self: QueryImpl, prev: any): (Archetype, integer, {integer})
-    local items = self._iterGroupSelected
-    if not items then
-        if prev == nil then
+    local items: {Archetype}
+    local i: integer
+    if prev == nil then
+        items = self._iterGroupSelected
+        if not items then
             -- First-call with no matching group: still needs a
             -- balanced push/pop pair so we don't leave dangling
             -- scope state.
             self._world:_pushQueryScope()
             self._world:_popQueryScope()
+            return
         end
-        return
+        self._world:_pushQueryScope()
+        i = 1
+    else
+        local arch = prev as Archetype
+        local groupId = self._archetypeGroups[arch]
+        items = self._activeGroupItems[groupId]
+        i = self._activeGroupIndices[groupId][arch] + 1
     end
-    local i = self._iterGroupItemIndex + 1
-    self._iterGroupItemIndex = i
-    if prev == nil then self._world:_pushQueryScope() end
     if i <= #items then
         local archetype = items[i]
         return archetype, archetype.entities[0] as integer, archetype.entities
@@ -226,13 +237,11 @@ local function groupNext(self: QueryImpl, prev: any): (Archetype, integer, {inte
 end
 
 function QueryImpl:groups(): (Query.GroupsIterFn, Query, any)
-    self._iterGroupsListIndex = 0
     return groupsNext, self, nil
 end
 
 function QueryImpl:group(groupId: integer): (Query.GroupIterFn, Query, any)
     self._iterGroupSelected = self._activeGroupItems[groupId]
-    self._iterGroupItemIndex = 0
     return groupNext, self, nil
 end
 
@@ -553,15 +562,12 @@ local function newQuery(
         _includeAnyWordBits = masks.includeAnyWordBits,
         _excludeBits = masks.excludeBits,
         _excludeWordBits = masks.excludeWordBits,
-        _iterIndex = 0,
         _activeItems = activeItems,
         _activeIndices = activeIndices,
         _activeGroupItems = activeGroupItems,
         _activeGroupIndices = activeGroupIndices,
         _activeGroupList = activeGroupList,
         _activeGroupListIndices = activeGroupListIndices,
-        _iterGroupIndex = 1,
-        _iterGroupArchIndex = 0,
         _groupBy = groupBy,
         onEntitiesAdded = wantAdd and queryOnEntitiesAdded or nil,
         onEntitiesRemoved = wantRemove and queryOnEntitiesRemoved or nil,
