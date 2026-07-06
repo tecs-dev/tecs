@@ -23,6 +23,7 @@ local STATE_MUTATE <const> = shared.STATE_MUTATE
 local STATE_DESPAWN <const> = shared.STATE_DESPAWN
 
 local getRequiresClosure <const> = shared.getRequiresClosure
+local applyRequires <const> = shared.applyRequires
 local getEntityState <const> = shared.getEntityState
 local setEntityState <const> = shared.setEntityState
 local getPendingArch <const> = shared.getPendingArch
@@ -242,6 +243,31 @@ local function stageScalar(
     local n = #ctList + 1
     ctList[n] = componentType
     values[n] = value
+end
+
+-- Stage default values for `requires`-closure components that a staged
+-- structural add pulls in. Mirrors `writeRequired`'s value semantics:
+-- scalars stage raw values, tags stage nothing (archetype membership is
+-- their whole payload).
+local function stageRequiredDefaults(
+    self: WorldImpl,
+    missing: {internal.RequireEntry},
+    stagingArch: Archetype,
+    slot: integer
+)
+    for i = 1, #missing do
+        local entry = missing[i]
+        local rType = entry.type
+        local v: any = entry.sharedValue
+        if v == nil then
+            v = (entry.factory as function(...: any): Component)()
+        end
+        if (rType as ComponentInternal).storageType == "scalar" then
+            stageScalar(self, stagingArch, slot, rType, (v as {string:any}).value)
+        elseif entry.writeColumn then
+            appendPendingValue(self, stagingArch, slot, v)
+        end
+    end
 end
 
 -- Move both the instance-list AND the scalar pair from one archetype to
@@ -512,7 +538,15 @@ function WorldImpl:deferSetRaw(id: integer, componentType: Component, value: any
                 -- Plain structural add: stage move out of source archetype.
                 local newArch = archetype:withComponent(componentType as Component, self.archetypeIndex)
                 if newArch ~= archetype then
-                    if (componentType as ComponentInternal).storageType == "scalar" then
+                    local ci = componentType as ComponentInternal
+                    if ci._hasRequires then
+                        local missing: {internal.RequireEntry}
+                        newArch, missing = applyRequires(newArch, ci, self.archetypeIndex)
+                        if missing then
+                            stageRequiredDefaults(self, missing, archetype, slot)
+                        end
+                    end
+                    if ci.storageType == "scalar" then
                         stageScalar(self, archetype, slot, componentType as Component, value)
                     else
                         appendPendingValue(self, archetype, slot, value)
@@ -557,6 +591,14 @@ function WorldImpl:_deferSetSlow(
         if pendingArch and (st == STATE_SPAWN or st == STATE_MUTATE) then
             local newArch = pendingArch:withComponent(componentType, self.archetypeIndex)
 
+            -- Requires closure applies only when this set structurally
+            -- adds the component, matching the instant path (a value-only
+            -- set never re-adds required components).
+            local missing: {internal.RequireEntry}
+            if newArch ~= pendingArch and ctI._hasRequires then
+                newArch, missing = applyRequires(newArch, ctI, self.archetypeIndex)
+            end
+
             if st == STATE_SPAWN then
                 if newArch ~= pendingArch then
                     local c = newArch.pendingSpawnCount + 1
@@ -568,6 +610,9 @@ function WorldImpl:_deferSetSlow(
                         stageScalar(self, newArch, slot, componentType, value)
                     elseif not isTag then
                         appendPendingValue(self, newArch, slot, value)
+                    end
+                    if missing then
+                        stageRequiredDefaults(self, missing, newArch, slot)
                     end
                 elseif isScalar then
                     stageScalar(self, pendingArch, slot, componentType, value)
@@ -600,6 +645,9 @@ function WorldImpl:_deferSetSlow(
                         appendPendingValue(self, srcArch, slot, value)
                     end
                 end
+                if missing and srcArch then
+                    stageRequiredDefaults(self, missing, srcArch, slot)
+                end
             end
 
             setPendingArch(self, slot, newArch)
@@ -625,6 +673,12 @@ function WorldImpl:_deferSetSlow(
         end
 
         local newArch = startArch:withComponent(componentType, self.archetypeIndex)
+        -- Requires closure applies only on a structural add, matching the
+        -- instant path.
+        local missing: {internal.RequireEntry}
+        if newArch ~= startArch and ctI._hasRequires then
+            newArch, missing = applyRequires(newArch, ctI, self.archetypeIndex)
+        end
         -- pendingWrites counts staged moves of committed entities only; the
         -- move drain consumes it to reserve destination capacity. Spawns and
         -- batch-staged slots reserve capacity in their own drains.
@@ -646,12 +700,18 @@ function WorldImpl:_deferSetSlow(
             elseif not isTag then
                 appendPendingValue(self, newArch, slot, value)
             end
+            if missing then
+                stageRequiredDefaults(self, missing, newArch, slot)
+            end
         else
             markDirty!(startArch, hasPendingMoveOut)
             if isScalar then
                 stageScalar(self, startArch, slot, componentType, value)
             elseif not isTag then
                 appendPendingValue(self, startArch, slot, value)
+            end
+            if missing then
+                stageRequiredDefaults(self, missing, startArch, slot)
             end
         end
         self.isDirty = true

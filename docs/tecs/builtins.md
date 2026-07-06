@@ -390,8 +390,8 @@ An event emitted when an entity is spawned. The event is emitted globally (addre
 Observe this event to react when entities are created.
 
 ::: info Event timing
-The `OnSpawn` event is emitted at spawn time (when `world:spawn` or `world:spawnAt` is called),
-before the entity is committed:
+The `OnSpawn` event is emitted at spawn time (when `world:spawn`, `world:spawnAt`, or a bundle
+spawn is called), before the entity is committed:
 - The entity is not yet placed in an archetype or visible to queries
 - `world:isAlive(entity)` returns `false` until commit
 - You can stage further mutations on the entity ID between spawn and commit

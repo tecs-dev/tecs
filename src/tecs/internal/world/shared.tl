@@ -298,84 +298,6 @@ local function bulkMoveEntireArchetype(
     return count, dstBase + 1
 end
 
-local function applyBatchSet(self: WorldImpl, mut: BatchMutation, srcArch: Archetype)
-    local componentType = mut.componentType
-    local archetypeIndex = self.archetypeIndex
-
-    local entities = srcArch.entities as {integer}
-    local count = entities[0] as integer
-    if count == 0 then return end
-
-    local hasComponent = srcArch.columns[componentType] ~= nil
-    local fast = mut.canBulk
-    local isTag = mut.isTag
-
-    if not fast then
-        -- Slow path: per-entity `_instantSet` for non-bulk behavior.
-        local value = mut.value
-        for i = count, 1, -1 do
-            self:_instantSet(entities[i], componentType, value)
-        end
-        return
-    end
-
-    if hasComponent then
-        if not isTag then
-            local col = srcArch.columns[componentType] as {any}
-            if mut.op == BATCH_OP_SET_CONST then
-                local value = mut.value
-                for row = 1, count do
-                    col[row] = value
-                end
-            else
-                mut.callback(srcArch, 1, count, count)
-            end
-        end
-        -- The whole column just changed. Observer notification
-        -- (notifyAdded) doesn't fire here because no entities were added.
-        srcArch:markComponentDirty(componentType)
-        return
-    end
-
-    local dstArch = srcArch:withComponent(componentType, archetypeIndex)
-    if dstArch == srcArch then return end
-    local moved, firstRow = bulkMoveEntireArchetype(self, srcArch, dstArch)
-    if moved == 0 or isTag then return end
-    local lastRow = firstRow + moved - 1
-
-    local newCol = dstArch.columns[componentType] as {any}
-    if mut.op == BATCH_OP_SET_CONST then
-        local value = mut.value
-        for row = firstRow, lastRow do
-            newCol[row] = value
-        end
-    else
-        mut.callback(dstArch, firstRow, lastRow, moved)
-    end
-end
-
-local function applyBatchRemove(self: WorldImpl, mut: BatchMutation, srcArch: Archetype)
-    local componentType = mut.componentType
-    if srcArch.columns[componentType] == nil then return end
-
-    local entities = srcArch.entities as {integer}
-    local count = entities[0] as integer
-    if count == 0 then return end
-
-    if not mut.canBulk then
-        -- Slow path: per-entity `_instantRemove`.
-        for i = count, 1, -1 do
-            self:_instantRemove(entities[i], componentType)
-        end
-        return
-    end
-
-    local archetypeIndex = self.archetypeIndex
-    local dstArch = srcArch:withoutComponent(componentType, archetypeIndex)
-    if dstArch == srcArch then return end
-    bulkMoveEntireArchetype(self, srcArch, dstArch)
-end
-
 local function copyPlanRow(
     planDstCols: {integer: {any}},
     planSrcCols: {integer: {any}},
@@ -528,6 +450,130 @@ local function writeRequired(
     end
 end
 
+-- Write `requires`-supplied defaults across a row range. Table storage
+-- gets a fresh factory value per row so rows never share one table;
+-- other storages resolve one value and fan it (scalars unwrapped).
+local function writeRequiredRange(
+    arch: Archetype,
+    requiredList: {RequireEntry},
+    rStart: integer,
+    rEnd: integer
+)
+    local cols = arch.columns
+    for k = 1, #requiredList do
+        local entry = requiredList[k]
+        local col = cols[entry.type] as {any}
+        if col then
+            local storage = (entry.type as ComponentInternal).storageType
+            if storage == "table" then
+                for r = rStart, rEnd do
+                    col[r] = (entry.factory as function(...: any): Component)()
+                end
+            else
+                local v: any = entry.sharedValue
+                if v == nil then
+                    v = (entry.factory as function(...: any): Component)()
+                end
+                if storage == "scalar" then
+                    v = (v as {string:any}).value
+                end
+                for r = rStart, rEnd do
+                    col[r] = v
+                end
+            end
+        end
+    end
+end
+
+local function applyBatchSet(self: WorldImpl, mut: BatchMutation, srcArch: Archetype)
+    local componentType = mut.componentType
+    local archetypeIndex = self.archetypeIndex
+
+    local entities = srcArch.entities as {integer}
+    local count = entities[0] as integer
+    if count == 0 then return end
+
+    local hasComponent = srcArch.columns[componentType] ~= nil
+    local fast = mut.canBulk
+    local isTag = mut.isTag
+
+    if not fast then
+        -- Slow path: per-entity `_instantSet` for non-bulk behavior.
+        local value = mut.value
+        for i = count, 1, -1 do
+            self:_instantSet(entities[i], componentType, value)
+        end
+        return
+    end
+
+    if hasComponent then
+        if not isTag then
+            local col = srcArch.columns[componentType] as {any}
+            if mut.op == BATCH_OP_SET_CONST then
+                local value = mut.value
+                for row = 1, count do
+                    col[row] = value
+                end
+            else
+                mut.callback(srcArch, 1, count, count)
+            end
+        end
+        -- The whole column just changed. Observer notification
+        -- (notifyAdded) doesn't fire here because no entities were added.
+        srcArch:markComponentDirty(componentType)
+        return
+    end
+
+    local dstArch = srcArch:withComponent(componentType, archetypeIndex)
+    local ci = componentType as ComponentInternal
+    local requiredList: {RequireEntry} = nil
+    if ci._hasRequires then
+        dstArch, requiredList = applyRequires(dstArch, ci, archetypeIndex)
+    end
+    if dstArch == srcArch then return end
+    local moved, firstRow = bulkMoveEntireArchetype(self, srcArch, dstArch)
+    if moved == 0 then return end
+    local lastRow = firstRow + moved - 1
+    -- Required defaults first; the user's value or callback wins on
+    -- any overlap.
+    if requiredList then
+        writeRequiredRange(dstArch, requiredList, firstRow, lastRow)
+    end
+    if isTag then return end
+
+    local newCol = dstArch.columns[componentType] as {any}
+    if mut.op == BATCH_OP_SET_CONST then
+        local value = mut.value
+        for row = firstRow, lastRow do
+            newCol[row] = value
+        end
+    else
+        mut.callback(dstArch, firstRow, lastRow, moved)
+    end
+end
+
+local function applyBatchRemove(self: WorldImpl, mut: BatchMutation, srcArch: Archetype)
+    local componentType = mut.componentType
+    if srcArch.columns[componentType] == nil then return end
+
+    local entities = srcArch.entities as {integer}
+    local count = entities[0] as integer
+    if count == 0 then return end
+
+    if not mut.canBulk then
+        -- Slow path: per-entity `_instantRemove`.
+        for i = count, 1, -1 do
+            self:_instantRemove(entities[i], componentType)
+        end
+        return
+    end
+
+    local archetypeIndex = self.archetypeIndex
+    local dstArch = srcArch:withoutComponent(componentType, archetypeIndex)
+    if dstArch == srcArch then return end
+    bulkMoveEntireArchetype(self, srcArch, dstArch)
+end
+
 local record shared
     type BatchMutation = BatchMutation
 
@@ -556,6 +602,8 @@ local record shared
     applyRequires: function(dstArch: Archetype, comp: ComponentInternal,
         archetypeIndex: ArchetypeIndex): Archetype, {RequireEntry}
     writeRequired: function(missing: {RequireEntry}, dstArch: Archetype, dLuaRow: integer)
+    writeRequiredRange: function(arch: Archetype, requiredList: {RequireEntry},
+        rStart: integer, rEnd: integer)
 
     getEntityState: function(world: WorldImpl, slot: integer): integer
     setEntityState: function(world: WorldImpl, slot: integer, state: integer)
@@ -582,6 +630,7 @@ shared.applyPendingScalars = applyPendingScalars
 shared.getRequiresClosure = getRequiresClosure
 shared.applyRequires = applyRequires
 shared.writeRequired = writeRequired
+shared.writeRequiredRange = writeRequiredRange
 shared.getEntityState = getEntityState
 shared.setEntityState = setEntityState
 shared.getPendingArch = getPendingArch

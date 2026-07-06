@@ -92,6 +92,8 @@ bounded at 64 iterations; exceeding the bound raises
 
 - Despawns apply before spawns within a wave; rows freed by despawns are reusable by spawns in the same wave.
 - For one entity and one component, the last staged write wins at commit.
+- Staged operations that net out structurally (remove then re-add of the same component) leave the entity's
+  row in place and apply the final value there; no query callbacks fire because the archetype never changes.
 - A staged despawn cancels every other staged operation for that entity: staged spawns are never placed, staged
   moves never run, and staged sparse writes are discarded.
 - Sparse writes staged by an entity that despawns in the same transaction are discarded, including when the
@@ -132,7 +134,7 @@ identical at every scope depth and on every path:
 | **`despawn`** | n/a | Once per entity, to the global and the entity address |
 | **`batchSpawn`, `batchSpawnAt`** | Not emitted, by design; use the fill callback or a query's `onEntitiesAdded` | n/a |
 | **`batchDespawn`** | n/a | Once per entity |
-| **Bundle spawn** | See [Conformance status](#conformance-status) | n/a |
+| **Bundle spawn** | Once per entity, same contract as `spawn` | n/a |
 
 - `OnSpawn` is emitted during the spawn call while the entity is staged: `isAlive` returns `false`, and
   mutations made by observers stage against the pending entity.
@@ -168,23 +170,3 @@ conformance checklist for adding or changing a mutation path.
   dirty. See [Dirty tracking](/tecs/components/dirty-tracking).
 - **Observer hygiene**: per-entity observers never survive into a recycled slot.
 - **Reservation accounting**: staged moves reserve destination capacity so drains do not reallocate mid-pass.
-
-## Conformance status
-
-::: warning Known divergences
-The following behaviors currently diverge from this specification. Each is a bug with a planned fix; do not
-rely on the divergent behavior.
-
-1. **Staged `set` and `batchSet` skip the `requires` closure.** A structural add through `world:set` inside a
-   scope, or through `batchSet`, does not pull in required components; the instant path and all spawn paths
-   do. Fix: apply the closure on the staged and batch structural-add paths.
-2. **Bundle spawns skip `Key`.** A `Key` component in a bundle is written as a plain column value: the key
-   index is not updated and duplicate live keys are not rejected. Until fixed, do not put `Key` in bundles;
-   claim keys with `world:set` after spawning.
-3. **Bundle spawns do not emit `OnSpawn`.** `world:spawn` and `world:spawnAt` emit it; bundle spawns will after
-   the fix.
-4. **Staged remove-then-set of the same component corrupts the archetype.** Removing a component and re-adding
-   it in one scope stages a self-move; when the drain relocates every row of the source archetype, the entity
-   ends up alive but matching no queries. Until fixed, avoid remove-then-set of one component in a single
-   scope; set the new value directly instead.
-:::

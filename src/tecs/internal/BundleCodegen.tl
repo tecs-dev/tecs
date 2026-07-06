@@ -6,6 +6,7 @@ bundle's fixed component list.
 local types <const> = require("tecs.types")
 local internal <const> = require("tecs.internal.types")
 local IdAllocator <const> = require("tecs.internal.IdAllocator")
+local builtins <const> = require("tecs.internal.builtins")
 local shared <const> = require("tecs.internal.world.shared")
 
 local type Component = types.components.Component
@@ -32,6 +33,51 @@ local function seq(prefix: string, lo: integer, hi: integer, sep: string): strin
     return table.concat(parts, sep)
 end
 
+-- Per-required-param nil checks shared by both codegen variants.
+local function requiredChecksSrc(requiredCount: integer): string
+    local parts: {string} = {}
+    for i = 1, requiredCount do
+        parts[#parts + 1] = string.format(
+            "    if r%d == nil then error('Required component missing: ' .. T%d.componentName, 2) end",
+            i, i)
+    end
+    return table.concat(parts, "\n")
+end
+
+-- Bundles containing Key delegate to `world:spawn`: key claiming is per
+-- entity, errors on duplicate live keys, and must happen before the
+-- entity becomes visible. `world:spawn` owns those semantics; the bundle
+-- fast path cannot express them.
+local function codegenKeyedSrc(n: integer, requiredCount: integer): string
+    local upvalueList: string do
+        local parts: {string} = {"world"}
+        for i = 1, n do parts[#parts + 1] = "T" .. i end
+        for i = requiredCount + 1, n do parts[#parts + 1] = "f" .. i end
+        upvalueList = table.concat(parts, ", ")
+    end
+    local paramList = seq("r", 1, requiredCount, ", ")
+    if paramList ~= "" then paramList = ", " .. paramList end
+    local argParts: {string} = {}
+    for i = 1, requiredCount do argParts[#argParts + 1] = "r" .. i end
+    for i = requiredCount + 1, n do argParts[#argParts + 1] = "f" .. i .. "()" end
+
+    local src: string = [[
+local __UPVALUES__ = ...
+
+local function spawn(_self__PARAM_LIST__)
+__REQUIRED_CHECKS__
+    return world:spawn(__ARGS__)
+end
+
+return spawn
+]]
+    src = src:gsub("__UPVALUES__", upvalueList)
+    src = src:gsub("__PARAM_LIST__", paramList)
+    src = src:gsub("__REQUIRED_CHECKS__", requiredChecksSrc(requiredCount))
+    src = src:gsub("__ARGS__", table.concat(argParts, ", "))
+    return src
+end
+
 local function codegenSrc(n: integer, requiredCount: integer, isSparse: {boolean}, isScalar: {boolean}): string
     -- Deferred path stores raw slots (NOT packed ids) + component values
     -- in a bundle-local queue. `queueSlot[i]` is the per-component offset
@@ -47,10 +93,10 @@ local function codegenSrc(n: integer, requiredCount: integer, isSparse: {boolean
     end
     local stride = 2 + nonSparseCount  -- target arch id + slot + non-sparse values
 
-    -- Upvalues: world, allocSlot, plus component types (T1..Tn) and
-    -- factories for the non-required suffix.
+    -- Upvalues: world, allocSlot, OnSpawn, plus component types (T1..Tn)
+    -- and factories for the non-required suffix.
     local upvalueList: string do
-        local parts: {string} = {"world", "allocSlot"}
+        local parts: {string} = {"world", "allocSlot", "OnSpawn"}
         for i = 1, n do parts[#parts + 1] = "T" .. i end
         for i = requiredCount + 1, n do parts[#parts + 1] = "f" .. i end
         upvalueList = table.concat(parts, ", ")
@@ -140,15 +186,7 @@ local function codegenSrc(n: integer, requiredCount: integer, isSparse: {boolean
         drainColumnWrites = table.concat(parts, "\n")
     end
 
-    local requiredChecks: string do
-        local parts: {string} = {}
-        for i = 1, requiredCount do
-            parts[#parts + 1] = string.format(
-                "    if r%d == nil then error('Required component missing: ' .. T%d.componentName, 2) end",
-                i, i)
-        end
-        requiredChecks = table.concat(parts, "\n")
-    end
+    local requiredChecks = requiredChecksSrc(requiredCount)
 
     -- Two hot paths in the emitted spawn:
     --   1. `_scopeDepth == 0`: immediate placement -- the entity is
@@ -219,7 +257,18 @@ __REQUIRED_CHECKS__
     local es = world.allocator.slots[slot]
     local id = slot + es.generation * __GEN_STRIDE__
 
-    if world._scopeDepth > 0 then
+    -- OnSpawn observers force the staged route so the event contract
+    -- (entity staged, observer mutations stage) matches world:spawn.
+    local staged = world._scopeDepth > 0
+    local synthetic = false
+    if not staged and world.messages._totalObservers > 0
+            and world:hasObservers(0, OnSpawn) then
+        staged = true
+        synthetic = true
+        world._scopeDepth = 1
+    end
+
+    if staged then
         -- Deferred: enqueue + register drain. Entity isn't visible to
         -- queries until `_drain` fires the registered drain callback.
         -- Slot is fresh from allocSlot so its stamp doesn't match the
@@ -245,6 +294,11 @@ __ENQUEUE_PUSHES__
             end
             pendingDrain = true
             world.isDirty = true
+        end
+        world:emit(0, OnSpawn, id)
+        if synthetic then
+            world:_drain()
+            world._scopeDepth = 0
         end
         return id
     end
@@ -372,10 +426,28 @@ function BundleCodegen.codegenBundleSpawn(
 
     local isSparse: {boolean} = {}
     local isScalar: {boolean} = {}
+    local hasKey = false
+    local Key <const> = builtins.Key as Component
     for i = 1, n do
         local ci = typeArray[i] as ComponentInternal
         isSparse[i] = ci.isSparse or false
         isScalar[i] = ci.storageType == "scalar"
+        if typeArray[i] == Key then
+            hasKey = true
+        end
+    end
+
+    if hasKey then
+        local keyedSrc = codegenKeyedSrc(n, requiredCount)
+        local keyedChunk, keyedErr = load(keyedSrc, "=bundle_spawn_keyed", "t")
+        if not keyedChunk then
+            error("bundle codegen failed: " .. tostring(keyedErr))
+        end
+        local keyedArgs: {any} = { world }
+        for i = 1, n do keyedArgs[#keyedArgs + 1] = typeArray[i] end
+        for i = requiredCount + 1, n do keyedArgs[#keyedArgs + 1] = factoryArray[i] end
+        return (keyedChunk as function(any...): any)(
+            table.unpack(keyedArgs, 1, #keyedArgs)) as BundleCodegen.SpawnFn
     end
 
     local src = codegenSrc(n, requiredCount, isSparse, isScalar)
@@ -383,10 +455,11 @@ function BundleCodegen.codegenBundleSpawn(
     if not chunk then error("bundle codegen failed: " .. tostring(err)) end
 
     -- Upvalue order must match the generated `local ... = ...` line:
-    -- world, allocSlot, T1..Tn, f(requiredCount+1)..fn.
+    -- world, allocSlot, OnSpawn, T1..Tn, f(requiredCount+1)..fn.
     local args: {any} = {
         world,
         IdAllocator.allocSlot,
+        builtins.OnSpawn,
     }
     for i = 1, n do args[#args + 1] = typeArray[i] end
     for i = requiredCount + 1, n do args[#args + 1] = factoryArray[i] end

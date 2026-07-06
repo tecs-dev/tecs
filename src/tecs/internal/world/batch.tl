@@ -40,6 +40,7 @@ local BATCH_OP_REMOVE <const> = shared.BATCH_OP_REMOVE
 local applyBatchSet <const> = shared.applyBatchSet
 local applyBatchRemove <const> = shared.applyBatchRemove
 local applyRequires <const> = shared.applyRequires
+local writeRequiredRange <const> = shared.writeRequiredRange
 
 local table_clear <const> = require("table.clear")
 local floor <const> = math.floor
@@ -416,39 +417,9 @@ function WorldImpl:_drainArchBatchSpawn(archetype: Archetype)
             callback(archetype, currentCount + 1, currentCount + placed, placed)
             -- Write `requires`-supplied defaults into the spawned rows.
             -- Skipped when nil (no `requires` declared on any of the
-            -- caller's component types). Runs after the user callback
-            -- so user data is the authoritative source if it overlaps.
-            -- Hoists per-entry resolution out of the row loop: FFI /
-            -- scalar storage have value-copy semantics on column write
-            -- so a single resolved value is safely fanned across all
-            -- spawned rows. `table` storage falls back to per-row
-            -- factory calls so each entity gets a fresh table.
+            -- caller's component types).
             if requiredList then
-                local rStart = currentCount + 1
-                local rEnd = currentCount + placed
-                for k = 1, #requiredList do
-                    local entry = requiredList[k]
-                    local col = archetype.columns[entry.type] as {any}
-                    if col then
-                        local storage = (entry.type as ComponentInternal).storageType
-                        if storage == "table" then
-                            for r = rStart, rEnd do
-                                col[r] = (entry.factory as function(...: any): Component)()
-                            end
-                        else
-                            local v = entry.sharedValue
-                            if v == nil then
-                                v = (entry.factory as function(...: any): Component)()
-                            end
-                            if storage == "scalar" then
-                                v = (v as {string:any}).value
-                            end
-                            for r = rStart, rEnd do
-                                col[r] = v
-                            end
-                        end
-                    end
-                end
+                writeRequiredRange(archetype, requiredList, currentCount + 1, currentCount + placed)
             end
         end
 
@@ -629,36 +600,8 @@ function WorldImpl:_drainArchBatchSpawnAt(archetype: Archetype)
 
         if placed > 0 then
             callback(archetype, currentCount + 1, currentCount + placed, placed)
-            -- See `_drainArchBatchSpawn` for shape: hoist factory /
-            -- shared-value resolution out of the per-row loop and fan
-            -- across rows. Tables fall back to per-row factory calls
-            -- so each row gets a fresh table.
             if requiredList then
-                local rStart = currentCount + 1
-                local rEnd = currentCount + placed
-                for k = 1, #requiredList do
-                    local entry = requiredList[k]
-                    local col = archetype.columns[entry.type] as {any}
-                    if col then
-                        local storage = (entry.type as ComponentInternal).storageType
-                        if storage == "table" then
-                            for r = rStart, rEnd do
-                                col[r] = (entry.factory as function(...: any): Component)()
-                            end
-                        else
-                            local v = entry.sharedValue
-                            if v == nil then
-                                v = (entry.factory as function(...: any): Component)()
-                            end
-                            if storage == "scalar" then
-                                v = (v as {string:any}).value
-                            end
-                            for r = rStart, rEnd do
-                                col[r] = v
-                            end
-                        end
-                    end
-                end
+                writeRequiredRange(archetype, requiredList, currentCount + 1, currentCount + placed)
             end
         end
 

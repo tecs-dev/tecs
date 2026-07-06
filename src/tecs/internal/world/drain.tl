@@ -146,7 +146,36 @@ function WorldImpl:_drainPendingMoves(srcArch: Archetype)
             if archId ~= 0 then dstArch = archIndex[archId] end
         end
 
-        if dstArch ~= nil then
+        if dstArch == srcArch then
+            -- Net-zero structural change (e.g. remove-then-set of the same
+            -- component in one scope): the row stays put. Apply staged
+            -- values in place. Routing this through the move machinery
+            -- corrupts the archetype: the full-relocation branch below
+            -- truncates rows including a self-moved one, and
+            -- reserveCapacity would reallocate the arrays this loop is
+            -- iterating.
+            if srcArch.pendingWrites > 0 then
+                srcArch.pendingWrites = srcArch.pendingWrites - 1
+            end
+            local vals = srcArch:getPendingValues(entSlot)
+            if vals then
+                applyPendingVals(vals, srcArch.columns, r)
+                for v = 1, #vals do
+                    local ct = (vals[v] as {string:any}).componentType as Component
+                    srcArch:markComponentDirty(ct)
+                end
+            end
+            if srcHasScalarPending then
+                local scalarTypes = srcPendingScalarTypes[entSlot]
+                if scalarTypes then
+                    applyPendingScalars(scalarTypes, srcPendingScalarValues[entSlot],
+                        srcArch.columns, r)
+                    for v = 1, #scalarTypes do
+                        srcArch:markComponentDirty(scalarTypes[v])
+                    end
+                end
+            end
+        elseif dstArch ~= nil then
             -- reserveCapacity may reallocate entities array.
             if dstArch.pendingWrites > 0 then
                 dstArch:reserveCapacity(dstArch.entities[0] + dstArch.pendingWrites)
