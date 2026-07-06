@@ -146,24 +146,26 @@ function runIf.inState(name: string): RunIfFn
     end
 end
 
--- Both combinators evaluate BOTH operands every tick so stateful
--- predicates (`every`, `cooldown`) keep accumulating time regardless of
--- the other side, making the combinators commutative. `every` remains an
--- edge trigger: a fire consumed while the other side is false is spent,
--- not deferred.
+-- Both combinators short-circuit, so operand ORDER is part of the API
+-- for stateful predicates (`every`, `cooldown`): the rhs receives dt
+-- only on ticks where the lhs lets evaluation reach it.
+--
+--   both(inState("menu"), every(1))  -- timer FROZEN outside the menu;
+--                                    -- resumes where it left off
+--   both(every(1), inState("menu"))  -- timer keeps running; fires that
+--                                    -- land outside the menu are spent
+--
+-- Put the gate first to pause a timer with the gate, the timer first to
+-- keep its cadence independent of the gate.
 function runIf.both(lhs: RunIfFn, rhs: RunIfFn): RunIfFn
     return function(dt: number, world: World, systemName: string): boolean
-        local a = lhs(dt, world, systemName)
-        local b = rhs(dt, world, systemName)
-        return a and b
+        return lhs(dt, world, systemName) and rhs(dt, world, systemName)
     end
 end
 
 function runIf.either(lhs: RunIfFn, rhs: RunIfFn): RunIfFn
     return function(dt: number, world: World, systemName: string): boolean
-        local a = lhs(dt, world, systemName)
-        local b = rhs(dt, world, systemName)
-        return a or b
+        return lhs(dt, world, systemName) or rhs(dt, world, systemName)
     end
 end
 

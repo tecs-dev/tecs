@@ -315,30 +315,32 @@ describe("runIf helpers", function()
         end)
     end)
 
-    describe("both / either operand evaluation", function()
-        it("both feeds dt to the timer while the other operand is false", function()
+    describe("both / either operand ordering", function()
+        it("gate-first freezes the timer while the gate is closed", function()
             local gate = false
             local pred = tecs.runif.both(function(): boolean return gate end, tecs.runif.every(1))
 
-            luassert.is_false(pred(0.4, world, "s"))
-            luassert.is_false(pred(0.4, world, "s"))
+            -- Two seconds pass while gated; the timer must NOT accumulate,
+            -- or reopening the gate would burst-fire the backlog.
+            luassert.is_false(pred(1.0, world, "s"))
+            luassert.is_false(pred(1.0, world, "s"))
             gate = true
-            luassert.is_true(pred(0.4, world, "s"),
-                "every must have accumulated 1.2s across the gated ticks")
+            luassert.is_false(pred(0.4, world, "s"),
+                "the timer resumes from zero, not from the gated backlog")
+            luassert.is_true(pred(0.6, world, "s"),
+                "the timer fires one interval after the gate opened")
         end)
 
-        it("either keeps feeding dt to the rhs after the lhs fires", function()
-            local lhsFired = false
-            local pred = tecs.runif.either(function(): boolean
-                local f = not lhsFired
-                lhsFired = true
-                return f
-            end, tecs.runif.every(1))
+        it("timer-first keeps cadence and spends gated fires", function()
+            local gate = false
+            local pred = tecs.runif.both(tecs.runif.every(1), function(): boolean return gate end)
 
-            luassert.is_true(pred(0.6, world, "s"), "lhs fires first tick")
-            -- rhs received 0.6 on the first tick even though lhs won.
+            luassert.is_false(pred(1.0, world, "s"), "fire spent while gated")
+            gate = true
+            luassert.is_false(pred(0.4, world, "s"),
+                "the gated fire is not deferred to the next tick")
             luassert.is_true(pred(0.6, world, "s"),
-                "every must have accumulated 1.2s across both ticks")
+                "the timer keeps its own cadence")
         end)
     end)
 

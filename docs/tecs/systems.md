@@ -210,6 +210,20 @@ world:addSystem({
 })
 ```
 
+::: info Operand order matters for timers
+`both` and `either` short-circuit, so the right operand only receives `dt` on ticks where evaluation
+reaches it. That makes order part of the behavior when one side is a stateful predicate like `every`
+or `cooldown`:
+
+- `both(inState("game"), every(2))` pauses the timer outside the state; it resumes where it left off,
+  with no burst of backlogged fires.
+- `both(every(2), inState("game"))` keeps the timer running on its own cadence; fires that land
+  outside the state are spent, not deferred.
+
+Put the gate first to pause a timer with the gate, the timer first to keep its cadence independent
+of the gate.
+:::
+
 #### `tecs.runif.either(lhs, rhs)`
 
 Combines two runIf predicates with logical OR. The system will run if either predicate returns true.
