@@ -314,4 +314,48 @@ describe("runIf helpers", function()
             luassert.equals(2, callCount, "Should run again when not in playing state")
         end)
     end)
+
+    describe("both / either operand evaluation", function()
+        it("both feeds dt to the timer while the other operand is false", function()
+            local gate = false
+            local pred = tecs.runif.both(function(): boolean return gate end, tecs.runif.every(1))
+
+            luassert.is_false(pred(0.4, world, "s"))
+            luassert.is_false(pred(0.4, world, "s"))
+            gate = true
+            luassert.is_true(pred(0.4, world, "s"),
+                "every must have accumulated 1.2s across the gated ticks")
+        end)
+
+        it("either keeps feeding dt to the rhs after the lhs fires", function()
+            local lhsFired = false
+            local pred = tecs.runif.either(function(): boolean
+                local f = not lhsFired
+                lhsFired = true
+                return f
+            end, tecs.runif.every(1))
+
+            luassert.is_true(pred(0.6, world, "s"), "lhs fires first tick")
+            -- rhs received 0.6 on the first tick even though lhs won.
+            luassert.is_true(pred(0.6, world, "s"),
+                "every must have accumulated 1.2s across both ticks")
+        end)
+    end)
+
+    describe("every with jitter", function()
+        it("clamps pathological jitter to a positive interval", function()
+            local pred = tecs.runif.every(1, 5)
+            local fires = 0
+            for _ = 1, 1000 do
+                if pred(0.1, world, "s") then
+                    fires = fires + 1
+                end
+            end
+            -- 100s of simulated time over clamped intervals averaging ~2s
+            -- yields well under 200 fires; nonpositive intervals fire on
+            -- roughly 40 percent of the 1000 frames.
+            luassert.is_true(fires < 200,
+                "jitter >= interval must not fire every frame, got " .. fires)
+        end)
+    end)
 end)

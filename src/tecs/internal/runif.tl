@@ -111,9 +111,14 @@ function runIf.every(interval: number, jitter?: number): RunIfFn
         elapsed = elapsed + dt
         if elapsed >= currentInterval then
             elapsed = elapsed - currentInterval
-            -- Apply jitter for next interval
+            -- Apply jitter for next interval. Clamp so jitter >= interval
+            -- cannot roll a zero or negative interval that fires every
+            -- frame until the next roll.
             local variance = (random() * 2 - 1) * jitter
             currentInterval = interval + variance
+            if currentInterval < interval * 0.01 then
+                currentInterval = interval * 0.01
+            end
             return true
         end
         return false
@@ -141,15 +146,24 @@ function runIf.inState(name: string): RunIfFn
     end
 end
 
+-- Both combinators evaluate BOTH operands every tick so stateful
+-- predicates (`every`, `cooldown`) keep accumulating time regardless of
+-- the other side, making the combinators commutative. `every` remains an
+-- edge trigger: a fire consumed while the other side is false is spent,
+-- not deferred.
 function runIf.both(lhs: RunIfFn, rhs: RunIfFn): RunIfFn
     return function(dt: number, world: World, systemName: string): boolean
-        return lhs(dt, world, systemName) and rhs(dt, world, systemName)
+        local a = lhs(dt, world, systemName)
+        local b = rhs(dt, world, systemName)
+        return a and b
     end
 end
 
 function runIf.either(lhs: RunIfFn, rhs: RunIfFn): RunIfFn
     return function(dt: number, world: World, systemName: string): boolean
-        return lhs(dt, world, systemName) or rhs(dt, world, systemName)
+        local a = lhs(dt, world, systemName)
+        local b = rhs(dt, world, systemName)
+        return a or b
     end
 end
 
