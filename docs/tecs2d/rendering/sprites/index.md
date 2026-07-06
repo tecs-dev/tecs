@@ -163,10 +163,13 @@ Sprite textures are automatically grouped into size-bucketed texture arrays:
 | Medium   | 256×256     | 128                |
 | Large    | 512×512     | 64                 |
 | XL       | 1024×1024   | 32                 |
-| XXL      | 2048×2048   | 16                 |
+| XXL      | 2048×2048   | 4                  |
+
+The XXL bucket is intentionally shallow because each 2048×2048 layer reserves albedo, normal, emission, and ORM
+surfaces. Additional XXL sheets spill into another texture array and render as another bucket.
 
 This architecture enables:
-- **Single draw call per bucket** - All sprites using textures in the same bucket are batched together
+- **Single draw call per bucket** - All sprites using textures in the same size bucket and texture array are batched together
 - **Automatic allocation** - Textures are assigned to buckets based on their dimensions
 - **GPU culling** - Visibility culling runs entirely on the GPU via compute shaders
 

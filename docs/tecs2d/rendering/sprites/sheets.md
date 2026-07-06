@@ -340,5 +340,5 @@ flat surface.
 - Material maps are optional; omitting them has no performance cost
 - Auto-generating normal maps happens at load time (slight delay)
 - Textures are automatically allocated into size-bucketed texture arrays for efficient GPU batching
-- All sprites within a size bucket (e.g., all 64×64 or smaller textures) are rendered in a single draw call
+- All sprites within the same size bucket and texture array are rendered in a single draw call
 - Textures larger than 2048×2048 require the `DirectSprite` component and are rendered separately

@@ -123,7 +123,7 @@ bucket_manager.CONFIGS = {
     },
     XXL = {
         size = 2048,
-        layersPerArray = 16,
+        layersPerArray = 4,
     },
 }
 
