@@ -108,6 +108,9 @@ function WorldImpl:_drainPendingSpawns(arch: Archetype)
 end
 
 function WorldImpl:_drainPendingMoves(srcArch: Archetype)
+    -- Consume the flag up front: observer-staged moves re-mark it, and a
+    -- stale flag makes every later wave and batch pass rescan all rows.
+    srcArch.hasPendingMoveOut = false
     local srcEntities = srcArch.entities as {integer}
     local srcCount = srcEntities[0]
     if srcCount == 0 then return end
