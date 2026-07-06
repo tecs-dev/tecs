@@ -8,9 +8,10 @@
 --- - An `archetype_shadow_set` covering whatever components were passed
 ---   in via `specs`. Components not present on the archetype are
 ---   skipped silently; the cull shader reads them via `ComponentMask`.
---- - An archetype observer so swap-pop notifications fire.
----   Dirty signalling itself flows through the per-archetype
----   per-component bitset; the observer methods are no-ops.
+--- - An archetype observer for the destruction signal. Dirty signalling
+---   flows through the per-archetype per-component bitset, so no row
+---   callbacks are defined; leaving them nil keeps the archetype's
+---   per-row observer loops off entirely.
 ---
 --- The state object IS the `ArchetypeEntityObserver` for its
 --- archetype. Lifecycle is driven by `archetype_registry`.
@@ -28,12 +29,9 @@ local record shadow_state
         --- map.
         destroyed: boolean
 
-        --- ArchetypeEntityObserver methods. Defining `onEntitiesAdded`
-        --- is what makes `addEntityObserver` bump `hasAddObservers`,
-        --- which gates swap-pop notifications.
-        onEntitiesAdded: function(self, archetype: tecs.Archetype, firstRow: integer, lastRow: integer, count: integer, sourceArch?: tecs.Archetype)
-        onEntitiesRemoved: function(self, archetype: tecs.Archetype, firstRow: integer, lastRow: integer, count: integer, destArch?: tecs.Archetype)
-        onEntityMove: function(self, archetype: tecs.Archetype, entity: integer, fromRow: integer, toRow: integer)
+        --- The only ArchetypeEntityObserver method this state defines;
+        --- row callbacks stay nil so the archetype's per-row observer
+        --- loops never run for shadow states.
         onArchetypeDestroyed: function(self, archetype: tecs.Archetype)
 
         --- Called by the per-shape uploader. Drives the shadow set's
@@ -67,32 +65,6 @@ function shadow_state.new(
         destroyed = false,
     }
     return setmetatable(self, STATE_MT)
-end
-
-function ArchetypeState:onEntitiesAdded(
-    _archetype: tecs.Archetype,
-    _firstRow: integer,
-    _lastRow: integer,
-    _count: integer,
-    _sourceArch?: tecs.Archetype
-)
-end
-
-function ArchetypeState:onEntitiesRemoved(
-    _archetype: tecs.Archetype,
-    _firstRow: integer,
-    _lastRow: integer,
-    _count: integer,
-    _destArch?: tecs.Archetype
-)
-end
-
-function ArchetypeState:onEntityMove(
-    _archetype: tecs.Archetype,
-    _entity: integer,
-    _fromRow: integer,
-    _toRow: integer
-)
 end
 
 function ArchetypeState:onArchetypeDestroyed(_archetype: tecs.Archetype)

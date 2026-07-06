@@ -59,6 +59,7 @@ local record Archetype is ArchetypeInternal
     observerCount: integer
     hasRemoveObservers: integer
     hasAddObservers: integer
+    hasMoveObservers: integer
     addEntityObserver: function(self, observer: ArchetypeEntityObserver)
 
     -- Transaction / drain staging state
@@ -330,6 +331,9 @@ function Archetype:addEntityObserver(observer: ArchetypeEntityObserver)
     if observer.onEntitiesAdded then
         self.hasAddObservers = self.hasAddObservers + 1
     end
+    if observer.onEntityMove then
+        self.hasMoveObservers = self.hasMoveObservers + 1
+    end
 end
 
 local function notifyMove(self: Archetype, entity: integer, fromRow: integer, toRow: integer)
@@ -508,7 +512,7 @@ function Archetype:removeEntity(row: integer, destArchetype?: Archetype): intege
         -- mutation. Observer notification remains gated below.
         self:markAllComponentsDirty()
 
-        if self.hasAddObservers > 0 then
+        if self.hasMoveObservers > 0 then
             notifyMove(self, movedEntityId, lastIndex - 1, row)
         end
 
@@ -833,6 +837,7 @@ function Archetype.new(
         observerCount = 0,
         hasRemoveObservers = 0,
         hasAddObservers = 0,
+        hasMoveObservers = 0,
         isEphemeral = isEphemeral,
         onDespawnComponents = onDespawnComponents,
         onDespawnCount = onDespawnCount,

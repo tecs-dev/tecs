@@ -88,4 +88,32 @@ describe("Archetype tests", function()
         end)
     end)
 
+    describe("entity observers", function()
+        it("notifies a move-only observer on swap-pop", function()
+            local WorldImpl <const> = require("tecs.internal.world")
+            local w = tecs.newWorld()
+            local Tag = tecs.newTagComponent({name = "MoveObsTag" .. math.random(1, 1000000)})
+            local e1 = w:spawn(Tag())
+            local e2 = w:spawn(Tag())
+            w:commit()
+
+            local moves = 0
+            local arch = (w as WorldImpl):currentArchetype(e1)
+            arch:addEntityObserver({
+                onEntityMove = function(_self: any, _arch: any, entity: integer, _from: integer, to: integer)
+                    moves = moves + 1
+                    luassert.equals(e2, entity, "the swapped-in entity is reported")
+                    luassert.equals(0, to, "e2 moves into e1's row")
+                end,
+            } as any)
+
+            -- Despawning e1 swap-pops e2 into its row.
+            w:despawn(e1)
+            w:commit()
+
+            luassert.equals(1, moves,
+                "an observer defining only onEntityMove must hear swap-pop moves")
+        end)
+    end)
+
 end)
