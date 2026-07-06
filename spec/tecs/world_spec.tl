@@ -191,6 +191,35 @@ describe("WorldImpl", function()
             luassert.equals(1, fired, "a dead id despawn is a no-op, not a second event")
         end)
 
+        it("carries high-generation packed ids intact in OnSpawn/OnDespawn", function()
+            local w2 = tecs.newWorld()
+
+            -- Recycle one slot until its generation pushes the packed id
+            -- past int32 range (generation lives above bit 22).
+            local churn: integer
+            for _ = 1, 520 do
+                churn = w2:spawn()
+                w2:despawn(churn)
+            end
+
+            local spawnSeen: number = 0
+            local despawnSeen: number = 0
+            w2:observe(0, tecs.builtins.OnSpawn, function(e: tecs.builtins.OnSpawn)
+                spawnSeen = e.entity
+            end)
+            w2:observe(0, tecs.builtins.OnDespawn, function(e: tecs.builtins.OnDespawn)
+                despawnSeen = e.entity
+            end)
+
+            local id = w2:spawn()
+            luassert.is_true(id > 2147483647, "setup must drive the id past int32")
+            luassert.equals(id, spawnSeen, "OnSpawn payload must not truncate the id")
+
+            w2:despawn(id)
+            w2:commit()
+            luassert.equals(id, despawnSeen, "OnDespawn payload must not truncate the id")
+        end)
+
         it("despawns entities and emits event", function()
             local w2 = tecs.newWorld()
 

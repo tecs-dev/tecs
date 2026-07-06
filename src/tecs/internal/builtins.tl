@@ -287,11 +287,11 @@ builtins.ChildOf = components.newRelationship({
 -------------------------------------------------------------------------------
 
 events.newFFIEvent(builtins.OnSpawn, {
-    {"entity", "int32_t"}
+    {"entity", "double"}
 }, "Tecs_OnSpawn")
 
 events.newFFIEvent(builtins.OnDespawn, {
-    {"entity", "int32_t"}
+    {"entity", "double"}
 }, "Tecs_OnDespawn")
 
 builtins.ArchetypeCreated.init = function(e: builtins.ArchetypeCreated, archetype: types.Archetype)
