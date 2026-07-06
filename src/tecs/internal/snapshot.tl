@@ -984,17 +984,12 @@ end
 -------------------------------------------------------------------------------
 
 local function clearWorld(world: World)
-    local toDelete: {integer} = {}
-    world:forEachArchetype(function(arch: Archetype)
-        local entities = arch.entities as {integer}
-        for i = 1, entities[0] do
-            toDelete[#toDelete + 1] = entities[i]
-        end
-    end)
-    for i = 1, #toDelete do
-        world:despawn(toDelete[i])
-    end
-    world:commit()
+    -- Load-replace wipes in place: a snapshot load replaces the world
+    -- rather than despawning gameplay entities, so no per-entity
+    -- OnDespawn fan-out fires. clearEntities also resets the allocator,
+    -- bumping every touched generation so pre-load handles cannot alias
+    -- restored ids, and empties the free stack for batchSpawnAt.
+    world:clearEntities()
 end
 
 -- Column-major fast path. For each FFI dense column, do ONE bulk memcpy
@@ -1086,13 +1081,6 @@ local function loadSnapshotImpl(world: World, reader: snapshot.Reader): Snapshot
         "unsupported snapshot version: " .. tostring(prelude.version))
 
     clearWorld(world)
-
-    -- After despawning all entities, reset the allocator so every touched
-    -- slot's generation is bumped (invalidating old handles) and the free
-    -- stack is emptied. batchSpawnAt will then restore each entity at its
-    -- original slot and set its generation from the encoded handle,
-    -- producing a clean deterministic state.
-    IdAllocator.reset((world as {string: any}).allocator as IdAllocator)
 
     -- Restore recreates entities with exactly their saved components. Suppress
     -- the active state's auto-tag during the load so restored entities are not
