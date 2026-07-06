@@ -120,22 +120,72 @@ transient renderer buckets, GPU slots, physics bodies, or audio playback handles
 
 ## Schema fingerprinting & migration
 
+Save games outlive the code that wrote them. When you ship a patch that changes a component's fields, snapshots taken
+by the old build still load into the new one. This happens automatically, with no version numbers or hand-written
+migration code for the common cases.
+
 Every FFI component carries a canonical schema fingerprint of the form `field1:type1,field2:type2,...|sizeBytes`. The
 save embeds each component's fingerprint in the snapshot prelude; on load the framework compares it against the
 current registration.
 
 - **Match** → the bulk memcpy fast path runs (one `memcpy` per column).
-- **Mismatch** → the loader falls back to per-entity migration. It reads each saved struct using the saved layout,
-  constructs the current component type, and copies same-named fields across. Added fields keep their zero/default
-  values, removed fields are discarded, and incompatible type conversions still surface as load errors.
+- **Mismatch** → the loader migrates per entity. It reads each saved struct using the *saved* layout, constructs a
+  fresh instance of the *current* component (so every field starts at its registered default), then copies each
+  field that exists in both by name.
 
-Use a custom `serialize` / `deserialize` pair when a field rename, semantic migration, or non-portable runtime field
-needs more control than same-name field copying.
+### What migrates automatically
 
-Non-FFI components aren't fingerprinted; they round-trip through their declared `serialize` / `deserialize` every time.
-That includes ordinary [table components](/tecs/components/table-components),
-[scalar components](/tecs/components/scalar-components), and
-[tag components](/tecs/components/tag-components).
+| Change to an FFI component between save and load | Old saves |
+| ------------------------------------------------ | --------- |
+| Add a field                                      | Load. The new field takes its registered default. |
+| Remove a field                                   | Load. The field is dropped. |
+| Reorder fields                                   | Load unchanged; matching is by name, not position. |
+| Change a field's numeric type (`int32_t` ↔ `float`, widen/narrow) | Load. Values convert like a Lua assignment (float→int truncates). |
+| Change a field to/from an array or a differently-shaped aggregate | Load **errors**; the conversion is not defined. |
+| Rename a field                                   | Load, but the value is **not** carried: the old name is dropped and the new name takes its default. |
+
+A worked example, shipping v2 of a `Health` component that widens `current` and adds `regen`:
+
+```teal
+-- v1 (the build that wrote the save)
+tecs.newFFIComponent({
+    name = "Health",
+    fields = {
+        {"current", "int32_t"},
+        {"max", "int32_t"},
+    },
+})
+
+-- v2 (the build loading it)
+tecs.newFFIComponent({
+    name = "Health",
+    fields = {
+        {"current", "float"},   -- widened; existing values convert
+        {"max", "int32_t"},
+        {"regen", "float"},     -- new; old saves get the default below
+    },
+    defaults = {100, 100, 1.0},
+})
+```
+
+A v1 save loads into v2: `current` and `max` carry over by name, and `regen` fills in as `1.0`.
+
+### Handling a rename
+
+A rename reads as "drop the old field, add a new one", so the value is lost. To carry data across a rename, either
+keep both fields for one release and copy in a system or `FinishSnapshotLoad`, then drop the old field in a later
+release, or give the component a custom `serialize` / `deserialize` pair that maps the old shape onto the new one.
+Reach for custom serialization whenever a rename, a semantic change, or a non-portable runtime field needs more than
+same-name copying.
+
+### Non-FFI and table-format components
+
+Non-FFI components aren't fingerprinted; they round-trip through their declared `serialize` / `deserialize` every
+time, which matches by field name and so tolerates the same add / remove / reorder changes (and carries the same
+rename caveat). That includes ordinary [table components](/tecs/components/table-components),
+[scalar components](/tecs/components/scalar-components), and [tag components](/tecs/components/tag-components).
+[Table-format](/tecs/save-games#table-snapshots) snapshots migrate the same way, since they always round-trip through
+`deserialize` rather than the raw memcpy path.
 
 ## Performance implications
 

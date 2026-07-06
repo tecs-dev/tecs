@@ -65,6 +65,11 @@ their schema. Components holding non-portable durable state (Love2D handles, GPU
 opt out of the bulk path with custom `serialize` / `deserialize` hooks. Runtime-only components that should never be
 saved should use `transient = true`.
 
+Snapshots also survive component changes across game updates: when a patch adds, removes, reorders, or retypes an
+FFI component's fields, old saves migrate automatically on load. See [Schema fingerprinting &
+migration](/tecs/components/serialization#schema-fingerprinting-migration) for exactly what carries over and how to
+handle renames.
+
 > See [Component serialization](/tecs/components/serialization) for the full reference, covering when to
 override, schema fingerprinting and migration, performance implications, and examples.
 
