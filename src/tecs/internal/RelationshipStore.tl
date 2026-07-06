@@ -61,6 +61,10 @@ local record RelationshipStore
     --- Forward storage operations - only meaningful on the Sparse implementation.
     --- Dense returns nil/false from these (forward data lives in archetype columns).
     get: function(self, entityId: integer): any
+    --- One relationship instance for the entity, or nil. For exclusive
+    --- stores this is the value; for non-exclusive stores an arbitrary
+    --- entry from the target map (never the map itself).
+    getFirst: function(self, entityId: integer): any
     getTarget: function(self, entityId: integer, targetId: integer): any
     set: function(self, entityId: integer, value: any): any
     remove: function(self, entityId: integer): any
@@ -85,6 +89,15 @@ end
 
 function SparseImpl:get(entityId: integer): any
     return self._forward[entityId]
+end
+
+function SparseImpl:getFirst(entityId: integer): any
+    local val = self._forward[entityId]
+    if val == nil or self._exclusive then
+        return val
+    end
+    local _, first = next(val as {integer: any})
+    return first
 end
 
 function SparseImpl:getTarget(entityId: integer, targetId: integer): any
@@ -276,6 +289,7 @@ end
 
 -- Forward storage methods are no-ops for dense -- forward data lives in archetype columns.
 function DenseImpl:get(_entityId: integer): any return nil end
+function DenseImpl:getFirst(_entityId: integer): any return nil end
 function DenseImpl:getTarget(_entityId: integer, _targetId: integer): any return nil end
 function DenseImpl:set(_entityId: integer, _value: any): any return nil end
 function DenseImpl:remove(_entityId: integer): any return nil end

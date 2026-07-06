@@ -463,3 +463,45 @@ describe("relationship and snapshot path parity", function()
         validate(w)
     end)
 end)
+
+describe("sparse relationship store hygiene", function()
+    local MatMark = tecs.newRelationship({
+        name = "MatrixMark",
+        sparse = true,
+        reverseIndex = true,
+        transient = true,
+    })
+
+    it("batchDespawn's bulk path cleans source store entries", function()
+        local w = tecs.newWorld()
+        local target = w:spawn(MatPos(1))
+        local src = w:spawn(MatBatchTag)
+        w:set(src, MatMark(target))
+
+        local q = w:query({ include = {MatBatchTag} })
+        w:batchDespawn(q)
+        luassert.is_false(w:isAlive(src))
+
+        local sources = 0
+        w:targets(target, MatMark, function(_id: integer, _ctx: nil)
+            sources = sources + 1
+        end, nil)
+        luassert.equals(0, sources, "reverse index cleaned by bulk clear")
+        validate(w)
+    end)
+
+    it("getFirstRelationship returns an instance for multi-target sparse stores", function()
+        local w = tecs.newWorld()
+        local t1 = w:spawn(MatPos(1))
+        local t2 = w:spawn(MatPos(2))
+        local src = w:spawn(MatPos(3))
+        w:set(src, MatMark(t1))
+        w:set(src, MatMark(t2))
+
+        local rel = w:getFirstRelationship(src, MatMark)
+        luassert.is_not_nil(rel)
+        local tgt = rel.target
+        luassert.is_true(tgt == t1 or tgt == t2, "instance with a real target, not the store map")
+        validate(w)
+    end)
+end)

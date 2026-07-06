@@ -250,7 +250,7 @@ function WorldImpl:getFirstRelationship<T is Relationship>(id: integer, relation
         return nil
     end
     if (relationship as ComponentInternal).isSparse then
-        return self.relationshipStores[relationship]:get(id) as T
+        return self.relationshipStores[relationship]:getFirst(id) as T
     else
         local archetype = self.archetypeIndex[s.archetypeId]
         if archetype then

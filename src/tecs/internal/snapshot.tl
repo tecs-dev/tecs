@@ -900,8 +900,19 @@ local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: Sna
                     local comp = cols[i]
                     if (comp as ComponentInternal).isSparse and (comp as ComponentInternal).isContainer then
                         local store = stores[comp] as {string: function(any, integer): any}
-                        if store then
+                        if store and comp.serialize then
                             local value = store.get(store, entityId)
+                            -- Non-exclusive sparse stores hold a target map
+                            -- per source; the snapshot row format carries one
+                            -- value per (entity, container), so these cannot
+                            -- round-trip. Fail at save time instead of
+                            -- corrupting the load.
+                            if value ~= nil
+                                    and not (comp as types.components.Relationship).exclusiveRelationship then
+                                error("snapshot: non-exclusive sparse relationship '"
+                                    .. comp.componentName
+                                    .. "' cannot be serialized; mark it transient")
+                            end
                             vals[i] = value as Component
                         else
                             vals[i] = nil

@@ -623,6 +623,25 @@ function WorldImpl:_deferBatchDespawn(archetypes: {Archetype})
                     self:_deferDespawn(entities[i])
                 end
             else
+                -- Sparse relationship sources: drop their store entries
+                -- and reverse-index links before the bulk clear frees the
+                -- rows, mirroring `_deferDespawn`'s store cleanup. Marks
+                -- imply the container column, so archetypes without one
+                -- skip this entirely.
+                if world._hasRelationshipStores then
+                    local list = arch.componentList
+                    for j = 1, arch.columnsCount do
+                        local c = list[j] as ComponentInternal
+                        if c.isSparse and c.isContainer then
+                            local store = world.relationshipStores[c as Component]
+                            if store then
+                                for i = 1, count do
+                                    store:remove(entities[i])
+                                end
+                            end
+                        end
+                    end
+                end
                 -- Fire events at write time, then mark for clear.
                 if hasGlobalObs or anyPerEntityObs then
                     for i = 1, count do

@@ -46,6 +46,9 @@ responsibility through the [custom data](#customdata) and [snapshot handler](#sn
 
 - Components marked [`transient`](#transient-components), and entities removed with
   [`ev:exclude(...)`](#excluding-derived-entities).
+- **Non-exclusive sparse relationships.** Their stores hold multiple targets per source, which does not fit the
+  snapshot's one-value-per-component row format; saving a world that uses one raises an error unless the
+  relationship is marked `transient`.
 - **`world.resources`.** Managers, RNGs, config objects, network sessions, and anything else stored there is outside
   the ECS. See [World resources](#world-resources) below.
 - **Process-local runtime objects**: GPU buffers, renderer handles, physics bodies, audio voices, Love `userdata`,

@@ -1,0 +1,74 @@
+name: Nightly Fuzz
+
+# Deep differential fuzz over the mutation model with a rotating seed
+# window: each night explores 1000 fresh seeds derived from the date, so
+# every run adds coverage instead of re-proving yesterday's seeds. A
+# failure names the absolute seed; reproduce locally with:
+#   TECS_FUZZ_SEEDS=1 TECS_FUZZ_OPS=<ops> TECS_FUZZ_SEED_OFFSET=<seed-1> make test
+
+on:
+  schedule:
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+    inputs:
+      seeds:
+        description: 'Number of seeds to run'
+        default: '1000'
+      ops:
+        description: 'Ops per seed'
+        default: '500'
+      seedOffset:
+        description: 'Seed window offset (empty derives from the date)'
+        default: ''
+
+# Same Teal compiler pin as ci.yml.
+env:
+  TL_REF: 4b97e8d4c743795cb148c898fb19e14b6f3b8f2d
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup LuaJIT
+      uses: leafo/gh-actions-lua@v11
+      with:
+        luaVersion: "luajit"
+
+    - name: Setup LuaRocks
+      uses: leafo/gh-actions-luarocks@v4
+      with:
+        luarocksVersion: "3.12.2"
+
+    - name: Install dependencies
+      run: |
+        luarocks install busted
+        luarocks install luacov
+        git clone https://github.com/teal-language/tl.git /tmp/tl-dev
+        cd /tmp/tl-dev && git checkout "$TL_REF"
+        luarocks make tl-dev-1.rockspec
+
+    - name: Build project
+      run: |
+        eval "$(luarocks path)"
+        make clean
+        make compile
+
+    - name: Run fuzz soak
+      run: |
+        eval "$(luarocks path)"
+        seeds="${{ github.event.inputs.seeds }}"
+        ops="${{ github.event.inputs.ops }}"
+        offset="${{ github.event.inputs.seedOffset }}"
+        seeds="${seeds:-1000}"
+        ops="${ops:-500}"
+        if [ -z "$offset" ]; then
+          # One non-overlapping 1000-seed window per day, reproducible
+          # from the date alone.
+          offset=$(( $(date -u +%s) / 86400 * 1000 ))
+        fi
+        echo "Fuzz window: seeds $((offset + 1))..$((offset + seeds)), $ops ops each"
+        echo "Reproduce a failed seed N locally with:"
+        echo "  TECS_FUZZ_SEEDS=1 TECS_FUZZ_OPS=$ops TECS_FUZZ_SEED_OFFSET=\$((N - 1)) make test"
+        TECS_FUZZ_SEEDS="$seeds" TECS_FUZZ_OPS="$ops" TECS_FUZZ_SEED_OFFSET="$offset" make test

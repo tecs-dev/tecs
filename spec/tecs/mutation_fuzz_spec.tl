@@ -15,10 +15,14 @@ while the instant world applies them back to back; these hunt for
 staging bugs that single ops cannot reach (remove-then-set self-moves,
 despawn cancellation, staged-spawn mutation). The op universe also
 covers sparse relationships (builtin ChildOf: exclusive, reverseIndex,
-cascadeDelete), a dense exclusive reverse-indexed relationship, Key
-claiming and release, spawnAt (fresh high ids and dead-id revival),
-batchSet / batchRemove / batchDespawn, and mid-sequence snapshot
-save/load round-trips.
+cascadeDelete), a dense exclusive reverse-indexed relationship, a
+non-exclusive sparse reverse-indexed relationship (multi-target,
+removeOne), an FFI component, Key claiming and release, spawnAt (fresh
+high ids and dead-id revival), batchSpawn / batchSpawnAt with callback
+fills, bundle spawns, batchSet / batchRemove / batchDespawn, TTL plus
+world:update ticks, state push/pop (auto-tagging, despawn-on-exit
+policy), clearEntities, compact, and mid-sequence snapshot save/load
+round-trips.
 
 Determinism rules: rng is consumed only OUTSIDE the shared op closure
 (it runs once per world); component instances are constructed INSIDE
@@ -36,10 +40,14 @@ lockstep.
 Soak knobs: TECS_FUZZ_SEEDS and TECS_FUZZ_OPS deepen the run without
 changing the fast defaults `make test` uses, e.g.
 `TECS_FUZZ_SEEDS=100 TECS_FUZZ_OPS=1000 make test`.
+TECS_FUZZ_SEED_OFFSET shifts the seed window so scheduled runs explore
+fresh seeds each night; failure messages report the absolute seed, so
+a red nightly reproduces locally with the same offset.
 ]]
 
 local FUZZ_SEEDS <const> = (tonumber(os.getenv("TECS_FUZZ_SEEDS")) or 5) as integer
 local FUZZ_OPS <const> = (tonumber(os.getenv("TECS_FUZZ_OPS")) or 200) as integer
+local FUZZ_SEED_OFFSET <const> = (tonumber(os.getenv("TECS_FUZZ_SEED_OFFSET")) or 0) as integer
 
 -- Id packing mirrors IdAllocator: slot + generation * 2^22.
 local GEN_STRIDE <const> = 4194304
@@ -63,6 +71,14 @@ local FzArmor = tecs.newComponent({
 })
 local FzTag = tecs.newTagComponent({ name = "FuzzTag" })
 
+-- FFI component: cdata columns through moves, batch bulk copies, and
+-- snapshot memcpy paths.
+local FzF = tecs.newFFIComponent({
+    name = "FuzzF",
+    container = {},
+    fields = {{"v", "double"}},
+})
+
 -- Dense exclusive reverse-indexed relationship (ChildOf covers the
 -- sparse + cascadeDelete axis).
 local FzLink = tecs.newRelationship({
@@ -71,11 +87,28 @@ local FzLink = tecs.newRelationship({
     reverseIndex = true,
 })
 
+-- Non-exclusive sparse reverse-indexed relationship: multi-target
+-- stores and the removeOne path. Transient: multi-target sparse stores
+-- do not fit the snapshot row format (one value per entity/container),
+-- so marks drop through snapshot round-trips in both worlds alike.
+local FzMark = tecs.newRelationship({
+    name = "FuzzMark",
+    sparse = true,
+    reverseIndex = true,
+    transient = true,
+})
+
+-- Pre-register the state tag so `createState("fuzzState")` reuses one
+-- global component across worlds and seeds.
+local FzState = tecs.newTagComponent({ name = "fuzzStateState" })
+local TTL <const> = tecs.builtins.TTL
+
 -- Ops draw from these; canonical reads also cover FzHealth (pulled in
 -- via requires, never set directly).
-local opComps: {tecs.Component} = {FzA, FzB, FzArmor, FzTag}
-local readComps: {tecs.Component} = {FzA, FzB, FzArmor, FzHealth, FzTag}
-local batchRemoveComps: {tecs.Component} = {FzB, FzTag, FzArmor, ChildOf}
+local opComps: {tecs.Component} = {FzA, FzB, FzArmor, FzTag, FzF}
+local readComps: {tecs.Component} = {FzA, FzB, FzArmor, FzHealth, FzTag, FzF}
+local batchRemoveComps: {tecs.Component} = {FzB, FzTag, FzArmor, ChildOf, FzF}
+local batchSpawnSets: {{tecs.Component}} = {{FzA}, {FzA, FzTag}, {FzF, FzB}}
 
 -- Park-Miller LCG: multiplier small enough that state * 16807 stays
 -- exact in a double, so sequences reproduce everywhere.
@@ -171,6 +204,23 @@ local function canonicalState(w: tecs.World): string
             if link then
                 piece[#piece + 1] = "Link=" .. tostring(link.target)
             end
+            if w:has(id, FzMark) then
+                piece[#piece + 1] = "MarkMark"
+            end
+            local markSources: {string} = {}
+            w:targets(id, FzMark, function(sourceId: integer, _ctx: nil)
+                markSources[#markSources + 1] = tostring(sourceId)
+            end, nil)
+            if #markSources > 0 then
+                table.sort(markSources)
+                piece[#piece + 1] = "MarkSrcs=" .. table.concat(markSources, ";")
+            end
+            if w:has(id, TTL) then
+                piece[#piece + 1] = "TTL=" .. tostring((w:get(id, TTL) as {string: any}).remaining)
+            end
+            if w:has(id, FzState) then
+                piece[#piece + 1] = "St"
+            end
             lines[#lines + 1] = table.concat(piece, ",")
         end
     end)
@@ -201,13 +251,20 @@ end
 
 describe("mutation differential fuzz", function()
     it("instant and staged execution converge over random op sequences", function()
-        for seed = 1, FUZZ_SEEDS do
+        for seedIndex = 1, FUZZ_SEEDS do
+            local seed = FUZZ_SEED_OFFSET + seedIndex
             local rng = newRng(seed * 7919)
             local wa = tecs.newWorld()
             local wb = tecs.newWorld()
             local alive: {integer} = {}
             local dead: {integer} = {}
             local keyN = 0
+            local statePushed = false
+
+            wa:newBundle("fuzzBundle", { required = {FzArmor}, with = { [FzB] = true } })
+            wb:newBundle("fuzzBundle", { required = {FzArmor}, with = { [FzB] = true } })
+            wa:createState("fuzzState")
+            wb:createState("fuzzState")
 
             -- Per-world persistent queries for the batch ops.
             local qs: {tecs.World: {string: tecs.Query}} = {
@@ -517,6 +574,152 @@ describe("mutation differential fuzz", function()
                         w:batchDespawn(qs[w].tag)
                         return nil
                     end)
+                end },
+                { weight = 3, run = function()  -- batchSpawn with callback fill
+                    local n = rng(4)
+                    local compSet = batchSpawnSets[rng(#batchSpawnSets)]
+                    local v0 = rng(1000)
+                    local function doBatch(w: tecs.World): {integer}
+                        local out: {integer} = {}
+                        local firstId, ids = w:batchSpawn(n, compSet,
+                            function(arch: tecs.Archetype, firstRow: integer, lastRow: integer, _c: integer)
+                                for ci = 1, #compSet do
+                                    local comp = compSet[ci]
+                                    if comp ~= FzTag then
+                                        local col = arch:getMut(comp)
+                                        for r = firstRow, lastRow do
+                                            col[r] = (comp as function(integer): tecs.Component)(v0 + r - firstRow + ci)
+                                        end
+                                    end
+                                end
+                            end)
+                        if firstId then
+                            for i = 0, n - 1 do
+                                out[#out + 1] = firstId + i
+                            end
+                        else
+                            local list = ids as {integer}
+                            for i = 1, n do
+                                out[#out + 1] = list[i]
+                            end
+                        end
+                        return out
+                    end
+                    local ra = doBatch(wa)
+                    wb:defer()
+                    local rb = doBatch(wb)
+                    wb:commit()
+                    for i = 1, n do
+                        luassert.equals(ra[i], rb[i], "batchSpawn ids diverged, seed " .. seed)
+                        alive[#alive + 1] = ra[i]
+                    end
+                end },
+                { weight = 2, run = function()  -- batchSpawnAt with fresh explicit ids
+                    local alloc = (wa as WorldImpl).allocator
+                    local base = alloc.nextFreshSlot + 11
+                    local n = rng(3)
+                    if base + n >= alloc.maxSlotCount then return end
+                    local idsList: {integer} = {}
+                    for i = 1, n do
+                        idsList[i] = (base + i) + GEN_STRIDE
+                    end
+                    local v0 = rng(1000)
+                    local function doBatchAt(w: tecs.World)
+                        w:batchSpawnAt(idsList, {FzA},
+                            function(arch: tecs.Archetype, firstRow: integer, lastRow: integer, _c: integer)
+                                local col = arch:getMut(FzA)
+                                for r = firstRow, lastRow do
+                                    col[r] = (FzA as function(integer): tecs.Component)(v0 + r - firstRow)
+                                end
+                            end)
+                    end
+                    doBatchAt(wa)
+                    wb:defer()
+                    doBatchAt(wb)
+                    wb:commit()
+                    for i = 1, n do
+                        alive[#alive + 1] = idsList[i]
+                    end
+                end },
+                { weight = 3, run = function()  -- bundle spawn
+                    local v = rng(1000)
+                    local id = bothWorlds(wa, wb, function(w: tecs.World): integer
+                        return w:spawnBundle("fuzzBundle", (FzArmor as function(integer): tecs.Component)(v))
+                    end)
+                    alive[#alive + 1] = id
+                end },
+                { weight = 4, run = function()  -- add a non-exclusive sparse mark
+                    local si = pickAliveIdx()
+                    if not si then return end
+                    local src = alive[si]
+                    local ti = pickAliveIdx()
+                    if not ti then return end
+                    local tgt = alive[ti]
+                    bothWorlds(wa, wb, function(w: tecs.World): integer
+                        w:set(src, FzMark(tgt))
+                        return nil
+                    end)
+                end },
+                { weight = 2, run = function()  -- remove one mark target
+                    local si = pickAliveIdx()
+                    if not si then return end
+                    local src = alive[si]
+                    local rel = wa:getFirstRelationship(src, FzMark)
+                    if rel == nil then return end
+                    local tgt = rel.target
+                    bothWorlds(wa, wb, function(w: tecs.World): integer
+                        w:remove(src, FzMark(tgt))
+                        return nil
+                    end)
+                end },
+                { weight = 1, run = function()  -- remove all mark targets
+                    local si = pickAliveIdx()
+                    if not si then return end
+                    local src = alive[si]
+                    bothWorlds(wa, wb, function(w: tecs.World): integer
+                        w:remove(src, FzMark)
+                        return nil
+                    end)
+                end },
+                { weight = 2, run = function()  -- set a TTL
+                    local si = pickAliveIdx()
+                    if not si then return end
+                    local id = alive[si]
+                    local ttl = rng(3) * 0.02
+                    bothWorlds(wa, wb, function(w: tecs.World): integer
+                        w:set(id, TTL(ttl))
+                        return nil
+                    end)
+                end },
+                { weight = 3, run = function()  -- frame tick: pipeline + TTL expiry
+                    local dt = rng(3) * 0.015
+                    wa:update(dt)
+                    wb:update(dt)
+                end },
+                { weight = 2, run = function()  -- state push/pop (auto-tag, despawn on exit)
+                    if statePushed then
+                        wa:popState()
+                        wb:popState()
+                        statePushed = false
+                    else
+                        wa:pushState("fuzzState")
+                        wb:pushState("fuzzState")
+                        statePushed = true
+                    end
+                end },
+                { weight = 1, run = function()  -- clearEntities wipes both worlds
+                    wa:clearEntities()
+                    wb:clearEntities()
+                    for i = #alive, 1, -1 do
+                        alive[i] = nil
+                    end
+                    for i = #dead, 1, -1 do
+                        dead[i] = nil
+                    end
+                end },
+                { weight = 1, run = function()  -- compact quiet worlds
+                    wa:compact()
+                    wb:compact()
                 end },
                 { weight = 1, run = function()  -- snapshot save/load round-trip
                     local binary = rng(2) == 1
