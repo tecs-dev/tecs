@@ -12,7 +12,7 @@ hero:
     - theme: brand
       text: Learn Tecs
       link: /tecs/
-    - theme: alt
+    - theme: brand
       text: Learn Tecs2D
       link: /tecs2d/
 
