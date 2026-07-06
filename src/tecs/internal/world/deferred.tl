@@ -871,27 +871,36 @@ function WorldImpl:_deferDespawn(id: integer)
     end
 
     -- Cascade delete + cleanup of relationships targeting this entity.
-    for container, store in pairs(relationshipStores) do
-        local contRel = container as ComponentInternal
-        if contRel.cascadeDelete then
-            local sources = store:removeTarget(id)
-            for sourceId in pairs(sources) do
-                local sourceSlot = IdAllocator.slotOf(sourceId)
-                if getEntityState(self, sourceSlot) ~= STATE_DESPAWN then
-                    self:_deferDespawn(sourceId)
+    -- Reverse-index work only applies when something targets this id;
+    -- the refcount check skips the per-store scans, and the relationship
+    -- instance is only constructed once sources are known to exist
+    -- (construction registers a per-target component).
+    if self._hasRelationshipStores then
+        local isTargeted = self._targetRefCounts[id] ~= nil
+        for container, store in pairs(relationshipStores) do
+            local contRel = container as ComponentInternal
+            if isTargeted and contRel.cascadeDelete then
+                local sources = store:removeTarget(id)
+                for sourceId in pairs(sources) do
+                    local sourceSlot = IdAllocator.slotOf(sourceId)
+                    if getEntityState(self, sourceSlot) ~= STATE_DESPAWN then
+                        self:_deferDespawn(sourceId)
+                    end
+                end
+            elseif isTargeted and not contRel.isSparse then
+                local sources = store:removeTarget(id)
+                if next(sources) ~= nil then
+                    local instance = (container as function(integer): any)(id) as Component
+                    for sourceId in pairs(sources) do
+                        local sourceSlot = IdAllocator.slotOf(sourceId)
+                        if getEntityState(self, sourceSlot) ~= STATE_DESPAWN then
+                            self:_deferRemove(sourceId, instance)
+                        end
+                    end
                 end
             end
-        elseif not contRel.isSparse then
-            local sources = store:removeTarget(id)
-            local instance = (container as function(integer): any)(id) as Component
-            for sourceId in pairs(sources) do
-                local sourceSlot = IdAllocator.slotOf(sourceId)
-                if getEntityState(self, sourceSlot) ~= STATE_DESPAWN then
-                    self:_deferRemove(sourceId, instance)
-                end
-            end
+            store:remove(id)
         end
-        store:remove(id)
     end
 
     -- Emit OnDespawn, then clear the slot's address whenever any
