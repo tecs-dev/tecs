@@ -353,15 +353,20 @@ local function commitSparseChanges(self: WorldImpl)
     local slots = self.allocator.slots as {integer: EntitySlot}
     local sparsePool = self._sparseArraysPool
     for slot, sets in pairs(self.sparseSets) do
-        if not (slotStamp[slot] == epoch and stateArr[slot] == STATE_DESPAWN) then
-            local packedId = IdAllocator.encodeId(slot, slots[slot].generation)
+        local stagedId = (sets as {any: any}).id as integer
+        -- Entries staged by an entity that died during the transaction
+        -- must not commit: a freed or recycled slot fails the generation
+        -- compare, and a not-yet-drained despawn holds STATE_DESPAWN.
+        if not IdAllocator.isStale(slots, stagedId, slot)
+            and not (slotStamp[slot] == epoch and stateArr[slot] == STATE_DESPAWN)
+        then
             for si = 1, #sets do
                 local value = sets[si]
                 local rel = value as types.components.Relationship
                 local container = rel.relationshipType as Component
                 local store = stores[container]
                 if store then
-                    store:set(packedId, value)
+                    store:set(stagedId, value)
                 end
             end
         end

@@ -113,7 +113,9 @@ local function codegenSrc(n: integer, requiredCount: integer, isSparse: {boolean
         local parts: {string} = {}
         for i = 1, n do
             if isSparse[i] then
-                parts[#parts + 1] = "    world:setSparseRaw(slot, " .. valueExpr(i) .. ")"
+                -- The packed handle: staging records it for commit-time
+                -- generation validation.
+                parts[#parts + 1] = "    world:setSparseRaw(id, " .. valueExpr(i) .. ")"
             else
                 parts[#parts + 1] = "    col" .. i .. "[row] = " .. valueExpr(i)
             end
@@ -128,7 +130,7 @@ local function codegenSrc(n: integer, requiredCount: integer, isSparse: {boolean
         parts[#parts + 1] = "        spawnQueue[c + 1] = slot"
         for i = 1, n do
             if isSparse[i] then
-                parts[#parts + 1] = "        world:setSparseRaw(slot, " .. valueExpr(i) .. ")"
+                parts[#parts + 1] = "        world:setSparseRaw(id, " .. valueExpr(i) .. ")"
             else
                 parts[#parts + 1] = "        spawnQueue[c + " .. (queueSlot[i] + 1) .. "] = " .. valueExpr(i)
             end

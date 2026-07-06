@@ -644,4 +644,97 @@ describe("Sparse Relationships", function()
                 "sparse relationships should not create per-target archetypes, got " .. newArchetypes .. " new")
         end)
     end)
+
+    describe("staged value lifecycle", function()
+        it("set then remove of the same target in one scope leaves nothing", function()
+            local Follows = tecs.newRelationship({
+                name = "SparseStagedFollows1",
+                sparse = true,
+            })
+            local target = world:spawn()
+            local e = world:spawn()
+            world:commit()
+
+            world:defer()
+            world:set(e, Follows(target) as tecs.Component)
+            world:remove(e, Follows(target) as tecs.Component)
+            world:commit()
+
+            luassert.is_false(world:has(e, Follows),
+                "the container marker must not survive the remove")
+            luassert.is_nil(world:getFirstRelationship(e, Follows),
+                "the staged value must not resurrect at commit")
+        end)
+
+        it("removing one staged target keeps the other staged target", function()
+            local Follows = tecs.newRelationship({
+                name = "SparseStagedFollows2",
+                sparse = true,
+            })
+            local t1 = world:spawn()
+            local t2 = world:spawn()
+            local e = world:spawn()
+            world:commit()
+
+            world:defer()
+            world:set(e, Follows(t1) as tecs.Component)
+            world:set(e, Follows(t2) as tecs.Component)
+            world:remove(e, Follows(t1) as tecs.Component)
+            world:commit()
+
+            luassert.is_true(world:has(e, Follows))
+            luassert.is_nil(world:get(e, Follows(t1) as tecs.Component),
+                "the removed target must not resurrect")
+            luassert.is_not_nil(world:get(e, Follows(t2) as tecs.Component),
+                "the surviving staged target must commit")
+        end)
+
+        it("staged values die with a same-transaction despawn and slot reuse", function()
+            local Marker = tecs.newComponent({
+                name = "SparseStagedMarker",
+                container = {},
+                fields = {"v"},
+                defaults = {0},
+            })
+            local Follows = tecs.newRelationship({
+                name = "SparseStagedFollows3",
+                sparse = true,
+            })
+            local target = world:spawn()
+            local e1 = world:spawn(Marker(1))
+            local e2 = world:spawn(Marker(2))
+            -- Survivor keeps the archetype off the whole-archetype truncate
+            -- path, so removals notify per row.
+            local e3 = world:spawn(Marker(3))
+            world:commit()
+
+            -- Fires per removal during the despawn drain; the second
+            -- removal runs after e1's slot was freed, so the spawn
+            -- recycles it inside the same transaction.
+            local removals = 0
+            local recycled: integer = nil
+            world:query({
+                name = "SparseSlotReuseWatcher",
+                include = {Marker},
+                onEntitiesRemoved = function(_arch: tecs.Archetype, _first: integer, _last: integer, _count: integer)
+                    removals = removals + 1
+                    if removals == 2 and not recycled then
+                        recycled = world:spawn()
+                    end
+                end,
+            })
+
+            world:defer()
+            world:set(e1, Follows(target) as tecs.Component)
+            world:despawn(e1)
+            world:despawn(e2)
+            world:commit()
+
+            luassert.is_not_nil(recycled)
+            luassert.is_true(world:isAlive(recycled))
+            luassert.is_true(world:isAlive(e3))
+            luassert.is_nil(world:getFirstRelationship(recycled, Follows),
+                "a dead entity's staged relationship must not attach to the recycled slot")
+        end)
+    end)
 end)
