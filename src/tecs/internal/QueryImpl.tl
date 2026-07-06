@@ -491,6 +491,11 @@ function QueryImpl:onArchetypeDestroyed(archetype: Archetype)
 end
 
 function QueryImpl:onNewArchetype(archetype: Archetype)
+    -- Membership guard: tolerate any delivery ordering without
+    -- double-adding an archetype.
+    if self._archetypeIndices[archetype] then
+        return
+    end
     if not archetypeMatches(self, archetype) then
         return
     end
@@ -591,6 +596,13 @@ local function newQuery(
         end
     end
 
+    -- Subscribe before the initial callbacks run: an onEntitiesAdded
+    -- callback can spawn an entity whose new archetype must reach this
+    -- query; the membership guard in onNewArchetype absorbs overlap.
+    if not isTemp then
+        subscribeQueryToArchetypeCreated(world, self)
+    end
+
     for i = 1, #matchingArchetypes do
         local archetype = matchingArchetypes[i]
         archetypeIndices[archetype] = i
@@ -601,10 +613,6 @@ local function newQuery(
                 onEntitiesAdded(archetype, 1, count, count)
             end
         end
-    end
-
-    if not isTemp then
-        subscribeQueryToArchetypeCreated(world, self)
     end
 
     return self

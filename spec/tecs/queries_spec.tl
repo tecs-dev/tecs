@@ -1352,4 +1352,40 @@ describe("Queries module tests", function()
             luassert.equals(2, archsSeen)
         end)
     end)
+
+    describe("archetype subscription window", function()
+        it("registers archetypes created by initial onEntitiesAdded callbacks", function()
+            local e1 = world:spawn(Position(1, 1))
+            world:update(0)
+
+            local spawned: integer = nil
+            local triggered = false
+            local q = world:query({
+                include = {Position},
+                onEntitiesAdded = function(_arch: tecs.Archetype, _first: integer, _last: integer, _count: integer)
+                    if not triggered then
+                        triggered = true
+                        -- Creates a new matching archetype during query
+                        -- construction, before the initial scan finishes.
+                        spawned = world:spawn(Position(9, 9), Velocity(1, 1))
+                    end
+                end,
+            })
+            world:commit()
+
+            local seen: {integer: boolean} = {}
+            local count = 0
+            for _, len, entities in q:iter() do
+                for r = 1, len do
+                    count = count + 1
+                    seen[entities[r]] = true
+                end
+            end
+
+            luassert.equals(2, count,
+                "the archetype created by the initial callback must join the query")
+            luassert.is_true(seen[e1])
+            luassert.is_true(seen[spawned])
+        end)
+    end)
 end)
