@@ -477,4 +477,53 @@ describe("MessageBus", function()
             luassert.is_equal(99, seen)
         end)
     end)
+
+    describe("address clear during emit", function()
+        it("survives an observer despawning its own entity mid-emit", function()
+            local world = tecs.newWorld()
+            -- A global OnDespawn observer makes despawn clear the entity's
+            -- observer address inline.
+            world:observe(0, tecs.builtins.OnDespawn, function(_e: tecs.builtins.OnDespawn) end)
+
+            local e = world:spawn()
+            world:commit()
+
+            local secondRan = false
+            world:observe(e, Greet, function(_g: Greet)
+                world:despawn(e)
+            end)
+            world:observe(e, Greet, function(_g: Greet)
+                secondRan = true
+            end)
+
+            world:emit(e, Greet, "hi")
+
+            luassert.is_true(secondRan,
+                "dispatch must finish over the array being cleared")
+            luassert.is_false(world:isAlive(e))
+
+            -- The address is cleared; a later emit finds no observers.
+            local ranAfter = false
+            world:observe(e, Depart, function(_d: Depart) ranAfter = true end)
+            world:emit(e, Greet, "again")
+            luassert.is_false(ranAfter)
+        end)
+
+        it("supports fresh observers at a cleared address after the emit", function()
+            local world = tecs.newWorld()
+            world:observe(0, tecs.builtins.OnDespawn, function(_e: tecs.builtins.OnDespawn) end)
+
+            local e = world:spawn()
+            world:commit()
+            world:observe(e, Greet, function(_g: Greet)
+                world:despawn(e)
+            end)
+            world:emit(e, Greet, "hi")
+
+            local seen: {string} = {}
+            world:observe(e, Greet, function(g: Greet) seen[#seen + 1] = g.name end)
+            world:emit(e, Greet, "fresh")
+            luassert.same({"fresh"}, seen)
+        end)
+    end)
 end)

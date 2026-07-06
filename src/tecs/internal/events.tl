@@ -443,12 +443,21 @@ end
 function MessageBus:clearAddress(address: integer)
     local byAddress = self._observers[address]
     if byAddress then
+        -- During an emit the in-flight dispatch loop may hold one of these
+        -- callbacks arrays, and pooling is clear-on-release; releasing would
+        -- nil entries under the loop. Detach without pooling and let the
+        -- tables fall to GC instead.
+        local pooling = self._emitDepth == 0
         local removed = 0
         for _, callbacks in pairs(byAddress) do
             removed = removed + math.floor((callbacks[0] as integer) / 2)
-            self._callbacksPool:release(callbacks as {any})
+            if pooling then
+                self._callbacksPool:release(callbacks as {any})
+            end
         end
-        self._byAddressPool:release(byAddress)
+        if pooling then
+            self._byAddressPool:release(byAddress)
+        end
         self._observers[address] = nil
         self._totalObservers = self._totalObservers - removed
     end
@@ -476,11 +485,14 @@ end
 
 function MessageBus:reset()
     if self._totalObservers > 0 then
-        for _, byAddress in pairs(self._observers) do
-            for _, callbacks in pairs(byAddress) do
-                self._callbacksPool:release(callbacks as {any})
+        -- Same in-flight hazard as clearAddress: skip pooling mid-emit.
+        if self._emitDepth == 0 then
+            for _, byAddress in pairs(self._observers) do
+                for _, callbacks in pairs(byAddress) do
+                    self._callbacksPool:release(callbacks as {any})
+                end
+                self._byAddressPool:release(byAddress)
             end
-            self._byAddressPool:release(byAddress)
         end
         table_clear(self._observers)
         self._totalObservers = 0
