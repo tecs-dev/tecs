@@ -68,6 +68,7 @@ export default defineConfig({
         items: [
           { text: 'Getting Started', link: '/tecs/' },
           { text: 'World', link: '/tecs/world' },
+          { text: 'Mutation Model', link: '/tecs/mutation-model' },
           { text: 'Phases', link: '/tecs/phases' },
           { text: 'Systems', link: '/tecs/systems' },
           {

@@ -12,8 +12,10 @@
 :root {
   --tecs-c-near-black: #110f0d;
   --tecs-c-purple: #372455;
+  --tecs-c-dark-heading-purple: #a192b1;
   --tecs-c-lavender: #867795;
   --tecs-c-crimson: #dd2020;
+  --tecs-c-logo-red: #da6f66;
   --tecs-c-tan: #9b8d75;
 }
 
@@ -197,11 +199,11 @@
     margin-left: -12px;
     padding: 0 12px;
     background: #000;
-    color: #da6f66;
-    -webkit-text-fill-color: #da6f66;
+    color: var(--tecs-c-logo-red);
+    -webkit-text-fill-color: var(--tecs-c-logo-red);
     text-decoration: underline;
-    text-decoration-color: var(--tecs-c-purple);
-    text-decoration-thickness: 3px;
+    text-decoration-color: var(--tecs-c-dark-heading-purple);
+    text-decoration-thickness: 2px;
     text-underline-offset: 5px;
   }
 
@@ -356,7 +358,7 @@
  * -------------------------------------------------------------------------- */
 
 .dark {
-  --vp-c-brand-1: #a192b1;
+  --vp-c-brand-1: var(--tecs-c-dark-heading-purple);
   --vp-c-brand-2: #b5a6c5;
   --vp-c-brand-3: var(--vp-c-brand-1);
   --vp-c-brand-soft: #86779529;
@@ -377,6 +379,7 @@
   --vp-c-gutter: var(--vp-c-bg);
 
   --vp-code-block-bg: #17141c;
+  --vp-code-tab-active-bar-color: var(--tecs-c-logo-red);
   --tecs-surface-outline: #3d3748;
   --vp-code-block-border-color: var(--tecs-surface-outline);
 
@@ -447,7 +450,7 @@
   }
 
   .outline-marker {
-    background-color: var(--tecs-c-crimson) !important;
+    background-color: var(--tecs-c-logo-red) !important;
   }
 
   .VPSidebar {
@@ -459,7 +462,15 @@
   }
 
   .vp-doc a {
-    color: #c2a875;
+    color: var(--tecs-c-logo-red);
+  }
+
+  .vp-doc a:hover {
+    color: #f08980;
+  }
+
+  .vp-doc a:active {
+    color: #ffaaa3;
   }
 
   /* Softer zebra striping: closer to the page background. */
