@@ -404,8 +404,14 @@ function WorldImpl:spawn(...: Component): integer
         return self:_deferSpawn(...)
     end
 
-    local ok, id = self:_instantSpawn(...)
-    if ok then return id end
+    -- OnSpawn observers require the staged path: the event contract is a
+    -- staged entity (not alive until commit) whose further mutations defer.
+    -- The fallback drains before returning, so the caller still receives a
+    -- committed entity.
+    if not self:hasObservers(0, builtins.OnSpawn) then
+        local ok, id = self:_instantSpawn(...)
+        if ok then return id end
+    end
     self._scopeDepth = 1
     local sid = self:_deferSpawn(...)
     self:_drain()

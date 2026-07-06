@@ -262,9 +262,9 @@ local function migratePending(src: Archetype, dst: Archetype, slot: integer)
     end
 end
 
--- Common setup: mark the slot as a spawn claim, emit OnSpawn, and
--- return freshly-borrowed accumulator state. Called from every
--- deferSpawnN; shared by the macro expansions in those functions.
+-- Common setup: mark the slot as a spawn claim and return freshly-borrowed
+-- accumulator state. Called from every deferSpawnN; shared by the macro
+-- expansions in those functions.
 local macro deferBegin!()
     return ```
         local world = self
@@ -273,8 +273,6 @@ local macro deferBegin!()
         setEntityState(self, slot, STATE_SPAWN)
         self.entityStateCount = self.entityStateCount + 1
         self.isDirty = true
-
-        world:emit(0, OnSpawn, id)
 
         local arch = self.emptyArchetype as Archetype
         local vals: {any} = borrowVals(self)
@@ -325,6 +323,11 @@ local macro deferFinish!()
             self.dirtyArchetypeList[__c] = arch
             self.dirtyArchetypeCount = __c
         end
+
+        -- Emit after the spawn is fully staged so observer mutations on
+        -- `id` migrate the pending archetype instead of being overwritten
+        -- by the staging above.
+        world:emit(0, OnSpawn, id)
 
         if exclusiveByContainer then
             self._exclusivePool:release(exclusiveByContainer)

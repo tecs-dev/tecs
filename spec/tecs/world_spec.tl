@@ -132,6 +132,46 @@ describe("WorldImpl", function()
             luassert.is_false(w2:isAlive(entity), "Entity should not be alive after despawning")
         end)
 
+        it("emits OnSpawn for a top-level spawn", function()
+            local w2 = tecs.newWorld()
+            local fired = 0
+            local aliveDuring: boolean = true
+            local eventId: integer = 0
+            w2:observe(0, tecs.builtins.OnSpawn, function(e: tecs.builtins.OnSpawn)
+                fired = fired + 1
+                eventId = e.entity
+                aliveDuring = w2:isAlive(e.entity)
+                w2:set(e.entity, VelComponent(9, 8))
+            end)
+
+            local id = w2:spawn(PosComponent(1, 2))
+
+            luassert.equals(1, fired, "OnSpawn fires once per spawn")
+            luassert.equals(id, eventId, "OnSpawn carries the spawned id")
+            luassert.is_false(aliveDuring, "entity is staged during the event")
+            luassert.is_true(w2:isAlive(id), "spawn returns a committed entity")
+            luassert.equals(1, (w2:get(id, PosComponent) as TestHelpers.Pos).x)
+            luassert.equals(9, (w2:get(id, VelComponent) as TestHelpers.Vel).x,
+                "observer mutation staged during OnSpawn survives the drain")
+        end)
+
+        it("keeps observer mutations staged during a deferred OnSpawn", function()
+            local w2 = tecs.newWorld()
+            w2:observe(0, tecs.builtins.OnSpawn, function(e: tecs.builtins.OnSpawn)
+                w2:set(e.entity, VelComponent(7, 6))
+            end)
+
+            w2:defer()
+            local id = w2:spawn(PosComponent(3, 4))
+            luassert.is_false(w2:isAlive(id))
+            w2:commit()
+
+            luassert.is_true(w2:isAlive(id))
+            luassert.equals(3, (w2:get(id, PosComponent) as TestHelpers.Pos).x)
+            luassert.equals(7, (w2:get(id, VelComponent) as TestHelpers.Vel).x,
+                "observer component must not be clobbered by spawn staging")
+        end)
+
         it("despawns entities and emits event", function()
             local w2 = tecs.newWorld()
 
