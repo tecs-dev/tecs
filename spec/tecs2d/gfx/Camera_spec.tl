@@ -748,4 +748,68 @@ describe("Camera", function()
             luassert.is_true(cam:getTrauma() < 0.8, "trauma should have decayed")
         end)
     end)
+
+    describe("captureState / applyState", function()
+        it("round-trips position, zoom, rotation, lerp, and bounds", function()
+            local src = Camera.new({screenWidth=800, screenHeight=600, virtualHeight=600})
+            src:setPosition(120, -45)
+            src:setZoom(2.5)
+            src.lerpingEnabled = false
+            src:setRotation(0.75)
+            src:setLerpSpeed(12)
+            src:setWorldBounds(-1000, -1000, 1000, 1000)
+            src:setClamp(true)
+
+            local state = src:captureState()
+
+            local dst = Camera.new({screenWidth=800, screenHeight=600, virtualHeight=600})
+            dst:applyState(state)
+
+            local x, y = dst:getPosition()
+            luassert.equals(120, x)
+            luassert.equals(-45, y)
+            luassert.equals(2.5, dst:getZoom())
+            luassert.equals(0.75, dst:getRotation())
+            luassert.is_false(dst.lerpingEnabled)
+            luassert.equals(12, dst.lerpSpeed)
+            luassert.is_true(dst.clampToBounds)
+            luassert.is_not_nil(dst.worldBounds)
+            luassert.equals(1000, dst.worldBounds[3])
+        end)
+
+        it("snaps target to current so no lerp animation plays after restore", function()
+            local src = Camera.new({screenWidth=800, screenHeight=600, virtualHeight=600})
+            src:setPosition(300, 400)
+
+            local dst = Camera.new({screenWidth=800, screenHeight=600, virtualHeight=600})
+            dst.lerpingEnabled = true
+            dst:move(0, 0)
+            dst:applyState(src:captureState())
+
+            -- Both current and target land on the restored pose; an update
+            -- tick must not drift the camera.
+            dst:update(0.5)
+            luassert.equals(300, dst.x)
+            luassert.equals(400, dst.y)
+        end)
+
+        it("does not alias the source worldBounds table", function()
+            local src = Camera.new({screenWidth=800, screenHeight=600, virtualHeight=600})
+            src:setWorldBounds(0, 0, 100, 100)
+
+            local state = src:captureState()
+            src:setWorldBounds(0, 0, 999, 999)
+
+            local dst = Camera.new({screenWidth=800, screenHeight=600, virtualHeight=600})
+            dst:applyState(state)
+            luassert.equals(100, dst.worldBounds[3])
+        end)
+
+        it("tolerates nil data", function()
+            local cam = Camera.new({screenWidth=800, screenHeight=600, virtualHeight=600})
+            cam:setPosition(50, 60)
+            cam:applyState(nil)
+            luassert.equals(50, cam.x)
+        end)
+    end)
 end)

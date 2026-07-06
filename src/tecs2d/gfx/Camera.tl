@@ -338,6 +338,18 @@ local record Camera
     --- Get the current trauma level.
     --- @return Trauma level (0-1).
     getTrauma: function(self): number
+
+    --- Capture the camera's durable view state (position, zoom, rotation,
+    --- lerp settings, and world bounds) as a plain table for snapshotting.
+    --- Screen/viewport dimensions and transient screenshake are excluded; the
+    --- pipeline re-establishes those on init and resize.
+    --- @return A string.buffer-encodable state table.
+    captureState: function(self): {string: any}
+
+    --- Apply state produced by `captureState`, snapping position and rotation
+    --- without lerp animation and recomputing bounds.
+    --- @param data The captured state table.
+    applyState: function(self, data: {string: any})
 end
 
 local CAMERA_MT <const>: metatable<Camera> = {
@@ -708,6 +720,71 @@ end
 
 function Camera:getViewport(): number, number, number, number
     return self._viewportX, self._viewportY, self._viewportW, self._viewportH
+end
+
+function Camera:captureState(): {string: any}
+    local state: {string: any} = {
+        name = self._name,
+        x = self.x,
+        y = self.y,
+        targetX = self.targetX,
+        targetY = self.targetY,
+        zoom = self.zoom,
+        rotation = self.rotation,
+        targetRotation = self.targetRotation,
+        lerpingEnabled = self.lerpingEnabled,
+        lerpSpeed = self.lerpSpeed,
+        clampToBounds = self.clampToBounds,
+        layerMask = self._layerMask,
+    }
+    -- worldBounds is {minX, minY, maxX, maxY} or nil; copy so the snapshot
+    -- doesn't alias the live camera's bounds table.
+    if self.worldBounds then
+        local b = self.worldBounds
+        state.worldBounds = {b[1], b[2], b[3], b[4]}
+    end
+    return state
+end
+
+function Camera:applyState(data: {string: any})
+    if not data then return end
+
+    -- Bounds first: clampPosition (called via updateBounds and any later
+    -- setter) reads these, so restore them before the position.
+    self.clampToBounds = data.clampToBounds == true
+    local bounds = data.worldBounds as {number}
+    if bounds then
+        self.worldBounds = {bounds[1], bounds[2], bounds[3], bounds[4]}
+    else
+        self.worldBounds = nil
+    end
+
+    if data.zoom ~= nil then
+        self.zoom = max(MIN_ZOOM, data.zoom as number)
+    end
+    if data.lerpingEnabled ~= nil then
+        self.lerpingEnabled = data.lerpingEnabled == true
+    end
+    if data.lerpSpeed ~= nil then
+        self.lerpSpeed = data.lerpSpeed as number
+    end
+    if data.layerMask ~= nil then
+        self._layerMask = data.layerMask as integer
+    end
+
+    -- Snap both current and target so no lerp animation plays from the
+    -- pre-load pose toward the restored one.
+    local x = (data.x as number) or self.x
+    local y = (data.y as number) or self.y
+    self.x, self.y = x, y
+    self.targetX = (data.targetX as number) or x
+    self.targetY = (data.targetY as number) or y
+
+    local rotation = (data.rotation as number) or self.rotation
+    self.rotation = rotation
+    self.targetRotation = (data.targetRotation as number) or rotation
+
+    self:updateBounds()
 end
 
 function Camera:setLayerMask(mask: integer)
