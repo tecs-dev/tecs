@@ -671,10 +671,6 @@ function WorldImpl:deferRemoveRaw(id: integer, component: Component)
             local s = (self.allocator.slots as {integer: EntitySlot})[slot]
             local archetype = self.archetypeIndex[s.archetypeId]
             if archetype then
-                if archetype ~= self.lastArch then
-                    self.lastArch = archetype
-                end
-
                 if archetype.columns[component] == nil then
                     return  -- component not present
                 end
