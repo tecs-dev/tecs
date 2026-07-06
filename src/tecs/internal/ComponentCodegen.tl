@@ -67,18 +67,13 @@ local function createCallFn(spec: ComponentCodegen.CallSpec): function(any, ...:
         allocArgs[i] = "l" .. i
     end
 
+    -- Defaults fill via statements, not the `a == nil and d or a`
+    -- expression: that form collapses a `false` default to nil.
     local hasDefaults = defaults ~= nil
     for i = 1, #fields do
         local param = "a" .. i
-        local field = fields[i]
-        local valueExpr: string
-        if hasDefaults and defaults[i] ~= nil then
-            valueExpr = param .. " == nil and d[" .. i .. "] or " .. param
-        else
-            valueExpr = param
-        end
-        tableAssigns[i] = field .. " = " .. valueExpr
-        allocArgs[leadingArgCount + i] = valueExpr
+        tableAssigns[i] = fields[i] .. " = " .. param
+        allocArgs[leadingArgCount + i] = param
     end
 
     if hasDefaults then
@@ -118,7 +113,15 @@ local function createCallFn(spec: ComponentCodegen.CallSpec): function(any, ...:
         CODEGEN_BUF:putf("a%d", i)
         needComma = true
     end
-    CODEGEN_BUF:put(")\n    ")
+    CODEGEN_BUF:put(")\n")
+    if hasDefaults then
+        for i = 1, #fields do
+            if defaults[i] ~= nil then
+                CODEGEN_BUF:putf("    if a%d == nil then a%d = d[%d] end\n", i, i, i)
+            end
+        end
+    end
+    CODEGEN_BUF:put("    ")
 
     if backend == "tableLiteral" then
         if spec.instanceMt then

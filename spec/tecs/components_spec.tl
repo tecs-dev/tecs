@@ -949,4 +949,28 @@ describe("components", function()
             luassert.is_equal(parent, data.target)
         end)
     end)
+
+    describe("constructor defaults", function()
+        it("preserves false defaults", function()
+            local record Flags is tecs.Component
+                flag: boolean
+                n: number
+            end
+            local FlagComp: Flags = tecs.newComponent({
+                name = "FalseDefaultComp" .. math.random(1, 1000000),
+                container = {} as Flags,
+                fields = {"flag", "n"},
+                defaults = {false, 5},
+            })
+
+            local a = FlagComp()
+            luassert.equals(false, a.flag,
+                "an omitted argument must take the false default, not nil")
+            luassert.equals(5, a.n)
+
+            local b = FlagComp(true, 1)
+            luassert.is_true(b.flag)
+            luassert.equals(1, b.n)
+        end)
+    end)
 end)
