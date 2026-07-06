@@ -672,4 +672,63 @@ describe("relationships", function()
                 "child of a high-gen parent should cascade delete")
         end)
     end)
+
+    describe("dense table relationship component ids", function()
+        local record OwesRec is tecs.Component
+            amount: number
+        end
+
+        local Owes = tecs.newRelationship({
+            name = "DenseRelIdOwes",
+            container = OwesRec,
+            fields = {"amount"},
+        })
+
+        it("allocates a distinct id per instance", function()
+            local t1 = world:spawn()
+            local t2 = world:spawn()
+            world:commit()
+
+            local containerId = (Owes as {any: any}).componentId as integer
+            local a = Owes:targeting(t1) as {any: any}
+            local b = Owes:targeting(t2) as {any: any}
+
+            luassert.not_equals(containerId, a.componentId as integer)
+            luassert.not_equals(containerId, b.componentId as integer)
+            luassert.not_equals(a.componentId as integer, b.componentId as integer)
+
+            -- The container must keep its own by-id entry.
+            local componentsInternal = require("tecs.internal.components")
+            local byId = componentsInternal.componentsById as {integer: any}
+            luassert.equals(Owes, byId[containerId])
+        end)
+
+        it("matches only the queried target after new archetypes appear", function()
+            local t1 = world:spawn()
+            local t2 = world:spawn()
+            world:commit()
+
+            local q = world:query({include = {Owes:targeting(t1) as tecs.Component}})
+
+            local e1 = world:spawn(Owes(t1) as tecs.Component)
+            world:commit()
+            -- Creates a new archetype after the query exists; it must not
+            -- match through a signature bit shared with the container.
+            local e2 = world:spawn(Owes(t2) as tecs.Component)
+            world:commit()
+
+            local count = 0
+            local seen: {integer: boolean} = {}
+            for _, len, entities in q:iter() do
+                for r = 1, len do
+                    count = count + 1
+                    seen[entities[r]] = true
+                end
+            end
+
+            luassert.equals(1, count)
+            luassert.is_true(seen[e1])
+            luassert.is_nil(seen[e2])
+        end)
+    end)
 end)

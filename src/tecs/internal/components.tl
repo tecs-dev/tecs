@@ -102,7 +102,10 @@ function components.registerComponent<T is Component>(container: Component): T
         error("Component " .. container.componentName .. " already registered")
     end
 
-    if not container.componentId then
+    -- Own-field check: dense relationship instances resolve the container
+    -- through their metatable, and inheriting the container's id would give
+    -- every instance one shared signature bit and clobber componentsById.
+    if not rawget(container as {any: any}, "componentId") then
         container.componentId = componentIds.allocate()
     end
 
