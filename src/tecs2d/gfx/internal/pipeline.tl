@@ -1134,9 +1134,13 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
     ---------------------------------------------------------------------------
     self.renderer._renderPhase = "world"
 
-    -- Run culling compute shaders (uses scaled G-buffer dims for tile viewport)
+    -- Run culling compute shaders (uses scaled G-buffer dims for tile viewport).
+    -- Restrict the cull's layer mask to the world layers: screen-layer
+    -- entities are culled and drawn by the screen phase, and world
+    -- entities must not survive into it.
+    local worldLayerMask = bit.band(cam._layerMask, bit.lshift(1, worldMaxLayer) - 1)
     zone("cull")
-    self.renderer:cull(camX, camY, renderZoom, useLowRes, globalTime, self.screenSpaceMask, self.ignoreZoomMask, self.virtualCoordsMask, self.unlitMask, self.parallaxX, self.parallaxY, self.sortModes, rot, cam._layerMask)
+    self.renderer:cull(camX, camY, renderZoom, useLowRes, globalTime, self.screenSpaceMask, self.ignoreZoomMask, self.virtualCoordsMask, self.unlitMask, self.parallaxX, self.parallaxY, self.sortModes, rot, worldLayerMask)
     zone()
 
     if hasScreenLayers then
@@ -1238,8 +1242,14 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
         self.renderer.screenWidth = sw
         self.renderer.screenHeight = sh
 
-        -- Cull with screen-space viewport (screen dims, identity camera)
-        self.renderer:cull(0, 0, 1.0, false, globalTime, self.screenSpaceMask, self.ignoreZoomMask, self.virtualCoordsMask, self.unlitMask, self.parallaxX, self.parallaxY, self.sortModes, 0.0, cam._layerMask)
+        -- Cull with screen-space viewport (screen dims, identity camera).
+        -- Restrict the layer mask to the screen layers: without this,
+        -- every world entity passes the screen-phase cull (its zoom is
+        -- 1.0 and the viewport comes from the world camera's AABB, so
+        -- zoomed-out views re-emit the whole world) and gets drawn just
+        -- to be rejected by LayerRange in the vertex shader.
+        local screenLayerMask = bit.band(cam._layerMask, bit.band(0xFFFF, bit.bnot(bit.lshift(1, self._firstScreenLayer - 1) - 1)))
+        self.renderer:cull(0, 0, 1.0, false, globalTime, self.screenSpaceMask, self.ignoreZoomMask, self.virtualCoordsMask, self.unlitMask, self.parallaxX, self.parallaxY, self.sortModes, 0.0, screenLayerMask)
 
         -- Render G-buffer at native resolution (screen-phase canvases)
         self.renderer:renderGBuffer(0, 0, 1.0, false, globalTime, gBufferCb, 0.0, 0.0, 0.0)
