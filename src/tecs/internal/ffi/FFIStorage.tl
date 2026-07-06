@@ -289,6 +289,7 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
     end
 
     local structSize = C.sizeof(structName) as integer
+    local fingerprint = table.concat(schemaParts, ",") .. "|" .. structSize
 
     local arrayTypeName = structName .. "[?]"
     local arrayType = arrayTypeCache[arrayTypeName]
@@ -528,6 +529,12 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
                 metadataFields.componentId = (container as {string:any}).componentId
                 metadataFields.storage = (container as {string:any}).storage
                 metadataFields.storageType = (container as {string:any}).storageType
+                -- Cdata relationship instances serve as archetype column
+                -- keys; move plans and snapshot bulk paths classify FFI
+                -- columns by `structSize`, so instances must expose it
+                -- like plain FFI containers do.
+                metadataFields.structSize = structSize
+                metadataFields.fingerprint = fingerprint
             end
             -- The allocator is called for every FFI construction; hand out
             -- createInstance directly instead of a vararg forwarder.
@@ -541,7 +548,7 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
         _ffiConstructor = true,
         -- Canonical schema fingerprint, copied to the container by
         -- `registerComponent`. Snapshot uses this to detect schema drift.
-        _fingerprint = table.concat(schemaParts, ",") .. "|" .. structSize,
+        _fingerprint = fingerprint,
         _structSize = structSize,
 
         -- Set shared metadata read by FFI instances through their metatype.

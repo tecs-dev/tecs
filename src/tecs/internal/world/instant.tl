@@ -222,9 +222,17 @@ function WorldImpl:instantSetRaw(id: integer, componentType: Component, value: a
         dstArch, requiredList = applyRequires(dstArch, ci, self.archetypeIndex)
     end
 
-    if dstArch == srcArch then return end
+    -- Dense relationship instances also carry their wildcard container
+    -- so wildcard queries match; the staged path adds it in
+    -- `_deferSetSlow`, this path adds it here.
+    local addedContainer: Component = nil
+    local wildcard = ci.wildcardContainer
+    if wildcard and dstArch.columns[wildcard] == nil then
+        dstArch = dstArch:withComponent(wildcard, self.archetypeIndex)
+        addedContainer = wildcard
+    end
 
-    -- `withComponent` handles wildcard container insertion for dense rel instances.
+    if dstArch == srcArch then return end
 
     local newRow = (dstArch.entities as {integer})[0] as integer
     if newRow + 1 > dstArch.capacity then
@@ -243,6 +251,12 @@ function WorldImpl:instantSetRaw(id: integer, componentType: Component, value: a
     local newCol = dstArch.columns[componentType as Component] as {any}
     if newCol then
         newCol[dstLuaRow] = value
+    end
+    if addedContainer then
+        local containerCol = dstArch.columns[addedContainer] as {any}
+        if containerCol then
+            containerCol[dstLuaRow] = addedContainer
+        end
     end
     writeRequired(requiredList, dstArch, dstLuaRow)
 
@@ -400,6 +414,13 @@ function WorldImpl:_instantDespawn(id: integer): boolean
     if self._hasRelationshipStores then
         if self._targetRefCounts[id] then
             return false
+        end
+        -- Source-side cleanup: drop this entity's own relationship
+        -- store entries and their reverse-index links. The staged path
+        -- does this in `_deferDespawn`; skipping it here leaks store
+        -- entries that resurrect when the slot recycles.
+        for _, store in pairs(self.relationshipStores) do
+            store:remove(id)
         end
     end
 

@@ -49,6 +49,13 @@ local MatVel = tecs.newComponent({
 local MatMarker = tecs.newTagComponent({ name = "MatrixMarker" })
 local MatBatchTag = tecs.newTagComponent({ name = "MatrixBatchTag" })
 
+-- Dense exclusive reverse-indexed relationship (compact FFI layout).
+local MatLink = tecs.newRelationship({
+    name = "MatrixLink",
+    exclusive = true,
+    reverseIndex = true,
+})
+
 local type Ops = function(tecs.World)
 
 local record Mode
@@ -366,6 +373,93 @@ describe("bundle spawn parity", function()
         w:commit()
         luassert.is_true(w:isAlive(id))
         luassert.equals(2, w:get(id, MatPos).x)
+        validate(w)
+    end)
+end)
+
+describe("relationship and snapshot path parity", function()
+    it("instant set of a dense relationship instance adds the wildcard container", function()
+        local w = tecs.newWorld()
+        local target = w:spawn(MatPos(1))
+        local e = w:spawn(MatPos(2))
+        w:set(e, MatLink(target))
+        luassert.is_true(w:has(e, MatLink), "container marker present on the instant path")
+        luassert.equals(target, w:getFirstRelationship(e, MatLink).target)
+
+        local w2 = tecs.newWorld()
+        local target2 = w2:spawn(MatPos(1))
+        local e2 = w2:spawn(MatPos(2))
+        w2:defer()
+        w2:set(e2, MatLink(target2))
+        w2:commit()
+        luassert.is_true(w2:has(e2, MatLink), "staged path agrees")
+        validate(w)
+        validate(w2)
+    end)
+
+    it("instant despawn of a sparse relationship source cleans the store", function()
+        local w = tecs.newWorld()
+        local parent = w:spawn(MatPos(1))
+        local child = w:spawn(MatPos(2))
+        w:set(child, tecs.builtins.ChildOf(parent))
+
+        -- The child is a source, not a target: its despawn takes the
+        -- instant path and must still drop its store entry and
+        -- reverse-index link.
+        w:despawn(child)
+        local sources = 0
+        w:targets(parent, tecs.builtins.ChildOf, function(_id: integer, _ctx: nil)
+            sources = sources + 1
+        end, nil)
+        luassert.equals(0, sources, "reverse index cleaned")
+
+        -- The recycled slot must not inherit the phantom relationship.
+        local recycled = w:spawn(MatPos(3))
+        luassert.is_nil(w:getFirstRelationship(recycled, tecs.builtins.ChildOf))
+        validate(w)
+    end)
+
+    it("bulk batch moves copy dense FFI relationship instance columns", function()
+        local w = tecs.newWorld()
+        local target = w:spawn(MatPos(1))
+        -- Two batches into the same source archetype so the second
+        -- batchSet takes the non-empty-destination copy branch.
+        local a = w:spawn(MatBatchTag)
+        w:set(a, MatLink(target))
+        w:set(a, MatVel(1))
+        local b = w:spawn(MatBatchTag)
+        w:set(b, MatLink(target))
+
+        local q = w:query({ include = {MatBatchTag} })
+        w:batchSet(q, MatPos(5))
+
+        luassert.equals(5, w:get(a, MatPos).x)
+        luassert.equals(5, w:get(b, MatPos).x)
+        luassert.equals(target, w:getFirstRelationship(a, MatLink).target, "link survives bulk move")
+        luassert.equals(target, w:getFirstRelationship(b, MatLink).target, "link survives bulk move")
+        validate(w)
+    end)
+
+    it("row-major snapshot round-trips scalar values on sparse-marker archetypes", function()
+        local w = tecs.newWorld()
+        local parent = w:spawn(MatPos(1))
+        local e = w:spawn(MatPos(2))
+        w:set(e, tecs.builtins.ChildOf(parent))
+        w:set(e, tecs.builtins.Key("matrixRowMajor"))
+
+        -- Binary form (crashed before the writer fix).
+        local out = w:saveSnapshot()
+        w:loadSnapshot(out.buffer)
+        luassert.equals("matrixRowMajor", w:get(e, tecs.builtins.Key))
+        luassert.equals(e, w:byKey("matrixRowMajor"))
+        luassert.equals(parent, w:getFirstRelationship(e, tecs.builtins.ChildOf).target)
+
+        -- Table form (silently dropped the Key before the fix).
+        local out2 = w:saveSnapshot({ format = "table" })
+        w:loadSnapshot(out2.snapshot)
+        luassert.equals("matrixRowMajor", w:get(e, tecs.builtins.Key))
+        luassert.equals(e, w:byKey("matrixRowMajor"))
+        luassert.equals(parent, w:getFirstRelationship(e, tecs.builtins.ChildOf).target)
         validate(w)
     end)
 end)

@@ -10,7 +10,7 @@
 ---       writer:startArchetype(columnCount, entityCount, columnIndices, mode)
 ---       writer:writeIds(ids, count)                 -- column-major
 ---       writer:writeColumnRaw(...) / writeColumnValue(...)
----       writer:writeEntity(id, components, count)   -- row-major
+---       writer:writeEntity(id, components, count, cols)   -- row-major
 ---       writer:endArchetype()
 ---       -- ...more archetypes...
 ---       writer:writeData(key, value)
@@ -195,8 +195,12 @@ local record snapshot
         --- Row-major mode only (sparse archetypes). `comps[1..count]`
         --- aligns with the archetype header's columns; missing sparse
         --- values are represented as nil entries so binary writers can
-        --- emit a self-describing presence bitmap.
-        writeEntity: function(self: Writer, id: integer, comps: {Component}, count: integer)
+        --- emit a self-describing presence bitmap. `cols[1..count]` are
+        --- the column components; serializers resolve through them
+        --- (values can be raw scalars with no componentType), mirroring
+        --- how readers resolve deserializers from the component table.
+        writeEntity: function(self: Writer, id: integer, comps: {Component}, count: integer,
+            cols: {Component})
 
         endArchetype: function(self: Writer)
 
@@ -909,7 +913,7 @@ local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: Sna
                         vals[i] = nil
                     end
                 end
-                writer:writeEntity(entityId, vals, #cols)
+                writer:writeEntity(entityId, vals, #cols, cols)
                 ::continue::
             end
         end
@@ -1237,7 +1241,7 @@ end
 -- `data_i` comes from the i-th component's `serialize` callback. Callers
 -- guarantee the component order matches the archetype header's
 -- `columnIndices`, so the reader can deserialize by position.
-local function buildEntry(id: integer, comps: {Component}, count: integer): {any}
+local function buildEntry(id: integer, comps: {Component}, count: integer, cols: {Component}): {any}
     local entry: {any} = {}
     entry[1] = id
     for i = 1, count do
@@ -1245,7 +1249,9 @@ local function buildEntry(id: integer, comps: {Component}, count: integer): {any
         if inst == nil then
             entry[i + 1] = nil
         else
-            local ct = inst.componentType as Component
+            -- Serialize through the column component: scalar columns
+            -- hold raw values with no componentType of their own.
+            local ct = cols[i]
             if ct and ct.serialize then
                 local serialize = ct.serialize as function(any): any
                 entry[i + 1] = serialize(inst)
@@ -1396,9 +1402,9 @@ function TableWriterImpl:writeColumnValue(colIdx: integer, value: Component, com
     end
 end
 
-function TableWriterImpl:writeEntity(id: integer, comps: {Component}, count: integer)
+function TableWriterImpl:writeEntity(id: integer, comps: {Component}, count: integer, cols: {Component})
     -- Row-major path (sparse archetypes). One entity at a time, variable count.
-    local entry = buildEntry(id, comps, count)
+    local entry = buildEntry(id, comps, count, cols)
     local entities = self._currentArch.entities as {{any}}
     entities[#entities + 1] = entry
 end
@@ -1675,7 +1681,7 @@ function BufferWriterImpl:writeColumnValue(_colIdx: integer, value: Component, c
     end
 end
 
-function BufferWriterImpl:writeEntity(id: integer, comps: {Component}, count: integer)
+function BufferWriterImpl:writeEntity(id: integer, comps: {Component}, count: integer, cols: {Component})
     -- Row-major fallback (sparse archetypes). Emit a per-row presence
     -- bitmask (bit i-1 = column i present), then only the present values
     -- in archetype-column order. One number instead of a boolean table:
@@ -1696,7 +1702,10 @@ function BufferWriterImpl:writeEntity(id: integer, comps: {Component}, count: in
     for i = 1, count do
         local inst = comps[i]
         if inst ~= nil then
-            local ct = inst.componentType as ComponentInternal
+            -- Serialize through the column component (readers resolve
+            -- deserializers from the component table the same way);
+            -- scalar columns hold raw values with no componentType.
+            local ct = cols[i] as ComponentInternal
             if ct.serializeRaw then
                 ct.serializeRaw(inst, buf)
             elseif ct.serialize then
