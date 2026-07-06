@@ -317,6 +317,10 @@ function sprite_plugin.create(config: sprite_plugin.SpritePluginConfig): types.R
         lg.setShader(dsShader)
         dsShader:send("RenderParams", renderParamsBuffer)
         dsShader:send("AOOverride", -1.0)  -- Use computed AO from shadow opacity
+        -- Cap instances to the cull shader's drop-shadow write guard so
+        -- the draw never reads rows the cull skipped. Must match the
+        -- MaxDropShadows value sent to the cull shader (sprite/init.tl).
+        dsShader:send("MaxDropShadows", 65536)
 
         -- Pass 1: draw drop shadows (replace blend, set by caller)
         for tier, tierSync in pairs(spriteBucketSync.tiers) do
@@ -336,6 +340,8 @@ function sprite_plugin.create(config: sprite_plugin.SpritePluginConfig): types.R
         -- This erases shadow where the character sprite exists, preventing self-shadowing.
         lg.setBlendMode("lighten", "premultiplied")
         dsShader:send("AOOverride", 1.0)
+        -- Pass 2 draws the main sprite list, which has no drop-shadow cap.
+        dsShader:send("MaxDropShadows", 0xFFFFFFFF)
 
         for tier, tierSync in pairs(spriteBucketSync.tiers) do
             local textureArrays = bucketManager:getArrays(tier)

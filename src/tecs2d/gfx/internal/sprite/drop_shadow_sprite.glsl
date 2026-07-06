@@ -25,6 +25,10 @@ layout(std430) readonly buffer DropShadowSpriteOutput {
     SpriteData sprites[];
 };
 
+// Instances past the cull shader's MaxDropShadows cap were never
+// written (the atomic counter can overshoot the buffer); cull them.
+uniform uint MaxDropShadows;
+
 varying vec4 vColor;
 varying vec2 vWorldPos;
 varying vec4 vClipBounds;
@@ -37,6 +41,9 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
     vec2 quadPos = QUAD_POSITIONS_UNIT[love_VertexID];
 
     int instanceID = love_InstanceID;
+    if (uint(instanceID) >= MaxDropShadows) {
+        return vec4(2.0, 2.0, 2.0, 1.0);
+    }
     SpriteData s = sprites[instanceID];
 
     // Layer range filtering
