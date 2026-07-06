@@ -20,15 +20,14 @@ Full documentation is available at https://tecs.dev.
 * **State machines**: State management with enter, exit, and transition events.
 * **Plugin system**: Share and reuse game mechanics across projects.
 * **Events**: Decouple systems with type-safe events. React to spawn, despawn, state changes, and custom events.
-* **Build with AI**: MCP server lets AI assistants query, spawn, and control your game.
+* **Build with AI**: Builtin MCP server lets AI assistants query, spawn, and control your game.
 * **LÖVE2D integration**: Integrates with LÖVE2D game loop, input handling, physics, audio, and events.
 * **Batteries included**: Pixel-perfect camera, rebindable controllers, async asset loading, component bundles,
   and more.
 
 ## Installation
 
-The fastest path to a working game is the
-[starter template](https://github.com/tecs-dev/tecs-starter):
+The fastest path to a working game is the [starter template](https://github.com/tecs-dev/tecs-starter):
 
 ```bash
 git clone https://github.com/tecs-dev/tecs-starter.git my-game
@@ -46,6 +45,7 @@ To hack on Tecs itself, run `make dev` to install LuaRocks and docs dev dependen
 ```lua
 local tecs = require("tecs")
 
+-- Create a new World (Tecs supports multi-world)
 local world = tecs.newWorld()
 
 -- Define typed component records with Teal
@@ -55,22 +55,7 @@ local record Position is tecs.Component
     metamethod __call: function(self, x?: number, y?: number): Position
 end
 
-local record Velocity is tecs.Component
-    x: number
-    y: number
-    metamethod __call: function(self, x?: number, y?: number): Velocity
-end
-
--- Easily create FFI components for C-like speed and memory
-tecs.newFFIComponent({
-    name = "Velocity",
-    container = Velocity,
-    fields = {
-        {"x", "float"},
-        {"y", "float"},
-    },
-})
-
+-- Easily register FFI components for C-like speed and memory
 tecs.newFFIComponent({
     name = "Position",
     container = Position,
@@ -80,15 +65,32 @@ tecs.newFFIComponent({
     },
 })
 
+local record Velocity is tecs.Component
+    x: number
+    y: number
+    metamethod __call: function(self, x?: number, y?: number): Velocity
+end
+
+tecs.newFFIComponent({
+    name = "Velocity",
+    container = Velocity,
+    fields = {
+        {"x", "float"},
+        {"y", "float"},
+    },
+})
+
 -- Queries find entities with specific components
-local query: tecs.Query = world:query({include = {Position, Velocity}})
+local query = world:query({
+    include = {Position, Velocity}
+})
 
 -- Systems can update entities
 world:addSystem({
     phase = tecs.phases.Update,
     run = function(dt: number)
         for archetype, len in query:iter() do
-            local positions = archetype:getMut(Position)
+            local positions = archetype:getMut(Position) -- get and mark dirty
             local velocities = archetype:get(Velocity)
             for row = 1, len do
                 local pos = positions[row]
@@ -118,6 +120,5 @@ at your option.
 
 ### Contribution
 
-Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
-dual licensed as above, without any additional terms or conditions.
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, 
+as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
