@@ -459,13 +459,20 @@ end
 
 function AssetManager:getFont(path: string): Handle<love.graphics.Font>
     local resolvedPath = self:resolvePath(path)
-    -- Cache keys are action-qualified; scan the cache for any loadFont hit
-    -- at this path. Since font cache entries also include size/hinting/dpi,
-    -- this returns the first font loaded for the path regardless of config.
-    local prefix = "loadFont|" .. resolvedPath
+    -- Cache keys are action-qualified; scan the cache for a TTF or image
+    -- font loaded at this path. Since font cache entries also include
+    -- size/hinting/dpi (or the image font's glyph string), this returns
+    -- the first font loaded for the path regardless of config.
+    local prefixes <const> = {"loadFont|" .. resolvedPath, "loadImageFont|" .. resolvedPath}
     for k, handle in pairs(self._cache) do
-        if type(k) == "string" and (k == prefix or (k as string):sub(1, #prefix + 1) == prefix .. "|") then
-            return handle as Handle<love.graphics.Font>
+        if type(k) == "string" then
+            local key = k as string
+            for i = 1, #prefixes do
+                local prefix = prefixes[i]
+                if key == prefix or key:sub(1, #prefix + 1) == prefix .. "|" then
+                    return handle as Handle<love.graphics.Font>
+                end
+            end
         end
     end
     error("No font was loaded for " .. path)
@@ -598,15 +605,31 @@ local function processHandle(self: threaded.AssetManager)
     end
 
     LOGGER:debug("Handle completed %d with result: %s, err: %s", id, result, err)
-    handle:_setResult(result, err)
 
+    -- Bookkeeping happens before result dispatch, and the dispatch runs
+    -- under pcall: _setResult fires user observe/derived-handle callbacks,
+    -- and one that throws must not wedge isLoading()/wait() forever or
+    -- kill the frame.
     self._runningCount = self._runningCount - 1
     self._completedCount = self._completedCount + 1
 
-    -- Store successful handle results in the cache under the same composite
-    -- key used on creation (action + path + extra args).
-    if not err and handle._cacheKey then
-        self._cache[handle._cacheKey] = handle
+    -- Failed loads must not stay cached: evict so a later request for the
+    -- same asset retries (e.g. the file appears on disk after a first
+    -- failed attempt). createHandle inserts into the cache at creation.
+    if err and handle._cacheKey then
+        self._cache[handle._cacheKey] = nil
+    end
+
+    local cbErr: string = nil
+    local ok = xpcall(function()
+        handle:_setResult(result, err)
+    end, function(e: any): string
+        cbErr = tostring(e)
+        return cbErr
+    end)
+    if not ok then
+        LOGGER:error("Asset handle observer failed for '%s': %s",
+            tostring(handle._path), cbErr)
     end
 end
 
@@ -664,6 +687,29 @@ function AssetManager:shutdown()
     while self._pushChannel:getCount() > 0 do
         self._pushChannel:pop()
     end
+
+    -- Fail every unresolved handle so nothing waits on results that can
+    -- no longer arrive: isLoading() returns false, wait() terminates,
+    -- and a blocking .value raises instead of spinning forever.
+    for id, task in pairs(self._runningTasks) do
+        local handle = task as HandleImpl<any>
+        self._runningTasks[id] = nil
+        if handle._cacheKey then
+            self._cache[handle._cacheKey] = nil
+        end
+        local cbErr: string = nil
+        local ok = xpcall(function()
+            handle:_setResult(nil, "asset manager shut down before the load completed")
+        end, function(e: any): string
+            cbErr = tostring(e)
+            return cbErr
+        end)
+        if not ok then
+            LOGGER:error("Asset handle observer failed during shutdown for '%s': %s",
+                tostring(handle._path), cbErr)
+        end
+    end
+    self._runningCount = 0
 
     -- Stop each thread by sending an exit message.
     for _ = 1, #self._threads do
