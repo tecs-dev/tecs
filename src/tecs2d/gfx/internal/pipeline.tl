@@ -517,6 +517,9 @@ function pipeline.newPipeline(config: pipeline.RenderConfig): Pipeline
     local pImpl = pipelineInstance as PipelineImpl
     pImpl:_recomputeScaledDims()
     renderer:resize(screenWidth, screenHeight)
+    -- The manager above was created at screen dims before scaled dims
+    -- were known; in pixel mode the render resolution is smaller.
+    pImpl.layerEffectsManager:resize(pImpl.scaledWidth, pImpl.scaledHeight)
     pImpl:_ensureWorldLitCanvas()
     pImpl._screenLitCanvas = lg.newCanvas(screenWidth, screenHeight, {format = "rgba8"})
     pImpl:_updateCameraRenderDims()
@@ -664,6 +667,10 @@ function PipelineImpl:setPixelMode(mode: boolean)
     self:_recomputeScaledDims()
     -- Recreate canvases at the updated virtualRes (pixel canvases change size)
     self.renderer:resize(self.screenWidth, self.screenHeight)
+    -- Layer-effect canvases must track the render resolution too, or the
+    -- lighting/effect passes render into stale-sized targets and the frame
+    -- clips to a corner after leaving pixel mode.
+    self.layerEffectsManager:resize(self.scaledWidth, self.scaledHeight)
     self:_ensureWorldLitCanvas()
     self:_updateCameraRenderDims()
 end

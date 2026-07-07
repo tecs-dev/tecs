@@ -117,6 +117,11 @@ test: compile
 # _spec pattern never picks them up.
 LOVE_FIXTURE_DIR=$(TEST_BUILD_DIR)/spec/integration/apps
 FILE_MATCH ?= _lovespec
+# Busted matches --pattern against basenames only, and the fixture apps
+# symlink the whole engine tree (whose module names can collide with a
+# FILE_MATCH like "layer_effects"). Require the _lovespec suffix in the
+# effective pattern so only spec files ever load.
+LOVE_FILE_PATTERN := $(if $(findstring _lovespec,$(FILE_MATCH)),$(FILE_MATCH),$(FILE_MATCH).*_lovespec)
 LOVE_TEST_FILTER := $(if $(MATCH),--filter="$(MATCH)",)
 test-love: compile $(LOVE12_BIN)
 	@echo "Running Love2D integration tests..."
@@ -130,7 +135,7 @@ test-love: compile $(LOVE12_BIN)
 	LUA_PATH="$(LUA_DIR)/?.lua;$(LUA_DIR)/?/init.lua;$(TEST_BUILD_DIR)/?.lua;$(TEST_BUILD_DIR)/?/init.lua;$(VENDOR_LUA)/?.lua;$(VENDOR_LUA)/?/init.lua;;" \
 	LUA_CPATH="$(VENDOR_CLIB)/?.so;;" \
 	LOVE="$(LOVE)" \
-	$(BUSTED_CMD) --no-auto-insulate --pattern="$(FILE_MATCH)" $(LOVE_TEST_FILTER) $(TEST_BUILD_DIR)/spec/integration
+	$(BUSTED_CMD) --no-auto-insulate --pattern="$(LOVE_FILE_PATTERN)" $(LOVE_TEST_FILTER) $(TEST_BUILD_DIR)/spec/integration
 
 clean:
 	rm -rf build
