@@ -50,7 +50,7 @@ inputHandlers.handlers = {
     end,
     wheelmoved = function(_world: tecs.World, x: number, y: number, direction: love.mouse.WheelDirection)
         local moved = input.mouseWheelMoved
-        moved[1], moved[2] = x, y
+        moved[1], moved[2] = moved[1] + x, moved[2] + y
         input.mouseWheelDirection = direction
         local latchedMoved = input.mouseWheelLatchedMoved
         latchedMoved[1], latchedMoved[2] = latchedMoved[1] + x, latchedMoved[2] + y

@@ -500,6 +500,36 @@ describe("tecs2d.controller", function()
             mockInput:simulateJoystickHat(joystick, 1, "c")
             luassert.is_false(controller:isDown("up"))
         end)
+
+        it("should handle diagonal hat directions", function()
+            local bindings = {
+                controls = {
+                    upLeft = {"hat:1lu"},
+                    downRight = {"hat:1rd"}
+                },
+                pairs = {}
+            }
+
+            local controller = manager:addController(bindings, {joystick = joystick})
+
+            mockInput:simulateJoystickHat(joystick, 1, "lu")
+            luassert.is_true(controller:isDown("upLeft"))
+            luassert.is_false(controller:isDown("downRight"))
+
+            mockInput:simulateJoystickHat(joystick, 1, "rd")
+            luassert.is_false(controller:isDown("upLeft"))
+            luassert.is_true(controller:isDown("downRight"))
+        end)
+
+        it("should reject malformed hat bindings", function()
+            local bindings = {
+                controls = { bad = {"hat:xu"} },
+                pairs = {}
+            }
+            luassert.has_error(function()
+                manager:addController(bindings, {joystick = joystick})
+            end)
+        end)
     end)
 
     describe("Auto-Assignment Modes", function()

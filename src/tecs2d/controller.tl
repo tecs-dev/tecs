@@ -382,8 +382,14 @@ local function createHatBinding(value: string, button: string): BindingGetters
             button, tostring(value)))
     end
 
-    local hat = tonumber(value:sub(1, -2)) as integer
-    local direction = value:sub(-1) as love.joystick.JoystickHat
+    local hatStr, directionStr = value:match("^(%d+)(%a+)$")
+    if not hatStr then
+        error(string.format(
+            "Invalid hat binding for button '%s': 'hat:%s' (expected format 'hat:indexdirection', e.g., 'hat:1u')",
+            button, value))
+    end
+    local hat = tonumber(hatStr) as integer
+    local direction = directionStr as love.joystick.JoystickHat
 
     -- Hats only support isDown
     return {
@@ -731,14 +737,13 @@ function ControlManager:onJoystickAdded(joystick: love.joystick.Joystick)
 end
 
 function ControlManager:onJoystickRemoved(joystick: love.joystick.Joystick)
-    -- Find controller using this joystick and clear it
+    -- Clear every controller using this joystick (manual setJoystick can share one)
     local ctrls <const> = self.controllers
     for i = 1, #ctrls do
         local ctrl = ctrls[i]
         if ctrl.joystick == joystick then
             ctrl:setJoystick(nil)
             LOGGER:debug("Disconnected joystick %s from controller", joystick:getName())
-            return
         end
     end
 end
