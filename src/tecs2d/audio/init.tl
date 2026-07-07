@@ -262,15 +262,12 @@ function audio.plugin(): tecs.Plugin
         end
 
         -----------------------------------------------------------------------
-        --- Helper: Apply pitch with optional variance
+        --- Helper: Apply pitch with optional variance. The variance offset
+        --- is rolled once per (re)trigger in updatePlayState and held for
+        --- the whole playback.
         -----------------------------------------------------------------------
         local function applyPitch(audioSrc: types.AudioSource)
-            local pitch = audioSrc.pitch
-            if audioSrc.pitchVariance > 0 and not audioSrc._source:isPlaying() then
-                local offset = (math.random() * 2 - 1) * audioSrc.pitchVariance
-                pitch = pitch + offset
-            end
-            audioSrc._source:setPitch(pitch)
+            audioSrc._source:setPitch(audioSrc.pitch + (audioSrc._pitchOffset or 0))
         end
 
         -----------------------------------------------------------------------
@@ -281,9 +278,21 @@ function audio.plugin(): tecs.Plugin
             local canPlay = audioManager:shouldComponentSourcePlay(src)
             local isFading = audioManager:isComponentSourceFading(src)
             if audioSrc.playing and canPlay and not src:isPlaying() then
-                src:play()
+                if audioSrc._wasPlaying and not audioSrc.looping then
+                    -- A one-shot that reached its natural end: clear the
+                    -- declarative flag instead of retriggering forever.
+                    audioSrc.playing = false
+                    audioSrc._wasPlaying = false
+                else
+                    if audioSrc.pitchVariance > 0 then
+                        audioSrc._pitchOffset = (math.random() * 2 - 1) * audioSrc.pitchVariance
+                    end
+                    src:play()
+                    audioSrc._wasPlaying = true
+                end
             elseif not isFading and (not audioSrc.playing or not canPlay) and src:isPlaying() then
                 src:stop()
+                audioSrc._wasPlaying = false
             end
         end
 

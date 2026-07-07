@@ -100,34 +100,48 @@ local function computeEffectiveVolume(self: AudioManagerImpl, groupName: string,
     if group.muted then
         return 0
     end
-    local masterVolume = masterGroup and masterGroup.volume or 1.0
+    -- A muted master silences every group.
+    local masterVolume = 1.0
+    if masterGroup then
+        masterVolume = masterGroup.muted and 0 or masterGroup.volume
+    end
     return volume * group.volume * masterVolume
 end
 
+local function applyEffectiveVolume(self: AudioManagerImpl, source: love.audio.Source, info: SourceInfo)
+    local effectiveVol = computeEffectiveVolume(self, info.group, info.baseVolume or 1.0)
+    if info.fadeDuration > 0 then
+        if effectiveVol == 0 then
+            -- Mute-style change: silence immediately and pin both fade
+            -- endpoints to 0 so update() can't lerp the volume back up;
+            -- fade completion bookkeeping (paused / stopAfterFade) still
+            -- fires when the timer elapses.
+            info.fadeStartVolume = 0
+            info.targetVolume = 0
+            source:setVolume(0)
+        elseif info.targetVolume > 0 then
+            -- Retarget in-progress fade-ins to the new level. Fade-outs
+            -- (target 0, from stop/pause fades) keep heading to 0 so
+            -- their completion semantics hold.
+            info.targetVolume = effectiveVol
+        end
+    else
+        source:setVolume(effectiveVol)
+    end
+end
+
 local function applyVolumeToSources(self: AudioManagerImpl, groupName: string)
-    -- When "master" volume changes, every group's effective volume shifts,
-    -- so we walk all sources. Otherwise only sources in the named group.
+    -- When a "master" setting changes, every group's effective volume
+    -- shifts, so we walk all sources. Otherwise only the named group.
     local isMaster <const> = (groupName == "master")
     for source, info in pairs(self._activeSources) do
         if isMaster or info.group == groupName then
-            local effectiveVol = computeEffectiveVolume(self, info.group, info.baseVolume or 1.0)
-            if info.fadeDuration > 0 then
-                -- Let any in-progress fade land on the new target volume
-                -- rather than fight it with an immediate setVolume.
-                info.targetVolume = effectiveVol
-            else
-                source:setVolume(effectiveVol)
-            end
+            applyEffectiveVolume(self, source, info)
         end
     end
     for source, info in pairs(self._componentSources) do
         if isMaster or info.group == groupName then
-            local effectiveVol = computeEffectiveVolume(self, info.group, info.baseVolume or 1.0)
-            if info.fadeDuration > 0 then
-                info.targetVolume = effectiveVol
-            else
-                source:setVolume(effectiveVol)
-            end
+            applyEffectiveVolume(self, source, info)
         end
     end
 end
@@ -152,17 +166,10 @@ function AudioManagerImpl:muteGroup(name: string, muted: boolean)
     local group = ensureGroup(self, name)
     group.muted = muted
 
-    -- Update all active sources in this group
-    for source, info in pairs(self._activeSources) do
-        if info.group == name then
-            if muted then
-                source:setVolume(0)
-            else
-                local effectiveVol = computeEffectiveVolume(self, name, info.baseVolume or 1.0)
-                source:setVolume(effectiveVol)
-            end
-        end
-    end
+    -- Route through the shared volume application: it fans a "master"
+    -- mute out to every group, covers component sources, and silences
+    -- sources mid-fade instead of letting the fade lerp them back up.
+    applyVolumeToSources(self, name)
 end
 
 function AudioManagerImpl:isGroupMuted(name: string): boolean
@@ -307,7 +314,14 @@ local function playInternal(
     else
         source:setVolume(targetVolume)
     end
-    source:play()
+
+    -- A paused group holds new sounds too: register them paused so
+    -- resumeGroup starts them, instead of playing through the pause.
+    local group = ensureGroup(self, groupName)
+    local startPaused = group.paused
+    if not startPaused then
+        source:play()
+    end
 
     -- Track source
     self._activeSources[source] = {
@@ -319,7 +333,7 @@ local function playInternal(
         fadeElapsed = 0,
         fadeStartVolume = 0,
         stopAfterFade = false,
-        paused = false
+        paused = startPaused
     }
     incrementVoiceCount(self, key)
     startCooldown(self, key)
@@ -583,6 +597,13 @@ function AudioManagerImpl:removeGroupEffect(groupName: string, effectName: strin
             setEffect(source, globalEffectName, false)
         end
     end
+
+    -- Free the global effect slot. Effect names are scoped per group, so
+    -- no other group can be using this one; without this, repeated
+    -- set/remove cycles with distinct names exhaust LÖVE's limited
+    -- effect slots.
+    local clearGlobalEffect = love.audio.setEffect as function(string, boolean): boolean
+    clearGlobalEffect(globalEffectName, false)
 end
 
 -------------------------------------------------------------------------------

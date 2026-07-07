@@ -316,6 +316,14 @@ local record types
         --- changes that require re-initialization.
         _appliedRelative: boolean
 
+        --- Internal: pitch variance offset rolled at (re)trigger time and
+        --- held for the whole playback.
+        _pitchOffset: number
+
+        --- Internal: whether the source was playing on the previous update;
+        --- distinguishes a finished one-shot from a not-yet-started source.
+        _wasPlaying: boolean
+
         --- Create a new AudioSource component.
         metamethod __call: function(self, config: AudioSourceConfig): AudioSource
     end
