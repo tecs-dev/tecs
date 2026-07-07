@@ -12,6 +12,7 @@ local SlotManager <const> = require("tecs2d.gfx.internal.gpu.SlotManager")
 local Color <const> = require("tecs2d.gfx.internal.Color")
 local Occluder <const> = require("tecs2d.gfx.internal.Occluder")
 local shaderUtils <const> = require("tecs2d.gfx.internal.gpu.shaders")
+local retire <const> = require("tecs2d.gfx.internal.gpu.retire")
 local C <const> = require("ffi")
 
 -- Compile tilechunk shaders
@@ -270,7 +271,7 @@ function tileChunk.plugin(world: tecs.World)
     }
 
     -- Grow when the slot manager hands out an index past the current
-    -- capacity. 4× growth matches the legacy GPUBuffer's policy.
+    -- capacity. Grows 4x to keep reallocations rare.
     local function ensureCapacity(slot: integer)
         if slot < capacity then return end
         local newCap = capacity * 4
@@ -285,6 +286,12 @@ function tileChunk.plugin(world: tecs.World)
         if capacity > 0 then
             newHandle:setArrayData(newByteData, 1, 1, capacity)
         end
+
+        -- In-flight GPU work may still read the replaced buffers;
+        -- release them through the deferred retire list.
+        retire.push(inputBufferRef.handle)
+        retire.push(growable.outputBuffer)
+        retire.push(growable.shadowOutputBuffer)
 
         byteData = newByteData
         shadowPtr = newShadowPtr

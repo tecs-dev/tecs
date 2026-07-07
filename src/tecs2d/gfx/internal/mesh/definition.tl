@@ -10,6 +10,7 @@
 --- the cull dispatch (`mesh/shadow_dispatch.tl`) routes outputs into
 --- the per-definition buffers held here.
 local C <const> = require("ffi")
+local retire <const> = require("tecs2d.gfx.internal.gpu.retire")
 
 local gpuTypes <const> = require("tecs2d.gfx.internal.gpu.types")
 
@@ -120,6 +121,10 @@ local DEFINITION_MT <const>: metatable<MeshDefinition> = { __index = MeshDefinit
 function MeshDefinition:grow(newCapacity: integer)
     if newCapacity <= self.capacity then return end
 
+    -- In-flight GPU work may still read the replaced buffers; release
+    -- them through the deferred retire list.
+    retire.push(self.outputBuffer)
+    retire.push(self.materialParamsBuffer)
     self.outputBuffer = lg.newBuffer(
         gpuTypes.MESH_FORMAT,
         newCapacity,

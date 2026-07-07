@@ -23,6 +23,7 @@ local DropShadowComponent <const> = require("tecs2d.gfx.internal.DropShadow")
 local blend <const> = require("tecs2d.gfx.internal.blend")
 local MaterialComponent <const> = require("tecs2d.gfx.internal.Material")
 local base <const> = require("tecs2d.gfx.internal.shape_sync_base")
+local retire <const> = require("tecs2d.gfx.internal.gpu.retire")
 
 local Transform <const> = tecs.builtins.Transform
 
@@ -196,6 +197,12 @@ local function ensureCapacity(arraySync: bucket_sync.ArraySync, liveCount: integ
     if liveCount <= arraySync.capacity then return end
     local newCap = arraySync.capacity * 2
     if newCap < liveCount then newCap = liveCount end
+    -- In-flight GPU work may still read the replaced buffers; release
+    -- them through the deferred retire list.
+    retire.push(arraySync.outputBuffer)
+    retire.push(arraySync.shadowOutputBuffer)
+    retire.push(arraySync.dropShadowOutputBuffer)
+    retire.push(arraySync.materialParamsOutputBuffer)
     arraySync.outputBuffer = lg.newBuffer(types.SPRITE_FORMAT, newCap, { usage = "dynamic", shaderstorage = true })
     arraySync.shadowOutputBuffer = lg.newBuffer(types.SPRITE_FORMAT, newCap, { usage = "dynamic", shaderstorage = true })
     arraySync.dropShadowOutputBuffer = lg.newBuffer(types.SPRITE_FORMAT, newCap * DS_FANOUT, { usage = "dynamic", shaderstorage = true })

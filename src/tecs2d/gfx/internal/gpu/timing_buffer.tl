@@ -4,6 +4,7 @@
 --- cumulative frame times. Sprites reference into this buffer via animTimingOffset.
 
 local C <const> = require("ffi")
+local retire <const> = require("tecs2d.gfx.internal.gpu.retire")
 
 local record timing_buffer
     --- Per-tag metadata (frameCount + totalDuration).
@@ -146,14 +147,17 @@ function TimingBuffer:getBuffer(): love.graphics.Buffer
         return self.gpuBuffer
     end
 
-    -- Use at least 1 element so we always have a valid GPU buffer bound.
-    -- Unlike the previous implementation, we don't pollute self.timings;
-    -- the dummy element is written only to the upload buffer.
+    -- Use at least 1 element so we always have a valid GPU buffer
+    -- bound; the dummy element is written only to the upload buffer,
+    -- never into self.timings.
     local count = self.nextOffset
     local uploadCount = count > 0 and count or 1
 
-    -- (Re)allocate byteData + GPU buffer when capacity grows.
+    -- (Re)allocate byteData + GPU buffer when capacity grows. The
+    -- replaced GPU buffer may still be referenced by in-flight work;
+    -- release it through the deferred retire list.
     if self.bufferCapacity < uploadCount then
+        retire.push(self.gpuBuffer)
         self.byteData = love.data.newByteData(uploadCount * SIZEOF_FLOAT)
         self.gpuBuffer = love.graphics.newBuffer(
             {{format = "float"}},

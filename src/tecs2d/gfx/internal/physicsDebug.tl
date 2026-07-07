@@ -26,6 +26,7 @@ local C <const> = require("ffi")
 local tecs <const> = require("tecs")
 local pipeline_mod <const> = require("tecs2d.gfx.internal.pipeline")
 local physics <const> = require("tecs2d.physics")
+local retire <const> = require("tecs2d.gfx.internal.gpu.retire")
 
 local lg <const> = love.graphics
 local math_cos <const> = math.cos
@@ -121,14 +122,15 @@ function physicsDebug.new(options?: physicsDebug.Options): tecs.Plugin
             local newByteData = love.data.newByteData(newCap * BYTES_PER_VERT)
             local newVertsRaw = C.cast("float*", newByteData:getFFIPointer()) as C.CData
             C.copy(newVertsRaw, vertsRaw, vertCount * BYTES_PER_VERT)
-            local releaseObj = (byteData as {any: any}).release as function(any)
-            releaseObj(byteData)
+            -- The previous frame's draw may still reference the old mesh
+            -- and its vertex data; release both through the deferred
+            -- retire list instead of mid-frame.
+            retire.push(byteData)
+            retire.push(mesh)
             byteData = newByteData
             vertsRaw = newVertsRaw
             verts = newVertsRaw as {integer: number}
             capacity = newCap
-            local releaseMesh = (mesh as {any: any}).release as function(any)
-            releaseMesh(mesh)
             mesh = lg.newMesh(VERT_FORMAT as {{number | string}}, newCap, "triangles", "stream")
         end
 

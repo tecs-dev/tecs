@@ -2,6 +2,7 @@
 --- Provides slot allocation, dirty tracking, and zero-copy FFI uploads.
 
 local C <const> = require("ffi")
+local retire <const> = require("tecs2d.gfx.internal.gpu.retire")
 
 local lg <const> = love.graphics
 
@@ -62,7 +63,9 @@ local record buffer
         --- Check if buffer has any dirty data
         isDirty: function(GPUBuffer): boolean
 
-        --- Grow the buffer to accommodate more elements (doubles capacity)
+        --- Grow the buffer to accommodate more elements. Grows 4x to
+        --- keep reallocations rare; the replaced GPU buffer is released
+        --- through the deferred retire list.
         grow: function(GPUBuffer)
 
         --- The FFI ctype name for elements (needed for resize)
@@ -182,7 +185,9 @@ function GPUBuffer:grow()
         shaderstorage = true
     })
 
-    -- Old GPU buffer will be garbage collected
+    -- The GPU may still read the old buffer this frame; release it
+    -- via the deferred retire list, never by dropping the reference.
+    retire.push(self.handle)
 
     -- Update buffer fields
     self.byteData = newByteData

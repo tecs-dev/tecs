@@ -4,6 +4,7 @@
 local types <const> = require("tecs2d.gfx.internal.gpu.types")
 local shaderCode <const> = require("tecs2d.gfx.internal.gpu.shaders")
 local forward_blend <const> = require("tecs2d.gfx.internal.gpu.forward_blend")
+local retire <const> = require("tecs2d.gfx.internal.gpu.retire")
 local C <const> = require("ffi")
 
 local lg <const> = love.graphics
@@ -261,6 +262,9 @@ function RendererMethods:resize(width: integer, height: integer)
 end
 
 function RendererMethods:upload()
+    -- Once-per-frame: release GPU objects retired by buffer growth two
+    -- frames ago, now that in-flight work no longer references them.
+    retire.tick()
     for _, plugin in ipairs(self.plugins) do
         if plugin.upload then
             plugin.upload(self)

@@ -30,6 +30,7 @@ local shadow_render_state <const> = require("tecs2d.gfx.internal.gpu.shadow_rend
 local shadow_dispatch <const> = require("tecs2d.gfx.internal.gpu.shadow_dispatch")
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
 local gpu_backing <const> = require("tecs2d.gfx.internal.gpu.gpu_backing")
+local retire <const> = require("tecs2d.gfx.internal.gpu.retire")
 local Material <const> = require("tecs2d.gfx.internal.Material")
 
 local lg <const> = love.graphics
@@ -158,12 +159,17 @@ function shadow_plugin.register(world: tecs.World, descriptor: shadow_plugin.Sha
         if entityCount <= growableCapacity then return end
         local newCap = growableCapacity * 2
         if newCap < entityCount then newCap = entityCount end
+        -- In-flight GPU work may still read the replaced buffers;
+        -- release them through the deferred retire list.
+        retire.push(growable.outputBuffer)
         growable.outputBuffer = lg.newBuffer(descriptor.outputFormat, newCap,
             {usage = "dynamic", shaderstorage = true})
         if hasShadow then
+            retire.push(growable.shadowOutputBuffer)
             growable.shadowOutputBuffer = lg.newBuffer(descriptor.outputFormat, newCap,
                 {usage = "dynamic", shaderstorage = true})
         end
+        retire.push(growable.materialParamsOutBuffer)
         growable.materialParamsOutBuffer = lg.newBuffer(gpuTypes.MATERIAL_PARAMS_FORMAT, newCap,
             {usage = "dynamic", shaderstorage = true})
         growableCapacity = newCap

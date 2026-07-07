@@ -9,6 +9,7 @@
 --- bytes and how to grow a Buffer.
 
 local C <const> = require("ffi")
+local retire <const> = require("tecs2d.gfx.internal.gpu.retire")
 
 local lg <const> = love.graphics
 
@@ -123,9 +124,7 @@ function ShadowBuffer:grow(newCapacity: integer)
     local oldCapacity = self.capacity
     local elementSize = self.elementSize
 
-    -- Shadow ctype is recoverable from the format's first attribute name
-    -- if needed; instead we store the original ctype inside `byteData`'s
-    -- pointer chain. Re-cast via the same `shadowPtr`'s effective type.
+    -- Recover the element ctype from the existing pointer's type.
     local shadowCtype = C.typeof(self.shadowPtr)
     local newByteSize = (newCapacity + 1) * elementSize
     local newByteData = love.data.newByteData(newByteSize)
@@ -141,6 +140,9 @@ function ShadowBuffer:grow(newCapacity: integer)
         usage = "dynamic",
         shaderstorage = true,
     })
+
+    -- In-flight GPU work may still read the old buffer; defer release.
+    retire.push(self.gpuBuffer)
 
     self.byteData = newByteData
     self.shadowPtr = newShadowPtr
