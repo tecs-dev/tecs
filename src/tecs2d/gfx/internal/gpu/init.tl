@@ -410,7 +410,7 @@ function RendererMethods:cull(cameraX: number, cameraY: number, cameraZoom: numb
     end
 end
 
-function RendererMethods:renderGBuffer(cameraX: number, cameraY: number, cameraZoom: number, useLowRes: boolean, globalTime: number, gBufferDrawCallback?: function(number, number, number, number, number), rotation?: number, subPixelX?: number, subPixelY?: number)
+function RendererMethods:renderGBuffer(cameraX: number, cameraY: number, cameraZoom: number, useLowRes: boolean, globalTime: number, gBufferDrawCallback?: function(number, number, number, number, number, number), rotation?: number, subPixelX?: number, subPixelY?: number)
 
     -- Select canvases based on render phase
     local albedo: love.graphics.Canvas
@@ -455,7 +455,7 @@ function RendererMethods:renderGBuffer(cameraX: number, cameraY: number, cameraZ
     if gBufferDrawCallback then
         zone("draws")
         lg.setDepthMode()  -- Disable depth testing/writing for G-buffer draws
-        gBufferDrawCallback(cameraX, cameraY, cameraZoom, rw, rh)
+        gBufferDrawCallback(cameraX, cameraY, cameraZoom, rw, rh, rotation or 0.0)
         zone()
     end
 

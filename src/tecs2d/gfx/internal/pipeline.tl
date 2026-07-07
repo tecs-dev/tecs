@@ -243,7 +243,7 @@ local record PipelineImpl is Pipeline
     drawRH: number
 
     -- G-buffer callback (created once to avoid per-frame closure allocation)
-    _gBufferCallback: function(number, number, number, number, number)
+    _gBufferCallback: function(number, number, number, number, number, number)
 
     -- Fluent world shader state (pre-allocated, reused)
     _worldShaderState: types.WorldShaderState
@@ -473,7 +473,7 @@ function pipeline.newPipeline(config: pipeline.RenderConfig): Pipeline
     } as types.WorldShaderState, WS_MT)
 
     -- Create G-buffer callback once (avoid per-frame closure allocation)
-    self._gBufferCallback = function(effCamX: number, effCamY: number, zoom: number, rw: number, rh: number)
+    self._gBufferCallback = function(effCamX: number, effCamY: number, zoom: number, rw: number, rh: number, rotation: number)
         -- Run Draw phase for CPU draws that need depth interleaving
         -- Set up state for depth shader methods
         self.drawActive = true
@@ -486,12 +486,14 @@ function pipeline.newPipeline(config: pipeline.RenderConfig): Pipeline
         -- Enable depth mode for Draw phase draws
         lg.setDepthMode("lequal", true)
 
-        -- Apply camera transform (same as renderGBufferDraws)
+        -- Apply camera transform (same as renderGBufferDraws). Rotation
+        -- comes from the render pass, not the camera: the screen phase
+        -- renders rotation-free even when the world camera is rotated.
         local screenHalfX = rw * 0.5
         local screenHalfY = rh * 0.5
         lg.push()
         lg.translate(screenHalfX, screenHalfY)
-        lg.rotate(-self._renderCamera._renderRotation)
+        lg.rotate(-(rotation or 0.0))
         lg.scale(zoom, zoom)
         lg.translate(-effCamX, -effCamY)
 
@@ -1176,6 +1178,11 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
     else
         self.renderer:resetLayerRange()
     end
+    -- Narrow the CPU-draw layer filter (attachWorldShader) to the world
+    -- layers; without this, Draw-phase content on screen layers renders
+    -- here in world space and again in the screen phase.
+    self.currentLayerMin = 1
+    self.currentLayerMax = worldMaxLayer
 
     -- Check if layer effects are active
     if self.layerEffectsManager:hasEffects() then
@@ -1262,6 +1269,10 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
         zone("screenLayers")
         self.renderer._renderPhase = "screen"
         self.renderer:setLayerRange(self._firstScreenLayer, MAX_LAYERS)
+        -- Narrow the CPU-draw layer filter to the screen layers so
+        -- world-layer Draw-phase content doesn't render a second time.
+        self.currentLayerMin = self._firstScreenLayer
+        self.currentLayerMax = MAX_LAYERS
 
         -- Screen layers use native resolution, no camera transform, no pixel mode
         -- Override renderer screen dims to native for this phase
@@ -1311,6 +1322,8 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
         -- Restore renderer state
         self.renderer.screenWidth = prevW
         self.renderer.screenHeight = prevH
+        self.currentLayerMin = 1
+        self.currentLayerMax = MAX_LAYERS
         zone()
     end
 
@@ -1473,13 +1486,28 @@ function PipelineImpl:renderWithLayerEffects(camX: number, camY: number, renderZ
     lg.clear(0, 0, 0, 0)
     lg.setCanvas()
 
+    -- This runs in the world phase: clamp groups to the world layers.
+    -- Screen layers were culled out by the world layer mask, so a group
+    -- extending past the boundary would pay full G-buffer + lighting
+    -- passes on content that isn't there (it renders in phase 2).
+    local hasScreenLayers = self._firstScreenLayer > 0
+    local worldMaxLayer = hasScreenLayers and (self._firstScreenLayer - 1) or MAX_LAYERS
+
     for _, group in ipairs(groups) do
+        if group.minLayer > worldMaxLayer then
+            goto continue
+        end
+        local groupMaxLayer = group.maxLayer
+        if groupMaxLayer > worldMaxLayer then
+            groupMaxLayer = worldMaxLayer
+        end
+
         -- Set layer range for GPU shape shaders
-        self.renderer:setLayerRange(group.minLayer, group.maxLayer)
+        self.renderer:setLayerRange(group.minLayer, groupMaxLayer)
 
         -- Set layer range for CPU draw filtering (checked in attachWorldShader)
         self.currentLayerMin = group.minLayer
-        self.currentLayerMax = group.maxLayer
+        self.currentLayerMax = groupMaxLayer
 
         -- Render G-buffer for this layer range.
         -- Pass gBufferCallback every pass; CPU draws self-filter via attachWorldShader
@@ -1644,6 +1672,8 @@ function PipelineImpl:renderWithLayerEffects(camX: number, camY: number, renderZ
             lg.draw(mgr.litLayer, 0, 0)
             lg.setCanvas()
         end
+
+        ::continue::
     end
 
     -- Reset layer range

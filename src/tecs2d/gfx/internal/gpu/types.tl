@@ -620,7 +620,7 @@ local record types
         --- Render the G-Buffer pass.
         --- The optional gBufferDrawCallback is called after canvas setup to render
         --- content that should be depth-sorted with GPU shapes (e.g. tilemaps).
-        renderGBuffer: function(Renderer, cameraX: number, cameraY: number, cameraZoom: number, useLowRes: boolean, globalTime: number, gBufferDrawCallback?: function(number, number, number, number, number), rotation?: number, subPixelX?: number, subPixelY?: number)
+        renderGBuffer: function(Renderer, cameraX: number, cameraY: number, cameraZoom: number, useLowRes: boolean, globalTime: number, gBufferDrawCallback?: function(number, number, number, number, number, number), rotation?: number, subPixelX?: number, subPixelY?: number)
 
         --- Render the shadow mask pass
         renderShadowMask: function(Renderer, cameraX: number, cameraY: number, cameraZoom: number, rotation: number)
