@@ -470,15 +470,6 @@ function RendererMethods:renderGBuffer(cameraX: number, cameraY: number, cameraZ
     end
     zone()
 
-    -- Render G-buffer blend batches via plugins
-    zone("blends")
-    for _, plugin in ipairs(self.plugins) do
-        if plugin.renderGBufferBlend then
-            plugin.renderGBufferBlend(self, renderParamsBuffer)
-        end
-    end
-    zone()
-
     lg.setShader()
     lg.setDepthMode()
     lg.setCanvas()

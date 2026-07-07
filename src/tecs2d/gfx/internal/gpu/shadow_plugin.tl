@@ -185,8 +185,6 @@ function shadow_plugin.register(world: tecs.World, descriptor: shadow_plugin.Sha
     local stubMetadata  = gpuBuffer.new(descriptor.stub.metadataFormat, 1, descriptor.stub.metadataCtype)
     local stubInput     = gpuBuffer.new(descriptor.stub.inputFormat, 1, descriptor.stub.inputCtype)
 
-    local blendBatches: {gpuTypes.BlendKey: gpuTypes.DualBlendBatch} = {}
-
     local plugin <const> = shape_utils.simpleShapePlugin({
         prefix = descriptor.prefix,
         plural = descriptor.plural,
@@ -198,7 +196,6 @@ function shadow_plugin.register(world: tecs.World, descriptor: shadow_plugin.Sha
         growable = growable,
         cullShader = descriptor.cullShader,
         renderShader = descriptor.renderShader,
-        blendBatches = blendBatches,
         syncRef = syncRef,
         shadowIndirectBuffer = shadowIndirectBuffer,
         shadowMaskShader = descriptor.shadowMaskShader,

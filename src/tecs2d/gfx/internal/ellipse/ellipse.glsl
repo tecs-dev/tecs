@@ -9,8 +9,8 @@ struct EllipseData {
 };
 
 // Flag constants, pass uniforms, and pass-filter helpers come from
-// render_common.glsl. Ellipse blend modes route through per-blend
-// batch buffers, so only the material pass filters here.
+// render_common.glsl. Non-alpha blend modes are not routed for
+// ellipses yet, so only the material pass filters here.
 
 // 0.0 = smooth SDF edges, 1.0 = hard pixel cutoff. Set per-frame from
 // pipeline.roughGeometry.

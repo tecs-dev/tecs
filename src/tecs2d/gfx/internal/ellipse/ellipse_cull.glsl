@@ -7,9 +7,8 @@
 // `ComponentMask`. Output `EllipseData` matches the render shader's
 // expected layout -- see `ellipse.glsl`.
 //
-// Ellipse blend modes route through per-blend batch buffers (see
-// shape_utils renderGBufferBlend), not in-shader blend filtering, so
-// the packed flags carry blend id 0.
+// Non-alpha blend modes are not routed for ellipses yet; the packed
+// flags carry blend id 0 and everything draws in the alpha pass.
 
 // ---------- Shape-specific source SSBOs ----------
 

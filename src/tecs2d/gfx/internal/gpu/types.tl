@@ -405,21 +405,6 @@ local record types
         entitySlots: {integer: integer}  -- entityId -> slot
     end
 
-    --- A dual-buffer blend batch for shapes using the dual-buffer architecture (circles, ellipses).
-    --- Separates transform data (synced every frame) from metadata (synced on dirty).
-    record DualBlendBatch
-        blendMode: love.graphics.BlendMode
-        blendAlphaMode: love.graphics.BlendAlphaMode
-        transformBuffer: buffer.GPUBuffer
-        metadataBuffer: buffer.GPUBuffer
-        outputBuffer: love.graphics.Buffer
-        indirectBuffer: love.graphics.Buffer
-        entitySlots: {integer: integer}  -- entityId -> slot
-    end
-
-    --- Key for blend batch lookup (mode + alphaMode concatenated)
-    type BlendKey = string
-
     --- A texture batch for sprites using different sprite sheets.
     --- Groups sprites by texture for separate draw calls.
     --- Each batch has its own buffers (transform, metadata, output, indirect).
@@ -464,8 +449,6 @@ local record types
         cull: function(Renderer, cullParamsBuffer: love.graphics.Buffer)
         --- Render to G-buffer (opaque/alpha-blend entities)
         renderGBuffer: function(Renderer, renderParamsBuffer: love.graphics.Buffer, globalTime: number)
-        --- Render blend-mode batches to G-buffer (depth test, no write)
-        renderGBufferBlend: function(Renderer, renderParamsBuffer: love.graphics.Buffer)
         --- Render shapes with non-alpha blend modes (forward pass after lighting)
         renderForwardBlend: function(Renderer, cameraX: number, cameraY: number, cameraZoom: number, useLowRes: boolean, subPixelX: number, subPixelY: number)
         --- Render shadow mask (occluder shapes)

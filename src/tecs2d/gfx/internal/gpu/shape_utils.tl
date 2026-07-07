@@ -48,9 +48,6 @@ local record shape_utils
         cullShader: love.graphics.ComputeShader
         renderShader: love.graphics.Shader
 
-        --- Blend batches (table ref stable, batch fields updated on growth)
-        blendBatches: {types.BlendKey: types.DualBlendBatch}
-
         --- Sync module reference. Must implement shape_sync_base.SyncRecord.
         syncRef: SyncRecord
 
@@ -101,13 +98,6 @@ function shape_utils.simpleShapePlugin(config: shape_utils.SimpleShapeConfig): t
         if syncRef and syncRef.materialParamsBuffer then
             syncRef.materialParamsBuffer:upload()
         end
-
-        for _, batch in pairs(config.blendBatches) do
-            if batch.transformBuffer.count > 0 then
-                batch.transformBuffer:upload()
-                batch.metadataBuffer:upload()
-            end
-        end
     end
 
     ---------------------------------------------------------------------------
@@ -151,32 +141,6 @@ function shape_utils.simpleShapePlugin(config: shape_utils.SimpleShapeConfig): t
             shader:send("MaterialParamsInput", matIn)
             shader:send("MaterialParamsOutput", growable.materialParamsOutBuffer)
             lg.dispatchThreadgroups(shader, ceil(count / 256), 1, 1)
-        end
-
-        -- Cull blend batches
-        local dummyMatParams <const> = renderer.dummyMaterialParamsBuffer
-        for _, batch in pairs(config.blendBatches) do
-            local batchCount = batch.transformBuffer.count
-            if batchCount > 0 then
-                batch.indirectBuffer:setArrayData(renderer.indirectResetData)
-                local shader = config.cullShader
-                shader:send("CullParams", cullParamsBuffer)
-                shader:send(totalUniform, batchCount)
-                shader:send(transformInputUniform, batch.transformBuffer.handle)
-                shader:send(metadataInputUniform, batch.metadataBuffer.handle)
-                shader:send(outputUniform, batch.outputBuffer)
-                shader:send("IndirectArgs", batch.indirectBuffer)
-
-                if hasShadow then
-                    shader:send(shadowOutputUniform, growable.shadowOutputBuffer)
-                    shader:send("ShadowIndirectArgs", config.shadowIndirectBuffer)
-                    shader:send("ShadowMargin", renderer.config.shadowMargin or 200.0)
-                end
-
-                shader:send("MaterialParamsInput", dummyMatParams)
-                shader:send("MaterialParamsOutput", dummyMatParams)
-                lg.dispatchThreadgroups(shader, ceil(batchCount / 256), 1, 1)
-            end
         end
     end
 
@@ -264,32 +228,6 @@ function shape_utils.simpleShapePlugin(config: shape_utils.SimpleShapeConfig): t
     end
 
     ---------------------------------------------------------------------------
-    -- RENDER G-BUFFER BLEND (blend batches in G-buffer)
-    -- Only for shapes without alpha blend filter (ellipse, arc, line)
-    ---------------------------------------------------------------------------
-    if not config.hasAlphaBlendFilter then
-        plugin.renderGBufferBlend = function(renderer: types.Renderer, renderParamsBuffer: love.graphics.Buffer)
-            local rough = renderer._roughGeometry and 1.0 or 0.0
-            for _, batch in pairs(config.blendBatches) do
-                if batch.transformBuffer.count > 0 then
-                    lg.setDepthMode("lequal", false)
-                    lg.setBlendMode(batch.blendMode, batch.blendAlphaMode)
-                    local shader = config.renderShader
-                    lg.setShader(shader)
-                    shader:send("RenderParams", renderParamsBuffer)
-                    shader:send("MaterialPass", -1)
-                    if shader:hasUniform("RoughGeometry") then
-                        shader:send("RoughGeometry", rough)
-                    end
-                    shader:send(outputUniform, batch.outputBuffer)
-                    lg.drawFromShaderIndirect("triangles", batch.indirectBuffer, 1)
-                    lg.setDepthMode("lequal", true)
-                end
-            end
-        end
-    end
-
-    ---------------------------------------------------------------------------
     -- RENDER FORWARD BLEND (non-alpha blend modes, post-lighting)
     -- Active for shapes whose sync ref reports blendGroups.
     ---------------------------------------------------------------------------
@@ -341,20 +279,7 @@ function shape_utils.simpleShapePlugin(config: shape_utils.SimpleShapeConfig): t
     ---------------------------------------------------------------------------
     if hasShadow then
         plugin.renderShadowMask = function(_renderer: types.Renderer, shadowTransform: love.math.Transform)
-            -- Skip when neither the main buffer nor any blend batch has
-            -- shadow-casting entities. Checking just transformBuffer.count
-            -- would miss blend batches that also appended to the shared
-            -- shadow indirect/output buffers during cull.
-            local hasWork = config.transformBuffer.count > 0
-            if not hasWork then
-                for _, batch in pairs(config.blendBatches) do
-                    if batch.transformBuffer.count > 0 then
-                        hasWork = true
-                        break
-                    end
-                end
-            end
-            if not hasWork then return end
+            if config.transformBuffer.count == 0 then return end
 
             local shader = config.shadowMaskShader
             lg.setShader(shader)
