@@ -2,7 +2,7 @@
 outline: deep
 ---
 
-# Tecs2D Getting Started
+# Tecs2D
 
 Tecs2D is a 2D game engine built on top of [Tecs](/tecs/) and [Love2D 12](https://love2d.org).
 It wires the ECS into the Love2D event loop and adds rendering, audio, input, physics, tiled maps,

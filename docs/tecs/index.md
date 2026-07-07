@@ -2,7 +2,7 @@
 outline: deep
 ---
 
-# Tecs Getting Started
+# Getting Started
 
 Tecs is a typed, archetype-based ECS for [LuaJIT](https://luajit.org) and [Teal](https://teal-language.org).
 Tecs is the core of [Tecs2D](/tecs2d/), a Love2D engine.
