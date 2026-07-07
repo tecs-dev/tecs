@@ -109,13 +109,20 @@ function Anchor.plugin(world: World)
                     local transform = transforms[row]
                     local layer = transform.layer
 
-                    -- Determine viewport bounds from layer space
+                    -- Determine viewport bounds from layer space. Layers
+                    -- outside 1..32 (e.g. a zero-initialized batchSpawn
+                    -- Transform) get no mask bit: LuaJIT masks shift
+                    -- counts to 5 bits, so layer 0 would otherwise test
+                    -- bit 31 and silently misclassify the space.
                     local vpLeft: number = 0
                     local vpTop: number = 0
                     local vpWidth: number
                     local vpHeight: number
                     local bitIndex = layer - 1
-                    local layerBit = bit.lshift(1, bitIndex)
+                    local layerBit = 0
+                    if bitIndex >= 0 and bitIndex < 32 then
+                        layerBit = bit.lshift(1, bitIndex)
+                    end
 
                     local isScreenSpace = bit.band(screenSpaceMask, layerBit) ~= 0
                     if isScreenSpace then

@@ -4,6 +4,7 @@ local ClipBounds <const> = require("tecs2d.gfx.internal.ClipBounds")
 
 local Transform <const> = tecs.builtins.Transform
 local ChildOf <const> = tecs.builtins.ChildOf
+local RelativeTransform <const> = tecs.builtins.RelativeTransform
 
 --- A layout node that provides clipping and scrolling for its children.
 --- Children use ChildOf + RelativeTransform to position within the node.
@@ -52,10 +53,15 @@ function LayoutNode.plugin(world: tecs.World)
         include = {LayoutNode, LayoutBox, Transform}
     })
 
-    -- Query for entities with ChildOf and Transform
+    -- Query for layout children. RelativeTransform is required: the
+    -- scroll offset is subtracted from Transform in place every frame,
+    -- which is only stable for entities whose Transform is rebuilt from
+    -- the parent first (the module contract: children use ChildOf +
+    -- RelativeTransform). Without it the subtraction accumulates and the
+    -- entity drifts by the scroll amount per frame.
     local childTransformQuery = world:query({
         name = "ui.ChildTransformQuery",
-        include = {ChildOf, Transform}
+        include = {ChildOf, Transform, RelativeTransform}
     })
 
     -----------------------------------------------------------------------
@@ -124,6 +130,9 @@ function LayoutNode.plugin(world: tecs.World)
                     end
                 end
             end
+
+            -- Nothing scrolled: skip the per-child ancestor walks.
+            if next(scrollOffsets) == nil then return end
 
             -- Apply scroll offset to all descendants of LayoutNodes.
             -- Sums offsets from the full ancestor chain so nested scrolling containers compose their displacements.

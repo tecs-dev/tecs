@@ -215,10 +215,14 @@ function FitContent.plugin(world: World)
                         local comp = tecs.getComponentById(fitContent.adjustComponentId)
                         if comp then
                             local renderData = world:get(parentId, comp) as Sizable
-                            if renderData then
-                                -- Directly set width/height (most components use these fields)
+                            if renderData and (renderData.width ~= newWidth
+                                or renderData.height ~= newHeight) then
                                 renderData.width = newWidth
                                 renderData.height = newHeight
+                                -- cdata writes through world:get don't
+                                -- signal the dirty model; without this the
+                                -- GPU sync never re-uploads the new size.
+                                world:markComponentDirty(parentId, comp)
                             end
                         end
                     end
