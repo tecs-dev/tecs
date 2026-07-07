@@ -551,9 +551,6 @@ local function ensure_teal_compiler()
         return
     end
     if ensure_msys_teal_wrapper() then return end
-    if os.getenv("GITHUB_ACTIONS") == "true" then
-        error("Teal compiler not found. CI should install it into src/vendor before running `tecs check`.", 0)
-    end
     local ref = tecs_tl_ref()
     if not ref then
         error("Could not find TL_REF in " .. path_join(tecs_dir, "Makefile"), 0)

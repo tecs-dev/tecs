@@ -21,6 +21,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Check out Tecs
+        uses: actions/checkout@v4
+        with:
+          repository: tecs-dev/tecs
+          path: tecs
+
       - name: Set up Lua
         uses: leafo/gh-actions-lua@v11
         with:
@@ -44,6 +50,8 @@ jobs:
 
       - name: Create and build a starter app
         shell: bash
+        env:
+          TECS_DIR: ${{ github.workspace }}/tecs
         run: |
           eval "$(luarocks path --local --bin)"
           tecs new "$RUNNER_TEMP/hello-tecs"
@@ -60,6 +68,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Check out Tecs
+        uses: actions/checkout@v4
+        with:
+          repository: tecs-dev/tecs
+          path: tecs
+
       - name: Set up Lua
         uses: leafo/gh-actions-lua@v11
         with:
@@ -85,6 +99,8 @@ jobs:
 
       - name: Create and build a starter app
         shell: cmd
+        env:
+          TECS_DIR: ${{ github.workspace }}\tecs
         run: |
           luarocks path --local --bin > luarocks-path.bat
           call luarocks-path.bat
