@@ -536,6 +536,23 @@ end
 --- Effects
 -------------------------------------------------------------------------------
 
+--- Enable or disable one global effect on every live source in a group
+--- (both play-API and component sources).
+local function setEffectOnGroupSources(self: AudioManagerImpl, groupName: string, globalEffectName: string, enabled: boolean)
+    for source, info in pairs(self._activeSources) do
+        if info.group == groupName then
+            local setEffect = source.setEffect as function(love.audio.Source, string, boolean): boolean
+            setEffect(source, globalEffectName, enabled)
+        end
+    end
+    for source, info in pairs(self._componentSources) do
+        if info.group == groupName then
+            local setEffect = source.setEffect as function(love.audio.Source, string, boolean): boolean
+            setEffect(source, globalEffectName, enabled)
+        end
+    end
+end
+
 function AudioManagerImpl:setGroupEffect(groupName: string, effectName: string, settings: {string:any})
     local ge = self._groupEffects[groupName]
     if not ge then
@@ -558,20 +575,7 @@ function AudioManagerImpl:setGroupEffect(groupName: string, effectName: string, 
     end
 
     -- Enable effect on all current sources in this group
-    for source, info in pairs(self._activeSources) do
-        if info.group == groupName then
-            local setEffect = source.setEffect as function(love.audio.Source, string, boolean): boolean
-            setEffect(source, globalEffectName, true)
-        end
-    end
-
-    -- Also apply to component sources
-    for source, info in pairs(self._componentSources) do
-        if info.group == groupName then
-            local setEffect = source.setEffect as function(love.audio.Source, string, boolean): boolean
-            setEffect(source, globalEffectName, true)
-        end
-    end
+    setEffectOnGroupSources(self, groupName, globalEffectName, true)
 end
 
 function AudioManagerImpl:removeGroupEffect(groupName: string, effectName: string)
@@ -583,20 +587,7 @@ function AudioManagerImpl:removeGroupEffect(groupName: string, effectName: strin
     local globalEffectName = groupName .. "_" .. effectName
 
     -- Remove from all current sources in this group
-    for source, info in pairs(self._activeSources) do
-        if info.group == groupName then
-            local setEffect = source.setEffect as function(love.audio.Source, string, boolean): boolean
-            setEffect(source, globalEffectName, false)
-        end
-    end
-
-    -- Also remove from component sources
-    for source, info in pairs(self._componentSources) do
-        if info.group == groupName then
-            local setEffect = source.setEffect as function(love.audio.Source, string, boolean): boolean
-            setEffect(source, globalEffectName, false)
-        end
-    end
+    setEffectOnGroupSources(self, groupName, globalEffectName, false)
 
     -- Free the global effect slot. Effect names are scoped per group, so
     -- no other group can be using this one; without this, repeated
@@ -692,14 +683,7 @@ function AudioManagerImpl:registerComponentSource(source: love.audio.Source, gro
     source:setVolume(effectiveVolume)
 
     -- Apply group effects (effects are already defined globally)
-    local ge = self._groupEffects[group]
-    if ge and ge.effects then
-        for effectName, _ in pairs(ge.effects) do
-            local globalEffectName = group .. "_" .. effectName
-            local setEffect = source.setEffect as function(love.audio.Source, string, boolean): boolean
-            setEffect(source, globalEffectName, true)
-        end
-    end
+    applyGroupEffects(self, source, group)
 end
 
 function AudioManagerImpl:unregisterComponentSource(source: love.audio.Source)
@@ -711,9 +695,9 @@ function AudioManagerImpl:refreshComponentSource(source: love.audio.Source, audi
     if not info then return end
 
     -- Re-apply mutable fields so gameplay mutations on the component take
-    -- effect. Group change updates tracking (effects won't migrate; that's
-    -- documented as an immutable-after-init field). Volume always flows
-    -- through computeEffectiveVolume so group/master volume stay honored.
+    -- effect. A group change re-routes volume tracking, but group effects
+    -- applied at registration do not migrate. Volume always flows through
+    -- computeEffectiveVolume so group/master volume stay honored.
     if info.group ~= audioSrc.group then
         info.group = audioSrc.group
     end

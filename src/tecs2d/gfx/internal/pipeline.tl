@@ -588,22 +588,11 @@ function pipeline.newPipeline(config: pipeline.RenderConfig): Pipeline
         end
     })
 
-    -- Resize handler
+    -- Resize handler. setScreenSize resizes the primary camera to
+    -- fullscreen; secondary cameras keep their viewport size and users
+    -- manage their resize.
     w:observe(0, levents.Resize, function(e: levents.Resize)
-        self.screenWidth = e.width as integer
-        self.screenHeight = e.height as integer
-        -- Recalculate virtual width to match new aspect ratio
-        self.virtualWidth = floor(self.virtualHeight * self.screenWidth / self.screenHeight) as integer
-        self.renderer.config.virtualRes = {self.virtualWidth, self.virtualHeight}
-        pImpl:_recomputeScaledDims()
-        self.renderer:resize(self.screenWidth, self.screenHeight)
-        pImpl:_ensureWorldLitCanvas()
-        pImpl._screenLitCanvas = lg.newCanvas(self.screenWidth, self.screenHeight, {format = "rgba8"})
-        self.layerEffectsManager:resize(pImpl.scaledWidth, pImpl.scaledHeight)
-        -- Primary camera always fullscreen
-        self._primaryCamera:setScreenSize(self.screenWidth, self.screenHeight, self.virtualHeight)
-        pImpl:_updateCameraRenderDims()
-        -- Secondary cameras keep their viewport size; users manage viewport resize
+        pImpl:setScreenSize(e.width, e.height)
     end)
 
     return pipelineInstance
@@ -947,34 +936,40 @@ function PipelineImpl:configureLayer(layer: integer, config: types.LayerConfig)
     end
 end
 
-function PipelineImpl:setLayerVisibility(layer: integer | string, visible: boolean)
-    local layerNum: integer
+--- Resolve a layer name or number to its layer number; errors on unknown names.
+local function resolveLayer(self: PipelineImpl, layer: integer | string): integer
     if layer is string then
-        layerNum = self.layerNames[layer] or error("Unknown layer: " .. layer)
-    else
-        layerNum = layer as integer
+        local layerNum = self.layerNames[layer]
+        if not layerNum then
+            error("Unknown layer: " .. layer)
+        end
+        return layerNum
     end
+    return layer as integer
+end
+
+--- Resolve a layer name or number to its layer number; nil for unknown names
+--- so getters can fall back to their defaults.
+local function findLayer(self: PipelineImpl, layer: integer | string): integer
+    if layer is string then
+        return self.layerNames[layer]
+    end
+    return layer as integer
+end
+
+function PipelineImpl:setLayerVisibility(layer: integer | string, visible: boolean)
+    local layerNum = resolveLayer(self, layer)
     self.layers[layerNum].visible = visible
 end
 
 function PipelineImpl:isLayerVisible(layer: integer | string): boolean
-    local layerNum: integer
-    if layer is string then
-        layerNum = self.layerNames[layer]
-        if not layerNum then return true end
-    else
-        layerNum = layer as integer
-    end
+    local layerNum = findLayer(self, layer)
+    if not layerNum then return true end
     return self.layers[layerNum].visible ~= false
 end
 
 function PipelineImpl:setLayerUnlit(layer: integer | string, unlit: boolean)
-    local layerNum: integer
-    if layer is string then
-        layerNum = self.layerNames[layer] or error("Unknown layer: " .. layer)
-    else
-        layerNum = layer as integer
-    end
+    local layerNum = resolveLayer(self, layer)
     local bitIndex = layerNum - 1
     local bitMask = bit.lshift(1, bitIndex)
     if unlit then
@@ -987,58 +982,33 @@ function PipelineImpl:setLayerUnlit(layer: integer | string, unlit: boolean)
 end
 
 function PipelineImpl:isLayerUnlit(layer: integer | string): boolean
-    local layerNum: integer
-    if layer is string then
-        layerNum = self.layerNames[layer]
-        if not layerNum then return false end  -- unknown layer defaults to lit (not unlit)
-    else
-        layerNum = layer as integer
-    end
+    local layerNum = findLayer(self, layer)
+    if not layerNum then return false end  -- unknown layer defaults to lit (not unlit)
     local bitIndex = layerNum - 1
     local bitMask = bit.lshift(1, bitIndex)
     return bit.band(self.unlitMask, bitMask) ~= 0
 end
 
 function PipelineImpl:setLayerParallax(layer: integer | string, parallaxX: number, parallaxY: number)
-    local layerNum: integer
-    if layer is string then
-        layerNum = self.layerNames[layer] or error("Unknown layer: " .. layer)
-    else
-        layerNum = layer as integer
-    end
+    local layerNum = resolveLayer(self, layer)
     self.parallaxX[layerNum] = parallaxX
     self.parallaxY[layerNum] = parallaxY or parallaxX
 end
 
 function PipelineImpl:getLayerParallax(layer: integer | string): number, number
-    local layerNum: integer
-    if layer is string then
-        layerNum = self.layerNames[layer]
-        if not layerNum then return 1.0, 1.0 end
-    else
-        layerNum = layer as integer
-    end
+    local layerNum = findLayer(self, layer)
+    if not layerNum then return 1.0, 1.0 end
     return self.parallaxX[layerNum], self.parallaxY[layerNum]
 end
 
 function PipelineImpl:setLayerSortMode(layer: integer | string, mode: types.SortMode)
-    local layerNum: integer
-    if layer is string then
-        layerNum = self.layerNames[layer] or error("Unknown layer: " .. layer)
-    else
-        layerNum = layer as integer
-    end
+    local layerNum = resolveLayer(self, layer)
     self.sortModes[layerNum] = assert(SORT_MODE_TO_INT[mode], "Invalid sort mode: " .. tostring(mode))
 end
 
 function PipelineImpl:getLayerSortMode(layer: integer | string): types.SortMode
-    local layerNum: integer
-    if layer is string then
-        layerNum = self.layerNames[layer]
-        if not layerNum then return "topdown" end
-    else
-        layerNum = layer as integer
-    end
+    local layerNum = findLayer(self, layer)
+    if not layerNum then return "topdown" end
     return SORT_MODE_FROM_INT[self.sortModes[layerNum]] or "topdown"
 end
 
@@ -1047,22 +1017,12 @@ end
 -------------------------------------------------------------------------------
 
 function PipelineImpl:setLayerEffect(layer: integer | string, shader: any, uniforms?: {string: any}, options?: types.LayerEffectOptions)
-    local layerNum: integer
-    if layer is string then
-        layerNum = self.layerNames[layer] or error("Unknown layer: " .. layer)
-    else
-        layerNum = layer as integer
-    end
+    local layerNum = resolveLayer(self, layer)
     self.layerEffectsManager:setEffect(layerNum, shader, uniforms, options as layerEffects.EffectOptions)
 end
 
 function PipelineImpl:clearLayerEffect(layer: integer | string)
-    local layerNum: integer
-    if layer is string then
-        layerNum = self.layerNames[layer] or error("Unknown layer: " .. layer)
-    else
-        layerNum = layer as integer
-    end
+    local layerNum = resolveLayer(self, layer)
     self.layerEffectsManager:clearEffect(layerNum)
 end
 
@@ -1465,6 +1425,59 @@ function PipelineImpl:_renderSecondary(cam: Camera, globalTime: number)
     self.renderer._renderPhase = prevPhase
 end
 
+--- Run a multi-pass effect chain, ping-ponging between src and dst.
+--- sceneBelow is the fixed texture sent as tecs_SceneBelow; when nil, each
+--- pass receives its own input canvas instead (accumulator mode, where the
+--- scene below is the pre-effect accumulator).
+--- @return The canvas holding the final result.
+local function runEffectPasses(
+    effect: layerEffects.LayerEffect,
+    src: love.graphics.Canvas,
+    dst: love.graphics.Canvas,
+    sceneBelow: love.graphics.Canvas,
+    normalBuf: love.graphics.Canvas,
+    emissionBuf: love.graphics.Canvas
+): love.graphics.Canvas
+    for i, s in ipairs(effect.shaders) do
+        lg.setCanvas(dst)
+        lg.clear(0, 0, 0, 0)
+        lg.setShader(s)
+
+        -- Send shared uniforms
+        for name, value in pairs(effect.uniforms) do
+            if s:hasUniform(name) then
+                local send = (s as {string:any}).send as function(any, string, any)
+                send(s, name, value)
+            end
+        end
+
+        -- Send standard uniforms
+        if s:hasUniform("tecs_SceneBelow") then
+            s:send("tecs_SceneBelow", sceneBelow or src)
+        end
+        if s:hasUniform("tecs_PassIndex") then
+            s:send("tecs_PassIndex", i - 1)
+        end
+        if s:hasUniform("tecs_Normal") then
+            s:send("tecs_Normal", normalBuf)
+        end
+        if s:hasUniform("tecs_Emission") then
+            s:send("tecs_Emission", emissionBuf)
+        end
+
+        lg.setColor(1, 1, 1, 1)
+        lg.draw(src, 0, 0)
+        lg.setShader()
+        lg.setCanvas()
+
+        -- Swap for next pass
+        src, dst = dst, src
+    end
+
+    -- After the loop, src holds the final result
+    return src
+end
+
 --- Multi-pass rendering with layer effects.
 --- Each layer group is rendered to the G-buffer, lit, optionally effected,
 --- and composited to the accumulator.
@@ -1547,7 +1560,6 @@ function PipelineImpl:renderWithLayerEffects(camX: number, camY: number, renderZ
         -- Apply effect if this group has one
         if group.effect then
             local effect = group.effect
-            local shaders = effect.shaders
 
             if group.applyToAccumulator then
                 -- "Layers below" mode: composite first, then apply effect to accumulator.
@@ -1558,100 +1570,21 @@ function PipelineImpl:renderWithLayerEffects(camX: number, camY: number, renderZ
                 lg.setCanvas()
 
                 -- Multi-pass: ping-pong between accumulator and effectTemp
-                local src = mgr.accumulator
-                local dst = mgr.effectTemp
+                local finalResult = runEffectPasses(effect, mgr.accumulator, mgr.effectTemp, nil, normalBuf, emissionBuf)
 
-                for i, s in ipairs(shaders) do
-                    lg.setCanvas(dst)
-                    lg.clear(0, 0, 0, 0)
-                    lg.setShader(s)
-
-                    -- Send shared uniforms
-                    for name, value in pairs(effect.uniforms) do
-                        if s:hasUniform(name) then
-                            local send = (s as {string:any}).send as function(any, string, any)
-                            send(s, name, value)
-                        end
-                    end
-
-                    -- Send standard uniforms
-                    if s:hasUniform("tecs_SceneBelow") then
-                        -- For accumulator mode, scene below is the pre-effect accumulator
-                        s:send("tecs_SceneBelow", src)
-                    end
-                    if s:hasUniform("tecs_PassIndex") then
-                        s:send("tecs_PassIndex", i - 1)
-                    end
-                    if s:hasUniform("tecs_Normal") then
-                        s:send("tecs_Normal", normalBuf)
-                    end
-                    if s:hasUniform("tecs_Emission") then
-                        s:send("tecs_Emission", emissionBuf)
-                    end
-
-                    lg.setColor(1, 1, 1, 1)
-                    lg.draw(src, 0, 0)
-                    lg.setShader()
-                    lg.setCanvas()
-
-                    -- Swap for next pass
-                    src, dst = dst, src
-                end
-
-                -- After the loop, src holds the final result
                 -- If result ended up in effectTemp, copy it back to accumulator
-                if src ~= mgr.accumulator then
+                if finalResult ~= mgr.accumulator then
                     lg.setCanvas(mgr.accumulator)
                     lg.setBlendMode("replace")
                     lg.setColor(1, 1, 1, 1)
-                    lg.draw(src, 0, 0)
+                    lg.draw(finalResult, 0, 0)
                     lg.setBlendMode("alpha")
                     lg.setCanvas()
                 end
             else
                 -- Single-layer mode: apply effect to litLayer first, then composite.
                 -- Multi-pass: ping-pong between litLayer and effectTemp.
-                local src = mgr.litLayer
-                local dst = mgr.effectTemp
-
-                for i, s in ipairs(shaders) do
-                    lg.setCanvas(dst)
-                    lg.clear(0, 0, 0, 0)
-                    lg.setShader(s)
-
-                    -- Send shared uniforms
-                    for name, value in pairs(effect.uniforms) do
-                        if s:hasUniform(name) then
-                            local send = (s as {string:any}).send as function(any, string, any)
-                            send(s, name, value)
-                        end
-                    end
-
-                    -- Send standard uniforms
-                    if s:hasUniform("tecs_SceneBelow") then
-                        s:send("tecs_SceneBelow", mgr.accumulator)
-                    end
-                    if s:hasUniform("tecs_PassIndex") then
-                        s:send("tecs_PassIndex", i - 1)
-                    end
-                    if s:hasUniform("tecs_Normal") then
-                        s:send("tecs_Normal", normalBuf)
-                    end
-                    if s:hasUniform("tecs_Emission") then
-                        s:send("tecs_Emission", emissionBuf)
-                    end
-
-                    lg.setColor(1, 1, 1, 1)
-                    lg.draw(src, 0, 0)
-                    lg.setShader()
-                    lg.setCanvas()
-
-                    -- Swap for next pass
-                    src, dst = dst, src
-                end
-
-                -- After the loop, src holds the final result
-                local finalResult = src
+                local finalResult = runEffectPasses(effect, mgr.litLayer, mgr.effectTemp, mgr.accumulator, normalBuf, emissionBuf)
 
                 -- Composite effected layer to accumulator
                 lg.setCanvas(mgr.accumulator)

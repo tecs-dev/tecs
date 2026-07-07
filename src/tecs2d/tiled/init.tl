@@ -234,36 +234,12 @@ function tiled.tileSourceFromGid(map: types.TilemapData, gid: integer): types.Ti
     })
 end
 
--- Utility functions
-function tiled.worldToTile(data: TilemapData, worldX: number, worldY: number): integer, integer
-    local tileX = math.floor(worldX / data.tilewidth) + 1
-    local tileY = math.floor(worldY / data.tileheight) + 1
-    return tileX, tileY
-end
-
-function tiled.tileToWorld(data: TilemapData, tileX: integer, tileY: integer): number, number
-    local worldX: number = (tileX - 1) * data.tilewidth
-    local worldY: number = (tileY - 1) * data.tileheight
-    return worldX, worldY
-end
-
-function tiled.getTileAt(data: TilemapData, layerIndex: integer, worldX: number, worldY: number): integer
-    local tileX, tileY = tiled.worldToTile(data, worldX, worldY)
-    return tiled.getTile(data, layerIndex, tileX, tileY)
-end
-
-function tiled.getTile(data: TilemapData, layerIndex: integer, tileX: integer, tileY: integer): integer
-    local layer = data.layers[layerIndex]
-    if not layer or layer.type ~= "tilelayer" then
-        return 0
-    end
-    if tileX < 1 or tileX > layer.width or tileY < 1 or tileY > layer.height then
-        return 0
-    end
-    -- 0-based FFI index
-    local idx = (tileY - 1) * layer.width + (tileX - 1)
-    return layer.data[idx] or 0
-end
+-- Utility functions: shared with the TilemapData instance methods that
+-- loader.parseTiledMap attaches.
+tiled.worldToTile = loader.worldToTile
+tiled.tileToWorld = loader.tileToWorld
+tiled.getTileAt = loader.getTileAt
+tiled.getTile = loader.getTile
 
 -- Plugin implementation
 function tiled.plugin(world: tecs.World)
@@ -499,9 +475,10 @@ function tiled.plugin(world: tecs.World)
                 if ts.imagePath and not ts.imagePath:match("%.tsj$") then
                     local imgPath = loader.resolveRelativePath(externalBase or path, ts.imagePath)
                     local imgHandle = assetManager:loadImage(imgPath)
-                    ts.image = imgHandle.value  -- Block until loaded
+                    local tilesetImage <const> = imgHandle.value  -- Block until loaded
+                    ts.image = tilesetImage
                     -- Use nearest-neighbor filtering to avoid tile bleeding
-                    (ts.image as love.graphics.Texture):setFilter("nearest", "nearest")
+                    tilesetImage:setFilter("nearest", "nearest")
 
                     -- Try to load optional material maps (_n.png, _e.png, _orm.png)
                     local basePath = imgPath:gsub("%.png$", "")
@@ -511,20 +488,23 @@ function tiled.plugin(world: tecs.World)
 
                     if love.filesystem.getInfo(normalPath) then
                         local normalHandle = assetManager:loadImage(normalPath)
-                        ts.normalImage = normalHandle.value
-                        (ts.normalImage as love.graphics.Texture):setFilter("nearest", "nearest")
+                        local normalImage <const> = normalHandle.value
+                        ts.normalImage = normalImage
+                        normalImage:setFilter("nearest", "nearest")
                     end
 
                     if love.filesystem.getInfo(emissionPath) then
                         local emissionHandle = assetManager:loadImage(emissionPath)
-                        ts.emissionImage = emissionHandle.value
-                        (ts.emissionImage as love.graphics.Texture):setFilter("nearest", "nearest")
+                        local emissionImage <const> = emissionHandle.value
+                        ts.emissionImage = emissionImage
+                        emissionImage:setFilter("nearest", "nearest")
                     end
 
                     if love.filesystem.getInfo(ormPath) then
                         local ormHandle = assetManager:loadImage(ormPath)
-                        ts.ormImage = ormHandle.value
-                        (ts.ormImage as love.graphics.Texture):setFilter("nearest", "nearest")
+                        local ormImage <const> = ormHandle.value
+                        ts.ormImage = ormImage
+                        ormImage:setFilter("nearest", "nearest")
                     end
                 end
             end
@@ -537,13 +517,14 @@ function tiled.plugin(world: tecs.World)
             if layer.type == "imagelayer" and layer.imagePath then
                 local imgPath = loader.resolveRelativePath(path, layer.imagePath)
                 local imgHandle = assetManager:loadImage(imgPath)
-                layer._image = imgHandle.value  -- Block until loaded
-                (layer._image as love.graphics.Texture):setFilter("nearest", "nearest")
+                local layerImage <const> = imgHandle.value  -- Block until loaded
+                layer._image = layerImage
+                layerImage:setFilter("nearest", "nearest")
                 if layer.imagewidth == 0 then
-                    layer.imagewidth = (layer._image as love.graphics.Texture):getWidth() as integer
+                    layer.imagewidth = layerImage:getWidth() as integer
                 end
                 if layer.imageheight == 0 then
-                    layer.imageheight = (layer._image as love.graphics.Texture):getHeight() as integer
+                    layer.imageheight = layerImage:getHeight() as integer
                 end
             end
         end

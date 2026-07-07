@@ -57,7 +57,8 @@ local record tileset
     --- @param tileset The tileset to initialize
     initializeAnimationStates: function(tileset: TilesetData)
 
-    --- Build the GID-to-tileset cache for a tilemap.
+    --- Reset the GID-to-tileset cache for a tilemap; getTilesetForGid
+    --- fills it lazily on lookup.
     --- @param map The tilemap data
     buildGidCache: function(map: TilemapData)
 

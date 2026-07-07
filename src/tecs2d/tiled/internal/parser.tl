@@ -382,6 +382,18 @@ local record parser
     --- @param map The TilemapData to attach methods to
     attachBaseMethods: function(map: TilemapData)
 
+    --- Convert world coordinates to tile coordinates.
+    worldToTile: function(map: TilemapData, worldX: number, worldY: number): integer, integer
+
+    --- Convert tile coordinates to world coordinates.
+    tileToWorld: function(map: TilemapData, tileX: integer, tileY: integer): number, number
+
+    --- Get a tile GID at tile coordinates (0 for out-of-range or non-tile layers).
+    getTile: function(map: TilemapData, layerIndex: integer, tileX: integer, tileY: integer): integer
+
+    --- Get a tile GID at world coordinates.
+    getTileAt: function(map: TilemapData, layerIndex: integer, worldX: number, worldY: number): integer
+
     -- Re-export types for convenience
     type TilemapData = types.TilemapData
     type TilesetData = types.TilesetData
@@ -816,6 +828,13 @@ local function parseLayer(
 
     table.insert(outputLayers, layer)
 end
+
+-- Export the coordinate/tile lookups so callers holding a TilemapData
+-- value (rather than a method receiver) share the same implementations.
+parser.worldToTile = worldToTile
+parser.tileToWorld = tileToWorld
+parser.getTile = getTile
+parser.getTileAt = getTileAt
 
 -- Attach read-only methods to a TilemapData instance
 function parser.attachBaseMethods(map: TilemapData)

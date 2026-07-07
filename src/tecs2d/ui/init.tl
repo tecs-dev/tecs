@@ -57,65 +57,58 @@ function ui.plugin(world: World)
     FitContent.plugin(world)
 end
 
-function ui.stackVertical(world: World, children: {integer}, spacing: number, startY?: number)
-    local currentY = startY or 0
+-- Shared body of stackVertical/stackHorizontal: place children sequentially
+-- along one axis, advancing by each child's extent on that axis plus spacing.
+local function stackChildren(world: World, children: {integer}, spacing: number, start: number, vertical: boolean)
+    local current = start
     for i = 1, #children do
         local childId = children[i]
         local relTransform = world:get(childId, RelativeTransform)
         local layoutBox = world:get(childId, LayoutBox)
         if relTransform then
-            relTransform.y = currentY
+            local step = spacing
             if layoutBox then
-                currentY = currentY + layoutBox.height + spacing
-            else
-                currentY = currentY + spacing
+                step = step + (vertical and layoutBox.height or layoutBox.width)
             end
+            if vertical then
+                relTransform.y = current
+            else
+                relTransform.x = current
+            end
+            current = current + step
         end
     end
+end
+
+function ui.stackVertical(world: World, children: {integer}, spacing: number, startY?: number)
+    stackChildren(world, children, spacing, startY or 0, true)
 end
 
 function ui.stackHorizontal(world: World, children: {integer}, spacing: number, startX?: number)
-    local currentX = startX or 0
-    for i = 1, #children do
-        local childId = children[i]
-        local relTransform = world:get(childId, RelativeTransform)
-        local layoutBox = world:get(childId, LayoutBox)
-        if relTransform then
-            relTransform.x = currentX
-            if layoutBox then
-                currentX = currentX + layoutBox.width + spacing
-            else
-                currentX = currentX + spacing
-            end
-        end
-    end
+    stackChildren(world, children, spacing, startX or 0, false)
 end
+
+-- Reusable measurement context (measureContent runs synchronously, so one
+-- module-level context is safe and avoids a per-call allocation).
+local measureCtx: FitContent.MeasureCtx = {
+    world = nil, hasChildren = false,
+    minX = 0.0, minY = 0.0, maxX = 0.0, maxY = 0.0,
+}
 
 function ui.measureContent(world: World, children: {integer}): number, number
     -- Track full bounding box including negative offsets.
-    local minX, minY = math.huge, math.huge
-    local maxX, maxY = -math.huge, -math.huge
-    local found = false
+    measureCtx.world = world
+    measureCtx.hasChildren = false
+    measureCtx.minX, measureCtx.minY = math.huge, math.huge
+    measureCtx.maxX, measureCtx.maxY = -math.huge, -math.huge
     for i = 1, #children do
-        local childId = children[i]
-        local layoutBox = world:get(childId, LayoutBox)
-        local relTransform = world:get(childId, RelativeTransform)
-        if layoutBox and relTransform then
-            local left = relTransform.x + layoutBox.offsetX
-            local top = relTransform.y + layoutBox.offsetY
-            local right = left + layoutBox.width
-            local bottom = top + layoutBox.height
-            if left < minX then minX = left end
-            if top < minY then minY = top end
-            if right > maxX then maxX = right end
-            if bottom > maxY then maxY = bottom end
-            found = true
-        end
+        FitContent.measureChild(children[i], measureCtx)
     end
-    if not found then
+    measureCtx.world = nil
+    if not measureCtx.hasChildren then
         return 0, 0
     end
-    return maxX - minX, maxY - minY
+    return measureCtx.maxX - measureCtx.minX, measureCtx.maxY - measureCtx.minY
 end
 
 return ui

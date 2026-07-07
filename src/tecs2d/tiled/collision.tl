@@ -13,10 +13,11 @@
 local types <const> = require("tecs2d.tiled.types")
 local tileset_utils <const> = require("tecs2d.tiled.internal.tileset")
 local getCleanGid <const> = tileset_utils.getCleanGid
+local getTilesetForGid <const> = tileset_utils.getTilesetForGid
 
 local type TilemapData = types.TilemapData
 local type TileData = types.TileData
-local type TilesetData = types.TilesetData
+local type LayerData = types.LayerData
 local type ObjectData = types.ObjectData
 
 local lp <const> = love.physics
@@ -182,6 +183,75 @@ local function extractObjectEdges(obj: ObjectData, worldX: number, worldY: numbe
     return {}
 end
 
+-- Collect edges and isolated objects from a single tile into the output arrays.
+local function collectTileEdges(
+    tilemapData: TilemapData,
+    layer: LayerData,
+    config: CollisionConfig,
+    tileX: integer,
+    tileY: integer,
+    edges: {Edge},
+    isolatedObjects: {ObjectData}
+)
+    -- 0-based FFI index
+    local idx = (tileY - 1) * layer.width + (tileX - 1)
+    local gid = layer.data[idx]
+    if not gid or gid <= 0 then
+        return
+    end
+
+    -- Strip flip flags before tileset/tile lookup. Without this, the
+    -- high-bit flip flags inflate the GID and the local-tile lookup
+    -- misses entirely, silently dropping collision.
+    local cleanGid = getCleanGid(gid)
+    local tileset = getTilesetForGid(tilemapData, cleanGid)
+    if not tileset then
+        return
+    end
+
+    local localId = cleanGid - tileset.firstgid
+    local tileData = tileset.tiles[localId]
+    if not (tileData and tileData.objectgroup and tileData.objectgroup.objects) then
+        return
+    end
+
+    -- Check filter
+    if config.filter and not config.filter(tileData, cleanGid, tileX, tileY) then
+        return
+    end
+
+    -- Calculate world position of tile
+    local worldX = (tileX - 1) * tilemapData.tilewidth + layer.offsetx
+    local worldY = (tileY - 1) * tilemapData.tileheight + layer.offsety
+
+    -- Extract edges from all collision objects
+    for _, obj in ipairs(tileData.objectgroup.objects) do
+        if obj.shape == "rectangle" or obj.shape == "polygon" then
+            local objEdges = extractObjectEdges(obj, worldX, worldY)
+            for _, edge in ipairs(objEdges) do
+                table.insert(edges, edge)
+            end
+        else
+            -- Store non-mergeable objects (ellipses, etc.) for later
+            local worldObj: ObjectData = {
+                id = obj.id,
+                name = obj.name,
+                class = obj.class,
+                x = worldX + obj.x,
+                y = worldY + obj.y,
+                width = obj.width,
+                height = obj.height,
+                rotation = obj.rotation,
+                visible = obj.visible,
+                gid = obj.gid,
+                properties = obj.properties,
+                shape = obj.shape,
+            }
+            table.insert(isolatedObjects, worldObj)
+        end
+    end
+end
+
 -- Collect all edges from tiles with collision data
 local function collectEdges(
     tilemapData: TilemapData,
@@ -195,65 +265,7 @@ local function collectEdges(
         if layer.type == "tilelayer" and layer.data then
             for tileY = 1, layer.height do
                 for tileX = 1, layer.width do
-                    -- 0-based FFI index
-                    local idx = (tileY - 1) * layer.width + (tileX - 1)
-                    local gid = layer.data[idx]
-
-                    if gid and gid > 0 then
-                        -- Strip flip flags before tileset/tile lookup. Without this,
-                        -- the high-bit flip flags inflate the GID and the local-tile
-                        -- lookup misses entirely, silently dropping collision.
-                        local cleanGid = getCleanGid(gid)
-                        -- Find tileset and tile data
-                        local tileset: TilesetData = nil
-                        for i = #tilemapData.tilesets, 1, -1 do
-                            if cleanGid >= tilemapData.tilesets[i].firstgid then
-                                tileset = tilemapData.tilesets[i]
-                                break
-                            end
-                        end
-
-                        if tileset then
-                            local localId = cleanGid - tileset.firstgid
-                            local tileData = tileset.tiles[localId]
-
-                            if tileData and tileData.objectgroup and tileData.objectgroup.objects then
-                                -- Check filter
-                                if not config.filter or config.filter(tileData, cleanGid, tileX, tileY) then
-                                    -- Calculate world position of tile
-                                    local worldX = (tileX - 1) * tilemapData.tilewidth + layer.offsetx
-                                    local worldY = (tileY - 1) * tilemapData.tileheight + layer.offsety
-
-                                    -- Extract edges from all collision objects
-                                    for _, obj in ipairs(tileData.objectgroup.objects) do
-                                        if obj.shape == "rectangle" or obj.shape == "polygon" then
-                                            local objEdges = extractObjectEdges(obj, worldX, worldY)
-                                            for _, edge in ipairs(objEdges) do
-                                                table.insert(edges, edge)
-                                            end
-                                        else
-                                            -- Store non-mergeable objects for later
-                                            local worldObj: ObjectData = {
-                                                id = obj.id,
-                                                name = obj.name,
-                                                class = obj.class,
-                                                x = worldX + obj.x,
-                                                y = worldY + obj.y,
-                                                width = obj.width,
-                                                height = obj.height,
-                                                rotation = obj.rotation,
-                                                visible = obj.visible,
-                                                gid = obj.gid,
-                                                properties = obj.properties,
-                                                shape = obj.shape,
-                                            }
-                                            table.insert(isolatedObjects, worldObj)
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                    end
+                    collectTileEdges(tilemapData, layer, config, tileX, tileY, edges, isolatedObjects)
                 end
             end
         end
@@ -286,63 +298,7 @@ local function collectChunkEdges(
 
     for tileY = startRow, endRow do
         for tileX = startCol, endCol do
-            -- 0-based FFI index
-            local idx = (tileY - 1) * layer.width + (tileX - 1)
-            local gid = layer.data[idx]
-
-            if gid and gid > 0 then
-                -- Strip flip flags before tileset/tile lookup (see collectEdges).
-                local cleanGid = getCleanGid(gid)
-                -- Find tileset and tile data
-                local tileset: TilesetData = nil
-                for i = #tilemapData.tilesets, 1, -1 do
-                    if cleanGid >= tilemapData.tilesets[i].firstgid then
-                        tileset = tilemapData.tilesets[i]
-                        break
-                    end
-                end
-
-                if tileset then
-                    local localId = cleanGid - tileset.firstgid
-                    local tileData = tileset.tiles[localId]
-
-                    if tileData and tileData.objectgroup and tileData.objectgroup.objects then
-                        -- Check filter
-                        if not config.filter or config.filter(tileData, cleanGid, tileX, tileY) then
-                            -- Calculate world position of tile
-                            local worldX = (tileX - 1) * tilemapData.tilewidth + layer.offsetx
-                            local worldY = (tileY - 1) * tilemapData.tileheight + layer.offsety
-
-                            -- Extract edges from all collision objects
-                            for _, obj in ipairs(tileData.objectgroup.objects) do
-                                if obj.shape == "rectangle" or obj.shape == "polygon" then
-                                    local objEdges = extractObjectEdges(obj, worldX, worldY)
-                                    for _, edge in ipairs(objEdges) do
-                                        table.insert(edges, edge)
-                                    end
-                                else
-                                    -- Store non-mergeable objects for later
-                                    local worldObj: ObjectData = {
-                                        id = obj.id,
-                                        name = obj.name,
-                                        class = obj.class,
-                                        x = worldX + obj.x,
-                                        y = worldY + obj.y,
-                                        width = obj.width,
-                                        height = obj.height,
-                                        rotation = obj.rotation,
-                                        visible = obj.visible,
-                                        gid = obj.gid,
-                                        properties = obj.properties,
-                                        shape = obj.shape,
-                                    }
-                                    table.insert(isolatedObjects, worldObj)
-                                end
-                            end
-                        end
-                    end
-                end
-            end
+            collectTileEdges(tilemapData, layer, config, tileX, tileY, edges, isolatedObjects)
         end
     end
 
@@ -466,6 +422,31 @@ local function createChainShape(body: PhysicsBody, vertices: {number})
     newChainShape(body, true, vertices)
 end
 
+-- Attach collision shapes to a body: remove internal edges (shared between
+-- adjacent tiles), trace the remaining boundary into closed polygons (one
+-- chain each), and approximate isolated objects.
+local function populateBodyShapes(body: PhysicsBody, edges: {Edge}, isolatedObjects: {ObjectData})
+    if #edges > 0 then
+        local externalEdges = removeInternalEdges(edges)
+        local polygons = tracePolygons(externalEdges)
+        for _, vertices in ipairs(polygons) do
+            createChainShape(body, vertices)
+        end
+    end
+
+    -- Handle isolated objects (ellipses, etc.) - Love2D 12 API
+    local newCircleShape = lp.newCircleShape as function(PhysicsBody, number, number, number): love.physics.Shape
+    for _, obj in ipairs(isolatedObjects) do
+        if obj.shape == "ellipse" then
+            -- Approximate ellipse as circle using average radius
+            local radius = (obj.width + obj.height) / 4
+            local cx = obj.x + obj.width / 2
+            local cy = obj.y + obj.height / 2
+            newCircleShape(body, cx, cy, radius)
+        end
+    end
+end
+
 function collision.createColliders(
     tilemapData: TilemapData,
     physicsWorld: PhysicsWorld,
@@ -491,27 +472,7 @@ function collision.createColliders(
     local body = lp.newBody(physicsWorld, originX or 0, originY or 0, "static")
     table.insert(bodies, body)
 
-    if #edges > 0 then
-        -- Remove internal edges (shared between adjacent tiles), trace
-        -- the remaining boundary into closed polygons, one chain each.
-        local externalEdges = removeInternalEdges(edges)
-        local polygons = tracePolygons(externalEdges)
-        for _, vertices in ipairs(polygons) do
-            createChainShape(body, vertices)
-        end
-    end
-
-    -- Handle isolated objects (ellipses, etc.) - Love2D 12 API
-    local newCircleShape = lp.newCircleShape as function(PhysicsBody, number, number, number): love.physics.Shape
-    for _, obj in ipairs(isolatedObjects) do
-        if obj.shape == "ellipse" then
-            -- Approximate ellipse as circle using average radius
-            local radius = (obj.width + obj.height) / 4
-            local cx = obj.x + obj.width / 2
-            local cy = obj.y + obj.height / 2
-            newCircleShape(body, cx, cy, radius)
-        end
-    end
+    populateBodyShapes(body, edges, isolatedObjects)
 
     return bodies
 end
@@ -555,27 +516,7 @@ function collision.createChunkCollider(
     -- map-local, so the body position places it where the map renders.
     local body = lp.newBody(physicsWorld, originX or 0, originY or 0, "static")
 
-    if #edges > 0 then
-        -- Remove internal edges (shared between adjacent tiles within the
-        -- chunk), trace the remaining boundary into closed polygons, one
-        -- chain each.
-        local externalEdges = removeInternalEdges(edges)
-        local polygons = tracePolygons(externalEdges)
-        for _, vertices in ipairs(polygons) do
-            createChainShape(body, vertices)
-        end
-    end
-
-    -- Handle isolated objects (ellipses, etc.) - Love2D 12 API
-    local newCircleShape = lp.newCircleShape as function(PhysicsBody, number, number, number): love.physics.Shape
-    for _, obj in ipairs(isolatedObjects) do
-        if obj.shape == "ellipse" then
-            local radius = (obj.width + obj.height) / 4
-            local cx = obj.x + obj.width / 2
-            local cy = obj.y + obj.height / 2
-            newCircleShape(body, cx, cy, radius)
-        end
-    end
+    populateBodyShapes(body, edges, isolatedObjects)
 
     -- Check if body has any shapes; if not, destroy and return nil
     -- Note: getShapes is the Love2D 12 replacement for deprecated getFixtures
@@ -597,15 +538,7 @@ function collision.tileHasCollision(tilemapData: TilemapData, gid: integer): boo
     -- Strip flip flags so flipped tiles correctly resolve to their base tile.
     local cleanGid = getCleanGid(gid)
 
-    -- Find tileset for this GID
-    local tileset: TilesetData = nil
-    for i = #tilemapData.tilesets, 1, -1 do
-        if cleanGid >= tilemapData.tilesets[i].firstgid then
-            tileset = tilemapData.tilesets[i]
-            break
-        end
-    end
-
+    local tileset = getTilesetForGid(tilemapData, cleanGid)
     if not tileset then
         return false
     end

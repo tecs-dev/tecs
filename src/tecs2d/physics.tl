@@ -555,8 +555,23 @@ function physics.new(config: physics.Config): tecs.Plugin
         -----------------------------------------------------------------------
         -- Contact Callbacks
         -----------------------------------------------------------------------
-        local function getShapeData(shape: love.physics.Shape): physics_events.ShapeData
-            return shape:getUserData() as physics_events.ShapeData
+        -- Shared preamble for the contact callbacks. In Love2D 12, Shape and
+        -- Fixture are merged, so the fixtures ARE shapes. Tile-collision
+        -- shapes (and any other shapes spawned without going through the
+        -- physics plugin) carry no user data; entity resolves to 0 in that
+        -- direction so contact handlers can still fire for the entity-bound
+        -- side.
+        local function resolveContact(
+            fixtureA: love.physics.Fixture,
+            fixtureB: love.physics.Fixture
+        ): love.physics.Shape, love.physics.Shape, physics_events.ShapeData, physics_events.ShapeData, integer, integer
+            local shapeA = fixtureA as love.physics.Shape
+            local shapeB = fixtureB as love.physics.Shape
+            local dataA = shapeA:getUserData() as physics_events.ShapeData
+            local dataB = shapeB:getUserData() as physics_events.ShapeData
+            local entityA = dataA and dataA.entity or 0
+            local entityB = dataB and dataB.entity or 0
+            return shapeA, shapeB, dataA, dataB, entityA, entityB
         end
 
         local function beginContact(
@@ -564,19 +579,8 @@ function physics.new(config: physics.Config): tecs.Plugin
             fixtureB: love.physics.Fixture,
             contact: love.physics.Contact
         )
-            -- In Love2D 12, Shape and Fixture are merged
-            local shapeA = fixtureA as love.physics.Shape
-            local shapeB = fixtureB as love.physics.Shape
-            local dataA = getShapeData(shapeA)
-            local dataB = getShapeData(shapeB)
+            local shapeA, shapeB, dataA, dataB, entityA, entityB = resolveContact(fixtureA, fixtureB)
             local nx, ny = contact:getNormal()
-
-            -- Tile-collision shapes (and any other shapes spawned without
-            -- going through the physics plugin) carry no user data; we
-            -- pass entity = 0 in that direction so contact handlers can
-            -- still fire for the entity-bound side.
-            local entityA = dataA and dataA.entity or 0
-            local entityB = dataB and dataB.entity or 0
 
             if dataA then
                 world:emit(dataA.entity, physics_events.BeginContact, entityB, shapeA, shapeB, contact, nx, ny)
@@ -593,15 +597,8 @@ function physics.new(config: physics.Config): tecs.Plugin
             fixtureB: love.physics.Fixture,
             contact: love.physics.Contact
         )
-            -- In Love2D 12, Shape and Fixture are merged
-            local shapeA = fixtureA as love.physics.Shape
-            local shapeB = fixtureB as love.physics.Shape
-            local dataA = getShapeData(shapeA)
-            local dataB = getShapeData(shapeB)
+            local shapeA, shapeB, dataA, dataB, entityA, entityB = resolveContact(fixtureA, fixtureB)
             local nx, ny = contact:getNormal()
-
-            local entityA = dataA and dataA.entity or 0
-            local entityB = dataB and dataB.entity or 0
 
             if dataA then
                 world:emit(dataA.entity, physics_events.EndContact, entityB, shapeA, shapeB, contact, nx, ny)
@@ -617,14 +614,7 @@ function physics.new(config: physics.Config): tecs.Plugin
             fixtureB: love.physics.Fixture,
             contact: love.physics.Contact
         )
-            -- In Love2D 12, Shape and Fixture are merged
-            local shapeA = fixtureA as love.physics.Shape
-            local shapeB = fixtureB as love.physics.Shape
-            local dataA = getShapeData(shapeA)
-            local dataB = getShapeData(shapeB)
-
-            local entityA = dataA and dataA.entity or 0
-            local entityB = dataB and dataB.entity or 0
+            local shapeA, shapeB, dataA, dataB, entityA, entityB = resolveContact(fixtureA, fixtureB)
 
             if dataA then
                 world:emit(dataA.entity, physics_events.PreSolve, entityB, shapeA, shapeB, contact)
@@ -642,14 +632,7 @@ function physics.new(config: physics.Config): tecs.Plugin
             normalImpulse: number,
             tangentImpulse: number
         )
-            -- In Love2D 12, Shape and Fixture are merged
-            local shapeA = fixtureA as love.physics.Shape
-            local shapeB = fixtureB as love.physics.Shape
-            local dataA = getShapeData(shapeA)
-            local dataB = getShapeData(shapeB)
-
-            local entityA = dataA and dataA.entity or 0
-            local entityB = dataB and dataB.entity or 0
+            local shapeA, shapeB, dataA, dataB, entityA, entityB = resolveContact(fixtureA, fixtureB)
 
             if dataA then
                 world:emit(dataA.entity, physics_events.PostSolve,

@@ -56,6 +56,21 @@ local record FitContent is Component
 
     new: function(config: FitContentConfig): FitContent
 
+    --- Reusable bounding-box accumulator for measuring child layout bounds.
+    record MeasureCtx
+        world: World
+        hasChildren: boolean
+        minX: number
+        minY: number
+        maxX: number
+        maxY: number
+    end
+
+    --- Accumulate one child's layout bounds (RelativeTransform position plus
+    --- LayoutBox offset and size) into ctx. Children missing RelativeTransform
+    --- or LayoutBox are ignored. Usable directly as a world:targets visitor.
+    measureChild: function(childId: integer, ctx: MeasureCtx)
+
     --- Plugin to install FitContent systems.
     plugin: function(world: World)
 end
@@ -73,6 +88,36 @@ local function resolveAdjustId(c: Component): integer
         end
     end
     return 0
+end
+
+-- LayoutBox is lazily required (as a generic Component) to avoid a circular
+-- dependency, so column reads are cast into the structural shape used here.
+local record SizableBox
+    width: number
+    height: number
+    offsetX: number
+    offsetY: number
+    originX: number
+    originY: number
+end
+
+function FitContent.measureChild(childId: integer, ctx: FitContent.MeasureCtx)
+    if not LayoutBox then
+        LayoutBox = require("tecs2d.ui.internal.LayoutBox")
+    end
+    local relTransform = ctx.world:get(childId, RelativeTransform)
+    local childBox = ctx.world:get(childId, LayoutBox) as SizableBox
+    if relTransform and childBox then
+        ctx.hasChildren = true
+        local left = relTransform.x + childBox.offsetX
+        local top = relTransform.y + childBox.offsetY
+        local right = left + childBox.width
+        local bottom = top + childBox.height
+        if left < ctx.minX then ctx.minX = left end
+        if top < ctx.minY then ctx.minY = top end
+        if right > ctx.maxX then ctx.maxX = right end
+        if bottom > ctx.maxY then ctx.maxY = bottom end
+    end
 end
 
 tecs.newComponent({
@@ -114,52 +159,12 @@ function FitContent.plugin(world: World)
     })
 
     -- Reusable measurement context. Hoisted to plugin scope so the
-    -- world:targets visitor doesn't allocate a fresh closure per parent.
-    local record MeasureCtx
-        world: tecs.World
-        hasChildren: boolean
-        minX: number
-        minY: number
-        maxX: number
-        maxY: number
-    end
-    local measureCtx: MeasureCtx = {
+    -- world:targets visitor doesn't allocate a fresh table per parent.
+    local measureCtx: FitContent.MeasureCtx = {
         world = world, hasChildren = false,
         minX = 0.0, minY = 0.0, maxX = 0.0, maxY = 0.0
     }
-
-    -- LayoutBox is lazily-required as a generic Component, so cast the
-    -- column read into the structural shape we actually use here.
-    local record SizableBox
-        width: number
-        height: number
-        offsetX: number
-        offsetY: number
-    end
-    local record SizableLayoutBox
-        width: number
-        height: number
-        offsetX: number
-        offsetY: number
-        originX: number
-        originY: number
-    end
-
-    local function measureChild(childId: integer, ctx: MeasureCtx)
-        local relTransform = ctx.world:get(childId, RelativeTransform)
-        local childBox = ctx.world:get(childId, LayoutBox) as SizableBox
-        if relTransform and childBox then
-            ctx.hasChildren = true
-            local left = relTransform.x + childBox.offsetX
-            local top = relTransform.y + childBox.offsetY
-            local right = left + childBox.width
-            local bottom = top + childBox.height
-            if left < ctx.minX then ctx.minX = left end
-            if top < ctx.minY then ctx.minY = top end
-            if right > ctx.maxX then ctx.maxX = right end
-            if bottom > ctx.maxY then ctx.maxY = bottom end
-        end
-    end
+    local measureChild <const> = FitContent.measureChild
 
     world:addSystem({
         name = "ui.ComputeFitContent",
@@ -172,7 +177,7 @@ function FitContent.plugin(world: World)
 
                 for row = 1, len do
                     local fitContent = fitContents[row]
-                    local layoutBox = layoutBoxes[row] as SizableLayoutBox
+                    local layoutBox = layoutBoxes[row] as SizableBox
                     local parentId = entities[row]
 
                     -- 1. Measure children via the reverse-indexed ChildOf

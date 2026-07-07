@@ -363,6 +363,25 @@ function audio.plugin(): tecs.Plugin
         })
 
         -----------------------------------------------------------------------
+        --- Helper: Per-frame sync for a relative (non-positional) source:
+        --- init when the handle completes, re-init on structural change, then
+        --- refresh mutable fields and play state.
+        -----------------------------------------------------------------------
+        local function updateRelativeSource(audioSrc: types.AudioSource)
+            if audioSrc.handle.isComplete and not audioSrc._source then
+                initializeSource(audioSrc, true)
+            end
+
+            reinitIfStructuralChange(audioSrc, true)
+
+            if audioSrc._source then
+                audioManager:refreshComponentSource(audioSrc._source, audioSrc)
+                applyPitch(audioSrc)
+                updatePlayState(audioSrc)
+            end
+        end
+
+        -----------------------------------------------------------------------
         --- System: Update AudioSources (relative/non-positional)
         -----------------------------------------------------------------------
         world:addSystem({
@@ -374,19 +393,7 @@ function audio.plugin(): tecs.Plugin
                     local sources = archetype:getMut(audio.AudioSource)
 
                     for i = 1, len do
-                        local audioSrc = sources[i]
-
-                        if audioSrc.handle.isComplete and not audioSrc._source then
-                            initializeSource(audioSrc, true)
-                        end
-
-                        reinitIfStructuralChange(audioSrc, true)
-
-                        if audioSrc._source then
-                            audioManager:refreshComponentSource(audioSrc._source, audioSrc)
-                            applyPitch(audioSrc)
-                            updatePlayState(audioSrc)
-                        end
+                        updateRelativeSource(sources[i])
                     end
                 end
 
@@ -396,24 +403,9 @@ function audio.plugin(): tecs.Plugin
 
                     for i = 1, len do
                         local audioSrc = sources[i]
-
-                        if not audioSrc.relative then
-                            goto continue
+                        if audioSrc.relative then
+                            updateRelativeSource(audioSrc)
                         end
-
-                        if audioSrc.handle.isComplete and not audioSrc._source then
-                            initializeSource(audioSrc, true)
-                        end
-
-                        reinitIfStructuralChange(audioSrc, true)
-
-                        if audioSrc._source then
-                            audioManager:refreshComponentSource(audioSrc._source, audioSrc)
-                            applyPitch(audioSrc)
-                            updatePlayState(audioSrc)
-                        end
-
-                        ::continue::
                     end
                 end
             end

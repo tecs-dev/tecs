@@ -71,6 +71,18 @@ local record loader
     --- @return Resolved absolute path
     resolveRelativePath: function(basePath: string, relativePath: string): string
 
+    --- Convert world coordinates to tile coordinates.
+    worldToTile: function(map: TilemapData, worldX: number, worldY: number): integer, integer
+
+    --- Convert tile coordinates to world coordinates.
+    tileToWorld: function(map: TilemapData, tileX: integer, tileY: integer): number, number
+
+    --- Get a tile GID at tile coordinates (0 for out-of-range or non-tile layers).
+    getTile: function(map: TilemapData, layerIndex: integer, tileX: integer, tileY: integer): integer
+
+    --- Get a tile GID at world coordinates.
+    getTileAt: function(map: TilemapData, layerIndex: integer, worldX: number, worldY: number): integer
+
     -- Re-export types for convenience
     type TilemapData = types.TilemapData
     type TilesetData = types.TilesetData
@@ -81,6 +93,10 @@ end
 loader.parseProperties = parser.parseProperties
 loader.resolveRelativePath = parser.resolveRelativePath
 loader.parseTileset = parser.parseTileset
+loader.worldToTile = parser.worldToTile
+loader.tileToWorld = parser.tileToWorld
+loader.getTile = parser.getTile
+loader.getTileAt = parser.getTileAt
 
 -- Wrap parseTiledMap to attach full methods including setTile
 function loader.parseTiledMap(data: {string: any}): TilemapData

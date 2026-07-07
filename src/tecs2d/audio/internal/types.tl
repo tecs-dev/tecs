@@ -278,7 +278,8 @@ local record types
         --- Handle to the audio asset.
         handle: tecs_assets.Handle<love.audio.Source>
 
-        --- Sound group name.
+        --- Sound group name. Changing it re-routes group/master volume;
+        --- group effects applied at registration do not migrate.
         group: string
 
         --- Volume 0-1.
