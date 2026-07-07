@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unix:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Lua
+        uses: leafo/gh-actions-lua@v11
+        with:
+          luaVersion: "5.4"
+
+      - name: Set up LuaRocks
+        uses: leafo/gh-actions-luarocks@v5
+
+      - name: Install tecs-cli
+        shell: bash
+        run: |
+          luarocks make --local tecs-cli-0.1.0-1.rockspec
+          eval "$(luarocks path --local --bin)"
+          tecs --version
+
+      - name: Run CLI tests
+        shell: bash
+        run: |
+          eval "$(luarocks path --local --bin)"
+          tecs test
+
+      - name: Create and build a starter app
+        shell: bash
+        run: |
+          eval "$(luarocks path --local --bin)"
+          tecs new "$RUNNER_TEMP/hello-tecs"
+          cd "$RUNNER_TEMP/hello-tecs"
+          tecs love12
+          tecs build
+          tecs check
+
+  windows:
+    name: windows-latest
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Lua
+        uses: leafo/gh-actions-lua@v11
+        with:
+          luaVersion: "5.4"
+
+      - name: Set up LuaRocks
+        uses: leafo/gh-actions-luarocks@v5
+
+      - name: Install tecs-cli
+        shell: cmd
+        run: |
+          luarocks make --local tecs-cli-0.1.0-1.rockspec
+          luarocks path --local --bin > luarocks-path.bat
+          call luarocks-path.bat
+          tecs --version
+
+      - name: Run CLI tests
+        shell: cmd
+        run: |
+          luarocks path --local --bin > luarocks-path.bat
+          call luarocks-path.bat
+          tecs test
+
+      - name: Create and build a starter app
+        shell: cmd
+        run: |
+          luarocks path --local --bin > luarocks-path.bat
+          call luarocks-path.bat
+          tecs new "%RUNNER_TEMP%\hello-tecs"
+          cd /D "%RUNNER_TEMP%\hello-tecs"
+          tecs love12
+          tecs build
+          tecs check

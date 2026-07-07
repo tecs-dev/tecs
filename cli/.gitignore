@@ -1,0 +1,7 @@
+/.luarocks
+/lua_modules
+/build
+/src/vendor
+/types
+/.tecs-tmp
+*.rock
