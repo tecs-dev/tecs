@@ -1,4 +1,4 @@
-.PHONY: all build test test-no-ffi clean dev compile check find-busted trim-whitespace \
+.PHONY: all build test test-love test-no-ffi clean dev compile check find-busted trim-whitespace \
 	coverage coverage-report coverage-xml coverage-lcov coverage-html \
 	check-examples build-examples new-example \
 	example-text-bench example-sprite-collision example-assets example-audio example-ball-bench example-circles \
@@ -82,6 +82,7 @@ dev:
 	luarocks install --tree=vendor --lua-version=5.1 luacov-cobertura
 	luarocks install --tree=vendor --lua-version=5.1 luacov-reporter-lcov
 	luarocks install --tree=vendor --lua-version=5.1 luafilesystem
+	luarocks install --tree=vendor --lua-version=5.1 luasocket
 	@echo "Installing documentation dependencies..."
 	cd docs && npm install
 	@echo "Development dependencies installed!"
@@ -109,6 +110,23 @@ rebuild: clean compile
 test: compile
 	@echo "Running tests..."
 	LUA_PATH="$(LUA_DIR)/?.lua;$(LUA_DIR)/?/init.lua;$(TEST_BUILD_DIR)/?.lua;$(TEST_BUILD_DIR)/?/init.lua;$(VENDOR_LUA)/?.lua;$(VENDOR_LUA)/?/init.lua;;" $(BUSTED_CMD) --no-auto-insulate $(TEST_BUILD_DIR)
+
+# Love2D integration tests: launch real LÖVE fixture apps and drive them over
+# the tecs2d MCP HTTP server. Opt-in (needs LÖVE, a display, and sockets);
+# integration specs use the *_lovespec.tl suffix so the fast suite's default
+# _spec pattern never picks them up.
+LOVE_FIXTURE_DIR=$(TEST_BUILD_DIR)/spec/integration/apps
+test-love: compile $(LOVE12_BIN)
+	@echo "Running Love2D integration tests..."
+	@for app in $(LOVE_FIXTURE_DIR)/*/; do \
+		ln -sfn $(CURDIR)/build/tecs "$$app/tecs"; \
+		ln -sfn $(CURDIR)/build/tecs2d "$$app/tecs2d"; \
+		ln -sfn $(CURDIR)/build/tecs2d/assets/internal "$$app/internal"; \
+	done
+	LUA_PATH="$(LUA_DIR)/?.lua;$(LUA_DIR)/?/init.lua;$(TEST_BUILD_DIR)/?.lua;$(TEST_BUILD_DIR)/?/init.lua;$(VENDOR_LUA)/?.lua;$(VENDOR_LUA)/?/init.lua;;" \
+	LUA_CPATH="$(VENDOR_CLIB)/?.so;;" \
+	LOVE="$(LOVE)" \
+	$(BUSTED_CMD) --no-auto-insulate --pattern=_lovespec $(TEST_BUILD_DIR)/spec/integration
 
 clean:
 	rm -rf build
@@ -472,6 +490,7 @@ help:
 	@echo "  rebuild        - Force full rebuild (clean + compile)"
 	@echo "  dev            - Install development dependencies"
 	@echo "  test           - Run tests"
+	@echo "  test-love      - Run Love2D integration tests (real LÖVE + MCP)"
 	@echo "  test-no-ffi    - Run tests with FFI disabled"
 	@echo "  typecheck      - Type check source files only"
 	@echo "  check-examples - Type check all examples"

@@ -1,0 +1,62 @@
+--- MCP compliance fixture: a tiny deterministic LÖVE app driven by the
+--- love2d integration suite over the tecs2d MCP HTTP server.
+---
+--- The scene is one red 80x80 rectangle centered in a 320x240 window with
+--- lighting disabled, so pixel probes have stable expectations. Test-visible
+--- state (frame counter, last key) is exposed through the `tecsTest` global
+--- so specs can read it via the run_lua MCP tool.
+
+local tecs <const> = require("tecs")
+local tecs2d <const> = require("tecs2d")
+local mcp <const> = require("tecs2d.mcp")
+local gfx <const> = require("tecs2d.gfx")
+
+local Transform <const> = tecs.builtins.Transform
+
+local WIDTH <const> = 320
+local HEIGHT <const> = 240
+
+local record TestState
+    frames: integer
+    lastKey: string
+end
+
+local function gamePlugin(world: tecs.World)
+    world:addPlugin(mcp.new({
+        port = tonumber(os.getenv("TECS_MCP_PORT")) or mcp.DEFAULT_PORT,
+    }))
+
+    local pipeline = world.resources[gfx.PIPELINE] as gfx.Pipeline
+    pipeline:getCamera():setPosition(WIDTH / 2, HEIGHT / 2)
+
+    world:spawn(
+        Transform(WIDTH / 2, HEIGHT / 2, 0, 1) as tecs.Component,
+        gfx.Rectangle(80, 80) as tecs.Component,
+        gfx.Color(1, 0, 0, 1) as tecs.Component
+    )
+
+    local state: TestState = {frames = 0, lastKey = nil}
+    local globals = _G as {string: any}
+    globals.tecsTest = state
+
+    world:addSystem({
+        name = "test.FrameCounter",
+        phase = tecs.phases.Update,
+        run = function()
+            state.frames = state.frames + 1
+        end,
+    })
+
+    world:observe(0, tecs2d.KeyPressed, function(e: tecs2d.KeyPressed)
+        state.lastKey = e.key
+    end)
+end
+
+love.run = tecs2d.run({
+    fps = 60,
+    game = gamePlugin,
+    render = {
+        virtualHeight = HEIGHT,
+        lightingMode = "none",
+    },
+})

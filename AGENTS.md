@@ -22,6 +22,7 @@ Documentation entry points:
 ```bash
 make build           # Compile src/ into build/ and compile test deps
 make test            # Build, then run the Busted suite from build/test_deps
+make test-love       # Love2D integration tests: real LÖVE apps driven over the MCP HTTP server
 make all             # Build + test
 make check           # Type-check all source files
 make typecheck       # Type-check source files only
@@ -110,6 +111,8 @@ tecs/
 - Add or update tests when changing behavior, fixing bugs, or extending public APIs.
 - Tests live under `spec/` and are written in Teal.
 - `make test` compiles sources and test dependencies before running Busted.
+- Love2D integration tests live under `spec/integration/` and use the `*_lovespec.tl` suffix so the fast
+  suite's default `_spec` pattern never collects them; run them with `make test-love` (needs a display).
 
 ### Documentation
 

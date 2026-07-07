@@ -846,7 +846,7 @@ toolHandlers["patch_entities"] = function(args: {string:any}, id: number)
         end
     end
 
-    -- Apply patches in the MCP queued-op drain (Last phase).
+    -- Apply patches in the MCP queued-op drain (RenderFirst phase).
     enqueueWorldOp(function(w: tecs.World)
         local patched = 0
         local errors: {string} = {}
@@ -1936,9 +1936,22 @@ function mcp.new(config?: mcp.Config): function(world: tecs.World)
     return function(w: tecs.World)
     world = w
 
+    -- The MCP frame systems run in RenderFirst, not a gameplay phase:
+    -- pause disables the gameplay phases (First..Last), and the server must
+    -- keep answering resume/step/run_lua while paused. RenderFirst also runs
+    -- before the render pipeline's PreRender sync, so world ops drained this
+    -- frame render this frame; the component-dirty bits they set would
+    -- otherwise be cleared at the end of world:update before the next sync
+    -- could see them.
+    --
+    -- Order within RenderFirst: StepCounter -> ProcessCommands ->
+    -- DrainQueuedOps. StepCounter runs first so a step command processed
+    -- this frame is not decremented until the next frame's gameplay phases
+    -- actually ran, keeping `step N` at exactly N gameplay frames.
     w:addSystem({
         name = "mcp.StepCounter",
-        phase = tecs.phases.PostRender,
+        phase = tecs.phases.RenderFirst,
+        before = {"mcp.ProcessCommands"},
         run = function()
             if stepsRemaining > 0 then
                 stepsRemaining = stepsRemaining - 1
@@ -1953,7 +1966,6 @@ function mcp.new(config?: mcp.Config): function(world: tecs.World)
     w:addSystem({
         name = "mcp.DebugDraw",
         phase = tecs.phases.PostRender,
-        before = {"mcp.StepCounter"},
         run = function()
             if #debugDrawCommands == 0 then return end
 
@@ -2077,9 +2089,10 @@ function mcp.new(config?: mcp.Config): function(world: tecs.World)
 
     w:addSystem({
         name = "mcp.ProcessCommands",
-        -- Process MCP HTTP requests in Last and enqueue world ops for
-        -- same-frame execution by `mcp.DrainQueuedOps`.
-        phase = tecs.phases.Last,
+        -- Process MCP HTTP requests and enqueue world ops for same-frame
+        -- execution by `mcp.DrainQueuedOps`. See the RenderFirst phase
+        -- rationale on mcp.StepCounter above.
+        phase = tecs.phases.RenderFirst,
         before = {"mcp.DrainQueuedOps"},
         run = function()
             processCommands()
@@ -2088,7 +2101,7 @@ function mcp.new(config?: mcp.Config): function(world: tecs.World)
 
     w:addSystem({
         name = "mcp.DrainQueuedOps",
-        phase = tecs.phases.Last,
+        phase = tecs.phases.RenderFirst,
         run = function(_dt: number, ww: tecs.World)
             drainQueuedWorldOps(ww)
         end
