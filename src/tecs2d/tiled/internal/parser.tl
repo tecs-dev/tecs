@@ -864,7 +864,6 @@ function parser.parseTiledMap(data: {string: any}): TilemapData
         layers = {},
         tilesets = {},
         properties = parser.parseProperties(data.properties as {{string: any}}),
-        _animatedTilesets = {},
         _gidToTileset = {},
         chunkSize = 32
     }
@@ -919,15 +918,6 @@ function parser.parseTiledMap(data: {string: any}): TilemapData
         local layers <const> = data.layers as {{string: any}}
         for i = 1, #layers do
             parseLayer(layers[i], map.layers, parseState)
-        end
-    end
-
-    -- Build animated tilesets list
-    local mapTilesets <const> = map.tilesets
-    for i = 1, #mapTilesets do
-        local ts = mapTilesets[i]
-        if ts._animatedTiles and #ts._animatedTiles > 0 then
-            table.insert(map._animatedTilesets, ts)
         end
     end
 

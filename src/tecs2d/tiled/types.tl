@@ -169,7 +169,6 @@ local record types
         properties: {string: any}
 
         -- Runtime state
-        _animatedTilesets: {TilesetData}  -- Subset with animations
         _gidToTileset: {integer: TilesetData}  -- Cache for GID lookups
         _world: any  -- ECS world reference for TileChunk dirty marking
         _physicsWorld: any  -- Box2D physics world for collision rebuild

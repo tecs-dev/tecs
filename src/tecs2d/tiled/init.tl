@@ -24,7 +24,6 @@ local pipeline_module <const> = require("tecs2d.gfx.internal.pipeline")
 local types <const> = require("tecs2d.tiled.types")
 local loader <const> = require("tecs2d.tiled.internal.loader")
 local chunk_utils <const> = require("tecs2d.tiled.internal.chunk")
-local animation_utils <const> = require("tecs2d.tiled.internal.animation")
 local debug_plugin <const> = require("tecs2d.tiled.internal.debug")
 local collision_module <const> = require("tecs2d.tiled.collision")
 local tileset_utils <const> = require("tecs2d.tiled.internal.tileset")
@@ -306,23 +305,6 @@ function tiled.plugin(world: tecs.World)
         ev:exclude(types.TileSource as tecs.Component)
     end)
 
-    -- Animation update system
-    world:addSystem({
-        name = "tiled.AnimationUpdate",
-        phase = tecs.phases.FixedUpdate,
-        run = function(dt: number)
-            for archetype, len in tilemapQuery:iter() do
-                local tilemaps = archetype:get(Tilemap)
-                for i = 1, len do
-                    local tilemap = tilemaps[i]
-                    if tilemap.data then
-                        animation_utils.updateAnimations(tilemap.data, dt)
-                    end
-                end
-            end
-        end
-    })
-
     -- Collision rebuild system: rebuilds dirty chunk collisions
     world:addSystem({
         name = "tiled.CollisionRebuild",
@@ -463,12 +445,6 @@ function tiled.plugin(world: tecs.World)
                     ts._animatedTiles = externalTs._animatedTiles
                     ts._animationStates = externalTs._animationStates
                     ts._occluderHeights = externalTs._occluderHeights
-                    -- parseTiledMap built _animatedTilesets before external
-                    -- tilesets were loaded; register late so their global
-                    -- animation states advance too.
-                    if ts._animatedTiles and #ts._animatedTiles > 0 then
-                        table.insert(map._animatedTilesets, ts)
-                    end
                 end
 
                 -- Load the image and optional material maps

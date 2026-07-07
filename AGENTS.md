@@ -23,6 +23,7 @@ Documentation entry points:
 make build           # Compile src/ into build/ and compile test deps
 make test            # Build, then run the Busted suite from build/test_deps
 make test-love       # Love2D integration tests: real LÖVE apps driven over the MCP HTTP server
+make bench-love      # Love2D perf benches: steady-state frame time + alloc per scenario (SCENARIO=, RUNS=)
 make all             # Build + test
 make check           # Type-check all source files
 make typecheck       # Type-check source files only
