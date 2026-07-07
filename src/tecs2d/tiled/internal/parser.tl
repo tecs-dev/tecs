@@ -219,7 +219,17 @@ local function serializeLayer(layer: LayerData): {string: any}
     if layer.type == "tilelayer" then
         result.width = layer.width
         result.height = layer.height
-        result.data = layer.data
+        -- layer.data is an FFI uint32_t buffer; the JSON serializer
+        -- rejects cdata, so copy it into a plain array of GIDs.
+        if layer.data then
+            local count = layer.width * layer.height
+            local src <const> = layer.data
+            local gids: {integer} = {}
+            for i = 1, count do
+                gids[i] = src[i - 1]
+            end
+            result.data = gids
+        end
     elseif layer.type == "objectgroup" then
         result.draworder = "topdown"
         local objects: {{string: any}} = {}
@@ -711,6 +721,13 @@ local function parseLayer(
         -- Parse tile data (supports compressed base64+zlib/gzip, CSV, or raw arrays)
         if layerJson.data then
             local encoding = layerJson.encoding as string
+            -- Tiled's JSON export stores CSV-encoded layers as a plain
+            -- JSON array (string CSV only exists in TMX), so route
+            -- table-typed data to the raw-array path regardless of the
+            -- declared encoding.
+            if type(layerJson.data) == "table" and encoding ~= "base64" then
+                encoding = nil
+            end
             if encoding == "base64" then
                 -- Compressed tile data: base64 decode -> decompress -> FFI
                 local b64data = layerJson.data as string
@@ -742,20 +759,44 @@ local function parseLayer(
                 local buf = ffi.new("uint32_t[?]", count) as {integer}
                 local idx = 0
                 for num in csvData:gmatch("%-?%d+") do
+                    -- Bound the write: a malformed CSV with extra values
+                    -- must not run past the FFI buffer.
+                    if idx >= count then
+                        error(string.format(
+                            "tiled: layer '%s' CSV data has more than %d entries (expected width * height)",
+                            layer.name, count))
+                    end
                     buf[idx] = tonumber(num) as integer
                     idx = idx + 1
                 end
+                if idx ~= count then
+                    error(string.format(
+                        "tiled: layer '%s' CSV data has %d entries, expected %d (width * height)",
+                        layer.name, idx, count))
+                end
                 layer.data = buf
             else
-                -- Uncompressed raw array (no encoding specified) - convert to FFI
+                -- Uncompressed raw array - convert to FFI. Size the buffer
+                -- by width * height (what readers index by) and require the
+                -- array to match, so a short array can't cause reads past
+                -- the allocation.
                 local rawData = layerJson.data as {integer}
-                local count = #rawData
+                local count = layer.width * layer.height
+                if #rawData ~= count then
+                    error(string.format(
+                        "tiled: layer '%s' data has %d entries, expected %d (width * height)",
+                        layer.name, #rawData, count))
+                end
                 local buf = ffi.new("uint32_t[?]", count) as {integer}
                 for i = 1, count do
                     buf[i - 1] = rawData[i]  -- 1-based Lua to 0-based FFI
                 end
                 layer.data = buf
             end
+        else
+            -- Chunked data (infinite maps) is rejected at the map level;
+            -- anything else without data is malformed input.
+            error("tiled: tile layer '" .. tostring(layer.name) .. "' has no data")
         end
     elseif layerType == "objectgroup" then
         layer.objects = {}
@@ -789,6 +830,13 @@ function parser.attachBaseMethods(map: TilemapData)
 end
 
 function parser.parseTiledMap(data: {string: any}): TilemapData
+    -- Infinite maps store tile data in per-layer chunk lists instead of
+    -- dense arrays; nothing downstream handles that layout, so reject
+    -- them with a clear message instead of nil-indexing at spawn.
+    if data.infinite == true then
+        error("tiled: infinite maps are not supported; disable 'Infinite' in Tiled's map properties and set a fixed size")
+    end
+
     local map: TilemapData = {
         width = data.width as integer,
         height = data.height as integer,
