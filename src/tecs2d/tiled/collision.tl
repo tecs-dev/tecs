@@ -1,8 +1,14 @@
 --- Collision geometry extraction from Tiled tilemaps.
 ---
---- Converts per-tile collision shapes into optimized Box2D chain shapes
---- for efficient static collision. Uses polygon tracing to merge adjacent
---- tiles into minimal chain shapes.
+--- Converts per-tile collision shapes into Box2D chain shapes: internal
+--- edges shared by adjacent tiles are removed and the remaining boundary
+--- is traced into closed polygons (one chain per polygon). Collinear
+--- segments are kept as-is (each tile edge stays one chain segment).
+---
+--- Collision is built per render chunk. Edges on chunk borders inside
+--- solid regions are not cancelled against the neighboring chunk's body,
+--- so coincident chain edges exist along chunk seams; bodies sliding
+--- across a seam can register ghost contacts there.
 
 local types <const> = require("tecs2d.tiled.types")
 local tileset_utils <const> = require("tecs2d.tiled.internal.tileset")
@@ -23,7 +29,8 @@ local type PhysicsBody = love.physics.Body
 local record CollisionConfig
     --- Whether collision is enabled (default: false)
     enabled: boolean
-    --- Merge adjacent shapes into chain shapes (default: true)
+    --- Accepted for compatibility; adjacent tiles always merge into
+    --- traced chain shapes (there is no unmerged mode).
     mergeShapes: boolean
     --- Optional filter function to include/exclude tiles
     filter: function(tile: TileData, gid: integer, tileX: integer, tileY: integer): boolean
@@ -484,21 +491,9 @@ function collision.createColliders(
     local body = lp.newBody(physicsWorld, originX or 0, originY or 0, "static")
     table.insert(bodies, body)
 
-    if config.mergeShapes ~= false and #edges > 0 then
-        -- Remove internal edges (shared between adjacent tiles)
-        local externalEdges = removeInternalEdges(edges)
-
-        -- Trace closed polygons
-        local polygons = tracePolygons(externalEdges)
-
-        -- Create chain shapes for each polygon
-        for _, vertices in ipairs(polygons) do
-            createChainShape(body, vertices)
-        end
-    else
-        -- No merging: create individual fixtures for each edge set
-        -- This would require tracking which edges belong to which tile
-        -- For simplicity, we'll still remove internal edges but not merge collinear
+    if #edges > 0 then
+        -- Remove internal edges (shared between adjacent tiles), trace
+        -- the remaining boundary into closed polygons, one chain each.
         local externalEdges = removeInternalEdges(edges)
         local polygons = tracePolygons(externalEdges)
         for _, vertices in ipairs(polygons) do
@@ -560,19 +555,10 @@ function collision.createChunkCollider(
     -- map-local, so the body position places it where the map renders.
     local body = lp.newBody(physicsWorld, originX or 0, originY or 0, "static")
 
-    if config.mergeShapes ~= false and #edges > 0 then
-        -- Remove internal edges (shared between adjacent tiles within chunk)
-        local externalEdges = removeInternalEdges(edges)
-
-        -- Trace closed polygons
-        local polygons = tracePolygons(externalEdges)
-
-        -- Create chain shapes for each polygon
-        for _, vertices in ipairs(polygons) do
-            createChainShape(body, vertices)
-        end
-    else
-        -- No merging: still remove internal edges but create separate shapes
+    if #edges > 0 then
+        -- Remove internal edges (shared between adjacent tiles within the
+        -- chunk), trace the remaining boundary into closed polygons, one
+        -- chain each.
         local externalEdges = removeInternalEdges(edges)
         local polygons = tracePolygons(externalEdges)
         for _, vertices in ipairs(polygons) do

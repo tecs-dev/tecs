@@ -459,33 +459,45 @@ function tiled.plugin(world: tecs.World)
                     error("External .tsx (XML) tilesets are not supported; export as .tsj (JSON): " .. ts.imagePath)
                 end
 
-                -- Check if this is an external tileset reference
+                -- Check if this is an external tileset reference. The
+                -- external tileset's image path is relative to the .tsj
+                -- file's directory, not the map's, so remember the
+                -- asset-relative .tsj location to resolve against.
+                local externalBase: string = nil
                 if ts.imagePath:match("%.tsj$") then
+                    externalBase = loader.resolveRelativePath(path, ts.imagePath)
                     local tsjPath = loader.resolveRelativePath(resolvedPath, ts.imagePath)
                     local tsjData = love.filesystem.read(tsjPath)
-                    if tsjData then
-                        local tsjParsed = json.parse(tsjData) as {string: any}
-                        local externalTs = loader.parseTileset(tsjParsed, ts.firstgid)
-                        ts.name = externalTs.name
-                        ts.tilewidth = externalTs.tilewidth
-                        ts.tileheight = externalTs.tileheight
-                        ts.tilecount = externalTs.tilecount
-                        ts.columns = externalTs.columns
-                        ts.spacing = externalTs.spacing
-                        ts.margin = externalTs.margin
-                        ts.imagePath = externalTs.imagePath
-                        ts.imagewidth = externalTs.imagewidth
-                        ts.imageheight = externalTs.imageheight
-                        ts.tiles = externalTs.tiles
-                        ts._animatedTiles = externalTs._animatedTiles
-                        ts._animationStates = externalTs._animationStates
-                        ts._occluderHeights = externalTs._occluderHeights
+                    if not tsjData then
+                        error("Failed to read external tileset '" .. tsjPath .. "' referenced by " .. path)
+                    end
+                    local tsjParsed = json.parse(tsjData) as {string: any}
+                    local externalTs = loader.parseTileset(tsjParsed, ts.firstgid)
+                    ts.name = externalTs.name
+                    ts.tilewidth = externalTs.tilewidth
+                    ts.tileheight = externalTs.tileheight
+                    ts.tilecount = externalTs.tilecount
+                    ts.columns = externalTs.columns
+                    ts.spacing = externalTs.spacing
+                    ts.margin = externalTs.margin
+                    ts.imagePath = externalTs.imagePath
+                    ts.imagewidth = externalTs.imagewidth
+                    ts.imageheight = externalTs.imageheight
+                    ts.tiles = externalTs.tiles
+                    ts._animatedTiles = externalTs._animatedTiles
+                    ts._animationStates = externalTs._animationStates
+                    ts._occluderHeights = externalTs._occluderHeights
+                    -- parseTiledMap built _animatedTilesets before external
+                    -- tilesets were loaded; register late so their global
+                    -- animation states advance too.
+                    if ts._animatedTiles and #ts._animatedTiles > 0 then
+                        table.insert(map._animatedTilesets, ts)
                     end
                 end
 
                 -- Load the image and optional material maps
                 if ts.imagePath and not ts.imagePath:match("%.tsj$") then
-                    local imgPath = loader.resolveRelativePath(path, ts.imagePath)
+                    local imgPath = loader.resolveRelativePath(externalBase or path, ts.imagePath)
                     local imgHandle = assetManager:loadImage(imgPath)
                     ts.image = imgHandle.value  -- Block until loaded
                     -- Use nearest-neighbor filtering to avoid tile bleeding

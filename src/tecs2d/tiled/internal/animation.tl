@@ -30,7 +30,9 @@ function animation.updateAnimations(map: TilemapData, dt: number)
         for j = 1, #animatedTiles do
             local localId = animatedTiles[j]
             local state = tileset._animationStates[localId]
-            if state then
+            -- Guard totalTime > 0: the wrap loop below never terminates on
+            -- zero-length animations (snapshot or hand-built states).
+            if state and state.totalTime > 0 then
                 -- Advance time
                 state.time = state.time + dt
 

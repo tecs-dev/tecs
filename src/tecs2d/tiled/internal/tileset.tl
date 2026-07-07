@@ -146,9 +146,6 @@ function tileset.initializeAnimationStates(ts: TilesetData)
     if ts.tiles then
         for localId, tile in pairs(ts.tiles) do
             if tile.animation and #tile.animation > 0 then
-                -- Track this as an animated tile
-                table.insert(ts._animatedTiles, localId)
-
                 -- Calculate total animation time
                 local totalTime: number = 0
                 local animation <const> = tile.animation
@@ -156,13 +153,18 @@ function tileset.initializeAnimationStates(ts: TilesetData)
                     totalTime = totalTime + animation[i].duration
                 end
 
-                -- Create animation state
-                local state: AnimationState = {
-                    totalTime = totalTime,
-                    time = 0,
-                    currentFrame = 1
-                }
-                ts._animationStates[localId] = state
+                -- Skip zero-length animations (Tiled permits authoring all
+                -- frame durations as 0); the update loop's time wrap would
+                -- never terminate on totalTime == 0.
+                if totalTime > 0 then
+                    table.insert(ts._animatedTiles, localId)
+                    local state: AnimationState = {
+                        totalTime = totalTime,
+                        time = 0,
+                        currentFrame = 1
+                    }
+                    ts._animationStates[localId] = state
+                end
             end
         end
     end

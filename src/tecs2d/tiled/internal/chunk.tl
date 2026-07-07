@@ -336,14 +336,22 @@ local function spawnAnimatedSprite(
     local worldY = baseY + layer.offsety + (tileY - 1) * th
     local tx, ty = worldX + tw * 0.5, worldY + th * 0.5
 
+    -- Tiled applies D (anti-diagonal), then H, then V to the tile image.
+    -- Scale is applied before rotation here, so under the diagonal's 90
+    -- degree rotation a post-rotation X flip (H) maps to a pre-rotation Y
+    -- negation and V maps to X; routing them straight to sx/sy renders
+    -- D+H and D+V swapped (90 vs 270 degrees).
     local rot = 0.0
     local sx, sy = 1.0, 1.0
     if flipD then
         rot = math.pi * 0.5
         sy = -sy
+        if flipH then sy = -sy end
+        if flipV then sx = -sx end
+    else
+        if flipH then sx = -sx end
+        if flipV then sy = -sy end
     end
-    if flipH then sx = -sx end
-    if flipV then sy = -sy end
 
     return world:spawn(
         Transform.new({
