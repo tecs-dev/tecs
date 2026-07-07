@@ -106,6 +106,15 @@ local record Camera
     _renderWidth: integer
     _renderHeight: integer
 
+    -- Pixel-mode screen mapping (set by the pipeline each render).
+    -- When _screenZoomScale > 0, the screen transform uses
+    -- zoom * _screenZoomScale (e.g. the integer upscale factor) plus the
+    -- sub-pixel blit offset, matching where content actually renders,
+    -- instead of the fractional screenHeight / virtualHeight scale.
+    _screenZoomScale: number
+    _screenOffsetX: number
+    _screenOffsetY: number
+
     -- Viewport (screen-space rect; 0 values = fullscreen)
     _viewportX: number
     _viewportY: number
@@ -250,6 +259,10 @@ local record Camera
     --- Recompute visible bounds and the Transform.
     --- Called after any change to position, zoom, rotation, or screen size.
     updateBounds: function(self)
+
+    --- Set the pixel-mode screen mapping (pipeline-internal); 0 zoomScale
+    --- falls back to the fractional screen/virtual mapping.
+    _setScreenMapping: function(self, zoomScale: number, offsetX: number, offsetY: number)
 
     --- Set the screen dimensions. Called by the pipeline on init and resize.
     --- @param sw Screen width in pixels.
@@ -435,6 +448,9 @@ function Camera.new(config: Camera.CameraConfig): Camera
         _virtualHeight = virtualHeight,
         _renderWidth = screenWidth,
         _renderHeight = screenHeight,
+        _screenZoomScale = 0,
+        _screenOffsetX = 0,
+        _screenOffsetY = 0,
         _viewportX = 0,
         _viewportY = 0,
         _viewportW = 0,
@@ -691,10 +707,37 @@ function Camera:updateBounds()
     self._renderY = self.y + self._shakeOffsetY
     self._renderRotation = self.rotation + self._shakeAngle
 
+    -- Screen transform for toWorld/toScreen. In pixel modes the pipeline
+    -- supplies the actual render mapping (integer upscale + sub-pixel
+    -- blit offset); the fractional effectiveZoom only matches where
+    -- content renders when no such mapping is set.
+    local screenZoom = effectiveZoom
+    local offsetX, offsetY = 0.0, 0.0
+    if self._screenZoomScale > 0 then
+        screenZoom = self.zoom * self._screenZoomScale
+        offsetX, offsetY = self._screenOffsetX, self._screenOffsetY
+    end
     setOrthographic(self._transform,
-        self._renderX, self._renderY, effectiveZoom, self._renderRotation,
-        self._screenWidth, self._screenHeight, 0, 0
+        self._renderX, self._renderY, screenZoom, self._renderRotation,
+        self._screenWidth, self._screenHeight, offsetX, offsetY
     )
+end
+
+--- Set the pixel-mode screen mapping (pipeline-internal). zoomScale is
+--- the factor the render path multiplies camera zoom by to reach screen
+--- pixels (e.g. the integer upscale); offsets are the sub-pixel blit
+--- offset in screen pixels. Pass 0 to fall back to the fractional
+--- screen/virtual mapping.
+function Camera:_setScreenMapping(zoomScale: number, offsetX: number, offsetY: number)
+    if self._screenZoomScale == zoomScale
+        and self._screenOffsetX == offsetX
+        and self._screenOffsetY == offsetY then
+        return
+    end
+    self._screenZoomScale = zoomScale
+    self._screenOffsetX = offsetX
+    self._screenOffsetY = offsetY
+    self:updateBounds()
 end
 
 function Camera:setScreenSize(sw: integer, sh: integer, vh: integer)

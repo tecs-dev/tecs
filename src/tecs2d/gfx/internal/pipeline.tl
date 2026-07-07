@@ -29,15 +29,6 @@ local clamp <const> = function(v: number, lo: number, hi: number): number
     return max(lo, min(hi, v))
 end
 
-local function setOrthographic(t: love.math.Transform, camX: number, camY: number,
-        zoom: number, rotation: number, w: number, h: number, spX: number, spY: number)
-    t:reset()
-    t:translate(w / 2 + spX, h / 2 + spY)
-    t:rotate(rotation)
-    t:scale(zoom, zoom)
-    t:translate(-camX, -camY)
-end
-
 local MAX_LAYERS <const> = 16
 local MAX_Z <const> = 1000
 local MAX_Y <const> = 100000
@@ -1331,31 +1322,25 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
     self.renderer:resetLayerRange()
     self.renderer._renderPhase = nil
 
-    -- Update camera VP to match the actual screen->world mapping for accurate toWorld/toScreen.
-    -- In pixel modes, the render VP uses render dimensions (virtual res in retro mode) which
-    -- differ from screen dimensions. Scale zoom and sub-pixel offset so mouse coordinates
-    -- (in screen space) correctly map to rendered world positions.
+    -- Keep the camera's screen mapping in sync with where content actually
+    -- renders. In pixel modes the render path draws at virtual dimensions
+    -- and upscales by an integer (or width-ratio) factor, not the
+    -- fractional screenHeight / virtualHeight zoom that updateBounds
+    -- derives on its own, so toWorld/toScreen need the real mapping.
+    -- Stored on the camera (not patched into the transform) so
+    -- updateBounds applies it every frame instead of stomping it.
+    -- Offsets stay 0: the render path's camera snap plus sub-pixel blit
+    -- offset cancel to the unsnapped camera position updateBounds already
+    -- uses (the blit's rounding leaves a sub-half-pixel residue only).
     if useLowRes then
         if self._integerScaling then
-            -- Integer scaling: each render pixel = intScale screen pixels, centered on screen.
-            -- The VP maps the full screen (sw x sh), so zoom = renderZoom * intScale.
-            local intScale = self._intScale
-            setOrthographic(cam._transform,
-                camX, camY,
-                renderZoom * intScale,
-                rot, sw, sh,
-                subPixelX * intScale, subPixelY * intScale
-            )
+            -- Integer scaling: each render pixel = intScale screen pixels.
+            cam:_setScreenMapping(self._intScale, 0, 0)
         else
-            local rw = useLowRes and self.scaledWidth or sw
-            local rh = useLowRes and self.scaledHeight or sh
-            setOrthographic(cam._transform,
-                camX, camY,
-                renderZoom * sw / rw,
-                rot, sw, sh,
-                subPixelX * sw / rw, subPixelY * sh / rh
-            )
+            cam:_setScreenMapping(sw / self.scaledWidth, 0, 0)
         end
+    else
+        cam:_setScreenMapping(0, 0, 0)
     end
 end
 
