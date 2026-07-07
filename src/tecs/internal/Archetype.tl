@@ -482,6 +482,12 @@ function Archetype:removeEntity(row: integer, destArchetype?: Archetype): intege
     if luaRow == lastIndex then
         setDoubleArraySize(self.entities, lastIndex - 1)
 
+        -- No swap-pop rewrite happened, but the live row range shrank;
+        -- consumers gated on component dirty (shadow uploads, cached
+        -- shadow masks, incremental serialization) must observe
+        -- removals just like moves.
+        self:markAllComponentsDirty()
+
         if self.observerCount > 0 and lastIndex == 1 then
             notifyDeactivated(self)
         end

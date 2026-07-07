@@ -95,6 +95,7 @@ function gpu.new(config: gpu.Config): gpu.Renderer
     -- Compile shared shaders (per-shape shaders are compiled by each shape module)
     renderer.lightingShader = lg.newShader(shaderCode.LIGHTING)
     renderer.shadowBlurShader = lg.newShader(shaderCode.SHADOW_BLUR)
+    renderer.screenUnlitShader = lg.newShader(shaderCode.SCREEN_UNLIT)
     renderer.bloomDownsampleShader = lg.newShader(shaderCode.BLOOM_DOWNSAMPLE)
     renderer.bloomUpsampleShader = lg.newShader(shaderCode.BLOOM_UPSAMPLE)
 

@@ -374,6 +374,8 @@ local record types
     record Renderer
         -- Shared shaders (not owned by any shape module)
         shadowBlurShader: love.graphics.Shader
+        --- Screen-phase unlit composite (albedo + emission passthrough).
+        screenUnlitShader: love.graphics.Shader
         shadowMaskTemp: love.graphics.Canvas  -- Temp canvas for blur pass
         lightingShader: love.graphics.Shader
         -- Cross-cutting light buffers (set by Light plugin, read by renderLighting)

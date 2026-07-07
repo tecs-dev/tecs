@@ -14,6 +14,7 @@ local phases <const> = tecs.phases
 local layerEffects <const> = require("tecs2d.gfx.internal.layer_effects")
 local Camera <const> = require("tecs2d.gfx.Camera")
 local sprite_sheet <const> = require("tecs2d.gfx.internal.sprite.sheet")
+local Occluder <const> = require("tecs2d.gfx.internal.Occluder")
 local bit <const> = require("bit")
 
 local lg <const> = love.graphics
@@ -252,6 +253,18 @@ local record PipelineImpl is Pipeline
 
     -- Screen-phase lit canvas (native resolution, for compositing screen layers)
     _screenLitCanvas: love.graphics.Canvas
+
+    -- Shadow-mask reuse: the occluder mask only redraws when the camera
+    -- moved, occluder-bearing state changed, or animated (sprite)
+    -- occluders exist. See _shadowMaskFresh.
+    _maskValid: boolean
+    _maskCamX: number
+    _maskCamY: number
+    _maskZoom: number
+    _maskRot: number
+    _occluderQuery: tecs.Query
+    _shadowMaskFresh: function(self, camX: number, camY: number, zoom: number, rot: number): boolean
+    _stampShadowMask: function(self, camX: number, camY: number, zoom: number, rot: number)
 
     -- Recompute scaled dimensions for current pixel mode and screen size
     _recomputeScaledDims: function(PipelineImpl)
@@ -721,6 +734,9 @@ end
 
 function PipelineImpl:enableLighting()
     self.lightingMode = "deferred"
+    -- Occluders may have changed while lighting was off; their dirty
+    -- marks are long cleared, so the cached mask can't be trusted.
+    self._maskValid = false
 end
 
 function PipelineImpl:disableLighting()
@@ -1038,6 +1054,8 @@ end
 function PipelineImpl:setScreenSize(w: number, h: number)
     self.screenWidth = w as integer
     self.screenHeight = h as integer
+    -- renderer:resize recreates the shadow-mask canvases blank.
+    self._maskValid = false
     -- Recalculate virtual width to match new aspect ratio
     self.virtualWidth = floor(self.virtualHeight * self.screenWidth / self.screenHeight) as integer
     self.renderer.config.virtualRes = {self.virtualWidth, self.virtualHeight}
@@ -1165,9 +1183,11 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
         self.renderer:renderGBuffer(camX, camY, renderZoom, useLowRes, globalTime, gBufferCb, rot, renderSubPixelX, renderSubPixelY)
         zone()
 
-        if self.shadowsEnabled and self.lightingMode == "deferred" then
+        if self.shadowsEnabled and self.lightingMode == "deferred"
+                and not self:_shadowMaskFresh(camX, camY, renderZoom, rot) then
             zone("shadowMask")
             self.renderer:renderShadowMask(camX, camY, renderZoom, rot)
+            self:_stampShadowMask(camX, camY, renderZoom, rot)
             zone()
         end
 
@@ -1261,18 +1281,26 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
 
         -- Skip shadow mask (all screen layers are unlit)
 
-        -- Render screen-phase lighting to a canvas (all pixels hit unlit early-exit)
+        -- Composite the screen G-buffer unlit. Screen layers are always
+        -- unlit, so the deferred lighting shader would take its unlit
+        -- early-exit on every pixel; the dedicated composite shader
+        -- reproduces that exit (albedo + emission, alpha 1, uncovered
+        -- pixels discarded) without binding the lighting pipeline.
         local screenLit = self._screenLitCanvas
+        local albedo = self.renderer.gBufferAlbedo
+        lg.setCanvas(screenLit)
+        lg.clear(0, 0, 0, 0)
+        lg.setColor(1, 1, 1, 1)
         if self.lightingMode == "deferred" then
-            self.renderer:renderLighting(false, false, self.ambientLight, 0, 0, 1.0, screenLit, 0.0, 0.0, 0.0)
-        else
-            local albedo = self.renderer.gBufferAlbedo
-            lg.setCanvas(screenLit)
-            lg.clear(0, 0, 0, 0)
-            lg.setColor(1, 1, 1, 1)
+            local unlitShader = self.renderer.screenUnlitShader
+            lg.setShader(unlitShader)
+            unlitShader:send("ScreenEmission", self.renderer.gBufferEmission)
             lg.draw(albedo, 0, 0)
-            lg.setCanvas()
+            lg.setShader()
+        else
+            lg.draw(albedo, 0, 0)
         end
+        lg.setCanvas()
 
         -- Forward pass for blend-mode screen-layer shapes
         lg.setCanvas(screenLit)
@@ -1372,8 +1400,10 @@ function PipelineImpl:_renderSecondary(cam: Camera, globalTime: number)
     self.renderer:resetLayerRange()
     self.renderer:renderGBuffer(camX, camY, effectiveZoom, useLowRes, globalTime, gBufferCb, rot)
 
-    if self.shadowsEnabled and self.lightingMode == "deferred" then
+    if self.shadowsEnabled and self.lightingMode == "deferred"
+            and not self:_shadowMaskFresh(camX, camY, effectiveZoom, rot) then
         self.renderer:renderShadowMask(camX, camY, effectiveZoom, rot)
+        self:_stampShadowMask(camX, camY, effectiveZoom, rot)
     end
 
     if hasCanvas then
@@ -1528,8 +1558,10 @@ function PipelineImpl:renderWithLayerEffects(camX: number, camY: number, renderZ
 
         -- Render shadow mask and lighting for this group
         if self.lightingMode == "deferred" then
-            if self.shadowsEnabled then
+            if self.shadowsEnabled
+                    and not self:_shadowMaskFresh(camX, camY, renderZoom, rotation) then
                 self.renderer:renderShadowMask(camX, camY, renderZoom, rotation)
+                self:_stampShadowMask(camX, camY, renderZoom, rotation)
             end
 
             -- Render lighting to the litLayer canvas
@@ -1805,6 +1837,87 @@ end
 --- @param worldX World-space X coordinate.
 --- @param worldY World-space Y coordinate.
 --- @return Perceptual luminance in [0, 1] (ITU-R BT.709), or 0 if off-screen.
+-- Per-archetype "column set contains a Sprite/TileChunk column" caches.
+-- Column sets are fixed per archetype, so one name scan suffices.
+local archHasSprite <const>: {tecs.Archetype: boolean} =
+    setmetatable({}, {__mode = "k"} as metatable<{tecs.Archetype: boolean}>)
+local archHasTileChunk <const>: {tecs.Archetype: boolean} =
+    setmetatable({}, {__mode = "k"} as metatable<{tecs.Archetype: boolean}>)
+
+local function scanColumns(arch: tecs.Archetype)
+    local hasSprite = false
+    local hasTileChunk = false
+    for comp in pairs((arch as {string:any}).columns as {tecs.Component: any}) do
+        local name = comp.componentName
+        if name == "Sprite" then
+            hasSprite = true
+        elseif name == "TileChunk" then
+            hasTileChunk = true
+        end
+    end
+    archHasSprite[arch] = hasSprite
+    archHasTileChunk[arch] = hasTileChunk
+end
+
+--- True when the occluder mask rendered last frame is still valid: same
+--- camera view, no occluder-bearing state changed this frame, and no
+--- sprite occluders (their silhouettes are GPU-animated, so the CPU
+--- can't prove them static).
+function PipelineImpl:_shadowMaskFresh(camX: number, camY: number, zoom: number, rot: number): boolean
+    if not self._maskValid
+            or camX ~= self._maskCamX or camY ~= self._maskCamY
+            or zoom ~= self._maskZoom or rot ~= self._maskRot then
+        return false
+    end
+
+    -- Occluder data or placement changed this frame? Structural changes
+    -- and swap-removes mark every component dirty, so spawn/despawn and
+    -- moves are covered. TileChunk edits (DirtyTileChunk resync) change
+    -- baked occluder heights without an Occluder column.
+    for arch in self.world:dirtyArchetypes() do
+        local cols = (arch as {string:any}).columns as {tecs.Component: any}
+        if cols[Occluder as tecs.Component] ~= nil then
+            return false
+        end
+        if archHasTileChunk[arch] == nil then
+            scanColumns(arch)
+        end
+        if archHasTileChunk[arch] then
+            return false
+        end
+    end
+
+    -- Animated sprite occluders: silhouettes track gameTime on the GPU.
+    -- Any live sprite occluder forces a redraw (no break inside iter();
+    -- early exits would leak the query's deferred scope).
+    if not self._occluderQuery then
+        self._occluderQuery = self.world:query({
+            name = "pipeline.ShadowMaskOccluders",
+            include = {Occluder},
+        })
+    end
+    local hasSpriteOccluders = false
+    for arch, len in self._occluderQuery:iter() do
+        if len > 0 then
+            if archHasSprite[arch] == nil then
+                scanColumns(arch)
+            end
+            if archHasSprite[arch] then
+                hasSpriteOccluders = true
+            end
+        end
+    end
+    return not hasSpriteOccluders
+end
+
+function PipelineImpl:_stampShadowMask(camX: number, camY: number, zoom: number, rot: number)
+    self._maskValid = true
+    self._maskCamX = camX
+    self._maskCamY = camY
+    self._maskZoom = zoom
+    self._maskRot = rot
+end
+
 function PipelineImpl:queryLightAt(worldX: number, worldY: number): number
     local cam = self._primaryCamera
     local renderer = self.renderer

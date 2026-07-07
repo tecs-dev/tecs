@@ -38,6 +38,7 @@ local record shaders
     --- Shared shader sources (not owned by any shape module)
     LIGHTING: string
     SHADOW_BLUR: string
+    SCREEN_UNLIT: string
     CPU_WORLD: string
     LIGHT_CULL: string
     BLOOM_DOWNSAMPLE: string
@@ -113,6 +114,7 @@ end
 -- Load shared shader sources (not owned by any shape module)
 shaders.LIGHTING = shaders.loadShader("lighting")
 shaders.SHADOW_BLUR = shaders.loadShader("shadow_blur")
+shaders.SCREEN_UNLIT = shaders.loadShader("screen_unlit")
 shaders.CPU_WORLD = shaders.loadShader("cpu_world")
 shaders.LIGHT_CULL = shaders.loadShader("light_cull")
 shaders.BLOOM_DOWNSAMPLE = shaders.loadShader("bloom_downsample")
