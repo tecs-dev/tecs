@@ -403,7 +403,7 @@ function pipeline.newPipeline(config: pipeline.RenderConfig): Pipeline
 
         -- Multi-camera
         _cameras = { cam },
-        _camerasByName = {},
+        _camerasByName = { ["__primary"] = cam },
         _primaryCamera = cam,
         _renderCamera = cam,
 

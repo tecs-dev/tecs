@@ -574,6 +574,9 @@ function Sprite:pause(time?: number)
         return  -- Already frame-paused (but pauseDepth incremented)
     end
     local inst <const> = getInstance(self.spriteId)
+    if not inst then
+        return  -- Zero-initialized sprite (batchSpawn skips FFI defaults)
+    end
     local currentTime = time or getGameTime()
     local localTime = (currentTime - self.animStartTime) % inst.animTotalDuration
     local frame = timingBuffer.global:getFrameAtTime(
@@ -614,6 +617,9 @@ end
 
 function Sprite:pauseAtEnd()
     local inst <const> = getInstance(self.spriteId)
+    if not inst then
+        return  -- Zero-initialized sprite (batchSpawn skips FFI defaults)
+    end
     local lastFrame = inst.animFrameCount - 1
     if self.pausedFrame >= 0 then
         -- Already paused, just jump to end
@@ -633,6 +639,9 @@ end
 
 function Sprite:gotoFrame(frame: integer)
     local inst <const> = getInstance(self.spriteId)
+    if not inst then
+        return  -- Zero-initialized sprite (batchSpawn skips FFI defaults)
+    end
     local maxFrame = inst.animFrameCount - 1
     if frame < 0 then frame = 0 end
     if frame > maxFrame then frame = maxFrame end
@@ -641,11 +650,11 @@ function Sprite:gotoFrame(frame: integer)
 
     if self.pausedFrame >= 0 then
         self.pausedFrame = frame
-        local world = sprite_instance.getWorld() as tecs.World
-        world:markComponentDirty(self._entity, Sprite as tecs.Component)
     else
         self.animStartTime = getGameTime() - frameTime
     end
+    local world = sprite_instance.getWorld() as tecs.World
+    world:markComponentDirty(self._entity, Sprite as tecs.Component)
     inst.cachedFrame = -1
 end
 

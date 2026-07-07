@@ -82,7 +82,7 @@ local record light
         --- Light is full intensity inside inner cone, fades to outer cone
         innerConeAngle: number
 
-        --- Shadow penumbra softness multiplier (default: 1.5).
+        --- Shadow penumbra softness multiplier (default: 0.5).
         --- Higher values = softer shadow edges, lower values = harder edges.
         --- 0 produces fully hard shadows.
         penumbra: number
