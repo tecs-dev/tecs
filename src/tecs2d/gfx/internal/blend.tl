@@ -152,8 +152,12 @@ blend.AdditiveBlend = createBlendComponent(
 blend.AdditiveBlendPremul = createBlendComponent(
     "AdditiveBlendPremul", "add", "premultiplied") as AdditiveBlendPremul
 
+-- LÖVE only permits the multiply, lighten, and darken blend modes with
+-- premultiplied alpha (setBlendMode errors otherwise), so their
+-- non-Premul tags register as premultiplied too. For SDF shapes the two
+-- are numerically identical (their shaders output alpha 1).
 blend.MultiplyBlend = createBlendComponent(
-    "MultiplyBlend", "multiply", "alphamultiply") as MultiplyBlend
+    "MultiplyBlend", "multiply", "premultiplied") as MultiplyBlend
 blend.MultiplyBlendPremul = createBlendComponent(
     "MultiplyBlendPremul", "multiply", "premultiplied") as MultiplyBlendPremul
 
@@ -168,12 +172,12 @@ blend.SubtractBlendPremul = createBlendComponent(
     "SubtractBlendPremul", "subtract", "premultiplied") as SubtractBlendPremul
 
 blend.LightenBlend = createBlendComponent(
-    "LightenBlend", "lighten", "alphamultiply") as LightenBlend
+    "LightenBlend", "lighten", "premultiplied") as LightenBlend
 blend.LightenBlendPremul = createBlendComponent(
     "LightenBlendPremul", "lighten", "premultiplied") as LightenBlendPremul
 
 blend.DarkenBlend = createBlendComponent(
-    "DarkenBlend", "darken", "alphamultiply") as DarkenBlend
+    "DarkenBlend", "darken", "premultiplied") as DarkenBlend
 blend.DarkenBlendPremul = createBlendComponent(
     "DarkenBlendPremul", "darken", "premultiplied") as DarkenBlendPremul
 

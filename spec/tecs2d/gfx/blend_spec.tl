@@ -127,6 +127,17 @@ describe("blend tag components", function()
             luassert.equals("replace", info.mode)
             luassert.equals("premultiplied", info.alphaMode)
         end)
+
+        it("registers multiply, lighten, and darken as premultiplied", function()
+            -- LÖVE's setBlendMode rejects these three modes with
+            -- alphamultiply; registering them premultiplied keeps the
+            -- non-Premul tags usable (SDF shapes output alpha 1, so the
+            -- result is identical).
+            for _, comp in ipairs({blend.MultiplyBlend, blend.LightenBlend, blend.DarkenBlend}) do
+                local info = blend.INFO[comp]
+                luassert.equals("premultiplied", info.alphaMode)
+            end
+        end)
     end)
 
     describe("blend.ID constants", function()
