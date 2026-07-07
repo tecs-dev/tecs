@@ -35,29 +35,6 @@ love.run = tecs2d.run({
 })
 ```
 
-## Architecture Overview
-
-The rendering pipeline consists of several passes:
-
-1. **G-Buffer Pass**: Renders all geometry (sprites, shapes, text) to multiple render targets storing albedo, normals,
-specular, and emission information.
-
-2. **Shadow Mask Pass**: Renders occluder silhouettes to a shadow mask texture using compute shader culling.
-
-3. **Lighting Pass**: Applies dynamic lighting using raymarched shadows and normal-based shading.
-
-4. **Composite Pass**: Combines all passes into the final output.
-
-## Key Features
-
-- **GPU Instancing**: Batches thousands of entities into single draw calls
-- **Compute Shader Culling**: Visibility testing runs entirely on the GPU
-- **Deferred Lighting**: Decouples scene complexity from lighting cost
-- **2.5D Lighting**: Height-based shading for pseudo-3D effects
-- **Dynamic Shadows**: Raymarched soft shadows with height-based occlusion
-- **Pixel-Perfect Rendering**: Opt-in retro mode for integer-scaled pixel art
-- **Multiple Cameras**: Minimaps, split-screen, and render-to-texture via independent cameras
-
 ## Components Overview
 
 ### Drawable Components
@@ -115,18 +92,6 @@ specular, and emission information.
 | [Lighting](./lighting)                   | Point lights, spotlights, shadows, and occluders                                 |
 | [Custom Drawing](./custom-drawing)       | CPU drawing with depth sorting                                                   |
 | [Materials](./materials)                 | GPU-batched fragment shader injection                                            |
-
-## Performance Characteristics
-
-The rendering system is designed to be **GPU-bound** rather than CPU-bound:
-
-- **Zero-copy FFI buffers**: Entity data is written directly to GPU-mapped memory
-- **Archetype batching**: Entities with the same components render together
-- **Dirty range tracking**: Only modified buffer regions are uploaded
-- **Indirect drawing**: Draw calls are issued from GPU-populated buffers
-
-This architecture allows rendering of 100K+ entities at 60fps on modern hardware, with performance scaling based on GPU
-fill rate rather than Lua interpreter speed.
 
 ## RenderConfig
 
