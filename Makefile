@@ -116,8 +116,12 @@ test: compile
 # integration specs use the *_lovespec.tl suffix so the fast suite's default
 # _spec pattern never picks them up.
 LOVE_FIXTURE_DIR=$(TEST_BUILD_DIR)/spec/integration/apps
+FILE_MATCH ?= _lovespec
+LOVE_TEST_FILTER := $(if $(MATCH),--filter="$(MATCH)",)
 test-love: compile $(LOVE12_BIN)
 	@echo "Running Love2D integration tests..."
+	@if [ -n "$(MATCH)" ]; then echo "Filtering test names with Lua pattern: $(MATCH)"; fi
+	@if [ "$(FILE_MATCH)" != "_lovespec" ]; then echo "Filtering test files with Lua pattern: $(FILE_MATCH)"; fi
 	@for app in $(LOVE_FIXTURE_DIR)/*/; do \
 		ln -sfn $(CURDIR)/build/tecs "$$app/tecs"; \
 		ln -sfn $(CURDIR)/build/tecs2d "$$app/tecs2d"; \
@@ -126,7 +130,7 @@ test-love: compile $(LOVE12_BIN)
 	LUA_PATH="$(LUA_DIR)/?.lua;$(LUA_DIR)/?/init.lua;$(TEST_BUILD_DIR)/?.lua;$(TEST_BUILD_DIR)/?/init.lua;$(VENDOR_LUA)/?.lua;$(VENDOR_LUA)/?/init.lua;;" \
 	LUA_CPATH="$(VENDOR_CLIB)/?.so;;" \
 	LOVE="$(LOVE)" \
-	$(BUSTED_CMD) --no-auto-insulate --pattern=_lovespec $(TEST_BUILD_DIR)/spec/integration
+	$(BUSTED_CMD) --no-auto-insulate --pattern="$(FILE_MATCH)" $(LOVE_TEST_FILTER) $(TEST_BUILD_DIR)/spec/integration
 
 clean:
 	rm -rf build
@@ -491,6 +495,7 @@ help:
 	@echo "  dev            - Install development dependencies"
 	@echo "  test           - Run tests"
 	@echo "  test-love      - Run Love2D integration tests (real LÖVE + MCP)"
+	@echo "                   Filter with MATCH='<Lua pattern>' or FILE_MATCH='<Lua pattern>'"
 	@echo "  test-no-ffi    - Run tests with FFI disabled"
 	@echo "  typecheck      - Type check source files only"
 	@echo "  check-examples - Type check all examples"
