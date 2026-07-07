@@ -35,3 +35,8 @@ coverage.info
 *.lcov.mcp.json
 .mcp.json
 *.src.rock
+benches/love2d/app/tecs
+benches/love2d/app/tecs2d
+benches/love2d/app/internal
+benches/love2d/app/assets
+benches/love2d/results/

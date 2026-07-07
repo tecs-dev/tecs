@@ -137,6 +137,29 @@ test-love: compile $(LOVE12_BIN)
 	LOVE="$(LOVE)" \
 	$(BUSTED_CMD) --no-auto-insulate --pattern="$(LOVE_FILE_PATTERN)" $(LOVE_TEST_FILTER) $(TEST_BUILD_DIR)/spec/integration
 
+# Love2D performance benches: run scenario apps under real LÖVE and record
+# steady-state frame times + per-frame Lua allocation. Results land in
+# benches/love2d/results/<scenario>.json and print as TECS_BENCH_RESULT
+# lines. Usage:
+#   make bench-love SCENARIO=lights      # one scenario
+#   make bench-love                      # all scenarios
+#   make bench-love SCENARIO=lights FRAMES=600 WARMUP=200
+BENCH_LOVE_APP := benches/love2d/app
+BENCH_LOVE_RESULTS := benches/love2d/results
+BENCH_SCENARIOS := $(basename $(notdir $(wildcard $(BENCH_LOVE_APP)/scenarios/*.lua)))
+bench-love: compile $(LOVE12_BIN)
+	@ln -sfn $(CURDIR)/build/tecs $(BENCH_LOVE_APP)/tecs
+	@ln -sfn $(CURDIR)/build/tecs2d $(BENCH_LOVE_APP)/tecs2d
+	@ln -sfn $(CURDIR)/build/tecs2d/assets/internal $(BENCH_LOVE_APP)/internal
+	@ln -sfn $(CURDIR)/examples/shared/assets $(BENCH_LOVE_APP)/assets
+	@mkdir -p $(BENCH_LOVE_RESULTS)
+	@for s in $(if $(SCENARIO),$(SCENARIO),$(BENCH_SCENARIOS)); do \
+		$(if $(FRAMES),TECS_BENCH_FRAMES=$(FRAMES),) \
+		$(if $(WARMUP),TECS_BENCH_WARMUP=$(WARMUP),) \
+		sh scripts/bench_love.sh "$(LOVE)" $(BENCH_LOVE_APP) $$s \
+			$(CURDIR)/$(BENCH_LOVE_RESULTS)/$$s.json $(or $(RUNS),3) || exit 1; \
+	done
+
 clean:
 	rm -rf build
 	rm -rf examples/*/build
