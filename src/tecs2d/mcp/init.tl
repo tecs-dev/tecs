@@ -215,8 +215,7 @@ toolHandlers["send_love_event"] = function(args: {string:any}, id: number)
     end
     -- Accept mixed-type payloads (numbers, booleans, strings). LÖVE events
     -- like resize, mousepressed, wheelmoved, focus, and touch events expect
-    -- non-string arguments, and restricting to strings here sent them with
-    -- the wrong types.
+    -- non-string arguments.
     local eventArgs = args.args as {any}
     if eventArgs and #eventArgs > 0 then
         le.push(eventName, table.unpack(eventArgs))
@@ -543,52 +542,57 @@ toolHandlers["query"] = function(args: {string:any}, id: number)
         table.insert(excludeComponents, comp)
     end
 
-    -- Create and execute query
+    -- Create and execute query. temp avoids registering a persistent query
+    -- (and its archetype observers) for every MCP call.
     local query = world:query({
+        temp = true,
         include = includeComponents,
         exclude = excludeComponents
     })
 
-    -- Iterate and collect results
+    -- Iterate and collect results. Iterate to exhaustion even after hitting
+    -- the limit: breaking out of query:iter() leaks the query scope and
+    -- leaves the world deferred for the rest of the frame.
     local results: {{string: any}} = {}
     local count = 0
 
     for archetype, len, entityList in query:iter() do
-        local archetypeSig = getArchetypeSignature(archetype)
-        local archetypeId = archetype.id
-        for row = 1, len do
-            if count >= limit then break end
-            local entityId = entityList[row]
-            local entityData: {string: any} = {
-                id = entityId,
-                archetypeId = archetypeId,
-                archetypeComponents = archetypeSig,
-                components = {}
-            }
-            local components: {string: any} = {}
+        if count < limit then
+            local archetypeSig = getArchetypeSignature(archetype)
+            local archetypeId = archetype.id
+            for row = 1, len do
+                if count >= limit then break end
+                local entityId = entityList[row]
+                local entityData: {string: any} = {
+                    id = entityId,
+                    archetypeId = archetypeId,
+                    archetypeComponents = archetypeSig,
+                    components = {}
+                }
+                local components: {string: any} = {}
 
-            for ci = 1, #includeComponents do
-                local comp = includeComponents[ci]
-                local column = archetype:get(comp)
-                -- Skip non-serializable components (tag components, or
-                -- components without a serialize callback). Without this guard
-                -- any non-serializable entry in `include` crashes the tool
-                -- instead of returning the serializable fields.
-                if column and comp.componentName and comp.serialize then
-                    local instance = column[row]
-                    local serialize = comp.serialize as function(any): {string: any}
-                    local ok, serialized = pcall(serialize, instance)
-                    if ok and serialized then
-                        components[comp.componentName] = serialized
+                for ci = 1, #includeComponents do
+                    local comp = includeComponents[ci]
+                    local column = archetype:get(comp)
+                    -- Skip non-serializable components (tag components, or
+                    -- components without a serialize callback). Without this guard
+                    -- any non-serializable entry in `include` crashes the tool
+                    -- instead of returning the serializable fields.
+                    if column and comp.componentName and comp.serialize then
+                        local instance = column[row]
+                        local serialize = comp.serialize as function(any): {string: any}
+                        local ok, serialized = pcall(serialize, instance)
+                        if ok and serialized then
+                            components[comp.componentName] = serialized
+                        end
                     end
                 end
-            end
 
-            entityData.components = components
-            table.insert(results, entityData)
-            count = count + 1
+                entityData.components = components
+                table.insert(results, entityData)
+                count = count + 1
+            end
         end
-        if count >= limit then break end
     end
 
     local response = {count = count, entities = results}
@@ -754,7 +758,8 @@ toolHandlers["run_lua"] = function(args: {string:any}, id: number)
     end
 
     -- Wrap user code in a function(world) body so they don't need boilerplate
-    local wrapped <const> = "return function(world) " .. code .. " end"
+    -- Newline before "end" so code ending in a line comment still parses.
+    local wrapped <const> = "return function(world) " .. code .. "\nend"
 
     -- Load the code
     local loadOk, loadResult = pcall(function(): function(tecs.World)
@@ -986,15 +991,17 @@ toolHandlers["query_in_bounds"] = function(args: {string:any}, id: number)
         end
     end
 
-    -- Query and filter by bounds
-    local query = world:query({include = includeComponents})
+    -- Query and filter by bounds. temp avoids registering a persistent query,
+    -- and the loop runs to exhaustion because breaking out of query:iter()
+    -- leaks the query scope and leaves the world deferred.
+    local query = world:query({temp = true, include = includeComponents})
     local results: {{string: any}} = {}
     local count = 0
     local boundsX2 = boundsX + boundsW
     local boundsY2 = boundsY + boundsH
 
     for archetype, len, entityList in query:iter() do
-        local posColumn = archetype:get(positionComp)
+        local posColumn = count < limit and archetype:get(positionComp)
         if posColumn then
             for row = 1, len do
                 if count >= limit then break end
@@ -1690,7 +1697,7 @@ end
 
 -- MCP method handlers
 local function handleInitialize(id: number, params: {string:any})
-    local clientVersion = params and params.protocolVersion as string or "2024-11-05"
+    local clientVersion = type(params) == "table" and params.protocolVersion as string or "2024-11-05"
     sendResponse(id, {
         protocolVersion = clientVersion,
         capabilities = {tools = {listChanged = false}},
@@ -1706,10 +1713,18 @@ local function handleToolsList(id: number)
 end
 
 local function handleToolsCall(id: number, params: {string:any})
-    local toolName = params.name as string
-    local handler = toolHandlers[toolName]
+    if type(params) ~= "table" then
+        sendError(id, ERR_INVALID_PARAMS, "params must be an object")
+        return
+    end
+    local toolName = params.name
+    if type(toolName) ~= "string" then
+        sendError(id, ERR_INVALID_PARAMS, "params.name must be a string")
+        return
+    end
+    local handler = toolHandlers[toolName as string]
     if not handler then
-        sendError(id, ERR_INVALID_PARAMS, "Unknown tool: " .. toolName)
+        sendError(id, ERR_INVALID_PARAMS, "Unknown tool: " .. tostring(toolName))
         return
     end
     local args = (params.arguments as {string:any}) or {}
@@ -1729,6 +1744,12 @@ local function processMessage(line: string)
         return
     end
 
+    -- Valid JSON is not necessarily an object (e.g. a bare number or bool);
+    -- guard before indexing so a malformed envelope can't crash the frame.
+    if type(msg) ~= "table" then
+        sendError(nil, ERR_PARSE, "Request must be a JSON object")
+        return
+    end
     local parsed = msg as {string:any}
     local method = parsed.method as string
     local id = parsed.id as number
@@ -1938,8 +1959,8 @@ function mcp.new(config?: mcp.Config): function(world: tecs.World)
 
             -- Find the active camera for world-to-screen conversion.
             -- Cameras aren't stored directly in resources; instead the
-            -- render pipeline is, and it exposes getCamera(). We also keep
-            -- the old toScreen-duck-type fallback for non-gfx setups.
+            -- render pipeline is, and it exposes getCamera(). A
+            -- toScreen-duck-type fallback covers non-gfx setups.
             local resources = w.resources as {any: any}
             local camera: any = nil
             for _, value in pairs(resources) do
