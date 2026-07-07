@@ -19,8 +19,6 @@ layout(std430) readonly buffer SpriteShadowOutput {
     SpriteData sprites[];
 };
 
-
-uniform mat4 ShadowViewProj;
 uniform float AlphaThreshold;  // Default 0.5, configurable per-batch
 
 varying vec2 vTexCoord;
@@ -29,14 +27,8 @@ varying float vOccluderHeight;
 varying float vTextureSlice;
 
 #ifdef VERTEX
-// Quad vertex positions (2 triangles, CCW winding)
-const vec2 QUAD_POSITIONS[6] = vec2[6](
-    vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(1.0, 1.0),  // First triangle
-    vec2(0.0, 0.0), vec2(1.0, 1.0), vec2(0.0, 1.0)   // Second triangle
-);
-
 vec4 position(mat4 transform_projection, vec4 vertex_position) {
-    vec2 quadPos = QUAD_POSITIONS[love_VertexID];
+    vec2 quadPos = MASK_QUAD_UNIT[love_VertexID];
 
     int instanceID = love_InstanceID;
     SpriteData s = sprites[instanceID];
@@ -84,7 +76,7 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
     vOccluderHeight = s.color.a;  // occluderHeight was encoded in color.a by cull shader
     vTextureSlice = s.pivot.z;  // textureSlice for ArrayImage sampling
 
-    vec2 screenPos = (ShadowViewProj * vec4(worldPos, 0.0, 1.0)).xy;
+    vec2 screenPos = shadowMaskToScreen(worldPos);
 
     return transform_projection * vec4(screenPos, 0.0, 1.0);
 }
@@ -107,15 +99,6 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
 
     // Alpha test - discard if below threshold
     if (texColor.a < AlphaThreshold) discard;
-
-    // Encode occluder height in red channel:
-    // 0.0 = no occluder (all lights pass)
-    // 1.0 = max height (blocks all lights)
-    // Using MAX blend: tallest occluder wins
-    // Height is already normalized 0-1 from ECS data
-    float normalizedHeight = clamp(vOccluderHeight, 0.0, 1.0);
-
-    // G=1 marks actual occluder pixels (distinguished from blur halo by lighting shader)
-    return vec4(normalizedHeight, 1.0, 0.0, 1.0);
+    return encodeOccluder(vOccluderHeight);
 }
 #endif

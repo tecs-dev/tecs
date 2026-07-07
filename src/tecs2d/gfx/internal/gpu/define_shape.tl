@@ -100,7 +100,7 @@ function define_shape.loadShaders(config: define_shape.ShaderConfig): define_sha
     material_compiler.registerBaseSource(name, renderSource)
     local shadowMask: love.graphics.Shader = nil
     if config.shadowMask then
-        shadowMask = lg.newShader(shaderUtils.loadShader("shadow_mask_" .. config.shadowMask))
+        shadowMask = lg.newShader(shaderUtils.loadShadowMaskShader("shadow_mask_" .. config.shadowMask))
     end
     return {
         render = lg.newShader(renderSource),

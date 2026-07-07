@@ -38,7 +38,7 @@ local SPRITE_SHADERS <const> = "tecs2d/gfx/internal/sprite/"
 local spriteRenderSource <const> = shaderUtils.loadRenderShader("sprite", SPRITE_SHADERS)
 local spriteRenderShader <const> = lg.newShader(spriteRenderSource)
 local spriteCullShader <const> = lg.newComputeShader(shaderUtils.loadCullShader("sprite_cull", SPRITE_SHADERS))
-local spriteShadowMaskShader <const> = lg.newShader(shaderUtils.loadShader("shadow_mask_sprite"))
+local spriteShadowMaskShader <const> = lg.newShader(shaderUtils.loadShadowMaskShader("shadow_mask_sprite"))
 local spriteDropShadowShader <const> = lg.newShader(shaderUtils.loadRenderShader("drop_shadow_sprite", SPRITE_SHADERS))
 material_compiler.registerBaseSource("sprite", spriteRenderSource)
 

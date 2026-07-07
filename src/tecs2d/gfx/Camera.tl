@@ -5,14 +5,7 @@ local max, min <const> = math.max, math.min
 local abs, exp <const> = math.abs, math.exp
 local cos, sin, atan2 <const> = math.cos, math.sin, math.atan2
 
-local function setOrthographic(t: love.math.Transform, camX: number, camY: number,
-        zoom: number, rotation: number, w: number, h: number, spX: number, spY: number)
-    t:reset()
-    t:translate(w / 2 + spX, h / 2 + spY)
-    t:rotate(rotation)
-    t:scale(zoom, zoom)
-    t:translate(-camX, -camY)
-end
+local setOrthographic <const> = require("tecs2d.gfx.internal.ortho").setOrthographic
 
 local function computeAABB(t: love.math.Transform, sw: number, sh: number, pad: number): number, number, number, number
     local x0, y0 = t:inverseTransformPoint(0, 0)

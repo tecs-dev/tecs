@@ -19,6 +19,7 @@ local shadow_state <const> = require("tecs2d.gfx.internal.gpu.shadow_state")
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
 local blend <const> = require("tecs2d.gfx.internal.blend")
 local TextureArray <const> = require("tecs2d.gfx.internal.sprite.TextureArray")
+local dummyFor <const> = require("tecs2d.gfx.internal.gpu.dummy_ssbo").dummyFor
 
 local Transform <const> = tecs.builtins.Transform
 
@@ -103,22 +104,6 @@ local record shadow_dispatch
     end
 
     new: function(config: Config): Context
-end
-
--- ---------------------------------------------------------------------------
--- Dummy SSBO singletons. Used when an archetype lacks an optional
--- component; the shader's `ComponentMask` branches the read but a
--- valid SSBO binding is still required.
--- ---------------------------------------------------------------------------
-
-local dummyByFormat: {string: love.graphics.Buffer} = {}
-
-local function dummyFor(layout: std430.Descriptor): love.graphics.Buffer
-    local existing = dummyByFormat[layout.shadowCtype]
-    if existing then return existing end
-    local buf = lg.newBuffer(layout.format, 1, {usage = "static", shaderstorage = true})
-    dummyByFormat[layout.shadowCtype] = buf
-    return buf
 end
 
 function shadow_dispatch.new(config: shadow_dispatch.Config): shadow_dispatch.Context

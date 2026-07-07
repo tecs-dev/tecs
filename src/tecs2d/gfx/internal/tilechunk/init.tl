@@ -25,7 +25,7 @@ local tileChunkRenderShader <const> = lg.newShader(tileChunkRenderSource)
 local tileChunkCullShader <const> = lg.newComputeShader(
     shaderUtils.loadShader("tilechunk_cull", TILECHUNK_SHADERS))
 local tileChunkShadowMaskShader <const> = lg.newShader(shaderUtils.insertAfterPragma(
-    shaderUtils.loadShader("shadow_mask_tilechunk"),
+    shaderUtils.loadShadowMaskShader("shadow_mask_tilechunk"),
     shaderUtils.TILE_COMMON))
 
 local Transform <const> = tecs.builtins.Transform

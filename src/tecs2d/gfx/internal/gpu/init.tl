@@ -15,13 +15,24 @@ local function loadUntyped(modName: string): any
 end
 local zone = loadUntyped("jit.zone") as function(?string): string
 
-local function setOrthographic(t: love.math.Transform, camX: number, camY: number,
-        zoom: number, rotation: number, w: number, h: number, spX: number, spY: number)
-    t:reset()
-    t:translate(w / 2 + spX, h / 2 + spY)
-    t:rotate(rotation)
-    t:scale(zoom, zoom)
-    t:translate(-camX, -camY)
+local setOrthographic <const> = require("tecs2d.gfx.internal.ortho").setOrthographic
+
+-- Shadow-mask view-projection: same camera, shadow-mask resolution, zoom
+-- widened so shadowMargin extra world pixels per side land inside the
+-- mask. Off-screen occluders within the margin still cast shadows, and
+-- the lighting shader inverts this same transform for world->UV, so the
+-- expanded coverage is accounted for automatically. Returns the mask
+-- dimensions in pixels.
+local function setShadowOrthographic(self: types.Renderer, t: love.math.Transform,
+        cameraX: number, cameraY: number, cameraZoom: number, rotation: number): integer, integer
+    local scale = self.config.shadowMaskScale
+    local maskW = math.floor(self.screenWidth * scale)
+    local maskH = math.floor(self.screenHeight * scale)
+    local margin = self.config.shadowMargin or 200.0
+    local zoomScaled = cameraZoom * scale
+    local shadowZoom = zoomScaled * maskW / (maskW + 2.0 * margin * zoomScaled)
+    setOrthographic(t, cameraX, cameraY, shadowZoom, rotation, maskW, maskH, 0, 0)
+    return maskW, maskH
 end
 
 -- Methods table for Renderer (used as __index metatable)
@@ -508,10 +519,6 @@ function RendererMethods:renderShadowMask(cameraX: number, cameraY: number, came
     else
         mask = self.shadowMask
     end
-    local scale = self.config.shadowMaskScale
-    local maskW = math.floor(self.screenWidth * scale)
-    local maskH = math.floor(self.screenHeight * scale)
-
     -- Clear shadow mask and render occluders with MAX/lighten blend (tallest wins)
     lg.setCanvas(mask)
     lg.clear(0, 0, 0, 0)
@@ -520,21 +527,8 @@ function RendererMethods:renderShadowMask(cameraX: number, cameraY: number, came
     -- MAX/lighten: tallest occluder wins per pixel
     lg.setBlendMode("lighten", "premultiplied")
 
-    -- Build ShadowViewProj matrix for shadow mask rendering.
-    -- Uses shadow-specific resolution but same camera position and rotation.
-    -- The shadow VP covers a wider world area than the screen so that
-    -- off-screen occluders (within shadowMargin) still appear in the mask.
-    -- The lighting shader uses this same VP to convert world->UV, so the
-    -- expanded coverage is automatically accounted for.
-    local margin = self.config.shadowMargin or 200.0
-    local zoomScaled = cameraZoom * scale
-    -- Reduce effective zoom to cover shadowMargin extra world pixels per side
-    local shadowZoom = zoomScaled * maskW / (maskW + 2.0 * margin * zoomScaled)
     local svt = self._shadowTransform
-    setOrthographic(svt,
-        cameraX, cameraY, shadowZoom, rotation,
-        maskW, maskH, 0, 0
-    )
+    local maskW, maskH = setShadowOrthographic(self, svt, cameraX, cameraY, cameraZoom, rotation)
 
     -- Render shadow casters via plugins
     for _, plugin in ipairs(self.plugins) do
@@ -626,17 +620,8 @@ function RendererMethods:renderLighting(useLowRes: boolean, shadowsEnabled: bool
         rw, rh, subPixelX, subPixelY
     )
 
-    local scale = self.config.shadowMaskScale
-    local maskW = math.floor(self.screenWidth * scale)
-    local maskH = math.floor(self.screenHeight * scale)
-    local margin = self.config.shadowMargin or 200.0
-    local zoomScaled = cameraZoom * scale
-    local shadowZoom = zoomScaled * maskW / (maskW + 2.0 * margin * zoomScaled)
     local lsvt = self._lightShadowTransform
-    setOrthographic(lsvt,
-        cameraX, cameraY, shadowZoom, rotation,
-        maskW, maskH, 0, 0
-    )
+    setShadowOrthographic(self, lsvt, cameraX, cameraY, cameraZoom, rotation)
 
     -- Always use lighting shader to apply ambient (even with 0 lights)
     -- Tile-based light binning: fragment shader reads per-tile light lists

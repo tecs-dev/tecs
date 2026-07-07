@@ -6,14 +6,7 @@
 local types <const> = require("tecs2d.gfx.internal.gpu.types")
 local C <const> = require("ffi")
 
-local function setOrthographic(t: love.math.Transform, camX: number, camY: number,
-        zoom: number, rotation: number, w: number, h: number, spX: number, spY: number)
-    t:reset()
-    t:translate(w / 2 + spX, h / 2 + spY)
-    t:rotate(rotation)
-    t:scale(zoom, zoom)
-    t:translate(-camX, -camY)
-end
+local setOrthographic <const> = require("tecs2d.gfx.internal.ortho").setOrthographic
 
 local function writeTransformToFFI(t: love.math.Transform, dst: {integer: number})
     local r1,r2,r3,r4, r5,r6,r7,r8, r9,r10,r11,r12, r13,r14,r15,r16 = t:getMatrix()

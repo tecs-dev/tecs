@@ -24,6 +24,7 @@ local shadow_state <const> = require("tecs2d.gfx.internal.gpu.shadow_state")
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
 local gpuTypes <const> = require("tecs2d.gfx.internal.gpu.types")
 local blend <const> = require("tecs2d.gfx.internal.blend")
+local dummyFor <const> = require("tecs2d.gfx.internal.gpu.dummy_ssbo").dummyFor
 local C <const> = require("ffi")
 
 local Transform <const> = tecs.builtins.Transform
@@ -83,24 +84,6 @@ local record shadow_dispatch
     --- the buffers; the ensureCapacity hook returned by `new` handles
     --- subsequent grows.
     newBuffers: function(initialEntityCapacity: integer, initialGlyphCapacity: integer): Buffers
-end
-
--- ---------------------------------------------------------------------------
--- Dummy SSBO singletons (mirrors gpu/shadow_dispatch).
--- ---------------------------------------------------------------------------
-
-local dummyByFormat: {string: love.graphics.Buffer} = {}
-
-local function makeDummy(formatKey: string, format: love.graphics.BufferFormat): love.graphics.Buffer
-    local existing = dummyByFormat[formatKey]
-    if existing then return existing end
-    local buf = lg.newBuffer(format, 1, {usage = "static", shaderstorage = true})
-    dummyByFormat[formatKey] = buf
-    return buf
-end
-
-local function dummyFor(layout: std430.Descriptor): love.graphics.Buffer
-    return makeDummy(layout.shadowCtype, layout.format)
 end
 
 -- Reset-data ByteData built once and reused. setArrayData wants a

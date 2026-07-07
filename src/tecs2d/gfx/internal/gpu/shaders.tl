@@ -21,6 +21,11 @@ local record shaders
     --- Load a cull shader with common code prepended
     loadCullShader: function(name: string, basePath?: string): string
 
+    --- Load a shadow-mask shader with the shared mask include (quad
+    --- constants, ShadowViewProj transform, occluder encoding) inserted
+    --- after the pragma.
+    loadShadowMaskShader: function(name: string, basePath?: string): string
+
     --- Insert content after the #pragma line of a shader
     insertAfterPragma: function(shader: string, content: string): string
 
@@ -96,6 +101,13 @@ end
 -- Load a render shader with layer filtering code inserted after pragma
 function shaders.loadRenderShader(name: string, basePath?: string): string
     return shaders.insertAfterPragma(shaders.loadShader(name, basePath), shaders.RENDER_COMMON)
+end
+
+local SHADOW_MASK_COMMON <const> = shaders.loadShader("shadow_mask_common")
+
+-- Load a shadow-mask shader with the shared mask include inserted
+function shaders.loadShadowMaskShader(name: string, basePath?: string): string
+    return shaders.insertAfterPragma(shaders.loadShader(name, basePath), SHADOW_MASK_COMMON)
 end
 
 -- Load shared shader sources (not owned by any shape module)

@@ -13,7 +13,6 @@ layout(std430) readonly buffer TileChunkShadowOutput {
     TileChunkVis chunks[];
 };
 
-uniform mat4 ShadowViewProj;
 uniform vec2 TilesetSize;     // Tileset texture dimensions in pixels
 uniform float AlphaThreshold; // Default 0.5
 
@@ -22,19 +21,13 @@ varying float vTileId;        // For discarding empty tiles (id == 0)
 varying float vOccluderHeight;
 
 #ifdef VERTEX
-// Quad vertex positions (2 triangles, CCW winding)
-const vec2 QUAD_POSITIONS[6] = vec2[6](
-    vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(1.0, 1.0),  // First triangle
-    vec2(0.0, 0.0), vec2(1.0, 1.0), vec2(0.0, 1.0)   // Second triangle
-);
-
 // Height lookup texture: row = tileset layer, col = local tile ID
 // Value = normalized height 0-1 (r16f format)
 uniform sampler2D HeightLookup;
 uniform vec2 HeightLookupSize;  // width, height of height lookup texture
 
 vec4 position(mat4 transform_projection, vec4 vertex_position) {
-    vec2 quadPos = QUAD_POSITIONS[love_VertexID];
+    vec2 quadPos = MASK_QUAD_UNIT[love_VertexID];
 
     // Decode chunk and tile index (same as tilechunk.glsl)
     int instanceID = love_InstanceID;
@@ -102,7 +95,7 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
 
     vTexCoord = vec3(uv, textureIndex);
 
-    vec2 screenPos = (ShadowViewProj * vec4(worldPos, 0.0, 1.0)).xy;
+    vec2 screenPos = shadowMaskToScreen(worldPos);
 
     return transform_projection * vec4(screenPos, 0.0, 1.0);
 }
@@ -130,10 +123,6 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
         discard;
     }
 
-    // Encode occluder height in red channel (already normalized 0-1)
-    float normalizedHeight = clamp(vOccluderHeight, 0.0, 1.0);
-
-    // G=1 marks actual occluder pixels (distinguished from blur halo by lighting shader)
-    return vec4(normalizedHeight, 1.0, 0.0, 1.0);
+    return encodeOccluder(vOccluderHeight);
 }
 #endif

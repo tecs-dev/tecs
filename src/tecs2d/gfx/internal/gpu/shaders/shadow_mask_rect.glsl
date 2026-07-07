@@ -16,22 +16,14 @@ layout(std430) readonly buffer RectOutput {
     RectData rects[];
 };
 
-uniform mat4 ShadowViewProj;
-
 varying vec2 vLocalPos;
 varying vec2 vHalfSize;
 varying vec2 vCornerRadius;
 varying float vOccluderHeight;
 
 #ifdef VERTEX
-// Quad vertex positions (2 triangles, CCW winding)
-const vec2 QUAD_POSITIONS[6] = vec2[6](
-    vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(1.0, 1.0),
-    vec2(0.0, 0.0), vec2(1.0, 1.0), vec2(0.0, 1.0)
-);
-
 vec4 position(mat4 transform_projection, vec4 vertex_position) {
-    vec2 quadPos = QUAD_POSITIONS[love_VertexID];
+    vec2 quadPos = MASK_QUAD_UNIT[love_VertexID];
 
     int instanceID = love_InstanceID;
     RectData r = rects[instanceID];
@@ -55,7 +47,7 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
     vec2 rotated = vec2(scaled.x * c - scaled.y * sn, scaled.x * sn + scaled.y * c);
     vec2 worldPos = pos + rotated;
 
-    vec2 screenPos = (ShadowViewProj * vec4(worldPos, 0.0, 1.0)).xy;
+    vec2 screenPos = shadowMaskToScreen(worldPos);
 
     // SDF uses center-relative coords
     vec2 scaledSize = size * vec2(scaleX, scaleY);
@@ -81,15 +73,6 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
     // SDF check - only inside the shape casts shadow (always filled for shadows)
     float dist = roundedBoxSDF(vLocalPos, vHalfSize, vCornerRadius);
     if (dist > 0.0) discard;
-
-    // Encode occluder height in red channel:
-    // 0.0 = no occluder (all lights pass)
-    // 1.0 = max height (blocks all lights)
-    // Using MAX blend: tallest occluder wins
-    // Height is already normalized 0-1 from ECS data
-    float normalizedHeight = clamp(vOccluderHeight, 0.0, 1.0);
-
-    // G=1 marks actual occluder pixels (distinguished from blur halo by lighting shader)
-    return vec4(normalizedHeight, 1.0, 0.0, 1.0);
+    return encodeOccluder(vOccluderHeight);
 }
 #endif
