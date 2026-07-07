@@ -452,6 +452,27 @@ describe("tecs2d.controller", function()
             luassert.equals(0, controller:getRaw("moveRight"))
         end)
 
+        it("preserves analog magnitude in pairs", function()
+            local bindings = {
+                controls = {
+                    left = {"axis:leftx-"},
+                    right = {"axis:leftx+"},
+                    up = {"axis:lefty-"},
+                    down = {"axis:lefty+"},
+                },
+                pairs = {
+                    move = {"left", "right", "up", "down"},
+                },
+            }
+            local controller = manager:addController(bindings, {joystick = joystick, deadzone = 0.25})
+
+            mockInput:simulateGamepadAxis(joystick, "leftx", 0.6)
+            mockInput:simulateGamepadAxis(joystick, "lefty", -0.4)
+            local x, y = controller:getPair("move") as (number, number)
+            luassert.is_near(0.6, x, 0.001)
+            luassert.is_near(-0.4, y, 0.001)
+        end)
+
         it("should handle raw gamepad axes without direction", function()
             local bindings = {
                 controls = {

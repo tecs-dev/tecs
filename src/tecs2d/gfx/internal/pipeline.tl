@@ -1877,10 +1877,17 @@ function PipelineImpl:queryLightAt(worldX: number, worldY: number): number
     local screenX, screenY = cam:toScreen(worldX, worldY)
 
     -- In retro mode, worldLitCanvas is at virtual resolution, so map
-    -- screen-space coords to virtual-space.
+    -- screen-space coords to virtual-space. Integer scaling letterboxes
+    -- the blit, so subtract the viewport offset and divide by the
+    -- integer scale rather than using the raw screen/virtual ratio.
     if self.pixelMode then
-        screenX = screenX * self.virtualWidth / self.screenWidth
-        screenY = screenY * self.virtualHeight / self.screenHeight
+        if self._integerScaling then
+            screenX = (screenX - self._intOffsetX) / self._intScale
+            screenY = (screenY - self._intOffsetY) / self._intScale
+        else
+            screenX = screenX * self.scaledWidth / self.screenWidth
+            screenY = screenY * self.scaledHeight / self.screenHeight
+        end
     end
 
     -- Clamp to canvas bounds

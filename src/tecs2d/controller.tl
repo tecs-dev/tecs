@@ -536,25 +536,16 @@ end
 
 function Controller:getPair(name: string): number, number
     local pairButtons = self.bindings.pairs[name]
-    local x, y = 0, 0
+    local x, y = 0.0, 0.0
     if pairButtons then
-        local left = self:isDown(pairButtons[1])
-        local right = self:isDown(pairButtons[2])
-        local up = self:isDown(pairButtons[3])
-        local down = self:isDown(pairButtons[4])
-
-        -- Opposites cancel out
-        if left and not right then
-            x = -1
-        elseif right and not left then
-            x = 1
-        end
-
-        if up and not down then
-            y = -1
-        elseif down and not up then
-            y = 1
-        end
+        -- Analog magnitudes preserved: an axis binding at half deflection
+        -- contributes 0.5, digital bindings contribute 0 or 1. Opposites
+        -- cancel by subtraction; clamp so combined bindings can't exceed
+        -- a unit deflection per axis.
+        x = self:getRaw(pairButtons[2]) - self:getRaw(pairButtons[1])
+        y = self:getRaw(pairButtons[4]) - self:getRaw(pairButtons[3])
+        if x > 1 then x = 1 elseif x < -1 then x = -1 end
+        if y > 1 then y = 1 elseif y < -1 then y = -1 end
     end
     return x, y
 end

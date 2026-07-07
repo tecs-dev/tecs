@@ -615,6 +615,54 @@ describe("builder", function()
         world:shutdown()
     end)
 
+    it("does not duplicate templates across save/load/play cycles", function()
+        local world = makeWorld()
+        local entity = world:spawn(Transform(0, 0))
+        tick(world, 0)
+
+        -- Looping so cursors (and their templates) stay live at save time.
+        local child <const> = tween.timeline()
+            :to(0.2, tween.linear, tween.translateY, 10)
+            :loop()
+        local preset <const> = tween.registerPreset("spec.nested", tween.timeline()
+            :to(0.2, tween.linear, tween.translateX, 10)
+            :step()
+            :run(child, 3)
+            :loop())
+
+        local function templateCount(snap: {string:any}): integer
+            local inner = snap.snapshot as {string:any}
+            local dataEntries = inner and inner.data as {{string:any}}
+            if not dataEntries then return -1 end
+            for i = 1, #dataEntries do
+                if dataEntries[i].key == "tecs2d.tween.registry" then
+                    local tweenData = dataEntries[i].value as {string:any}
+                    local templates = tweenData.templates as {any}
+                    return templates and #templates or -1
+                end
+            end
+            return -1
+        end
+
+        preset:apply(world, entity)
+        tick(world, 0.5)
+        local first = world:saveSnapshot({format = "table"}) as {string:any}
+        local baseline = templateCount(first)
+        luassert.is_true(baseline > 0, "no templates serialized")
+
+        -- Two load -> replay -> save rounds must not grow the registry.
+        for _ = 1, 2 do
+            world:loadSnapshot(first as any)
+            tween.play(world, entity, "spec.nested")
+            tick(world, 0.5)
+        end
+        local final = world:saveSnapshot({format = "table"}) as {string:any}
+        luassert.are.equal(baseline, templateCount(final),
+            "template registry grew across save/load/play cycles")
+
+        world:shutdown()
+    end)
+
     it("serializes active custom field2 targets", function()
         local world = makeWorld()
         local PairComp = tecs.newComponent({

@@ -228,6 +228,7 @@ inputHandlers.handlers = {
 
 -- Restart request flag (set by event handler, checked by main loop)
 inputHandlers.restartRequested = false
+inputHandlers.quitRequested = false
 
 function inputHandlers.pollEvents(w: tecs.World): tecs.System
     local handlers <const> = inputHandlers.handlers

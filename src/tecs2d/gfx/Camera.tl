@@ -406,9 +406,11 @@ local function buildMaskFromRange(minLayer: integer, maxLayer: integer): integer
 end
 
 function Camera.new(config: Camera.CameraConfig): Camera
-    local screenWidth = config.screenWidth
-    local screenHeight = config.screenHeight
-    local virtualHeight = config.virtualHeight
+    local screenWidth = config.screenWidth or (love.graphics.getWidth() as integer)
+    local screenHeight = config.screenHeight or (love.graphics.getHeight() as integer)
+    -- Default to the screen height (1:1 mapping): updateBounds divides by
+    -- it, so a nil virtualHeight would crash in the constructor.
+    local virtualHeight = config.virtualHeight or screenHeight
 
     -- Determine initial layer mask
     local layerMask = ALL_LAYERS_MASK

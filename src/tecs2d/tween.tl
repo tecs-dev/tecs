@@ -917,9 +917,26 @@ local function restoreRegistry(world: World, data: {string:any})
             local id <const> = item.id as integer
             local tl <const> = deserializeTimeline(item.timeline as {string:any})
             reg.byId[id] = tl
+            -- Register the object identity too: a later play of a restored
+            -- preset must resolve to this entry rather than interning a
+            -- duplicate template.
+            reg.objectIds[tl] = id
             reg.refcounts[id] = 0
             if tl.presetName then reg.named[tl.presetName] = id end
             if id > maxId then maxId = id end
+        end
+    end
+    -- Rewire nested run() children to the registered instances via their
+    -- saved timelineIds, so replaying a restored timeline reuses them
+    -- instead of interning fresh copies on every save/load/play cycle.
+    for _, tl in pairs(reg.byId) do
+        if tl.runs then
+            for i = 1, #tl.runs do
+                local run = tl.runs[i]
+                if run.timelineId and reg.byId[run.timelineId] then
+                    run.timeline = reg.byId[run.timelineId]
+                end
+            end
         end
     end
     reg.nextId = maxId + 1
@@ -1335,7 +1352,14 @@ evaluateCursor = function(c: Cursor, world: World, target: integer)
                     local cycleIndex = math.floor(localElapsed / cycleDuration)
                     if child._lastCycleIndex ~= cycleIndex then
                         ffi.fill(child.state as ffi.CData, ffi.sizeof("TweenSlotState") * childTl.stateSize, 0)
-                        child.nextEmit = 1
+                        if runSlot.pingPong and cycleIndex % 2 == 1 then
+                            -- Reverse pass: elapsed runs high-to-low, so
+                            -- every emit time reads as already passed;
+                            -- suppress instead of firing them all at once.
+                            child.nextEmit = (childTl.emits and #childTl.emits or 0) + 1
+                        else
+                            child.nextEmit = 1
+                        end
                         child._lastCycleIndex = cycleIndex
                     end
                     if cycleIndex > child.repeatCount and child.repeatCount >= 0 then
