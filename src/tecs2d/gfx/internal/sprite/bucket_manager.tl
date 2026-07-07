@@ -397,10 +397,12 @@ function Manager:remove(sheetId: integer): boolean
         texArray.freeList[#texArray.freeList + 1] = allocation.layerIndex
         texArray.usedCount = texArray.usedCount - 1
         -- Increment generation to invalidate any stale references.
-        -- Wrap at 65536 to match the 16-bit SlicePackingBits used by the
-        -- cull shader. Using 256 here would alias after 256 reuses and
-        -- resurrect stale sprite references pointing at evicted textures.
-        texArray.generations[allocation.layerIndex] = (texArray.generations[allocation.layerIndex] + 1) % 65536
+        -- Wrap at 4096 (12 bits). textureSlice packs layer | gen << 16 as
+        -- uint32 bits reinterpreted through a float field; keeping the
+        -- packed value below the float exponent range guarantees the bit
+        -- pattern is never NaN/Inf, which drivers may canonicalize.
+        -- 4096 reuses before aliasing is ample.
+        texArray.generations[allocation.layerIndex] = (texArray.generations[allocation.layerIndex] + 1) % 4096
         -- Update GPU buffer
         updateGenerationsBuffer(texArray)
     end

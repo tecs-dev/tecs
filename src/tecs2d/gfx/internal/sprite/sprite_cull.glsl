@@ -49,7 +49,7 @@ struct Std430SpriteData {
     float animColumnCount;
     float animFrameHeight;
     float animTimingOffset;
-    float textureSlice;        // packed: layerIndex | (generation << packBits)
+    float textureSlice;        // uint32 bits: layerIndex | (generation << packBits)
     float animDirection;       // 0 forward, 1 reverse, 2 pingpong
     float animFirstFrame;      // tag's first sheet frame, 0-based
     float spriteId;            // CPU-side replacement tracking; unused here
@@ -136,6 +136,9 @@ layout(std430) readonly buffer SliceGenerations {
 
 uniform float GlobalTime;
 uniform int   SlicePackingBits;
+// 1 when the tile-light SSBOs (LightBuffer/TileLightCounts/TileLightIndices)
+// hold live data this frame; 0 when lighting is disabled.
+uniform int   TileLightsBound;
 uniform float ShadowMargin;
 uniform uint  MaxDropShadows;
 
@@ -222,12 +225,14 @@ void computemain() {
     Std430SpriteData sd = spriteData[row];
 
     // Generation check: if the texture slice was evicted since this
-    // sprite was allocated, skip rendering (matches legacy behavior).
+    // sprite was allocated, skip rendering. textureSlice carries the
+    // packed uint32 (layer | generation << packBits) as raw float BITS,
+    // not a float value: a numeric encoding loses layer bits once the
+    // generation exceeds the 24-bit mantissa.
     int packBits = SlicePackingBits > 0 ? SlicePackingBits : 8;
-    int sliceMask = (1 << packBits) - 1;
-    int packedInt = int(sd.textureSlice);
-    int sliceIndex = packedInt & sliceMask;
-    int entityGen = (packedInt >> packBits) & sliceMask;
+    uint slicePacked = floatBitsToUint(sd.textureSlice);
+    int sliceIndex = int(slicePacked & uint((1 << packBits) - 1));
+    int entityGen = int(slicePacked >> uint(packBits));
     int currentGen = int(sliceGens[sliceIndex]);
     if (entityGen != currentGen) return;
 
@@ -379,8 +384,10 @@ void computemain() {
         spritesShadowOut[shadowIdx].pivot = vec4(pivotX, pivotY, float(sliceIndex), packedBits);
     }
 
-    // Drop-shadow per-light fan-out.
-    if ((flags & FLAG_DROP_SHADOW) != 0u) {
+    // Drop-shadow per-light fan-out. Gated on TileLightsBound: with
+    // lighting disabled the tile-light SSBOs are never populated, and
+    // reading them here would consume unbound/stale bindings.
+    if ((flags & FLAG_DROP_SHADOW) != 0u && TileLightsBound != 0) {
         vec2 dsParams = readDropShadowParams(row);
         float entityHeight = dsParams.x;
         float baseOpacity  = dsParams.y;

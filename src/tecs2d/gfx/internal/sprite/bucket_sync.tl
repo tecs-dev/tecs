@@ -87,6 +87,14 @@ end
 local getInstance <const> = sprite_instance.get
 local DEFAULT_CAPACITY <const> = 4096
 
+-- Reused scratch union for writing the packed textureSlice bit pattern
+-- into SpriteData's float field (decoded with floatBitsToUint on GPU).
+local record SlicePack
+    u: integer
+    f: number
+end
+local slicePack <const> = require("ffi").new("union { uint32_t u; float f; }") as SlicePack
+
 -- Group ID encoding: (tierIdx * 1024) + (arrayIdx * 16) + blendId
 -- Decoding: tierIdx = groupId // 1024, arrayIdx = (groupId % 1024) // 16, blendId = groupId % 16
 local TIER_SHIFT <const> = 1024
@@ -567,7 +575,14 @@ function SpriteBucketSync:sync(_dt: number)
                             sd.animColumnCount = cols
                             sd.animFrameHeight = inst.animFrameHeight * uvScaleY
                             sd.animTimingOffset = inst.animTimingOffset or 0
-                            sd.textureSlice = bucket.layerIndex + (bucket.generation * 65536)
+                            -- Pack layer | generation << 16 as uint32 BITS
+                            -- through the float field (the cull decodes
+                            -- with floatBitsToUint). Encoding the packed
+                            -- value as a float NUMBER loses layer bits
+                            -- once generation reaches 256 (24-bit
+                            -- mantissa).
+                            slicePack.u = bucket.layerIndex + bucket.generation * 65536
+                            sd.textureSlice = slicePack.f
                             sd.animDirection = inst.animDirection or 0
                             sd.animFirstFrame = inst.animFirstFrame or 0
                         end

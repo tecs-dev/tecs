@@ -1297,12 +1297,19 @@ function sprite.plugin(renderPipeline: types.Pipeline): function(world: tecs.Wor
                 -- MaxDropShadows is per bucket (each bucket owns its own
                 -- drop-shadow buffer), so shadow_dispatch sends it next to
                 -- the DropShadowOutput binding rather than here.
+                local tileLightsBound = 0
                 if r.lightOutputBuffer and shader:hasUniform("LightBuffer") then
                     shader:send("LightBuffer", r.lightOutputBuffer as love.graphics.Buffer)
                     shader:send("TileLightCounts", r.tileLightCountBuffer as love.graphics.Buffer)
                     shader:send("TileLightIndices", r.tileLightIndexBuffer as love.graphics.Buffer)
                     shader:send("TileViewport", r._tileViewport as {number})
                     shader:send("TileGridDims", {r._effectiveTileGridW as integer, r._effectiveTileGridH as integer})
+                    tileLightsBound = 1
+                end
+                -- Gates the drop-shadow per-light fan-out: with lighting
+                -- off the tile-light SSBOs above are never populated.
+                if shader:hasUniform("TileLightsBound") then
+                    shader:send("TileLightsBound", tileLightsBound)
                 end
             end
 
