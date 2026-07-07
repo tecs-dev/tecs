@@ -23,7 +23,7 @@ local function getWorkerCode(): string
     WORKER_CODE = love.filesystem.read(WORKER_PATH)
     if not WORKER_CODE then
         error("Could not load assets worker from '" .. WORKER_PATH .. "'. " ..
-              "Copy build/tecs/assets/internal/worker.lua to your game's internal/ folder.")
+              "Copy build/tecs2d/assets/internal/worker.lua to your game's internal/ folder.")
     end
     return WORKER_CODE
 end

@@ -228,6 +228,8 @@ function audio.plugin(): tecs.Plugin
         -----------------------------------------------------------------------
         local function initializeSource(audioSrc: types.AudioSource, isRelative: boolean)
             if not audioSrc.handle or not audioSrc.handle.isComplete then return end
+            -- A completed handle may hold an error; dereferencing .value would raise.
+            if audioSrc.handle.err then return end
             local src = audioSrc.handle.value:clone()
             src:setRelative(isRelative)
             src:setLooping(audioSrc.looping)
@@ -292,13 +294,19 @@ function audio.plugin(): tecs.Plugin
             name = "audio.UpdateListener",
             phase = tecs.phases.PostUpdate,
             run = function(_dt: number)
+                -- Only the first listener is used; returning mid-iteration would
+                -- leave the world in deferred scope, so finish the loop instead.
+                local found = false
+                local x, y, z = 0.0, 0.0, 0.0
                 for archetype, len in listenerQuery:iter() do
-                    local transforms = archetype:get(Transform)
-                    for i = 1, len do
-                        local t = transforms[i]
-                        audioManager:setListenerPosition(t.x, t.y, t.z)
-                        return  -- Only use first listener
+                    if not found and len > 0 then
+                        local t = archetype:get(Transform)[1]
+                        x, y, z = t.x, t.y, t.z
+                        found = true
                     end
+                end
+                if found then
+                    audioManager:setListenerPosition(x, y, z)
                 end
             end
         })

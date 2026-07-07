@@ -135,10 +135,8 @@ end
 function AudioManagerImpl:setGroupVolume(name: string, volume: number)
     local group = ensureGroup(self, name)
     group.volume = math.max(0, math.min(1, volume))
-    -- Previously this only mutated the stored group volume; sounds already
-    -- playing stayed at their old volume until they restarted. Walk the
-    -- active and component sources and apply the new effective volume now
-    -- so setGroupVolume works as a live-mixer control.
+    -- Apply the new effective volume to live active and component sources so
+    -- setGroupVolume works as a live-mixer control.
     applyVolumeToSources(self, name)
 end
 
