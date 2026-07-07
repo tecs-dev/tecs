@@ -889,6 +889,14 @@ function PipelineImpl:configureLayer(layer: integer, config: types.LayerConfig)
     if space ~= "world" and space ~= "virtual" and space ~= "screen" then
         error("LayerConfig.space must be 'world', 'virtual', or 'screen'; got '" .. tostring(space) .. "'")
     end
+    -- The screen render phase is derived from NAMED layers; an unnamed
+    -- screen layer would silently render through the world phase's
+    -- in-shader screen-space handling instead, which behaves differently
+    -- (no phase 2, world lighting canvases). Fail loudly.
+    if space == "screen" and not l.name then
+        error("Screen-space layer " .. layer .. " must be named: "
+            .. "configureLayer(" .. layer .. ", {name = \"hud\", space = \"screen\"})")
+    end
     l.space = space
 
     -- Compute bitmasks from space enum

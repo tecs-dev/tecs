@@ -58,4 +58,18 @@ describe("screen phase: world content renders exactly once", function()
             "world CPU draw ghosted into the screen phase (green at identity-camera position: "
             .. tostring(p[2]) .. ")")
     end)
+
+    it("rejects unnamed screen-space layers", function()
+        local values = fixture.runLua(app, [[
+            local gfx = require("tecs2d.gfx")
+            local pipeline = world.resources[gfx.PIPELINE]
+            local ok, err = pcall(function()
+                pipeline:configureLayer(3, {space = "screen"})
+            end)
+            return tostring(ok), tostring(err)
+        ]])
+        luassert.are.equal("false", values[1],
+            "unnamed screen layer accepted (it silently skips the screen phase)")
+        luassert.matches("must be named", values[2])
+    end)
 end)
