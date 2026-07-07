@@ -74,6 +74,7 @@ local Registry <const> = archetype_registry.Registry
 local REGISTRY_MT <const>: metatable<Registry> = {__index = Registry}
 
 local ArchetypeCreated <const> = tecs.builtins.ArchetypeCreated
+local Disabled <const> = tecs.builtins.Disabled
 
 --- Wraps the user-supplied state to intercept `onArchetypeDestroyed`.
 --- The registry needs to remove the state from its tracking table when
@@ -91,6 +92,13 @@ end
 
 local function consider(self: Registry, arch: tecs.Archetype)
     if self.states[arch] then return end
+    -- Every registry consumer is render-side, and disabled entities must
+    -- never render. Queries auto-exclude Disabled; this path bypasses the
+    -- query engine, so mirror that rule here rather than in each caller's
+    -- predicate. Disabling moves an entity into a Disabled-bearing
+    -- archetype, which stays unregistered; re-enabling moves it back into
+    -- a tracked one, re-syncing it through onEntitiesAdded.
+    if arch.columns[Disabled] ~= nil then return end
     if not self.matches(arch) then return end
 
     local state = self.create(arch)
