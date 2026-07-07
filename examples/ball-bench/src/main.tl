@@ -86,7 +86,7 @@ local function ballBenchPlugin(world: tecs.World)
                 local toSpawn = min(SPAWN_BATCH_SIZE, maxEntities - spawnedCount)
                 world:batchSpawn(toSpawn,
                     {Velocity as tecs.Component, Transform as tecs.Component, gfx.Sprite as tecs.Component},
-                    function(arch: tecs.Archetype, startRow: integer, lastRow: integer, batchCount: integer)
+                    function(arch: tecs.Archetype, startRow: integer, lastRow: integer, _batchCount: integer)
                         for i = startRow, lastRow do
                             arch:set(i, Velocity(random(10, 30), random(10, 30)))
                             arch:set(i, Transform(0, 0, 0, 1))

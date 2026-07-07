@@ -117,7 +117,7 @@ local function physicsBenchPlugin(world: tecs.World)
     -- Spawn initial balls immediately
     world:batchSpawn(INITIAL_TARGET,
         {Transform as tecs.Component, Collider as tecs.Component, RigidBody as tecs.Component, gfx.Circle as tecs.Component, gfx.Color as tecs.Component},
-        function(arch: tecs.Archetype, startRow: integer, lastRow: integer, batchCount: integer)
+        function(arch: tecs.Archetype, startRow: integer, lastRow: integer, _batchCount: integer)
             for i = startRow, lastRow do
                 local radius = math.random(10, 25)
                 local margin = WALL_THICKNESS + radius + 10
@@ -149,7 +149,7 @@ local function physicsBenchPlugin(world: tecs.World)
             if delta > 0 then
                 world:batchSpawn(delta,
                     {Transform as tecs.Component, Collider as tecs.Component, RigidBody as tecs.Component, gfx.Circle as tecs.Component, gfx.Color as tecs.Component},
-                    function(arch: tecs.Archetype, startRow: integer, lastRow: integer, batchCount: integer)
+                    function(arch: tecs.Archetype, startRow: integer, lastRow: integer, _batchCount: integer)
                         for i = startRow, lastRow do
                             local radius = math.random(10, 25)
                             local margin = WALL_THICKNESS + radius + 10

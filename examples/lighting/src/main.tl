@@ -298,7 +298,7 @@ local function lightingPlugin(world: tecs.World)
     -- Shadow-casting rectangles (1/20 of total)
     world:batchSpawn(rectCount,
         {Transform as tecs.Component, gfx.Rectangle as tecs.Component, gfx.Color as tecs.Component, gfx.Occluder as tecs.Component},
-        function(arch: tecs.Archetype, startRow: integer, lastRow: integer, batchCount: integer)
+        function(arch: tecs.Archetype, startRow: integer, lastRow: integer, _batchCount: integer)
             for i = startRow, lastRow do
                 arch:set(i, Transform(math.random() * WORLD_SIZE, math.random() * WORLD_SIZE, 0, 2))
                 arch:set(i, gfx.Rectangle(16 + math.random() * 48, 16 + math.random() * 48))
@@ -310,7 +310,7 @@ local function lightingPlugin(world: tecs.World)
     -- Shadow-casting circles (19/20 of total)
     world:batchSpawn(circleCount,
         {Transform as tecs.Component, gfx.Circle as tecs.Component, gfx.Color as tecs.Component, gfx.Occluder as tecs.Component},
-        function(arch: tecs.Archetype, startRow: integer, lastRow: integer, batchCount: integer)
+        function(arch: tecs.Archetype, startRow: integer, lastRow: integer, _batchCount: integer)
             for i = startRow, lastRow do
                 arch:set(i, Transform(math.random() * WORLD_SIZE, math.random() * WORLD_SIZE, 0, 2))
                 arch:set(i, gfx.Circle(8 + math.random() * 24))
@@ -372,7 +372,7 @@ local function lightingPlugin(world: tecs.World)
     local treeSheet = spriteSheetModule.fromTextureFile("assets/tree-branched.png")
     world:batchSpawn(TREE_COUNT,
         {Transform as tecs.Component, Sprite as tecs.Component, gfx.Pivot as tecs.Component, gfx.DropShadow as tecs.Component},
-        function(arch: tecs.Archetype, startRow: integer, lastRow: integer, batchCount: integer)
+        function(arch: tecs.Archetype, startRow: integer, lastRow: integer, _batchCount: integer)
             for i = startRow, lastRow do
                 arch:set(i, Transform(math.random() * WORLD_SIZE, math.random() * WORLD_SIZE, 0, 2))
                 arch:set(i, Sprite.fromSheet(treeSheet))
@@ -436,7 +436,7 @@ local function lightingPlugin(world: tecs.World)
                 if rectChanges > 0 then
                     world:batchSpawn(rectChanges,
                         {Transform as tecs.Component, gfx.Rectangle as tecs.Component, gfx.Color as tecs.Component, gfx.Occluder as tecs.Component},
-                        function(arch: tecs.Archetype, startRow: integer, lastRow: integer, batchCount: integer)
+                        function(arch: tecs.Archetype, startRow: integer, lastRow: integer, _batchCount: integer)
                             for i = startRow, lastRow do
                                 arch:set(i, Transform(math.random() * WORLD_SIZE, math.random() * WORLD_SIZE, 0, 2))
                                 arch:set(i, gfx.Rectangle(16 + math.random() * 48, 16 + math.random() * 48))
@@ -448,7 +448,7 @@ local function lightingPlugin(world: tecs.World)
                 if circleChanges > 0 then
                     world:batchSpawn(circleChanges,
                         {Transform as tecs.Component, gfx.Circle as tecs.Component, gfx.Color as tecs.Component, gfx.Occluder as tecs.Component},
-                        function(arch: tecs.Archetype, startRow: integer, lastRow: integer, batchCount: integer)
+                        function(arch: tecs.Archetype, startRow: integer, lastRow: integer, _batchCount: integer)
                             for i = startRow, lastRow do
                                 arch:set(i, Transform(math.random() * WORLD_SIZE, math.random() * WORLD_SIZE, 0, 2))
                                 arch:set(i, gfx.Circle(8 + math.random() * 24))
@@ -557,7 +557,7 @@ local function lightingPlugin(world: tecs.World)
                 local addCount = input.isKeyDown("lshift") and 1000 or 100
                 world:batchSpawn(addCount,
                     {Transform as tecs.Component, gfx.Light as tecs.Component},
-                    function(arch: tecs.Archetype, startRow: integer, lastRow: integer, batchCount: integer)
+                    function(arch: tecs.Archetype, startRow: integer, lastRow: integer, _batchCount: integer)
                         for i = startRow, lastRow do
                             local col = LIGHT_COLORS[math.random(#LIGHT_COLORS)]
                             arch:set(i, Transform(math.random() * WORLD_SIZE, math.random() * WORLD_SIZE, 0, 3))

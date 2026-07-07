@@ -55,7 +55,7 @@ local function circlesPlugin(world: tecs.World)
 
     world:batchSpawn(CIRCLE_COUNT,
         {Transform as tecs.Component, Velocity as tecs.Component, gfx.Circle as tecs.Component},
-        function(arch: tecs.Archetype, startRow: integer, lastRow: integer, batchCount: integer)
+        function(arch: tecs.Archetype, startRow: integer, lastRow: integer, _batchCount: integer)
             local transforms = arch:getMut(Transform)
             local velocities = arch:getMut(Velocity)
             local circles = arch:getMut(gfx.Circle) as {gfx.Circle}
