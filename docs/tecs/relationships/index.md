@@ -459,7 +459,9 @@ The callback may return `false` to stop the walk early; any other return value (
 cap; exceeding it raises an error so accidental cycles surface immediately rather than
 silently truncating.
 
-All three methods require a relationship with `reverseIndex = true` (sparse or dense).
+`world:targets` and `world:traverse` require a relationship with `reverseIndex = true` (sparse or dense).
+`world:walkUp` follows forward edges via `getFirstRelationship`, so it works on any exclusive relationship even
+without `reverseIndex`.
 
 ## Removing relationships
 
@@ -508,11 +510,14 @@ All relationships provide these methods:
 - `Relationship(targetId, ...)` - Creates a relationship instance targeting the specified entity
 - `Relationship:targeting(targetId)` - Returns the component for target-specific queries (dense relationships only)
 
-World methods for relationships with `reverseIndex = true`:
+World methods that read the inverse index, so they require `reverseIndex = true`:
 
 - `world:targets(entity, Relationship, callback, context?)` - Invokes `callback(sourceId, context)`
   for each source entity targeting `entity`. `context` is optional and forwarded to the callback unchanged.
 - `world:traverse(root, Relationship)` - DFS iterator yielding `(depth, entityId)` for the full subtree
+
+`world:walkUp` follows forward edges instead, so it works on any exclusive relationship with or without `reverseIndex`:
+
 - `world:walkUp(entity, Relationship, callback, context?, maxDepth?)` - Walks up the parent chain
   from `entity`, invoking `callback(ancestorId, depth, context)` for each ancestor. Return `false`
   from the callback to stop early. `maxDepth` defaults to 100; exceeding it raises an error.

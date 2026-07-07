@@ -119,7 +119,7 @@ Each state can define policies for lifecycle events:
 
 ### Policy actions
 
-Each policy can be a string action or a custom function:
+Most policies can be a string action or a custom function. `onEnter` is the exception; it accepts only a function:
 
 | Action       | Effect                                                       |
 | ------------ | ------------------------------------------------------------ |

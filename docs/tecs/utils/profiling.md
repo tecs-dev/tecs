@@ -177,7 +177,8 @@ Starts a sampling session and returns a handle. Errors if a sample session is al
 
 | Field         | Default | Description                                                                                      |
 | ------------- | ------- | ------------------------------------------------------------------------------------------------ |
-| `intervalMs`  | `1`     | Sampler interval in ms. 1 is the practical minimum; use 5 or 10 for long sessions.               |
+| `intervalMs`  | `10`    | Sampler interval in ms (~100 samples/sec). 10 is the practical floor; raise it for longer, lower-overhead sessions. Going below 10 risks the timer stealing real time from the main thread. |
+| `stackDepth`  | `16`    | Per-sample stack depth. Walk cost is linear in depth, so raise it only when an investigation needs deeper stacks. |
 | `zone`        | nil     | Restrict output to samples whose zone path starts with this prefix (e.g. `"afterFixed/Render"`). |
 
 Leaf frames always carry a `_[N]`/`_[I]`/`_[C]`/`_[G]`/`_[J]` marker reflecting the dominant VM state

@@ -127,7 +127,7 @@ record Transform is components.Component
     --- The z coordinate of the entity.
     z: number
 
-    --- The layer of the entity (or nil if you don't use layers).
+    --- The layer of the entity (default: 1; must be at least 1).
     layer: integer
 
     --- The rotation of the entity in radians (default: 0).
@@ -141,18 +141,27 @@ record Transform is components.Component
 
     --- Creates a new Transform component.
     ---
-    --- @param xOrValue The x position or full transform data if passing a table.
+    --- @param x The x position.
     --- @param y The y position.
     --- @param z The z position.
-    --- @param layer The layer.
+    --- @param layer The layer (defaults to 1).
+    --- @param rotation The rotation in radians (defaults to 0).
+    --- @param scaleX The x scale (defaults to 1).
+    --- @param scaleY The y scale (defaults to 1).
     --- @return the created transform component.
     metamethod __call: function(
         self,
-        xOrValue?: Transform | number,
+        x?: number,
         y?: number,
         z?: number,
-        layer?: integer
+        layer?: integer,
+        rotation?: number,
+        scaleX?: number,
+        scaleY?: number
     ): Transform
+
+    --- Table-form constructor. `data` is a partial `{x, y, z, layer, rotation, scaleX, scaleY}`.
+    new: function(data: {string: any}): Transform
 end
 ```
 
@@ -349,6 +358,13 @@ See *[Paused entities](/tecs/queries/#paused-entities)* for more on how paused e
 | [ArchetypeCreated](#archetypecreated-event)         | Emitted when a new archetype is created             |
 | [OnSpawn](#onspawn-event)                           | Emitted when an entity is spawned                   |
 | [OnDespawn](#ondespawn-event)                       | Emitted when an entity is despawned                 |
+| `StateEnter`                                        | Emitted when a state is first pushed. See [States](/tecs/states).       |
+| `StateExit`                                         | Emitted when a state is popped. See [States](/tecs/states).             |
+| `StateBlur`                                         | Emitted when a state is no longer top. See [States](/tecs/states).      |
+| `StateFocus`                                        | Emitted when a state becomes top again. See [States](/tecs/states).     |
+| `OnSnapshotSave`                                    | Emitted while saving a snapshot. See [Save games](/tecs/save-games).    |
+| `StartSnapshotLoad`                                 | Emitted before restoring a snapshot. See [Save games](/tecs/save-games). |
+| `FinishSnapshotLoad`                                | Emitted after restoring a snapshot. See [Save games](/tecs/save-games). |
 
 ### ArchetypeCreated event
 

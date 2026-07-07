@@ -34,7 +34,7 @@ local world = tecs.newWorld({
 | Parameter           | Type                                                   | Required   | Default    | Description                                        |
 | ------------------- | ------------------------------------------------------ | ---------- | ---------- | -------------------------------------------------- |
 | `timestep`          | `number`                                               | No         | 1/60       | The fixed timestep of the game in seconds          |
-| `pipelineFactory`   | `function(number, function): Pipeline`                 | No         | Built-in   | Custom factory for creating the system pipeline    |
+| `pipelineFactory`   | `function(number): Pipeline`                           | No         | Built-in   | Custom factory for creating the system pipeline    |
 | `maxEntities`       | `integer`                                              | No         | 2^20 (~1M) | Maximum allocated entity slots for the world. Must be positive and at most `2^22` (~4M). The allocator is preallocated, so raise it only when you need more concurrent entities. |
 
 ## World Lifecycle
@@ -838,7 +838,7 @@ constructor behavior, and MessageBus details.
 Get statistics about the World.
 
 ```teal
-function World:getStats(fill?: world.Stats): world.Stats
+function World:getStats(fill?: World.Stats): World.Stats
 ```
 
 **Parameters:**

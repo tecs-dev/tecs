@@ -123,19 +123,22 @@ world:runPhase(tecs.phases.RenderGroup)
 ::: info Disabled phases behavior
 When you disable a phase:
 - It won't run during the normal game loop
-- You can still explicitly run it with `world:runPhase()`
-- If you disable a parent phase, its child phases remain disabled even when you explicitly run the parent
+- `world:runPhase()` honors the disabled state too, so it also skips the phase
+- Disabling a parent phase cascades to its children, so they are disabled as well
+
+Re-enable a phase with `world:enablePhase()` before running it directly.
 :::
 
 ```teal
--- Disable all rendering
+-- Disable all rendering (this cascades to RenderGroup's children too)
 world:disablePhase(tecs.phases.RenderGroup)
 
--- This runs RenderGroup but NOT its children (PreRender, Render, PostRender, etc.)
+-- runPhase honors the disabled state, so this runs nothing
 world:runPhase(tecs.phases.RenderGroup)
 
--- To run a specific child phase when parent is disabled:
-world:runPhase(tecs.phases.Render)  -- This works even though RenderGroup is disabled
+-- Re-enable a phase before running it directly
+world:enablePhase(tecs.phases.Render)
+world:runPhase(tecs.phases.Render)
 ```
 
 ### world:enablePhase {#world-enable-phase}
@@ -178,8 +181,8 @@ function World:registerPhase(phase: Phase)
 
 ### world:runPhase {#world-run-phase}
 
-Runs a phase or phase group immediately. Disabled child phases are still skipped when running a disabled parent group;
-run a child phase directly if you need to bypass the parent.
+Runs a phase or phase group immediately. Disabled phases are skipped whether you run them directly or via a parent
+group; re-enable a phase with `world:enablePhase()` before running it.
 
 ```teal
 function World:runPhase(phase: Phase, dt?: number)

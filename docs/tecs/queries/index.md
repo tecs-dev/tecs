@@ -21,7 +21,7 @@ These methods are available on every `World`.
 Creates a query to find entities with specific components.
 
 ```teal
-function World:query(descriptor: queries.QueryDescriptor): Query
+function World:query(descriptor: QueryDescriptor): Query
 ```
 
 **Parameters:**

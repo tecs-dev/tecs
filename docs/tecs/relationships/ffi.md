@@ -82,9 +82,10 @@ The `tecs.newFFIRelationship` function accepts a configuration table with these 
 | `name`          | **Required** - The name of the FFI relationship                                               |
 | `container`     | **Required** - Type for the FFI relationship data                                             |
 | `fields`        | **Required** - Array of field tuples `{name, type}` for FFI struct definition                 |
+| `defaults`      | Positional defaults, in the same order as `fields` (`nil` means no default)                    |
 | `exclusive`     | Whether only one target can exist per entity (default: `false`)                               |
 | `sparse`        | Use entity-indexed storage instead of per-target archetype components (default: `false`)      |
-| `reverseIndex`  | Maintain an inverse index for `world:targets()`, `world:traverse()`, and `world:walkUp()`     |
+| `reverseIndex`  | Maintain an inverse index for `world:targets()` and `world:traverse()`                         |
 | `cascadeDelete` | Despawning the target despawns all source entities. Requires `exclusive` and `reverseIndex`    |
 | `init`          | Validation and initialization hook (positional args only; `.new` unpacks before calling)       |
 | `new`           | Override the auto-codegenned `.new(data)` table-form constructor (optional)                   |

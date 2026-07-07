@@ -331,7 +331,7 @@ standalone bus if you want routing without a world.
 | `bus:observe(address, EventType, callback, id?)` | Subscribe to an event type at an address. Optional `id` lets you unsubscribe by name. |
 | `bus:observeOnce(address, EventType, callback)` | Subscribe; the observer is removed after it fires once. |
 | `bus:stopObserving(address, EventType, callbackOrId)` | Unsubscribe a callback (or `id`) from an event type at an address. |
-| `bus:emit(address, EventType, ...)` | Construct and dispatch an event to observers at the address. Skips construction when there are none. |
+| `bus:emit(address, event)` | Dispatch an already-constructed event instance to observers at the address. Returns early when there are none. Construct the event first (e.g. `MyEvent(...)`), or use `world:emit` for the lazy construct-and-skip path. |
 | `bus:hasObservers(address, EventType)` | Whether any observer exists for that event type at the address. |
 | `bus:clearAddress(address)` | Remove every observer at one address. Used when an entity despawns. |
 | `bus:clearEntityObservers()` | Remove every per-entity observer (all addresses except global `0`), preserving global subscriptions. Used by `world:clearEntities`. |

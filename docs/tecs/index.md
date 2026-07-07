@@ -96,7 +96,7 @@ Components describe traits like position, velocity, or health, and are the build
 ```teal
 -- Get the Name component of the entity
 local name = world:get(entityId, tecs.builtins.Name)
-print(name.value)
+print(name)
 ```
 
 ::: tip Tecs is strongly typed

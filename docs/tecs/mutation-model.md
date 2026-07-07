@@ -86,7 +86,7 @@ the next wave. When a wave completes with no new structural work, two one-shot p
 
 Phases 4 and 5 can stage new structural work, which starts another wave. The drain loops to a fixed point,
 bounded at 64 iterations; exceeding the bound raises
-`"_drain exceeded MAX_DRAIN_ITERATIONS — likely an observer cascade with no fixed point"`.
+`"_drain exceeded MAX_DRAIN_ITERATIONS; likely an observer cascade with no fixed point"`.
 
 **Ordering guarantees:**
 

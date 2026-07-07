@@ -148,7 +148,7 @@ Tecs includes a built-in plugin that's automatically added to every World. This 
 
 - **ChildOf relationship**: Automatically despawns children when you despawn parents
 - **TTL system**: Despawns entities when their time-to-live expires
-- **Debug state**: Manages debug mode state
+- **RelativeTransform system**: Composes each child's world-space `Transform` from its parent's transform plus its `RelativeTransform` offset (following `ChildOf`)
 
 Tecs adds the built-in plugin automatically when you create a World, so you don't need to add it manually.
 

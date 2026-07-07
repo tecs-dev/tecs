@@ -448,7 +448,7 @@ function WorldImpl:_drain()
     while true do
         iterations = iterations + 1
         if iterations > MAX_DRAIN_ITERATIONS then
-            error("_drain exceeded MAX_DRAIN_ITERATIONS — likely an observer cascade with no fixed point")
+            error("_drain exceeded MAX_DRAIN_ITERATIONS; likely an observer cascade with no fixed point")
         end
 
         local count = self.dirtyArchetypeCount
