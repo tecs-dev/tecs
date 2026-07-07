@@ -1016,6 +1016,11 @@ end
 function M.run(argv)
     argv = argv or {}
     local ok, err = pcall(function()
+        if #argv == 1 and (argv[1] == "-h" or argv[1] == "--help") then
+            print_help()
+            return
+        end
+
         local ok, args = parser():pparse(argv)
         if not ok then
             fail(args)
