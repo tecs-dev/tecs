@@ -52,6 +52,7 @@ struct Std430SpriteData {
     float textureSlice;        // packed: layerIndex | (generation << packBits)
     float animDirection;       // 0 forward, 1 reverse, 2 pingpong
     float animFirstFrame;      // tag's first sheet frame, 0-based
+    float spriteId;            // CPU-side replacement tracking; unused here
 };
 layout(std430) readonly buffer SpriteDataInput {
     Std430SpriteData spriteData[];

@@ -286,6 +286,7 @@ local record sprite
         textureSlice: number    -- packed: layerIndex | (generation << packBits)
         animDirection: number   -- 0 forward, 1 reverse, 2 pingpong
         animFirstFrame: number  -- tag's first sheet frame, 0-based
+        spriteId: number        -- instance id last synced; detects in-place replacement
     end
 end
 
@@ -1088,7 +1089,7 @@ tecs.newFFIComponent({
 })
 
 -- SpriteData: renderer-internal derived metadata, populated by sync,
--- read by the shadow cull shader. 17 floats = 68 bytes, matching
+-- read by the shadow cull shader. 18 floats = 72 bytes, matching
 -- Std430SpriteData in `gpu/std430.tl`. Default zeros come from FFI
 -- column allocation; Sprite's `requires = {SpriteData}` adds it to
 -- the initial archetype so the lifecycle observer doesn't have to
@@ -1115,8 +1116,9 @@ tecs.newFFIComponent({
         {"textureSlice", "float"},
         {"animDirection", "float"},
         {"animFirstFrame", "float"},
+        {"spriteId", "float"},
     },
-    defaults = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    defaults = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 })
 
 -- Map tier names to bucket components
@@ -1185,6 +1187,20 @@ function sprite.plugin(renderPipeline: types.Pipeline): function(world: tecs.Wor
 
         -- Create the bucket-based sync system (handles both normal and blend mode sprites via groupBy)
         local sync = bucketSync.new(world, Sprite, SpriteData as tecs.Component, TIER_TO_COMPONENT, DirectSprite, RepeatedSprite)
+
+        -- In-place Sprite replacement (world:set over an existing Sprite, or
+        -- a batch-spawned zero sprite receiving its first value) causes no
+        -- archetype transition, so the lifecycle observer can't see it.
+        -- The sync dirty path detects the instance-id change and hands it
+        -- here: release the old instance's refcount and re-run bucket
+        -- assignment for the new sheet.
+        sync.onSpriteReplaced = function(entityId: integer, spr: any, oldSpriteId: integer)
+            if oldSpriteId ~= 0 then
+                clearPlayOnceCallback(entityId)
+                releaseInstance(oldSpriteId)
+            end
+            onSpriteAdded(world, entityId, spr as sprite.Sprite)
+        end
 
         -- Renderer-owned shadow-column path. The bucket-aware shadow
         -- pipeline builds per-archetype shadow state, dispatches the
@@ -1353,11 +1369,19 @@ function sprite.plugin(renderPipeline: types.Pipeline): function(world: tecs.Wor
             include = {Sprite},
             onEntitiesAdded = function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer, _count: integer)
                 local sprites = archetype:get(Sprite) as {sprite.Sprite}
+                local spriteDatas = archetype:get(SpriteData as tecs.Component) as {sprite.SpriteData}
                 local entities = archetype.entities
                 for row = firstRow, lastRow do
                     local self = sprites[row]
                     if self and self.spriteId ~= 0 then
                         onSpriteAdded(world, entities[row], self)
+                        -- Pre-stamp the synced instance id so the sync dirty
+                        -- path's replacement detection doesn't re-run bucket
+                        -- assignment for a plain spawn. The column is already
+                        -- dirty at spawn time, so no explicit mark needed.
+                        if spriteDatas then
+                            spriteDatas[row].spriteId = self.spriteId
+                        end
                     end
                 end
             end,

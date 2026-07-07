@@ -81,6 +81,7 @@ local record SpriteDataFFI
     textureSlice: number
     animDirection: number
     animFirstFrame: number
+    spriteId: number
 end
 
 local getInstance <const> = sprite_instance.get
@@ -144,6 +145,15 @@ local record bucket_sync
         hasAlphaBlend: boolean
         -- One-shot: request a full resync on the next sync() (set on snapshot load).
         _forceResync: boolean
+
+        -- Fired when the dirty path sees a row whose Sprite instance id
+        -- changed without an archetype transition (world:set replacement,
+        -- or a batch-spawned zero sprite receiving its first value).
+        -- oldSpriteId is 0 for the first assignment. Set by the sprite
+        -- plugin to release the old instance and re-run bucket assignment;
+        -- spr is the row's Sprite component (typed loosely because the
+        -- Sprite record lives in the plugin module).
+        onSpriteReplaced: function(entityId: integer, spr: any, oldSpriteId: integer)
 
         sync: function(SpriteBucketSync, dt: number)
         getArraySyncs: function(SpriteBucketSync, tier: string): {integer: ArraySync}
@@ -472,11 +482,27 @@ function SpriteBucketSync:sync(_dt: number)
                     and archetype:isComponentDirty(repeatedSpriteComponent)) then
                 local sprites = archetype:get(spriteComponent) as {SpriteData}
                 local spriteDatas = archetype:getMut(self.spriteDataComponent) as {SpriteDataFFI}
+                local entityList = archetype.entities
 
                 for row = 1, len do
                     local bucket = bucketData[row]
                     local spr = sprites[row]
                     if spr then
+                        -- Detect in-place instance replacement (world:set of a
+                        -- new Sprite, or a batch-spawned zero sprite getting
+                        -- its first value). No archetype transition happens,
+                        -- so the lifecycle observer can't see it; hand it to
+                        -- the plugin to release the old instance and re-run
+                        -- bucket assignment. The marker writes it makes are
+                        -- deferred, so this row renders with the old bucket
+                        -- for one frame and resyncs when they land.
+                        local syncedId = spriteDatas[row].spriteId
+                        if syncedId ~= spr.spriteId then
+                            spriteDatas[row].spriteId = spr.spriteId
+                            if self.onSpriteReplaced and spr.spriteId ~= 0 then
+                                self.onSpriteReplaced(entityList[row], spr, syncedId as integer)
+                            end
+                        end
                         local inst = getInstance(spr.spriteId)
                         if inst then
                             -- Resolve UV scale (texture-array fitting).
