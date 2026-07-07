@@ -1233,10 +1233,9 @@ function sprite.plugin(renderPipeline: types.Pipeline): function(world: tecs.Wor
             end
 
             -- Binds the per-frame globals the cull shader needs:
-            -- GlobalTime, FrameTimings, ShadowMargin, MaxDropShadows,
-            -- SlicePackingBits, plus the optional tile-light data the
-            -- drop-shadow per-light fan-out reads. Mirrors what
-            -- `render_plugin.cull` sends on the slot path.
+            -- GlobalTime, FrameTimings, ShadowMargin, SlicePackingBits,
+            -- plus the optional tile-light data the drop-shadow
+            -- per-light fan-out reads.
             local function bindGlobals(shader: love.graphics.ComputeShader, rendererArg: any, _cullParamsBuffer: love.graphics.Buffer)
                 local r = rendererArg as {string:any}
                 if shader:hasUniform("GlobalTime") then
@@ -1252,11 +1251,9 @@ function sprite.plugin(renderPipeline: types.Pipeline): function(world: tecs.Wor
                     local rConfig = r.config as {string:any}
                     shader:send("ShadowMargin", (rConfig.shadowMargin as number) or 200.0)
                 end
-                if shader:hasUniform("MaxDropShadows") then
-                    -- Conservative; sized to total live entities. Buckets
-                    -- grow per arraySync.transformBuffer.capacity.
-                    shader:send("MaxDropShadows", 65536)
-                end
+                -- MaxDropShadows is per bucket (each bucket owns its own
+                -- drop-shadow buffer), so shadow_dispatch sends it next to
+                -- the DropShadowOutput binding rather than here.
                 if r.lightOutputBuffer and shader:hasUniform("LightBuffer") then
                     shader:send("LightBuffer", r.lightOutputBuffer as love.graphics.Buffer)
                     shader:send("TileLightCounts", r.tileLightCountBuffer as love.graphics.Buffer)

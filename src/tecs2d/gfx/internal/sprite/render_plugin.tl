@@ -26,6 +26,7 @@ local record ArraySyncRecord
     dropShadowOutputBuffer: love.graphics.Buffer
     dropShadowIndirectBuffer: love.graphics.Buffer
     materialParamsOutputBuffer: love.graphics.Buffer
+    dropShadowCapacity: integer
     count: integer
 end
 
@@ -317,10 +318,6 @@ function sprite_plugin.create(config: sprite_plugin.SpritePluginConfig): types.R
         lg.setShader(dsShader)
         dsShader:send("RenderParams", renderParamsBuffer)
         dsShader:send("AOOverride", -1.0)  -- Use computed AO from shadow opacity
-        -- Cap instances to the cull shader's drop-shadow write guard so
-        -- the draw never reads rows the cull skipped. Must match the
-        -- MaxDropShadows value sent to the cull shader (sprite/init.tl).
-        dsShader:send("MaxDropShadows", 65536)
 
         -- Pass 1: draw drop shadows (replace blend, set by caller)
         for tier, tierSync in pairs(spriteBucketSync.tiers) do
@@ -328,6 +325,11 @@ function sprite_plugin.create(config: sprite_plugin.SpritePluginConfig): types.R
             for arrayIdx, arraySync in pairs(tierSync.arraySyncs) do
                 if arraySync.count > 0 then
                     local texArray = textureArrays[arrayIdx]
+                    -- Cap instances to this bucket's drop-shadow capacity:
+                    -- the cull's atomicAdd counter can exceed it (writes
+                    -- past it are skipped), so the indirect instance count
+                    -- may name rows that were never written.
+                    dsShader:send("MaxDropShadows", arraySync.dropShadowCapacity)
                     dsShader:send("DropShadowSpriteOutput", arraySync.dropShadowOutputBuffer)
                     local mainTex = texArray.albedo as love.graphics.Texture
                     dsShader:send("MainTex", mainTex)

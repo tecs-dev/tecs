@@ -101,6 +101,11 @@ local record bucket_sync
         dropShadowIndirectBuffer: love.graphics.Buffer
         materialParamsOutputBuffer: love.graphics.Buffer
         capacity: integer
+        --- Row capacity of dropShadowOutputBuffer. Larger than `capacity`
+        --- because the cull's per-light fan-out writes up to one entry per
+        --- (sprite, affecting light) pair. Sent to the cull and render
+        --- shaders as MaxDropShadows so writes and reads never pass it.
+        dropShadowCapacity: integer
         count: integer
     end
 
@@ -156,22 +161,30 @@ local SpriteBucketSync <const> = bucket_sync.SpriteBucketSync
 local SYNC_MT <const>: metatable<SpriteBucketSync> = { __index = SpriteBucketSync }
 local lg <const> = love.graphics
 
+--- Drop-shadow fan-out headroom: the cull writes one entry per
+--- (sprite, affecting light) pair, so the buffer needs more rows than
+--- live sprites. 8 lights per sprite matches shadow_dispatch's
+--- non-provider heuristic; overflow past it is dropped by the
+--- MaxDropShadows guard rather than written out of bounds.
+local DS_FANOUT <const> = 8
+
 local function createArraySync(capacity: integer): bucket_sync.ArraySync
-    local function newOutput(): love.graphics.Buffer
-        return lg.newBuffer(types.SPRITE_FORMAT, capacity, { usage = "dynamic", shaderstorage = true })
+    local function newOutput(cap: integer): love.graphics.Buffer
+        return lg.newBuffer(types.SPRITE_FORMAT, cap, { usage = "dynamic", shaderstorage = true })
     end
     local function newIndirect(): love.graphics.Buffer
         return lg.newBuffer(types.INDIRECT_FORMAT, 4, { usage = "dynamic", shaderstorage = true, indirectarguments = true })
     end
     return {
-        outputBuffer = newOutput(),
+        outputBuffer = newOutput(capacity),
         indirectBuffer = newIndirect(),
-        shadowOutputBuffer = newOutput(),
+        shadowOutputBuffer = newOutput(capacity),
         shadowIndirectBuffer = newIndirect(),
-        dropShadowOutputBuffer = newOutput(),
+        dropShadowOutputBuffer = newOutput(capacity * DS_FANOUT),
         dropShadowIndirectBuffer = newIndirect(),
         materialParamsOutputBuffer = lg.newBuffer(types.MATERIAL_PARAMS_FORMAT, capacity, { usage = "dynamic", shaderstorage = true }),
         capacity = capacity,
+        dropShadowCapacity = capacity * DS_FANOUT,
         count = 0,
     }
 end
@@ -185,9 +198,10 @@ local function ensureCapacity(arraySync: bucket_sync.ArraySync, liveCount: integ
     if newCap < liveCount then newCap = liveCount end
     arraySync.outputBuffer = lg.newBuffer(types.SPRITE_FORMAT, newCap, { usage = "dynamic", shaderstorage = true })
     arraySync.shadowOutputBuffer = lg.newBuffer(types.SPRITE_FORMAT, newCap, { usage = "dynamic", shaderstorage = true })
-    arraySync.dropShadowOutputBuffer = lg.newBuffer(types.SPRITE_FORMAT, newCap, { usage = "dynamic", shaderstorage = true })
+    arraySync.dropShadowOutputBuffer = lg.newBuffer(types.SPRITE_FORMAT, newCap * DS_FANOUT, { usage = "dynamic", shaderstorage = true })
     arraySync.materialParamsOutputBuffer = lg.newBuffer(types.MATERIAL_PARAMS_FORMAT, newCap, { usage = "dynamic", shaderstorage = true })
     arraySync.capacity = newCap
+    arraySync.dropShadowCapacity = newCap * DS_FANOUT
 end
 
 function bucket_sync.new(

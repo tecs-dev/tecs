@@ -385,6 +385,12 @@ function shadow_dispatch.new(config: shadow_dispatch.Config): shadow_dispatch.Co
             shader:send("SpriteOutput", bucket.outputBuffer)
             shader:send("SpriteShadowOutput", bucket.shadowOutputBuffer)
             shader:send("DropShadowOutput", bucket.dropShadowOutputBuffer)
+            if shader:hasUniform("MaxDropShadows") then
+                -- The per-light fan-out's write guard. Must be this
+                -- bucket's actual buffer capacity or the atomicAdd
+                -- index runs past the SSBO.
+                shader:send("MaxDropShadows", bucket.dropShadowCapacity or bucket.capacity)
+            end
             shader:send("MaterialParamsOutput", bucket.materialParamsOutputBuffer)
             shader:send("IndirectArgs", bucket.indirectBuffer)
             shader:send("ShadowIndirectArgs", bucket.shadowIndirectBuffer)
