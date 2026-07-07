@@ -35,7 +35,11 @@ local type ArchetypeEntityObserver = tecs_types.ArchetypeEntityObserver
 --   onArchetypeDestroyed(self, archetype)                   -- optional
 --   flush(self)                                             -- called by uploader
 
+local type StateIterator = function({tecs.Archetype: any}, tecs.Archetype): (tecs.Archetype, any)
+
 local record archetype_registry
+    type StateIterator = StateIterator
+
     record Options
         --- Logging label for this registry.
         name: string
@@ -57,8 +61,9 @@ local record archetype_registry
 
         --- Iterator over (archetype, state) pairs. Stable while
         --- archetypes aren't destroyed mid-iteration; consumers should
-        --- treat it like a query iterator.
-        archetypes: function(self): function(): tecs.Archetype, any
+        --- treat it like a query iterator. Stateless (returns `next` +
+        --- the state map), so per-frame callers allocate nothing.
+        archetypes: function(self): (StateIterator, {tecs.Archetype: any})
         --- Convenience: invoke `state:flush()` for every registered
         --- archetype. Per-shape uploaders typically use this directly
         --- after walking their own dirty state.
@@ -133,14 +138,10 @@ function archetype_registry.new(world: tecs.World, opts: archetype_registry.Opti
     return self
 end
 
-function Registry:archetypes(): function(): tecs.Archetype, any
-    local states = self.states
-    local key: tecs.Archetype = nil
-    return function(): tecs.Archetype, any
-        local k, v = next(states, key)
-        key = k
-        return k, v
-    end
+local nextState <const> = next as StateIterator
+
+function Registry:archetypes(): StateIterator, {tecs.Archetype: any}
+    return nextState, self.states
 end
 
 function Registry:flushAll()

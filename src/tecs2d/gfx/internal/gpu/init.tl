@@ -17,6 +17,16 @@ local zone = loadUntyped("jit.zone") as function(?string): string
 
 local setOrthographic <const> = require("tecs2d.gfx.internal.ortho").setOrthographic
 
+local EMPTY_NUMBERS <const>: {number} = {}
+local EMPTY_INTEGERS <const>: {integer} = {}
+
+local record MaskPack
+    u: integer
+    f: number
+end
+-- Reused scratch union for the uint16 layer-mask -> float bit reinterpret.
+local maskPack <const> = C.new("union { uint32_t u; float f; }") as MaskPack
+
 -- Shadow-mask view-projection: same camera, shadow-mask resolution, zoom
 -- widened so shadowMargin extra world pixels per side land inside the
 -- mask. Off-screen occluders within the margin still cast shadows, and
@@ -150,6 +160,20 @@ function gpu.new(config: gpu.Config): gpu.Renderer
     renderer._lightShadowTransform = love.math.newTransform()
     renderer._renderTransform = love.math.newTransform()
 
+    -- Per-cull scratch tables, refilled in place each cull so the
+    -- per-frame path allocates nothing.
+    renderer._cullViewport = {0, 0, 0, 0}
+    renderer._tileViewport = {0, 0, 0, 0}
+    renderer._cullCameraPos = {0, 0}
+    renderer._cullParallaxMatX = {}
+    renderer._cullParallaxMatY = {}
+    renderer.sortModesMat = {}
+    for i = 1, 16 do
+        renderer._cullParallaxMatX[i] = 1.0
+        renderer._cullParallaxMatY[i] = 1.0
+        renderer.sortModesMat[i] = 0
+    end
+
     -- Set metatable before calling methods
     setmetatable(renderer, {__index = RendererMethods})
     renderer:resize(renderer.screenWidth, renderer.screenHeight)
@@ -276,40 +300,35 @@ function RendererMethods:cull(cameraX: number, cameraY: number, cameraZoom: numb
     local sw, sh = self.screenWidth, self.screenHeight
     local pad = 50 / cameraZoom
 
+    -- Scratch tables cached on the renderer and refilled in place;
+    -- consumers only read them for same-frame shader sends.
     local minX, minY, maxX, maxY = self.camera:aabb(sw, sh, pad)
-    local viewport: {number} = { minX, minY, maxX, maxY }
+    local viewport = self._cullViewport
+    viewport[1], viewport[2], viewport[3], viewport[4] = minX, minY, maxX, maxY
 
-    local cameraPos = { cameraX, cameraY }
+    local cameraPos = self._cullCameraPos
+    cameraPos[1], cameraPos[2] = cameraX, cameraY
 
     -- Pack parallax arrays into mat4 format (column-major: [col][row] = layer col*4+row+1)
     -- Default to 1.0 if not provided
-    parallaxX = parallaxX or {}
-    parallaxY = parallaxY or {}
-    local parallaxMatX = {
-        parallaxX[1] or 1.0, parallaxX[2] or 1.0, parallaxX[3] or 1.0, parallaxX[4] or 1.0,
-        parallaxX[5] or 1.0, parallaxX[6] or 1.0, parallaxX[7] or 1.0, parallaxX[8] or 1.0,
-        parallaxX[9] or 1.0, parallaxX[10] or 1.0, parallaxX[11] or 1.0, parallaxX[12] or 1.0,
-        parallaxX[13] or 1.0, parallaxX[14] or 1.0, parallaxX[15] or 1.0, parallaxX[16] or 1.0,
-    }
-    local parallaxMatY = {
-        parallaxY[1] or 1.0, parallaxY[2] or 1.0, parallaxY[3] or 1.0, parallaxY[4] or 1.0,
-        parallaxY[5] or 1.0, parallaxY[6] or 1.0, parallaxY[7] or 1.0, parallaxY[8] or 1.0,
-        parallaxY[9] or 1.0, parallaxY[10] or 1.0, parallaxY[11] or 1.0, parallaxY[12] or 1.0,
-        parallaxY[13] or 1.0, parallaxY[14] or 1.0, parallaxY[15] or 1.0, parallaxY[16] or 1.0,
-    }
+    parallaxX = parallaxX or EMPTY_NUMBERS
+    parallaxY = parallaxY or EMPTY_NUMBERS
+    local parallaxMatX = self._cullParallaxMatX
+    local parallaxMatY = self._cullParallaxMatY
+    for i = 1, 16 do
+        parallaxMatX[i] = parallaxX[i] or 1.0
+        parallaxMatY[i] = parallaxY[i] or 1.0
+    end
 
     -- Pack sort modes into mat4 format (0=topdown, 1=z-only, 2=isometric)
-    sortModes = sortModes or {}
-    local sortModesMat = {
-        sortModes[1] or 0, sortModes[2] or 0, sortModes[3] or 0, sortModes[4] or 0,
-        sortModes[5] or 0, sortModes[6] or 0, sortModes[7] or 0, sortModes[8] or 0,
-        sortModes[9] or 0, sortModes[10] or 0, sortModes[11] or 0, sortModes[12] or 0,
-        sortModes[13] or 0, sortModes[14] or 0, sortModes[15] or 0, sortModes[16] or 0,
-    }
+    sortModes = sortModes or EMPTY_INTEGERS
+    local sortModesMat = self.sortModesMat
+    for i = 1, 16 do
+        sortModesMat[i] = sortModes[i] or 0
+    end
 
     local cfg = self.config
     local virtualRes = cfg.virtualRes
-    local virtualSize = { virtualRes[1], virtualRes[2] }
     screenSpaceMask = screenSpaceMask or 0
     ignoreZoomMask = ignoreZoomMask or 0
     virtualCoordsMask = virtualCoordsMask or 0
@@ -320,30 +339,27 @@ function RendererMethods:cull(cameraX: number, cameraY: number, cameraZoom: numb
     self.ignoreZoomMask = ignoreZoomMask
     self.virtualCoordsMask = virtualCoordsMask
     self.unlitMask = unlitMask
-    self.sortModesMat = sortModesMat
 
     -- Populate CullParams SSBO (uploaded once, sent to all cull shaders)
     local cullPtr = C.cast("GPUCullParams*", self.cullParamsByteData:getFFIPointer()) as {integer: types.CullParamsRecord}
-    cullPtr[0].viewMinX = viewport[1] as number
-    cullPtr[0].viewMinY = viewport[2] as number
-    cullPtr[0].viewMaxX = viewport[3] as number
-    cullPtr[0].viewMaxY = viewport[4] as number
+    cullPtr[0].viewMinX = minX
+    cullPtr[0].viewMinY = minY
+    cullPtr[0].viewMaxX = maxX
+    cullPtr[0].viewMaxY = maxY
     cullPtr[0].camX = cameraX
     cullPtr[0].camY = cameraY
     cullPtr[0].cameraZoom = cameraZoom
     cullPtr[0].maxLayer = cfg.maxLayers
     cullPtr[0].maxZ = cfg.maxZ
     cullPtr[0].maxY = cfg.maxY
-    cullPtr[0].virtualW = virtualSize[1] as number
-    cullPtr[0].virtualH = virtualSize[2] as number
+    cullPtr[0].virtualW = virtualRes[1] as number
+    cullPtr[0].virtualH = virtualRes[2] as number
     cullPtr[0].screenW = sw as number
     cullPtr[0].screenH = sh as number
     -- Pack uint16 layer mask into float via reinterpret cast
     cameraLayerMask = cameraLayerMask or 0xFFFF
-    local maskU32 = C.new("uint32_t[1]") as {integer: integer}
-    maskU32[0] = cameraLayerMask
-    local maskF32 = C.cast("float*", maskU32) as {integer: number}
-    cullPtr[0]._cameraLayerMask = maskF32[0]
+    maskPack.u = cameraLayerMask
+    cullPtr[0]._cameraLayerMask = maskPack.f
     cullPtr[0]._pad1 = 0
     cullPtr[0].screenSpaceMask = screenSpaceMask
     cullPtr[0].ignoreZoomMask = ignoreZoomMask
@@ -356,9 +372,6 @@ function RendererMethods:cull(cameraX: number, cameraY: number, cameraZoom: numb
     end
     self.cullParamsBuffer:setArrayData(self.cullParamsByteData)
     local cullParamsBuffer <const> = self.cullParamsBuffer
-
-    -- Cache cull-phase data for plugins that use individual uniforms
-    self._cullViewport = viewport
     -- Unpadded viewport for tile-based light binning.
     -- Must match renderLighting()'s InvViewProj exactly: use render dimensions from
     -- the G-buffer canvases.
@@ -382,14 +395,15 @@ function RendererMethods:cull(cameraX: number, cameraY: number, cameraZoom: numb
         tileHW = aabbHW
         tileHH = aabbHH
     end
-    self._tileViewport = { cameraX - tileHW, cameraY - tileHH, cameraX + tileHW, cameraY + tileHH }
+    local tileViewport = self._tileViewport
+    tileViewport[1] = cameraX - tileHW
+    tileViewport[2] = cameraY - tileHH
+    tileViewport[3] = cameraX + tileHW
+    tileViewport[4] = cameraY + tileHH
     -- Effective tile grid dims must match renderLighting's TileGridDims
     local TILE_SIZE <const> = 16
     self._effectiveTileGridW = math.ceil(rw / TILE_SIZE) as integer
     self._effectiveTileGridH = math.ceil(rh / TILE_SIZE) as integer
-    self._cullCameraPos = cameraPos
-    self._cullParallaxMatX = parallaxMatX
-    self._cullParallaxMatY = parallaxMatY
     self._cullGlobalTime = globalTime or 0.0
     self._cullCameraLayerMask = cameraLayerMask or 0xFFFF
 

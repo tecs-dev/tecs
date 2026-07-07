@@ -566,12 +566,14 @@ function tileChunk.plugin(world: tecs.World)
     })
 
     -- Sync only dirty chunks to GPU buffer
+    -- Reused across frames: entities to strip DirtyTileChunk from
+    -- (can't remove a component during query iteration).
+    local toClean: {integer} = {}
     world:addSystem({
         name = "tileChunk.GPUSync",
         phase = tecs.phases.PreRender,
         run = function()
-            -- Collect entities to clean (can't remove component during iteration)
-            local toClean: {integer} = {}
+            local toCleanCount = 0
 
             for archetype, len, entities in dirtyQuery:iter() do
                 -- The sync writes through the renderer's GPU buffer, not
@@ -682,13 +684,15 @@ function tileChunk.plugin(world: tecs.World)
                     -- chunks land here.
                     inputBufferRef.handle:setArrayData(byteData, slot + 1, slot + 1, 1)
 
-                    toClean[#toClean + 1] = entityId
+                    toCleanCount = toCleanCount + 1
+                    toClean[toCleanCount] = entityId
                 end
             end
 
             -- Remove DirtyTileChunk from synced entities (moves to clean archetype)
-            for _, entityId in ipairs(toClean) do
-                world:remove(entityId, DirtyTileChunk)
+            for i = 1, toCleanCount do
+                world:remove(toClean[i], DirtyTileChunk)
+                toClean[i] = nil
             end
         end
     })

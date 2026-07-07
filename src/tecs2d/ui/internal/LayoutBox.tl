@@ -169,30 +169,64 @@ function LayoutBox.plugin(world: World)
         include = {LayoutBox}
     })
 
+    -- Scratch LayoutBox: computed dimensions land here first so the
+    -- change compare sees float32-rounded values (the column stores
+    -- floats; comparing against unrounded doubles would always differ).
+    local scratchBox = LayoutBox(0, 0)
+
+    -- Per-archetype source-column cache: sourceComponentId -> column
+    -- (false = component not on this archetype). Cleared per archetype.
+    local sourceColById: {integer: any} = {}
+    local sourceColIds: {integer} = {}
+
     world:addSystem({
         name = "ui.ComputeLayoutBox",
         phase = tecs.phases.PostUpdate,
         run = function()
-            for archetype, len, entities in layoutBoxQuery:iter() do
-                local layoutBoxes = archetype:getMut(LayoutBox)
+            for archetype, len in layoutBoxQuery:iter() do
+                local layoutBoxes = archetype:get(LayoutBox)
+                local mutBoxes: {LayoutBox} = nil
                 -- Get Pivot component array from archetype (may be nil)
-                local pivots = archetype:getMut(PivotModule)
+                local pivots = archetype:get(PivotModule)
+                local mutPivots: {tecs.Component} = nil
+
+                local sourceColCount = 0
 
                 for row = 1, len do
                     local box = layoutBoxes[row]
-                    local entity = entities[row]
 
                     -- Compute dimensions from source component if specified
-                    if box.sourceComponentId > 0 then
-                        local sourceComp = tecs.getComponentById(box.sourceComponentId)
-                        if sourceComp then
-                            local sourceData = world:get(entity, sourceComp) as Rect
-                            if sourceData and sourceData.getRect then
-                                local _offsetX, _offsetY, width, height = sourceData:getRect()
-                                box.width = width
-                                box.height = height
-                                box.offsetX = -width * box.originX
-                                box.offsetY = -height * box.originY
+                    local sourceId = box.sourceComponentId
+                    if sourceId > 0 then
+                        local col = sourceColById[sourceId]
+                        if col == nil then
+                            local sourceComp = tecs.getComponentById(sourceId)
+                            col = sourceComp and archetype:get(sourceComp) or false
+                            sourceColById[sourceId] = col
+                            sourceColCount = sourceColCount + 1
+                            sourceColIds[sourceColCount] = sourceId
+                        end
+                        local sourceData = col and (col as {Rect})[row]
+                        if sourceData and sourceData.getRect then
+                            local _offsetX, _offsetY, width, height = sourceData:getRect()
+                            scratchBox.width = width
+                            scratchBox.height = height
+                            scratchBox.offsetX = -width * box.originX
+                            scratchBox.offsetY = -height * box.originY
+                            -- Write back (and mark the column dirty) only
+                            -- when the rounded result actually changed.
+                            if box.width ~= scratchBox.width
+                                or box.height ~= scratchBox.height
+                                or box.offsetX ~= scratchBox.offsetX
+                                or box.offsetY ~= scratchBox.offsetY then
+                                if not mutBoxes then
+                                    mutBoxes = archetype:getMut(LayoutBox)
+                                end
+                                local mut = mutBoxes[row]
+                                mut.width = scratchBox.width
+                                mut.height = scratchBox.height
+                                mut.offsetX = scratchBox.offsetX
+                                mut.offsetY = scratchBox.offsetY
                             end
                         end
                     end
@@ -200,11 +234,20 @@ function LayoutBox.plugin(world: World)
                     -- Sync LayoutBox origin to Pivot component
                     if pivots then
                         local pivot = pivots[row] as PivotData
-                        if pivot then
-                            pivot.x = box.originX
-                            pivot.y = box.originY
+                        if pivot and (pivot.x ~= box.originX or pivot.y ~= box.originY) then
+                            if not mutPivots then
+                                mutPivots = archetype:getMut(PivotModule)
+                            end
+                            local mutPivot = mutPivots[row] as PivotData
+                            mutPivot.x = box.originX
+                            mutPivot.y = box.originY
                         end
                     end
+                end
+
+                for i = 1, sourceColCount do
+                    sourceColById[sourceColIds[i]] = nil
+                    sourceColIds[i] = nil
                 end
             end
         end
@@ -216,14 +259,40 @@ function LayoutBox.plugin(world: World)
         include = {RelativeTransform, ChildOf, Transform}
     })
 
+    -- Reused across passes and frames: parent component lookups are
+    -- cached by parent id (children overwhelmingly share parents), and
+    -- composition goes through one scratch Transform so per-row
+    -- `world:get` cdata boxing disappears. Cached references read the
+    -- live column, so later passes of the same frame observe parent
+    -- movement from earlier passes.
+    local scratchTransform = Transform(0, 0)
+    local parentTransformById: {integer: tecs.builtins.Transform} = {}
+    local parentBoxById: {integer: LayoutBox} = {}
+    local parentSeen: {integer: boolean} = {}
+    local parentIds: {integer} = {}
+    local parentCount = 0
+
+    local function clearParentCache()
+        for i = 1, parentCount do
+            local id = parentIds[i]
+            parentTransformById[id] = nil
+            parentBoxById[id] = nil
+            parentSeen[id] = nil
+            parentIds[i] = nil
+        end
+        parentCount = 0
+    end
+
     -- Process one pass of the hierarchy. Returns true if any child's
     -- computed transform differs from its current Transform (indicating the
     -- parent moved and we need another pass).
     local function processHierarchy(): boolean
         local changed = false
+        local scratch = scratchTransform
         for archetype, len, entities in hierarchyQuery:iter() do
             local relativeTransforms = archetype:get(RelativeTransform)
-            local transforms = archetype:getMut(Transform)
+            local transforms = archetype:get(Transform)
+            local mutTransforms: {tecs.builtins.Transform} = nil
             for row = 1, len do
                 local relativeTransform = relativeTransforms[row]
                 local childOf = world:getFirstRelationship(entities[row], ChildOf)
@@ -231,20 +300,40 @@ function LayoutBox.plugin(world: World)
                     goto continue
                 end
                 local parentId = childOf.target
-                local parentTransform = world:get(parentId, Transform)
+                if not parentSeen[parentId] then
+                    parentSeen[parentId] = true
+                    parentCount = parentCount + 1
+                    parentIds[parentCount] = parentId
+                    parentTransformById[parentId] = world:get(parentId, Transform)
+                    parentBoxById[parentId] = world:get(parentId, LayoutBox)
+                end
+                local parentTransform = parentTransformById[parentId]
                 if parentTransform then
                     local childTransform = transforms[row]
-                    local parentLayoutBox = world:get(parentId, LayoutBox)
-                    local prevX, prevY = childTransform.x, childTransform.y
-                    local prevRot, prevSX, prevSY = childTransform.rotation, childTransform.scaleX, childTransform.scaleY
                     composeTransformsWithOrigin(
-                        parentTransform, relativeTransform, childTransform, parentLayoutBox
+                        parentTransform, relativeTransform, scratch, parentBoxById[parentId]
                     )
-                    if childTransform.x ~= prevX or childTransform.y ~= prevY
-                        or childTransform.rotation ~= prevRot
-                        or childTransform.scaleX ~= prevSX
-                        or childTransform.scaleY ~= prevSY then
+                    -- Write back (and mark Transform dirty) only when the
+                    -- composed result differs; static UI must not dirty
+                    -- its Transform columns every frame.
+                    if childTransform.x ~= scratch.x or childTransform.y ~= scratch.y
+                        or childTransform.z ~= scratch.z
+                        or childTransform.layer ~= scratch.layer
+                        or childTransform.rotation ~= scratch.rotation
+                        or childTransform.scaleX ~= scratch.scaleX
+                        or childTransform.scaleY ~= scratch.scaleY then
                         changed = true
+                        if not mutTransforms then
+                            mutTransforms = archetype:getMut(Transform)
+                        end
+                        local mut = mutTransforms[row]
+                        mut.x = scratch.x
+                        mut.y = scratch.y
+                        mut.z = scratch.z
+                        mut.layer = scratch.layer
+                        mut.rotation = scratch.rotation
+                        mut.scaleX = scratch.scaleX
+                        mut.scaleY = scratch.scaleY
                     end
                 end
                 ::continue::
@@ -258,6 +347,26 @@ function LayoutBox.plugin(world: World)
         phase = tecs.phases.PostUpdate,
         after = {"ui.ComputeLayoutBox", "RelativeTransform"},
         run = function()
+            -- Dirty gate (mirrors the core RelativeTransform system):
+            -- recompose only when hierarchy or layout state changed this
+            -- frame. Composition inputs are parent Transform, the row's
+            -- RelativeTransform, ChildOf, and the parent's LayoutBox.
+            local dirty = false
+            for arch in world:dirtyArchetypes() do
+                local cols = arch.columns
+                if cols[Transform] or cols[RelativeTransform] or cols[ChildOf]
+                        or cols[LayoutBox] then
+                    dirty = true
+                    break
+                end
+            end
+            if not dirty then return end
+
+            -- The parent cache holds live column references; it must not
+            -- survive frames (rows move between archetypes), but staying
+            -- warm across the convergence passes below is what makes
+            -- them cheap.
+            clearParentCache()
             -- Iterate the hierarchy until no child transform changes,
             -- which means every parent has been processed before any of
             -- its descendants. The hard cap is a safety bound, not a

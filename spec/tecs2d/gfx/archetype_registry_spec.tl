@@ -96,7 +96,11 @@ describe("archetype_registry", function()
         world:spawn(Pos(1, 2))
 
         -- Find the state for the Pos archetype.
-        local _, state = registry:archetypes()()
+        local state: any
+        for _, s in registry:archetypes() do
+            state = s
+            break
+        end
         assert.is_not_nil(state)
 
         local events = (state as {string:any}).events as {{string:any}}

@@ -410,7 +410,11 @@ function pipeline.newPipeline(config: pipeline.RenderConfig): Pipeline
         roughGeometry = config.roughGeometry == true,
         lightingMode = config.lightingMode or "deferred",
         shadowsEnabled = config.shadowsEnabled ~= false,
-        ambientLight = config.ambientLight or {1.0, 1.0, 1.0},
+        -- Copied so setAmbientLight's in-place writes never mutate the
+        -- caller's config table.
+        ambientLight = config.ambientLight
+            and {config.ambientLight[1], config.ambientLight[2], config.ambientLight[3]}
+            or {1.0, 1.0, 1.0},
         scaledWidth = 0,   -- computed by _recomputeScaledDims
         scaledHeight = 0,  -- computed by _recomputeScaledDims
         _firstScreenLayer = 0,  -- 0 = no screen layers
@@ -724,7 +728,8 @@ function PipelineImpl:disableLighting()
 end
 
 function PipelineImpl:setAmbientLight(r: number, g: number, b: number)
-    self.ambientLight = {r, g, b}
+    local ambient = self.ambientLight
+    ambient[1], ambient[2], ambient[3] = r, g, b
 end
 
 function PipelineImpl:getAmbientLight(): number, number, number

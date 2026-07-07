@@ -65,49 +65,80 @@ function LayoutNode.plugin(world: tecs.World)
     })
 
     -----------------------------------------------------------------------
-    -- Reusable walkUp contexts and visitors (allocated once at plugin init)
-    -- so per-entity walks don't allocate closures every frame.
+    -- Reusable walkUp contexts, visitors, and per-frame maps (allocated
+    -- once at plugin init) so per-entity walks and per-frame rebuilds
+    -- don't allocate.
     -----------------------------------------------------------------------
     local record ScrollCtx
-        offsets: {integer: {number, number}}
+        offsetsX: {integer: number}
+        offsetsY: {integer: number}
         x: number
         y: number
     end
-    local scrollCtx: ScrollCtx = {offsets = {}, x = 0.0, y = 0.0}
+    local scrollCtx: ScrollCtx = {offsetsX = {}, offsetsY = {}, x = 0.0, y = 0.0}
 
     local function visitScrollAncestor(ancestorId: integer, _depth: integer, ctx: ScrollCtx): boolean
-        local offset = ctx.offsets[ancestorId]
-        if offset then
-            ctx.x = ctx.x + offset[1]
-            ctx.y = ctx.y + offset[2]
+        local ox = ctx.offsetsX[ancestorId]
+        if ox then
+            ctx.x = ctx.x + ox
+            ctx.y = ctx.y + ctx.offsetsY[ancestorId]
         end
         return true
     end
 
     local record BoundsCtx
-        bounds: {integer: {number, number, number, number}}
+        minXByNode: {integer: number}
+        minYByNode: {integer: number}
+        maxXByNode: {integer: number}
+        maxYByNode: {integer: number}
         haveBounds: boolean
         minX: number
         minY: number
         maxX: number
         maxY: number
     end
-    local boundsCtx: BoundsCtx = {bounds = {}, haveBounds = false, minX = 0.0, minY = 0.0, maxX = 0.0, maxY = 0.0}
+    local boundsCtx: BoundsCtx = {
+        minXByNode = {}, minYByNode = {}, maxXByNode = {}, maxYByNode = {},
+        haveBounds = false, minX = 0.0, minY = 0.0, maxX = 0.0, maxY = 0.0,
+    }
 
     local function visitBoundsAncestor(ancestorId: integer, _depth: integer, ctx: BoundsCtx): boolean
-        local b = ctx.bounds[ancestorId]
-        if b then
+        local bMinX = ctx.minXByNode[ancestorId]
+        if bMinX then
+            local bMinY = ctx.minYByNode[ancestorId]
+            local bMaxX = ctx.maxXByNode[ancestorId]
+            local bMaxY = ctx.maxYByNode[ancestorId]
             if not ctx.haveBounds then
-                ctx.minX, ctx.minY, ctx.maxX, ctx.maxY = b[1], b[2], b[3], b[4]
+                ctx.minX, ctx.minY, ctx.maxX, ctx.maxY = bMinX, bMinY, bMaxX, bMaxY
                 ctx.haveBounds = true
             else
-                if b[1] > ctx.minX then ctx.minX = b[1] end
-                if b[2] > ctx.minY then ctx.minY = b[2] end
-                if b[3] < ctx.maxX then ctx.maxX = b[3] end
-                if b[4] < ctx.maxY then ctx.maxY = b[4] end
+                if bMinX > ctx.minX then ctx.minX = bMinX end
+                if bMinY > ctx.minY then ctx.minY = bMinY end
+                if bMaxX < ctx.maxX then ctx.maxX = bMaxX end
+                if bMaxY < ctx.maxY then ctx.maxY = bMaxY end
             end
         end
         return true
+    end
+
+    -- Keys written into the reused per-frame maps, so clearing walks the
+    -- inserted entries instead of allocating fresh maps.
+    local scrollNodeIds: {integer} = {}
+    local boundsNodeIds: {integer} = {}
+
+    -- Dirty gate shared by the layout passes: hierarchy or layout state
+    -- changed this frame. Mirrors the core RelativeTransform system's
+    -- gate; per-child ancestor walks are only worth running when
+    -- something that feeds them moved.
+    local function hierarchyDirty(): boolean
+        for arch in world:dirtyArchetypes() do
+            local cols = arch.columns
+            if cols[Transform] or cols[RelativeTransform] or cols[ChildOf]
+                    or cols[LayoutNode] or cols[LayoutBox] then
+                return true
+            end
+        end
+        return false
     end
 
     -- Apply scroll offset to children of LayoutNodes
@@ -117,26 +148,35 @@ function LayoutNode.plugin(world: tecs.World)
         phase = tecs.phases.PostUpdate,
         after = {"ui.RelativeTransform"},
         run = function()
+            -- Transforms only recompose (ui.RelativeTransform) when the
+            -- hierarchy gate opens; the scroll subtraction must track it
+            -- exactly, or recomposed children lose their scroll offset.
+            if not hierarchyDirty() then return end
+
             -- Build a map of LayoutNode entity ID -> scroll offset
-            local scrollOffsets: {integer: {number, number}} = {}
+            local offsetsX = scrollCtx.offsetsX
+            local offsetsY = scrollCtx.offsetsY
+            local scrollCount = 0
 
             for archetype, len, entities in layoutNodeQuery:iter() do
                 local layouts = archetype:get(LayoutNode)
                 for i = 1, len do
-                    local entityId = entities[i]
                     local layout = layouts[i]
                     if layout.scrollX ~= 0 or layout.scrollY ~= 0 then
-                        scrollOffsets[entityId] = {layout.scrollX, layout.scrollY}
+                        local entityId = entities[i]
+                        offsetsX[entityId] = layout.scrollX
+                        offsetsY[entityId] = layout.scrollY
+                        scrollCount = scrollCount + 1
+                        scrollNodeIds[scrollCount] = entityId
                     end
                 end
             end
 
             -- Nothing scrolled: skip the per-child ancestor walks.
-            if next(scrollOffsets) == nil then return end
+            if scrollCount == 0 then return end
 
             -- Apply scroll offset to all descendants of LayoutNodes.
             -- Sums offsets from the full ancestor chain so nested scrolling containers compose their displacements.
-            scrollCtx.offsets = scrollOffsets
             for archetype, len, entities in childTransformQuery:iter() do
                 local transforms = archetype:getMut(Transform)
                 for i = 1, len do
@@ -149,6 +189,13 @@ function LayoutNode.plugin(world: tecs.World)
                     end
                 end
             end
+
+            for i = 1, scrollCount do
+                local entityId = scrollNodeIds[i]
+                offsetsX[entityId] = nil
+                offsetsY[entityId] = nil
+                scrollNodeIds[i] = nil
+            end
         end
     })
 
@@ -159,8 +206,17 @@ function LayoutNode.plugin(world: tecs.World)
         phase = tecs.phases.PostUpdate,
         after = {"ui.ApplyScrollOffset"},
         run = function()
+            -- Clip bounds derive from container transforms and boxes;
+            -- when nothing in the hierarchy moved this frame the bounds
+            -- from the previous run are still correct.
+            if not hierarchyDirty() then return end
+
             -- Build a map of LayoutNode entity ID -> clip bounds
-            local layoutBounds: {integer: {number, number, number, number}} = {}
+            local minXByNode = boundsCtx.minXByNode
+            local minYByNode = boundsCtx.minYByNode
+            local maxXByNode = boundsCtx.maxXByNode
+            local maxYByNode = boundsCtx.maxYByNode
+            local boundsCount = 0
 
             for archetype, len, entities in layoutNodeQuery:iter() do
                 local boxes = archetype:get(LayoutBox)
@@ -175,30 +231,58 @@ function LayoutNode.plugin(world: tecs.World)
                     -- offsetX/Y converts from transform position to visual top-left
                     local minX = transform.x + box.offsetX
                     local minY = transform.y + box.offsetY
-                    local maxX = minX + box.width
-                    local maxY = minY + box.height
 
-                    layoutBounds[entityId] = {minX, minY, maxX, maxY}
+                    minXByNode[entityId] = minX
+                    minYByNode[entityId] = minY
+                    maxXByNode[entityId] = minX + box.width
+                    maxYByNode[entityId] = minY + box.height
+                    boundsCount = boundsCount + 1
+                    boundsNodeIds[boundsCount] = entityId
                 end
             end
 
             -- Apply ClipBounds to all entities that have a LayoutNode ancestor, and explicitly remove ClipBounds
             -- from entities that don't. Intersects bounds from EVERY LayoutNode ancestor so content inside an inner
-            -- container can't escape an outer clipped one.
-            boundsCtx.bounds = layoutBounds
-            for _archetype, len, entities in childTransformQuery:iter() do
+            -- container can't escape an outer clipped one. Rows whose bounds are unchanged are left alone so the
+            -- ClipBounds column doesn't go dirty (and re-upload) every frame.
+            for archetype, len, entities in childTransformQuery:iter() do
+                local clipCol = archetype:get(ClipBounds)
                 for i = 1, len do
                     local entityId = entities[i]
                     boundsCtx.haveBounds = false
                     world:walkUp(entityId, ChildOf, visitBoundsAncestor, boundsCtx)
                     if boundsCtx.haveBounds then
-                        world:set(entityId, ClipBounds(
-                            boundsCtx.minX, boundsCtx.minY, boundsCtx.maxX, boundsCtx.maxY
-                        ))
-                    else
+                        local existing = clipCol and clipCol[i]
+                        if existing then
+                            if existing.minX ~= boundsCtx.minX
+                                    or existing.minY ~= boundsCtx.minY
+                                    or existing.maxX ~= boundsCtx.maxX
+                                    or existing.maxY ~= boundsCtx.maxY then
+                                local mutCol = archetype:getMut(ClipBounds)
+                                local mut = mutCol[i]
+                                mut.minX = boundsCtx.minX
+                                mut.minY = boundsCtx.minY
+                                mut.maxX = boundsCtx.maxX
+                                mut.maxY = boundsCtx.maxY
+                            end
+                        else
+                            world:set(entityId, ClipBounds(
+                                boundsCtx.minX, boundsCtx.minY, boundsCtx.maxX, boundsCtx.maxY
+                            ))
+                        end
+                    elseif clipCol then
                         world:remove(entityId, ClipBounds)
                     end
                 end
+            end
+
+            for i = 1, boundsCount do
+                local entityId = boundsNodeIds[i]
+                minXByNode[entityId] = nil
+                minYByNode[entityId] = nil
+                maxXByNode[entityId] = nil
+                maxYByNode[entityId] = nil
+                boundsNodeIds[i] = nil
             end
         end
     })

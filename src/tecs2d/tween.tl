@@ -1520,12 +1520,15 @@ function tween.plugin(world: World)
         end
     end)
 
+    -- Reused across frames: entities whose playback emptied this tick
+    -- (component removal is deferred until after query iteration).
+    local emptyEntities: {integer} = {}
     world:addSystem({
         name = "tween.Update",
         phase = tecs.phases.Update,
         run = function(dt: number)
             local reg <const> = registry(world)
-            local emptyEntities: {integer} = {}
+            local emptyCount = 0
             for archetype, len, entities in playbackQuery:iter() do
                 local playbacks = archetype:getMut(TweenPlayback)
                 for i = 1, len do
@@ -1544,14 +1547,16 @@ function tween.plugin(world: World)
                         end
                     end
                     if #cursors == 0 then
-                        emptyEntities[#emptyEntities + 1] = entity
+                        emptyCount = emptyCount + 1
+                        emptyEntities[emptyCount] = entity
                     end
                 end
             end
-            for i = 1, #emptyEntities do
+            for i = 1, emptyCount do
                 if world:isAlive(emptyEntities[i]) then
                     world:remove(emptyEntities[i], TweenPlayback)
                 end
+                emptyEntities[i] = nil
             end
         end
     })
