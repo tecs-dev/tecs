@@ -93,7 +93,7 @@ function physicsDebug.new(options?: physicsDebug.Options): tecs.Plugin
         end
 
         local physicsWorld = physicsState.world
-        local enabled = false
+        local enabled = physicsState.debug or false
 
         -- Mesh buffer state
         local capacity = INITIAL_CAPACITY

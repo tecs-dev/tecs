@@ -494,6 +494,10 @@ function physics.new(config: physics.Config): tecs.Plugin
     local contactFilterFn = config.contactFilter or defaultContactFilter
     local debugDraw = config.debug or false
     local smoothing = config.smoothing == nil and "interpolate" or config.smoothing
+    if smoothing ~= "interpolate" and smoothing ~= "extrapolate" and smoothing ~= "disabled" then
+        error("physics.new: invalid smoothing mode '" .. tostring(smoothing)
+            .. "' (expected 'interpolate', 'extrapolate', or 'disabled')")
+    end
 
     return function(world: World)
         local state: physics.PhysicsState = {
@@ -664,8 +668,8 @@ function physics.new(config: physics.Config): tecs.Plugin
 
         -----------------------------------------------------------------------
         -- Helper: Configure a shape (already attached to body) with user data.
-        -- In LÖVE 12, shapes are created attached to bodies and include all
-        -- the methods that were previously on Fixture objects.
+        -- In LÖVE 12, shapes are created attached to bodies and carry the
+        -- fixture methods (friction, restitution, filtering).
         -----------------------------------------------------------------------
         local function configureShape(
             shape: love.physics.Shape,
@@ -894,11 +898,8 @@ function physics.new(config: physics.Config): tecs.Plugin
         -----------------------------------------------------------------------
         world:addSystem({
             -- Physics writes back to Transform here. Runs in PostUpdate
-            -- (before PreRender) so renderer shadow-upload systems see
-            -- the freshly-marked-dirty Transform when they flush. The
-            -- legacy slot-keyed renderers re-copied Transform every
-            -- frame regardless of dirty state and didn't care about
-            -- ordering, but the shadow pipeline is dirty-gated.
+            -- (before PreRender) so the dirty-gated renderer shadow-upload
+            -- systems see the freshly-marked-dirty Transform when they flush.
             name = "physics.applyTransform",
             phase = tecs.phases.PostUpdate,
             run = function(_dt: number)

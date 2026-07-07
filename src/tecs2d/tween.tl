@@ -506,7 +506,9 @@ local function fieldsFrom(field: string | {string}): {string}
 end
 
 local function componentByName(name: string): Component
-    return assert(components.registeredComponents[name], "Unknown tween component " .. name)
+    local component = components.registeredComponents[name]
+    if not component then error("Unknown tween component " .. name) end
+    return component
 end
 
 local function resolveTarget(t: Target): Target
@@ -959,8 +961,12 @@ end
 local function playbackFor(world: World, entity: integer): TweenPlayback
     local pb = world:getMut(entity, TweenPlayback)
     if pb then return pb end
-    world:set(entity, TweenPlayback.new({}))
-    return world:getMut(entity, TweenPlayback)
+    -- Inside a deferred scope (query iteration, observers) the set is queued,
+    -- so a re-fetch would return nil; return the instance handed to set. It is
+    -- a Lua-table component, so mutations before commit land in the same table.
+    local created <const> = TweenPlayback.new({})
+    world:set(entity, created)
+    return created
 end
 
 local function cursorTimeline(world: World, c: Cursor): Timeline
@@ -994,7 +1000,7 @@ end
 function tween.play(world: World, entity: integer, timelineOrName: Timeline | string, speed?: number, delay?: number)
     if timelineOrName is string then
         local id = registry(world).named[timelineOrName]
-        assert(id, "Unknown tween preset " .. timelineOrName)
+        if not id then error("Unknown tween preset " .. timelineOrName) end
         addCursor(world, entity, registry(world).byId[id], speed, delay)
         return
     end
