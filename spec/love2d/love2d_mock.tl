@@ -517,7 +517,7 @@ love.graphics = {
         return {
             _count = count,
             _writes = {} as {{string:any}},
-            setArrayData = function(self: any, data: any, destStart: integer, srcStart: integer, n: integer)
+            setArrayData = function(self: any, data: any, srcStart: integer, destStart: integer, n: integer)
                 local writes = self._writes as {{string:any}}
                 writes[#writes + 1] = {
                     data = data, dest = destStart, src = srcStart, count = n,

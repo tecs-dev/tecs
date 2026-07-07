@@ -837,8 +837,10 @@ global type love = record
 			getElementSize: function(self: Buffer): number
 			--- Get the number of elements
 			getElementCount: function(self: Buffer): number
-			--- Set buffer data from array (1-indexed)
-			setArrayData: function(self: Buffer, data: love.data.ByteData, destIndex: integer, srcIndex: integer, count: integer)
+			--- Set buffer data from array (1-indexed). Argument order is
+			--- (data, srcIndex, destIndex, count), matching LÖVE's
+			--- wrap_Buffer.cpp (source start before destination start).
+			setArrayData: function(self: Buffer, data: love.data.ByteData, srcIndex: integer, destIndex: integer, count: integer)
 			--- Set buffer data from array (simple form)
 			setArrayData: function(self: Buffer, data: love.data.ByteData)
 		end

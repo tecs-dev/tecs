@@ -271,7 +271,7 @@ function GPUBuffer:upload(): boolean
     end
 
     -- Upload only the dirty range
-    -- setArrayData(data, destIndex, srcIndex, count) - indices are 1-based
+    -- setArrayData(data, srcIndex, destIndex, count) - indices are 1-based
     local startIndex = self.dirtyMin
     local endIndex = self.dirtyMax
     local count = endIndex - startIndex + 1
