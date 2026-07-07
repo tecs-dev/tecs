@@ -72,17 +72,28 @@ void computemain() {
     bool ignoresZoom = isIgnoreZoomLayer(layer);
     bool usesVirtualCoords = isVirtualCoordsLayer(layer);
 
-    // Compute bounding box for line (include line width for thickness).
-    float halfWidth = lineWidth * 0.5;
-    vec4 bounds = vec4(
-        min(x1, x2) - halfWidth, min(y1, y2) - halfWidth,
-        max(x1, x2) + halfWidth, max(y1, y2) + halfWidth
-    );
-
-    // Line length for sub-pixel culling.
+    // Line length for sub-pixel culling and rotated bounds.
     float dx = x2 - x1;
     float dy = y2 - y1;
     float lineLen = sqrt(dx * dx + dy * dy);
+
+    // Compute bounding box for line (include line width for thickness).
+    // The render shader rotates the endpoints around the segment
+    // midpoint, so a rotated line needs a bounding circle around the
+    // midpoint; the tight endpoint AABB only holds when unrotated.
+    float halfWidth = lineWidth * 0.5;
+    vec4 bounds;
+    if (rotation != 0.0) {
+        float midX = (x1 + x2) * 0.5;
+        float midY = (y1 + y2) * 0.5;
+        float reach = lineLen * 0.5 + halfWidth;
+        bounds = vec4(midX - reach, midY - reach, midX + reach, midY + reach);
+    } else {
+        bounds = vec4(
+            min(x1, x2) - halfWidth, min(y1, y2) - halfWidth,
+            max(x1, x2) + halfWidth, max(y1, y2) + halfWidth
+        );
+    }
 
     vec2 pOff = isScreenSpace ? vec2(0.0) : getParallaxOffset(layer);
     bool sizeOK = (lineLen > 0.0 || lineWidth > 0.0);

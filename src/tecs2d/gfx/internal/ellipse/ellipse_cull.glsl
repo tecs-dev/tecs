@@ -86,9 +86,15 @@ void computemain() {
     bool ignoresZoom = isIgnoreZoomLayer(layer);
     bool usesVirtualCoords = isVirtualCoordsLayer(layer);
 
-    // Conservative bounding circle = max(rx, ry).
+    // Conservative bounding circle = max(rx, ry), expanded by the pivot
+    // offset: the render shader draws the body displaced from the
+    // transform by up to pivotOffset * radii (then rotated around the
+    // transform), so bounds centered on the transform must include that
+    // orbit or pivoted ellipses get culled while visibly on-screen.
     float maxRadius = max(rx, ry);
-    vec4 bounds = vec4(x - maxRadius, y - maxRadius, x + maxRadius, y + maxRadius);
+    vec2 pivotOffset = (pivot - 0.5) * 2.0;
+    float cullRadius = maxRadius + length(pivotOffset * vec2(rx, ry));
+    vec4 bounds = vec4(x - cullRadius, y - cullRadius, x + cullRadius, y + cullRadius);
 
     vec2 pOff = isScreenSpace ? vec2(0.0) : getParallaxOffset(layer);
     bool sizeOK = (rx > 0.0) && (ry > 0.0);

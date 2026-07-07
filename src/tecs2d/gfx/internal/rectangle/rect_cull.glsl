@@ -183,12 +183,24 @@ void computemain() {
 
     // Compute rectangle center accounting for pivot. Transform position
     // sits at the pivot point; center is offset from it.
-    float centerX = x + scaledW * (0.5 - pivotX);
-    float centerY = y + scaledH * (0.5 - pivotY);
+    float centerOffX = scaledW * (0.5 - pivotX);
+    float centerOffY = scaledH * (0.5 - pivotY);
+    float centerX = x + centerOffX;
+    float centerY = y + centerOffY;
 
     // Conservative bounding box for rotated rectangle: half-diagonal
     // gives guaranteed coverage.
     float halfDiag = sqrt(scaledW * scaledW + scaledH * scaledH) * 0.5;
+
+    // The render shader rotates around the pivot (the transform
+    // position), so under rotation the body's center orbits it at
+    // |centerOff|. Bound around the transform with the orbit radius
+    // added; keep the tighter center-based bounds when unrotated.
+    if (rotation != 0.0) {
+        halfDiag += sqrt(centerOffX * centerOffX + centerOffY * centerOffY);
+        centerX = x;
+        centerY = y;
+    }
 
     // Expand culling bounds for occluders (raymarched shadows extend
     // beyond the entity).
