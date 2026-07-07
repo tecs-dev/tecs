@@ -51,18 +51,25 @@ local record collision
     --- @param tilemapData The parsed tilemap data
     --- @param physicsWorld The Box2D physics world
     --- @param config Collision configuration
+    --- @param originX World X of the tilemap entity's Transform (default 0)
+    --- @param originY World Y of the tilemap entity's Transform (default 0)
     --- @return Array of created physics bodies
     createColliders: function(
-        tilemapData: TilemapData, physicsWorld: PhysicsWorld, config: CollisionConfig
+        tilemapData: TilemapData, physicsWorld: PhysicsWorld, config: CollisionConfig,
+        originX?: number, originY?: number
     ): {PhysicsBody}
 
-    --- Create collision body for a single chunk.
+    --- Create collision body for a single chunk. The body is created at
+    --- the tilemap origin so map-local shape geometry lands where the
+    --- map renders.
     --- @param tilemapData The parsed tilemap data
     --- @param physicsWorld The Box2D physics world
     --- @param config Collision configuration
     --- @param layerIndex Layer index (1-based)
     --- @param chunkX Chunk X coordinate (0-based)
     --- @param chunkY Chunk Y coordinate (0-based)
+    --- @param originX World X of the tilemap entity's Transform (default 0)
+    --- @param originY World Y of the tilemap entity's Transform (default 0)
     --- @return Physics body for this chunk (nil if no collision tiles)
     createChunkCollider: function(
         tilemapData: TilemapData,
@@ -70,7 +77,9 @@ local record collision
         config: CollisionConfig,
         layerIndex: integer,
         chunkX: integer,
-        chunkY: integer
+        chunkY: integer,
+        originX?: number,
+        originY?: number
     ): PhysicsBody
 
     --- Destroy a single collision body.
@@ -453,7 +462,9 @@ end
 function collision.createColliders(
     tilemapData: TilemapData,
     physicsWorld: PhysicsWorld,
-    config: CollisionConfig
+    config: CollisionConfig,
+    originX?: number,
+    originY?: number
 ): {PhysicsBody}
     if not config.enabled then
         return {}
@@ -468,8 +479,9 @@ function collision.createColliders(
         return bodies
     end
 
-    -- Create main static body for collision geometry
-    local body = lp.newBody(physicsWorld, 0, 0, "static")
+    -- Create main static body at the tilemap origin; edge geometry is
+    -- map-local, so the body position places it where the map renders.
+    local body = lp.newBody(physicsWorld, originX or 0, originY or 0, "static")
     table.insert(bodies, body)
 
     if config.mergeShapes ~= false and #edges > 0 then
@@ -529,7 +541,9 @@ function collision.createChunkCollider(
     config: CollisionConfig,
     layerIndex: integer,
     chunkX: integer,
-    chunkY: integer
+    chunkY: integer,
+    originX?: number,
+    originY?: number
 ): PhysicsBody
     if not config.enabled then
         return nil
@@ -542,8 +556,9 @@ function collision.createChunkCollider(
         return nil
     end
 
-    -- Create static body for this chunk's collision geometry
-    local body = lp.newBody(physicsWorld, 0, 0, "static")
+    -- Create static body at the tilemap origin; edge geometry is
+    -- map-local, so the body position places it where the map renders.
+    local body = lp.newBody(physicsWorld, originX or 0, originY or 0, "static")
 
     if config.mergeShapes ~= false and #edges > 0 then
         -- Remove internal edges (shared between adjacent tiles within chunk)

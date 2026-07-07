@@ -405,7 +405,9 @@ function tiled.plugin(world: tecs.World)
                                         collisionConfig,
                                         li,
                                         chunkX,
-                                        chunkY
+                                        chunkY,
+                                        data._collisionOriginX,
+                                        data._collisionOriginY
                                     )
 
                                     if newBody then
@@ -569,9 +571,14 @@ function tiled.plugin(world: tecs.World)
                         if physicsState and physicsState["world"] then
                             local physicsWorld = physicsState["world"] as love.physics.World
 
-                            -- Store collision config and physics world on tilemap data for rebuild
+                            -- Store collision config, physics world, and the
+                            -- tilemap's Transform origin on tilemap data so
+                            -- rebuilds place bodies where the map renders.
+                            local tilemapTransform = transforms[i]
                             tilemap.data._collisionConfig = tilemap.collision
                             tilemap.data._physicsWorld = physicsWorld
+                            tilemap.data._collisionOriginX = tilemapTransform.x
+                            tilemap.data._collisionOriginY = tilemapTransform.y
 
                             -- Create per-chunk collision bodies for each tile layer
                             tilemap.collisionBodies = {}
@@ -595,7 +602,9 @@ function tiled.plugin(world: tecs.World)
                                                 tilemap.collision,
                                                 li,
                                                 cx,
-                                                cy
+                                                cy,
+                                                tilemapTransform.x,
+                                                tilemapTransform.y
                                             )
                                             if body then
                                                 layer._chunkCollisionBodies[cy][cx] = body

@@ -174,6 +174,11 @@ local record types
         _world: any  -- ECS world reference for TileChunk dirty marking
         _physicsWorld: any  -- Box2D physics world for collision rebuild
         _collisionConfig: any  -- Collision config for rebuild
+        -- Tilemap entity Transform position at load time; collision
+        -- bodies are created at this origin so physics geometry lands
+        -- where the map renders.
+        _collisionOriginX: number
+        _collisionOriginY: number
 
         -- Chunk configuration
         chunkSize: integer       -- Tiles per chunk side (default 32)
