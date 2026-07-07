@@ -1,3 +1,5 @@
+local json <const> = require("tecs.utils.json")
+
 --- MCP tool definitions shared between server and client bridge.
 local record tools
     record Schema
@@ -21,9 +23,10 @@ local record tools
     toJSON: function(): string
 end
 
+-- json.EMPTY_OBJECT keeps empty schema tables serializing as {} rather than [].
 local EMPTY_SCHEMA: tools.Schema = {
     type = "object",
-    properties = {},
+    properties = json.EMPTY_OBJECT as {string: tools.Schema},
     additionalProperties = false
 }
 
@@ -98,7 +101,7 @@ tools.list = {
                         "passed through to love.event.push() with its original type so events " ..
                         "like resize/mousepressed/wheelmoved receive numbers, focus receives booleans, etc.",
                     -- No `type` on items means "any JSON type" per JSON Schema.
-                    items = {}
+                    items = json.EMPTY_OBJECT as tools.Schema
                 }
             },
             required = {"event"},
@@ -447,62 +450,8 @@ tools.list = {
     }
 }
 
--- Simple JSON serializer for tool definitions (no external deps)
-local function escapeString(s: string): string
-    local result = s:gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n')
-    return result
-end
-
-local function serializeSchema(schema: tools.Schema): string
-    local parts: {string} = {}
-    if schema.type then
-        table.insert(parts, '"type":"' .. schema.type .. '"')
-    end
-
-    if schema.properties then
-        local propParts: {string} = {}
-        for k, v in pairs(schema.properties) do
-            local propJson = serializeSchema(v)
-            table.insert(propParts, '"' .. k .. '":' .. propJson)
-        end
-        table.insert(parts, '"properties":{' .. table.concat(propParts, ",") .. '}')
-    end
-
-    if schema.items then
-        table.insert(parts, '"items":' .. serializeSchema(schema.items))
-    end
-
-    if schema.required then
-        local reqParts: {string} = {}
-        local required <const> = schema.required
-        for i = 1, #required do
-            table.insert(reqParts, '"' .. required[i] .. '"')
-        end
-        table.insert(parts, '"required":[' .. table.concat(reqParts, ",") .. ']')
-    end
-
-    if schema.additionalProperties ~= nil then
-        table.insert(parts, '"additionalProperties":' .. tostring(schema.additionalProperties))
-    end
-
-    if schema.description then
-        table.insert(parts, '"description":"' .. escapeString(schema.description) .. '"')
-    end
-
-    return '{' .. table.concat(parts, ",") .. '}'
-end
-
 function tools.toJSON(): string
-    local toolParts: {string} = {}
-    local list <const> = tools.list
-    for i = 1, #list do
-        local tool = list[i]
-        local json = '{"name":"' .. tool.name .. '",' ..
-                     '"description":"' .. escapeString(tool.description) .. '",' ..
-                     '"inputSchema":' .. serializeSchema(tool.inputSchema) .. '}'
-        table.insert(toolParts, json)
-    end
-    return '[' .. table.concat(toolParts, ",") .. ']'
+    return json.serialize(tools.list)
 end
 
 return tools

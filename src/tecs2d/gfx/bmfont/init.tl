@@ -64,10 +64,11 @@ local record bmfont
         page: string
         --- Character metrics keyed by codepoint
         chars: {integer: BMFontChar}
-        --- Kerning pairs keyed by "first:second" codepoint strings.
-        --- String keys are used (rather than packed integers) to support
-        --- Unicode codepoints beyond the BMP without collision.
-        kernings: {string: number}
+        --- Kerning pairs keyed by packed codepoints:
+        --- first * 0x200000 + second. Codepoints are < 0x110000, so the
+        --- packed key is collision-free for all of Unicode, stays exact
+        --- in a double, and avoids building a string per lookup.
+        kernings: {integer: number}
         --- The loaded atlas texture
         atlas: love.graphics.Image
         --- Distance field info (for MSDF/SDF fonts)
@@ -123,7 +124,7 @@ function BMFont:getChar(codepoint: integer): bmfont.BMFontChar
 end
 
 function BMFont:getKerning(left: integer, right: integer): number
-    return self.kernings[left .. ":" .. right] or 0
+    return self.kernings[left * 0x200000 + right] or 0
 end
 
 function BMFont:isSDF(): boolean
@@ -333,7 +334,7 @@ local function parseTextContent(content: string): bmfont.BMFont
             local first = (tonumber(values["first"]) or 0) as integer
             local second = (tonumber(values["second"]) or 0) as integer
             local amount = tonumber(values["amount"]) or 0
-            font.kernings[first .. ":" .. second] = amount
+            font.kernings[first * 0x200000 + second] = amount
         end
     end
 
@@ -405,7 +406,7 @@ local function parseJsonContent(content: string): bmfont.BMFont
             local first = (k.first or 0) as integer
             local second = (k.second or 0) as integer
             local amount = k.amount or 0
-            font.kernings[first .. ":" .. second] = amount
+            font.kernings[first * 0x200000 + second] = amount
         end
     end
 
@@ -424,22 +425,26 @@ function bmfont.parse(content: string, fontPath: string): bmfont.BMFont
     end
 end
 
+--- Shared tail of loadText/loadJson: resolve the atlas page next to the
+--- font file, load it (linear for SDF fonts, which .fnt fonts never are),
+--- and attach it to the font.
+local function loadAtlas(font: bmfont.BMFont, fontPath: string): bmfont.BMFont
+    if font.page == nil or font.page == "" then
+        error("BMFont: atlas page filename missing in " .. fontPath)
+    end
+    local dir = getDirectory(fontPath)
+    local atlasPath = dir .. font.page
+    local atlasImage = lg.newImage(atlasPath, {linear = font:isSDF()})
+    font:setAtlas(atlasImage)
+    return font
+end
+
 function bmfont.loadText(fntPath: string): bmfont.BMFont
     local content = love.filesystem.read(fntPath)
     if not content then
         error("Failed to read BMFont file: " .. fntPath)
     end
-
-    local font = parseTextContent(content)
-    if font.page == nil or font.page == "" then
-        error("BMFont: atlas page filename missing in " .. fntPath)
-    end
-    local dir = getDirectory(fntPath)
-    local atlasPath = dir .. font.page
-    local atlasImage = lg.newImage(atlasPath)
-    font:setAtlas(atlasImage)
-
-    return font
+    return loadAtlas(parseTextContent(content), fntPath)
 end
 
 function bmfont.loadJson(jsonPath: string): bmfont.BMFont
@@ -447,17 +452,7 @@ function bmfont.loadJson(jsonPath: string): bmfont.BMFont
     if not content then
         error("Failed to read BMFont JSON file: " .. jsonPath)
     end
-
-    local font = parseJsonContent(content)
-    if font.page == nil or font.page == "" then
-        error("BMFont: atlas page filename missing in " .. jsonPath)
-    end
-    local dir = getDirectory(jsonPath)
-    local atlasPath = dir .. font.page
-    local atlasImage = lg.newImage(atlasPath, {linear = font:isSDF()})
-    font:setAtlas(atlasImage)
-
-    return font
+    return loadAtlas(parseJsonContent(content), jsonPath)
 end
 
 function bmfont.load(fontPath: string): bmfont.BMFont

@@ -6,6 +6,7 @@
 
 local ffi <const> = require("ffi")
 local ChunkedArray <const> = require("tecs.internal.ffi.StableChunkedArray")
+local free_range <const> = require("tecs2d.gfx.internal.text.free_range")
 
 -- Define the block metadata struct
 ffi.cdef[[
@@ -65,26 +66,9 @@ local ALLOC_MT <const>: metatable<GlyphBlockAllocator> = { __index = GlyphBlockA
 local CAPACITY_MULTIPLIER <const> = 1.5
 local MIN_BLOCK_CAPACITY <const> = 16
 
--- Find a free range that fits the requested capacity
-local function findFreeRange(self: glyph_block.GlyphBlockAllocator, needed: integer): integer, integer
-    for i = #self.freeRanges, 1, -1 do
-        local range = self.freeRanges[i]
-        if range[2] >= needed then
-            local start = range[1]
-            local capacity = range[2]
-            -- Remove from free list
-            self.freeRanges[i] = self.freeRanges[#self.freeRanges]
-            self.freeRanges[#self.freeRanges] = nil
-            return start, capacity
-        end
-    end
-    return -1, 0
-end
-
--- Add range to free list (coalesce adjacent if possible)
+-- Add range to free list, merging with adjacent ranges
 local function addFreeRange(self: glyph_block.GlyphBlockAllocator, start: integer, capacity: integer)
-    -- Simple approach: just add to list (could optimize with coalescing later)
-    self.freeRanges[#self.freeRanges + 1] = {start, capacity}
+    free_range.insert(self.freeRanges, start, capacity)
 end
 
 function GlyphBlockAllocator:alloc(glyphCount: integer): integer, glyph_block.GlyphBlock
@@ -95,7 +79,7 @@ function GlyphBlockAllocator:alloc(glyphCount: integer): integer, glyph_block.Gl
     )
 
     -- Try to find existing free range
-    local gpuStart, actualCapacity = findFreeRange(self, capacity)
+    local gpuStart, actualCapacity = free_range.find(self.freeRanges, capacity)
 
     if gpuStart < 0 then
         -- Allocate new GPU slots at end
@@ -149,7 +133,7 @@ function GlyphBlockAllocator:resize(blockId: integer, newCount: integer): boolea
     )
 
     -- Try to find existing free range
-    local gpuStart, actualCapacity = findFreeRange(self, newCapacity)
+    local gpuStart, actualCapacity = free_range.find(self.freeRanges, newCapacity)
 
     if gpuStart < 0 then
         -- Allocate at end

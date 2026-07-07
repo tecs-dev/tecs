@@ -6,6 +6,7 @@
 local C <const> = require("ffi")
 local bit <const> = require("bit")
 local bmfont <const> = require("tecs2d.gfx.bmfont")
+local free_range <const> = require("tecs2d.gfx.internal.text.free_range")
 
 -- Define the slab entry struct (32 bytes per glyph, matches GPUGlyphData exactly)
 C.cdef[[
@@ -234,25 +235,6 @@ local function computeLayout(
     return glyphCount, maxWidth, height
 end
 
--- Find a free range that fits the requested glyph count
--- Returns offset and capacity, or -1, 0 if none found
-local function findFreeRange(allocator: glyph_slab.SlabAllocator, needed: integer): integer, integer
-    local freeRanges = allocator.freeRanges
-    -- Search from end (most recently freed, likely still in cache)
-    for i = #freeRanges, 1, -1 do
-        local range = freeRanges[i]
-        if range[2] >= needed then
-            local offset = range[1]
-            local capacity = range[2]
-            -- Remove from free list
-            freeRanges[i] = freeRanges[#freeRanges]
-            freeRanges[#freeRanges] = nil
-            return offset, capacity
-        end
-    end
-    return -1, 0
-end
-
 -- Grow the slab buffer
 local function growBuffer(allocator: glyph_slab.SlabAllocator, needed: integer)
     local newCapacity = allocator.capacity
@@ -292,7 +274,7 @@ function SlabAllocator:acquire(
     local maxGlyphs = #text
 
     -- Try to find a free range first
-    local startOffset, allocatedCapacity = findFreeRange(self, maxGlyphs)
+    local startOffset, allocatedCapacity = free_range.find(self.freeRanges, maxGlyphs)
 
     if startOffset < 0 then
         -- No suitable free range, allocate from end
@@ -341,43 +323,7 @@ function SlabAllocator:release(entry: glyph_slab.SlabEntry)
     entry.refCount = entry.refCount - 1
     if entry.refCount <= 0 then
         self.registry[entry.key] = nil
-
-        -- Add to free list with coalescing
-        if entry.capacity > 0 then
-            local newOffset = entry.offset
-            local newCapacity = entry.capacity
-            local freeRanges = self.freeRanges
-
-            -- Try to coalesce with existing ranges
-            local i = 1
-            while i <= #freeRanges do
-                local range = freeRanges[i]
-                local rangeEnd = range[1] + range[2]
-                local newEnd = newOffset + newCapacity
-
-                if rangeEnd == newOffset then
-                    -- Range is immediately before us: merge
-                    newOffset = range[1]
-                    newCapacity = newCapacity + range[2]
-                    -- Remove merged range
-                    freeRanges[i] = freeRanges[#freeRanges]
-                    freeRanges[#freeRanges] = nil
-                    -- Don't increment i, check same slot again
-                elseif newEnd == range[1] then
-                    -- Range is immediately after us: merge
-                    newCapacity = newCapacity + range[2]
-                    -- Remove merged range
-                    freeRanges[i] = freeRanges[#freeRanges]
-                    freeRanges[#freeRanges] = nil
-                    -- Don't increment i, check same slot again
-                else
-                    i = i + 1
-                end
-            end
-
-            -- Add the (possibly coalesced) range
-            freeRanges[#freeRanges + 1] = {newOffset, newCapacity}
-        end
+        free_range.insert(self.freeRanges, entry.offset, entry.capacity)
     end
 end
 

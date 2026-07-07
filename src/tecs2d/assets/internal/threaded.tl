@@ -157,18 +157,24 @@ function HandleImpl:pin()
     table.insert(self._assetManager._pinnedHandles, self as Handle<any>)
 end
 
-function HandleImpl:map<U>(transform: function(T): U): Handle<U>
-    -- Create a new handle that waits for this one to complete, then transforms the result
-    local mappedHandle: HandleImpl<U> = setmetatable({
-        id = self._assetManager:_getNextId(),
+--- Build a derived handle (map/flatMap/handle/handleAll) that completes when
+--- its source handles settle rather than through the worker channel.
+local function newDerivedHandle<U>(assetManager: AssetManager, action: string, path: string): HandleImpl<U>
+    return setmetatable({
+        id = assetManager:_getNextId(),
         isComplete = false,
         err = nil,
         _value = nil,
-        _action = "map",
-        _path = self._path,
+        _action = action,
+        _path = path,
         _args = {},
-        _assetManager = self._assetManager
+        _assetManager = assetManager
     }, HANDLE_MT as metatable<HandleImpl<U>>)
+end
+
+function HandleImpl:map<U>(transform: function(T): U): Handle<U>
+    -- Create a new handle that waits for this one to complete, then transforms the result
+    local mappedHandle: HandleImpl<U> = newDerivedHandle(self._assetManager, "map", self._path)
 
     -- When this handle completes, transform and complete the mapped handle
     self:observe(function(originalHandle)
@@ -191,16 +197,7 @@ end
 function HandleImpl:flatMap<U>(transform: function(T): Handle<U>): Handle<U>
     -- Create a new handle that waits for this one to complete,
     -- then waits for the inner handle returned by the transform
-    local flatMappedHandle: HandleImpl<U> = setmetatable({
-        id = self._assetManager:_getNextId(),
-        isComplete = false,
-        err = nil,
-        _value = nil,
-        _action = "flatMap",
-        _path = self._path,
-        _args = {},
-        _assetManager = self._assetManager
-    }, HANDLE_MT as metatable<HandleImpl<U>>)
+    local flatMappedHandle: HandleImpl<U> = newDerivedHandle(self._assetManager, "flatMap", self._path)
 
     -- When this handle completes, call transform to get the inner handle
     self:observe(function(originalHandle)
@@ -229,16 +226,7 @@ end
 
 function HandleImpl:handle<U>(fn: function(T, any): U): Handle<U>
     -- Create a new handle that always calls fn with (value, err)
-    local handledHandle: HandleImpl<U> = setmetatable({
-        id = self._assetManager:_getNextId(),
-        isComplete = false,
-        err = nil,
-        _value = nil,
-        _action = "handle",
-        _path = self._path,
-        _args = {},
-        _assetManager = self._assetManager
-    }, HANDLE_MT as metatable<HandleImpl<U>>)
+    local handledHandle: HandleImpl<U> = newDerivedHandle(self._assetManager, "handle", self._path)
 
     -- When this handle completes, call fn with both value and error
     self:observe(function(originalHandle)
@@ -489,27 +477,27 @@ function AssetManager:loadJson(path: string): Handle<any>
 end
 
 
+--- Runs a main-thread LÖVE constructor under pcall and normalizes failures
+--- into a (false, message) pair for COMPLETION_FUNCTIONS.
+local function guardedCreate(fn: function(...: any): (any), ...: any): boolean, any
+    local success, value = pcall(fn, ...)
+    if not success then
+        return false, tostring(value)
+    end
+    return true, value
+end
+
 local COMPLETION_FUNCTIONS <const>: {string:function(handle: HandleImpl<any>, result: any): boolean, any} = {
     loadImage = function(_handle: HandleImpl<any>, result: any): boolean, any
-        local success, value = pcall(love.graphics.newImage, result as love.image.ImageData)
-        if not success then
-            return false, tostring(value)
-        else
-            return true, value
-        end
+        return guardedCreate(love.graphics.newImage as function(...: any): (any), result as love.image.ImageData)
     end,
     loadImageFont = function(handle: HandleImpl<any>, result: any): boolean, any
-        local success, value = pcall(
-            love.graphics.newImageFont,
+        return guardedCreate(
+            love.graphics.newImageFont as function(...: any): (any),
             result as love.image.ImageData,
             handle._args[4] as string,
             handle._args[5] as number
         )
-        if not success then
-            return false, tostring(value)
-        else
-            return true, value
-        end
     end,
     loadFont = function(handle: HandleImpl<any>, _result: any): boolean, any
         -- result is the file contents, but we need the path to create the font
@@ -517,46 +505,46 @@ local COMPLETION_FUNCTIONS <const>: {string:function(handle: HandleImpl<any>, re
         local size = handle._args[4] as number
         local hinting = handle._args[5] as love.font.HintingMode
         local dpiscale = handle._args[6] as number
-        local success, value: boolean, any
+        local newFont <const> = love.graphics.newFont as function(...: any): (any)
         if size or hinting or dpiscale then
             -- Use LÖVE 12 settings table variant
             local settings: {string: any} = {}
             if size then settings.size = size end
             if hinting then settings.hinting = hinting end
             if dpiscale then settings.dpiscale = dpiscale end
-            success, value = pcall(love.graphics.newFont, path, settings)
-        else
-            success, value = pcall(love.graphics.newFont, path)
+            return guardedCreate(newFont, path, settings)
         end
-        if not success then
-            return false, tostring(value)
-        else
-            return true, value
-        end
+        return guardedCreate(newFont, path)
     end,
     loadShader = function(_handle: HandleImpl<any>, result: any): boolean, any
-        local success, value = pcall(love.graphics.newShader, result as string)
-        if not success then
-            return false, tostring(value)
-        else
-            return true, value
-        end
+        return guardedCreate(love.graphics.newShader as function(...: any): (any), result as string)
     end,
     loadVideo = function(handle: HandleImpl<any>, _result: any): boolean, any
         -- Video creation must happen on the main thread using the file path
-        local path = handle._path
-        local success, value = pcall(love.graphics.newVideo, path)
-        if not success then
-            return false, tostring(value)
-        else
-            return true, value
-        end
+        return guardedCreate(love.graphics.newVideo as function(...: any): (any), handle._path)
     end,
     loadCompressedImage = function(_handle: HandleImpl<any>, result: any): boolean, any
         -- CompressedImageData is returned directly from the worker thread
         return true, result
     end
 }
+
+--- Deliver a result to a handle under xpcall: _setResult fires user
+--- observe/derived-handle callbacks, and one that throws must not wedge
+--- isLoading()/wait() forever or kill the frame.
+local function settleHandle(handle: HandleImpl<any>, value: any, err: string, context: string)
+    local cbErr: string = nil
+    local ok = xpcall(function()
+        handle:_setResult(value, err)
+    end, function(e: any): string
+        cbErr = tostring(e)
+        return cbErr
+    end)
+    if not ok then
+        LOGGER:error("Asset handle observer failed%s for '%s': %s",
+            context, tostring(handle._path), cbErr)
+    end
+end
 
 local function processHandle(self: threaded.AssetManager)
     local variant = self._pullChannel:pop() as {any}
@@ -596,10 +584,8 @@ local function processHandle(self: threaded.AssetManager)
 
     LOGGER:debug("Handle completed %d with result: %s, err: %s", id, result, err)
 
-    -- Bookkeeping happens before result dispatch, and the dispatch runs
-    -- under pcall: _setResult fires user observe/derived-handle callbacks,
-    -- and one that throws must not wedge isLoading()/wait() forever or
-    -- kill the frame.
+    -- Bookkeeping happens before result dispatch so a throwing observer
+    -- cannot leave the counts out of sync.
     self._runningCount = self._runningCount - 1
     self._completedCount = self._completedCount + 1
 
@@ -610,17 +596,7 @@ local function processHandle(self: threaded.AssetManager)
         self._cache[handle._cacheKey] = nil
     end
 
-    local cbErr: string = nil
-    local ok = xpcall(function()
-        handle:_setResult(result, err)
-    end, function(e: any): string
-        cbErr = tostring(e)
-        return cbErr
-    end)
-    if not ok then
-        LOGGER:error("Asset handle observer failed for '%s': %s",
-            tostring(handle._path), cbErr)
-    end
+    settleHandle(handle, result, err, "")
 end
 
 function AssetManager:update(): boolean
@@ -687,17 +663,7 @@ function AssetManager:shutdown()
         if handle._cacheKey then
             self._cache[handle._cacheKey] = nil
         end
-        local cbErr: string = nil
-        local ok = xpcall(function()
-            handle:_setResult(nil, "asset manager shut down before the load completed")
-        end, function(e: any): string
-            cbErr = tostring(e)
-            return cbErr
-        end)
-        if not ok then
-            LOGGER:error("Asset handle observer failed during shutdown for '%s': %s",
-                tostring(handle._path), cbErr)
-        end
+        settleHandle(handle, nil, "asset manager shut down before the load completed", " during shutdown")
     end
     self._runningCount = 0
 
@@ -754,16 +720,7 @@ function AssetManager:handleAll<T, U>(handles: {Handle<T>}, fn: function({T}): U
     local count = #handles
 
     -- Create a handle that will complete when all inputs complete
-    local handleAllHandle: HandleImpl<U> = setmetatable({
-        id = self:_getNextId(),
-        isComplete = false,
-        err = nil,
-        _value = nil,
-        _action = "handleAll",
-        _path = "handleAll",
-        _args = {},
-        _assetManager = self
-    }, HANDLE_MT as metatable<HandleImpl<U>>)
+    local handleAllHandle: HandleImpl<U> = newDerivedHandle(self, "handleAll", "handleAll")
 
     -- Edge case: no handles
     if count == 0 then

@@ -118,6 +118,55 @@ local NEXT_TEXT_ID: integer = 1
 local type TextContext = {tecs.World, integer}
 local textIdToContext: {integer: TextContext} = {}
 
+--- Shared tail of setText/setScale: swap the slab entry for the new
+--- (text, scale) combination, resize the glyph block, refresh the FFI
+--- fields and pivot, and mark the component dirty for GPU sync.
+--- The caller updates the changed meta field(s) before calling.
+local function reacquireSlabEntry(
+    self: text.Text,
+    world: tecs.World,
+    entityId: integer,
+    textStr: string,
+    sx: number,
+    sy: number
+)
+    local meta = world.resources[text.TEXT_META]
+    local slab = world.resources[text.SLAB_ALLOCATOR]
+    local blockAlloc = world.resources[text.BLOCK_ALLOCATOR]
+
+    -- Release old slab entry
+    local oldEntry = meta.slabEntries[entityId]
+    if oldEntry then
+        slab:release(oldEntry)
+    end
+
+    -- Acquire new slab entry
+    local font = meta.fonts[entityId]
+    local entry = slab:acquire(font, textStr, sx, sy)
+    meta.slabEntries[entityId] = entry
+
+    -- Resize glyph block if needed
+    local blockId = meta.glyphBlockIds[entityId]
+    if blockId and blockId > 0 then
+        blockAlloc:resize(blockId, entry.count)
+    end
+
+    -- Update FFI component
+    self.slabOffset = entry.offset
+    self.charCount = entry.count
+    self.width = entry.width
+    self.height = entry.height
+
+    -- Recompute pivot offset
+    local ox = meta.originX[entityId] or 0
+    local oy = meta.originY[entityId] or 0
+    self.pivotOffsetX = ox + 0.5 * entry.width
+    self.pivotOffsetY = oy + 0.5 * entry.height
+
+    -- Mark entity dirty so GPU sync picks up the change
+    world:markComponentDirty(entityId, Text as tecs.Component)
+end
+
 -- Methods table for FFI metatable (defined after activeWorld/activeEntityId)
 local methods = {
     getRect = function(self: text.Text): number, number, number, number
@@ -133,47 +182,11 @@ local methods = {
         local world = ctx[1]
         local entityId = ctx[2]
         local meta = world.resources[text.TEXT_META]
-        local slab = world.resources[text.SLAB_ALLOCATOR]
-        local blockAlloc = world.resources[text.BLOCK_ALLOCATOR]
-        local oldText = meta.texts[entityId]
-        if oldText == newText then return end
+        if meta.texts[entityId] == newText then return end
 
-        -- Release old slab entry
-        local oldEntry = meta.slabEntries[entityId]
-        if oldEntry then
-            slab:release(oldEntry)
-        end
-
-        -- Acquire new slab entry
-        local font = meta.fonts[entityId]
-        local sx = meta.scaleX[entityId]
-        local sy = meta.scaleY[entityId]
-        local entry = slab:acquire(font, newText, sx, sy)
-
-        -- Update metadata
         meta.texts[entityId] = newText
-        meta.slabEntries[entityId] = entry
-
-        -- Resize glyph block if needed
-        local blockId = meta.glyphBlockIds[entityId]
-        if blockId and blockId > 0 then
-            blockAlloc:resize(blockId, entry.count)
-        end
-
-        -- Update FFI component
-        self.slabOffset = entry.offset
-        self.charCount = entry.count
-        self.width = entry.width
-        self.height = entry.height
-
-        -- Recompute pivot offset
-        local ox = meta.originX[entityId] or 0
-        local oy = meta.originY[entityId] or 0
-        self.pivotOffsetX = ox + 0.5 * entry.width
-        self.pivotOffsetY = oy + 0.5 * entry.height
-
-        -- Mark entity dirty so GPU sync picks up the change
-        world:markComponentDirty(entityId, Text as tecs.Component)
+        reacquireSlabEntry(self, world, entityId, newText,
+            meta.scaleX[entityId], meta.scaleY[entityId])
     end,
 
     getText = function(self: text.Text): string
@@ -197,48 +210,11 @@ local methods = {
         local entityId = ctx[2]
         local newSy = sy or sx
         local meta = world.resources[text.TEXT_META]
-        local slab = world.resources[text.SLAB_ALLOCATOR]
-        local blockAlloc = world.resources[text.BLOCK_ALLOCATOR]
-        local oldSx = meta.scaleX[entityId]
-        local oldSy = meta.scaleY[entityId]
-        if oldSx == sx and oldSy == newSy then return end
+        if meta.scaleX[entityId] == sx and meta.scaleY[entityId] == newSy then return end
 
-        -- Release old slab entry
-        local oldEntry = meta.slabEntries[entityId]
-        if oldEntry then
-            slab:release(oldEntry)
-        end
-
-        -- Acquire new slab entry
-        local font = meta.fonts[entityId]
-        local textStr = meta.texts[entityId]
-        local entry = slab:acquire(font, textStr, sx, newSy)
-
-        -- Update metadata
         meta.scaleX[entityId] = sx
         meta.scaleY[entityId] = newSy
-        meta.slabEntries[entityId] = entry
-
-        -- Resize glyph block if needed
-        local blockId = meta.glyphBlockIds[entityId]
-        if blockId and blockId > 0 then
-            blockAlloc:resize(blockId, entry.count)
-        end
-
-        -- Update FFI component
-        self.slabOffset = entry.offset
-        self.charCount = entry.count
-        self.width = entry.width
-        self.height = entry.height
-
-        -- Recompute pivot offset
-        local ox = meta.originX[entityId] or 0
-        local oy = meta.originY[entityId] or 0
-        self.pivotOffsetX = ox + 0.5 * entry.width
-        self.pivotOffsetY = oy + 0.5 * entry.height
-
-        -- Mark entity dirty so GPU sync picks up the change
-        world:markComponentDirty(entityId, Text as tecs.Component)
+        reacquireSlabEntry(self, world, entityId, meta.texts[entityId], sx, newSy)
     end,
 }
 local TEXT_MT <const> = { __index = methods }

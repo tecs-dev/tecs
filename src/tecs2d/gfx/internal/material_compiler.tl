@@ -53,6 +53,21 @@ function material_compiler.getBaseSource(shapeType: string): string
     return baseSourceMap[shapeType]
 end
 
+-- Round SDF shapes (circle, ellipse, arc) share one call site: unit-space
+-- local UV from vLocalPos and an SDF distance of dist - 1.0.
+local ROUND_CALL_SITE <const> = [[
+    mi.color = vColor;
+    mi.uv = (vLocalPos + 1.0) * 0.5;
+    mi.worldPos = vWorldPos;
+    mi.localPos = (vLocalPos + 1.0) * 0.5;
+    mi.sdfDist = dist - 1.0;
+    _std.albedo = mi.color;
+    _std.normal = normal * 0.5 + 0.5;
+    _std.lit = litMarker;
+    _std.orm = DEFAULT_ORM;
+    _std.emission = vec4(0.0);
+]]
+
 -- Per-shape-type GLSL that populates MaterialInput fields and the _std
 -- MaterialOutput (used by standardMaterial()). The _std output captures the
 -- shape's standard G-buffer values so custom materials can build on them.
@@ -69,42 +84,9 @@ local CALL_SITE <const>: {string: string} = {
     _std.orm = DEFAULT_ORM;
     _std.emission = vec4(0.0);
 ]],
-    circle = [[
-    mi.color = vColor;
-    mi.uv = (vLocalPos + 1.0) * 0.5;
-    mi.worldPos = vWorldPos;
-    mi.localPos = (vLocalPos + 1.0) * 0.5;
-    mi.sdfDist = dist - 1.0;
-    _std.albedo = mi.color;
-    _std.normal = normal * 0.5 + 0.5;
-    _std.lit = litMarker;
-    _std.orm = DEFAULT_ORM;
-    _std.emission = vec4(0.0);
-]],
-    ellipse = [[
-    mi.color = vColor;
-    mi.uv = (vLocalPos + 1.0) * 0.5;
-    mi.worldPos = vWorldPos;
-    mi.localPos = (vLocalPos + 1.0) * 0.5;
-    mi.sdfDist = dist - 1.0;
-    _std.albedo = mi.color;
-    _std.normal = normal * 0.5 + 0.5;
-    _std.lit = litMarker;
-    _std.orm = DEFAULT_ORM;
-    _std.emission = vec4(0.0);
-]],
-    arc = [[
-    mi.color = vColor;
-    mi.uv = (vLocalPos + 1.0) * 0.5;
-    mi.worldPos = vWorldPos;
-    mi.localPos = (vLocalPos + 1.0) * 0.5;
-    mi.sdfDist = dist - 1.0;
-    _std.albedo = mi.color;
-    _std.normal = normal * 0.5 + 0.5;
-    _std.lit = litMarker;
-    _std.orm = DEFAULT_ORM;
-    _std.emission = vec4(0.0);
-]],
+    circle = ROUND_CALL_SITE,
+    ellipse = ROUND_CALL_SITE,
+    arc = ROUND_CALL_SITE,
     line = [[
     mi.color = vColor;
     vec2 pa_m = vWorldPos - vP1;

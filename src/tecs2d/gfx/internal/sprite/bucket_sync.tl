@@ -267,40 +267,26 @@ function bucket_sync.new(
         end
     end
 
-    -- Create unified groupBy function
-    -- Group ID = (tierIdx * 1024) + (arrayIdx * 16) + blendId
-    local blendAll = blend.ALL
-    local blendIdMap = blend.ID
-    local function unifiedGroupBy(archetype: tecs.Archetype): integer
-        -- Determine tier index by checking which bucket component is present
-        local detectedTierIdx = 0
+    -- Determine tier index by checking which bucket component is present
+    local function detectTierIdx(archetype: tecs.Archetype): integer
         for comp, idx in pairs(componentToTierIdx) do
             if archetype:get(comp) then
-                detectedTierIdx = idx
-                break
+                return idx
             end
         end
+        return 0
+    end
+
+    -- Create unified groupBy function
+    -- Group ID = (tierIdx * 1024) + (arrayIdx * 16) + blendId
+    local function unifiedGroupBy(archetype: tecs.Archetype): integer
+        local detectedTierIdx = detectTierIdx(archetype)
 
         -- Get array index from TextureArray component (1-based, or 0 if not found)
         local arrayIdx = TextureArray.getArrayIndex(archetype)
 
         -- Get blend mode (0 = default alpha, 1-14 = blend modes)
-        local blendId = 0
-        if archetype:get(blendAll[1]) then blendId = blendIdMap.ADD
-        elseif archetype:get(blendAll[2]) then blendId = blendIdMap.ADD_PREMUL
-        elseif archetype:get(blendAll[3]) then blendId = blendIdMap.MULTIPLY
-        elseif archetype:get(blendAll[4]) then blendId = blendIdMap.MULTIPLY_PREMUL
-        elseif archetype:get(blendAll[5]) then blendId = blendIdMap.SCREEN
-        elseif archetype:get(blendAll[6]) then blendId = blendIdMap.SCREEN_PREMUL
-        elseif archetype:get(blendAll[7]) then blendId = blendIdMap.SUBTRACT
-        elseif archetype:get(blendAll[8]) then blendId = blendIdMap.SUBTRACT_PREMUL
-        elseif archetype:get(blendAll[9]) then blendId = blendIdMap.LIGHTEN
-        elseif archetype:get(blendAll[10]) then blendId = blendIdMap.LIGHTEN_PREMUL
-        elseif archetype:get(blendAll[11]) then blendId = blendIdMap.DARKEN
-        elseif archetype:get(blendAll[12]) then blendId = blendIdMap.DARKEN_PREMUL
-        elseif archetype:get(blendAll[13]) then blendId = blendIdMap.REPLACE
-        elseif archetype:get(blendAll[14]) then blendId = blendIdMap.REPLACE_PREMUL
-        end
+        local blendId = blend.groupBy(archetype)
 
         return (detectedTierIdx * TIER_SHIFT) + (arrayIdx * ARRAY_SHIFT) + blendId
     end
@@ -321,13 +307,7 @@ function bucket_sync.new(
         exclude = excludeList,
         groupBy = unifiedGroupBy,
         onEntitiesAdded = function(archetype: tecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer)
-            local detectedTierIdx = 0
-            for comp, idx in pairs(componentToTierIdx) do
-                if archetype:get(comp) then
-                    detectedTierIdx = idx
-                    break
-                end
-            end
+            local detectedTierIdx = detectTierIdx(archetype)
             local arrayIdx = TextureArray.getArrayIndex(archetype)
             if arrayIdx == 0 then return end
             local tierSync = tiersByIdx[detectedTierIdx]
@@ -341,13 +321,7 @@ function bucket_sync.new(
             ensureCapacity(arraySync, arraySync.count)
         end,
         onEntitiesRemoved = function(archetype: tecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer)
-            local detectedTierIdx = 0
-            for comp, idx in pairs(componentToTierIdx) do
-                if archetype:get(comp) then
-                    detectedTierIdx = idx
-                    break
-                end
-            end
+            local detectedTierIdx = detectTierIdx(archetype)
             local arrayIdx = TextureArray.getArrayIndex(archetype)
             if arrayIdx == 0 then return end
             local tierSync = tiersByIdx[detectedTierIdx]

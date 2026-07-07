@@ -7,73 +7,17 @@ local types <const> = require("tecs2d.gfx.internal.gpu.types")
 local forward_blend <const> = require("tecs2d.gfx.internal.gpu.forward_blend")
 local material_compiler <const> = require("tecs2d.gfx.internal.material_compiler")
 local material_registry <const> = require("tecs2d.gfx.internal.material_registry")
+local bucket_sync <const> = require("tecs2d.gfx.internal.sprite.bucket_sync")
+local bucket_manager <const> = require("tecs2d.gfx.internal.sprite.bucket_manager")
 local lg <const> = love.graphics
-
--- Local type alias for blend group (from shape_sync_base)
-local record BlendGroupRecord
-    blendId: integer
-    blendMode: love.graphics.BlendMode
-    blendAlphaMode: love.graphics.BlendAlphaMode
-end
-
--- Local type alias for bucket sync array state. Fields are the
--- cull-output buffers + indirect args + active-entity count gate.
-local record ArraySyncRecord
-    outputBuffer: love.graphics.Buffer
-    indirectBuffer: love.graphics.Buffer
-    shadowOutputBuffer: love.graphics.Buffer
-    shadowIndirectBuffer: love.graphics.Buffer
-    dropShadowOutputBuffer: love.graphics.Buffer
-    dropShadowIndirectBuffer: love.graphics.Buffer
-    materialParamsOutputBuffer: love.graphics.Buffer
-    dropShadowCapacity: integer
-    count: integer
-end
-
--- Local type alias for tier sync state
-local record TierSyncRecord
-    tier: string
-    arraySyncs: {integer: ArraySyncRecord}
-end
-
--- Local type alias for sprite bucket sync
-local record SpriteBucketSyncRecord
-    tiers: {string: TierSyncRecord}
-    materialGroups: {MaterialGroup}
-    materialGroupCount: integer
-    hasDropShadows: boolean
-    blendGroups: {BlendGroupRecord}
-    blendGroupCount: integer
-    hasAlphaBlend: boolean
-end
-
--- Local type alias for bucket manager texture array
-local record BucketTextureArray
-    albedo: love.graphics.Canvas
-    normal: love.graphics.Canvas
-    emission: love.graphics.Canvas
-    orm: love.graphics.Canvas
-    generations: {integer}
-    generationsBuffer: love.graphics.Buffer
-end
-
--- Local type alias for bucket manager
-local record BucketManagerRecord
-    getArrays: function(BucketManagerRecord, tier: string): {BucketTextureArray}
-end
-
--- Local type alias for material group
-local record MaterialGroup
-    materialId: integer
-end
 
 local record sprite_plugin
     record SpritePluginConfig
         renderShader: love.graphics.Shader
         shadowMaskShader: love.graphics.Shader
         dropShadowShader: love.graphics.Shader
-        bucketSync: any
-        bucketManager: any
+        bucketSync: bucket_sync.SpriteBucketSync
+        bucketManager: bucket_manager.Manager
         --- Cull dispatch closure. Owns the per-frame cull pass: walks
         --- registered sprite archetypes, binds shadow source columns,
         --- routes outputs to arraySync's per-(tier, array) buffers.
@@ -88,8 +32,8 @@ function sprite_plugin.create(config: sprite_plugin.SpritePluginConfig): types.R
     local spriteRenderShader <const> = config.renderShader
     local spriteShadowMaskShader <const> = config.shadowMaskShader
     local spriteDropShadowShader <const> = config.dropShadowShader
-    local spriteBucketSync <const> = config.bucketSync as SpriteBucketSyncRecord
-    local bucketManager <const> = config.bucketManager as BucketManagerRecord
+    local spriteBucketSync <const> = config.bucketSync
+    local bucketManager <const> = config.bucketManager
     local cullDispatch <const> = config.cullDispatch
 
     function plugin.upload(_self: types.Renderer)
@@ -126,7 +70,7 @@ function sprite_plugin.create(config: sprite_plugin.SpritePluginConfig): types.R
         shader:send("RenderParams", renderParamsBuffer)
 
         for tier, tierSync in pairs(spriteBucketSync.tiers) do
-            local textureArrays = bucketManager:getArrays(tier)
+            local textureArrays = bucketManager:getArrays(tier as bucket_manager.Tier)
             for arrayIdx, arraySync in pairs(tierSync.arraySyncs) do
                 if arraySync.count > 0 then
                     local texArray = textureArrays[arrayIdx]
@@ -197,7 +141,7 @@ function sprite_plugin.create(config: sprite_plugin.SpritePluginConfig): types.R
                     end
                     -- Draw across all tiers/arrays
                     for tier2, tierSync2 in pairs(spriteBucketSync.tiers) do
-                        local textureArrays2 = bucketManager:getArrays(tier2)
+                        local textureArrays2 = bucketManager:getArrays(tier2 as bucket_manager.Tier)
                         for arrayIdx2, arraySync2 in pairs(tierSync2.arraySyncs) do
                             if arraySync2.count > 0 then
                                 local texArray2 = textureArrays2[arrayIdx2]
@@ -255,7 +199,7 @@ function sprite_plugin.create(config: sprite_plugin.SpritePluginConfig): types.R
                 lg.setBlendMode(blendGroup.blendMode, blendGroup.blendAlphaMode)
 
                 for _, tierSync in pairs(spriteBucketSync.tiers) do
-                    local textureArrays = bucketManager:getArrays(tierSync.tier)
+                    local textureArrays = bucketManager:getArrays(tierSync.tier as bucket_manager.Tier)
                     for arrayIdx, arraySync in pairs(tierSync.arraySyncs) do
                         if arraySync.count > 0 then
                             local texArray = textureArrays[arrayIdx]
@@ -292,7 +236,7 @@ function sprite_plugin.create(config: sprite_plugin.SpritePluginConfig): types.R
         shader:send("AlphaThreshold", 0.5)
 
         for tier, tierSync in pairs(spriteBucketSync.tiers) do
-            local textureArrays = bucketManager:getArrays(tier)
+            local textureArrays = bucketManager:getArrays(tier as bucket_manager.Tier)
             for arrayIdx, arraySync in pairs(tierSync.arraySyncs) do
                 if arraySync.count > 0 then
                     local texArray = textureArrays[arrayIdx]
@@ -319,7 +263,7 @@ function sprite_plugin.create(config: sprite_plugin.SpritePluginConfig): types.R
 
         -- Pass 1: draw drop shadows (replace blend, set by caller)
         for tier, tierSync in pairs(spriteBucketSync.tiers) do
-            local textureArrays = bucketManager:getArrays(tier)
+            local textureArrays = bucketManager:getArrays(tier as bucket_manager.Tier)
             for arrayIdx, arraySync in pairs(tierSync.arraySyncs) do
                 if arraySync.count > 0 then
                     local texArray = textureArrays[arrayIdx]
@@ -344,7 +288,7 @@ function sprite_plugin.create(config: sprite_plugin.SpritePluginConfig): types.R
         dsShader:send("MaxDropShadows", 0xFFFFFFFF)
 
         for tier, tierSync in pairs(spriteBucketSync.tiers) do
-            local textureArrays = bucketManager:getArrays(tier)
+            local textureArrays = bucketManager:getArrays(tier as bucket_manager.Tier)
             for arrayIdx, arraySync in pairs(tierSync.arraySyncs) do
                 if arraySync.count > 0 then
                     local texArray = textureArrays[arrayIdx]

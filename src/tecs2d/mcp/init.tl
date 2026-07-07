@@ -151,6 +151,48 @@ local function sendToolError(id: number, code: string, message: string, details?
     sendToolJSON(id, {ok = false, error = err}, true)
 end
 
+--- Returns the world when initialized, otherwise reports world_unavailable
+--- to the client and returns nil so the handler can early-return.
+local function requireWorld(id: number): tecs.World
+    if world then
+        return world
+    end
+    sendToolError(id, "world_unavailable", "World not initialized", nil)
+    return nil
+end
+
+--- Collect entity IDs from the 'id' or 'ids' args, validating types at the
+--- boundary. Reports a tool error and returns nil on invalid input.
+local function collectEntityIds(args: {string:any}, id: number): {integer}
+    local entityIds: {integer} = {}
+    if args.ids then
+        if type(args.ids) ~= "table" then
+            sendToolError(id, "invalid_parameter", "'ids' must be an array of numbers", nil)
+            return nil
+        end
+        local ids = args.ids as {any}
+        for i = 1, #ids do
+            if type(ids[i]) ~= "number" then
+                sendToolError(id, "invalid_parameter", "Entity ids must be numbers",
+                    {index = i, value = tostring(ids[i])})
+                return nil
+            end
+            table.insert(entityIds, ids[i] as integer)
+        end
+    elseif args.id then
+        if type(args.id) ~= "number" then
+            sendToolError(id, "invalid_parameter", "'id' must be a number",
+                {value = tostring(args.id)})
+            return nil
+        end
+        table.insert(entityIds, args.id as integer)
+    else
+        sendToolError(id, "missing_parameter", "Missing entity ID(s) - provide 'id' or 'ids'", nil)
+        return nil
+    end
+    return entityIds
+end
+
 local function enqueueWorldOp(op: function(tecs.World))
     queuedWorldOps[#queuedWorldOps + 1] = op
 end
@@ -308,10 +350,7 @@ toolHandlers["get_fps"] = function(_: {string:any}, id: number)
 end
 
 toolHandlers["get_stats"] = function(_: {string:any}, id: number)
-    if not world then
-        sendToolError(id, "world_unavailable", "World not initialized", nil)
-        return
-    end
+    if not requireWorld(id) then return end
     local stats = world:getStats()
     local memoryKB = collectgarbage("count")
     sendToolOK(id, {
@@ -325,10 +364,7 @@ toolHandlers["get_stats"] = function(_: {string:any}, id: number)
 end
 
 toolHandlers["get_components"] = function(_: {string:any}, id: number)
-    if not world then
-        sendToolError(id, "world_unavailable", "World not initialized", nil)
-        return
-    end
+    if not requireWorld(id) then return end
     -- Access internal archetypeIndex (not on public interface)
     local archetypeIndex = (world as {string:any}).archetypeIndex as {tecs.Archetype}
     local componentIds: {string: integer} = {}
@@ -367,10 +403,7 @@ toolHandlers["get_components"] = function(_: {string:any}, id: number)
 end
 
 toolHandlers["get_systems"] = function(_: {string:any}, id: number)
-    if not world then
-        sendToolError(id, "world_unavailable", "World not initialized", nil)
-        return
-    end
+    if not requireWorld(id) then return end
     local pipeline = (world as {string:any}).pipeline as {string:any}
     local pipelineSystems = pipeline.systems as {{tecs.SystemConfig}}
 
@@ -390,10 +423,7 @@ toolHandlers["get_systems"] = function(_: {string:any}, id: number)
 end
 
 toolHandlers["get_resources"] = function(_: {string:any}, id: number)
-    if not world then
-        sendToolError(id, "world_unavailable", "World not initialized", nil)
-        return
-    end
+    if not requireWorld(id) then return end
 
     local resources = world.resources as {any: any}
     local result: {{string: any}} = {}
@@ -434,24 +464,11 @@ toolHandlers["get_resources"] = function(_: {string:any}, id: number)
 end
 
 toolHandlers["despawn"] = function(args: {string:any}, id: number)
-    if not world then
-        sendToolError(id, "world_unavailable", "World not initialized", nil)
-        return
-    end
+    if not requireWorld(id) then return end
 
     -- Build list of entity IDs to despawn
-    local entityIds: {integer} = {}
-    if args.ids then
-        local ids = args.ids as {integer}
-        for i = 1, #ids do
-            table.insert(entityIds, ids[i])
-        end
-    elseif args.id then
-        table.insert(entityIds, args.id as integer)
-    else
-        sendToolError(id, "missing_parameter", "Missing entity ID(s) - provide 'id' or 'ids'", nil)
-        return
-    end
+    local entityIds = collectEntityIds(args, id)
+    if not entityIds then return end
 
     -- Despawn all entities
     local succeeded: {integer} = {}
@@ -516,11 +533,62 @@ local function getArchetypeSignature(archetype: tecs.Archetype): string
     return table.concat(names, ", ")
 end
 
-toolHandlers["get_entity"] = function(args: {string:any}, id: number)
-    if not world then
-        sendToolError(id, "world_unavailable", "World not initialized", nil)
-        return
+--- Deserialize a component-name to component-data map into instances.
+--- Reports a tool error and returns nil when a component is unknown or
+--- fails to deserialize.
+local function deserializeComponents(
+    id: number,
+    componentsData: {string: {string: any}},
+    componentMap: {string: tecs.Component}
+): {tecs.Component}
+    local instances: {tecs.Component} = {}
+    for compName, compData in pairs(componentsData) do
+        local comp = componentMap[compName]
+        if not comp then
+            sendToolError(id, "unknown_component", "Unknown component", {component = compName})
+            return nil
+        end
+
+        -- Use component's deserialize method to create instance from data
+        local ok, instance = pcall(function(): tecs.Component
+            return comp.deserialize(world, compData)
+        end)
+        if not ok then
+            sendToolError(id, "component_deserialize_failed", "Failed to create component", {
+                component = compName,
+                error = tostring(instance)
+            })
+            return nil
+        end
+        table.insert(instances, instance)
     end
+    return instances
+end
+
+--- Serialize the serializable components of one archetype row (1-based).
+--- Non-serializable components (tag components, or components without a
+--- serialize callback) are skipped so they never crash the tool.
+local function serializeRow(archetype: tecs.Archetype, compList: {tecs.Component}, row: integer): {string: any}
+    local components: {string: any} = {}
+    for i = 1, #compList do
+        local comp = compList[i]
+        if comp.componentName and comp.serialize then
+            local column = archetype:get(comp) as {any}
+            local instance = column and column[row]
+            if instance ~= nil then
+                local serialize = comp.serialize as function(any): {string: any}
+                local ok, serialized = pcall(serialize, instance)
+                if ok and serialized then
+                    components[comp.componentName] = serialized
+                end
+            end
+        end
+    end
+    return components
+end
+
+toolHandlers["get_entity"] = function(args: {string:any}, id: number)
+    if not requireWorld(id) then return end
 
     local entityId = args.id as integer
     if not entityId then
@@ -545,24 +613,8 @@ toolHandlers["get_entity"] = function(args: {string:any}, id: number)
         sendToolError(id, "entity_not_committed", "Entity not committed yet", {id = entityId})
         return
     end
-    local row = s.row
-    local components: {string: any} = {}
-
-    local compList = archetype.componentList
-    for i = 1, #compList do
-        local comp = compList[i]
-        if comp.componentName and comp.serialize then
-            local column = archetype:get(comp) as {any}
-            local instance = column and column[row + 1]
-            if instance ~= nil then
-                local serialize = comp.serialize as function(any): {string: any}
-                local ok, serialized = pcall(serialize, instance)
-                if ok and serialized then
-                    components[comp.componentName] = serialized
-                end
-            end
-        end
-    end
+    -- serializeRow takes a 1-based row; the allocator's row is 0-based.
+    local components = serializeRow(archetype, archetype.componentList, s.row + 1)
 
     local result = {
         id = entityId,
@@ -574,10 +626,7 @@ toolHandlers["get_entity"] = function(args: {string:any}, id: number)
 end
 
 toolHandlers["query"] = function(args: {string:any}, id: number)
-    if not world then
-        sendToolError(id, "world_unavailable", "World not initialized", nil)
-        return
-    end
+    if not requireWorld(id) then return end
 
     local includeNames = args.include as {string}
     if not includeNames or #includeNames == 0 then
@@ -638,28 +687,8 @@ toolHandlers["query"] = function(args: {string:any}, id: number)
                     id = entityId,
                     archetypeId = archetypeId,
                     archetypeComponents = archetypeSig,
-                    components = {}
+                    components = serializeRow(archetype, includeComponents, row)
                 }
-                local components: {string: any} = {}
-
-                for ci = 1, #includeComponents do
-                    local comp = includeComponents[ci]
-                    local column = archetype:get(comp)
-                    -- Skip non-serializable components (tag components, or
-                    -- components without a serialize callback). Without this guard
-                    -- any non-serializable entry in `include` crashes the tool
-                    -- instead of returning the serializable fields.
-                    if column and comp.componentName and comp.serialize then
-                        local instance = column[row]
-                        local serialize = comp.serialize as function(any): {string: any}
-                        local ok, serialized = pcall(serialize, instance)
-                        if ok and serialized then
-                            components[comp.componentName] = serialized
-                        end
-                    end
-                end
-
-                entityData.components = components
                 table.insert(results, entityData)
                 count = count + 1
             end
@@ -671,10 +700,7 @@ toolHandlers["query"] = function(args: {string:any}, id: number)
 end
 
 toolHandlers["get_archetypes"] = function(_: {string:any}, id: number)
-    if not world then
-        sendToolError(id, "world_unavailable", "World not initialized", nil)
-        return
-    end
+    if not requireWorld(id) then return end
 
     local archetypeIndex = (world as {string:any}).archetypeIndex as {tecs.Archetype}
     local archetypes: {{string: any}} = {}
@@ -704,10 +730,7 @@ toolHandlers["get_archetypes"] = function(_: {string:any}, id: number)
 end
 
 toolHandlers["spawn"] = function(args: {string:any}, id: number)
-    if not world then
-        sendToolError(id, "world_unavailable", "World not initialized", nil)
-        return
-    end
+    if not requireWorld(id) then return end
 
     local componentsData = args.components as {string: {string: any}}
     if not componentsData then
@@ -715,29 +738,8 @@ toolHandlers["spawn"] = function(args: {string:any}, id: number)
         return
     end
 
-    local componentMap = getComponentMap()
-    local instances: {tecs.Component} = {}
-
-    for compName, compData in pairs(componentsData) do
-        local comp = componentMap[compName]
-        if not comp then
-            sendToolError(id, "unknown_component", "Unknown component", {component = compName})
-            return
-        end
-
-        -- Use component's deserialize method to create instance from data
-        local ok, instance = pcall(function(): tecs.Component
-            return comp.deserialize(world, compData)
-        end)
-        if not ok then
-            sendToolError(id, "component_deserialize_failed", "Failed to create component", {
-                component = compName,
-                error = tostring(instance)
-            })
-            return
-        end
-        table.insert(instances, instance)
-    end
+    local instances = deserializeComponents(id, componentsData, getComponentMap())
+    if not instances then return end
 
     -- Spawn entity
     local ok, result = pcall(function(): integer
@@ -751,10 +753,7 @@ toolHandlers["spawn"] = function(args: {string:any}, id: number)
 end
 
 toolHandlers["get_bundles"] = function(_: {string:any}, id: number)
-    if not world then
-        sendToolError(id, "world_unavailable", "World not initialized", nil)
-        return
-    end
+    if not requireWorld(id) then return end
 
     local bundles = world:getBundles()
     local result: {string: {string: any}} = {}
@@ -771,10 +770,7 @@ toolHandlers["get_bundles"] = function(_: {string:any}, id: number)
 end
 
 toolHandlers["spawn_bundle"] = function(args: {string:any}, id: number)
-    if not world then
-        sendToolError(id, "world_unavailable", "World not initialized", nil)
-        return
-    end
+    if not requireWorld(id) then return end
 
     local bundleName = args.bundle as string
     if not bundleName then
@@ -783,28 +779,8 @@ toolHandlers["spawn_bundle"] = function(args: {string:any}, id: number)
     end
 
     local componentsData = (args.components as {string: {string: any}}) or {}
-    local componentMap = getComponentMap()
-    local instances: {tecs.Component} = {}
-
-    for compName, compData in pairs(componentsData) do
-        local comp = componentMap[compName]
-        if not comp then
-            sendToolError(id, "unknown_component", "Unknown component", {component = compName})
-            return
-        end
-
-        local ok, instance = pcall(function(): tecs.Component
-            return comp.deserialize(world, compData)
-        end)
-        if not ok then
-            sendToolError(id, "component_deserialize_failed", "Failed to create component", {
-                component = compName,
-                error = tostring(instance)
-            })
-            return
-        end
-        table.insert(instances, instance)
-    end
+    local instances = deserializeComponents(id, componentsData, getComponentMap())
+    if not instances then return end
 
     local ok, result = pcall(function(): integer
         return world:spawnBundle(bundleName, table.unpack(instances))
@@ -817,10 +793,7 @@ toolHandlers["spawn_bundle"] = function(args: {string:any}, id: number)
 end
 
 toolHandlers["run_lua"] = function(args: {string:any}, id: number)
-    if not world then
-        sendToolError(id, "world_unavailable", "World not initialized", nil)
-        return
-    end
+    if not requireWorld(id) then return end
 
     local code = args.code as string
     if not code then
@@ -880,40 +853,13 @@ toolHandlers["run_lua"] = function(args: {string:any}, id: number)
 end
 
 toolHandlers["patch_entities"] = function(args: {string:any}, id: number)
-    if not world then
-        sendToolError(id, "world_unavailable", "World not initialized", nil)
-        return
-    end
+    if not requireWorld(id) then return end
 
-    -- Build list of entity IDs. Validate types here: the queued op runs
+    -- Build list of entity IDs. Validation matters here: the queued op runs
     -- in the drain outside any pcall, one frame after this tool already
     -- replied, so a bad id there would crash the frame.
-    local entityIds: {integer} = {}
-    if args.ids then
-        if type(args.ids) ~= "table" then
-            sendToolError(id, "invalid_parameter", "'ids' must be an array of numbers", nil)
-            return
-        end
-        local ids = args.ids as {any}
-        for i = 1, #ids do
-            if type(ids[i]) ~= "number" then
-                sendToolError(id, "invalid_parameter", "Entity ids must be numbers",
-                    {index = i, value = tostring(ids[i])})
-                return
-            end
-            table.insert(entityIds, ids[i] as integer)
-        end
-    elseif args.id then
-        if type(args.id) ~= "number" then
-            sendToolError(id, "invalid_parameter", "'id' must be a number",
-                {value = tostring(args.id)})
-            return
-        end
-        table.insert(entityIds, args.id as integer)
-    else
-        sendToolError(id, "missing_parameter", "Missing entity ID(s) - provide 'id' or 'ids'", nil)
-        return
-    end
+    local entityIds = collectEntityIds(args, id)
+    if not entityIds then return end
 
     local setData = (args.set as {string: {string: any}}) or {}
     local removeNames = (args.remove as {string}) or {}
@@ -990,10 +936,7 @@ toolHandlers["patch_entities"] = function(args: {string:any}, id: number)
 end
 
 toolHandlers["screen_to_world"] = function(args: {string:any}, id: number)
-    if not world then
-        sendToolError(id, "world_unavailable", "World not initialized", nil)
-        return
-    end
+    if not requireWorld(id) then return end
 
     local screenX = args.x as number
     local screenY = args.y as number
@@ -1036,10 +979,7 @@ toolHandlers["screen_to_world"] = function(args: {string:any}, id: number)
 end
 
 toolHandlers["query_in_bounds"] = function(args: {string:any}, id: number)
-    if not world then
-        sendToolError(id, "world_unavailable", "World not initialized", nil)
-        return
-    end
+    if not requireWorld(id) then return end
 
     local boundsX = args.x as number
     local boundsY = args.y as number
@@ -1107,26 +1047,8 @@ toolHandlers["query_in_bounds"] = function(args: {string:any}, id: number)
                     local entityId = entityList[row]
                     local entityData: {string: any} = {
                         id = entityId,
-                        components = {}
+                        components = serializeRow(archetype, includeComponents, row)
                     }
-                    local components: {string: any} = {}
-
-                    for ci = 1, #includeComponents do
-                        local comp = includeComponents[ci]
-                        local column = archetype:get(comp)
-                        -- Skip non-serializable components so tag components
-                        -- in the include list don't crash the tool.
-                        if column and comp.componentName and comp.serialize then
-                            local instance = column[row]
-                            local serialize = comp.serialize as function(any): {string: any}
-                            local ok, serialized = pcall(serialize, instance)
-                            if ok and serialized then
-                                components[comp.componentName] = serialized
-                            end
-                        end
-                    end
-
-                    entityData.components = components
                     table.insert(results, entityData)
                     count = count + 1
                 end
@@ -1146,10 +1068,7 @@ end
 local disabledSystems: {string: boolean} = {}
 
 toolHandlers["toggle_system"] = function(args: {string:any}, id: number)
-    if not world then
-        sendToolError(id, "world_unavailable", "World not initialized", nil)
-        return
-    end
+    if not requireWorld(id) then return end
 
     local systemName = args.name as string
     local isEnabled = args.enabled as boolean
@@ -1217,10 +1136,7 @@ toolHandlers["toggle_system"] = function(args: {string:any}, id: number)
 end
 
 toolHandlers["set_time_scale"] = function(args: {string:any}, id: number)
-    if not world then
-        sendToolError(id, "world_unavailable", "World not initialized", nil)
-        return
-    end
+    if not requireWorld(id) then return end
 
     local scale = args.scale as number
     if not scale then
@@ -1288,10 +1204,7 @@ local function getRenderTimeScale(): number
 end
 
 toolHandlers["pause"] = function(_: {string:any}, id: number)
-    if not world then
-        sendToolError(id, "world_unavailable", "World not initialized", nil)
-        return
-    end
+    if not requireWorld(id) then return end
     if paused then
         sendToolOK(id, {paused = true, alreadyPaused = true}, nil)
         return
@@ -1307,10 +1220,7 @@ toolHandlers["pause"] = function(_: {string:any}, id: number)
 end
 
 toolHandlers["resume"] = function(_: {string:any}, id: number)
-    if not world then
-        sendToolError(id, "world_unavailable", "World not initialized", nil)
-        return
-    end
+    if not requireWorld(id) then return end
     if not paused then
         sendToolOK(id, {paused = false, alreadyResumed = true}, nil)
         return
@@ -1329,10 +1239,7 @@ toolHandlers["resume"] = function(_: {string:any}, id: number)
 end
 
 toolHandlers["step"] = function(args: {string:any}, id: number)
-    if not world then
-        sendToolError(id, "world_unavailable", "World not initialized", nil)
-        return
-    end
+    if not requireWorld(id) then return end
     if not paused then
         sendToolError(id, "not_paused", "Must be paused to step", nil)
         return
@@ -1489,10 +1396,7 @@ local function emitResult(id: number, result: string, saveTo: string)
 end
 
 toolHandlers["profiler_start"] = function(args: {string:any}, id: number)
-    if not world then
-        sendToolError(id, "world_unavailable", "World not initialized", nil)
-        return
-    end
+    if not requireWorld(id) then return end
     if sampleSession then
         sendToolError(id, "profiler_already_running", "Profiler is already running; call profiler_stop first", nil)
         return
@@ -1572,10 +1476,7 @@ end
 -------------------------------------------------------------------------------
 
 toolHandlers["snapshot_save"] = function(args: {string:any}, id: number)
-    if not world then
-        sendToolError(id, "world_unavailable", "No world available", nil)
-        return
-    end
+    if not requireWorld(id) then return end
 
     local format = (args.format as string) or "json"
     local saveTo = args.save_to as string
@@ -1723,10 +1624,7 @@ toolHandlers["snapshot_save"] = function(args: {string:any}, id: number)
 end
 
 toolHandlers["snapshot_load"] = function(args: {string:any}, id: number)
-    if not world then
-        sendToolError(id, "world_unavailable", "No world available", nil)
-        return
-    end
+    if not requireWorld(id) then return end
 
     local format = (args.format as string) or "json"
     local payload = args.payload as string
@@ -1848,8 +1746,6 @@ local function handleInitialize(id: number, params: {string:any})
 end
 
 local function handleToolsList(id: number)
-    -- Use mcpTools.toJSON() to avoid empty-table-as-array serialization issue
-    -- (Lua's json.serialize turns {} into [] which is invalid for JSON Schema "properties")
     local body = '{"jsonrpc":"2.0","id":' .. tostring(id) .. ',"result":{"tools":' .. mcpTools.toJSON() .. '}}'
     sendHttpResponse(200, "OK", body)
 end
