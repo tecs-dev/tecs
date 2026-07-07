@@ -639,9 +639,6 @@ end
 
 function ControlManager:_hasJoystickActivity(joystick: love.joystick.Joystick): boolean
     local js = input.getJoystick(joystick)
-    if not js then
-        return false
-    end
 
     -- Check for any button activity (we don't care about press vs release)
     if next(js.gamepadButtons) then

@@ -1,16 +1,10 @@
---- Forward blend rendering for shapes with non-alpha blend modes.
---- These shapes cannot use G-buffer/deferred rendering because blend modes
---- need to blend with the final lit image, not write to G-buffer textures.
----
---- Shape modules register their forward blend renderers during setup via
---- renderer:registerForwardBlend(). The pipeline calls renderer:renderForwardBlend()
---- once, which iterates all registered renderers.
+--- Shared render-parameter setup for the forward blend pass.
+--- populateRenderParams fills and uploads the RenderParams SSBO used by both
+--- renderGBuffer and the shape plugins' forward blend renderers, which draw
+--- non-alpha blend modes over the lit image after lighting.
 
 local types <const> = require("tecs2d.gfx.internal.gpu.types")
-local shape_sync_base <const> = require("tecs2d.gfx.internal.shape_sync_base")
 local C <const> = require("ffi")
-
-local lg <const> = love.graphics
 
 local function setOrthographic(t: love.math.Transform, camX: number, camY: number,
         zoom: number, rotation: number, w: number, h: number, spX: number, spY: number)
@@ -29,8 +23,6 @@ local function writeTransformToFFI(t: love.math.Transform, dst: {integer: number
     dst[12]=r4; dst[13]=r8; dst[14]=r12; dst[15]=r16
 end
 
-local type ShapeSyncRecord = shape_sync_base.SyncRecord
-
 local record forward_blend
     populateRenderParams: function(
         renderer: types.Renderer,
@@ -40,17 +32,6 @@ local record forward_blend
         rw: number, rh: number,
         rotation: number
     )
-
-    --- Create a forward blend renderer for a simple shape (circle, rect, line).
-    --- The returned function can be passed to renderer:registerForwardBlend().
-    makeSimpleShapeRenderer: function(
-        getSyncRef: function(types.Renderer): ShapeSyncRecord,
-        getShader: function(types.Renderer): love.graphics.Shader,
-        getOutputBuffer: function(types.Renderer): love.graphics.Buffer,
-        getIndirectBuffer: function(types.Renderer): love.graphics.Buffer,
-        outputUniform: string
-    ): function(types.Renderer, number, number, number, boolean, number, number)
-
 end
 
 --- Populate and upload RenderParams SSBO. Used by renderGBuffer and forward blend.
@@ -120,59 +101,6 @@ function forward_blend.populateRenderParams(
     writeTransformToFFI(vt:inverse(), renderPtr[0].invViewProj)
 
     renderer.renderParamsBuffer:setArrayData(renderer.renderParamsByteData)
-end
-
---- Create a forward blend renderer for a simple shape (circle, rect, line).
---- All simple shapes share the same pattern: check sync ref, populate render params,
---- set shader, iterate blend groups with drawFromShaderIndirect.
---- subPixelX/subPixelY are pre-computed by the pipeline's centralized snap.
-function forward_blend.makeSimpleShapeRenderer(
-    getSyncRef: function(types.Renderer): ShapeSyncRecord,
-    getShader: function(types.Renderer): love.graphics.Shader,
-    getOutputBuffer: function(types.Renderer): love.graphics.Buffer,
-    getIndirectBuffer: function(types.Renderer): love.graphics.Buffer,
-    outputUniform: string
-): function(types.Renderer, number, number, number, boolean, number, number)
-    return function(renderer: types.Renderer, cameraX: number, cameraY: number, cameraZoom: number, useLowRes: boolean, subPixelX: number, subPixelY: number)
-        local syncRef = getSyncRef(renderer)
-        if not syncRef or syncRef.blendGroupCount == 0 then return end
-
-        -- useLowRes is now a parameter
-        local rw: number
-        local rh: number
-        if renderer._renderPhase == "screen" then
-            local screenAlbedo = renderer.screenAlbedo or renderer.gBufferAlbedo
-            rw = screenAlbedo:getWidth()
-            rh = screenAlbedo:getHeight()
-        elseif useLowRes then
-            rw = renderer.pixelAlbedo:getWidth()
-            rh = renderer.pixelAlbedo:getHeight()
-        else
-            rw = renderer.gBufferAlbedo:getWidth()
-            rh = renderer.gBufferAlbedo:getHeight()
-        end
-        subPixelX = subPixelX or 0.0
-        subPixelY = subPixelY or 0.0
-
-        forward_blend.populateRenderParams(renderer, cameraX, cameraY, cameraZoom, subPixelX, subPixelY, rw, rh, 0.0)
-
-        local shader = getShader(renderer)
-        lg.setShader(shader)
-        shader:send("RenderParams", renderer.renderParamsBuffer)
-        shader:send(outputUniform, getOutputBuffer(renderer))
-        shader:send("MaterialPass", -1)
-
-        local indirectBuffer = getIndirectBuffer(renderer)
-        for i = 1, syncRef.blendGroupCount do
-            local group = syncRef.blendGroups[i]
-            shader:send("BlendModePass", group.blendId)
-            lg.setBlendMode(group.blendMode, group.blendAlphaMode)
-            lg.drawFromShaderIndirect("triangles", indirectBuffer, 1)
-        end
-
-        lg.setBlendMode("alpha", "alphamultiply")
-        lg.setShader()
-    end
 end
 
 return forward_blend

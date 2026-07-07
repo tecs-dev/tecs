@@ -51,7 +51,6 @@ local record gfx is tecs.Key<pipeline.Pipeline>
     type Pipeline = types.Pipeline
     type RenderPlugin = types.RenderPlugin
     type Layer = types.Layer
-    type ScaleMode = types.ScaleMode
     type RenderConfig = pipeline.RenderConfig
     type Camera = CameraClass
 

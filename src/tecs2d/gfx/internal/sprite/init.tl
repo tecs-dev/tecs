@@ -334,7 +334,7 @@ local function populateInstanceFromConfig(inst: SpriteInstance, sheetVal: sprite
 
     -- Get frame tag (0 = default)
     local frameTag = sheetVal:getFrameTagById(tagId)
-    local firstFrame = frameTag and frameTag.from or 1
+    local firstFrame = frameTag.from
 
     -- Get UV coordinates and dimensions
     inst.uvX, inst.uvY, inst.uvW, inst.uvH = sheetVal:getFrameUV(firstFrame)
@@ -1254,9 +1254,6 @@ function sprite.plugin(renderPipeline: types.Pipeline): function(world: tecs.Wor
             -- bucketProvider returns the arraySync object cast to
             -- BucketBuffers. The field names line up post-rename
             -- (materialParamsOutputBuffer, indirectBuffer, etc.).
-            -- materialParamsOutputBuffer is lazy on the slot path
-            -- (created on first cull); ensure it exists before the
-            -- shadow cull binds it.
             local bucketProvider = function(tierIdx: integer, arrayIdx: integer): shadow_dispatch.BucketBuffers
                 local tierName = tierIdxToName[tierIdx]
                 if not tierName then return nil end
@@ -1264,14 +1261,6 @@ function sprite.plugin(renderPipeline: types.Pipeline): function(world: tecs.Wor
                 if not tierSync then return nil end
                 local arrSync = tierSync.arraySyncs[arrayIdx] as {string: any}
                 if not arrSync then return nil end
-                if arrSync.materialParamsOutputBuffer == nil then
-                    local transformBuf = arrSync.transformBuffer as {string: any}
-                    local cap = (transformBuf.capacity as integer) or 1
-                    arrSync.materialParamsOutputBuffer = (love.graphics.newBuffer as function(any, integer, any): any)(
-                        gpuTypes.MATERIAL_PARAMS_FORMAT, cap,
-                        {usage = "dynamic", shaderstorage = true}
-                    )
-                end
                 return arrSync as shadow_dispatch.BucketBuffers
             end
 

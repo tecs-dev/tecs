@@ -56,17 +56,11 @@ local record layer_effects
         litLayer: love.graphics.Canvas         -- Single layer group after lighting
         compositeShader: love.graphics.Shader  -- Pre-multiplies alpha for opaque compositing
 
-        -- Screen-phase canvases (native resolution, for screen-space layers)
-        screenAccumulator: love.graphics.Canvas
-        screenEffectTemp: love.graphics.Canvas
-        screenLitLayer: love.graphics.Canvas
-
         setEffect: function(Manager, layer: integer, shader: any, uniforms?: {string: any}, options?: EffectOptions)
         clearEffect: function(Manager, layer: integer)
         hasEffects: function(Manager): boolean
         getGroups: function(Manager): {LayerGroup}
         resize: function(Manager, width: integer, height: integer)
-        resizeScreen: function(Manager, width: integer, height: integer)
     end
 
     --- Create a new layer effects manager
@@ -87,13 +81,6 @@ function layer_effects.new(maxLayers: integer, width: integer, height: integer):
         effectTemp = lg.newCanvas(width, height),
         litLayer = lg.newCanvas(width, height),
         compositeShader = lg.newShader(COMPOSITE_SHADER_CODE),
-        -- Initialize screen-phase canvases at the same dimensions so they
-        -- exist even if resizeScreen() is never called. resizeScreen() will
-        -- replace them if the screen resolution differs from the world
-        -- render resolution.
-        screenAccumulator = lg.newCanvas(width, height),
-        screenEffectTemp = lg.newCanvas(width, height),
-        screenLitLayer = lg.newCanvas(width, height),
     }, MANAGER_MT)
 
     return manager
@@ -216,12 +203,6 @@ function layer_effects.Manager:resize(width: integer, height: integer)
     self.accumulator = lg.newCanvas(width, height)
     self.effectTemp = lg.newCanvas(width, height)
     self.litLayer = lg.newCanvas(width, height)
-end
-
-function layer_effects.Manager:resizeScreen(width: integer, height: integer)
-    self.screenAccumulator = lg.newCanvas(width, height)
-    self.screenEffectTemp = lg.newCanvas(width, height)
-    self.screenLitLayer = lg.newCanvas(width, height)
 end
 
 return layer_effects

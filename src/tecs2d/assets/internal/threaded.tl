@@ -87,11 +87,9 @@ local record HandleImpl<T> is Handle<T>
     err: string
 
     _value: T
-    _hasBlockedOnce: boolean
     _action: string
     _path: string
     _args: {any}
-    _channelId: number
     _assetManager: AssetManager
     _cacheKey: string
 end
@@ -116,7 +114,6 @@ function HandleImpl._new<T>(
     path: string,
     args: {any},
     id: integer,
-    channelId: number,
     assetManager: AssetManager
 ): HandleImpl<T>
     local self: HandleImpl<T> = {
@@ -125,7 +122,6 @@ function HandleImpl._new<T>(
         _action = action,
         _path = path,
         _args = args,
-        _channelId = channelId,
         _assetManager = assetManager,
     }
     return setmetatable(self, HANDLE_MT as metatable<HandleImpl<T>>) as HandleImpl<T>
@@ -168,11 +164,9 @@ function HandleImpl:map<U>(transform: function(T): U): Handle<U>
         isComplete = false,
         err = nil,
         _value = nil,
-        _hasBlockedOnce = false,
         _action = "map",
         _path = self._path,
         _args = {},
-        _channelId = 0,
         _assetManager = self._assetManager
     }, HANDLE_MT as metatable<HandleImpl<U>>)
 
@@ -202,11 +196,9 @@ function HandleImpl:flatMap<U>(transform: function(T): Handle<U>): Handle<U>
         isComplete = false,
         err = nil,
         _value = nil,
-        _hasBlockedOnce = false,
         _action = "flatMap",
         _path = self._path,
         _args = {},
-        _channelId = 0,
         _assetManager = self._assetManager
     }, HANDLE_MT as metatable<HandleImpl<U>>)
 
@@ -242,11 +234,9 @@ function HandleImpl:handle<U>(fn: function(T, any): U): Handle<U>
         isComplete = false,
         err = nil,
         _value = nil,
-        _hasBlockedOnce = false,
         _action = "handle",
         _path = self._path,
         _args = {},
-        _channelId = 0,
         _assetManager = self._assetManager
     }, HANDLE_MT as metatable<HandleImpl<U>>)
 
@@ -421,8 +411,8 @@ local function createHandle<T>(self: AssetManager, args: {any}): Handle<T>
         self._runningCount = self._runningCount + 1
         local id = self:_getNextId()
         table.insert(args, 1, id)
-        local channelId = self._pushChannel:push(args)
-        local handleResult = HandleImpl._new(action, path, args, id, channelId, self)
+        self._pushChannel:push(args)
+        local handleResult = HandleImpl._new(action, path, args, id, self)
         handleResult._cacheKey = cacheKey
         self._runningTasks[id] = handleResult as Handle<any>
         local handle = handleResult as Handle<T>
@@ -769,11 +759,9 @@ function AssetManager:handleAll<T, U>(handles: {Handle<T>}, fn: function({T}): U
         isComplete = false,
         err = nil,
         _value = nil,
-        _hasBlockedOnce = false,
         _action = "handleAll",
         _path = "handleAll",
         _args = {},
-        _channelId = 0,
         _assetManager = self
     }, HANDLE_MT as metatable<HandleImpl<U>>)
 
@@ -835,7 +823,7 @@ end
 
 function AssetManager:loadSpriteSheet(
     path: string,
-    options?: types.SpriteSheetLoadOptions
+    _options?: types.SpriteSheetLoadOptions
 ): Handle<sprite_sheet.SpriteSheet>
     local resolvedPath = self:resolvePath(path)
 
@@ -875,12 +863,6 @@ function AssetManager:loadSpriteSheet(
             if normal then b:normalImage(normal) end
             if emission then b:emissionImage(emission) end
             if ormImg then b:ormImage(ormImg) end
-
-            -- Generate normal from luminance if requested and no _n.png exists
-            if options and options.generateNormal and not normal then
-                -- Note: generateNormal requires sync file access, so we skip it for async loading
-                -- Users should provide _n.png files or use sync loading with generateNormal
-            end
 
             return b:build()
         end

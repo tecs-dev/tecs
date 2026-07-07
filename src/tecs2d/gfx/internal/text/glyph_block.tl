@@ -55,7 +55,7 @@ local record glyph_block
     end
 
     --- Create a new block allocator
-    new: function(initialGpuCapacity?: integer): GlyphBlockAllocator
+    new: function(): GlyphBlockAllocator
 end
 
 local GlyphBlockAllocator <const> = glyph_block.GlyphBlockAllocator
@@ -202,9 +202,7 @@ function GlyphBlockAllocator:getStats(): integer, integer, integer, integer
     return allocatedCount, self.nextGpuSlot, freeRangesCount, totalFreeSlots
 end
 
-function glyph_block.new(initialGpuCapacity?: integer): glyph_block.GlyphBlockAllocator
-    local _ = initialGpuCapacity  -- Reserved for future use
-
+function glyph_block.new(): glyph_block.GlyphBlockAllocator
     local allocator: glyph_block.GlyphBlockAllocator = {
         blocks = ChunkedArray.new("GlyphBlockFFI", 256),
         nextGpuSlot = 0,

@@ -45,8 +45,6 @@ local record SpriteBucketSyncRecord
     blendGroups: {BlendGroupRecord}
     blendGroupCount: integer
     hasAlphaBlend: boolean
-    getArraySyncs: function(SpriteBucketSyncRecord, tier: string): {integer: ArraySyncRecord}
-    getActiveTiers: function(SpriteBucketSyncRecord): {string}
 end
 
 -- Local type alias for bucket manager texture array

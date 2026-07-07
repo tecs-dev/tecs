@@ -164,8 +164,6 @@ local record bucket_sync
         onSpriteReplaced: function(entityId: integer, spr: any, oldSpriteId: integer)
 
         sync: function(SpriteBucketSync, dt: number)
-        getArraySyncs: function(SpriteBucketSync, tier: string): {integer: ArraySync}
-        getActiveTiers: function(SpriteBucketSync): {string}
     end
 
     new: function(
@@ -597,24 +595,6 @@ function SpriteBucketSync:sync(_dt: number)
     end
     -- arraySync.count is maintained by the lifecycle observer; nothing
     -- to finalize per frame.
-end
-
-function SpriteBucketSync:getArraySyncs(tier: string): {integer: bucket_sync.ArraySync}
-    local tierSync = self.tiers[tier]
-    return tierSync and tierSync.arraySyncs or {}
-end
-
-function SpriteBucketSync:getActiveTiers(): {string}
-    local result: {string} = {}
-    for tier, tierSync in pairs(self.tiers) do
-        for _, arraySync in pairs(tierSync.arraySyncs) do
-            if arraySync.count > 0 then
-                result[#result + 1] = tier
-                break
-            end
-        end
-    end
-    return result
 end
 
 return bucket_sync

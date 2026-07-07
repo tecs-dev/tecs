@@ -405,8 +405,6 @@ toolHandlers["get_resources"] = function(_: {string:any}, id: number)
         -- Try to get a meaningful name for the key
         if type(key) == "table" and (key as {string:any}).name then
             keyStr = (key as {string:any}).name as string
-        elseif type(key) == "table" then
-            keyStr = tostring(key)
         else
             keyStr = tostring(key)
         end
@@ -1416,7 +1414,7 @@ toolHandlers["debug_draw"] = function(args: {string:any}, id: number)
     local expiresAt: number = nil
     if duration and duration > 0 then
         expiresAt = lt.getTime() + duration
-    elseif duration and duration == 0 then
+    elseif duration == 0 then
         -- Single frame: expire almost immediately, but render once
         expiresAt = lt.getTime() + 0.001
     end
@@ -1918,11 +1916,8 @@ local function readHttpRequest(sock: socket.tcp): (string, string, {string:strin
     -- Read request line with short blocking timeout (full request arrives as one packet)
     sock:settimeout(0.05)
 
-    local requestLine, err = sock:receive("*l")
+    local requestLine = sock:receive("*l")
     if not requestLine then
-        if err ~= "timeout" then
-            return nil, nil, nil, nil
-        end
         return nil, nil, nil, nil
     end
 

@@ -150,10 +150,6 @@ function debugVis.spawnDebugShapes(
                         colorR, colorG, colorB, colorA = 1.0, 0.0, 1.0, 1.0
                     elseif obj.shape == "point" then
                         colorR, colorG, colorB, colorA = 1.0, 1.0, 0.0, 1.0
-                    elseif obj.shape == "polygon" then
-                        colorR, colorG, colorB, colorA = 0.0, 0.5, 1.0, 1.0
-                    elseif obj.shape == "polyline" then
-                        colorR, colorG, colorB, colorA = 1.0, 0.5, 0.0, 1.0
                     else
                         colorR, colorG, colorB, colorA = cfg.color[1], cfg.color[2], cfg.color[3], cfg.color[4]
                     end

@@ -1,6 +1,7 @@
 --- GPU-accelerated render pipeline for tecs.
 --- Primary rendering uses GPU instanced draws with depth buffer sorting.
---- CPU draw queue supports love.graphics.* calls (text, custom draws) with proper depth interleaving.
+--- CPU love.graphics.* calls (text, custom draws) run live during the Draw
+--- phase callback, depth-interleaved with GPU shapes via the world shader.
 
 local tecs <const> = require("tecs")
 local types <const> = require("tecs2d.gfx.types")
@@ -500,7 +501,7 @@ function pipeline.newPipeline(config: pipeline.RenderConfig): Pipeline
 
     -- Initialize layers
     for i = 1, MAX_LAYERS do
-        self.layers[i] = {layer = i, draws = {}, lights = {}, visible = true, space = "world"}
+        self.layers[i] = {layer = i, visible = true, space = "world"}
         self.parallaxX[i] = 1.0
         self.parallaxY[i] = 1.0
         self.sortModes[i] = 0  -- 0 = topdown (default)
@@ -599,7 +600,6 @@ function pipeline.newPipeline(config: pipeline.RenderConfig): Pipeline
         pImpl:_ensureWorldLitCanvas()
         pImpl._screenLitCanvas = lg.newCanvas(self.screenWidth, self.screenHeight, {format = "rgba8"})
         self.layerEffectsManager:resize(pImpl.scaledWidth, pImpl.scaledHeight)
-        self.layerEffectsManager:resizeScreen(self.screenWidth, self.screenHeight)
         -- Primary camera always fullscreen
         self._primaryCamera:setScreenSize(self.screenWidth, self.screenHeight, self.virtualHeight)
         pImpl:_updateCameraRenderDims()
@@ -1080,9 +1080,8 @@ function PipelineImpl:setScreenSize(w: number, h: number)
     self.renderer:resize(self.screenWidth, self.screenHeight)
     self:_ensureWorldLitCanvas()
     self._screenLitCanvas = lg.newCanvas(self.screenWidth, self.screenHeight, {format = "rgba8"})
-    -- Layer effects: world-phase at scaled resolution, screen-phase at native
+    -- Layer effects render at the world-phase scaled resolution
     self.layerEffectsManager:resize(self.scaledWidth, self.scaledHeight)
-    self.layerEffectsManager:resizeScreen(self.screenWidth, self.screenHeight)
     self._primaryCamera:setScreenSize(self.screenWidth, self.screenHeight, self.virtualHeight)
     self:_updateCameraRenderDims()
 end
@@ -1258,10 +1257,6 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
         worldLit:setFilter("nearest", "nearest")
         lg.draw(worldLit, vpX + blitOffsetX, vpY + blitOffsetY, 0, intScale, intScale)
         lg.setScissor()
-    elseif useLowRes then
-        -- Retro fallback (shouldn't normally happen since retro always uses integer scaling)
-        worldLit:setFilter("nearest", "nearest")
-        lg.draw(worldLit, 0, 0, 0, sw / worldLitW, sh / worldLitH)
     else
         -- Non-pixel or modern: bilinear filtering
         worldLit:setFilter("linear", "linear")
@@ -1306,7 +1301,7 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
         if self.lightingMode == "deferred" then
             self.renderer:renderLighting(false, false, self.ambientLight, 0, 0, 1.0, screenLit, 0.0, 0.0, 0.0)
         else
-            local albedo = self.renderer.screenAlbedo or self.renderer.gBufferAlbedo
+            local albedo = self.renderer.gBufferAlbedo
             lg.setCanvas(screenLit)
             lg.clear(0, 0, 0, 0)
             lg.setColor(1, 1, 1, 1)
@@ -1431,7 +1426,7 @@ function PipelineImpl:_renderSecondary(cam: Camera, globalTime: number)
             self.renderer:renderLighting(useLowRes, self.shadowsEnabled, self.ambientLight, camX, camY, effectiveZoom, cam._canvas, rot)
             self.renderer:renderBloom(useLowRes, cam._canvas)
         else
-            local albedo = self.renderer.screenAlbedo or self.renderer.gBufferAlbedo
+            local albedo = self.renderer.gBufferAlbedo
             lg.setCanvas(cam._canvas)
             lg.clear(0, 0, 0, 0)
             lg.setColor(1, 1, 1, 1)
@@ -1455,7 +1450,7 @@ function PipelineImpl:_renderSecondary(cam: Camera, globalTime: number)
             self.renderer:renderLighting(useLowRes, self.shadowsEnabled, self.ambientLight, camX, camY, effectiveZoom, nil, rot)
             self.renderer:renderBloom(useLowRes)
         else
-            local albedo = self.renderer.screenAlbedo or self.renderer.gBufferAlbedo
+            local albedo = self.renderer.gBufferAlbedo
             lg.setColor(1, 1, 1, 1)
             lg.draw(albedo, 0, 0)
         end

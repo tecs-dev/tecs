@@ -174,26 +174,23 @@ vec2 readDropShadowParams(uint row) {
     return vec2(0.0, 0.0);
 }
 
-// Returns (repeatXBits | repeatYBits, scaledUvW, scaledUvH). The cull
-// shader stretches the UV rect so the render shader's `fract` wrap
-// produces N tiles inside the larger sprite quad.
+// Returns (repeatXBits | repeatYBits, uvW, uvH). The CPU bucket sync
+// pre-stretches the sprite quad and UV rect for tiling, so this
+// function only contributes the repeat flag bits that make the render
+// shader wrap UVs with `fract`.
 vec3 readRepeatedSprite(uint row, float spriteW, float spriteH, float baseUvW, float baseUvH) {
     if ((ComponentMask & COMP_REPEATEDSPRITE) == 0u) {
         return vec3(0.0, baseUvW, baseUvH);
     }
     Std430RepeatedSprite r = repeats[row];
     float flagBits = 0.0;
-    float outUvW = baseUvW;
-    float outUvH = baseUvH;
     if (r.repeatX != 0u && spriteW > 0.0 && r.width > 0.0) {
         flagBits += float(FLAG_REPEAT_X);
-        outUvW = baseUvW * (r.width / spriteW);
     }
     if (r.repeatY != 0u && spriteH > 0.0 && r.height > 0.0) {
         flagBits += float(FLAG_REPEAT_Y);
-        outUvH = baseUvH * (r.height / spriteH);
     }
-    return vec3(flagBits, outUvW, outUvH);
+    return vec3(flagBits, baseUvW, baseUvH);
 }
 
 // ---------- Frame-index lookup (variable per-frame timing) ----------
@@ -334,7 +331,7 @@ void computemain() {
 
     float depthWithTie = computeDepth(layer, z, x, bottomY, row);
 
-    // Apply repeat-mode UV scaling (no-op for non-repeated sprites).
+    // Repeat flags only; the CPU pre-stretches quad size and UVs.
     vec3 repeatPack = readRepeatedSprite(row, w, h, sd.uvW, sd.uvH);
     flags = flags | uint(repeatPack.x);
     float outUvW = repeatPack.y;

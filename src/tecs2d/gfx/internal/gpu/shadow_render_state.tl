@@ -33,20 +33,8 @@ local record shadow_render_state
         materialGroupCount: integer
     end
 
-    newFrame: function(): Frame
-
     --- Walk the registered archetypes and update `frame` in place.
     run: function(registry: Registry, frame: Frame, materialComponent: tecs.Component)
-end
-
-function shadow_render_state.newFrame(): shadow_render_state.Frame
-    return {
-        hasAlphaBlend = false,
-        blendGroups = {},
-        blendGroupCount = 0,
-        materialGroups = {},
-        materialGroupCount = 0,
-    }
 end
 
 function shadow_render_state.run(

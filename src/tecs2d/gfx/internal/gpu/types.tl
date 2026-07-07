@@ -16,33 +16,6 @@ C.cdef[[
         float flags;                // RenderFlags bitmask (4 bytes) - total 32 bytes
     } GPUTransformInstance;
 
-    // Sprite metadata (128 bytes, 16-byte aligned for std430)
-    // Synced only on entity add/move events via archetype callbacks.
-    // Contains everything EXCEPT position data (which comes from Transform).
-    typedef struct {
-        float pivotX, pivotY;       // pivot point for rotation/scale (8 bytes)
-        float width, height;        // sprite dimensions (8 bytes) - total 16 bytes
-        float uvX, uvY, uvW, uvH;   // texture UV rect (16 bytes) - total 32 bytes
-        float r, g, b, a;           // color (16 bytes) - total 48 bytes
-        float clipMinX, clipMinY, clipMaxX, clipMaxY;  // clip bounds (16 bytes) - total 64 bytes
-        float animStartTime;        // when animation started (4 bytes)
-        float animTotalDuration;    // total animation loop duration (4 bytes)
-        float animFrameCount;       // number of frames (4 bytes)
-        float animFrameWidth;       // frame width in UV space (4 bytes) - total 80 bytes
-        float animColumnCount;      // frames per row for grid animation (4 bytes)
-        float animFrameHeight;      // height of one frame in UV space (4 bytes)
-        float animTimingOffset;     // offset into timing buffer (as float) (4 bytes)
-        float animPausedFrame;      // paused frame index (-1 = not paused, >= 0 = paused at frame) - total 96 bytes
-        float occluderHeight;       // height for shadow casting (4 bytes)
-        float _padLM;              // padding (was lightMask) (4 bytes)
-        float textureSlice;         // texture array slice index (4 bytes)
-        float blendId;              // blend mode ID (0=alpha, 1-14=blend modes) - total 112 bytes
-        float dropShadowHeight;     // entity height for shadow projection (4 bytes)
-        float dropShadowOpacity;    // drop shadow darkness 0-1 (4 bytes)
-        float _padDS1;              // padding (4 bytes)
-        float _padDS2;              // padding (4 bytes) - total 128 bytes
-    } GPUSpriteMetadata;
-
     // Sprite instance data for cull output (128 bytes, 16-byte aligned for std430)
     // Used by cull shader to write visible sprite data for rendering
     // Supports GPU-side animation: shader computes current frame from time
@@ -243,18 +216,6 @@ C.cdef[[
         uint32_t tiles[256];                // tile IDs (64 uvec4s), 0 = empty/skip
     } GPUTileChunkInstance;
 
-    // Text glyph instance data (96 bytes, 16-byte aligned)
-    // Each character in a text entity becomes one GPU instance.
-    // Enables batched text rendering with per-character transforms.
-    typedef struct {
-        float x, y, z, layerFloat;           // posLayer (vec4): world position + layer
-        float fontLayer, cosRot, sinRot, flags; // fontRotFlags (vec4): font texture layer + rotation + render flags
-        float uvX, uvY, uvW, uvH;            // uvRect (vec4): glyph UV in atlas
-        float glyphW, glyphH, r, g;          // sizeColor1 (vec4): glyph dimensions + color RG
-        float b, a, clipMinX, clipMinY;      // color2Clip1 (vec4): color BA + clip min
-        float clipMaxX, clipMaxY, pivotX, pivotY; // clip2Pivot (vec4): clip max + pivot
-    } GPUTextGlyphInstance;
-
     // === Two-Tier Text Rendering Architecture ===
     // Reduces memory from 96 bytes/glyph to ~40 bytes/glyph average for 100K+ entities
 
@@ -284,15 +245,6 @@ C.cdef[[
         uint32_t headerIndex;  // Index into TextHeader buffer
         uint32_t glyphIndex;   // Index into GlyphData buffer
     } GPUVisibleGlyph;
-
-    // Glyph slab entry (8 bytes per glyph, shared across entities)
-    // Pre-computed glyph layout data, reference-counted and shared.
-    typedef struct {
-        uint16_t glyphID;      // Codepoint for atlas lookup
-        int16_t xOffset;       // Local X offset (1/16 pixel fixed-point)
-        int16_t yOffset;       // Local Y offset (1/16 pixel fixed-point)
-        uint16_t _pad;         // Alignment padding
-    } GPUGlyphSlabEntry;
 
     // Camera/cull parameters SSBO (272 bytes, matches CullParams GLSL layout)
     // Uploaded once per frame, shared across all cull shader dispatches.
@@ -333,7 +285,6 @@ C.cdef[[
     } GPUMeshInstance;
 ]]
 
-local buffer <const> = require("tecs2d.gfx.internal.gpu.buffer")
 local Camera <const> = require("tecs2d.gfx.Camera")
 local gfxTypes <const> = require("tecs2d.gfx.types")
 
@@ -391,48 +342,6 @@ local record types
         --- Default: 200
         shadowMargin: number
 
-    end
-
-    --- A blend batch holds buffers for entities using a specific blend mode.
-    --- Enables GPU batching per blend mode without hurting normal case performance.
-    --- Created lazily only when entities with that blend mode exist.
-    record BlendBatch
-        blendMode: love.graphics.BlendMode
-        blendAlphaMode: love.graphics.BlendAlphaMode
-        inputBuffer: buffer.GPUBuffer
-        outputBuffer: love.graphics.Buffer
-        indirectBuffer: love.graphics.Buffer
-        entitySlots: {integer: integer}  -- entityId -> slot
-    end
-
-    --- A texture batch for sprites using different sprite sheets.
-    --- Groups sprites by texture for separate draw calls.
-    --- Each batch has its own buffers (transform, metadata, output, indirect).
-    record SpriteTextureBatch
-        --- Sheet ID used as texture bucket key
-        sheetId: integer
-        --- Main albedo texture
-        texture: love.graphics.Texture
-        --- Normal map texture (may be nil)
-        normalTexture: love.graphics.Texture
-        --- Emission map texture (may be nil)
-        emissionTexture: love.graphics.Texture
-        --- ORM map texture (may be nil)
-        ormTexture: love.graphics.Texture
-        --- Transform buffer (synced every frame)
-        transformBuffer: buffer.GPUBuffer
-        --- Metadata buffer (synced on dirty)
-        metadataBuffer: buffer.GPUBuffer
-        --- Output buffer for cull shader results
-        outputBuffer: love.graphics.Buffer
-        --- Indirect draw arguments buffer
-        indirectBuffer: love.graphics.Buffer
-        --- Shadow output buffer (for occluder sprites)
-        shadowOutputBuffer: love.graphics.Buffer
-        --- Shadow indirect buffer (for occluder sprites)
-        shadowIndirectBuffer: love.graphics.Buffer
-        --- Number of sprites in this batch
-        count: integer
     end
 
     --- A modular render plugin that registers with the renderer via hooks.
@@ -510,7 +419,6 @@ local record types
         pixelNormal: love.graphics.Canvas
         pixelORM: love.graphics.Canvas
         pixelEmission: love.graphics.Canvas
-        pixelShadowMask: love.graphics.Canvas
         pixelCanvas: love.graphics.Canvas
 
         -- Drop shadow AO canvas (R8, virtual res)
@@ -534,11 +442,7 @@ local record types
         -- Always-to-canvas target for world lighting result
         worldLitCanvas: love.graphics.Canvas
 
-        -- Screen-phase G-buffer canvases (nil; screen layers use main G-buffers)
-        screenAlbedo: love.graphics.Canvas
-        screenNormal: love.graphics.Canvas
-        screenORM: love.graphics.Canvas
-        screenEmission: love.graphics.Canvas
+        -- Screen-phase canvases (nil; screen layers use main G-buffers)
         screenShadowMask: love.graphics.Canvas
         screenDropShadowAO: love.graphics.Canvas
 
@@ -635,9 +539,6 @@ local record types
         --- Must be called after renderLighting to properly blend with the lit scene.
         renderForwardBlend: function(Renderer, cameraX: number, cameraY: number, cameraZoom: number, useLowRes: boolean, subPixelX: number, subPixelY: number)
 
-        --- Register a forward blend render function (called by shape modules during setup).
-        registerForwardBlend: function(Renderer, fn: function(Renderer, number, number, number, boolean, number, number))
-
         --- Handle window resize
         resize: function(Renderer, width: integer, height: integer)
 
@@ -646,9 +547,6 @@ local record types
 
         --- Register a render plugin (called by shape modules during setup)
         registerPlugin: function(Renderer, plugin: RenderPlugin)
-
-        --- Registered forward blend render functions (shape modules push into this list)
-        forwardBlendRenderers: {function(Renderer, number, number, number, integer, number, number)}
 
         --- Register a tileset texture and get its layer index in the texture array.
         --- If already registered, returns the existing index.
@@ -674,9 +572,6 @@ local record types
 
     --- Buffer format for transforms (matches GPUTransformInstance)
     TRANSFORM_FORMAT: love.graphics.BufferFormat
-
-    --- Buffer format for sprite metadata (matches GPUSpriteMetadata)
-    SPRITE_METADATA_FORMAT: love.graphics.BufferFormat
 
     --- Buffer format for sprite cull output (matches GPUSpriteInstance)
     SPRITE_FORMAT: love.graphics.BufferFormat
@@ -739,9 +634,6 @@ local record types
     TILECHUNK_FORMAT: love.graphics.BufferFormat
     TILECHUNK_VIS_FORMAT: love.graphics.BufferFormat
 
-    --- Buffer format for text glyphs (matches GPUTextGlyphInstance)
-    TEXT_GLYPH_FORMAT: love.graphics.BufferFormat
-
     --- Buffer format for text headers (matches GPUTextHeader) - two-tier architecture
     TEXT_HEADER_FORMAT: love.graphics.BufferFormat
 
@@ -750,9 +642,6 @@ local record types
 
     --- Buffer format for visible glyph indices (matches GPUVisibleGlyph) - two-tier architecture
     VISIBLE_GLYPH_FORMAT: love.graphics.BufferFormat
-
-    --- Buffer format for glyph slab entries (matches GPUGlyphSlabEntry) - slab architecture
-    GLYPH_SLAB_FORMAT: love.graphics.BufferFormat
 
     --- Buffer format for mesh cull output (matches GPUMeshInstance)
     MESH_FORMAT: love.graphics.BufferFormat
@@ -769,7 +658,6 @@ local record types
 
     --- FFI type names
     TRANSFORM_CTYPE: string
-    SPRITE_METADATA_CTYPE: string
     CIRCLE_CTYPE: string
     CIRCLE_TRANSFORM_CTYPE: string
     CIRCLE_METADATA_CTYPE: string
@@ -789,11 +677,9 @@ local record types
     MATERIAL_PARAMS_CTYPE: string
     INDIRECT_CTYPE: string
     TILECHUNK_CTYPE: string
-    TEXT_GLYPH_CTYPE: string
     TEXT_HEADER_CTYPE: string
     GLYPH_DATA_CTYPE: string
     VISIBLE_GLYPH_CTYPE: string
-    GLYPH_SLAB_CTYPE: string
     MESH_CTYPE: string
 
     --- Buffer format for cull params SSBO (matches GPUCullParams)
@@ -867,18 +753,6 @@ end
 types.TRANSFORM_FORMAT = {
     {format = "floatvec4"},  -- x, y, z, layerFloat (16 bytes)
     {format = "floatvec4"},  -- rotation, scaleX, scaleY, _pad (16 bytes) - total 32 bytes
-}
-
--- Sprite metadata buffer: 128 bytes per entity (synced on add/move only)
-types.SPRITE_METADATA_FORMAT = {
-    {format = "floatvec4"},  -- pivotX, pivotY, width, height
-    {format = "floatvec4"},  -- uvX, uvY, uvW, uvH
-    {format = "floatvec4"},  -- r, g, b, a
-    {format = "floatvec4"},  -- clipMinX, clipMinY, clipMaxX, clipMaxY
-    {format = "floatvec4"},  -- animStartTime, animTotalDuration, animFrameCount, animFrameWidth
-    {format = "floatvec4"},  -- animColumnCount, animFrameHeight, animTimingOffset, animPausedFrame
-    {format = "floatvec4"},  -- occluderHeight, _pad, textureSlice, blendId
-    {format = "floatvec4"},  -- dropShadowOffsetX, dropShadowOffsetY, dropShadowScaleY, dropShadowOpacity
 }
 
 -- Sprite output format for cull shader results (GPU-side sprite instances after culling)
@@ -1051,16 +925,6 @@ types.TILECHUNK_FORMAT = {
     {format = "uint32vec4"}, {format = "uint32vec4"}, {format = "uint32vec4"}, {format = "uint32vec4"},
 }
 
--- Text glyph buffer format: 96 bytes per glyph (6 vec4s)
-types.TEXT_GLYPH_FORMAT = {
-    {format = "floatvec4"},  -- posLayer: x, y, z, layer
-    {format = "floatvec4"},  -- fontRotFlags: fontLayer, cosRot, sinRot, flags
-    {format = "floatvec4"},  -- uvRect: uvX, uvY, uvW, uvH
-    {format = "floatvec4"},  -- sizeColor1: glyphW, glyphH, r, g
-    {format = "floatvec4"},  -- color2Clip1: b, a, clipMinX, clipMinY
-    {format = "floatvec4"},  -- clip2Pivot: clipMaxX, clipMaxY, pivotX, pivotY
-}
-
 -- Instance flags
 types.FLAG_UNLIT = 0x1
 types.FLAG_REPEAT_X = 0x2  -- Sprite: tile horizontally
@@ -1073,7 +937,6 @@ types.FLAG_DROP_SHADOW = 0x200  -- Entity has a drop shadow (has DropShadow comp
 
 -- FFI type names
 types.TRANSFORM_CTYPE = "GPUTransformInstance"
-types.SPRITE_METADATA_CTYPE = "GPUSpriteMetadata"
 types.CIRCLE_CTYPE = "GPUCircleInstance"
 types.CIRCLE_TRANSFORM_CTYPE = "GPUCircleTransform"
 types.CIRCLE_METADATA_CTYPE = "GPUCircleMetadata"
@@ -1093,7 +956,6 @@ types.LIGHT_CTYPE = "GPULightInstance"
 types.MATERIAL_PARAMS_CTYPE = "GPUMaterialParams"
 types.INDIRECT_CTYPE = "GPUIndirectArgs"
 types.TILECHUNK_CTYPE = "GPUTileChunkInstance"
-types.TEXT_GLYPH_CTYPE = "GPUTextGlyphInstance"
 types.TEXT_HEADER_CTYPE = "GPUTextHeader"
 types.GLYPH_DATA_CTYPE = "GPUGlyphData"
 types.VISIBLE_GLYPH_CTYPE = "GPUVisibleGlyph"
@@ -1119,14 +981,6 @@ types.VISIBLE_GLYPH_FORMAT = {
     {format = "uint32"},  -- headerIndex
     {format = "uint32"},  -- glyphIndex
 }
-
--- Glyph slab buffer format (8 bytes per glyph, 2 uint16s + 2 int16s packed as uint32s)
-types.GLYPH_SLAB_FORMAT = {
-    {format = "uint32"},  -- glyphID (u16) + xOffset (i16) packed
-    {format = "uint32"},  -- yOffset (i16) + _pad (u16) packed
-}
-
-types.GLYPH_SLAB_CTYPE = "GPUGlyphSlabEntry"
 
 -- Mesh output format for cull shader results (GPU-side mesh instances
 -- after culling). Source columns flow through the renderer-owned

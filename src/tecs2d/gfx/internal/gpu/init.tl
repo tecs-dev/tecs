@@ -186,10 +186,6 @@ function RendererMethods:resize(width: integer, height: integer)
     -- See PipelineImpl:_ensureWorldLitCanvas().
 
     -- Screen-phase rendering uses the main G-buffers (both are at native resolution)
-    self.screenAlbedo = nil
-    self.screenNormal = nil
-    self.screenORM = nil
-    self.screenEmission = nil
     self.screenDropShadowAO = nil
     self.screenShadowMask = nil
 
@@ -204,10 +200,6 @@ function RendererMethods:resize(width: integer, height: integer)
     local pixelDsH = math.max(1, math.floor(pixelH * dsScale)) as integer
     self.pixelDropShadowAO = lg.newCanvas(pixelDsW, pixelDsH, {format = "rgba8"})
     self.pixelDropShadowAO:setFilter("linear", "linear")
-    local pixelMaskW = math.max(1, math.floor(pixelW * scale)) as integer
-    local pixelMaskH = math.max(1, math.floor(pixelH * scale)) as integer
-    self.pixelShadowMask = lg.newCanvas(pixelMaskW, pixelMaskH, {format = "rgba8"})
-    self.pixelShadowMask:setFilter("nearest", "nearest")
     self.pixelCanvas = lg.newCanvas(pixelW, pixelH, {format = "rgba8"})
 
     -- Set nearest-neighbor filtering for pixel-perfect
@@ -417,12 +409,7 @@ function RendererMethods:renderGBuffer(cameraX: number, cameraY: number, cameraZ
     local normal: love.graphics.Canvas
     local orm: love.graphics.Canvas
     local emission: love.graphics.Canvas
-    if self._renderPhase == "screen" then
-        albedo = self.screenAlbedo or self.gBufferAlbedo
-        normal = self.screenNormal or self.gBufferNormal
-        orm = self.screenORM or self.gBufferORM
-        emission = self.screenEmission or self.gBufferEmission
-    elseif useLowRes then
+    if useLowRes and self._renderPhase ~= "screen" then
         albedo = self.pixelAlbedo
         normal = self.pixelNormal
         orm = self.pixelORM
@@ -593,10 +580,10 @@ function RendererMethods:renderLighting(useLowRes: boolean, shadowsEnabled: bool
     local emissionBuf: love.graphics.Canvas
     local mask: love.graphics.Canvas
     if self._renderPhase == "screen" then
-        albedo = self.screenAlbedo or self.gBufferAlbedo
-        normal = self.screenNormal or self.gBufferNormal
-        ormBuf = self.screenORM or self.gBufferORM
-        emissionBuf = self.screenEmission or self.gBufferEmission
+        albedo = self.gBufferAlbedo
+        normal = self.gBufferNormal
+        ormBuf = self.gBufferORM
+        emissionBuf = self.gBufferEmission
         mask = self.screenShadowMask or self.shadowMask
     elseif useLowRes then
         albedo = self.pixelAlbedo
@@ -737,7 +724,7 @@ function RendererMethods:renderBloom(useLowRes: boolean, outputCanvas?: love.gra
     local mipWidths: {integer}
     local mipHeights: {integer}
     if self._renderPhase == "screen" then
-        emission = self.screenEmission or self.gBufferEmission
+        emission = self.gBufferEmission
         mips = self.bloomMips  -- screen phase uses full-res mips
         mipWidths = self.bloomMipWidths
         mipHeights = self.bloomMipHeights

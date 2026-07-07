@@ -6,14 +6,6 @@ local record types
     --- Camera type re-export.
     type Camera = Camera
 
-    --- Scaling mode for final screen presentation.
-    enum ScaleMode
-        --- Maintain aspect ratio with smooth scaling
-        "aspect"
-        --- Integer scaling for pixel-perfect rendering (default)
-        "pixel"
-    end
-
     --- Coordinate space for a layer.
     enum LayerSpace
         --- World coordinates, camera-relative (default)
@@ -366,10 +358,6 @@ local record types
     record Layer
         --- The layer number.
         layer: integer
-        --- The lights to render (indices into SoA arrays).
-        lights: {integer}
-        --- The draws to render (indices into SoA arrays).
-        draws: {integer}
         --- Whether the layer is visible (defaults to true).
         visible: boolean
         --- Optional name for the layer.

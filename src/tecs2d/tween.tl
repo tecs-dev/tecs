@@ -114,7 +114,6 @@ local record Timeline
 end
 
 local record Cursor
-    target: integer
     timelineId: integer
     stateSize: integer
     state: {TweenSlotState}
@@ -960,7 +959,6 @@ local function createCursor(world: World, tl: Timeline, target: integer, rate: n
     end
     incRef(registry(world), id)
     return {
-        target = target,
         timelineId = id,
         stateSize = tl.stateSize,
         state = state,

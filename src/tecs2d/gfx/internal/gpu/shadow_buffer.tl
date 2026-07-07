@@ -47,8 +47,6 @@ local record shadow_buffer
         --- gate their flushRange invocations there.
         flushRange: function(self, canonicalPtr: C.CData, rowCount: integer)
         grow: function(self, newCapacity: integer)
-        --- Total rows the shadow can address. Useful for tests and asserts.
-        getCapacity: function(self): integer
     end
 
     new: function(
@@ -148,10 +146,6 @@ function ShadowBuffer:grow(newCapacity: integer)
     self.shadowPtr = newShadowPtr
     self.gpuBuffer = newGpuBuffer
     self.capacity = newCapacity
-end
-
-function ShadowBuffer:getCapacity(): integer
-    return self.capacity
 end
 
 return shadow_buffer

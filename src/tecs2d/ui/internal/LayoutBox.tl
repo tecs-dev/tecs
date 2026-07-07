@@ -129,8 +129,7 @@ local function composeTransformsWithOrigin(
     parentTransform: tecs.builtins.Transform,
     relativeTransform: tecs.builtins.RelativeTransform,
     outputTransform: tecs.builtins.Transform,
-    parentLayoutBox: LayoutBox,
-    _childLayoutBox: LayoutBox
+    parentLayoutBox: LayoutBox
 )
     local pRot, pScaleX, pScaleY = parentTransform.rotation, parentTransform.scaleX, parentTransform.scaleY
 
@@ -225,7 +224,6 @@ function LayoutBox.plugin(world: World)
         for archetype, len, entities in hierarchyQuery:iter() do
             local relativeTransforms = archetype:get(RelativeTransform)
             local transforms = archetype:getMut(Transform)
-            local childLayoutBoxes = archetype:get(LayoutBox)
             for row = 1, len do
                 local relativeTransform = relativeTransforms[row]
                 local childOf = world:getFirstRelationship(entities[row], ChildOf)
@@ -237,11 +235,10 @@ function LayoutBox.plugin(world: World)
                 if parentTransform then
                     local childTransform = transforms[row]
                     local parentLayoutBox = world:get(parentId, LayoutBox)
-                    local childLayoutBox = childLayoutBoxes and childLayoutBoxes[row] or nil
                     local prevX, prevY = childTransform.x, childTransform.y
                     local prevRot, prevSX, prevSY = childTransform.rotation, childTransform.scaleX, childTransform.scaleY
                     composeTransformsWithOrigin(
-                        parentTransform, relativeTransform, childTransform, parentLayoutBox, childLayoutBox
+                        parentTransform, relativeTransform, childTransform, parentLayoutBox
                     )
                     if childTransform.x ~= prevX or childTransform.y ~= prevY
                         or childTransform.rotation ~= prevRot
