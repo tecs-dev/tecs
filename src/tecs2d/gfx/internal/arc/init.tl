@@ -57,7 +57,7 @@ tecs.newFFIComponent({
             end
         }
     },
-    defaults = {nil, nil, 0, math.pi * 2, 0, -1},
+    defaults = {nil, nil, 0, math.pi * 2, 0},
     init = function(instance: Arc)
         assert(instance.radiusX, "Missing Arc radiusX")
         assert(instance.radiusY, "Missing Arc radiusY")

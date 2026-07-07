@@ -93,7 +93,9 @@ void computemain() {
 
     float scaleX = t.scaleX;
     float scaleY = t.scaleY;
-    float uniformScale = (scaleX + scaleY) * 0.5;
+    // Negative scale (mirroring) yields a zero or negative radius and culls
+    // a visible circle; take the magnitude like the other shape culls.
+    float uniformScale = (abs(scaleX) + abs(scaleY)) * 0.5;
     float r = c.radiusLineWidth.x * uniformScale;
     float lineWidth = c.radiusLineWidth.y;
 

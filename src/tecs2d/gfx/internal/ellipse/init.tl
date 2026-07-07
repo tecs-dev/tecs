@@ -53,7 +53,7 @@ tecs.newFFIComponent({
             end
         }
     },
-    defaults = {nil, nil, 0, -1},
+    defaults = {nil, nil, 0},
     init = function(instance: Ellipse)
         assert(instance.radiusX, "Missing Ellipse radiusX")
         assert(instance.radiusY, "Missing Ellipse radiusY")

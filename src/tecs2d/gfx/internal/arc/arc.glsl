@@ -120,8 +120,11 @@ void effect() {
     // Subtract rotation to "unrotate" the pixel position before checking arc range
     float pixelAngle = atan(vLocalPos.y, vLocalPos.x) - vRotation;
 
-    // Check if pixel is within arc angular range
-    if (!isInArcRange(pixelAngle, vAngles.x, vAngles.y)) {
+    // A full-circle sweep (endAngle - startAngle >= 2*pi) normalizes to a
+    // zero-width range in isInArcRange, so skip the angular test entirely.
+    const float TWO_PI = 6.28318530718;
+    float sweep = abs(vAngles.y - vAngles.x);
+    if (sweep < TWO_PI - 1e-4 && !isInArcRange(pixelAngle, vAngles.x, vAngles.y)) {
         discard;
     }
 

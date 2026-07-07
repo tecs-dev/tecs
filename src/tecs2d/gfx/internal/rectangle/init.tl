@@ -60,7 +60,7 @@ tecs.newFFIComponent({
             end
         }
     },
-    defaults = {nil, nil, 0, -1},
+    defaults = {nil, nil, 0},
     init = function(instance: Rectangle)
         -- Reject negative width/height: the SDF fragment math assumes
         -- non-negative half extents, and the cull shader silently

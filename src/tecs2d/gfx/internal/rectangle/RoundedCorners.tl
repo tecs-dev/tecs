@@ -38,8 +38,8 @@ tecs.newFFIComponent({
         instance.ry = ryVal
     end,
     -- RoundedCorners requires a Rectangle component on the same entity.
-    -- The framework does not yet have declarative component requirements,
-    -- so this stays as a convention for now.
+    -- Declarative `requires` can't express this because Rectangle needs
+    -- constructor arguments, so it stays a convention.
 })
 
 return RoundedCorners
