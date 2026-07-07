@@ -236,7 +236,7 @@ local record types
 
 
         --- Set the time scale multiplier.
-        --- @param scale Time scale (0.1 to 10.0, 1.0 = normal)
+        --- @param scale Time scale (clamped to 0.0 to 10.0, 1.0 = normal)
         setTimeScale: function(self, scale: number)
 
         --- Get the current time scale multiplier.
@@ -310,9 +310,10 @@ local record types
         getCookieName: function(self, id: integer): string
 
         --- Query the lighting brightness at a world position.
-        --- Returns 0-1 luminance including shadow occlusion.
-        --- Lazy: first call activates an intermediate canvas (zero cost until called).
-        --- The first frame after activation returns 0 (no data yet).
+        --- Returns 0-1 perceptual luminance including shadow occlusion,
+        --- or 0 when the position is off-screen. Performs a GPU readback
+        --- that stalls the pipeline; intended for tooling and infrequent
+        --- checks, not per-frame gameplay code.
         queryLightAt: function(self, worldX: number, worldY: number): number
 
         --- Check if Draw phase is currently active.

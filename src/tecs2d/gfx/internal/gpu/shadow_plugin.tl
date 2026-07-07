@@ -1,15 +1,15 @@
 --- Generic plugin assembly for the shadow-column path. One call
---- (`shadow_plugin.register(world, descriptor)`) replaces the ~150
---- lines of bookkeeping each shape's `init.tl` used to repeat:
+--- (`shadow_plugin.register(world, descriptor)`) covers the bookkeeping
+--- every shape needs:
 ---
 ---   - Build the shadow registry (gates on `Transform` + the shape's
 ---     primary component).
 ---   - Allocate indirect + growable + shadow-indirect buffers.
 ---   - Wire `ensureGrowableCapacity` so the cull's atomicAdd writes
----     never go OOB on the output buffer (this is what was missed in
----     the first circle migration; pink garbage on screen).
----   - Stub the legacy `simpleShapePlugin` slots since the shadow
----     path overrides `cull` and `upload`.
+---     never go OOB on the output buffer (skipping this manifests as
+---     pink garbage on screen).
+---   - Stub the `simpleShapePlugin` slots since the shadow path
+---     overrides `cull` and `upload`.
 ---   - Add the two PreRender systems: `<shape>.ShadowRenderState`
 ---     (build syncRef) and `<shape>.ShadowUpload` (flushAll +
 ---     ensureGrowableCapacity + stubTransform.count).

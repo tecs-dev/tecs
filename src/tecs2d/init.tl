@@ -136,32 +136,33 @@ local record tecs2d
 end
 
 -- Re-export events at runtime
-(tecs2d as {string:any}).Quit = events.Quit
-(tecs2d as {string:any}).KeyPressed = events.KeyPressed
-(tecs2d as {string:any}).KeyReleased = events.KeyReleased
-(tecs2d as {string:any}).MousePressed = events.MousePressed
-(tecs2d as {string:any}).MouseReleased = events.MouseReleased
-(tecs2d as {string:any}).JoystickAdded = events.JoystickAdded
-(tecs2d as {string:any}).JoystickRemoved = events.JoystickRemoved
-(tecs2d as {string:any}).DirectoryDropped = events.DirectoryDropped
-(tecs2d as {string:any}).FileDropped = events.FileDropped
-(tecs2d as {string:any}).Focus = events.Focus
-(tecs2d as {string:any}).MouseFocus = events.MouseFocus
-(tecs2d as {string:any}).Resize = events.Resize
-(tecs2d as {string:any}).Visible = events.Visible
-(tecs2d as {string:any}).Exposed = events.Exposed
-(tecs2d as {string:any}).Occluded = events.Occluded
-(tecs2d as {string:any}).LocaleChanged = events.LocaleChanged
-(tecs2d as {string:any}).ThemeChanged = events.ThemeChanged
-(tecs2d as {string:any}).DropBegan = events.DropBegan
-(tecs2d as {string:any}).DropMoved = events.DropMoved
-(tecs2d as {string:any}).DropCompleted = events.DropCompleted
-(tecs2d as {string:any}).AudioDisconnected = events.AudioDisconnected
-(tecs2d as {string:any}).SensorUpdated = events.SensorUpdated
-(tecs2d as {string:any}).JoystickSensorUpdated = events.JoystickSensorUpdated
-(tecs2d as {string:any}).TouchPressed = events.TouchPressed
-(tecs2d as {string:any}).TouchMoved = events.TouchMoved
-(tecs2d as {string:any}).TouchReleased = events.TouchReleased
+local tecs2dExports <const> = tecs2d as {string: any}
+tecs2dExports.Quit = events.Quit
+tecs2dExports.KeyPressed = events.KeyPressed
+tecs2dExports.KeyReleased = events.KeyReleased
+tecs2dExports.MousePressed = events.MousePressed
+tecs2dExports.MouseReleased = events.MouseReleased
+tecs2dExports.JoystickAdded = events.JoystickAdded
+tecs2dExports.JoystickRemoved = events.JoystickRemoved
+tecs2dExports.DirectoryDropped = events.DirectoryDropped
+tecs2dExports.FileDropped = events.FileDropped
+tecs2dExports.Focus = events.Focus
+tecs2dExports.MouseFocus = events.MouseFocus
+tecs2dExports.Resize = events.Resize
+tecs2dExports.Visible = events.Visible
+tecs2dExports.Exposed = events.Exposed
+tecs2dExports.Occluded = events.Occluded
+tecs2dExports.LocaleChanged = events.LocaleChanged
+tecs2dExports.ThemeChanged = events.ThemeChanged
+tecs2dExports.DropBegan = events.DropBegan
+tecs2dExports.DropMoved = events.DropMoved
+tecs2dExports.DropCompleted = events.DropCompleted
+tecs2dExports.AudioDisconnected = events.AudioDisconnected
+tecs2dExports.SensorUpdated = events.SensorUpdated
+tecs2dExports.JoystickSensorUpdated = events.JoystickSensorUpdated
+tecs2dExports.TouchPressed = events.TouchPressed
+tecs2dExports.TouchMoved = events.TouchMoved
+tecs2dExports.TouchReleased = events.TouchReleased
 
 -------------------------------------------------------------------------------
 -- game plugin
@@ -351,8 +352,9 @@ local function restoreHotReloadSnapshot(world: tecs.World, state: HotReloadState
 
     LOGGER:info("Restored hot reload snapshot from %s", state.snapshotPath)
     if state.deleteAfterRestore and love_fs_any.remove then
+        local removeFile <const> = love_fs_any.remove as function(string): boolean, string
         local removeResult: {any} = {pcall(function()
-            (love_fs_any.remove as function(string): boolean, string)(state.snapshotPath)
+            removeFile(state.snapshotPath)
         end)}
         if not removeResult[1] then
             LOGGER:warn("Failed to remove hot reload snapshot %s: %s", state.snapshotPath, tostring(removeResult[2]))
@@ -502,7 +504,8 @@ local function runLoop(config: tecs2d.RunConfig): (function(): number | string)
         local scaledDt = dt * timeScale
 
         -- Update game time for GPU animations
-        (pipelineInstance as {string: any}).gameTime = pipelineInstance:getTime() + scaledDt
+        local pipelineAny <const> = pipelineInstance as {string: any}
+        pipelineAny.gameTime = pipelineInstance:getTime() + scaledDt
 
         world:update(scaledDt)
 

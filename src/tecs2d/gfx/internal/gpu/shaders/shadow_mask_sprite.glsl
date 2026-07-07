@@ -12,7 +12,7 @@ struct SpriteData {
     vec4 uvRect;        // uvX (base), uvY, uvW (single frame), uvH
     vec4 animData;      // frameIndex (computed by cull), firstFrame, frameCount, frameWidth
     vec4 rotScale;      // rotation, scaleX, scaleY, unused (for shadow output)
-    vec4 pivot;         // pivotX, pivotY, flags, screenSpaceFlags
+    vec4 pivot;         // pivotX, pivotY, textureSlice, packed flags (uint bits)
 };
 
 layout(std430) readonly buffer SpriteShadowOutput {

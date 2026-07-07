@@ -102,7 +102,7 @@ vec2 readLayoutBoxOffset(uint row) {
     return vec2(0.0, 0.0);
 }
 
-// Pivot fallback chain (matches legacy rectangle/sync.tl:279-298):
+// Pivot fallback chain:
 //   explicit Pivot component → LayoutBox origin → (0.5, 0.5).
 vec2 readPivot(uint row) {
     if ((ComponentMask & COMP_PIVOT) != 0u) {
@@ -144,8 +144,8 @@ void computemain() {
     float height = rc.height;
     float lineWidth = rc.lineWidth;
 
-    // SDF math assumes non-negative half extents; legacy sync took the
-    // magnitude of scaledWidth/scaledHeight (rectangle/sync.tl:206-211).
+    // SDF math assumes non-negative half extents; take the magnitude
+    // of the scaled dimensions.
     float scaledW = width * scaleX;
     float scaledH = height * scaleY;
     if (scaledW < 0.0) scaledW = -scaledW;
@@ -157,8 +157,7 @@ void computemain() {
     y += layoutOffset.y;
 
     // Build output flags. StaticFlags carries per-archetype tag bits;
-    // FLAG_FILLED is set when lineWidth is 0 (legacy
-    // rectangle/sync.tl:215).
+    // FLAG_FILLED is set when lineWidth is 0.
     uint baseFlags = StaticFlags;
     if (lineWidth == 0.0) {
         baseFlags = baseFlags | FLAG_FILLED;
@@ -226,7 +225,7 @@ void computemain() {
 
     // Build output struct. posSize carries pre-scaled dimensions; the
     // scale lanes in cornerScale stay 1.0 because scale is already
-    // baked in (matching legacy rect_cull.glsl:165).
+    // baked in.
     RectOut r;
     r.posSize = vec4(outX, outY, scaledW, scaledH);
     r.color = color;

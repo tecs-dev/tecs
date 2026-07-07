@@ -128,6 +128,7 @@ const uint COMP_PIVOT          = 0x40u;
 const uint COMP_ROUNDEDCORNERS = 0x80u;
 const uint COMP_DROPSHADOW     = 0x100u;
 const uint COMP_REPEATEDSPRITE = 0x200u;
+const uint COMP_SPRITEDATA     = 0x400u;  // sprite cull binds it unconditionally; bit kept for mask parity
 const uint COMP_TEXTEFFECTS    = 0x800u;
 
 // ---------- Shared flag bits (must match types.tl) ----------

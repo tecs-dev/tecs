@@ -235,7 +235,6 @@ function shape_utils.simpleShapePlugin(config: shape_utils.SimpleShapeConfig): t
         local syncRef = config.syncRef
         if not syncRef or not syncRef.blendGroupCount or syncRef.blendGroupCount == 0 then return end
 
-        -- useLowRes is now a parameter
         local vw, vh = renderer.config.virtualRes[1], renderer.config.virtualRes[2]
         local rw = useLowRes and vw or renderer.screenWidth
         local rh = useLowRes and vh or renderer.screenHeight

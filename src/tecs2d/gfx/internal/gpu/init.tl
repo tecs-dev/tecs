@@ -188,11 +188,6 @@ function RendererMethods:resize(width: integer, height: integer)
     self.shadowMask:setFilter("linear", "linear")
     self.shadowMaskTemp:setFilter("linear", "linear")
 
-    -- Recreate litCanvas if it was previously activated (lazy allocation for queryLightAt)
-    if self.litCanvas then
-        self.litCanvas = lg.newCanvas(scaledW, scaledH, {format = "rgba8"})
-    end
-
     -- worldLitCanvas is managed by the pipeline (it knows the pixel mode).
     -- See PipelineImpl:_ensureWorldLitCanvas().
 
@@ -597,15 +592,10 @@ function RendererMethods:renderLighting(useLowRes: boolean, shadowsEnabled: bool
 
     -- Determine output target
     -- When rendering world phase without explicit outputCanvas, use worldLitCanvas
-    local useLitCanvas = (not outputCanvas and not useLowRes and self.litCanvas)
     if outputCanvas then
         lg.setCanvas(outputCanvas)
-    elseif self._renderPhase == "world" and not useLowRes then
+    elseif self._renderPhase == "world" or useLowRes then
         lg.setCanvas(self.worldLitCanvas)
-    elseif useLowRes then
-        lg.setCanvas(self.worldLitCanvas)
-    elseif useLitCanvas then
-        lg.setCanvas(self.litCanvas)
     end
     if outputCanvas then
         lg.clear(0, 0, 0, 0)
@@ -675,14 +665,9 @@ function RendererMethods:renderLighting(useLowRes: boolean, shadowsEnabled: bool
     lg.draw(albedo, 0, 0)
     lg.setShader()
 
-    if outputCanvas then
+    if outputCanvas or self._renderPhase == "world" or useLowRes then
+        -- World phase renders to worldLitCanvas; the pipeline handles upscale
         lg.setCanvas()
-    elseif self._renderPhase == "world" or useLowRes then
-        -- World phase: always render to worldLitCanvas, pipeline handles upscale
-        lg.setCanvas()
-    elseif useLitCanvas then
-        lg.setCanvas()
-        lg.draw(self.litCanvas, 0, 0)
     end
 end
 

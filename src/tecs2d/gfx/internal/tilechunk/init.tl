@@ -170,14 +170,14 @@ local record TileChunkHeaderFFI
     b: number
     a: number
     occluderHeight: number  -- Shadow casting height (0 = no shadows)
-    _padLM: number          -- Padding (was lightMask, struct layout preserved)
+    _padLM: number          -- Padding, keeps the 16-float struct layout
     hasOccluders: number    -- 1.0 if chunk has any occluding tiles, 0.0 otherwise
     _pad: number
 end
 
 -- Helper to write uint32 array to FFI pointer (bypasses Teal type checking)
 -- Offset is 64 bytes (4 vec4s: posSize, layerInfo, color, occluderInfo)
-local write_tile_data: function(dataPtr: C.CData, slotOffset: integer, tiles: {integer})
+local writeTileData: function(dataPtr: C.CData, slotOffset: integer, tiles: {integer})
 do
     local loadfn = rawget(_G as table, "load") or rawget(_G as table, "loadstring")
     local code = [[
@@ -190,18 +190,18 @@ do
         end
     ]]
     local fn = (loadfn as function(string): function(): any)(code)()
-    write_tile_data = fn as function(C.CData, integer, {integer})
+    writeTileData = fn as function(C.CData, integer, {integer})
 end
 
 -- Pointer arithmetic helper. LuaJIT supports `cdata + integer` natively
 -- on pointer cdata, but Teal's checker disallows it. Compile via load()
 -- once at module scope.
-local ffi_offset_ptr: function(ptr: C.CData, offset: integer): C.CData
+local ffiOffsetPtr: function(ptr: C.CData, offset: integer): C.CData
 do
     local loadfn = rawget(_G as table, "load") or rawget(_G as table, "loadstring")
     local code = "local ffi = require('ffi'); return function(ptr, offset) return ffi.cast('char*', ptr) + offset end"
     local fn = (loadfn as function(string): function(): any)(code)()
-    ffi_offset_ptr = fn as function(C.CData, integer): C.CData
+    ffiOffsetPtr = fn as function(C.CData, integer): C.CData
 end
 
 function tileChunk.plugin(world: tecs.World)
@@ -225,14 +225,13 @@ function tileChunk.plugin(world: tecs.World)
     -- Plugin-owned input buffer.
     --
     -- Tilechunk's per-frame upload signal lives at the ECS level (the
-    -- `DirtyTileChunk` tag query). That makes the legacy `GPUBuffer`'s
-    -- per-slot dirty bitmap redundant -- there's nothing to gate on
-    -- below the tag. So we hold the storage as a plain ByteData +
-    -- love.graphics.Buffer pair, with a small slot manager on top for
-    -- stable per-chunk indices.
+    -- `DirtyTileChunk` tag query), so a per-slot dirty bitmap would be
+    -- redundant; there's nothing to gate on below the tag. The storage
+    -- is a plain ByteData + love.graphics.Buffer pair, with a small
+    -- slot manager on top for stable per-chunk indices.
     --
     -- Writes during sync go: write fields into `shadowPtr[slot]`, write
-    -- 256 tile uint32s via `write_tile_data`, then issue a single
+    -- 256 tile uint32s via `writeTileData`, then issue a single
     -- `setArrayData(byteData, slot+1, slot+1, 1)` for that slot. No
     -- batched dirty range; the dirty count per frame is "however many
     -- chunks the user marked dirty", which is small in typical use.
@@ -511,7 +510,7 @@ function tileChunk.plugin(world: tecs.World)
         freedSet[slot] = true
 
         local offset = slot * elementSize
-        local offsetPtr = ffi_offset_ptr(shadowPtr as C.CData, offset)
+        local offsetPtr = ffiOffsetPtr(shadowPtr as C.CData, offset)
         C.fill(offsetPtr, elementSize, 0)
         inputBufferRef.handle:setArrayData(byteData, slot + 1, slot + 1, 1)
 
@@ -674,7 +673,7 @@ function tileChunk.plugin(world: tecs.World)
                     -- Write 256 tile IDs (1024 bytes) at offset 64 bytes
                     -- past the header.
                     local slotOffset = slot * elementSize
-                    write_tile_data(shadowPtr as C.CData, slotOffset, chunk.tiles)
+                    writeTileData(shadowPtr as C.CData, slotOffset, chunk.tiles)
 
                     -- Push this slot's full row (header + tile data) to
                     -- the GPU. One driver call per dirty chunk; in the

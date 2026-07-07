@@ -105,7 +105,7 @@ local record sprite
 
     --- Texture bucket marker components - group sprites by texture array size tier.
     --- layerIndex is the 0-based layer within the texture array (for GLSL sampling).
-    --- arrayIndex is now implicit via TextureArray(N) tag component.
+    --- arrayIndex is implicit via the TextureArray(N) tag component.
     record TinyTextureBucket is tecs.Component
         layerIndex: integer  -- 0-based layer index for GLSL texture sampling
         generation: integer  -- Generation counter for staleness detection
@@ -265,7 +265,7 @@ local record sprite
     --- Renderer-internal derived metadata. Sync writes the resolved
     --- frame UV / pivot / size / animation params / packed
     --- textureSlice on dirty; the shadow cull shader reads it
-    --- per-row in place of the legacy slot-keyed metadata buffer.
+    --- per-row.
     --- Auto-added when a Sprite is added to an entity; users should
     --- never construct or write to this directly.
     record SpriteData is tecs.Component

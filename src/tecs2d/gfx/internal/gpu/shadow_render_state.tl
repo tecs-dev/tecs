@@ -23,7 +23,7 @@ local trackMaterialGroup <const> = shape_sync_base.trackMaterialGroup
 
 local record shadow_render_state
     --- Per-frame render-scheduling state. Same shape as
-    --- `shape_sync_base.SyncRecord` so it can be passed to the legacy
+    --- `shape_sync_base.SyncRecord` so it can be passed to the
     --- renderer's renderGBuffer without translation.
     record Frame
         hasAlphaBlend: boolean

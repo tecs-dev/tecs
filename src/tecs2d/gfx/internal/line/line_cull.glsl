@@ -56,7 +56,6 @@ void computemain() {
     float scaleY = t.scaleY;
 
     // World endpoints: entity position + local endpoint * scale.
-    // Mirrors the legacy CPU sync (line/sync.tl:177-180).
     float x1 = tx + ln.x1 * scaleX;
     float y1 = ty + ln.y1 * scaleY;
     float x2 = tx + ln.x2 * scaleX;

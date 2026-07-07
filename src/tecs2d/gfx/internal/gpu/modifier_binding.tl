@@ -6,8 +6,8 @@
 --- entry per modifier, where the cull shader gates each read on
 --- `ComponentMask & COMP_<NAME>`.
 ---
---- Three of those four fields are mechanical and were previously
---- hand-written (and drifted) per content type:
+--- Three of those four fields are mechanical and derive from the
+--- component name, so binding them here keeps content types in sync:
 ---   - `layout`   ← `std430.layouts[componentName]`
 ---   - `ssboName` ← `componentName .. "Input"`
 ---   - `mask`     ← the canonical `MASK` table below

@@ -133,7 +133,7 @@ function TimingBuffer:registerTag(sheetPath: string, tagName: string, frameDurat
     self.nextOffset = offset + frameCount
     self.dirty = true
 
-    return offset, cumulative  -- cumulative is now totalDuration
+    return offset, cumulative  -- cumulative equals the tag's totalDuration
 end
 
 function TimingBuffer:getTagOffset(sheetPath: string, tagName: string): integer

@@ -29,8 +29,8 @@ local physics <const> = require("tecs2d.physics")
 local retire <const> = require("tecs2d.gfx.internal.gpu.retire")
 
 local lg <const> = love.graphics
-local math_cos <const> = math.cos
-local math_sin <const> = math.sin
+local mathCos <const> = math.cos
+local mathSin <const> = math.sin
 local math_sqrt <const> = math.sqrt
 
 local DEBUG_LAYER <const> = 15
@@ -52,8 +52,8 @@ local circleUX: {number} = {}
 local circleUY: {number} = {}
 for s = 0, CIRCLE_SEGMENTS do
     local a = s / CIRCLE_SEGMENTS * TWO_PI
-    circleUX[s] = math_cos(a)
-    circleUY[s] = math_sin(a)
+    circleUX[s] = mathCos(a)
+    circleUY[s] = mathSin(a)
 end
 
 local record physicsDebug
@@ -165,7 +165,7 @@ function physicsDebug.new(options?: physicsDebug.Options): tecs.Plugin
         local function writeBody(body: love.physics.Body, lineHW: number)
             local bx, by = body:getPosition()
             local angle = body:getAngle()
-            local cos_a, sin_a = math_cos(angle), math_sin(angle)
+            local cosA, sinA = mathCos(angle), mathSin(angle)
             local bodyAny = body as {any: any}
             local getShapes = bodyAny.getShapes as function(any): {any}
             local shapes = getShapes(body)
@@ -180,8 +180,8 @@ function physicsDebug.new(options?: physicsDebug.Options): tecs.Plugin
                     local circleShape = shapeObj as love.physics.CircleShape
                     local radius = circleShape:getRadius()
                     local ox, oy = circleShape:getPoint()
-                    local cx = bx + ox * cos_a - oy * sin_a
-                    local cy = by + ox * sin_a + oy * cos_a
+                    local cx = bx + ox * cosA - oy * sinA
+                    local cy = by + ox * sinA + oy * cosA
                     for s = 0, CIRCLE_SEGMENTS - 1 do
                         addLineQuad(
                             cx + circleUX[s] * radius, cy + circleUY[s] * radius,
@@ -196,8 +196,8 @@ function physicsDebug.new(options?: physicsDebug.Options): tecs.Plugin
                     local wp: {number} = {}
                     for i = 1, #points, 2 do
                         local px, py = points[i] as number, points[i + 1] as number
-                        wp[#wp + 1] = bx + px * cos_a - py * sin_a
-                        wp[#wp + 1] = by + px * sin_a + py * cos_a
+                        wp[#wp + 1] = bx + px * cosA - py * sinA
+                        wp[#wp + 1] = by + px * sinA + py * cosA
                     end
                     local numPoints = #wp
                     for i = 1, numPoints, 2 do
@@ -214,8 +214,8 @@ function physicsDebug.new(options?: physicsDebug.Options): tecs.Plugin
                     local wp: {number} = {}
                     for idx = 1, count do
                         local px, py = getPoint(shape, idx)
-                        wp[#wp + 1] = bx + px * cos_a - py * sin_a
-                        wp[#wp + 1] = by + px * sin_a + py * cos_a
+                        wp[#wp + 1] = bx + px * cosA - py * sinA
+                        wp[#wp + 1] = by + px * sinA + py * cosA
                     end
                     for i = 1, #wp - 2, 2 do
                         addLineQuad(wp[i], wp[i + 1], wp[i + 2], wp[i + 3], lineHW)

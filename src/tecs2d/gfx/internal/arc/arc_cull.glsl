@@ -72,7 +72,7 @@ void computemain() {
     float scaleY = t.scaleY;
     float rotation = t.rotation;
 
-    // Pre-scale radii to mirror the legacy CPU-side scaling. Negative
+    // Pre-scale radii so downstream math is scale-free. Negative
     // scale produces invalid bounds; take the magnitude.
     float rx = a.radiusX * scaleX;
     float ry = a.radiusY * scaleY;

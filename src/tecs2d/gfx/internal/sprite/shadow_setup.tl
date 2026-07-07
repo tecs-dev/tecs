@@ -59,9 +59,9 @@ local record shadow_setup
         registryName: string
         renderStateSystemName: string
         uploadSystemName: string
-        --- Extra `after` constraints for the upload system. Used to
-        --- order the shadow flush after legacy sync systems that may
-        --- still write to the canonical columns during the migration.
+        --- Extra `after` constraints for the upload system. Orders the
+        --- shadow flush after sync systems that write to the canonical
+        --- columns (e.g. sprite.GPUSync).
         uploadAfter: {string}
     end
 

@@ -113,8 +113,7 @@ void computemain() {
     // (Transform.x/y at the layout box origin, offset + radius to
     // recenter at the circle's center). Non-UI circles have Transform
     // at the circle center already, so the shift only applies when
-    // LayoutBox is actually on the archetype -- gating on COMP_LAYOUTBOX
-    // matches the legacy `circle/sync.tl` behavior.
+    // LayoutBox is actually on the archetype (gated on COMP_LAYOUTBOX).
     if ((ComponentMask & COMP_LAYOUTBOX) != 0u) {
         vec2 layoutOffset = readLayoutBoxOffset(row);
         x += layoutOffset.x + r;

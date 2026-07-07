@@ -473,12 +473,12 @@ local MESH_STD_SIZE             <const> = sizeof("Std430Mesh") as integer
 --
 -- Pointer arithmetic is wrapped in `load()` to bypass Teal's checker, the
 -- same pattern as `gpu/buffer.tl:211-217`.
-local ffi_offset_ptr: function(C.CData, integer): C.CData
+local ffiOffsetPtr: function(C.CData, integer): C.CData
 do
     local loadfn = rawget(_G as table, "load") or rawget(_G as table, "loadstring")
     local code = "local ffi = require('ffi'); return function(ptr, offset) return ffi.cast('char*', ptr) + offset end"
     local fn = (loadfn as function(string): function(): any)(code)()
-    ffi_offset_ptr = fn as function(C.CData, integer): C.CData
+    ffiOffsetPtr = fn as function(C.CData, integer): C.CData
 end
 
 -- Functions produced by `translateIdentity` are tagged here so `makeLayout`
@@ -490,7 +490,7 @@ local function translateIdentity(elementSize: integer): function(C.CData, C.CDat
         if lastRow < firstRow then return end
         local count = lastRow - firstRow + 1
         local offset = firstRow * elementSize
-        copy(ffi_offset_ptr(shadowRaw, offset), ffi_offset_ptr(canonicalRaw, offset), count * elementSize)
+        copy(ffiOffsetPtr(shadowRaw, offset), ffiOffsetPtr(canonicalRaw, offset), count * elementSize)
     end
     identityTranslates[fn] = true
     return fn
@@ -539,13 +539,12 @@ end
 -- 8 bytes, std430 vec2 stride is 8). Use identity memcpy.
 local translateCircle <const> = translateIdentity(CIRCLE_STD_SIZE)
 
--- Canonical Rectangle and Std430Rectangle are byte-identical (16 bytes
--- including the legacy gpuSlot field, which sits in the unused 4th
--- lane of the std430 vec4). Identity memcpy.
+-- Canonical Rectangle and Std430Rectangle are field-identical 3-float
+-- structs (12 bytes). Identity memcpy.
 local translateRectangle <const> = translateIdentity(RECTANGLE_STD_SIZE)
 
--- Canonical Ellipse and Std430Ellipse are byte-identical (16 bytes
--- including the legacy gpuSlot field). Identity memcpy.
+-- Canonical Ellipse and Std430Ellipse are field-identical 3-float
+-- structs (12 bytes). Identity memcpy.
 local translateEllipse <const> = translateIdentity(ELLIPSE_STD_SIZE)
 
 -- Canonical Pivot is 8 bytes; std430 stride is 16. Per-row copy with
@@ -575,7 +574,7 @@ local translateLine <const> = translateIdentity(LINE_STD_SIZE)
 -- 17 floats = 68 bytes). Identity memcpy.
 local translateTextEffects <const> = translateIdentity(TEXTEFFECTS_STD_SIZE)
 
--- Canonical Text and Std430Text are byte-identical at 44 bytes; the two
+-- Canonical Text and Std430Text are byte-identical at 40 bytes; the two
 -- uint16 fields (charCount, fontId) pack into the std430 uint32 slot
 -- (charCountFontId) via little-endian byte order. Identity memcpy.
 local translateText <const> = translateIdentity(TEXT_STD_SIZE)

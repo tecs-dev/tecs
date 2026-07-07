@@ -2,7 +2,7 @@ local tecs <const> = require("tecs")
 local ffi <const> = require("ffi")
 local components <const> = require("tecs.internal.components")
 
-local math_pi, math_sin, math_cos, math_pow <const> = math.pi, math.sin, math.cos, math.pow
+local mathPi, mathSin, mathCos, mathPow <const> = math.pi, math.sin, math.cos, math.pow
 
 local type World = tecs.World
 local type Component = tecs.Component
@@ -310,10 +310,10 @@ makeVariants("quad", function(t: number): number return t * t end)
 makeVariants("cubic", function(t: number): number return t * t * t end)
 makeVariants("quart", function(t: number): number return t * t * t * t end)
 makeVariants("quint", function(t: number): number return t * t * t * t * t end)
-makeVariants("sine", function(t: number): number return 1 - math_cos(t * math_pi * 0.5) end)
+makeVariants("sine", function(t: number): number return 1 - mathCos(t * mathPi * 0.5) end)
 makeVariants("expo", function(t: number): number
     if t == 0 then return 0 end
-    return math_pow(2, 10 * (t - 1))
+    return mathPow(2, 10 * (t - 1))
 end)
 makeVariants("back", function(t: number): number
     local s <const> = 1.70158
@@ -323,7 +323,7 @@ makeVariants("elastic", function(t: number): number
     if t == 0 then return 0 end
     if t == 1 then return 1 end
     local p <const> = 0.3
-    return -math_pow(2, 10 * (t - 1)) * math_sin((t - 1 - p / 4) * (2 * math_pi) / p)
+    return -mathPow(2, 10 * (t - 1)) * mathSin((t - 1 - p / 4) * (2 * mathPi) / p)
 end)
 
 do
@@ -567,7 +567,7 @@ targetInit = function(self: Target,
         if relative then
             delta = t1
         else
-            local twoPi <const> = math_pi * 2
+            local twoPi <const> = mathPi * 2
             local diff <const> = (t1 - startVal) % twoPi
             delta = 2 * diff % twoPi - diff
         end

@@ -334,7 +334,7 @@ local record types
         --- Number of raymarch steps for shadow calculation.
         --- Higher values produce more accurate shadows at the cost of performance.
         --- Doubled automatically in pixel-perfect mode (low res = cheap pixels).
-        --- Default: 10
+        --- Default: 24
         shadowSteps: integer
 
         --- Extra culling margin for off-screen lights (for shadow continuity).
@@ -423,9 +423,6 @@ local record types
 
         -- Drop shadow AO canvas (R8, virtual res)
         pixelDropShadowAO: love.graphics.Canvas
-
-        -- Lit result canvas (screen-resolution, lazy-allocated for queryLightAt)
-        litCanvas: love.graphics.Canvas
 
         -- Bloom post-processing
         bloomDownsampleShader: love.graphics.Shader
@@ -782,7 +779,7 @@ types.CIRCLE_TRANSFORM_FORMAT = {
 
 -- Circle metadata buffer: 48 bytes per entity (synced only on dirty)
 types.CIRCLE_METADATA_FORMAT = {
-    {format = "floatvec4"},  -- lineWidth, _pad0, _pad1, _pad2
+    {format = "floatvec4"},  -- lineWidth, occluderHeight, _pad, blendId
     {format = "floatvec4"},  -- color: r, g, b, a
     {format = "floatvec4"},  -- clipBounds: minX, minY, maxX, maxY
 }
@@ -803,7 +800,7 @@ types.ELLIPSE_TRANSFORM_FORMAT = {
 
 -- Ellipse metadata buffer: 64 bytes per entity (synced only on dirty)
 types.ELLIPSE_METADATA_FORMAT = {
-    {format = "floatvec4"},  -- lineWidthPad: lineWidth, _pad, _pad, _pad
+    {format = "floatvec4"},  -- lineWidth, blendId, _pad, _pad
     {format = "floatvec4"},  -- color: r, g, b, a
     {format = "floatvec4"},  -- clipBounds: minX, minY, maxX, maxY
     {format = "floatvec4"},  -- pivot: pivotX, pivotY, _pad, _pad
@@ -825,9 +822,9 @@ types.ARC_TRANSFORM_FORMAT = {
     {format = "floatvec4"},  -- rotation, flags, _pad, _pad
 }
 
--- Arc metadata buffer: 48 bytes per entity (synced only on dirty)
+-- Arc metadata buffer: 64 bytes per entity (synced only on dirty)
 types.ARC_METADATA_FORMAT = {
-    {format = "floatvec4"},  -- lineWidthPad: lineWidth, _pad, _pad, _pad
+    {format = "floatvec4"},  -- lineWidth, blendId, _pad, _pad
     {format = "floatvec4"},  -- color: r, g, b, a
     {format = "floatvec4"},  -- clipBounds: minX, minY, maxX, maxY
     {format = "floatvec4"},  -- pivot: pivotX, pivotY, _pad, _pad
@@ -849,7 +846,7 @@ types.LINE_TRANSFORM_FORMAT = {
 
 -- Line metadata buffer: 48 bytes per entity (synced only on dirty)
 types.LINE_METADATA_FORMAT = {
-    {format = "floatvec4"},  -- lineWidthPad: lineWidth, _pad, _pad, _pad
+    {format = "floatvec4"},  -- lineWidth, blendId, _pad, _pad
     {format = "floatvec4"},  -- color: r, g, b, a
     {format = "floatvec4"},  -- clipBounds: minX, minY, maxX, maxY
 }
@@ -869,10 +866,10 @@ types.RECT_TRANSFORM_FORMAT = {
     {format = "floatvec4"},  -- scaledWidth, scaledHeight, rotation, flags
 }
 
--- Rectangle metadata buffer: 64 bytes per entity (synced only on dirty)
--- Note: width/height are now pre-computed in transform buffer as scaledWidth/scaledHeight
+-- Rectangle metadata buffer: 64 bytes per entity (synced only on dirty).
+-- Width/height live in the transform buffer as scaledWidth/scaledHeight.
 types.RECT_METADATA_FORMAT = {
-    {format = "floatvec4"},  -- lineWidthPad: lineWidth, _pad, _pad, _pad
+    {format = "floatvec4"},  -- lineWidth, occluderHeight, _pad, blendId
     {format = "floatvec4"},  -- color: r, g, b, a
     {format = "floatvec4"},  -- cornerPivot: rx, ry, pivotX, pivotY
     {format = "floatvec4"},  -- clipBounds: minX, minY, maxX, maxY

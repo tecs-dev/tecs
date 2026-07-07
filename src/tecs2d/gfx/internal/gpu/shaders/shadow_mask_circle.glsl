@@ -6,7 +6,7 @@
 struct CircleData {
     vec4 posRadius;
     vec4 color;             // rgb = color, a = occluderHeight (from cull shader)
-    vec4 depthLayerLineFlags;  // depth, layer, unused, flags
+    vec4 depthLayerLineFlags;  // depth, layer, unused, unused (zeroed for shadow output)
     vec4 clipBounds;
 };
 
