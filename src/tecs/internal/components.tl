@@ -131,6 +131,20 @@ end
 local INTERNAL_STORAGE_TOKEN <const> = {} as any
 local NOOP_INIT <const> = function(_instance: any) end
 
+-- Metadata the relationship machinery stamps on table instances; the
+-- fallback instance serializer excludes these (plus the `component*`
+-- family) from payloads.
+local INSTANCE_METADATA_KEYS <const>: {string: boolean} = {
+    storage = true,
+    storageType = true,
+    relationshipType = true,
+    exclusiveRelationship = true,
+    wildcardContainer = true,
+    isContainer = true,
+    isSparseInstance = true,
+    transient = true,
+}
+
 local function applyPositionalDefaults(instance: {string:any}, fields: {string}, defaults: {any})
     if not defaults then
         return
@@ -588,20 +602,31 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
             return (storageAny.serialize as function(Storage, R): {string: any})(
                 relationshipStorage, instance)
         end
+    elseif cfg.fields then
+        -- Declared fields ARE the payload: serialize exactly them plus
+        -- the target. An allowlist cannot leak instance metadata, no
+        -- matter what the relationship machinery stamps on instances
+        -- later.
+        local declaredFields <const> = cfg.fields as {string}
+        relContainer.serialize = function(instance: R): {string: any}
+            local inst = instance as {string: any}
+            local data: {string: any} = { target = inst.target }
+            for i = 1, #declaredFields do
+                local f = declaredFields[i]
+                data[f] = inst[f]
+            end
+            return data
+        end
     else
+        -- Custom `new` without declared fields: the instance shape is
+        -- unknown, so fall back to scanning it minus the stamped
+        -- metadata.
         relContainer.serialize = function(instance: R): {string: any}
             local data: {string: any} = {}
             for k, v in pairs(instance as {string: any}) do
                 if type(k) == "string"
                         and not (k as string):match("^component")
-                        and k ~= "storage"
-                        and k ~= "storageType"
-                        and k ~= "relationshipType"
-                        and k ~= "exclusiveRelationship"
-                        and k ~= "wildcardContainer"
-                        and k ~= "isContainer"
-                        and k ~= "isSparseInstance"
-                        and k ~= "transient" then
+                        and not INSTANCE_METADATA_KEYS[k as string] then
                     local vtype = type(v)
                     if vtype == "number" or vtype == "string" or vtype == "boolean" or vtype == "table" then
                         data[k] = v
