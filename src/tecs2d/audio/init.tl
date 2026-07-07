@@ -323,6 +323,30 @@ function audio.plugin(): tecs.Plugin
         -----------------------------------------------------------------------
         --- System: Update AudioSources (positional)
         -----------------------------------------------------------------------
+        -----------------------------------------------------------------------
+        --- Helper: Per-frame sync for a relative (non-positional) source:
+        --- init when the handle completes, re-init on structural change, then
+        --- refresh mutable fields and play state.
+        -----------------------------------------------------------------------
+        local function updateRelativeSource(audioSrc: types.AudioSource)
+            if audioSrc.handle.isComplete and not audioSrc._source then
+                initializeSource(audioSrc, true)
+            end
+
+            reinitIfStructuralChange(audioSrc, true)
+
+            if audioSrc._source then
+                audioManager:refreshComponentSource(audioSrc._source, audioSrc)
+                applyPitch(audioSrc)
+                updatePlayState(audioSrc)
+            end
+        end
+
+        -----------------------------------------------------------------------
+        --- System: Update AudioSources with a Transform. Relative rows take
+        --- the non-positional path in the same iteration, so the query is
+        --- only walked once per frame.
+        -----------------------------------------------------------------------
         world:addSystem({
             name = "audio.UpdateSources",
             phase = tecs.phases.PostUpdate,
@@ -334,8 +358,8 @@ function audio.plugin(): tecs.Plugin
                     for i = 1, len do
                         local audioSrc = sources[i]
 
-                        -- Skip relative sources (handled by UpdateRelativeSources)
                         if audioSrc.relative then
+                            updateRelativeSource(audioSrc)
                             goto continue
                         end
 
@@ -363,49 +387,17 @@ function audio.plugin(): tecs.Plugin
         })
 
         -----------------------------------------------------------------------
-        --- Helper: Per-frame sync for a relative (non-positional) source:
-        --- init when the handle completes, re-init on structural change, then
-        --- refresh mutable fields and play state.
-        -----------------------------------------------------------------------
-        local function updateRelativeSource(audioSrc: types.AudioSource)
-            if audioSrc.handle.isComplete and not audioSrc._source then
-                initializeSource(audioSrc, true)
-            end
-
-            reinitIfStructuralChange(audioSrc, true)
-
-            if audioSrc._source then
-                audioManager:refreshComponentSource(audioSrc._source, audioSrc)
-                applyPitch(audioSrc)
-                updatePlayState(audioSrc)
-            end
-        end
-
-        -----------------------------------------------------------------------
-        --- System: Update AudioSources (relative/non-positional)
+        --- System: Update AudioSources without a Transform (always relative)
         -----------------------------------------------------------------------
         world:addSystem({
             name = "audio.UpdateRelativeSources",
             phase = tecs.phases.PostUpdate,
             run = function(_dt: number)
-                -- Handle sources without Transform (always relative)
                 for archetype, len in relativeSourceQuery:iter() do
                     local sources = archetype:getMut(audio.AudioSource)
 
                     for i = 1, len do
                         updateRelativeSource(sources[i])
-                    end
-                end
-
-                -- Handle sources with Transform but marked as relative
-                for archetype, len in sourceQuery:iter() do
-                    local sources = archetype:getMut(audio.AudioSource)
-
-                    for i = 1, len do
-                        local audioSrc = sources[i]
-                        if audioSrc.relative then
-                            updateRelativeSource(audioSrc)
-                        end
                     end
                 end
             end
