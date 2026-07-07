@@ -38,11 +38,11 @@ local record LayoutBox is Component
     offsetY: number
 
     --- Origin X as a percentage (0-1). 0 = left edge, 0.5 = center, 1 = right edge.
-    --- Defaults to 0.5 (centered) for backward compatibility.
+    --- Defaults to 0.5 (centered).
     originX: number
 
     --- Origin Y as a percentage (0-1). 0 = top edge, 0.5 = center, 1 = bottom edge.
-    --- Defaults to 0.5 (centered) for backward compatibility.
+    --- Defaults to 0.5 (centered).
     originY: number
 
     --- The component ID to query for dimensions (0 = use fixed width/height).
@@ -86,7 +86,7 @@ tecs.newFFIComponent({
         originX: number,
         originY: number
     )
-        -- Default origin to 0.5 (centered) for backward compatibility
+        -- Default origin to 0.5 (centered)
         local ox = originX or 0.5
         local oy = originY or 0.5
 

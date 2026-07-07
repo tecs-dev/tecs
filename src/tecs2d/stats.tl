@@ -28,7 +28,7 @@ local record stats
         --- The frequency in seconds to sample the memory usage.
         sampleFrequency: number
 
-        --- The frequency in seconds to run garbage collection.
+        --- The frequency in seconds to sample the Lua heap size and world stats.
         gcFrequency: number
     end
 
