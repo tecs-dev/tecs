@@ -43,6 +43,9 @@ local record bmfont
 
     --- A loaded BMFont with metrics and atlas.
     record BMFont
+        --- Unique id per loaded font instance; identifies the font in
+        --- caches (face/page names are not unique across files).
+        _uid: integer
         --- Font type: "bitmap", "msdf", "sdf", or "psdf"
         type: string
         --- Font face name
@@ -211,8 +214,12 @@ local function getExtension(path: string): string
 end
 
 -- Create font with metatable
+local nextFontUid = 1
 local function createFont(): bmfont.BMFont
+    local uid = nextFontUid
+    nextFontUid = nextFontUid + 1
     local font: bmfont.BMFont = {
+        _uid = uid,
         type = "bitmap",
         face = "",
         size = 0,

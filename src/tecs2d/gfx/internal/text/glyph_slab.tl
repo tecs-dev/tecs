@@ -39,12 +39,7 @@ local record glyph_slab
         width: number          -- Cached text width (scaled)
         height: number         -- Cached text height (scaled)
         fontId: integer        -- Font ID for atlas layer lookup
-        hash: integer          -- Hash key for registry removal on release
-        -- Collision detection fields (verify hash match)
-        text: string           -- Original text for collision check
-        fontKey: string        -- Font identifier for collision check
-        sx: number             -- Scale X for collision check
-        sy: number             -- Scale Y for collision check
+        key: string            -- Registry key (font uid + text + scale)
     end
 
     --- The slab allocator
@@ -58,8 +53,10 @@ local record glyph_slab
         --- Next free slot
         nextSlot: integer
 
-        --- Registry: hash → SlabEntry
-        registry: {integer: SlabEntry}
+        --- Registry: composite key (font uid + text + scale) → SlabEntry.
+        --- Plain string keys make dedup exact; there is no hashing to
+        --- collide and no probing to corrupt on release.
+        registry: {string: SlabEntry}
 
         --- Free ranges: {offset, count} pairs for reclaimed slots
         freeRanges: {{integer, integer}}
@@ -103,17 +100,32 @@ glyph_slab.SLAB_ENTRY_CTYPE = "GlyphSlabEntry"
 local SlabAllocator <const> = glyph_slab.SlabAllocator
 local SLAB_MT <const>: metatable<SlabAllocator> = { __index = SlabAllocator }
 
--- Hash function for (fontPath + text + scale)
-local function computeHash(fontPath: string, text: string, sx: number, sy: number): integer
-    -- FNV-1a hash
-    local hash = 2166136261
-    local str = fontPath .. "\0" .. text .. "\0" .. tostring(sx) .. "\0" .. tostring(sy)
-    for i = 1, #str do
-        hash = bit.bxor(hash, str:byte(i))
-        hash = hash * 16777619
-        hash = bit.band(hash, 0xFFFFFFFF)  -- Keep 32-bit
+-- Decode the UTF-8 codepoint starting at byte i.
+-- Returns the codepoint and the index of the next character. Malformed
+-- bytes decode as U+FFFD-style fallback (the byte value) and advance by
+-- one so bad input degrades to mojibake instead of skewing the layout.
+local band <const> = bit.band
+local bor <const> = bit.bor
+local lshift <const> = bit.lshift
+local function decodeUtf8(text: string, i: integer): integer, integer
+    local b1 = text:byte(i)
+    if b1 < 0x80 then
+        return b1, i + 1
+    elseif b1 >= 0xC0 and b1 < 0xE0 then
+        local b2 = text:byte(i + 1)
+        if not b2 then return b1, i + 1 end
+        return bor(lshift(band(b1, 0x1F), 6), band(b2, 0x3F)), i + 2
+    elseif b1 < 0xF0 then
+        local b2, b3 = text:byte(i + 1), text:byte(i + 2)
+        if not b3 then return b1, i + 1 end
+        return bor(lshift(band(b1, 0x0F), 12), lshift(band(b2, 0x3F), 6), band(b3, 0x3F)), i + 3
+    elseif b1 < 0xF8 then
+        local b2, b3, b4 = text:byte(i + 1), text:byte(i + 2), text:byte(i + 3)
+        if not b4 then return b1, i + 1 end
+        return bor(lshift(band(b1, 0x07), 18), lshift(band(b2, 0x3F), 12),
+            lshift(band(b3, 0x3F), 6), band(b4, 0x3F)), i + 4
     end
-    return hash
+    return b1, i + 1
 end
 
 -- Compute glyph layout and write full GPU-ready data to slab buffer
@@ -137,8 +149,11 @@ local function computeLayout(
     local atlasW = font.scaleW
     local atlasH = font.scaleH
 
-    for i = 1, #text do
-        local codepoint = text:byte(i)
+    local i = 1
+    local textLen = #text
+    while i <= textLen do
+        local codepoint: integer
+        codepoint, i = decodeUtf8(text, i)
 
         -- Skip control characters (except newline and tab)
         if codepoint < 32 and codepoint ~= 9 and codepoint ~= 10 then
@@ -210,8 +225,8 @@ local function computeLayout(
     -- This eliminates pivot math from the CPU hot path
     local pivotOffsetX = 0.5 * maxWidth
     local pivotOffsetY = 0.5 * height
-    for i = 0, glyphCount - 1 do
-        local entry = buffer[startOffset + i]
+    for g = 0, glyphCount - 1 do
+        local entry = buffer[startOffset + g]
         entry.localX = entry.localX - pivotOffsetX
         entry.localY = entry.localY - pivotOffsetY
     end
@@ -262,28 +277,18 @@ function SlabAllocator:acquire(
     sx: number,
     sy: number
 ): glyph_slab.SlabEntry
-    local fontKey = font.face .. (font.page or "")
-    local hash = computeHash(fontKey, text, sx, sy)
+    -- Font uid (not face/page names, which collide across files) plus
+    -- text and scale form an exact dedup key.
+    local key = tostring(font._uid) .. "\0" .. text .. "\0" .. tostring(sx) .. "\0" .. tostring(sy)
 
-    -- Check if already exists (with collision detection)
-    local existing = self.registry[hash]
+    local existing = self.registry[key]
     if existing then
-        -- Verify it's actually the same text/font/scale (hash collision check)
-        if existing.text == text and existing.fontKey == fontKey
-           and existing.sx == sx and existing.sy == sy then
-            existing.refCount = existing.refCount + 1
-            return existing
-        end
-        -- Hash collision: fall through to create new entry with different hash
-        -- Use linear probing to find an unused hash slot
-        local probeHash = hash
-        while self.registry[probeHash] do
-            probeHash = probeHash + 1
-        end
-        hash = probeHash
+        existing.refCount = existing.refCount + 1
+        return existing
     end
 
-    -- Estimate max glyphs needed (worst case: all printable)
+    -- Estimate max glyphs needed (worst case: all printable; byte count
+    -- is an upper bound on decoded codepoints)
     local maxGlyphs = #text
 
     -- Try to find a free range first
@@ -316,7 +321,6 @@ function SlabAllocator:acquire(
     -- Get or register font ID
     local fontId = self:getFontId(font)
 
-    -- Create entry with collision detection fields
     local entry: glyph_slab.SlabEntry = {
         offset = startOffset,
         count = glyphCount,
@@ -325,14 +329,10 @@ function SlabAllocator:acquire(
         width = width,
         height = height,
         fontId = fontId,
-        hash = hash,
-        text = text,
-        fontKey = fontKey,
-        sx = sx,
-        sy = sy,
+        key = key,
     }
 
-    self.registry[hash] = entry
+    self.registry[key] = entry
 
     return entry
 end
@@ -340,8 +340,7 @@ end
 function SlabAllocator:release(entry: glyph_slab.SlabEntry)
     entry.refCount = entry.refCount - 1
     if entry.refCount <= 0 then
-        -- Remove from registry so the hash can be reused
-        self.registry[entry.hash] = nil
+        self.registry[entry.key] = nil
 
         -- Add to free list with coalescing
         if entry.capacity > 0 then

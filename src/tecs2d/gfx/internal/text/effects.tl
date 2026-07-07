@@ -59,25 +59,24 @@ end
 
 local function applyConfig(eff: TextEffects, config: TextEffectsConfig)
     if not config then return end
+    -- Effects without an explicit color default to opaque black; leaving
+    -- the FFI-zeroed alpha would make a configured width/radius invisible
+    -- (the shader multiplies by the color's alpha).
     if config.outline then
         eff.outlineWidth = config.outline.width or 0
         local c = config.outline.color
-        if c then
-            eff.outlineR = c[1] or 0
-            eff.outlineG = c[2] or 0
-            eff.outlineB = c[3] or 0
-            eff.outlineA = c[4] or 1
-        end
+        eff.outlineR = c and c[1] or 0
+        eff.outlineG = c and c[2] or 0
+        eff.outlineB = c and c[3] or 0
+        eff.outlineA = c and (c[4] or 1) or 1
     end
     if config.glow then
         eff.glowRadius = config.glow.radius or 0
         local c = config.glow.color
-        if c then
-            eff.glowR = c[1] or 0
-            eff.glowG = c[2] or 0
-            eff.glowB = c[3] or 0
-            eff.glowA = c[4] or 1
-        end
+        eff.glowR = c and c[1] or 0
+        eff.glowG = c and c[2] or 0
+        eff.glowB = c and c[3] or 0
+        eff.glowA = c and (c[4] or 1) or 1
     end
     if config.shadow then
         local off = config.shadow.offset
@@ -87,12 +86,10 @@ local function applyConfig(eff: TextEffects, config: TextEffectsConfig)
         end
         eff.shadowBlur = config.shadow.blur or 0
         local c = config.shadow.color
-        if c then
-            eff.shadowR = c[1] or 0
-            eff.shadowG = c[2] or 0
-            eff.shadowB = c[3] or 0
-            eff.shadowA = c[4] or 1
-        end
+        eff.shadowR = c and c[1] or 0
+        eff.shadowG = c and c[2] or 0
+        eff.shadowB = c and c[3] or 0
+        eff.shadowA = c and (c[4] or 1) or 1
     end
 end
 

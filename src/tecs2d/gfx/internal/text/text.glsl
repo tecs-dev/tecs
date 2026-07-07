@@ -51,7 +51,14 @@ layout(std430) readonly buffer VisibleGlyphBuffer {
 
 uniform int ShadowPass;   // 0 = normal (fill+outline+glow), 1 = shadow pass
 uniform ArrayImage SDFAtlas;
-uniform float PxRange;
+
+// Per-font-layer params, indexed by the header's fontLayer:
+// x, y = font atlas size over array size (atlases smaller than the
+// max-sized array occupy its top-left corner, so per-font UVs need
+// this scale); z = the font's SDF pxRange (SDF layers only).
+const int MAX_FONT_LAYERS = 16;
+uniform vec4 SDFFontParams[MAX_FONT_LAYERS];
+uniform vec4 BitmapFontParams[MAX_FONT_LAYERS];
 
 varying vec4 vColor;
 varying vec2 vWorldPos;
@@ -166,8 +173,14 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
         worldPos += shdOff;
     }
 
-    // Texture coordinates (within atlas glyph region, includes SDF padding)
-    vTexCoord = vec3(uvOrigin + quadPos * uvSize, fontLayer);
+    // Texture coordinates (within atlas glyph region, includes SDF padding).
+    // Glyph UVs are normalized to the font's own atlas; scale them to the
+    // (possibly larger) array layer.
+    int fontLayerIdx = clamp(int(fontLayer + 0.5), 0, MAX_FONT_LAYERS - 1);
+    vec2 uvScale = ((flagBits & FLAG_MSDF) != 0u)
+        ? SDFFontParams[fontLayerIdx].xy
+        : BitmapFontParams[fontLayerIdx].xy;
+    vTexCoord = vec3((uvOrigin + quadPos * uvSize) * uvScale, fontLayer);
     // -- VERTEX_MATERIAL --
     vec2 screenPos = worldToScreen(worldPos, isScreenSpace, ignoresZoom, usesVirtualCoords);
 
@@ -194,7 +207,7 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
     vEffects1 = h.effects1;
     vEffects2 = h.effects2;
     vQuadPos = quadPos;
-    vUVBounds = vec4(uvOrigin, uvOrigin + uvSize);
+    vUVBounds = vec4(uvOrigin * uvScale, (uvOrigin + uvSize) * uvScale);
 
     return result;
 }
@@ -254,10 +267,12 @@ void effect() {
     vec4 finalColor;
 
     if (isMSDF) {
-        // Screen-space pixel range for anti-aliasing
+        // Screen-space pixel range for anti-aliasing, using this font
+        // layer's own distance range.
+        float pxRange = SDFFontParams[clamp(int(vTexCoord.z + 0.5), 0, MAX_FONT_LAYERS - 1)].z;
         vec2 atlasSize = vec2(textureSize(SDFAtlas, 0).xy);
         float texelsPerPx = length(fwidth(vTexCoord.xy) * atlasSize);
-        float screenPxRange = max(PxRange / texelsPerPx, 1.0);
+        float screenPxRange = max(pxRange / texelsPerPx, 1.0);
 
         // Sample SDF within the glyph's atlas region (includes PxRange/2 padding)
         float sd = sampleMSDFMedian(SDFAtlas, vec3(vTexCoord.xy, vTexCoord.z), atlasSize, vUVBounds);

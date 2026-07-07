@@ -233,9 +233,21 @@ function text_sync.plugin(_world: tecs.World, renderer: gpuTypes.Renderer, TextC
         } as love.graphics.CanvasSetting)
         placeholderSdfArray:setFilter("linear", "linear")
 
+        local MAX_FONT_LAYERS <const> = 16
+
+        local function defaultFontParams(): {{number}}
+            local params: {{number}} = {}
+            for i = 1, MAX_FONT_LAYERS do
+                params[i] = {1.0, 1.0, 4.0, 0.0}
+            end
+            return params
+        end
+
         local growable: render_plugin.TextGrowable = {
             atlasArray = nil,
             sdfAtlasArray = placeholderSdfArray as love.graphics.Texture,
+            sdfFontParams = defaultFontParams(),
+            bitmapFontParams = defaultFontParams(),
         }
 
         -- Bitmap font registry (nearest filter)
@@ -249,7 +261,6 @@ function text_sync.plugin(_world: tecs.World, renderer: gpuTypes.Renderer, TextC
         local nextSdfFontLayer = 0
 
         local sdfDistanceRanges: {integer: number} = {}
-        local pxRange: {number} = {4.0}
 
         local function rebuildAtlasArray(atlases: {love.graphics.Image}, filter: string, isLinear: boolean): love.graphics.Texture
             local numLayers = #atlases
@@ -284,27 +295,59 @@ function text_sync.plugin(_world: tecs.World, renderer: gpuTypes.Renderer, TextC
             return newArray as love.graphics.Texture
         end
 
+        -- Recompute per-layer params after a rebuild: every atlas smaller
+        -- than the (max-sized) array needs a UV scale so per-font UVs land
+        -- on the right texels, and SDF layers carry their own pxRange
+        -- instead of sharing whichever font registered last.
+        local function rebuildFontParams(
+            params: {{number}},
+            atlases: {love.graphics.Image},
+            array: love.graphics.Texture,
+            ranges?: {integer: number}
+        )
+            if not array then return end
+            local arrayW, arrayH = array:getWidth(), array:getHeight()
+            for i = 1, MAX_FONT_LAYERS do
+                local img = atlases[i]
+                local entry = params[i]
+                if img then
+                    entry[1] = img:getWidth() / arrayW
+                    entry[2] = img:getHeight() / arrayH
+                    entry[3] = ranges and (ranges[i - 1] or 4.0) or 0.0
+                else
+                    entry[1], entry[2], entry[3] = 1.0, 1.0, 4.0
+                end
+            end
+        end
+
         local function registerBitmapFontAtlas(atlas: love.graphics.Image): integer
             local existing = bitmapFontLayers[atlas]
             if existing then return existing end
+            if nextBitmapFontLayer >= MAX_FONT_LAYERS then
+                error("text: at most " .. MAX_FONT_LAYERS .. " bitmap font atlases are supported")
+            end
             local layerIndex = nextBitmapFontLayer
             bitmapFontLayers[atlas] = layerIndex
             bitmapFontAtlases[#bitmapFontAtlases + 1] = atlas
             nextBitmapFontLayer = layerIndex + 1
             growable.atlasArray = rebuildAtlasArray(bitmapFontAtlases, "nearest", false)
+            rebuildFontParams(growable.bitmapFontParams, bitmapFontAtlases, growable.atlasArray)
             return layerIndex
         end
 
         local function registerSDFFontAtlas(atlas: love.graphics.Image, distanceRange: number): integer
             local existing = sdfFontLayers[atlas]
             if existing then return existing end
+            if nextSdfFontLayer >= MAX_FONT_LAYERS then
+                error("text: at most " .. MAX_FONT_LAYERS .. " SDF font atlases are supported")
+            end
             local layerIndex = nextSdfFontLayer
             sdfFontLayers[atlas] = layerIndex
             sdfFontAtlases[#sdfFontAtlases + 1] = atlas
             sdfDistanceRanges[layerIndex] = distanceRange
-            pxRange[1] = distanceRange
             nextSdfFontLayer = layerIndex + 1
             growable.sdfAtlasArray = rebuildAtlasArray(sdfFontAtlases, "linear", true)
+            rebuildFontParams(growable.sdfFontParams, sdfFontAtlases, growable.sdfAtlasArray, sdfDistanceRanges)
             return layerIndex
         end
 
@@ -369,7 +412,6 @@ function text_sync.plugin(_world: tecs.World, renderer: gpuTypes.Renderer, TextC
             syncRef = shadowCtx.syncRef,
             registry = shadowCtx.registry,
             textComponent = TextComponent,
-            pxRange = pxRange,
         }))
 
         w:addSystem({

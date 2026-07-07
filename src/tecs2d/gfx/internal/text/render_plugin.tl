@@ -35,6 +35,11 @@ local record render_plugin
     record TextGrowable
         atlasArray: love.graphics.Texture
         sdfAtlasArray: love.graphics.Texture
+        --- Per-layer font params (16 vec4s each): uvScaleX, uvScaleY
+        --- (font atlas size over array size), pxRange (SDF only), 0.
+        --- Rebuilt by sync whenever a font atlas registers.
+        sdfFontParams: {{number}}
+        bitmapFontParams: {{number}}
     end
 
     record Config
@@ -58,8 +63,6 @@ local record render_plugin
         --- shadow registry on each cull pass.
         registry: archetype_registry.Registry
         textComponent: tecs.Component
-        --- Shared PxRange ref (pxRange[1] is the current value).
-        pxRange: {number}
     end
 
     create: function(config: Config): types.RenderPlugin
@@ -106,7 +109,7 @@ function render_plugin.create(config: render_plugin.Config): types.RenderPlugin
     local syncRef <const> = config.syncRef
     local registry <const> = config.registry
     local textComponent <const> = config.textComponent
-    local pxRange <const> = config.pxRange
+    local unpackFn <const> = (rawget(_G as table, "unpack") or (table as {string:any}).unpack) as function({{number}}): {number}...
 
     -- Cached frame state populated by `cull`, consumed by the draw
     -- hooks. Avoids a second registry walk per frame.
@@ -119,8 +122,11 @@ function render_plugin.create(config: render_plugin.Config): types.RenderPlugin
             sdfTex:setWrap("clamp", "clamp")
             shader:send("SDFAtlas", sdfTex)
         end
-        if shader:hasUniform("PxRange") then
-            shader:send("PxRange", pxRange[1])
+        if shader:hasUniform("SDFFontParams") and growable.sdfFontParams then
+            shader:send("SDFFontParams", unpackFn(growable.sdfFontParams))
+        end
+        if shader:hasUniform("BitmapFontParams") and growable.bitmapFontParams then
+            shader:send("BitmapFontParams", unpackFn(growable.bitmapFontParams))
         end
     end
 
@@ -206,7 +212,14 @@ function render_plugin.create(config: render_plugin.Config): types.RenderPlugin
                         end
                     end
 
-                    lg.drawFromShaderIndirect("triangles", shadowBuffers.indirectBuffer, 1, tex)
+                    -- Mirror the base pass's drop-shadow dispatch: material
+                    -- text keeps its MSDF drop shadows.
+                    if variantShader:hasUniform("ShadowPass") then
+                        variantShader:send("ShadowPass", 1)
+                        lg.drawFromShaderIndirect("triangles", shadowBuffers.indirectBuffer, 1, tex or growable.sdfAtlasArray)
+                        variantShader:send("ShadowPass", 0)
+                    end
+                    lg.drawFromShaderIndirect("triangles", shadowBuffers.indirectBuffer, 1, tex or growable.sdfAtlasArray)
                 end
             end
         end
@@ -253,6 +266,56 @@ function render_plugin.create(config: render_plugin.Config): types.RenderPlugin
 
             lg.setBlendMode(group.blendMode, group.blendAlphaMode)
             lg.drawFromShaderIndirect("triangles", shadowBuffers.indirectBuffer, 1, tex or growable.sdfAtlasArray)
+        end
+
+        -- Material variants: text with both a Material and a blend mode is
+        -- filtered out of the base draws above (MaterialPass -1), so run
+        -- the variant shaders per blend group too.
+        if syncRef.materialGroupCount > 0 then
+            for m = 1, syncRef.materialGroupCount do
+                local matGroup = syncRef.materialGroups[m]
+                local matId = matGroup.materialId
+                local variantShader = material_compiler.compile(matId, "text")
+                if variantShader then
+                    lg.setShader(variantShader)
+                    variantShader:send("RenderParams", renderer.renderParamsBuffer)
+                    if variantShader:hasUniform("LayerRange") then
+                        variantShader:send("LayerRange", renderer._layerRange)
+                    end
+                    variantShader:send("MaterialPass", matId)
+                    variantShader:send("TextHeaderBuffer", shadowBuffers.headerBuffer)
+                    variantShader:send("GlyphDataBuffer", glyphBuffer.handle)
+                    variantShader:send("VisibleGlyphBuffer", shadowBuffers.visibleGlyphBuffer)
+                    variantShader:send("MaterialParamsBuffer", shadowBuffers.materialParamsBuffer)
+                    if tex then
+                        variantShader:send("MainTex", tex)
+                    end
+                    sendSDFUniforms(variantShader)
+
+                    local def = material_registry.getById(matId)
+                    if def then
+                        for uniformName, t in pairs(def.textures) do
+                            if variantShader:hasUniform(uniformName) then
+                                variantShader:send(uniformName, t)
+                            end
+                        end
+                    end
+
+                    for b = 1, syncRef.blendGroupCount do
+                        local group = syncRef.blendGroups[b]
+                        if variantShader:hasUniform("BlendModePass") then
+                            variantShader:send("BlendModePass", group.blendId)
+                        end
+                        lg.setBlendMode(group.blendMode, group.blendAlphaMode)
+                        if variantShader:hasUniform("ShadowPass") then
+                            variantShader:send("ShadowPass", 1)
+                            lg.drawFromShaderIndirect("triangles", shadowBuffers.indirectBuffer, 1, tex or growable.sdfAtlasArray)
+                            variantShader:send("ShadowPass", 0)
+                        end
+                        lg.drawFromShaderIndirect("triangles", shadowBuffers.indirectBuffer, 1, tex or growable.sdfAtlasArray)
+                    end
+                end
+            end
         end
 
         lg.setBlendMode("alpha", "alphamultiply")
