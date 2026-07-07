@@ -50,6 +50,38 @@ tools.list = {
         }
     },
     {
+        name = "sample_pixels",
+        description = "Sample framebuffer pixel colors at one or more points without transferring a " ..
+            "full screenshot. Returns RGBA floats in 0..1 per point plus the framebuffer size." ..
+            JSON_TEXT_RESPONSE,
+        inputSchema = {
+            type = "object",
+            properties = {
+                points = {
+                    type = "array",
+                    description = "Points to sample, each an object with x and y. " ..
+                        "Pixel coordinates by default; out-of-range points are clamped.",
+                    items = {
+                        type = "object",
+                        properties = {
+                            x = {type = "number", description = "X coordinate"},
+                            y = {type = "number", description = "Y coordinate"}
+                        },
+                        required = {"x", "y"},
+                        additionalProperties = false
+                    }
+                },
+                normalized = {
+                    type = "boolean",
+                    description = "When true, x and y are 0..1 fractions of the framebuffer size " ..
+                        "instead of pixel coordinates (resolution-independent)."
+                }
+            },
+            required = {"points"},
+            additionalProperties = false
+        }
+    },
+    {
         name = "send_love_event",
         description = "Send a Love2D event to the game." .. JSON_TEXT_RESPONSE,
         inputSchema = {

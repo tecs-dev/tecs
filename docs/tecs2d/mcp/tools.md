@@ -6,8 +6,8 @@ outline: deep
 
 The MCP server provides tools for AI assistants to inspect and control a running game.
 
-Except for `screenshot`, tool results are returned as MCP text content whose text is compact JSON. Successful tool
-payloads use:
+Except for `screenshot`, tool calls return an MCP `result` with one text content item. The text is a compact JSON
+envelope. Successful tool payloads use:
 
 ```json
 {"ok":true,"result":{}}
@@ -19,13 +19,33 @@ Some tools also include metadata:
 {"ok":true,"result":{},"meta":{"limit":100,"truncated":false}}
 ```
 
-Tool-level failures use MCP `isError: true` and a structured payload:
+Tool-level failures still return a JSON-RPC `result`, not a JSON-RPC `error`. The MCP tool result has
+`isError: true`, and its text content contains the structured error envelope:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"ok\":false,\"error\":{\"code\":\"unknown_component\",\"message\":\"Unknown component\",\"details\":{\"component\":\"Health\"}}}"
+      }
+    ],
+    "isError": true
+  }
+}
+```
+
+Decoded from `content[0].text`, the payload is:
 
 ```json
 {"ok":false,"error":{"code":"unknown_component","message":"Unknown component","details":{"component":"Health"}}}
 ```
 
-JSON-RPC protocol errors, such as unknown tool names or malformed requests, still use standard JSON-RPC errors.
+JSON-RPC protocol and dispatch errors, such as unknown tool names, invalid `tools/call` params, unknown methods, or
+malformed requests, use standard JSON-RPC `error` responses instead of MCP tool results.
 
 ## Discovery
 
@@ -57,6 +77,34 @@ Capture a screenshot of the game window.
 | `height` | number | No | Height for region capture |
 
 **Response:** MCP image content containing a base64-encoded PNG.
+
+## sample_pixels
+
+Sample framebuffer pixel colors at one or more points without transferring a full screenshot. Useful for cheap
+graphics assertions and agent-driven visual checks.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `points` | array | Yes | Points to sample, each an object with `x` and `y`. At most 256 per call. |
+| `normalized` | boolean | No | When true, `x` and `y` are 0..1 fractions of the framebuffer size instead of pixel coordinates |
+
+Points use pixel coordinates by default; out-of-range points are clamped to the framebuffer. Each returned pixel
+carries the clamped integer coordinates that were sampled plus RGBA floats in 0..1.
+
+**Example:**
+
+```json
+{"points":[{"x":0.5,"y":0.5},{"x":0.02,"y":0.02}],"normalized":true}
+```
+
+**Response:**
+
+```json
+{"ok":true,"result":{"width":320,"height":240,"pixels":[
+  {"x":160,"y":120,"r":1,"g":0,"b":0,"a":1},
+  {"x":6,"y":5,"r":0,"g":0,"b":0,"a":1}
+]}}
+```
 
 ## send_love_event
 

@@ -98,49 +98,23 @@ local function eventually<T>(seconds: number, fn: function(): T): T
     return last
 end
 
---- Capture a screenshot inside the app and probe pixels via run_lua, so no
---- PNG decoding is needed on the test side. `points` are {fx, fy} fractions
---- of the framebuffer size; returns one {r, g, b} triple (0..1) per point.
+--- Probe framebuffer pixels through the sample_pixels MCP tool. `points`
+--- are {fx, fy} fractions of the framebuffer size; returns one {r, g, b}
+--- triple (0..1) per point.
 local function probePixels(app: App, points: {{number, number}}): {{number}}
-    runLua(app, [[
-        rawset(_G, "tecsShot", nil)
-        love.graphics.captureScreenshot(function(d) rawset(_G, "tecsShot", d) end)
-        return true
-    ]])
-
-    local reads: {string} = {}
+    local requestPoints: {{string: number}} = {}
     for i = 1, #points do
-        reads[i] = string.format(
-            "do local r, g, b = shot:getPixel(math.floor(w * %f), math.floor(h * %f)) " ..
-            "out[#out + 1] = r out[#out + 1] = g out[#out + 1] = b end",
-            points[i][1], points[i][2])
+        requestPoints[i] = {x = points[i][1], y = points[i][2]}
     end
-    local code = [[
-        local shot = rawget(_G, "tecsShot")
-        if not shot then return "pending" end
-        local w, h = shot:getDimensions()
-        local out = {}
-        ]] .. table.concat(reads, "\n") .. [[
-        return unpack(out)]]
-
-    local values = eventually(CALL_TIMEOUT, function(): {string}
-        local results = runLua(app, code)
-        if results[1] == "pending" then return nil end
-        return results
-    end)
-    luassert.is_table(values, "screenshot capture never completed")
+    local result = app.client:call("sample_pixels",
+        {points = requestPoints, normalized = true}, 10)
+    local pixels = result.pixels as {{string: number}}
+    luassert.is_table(pixels, "sample_pixels returned no pixels")
 
     local triples: {{number}} = {}
     for i = 1, #points do
-        local base = (i - 1) * 3
-        local triple: {number} = {}
-        for channel = 1, 3 do
-            local value = tonumber(values[base + channel])
-            luassert.is_number(value,
-                "pixel probe returned non-number: " .. tostring(values[base + channel]))
-            triple[channel] = value
-        end
-        triples[i] = triple
+        local pixel = pixels[i]
+        triples[i] = {pixel.r, pixel.g, pixel.b}
     end
     return triples
 end
@@ -252,6 +226,19 @@ describe("mcp compliance: rendering", function()
         luassert.is_table(header, tostring(headerErr))
         luassert.are.equal(64, header.width)
         luassert.are.equal(32, header.height)
+    end)
+
+    it("sample_pixels reports framebuffer size and clamps out-of-range points", function()
+        local pixelDims = runLua(app, "return love.graphics.getPixelWidth(), love.graphics.getPixelHeight()")
+        local result = app.client:call("sample_pixels",
+            {points = {{x = 99999, y = 99999}}}, 10)
+        local width = tonumber(pixelDims[1])
+        local height = tonumber(pixelDims[2])
+        luassert.are.equal(width, result.width as number)
+        luassert.are.equal(height, result.height as number)
+        local pixel = (result.pixels as {{string: number}})[1]
+        luassert.are.equal(width - 1, pixel.x)
+        luassert.are.equal(height - 1, pixel.y)
     end)
 
     it("renders the red center rectangle on a dark background", function()

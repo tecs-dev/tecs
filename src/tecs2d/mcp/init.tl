@@ -207,6 +207,51 @@ toolHandlers["screenshot"] = function(args: {string:any}, id: number)
     end)
 end
 
+toolHandlers["sample_pixels"] = function(args: {string:any}, id: number)
+    local points = args.points as {{string: any}}
+    if type(points) ~= "table" or #points == 0 then
+        sendToolError(id, "missing_parameter", "Missing or empty 'points' array", nil)
+        return
+    end
+    if #points > 256 then
+        sendToolError(id, "too_many_points", "At most 256 points per call", {count = #points})
+        return
+    end
+    for i = 1, #points do
+        local point = points[i]
+        if type(point) ~= "table" or type(point.x) ~= "number" or type(point.y) ~= "number" then
+            sendToolError(id, "invalid_point", "Each point must be an object with numeric x and y",
+                {index = i})
+            return
+        end
+    end
+    local normalized = args.normalized as boolean
+
+    -- Reuses the screenshot keep-alive: the response is sent from the capture
+    -- callback one frame later, so the client socket stays open until then.
+    pendingScreenshotId = id
+    love.graphics.captureScreenshot(function(imageData: love.image.ImageData)
+        if pendingScreenshotId ~= id then return end
+        local w, h = imageData:getWidth(), imageData:getHeight()
+        local samples: {{string: number}} = {}
+        for i = 1, #points do
+            local point = points[i]
+            local x = point.x as number
+            local y = point.y as number
+            if normalized then
+                x = x * (w - 1)
+                y = y * (h - 1)
+            end
+            local px = math.floor(math.max(0, math.min(x, w - 1)) + 0.5)
+            local py = math.floor(math.max(0, math.min(y, h - 1)) + 0.5)
+            local r, g, b, a = imageData:getPixel(px, py)
+            samples[i] = {x = px, y = py, r = r, g = g, b = b, a = a}
+        end
+        sendToolOK(id, {width = w, height = h, pixels = samples}, nil)
+        pendingScreenshotId = nil
+    end)
+end
+
 toolHandlers["send_love_event"] = function(args: {string:any}, id: number)
     local eventName = args.event as string
     if not eventName then
