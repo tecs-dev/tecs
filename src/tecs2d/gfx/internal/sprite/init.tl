@@ -1288,8 +1288,6 @@ function sprite.plugin(renderPipeline: types.Pipeline): function(world: tecs.Wor
                 bucketMarkers = bucketMarkers,
                 optional = optional as {shadow_dispatch.OptionalBinding},
                 tagFlags = tagFlags,
-                initialBucketCapacity = 256,    -- unused when bucketProvider set
-                initialDropShadowCapacity = 256,
                 bucketProvider = bucketProvider,
                 bindGlobals = bindGlobals,
                 bindPerArchetype = bindPerArchetype,
