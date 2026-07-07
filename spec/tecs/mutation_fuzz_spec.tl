@@ -64,6 +64,7 @@ local GEN_STRIDE <const> = 4194304
 
 local ChildOf <const> = tecs.builtins.ChildOf
 local Key <const> = tecs.builtins.Key
+local Transform <const> = tecs.builtins.Transform
 
 -- Fuzz components: one numeric field each so canonical state is cheap.
 local FzA = tecs.newComponent({
@@ -89,12 +90,32 @@ local FzF = tecs.newFFIComponent({
     fields = {{"v", "double"}},
 })
 
+-- Raw-value scalar columns; string scalars ride builtin Key.
+local FzNum = tecs.newScalarComponent({
+    name = "FuzzNum", kind = "number", default = 0,
+})
+local FzBool = tecs.newScalarComponent({
+    name = "FuzzBool", kind = "boolean", default = false,
+})
+
 -- Dense exclusive reverse-indexed relationship (ChildOf covers the
 -- sparse + cascadeDelete axis).
 local FzLink = tecs.newRelationship({
     name = "FuzzLink",
     exclusive = true,
     reverseIndex = true,
+})
+
+-- Data-carrying dense relationship: payload fields ride the instance.
+-- Dense instances are cached one per target (weak values), so the fuzz
+-- always derives `w` from the target: a cache hit and a rebuilt
+-- instance then agree, keeping both worlds and snapshot round-trips
+-- deterministic.
+local FzRope = tecs.newRelationship({
+    name = "FuzzRope",
+    exclusive = true,
+    reverseIndex = true,
+    fields = {"w"},
 })
 
 -- Non-exclusive sparse reverse-indexed relationship: multi-target
@@ -115,9 +136,9 @@ local TTL <const> = tecs.builtins.TTL
 
 -- Ops draw from these; canonical reads also cover FzHealth (pulled in
 -- via requires, never set directly).
-local opComps: {tecs.Component} = {FzA, FzB, FzArmor, FzTag, FzF}
-local readComps: {tecs.Component} = {FzA, FzB, FzArmor, FzHealth, FzTag, FzF}
-local batchRemoveComps: {tecs.Component} = {FzB, FzTag, FzArmor, ChildOf, FzF}
+local opComps: {tecs.Component} = {FzA, FzB, FzArmor, FzTag, FzF, FzNum, FzBool}
+local readComps: {tecs.Component} = {FzA, FzB, FzArmor, FzHealth, FzTag, FzF, FzNum, FzBool}
+local batchRemoveComps: {tecs.Component} = {FzB, FzTag, FzArmor, ChildOf, FzF, FzNum}
 local batchSpawnSets: {{tecs.Component}} = {{FzA}, {FzA, FzTag}, {FzF, FzB}}
 
 -- Park-Miller LCG: multiplier small enough that state * 16807 stays
@@ -134,6 +155,9 @@ local function instanceOf(compIdx: integer, value: integer): tecs.Component
     local comp = opComps[compIdx]
     if comp == FzTag then
         return FzTag
+    end
+    if comp == FzBool then
+        return (FzBool as function(boolean): tecs.Component)(value % 2 == 0)
     end
     return (comp as function(integer): tecs.Component)(value)
 end
@@ -176,66 +200,90 @@ end
 -- Canonical observable state: one sorted line per live entity listing
 -- its id, component values, key, and relationship targets.
 -- `skipTransient` omits transient pieces (FzMark) for comparisons
--- across a snapshot boundary, which legitimately drops them.
-local function canonicalState(w: tecs.World, skipTransient?: boolean): string
+-- across a snapshot boundary, which legitimately drops them. `keep`
+-- filters entities, mirroring a partial save's expected subset.
+local function canonicalState(
+    w: tecs.World,
+    skipTransient?: boolean,
+    keep?: function(tecs.World, integer): boolean
+): string
     local lines: {string} = {}
     w:forEachArchetype(function(arch: tecs.Archetype)
         local entities = arch.entities
         for row = 1, entities[0] as integer do
             local id = entities[row] as integer
-            local piece: {string} = {tostring(id)}
-            for c = 1, #readComps do
-                local comp = readComps[c]
-                if w:has(id, comp) then
-                    if comp == FzTag then
-                        piece[#piece + 1] = "Tag"
-                    else
-                        local inst = w:get(id, comp) as {string: any}
-                        piece[#piece + 1] = (comp as {string: any}).componentName as string
-                            .. "=" .. tostring(inst.v)
+            if keep == nil or keep(w, id) then
+                local piece: {string} = {tostring(id)}
+                for c = 1, #readComps do
+                    local comp = readComps[c]
+                    if w:has(id, comp) then
+                        if comp == FzTag then
+                            piece[#piece + 1] = "Tag"
+                        elseif comp == FzNum or comp == FzBool then
+                            -- Scalar columns hold raw values.
+                            piece[#piece + 1] = (comp as {string: any}).componentName as string
+                                .. "=" .. tostring(w:get(id, comp))
+                        else
+                            local inst = w:get(id, comp) as {string: any}
+                            piece[#piece + 1] = (comp as {string: any}).componentName as string
+                                .. "=" .. tostring(inst.v)
+                        end
                     end
                 end
-            end
-            if w:has(id, Key) then
-                piece[#piece + 1] = "Key=" .. tostring(w:get(id, Key))
-            end
-            -- Sparse targets read from the store; `has` reads the
-            -- archetype's container marker. Encode both so a
-            -- marker-vs-store divergence is visible at its origin.
-            if w:has(id, ChildOf) then
-                piece[#piece + 1] = "ChildOfMark"
-            end
-            local parent = w:getFirstRelationship(id, ChildOf)
-            if parent then
-                piece[#piece + 1] = "ChildOf=" .. tostring(parent.target)
-            end
-            if w:has(id, FzLink) then
-                piece[#piece + 1] = "LinkMark"
-            end
-            local link = w:getFirstRelationship(id, FzLink)
-            if link then
-                piece[#piece + 1] = "Link=" .. tostring(link.target)
-            end
-            if not skipTransient then
-                if w:has(id, FzMark) then
-                    piece[#piece + 1] = "MarkMark"
+                if w:has(id, Key) then
+                    piece[#piece + 1] = "Key=" .. tostring(w:get(id, Key))
                 end
-                local markSources: {string} = {}
-                w:targets(id, FzMark, function(sourceId: integer, _ctx: nil)
-                    markSources[#markSources + 1] = tostring(sourceId)
-                end, nil)
-                if #markSources > 0 then
-                    table.sort(markSources)
-                    piece[#piece + 1] = "MarkSrcs=" .. table.concat(markSources, ";")
+                local tr = w:get(id, Transform) as {string: any}
+                if tr then
+                    piece[#piece + 1] = "T=" .. tostring(tr.x) .. ";" .. tostring(tr.y)
+                        .. ";" .. tostring(tr.layer)
                 end
+                -- Sparse targets read from the store; `has` reads the
+                -- archetype's container marker. Encode both so a
+                -- marker-vs-store divergence is visible at its origin.
+                if w:has(id, ChildOf) then
+                    piece[#piece + 1] = "ChildOfMark"
+                end
+                local parent = w:getFirstRelationship(id, ChildOf)
+                if parent then
+                    piece[#piece + 1] = "ChildOf=" .. tostring(parent.target)
+                end
+                if w:has(id, FzLink) then
+                    piece[#piece + 1] = "LinkMark"
+                end
+                local link = w:getFirstRelationship(id, FzLink)
+                if link then
+                    piece[#piece + 1] = "Link=" .. tostring(link.target)
+                end
+                if w:has(id, FzRope) then
+                    piece[#piece + 1] = "RopeMark"
+                end
+                local rope = w:getFirstRelationship(id, FzRope)
+                if rope then
+                    piece[#piece + 1] = "Rope=" .. tostring(rope.target)
+                        .. ":" .. tostring((rope as {string: any}).w)
+                end
+                if not skipTransient then
+                    if w:has(id, FzMark) then
+                        piece[#piece + 1] = "MarkMark"
+                    end
+                    local markSources: {string} = {}
+                    w:targets(id, FzMark, function(sourceId: integer, _ctx: nil)
+                        markSources[#markSources + 1] = tostring(sourceId)
+                    end, nil)
+                    if #markSources > 0 then
+                        table.sort(markSources)
+                        piece[#piece + 1] = "MarkSrcs=" .. table.concat(markSources, ";")
+                    end
+                end
+                if w:has(id, TTL) then
+                    piece[#piece + 1] = "TTL=" .. tostring((w:get(id, TTL) as {string: any}).remaining)
+                end
+                if w:has(id, FzState) then
+                    piece[#piece + 1] = "St"
+                end
+                lines[#lines + 1] = table.concat(piece, ",")
             end
-            if w:has(id, TTL) then
-                piece[#piece + 1] = "TTL=" .. tostring((w:get(id, TTL) as {string: any}).remaining)
-            end
-            if w:has(id, FzState) then
-                piece[#piece + 1] = "St"
-            end
-            lines[#lines + 1] = table.concat(piece, ",")
         end
     end)
     table.sort(lines)
@@ -531,6 +579,48 @@ describe("mutation differential fuzz", function()
                     local tgt = alive[ti]
                     bothWorlds(wa, wb, function(w: tecs.World): integer
                         w:set(src, FzLink(tgt))
+                        return nil
+                    end)
+                end },
+                { weight = 3, name = "set data-carrying FzRope", run = function()
+                    local si = pickAliveIdx()
+                    if not si then return end
+                    local src = alive[si]
+                    local ti = pickAliveIdx()
+                    if not ti then return end
+                    local tgt = alive[ti]
+                    -- Payload derives from the target: dense instances
+                    -- are cached per target, so any construction yields
+                    -- the same payload deterministically.
+                    local wv = tgt % 1000 + 1
+                    bothWorlds(wa, wb, function(w: tecs.World): integer
+                        w:set(src, (FzRope as function(integer, integer): tecs.Component)(tgt, wv))
+                        return nil
+                    end)
+                end },
+                { weight = 2, name = "remove FzRope instance", run = function()
+                    local si = pickAliveIdx()
+                    if not si then return end
+                    local src = alive[si]
+                    local rel = wa:getFirstRelationship(src, FzRope)
+                    if rel == nil then return end
+                    local tgt = rel.target
+                    local wv = tgt % 1000 + 1
+                    bothWorlds(wa, wb, function(w: tecs.World): integer
+                        w:remove(src, (FzRope as function(integer, integer): tecs.Component)(tgt, wv))
+                        return nil
+                    end)
+                end },
+                { weight = 3, name = "set Transform with layer", run = function()
+                    local si = pickAliveIdx()
+                    if not si then return end
+                    local id = alive[si]
+                    local x = rng(1000)
+                    local y = rng(1000)
+                    local layer = rng(3)
+                    bothWorlds(wa, wb, function(w: tecs.World): integer
+                        w:set(id, (Transform as function(number, number, number, integer): tecs.Component)(
+                            x, y, 0, layer))
                         return nil
                     end)
                 end },
@@ -908,6 +998,39 @@ describe("mutation differential fuzz", function()
             luassert.equals(want, canonicalState(freshAgain, true),
                 "re-save stability diverged, seed " .. seed)
             validate(freshAgain)
+
+            -- Layer-filtered binary save restores exactly the matching
+            -- subset; entities without Transform always pass the filter.
+            local outLayers = wa:saveSnapshot({ layers = {1, 3} })
+            local freshLayers = tecs.newWorld()
+            freshLayers:createState("fuzzState")
+            freshLayers:loadSnapshot(outLayers.buffer)
+            local wantLayers = canonicalState(wa, true, function(w2: tecs.World, id: integer): boolean
+                local tr = w2:get(id, Transform) as {string: any}
+                if tr == nil then
+                    return true
+                end
+                local layer = tr.layer as integer
+                return layer == 1 or layer == 3
+            end)
+            luassert.equals(wantLayers, canonicalState(freshLayers, true),
+                "layer-filtered restore diverged, seed " .. seed)
+            validate(freshLayers)
+
+            -- filterQuery save keeps only matching entities.
+            local outQuery = wa:saveSnapshot({
+                format = "table",
+                filterQuery = { include = {FzTag} },
+            })
+            local freshQuery = tecs.newWorld()
+            freshQuery:createState("fuzzState")
+            freshQuery:loadSnapshot(outQuery.snapshot)
+            local wantQuery = canonicalState(wa, true, function(w2: tecs.World, id: integer): boolean
+                return w2:has(id, FzTag)
+            end)
+            luassert.equals(wantQuery, canonicalState(freshQuery, true),
+                "filterQuery restore diverged, seed " .. seed)
+            validate(freshQuery)
         end
     end)
 end)

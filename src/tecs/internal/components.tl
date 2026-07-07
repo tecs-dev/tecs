@@ -595,8 +595,13 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
                 if type(k) == "string"
                         and not (k as string):match("^component")
                         and k ~= "storage"
+                        and k ~= "storageType"
                         and k ~= "relationshipType"
-                        and k ~= "exclusiveRelationship" then
+                        and k ~= "exclusiveRelationship"
+                        and k ~= "wildcardContainer"
+                        and k ~= "isContainer"
+                        and k ~= "isSparseInstance"
+                        and k ~= "transient" then
                     local vtype = type(v)
                     if vtype == "number" or vtype == "string" or vtype == "boolean" or vtype == "table" then
                         data[k] = v
