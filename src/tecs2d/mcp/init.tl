@@ -180,29 +180,57 @@ toolHandlers["ping"] = function(_: {string:any}, id: number)
 end
 
 toolHandlers["screenshot"] = function(args: {string:any}, id: number)
-    pendingScreenshotId = id
+    -- Validate region params at the boundary: the capture callback runs
+    -- during present, outside the tool-handler pcall, so bad values there
+    -- crash the frame and wedge the connection.
     local regionX = args.x as number
     local regionY = args.y as number
     local regionW = args.width as number
     local regionH = args.height as number
+    local hasRegion = regionX ~= nil or regionY ~= nil or regionW ~= nil or regionH ~= nil
+    if hasRegion then
+        if type(regionX) ~= "number" or type(regionY) ~= "number"
+            or type(regionW) ~= "number" or type(regionH) ~= "number" then
+            sendToolError(id, "invalid_parameter",
+                "Region requires numeric x, y, width, and height", nil)
+            return
+        end
+        if regionW < 1 or regionH < 1 then
+            sendToolError(id, "invalid_parameter",
+                "Region width and height must be at least 1",
+                {width = regionW, height = regionH})
+            return
+        end
+    end
 
+    pendingScreenshotId = id
     love.graphics.captureScreenshot(function(imageData: love.image.ImageData)
-        if pendingScreenshotId == id then
+        if pendingScreenshotId ~= id then return end
+        -- Errors here would propagate into love.run; report them as a
+        -- tool error and always release the pending slot.
+        local captureErr: string = nil
+        local ok = xpcall(function()
             local finalData = imageData
-            if regionX and regionY and regionW and regionH then
+            if hasRegion then
                 local maxW, maxH = imageData:getWidth(), imageData:getHeight()
-                regionX = math.max(0, math.min(regionX, maxW - 1))
-                regionY = math.max(0, math.min(regionY, maxH - 1))
-                regionW = math.min(regionW, maxW - regionX)
-                regionH = math.min(regionH, maxH - regionY)
-                local cropped = love.image.newImageData(regionW, regionH)
-                cropped:paste(imageData, 0, 0, regionX, regionY, regionW, regionH)
+                local cx = math.max(0, math.min(regionX, maxW - 1))
+                local cy = math.max(0, math.min(regionY, maxH - 1))
+                local cw = math.max(1, math.min(regionW, maxW - cx))
+                local ch = math.max(1, math.min(regionH, maxH - cy))
+                local cropped = love.image.newImageData(cw, ch)
+                cropped:paste(imageData, 0, 0, cx, cy, cw, ch)
                 finalData = cropped
             end
             local pngData = finalData:encode("png", "screenshot.png") as love.Data
             local base64 = love.data.encode("string", "base64", pngData:getString())
             sendResponse(id, {content = {{type = "image", data = base64, mimeType = "image/png"}}})
-            pendingScreenshotId = nil
+        end, function(e: any): string
+            captureErr = tostring(e)
+            return captureErr
+        end)
+        pendingScreenshotId = nil
+        if not ok then
+            sendToolError(id, "screenshot_failed", captureErr, nil)
         end
     end)
 end
@@ -859,14 +887,30 @@ toolHandlers["patch_entities"] = function(args: {string:any}, id: number)
         return
     end
 
-    -- Build list of entity IDs
+    -- Build list of entity IDs. Validate types here: the queued op runs
+    -- in the drain outside any pcall, one frame after this tool already
+    -- replied, so a bad id there would crash the frame.
     local entityIds: {integer} = {}
     if args.ids then
-        local ids = args.ids as {integer}
+        if type(args.ids) ~= "table" then
+            sendToolError(id, "invalid_parameter", "'ids' must be an array of numbers", nil)
+            return
+        end
+        local ids = args.ids as {any}
         for i = 1, #ids do
-            table.insert(entityIds, ids[i])
+            if type(ids[i]) ~= "number" then
+                sendToolError(id, "invalid_parameter", "Entity ids must be numbers",
+                    {index = i, value = tostring(ids[i])})
+                return
+            end
+            table.insert(entityIds, ids[i] as integer)
         end
     elseif args.id then
+        if type(args.id) ~= "number" then
+            sendToolError(id, "invalid_parameter", "'id' must be a number",
+                {value = tostring(args.id)})
+            return
+        end
         table.insert(entityIds, args.id as integer)
     else
         sendToolError(id, "missing_parameter", "Missing entity ID(s) - provide 'id' or 'ids'", nil)
@@ -898,20 +942,26 @@ toolHandlers["patch_entities"] = function(args: {string:any}, id: number)
 
         for i = 1, #entityIds do
             local entityId = entityIds[i]
-            if not w:isAlive(entityId) then
+            -- The drain runs outside any pcall; nothing per-entity may
+            -- raise or the whole frame dies after the client already got
+            -- a queued=true reply.
+            local aliveOk, alive = pcall(w.isAlive, w, entityId)
+            if not aliveOk or not alive then
                 table.insert(errors, "Entity " .. entityId .. " not found")
             else
                 -- Set/update components
                 for compName, compData in pairs(setData) do
                     local comp = componentMap[compName]
-                    local ok, instance = pcall(function(): tecs.Component
-                        return comp.deserialize(w, compData)
+                    local setErr: string = nil
+                    local ok = xpcall(function()
+                        w:set(entityId, comp.deserialize(w, compData))
+                    end, function(e: any): string
+                        setErr = tostring(e)
+                        return setErr
                     end)
-                    if ok then
-                        w:set(entityId, instance)
-                    else
+                    if not ok then
                         local err = "Failed to set " .. compName .. " on " .. entityId ..
-                            ": " .. tostring(instance)
+                            ": " .. setErr
                         table.insert(errors, err)
                     end
                 end
@@ -1131,16 +1181,16 @@ toolHandlers["toggle_system"] = function(args: {string:any}, id: number)
         local config = phaseSystems[i]
         if config.name == systemName then
             if isEnabled then
-                -- Restore original runIf if we wrapped it
+                -- Restore the original runIf if we wrapped it. Always
+                -- restore, even when the original was nil: leaving the
+                -- wrapper installed makes the next disable capture the
+                -- wrapper as the "original", nesting one closure per
+                -- disable/enable cycle forever.
                 if disabledSystems[systemName] then
                     disabledSystems[systemName] = nil
-                    -- If we stored the original, restore it
                     local configAny = config as {string:any}
-                    local originalRunIf = configAny._originalRunIf as function(number, tecs.World, string): boolean
-                    if originalRunIf then
-                        config.runIf = originalRunIf;
-                        (config as {string:any})._originalRunIf = nil
-                    end
+                    config.runIf = configAny._originalRunIf as function(number, tecs.World, string): boolean
+                    configAny._originalRunIf = nil
                 end
                 sendToolOK(id, {system = systemName, enabled = true}, nil)
             else
@@ -1306,13 +1356,62 @@ end
 local DEFAULT_COLOR <const>: {number} = {1, 1, 0, 0.8}
 
 toolHandlers["debug_draw"] = function(args: {string:any}, id: number)
+    -- Validate everything at the boundary: commands persist and are
+    -- consumed by the render system outside any pcall, where a bad value
+    -- would crash the frame every frame until cleared.
     local drawType = args.type as DebugDrawType
     if not drawType then
         sendToolError(id, "missing_parameter", "Missing 'type' (rect, circle, text, line)", nil)
         return
     end
+    if drawType ~= "rect" and drawType ~= "circle" and drawType ~= "text" and drawType ~= "line" then
+        sendToolError(id, "invalid_parameter",
+            "Unknown draw type (expected rect, circle, text, or line)",
+            {type = tostring(drawType)})
+        return
+    end
 
-    local color = (args.color as {number}) or DEFAULT_COLOR
+    local numericArgs <const> = {"x", "y", "w", "h", "radius", "x2", "y2", "duration", "lineWidth", "fontSize"}
+    for i = 1, #numericArgs do
+        local name = numericArgs[i]
+        local value = args[name]
+        if value ~= nil and type(value) ~= "number" then
+            sendToolError(id, "invalid_parameter",
+                "'" .. name .. "' must be a number", {value = tostring(value)})
+            return
+        end
+    end
+
+    local color = DEFAULT_COLOR
+    if args.color ~= nil then
+        if type(args.color) ~= "table" then
+            sendToolError(id, "invalid_parameter", "'color' must be an array of numbers", nil)
+            return
+        end
+        local colorArr = args.color as {any}
+        for i = 1, math.max(#colorArr, 3) do
+            local channel = colorArr[i]
+            if i <= 3 and type(channel) ~= "number" then
+                sendToolError(id, "invalid_parameter",
+                    "'color' must have at least numeric r, g, b entries", nil)
+                return
+            end
+            if channel ~= nil and type(channel) ~= "number" then
+                sendToolError(id, "invalid_parameter",
+                    "'color' entries must be numbers", nil)
+                return
+            end
+        end
+        color = colorArr as {number}
+    end
+    if args.text ~= nil and type(args.text) ~= "string" then
+        sendToolError(id, "invalid_parameter", "'text' must be a string", nil)
+        return
+    end
+    if args.tag ~= nil and type(args.tag) ~= "string" then
+        sendToolError(id, "invalid_parameter", "'tag' must be a string", nil)
+        return
+    end
     local duration = args.duration as number
     local expiresAt: number = nil
     if duration and duration > 0 then
