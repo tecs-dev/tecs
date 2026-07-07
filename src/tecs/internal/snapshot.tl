@@ -755,8 +755,19 @@ local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: Sna
         if idx then return idx end
         idx = #componentTable + 1
         componentIndex[comp] = idx
+        -- Dense relationship instance columns save as
+        -- "<container>-><target>": FFI instances share one metatype
+        -- componentName across targets, and per-target instances may not
+        -- exist yet in the loading process, so the loader reconstructs
+        -- them from the container. Table-backed instances already carry
+        -- this name shape.
+        local name = comp.componentName
+        local wildcard = (comp as ComponentInternal).wildcardContainer
+        if wildcard and comp.target ~= nil then
+            name = wildcard.componentName .. "->" .. tostring(comp.target)
+        end
         componentTable[idx] = {
-            name = comp.componentName,
+            name = name,
             fingerprint = (comp as {string: any}).fingerprint as string or "",
         }
         return idx
@@ -767,8 +778,11 @@ local function saveSnapshotImpl(world: World, writer: snapshot.Writer, opts: Sna
         local count = countFilteredArchetype(arch, layerMask, hasTransform)
         if count == 0 then return end
 
+        -- Archetypes with zero serializable columns (empty entities, or
+        -- all components transient) still emit an id-only frame: entity
+        -- identity survives the snapshot even when no data does, per the
+        -- transient contract in docs/tecs/save-games.md.
         local cols, hasSparse = archetypeColumns(arch)
-        if #cols == 0 then return end
 
         local columnIndices: {integer} = {}
         for i = 1, #cols do
@@ -1282,6 +1296,20 @@ local function buildByName(): {string: Component}
     return byName
 end
 
+-- Resolve a saved "<container>-><target>" instance-column name by
+-- constructing the per-target relationship instance from its registered
+-- container. Covers instances that were never constructed in this
+-- process (fresh load) and FFI instances, which are not registered.
+local function resolveInstanceByName(byName: {string: Component}, name: string): Component
+    local base, targetStr = name:match("^(.-)%->([%d%.]+)$")
+    if not base then return nil end
+    local container = byName[base]
+    if not container then return nil end
+    local target = tonumber(targetStr)
+    if not target then return nil end
+    return (container as function(number): Component)(target)
+end
+
 -- Deserialize a positional entry `{id, data_1, ..., data_N}` back into
 -- (id, component_1, ..., component_N) using a pre-resolved componentTypes
 -- array. Returns gaps as `nil` so positions remain aligned for the caller.
@@ -1508,7 +1536,11 @@ function TableReaderImpl:nextArchetype(): {Component}, {integer}, integer, integ
     local compTypes: {Component} = {}
     for i = 1, #columnIndices do
         local nameEntry = componentTable[columnIndices[i]]
-        compTypes[i] = self._byName[nameEntry.name]
+        local comp = self._byName[nameEntry.name]
+        if not comp then
+            comp = resolveInstanceByName(self._byName, nameEntry.name)
+        end
+        compTypes[i] = comp
     end
     self._currentTypes = compTypes
     -- Always row-shape (mode=1); table storage doesn't keep mode info.
@@ -1807,6 +1839,9 @@ function BufferReaderImpl:readPrelude(): snapshot.Prelude
         local fingerprint = decode(buf) as string
         componentTable[i] = {name = name, fingerprint = fingerprint}
         local comp = self._byName[name]
+        if not comp then
+            comp = resolveInstanceByName(self._byName, name)
+        end
         -- Binary frames have no per-column skip markers, so an unknown
         -- component makes the rest of the stream unreadable. Fail here,
         -- before the loader clears the world.

@@ -22,7 +22,13 @@ high ids and dead-id revival), batchSpawn / batchSpawnAt with callback
 fills, bundle spawns, batchSet / batchRemove / batchDespawn, TTL plus
 world:update ticks, state push/pop (auto-tagging, despawn-on-exit
 policy), clearEntities, compact, and mid-sequence snapshot save/load
-round-trips.
+round-trips. Even seeds install an OnSpawn observer actor that mutates
+every third spawn (and forces the staged spawn regime); odd seeds keep
+the instant paths hot. A query-callback ledger asserts added minus
+removed equals the currently matching count per world, and each seed
+ends with a snapshot fidelity check: table and binary saves restore
+into fresh worlds with identical observable state, and a save of the
+restored world round-trips stably.
 
 Determinism rules: rng is consumed only OUTSIDE the shared op closure
 (it runs once per world); component instances are constructed INSIDE
@@ -48,6 +54,10 @@ a red nightly reproduces locally with the same offset.
 local FUZZ_SEEDS <const> = (tonumber(os.getenv("TECS_FUZZ_SEEDS")) or 5) as integer
 local FUZZ_OPS <const> = (tonumber(os.getenv("TECS_FUZZ_OPS")) or 200) as integer
 local FUZZ_SEED_OFFSET <const> = (tonumber(os.getenv("TECS_FUZZ_SEED_OFFSET")) or 0) as integer
+-- Debug knobs: checkpoint stride (1 pinpoints the diverging op) and an
+-- op trace printed per step.
+local FUZZ_CHECK_EVERY <const> = (tonumber(os.getenv("TECS_FUZZ_CHECK_EVERY")) or 25) as integer
+local FUZZ_TRACE <const> = os.getenv("TECS_FUZZ_TRACE") ~= nil
 
 -- Id packing mirrors IdAllocator: slot + generation * 2^22.
 local GEN_STRIDE <const> = 4194304
@@ -165,7 +175,9 @@ end
 
 -- Canonical observable state: one sorted line per live entity listing
 -- its id, component values, key, and relationship targets.
-local function canonicalState(w: tecs.World): string
+-- `skipTransient` omits transient pieces (FzMark) for comparisons
+-- across a snapshot boundary, which legitimately drops them.
+local function canonicalState(w: tecs.World, skipTransient?: boolean): string
     local lines: {string} = {}
     w:forEachArchetype(function(arch: tecs.Archetype)
         local entities = arch.entities
@@ -204,16 +216,18 @@ local function canonicalState(w: tecs.World): string
             if link then
                 piece[#piece + 1] = "Link=" .. tostring(link.target)
             end
-            if w:has(id, FzMark) then
-                piece[#piece + 1] = "MarkMark"
-            end
-            local markSources: {string} = {}
-            w:targets(id, FzMark, function(sourceId: integer, _ctx: nil)
-                markSources[#markSources + 1] = tostring(sourceId)
-            end, nil)
-            if #markSources > 0 then
-                table.sort(markSources)
-                piece[#piece + 1] = "MarkSrcs=" .. table.concat(markSources, ";")
+            if not skipTransient then
+                if w:has(id, FzMark) then
+                    piece[#piece + 1] = "MarkMark"
+                end
+                local markSources: {string} = {}
+                w:targets(id, FzMark, function(sourceId: integer, _ctx: nil)
+                    markSources[#markSources + 1] = tostring(sourceId)
+                end, nil)
+                if #markSources > 0 then
+                    table.sort(markSources)
+                    piece[#piece + 1] = "MarkSrcs=" .. table.concat(markSources, ";")
+                end
             end
             if w:has(id, TTL) then
                 piece[#piece + 1] = "TTL=" .. tostring((w:get(id, TTL) as {string: any}).remaining)
@@ -230,6 +244,11 @@ end
 
 local type OpFn = function(tecs.World): integer
 
+-- Failure context for inline asserts (set by the main loop).
+local curSeed = 0
+local curStep = 0
+local curOp = ""
+
 -- Apply the same ops to both worlds: instant on `wa`, one staged scope
 -- on `wb`. Spawning ops return the new id from each world; slot
 -- allocation happens at call time on both paths so the ids must match.
@@ -239,13 +258,15 @@ local function bothWorlds(wa: tecs.World, wb: tecs.World, opsFn: OpFn): integer
     local rb = opsFn(wb)
     wb:commit()
     if ra ~= nil or rb ~= nil then
-        luassert.equals(ra, rb, "spawned ids diverged between worlds")
+        luassert.equals(ra, rb, "spawned ids diverged between worlds at seed "
+            .. curSeed .. " step " .. curStep .. " op " .. curOp)
     end
     return ra
 end
 
 local record FuzzOp
     weight: integer
+    name: string
     run: function()
 end
 
@@ -266,17 +287,72 @@ describe("mutation differential fuzz", function()
             wa:createState("fuzzState")
             wb:createState("fuzzState")
 
+            -- Observer actors on even seeds: an OnSpawn observer that
+            -- mutates a subset of spawned entities. Its presence also
+            -- forces every spawn through the staged route, so odd seeds
+            -- keep fuzzing the instant spawn paths. Two rules keep this
+            -- deterministic: never allocate inside an observer (a spawn
+            -- fires at different points on the two paths and desyncs
+            -- ids), and decide from the ENTITY ID, never from arrival
+            -- order (snapshot loads re-emit OnSpawn in row order, which
+            -- is not part of the observable contract).
+            if seed % 2 == 0 then
+                local function installSpawnObserver(w: tecs.World)
+                    w:observe(0, tecs.builtins.OnSpawn, function(ev: tecs.builtins.OnSpawn)
+                        if ev.entity % 3 == 0 then
+                            w:set(ev.entity, (FzB as function(integer): tecs.Component)(ev.entity % 997 + 1))
+                        end
+                    end)
+                end
+                installSpawnObserver(wa)
+                installSpawnObserver(wb)
+            end
+
+            -- Query-callback ledger: per world, entities reported added
+            -- minus reported removed must equal the entities currently
+            -- matching. Note per-range counts are path-dependent (net-zero
+            -- composites fire no callbacks on the staged path), so only
+            -- this per-world ledger is a valid invariant.
+            local addedCount: {tecs.World: integer} = { [wa] = 0, [wb] = 0 }
+            local removedCount: {tecs.World: integer} = { [wa] = 0, [wb] = 0 }
+
             -- Per-world persistent queries for the batch ops.
+            local function makeQueries(w: tecs.World): {string: tecs.Query}
+                return {
+                    tag = w:query({
+                        include = {FzTag},
+                        onEntitiesAdded = function(_a: tecs.Archetype, _f: integer, _l: integer, count: integer)
+                            addedCount[w] = addedCount[w] + count
+                        end,
+                        onEntitiesRemoved = function(_a: tecs.Archetype, _f: integer, _l: integer, count: integer)
+                            removedCount[w] = removedCount[w] + count
+                        end,
+                    }),
+                    a = w:query({ include = {FzA} }),
+                }
+            end
             local qs: {tecs.World: {string: tecs.Query}} = {
-                [wa] = {
-                    tag = wa:query({ include = {FzTag} }),
-                    a = wa:query({ include = {FzA} }),
-                },
-                [wb] = {
-                    tag = wb:query({ include = {FzTag} }),
-                    a = wb:query({ include = {FzA} }),
-                },
+                [wa] = makeQueries(wa),
+                [wb] = makeQueries(wb),
             }
+
+            local function countTagged(w: tecs.World): integer
+                local n = 0
+                for _arch, len in qs[w].tag:iter() do
+                    n = n + len
+                end
+                return n
+            end
+
+            -- Wipe-style ops (clearEntities, in-place snapshot load) may
+            -- not notify removals for rows they drop; rebase the ledger
+            -- to the post-op reality.
+            local function rebaseLedger()
+                addedCount[wa] = countTagged(wa)
+                removedCount[wa] = 0
+                addedCount[wb] = countTagged(wb)
+                removedCount[wb] = 0
+            end
 
             -- Pick a live entity, lazily purging entries killed by
             -- cascades or batchDespawn into the dead list. Purging
@@ -302,7 +378,7 @@ describe("mutation differential fuzz", function()
             end
 
             local ops: {FuzzOp} = {
-                { weight = 10, run = function()  -- spawn
+                { weight = 10, name = "spawn", run = function()
                     local compIdx = rng(#opComps)
                     local v = rng(1000)
                     local id = bothWorlds(wa, wb, function(w: tecs.World): integer
@@ -310,7 +386,7 @@ describe("mutation differential fuzz", function()
                     end)
                     alive[#alive + 1] = id
                 end },
-                { weight = 10, run = function()  -- set
+                { weight = 10, name = "set", run = function()
                     local idx = pickAliveIdx()
                     if not idx then return end
                     local id = alive[idx]
@@ -321,7 +397,7 @@ describe("mutation differential fuzz", function()
                         return nil
                     end)
                 end },
-                { weight = 7, run = function()  -- remove
+                { weight = 7, name = "remove", run = function()
                     local idx = pickAliveIdx()
                     if not idx then return end
                     local id = alive[idx]
@@ -331,7 +407,7 @@ describe("mutation differential fuzz", function()
                         return nil
                     end)
                 end },
-                { weight = 6, run = function()  -- despawn
+                { weight = 6, name = "despawn", run = function()
                     local idx = pickAliveIdx()
                     if not idx then return end
                     local id = alive[idx]
@@ -341,7 +417,7 @@ describe("mutation differential fuzz", function()
                     end)
                     killEntry(idx)
                 end },
-                { weight = 6, run = function()  -- remove-then-set, one scope
+                { weight = 6, name = "remove-then-set, one scope", run = function()
                     local idx = pickAliveIdx()
                     if not idx then return end
                     local id = alive[idx]
@@ -353,7 +429,7 @@ describe("mutation differential fuzz", function()
                         return nil
                     end)
                 end },
-                { weight = 6, run = function()  -- set-then-remove, one scope
+                { weight = 6, name = "set-then-remove, one scope", run = function()
                     local idx = pickAliveIdx()
                     if not idx then return end
                     local id = alive[idx]
@@ -365,7 +441,7 @@ describe("mutation differential fuzz", function()
                         return nil
                     end)
                 end },
-                { weight = 3, run = function()  -- repeated sets: last write wins
+                { weight = 3, name = "repeated sets: last write wins", run = function()
                     local idx = pickAliveIdx()
                     if not idx then return end
                     local id = alive[idx]
@@ -378,7 +454,7 @@ describe("mutation differential fuzz", function()
                         return nil
                     end)
                 end },
-                { weight = 5, run = function()  -- spawn plus set on the new id, one scope
+                { weight = 5, name = "spawn plus set on the new id, one scope", run = function()
                     local compIdx = rng(#opComps)
                     local otherIdx = rng(#opComps)
                     local v0 = rng(1000)
@@ -390,7 +466,7 @@ describe("mutation differential fuzz", function()
                     end)
                     alive[#alive + 1] = id
                 end },
-                { weight = 4, run = function()  -- mutate then despawn, one scope
+                { weight = 4, name = "mutate then despawn, one scope", run = function()
                     local idx = pickAliveIdx()
                     if not idx then return end
                     local id = alive[idx]
@@ -403,7 +479,7 @@ describe("mutation differential fuzz", function()
                     end)
                     killEntry(idx)
                 end },
-                { weight = 2, run = function()  -- dead-handle no-ops
+                { weight = 2, name = "dead-handle no-ops", run = function()
                     if #dead == 0 then return end
                     local id = dead[rng(#dead)]
                     local compIdx = rng(#opComps)
@@ -413,7 +489,7 @@ describe("mutation differential fuzz", function()
                         return nil
                     end)
                 end },
-                { weight = 8, run = function()  -- set sparse ChildOf (exclusive replace)
+                { weight = 8, name = "set sparse ChildOf (exclusive replace)", run = function()
                     -- Capture each id right after its pick: the second
                     -- pick can purge entries and shift indices.
                     local si = pickAliveIdx()
@@ -427,7 +503,7 @@ describe("mutation differential fuzz", function()
                         return nil
                     end)
                 end },
-                { weight = 3, run = function()  -- remove ChildOf, container or instance form
+                { weight = 3, name = "remove ChildOf, container or instance form", run = function()
                     local si = pickAliveIdx()
                     if not si then return end
                     local src = alive[si]
@@ -446,7 +522,7 @@ describe("mutation differential fuzz", function()
                         end)
                     end
                 end },
-                { weight = 6, run = function()  -- set dense FzLink (exclusive replace)
+                { weight = 6, name = "set dense FzLink (exclusive replace)", run = function()
                     local si = pickAliveIdx()
                     if not si then return end
                     local src = alive[si]
@@ -458,7 +534,7 @@ describe("mutation differential fuzz", function()
                         return nil
                     end)
                 end },
-                { weight = 3, run = function()  -- remove dense FzLink instance
+                { weight = 3, name = "remove dense FzLink instance", run = function()
                     local si = pickAliveIdx()
                     if not si then return end
                     local src = alive[si]
@@ -470,7 +546,7 @@ describe("mutation differential fuzz", function()
                         return nil
                     end)
                 end },
-                { weight = 4, run = function()  -- spawn with a fresh unique Key
+                { weight = 4, name = "spawn with a fresh unique Key", run = function()
                     keyN = keyN + 1
                     local name = "fz" .. seed .. "_" .. keyN
                     local v = rng(1000)
@@ -479,7 +555,7 @@ describe("mutation differential fuzz", function()
                     end)
                     alive[#alive + 1] = id
                 end },
-                { weight = 2, run = function()  -- set a fresh Key on an existing entity
+                { weight = 2, name = "set a fresh Key on an existing entity", run = function()
                     local idx = pickAliveIdx()
                     if not idx then return end
                     keyN = keyN + 1
@@ -490,7 +566,7 @@ describe("mutation differential fuzz", function()
                         return nil
                     end)
                 end },
-                { weight = 2, run = function()  -- remove Key
+                { weight = 2, name = "remove Key", run = function()
                     local idx = pickAliveIdx()
                     if not idx then return end
                     local id = alive[idx]
@@ -499,7 +575,7 @@ describe("mutation differential fuzz", function()
                         return nil
                     end)
                 end },
-                { weight = 3, run = function()  -- spawnAt a fresh untouched slot
+                { weight = 3, name = "spawnAt a fresh untouched slot", run = function()
                     -- Slots at or above nextFreshSlot were never
                     -- allocated, so the id cannot collide with a live
                     -- entity; the allocators stay in lockstep so both
@@ -517,7 +593,7 @@ describe("mutation differential fuzz", function()
                     end)
                     alive[#alive + 1] = id
                 end },
-                { weight = 2, run = function()  -- spawnAt revives a dead id
+                { weight = 2, name = "spawnAt revives a dead id", run = function()
                     if #dead == 0 then return end
                     -- Only revive ids whose slot no other live entity
                     -- occupies; spawnAt on a live slot is caller error.
@@ -542,7 +618,7 @@ describe("mutation differential fuzz", function()
                         end
                     end
                 end },
-                { weight = 3, run = function()  -- batchSet constant form
+                { weight = 3, name = "batchSet constant form", run = function()
                     local qk = rng(2) == 1 and "a" or "tag"
                     if rng(10) <= 7 then
                         local v = rng(1000)
@@ -561,7 +637,7 @@ describe("mutation differential fuzz", function()
                         end)
                     end
                 end },
-                { weight = 2, run = function()  -- batchRemove
+                { weight = 2, name = "batchRemove", run = function()
                     local qk = rng(2) == 1 and "a" or "tag"
                     local ci = rng(#batchRemoveComps)
                     bothWorlds(wa, wb, function(w: tecs.World): integer
@@ -569,13 +645,13 @@ describe("mutation differential fuzz", function()
                         return nil
                     end)
                 end },
-                { weight = 2, run = function()  -- batchDespawn tagged entities
+                { weight = 2, name = "batchDespawn tagged entities", run = function()
                     bothWorlds(wa, wb, function(w: tecs.World): integer
                         w:batchDespawn(qs[w].tag)
                         return nil
                     end)
                 end },
-                { weight = 3, run = function()  -- batchSpawn with callback fill
+                { weight = 3, name = "batchSpawn with callback fill", run = function()
                     local n = rng(4)
                     local compSet = batchSpawnSets[rng(#batchSpawnSets)]
                     local v0 = rng(1000)
@@ -614,7 +690,7 @@ describe("mutation differential fuzz", function()
                         alive[#alive + 1] = ra[i]
                     end
                 end },
-                { weight = 2, run = function()  -- batchSpawnAt with fresh explicit ids
+                { weight = 2, name = "batchSpawnAt with fresh explicit ids", run = function()
                     local alloc = (wa as WorldImpl).allocator
                     local base = alloc.nextFreshSlot + 11
                     local n = rng(3)
@@ -641,14 +717,30 @@ describe("mutation differential fuzz", function()
                         alive[#alive + 1] = idsList[i]
                     end
                 end },
-                { weight = 3, run = function()  -- bundle spawn
+                { weight = 3, name = "bundle spawn", run = function()
                     local v = rng(1000)
                     local id = bothWorlds(wa, wb, function(w: tecs.World): integer
                         return w:spawnBundle("fuzzBundle", (FzArmor as function(integer): tecs.Component)(v))
                     end)
                     alive[#alive + 1] = id
                 end },
-                { weight = 4, run = function()  -- add a non-exclusive sparse mark
+                { weight = 3, name = "spawn with conflicting exclusive relationship args", run = function()
+                    local ti1 = pickAliveIdx()
+                    if not ti1 then return end
+                    local t1 = alive[ti1]
+                    local ti2 = pickAliveIdx()
+                    if not ti2 then return end
+                    local t2 = alive[ti2]
+                    local compIdx = rng(#opComps)
+                    local v = rng(1000)
+                    -- Exclusive FzLink passed twice: the later sibling
+                    -- evicts the earlier one during spawn staging.
+                    local id = bothWorlds(wa, wb, function(w: tecs.World): integer
+                        return w:spawn(instanceOf(compIdx, v), FzLink(t1), FzLink(t2), ChildOf(t1))
+                    end)
+                    alive[#alive + 1] = id
+                end },
+                { weight = 4, name = "add a non-exclusive sparse mark", run = function()
                     local si = pickAliveIdx()
                     if not si then return end
                     local src = alive[si]
@@ -660,7 +752,7 @@ describe("mutation differential fuzz", function()
                         return nil
                     end)
                 end },
-                { weight = 2, run = function()  -- remove one mark target
+                { weight = 2, name = "remove one mark target", run = function()
                     local si = pickAliveIdx()
                     if not si then return end
                     local src = alive[si]
@@ -672,7 +764,7 @@ describe("mutation differential fuzz", function()
                         return nil
                     end)
                 end },
-                { weight = 1, run = function()  -- remove all mark targets
+                { weight = 1, name = "remove all mark targets", run = function()
                     local si = pickAliveIdx()
                     if not si then return end
                     local src = alive[si]
@@ -681,7 +773,7 @@ describe("mutation differential fuzz", function()
                         return nil
                     end)
                 end },
-                { weight = 2, run = function()  -- set a TTL
+                { weight = 2, name = "set a TTL", run = function()
                     local si = pickAliveIdx()
                     if not si then return end
                     local id = alive[si]
@@ -691,12 +783,12 @@ describe("mutation differential fuzz", function()
                         return nil
                     end)
                 end },
-                { weight = 3, run = function()  -- frame tick: pipeline + TTL expiry
+                { weight = 3, name = "frame tick: pipeline + TTL expiry", run = function()
                     local dt = rng(3) * 0.015
                     wa:update(dt)
                     wb:update(dt)
                 end },
-                { weight = 2, run = function()  -- state push/pop (auto-tag, despawn on exit)
+                { weight = 2, name = "state push/pop (auto-tag, despawn on exit)", run = function()
                     if statePushed then
                         wa:popState()
                         wb:popState()
@@ -707,7 +799,7 @@ describe("mutation differential fuzz", function()
                         statePushed = true
                     end
                 end },
-                { weight = 1, run = function()  -- clearEntities wipes both worlds
+                { weight = 1, name = "clearEntities wipes both worlds", run = function()
                     wa:clearEntities()
                     wb:clearEntities()
                     for i = #alive, 1, -1 do
@@ -716,12 +808,13 @@ describe("mutation differential fuzz", function()
                     for i = #dead, 1, -1 do
                         dead[i] = nil
                     end
+                    rebaseLedger()
                 end },
-                { weight = 1, run = function()  -- compact quiet worlds
+                { weight = 1, name = "compact quiet worlds", run = function()
                     wa:compact()
                     wb:compact()
                 end },
-                { weight = 1, run = function()  -- snapshot save/load round-trip
+                { weight = 1, name = "snapshot save/load round-trip", run = function()
                     local binary = rng(2) == 1
                     if binary then
                         local outA = wa:saveSnapshot()
@@ -734,6 +827,7 @@ describe("mutation differential fuzz", function()
                         local outB = wb:saveSnapshot({ format = "table" })
                         wb:loadSnapshot(outB.snapshot)
                     end
+                    rebaseLedger()
                 end },
             }
 
@@ -748,6 +842,12 @@ describe("mutation differential fuzz", function()
                 for k = 1, #ops do
                     acc = acc + ops[k].weight
                     if roll <= acc then
+                        curSeed = seed
+                        curStep = step
+                        curOp = ops[k].name
+                        if FUZZ_TRACE then
+                            print("fuzz seed " .. seed .. " step " .. step .. ": " .. ops[k].name)
+                        end
                         ops[k].run()
                         break
                     end
@@ -755,12 +855,19 @@ describe("mutation differential fuzz", function()
 
                 sortFreeStack(wa)
                 sortFreeStack(wb)
+                luassert.equals(freeSetString(wa), freeSetString(wb),
+                    "free slot sets diverged at seed " .. seed .. " step " .. step
+                    .. " op " .. curOp)
 
-                if step % 25 == 0 then
+                if step % FUZZ_CHECK_EVERY == 0 then
                     luassert.equals(canonicalState(wa), canonicalState(wb),
                         "state diverged at seed " .. seed .. " step " .. step)
                     luassert.equals(freeSetString(wa), freeSetString(wb),
                         "free slot sets diverged at seed " .. seed .. " step " .. step)
+                    luassert.equals(countTagged(wa), addedCount[wa] - removedCount[wa],
+                        "callback ledger drifted in wa at seed " .. seed .. " step " .. step)
+                    luassert.equals(countTagged(wb), addedCount[wb] - removedCount[wb],
+                        "callback ledger drifted in wb at seed " .. seed .. " step " .. step)
                     validate(wa)
                     validate(wb)
                 end
@@ -770,6 +877,37 @@ describe("mutation differential fuzz", function()
                 "final state diverged at seed " .. seed)
             validate(wa)
             validate(wb)
+
+            -- Snapshot fidelity: both formats restore into fresh worlds
+            -- with identical observable state (transient marks drop by
+            -- design), and a save of the restored world round-trips
+            -- stably. Also exercises state-stack restore when the seed
+            -- ends mid-push.
+            local want = canonicalState(wa, true)
+
+            local outTable = wa:saveSnapshot({ format = "table" })
+            local freshTable = tecs.newWorld()
+            freshTable:createState("fuzzState")
+            freshTable:loadSnapshot(outTable.snapshot)
+            luassert.equals(want, canonicalState(freshTable, true),
+                "table restore diverged, seed " .. seed)
+            validate(freshTable)
+
+            local outBinary = wa:saveSnapshot()
+            local freshBinary = tecs.newWorld()
+            freshBinary:createState("fuzzState")
+            freshBinary:loadSnapshot(outBinary.buffer)
+            luassert.equals(want, canonicalState(freshBinary, true),
+                "binary restore diverged, seed " .. seed)
+            validate(freshBinary)
+
+            local resaved = freshTable:saveSnapshot()
+            local freshAgain = tecs.newWorld()
+            freshAgain:createState("fuzzState")
+            freshAgain:loadSnapshot(resaved.buffer)
+            luassert.equals(want, canonicalState(freshAgain, true),
+                "re-save stability diverged, seed " .. seed)
+            validate(freshAgain)
         end
     end)
 end)

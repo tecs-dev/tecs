@@ -640,6 +640,17 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
         end
     end
 
+    -- FFI-backed instances resolve metadata through a shared metatype,
+    -- not a per-instance `__index = relContainer`; push the container's
+    -- serializers into the metatype so snapshot save sees instance
+    -- columns as serializable (nil for transient relationships keeps
+    -- them excluded).
+    if relationshipStorage.storageType == "ffi" then
+        local setMeta = storageAny.setMetadata as function(Storage, string, any)
+        setMeta(relationshipStorage, "serialize", relContainer.serialize)
+        setMeta(relationshipStorage, "deserialize", relContainer.deserialize)
+    end
+
     local instance_mt <const> = {
         __index = relContainer,
         __tostring = function(self: Relationship): string
@@ -719,15 +730,18 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
     if isSparse then
         relContainerI.frameworkBehavior = frameworkBehavior.SparseRelationship
         relContainerI.frameworkBehaviorBits = frameworkBehavior.sparseRelationshipBits()
-    elseif isExclusive or hasReverseIndex then
+    else
+        -- Every dense relationship dispatches removes so the wildcard
+        -- container drops with the last sibling instance, matching
+        -- sparse semantics (marker present == at least one target).
         relContainerI.frameworkBehavior = frameworkBehavior.DenseRelationship
         if hasReverseIndex then
             relContainerI.frameworkBehaviorBits = frameworkBehavior.denseReverseIndexRelationshipBits()
-        else
+        elseif isExclusive then
             relContainerI.frameworkBehaviorBits = frameworkBehavior.denseExclusiveRelationshipBits()
+        else
+            relContainerI.frameworkBehaviorBits = frameworkBehavior.densePlainRelationshipBits()
         end
-    elseif not isSparse then
-        relContainerI.frameworkBehaviorBits = frameworkBehavior.NoBulkBatch
     end
 
     components.registerComponent(relContainer)

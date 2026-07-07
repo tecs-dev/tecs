@@ -599,6 +599,15 @@ function WorldImpl:_deferSetSlow(
                 newArch, missing = applyRequires(newArch, ctI, self.archetypeIndex)
             end
 
+            -- Dense relationship instances carry their wildcard container.
+            -- This branch returns early, so the trailing container block
+            -- never runs for it; re-add here (an exclusive replace may
+            -- have dropped the container along with the evicted sibling).
+            local wildcard = ctI.wildcardContainer
+            if wildcard and newArch.columns[wildcard] == nil then
+                newArch = newArch:withComponent(wildcard, self.archetypeIndex)
+            end
+
             if st == STATE_SPAWN then
                 if newArch ~= pendingArch then
                     local c = newArch.pendingSpawnCount + 1

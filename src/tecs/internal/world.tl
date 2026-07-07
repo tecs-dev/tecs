@@ -778,40 +778,68 @@ end
 -- State Stack methods
 -------------------------------------------------------------------------------
 
+-- Snapshot the matching archetypes before mutating: staged set/remove/
+-- despawn can create archetypes mid-walk (edge walks, cascade
+-- removals), and adding keys to the live component-archetype set during
+-- its next() traversal is undefined, so entries can be skipped.
+local function snapshotStateArchetypes(
+    self: WorldImpl,
+    component: Component
+): {Archetype}, {integer}
+    local archs: {Archetype} = {}
+    local lens: {integer} = {}
+    for archetype, len in self:findArchetypes(component) do
+        archs[#archs + 1] = archetype
+        lens[#lens + 1] = len
+    end
+    return archs, lens
+end
+
 local ACTIONS <const>: {string: function(WorldImpl, Component)} = {
     pause = function(self: WorldImpl, stateComponent: Component)
         local Paused <const> = builtins.Paused
-        for archetype, len, entities in self:findArchetypes(stateComponent) do
+        local archs, lens = snapshotStateArchetypes(self, stateComponent)
+        for k = 1, #archs do
+            local archetype = archs[k]
             if not archetype.columns[Paused] then
-                for i = 1, len do
-                    self:set(entities[i], Paused)
+                local entities = archetype.entities
+                for i = 1, lens[k] do
+                    self:set(entities[i] as integer, Paused)
                 end
             end
         end
     end,
     resume = function(self: WorldImpl, stateComponent: Component)
         local Paused <const> = builtins.Paused
-        for archetype, len, entities in self:findArchetypes(stateComponent) do
+        local archs, lens = snapshotStateArchetypes(self, stateComponent)
+        for k = 1, #archs do
+            local archetype = archs[k]
             if archetype.columns[Paused] then
-                for i = 1, len do
-                    self:remove(entities[i], Paused)
+                local entities = archetype.entities
+                for i = 1, lens[k] do
+                    self:remove(entities[i] as integer, Paused)
                 end
             end
         end
     end,
     despawn = function(self: WorldImpl, stateComponent: Component)
-        for _, len, entities in self:findArchetypes(stateComponent) do
-            for i = 1, len do
-                self:despawn(entities[i])
+        local archs, lens = snapshotStateArchetypes(self, stateComponent)
+        for k = 1, #archs do
+            local entities = archs[k].entities
+            for i = 1, lens[k] do
+                self:despawn(entities[i] as integer)
             end
         end
     end,
     disable = function(self: WorldImpl, stateComponent: Component)
         local Disabled <const> = builtins.Disabled
-        for archetype, len, entities in self:findArchetypes(stateComponent) do
+        local archs, lens = snapshotStateArchetypes(self, stateComponent)
+        for k = 1, #archs do
+            local archetype = archs[k]
             if not archetype.columns[Disabled] then
-                for i = 1, len do
-                    self:set(entities[i], Disabled)
+                local entities = archetype.entities
+                for i = 1, lens[k] do
+                    self:set(entities[i] as integer, Disabled)
                 end
             end
         end

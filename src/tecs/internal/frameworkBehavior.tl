@@ -51,6 +51,7 @@ local record frameworkBehavior
     sparseRelationshipBits: function(): integer
     denseExclusiveRelationshipBits: function(): integer
     denseReverseIndexRelationshipBits: function(): integer
+    densePlainRelationshipBits: function(): integer
 
     set: function(world: WorldImpl, id: integer, componentType: Component, value: any)
     remove: function(world: WorldImpl, id: integer, component: Component)
@@ -112,7 +113,11 @@ function frameworkBehavior.sparseRelationshipBits(): integer
 end
 
 function frameworkBehavior.denseExclusiveRelationshipBits(): integer
-    return bor(NeedsSet, NoBulkBatch)
+    return bor(NeedsSet, NeedsRemove, NoBulkBatch)
+end
+
+function frameworkBehavior.densePlainRelationshipBits(): integer
+    return bor(NeedsRemove, NoBulkBatch)
 end
 
 function frameworkBehavior.denseReverseIndexRelationshipBits(): integer
@@ -214,13 +219,39 @@ function frameworkBehavior.remove(world: WorldImpl, id: integer, component: Comp
         return world:removeSparseOneRaw(id, owner, component.target)
     end
 
-    if behavior ~= DenseRelationship or not owner.reverseIndex then
+    if behavior ~= DenseRelationship then
         return world:removeRaw(id, component)
     end
 
-    local oldValue = world:oldValueOf(id, component)
+    local oldValue: any = nil
+    if owner.reverseIndex then
+        oldValue = world:oldValueOf(id, component)
+    end
     world:removeRaw(id, component)
-    denseUnlink(world, owner, id, oldValue)
+    if owner.reverseIndex then
+        denseUnlink(world, owner, id, oldValue)
+    end
+
+    -- Removing the last sibling instance also drops the wildcard
+    -- container, matching sparse semantics: the marker means "at least
+    -- one target". Explicit container removal skips the scan.
+    local ownerComp = owner as Component
+    if component ~= ownerComp then
+        local arch = world:currentArchetype(id)
+        if arch and arch.columns[ownerComp] ~= nil then
+            local list = arch.componentList
+            local hasSibling = false
+            for i = 1, arch.columnsCount do
+                if (list[i] as ComponentInternal).wildcardContainer == ownerComp then
+                    hasSibling = true
+                    break
+                end
+            end
+            if not hasSibling then
+                world:removeRaw(id, ownerComp)
+            end
+        end
+    end
 end
 
 function frameworkBehavior.despawn(world: WorldImpl, id: integer, component: Component, arch: Archetype, row: integer)
