@@ -6,7 +6,6 @@ local shaderUtils <const> = require("tecs2d.gfx.internal.gpu.shaders")
 local C <const> = require("ffi")
 
 local Transform <const> = tecs.builtins.Transform
-local OnDespawn <const> = tecs.builtins.OnDespawn
 
 -- Compile light cull shader (handles both visibility culling and tile assignment)
 local lightCullShader <const> = love.graphics.newComputeShader(shaderUtils.LIGHT_CULL)
@@ -327,10 +326,24 @@ function light.plugin(world: tecs.World)
         end
     end
 
-    -- Query for lights with transforms
+    -- Query for lights with transforms. The removal hook fires when an
+    -- entity stops matching (Light or Transform removed, Disabled added,
+    -- or despawn), so the GPU slot is freed in every case; without it a
+    -- removed light kept rendering forever because the cull shader's
+    -- TotalLights still counted its slot.
     local lightQuery = world:query({
         name = "light.GPUSync",
-        include = {Light, Transform}
+        include = {Light, Transform},
+        onEntitiesRemoved = function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer, _count: integer)
+            local entities = archetype.entities
+            for row = firstRow, lastRow do
+                local slot = entitySlots[entities[row]]
+                if slot then
+                    lightBuffer:free(slot)
+                    entitySlots[entities[row]] = nil
+                end
+            end
+        end,
     })
 
     -- Sync light data to GPU buffer each frame
@@ -392,14 +405,6 @@ function light.plugin(world: tecs.World)
         end
     })
 
-    -- Track removed entities to free GPU slots
-    world:observe(0, OnDespawn, function(e: tecs.builtins.OnDespawn)
-        local slot = entitySlots[e.entity]
-        if slot then
-            lightBuffer:free(slot)
-            entitySlots[e.entity] = nil
-        end
-    end)
 end
 
 return light
