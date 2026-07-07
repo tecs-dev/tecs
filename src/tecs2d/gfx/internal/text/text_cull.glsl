@@ -43,14 +43,18 @@ layout(std430) readonly buffer TextInput {
     Std430Text texts[];
 };
 
-// TextEffects: 17 floats grouped into 4 vec4 + 1 trailing float to
-// match the BufferFormat declared in std430.tl.
+// TextEffects: 17 scalar floats. All-scalar so the std430 array
+// stride is the natural 68 bytes, matching the FFI struct and the
+// BufferFormat in std430.tl; vec4 members would round the stride up
+// to 80 and misalign every row past the first.
 struct Std430TextEffects {
-    vec4 outlineWRGB;     // outlineWidth, outlineR, outlineG, outlineB
-    vec4 oAGlowRRG;       // outlineA, glowRadius, glowR, glowG
-    vec4 glowBAShadowXY;  // glowB, glowA, shadowOffsetX, shadowOffsetY
-    vec4 shBRGB;          // shadowBlur, shadowR, shadowG, shadowB
-    float shadowA;
+    float outlineWidth;
+    float outlineR, outlineG, outlineB, outlineA;
+    float glowRadius;
+    float glowR, glowG, glowB, glowA;
+    float shadowOffsetX, shadowOffsetY;
+    float shadowBlur;
+    float shadowR, shadowG, shadowB, shadowA;
 };
 layout(std430) readonly buffer TextEffectsInput {
     Std430TextEffects effects[];
@@ -103,22 +107,22 @@ EffectsPack readEffectsPacked(uint row) {
         return ep;
     }
     Std430TextEffects e = effects[row];
-    float outlineWidth = e.outlineWRGB.x;
-    float outlineR     = e.outlineWRGB.y;
-    float outlineG     = e.outlineWRGB.z;
-    float outlineB     = e.outlineWRGB.w;
-    float outlineA     = e.oAGlowRRG.x;
-    float glowRadius   = e.oAGlowRRG.y;
-    float glowR        = e.oAGlowRRG.z;
-    float glowG        = e.oAGlowRRG.w;
-    float glowB        = e.glowBAShadowXY.x;
-    float glowA        = e.glowBAShadowXY.y;
-    float shadowOffX   = e.glowBAShadowXY.z;
-    float shadowOffY   = e.glowBAShadowXY.w;
-    float shadowBlur   = e.shBRGB.x;
-    float shadowR      = e.shBRGB.y;
-    float shadowG      = e.shBRGB.z;
-    float shadowB      = e.shBRGB.w;
+    float outlineWidth = e.outlineWidth;
+    float outlineR     = e.outlineR;
+    float outlineG     = e.outlineG;
+    float outlineB     = e.outlineB;
+    float outlineA     = e.outlineA;
+    float glowRadius   = e.glowRadius;
+    float glowR        = e.glowR;
+    float glowG        = e.glowG;
+    float glowB        = e.glowB;
+    float glowA        = e.glowA;
+    float shadowOffX   = e.shadowOffsetX;
+    float shadowOffY   = e.shadowOffsetY;
+    float shadowBlur   = e.shadowBlur;
+    float shadowR      = e.shadowR;
+    float shadowG      = e.shadowG;
+    float shadowB      = e.shadowB;
     float shadowA_     = e.shadowA;
 
     bool effectsActive = (outlineWidth > 0.0) || (glowRadius > 0.0)

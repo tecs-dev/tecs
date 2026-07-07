@@ -195,5 +195,30 @@ describe("std430 translations", function()
         assert.equals(32, std430.sizes.LayoutBox)
         assert.equals(8,  std430.sizes.Circle)
         assert.equals(8,  std430.sizes.Occluder)
+        -- TextEffects is 17 scalar floats. All three layers (FFI struct,
+        -- BufferFormat, GLSL struct) must stay all-scalar at the natural
+        -- 68-byte stride; a vec4-grouped layout rounds the std430 array
+        -- stride up to 80 and misaligns every row past the first.
+        assert.equals(68, std430.sizes.TextEffects)
+    end)
+
+    it("declares BufferFormat lane counts that sum to the FFI struct size", function()
+        -- Guards against a format lane regrouping (e.g. scalars into
+        -- vec4s) silently disagreeing with the FFI stride.
+        local laneBytes: {string: integer} = {
+            float = 4, floatvec2 = 8, floatvec3 = 12, floatvec4 = 16,
+            uint32 = 4, int32 = 4,
+        }
+        for name, layout in pairs(std430.layouts) do
+            local total = 0
+            for _, lane in ipairs(layout.format as {{string: string}}) do
+                local bytes = laneBytes[lane.format]
+                assert.is_not_nil(bytes, name .. " has unknown lane format " .. tostring(lane.format))
+                total = total + bytes
+            end
+            assert.equals(std430.sizes[name], total,
+                name .. ": BufferFormat lanes sum to " .. total
+                .. " but FFI struct is " .. tostring(std430.sizes[name]) .. " bytes")
+        end
     end)
 end)

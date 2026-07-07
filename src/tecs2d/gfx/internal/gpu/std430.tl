@@ -702,12 +702,28 @@ local LINE_FORMAT: love.graphics.BufferFormat = {
 
 -- TextEffects: 68 bytes per row = 17 floats. Grouped into 4 vec4 lanes
 -- + 1 trailing float to match the std430 struct stride exactly.
+-- All-scalar lanes so the std430 array stride is the natural 68 bytes,
+-- matching the FFI struct and the shader's all-scalar struct. A vec4
+-- grouping would round the stride up to 80 and misalign every row
+-- past the first.
 local TEXTEFFECTS_FORMAT: love.graphics.BufferFormat = {
-    {format = "floatvec4"},  -- outlineWidth, outlineR, outlineG, outlineB
-    {format = "floatvec4"},  -- outlineA, glowRadius, glowR, glowG
-    {format = "floatvec4"},  -- glowB, glowA, shadowOffsetX, shadowOffsetY
-    {format = "floatvec4"},  -- shadowBlur, shadowR, shadowG, shadowB
-    {format = "float"},      -- shadowA
+    {format = "float"},  -- outlineWidth
+    {format = "float"},  -- outlineR
+    {format = "float"},  -- outlineG
+    {format = "float"},  -- outlineB
+    {format = "float"},  -- outlineA
+    {format = "float"},  -- glowRadius
+    {format = "float"},  -- glowR
+    {format = "float"},  -- glowG
+    {format = "float"},  -- glowB
+    {format = "float"},  -- glowA
+    {format = "float"},  -- shadowOffsetX
+    {format = "float"},  -- shadowOffsetY
+    {format = "float"},  -- shadowBlur
+    {format = "float"},  -- shadowR
+    {format = "float"},  -- shadowG
+    {format = "float"},  -- shadowB
+    {format = "float"},  -- shadowA
 }
 
 -- Text: 40 bytes per row = 10 × 4-byte scalars. The first six slots
