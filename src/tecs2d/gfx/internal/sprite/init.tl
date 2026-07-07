@@ -625,7 +625,8 @@ function Sprite:pauseAtEnd()
         -- Already paused, just jump to end
         self.pausedFrame = lastFrame
     else
-        -- GPU handles play-once clamping via sentinel encoding
+        -- The cull shader reads pauseAtFrame and clamps the visual;
+        -- Sprite:getFrame lazily converts it into a hard pause on the CPU.
         self._pauseAtFrame = lastFrame
     end
     local world = sprite_instance.getWorld() as tecs.World

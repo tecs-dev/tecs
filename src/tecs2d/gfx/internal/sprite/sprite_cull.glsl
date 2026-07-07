@@ -286,15 +286,18 @@ void computemain() {
     // visibility test.
     Std430Sprite sp = sprites[row];
 
-    // Compute current animation frame.
+    // Compute current animation frame. pauseAtFrame >= 0 is a pending
+    // play-once clamp (Sprite:pauseAtEnd / playOnce): play the current
+    // cycle to that frame, then hold it instead of wrapping. Mirrors the
+    // CPU reference in Sprite:getFrame.
     int   animFrameCount   = int(sd.animFrameCount);
     int   animTimingOffset = int(sd.animTimingOffset);
     float animPausedFrame  = float(sp.pausedFrame);
     float frameIndex;
     if (animPausedFrame >= 0.0) {
         frameIndex = animPausedFrame;
-    } else if (animPausedFrame <= -2.0) {
-        float targetFrame = -(animPausedFrame + 2.0);
+    } else if (sp.pauseAtFrame >= 0) {
+        float targetFrame = float(sp.pauseAtFrame);
         float elapsed = GlobalTime - sp.animStartTime;
         if (elapsed >= sd.animTotalDuration || elapsed < 0.0) {
             frameIndex = targetFrame;
