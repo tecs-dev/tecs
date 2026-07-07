@@ -544,7 +544,7 @@ local record types
         interface Config
             timestep: number
             pipelineFactory: function(number): Pipeline
-            --- Maximum number of concurrent entity slots. Must be a power of 2, at most 2^22 (~4M, format cap).
+            --- Maximum number of concurrent entity slots. Must be a positive integer, at most 2^22 (~4M, format cap).
             --- Defaults to 2^20 (~1M). Arena memory is preallocated to accommodate this size.
             maxEntities: integer
         end
