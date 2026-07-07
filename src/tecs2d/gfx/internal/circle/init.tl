@@ -1,7 +1,5 @@
 local tecs <const> = require("tecs")
 local types <const> = require("tecs2d.gfx.types")
-local shaderUtils <const> = require("tecs2d.gfx.internal.gpu.shaders")
-local material_compiler <const> = require("tecs2d.gfx.internal.material_compiler")
 local defineShape <const> = require("tecs2d.gfx.internal.gpu.define_shape")
 
 local ColorComponent <const> = require("tecs2d.gfx.internal.Color")
@@ -11,18 +9,14 @@ local Occluder <const> = require("tecs2d.gfx.internal.Occluder")
 local Material <const> = require("tecs2d.gfx.internal.Material")
 local LayoutBox <const> = require("tecs2d.ui.internal.LayoutBox")
 
-local lg <const> = love.graphics
-
 -- Circle uses the renderer-owned shadow-column path: per-archetype
 -- dispatch, std430 source SSBOs read directly by the cull shader, no
 -- slot management. Wiring is provided by `shadow_plugin`.
-local CIRCLE_SHADERS <const> = "tecs2d/gfx/internal/circle/"
-local renderSource <const> = shaderUtils.loadRenderShader("circle", CIRCLE_SHADERS)
-local renderShader <const> = lg.newShader(renderSource)
-local cullShader <const> =
-    lg.newComputeShader(shaderUtils.loadCullShader("circle_cull", CIRCLE_SHADERS))
-local shadowMaskShader <const> = lg.newShader(shaderUtils.loadShader("shadow_mask_circle"))
-material_compiler.registerBaseSource("circle", renderSource)
+local shaders <const> = defineShape.loadShaders({
+    name = "circle",
+    dir = "tecs2d/gfx/internal/circle/",
+    shadowMask = "circle",
+})
 
 local record circle
     record Circle is tecs.Component, types.Rect
@@ -63,9 +57,9 @@ function circle.plugin(world: tecs.World)
     defineShape.register(world, {
         name = "Circle",
         component = Circle as tecs.Component,
-        render = renderShader,
-        cull = cullShader,
-        shadowMask = shadowMaskShader,
+        render = shaders.render,
+        cull = shaders.cull,
+        shadowMask = shaders.shadowMask,
         modifiers = {ColorComponent, ClipBounds, Occluder, Material, LayoutBox},
         tags = {Unlit},
         alphaBlendFilter = true,

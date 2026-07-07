@@ -27,6 +27,10 @@ local tecs <const> = require("tecs")
 local gpuTypes <const> = require("tecs2d.gfx.internal.gpu.types")
 local shadow_plugin <const> = require("tecs2d.gfx.internal.gpu.shadow_plugin")
 local modifier_binding <const> = require("tecs2d.gfx.internal.gpu.modifier_binding")
+local shaderUtils <const> = require("tecs2d.gfx.internal.gpu.shaders")
+local material_compiler <const> = require("tecs2d.gfx.internal.material_compiler")
+
+local lg <const> = love.graphics
 
 -- The culled-instance *output* format and the (vestigial) stub formats
 -- are larger structs declared by the shape's render/cull GLSL. They
@@ -65,7 +69,44 @@ local record define_shape
         outputFormat: love.graphics.BufferFormat
     end
 
+    record ShaderSet
+        render: love.graphics.Shader
+        cull: love.graphics.ComputeShader
+        shadowMask: love.graphics.Shader
+    end
+
+    record ShaderConfig
+        --- Base shader name, e.g. "circle": loads `<dir><name>.glsl`.
+        name: string
+        --- Shader directory, e.g. "tecs2d/gfx/internal/circle/".
+        dir: string
+        --- Cull shader base name; defaults to `<name>_cull`.
+        cull: string
+        --- Shared shadow-mask shader suffix (loads `shadow_mask_<value>`);
+        --- omit for shapes without a raymarched shadow silhouette.
+        shadowMask: string
+    end
+
     register: function(world: tecs.World, config: Config)
+
+    --- Compile a shape's shader set by naming convention and register
+    --- the render source with the material compiler under `name`.
+    loadShaders: function(config: ShaderConfig): ShaderSet
+end
+
+function define_shape.loadShaders(config: define_shape.ShaderConfig): define_shape.ShaderSet
+    local name <const> = config.name
+    local renderSource <const> = shaderUtils.loadRenderShader(name, config.dir)
+    material_compiler.registerBaseSource(name, renderSource)
+    local shadowMask: love.graphics.Shader = nil
+    if config.shadowMask then
+        shadowMask = lg.newShader(shaderUtils.loadShader("shadow_mask_" .. config.shadowMask))
+    end
+    return {
+        render = lg.newShader(renderSource),
+        cull = lg.newComputeShader(shaderUtils.loadCullShader(config.cull or (name .. "_cull"), config.dir)),
+        shadowMask = shadowMask,
+    }
 end
 
 function define_shape.register(world: tecs.World, config: define_shape.Config)

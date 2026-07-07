@@ -1,6 +1,4 @@
 local tecs <const> = require("tecs")
-local shaderUtils <const> = require("tecs2d.gfx.internal.gpu.shaders")
-local material_compiler <const> = require("tecs2d.gfx.internal.material_compiler")
 local defineShape <const> = require("tecs2d.gfx.internal.gpu.define_shape")
 
 local ColorComponent <const> = require("tecs2d.gfx.internal.Color")
@@ -8,17 +6,13 @@ local ClipBounds <const> = require("tecs2d.gfx.internal.ClipBounds")
 local Unlit <const> = require("tecs2d.gfx.internal.Unlit")
 local Material <const> = require("tecs2d.gfx.internal.Material")
 
-local lg <const> = love.graphics
-
 -- Line uses the renderer-owned shadow-column path; wiring is provided
--- by `shadow_plugin`. No shadow path (lines don't cast raymarched
--- shadows) and no Pivot (lines have explicit endpoints).
-local LINE_SHADERS <const> = "tecs2d/gfx/internal/line/"
-local renderSource <const> = shaderUtils.loadRenderShader("line", LINE_SHADERS)
-local renderShader <const> = lg.newShader(renderSource)
-local cullShader <const> =
-    lg.newComputeShader(shaderUtils.loadCullShader("line_cull", LINE_SHADERS))
-material_compiler.registerBaseSource("line", renderSource)
+-- by `shadow_plugin`. No shadow-mask shader (lines do not cast
+-- raymarched shadows) and no Pivot (lines have explicit endpoints).
+local shaders <const> = defineShape.loadShaders({
+    name = "line",
+    dir = "tecs2d/gfx/internal/line/",
+})
 
 local record line
     record Line is tecs.Component
@@ -54,8 +48,8 @@ function line.plugin(world: tecs.World)
     defineShape.register(world, {
         name = "Line",
         component = Line as tecs.Component,
-        render = renderShader,
-        cull = cullShader,
+        render = shaders.render,
+        cull = shaders.cull,
         modifiers = {ColorComponent, ClipBounds, Material},
         tags = {Unlit},
         alphaBlendFilter = false,

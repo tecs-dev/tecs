@@ -21,7 +21,7 @@ local meshDefinition <const> = require("tecs2d.gfx.internal.mesh.definition")
 local material_compiler <const> = require("tecs2d.gfx.internal.material_compiler")
 local shadow_setup <const> = require("tecs2d.gfx.internal.mesh.shadow_setup")
 local shadow_dispatch <const> = require("tecs2d.gfx.internal.mesh.shadow_dispatch")
-local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
+local modifierBinding <const> = require("tecs2d.gfx.internal.gpu.modifier_binding")
 local gpuTypes <const> = require("tecs2d.gfx.internal.gpu.types")
 local shaderUtils <const> = require("tecs2d.gfx.internal.gpu.shaders")
 
@@ -102,16 +102,17 @@ function mesh.plugin(world: tecs.World)
 
     -- Build the per-archetype shadow registry + render-state /
     -- upload PreRender systems.
+    -- Modifier bindings (layout, mask bit, SSBO name) derived from the
+    -- shared registry so they can't drift from cull_common.glsl. The
+    -- mesh shadow modules declare their own structurally identical
+    -- OptionalBinding records, hence the casts.
+    local meshModifiers <const> = modifierBinding.bind({
+        ColorComponent, ClipBounds, Pivot, Material,
+    })
+
     local shadowCtx = shadow_setup.register(world, {
         meshComponent = Mesh as tecs.Component,
-        optional = {
-            -- Canonical mask bits; must match modifier_binding.MASK and
-            -- the COMP_* constants in cull_common.glsl.
-            {component = ColorComponent,    layout = std430.layouts.Color,      mask = 0x1,  ssboName = "ColorInput"},
-            {component = ClipBounds,        layout = std430.layouts.ClipBounds, mask = 0x2,  ssboName = "ClipBoundsInput"},
-            {component = Pivot,             layout = std430.layouts.Pivot,      mask = 0x40, ssboName = "PivotInput"},
-            {component = Material,          layout = std430.layouts.Material,   mask = 0x10, ssboName = "MaterialInput"},
-        },
+        optional = meshModifiers as {shadow_setup.OptionalBinding},
         registryName = "mesh.shadows",
         renderStateSystemName = "mesh.ShadowRenderState",
         uploadSystemName = "mesh.ShadowUpload",
@@ -125,14 +126,7 @@ function mesh.plugin(world: tecs.World)
         shader = meshCullShader,
         registry = shadowCtx.registry,
         meshComponent = Mesh as tecs.Component,
-        optional = {
-            -- Canonical mask bits; must match modifier_binding.MASK and
-            -- the COMP_* constants in cull_common.glsl.
-            {component = ColorComponent,    layout = std430.layouts.Color,      mask = 0x1,  ssboName = "ColorInput"},
-            {component = ClipBounds,        layout = std430.layouts.ClipBounds, mask = 0x2,  ssboName = "ClipBoundsInput"},
-            {component = Pivot,             layout = std430.layouts.Pivot,      mask = 0x40, ssboName = "PivotInput"},
-            {component = Material,          layout = std430.layouts.Material,   mask = 0x10, ssboName = "MaterialInput"},
-        },
+        optional = meshModifiers as {shadow_dispatch.OptionalBinding},
         tagFlags = {
             {component = Unlit, flag = gpuTypes.FLAG_UNLIT},
         },

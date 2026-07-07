@@ -1,7 +1,5 @@
 local tecs <const> = require("tecs")
 local types <const> = require("tecs2d.gfx.types")
-local shaderUtils <const> = require("tecs2d.gfx.internal.gpu.shaders")
-local material_compiler <const> = require("tecs2d.gfx.internal.material_compiler")
 local defineShape <const> = require("tecs2d.gfx.internal.gpu.define_shape")
 
 local ColorComponent <const> = require("tecs2d.gfx.internal.Color")
@@ -10,17 +8,13 @@ local Unlit <const> = require("tecs2d.gfx.internal.Unlit")
 local Material <const> = require("tecs2d.gfx.internal.Material")
 local Pivot <const> = require("tecs2d.gfx.internal.Pivot")
 
-local lg <const> = love.graphics
-
 -- Arc uses the renderer-owned shadow-column path; wiring is provided
--- by `shadow_plugin`. No shadow path (arcs don't cast raymarched
--- shadows in the legacy renderer either).
-local ARC_SHADERS <const> = "tecs2d/gfx/internal/arc/"
-local renderSource <const> = shaderUtils.loadRenderShader("arc", ARC_SHADERS)
-local renderShader <const> = lg.newShader(renderSource)
-local cullShader <const> =
-    lg.newComputeShader(shaderUtils.loadCullShader("arc_cull", ARC_SHADERS))
-material_compiler.registerBaseSource("arc", renderSource)
+-- by `shadow_plugin`. No shadow-mask shader: arcs do not cast
+-- raymarched shadows.
+local shaders <const> = defineShape.loadShaders({
+    name = "arc",
+    dir = "tecs2d/gfx/internal/arc/",
+})
 
 local record arc
     record Arc is tecs.Component, types.Rect
@@ -68,8 +62,8 @@ function arc.plugin(world: tecs.World)
     defineShape.register(world, {
         name = "Arc",
         component = Arc as tecs.Component,
-        render = renderShader,
-        cull = cullShader,
+        render = shaders.render,
+        cull = shaders.cull,
         modifiers = {ColorComponent, ClipBounds, Material, Pivot},
         tags = {Unlit},
         alphaBlendFilter = false,
