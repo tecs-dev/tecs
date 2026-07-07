@@ -45,6 +45,38 @@ describe("tiled collision: geometry follows the tilemap Transform", function()
         luassert.is_true(ok == true, "floor tiles not rendered at the offset position")
     end)
 
+    it("physics debug overlay draws on toggle and clears on re-toggle", function()
+        -- The floor collider's top edge runs along world y=128. The debug
+        -- overlay draws red outlines (default color r=1); the tile under
+        -- it is green. Buffers allocate lazily on the first enabled frame,
+        -- so this exercises that path end to end.
+        local EDGE_PROBE = {{248 / 320, 128 / 240}}
+
+        fixture.runLua(app, [[
+            local gfx = require("tecs2d.gfx")
+            world:emit(0, gfx.PhysicsDebugToggle())
+            return true
+        ]])
+        local drawn = fixture.eventually(fixture.callTimeout, function(): boolean
+            local p = fixture.probePixels(app, EDGE_PROBE)[1]
+            if p[1] > 0.8 then return true end
+            return nil
+        end)
+        luassert.is_true(drawn == true, "debug overlay never drew the collider outline")
+
+        fixture.runLua(app, [[
+            local gfx = require("tecs2d.gfx")
+            world:emit(0, gfx.PhysicsDebugToggle())
+            return true
+        ]])
+        local cleared = fixture.eventually(fixture.callTimeout, function(): boolean
+            local p = fixture.probePixels(app, EDGE_PROBE)[1]
+            if p[1] < 0.1 then return true end
+            return nil
+        end)
+        luassert.is_true(cleared == true, "debug overlay did not clear after toggling off")
+    end)
+
     it("drops the ball onto the floor instead of through it", function()
         -- Wait for the ball to settle: two consecutive samples nearly equal.
         local settled = fixture.eventually(8, function(): number

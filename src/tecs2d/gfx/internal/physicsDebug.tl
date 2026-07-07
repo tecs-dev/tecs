@@ -96,13 +96,24 @@ function physicsDebug.new(options?: physicsDebug.Options): tecs.Plugin
         local physicsWorld = physicsState.world
         local enabled = physicsState.debug or false
 
-        -- Mesh buffer state
-        local capacity = INITIAL_CAPACITY
-        local byteData = love.data.newByteData(capacity * BYTES_PER_VERT)
-        local vertsRaw = C.cast("float*", byteData:getFFIPointer()) as C.CData
-        local verts = vertsRaw as {integer: number}
-        local mesh = lg.newMesh(VERT_FORMAT as {{number | string}}, capacity, "triangles", "stream")
+        -- Mesh buffer state, allocated lazily on the first enabled frame
+        -- so installing the plugin costs no VRAM or RAM until the debug
+        -- overlay is actually toggled on.
+        local capacity = 0
+        local byteData: love.data.ByteData = nil
+        local vertsRaw: C.CData = nil
+        local verts: {integer: number} = nil
+        local mesh: love.graphics.Mesh = nil
         local vertCount = 0
+
+        local function ensureBuffers()
+            if byteData then return end
+            capacity = INITIAL_CAPACITY
+            byteData = love.data.newByteData(capacity * BYTES_PER_VERT)
+            vertsRaw = C.cast("float*", byteData:getFFIPointer()) as C.CData
+            verts = vertsRaw as {integer: number}
+            mesh = lg.newMesh(VERT_FORMAT as {{number | string}}, capacity, "triangles", "stream")
+        end
 
         -- Cache state: static geometry is built once and reused.
         -- Per-body shape count keyed by body identity catches chunk
@@ -288,6 +299,7 @@ function physicsDebug.new(options?: physicsDebug.Options): tecs.Plugin
             phase = tecs.phases.Draw,
             run = function(_dt: number)
                 if not enabled then return end
+                ensureBuffers()
 
                 local camZoom = pipelineInstance:getCamera():getZoom()
                 local lineHW = 0.75 / camZoom
@@ -322,9 +334,11 @@ function physicsDebug.new(options?: physicsDebug.Options): tecs.Plugin
 
                 if vertCount > 0 then
                     local meshTbl = mesh as {any: any}
-                    local setVertices = meshTbl.setVertices as function(any, any)
+                    local setVertices = meshTbl.setVertices as function(any, any, integer, integer)
                     local setDrawRange = meshTbl.setDrawRange as function(any, integer, integer)
-                    setVertices(mesh, byteData)
+                    -- Upload only the live vertex range, not the full
+                    -- buffer capacity.
+                    setVertices(mesh, byteData, 1, vertCount)
                     setDrawRange(mesh, 1, vertCount)
                     pipelineInstance:worldShader():at(DEBUG_LAYER, 0, 0):unlit():attach()
                     lg.setColor(1, 1, 1, 1)
