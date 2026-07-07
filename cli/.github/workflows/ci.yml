@@ -30,7 +30,7 @@ jobs:
       - name: Set up Lua
         uses: leafo/gh-actions-lua@v11
         with:
-          luaVersion: "5.4"
+          luaVersion: "5.1"
 
       - name: Set up LuaRocks
         uses: leafo/gh-actions-luarocks@v5
@@ -74,13 +74,15 @@ jobs:
           repository: tecs-dev/tecs
           path: tecs
 
-      - name: Set up Lua
-        uses: leafo/gh-actions-lua@v11
-        with:
-          luaVersion: "5.4"
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Set up LuaRocks
-        uses: leafo/gh-actions-luarocks@v5
+      - name: Set up Lua and LuaRocks
+        shell: pwsh
+        run: |
+          python -m pip install hererocks
+          hererocks "$env:RUNNER_TEMP\lua" -l 5.1 -r latest
+          "$env:RUNNER_TEMP\lua\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Install tecs-cli
         shell: cmd
