@@ -172,12 +172,12 @@ C.cdef[[
         float opacity;
     } Std430DropShadow;
 
-    // SpriteData: 56 bytes. Renderer-internal derived metadata that
-    // sync writes per dirty entity (resolved frame UV, animation
-    // params from the sheet, packed textureSlice with layer index +
-    // generation). The cull shader reads this in place of the
-    // slot-keyed metadataBuffer the legacy path used. Field-identical
-    // to CanonicalSpriteData; identity memcpy.
+    // SpriteData: 68 bytes (17 floats). Renderer-internal derived
+    // metadata that sync writes per dirty entity (resolved frame UV,
+    // animation params from the sheet, packed textureSlice with layer
+    // index + generation, playback direction and the tag's first
+    // sheet frame). Field-identical to CanonicalSpriteData; identity
+    // memcpy.
     typedef struct {
         float pivotX, pivotY;
         float width, height;
@@ -189,6 +189,8 @@ C.cdef[[
         float animFrameHeight;
         float animTimingOffset;
         float textureSlice;        // packed: layer index + generation
+        float animDirection;       // 0 forward, 1 reverse, 2 pingpong
+        float animFirstFrame;      // tag's first sheet frame, 0-based
     } Std430SpriteData;
 
     // Mesh: 4 bytes. The cull shader reads `definitionId` per row to
@@ -374,7 +376,7 @@ C.cdef[[
         float opacity;
     } CanonicalDropShadow;
 
-    // Canonical SpriteData: 56 bytes. Field-identical to Std430SpriteData.
+    // Canonical SpriteData: 68 bytes. Field-identical to Std430SpriteData.
     typedef struct {
         float pivotX, pivotY;
         float width, height;
@@ -386,6 +388,8 @@ C.cdef[[
         float animFrameHeight;
         float animTimingOffset;
         float textureSlice;
+        float animDirection;
+        float animFirstFrame;
     } CanonicalSpriteData;
 
     // Canonical Mesh: 4 bytes. Single int32 field (renamed from FFI's
@@ -582,8 +586,8 @@ local translateSprite <const> = translateIdentity(SPRITE_STD_SIZE)
 -- Identity memcpy.
 local translateDropShadow <const> = translateIdentity(DROPSHADOW_STD_SIZE)
 
--- Canonical SpriteData and Std430SpriteData are byte-identical 56 bytes
--- (14 floats). Identity memcpy.
+-- Canonical SpriteData and Std430SpriteData are byte-identical 68 bytes
+-- (17 floats). Identity memcpy.
 local translateSpriteData <const> = translateIdentity(SPRITEDATA_STD_SIZE)
 
 -- Canonical Mesh and Std430Mesh are byte-identical 4 bytes (int32 vs
@@ -776,7 +780,7 @@ local MESH_FORMAT: love.graphics.BufferFormat = {
     {format = "uint32"},  -- definitionId
 }
 
--- SpriteData: 56 bytes per row = 14 × float. All-scalar struct so
+-- SpriteData: 68 bytes per row = 17 × float. All-scalar struct so
 -- std430 stride is the natural 4-byte alignment.
 local SPRITEDATA_FORMAT: love.graphics.BufferFormat = {
     {format = "float"},  -- pivotX
@@ -794,6 +798,8 @@ local SPRITEDATA_FORMAT: love.graphics.BufferFormat = {
     {format = "float"},  -- animFrameHeight
     {format = "float"},  -- animTimingOffset
     {format = "float"},  -- textureSlice (packed)
+    {format = "float"},  -- animDirection (0 forward, 1 reverse, 2 pingpong)
+    {format = "float"},  -- animFirstFrame (tag's first sheet frame, 0-based)
 }
 
 -------------------------------------------------------------------------------

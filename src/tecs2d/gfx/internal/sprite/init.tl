@@ -284,6 +284,8 @@ local record sprite
         animFrameHeight: number
         animTimingOffset: number
         textureSlice: number    -- packed: layerIndex | (generation << packBits)
+        animDirection: number   -- 0 forward, 1 reverse, 2 pingpong
+        animFirstFrame: number  -- tag's first sheet frame, 0-based
     end
 end
 
@@ -344,9 +346,14 @@ local function populateInstanceFromConfig(inst: SpriteInstance, sheetVal: sprite
     inst.animFrameWidth = inst.uvW
     inst.animColumnCount = 0
     inst.animFrameHeight = inst.uvH
+    inst.animDirection = 0
+    inst.animFirstFrame = 0
 
     if frameTag then
         local sheetId = inst.sheetId
+        local direction = frameTag.direction or 0
+        inst.animDirection = direction
+        inst.animFirstFrame = frameTag.from - 1  -- 0-based for the shaders
 
         -- Check timing cache: timingCache[sheetId][tagId][speed]
         local timingSheetCache = timingCache[sheetId]
@@ -361,21 +368,38 @@ local function populateInstanceFromConfig(inst: SpriteInstance, sheetVal: sprite
             inst.animColumnCount = timingCached[4]
             inst.animFrameHeight = timingCached[5]
         else
-            -- Timing cache miss: compute and cache
-            local frameCount = frameTag.to - frameTag.from + 1
-
             -- Compute grid layout info for GPU animation
             local sheetW, sheetH = sheetVal:getSheetSize()
             local spriteW, spriteH = sheetVal:getSpriteSize()
             local columnCount = floor(sheetW / spriteW)
             local frameHeight = spriteH / sheetH
 
-            -- Collect per-frame durations for variable timing support
+            -- Collect per-frame durations in PLAY order. The timing
+            -- buffer stores the timeline the GPU steps through; the cull
+            -- shader maps timeline indices back to display frames via
+            -- animDirection. Reverse plays to..from; pingpong plays
+            -- from..to then back down to from+1 (2n-2 timeline entries).
             local frameDurations: {number} = {}
-            for i = frameTag.from, frameTag.to do
-                local frameDur = sheetVal:getFrame(i).duration / speed
-                frameDurations[#frameDurations + 1] = frameDur
+            local function pushDuration(frame: integer)
+                frameDurations[#frameDurations + 1] = sheetVal:getFrame(frame).duration / speed
             end
+            if direction == 1 then
+                for i = frameTag.to, frameTag.from, -1 do
+                    pushDuration(i)
+                end
+            elseif direction == 2 then
+                for i = frameTag.from, frameTag.to do
+                    pushDuration(i)
+                end
+                for i = frameTag.to - 1, frameTag.from + 1, -1 do
+                    pushDuration(i)
+                end
+            else
+                for i = frameTag.from, frameTag.to do
+                    pushDuration(i)
+                end
+            end
+            local frameCount = #frameDurations
 
             -- Register with timing buffer
             local sheetPath = sheetVal:getPath() or "unknown"
@@ -1064,7 +1088,7 @@ tecs.newFFIComponent({
 })
 
 -- SpriteData: renderer-internal derived metadata, populated by sync,
--- read by the shadow cull shader. 14 floats = 56 bytes, matching
+-- read by the shadow cull shader. 17 floats = 68 bytes, matching
 -- Std430SpriteData in `gpu/std430.tl`. Default zeros come from FFI
 -- column allocation; Sprite's `requires = {SpriteData}` adds it to
 -- the initial archetype so the lifecycle observer doesn't have to
@@ -1089,8 +1113,10 @@ tecs.newFFIComponent({
         {"animFrameHeight", "float"},
         {"animTimingOffset", "float"},
         {"textureSlice", "float"},
+        {"animDirection", "float"},
+        {"animFirstFrame", "float"},
     },
-    defaults = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    defaults = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 })
 
 -- Map tier names to bucket components

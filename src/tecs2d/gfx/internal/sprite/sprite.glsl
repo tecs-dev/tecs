@@ -6,7 +6,7 @@ struct SpriteData {
     vec4 depthLayerGrid; // computed depth, layer, animColumnCount, animFrameHeight
     vec4 clipBounds;    // minX, minY, maxX, maxY (world coords)
     vec4 uvRect;        // uvX (base), uvY, uvW (single frame), uvH
-    vec4 animData;      // frameIndex (computed by cull), totalDuration, frameCount, frameWidth
+    vec4 animData;      // frameIndex (computed by cull), firstFrame, frameCount, frameWidth
     vec4 rotScale;      // rotation, scaleX, scaleY, textureSlice
     vec4 pivot;         // pivotX, pivotY, spare, packed flags (uint bits)
 };
@@ -75,6 +75,7 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
 
     // Animation data (frame index computed by cull shader using timing buffer)
     float frameIndex = s.animData.x;      // Pre-computed frame index
+    float animFirstFrame = s.animData.y;  // Tag's first sheet frame (0-based)
     float animFrameCount = s.animData.z;
     float animFrameWidth = s.animData.w;
     float animColumnCount = s.depthLayerGrid.z;  // frames per row (0 = single row strip)
@@ -83,16 +84,19 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
     // Clamp frame index (should already be valid from cull shader)
     frameIndex = clamp(frameIndex, 0.0, animFrameCount - 1.0);
 
-    // Compute animated UV coordinates with grid support
-    // Grid layout: frames wrap to next row after animColumnCount frames
+    // Compute animated UV coordinates with grid support. Grid positions
+    // are sheet-absolute (firstFrame + frameIndex) so a tag that starts
+    // mid-row wraps to the next sheet row instead of stepping past the
+    // sheet's right edge; uvRect.xy is the first frame's UV, so subtract
+    // its own grid position back out.
     vec2 uvOffset;
     if (animColumnCount > 0.0) {
-        // Grid layout: compute row and column
-        float col = mod(frameIndex, animColumnCount);
-        float row = floor(frameIndex / animColumnCount);
+        float absFrame = animFirstFrame + frameIndex;
+        float col = mod(absFrame, animColumnCount) - mod(animFirstFrame, animColumnCount);
+        float row = floor(absFrame / animColumnCount) - floor(animFirstFrame / animColumnCount);
         uvOffset = vec2(s.uvRect.x + col * animFrameWidth, s.uvRect.y + row * animFrameHeight);
     } else {
-        // Horizontal strip: simple offset (backwards compatible)
+        // Horizontal strip: simple offset
         uvOffset = vec2(s.uvRect.x + frameIndex * animFrameWidth, s.uvRect.y);
     }
     vec2 uvSize = s.uvRect.zw;

@@ -50,6 +50,8 @@ struct Std430SpriteData {
     float animFrameHeight;
     float animTimingOffset;
     float textureSlice;        // packed: layerIndex | (generation << packBits)
+    float animDirection;       // 0 forward, 1 reverse, 2 pingpong
+    float animFirstFrame;      // tag's first sheet frame, 0-based
 };
 layout(std430) readonly buffer SpriteDataInput {
     Std430SpriteData spriteData[];
@@ -88,7 +90,7 @@ struct SpriteOut {
     vec4 depthLayerGrid;  // depth, layer, animColumnCount, animFrameHeight
     vec4 clipBounds;
     vec4 uvRect;
-    vec4 animData;        // frameIndex, totalDuration, frameCount, frameWidth
+    vec4 animData;        // frameIndex, firstFrame, frameCount, frameWidth
     vec4 rotScale;        // rotation, scaleX, scaleY, textureSlice
     vec4 pivot;           // pivotX, pivotY, slice-or-spare, packed flags (uint bits)
 };
@@ -309,6 +311,21 @@ void computemain() {
         frameIndex = computeFrameIndex(sp.animStartTime, sd.animTotalDuration, animFrameCount, animTimingOffset);
     }
 
+    // Map the timeline index to a display frame. Timing entries are
+    // registered in play order, so reverse timelines count down from
+    // the tag's end and pingpong timelines (2n-2 entries) fold back
+    // after the peak. displayCount is what the render shader clamps to.
+    int dir = int(sd.animDirection);
+    float displayCount = float(animFrameCount);
+    if (dir == 1) {
+        frameIndex = (float(animFrameCount) - 1.0) - frameIndex;
+    } else if (dir == 2 && animFrameCount > 2) {
+        displayCount = (float(animFrameCount) + 2.0) * 0.5;
+        if (frameIndex >= displayCount) {
+            frameIndex = (2.0 * displayCount - 2.0) - frameIndex;
+        }
+    }
+
     float depthWithTie = computeDepth(layer, z, x, bottomY, row);
 
     // Apply repeat-mode UV scaling (no-op for non-repeated sprites).
@@ -333,7 +350,7 @@ void computemain() {
     vec4 outPosSize = vec4(outX, outY, w, h);
     vec4 outDepthLayerGrid = vec4(depthWithTie, layer, sd.animColumnCount, sd.animFrameHeight);
     vec4 outUvRect = vec4(sd.uvX, sd.uvY, outUvW, outUvH);
-    vec4 outAnimData = vec4(frameIndex, sd.animTotalDuration, float(animFrameCount), sd.animFrameWidth);
+    vec4 outAnimData = vec4(frameIndex, sd.animFirstFrame, displayCount, sd.animFrameWidth);
     vec4 outRotScale = vec4(t.rotation, scaleX, scaleY, float(sliceIndex));
 
     spritesOut[outIdx].posSize = outPosSize;

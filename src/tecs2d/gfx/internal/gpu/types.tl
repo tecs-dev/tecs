@@ -888,7 +888,7 @@ types.SPRITE_FORMAT = {
     {format = "floatvec4"},  -- layerZ / depthLayerGrid (depth, layer, animColumnCount, animFrameHeight)
     {format = "floatvec4"},  -- clipBounds
     {format = "floatvec4"},  -- uvRect (base UV for animation)
-    {format = "floatvec4"},  -- animData (frameIndex, totalDuration, frameCount, frameWidth)
+    {format = "floatvec4"},  -- animData (frameIndex, firstFrame, frameCount, frameWidth)
     {format = "floatvec4"},  -- rotScale (rotation, scaleX, scaleY, textureSlice)
     {format = "floatvec4"},  -- pivot (pivotX, pivotY, flags, screenSpaceFlags)
 }

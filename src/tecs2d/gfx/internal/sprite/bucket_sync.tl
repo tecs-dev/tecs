@@ -79,6 +79,8 @@ local record SpriteDataFFI
     animFrameHeight: number
     animTimingOffset: number
     textureSlice: number
+    animDirection: number
+    animFirstFrame: number
 end
 
 local getInstance <const> = sprite_instance.get
@@ -540,6 +542,8 @@ function SpriteBucketSync:sync(_dt: number)
                             sd.animFrameHeight = inst.animFrameHeight * uvScaleY
                             sd.animTimingOffset = inst.animTimingOffset or 0
                             sd.textureSlice = bucket.layerIndex + (bucket.generation * 65536)
+                            sd.animDirection = inst.animDirection or 0
+                            sd.animFirstFrame = inst.animFirstFrame or 0
                         end
                     end
                 end

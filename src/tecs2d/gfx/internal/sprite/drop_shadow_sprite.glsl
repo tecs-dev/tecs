@@ -16,7 +16,7 @@ struct SpriteData {
     vec4 depthLayerGrid; // computed depth, layer, animColumnCount, animFrameHeight
     vec4 clipBounds;    // minX, minY, maxX, maxY (world coords)
     vec4 uvRect;        // uvX (base), uvY, uvW (single frame), uvH
-    vec4 animData;      // frameIndex (computed by cull), totalDuration, frameCount, frameWidth
+    vec4 animData;      // frameIndex (computed by cull), firstFrame, frameCount, frameWidth
     vec4 rotScale;      // rotation, scaleX, scaleY, textureSlice
     vec4 pivot;         // pivotX, pivotY, spare, packed flags (uint bits)
 };
@@ -75,6 +75,7 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
 
     // Animation data
     float frameIndex = s.animData.x;
+    float animFirstFrame = s.animData.y;
     float animFrameCount = s.animData.z;
     float animFrameWidth = s.animData.w;
     float animColumnCount = s.depthLayerGrid.z;
@@ -82,11 +83,13 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
 
     frameIndex = clamp(frameIndex, 0.0, animFrameCount - 1.0);
 
-    // Compute animated UV coordinates
+    // Compute animated UV coordinates. Sheet-absolute grid positions so
+    // mid-row tags wrap to the next row (matches sprite.glsl).
     vec2 uvOffset;
     if (animColumnCount > 0.0) {
-        float col = mod(frameIndex, animColumnCount);
-        float row = floor(frameIndex / animColumnCount);
+        float absFrame = animFirstFrame + frameIndex;
+        float col = mod(absFrame, animColumnCount) - mod(animFirstFrame, animColumnCount);
+        float row = floor(absFrame / animColumnCount) - floor(animFirstFrame / animColumnCount);
         uvOffset = vec2(s.uvRect.x + col * animFrameWidth, s.uvRect.y + row * animFrameHeight);
     } else {
         uvOffset = vec2(s.uvRect.x + frameIndex * animFrameWidth, s.uvRect.y);

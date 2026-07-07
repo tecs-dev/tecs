@@ -29,6 +29,8 @@ typedef struct {
     float animFrameWidth;
     int32_t animColumnCount;
     float animFrameHeight;
+    int32_t animDirection;
+    int32_t animFirstFrame;
     float cachedPivotX;
     float cachedPivotY;
     int32_t cachedFrame;
@@ -61,6 +63,14 @@ local record instance
         animFrameWidth: number
         animColumnCount: integer
         animFrameHeight: number
+        --- Playback direction (0 forward, 1 reverse, 2 pingpong). Timing
+        --- entries are registered in play order; the cull shader maps the
+        --- timeline index back to a display frame using this.
+        animDirection: integer
+        --- The tag's first sheet frame, 0-based. Lets the render shaders
+        --- compute sheet-absolute grid positions so tags that start
+        --- mid-row wrap to the next row instead of off the sheet edge.
+        animFirstFrame: integer
 
         -- Cached pivot for frame-dependent pivot calculation
         cachedPivotX: number
@@ -200,6 +210,8 @@ function instance.set(spriteId: integer, inst: instance.SpriteInstance)
     dst.animFrameWidth = inst.animFrameWidth
     dst.animColumnCount = inst.animColumnCount
     dst.animFrameHeight = inst.animFrameHeight
+    dst.animDirection = inst.animDirection
+    dst.animFirstFrame = inst.animFirstFrame
     dst.cachedPivotX = inst.cachedPivotX
     dst.cachedPivotY = inst.cachedPivotY
     dst.cachedFrame = inst.cachedFrame
