@@ -98,7 +98,16 @@ check:
 	$(TEAL_ENV) tl check $(SOURCE_TL)
 
 compile: $(SOURCE_TL) $(SOURCE_GLSL) tlconfig.lua
-	@$(TEAL_ENV) tl -q gen --root src --output-dir build $(SOURCE_TL)
+	@if $(TEAL_ENV) tl gen --help 2>&1 | grep -q -- '--root'; then \
+		$(TEAL_ENV) tl -q gen --root src --output-dir build $(SOURCE_TL); \
+	else \
+		for src in $(SOURCE_TL); do \
+			out="$(LUA_DIR)/$${src#$(TL_SRC_DIR)/}"; \
+			out="$${out%.tl}.lua"; \
+			mkdir -p "$$(dirname "$$out")"; \
+			$(TEAL_ENV) tl -q gen "$$src" -o "$$out"; \
+		done; \
+	fi
 	@# Copy shader files (always sync from source, preserving directory structure)
 	@cd src && find tecs2d/gfx/internal -name "*.glsl" -exec sh -c 'mkdir -p "../$(LUA_DIR)/$$(dirname {})" && cp {} "../$(LUA_DIR)/{}"' \;
 	@echo "Synced $(words $(SOURCE_GLSL)) shader files"
