@@ -102,9 +102,11 @@ void effect() {
     float litMarker = isUnlit ? 0.0 : 1.0;
 
     // G-buffer output
+    // -- MATERIAL_BEGIN --
     love_Canvases[0] = finalColor;  // Albedo
     love_Canvases[1] = vec4(0.5, 0.5, 1.0, litMarker);  // Flat normal + unlit flag
     love_Canvases[2] = DEFAULT_ORM;
     love_Canvases[3] = vec4(0.0);  // No emission for meshes
+    // -- MATERIAL_END --
 }
 #endif

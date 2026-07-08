@@ -40,6 +40,16 @@ local ERR_INTERNAL <const> = -32603
 
 local server: socket.tcp = nil
 local client: socket.tcp = nil
+-- When set, the next closeClient() aborts the connection with linger 0
+-- (RST) instead of a FIN close. The restart handler sets this: a normal
+-- close leaves the accepted socket in FIN_WAIT/TIME_WAIT, which can
+-- block rebinding the same port for many seconds after the engine
+-- restarts (SO_REUSEADDR does not bypass FIN_WAIT states).
+local rstOnClose = false
+-- Port the server still needs to bind (set when startServer exhausts
+-- its retries after a restart); processCommands retries once per second.
+local pendingBindPort: number = nil
+local nextBindAttempt: number = 0
 local world: tecs.World = nil
 local boundPort: number = nil   -- The port we successfully bound to
 local queuedWorldOps: {function(tecs.World)} = {}
@@ -498,6 +508,9 @@ end
 
 toolHandlers["restart"] = function(_: {string:any}, id: number)
     sendToolOK(id, {restarting = true}, nil)
+    -- Abort this connection with RST so the restarted instance can
+    -- rebind the port immediately (see closeClient).
+    rstOnClose = true
     love.event.quit("restart")
 end
 
@@ -1852,14 +1865,54 @@ local function closeClient()
     if pendingScreenshotId then return end  -- keep connection open for async screenshot
     if pendingWorldOpResponse then return end  -- keep open for deferred world-op response
     if client then
+        if rstOnClose then
+            rstOnClose = false
+            pcall(function()
+                client:setoption("linger", {on = true, timeout = 0})
+            end)
+        end
         pcall(function() client:close() end)
         client = nil
     end
 end
 
+--- One bind attempt. Returns true and installs `server` on success;
+--- returns false and the bind error otherwise.
+local function tryBind(port: number): boolean, string
+    server = socket.tcp()
+    server:setoption("reuseaddr", true)
+    pcall(function() server:setoption("reuseport", true) end)
+    local ok, bindErr = server:bind("127.0.0.1", port)
+    if not ok then
+        server:close()
+        server = nil
+        return false, tostring(bindErr)
+    end
+
+    server:listen(5)
+    server:settimeout(0)
+    boundPort = port
+    pendingBindPort = nil
+    log:info("MCP HTTP server listening on port %d", port as integer)
+
+    -- Update window title to show MCP port
+    local currentTitle = love.window.getTitle()
+    currentTitle = currentTitle:gsub("%s*%(MCP:.-%)%s*$", "")
+    love.window.setTitle(currentTitle .. " (MCP:" .. port .. ")")
+    return true, nil
+end
+
 -- Process pending HTTP requests from socket
 local function processCommands()
-    if not server then return end
+    -- Background rebinder: the previous instance's kernel connection
+    -- state can hold the port for up to ~30 seconds after a restart.
+    if not server then
+        if pendingBindPort and lt.getTime() >= nextBindAttempt then
+            nextBindAttempt = lt.getTime() + 1.0
+            tryBind(pendingBindPort)
+        end
+        return
+    end
 
     -- If a pending screenshot was completed, the callback already sent the response
     -- and cleared pendingScreenshotId. Close that connection now.
@@ -1909,41 +1962,43 @@ local function processCommands()
 end
 
 local function startServer(port: number)
-    local RETRIES <const> = 3
+    -- Rebinding the same port right after an engine restart can race
+    -- kernel connection state from the previous instance (TIME_WAIT
+    -- entries live up to 30 seconds on macOS and SO_REUSEADDR does not
+    -- always bypass them). Retry briefly here, then hand off to the
+    -- per-frame rebinder in processCommands so MCP always comes back
+    -- once the kernel releases the port.
+    local RETRIES <const> = 20
     local RETRY_DELAY <const> = 0.1
 
+    local lastErr: string = nil
     for attempt = 1, RETRIES do
-        server = socket.tcp()
-        server:setoption("reuseaddr", true)
-        pcall(function() server:setoption("reuseport", true) end)
-        local ok, _ = server:bind("127.0.0.1", port)
-        if ok then
-            server:listen(5)
-            server:settimeout(0)
-            boundPort = port
-            log:info("MCP HTTP server listening on port %d", port as integer)
-
-            -- Update window title to show MCP port
-            local currentTitle = love.window.getTitle()
-            currentTitle = currentTitle:gsub("%s*%(MCP:.-%)%s*$", "")
-            love.window.setTitle(currentTitle .. " (MCP:" .. port .. ")")
-            return
-        end
-
-        server:close()
-        server = nil
+        local ok, bindErr = tryBind(port)
+        if ok then return end
+        lastErr = bindErr
 
         if attempt < RETRIES then
             lt.sleep(RETRY_DELAY)
         end
     end
 
-    log:error("Failed to start MCP HTTP server on port %d", port as integer)
+    pendingBindPort = port
+    nextBindAttempt = lt.getTime() + 1.0
+    log:warn("MCP HTTP server could not bind port %d yet (%s); retrying in the background",
+        port as integer, tostring(lastErr))
 end
 
 local function cleanup()
     queuedWorldOps = {}
     if client then
+        -- Linger 0 closes with RST instead of FIN, so the accepted
+        -- socket leaves no FIN_WAIT/TIME_WAIT state behind. Without it,
+        -- an engine restart can fail to rebind the port for seconds
+        -- (SO_REUSEADDR does not bypass every lingering state on macOS)
+        -- when the restart request's own connection is still draining.
+        pcall(function()
+            client:setoption("linger", {on = true, timeout = 0})
+        end)
         pcall(function() client:close() end)
         client = nil
     end

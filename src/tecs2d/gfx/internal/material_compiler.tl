@@ -127,6 +127,18 @@ local CALL_SITE <const>: {string: string} = {
     _std.orm = DEFAULT_ORM;
     _std.emission = vec4(0.0);
 ]],
+    mesh = [[
+    mi.color = finalColor;
+    mi.uv = vTexCoord;
+    mi.worldPos = vWorldPos;
+    mi.localPos = vTexCoord;
+    mi.sdfDist = 0.0;
+    _std.albedo = finalColor;
+    _std.normal = vec3(0.5, 0.5, 1.0);
+    _std.lit = litMarker;
+    _std.orm = DEFAULT_ORM;
+    _std.emission = vec4(0.0);
+]],
 }
 
 -- Derived list of supported shape types, computed from CALL_SITE keys.

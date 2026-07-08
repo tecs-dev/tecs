@@ -165,7 +165,9 @@ local function buildChunkComponents(
         columns = tileset.columns,
         tiles = tiles,
         occluderHeights = tileset._occluderHeights,
-        firstgid = tileset.firstgid,
+        -- Tile values are stored as 1-based LOCAL ids (+flip bits), so
+        -- the occluder-height lookup subtracts 1, not the map firstgid.
+        firstgid = 1,
     })
     if layer.tintcolor then
         local tint = layer.tintcolor
@@ -235,7 +237,7 @@ function chunk.spawnTileChunkEntities(
                             local localIdx = localY * TILE_CHUNK_SIZE + localX + 1
 
                             if gid and gid > 0 then
-                                local _flipH, _flipV, _flipD, cleanGid = decodeFlipFlags(gid)
+                                local flipH, flipV, flipD, cleanGid = decodeFlipFlags(gid)
                                 local tileset = getTilesetForGid(map, cleanGid)
 
                                 if tileset and tileset.image then
@@ -251,12 +253,19 @@ function chunk.spawnTileChunkEntities(
                                                 tilesetTiles[tileset][i] = 0
                                             end
                                         end
-                                        -- Store the RAW gid (with flip flags preserved
-                                        -- in the high bits). The shader strips flip
-                                        -- bits for atlas lookup and uses them to flip
-                                        -- the sampled UV coordinates so flipped tiles
-                                        -- render correctly.
-                                        tilesetTiles[tileset][localIdx] = gid
+                                        -- Store the 1-based LOCAL tile id with the
+                                        -- flip flags re-packed into the high bits
+                                        -- (H bit 31, V bit 30, anti-diagonal bit
+                                        -- 29). The render and shadow-mask shaders
+                                        -- mask the low bits for the atlas lookup
+                                        -- and flip the sampled UVs; local ids keep
+                                        -- that lookup correct for tilesets whose
+                                        -- firstgid is not 1.
+                                        local value = localId + 1
+                                        if flipH then value = value + 0x80000000 end
+                                        if flipV then value = value + 0x40000000 end
+                                        if flipD then value = value + 0x20000000 end
+                                        tilesetTiles[tileset][localIdx] = value
                                         hasAnyTile = true
                                     end
                                 end

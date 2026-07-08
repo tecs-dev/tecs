@@ -48,7 +48,15 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
     int uvec4Index = localTile / 4;
     int componentIndex = localTile % 4;
     uvec4 tileGroup = getTileGroup(srcIdx, uvec4Index);
-    uint tileId = tileGroup[componentIndex];
+    uint rawTile = tileGroup[componentIndex];
+
+    // Tile values carry Tiled's flip flags in the high bits (H bit 31,
+    // V bit 30, anti-diagonal bit 29); the low bits are the 1-based
+    // local tile id.
+    uint tileId = rawTile & 0x1FFFFFFFu;
+    bool flipH = (rawTile & 0x80000000u) != 0u;
+    bool flipV = (rawTile & 0x40000000u) != 0u;
+    bool flipD = (rawTile & 0x20000000u) != 0u;
 
     // Pass tile ID to fragment shader for discard check
     vTileId = float(tileId);
@@ -81,10 +89,17 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
     float col = mod(float(atlasId), columns);
     float row = floor(float(atlasId) / columns);
 
-    // UV rect for this tile
+    // UV rect for this tile. Flip flags transform the intra-tile
+    // sample position: anti-diagonal transposes first, then the
+    // horizontal/vertical mirrors apply (Tiled's flag semantics).
+    vec2 uvLocal = localPos;
+    if (flipD) uvLocal = uvLocal.yx;
+    if (flipH) uvLocal.x = 1.0 - uvLocal.x;
+    if (flipV) uvLocal.y = 1.0 - uvLocal.y;
+
     vec2 uvTileSize = vec2(tw, th) / TilesetSize;
     vec2 uvBase = vec2(col * tw, row * th) / TilesetSize;
-    vec2 uv = uvBase + localPos * uvTileSize;
+    vec2 uv = uvBase + uvLocal * uvTileSize;
 
     // Pass texture array layer from chunk data
     float textureLayer = layerInfo.w;

@@ -25,7 +25,7 @@ companion `tecs2d` rock.
 
 dependencies = {
     "lua >= 5.1, < 5.5",
-    "tl >= 0.24.0",
+    "tl == dev-1",
 }
 
 test_dependencies = {

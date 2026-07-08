@@ -13,6 +13,7 @@ local Color <const> = require("tecs2d.gfx.internal.Color")
 local Occluder <const> = require("tecs2d.gfx.internal.Occluder")
 local shaderUtils <const> = require("tecs2d.gfx.internal.gpu.shaders")
 local retire <const> = require("tecs2d.gfx.internal.gpu.retire")
+local band <const> = require("bit").band
 local C <const> = require("ffi")
 
 -- Compile tilechunk shaders
@@ -653,7 +654,10 @@ function tileChunk.plugin(world: tecs.World)
                         for ti = 1, 256 do
                             local gid = tiles[ti]
                             if gid and gid > 0 then
-                                local localId = gid - firstgid
+                                -- Tile values may carry Tiled flip flags in
+                                -- the high bits; only the low bits identify
+                                -- the tile for the occluder-height lookup.
+                                local localId = band(gid, 0x1FFFFFFF) - firstgid
                                 if localId >= 0 and occluderHeights[localId] then
                                     hasOccluders = true
                                     break

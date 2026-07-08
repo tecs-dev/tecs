@@ -37,11 +37,15 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
     TileChunkVis vis = chunks[chunkIndex];
     uint srcIdx = vis.srcIndex.x;
 
-    // Get tile ID
+    // Get tile ID (low bits; Tiled flip flags ride bits 29..31)
     int uvec4Index = localTile / 4;
     int componentIndex = localTile % 4;
     uvec4 tileGroup = getTileGroup(srcIdx, uvec4Index);
-    uint tileId = tileGroup[componentIndex];
+    uint rawTile = tileGroup[componentIndex];
+    uint tileId = rawTile & 0x1FFFFFFFu;
+    bool flipH = (rawTile & 0x80000000u) != 0u;
+    bool flipV = (rawTile & 0x40000000u) != 0u;
+    bool flipD = (rawTile & 0x20000000u) != 0u;
 
     vTileId = float(tileId);
 
@@ -84,14 +88,20 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
     vec2 tileOffset = vec2(float(tileX) * tw, float(tileY) * th);
     vec2 worldPos = chunkPos + tileOffset + quadPos * vec2(tw, th);
 
-    // Calculate UV coordinates from tile ID
+    // Calculate UV coordinates from tile ID; flips shape the alpha
+    // silhouette the same way they shape the rendered tile.
     uint atlasId = tileId - 1u;
     float col = mod(float(atlasId), columns);
     float row = floor(float(atlasId) / columns);
 
+    vec2 uvLocal = quadPos;
+    if (flipD) uvLocal = uvLocal.yx;
+    if (flipH) uvLocal.x = 1.0 - uvLocal.x;
+    if (flipV) uvLocal.y = 1.0 - uvLocal.y;
+
     vec2 uvTileSize = vec2(tw, th) / TilesetSize;
     vec2 uvBase = vec2(col * tw, row * th) / TilesetSize;
-    vec2 uv = uvBase + quadPos * uvTileSize;
+    vec2 uv = uvBase + uvLocal * uvTileSize;
 
     vTexCoord = vec3(uv, textureIndex);
 
