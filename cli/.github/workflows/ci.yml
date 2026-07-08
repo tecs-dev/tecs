@@ -22,9 +22,15 @@ jobs:
       - name: Set up LuaRocks
         uses: leafo/gh-actions-luarocks@v5
 
+      - name: Clear LuaRocks cache
+        run: rm -rf "$HOME/.cache/luarocks"
+
       - name: Run luacheck
         run: |
-          luarocks install luacheck
+          luarocks --lua-version=5.1 install https://luarocks.org/argparse-0.7.2-1.src.rock
+          luarocks --lua-version=5.1 install https://luarocks.org/luafilesystem-1.9.0-1.src.rock
+          luarocks --lua-version=5.1 install --deps-mode=none https://luarocks.org/luacheck-1.2.0-1.src.rock
+          eval "$(luarocks --lua-version=5.1 path --bin)"
           luacheck tecs_cli spec bin/tecs --codes
 
   unix:
@@ -56,19 +62,25 @@ jobs:
       - name: Set up LuaRocks
         uses: leafo/gh-actions-luarocks@v5
 
+      - name: Clear LuaRocks cache
+        shell: bash
+        run: rm -rf "$HOME/.cache/luarocks"
+
       - name: Install tecs-cli
         shell: bash
         run: |
-          luarocks make --local tecs-cli-0.1.0-1.rockspec
+          luarocks --lua-version=5.1 install --local https://luarocks.org/ansicolors-1.0.2-3.src.rock
+          luarocks --lua-version=5.1 install --local https://luarocks.org/argparse-0.7.2-1.src.rock
+          luarocks --lua-version=5.1 install --local https://luarocks.org/luafilesystem-1.9.0-1.src.rock
+          luarocks --lua-version=5.1 make --local --deps-mode=none tecs-cli-0.1.0-1.rockspec
           eval "$(luarocks path --local --bin)"
           tecs --version
 
       - name: Run CLI tests
         shell: bash
         run: |
-          luarocks install --local busted
           eval "$(luarocks path --local --bin)"
-          busted
+          luajit spec/run.lua
 
       - name: Create and build a starter app
         shell: bash
@@ -106,10 +118,19 @@ jobs:
           hererocks "$env:RUNNER_TEMP\lua" -j 2.1 -r latest
           "$env:RUNNER_TEMP\lua\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
+      - name: Clear LuaRocks cache
+        shell: cmd
+        run: |
+          if exist "%USERPROFILE%\.cache\luarocks" rmdir /S /Q "%USERPROFILE%\.cache\luarocks"
+          if exist "%LOCALAPPDATA%\LuaRocks\Cache" rmdir /S /Q "%LOCALAPPDATA%\LuaRocks\Cache"
+
       - name: Install tecs-cli
         shell: cmd
         run: |
-          luarocks make --local tecs-cli-0.1.0-1.rockspec
+          luarocks --lua-version=5.1 install --local https://luarocks.org/ansicolors-1.0.2-3.src.rock
+          luarocks --lua-version=5.1 install --local https://luarocks.org/argparse-0.7.2-1.src.rock
+          luarocks --lua-version=5.1 install --local https://luarocks.org/luafilesystem-1.9.0-1.src.rock
+          luarocks --lua-version=5.1 make --local --deps-mode=none tecs-cli-0.1.0-1.rockspec
           luarocks path --local --bin > luarocks-path.bat
           call luarocks-path.bat
           tecs --version
@@ -117,10 +138,9 @@ jobs:
       - name: Run CLI tests
         shell: cmd
         run: |
-          luarocks install --local busted
           luarocks path --local --bin > luarocks-path.bat
           call luarocks-path.bat
-          busted
+          luajit spec\run.lua
 
       - name: Create and build a starter app
         shell: cmd
