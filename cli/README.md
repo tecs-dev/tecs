@@ -1,12 +1,15 @@
 # tecs-cli
 
-Command-line tool for creating, building, checking, testing, and running
-fixed-layout Tecs2D projects.
+Command-line tool for creating, building, checking, and running fixed-layout
+Tecs2D projects.
 
 ## Install
 
+Tecs targets LuaJIT, so install with a LuaRocks tree configured for LuaJIT
+(Lua 5.1):
+
 ```sh
-luarocks install tecs-cli
+luarocks --lua-version=5.1 install tecs-cli
 ```
 
 If your shell cannot find `tecs` after installing with LuaRocks, add your
@@ -19,7 +22,7 @@ eval "$(luarocks path --bin)"
 For local checkout development:
 
 ```sh
-luarocks make tecs-cli-0.1.0-1.rockspec
+luarocks --lua-version=5.1 make tecs-cli-0.1.0-1.rockspec
 ```
 
 ## Create A Project
@@ -48,7 +51,6 @@ tecs new hello
 tecs run
 tecs build
 tecs check
-tecs test
 tecs clean
 tecs wipe-clean
 tecs love12
@@ -56,7 +58,18 @@ tecs love12
 
 `tecs run` builds the project and launches Love2D. `tecs build` compiles Teal
 source into `build/` and stages vendored runtime files. `tecs check` runs the
-Teal type checker. `tecs test` runs Busted and forwards additional arguments.
+Teal type checker. Pass `--quiet` (or `-q`) to any command to suppress
+progress output.
+
+## Development Commands
+
+These commands work against a local Tecs checkout, found via `TECS_DIR` or a
+sibling `../tecs` directory:
+
+```sh
+tecs dev        # copy local Tecs/Tecs2D sources into src/vendor/ for iteration
+tecs sync-tecs  # reinstall Tecs/Tecs2D into src/vendor/ from local rockspecs
+```
 
 ## Project Dependencies
 
@@ -72,7 +85,7 @@ LuaRocks.
 
 ## System Requirements
 
-- Lua and LuaRocks
+- LuaJIT and LuaRocks
 - Git
 - curl
 - unzip on macOS/Linux, or PowerShell `Expand-Archive` on Windows

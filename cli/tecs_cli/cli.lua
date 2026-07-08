@@ -1,19 +1,36 @@
 -- Cross-platform task runner for Tecs starter projects.
--- Usage: tecs [help|check|build|run|clean|love12|dev|sync-tecs]
+-- Usage: tecs [--version] [--quiet] <command>
 
 local argparse = require("argparse")
 local have_ansicolors, ansicolors = pcall(require, "ansicolors")
 local have_lfs, lfs = pcall(require, "lfs")
 
-local VERSION = "0.1.0"
+local VERSION = "0.1.0" -- keep in sync with the rockspec version
 
--- Detect the platform from the OS path separator.
-local host_sep = package.config:sub(1, 1)
-local sep = host_sep
-local is_msys = os.getenv("MSYSTEM") ~= nil
-if is_msys then sep = "/" end
-local is_windows = sep == "\\" and not is_msys
-local uses_cmd_shell = host_sep == "\\"
+-- Platform traits detected from the OS path separator. Held in mutable locals
+-- so specs can substitute another platform via M._internal.set_platform.
+local sep, is_msys, is_windows, uses_cmd_shell
+
+local function detect_platform()
+    local host_sep = package.config:sub(1, 1)
+    local msys = os.getenv("MSYSTEM") ~= nil
+    local separator = msys and "/" or host_sep
+    return {
+        sep = separator,
+        is_msys = msys,
+        is_windows = separator == "\\" and not msys,
+        uses_cmd_shell = host_sep == "\\",
+    }
+end
+
+local function set_platform(platform)
+    sep = platform.sep
+    is_msys = platform.is_msys or false
+    is_windows = platform.is_windows or false
+    uses_cmd_shell = platform.uses_cmd_shell or false
+end
+
+set_platform(detect_platform())
 
 -- Local Tecs/Tecs2D checkout used for installs and dev mode. Override with
 -- TECS_DIR; otherwise use a sibling checkout, matching the CI layout.
@@ -34,7 +51,18 @@ local exclude_assets = {
     ["aseprite"] = true,
 }
 
+-- The same extensions as glob patterns, for copy_dir exclusion lists.
+local function exclude_asset_patterns()
+    local patterns = {}
+    for ext in pairs(exclude_assets) do
+        patterns[#patterns + 1] = "*." .. ext
+    end
+    table.sort(patterns)
+    return patterns
+end
+
 local color_enabled
+local quiet = false
 
 local function require_lfs()
     if not have_lfs then
@@ -43,11 +71,28 @@ local function require_lfs()
     return lfs
 end
 
+local function env_flag(name)
+    local value = os.getenv(name)
+    return value ~= nil and value ~= "" and value ~= "0"
+end
+
 local function supports_color()
     if color_enabled ~= nil then return color_enabled end
-    local no_color = os.getenv("NO_COLOR")
     local term = os.getenv("TERM")
-    color_enabled = no_color == nil and not is_windows and term ~= "dumb"
+    if os.getenv("NO_COLOR") ~= nil then
+        color_enabled = false
+    elseif env_flag("FORCE_COLOR") or env_flag("CLICOLOR_FORCE") then
+        color_enabled = true
+    elseif term == "dumb" then
+        color_enabled = false
+    elseif is_windows then
+        -- Plain cmd.exe consoles may not render ANSI codes, but ANSI-capable
+        -- Windows environments (Windows Terminal, Git Bash) advertise
+        -- themselves through these variables.
+        color_enabled = os.getenv("WT_SESSION") ~= nil or term ~= nil
+    else
+        color_enabled = true
+    end
     return color_enabled
 end
 
@@ -76,6 +121,7 @@ end
 
 -- Print a progress message to stderr (stdout is reserved for echoed commands).
 local function status(message)
+    if quiet then return end
     io.stderr:write(color("cyan", "==> ") .. message .. "\n")
 end
 
@@ -83,27 +129,19 @@ local function fail(message)
     error({tecs_exit = true, message = message}, 0)
 end
 
--- Quote a path so it survives as a single shell argument.
+-- Quote a path so it survives as a single shell argument. cmd.exe expects
+-- doubled quotes inside a quoted string; POSIX shells use backslash escapes.
 local function q(path)
-    return '"' .. tostring(path):gsub('"', '\\"') .. '"'
+    path = tostring(path)
+    if is_windows then
+        return '"' .. path:gsub('"', '""') .. '"'
+    end
+    return '"' .. path:gsub('"', '\\"') .. '"'
 end
 
 -- Quote text for a single-quoted POSIX shell string.
 local function shq(text)
     return "'" .. tostring(text):gsub("'", "'\\''") .. "'"
-end
-
-local function shell_arg(value)
-    value = tostring(value)
-    if is_windows then
-        return q(value)
-    end
-    return shq(value)
-end
-
-local function basename(path)
-    path = tostring(path):gsub("[/\\]+$", "")
-    return path:match("([^/\\]+)$") or path
 end
 
 local function source_path()
@@ -137,8 +175,8 @@ local function normalize(path)
     return path
 end
 
--- Path spelling for Lua module search. Under MSYS2 our shell tools need
--- `/d/...`, but the `tl` shim ultimately runs Windows Lua and needs `D:/...`.
+-- Path spelling for Lua module search: forward slashes work for every tool we
+-- invoke, including Windows Lua, so just flip backslashes.
 local function lua_module_path(path)
     path = tostring(path):gsub("\\", "/")
     return path
@@ -179,22 +217,12 @@ local function exists(path)
     return require_lfs().attributes(normalize(path)) ~= nil
 end
 
-local function path_exists(path)
-    path = normalize(path)
-    local ok = os.rename(path, path)
-    if ok then return true end
-    local f = io.open(path, "rb")
-    if f then
-        f:close()
-        return true
-    end
-    return false
-end
-
 -- Echo and run a shell command, raising on failure. Handles both the
--- Lua 5.1 (numeric) and 5.2+ (boolean) os.execute return conventions.
+-- LuaJIT/Lua 5.1 (numeric) and 5.2+ (boolean) os.execute return conventions.
 local function run(cmd)
-    io.stderr:write(color("black", cmd) .. "\n")
+    if not quiet then
+        io.stderr:write(color("black", cmd) .. "\n")
+    end
     local a, _, c = os.execute(cmd)
     if a == true or a == 0 then return end
     local code = c or a or 1
@@ -547,20 +575,21 @@ exec luajit "$script" "$@"
 end
 
 local function ensure_teal_compiler()
-    if exists(path_join("src/vendor/bin/tl")) and not is_msys and command_ok(posix_cmd(q(path_join("src/vendor/bin/tl")) .. " --version >/dev/null 2>&1")) then
+    local tl_bin = path_join("src/vendor/bin/tl")
+    if exists(tl_bin) and not is_msys
+        and command_ok(posix_cmd(q(tl_bin) .. " --version >/dev/null 2>&1")) then
         return
     end
     if ensure_msys_teal_wrapper() then return end
     local ref = tecs_tl_ref()
-    if not ref then
-        error("Could not find TL_REF in " .. path_join(tecs_dir, "Makefile"), 0)
-    end
     status("Installing Teal compiler at " .. ref .. "...")
     local tmp = path_join(".tecs-tmp", "tl")
     remove(tmp)
     run(posix_cmd("git clone --branch main " .. q("https://github.com/teal-language/tl.git") .. " " .. q(tmp)))
     run(posix_cmd("cd " .. q(tmp) .. " && git checkout --detach " .. q(ref)))
-    run(posix_cmd("cd " .. q(tmp) .. " && luarocks make --tree=" .. q(path_join(cwd(), "src/vendor")) .. " --lua-version=5.1 tl-dev-1.rockspec"))
+    run(posix_cmd("cd " .. q(tmp)
+        .. " && luarocks make --tree=" .. q(path_join(cwd(), "src/vendor"))
+        .. " --lua-version=5.1 tl-dev-1.rockspec"))
     remove(path_join(".tecs-tmp"))
 end
 
@@ -588,7 +617,8 @@ local function ensure_types()
     if not exists(source) then
         error(
             "Type definitions not found. Expected " .. source .. "\n" ..
-            "Set TECS_DIR to a current Tecs checkout, run `git pull` there, or restore this starter's types/ directory.",
+            "Set TECS_DIR to a current Tecs checkout, run `git pull` there, " ..
+            "or restore this starter's types/ directory.",
             0
         )
     end
@@ -640,21 +670,25 @@ local function download_love12()
         status("Downloading Love2D 12 for Windows...")
         local outer = path_join(love12_dir, "outer.zip")
         run("curl -sL -o " .. q(outer) .. " " .. q(nightly_base .. "/love-windows-x64.zip"))
-        run('powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Force ' .. q(outer) .. " " .. q(love12_dir) .. '"')
+        run('powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Force '
+            .. q(outer) .. " " .. q(love12_dir) .. '"')
         local inner = path_join(love12_dir, "love-windows-x64.zip")
         if exists(inner) then
-            run('powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Force ' .. q(inner) .. " " .. q(love12_dir) .. '"')
+            run('powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Force '
+                .. q(inner) .. " " .. q(love12_dir) .. '"')
         end
     else
         local outer = path_join(love12_dir, "outer.zip")
         if uname_s() == "Darwin" then
             status("Downloading Love2D 12 for macOS...")
             run("curl -sL -o " .. q(outer) .. " " .. q(nightly_base .. "/love-macos.zip"))
-            run("cd " .. q(love12_dir) .. " && unzip -q outer.zip && unzip -q love-macos.zip && rm -f outer.zip love-macos.zip")
+            run("cd " .. q(love12_dir)
+                .. " && unzip -q outer.zip && unzip -q love-macos.zip && rm -f outer.zip love-macos.zip")
         else
             status("Downloading Love2D 12 for Linux...")
             run("curl -sL -o " .. q(outer) .. " " .. q(nightly_base .. "/love-linux-X64.AppImage.zip"))
-            run("cd " .. q(love12_dir) .. " && unzip -q outer.zip && rm -f outer.zip && mv love-* love && chmod +x love")
+            run("cd " .. q(love12_dir)
+                .. " && unzip -q outer.zip && rm -f outer.zip && mv love-* love && chmod +x love")
         end
     end
     status("Love2D 12 installed to " .. love12_dir)
@@ -681,6 +715,7 @@ local function compile_sources()
         end
     end
     if compiled == 0 then status("Teal output is up to date.") end
+    return compiled
 end
 
 -- Compile vendored Tecs/Tecs2D sources after staging them into build/. This
@@ -702,20 +737,23 @@ local function compile_vendor_tecs_sources()
 end
 
 -- Copy assets/ into build/, skipping source-only files; stamp guards reruns.
+-- Returns true when anything was copied.
 local function copy_assets()
-    if not exists("assets") then return end
+    if not exists("assets") then return false end
     local stamp = path_join("build/assets/.copy-stamp")
     if exists(stamp) and file_mtime(stamp) >= tree_mtime("assets") then
         status("Assets are up to date.")
-        return
+        return false
     end
     status("Copying assets...")
-    copy_dir("assets", "build/assets", {"*.ase", "*.aseprite"})
+    copy_dir("assets", "build/assets", exclude_asset_patterns())
     write_file(stamp, tostring(os.time()) .. "\n")
+    return true
 end
 
 -- Stage the runtime Lua tree into build/: the vendored rocks plus the latest
 -- tecs/tecs2d builds and their bundled internal assets. Stamp guards reruns.
+-- Returns true when anything was staged.
 local function copy_vendor()
     local required = path_join("build/vendor/share/lua/5.1/tecs2d/init.lua")
     local stamp = path_join("build/vendor/.copy-stamp")
@@ -728,7 +766,7 @@ local function copy_vendor()
     )
     if exists(required) and exists(stamp) and file_mtime(stamp) >= vendor_time then
         status("Runtime vendor tree is up to date.")
-        return
+        return false
     end
 
     status("Preparing runtime vendor tree...")
@@ -762,6 +800,7 @@ local function copy_vendor()
         copy_dir(internal, "build/internal")
     end
     write_file(stamp, tostring(os.time()) .. "\n")
+    return true
 end
 
 -- Task table: each entry implements one `tecs <target>` command.
@@ -779,10 +818,14 @@ function tasks.build()
     status("Building...")
     ensure_types()
     ensure_vendor()
-    compile_sources()
-    copy_assets()
-    copy_vendor()
-    write_file(HOT_RELOAD_STAMP, tostring(os.time()) .. "\n")
+    local changed = compile_sources() > 0
+    if copy_assets() then changed = true end
+    if copy_vendor() then changed = true end
+    -- Only refresh the stamp when output changed, so a no-op rebuild does not
+    -- trigger the running game's hot reload.
+    if changed or not exists(HOT_RELOAD_STAMP) then
+        write_file(HOT_RELOAD_STAMP, tostring(os.time()) .. "\n")
+    end
 end
 
 function tasks.run()
@@ -820,34 +863,6 @@ function tasks.new(args)
     status("Project created. Next: cd " .. target .. " && tecs check")
 end
 
-local function local_busted()
-    local bin = path_join("src/vendor/bin")
-    local candidates = is_windows and {
-        path_join(bin, "busted.bat"),
-        path_join(bin, "busted.cmd"),
-        path_join(bin, "busted.exe"),
-        path_join(bin, "busted"),
-    } or {
-        path_join(bin, "busted"),
-    }
-    for _, candidate in ipairs(candidates) do
-        if path_exists(candidate) then
-            return q(candidate)
-        end
-    end
-    return "busted"
-end
-
-function tasks.test(args)
-    status("Running tests...")
-    local cmd = local_busted()
-    args = args or {}
-    for _, arg in ipairs(args) do
-        cmd = cmd .. " " .. shell_arg(arg)
-    end
-    run(cmd)
-end
-
 tasks["wipe-clean"] = function()
     status("Removing build artifacts, vendored dependencies, and Love2D...")
     remove("build")
@@ -883,8 +898,10 @@ tasks["sync-tecs"] = function()
     remove(path_join(vendor_lua, "tecs"))
     remove(path_join(vendor_lua, "tecs2d"))
     ensure_types()
-    run(tecs_cmd("luarocks make --tree=" .. q(path_join(cwd(), "src/vendor")) .. " --lua-version=5.1 tecs-dev-1.rockspec"))
-    run(tecs_cmd("luarocks make --tree=" .. q(path_join(cwd(), "src/vendor")) .. " --lua-version=5.1 tecs2d-dev-1.rockspec"))
+    run(tecs_cmd("luarocks make --tree=" .. q(path_join(cwd(), "src/vendor"))
+        .. " --lua-version=5.1 tecs-dev-1.rockspec"))
+    run(tecs_cmd("luarocks make --tree=" .. q(path_join(cwd(), "src/vendor"))
+        .. " --lua-version=5.1 tecs2d-dev-1.rockspec"))
     status("Sync complete.")
 end
 
@@ -906,7 +923,8 @@ local commands = {
     {
         name = "build",
         summary = "Compile without running",
-        description = "Install project dependencies if needed, compile Teal sources, copy assets, and refresh build output.",
+        description = "Install project dependencies if needed, compile Teal sources, copy assets, "
+            .. "and refresh build output.",
         action = tasks.build,
     },
     {
@@ -920,12 +938,6 @@ local commands = {
         summary = "Remove build artifacts",
         description = "Remove build/ while leaving vendored dependencies and the Love2D runtime in place.",
         action = tasks.clean,
-    },
-    {
-        name = "test",
-        summary = "Run Busted tests",
-        description = "Run the project's Busted test suite from the project root.",
-        action = tasks.test,
     },
     {
         name = "wipe-clean",
@@ -942,7 +954,8 @@ local commands = {
     {
         name = "dev",
         summary = "Prepare local Tecs source for development",
-        description = "Copy local Tecs/Tecs2D sources from TECS_DIR or ../tecs into src/vendor/ for development iteration.",
+        description = "Copy local Tecs/Tecs2D sources from TECS_DIR or ../tecs into src/vendor/ "
+            .. "for development iteration.",
         action = tasks.dev,
     },
     {
@@ -963,7 +976,8 @@ end
 
 local function print_help()
     io.write(color("bright cyan", "Tecs CLI ") .. color("black", VERSION) .. "\n\n")
-    io.write(color("bright", "Usage: ") .. color("green", "tecs") .. " [--version] " .. color("cyan", "<command>") .. "\n\n")
+    io.write(color("bright", "Usage: ") .. color("green", "tecs")
+        .. " [--version] [--quiet] " .. color("cyan", "<command>") .. "\n\n")
     io.write(color("bright", "Commands:") .. "\n")
     for _, command in ipairs(commands) do
         io.write("  " .. color("cyan", string.format("%-11s", command.name)) .. command.summary .. "\n")
@@ -973,20 +987,18 @@ local function print_help()
 agent to launch the game and connect over MCP.
 
 ]])
-    io.write(color("magenta", "Hot reload:") .. [[ while the game is running, rerun ]] .. color("cyan", "tecs build") .. [[ from another terminal.
+    io.write(color("magenta", "Hot reload:") .. [[ while the game is running, rerun ]]
+        .. color("cyan", "tecs build") .. [[ from another terminal.
 A successful build updates build/.tecs-reload-stamp; the running game will
 snapshot, restart, and restore state automatically.
 ]])
-end
-
-function tasks.help()
-    print_help()
 end
 
 local function parser()
     local p = argparse("tecs", "Build, check, run, and manage fixed-layout Tecs starter projects.")
     p:help_max_width(88)
     p:flag("--version", "Show version and exit")
+    p:flag("-q --quiet", "Suppress progress output")
     p:command_target("command")
     p:require_command(false)
 
@@ -996,11 +1008,7 @@ local function parser()
             :action(function(args)
                 args.command = command.name
             end)
-        if command.name == "test" then
-            subcommand:handle_options(false)
-            subcommand:argument("busted_args", "Arguments passed through to busted.")
-                :args("*")
-        elseif command.name == "new" then
+        if command.name == "new" then
             subcommand:argument("project", "Directory to create for the new project.")
         end
     end
@@ -1025,6 +1033,7 @@ function M.run(argv)
         if not ok then
             fail(args)
         end
+        quiet = args.quiet or false
         if args.version then
             print(VERSION)
             return
@@ -1041,9 +1050,7 @@ function M.run(argv)
             fail("unknown command '" .. tostring(target) .. "'. Expected one of: " .. command_names())
         end
 
-        if target == "test" then
-            task(args.busted_args)
-        elseif target == "new" then
+        if target == "new" then
             task(args)
         else
             task()
@@ -1065,5 +1072,20 @@ function M.main(argv)
         os.exit(1)
     end
 end
+
+-- Test-only access to internal helpers; see spec/cli_spec.lua. set_platform
+-- lets specs exercise other platforms' path handling on any host.
+M._internal = {
+    detect_platform = detect_platform,
+    set_platform = set_platform,
+    normalize = normalize,
+    path_join = path_join,
+    dirname = dirname,
+    relative_to = relative_to,
+    should_exclude = should_exclude,
+    needs_update = needs_update,
+    copy_dir = copy_dir,
+    q = q,
+}
 
 return M

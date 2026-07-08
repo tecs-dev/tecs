@@ -18,11 +18,11 @@ new projects can be bootstrapped with `tecs new` and `tecs run`.
     license = "MIT OR Apache-2.0",
 }
 
+-- Tecs targets LuaJIT, which implements Lua 5.1.
 dependencies = {
-    "lua >= 5.1",
+    "lua == 5.1",
     "ansicolors",
     "argparse",
-    "busted",
     "luafilesystem",
 }
 

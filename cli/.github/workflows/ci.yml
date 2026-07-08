@@ -6,6 +6,27 @@ on:
   pull_request:
 
 jobs:
+  lint:
+    name: luacheck
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up LuaJIT
+        uses: leafo/gh-actions-lua@v11
+        with:
+          luaVersion: "luajit-2.1"
+
+      - name: Set up LuaRocks
+        uses: leafo/gh-actions-luarocks@v5
+
+      - name: Run luacheck
+        run: |
+          luarocks install luacheck
+          luacheck tecs_cli spec bin/tecs --codes
+
   unix:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -27,10 +48,10 @@ jobs:
           repository: tecs-dev/tecs
           path: tecs
 
-      - name: Set up Lua
+      - name: Set up LuaJIT
         uses: leafo/gh-actions-lua@v11
         with:
-          luaVersion: "5.1"
+          luaVersion: "luajit-2.1"
 
       - name: Set up LuaRocks
         uses: leafo/gh-actions-luarocks@v5
@@ -45,8 +66,9 @@ jobs:
       - name: Run CLI tests
         shell: bash
         run: |
+          luarocks install --local busted
           eval "$(luarocks path --local --bin)"
-          tecs test
+          busted
 
       - name: Create and build a starter app
         shell: bash
@@ -77,11 +99,11 @@ jobs:
       - name: Set up MSVC
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Set up Lua and LuaRocks
+      - name: Set up LuaJIT and LuaRocks
         shell: pwsh
         run: |
           python -m pip install hererocks
-          hererocks "$env:RUNNER_TEMP\lua" -l 5.1 -r latest
+          hererocks "$env:RUNNER_TEMP\lua" -j 2.1 -r latest
           "$env:RUNNER_TEMP\lua\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Install tecs-cli
@@ -95,9 +117,10 @@ jobs:
       - name: Run CLI tests
         shell: cmd
         run: |
+          luarocks install --local busted
           luarocks path --local --bin > luarocks-path.bat
           call luarocks-path.bat
-          tecs test
+          busted
 
       - name: Create and build a starter app
         shell: cmd
