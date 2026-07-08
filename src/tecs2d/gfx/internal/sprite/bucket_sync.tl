@@ -113,11 +113,18 @@ local record bucket_sync
         dropShadowIndirectBuffer: love.graphics.Buffer
         materialParamsOutputBuffer: love.graphics.Buffer
         capacity: integer
-        --- Row capacity of dropShadowOutputBuffer. Larger than `capacity`
-        --- because the cull's per-light fan-out writes up to one entry per
-        --- (sprite, affecting light) pair. Sent to the cull and render
-        --- shaders as MaxDropShadows so writes and reads never pass it.
+        --- Row capacity of dropShadowOutputBuffer. Once `dropShadowActive`,
+        --- it is DS_FANOUT * `capacity` because the cull's per-light
+        --- fan-out writes up to one entry per (sprite, affecting light)
+        --- pair; before then it stays at the DS_MIN_CAPACITY floor. Sent to
+        --- the cull and render shaders as MaxDropShadows so writes and reads
+        --- never pass it.
         dropShadowCapacity: integer
+        --- Set true the first time this bucket contains DropShadow entities.
+        --- Until then the drop-shadow buffer is kept at the floor so scenes
+        --- that never use drop shadows don't pay DS_FANOUT * capacity (the
+        --- dominant sprite allocation).
+        dropShadowActive: boolean
         count: integer
     end
 
@@ -172,7 +179,8 @@ local record bucket_sync
         spriteDataComponent: tecs.Component,
         bucketComponents: {string: tecs.Component},
         directSpriteComponent?: tecs.Component,
-        repeatedSpriteComponent?: tecs.Component
+        repeatedSpriteComponent?: tecs.Component,
+        spriteSizeHint?: integer
     ): SpriteBucketSync
 end
 
@@ -187,6 +195,16 @@ local lg <const> = love.graphics
 --- MaxDropShadows guard rather than written out of bounds.
 local DS_FANOUT <const> = 8
 
+--- Floor capacity for a bucket's drop-shadow output buffer before any
+--- drop-shadow sprite is seen. The buffer must exist (the cull binds it
+--- unconditionally), but at DS_FANOUT * capacity it is the single
+--- largest sprite allocation, so it stays at this floor until a bucket
+--- actually contains DropShadow entities (see ensureDropShadowActive).
+--- The cull's MaxDropShadows guard clamps writes to this floor, and the
+--- AO pass draws 0 instances for such buckets, so the small buffer is
+--- never read out of bounds.
+local DS_MIN_CAPACITY <const> = 256
+
 local function createArraySync(capacity: integer): bucket_sync.ArraySync
     local function newOutput(cap: integer): love.graphics.Buffer
         return lg.newBuffer(types.SPRITE_FORMAT, cap, { usage = "dynamic", shaderstorage = true })
@@ -199,11 +217,15 @@ local function createArraySync(capacity: integer): bucket_sync.ArraySync
         indirectBuffer = newIndirect(),
         shadowOutputBuffer = newOutput(capacity),
         shadowIndirectBuffer = newIndirect(),
-        dropShadowOutputBuffer = newOutput(capacity * DS_FANOUT),
+        -- Drop-shadow buffer stays at the floor until this bucket is seen
+        -- to hold DropShadow entities (ensureDropShadowActive), so scenes
+        -- without drop shadows never allocate DS_FANOUT * capacity.
+        dropShadowOutputBuffer = newOutput(DS_MIN_CAPACITY),
         dropShadowIndirectBuffer = newIndirect(),
         materialParamsOutputBuffer = lg.newBuffer(types.MATERIAL_PARAMS_FORMAT, capacity, { usage = "dynamic", shaderstorage = true }),
         capacity = capacity,
-        dropShadowCapacity = capacity * DS_FANOUT,
+        dropShadowCapacity = DS_MIN_CAPACITY,
+        dropShadowActive = false,
         count = 0,
     }
 end
@@ -219,14 +241,31 @@ local function ensureCapacity(arraySync: bucket_sync.ArraySync, liveCount: integ
     -- them through the deferred retire list.
     retire.push(arraySync.outputBuffer)
     retire.push(arraySync.shadowOutputBuffer)
-    retire.push(arraySync.dropShadowOutputBuffer)
     retire.push(arraySync.materialParamsOutputBuffer)
     arraySync.outputBuffer = lg.newBuffer(types.SPRITE_FORMAT, newCap, { usage = "dynamic", shaderstorage = true })
     arraySync.shadowOutputBuffer = lg.newBuffer(types.SPRITE_FORMAT, newCap, { usage = "dynamic", shaderstorage = true })
-    arraySync.dropShadowOutputBuffer = lg.newBuffer(types.SPRITE_FORMAT, newCap * DS_FANOUT, { usage = "dynamic", shaderstorage = true })
     arraySync.materialParamsOutputBuffer = lg.newBuffer(types.MATERIAL_PARAMS_FORMAT, newCap, { usage = "dynamic", shaderstorage = true })
     arraySync.capacity = newCap
-    arraySync.dropShadowCapacity = newCap * DS_FANOUT
+    -- The drop-shadow buffer only tracks capacity once activated; inactive
+    -- buckets keep the floor and leave dropShadowCapacity untouched.
+    if arraySync.dropShadowActive then
+        retire.push(arraySync.dropShadowOutputBuffer)
+        arraySync.dropShadowOutputBuffer = lg.newBuffer(types.SPRITE_FORMAT, newCap * DS_FANOUT, { usage = "dynamic", shaderstorage = true })
+        arraySync.dropShadowCapacity = newCap * DS_FANOUT
+    end
+end
+
+--- Promote a bucket's drop-shadow buffer from the floor to the full
+--- DS_FANOUT * capacity the first time the bucket is seen to contain
+--- DropShadow entities. Must run before the cull dispatch (called from
+--- sync(), which is a PreRender system) so the fan-out writes land in a
+--- correctly sized buffer instead of being clamped by MaxDropShadows.
+local function ensureDropShadowActive(arraySync: bucket_sync.ArraySync)
+    if arraySync.dropShadowActive then return end
+    arraySync.dropShadowActive = true
+    retire.push(arraySync.dropShadowOutputBuffer)
+    arraySync.dropShadowOutputBuffer = lg.newBuffer(types.SPRITE_FORMAT, arraySync.capacity * DS_FANOUT, { usage = "dynamic", shaderstorage = true })
+    arraySync.dropShadowCapacity = arraySync.capacity * DS_FANOUT
 end
 
 function bucket_sync.new(
@@ -235,9 +274,22 @@ function bucket_sync.new(
     spriteDataComponent: tecs.Component,
     bucketComponents: {string: tecs.Component},
     directSpriteComponent?: tecs.Component,
-    repeatedSpriteComponent?: tecs.Component
+    repeatedSpriteComponent?: tecs.Component,
+    spriteSizeHint?: integer
 ): bucket_sync.SpriteBucketSync
     local bucketMgr = bucket_manager.get()
+
+    -- Initial per-bucket output capacity. sizeHints.sprites is a global
+    -- sprite capacity hint, not a per-texture-bucket reservation, so use it
+    -- as a cap while sizing each new bucket from the first observed add.
+    local function initialBucketCapacity(firstAddCount: integer): integer
+        local cap = DEFAULT_CAPACITY
+        if firstAddCount > cap then cap = firstAddCount end
+        if spriteSizeHint and spriteSizeHint > 0 and cap > spriteSizeHint then
+            cap = spriteSizeHint
+        end
+        return cap
+    end
 
     -- Build tier structures and component -> tierIdx map
     local tiers: {string: bucket_sync.TierSync} = {}
@@ -314,7 +366,7 @@ function bucket_sync.new(
             if not tierSync then return end
             local arraySync = tierSync.arraySyncs[arrayIdx]
             if not arraySync then
-                arraySync = createArraySync(DEFAULT_CAPACITY)
+                arraySync = createArraySync(initialBucketCapacity(count))
                 tierSync.arraySyncs[arrayIdx] = arraySync
             end
             arraySync.count = arraySync.count + count
@@ -431,7 +483,13 @@ function SpriteBucketSync:sync(_dt: number)
             local repeatedSprites = repeatedSpriteComponent and (archetype:get(repeatedSpriteComponent) as {RepeatedSpriteData}) or nil
             local dropShadowArr = archetype:get(DropShadowComponent) as {DropShadowData}
             local materialArr = archetype:get(MaterialComponent) as {MaterialData}
-            if dropShadowArr then self.hasDropShadows = true end
+            if dropShadowArr then
+                self.hasDropShadows = true
+                -- Promote this bucket's drop-shadow buffer off the floor
+                -- before the cull dispatch reads it (this runs in PreRender,
+                -- the cull in Render). No-op once already active.
+                ensureDropShadowActive(arraySync)
+            end
 
             -- Material grouping (per frame): the render plugin uses the
             -- group list to dispatch material-variant draws; the cull
@@ -455,19 +513,20 @@ function SpriteBucketSync:sync(_dt: number)
             -- since no output depends on position/rotation/scale (scale is
             -- applied in the cull shader). The bulk transform mirror still
             -- re-uploads.
-            if forceResync
-                or archetype:isComponentDirty(spriteComponent)
-                or archetype:isComponentDirty(bucketComponent)
-                or (repeatedSpriteComponent ~= nil
-                    and archetype:isComponentDirty(repeatedSpriteComponent)) then
+            local spriteDirty = archetype:isComponentDirty(spriteComponent)
+            local bucketDirty = archetype:isComponentDirty(bucketComponent)
+            local repeatedDirty = repeatedSpriteComponent ~= nil
+                and archetype:isComponentDirty(repeatedSpriteComponent)
+
+            if forceResync or spriteDirty or bucketDirty or repeatedDirty then
                 local sprites = archetype:get(spriteComponent) as {SpriteData}
                 local spriteDatas = archetype:getMut(self.spriteDataComponent) as {SpriteDataFFI}
                 local entityList = archetype.entities
 
                 for row = 1, len do
-                    local bucket = bucketData[row]
                     local spr = sprites[row]
                     if spr then
+                        local sd = spriteDatas[row]
                         -- Detect in-place instance replacement (world:set of a
                         -- new Sprite, or a batch-spawned zero sprite getting
                         -- its first value). No archetype transition happens,
@@ -476,15 +535,32 @@ function SpriteBucketSync:sync(_dt: number)
                         -- bucket assignment. The marker writes it makes are
                         -- deferred, so this row renders with the old bucket
                         -- for one frame and resyncs when they land.
-                        local syncedId = spriteDatas[row].spriteId
-                        if syncedId ~= spr.spriteId then
-                            spriteDatas[row].spriteId = spr.spriteId
+                        local syncedId = sd.spriteId
+                        local replaced = syncedId ~= spr.spriteId
+                        if replaced then
+                            sd.spriteId = spr.spriteId
                             if self.onSpriteReplaced and spr.spriteId ~= 0 then
                                 self.onSpriteReplaced(entityList[row], spr, syncedId as integer)
                             end
                         end
-                        local inst = getInstance(spr.spriteId)
-                        if inst then
+
+                        -- Per-row resolution gate. The derived metadata below
+                        -- depends only on the sprite instance and the row's
+                        -- texture-array slice, neither of which changes frame
+                        -- to frame once resolved. Re-resolve only when the row
+                        -- is new (zeroed SpriteData, so width 0), its instance
+                        -- was replaced, its slice/generation changed (texture
+                        -- array repack), or a full resync was requested. The
+                        -- outer dirty gate fires for the whole archetype every
+                        -- time a batch spawn adds rows; without this per-row
+                        -- gate every existing row is re-resolved each spawn
+                        -- frame, making a full spawn O(n^2).
+                        local bucket = bucketData[row]
+                        local desiredSlice = bucket.layerIndex + bucket.generation * 65536
+                        slicePack.f = sd.textureSlice
+                        if forceResync or repeatedDirty or replaced or sd.width == 0 or slicePack.u ~= desiredSlice then
+                            local inst = getInstance(spr.spriteId)
+                            if inst then
                             -- Resolve UV scale (texture-array fitting).
                             local uvScaleX, uvScaleY = 1.0, 1.0
                             local sheet = sprite_sheet.SpriteSheet.getById(inst.sheetId)
@@ -532,7 +608,6 @@ function SpriteBucketSync:sync(_dt: number)
                                 pivotY = frameH > 0 and inst.pivotY / frameH or 0
                             end
 
-                            local sd = spriteDatas[row]
                             sd.pivotX = pivotX
                             sd.pivotY = pivotY
                             sd.width = spriteWidth
@@ -553,10 +628,11 @@ function SpriteBucketSync:sync(_dt: number)
                             -- value as a float NUMBER loses layer bits
                             -- once generation reaches 256 (24-bit
                             -- mantissa).
-                            slicePack.u = bucket.layerIndex + bucket.generation * 65536
+                            slicePack.u = desiredSlice
                             sd.textureSlice = slicePack.f
                             sd.animDirection = inst.animDirection or 0
                             sd.animFirstFrame = inst.animFirstFrame or 0
+                            end
                         end
                     end
                 end

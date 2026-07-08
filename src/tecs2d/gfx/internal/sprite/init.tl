@@ -1186,7 +1186,8 @@ function sprite.plugin(renderPipeline: types.Pipeline): function(world: tecs.Wor
         local bucketMgr = bucket_manager.init()
 
         -- Create the bucket-based sync system (handles both normal and blend mode sprites via groupBy)
-        local sync = bucketSync.new(world, Sprite, SpriteData as tecs.Component, TIER_TO_COMPONENT, DirectSprite, RepeatedSprite)
+        local spriteSizeHint = (renderer as gpuTypes.Renderer).config.sizeHints["sprites"]
+        local sync = bucketSync.new(world, Sprite, SpriteData as tecs.Component, TIER_TO_COMPONENT, DirectSprite, RepeatedSprite, spriteSizeHint)
 
         -- In-place Sprite replacement (world:set over an existing Sprite, or
         -- a batch-spawned zero sprite receiving its first value) causes no
