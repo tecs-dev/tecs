@@ -56,12 +56,10 @@ describe("tilechunk: renders and resyncs edited tiles", function()
             end
             local tileset = love.graphics.newImage(imgData)
 
-            -- Dense 256-entry array (the constructor's fill loop treats
-            -- the table length as the fill start, so sparse tables lose
-            -- entries past the first hole). Tiles 1 and 2 in the first
-            -- row, tile 1 at grid (0, 1).
+            -- Sparse tiles table: the constructor must pad the holes
+            -- with 0 without clobbering entries past them. Tiles 1 and
+            -- 2 in the first row, tile 1 at grid (0, 1).
             local tiles = {}
-            for i = 1, 256 do tiles[i] = 0 end
             tiles[1] = 1
             tiles[2] = 2
             tiles[17] = 1

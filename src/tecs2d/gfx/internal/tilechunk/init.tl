@@ -128,9 +128,14 @@ tecs.newComponent({
     new = function(data: {string: any}): tileChunk.TileChunk
         local config = data as tileChunk.TileChunkConfig
         local tiles = config.tiles or {}
-        -- Ensure 256 tiles
-        for i = #tiles + 1, 256 do
-            tiles[i] = 0
+        -- Ensure 256 tiles. Fill only the holes: users build tiles
+        -- tables sparsely (`tiles[row * 16 + col + 1] = id`), and `#`
+        -- stops at the first hole, so filling from `#tiles + 1` would
+        -- silently zero every entry past it.
+        for i = 1, 256 do
+            if tiles[i] == nil then
+                tiles[i] = 0
+            end
         end
         return {
             tileset = config.tileset,
