@@ -115,7 +115,8 @@ tecs/
 - Love2D integration tests live under `spec/integration/` and use the `*_lovespec.tl` suffix so the fast
   suite's default `_spec` pattern never collects them; run them with `make test-love` (needs a display).
 - Before writing a new integration spec, load the `love2d-integration-test` skill (`.claude/skills/`);
-  it carries the harness conventions and the accumulated gotchas. For performance work, load `love2d-bench`.
+  it carries the harness conventions and the accumulated gotchas. For performance work, load `love2d-bench`;
+  to diagnose live rendering problems, load `love2d-debug-rendering`.
 
 ### Documentation
 
