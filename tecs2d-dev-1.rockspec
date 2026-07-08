@@ -24,6 +24,7 @@ declared as a dependency.
 
 dependencies = {
     "lua >= 5.1, < 5.5",
+    "tl >= 0.24.0",
     "tecs == dev-1",
 }
 

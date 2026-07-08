@@ -131,6 +131,7 @@ test-love: compile $(LOVE12_BIN)
 		ln -sfn $(CURDIR)/build/tecs "$$app/tecs"; \
 		ln -sfn $(CURDIR)/build/tecs2d "$$app/tecs2d"; \
 		ln -sfn $(CURDIR)/build/tecs2d/assets/internal "$$app/internal"; \
+		ln -sfn $(CURDIR)/examples/shared/assets "$$app/assets"; \
 	done
 	LUA_PATH="$(LUA_DIR)/?.lua;$(LUA_DIR)/?/init.lua;$(TEST_BUILD_DIR)/?.lua;$(TEST_BUILD_DIR)/?/init.lua;$(VENDOR_LUA)/?.lua;$(VENDOR_LUA)/?/init.lua;;" \
 	LUA_CPATH="$(VENDOR_CLIB)/?.so;;" \
