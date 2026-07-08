@@ -1,6 +1,8 @@
 .kiro/
 .vscode/
-.claude/
+# Personal Claude Code state stays local; repo-shared skills are checked in.
+.claude/*
+!.claude/skills/
 
 /build/
 /vendor/
