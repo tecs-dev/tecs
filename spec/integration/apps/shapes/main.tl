@@ -12,6 +12,30 @@ local gfx <const> = require("tecs2d.gfx")
 local WIDTH <const> = 320
 local HEIGHT <const> = 240
 
+-- Test materials, registered at load time like a real game would.
+-- flat: albedo comes entirely from params.xyz (ignores Color).
+-- glow: standard albedo plus params.xyz emission scaled by params.w.
+local globals <const> = _G as {string: any}
+globals.tecsFlatMaterial = gfx.newMaterial("testflat", {
+    fragment = [[
+        MaterialOutput material(MaterialInput i) {
+            MaterialOutput o = standardMaterial(i);
+            o.albedo = vec4(i.params.x, i.params.y, i.params.z, 1.0);
+            return o;
+        }
+    ]],
+})
+globals.tecsGlowMaterial = gfx.newMaterial("testglow", {
+    fragment = [[
+        MaterialOutput material(MaterialInput i) {
+            MaterialOutput o = standardMaterial(i);
+            o.emission = vec4(i.params.x * i.params.w, i.params.y * i.params.w,
+                i.params.z * i.params.w, 1.0);
+            return o;
+        }
+    ]],
+})
+
 local function gamePlugin(world: tecs.World)
     world:addPlugin(mcp.new({
         port = tonumber(os.getenv("TECS_MCP_PORT")) or mcp.DEFAULT_PORT,

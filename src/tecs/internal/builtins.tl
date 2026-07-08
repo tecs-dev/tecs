@@ -486,6 +486,12 @@ function builtins.plugin(w: types.World)
 
     -- Relative transform system
     do
+        -- Composition scratch: results land here first so the write to
+        -- the child's column (and its dirty mark) only happens when the
+        -- float32-rounded values actually changed. An idle hierarchy
+        -- walk therefore marks nothing and the gate below converges.
+        local scratchTransform = Transform(0, 0)
+
         -- Memoized world transform resolution via __index.
         -- On first access, recursively resolves the parent chain and caches the result.
         -- Subsequent accesses for the same entity are plain table lookups.
@@ -513,7 +519,27 @@ function builtins.plugin(w: types.World)
                 -- Recurse to resolve parent's world transform (triggers __index if not cached)
                 local parentWorldTransform = self[childOf.target]
                 if parentWorldTransform then
-                    composeTransforms(parentWorldTransform, relTransform, transform)
+                    local scratch = scratchTransform
+                    composeTransforms(parentWorldTransform, relTransform, scratch)
+                    if transform.x ~= scratch.x or transform.y ~= scratch.y
+                            or transform.z ~= scratch.z
+                            or transform.layer ~= scratch.layer
+                            or transform.rotation ~= scratch.rotation
+                            or transform.scaleX ~= scratch.scaleX
+                            or transform.scaleY ~= scratch.scaleY then
+                        transform.x = scratch.x
+                        transform.y = scratch.y
+                        transform.z = scratch.z
+                        transform.layer = scratch.layer
+                        transform.rotation = scratch.rotation
+                        transform.scaleX = scratch.scaleX
+                        transform.scaleY = scratch.scaleY
+                        -- Downstream dirty-gated consumers (GPU shadow
+                        -- uploads) must see the write; marking here also
+                        -- covers ancestors resolved recursively from
+                        -- another row's chain.
+                        w:markComponentDirty(entityId, Transform)
+                    end
                 end
 
                 self[entityId] = transform
@@ -526,31 +552,47 @@ function builtins.plugin(w: types.World)
             include = {RelativeTransform, ChildOf, Transform},
         })
 
+        local function hierarchyStateDirty(): boolean
+            for arch in w:dirtyArchetypes() do
+                local cols = arch.columns
+                if cols[Transform] or cols[RelativeTransform] or cols[ChildOf] then
+                    return true
+                end
+            end
+            return false
+        end
+
+        -- Dirty bits clear at the end of each update, but this system
+        -- runs in PostUpdate; direct writes made after it (render-phase
+        -- systems, MCP run_lua) would be wiped before the gate sees
+        -- them. Sample at frame end and carry the result into the next
+        -- frame's gate.
+        local pendingHierarchyDirty = false
+        w:addSystem({
+            name = "RelativeTransformDirtySampler",
+            phase = phases.RenderLast,
+            run = function()
+                pendingHierarchyDirty = hierarchyStateDirty()
+            end
+        })
+
         w:addSystem({
             name = "RelativeTransform",
             phase = phases.PostUpdate,
             run = function()
                 -- Dirty-skip: recompute only when an archetype carrying
-                -- hierarchy state changed this frame. Sparse ChildOf
-                -- retargets mark the container column at commit, so they
-                -- open this gate too.
-                local dirty = false
-                for arch in w:dirtyArchetypes() do
-                    local cols = arch.columns
-                    if cols[Transform] or cols[RelativeTransform] or cols[ChildOf] then
-                        dirty = true
-                        break
-                    end
-                end
-                if not dirty then
+                -- hierarchy state changed this frame or at the end of
+                -- the previous one. Sparse ChildOf retargets mark the
+                -- container column at commit, so they open this gate too.
+                if not pendingHierarchyDirty and not hierarchyStateDirty() then
                     return
                 end
+                pendingHierarchyDirty = false
 
                 table_clear(worldTransformCache)
-                for archetype, len, entities in hierarchyQuery:iter() do
-                    -- Children get their world transform written in place;
-                    -- dirty-gated consumers must re-upload the column.
-                    archetype:markComponentDirty(Transform)
+                for _archetype, len, entities in hierarchyQuery:iter() do
+                    -- The resolver writes world transforms in place and
+                    -- marks Transform dirty per changed entity.
                     for row = 1, len do
                         -- Access triggers __index, which recursively resolves the parent chain
                         local _ = worldTransformCache[entities[row]]
