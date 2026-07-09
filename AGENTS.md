@@ -123,6 +123,21 @@ tecs/
 - Update `docs/`, `README.md`, and agent guidance files when public behavior or workflows change.
 - Prefer linking to current docs entry points that exist in this repo, not guessed future paths.
 
+### Mutation and Dirty Model
+
+`docs/tecs/mutation-model.md` is normative. The rules that prevent the most common defect class:
+
+- Reads use `archetype:get` / `world:get`; writes go through `getMut`, which marks the component's
+  column dirty on the archetype. Never `getMut` in a loop that might not write - it defeats every
+  dirty-gated consumer (GPU uploads, cached masks, layout gates).
+- Direct cdata writes through `world:get` on FFI components need an explicit
+  `world:markComponentDirty(id, Component)` or the GPU never re-syncs.
+- Dirty bits clear at the end of each `world:update`. Systems gated on dirty state that run before
+  a mutation's phase need a frame-end carryover sampler (see `ui/internal/layout_dirty.tl`).
+- `world:batchSpawn` skips FFI defaults; set every field in the callback.
+- Never `break` or return early inside `query:iter()` - it leaks the deferred scope and spawns
+  silently queue. Loop to completion with a flag.
+
 ### Code Style
 
 - Use 4-space indentation.
