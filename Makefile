@@ -339,7 +339,7 @@ build-examples: build
 	@echo "Building examples..."
 	@for dir in $(EXAMPLE_DIRS); do \
 		echo "  Building $$(basename $$dir)..."; \
-		(cd "$$dir" && $(TEAL_ENV) tl run shared/run.tl --build-only) || exit 1; \
+		(cd "$$dir" && $(TEAL_ENV) tl run shared/run.tl -- --build-only) || exit 1; \
 	done
 	@echo "All examples built successfully!"
 
