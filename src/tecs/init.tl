@@ -11,13 +11,15 @@ local events <const> = require("tecs.internal.events")
 local phases <const> = require("tecs.internal.phases")
 local runIfHelpers <const> = require("tecs.internal.runif")
 local json <const> = require("tecs.utils.json")
+local IdAllocator <const> = require("tecs.internal.IdAllocator")
 local WorldImpl <const> = require("tecs.internal.world")
 
 --- Public API surface.
 ---
 --- Support policy: values and types exported from `require("tecs")` are the
---- supported API. Deep modules, especially `tecs.internal.*`, are implementation
---- details unless re-exported here.
+--- supported API, as are the `tecs.utils.*` modules (json, logging, profile,
+--- pool, Bitset), which may be required directly. `tecs.internal.*` modules
+--- are implementation details unless re-exported here.
 local record tecs
     type World = types.World
     type System = types.System
@@ -59,6 +61,14 @@ local record tecs
     phases: phases
     builtins: builtins
     runif: runIfHelpers
+
+    --- Absolute ceiling for `World.Config.maxEntities` (2^22, the
+    --- entity-id format cap). A world can never hold more concurrent
+    --- entity slots than this.
+    MAX_ENTITIES: integer
+
+    --- Default `World.Config.maxEntities` when none is given (2^20).
+    DEFAULT_MAX_ENTITIES: integer
 
     --- Create a new World.
     ---
@@ -156,5 +166,7 @@ tecs.json = json
 tecs.phases = phases
 tecs.builtins = builtins
 tecs.runif = runIfHelpers
+tecs.MAX_ENTITIES = IdAllocator.ABSOLUTE_MAX_SLOT_COUNT
+tecs.DEFAULT_MAX_ENTITIES = IdAllocator.DEFAULT_MAX_SLOT_COUNT
 
 return tecs

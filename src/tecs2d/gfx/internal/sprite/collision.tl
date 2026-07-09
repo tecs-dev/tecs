@@ -37,6 +37,12 @@ local record sprite_collision
         slices: {string: SliceConfig | string}
         --- Internal: tracks if fixtures have been created
         _setupComplete: boolean
+
+        --- Register a named collision template usable as a `slices` value.
+        addTemplate: function(name: string, config: SliceConfig)
+
+        --- Get a registered collision template by name.
+        getTemplate: function(name: string): SliceConfig
     end
 
     --- Register a named collision template
@@ -128,6 +134,11 @@ end
 function sprite_collision.getTemplate(name: string): sprite_collision.SliceConfig
     return templates[name]
 end
+
+-- Public surface: templates register through the component container
+-- (`gfx.SpriteCollision.addTemplate(...)`).
+SpriteCollision.addTemplate = sprite_collision.addTemplate
+SpriteCollision.getTemplate = sprite_collision.getTemplate
 
 -- Resolve config (template name string or inline config table)
 local function resolveSliceConfig(configOrName: sprite_collision.SliceConfig | string): sprite_collision.SliceConfig

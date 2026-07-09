@@ -31,6 +31,7 @@ local gpu_types <const> = require("tecs2d.gfx.internal.gpu.types")
 local Material <const> = require("tecs2d.gfx.internal.Material")
 local material_registry <const> = require("tecs2d.gfx.internal.material_registry")
 local material_compiler <const> = require("tecs2d.gfx.internal.material_compiler")
+local ClipBounds <const> = require("tecs2d.gfx.internal.ClipBounds")
 
 local CameraClass <const> = require("tecs2d.gfx.Camera")
 
@@ -215,6 +216,10 @@ local record gfx
     --- Chunk size constant (16)
     TILE_CHUNK_SIZE: integer
 
+    --- ClipBounds component for GPU-based clipping. Entities with this
+    --- component render clipped to the given world-space bounds.
+    ClipBounds: ClipBounds
+
 end
 
 gfx.Sprite = sprite.Sprite
@@ -250,6 +255,7 @@ gfx.PhysicsDebugToggle = physicsDebug.PhysicsDebugToggle
 gfx.TileChunk = tileChunkMod.TileChunk
 gfx.DirtyTileChunk = tileChunkMod.DirtyTileChunk
 gfx.TILE_CHUNK_SIZE = tileChunkMod.CHUNK_SIZE
+gfx.ClipBounds = ClipBounds
 -- Re-export the pipeline key for external access
 gfx.PIPELINE = pipeline_key.PIPELINE
 

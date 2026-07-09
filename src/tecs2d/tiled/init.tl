@@ -59,8 +59,8 @@ local record tiled is tecs_assets.AssetHandler<TilemapData>
     collision: collision_module
 
     -- TileSource component - associates sprites with their source tile data
-    -- (registered in types.tl, re-exported here)
-    type TileSource = types.TileSource
+    -- (registered in types.tl, re-exported here as both value and type)
+    TileSource: types.TileSource
 
     -- Plugin
     plugin: function(world: tecs.World)
@@ -90,9 +90,15 @@ local record tiled is tecs_assets.AssetHandler<TilemapData>
     --- Get a tile at tile coordinates
     getTile: function(data: TilemapData, layerIndex: integer, tileX: integer, tileY: integer): integer
 
+    --- Parse an in-memory Tiled JSON export (already decoded to a Lua
+    --- table) into TilemapData with full instance methods attached.
+    --- Use this to build maps programmatically or in tests; file/asset
+    --- loading goes through the `Tilemap` component instead.
+    parseTiledMap: function(data: {string: any}): TilemapData
+
     --- Create a TileSource component from a global tile ID.
     --- Useful for manually adding TileSource to entities spawned from Tiled objects.
-    tileSourceFromGid: function(map: TilemapData, gid: integer): TileSource
+    tileSourceFromGid: function(map: TilemapData, gid: integer): types.TileSource
 end
 
 local Tilemap <const> = tiled.Tilemap
@@ -198,8 +204,7 @@ tecs.newComponent({
 })
 
 -- TileSource is registered in types.tl (must be registered before chunk.tl uses it)
--- Export it as a runtime value (type alias only works for type checking)
-tiledAny.TileSource = types.TileSource
+tiled.TileSource = types.TileSource
 
 --- Create a TileSource component from a global tile ID.
 --- Useful for manually adding TileSource to entities spawned from Tiled objects.
@@ -239,6 +244,7 @@ tiled.worldToTile = loader.worldToTile
 tiled.tileToWorld = loader.tileToWorld
 tiled.getTileAt = loader.getTileAt
 tiled.getTile = loader.getTile
+tiled.parseTiledMap = loader.parseTiledMap
 
 -- Plugin implementation
 function tiled.plugin(world: tecs.World)

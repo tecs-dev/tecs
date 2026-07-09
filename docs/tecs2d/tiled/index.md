@@ -121,6 +121,21 @@ local worldX, worldY = tilemapData:tileToWorld(tileX, tileY)
 
 See [Utility Functions](./utility-functions) for detailed documentation.
 
+### Programmatic Maps
+
+Build a `TilemapData` from an in-memory Tiled JSON table (no file needed) with
+`tiled.parseTiledMap`. The returned map carries the full instance-method surface,
+including `setTile`/`setTileAt`:
+
+```teal
+local map = tiled.parseTiledMap({
+    width = 4, height = 4,
+    tilewidth = 16, tileheight = 16,
+    layers = { ... },
+    tilesets = { ... },
+})
+```
+
 ### Animated Tiles
 
 Tiles with animation defined in Tiled are automatically spawned as individual Sprite entities instead of being

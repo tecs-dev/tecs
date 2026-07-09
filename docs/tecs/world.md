@@ -103,7 +103,9 @@ world:isAlive(b)        -- true
 
 The packed layout reserves 22 bits for the slot and 31 bits for the generation. That means a world can be configured
 for at most `2^22` allocated slots (~4M), and each slot has `2^31` generation values before wrapping. The default
-`maxEntities` is lower (`2^20`, roughly one million slots) to keep the preallocated entity table smaller.
+`maxEntities` is lower (`2^20`, roughly one million slots) to keep the preallocated entity table smaller. Both limits
+are exported as constants: `tecs.MAX_ENTITIES` (the 2^22 format cap) and `tecs.DEFAULT_MAX_ENTITIES` (the 2^20
+default), so sizing code never hard-codes the numbers.
 
 Don't inspect or unpack IDs with `bit.*`; packed IDs can exceed 32-bit range, and LuaJIT bit operations truncate to
 32 bits. If tooling needs the slot or generation, use the arithmetic layout:
