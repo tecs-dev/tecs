@@ -8,7 +8,7 @@ local types <const> = require("tecs2d.gfx.types")
 local ColorComponent = require("tecs2d.gfx.internal.Color")
 local timingbuffer <const> = require("tecs2d.gfx.internal.gpu.timingbuffer")
 local sprite_sheet <const> = require("tecs2d.gfx.internal.sprite.sheet")
-local spritesheet <const> = require("tecs2d.gfx.spritesheet")
+local sheet <const> = require("tecs2d.gfx.sheet")
 local sprite_events <const> = require("tecs2d.gfx.internal.sprite.events")
 local sprite_collision <const> = require("tecs2d.gfx.internal.sprite.collision")
 local sprite_instance <const> = require("tecs2d.gfx.internal.sprite.instance")
@@ -189,7 +189,7 @@ local record sprite
         --- @return The current frame being displayed
         getFrame: function(self): integer
 
-        --- Get the absolute frame number (1-based, across entire sheet)
+        --- Get the absolute frame number (1-based, across entire spriteSheet)
         --- @return The absolute frame number
         getAbsoluteFrame: function(self): integer
 
@@ -218,12 +218,12 @@ local record sprite
         metamethod __call: function(self, spriteId: integer, startTime?: number): Sprite
 
         --- Create a Sprite from a loaded SpriteSheet
-        --- @param sheet The sprite sheet
+        --- @param spriteSheet The sprite spriteSheet
         --- @param tag Optional animation tag (defaults to "" = all frames)
         --- @param options Optional configuration (centered, pivotSlice, speed, startTime)
         --- @return A new Sprite instance
         fromSheet: function(
-            sheet: spritesheet.SpriteSheet,
+            spriteSheet: sheet.SpriteSheet,
             tag?: string,
             options?: {string: any}
         ): Sprite
@@ -286,7 +286,7 @@ local record sprite
         animTimingOffset: number
         textureSlice: number    -- packed: layerIndex | (generation << packBits)
         animDirection: number   -- 0 forward, 1 reverse, 2 pingpong
-        animFirstFrame: number  -- tag's first sheet frame, 0-based
+        animFirstFrame: number  -- tag's first spriteSheet frame, 0-based
         spriteId: number        -- instance id last synced; detects in-place replacement
     end
 end
@@ -446,7 +446,7 @@ local function createInstance(
 ): integer
     -- Validate tag if specified
     if tagName ~= "" and not sheetVal:hasFrameTag(tagName) then
-        error("Animation tag '" .. tagName .. "' not found in sheet")
+        error("Animation tag '" .. tagName .. "' not found in spriteSheet")
     end
 
     -- Check cache for existing instance
@@ -814,7 +814,7 @@ local SpriteMT <const>: {any:any} = {__index = Sprite}
 
 -- Sheet cache shared by deserialize: `SpriteSheet.fromFile` doesn't cache
 -- internally, so without this a snapshot with N sprites all from the same
--- sheet would parse that sheet N times on load.
+-- spriteSheet would parse that spriteSheet N times on load.
 local sheetCacheByPath: {string: sprite_sheet.SpriteSheet} = {}
 local resolvedSpritePathCache: {string: any} = {}
 
@@ -875,14 +875,14 @@ tecs.newFFIComponent({
 
     -- Custom serde: spriteId is a handle into a process-local registry
     -- that doesn't survive clear-all. Save the *durable* descriptor of the
-    -- sprite (sheet path + tag + config) so load can re-resolve through
+    -- sprite (spriteSheet path + tag + config) so load can re-resolve through
     -- the normal creation path.
     serialize = function(instance: sprite.Sprite): {string: any}
         local inst = sprite_instance.get(instance.spriteId)
         if not inst then return nil end
-        local sheet = sprite_sheet.SpriteSheet.getById(inst.sheetId)
-        if not sheet then return nil end
-        local path = sheet:getPath()
+        local spriteSheet = sprite_sheet.SpriteSheet.getById(inst.sheetId)
+        if not spriteSheet then return nil end
+        local path = spriteSheet:getPath()
         if path == "" then
             -- Sprite was built from an in-memory texture with no path;
             -- nothing durable to serialize. Skip rather than save a stale
@@ -903,10 +903,10 @@ tecs.newFFIComponent({
         end
         return {
             path          = resolvedPath,
-            tag           = sheet:getTagName(inst.tagId),
+            tag           = spriteSheet:getTagName(inst.tagId),
             speed         = inst.speed,
             centered      = inst.centered,
-            pivotSlice    = sheet:getSliceName(inst.sliceId) or "",
+            pivotSlice    = spriteSheet:getSliceName(inst.sliceId) or "",
             animStartTime = instance.animStartTime,
             pausedFrame   = instance.pausedFrame,
             _pauseAtFrame = instance._pauseAtFrame,
@@ -923,20 +923,20 @@ tecs.newFFIComponent({
         if not data then return nil end
         local path = data.path as string
         path = resolveDurableSpritePath(path) or path
-        local sheet = sheetCacheByPath[path]
-        if not sheet then
+        local spriteSheet = sheetCacheByPath[path]
+        if not spriteSheet then
             -- Aseprite sheets need an adjacent .json; plain textures don't.
             -- Probe for the JSON alongside the path to pick the right loader.
             local jsonPath = path:gsub("%.[^.]+$", "") .. ".json"
             local fsInfo = (love.filesystem as {string: function}).getInfo as function(string): any
             if fsInfo and fsInfo(jsonPath) ~= nil then
-                sheet = sprite_sheet.SpriteSheet.fromFile(path)
+                spriteSheet = sprite_sheet.SpriteSheet.fromFile(path)
             else
-                sheet = sprite_sheet.SpriteSheet.fromTextureFile(path)
+                spriteSheet = sprite_sheet.SpriteSheet.fromTextureFile(path)
             end
-            sheetCacheByPath[path] = sheet
+            sheetCacheByPath[path] = spriteSheet
         end
-        local inst = Sprite.fromSheet(sheet as spritesheet.SpriteSheet, data.tag as string, {
+        local inst = Sprite.fromSheet(spriteSheet as sheet.SpriteSheet, data.tag as string, {
             speed      = data.speed,
             centered   = data.centered,
             pivotSlice = data.pivotSlice,
@@ -955,7 +955,7 @@ tecs.newFFIComponent({
 })
 
 -- Per-entity lifecycle handler for Sprite added to an entity.
--- Assigns the bucket/TextureArray tag for the sprite's sheet; the
+-- Assigns the bucket/TextureArray tag for the sprite's spriteSheet; the
 -- subsequent `bucket_sync` observer allocates a GPU slot.
 local function onSpriteAdded(world: tecs.World, entityId: integer, self: sprite.Sprite)
     self._entity = entityId
@@ -967,14 +967,14 @@ local function onSpriteAdded(world: tecs.World, entityId: integer, self: sprite.
 
     local allocation = bucketMgr:getAllocation(inst.sheetId)
     if not allocation then
-        local sheet = sprite_sheet.SpriteSheet.getById(inst.sheetId)
-        if sheet then
+        local spriteSheet = sprite_sheet.SpriteSheet.getById(inst.sheetId)
+        if spriteSheet then
             allocation = bucketMgr:allocate(
                 inst.sheetId,
-                sheet:getImage(),
-                sheet:getNormalImage(),
-                sheet:getEmissionImage(),
-                sheet:getORMImage()
+                spriteSheet:getImage(),
+                spriteSheet:getNormalImage(),
+                spriteSheet:getEmissionImage(),
+                spriteSheet:getORMImage()
             )
         end
     end
@@ -1137,7 +1137,7 @@ local TIER_TO_COMPONENT: {string: tecs.Component} = {
 -------------------------------------------------------------------------------
 
 function Sprite.fromSheet(
-    sheet: spritesheet.SpriteSheet,
+    spriteSheet: sheet.SpriteSheet,
     tag?: string,
     options?: {string: any}
 ): sprite.Sprite
@@ -1150,7 +1150,7 @@ function Sprite.fromSheet(
     local startTime = (opts.startTime as number) or 0
 
     local spriteId = createInstance(
-        sheet as sprite_sheet.SpriteSheet,
+        spriteSheet as sprite_sheet.SpriteSheet,
         tagStr,
         speed,
         centered,
@@ -1162,16 +1162,16 @@ end
 
 function Sprite.fromAseprite(path: string, tag?: string, options?: {string: any}): sprite.Sprite
     return Sprite.fromSheet(
-        sprite_sheet.SpriteSheet.fromFile(path) as spritesheet.SpriteSheet, tag, options)
+        sprite_sheet.SpriteSheet.fromFile(path) as sheet.SpriteSheet, tag, options)
 end
 
 function Sprite.fromTexture(texture: love.graphics.Texture, options?: {string: any}): sprite.Sprite
     -- `options.path`, when supplied, is threaded through to the underlying
-    -- sheet so the sprite round-trips through snapshot save/load. Caller is
+    -- spriteSheet so the sprite round-trips through snapshot save/load. Caller is
     -- responsible for keeping the texture and path in sync.
     local path = options and (options.path as string) or nil
     return Sprite.fromSheet(
-        sprite_sheet.SpriteSheet.fromTexture(texture, path) as spritesheet.SpriteSheet, "", options)
+        sprite_sheet.SpriteSheet.fromTexture(texture, path) as sheet.SpriteSheet, "", options)
 end
 
 -------------------------------------------------------------------------------
@@ -1197,7 +1197,7 @@ function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(worl
         -- archetype transition, so the lifecycle observer can't see it.
         -- The sync dirty path detects the instance-id change and hands it
         -- here: release the old instance's refcount and re-run bucket
-        -- assignment for the new sheet.
+        -- assignment for the new spriteSheet.
         sync.onSpriteReplaced = function(entityId: integer, spr: any, oldSpriteId: integer)
             if oldSpriteId ~= 0 then
                 clearPlayOnceCallback(entityId)

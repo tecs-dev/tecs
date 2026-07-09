@@ -159,8 +159,13 @@ lowercase modules (never snake_case).
     → `local Camera = require("tecs2d.gfx.Camera")`.
   - The file is a *module* that contains a class or is a namespace of
     functions/data: **luacase** (all lowercase, no separators, no camelCase),
-    e.g. `spritesheet.tl` → `local spritesheet = require("tecs2d.gfx.spritesheet")`.
-    Multi-word module files drop their underscores (`sprite_sheet` → `spritesheet`).
+    e.g. `bucketmanager.tl` → `local bucketmanager = require("...bucketmanager")`.
+    Multi-word module files drop their underscores (`bucket_manager` → `bucketmanager`).
+- **Prefer single-word module names** where a clear one exists: `behavior`, not
+  `frameworkbehavior`; `dirty`, not `layoutdirty`. Only keep a compound when no
+  single word is unambiguous (`bucketmanager`, `componentids`).
+- Prefer a flat `module.tl` over a `module/init.tl` directory when the module is
+  a single file (`bmfont.tl`, not `bmfont/init.tl`).
 - The `require` path mirrors the filename; the local binding mirrors it too.
 
 ### Performance

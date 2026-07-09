@@ -7,7 +7,7 @@ local types <const> = require("tecs.types")
 local internal <const> = require("tecs.internal.types")
 local IdAllocator <const> = require("tecs.internal.IdAllocator")
 local builtins <const> = require("tecs.internal.builtins")
-local frameworkbehavior <const> = require("tecs.internal.frameworkbehavior")
+local behavior <const> = require("tecs.internal.behavior")
 local table_clear <const> = require("table.clear")
 local shared <const> = require("tecs.internal.world.shared")
 
@@ -495,8 +495,8 @@ end
 -- fall through to the raw default behavior.
 -- Underscored -- users call `world:set`, not this directly.
 function WorldImpl:_deferSet(id: integer, componentType: Component, value: any)
-    if frameworkbehavior.hasBits(componentType, frameworkbehavior.NeedsSet) then
-        return frameworkbehavior.set(self, id, componentType, value)
+    if behavior.hasBits(componentType, behavior.NeedsSet) then
+        return behavior.set(self, id, componentType, value)
     end
     return self:deferSetRaw(id, componentType, value)
 end
@@ -755,8 +755,8 @@ end
 -- Dispatcher: run component-specific defer behavior when present; otherwise
 -- fall through to the raw default behavior.
 function WorldImpl:_deferRemove(id: integer, component: Component)
-    if frameworkbehavior.hasBits(component, frameworkbehavior.NeedsRemove) then
-        return frameworkbehavior.remove(self, id, component)
+    if behavior.hasBits(component, behavior.NeedsRemove) then
+        return behavior.remove(self, id, component)
     end
     return self:deferRemoveRaw(id, component)
 end
@@ -935,7 +935,7 @@ function WorldImpl:_deferDespawn(id: integer)
         local list = logicalArch.onDespawnComponents
         for i = 1, logicalArch.onDespawnCount do
             local comp = list[i]
-            frameworkbehavior.despawn(world, id, comp, logicalArch, sourceRow)
+            behavior.despawn(world, id, comp, logicalArch, sourceRow)
         end
     end
 

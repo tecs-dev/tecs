@@ -1,7 +1,7 @@
 local components <const> = require("tecs.internal.components")
 local events <const> = require("tecs.internal.events")
 local internal <const> = require("tecs.internal.types")
-local frameworkbehavior <const> = require("tecs.internal.frameworkbehavior")
+local behavior <const> = require("tecs.internal.behavior")
 local phases <const> = require("tecs.internal.phases")
 local types <const> = require("tecs.types")
 local table_clear <const> = require("table.clear")
@@ -354,8 +354,8 @@ builtins.Key = components.newScalarComponent({
 do
     local Key <const> = builtins.Key as Component
     local keyI = Key as {string:any}
-    keyI.frameworkBehavior = frameworkbehavior.Key
-    keyI.frameworkBehaviorBits = frameworkbehavior.keyBits()
+    keyI.frameworkBehavior = behavior.Key
+    keyI.frameworkBehaviorBits = behavior.keyBits()
 end
 
 components.newFFIComponent({

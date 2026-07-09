@@ -3,7 +3,7 @@ local internal <const> = require("tecs.internal.types")
 local storage <const> = require("tecs.internal.storage")
 local componentcodegen <const> = require("tecs.internal.componentcodegen")
 local componentids <const> = require("tecs.internal.componentids")
-local frameworkbehavior <const> = require("tecs.internal.frameworkbehavior")
+local behavior <const> = require("tecs.internal.behavior")
 local bit <const> = require("bit")
 
 local assert, table_concat <const> = assert, table.concat
@@ -758,19 +758,19 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
     end
 
     if isSparse then
-        relContainerI.frameworkBehavior = frameworkbehavior.SparseRelationship
-        relContainerI.frameworkBehaviorBits = frameworkbehavior.sparseRelationshipBits()
+        relContainerI.frameworkBehavior = behavior.SparseRelationship
+        relContainerI.frameworkBehaviorBits = behavior.sparseRelationshipBits()
     else
         -- Every dense relationship dispatches removes so the wildcard
         -- container drops with the last sibling instance, matching
         -- sparse semantics (marker present == at least one target).
-        relContainerI.frameworkBehavior = frameworkbehavior.DenseRelationship
+        relContainerI.frameworkBehavior = behavior.DenseRelationship
         if hasReverseIndex then
-            relContainerI.frameworkBehaviorBits = frameworkbehavior.denseReverseIndexRelationshipBits()
+            relContainerI.frameworkBehaviorBits = behavior.denseReverseIndexRelationshipBits()
         elseif isExclusive then
-            relContainerI.frameworkBehaviorBits = frameworkbehavior.denseExclusiveRelationshipBits()
+            relContainerI.frameworkBehaviorBits = behavior.denseExclusiveRelationshipBits()
         else
-            relContainerI.frameworkBehaviorBits = frameworkbehavior.densePlainRelationshipBits()
+            relContainerI.frameworkBehaviorBits = behavior.densePlainRelationshipBits()
         end
     end
 

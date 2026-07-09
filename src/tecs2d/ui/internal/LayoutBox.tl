@@ -4,7 +4,7 @@
 local tecs <const> = require("tecs")
 local render_types <const> = require("tecs2d.gfx.types")
 local PivotModule <const> = require("tecs2d.gfx.internal.Pivot")
-local layoutdirty <const> = require("tecs2d.ui.internal.layoutdirty")
+local dirty <const> = require("tecs2d.ui.internal.dirty")
 
 local ChildOf <const> = tecs.builtins.ChildOf
 local Transform <const> = tecs.builtins.Transform
@@ -255,7 +255,7 @@ function LayoutBox.plugin(world: World)
     })
 
     -- Origin-aware RelativeTransform pass for UI entities.
-    layoutdirty.watch(world, {Transform, RelativeTransform, ChildOf, LayoutBox as tecs.Component})
+    dirty.watch(world, {Transform, RelativeTransform, ChildOf, LayoutBox as tecs.Component})
     local hierarchyQuery = world:query({
         name = "ui.RelativeTransform",
         include = {RelativeTransform, ChildOf, Transform}
@@ -351,9 +351,9 @@ function LayoutBox.plugin(world: World)
         run = function()
             -- Dirty gate: recompose only when hierarchy or layout state
             -- changed this frame or at the end of the previous one (the
-            -- layoutdirty sampler carries over post-PostUpdate
+            -- dirty sampler carries over post-PostUpdate
             -- mutations such as MCP run_lua writes).
-            if not layoutdirty.changed(world) then return end
+            if not dirty.changed(world) then return end
 
             -- The parent cache holds live column references; it must not
             -- survive frames (rows move between archetypes), but staying

@@ -9,7 +9,7 @@ local tileset_utils <const> = require("tecs2d.tiled.internal.tileset")
 local gfx <const> = require("tecs2d.gfx")
 local sprite_module <const> = require("tecs2d.gfx.internal.sprite")
 local sprite_sheet <const> = require("tecs2d.gfx.internal.sprite.sheet")
-local spritesheet <const> = require("tecs2d.gfx.spritesheet")
+local sheet <const> = require("tecs2d.gfx.sheet")
 local collision_module <const> = require("tecs2d.tiled.collision")
 
 local type TilemapData = types.TilemapData
@@ -340,7 +340,7 @@ local function spawnAnimatedSprite(
     renderLayer: integer,
     zOffset: number
 ): integer
-    local sheet = createAnimatedTileSpriteSheet(tileset, tile, localId)
+    local spriteSheet = createAnimatedTileSpriteSheet(tileset, tile, localId)
 
     local worldX = baseX + layer.offsetx + (tileX - 1) * tw
     local worldY = baseY + layer.offsety + (tileY - 1) * th
@@ -372,7 +372,7 @@ local function spawnAnimatedSprite(
             scaleX = sx,
             scaleY = sy,
         }),
-        sprite_module.Sprite.fromSheet(sheet as spritesheet.SpriteSheet, "default", {
+        sprite_module.Sprite.fromSheet(spriteSheet as sheet.SpriteSheet, "default", {
             centered = true,
             startTime = 0,
         }),
@@ -691,9 +691,9 @@ createAnimatedTileSpriteSheet = function(
         }
     }
 
-    local sheet = sprite_sheet.SpriteSheet.fromConfig(image, config, cacheKey)
-    animatedTileSpriteSheets[cacheKey] = sheet
-    return sheet
+    local spriteSheet = sprite_sheet.SpriteSheet.fromConfig(image, config, cacheKey)
+    animatedTileSpriteSheets[cacheKey] = spriteSheet
+    return spriteSheet
 end
 
 -- Spawn Sprite entities for animated tiles

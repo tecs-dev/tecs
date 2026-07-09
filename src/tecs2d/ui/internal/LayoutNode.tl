@@ -1,7 +1,7 @@
 local tecs <const> = require("tecs")
 local LayoutBox <const> = require("tecs2d.ui.internal.LayoutBox")
 local ClipBounds <const> = require("tecs2d.gfx.internal.ClipBounds")
-local layoutdirty <const> = require("tecs2d.ui.internal.layoutdirty")
+local dirty <const> = require("tecs2d.ui.internal.dirty")
 
 local Transform <const> = tecs.builtins.Transform
 local ChildOf <const> = tecs.builtins.ChildOf
@@ -130,14 +130,14 @@ function LayoutNode.plugin(world: tecs.World)
     -- Dirty gate shared by the layout passes: hierarchy or layout state
     -- changed this frame or at the end of the previous one (mutations
     -- made after PostUpdate, e.g. MCP run_lua, surface via the
-    -- layoutdirty carryover sampler). Per-child ancestor walks are only
+    -- dirty carryover sampler). Per-child ancestor walks are only
     -- worth running when something that feeds them moved.
-    layoutdirty.watch(world, {
+    dirty.watch(world, {
         Transform, RelativeTransform, ChildOf,
         LayoutNode as tecs.Component, LayoutBox as tecs.Component,
     })
     local function hierarchyDirty(): boolean
-        return layoutdirty.changed(world)
+        return dirty.changed(world)
     end
 
     -- Apply scroll offset to children of LayoutNodes

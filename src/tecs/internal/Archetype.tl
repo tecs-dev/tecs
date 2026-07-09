@@ -1,6 +1,6 @@
 local types <const> = require("tecs.types")
 local internal <const> = require("tecs.internal.types")
-local frameworkbehavior <const> = require("tecs.internal.frameworkbehavior")
+local behavior <const> = require("tecs.internal.behavior")
 local ffi <const> = require("tecs.internal.ffi")
 local Bitset <const> = require("tecs.utils.Bitset")
 local RelationshipStore <const> = require("tecs.internal.RelationshipStore")
@@ -819,7 +819,7 @@ function Archetype.new(
         signatureWordBits:set(signatureWordIndex)
 
         if comp.target ~= nil then isEphemeral = true end
-        if frameworkbehavior.hasBits(comp, frameworkbehavior.NeedsDespawn) then
+        if behavior.hasBits(comp, behavior.NeedsDespawn) then
             onDespawnCount = onDespawnCount + 1
             onDespawnComponents[onDespawnCount] = comp
         end
