@@ -1,5 +1,6 @@
 local components <const> = require("tecs.internal.components")
 local events <const> = require("tecs.internal.events")
+local internal <const> = require("tecs.internal.types")
 local frameworkBehavior <const> = require("tecs.internal.frameworkBehavior")
 local phases <const> = require("tecs.internal.phases")
 local types <const> = require("tecs.types")
@@ -552,8 +553,9 @@ function builtins.plugin(w: types.World)
             include = {RelativeTransform, ChildOf, Transform},
         })
 
+        local wImpl <const> = w as internal.WorldImpl
         local function hierarchyStateDirty(): boolean
-            for arch in w:dirtyArchetypes() do
+            for arch in wImpl:dirtyArchetypes() do
                 local cols = arch.columns
                 if cols[Transform] or cols[RelativeTransform] or cols[ChildOf] then
                     return true

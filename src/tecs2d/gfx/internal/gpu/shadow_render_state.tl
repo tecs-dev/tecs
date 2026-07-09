@@ -62,7 +62,7 @@ function shadow_render_state.run(
             )
         end
 
-        local materials = arch.columns[materialComponent] as {MaterialData}
+        local materials = arch:get(materialComponent) as {MaterialData}
         if materials then
             for row = 1, rowCount do
                 local mat = materials[row]

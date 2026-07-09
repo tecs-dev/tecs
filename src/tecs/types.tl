@@ -260,9 +260,6 @@ local record types
         --- The unique identifier of the archetype in the ECS container.
         id: integer
 
-        --- Columns in the archetype. Treat as read-only.
-        columns: {components.Component: {components.Component}}
-
         --- Entity IDs that belong to this archetype. Length is
         --- `entities[0]`; rows are 1-based (`entities[1]` is the
         --- first entity).
@@ -332,9 +329,8 @@ local record types
         --- Iterate components currently marked dirty on this archetype.
         dirtyComponents: function(self): function(): components.Component
 
-        observerCount: integer
-        hasRemoveObservers: integer
-        hasAddObservers: integer
+        --- Register an observer for entity add/remove ranges on this
+        --- archetype. See `ArchetypeEntityObserver`.
         addEntityObserver: function(self, observer: ArchetypeEntityObserver)
     end
 
@@ -771,14 +767,6 @@ local record types
         --- @param componentTypes Array of component types defining the archetype.
         --- @param callback Called at commit with `(archetype, firstRow, lastRow, count)`.
         batchSpawnAt: function(self, ids: {integer}, componentTypes: {components.Component},
-            callback: function(Archetype, integer, integer, integer))
-
-        --- Internal raw-FFI variant of `batchSpawnAt`. `ids` is an
-        --- `int32_t[count]` (or compatible cdata) indexed 0..count-1.
-        --- Used by the snapshot loader to consume FFI-read ids directly
-        --- without a Lua-table intermediate. Not intended for user code.
-        batchSpawnAtRaw: function(self, ids: any, count: integer,
-            componentTypes: {components.Component},
             callback: function(Archetype, integer, integer, integer))
 
         --- Despawn an entity.

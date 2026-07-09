@@ -13,6 +13,7 @@
 --- API change.
 
 local tecs <const> = require("tecs")
+local tecsInternal <const> = require("tecs.internal.types")
 local archetype_registry <const> = require("tecs2d.gfx.internal.archetype_registry")
 local shadow_state <const> = require("tecs2d.gfx.internal.gpu.shadow_state")
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
@@ -129,9 +130,10 @@ function shadow_dispatch.new(config: shadow_dispatch.Config): function(any, love
                 end
 
                 local staticFlags = 0
+                local cols = (arch as tecsInternal.ArchetypeInternal).columns
                 for i = 1, tagFlagCount do
                     local tf = tagFlags[i]
-                    if arch.columns[tf.component] ~= nil then
+                    if cols[tf.component] ~= nil then
                         staticFlags = bor(staticFlags, tf.flag)
                     end
                 end

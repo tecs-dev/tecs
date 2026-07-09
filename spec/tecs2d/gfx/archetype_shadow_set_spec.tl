@@ -43,7 +43,7 @@ local function findArchetype(world: tecs.World, components: {tecs.Component}): t
         if match ~= nil then return end
         if ((arch as {string:any}).entities as {integer})[0] == 0 then return end
         for i = 1, #components do
-            if arch.columns[components[i]] == nil then return end
+            if arch:get(components[i]) == nil then return end
         end
         match = arch
     end)

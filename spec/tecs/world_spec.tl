@@ -1370,7 +1370,8 @@ describe("WorldImpl", function()
 
         it("rebuilds the Key index after raw batch spawn", function()
             local ids = ffi.new("uint32_t[1]", 1001)
-            w:batchSpawnAtRaw(ids, 1, {tecs.builtins.Key, PosComponent}, function(arch, rowStart, _rowEnd, _count)
+            local wImpl = w as WorldImpl
+            wImpl:batchSpawnAtRaw(ids, 1, {tecs.builtins.Key, PosComponent}, function(arch, rowStart, _rowEnd, _count)
                 (arch.columns[tecs.builtins.Key] as {string})[rowStart] = "player"
                 (arch.columns[PosComponent] as {PosComponent})[rowStart] = PosComponent(1, 2)
             end)

@@ -12,6 +12,7 @@
 --- one builds.
 
 local tecs <const> = require("tecs")
+local tecsInternal <const> = require("tecs.internal.types")
 local archetype_registry <const> = require("tecs2d.gfx.internal.archetype_registry")
 local shadow_state <const> = require("tecs2d.gfx.internal.gpu.shadow_state")
 local shadow_render_state <const> = require("tecs2d.gfx.internal.gpu.shadow_render_state")
@@ -69,8 +70,9 @@ local function buildSpecs(
 end
 
 local function archMatches(arch: tecs.Archetype, meshComponent: tecs.Component): boolean
-    if arch.columns[Transform] == nil then return false end
-    if arch.columns[meshComponent] == nil then return false end
+    local cols = (arch as tecsInternal.ArchetypeInternal).columns
+    if cols[Transform] == nil then return false end
+    if cols[meshComponent] == nil then return false end
     return true
 end
 

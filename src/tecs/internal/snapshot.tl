@@ -1043,7 +1043,7 @@ end
 -- from the buffer into the archetype column (no per-entity allocations).
 -- Non-FFI columns fall through to per-entity decode.
 local function loadColumnMajor(
-    world: World,
+    world: internal.WorldImpl,
     reader: snapshot.Reader,
     componentTypes: {Component},
     entityCount: integer
@@ -1126,6 +1126,7 @@ local attachWorld: function(snapshot.Reader, World)
 -- `loadSnapshotTable` (in-memory). The reader abstraction is internal.
 -- Returns the prelude so the public wrappers can hand it back to callers.
 local function loadSnapshotImpl(world: World, reader: snapshot.Reader): SnapshotPrelude
+    local worldImpl <const> = world as internal.WorldImpl
     local prelude = reader:readPrelude()
     assert(prelude, "reader:readPrelude returned nil")
     assert(prelude.version == SNAPSHOT_VERSION,
@@ -1139,16 +1140,15 @@ local function loadSnapshotImpl(world: World, reader: snapshot.Reader): Snapshot
     -- entities like the player/HUD would inherit e.g. gameState and be despawned
     -- on the next state transition. restoreStateStack below re-establishes the
     -- correct autoStateComponent from the saved state stack.
-    local worldForAutoState = world as {string: any}
-    local savedAutoState = worldForAutoState.autoStateComponent
-    worldForAutoState.autoStateComponent = nil
+    local savedAutoState = worldImpl.autoStateComponent
+    worldImpl.autoStateComponent = nil
 
     while true do
         local componentTypes, _columnIndices, entityCount, mode = reader:nextArchetype()
         if not componentTypes then break end
 
         if mode == 0 then
-            loadColumnMajor(world, reader, componentTypes, entityCount)
+            loadColumnMajor(worldImpl, reader, componentTypes, entityCount)
         else
             loadRowMajor(world, reader)
         end
@@ -1159,12 +1159,12 @@ local function loadSnapshotImpl(world: World, reader: snapshot.Reader): Snapshot
         world:commit()
     end
 
-    worldForAutoState.autoStateComponent = savedAutoState
+    worldImpl.autoStateComponent = savedAutoState
     -- Bump the fresh-slot watermark past the highest restored slot so new
     -- spawns don't collide with loaded ids. batchSpawnAt already advances
     -- nextFreshSlot on a per-entity basis; this is a belt-and-braces cap
     -- for the snapshot-wide maximum recorded in the prelude.
-    local allocator = (world as {string: any}).allocator as IdAllocator
+    local allocator = worldImpl.allocator
     if prelude.nextEntityId > allocator.nextFreshSlot then
         allocator.nextFreshSlot = prelude.nextEntityId
     end

@@ -19,6 +19,7 @@
 --- mechanical (shader paths, format constants, naming).
 
 local tecs <const> = require("tecs")
+local tecsInternal <const> = require("tecs.internal.types")
 local pipeline_key <const> = require("tecs2d.gfx.internal.pipeline_key")
 local gpuBuffer <const> = require("tecs2d.gfx.internal.gpu.buffer")
 local gpuTypes <const> = require("tecs2d.gfx.internal.gpu.types")
@@ -229,7 +230,8 @@ function shadow_plugin.register(world: tecs.World, descriptor: shadow_plugin.Sha
     local shadowRegistry = archetype_registry.new(world, {
         name = descriptor.registryName,
         matches = function(arch: tecs.Archetype): boolean
-            return arch.columns[Transform] ~= nil and arch.columns[primary] ~= nil
+            local cols = (arch as tecsInternal.ArchetypeInternal).columns
+            return cols[Transform] ~= nil and cols[primary] ~= nil
         end,
         create = function(arch: tecs.Archetype): any
             return shadow_state.new(arch, buildSpecs())

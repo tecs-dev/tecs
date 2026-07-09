@@ -12,6 +12,7 @@
 --- gates one frame after the last real change.
 
 local tecs <const> = require("tecs")
+local tecsInternal <const> = require("tecs.internal.types")
 
 local record layout_dirty
     --- Merge components into the world's watch set and install the
@@ -42,7 +43,8 @@ local function stateFor(world: tecs.World): WorldState
 end
 
 local function scan(world: tecs.World, watched: {tecs.Component: boolean}): boolean
-    for arch in world:dirtyArchetypes() do
+    local worldImpl <const> = world as tecsInternal.WorldImpl
+    for arch in worldImpl:dirtyArchetypes() do
         local cols = arch.columns
         for comp in pairs(watched) do
             if cols[comp] ~= nil then

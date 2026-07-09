@@ -20,6 +20,7 @@
 --- to that tier's per-array buffers (see `shadow_dispatch.tl`).
 
 local tecs <const> = require("tecs")
+local tecsInternal <const> = require("tecs.internal.types")
 local archetype_registry <const> = require("tecs2d.gfx.internal.archetype_registry")
 local shadow_state <const> = require("tecs2d.gfx.internal.gpu.shadow_state")
 local shadow_render_state <const> = require("tecs2d.gfx.internal.gpu.shadow_render_state")
@@ -94,12 +95,13 @@ local function buildSpecs(
 end
 
 local function archMatches(arch: tecs.Archetype, sprite: tecs.Component, bucketMarkers: {tecs.Component}): boolean
-    if arch.columns[Transform] == nil then return false end
-    if arch.columns[sprite] == nil then return false end
+    local cols = (arch as tecsInternal.ArchetypeInternal).columns
+    if cols[Transform] == nil then return false end
+    if cols[sprite] == nil then return false end
     -- Must carry one of the six tier markers. Sprites without a bucket
     -- marker haven't been bucket-allocated yet and aren't renderable.
     for i = 1, #bucketMarkers do
-        if arch.columns[bucketMarkers[i]] ~= nil then
+        if cols[bucketMarkers[i]] ~= nil then
             return true
         end
     end

@@ -19,6 +19,7 @@
 --- `shadow_render_state`) keeps the architectures aligned.
 
 local tecs <const> = require("tecs")
+local tecsInternal <const> = require("tecs.internal.types")
 local archetype_registry <const> = require("tecs2d.gfx.internal.archetype_registry")
 local shadow_state <const> = require("tecs2d.gfx.internal.gpu.shadow_state")
 local shadow_render_state <const> = require("tecs2d.gfx.internal.gpu.shadow_render_state")
@@ -98,7 +99,8 @@ function shadow_setup.register(world: tecs.World, config: shadow_setup.Config): 
     local shadowRegistry = archetype_registry.new(world, {
         name = config.registryName,
         matches = function(arch: tecs.Archetype): boolean
-            return arch.columns[Transform] ~= nil and arch.columns[text] ~= nil
+            local cols = (arch as tecsInternal.ArchetypeInternal).columns
+            return cols[Transform] ~= nil and cols[text] ~= nil
         end,
         create = function(arch: tecs.Archetype): any
             return shadow_state.new(arch, specs)

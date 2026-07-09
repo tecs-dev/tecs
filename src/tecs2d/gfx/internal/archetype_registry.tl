@@ -103,7 +103,7 @@ local function consider(self: Registry, arch: tecs.Archetype)
     -- predicate. Disabling moves an entity into a Disabled-bearing
     -- archetype, which stays unregistered; re-enabling moves it back into
     -- a tracked one, re-syncing it through onEntitiesAdded.
-    if arch.columns[Disabled] ~= nil then return end
+    if arch:get(Disabled) ~= nil then return end
     if not self.matches(arch) then return end
 
     local state = self.create(arch)
