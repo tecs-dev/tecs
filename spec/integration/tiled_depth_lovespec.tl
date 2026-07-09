@@ -128,9 +128,9 @@ describe("tiled depth: external tilesets, flips, infinite rejection", function()
 
     it("rejects infinite maps with the documented error", function()
         local values = fixture.runLua(app, [[
-            local parser = require("tecs2d.tiled.internal.parser")
+            local tiled = require("tecs2d.tiled")
             local ok, err = pcall(function()
-                parser.parseTiledMap({
+                tiled.parseTiledMap({
                     width = 2, height = 2, tilewidth = 16, tileheight = 16,
                     infinite = true,
                     layers = {}, tilesets = {},

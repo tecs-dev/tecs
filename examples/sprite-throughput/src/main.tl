@@ -7,8 +7,7 @@
 local tecs <const> = require("tecs")
 local tecs2d <const> = require("tecs2d")
 local gfx <const> = require("tecs2d.gfx")
-local SpriteSheet <const> = require("tecs2d.gfx.internal.sprite.sheet").SpriteSheet
-local Sprite <const> = require("tecs2d.gfx.internal.sprite")
+local SpriteSheet <const> = gfx.SpriteSheet
 
 local sin <const> = math.sin
 local cos <const> = math.cos
@@ -84,7 +83,7 @@ local function benchPlugin(world: tecs.World)
     local sharedSpriteId = probe.spriteId
 
     local Transform <const> = tecs.builtins.Transform
-    local SpriteComponent <const> = Sprite.Sprite
+    local SpriteComponent <const> = gfx.Sprite
 
     -- Per-sprite base position, precomputed once (1-indexed, by column row).
     -- ofsX/ofsY hold the orbit offset vector (used by the incremental-rotation

@@ -26,9 +26,8 @@ local Occluder <const> = gfx.Occluder
 
 local FONT_PATH <const> = "assets/press-start-2p.fnt"
 local VIRTUAL_HEIGHT <const> = 480
-local tiled_types <const> = require("tecs2d.tiled.types")
-local type TileSourceData = tiled_types.TileSource
-local TileSource <const> = tiled_types.TileSource
+local type TileSourceData = tecs_tiled.TileSource
+local TileSource <const> = tecs_tiled.TileSource
 local Collider <const> = physics.Collider
 local RigidBody <const> = physics.RigidBody
 

@@ -85,7 +85,7 @@ local LIGHT_COLORS <const>: {{number, number, number}} = {
 -- Procedural cookie texture generators
 -------------------------------------------------------------------------------
 
-local spriteSheetModule <const> = require("tecs2d.gfx.internal.sprite.sheet").SpriteSheet
+local spriteSheetModule <const> = gfx.SpriteSheet
 
 --- Generate a window blinds cookie: horizontal stripes with soft edges.
 local function generateBlindsCookie(size: integer, slats: integer): love.graphics.Image

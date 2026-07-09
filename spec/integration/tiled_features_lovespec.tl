@@ -47,7 +47,6 @@ describe("tiled features: flips and external tilesets", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
             local tiled = require("tecs2d.tiled")
-            local parser = require("tecs2d.tiled.internal.parser")
             local Transform = tecs.builtins.Transform
 
             local mapData = {
@@ -69,7 +68,7 @@ describe("tiled features: flips and external tilesets", function()
                     tiles = {{id = 0, animation = {{tileid = 0, duration = 100000}}}},
                 }},
             }
-            local map = parser.parseTiledMap(mapData)
+            local map = tiled.parseTiledMap(mapData)
             local d = love.image.newImageData(16, 16)
             for y = 0, 15 do
                 for x = 0, 15 do

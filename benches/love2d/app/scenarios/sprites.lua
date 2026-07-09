@@ -5,8 +5,7 @@
 
 local tecs = require("tecs")
 local gfx = require("tecs2d.gfx")
-local SpriteSheet = require("tecs2d.gfx.internal.sprite.sheet").SpriteSheet
-local spriteModule = require("tecs2d.gfx.internal.sprite")
+local SpriteSheet = gfx.SpriteSheet
 
 local Transform = tecs.builtins.Transform
 
@@ -35,7 +34,7 @@ return {
         local spacing = 40
         local startX = -((gridSize - 1) * spacing) / 2
         local startY = -((gridSize - 1) * spacing) / 2
-        local SpriteComponent = spriteModule.Sprite
+        local SpriteComponent = gfx.Sprite
 
         world:batchSpawn(SPRITES,
             {Transform, SpriteComponent},

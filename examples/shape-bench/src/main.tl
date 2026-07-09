@@ -4,7 +4,6 @@ local gfx <const> = require("tecs2d.gfx")
 local mcp <const> = require("tecs2d.mcp")
 local stats <const> = require("tecs2d.stats")
 local floor <const> = require("floor")
-local IdAllocator <const> = require("tecs.internal.IdAllocator")
 
 local Text <const> = gfx.Text
 local FONT_PATH <const> = "assets/press-start-2p.fnt"
@@ -47,7 +46,7 @@ end
 
 -- Configuration
 local REQUESTED_TARGET <const> = (tonumber(os.getenv("ENTITIES")) or tonumber(arg[2]) or 100000) as integer
-local MAX_LIVE_ENTITIES <const> = IdAllocator.ABSOLUTE_MAX_SLOT_COUNT - 1
+local MAX_LIVE_ENTITIES <const> = tecs.MAX_ENTITIES - 1
 local INITIAL_TARGET <const> = math.min(REQUESTED_TARGET, MAX_LIVE_ENTITIES)
 local WORLD_SIZE <const> = math.max(5000, math.floor(math.sqrt(INITIAL_TARGET) * 35))
 
@@ -60,7 +59,7 @@ local function nextPow2(n: integer): integer
     return p
 end
 local DESIRED_MAX_ENTITIES <const> = nextPow2(math.max(math.floor(INITIAL_TARGET * 1.5), 1048576))
-local MAX_ENTITIES <const> = math.min(DESIRED_MAX_ENTITIES, IdAllocator.ABSOLUTE_MAX_SLOT_COUNT)
+local MAX_ENTITIES <const> = math.min(DESIRED_MAX_ENTITIES, tecs.MAX_ENTITIES)
 local CAMERA_SPEED <const> = math.max(1000, WORLD_SIZE / 5)
 
 local record ShowcaseState

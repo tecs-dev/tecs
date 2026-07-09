@@ -1,8 +1,7 @@
 local tecs <const> = require("tecs")
 local tecs2d <const> = require("tecs2d")
 local gfx <const> = require("tecs2d.gfx")
-local SpriteSheet <const> = require("tecs2d.gfx.internal.sprite.sheet").SpriteSheet
-local Sprite <const> = require("tecs2d.gfx.internal.sprite")
+local SpriteSheet <const> = gfx.SpriteSheet
 local mcp <const> = require("tecs2d.mcp")
 local stats <const> = require("tecs2d.stats")
 
@@ -57,7 +56,7 @@ local function benchPlugin(world: tecs.World)
     local probe = gfx.Sprite.fromSheet(runnerSheet, "run", {centered = true, startTime = sharedStartTime})
     local sharedSpriteId = probe.spriteId
     local Transform <const> = tecs.builtins.Transform
-    local SpriteComponent <const> = Sprite.Sprite
+    local SpriteComponent <const> = gfx.Sprite
     world:batchSpawn(spawnCount,
         {Transform as tecs.Component, SpriteComponent as tecs.Component},
         function(arch: tecs.Archetype, startRow: integer, lastRow: integer, _batchCount: integer)
@@ -131,7 +130,7 @@ local function benchPlugin(world: tecs.World)
     )
 
     -- Toggle pause/resume all sprites with space
-    local pauseQuery = world:query({ include = {Sprite.Sprite} })
+    local pauseQuery = world:query({ include = {gfx.Sprite} })
     world:addSystem({
         name = "PauseControl",
         phase = tecs.phases.Update,
@@ -140,7 +139,7 @@ local function benchPlugin(world: tecs.World)
                 allPaused = not allPaused
                 local pauseTime = love.timer.getTime()
                 for archetype, len in pauseQuery:iter() do
-                    local sprites = archetype:getMut(Sprite.Sprite)
+                    local sprites = archetype:getMut(gfx.Sprite)
                     for i = 1, len do
                         local s = sprites[i]
                         if allPaused then

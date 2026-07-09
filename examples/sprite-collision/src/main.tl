@@ -4,8 +4,7 @@
 local tecs = require("tecs")
 local tecs2d = require("tecs2d")
 local gfx = require("tecs2d.gfx")
-local SpriteSheet <const> = require("tecs2d.gfx.internal.sprite.sheet").SpriteSheet
-local sprite_collision <const> = require("tecs2d.gfx.internal.sprite.collision")
+local SpriteSheet <const> = gfx.SpriteSheet
 local mcp <const> = require("tecs2d.mcp")
 
 local physics = require("tecs2d.physics")
@@ -44,7 +43,7 @@ local function examplePlugin(w: tecs.World)
     w:addPlugin(gfx.physicsDebug.new())
 
     -- Register collision templates
-    sprite_collision.addTemplate("PLAYER", {
+    gfx.SpriteCollision.addTemplate("PLAYER", {
         shape = "circle",
         restitution = 0.0,
         friction = 0.0

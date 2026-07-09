@@ -15,7 +15,6 @@ local mcp <const> = require("tecs2d.mcp")
 local gfx <const> = require("tecs2d.gfx")
 local tiled <const> = require("tecs2d.tiled")
 local physics <const> = require("tecs2d.physics")
-local parser <const> = require("tecs2d.tiled.internal.parser")
 
 local Transform <const> = tecs.builtins.Transform
 
@@ -58,7 +57,7 @@ local function buildMap(): tiled.TilemapData
             tiles = {solidTile},
         }},
     }
-    local map = parser.parseTiledMap(mapData)
+    local map = tiled.parseTiledMap(mapData)
 
     -- The file loader normally loads the tileset image; supply a solid
     -- green one directly since this map never touches disk.

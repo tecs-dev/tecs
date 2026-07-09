@@ -5,7 +5,7 @@
 local tecs <const> = require("tecs")
 local tecs2d <const> = require("tecs2d")
 local gfx <const> = require("tecs2d.gfx")
-local SpriteSheet <const> = require("tecs2d.gfx.internal.sprite.sheet").SpriteSheet
+local SpriteSheet <const> = gfx.SpriteSheet
 local stats <const> = require("tecs2d.stats")
 local input <const> = require("tecs2d.input")
 local mcp <const> = require("tecs2d.mcp")

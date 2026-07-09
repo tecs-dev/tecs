@@ -10,7 +10,7 @@ local input <const> = require("tecs2d.input")
 local mcp <const> = require("tecs2d.mcp")
 local stats <const> = require("tecs2d.stats")
 local floor <const> = require("floor")
-local SpriteSheet <const> = require("tecs2d.gfx.internal.sprite.sheet").SpriteSheet
+local SpriteSheet <const> = gfx.SpriteSheet
 
 local lg <const> = love.graphics
 local random <const> = math.random

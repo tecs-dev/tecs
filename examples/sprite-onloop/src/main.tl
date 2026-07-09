@@ -4,13 +4,12 @@
 local tecs <const> = require("tecs")
 local tecs2d <const> = require("tecs2d")
 local gfx <const> = require("tecs2d.gfx")
-local SpriteSheet <const> = require("tecs2d.gfx.internal.sprite.sheet").SpriteSheet
-local sprite_module <const> = require("tecs2d.gfx.internal.sprite")
+local SpriteSheet <const> = gfx.SpriteSheet
 local mcp <const> = require("tecs2d.mcp")
 
 local Text <const> = gfx.Text
 local FONT_PATH <const> = "assets/press-start-2p.fnt"
-local type Sprite = sprite_module.Sprite
+local type Sprite = gfx.Sprite
 
 
 local lg <const> = love.graphics
