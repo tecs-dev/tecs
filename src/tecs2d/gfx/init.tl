@@ -4,6 +4,7 @@ local types <const> = require("tecs2d.gfx.types")
 local pipeline_key <const> = require("tecs2d.gfx.internal.pipeline_key")
 local sprite <const> = require("tecs2d.gfx.internal.sprite")
 local sprite_sheet <const> = require("tecs2d.gfx.internal.sprite.sheet")
+local sprite_sheet_types <const> = require("tecs2d.gfx.sprite_sheet")
 local circle <const> = require("tecs2d.gfx.internal.circle")
 local ellipse <const> = require("tecs2d.gfx.internal.ellipse")
 local arc <const> = require("tecs2d.gfx.internal.arc")
@@ -68,7 +69,7 @@ local record gfx
 
     --- SpriteSheet record for sprite frame data, textures, and animations.
     --- Factory methods: fromFile, fromImage, fromTexture, fromTextureFile
-    SpriteSheet: sprite_sheet.SpriteSheet
+    SpriteSheet: sprite_sheet_types.SpriteSheet
 
     --- SpriteCollision component for slice-based physics.
     --- Add alongside a Sprite to enable collision from Aseprite slices.
@@ -223,7 +224,7 @@ local record gfx
 end
 
 gfx.Sprite = sprite.Sprite
-gfx.SpriteSheet = sprite_sheet.SpriteSheet
+gfx.SpriteSheet = sprite_sheet.SpriteSheet as sprite_sheet_types.SpriteSheet
 gfx.SpriteCollision = sprite.SpriteCollision
 gfx.RepeatedSprite = sprite.RepeatedSprite
 gfx.ChangeTag = sprite.ChangeTag

@@ -1,4 +1,4 @@
-local sprite_sheet <const> = require("tecs2d.gfx.internal.sprite.sheet")
+local sprite_sheet <const> = require("tecs2d.gfx.sprite_sheet")
 local bmfont_module <const> = require("tecs2d.gfx.bmfont")
 local tiled_types <const> = require("tecs2d.tiled.types")
 

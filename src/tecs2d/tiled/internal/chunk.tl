@@ -9,6 +9,7 @@ local tileset_utils <const> = require("tecs2d.tiled.internal.tileset")
 local gfx <const> = require("tecs2d.gfx")
 local sprite_module <const> = require("tecs2d.gfx.internal.sprite")
 local sprite_sheet <const> = require("tecs2d.gfx.internal.sprite.sheet")
+local sprite_sheet_types <const> = require("tecs2d.gfx.sprite_sheet")
 local collision_module <const> = require("tecs2d.tiled.collision")
 
 local type TilemapData = types.TilemapData
@@ -371,7 +372,7 @@ local function spawnAnimatedSprite(
             scaleX = sx,
             scaleY = sy,
         }),
-        sprite_module.Sprite.fromSheet(sheet, "default", {
+        sprite_module.Sprite.fromSheet(sheet as sprite_sheet_types.SpriteSheet, "default", {
             centered = true,
             startTime = 0,
         }),

@@ -8,6 +8,7 @@ local types <const> = require("tecs2d.gfx.types")
 local ColorComponent = require("tecs2d.gfx.internal.Color")
 local timingBuffer <const> = require("tecs2d.gfx.internal.gpu.timing_buffer")
 local sprite_sheet <const> = require("tecs2d.gfx.internal.sprite.sheet")
+local sprite_sheet_types <const> = require("tecs2d.gfx.sprite_sheet")
 local sprite_events <const> = require("tecs2d.gfx.internal.sprite.events")
 local sprite_collision <const> = require("tecs2d.gfx.internal.sprite.collision")
 local sprite_instance <const> = require("tecs2d.gfx.internal.sprite.instance")
@@ -222,7 +223,7 @@ local record sprite
         --- @param options Optional configuration (centered, pivotSlice, speed, startTime)
         --- @return A new Sprite instance
         fromSheet: function(
-            sheet: sprite_sheet.SpriteSheet,
+            sheet: sprite_sheet_types.SpriteSheet,
             tag?: string,
             options?: {string: any}
         ): Sprite
@@ -935,7 +936,7 @@ tecs.newFFIComponent({
             end
             sheetCacheByPath[path] = sheet
         end
-        local inst = Sprite.fromSheet(sheet, data.tag as string, {
+        local inst = Sprite.fromSheet(sheet as sprite_sheet_types.SpriteSheet, data.tag as string, {
             speed      = data.speed,
             centered   = data.centered,
             pivotSlice = data.pivotSlice,
@@ -1136,7 +1137,7 @@ local TIER_TO_COMPONENT: {string: tecs.Component} = {
 -------------------------------------------------------------------------------
 
 function Sprite.fromSheet(
-    sheet: sprite_sheet.SpriteSheet,
+    sheet: sprite_sheet_types.SpriteSheet,
     tag?: string,
     options?: {string: any}
 ): sprite.Sprite
@@ -1149,7 +1150,7 @@ function Sprite.fromSheet(
     local startTime = (opts.startTime as number) or 0
 
     local spriteId = createInstance(
-        sheet,
+        sheet as sprite_sheet.SpriteSheet,
         tagStr,
         speed,
         centered,
@@ -1160,7 +1161,8 @@ function Sprite.fromSheet(
 end
 
 function Sprite.fromAseprite(path: string, tag?: string, options?: {string: any}): sprite.Sprite
-    return Sprite.fromSheet(sprite_sheet.SpriteSheet.fromFile(path), tag, options)
+    return Sprite.fromSheet(
+        sprite_sheet.SpriteSheet.fromFile(path) as sprite_sheet_types.SpriteSheet, tag, options)
 end
 
 function Sprite.fromTexture(texture: love.graphics.Texture, options?: {string: any}): sprite.Sprite
@@ -1168,7 +1170,8 @@ function Sprite.fromTexture(texture: love.graphics.Texture, options?: {string: a
     -- sheet so the sprite round-trips through snapshot save/load. Caller is
     -- responsible for keeping the texture and path in sync.
     local path = options and (options.path as string) or nil
-    return Sprite.fromSheet(sprite_sheet.SpriteSheet.fromTexture(texture, path), "", options)
+    return Sprite.fromSheet(
+        sprite_sheet.SpriteSheet.fromTexture(texture, path) as sprite_sheet_types.SpriteSheet, "", options)
 end
 
 -------------------------------------------------------------------------------
