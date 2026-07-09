@@ -99,6 +99,15 @@ tecs/
   tiled plugin, and UI plugin before the user game plugin runs.
 - Rendering is GPU-oriented and depends on LÖVE 12 features for the modern pipeline.
 
+### MCP debugging
+
+- MCP tools may be exposed lazily by the agent environment. If a useful tool is not initially visible, search for
+  the specific capability before falling back to `run_lua`.
+- Prefer high-level MCP world-operation tools over `run_lua` for live game edits. In particular, use
+  `patch_entities` to add, update, or remove components on existing entities.
+- Useful live-debug tools include `get_debug_context`, `get_entity`, `query`, `query_in_bounds`,
+  `patch_entities`, and `set_debug_selection`.
+
 ## Development Guidelines
 
 ### Type Safety
