@@ -3,7 +3,7 @@
 --- Resolves viewport bounds based on the entity's layer coordinate space (screen/virtual/world).
 
 local tecs <const> = require("tecs")
-local pipeline_key <const> = require("tecs2d.gfx.internal.pipeline_key")
+local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
 local bit <const> = require("bit")
 
 local Transform <const> = tecs.builtins.Transform
@@ -89,7 +89,7 @@ function Anchor.plugin(world: World)
         run = function()
             -- Lazy-load pipeline resource (not available at registration time)
             if not pipeline then
-                pipeline = world.resources[pipeline_key.PIPELINE] as PipelineData
+                pipeline = world.resources[pipelinekey.PIPELINE] as PipelineData
                 if not pipeline then return end
             end
 

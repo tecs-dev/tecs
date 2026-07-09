@@ -1,7 +1,7 @@
 local tecs <const> = require("tecs")
 local types <const> = require("tecs2d.assets.types")
 local sprite_sheet <const> = require("tecs2d.gfx.internal.sprite.sheet")
-local sprite_sheet_types <const> = require("tecs2d.gfx.sprite_sheet")
+local spritesheet <const> = require("tecs2d.gfx.spritesheet")
 local bmfont <const> = require("tecs2d.gfx.bmfont")
 local json <const> = require("tecs.utils.json")
 local tiled_parser <const> = require("tecs2d.tiled.internal.parser")
@@ -782,7 +782,7 @@ end
 function AssetManager:loadSpriteSheet(
     path: string,
     _options?: types.SpriteSheetLoadOptions
-): Handle<sprite_sheet_types.SpriteSheet>
+): Handle<spritesheet.SpriteSheet>
     local resolvedPath = self:resolvePath(path)
 
     -- Load main image and JSON data concurrently
@@ -810,7 +810,7 @@ function AssetManager:loadSpriteSheet(
             emissionHandle as Handle<any>,
             ormHandle as Handle<any>
         },
-        function(results: {any}): sprite_sheet_types.SpriteSheet
+        function(results: {any}): spritesheet.SpriteSheet
             local image = results[1] as love.graphics.Image
             local jsonData = results[2] as love.filesystem.FileData
             local normal = results[3] as love.graphics.Image
@@ -822,7 +822,7 @@ function AssetManager:loadSpriteSheet(
             if emission then b:emissionImage(emission) end
             if ormImg then b:ormImage(ormImg) end
 
-            return b:build() as sprite_sheet_types.SpriteSheet
+            return b:build() as spritesheet.SpriteSheet
         end
     )
 end
@@ -830,7 +830,7 @@ end
 function AssetManager:loadStaticSheet(
     path: string,
     _options?: types.SpriteSheetLoadOptions
-): Handle<sprite_sheet_types.SpriteSheet>
+): Handle<spritesheet.SpriteSheet>
     local resolvedPath = self:resolvePath(path)
 
     -- Load main image
@@ -855,7 +855,7 @@ function AssetManager:loadStaticSheet(
             emissionHandle as Handle<any>,
             ormHandle as Handle<any>
         },
-        function(results: {any}): sprite_sheet_types.SpriteSheet
+        function(results: {any}): spritesheet.SpriteSheet
             local image = results[1] as love.graphics.Image
             local normal = results[2] as love.graphics.Image
             local emission = results[3] as love.graphics.Image
@@ -868,7 +868,7 @@ function AssetManager:loadStaticSheet(
             if emission then b:emissionImage(emission) end
             if ormImg then b:ormImage(ormImg) end
 
-            return b:build() as sprite_sheet_types.SpriteSheet
+            return b:build() as spritesheet.SpriteSheet
         end
     )
 end

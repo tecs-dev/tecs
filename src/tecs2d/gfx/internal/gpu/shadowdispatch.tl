@@ -19,12 +19,12 @@
 
 local tecs <const> = require("tecs")
 local tecsInternal <const> = require("tecs.internal.types")
-local archetype_registry <const> = require("tecs2d.gfx.internal.archetype_registry")
-local shadow_state <const> = require("tecs2d.gfx.internal.gpu.shadow_state")
+local archetyperegistry <const> = require("tecs2d.gfx.internal.archetyperegistry")
+local shadowstate <const> = require("tecs2d.gfx.internal.gpu.shadowstate")
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
 local blend <const> = require("tecs2d.gfx.internal.blend")
-local shape_utils <const> = require("tecs2d.gfx.internal.gpu.shape_utils")
-local dummyFor <const> = require("tecs2d.gfx.internal.gpu.dummy_ssbo").dummyFor
+local shapeutils <const> = require("tecs2d.gfx.internal.gpu.shapeutils")
+local dummyFor <const> = require("tecs2d.gfx.internal.gpu.dummyssbo").dummyFor
 
 local Transform <const> = tecs.builtins.Transform
 
@@ -58,9 +58,9 @@ local record shadow_dispatch
         --- `*_cull.glsl`).
         shader: love.graphics.ComputeShader
         --- Renderer-owned shape registry.
-        registry: archetype_registry.Registry
+        registry: archetyperegistry.Registry
         --- Shared output / indirect buffers.
-        growable: shape_utils.GrowableBuffers
+        growable: shapeutils.GrowableBuffers
         --- Indirect args + shadow indirect args. Shared across
         --- dispatches for the shape.
         indirectBuffer: love.graphics.Buffer
@@ -110,7 +110,7 @@ function shadow_dispatch.new(config: shadow_dispatch.DispatchConfig): function(a
 
     return function(renderer: any, cullParamsBuffer: love.graphics.Buffer)
         for arch, stateAny in registry:archetypes() do
-            local state = stateAny as shadow_state.ArchetypeState
+            local state = stateAny as shadowstate.ArchetypeState
             if state.destroyed then goto continue end
 
             local rowCount = ((arch as {string:any}).entities as {integer})[0] as integer

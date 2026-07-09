@@ -3,7 +3,7 @@
 
 local types <const> = require("tecs.types")
 local storage <const> = require("tecs.internal.storage")
-local componentIds <const> = require("tecs.internal.componentIds")
+local componentids <const> = require("tecs.internal.componentids")
 local C <const> = require("ffi")
 local schema <const> = require("tecs.internal.ffi.schema")
 local StringBuffer <const> = require("string.buffer")
@@ -396,7 +396,7 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
         end
 
         if instanceIds then
-            local componentId = componentIds.allocate()
+            local componentId = componentids.allocate()
             instanceIds[instance] = componentId
         end
 
@@ -593,7 +593,7 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
             C.copy(instance, ptr as C.CData, structSize)
             BUF_SKIP(buf, structSize)
             if instanceIds then
-                local componentId = componentIds.allocate()
+                local componentId = componentids.allocate()
                 instanceIds[instance] = componentId
             end
             return instance as types.components.Component

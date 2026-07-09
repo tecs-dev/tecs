@@ -1,5 +1,5 @@
 local tecs <const> = require("tecs")
-local defineShape <const> = require("tecs2d.gfx.internal.gpu.define_shape")
+local defineshape <const> = require("tecs2d.gfx.internal.gpu.defineshape")
 
 local ColorComponent <const> = require("tecs2d.gfx.internal.Color")
 local ClipBounds <const> = require("tecs2d.gfx.internal.ClipBounds")
@@ -9,7 +9,7 @@ local Material <const> = require("tecs2d.gfx.internal.Material")
 -- Line uses the renderer-owned shadow-column path; wiring is provided
 -- by `shadow_plugin`. No shadow-mask shader (lines do not cast
 -- raymarched shadows) and no Pivot (lines have explicit endpoints).
-local shaders <const> = defineShape.loadShaders({
+local shaders <const> = defineshape.loadShaders({
     name = "line",
     dir = "tecs2d/gfx/internal/line/",
 })
@@ -45,7 +45,7 @@ tecs.newFFIComponent({
 })
 
 function line.plugin(world: tecs.World)
-    defineShape.register(world, {
+    defineshape.register(world, {
         name = "Line",
         component = Line as tecs.Component,
         render = shaders.render,

@@ -1,6 +1,6 @@
 --- Declarative shape registration over the shadow-column path.
 ---
---- `shadow_plugin.register` is the full, explicit descriptor: ~45 lines
+--- `shadowplugin.register` is the full, explicit descriptor: ~45 lines
 --- per shape, most of it mechanical. `defineShape` derives all of that
 --- so a shape declares only what is genuinely shape-specific:
 ---
@@ -11,8 +11,8 @@
 ---
 --- Everything else is derived:
 ---   - all naming strings              ← `name` (+ optional `prefix`)
----   - each modifier's layout/SSBO/mask ← `modifier_binding` (shared)
----   - each tag's static flag           ← `modifier_binding` (shared)
+---   - each modifier's layout/SSBO/mask ← `modifierbinding` (shared)
+---   - each tag's static flag           ← `modifierbinding` (shared)
 ---   - output + stub buffer formats     ← `gpuTypes.<PREFIX>_*`
 ---
 --- A shape has two naming roots that usually coincide: `name` is the
@@ -25,10 +25,10 @@
 
 local tecs <const> = require("tecs")
 local gpuTypes <const> = require("tecs2d.gfx.internal.gpu.types")
-local shadow_plugin <const> = require("tecs2d.gfx.internal.gpu.shadow_plugin")
-local modifier_binding <const> = require("tecs2d.gfx.internal.gpu.modifier_binding")
+local shadowplugin <const> = require("tecs2d.gfx.internal.gpu.shadowplugin")
+local modifierbinding <const> = require("tecs2d.gfx.internal.gpu.modifierbinding")
 local shaderUtils <const> = require("tecs2d.gfx.internal.gpu.shaders")
-local material_compiler <const> = require("tecs2d.gfx.internal.material_compiler")
+local materialcompiler <const> = require("tecs2d.gfx.internal.materialcompiler")
 
 local lg <const> = love.graphics
 
@@ -51,7 +51,7 @@ local record define_shape
         --- Optional shadow-mask shader. Presence enables the shadow pass.
         shadowMask: love.graphics.Shader
         --- Modifier components this shape supports. Each must have an entry
-        --- in `modifier_binding.MASK` matching the shape's cull GLSL.
+        --- in `modifierbinding.MASK` matching the shape's cull GLSL.
         modifiers: {tecs.Component}
         --- Tag components this shape honours (each via the shared TAG_FLAG).
         tags: {tecs.Component}
@@ -97,7 +97,7 @@ end
 function define_shape.loadShaders(config: define_shape.ShaderConfig): define_shape.ShaderSet
     local name <const> = config.name
     local renderSource <const> = shaderUtils.loadRenderShader(name, config.dir)
-    material_compiler.registerBaseSource(name, renderSource)
+    materialcompiler.registerBaseSource(name, renderSource)
     local shadowMask: love.graphics.Shader = nil
     if config.shadowMask then
         shadowMask = lg.newShader(shaderUtils.loadShadowMaskShader("shadow_mask_" .. config.shadowMask))
@@ -115,7 +115,7 @@ function define_shape.register(world: tecs.World, config: define_shape.Config)
     local prefix <const> = config.prefix or name
     local prefixUpper <const> = prefix:upper()
     local plural <const> = config.plural or (prefix .. "s")
-    local primaryLayout <const> = modifier_binding.layoutFor(config.component)
+    local primaryLayout <const> = modifierbinding.layoutFor(config.component)
 
     -- Look up a `gpuTypes.<PREFIX><suffix>` constant by naming convention.
     local function gt(suffix: string): any
@@ -127,15 +127,15 @@ function define_shape.register(world: tecs.World, config: define_shape.Config)
         return v
     end
 
-    local tagFlags: {shadow_plugin.TagFlagBinding} = {}
+    local tagFlags: {shadowplugin.TagFlagBinding} = {}
     if config.tags then
         for i = 1, #config.tags do
             local t <const> = config.tags[i]
-            tagFlags[i] = {component = t, flag = modifier_binding.flagFor(t)}
+            tagFlags[i] = {component = t, flag = modifierbinding.flagFor(t)}
         end
     end
 
-    shadow_plugin.register(world, {
+    shadowplugin.register(world, {
         prefix = prefix,
         plural = plural,
         materialShapeName = lower,
@@ -148,7 +148,7 @@ function define_shape.register(world: tecs.World, config: define_shape.Config)
         primaryLayout = primaryLayout,
         primaryInputName = name .. "Input",
 
-        optional = modifier_binding.bind(config.modifiers),
+        optional = modifierbinding.bind(config.modifiers),
         tagFlags = tagFlags,
 
         cullShader = config.cull,

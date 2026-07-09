@@ -1,6 +1,6 @@
 local tecs <const> = require("tecs")
 local types <const> = require("tecs2d.gfx.types")
-local defineShape <const> = require("tecs2d.gfx.internal.gpu.define_shape")
+local defineshape <const> = require("tecs2d.gfx.internal.gpu.defineshape")
 
 local ColorComponent <const> = require("tecs2d.gfx.internal.Color")
 local ClipBounds <const> = require("tecs2d.gfx.internal.ClipBounds")
@@ -11,7 +11,7 @@ local Pivot <const> = require("tecs2d.gfx.internal.Pivot")
 -- Arc uses the renderer-owned shadow-column path; wiring is provided
 -- by `shadow_plugin`. No shadow-mask shader: arcs do not cast
 -- raymarched shadows.
-local shaders <const> = defineShape.loadShaders({
+local shaders <const> = defineshape.loadShaders({
     name = "arc",
     dir = "tecs2d/gfx/internal/arc/",
 })
@@ -59,7 +59,7 @@ tecs.newFFIComponent({
 })
 
 function arc.plugin(world: tecs.World)
-    defineShape.register(world, {
+    defineshape.register(world, {
         name = "Arc",
         component = Arc as tecs.Component,
         render = shaders.render,

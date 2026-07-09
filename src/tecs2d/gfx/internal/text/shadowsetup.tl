@@ -1,6 +1,6 @@
 --- Renderer-owned shadow-column scaffolding for text archetypes.
 ---
---- Builds per-archetype `shadow_state` instances for any archetype that
+--- Builds per-archetype `shadowstate` instances for any archetype that
 --- contains both `Transform` and `Text`, plus optional bindings for
 --- the renderer's dynamic input columns (Color, ClipBounds, RenderFlags,
 --- Material, TextEffects). Adds the two PreRender systems (render-state
@@ -15,16 +15,16 @@
 --- `gpu/shadow_plugin.tl` because text needs a custom dispatch shape
 --- (two output streams: per-entity headerOut + per-glyph visibleGlyph)
 --- that the generic `shadow_plugin` doesn't model. Reusing the same
---- lower-level building blocks (`shadow_state`, `archetype_registry`,
---- `shadow_render_state`) keeps the architectures aligned.
+--- lower-level building blocks (`shadowstate`, `archetyperegistry`,
+--- `shadowrenderstate`) keeps the architectures aligned.
 
 local tecs <const> = require("tecs")
 local tecsInternal <const> = require("tecs.internal.types")
-local archetype_registry <const> = require("tecs2d.gfx.internal.archetype_registry")
-local shadow_state <const> = require("tecs2d.gfx.internal.gpu.shadow_state")
-local shadow_render_state <const> = require("tecs2d.gfx.internal.gpu.shadow_render_state")
+local archetyperegistry <const> = require("tecs2d.gfx.internal.archetyperegistry")
+local shadowstate <const> = require("tecs2d.gfx.internal.gpu.shadowstate")
+local shadowrenderstate <const> = require("tecs2d.gfx.internal.gpu.shadowrenderstate")
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
-local gpu_backing <const> = require("tecs2d.gfx.internal.gpu.gpu_backing")
+local gpubacking <const> = require("tecs2d.gfx.internal.gpu.gpubacking")
 local Material <const> = require("tecs2d.gfx.internal.Material")
 
 local Transform <const> = tecs.builtins.Transform
@@ -59,8 +59,8 @@ local record shadow_setup
     end
 
     record Context
-        registry: archetype_registry.Registry
-        syncRef: shadow_render_state.Frame
+        registry: archetyperegistry.Registry
+        syncRef: shadowrenderstate.Frame
     end
 
     register: function(world: tecs.World, config: Config): Context
@@ -79,7 +79,7 @@ local function buildSpecs(text: tecs.Component, optional: {shadow_setup.Optional
 end
 
 function shadow_setup.register(world: tecs.World, config: shadow_setup.Config): shadow_setup.Context
-    local syncRef: shadow_render_state.Frame = {
+    local syncRef: shadowrenderstate.Frame = {
         hasAlphaBlend = false,
         blendGroups = {},
         blendGroupCount = 0,
@@ -93,17 +93,17 @@ function shadow_setup.register(world: tecs.World, config: shadow_setup.Config): 
     -- Back identity-layout columns (Transform, ...) with ByteData so the shadow
     -- path uploads them straight to their SSBO. Install-time, before spawn.
     for comp, layout in pairs(specs) do
-        gpu_backing.enable(comp, layout as {string:any})
+        gpubacking.enable(comp, layout as {string:any})
     end
 
-    local shadowRegistry = archetype_registry.new(world, {
+    local shadowRegistry = archetyperegistry.new(world, {
         name = config.registryName,
         matches = function(arch: tecs.Archetype): boolean
             local cols = (arch as tecsInternal.ArchetypeInternal).columns
             return cols[Transform] ~= nil and cols[text] ~= nil
         end,
         create = function(arch: tecs.Archetype): any
-            return shadow_state.new(arch, specs)
+            return shadowstate.new(arch, specs)
         end,
     })
 
@@ -111,7 +111,7 @@ function shadow_setup.register(world: tecs.World, config: shadow_setup.Config): 
         name = config.renderStateSystemName,
         phase = tecs.phases.PreRender,
         run = function()
-            shadow_render_state.run(
+            shadowrenderstate.run(
                 shadowRegistry,
                 syncRef,
                 Material as tecs.Component

@@ -15,12 +15,12 @@
 
 local tecs <const> = require("tecs")
 local tecsInternal <const> = require("tecs.internal.types")
-local archetype_registry <const> = require("tecs2d.gfx.internal.archetype_registry")
-local shadow_state <const> = require("tecs2d.gfx.internal.gpu.shadow_state")
+local archetyperegistry <const> = require("tecs2d.gfx.internal.archetyperegistry")
+local shadowstate <const> = require("tecs2d.gfx.internal.gpu.shadowstate")
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
 local blend <const> = require("tecs2d.gfx.internal.blend")
 local TextureArray <const> = require("tecs2d.gfx.internal.sprite.TextureArray")
-local dummyFor <const> = require("tecs2d.gfx.internal.gpu.dummy_ssbo").dummyFor
+local dummyFor <const> = require("tecs2d.gfx.internal.gpu.dummyssbo").dummyFor
 
 local Transform <const> = tecs.builtins.Transform
 
@@ -73,7 +73,7 @@ local record shadow_dispatch
         --- ownership without enabling dispatch (useful while the
         --- shader is being authored).
         shader: love.graphics.ComputeShader
-        registry: archetype_registry.Registry
+        registry: archetyperegistry.Registry
         spriteComponent: tecs.Component
         bucketMarkers: {tecs.Component}
         optional: {OptionalBinding}
@@ -158,7 +158,7 @@ function shadow_dispatch.new(config: shadow_dispatch.Config): shadow_dispatch.Co
         end
 
         for arch, stateAny in registry:archetypes() do
-            local state = stateAny as shadow_state.ArchetypeState
+            local state = stateAny as shadowstate.ArchetypeState
             if state.destroyed then goto continue end
 
             local rowCount = ((arch as {string:any}).entities as {integer})[0] as integer

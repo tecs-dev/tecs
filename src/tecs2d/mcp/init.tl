@@ -13,7 +13,7 @@ local socket <const> = require("socket")
 local json <const> = require("tecs.utils.json")
 local mcpTools <const> = require("tecs2d.mcp.tools")
 local IdAllocator <const> = require("tecs.internal.IdAllocator")
-local pipeline_key <const> = require("tecs2d.gfx.internal.pipeline_key")
+local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
 local logging <const> = require("tecs.utils.logging")
 local StringBuffer <const> = require("string.buffer")
 
@@ -1161,7 +1161,7 @@ toolHandlers["set_time_scale"] = function(args: {string:any}, id: number)
     scale = math.max(0.0, math.min(10.0, scale))
 
     -- Get the render pipeline from resources (not world.pipeline which is the system scheduler)
-    local renderPipeline = world.resources[pipeline_key.PIPELINE] as {string: any}
+    local renderPipeline = world.resources[pipelinekey.PIPELINE] as {string: any}
     if not renderPipeline then
         sendToolError(id, "render_pipeline_not_found", "Render pipeline not found", nil)
         return
@@ -1201,7 +1201,7 @@ local function enableGameplayPhases()
 end
 
 local function setRenderTimeScale(scale: number)
-    local renderPipeline = world.resources[pipeline_key.PIPELINE] as {string: any}
+    local renderPipeline = world.resources[pipelinekey.PIPELINE] as {string: any}
     if not renderPipeline then return end
     if renderPipeline.setTimeScale then
         (renderPipeline.setTimeScale as function(any, number))(renderPipeline, scale)
@@ -1211,7 +1211,7 @@ local function setRenderTimeScale(scale: number)
 end
 
 local function getRenderTimeScale(): number
-    local renderPipeline = world.resources[pipeline_key.PIPELINE] as {string: any}
+    local renderPipeline = world.resources[pipelinekey.PIPELINE] as {string: any}
     if not renderPipeline then return 1.0 end
     return (renderPipeline.timeScale as number) or 1.0
 end

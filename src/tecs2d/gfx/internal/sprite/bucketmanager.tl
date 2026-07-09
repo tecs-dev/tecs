@@ -4,7 +4,7 @@
 --- Sprites are assigned to buckets based on their texture size.
 
 local lg <const> = love.graphics
-local LOGGER <const> = require("tecs.utils.logging").getLogger("tecs2d.gfx.bucket_manager")
+local LOGGER <const> = require("tecs.utils.logging").getLogger("tecs2d.gfx.bucketmanager")
 
 -- Bucket tier enumeration
 local enum BucketTier

@@ -7,23 +7,23 @@
 --- identical except for the state-record cast.
 
 local tecs <const> = require("tecs")
-local archetype_registry <const> = require("tecs2d.gfx.internal.archetype_registry")
-local shadow_state <const> = require("tecs2d.gfx.internal.gpu.shadow_state")
-local shape_sync_base <const> = require("tecs2d.gfx.internal.shape_sync_base")
+local archetyperegistry <const> = require("tecs2d.gfx.internal.archetyperegistry")
+local shadowstate <const> = require("tecs2d.gfx.internal.gpu.shadowstate")
+local shapesyncbase <const> = require("tecs2d.gfx.internal.shapesyncbase")
 local blend <const> = require("tecs2d.gfx.internal.blend")
 
-local type Registry = archetype_registry.Registry
-local type ArchetypeState = shadow_state.ArchetypeState
-local type BlendGroup = shape_sync_base.BlendGroup
-local type MaterialGroup = shape_sync_base.MaterialGroup
-local type MaterialData = shape_sync_base.MaterialData
+local type Registry = archetyperegistry.Registry
+local type ArchetypeState = shadowstate.ArchetypeState
+local type BlendGroup = shapesyncbase.BlendGroup
+local type MaterialGroup = shapesyncbase.MaterialGroup
+local type MaterialData = shapesyncbase.MaterialData
 
-local trackBlendGroup <const> = shape_sync_base.trackBlendGroup
-local trackMaterialGroup <const> = shape_sync_base.trackMaterialGroup
+local trackBlendGroup <const> = shapesyncbase.trackBlendGroup
+local trackMaterialGroup <const> = shapesyncbase.trackMaterialGroup
 
 local record shadow_render_state
     --- Per-frame render-scheduling state. Same shape as
-    --- `shape_sync_base.SyncRecord` so it can be passed to the
+    --- `shapesyncbase.SyncRecord` so it can be passed to the
     --- renderer's renderGBuffer without translation.
     record Frame
         hasAlphaBlend: boolean

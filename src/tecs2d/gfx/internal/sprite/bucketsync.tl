@@ -17,12 +17,12 @@ local gpuTypes <const> = require("tecs2d.gfx.internal.gpu.types")
 local types <const> = gpuTypes
 local sprite_instance <const> = require("tecs2d.gfx.internal.sprite.instance")
 local sprite_sheet <const> = require("tecs2d.gfx.internal.sprite.sheet")
-local bucket_manager <const> = require("tecs2d.gfx.internal.sprite.bucket_manager")
+local bucketmanager <const> = require("tecs2d.gfx.internal.sprite.bucketmanager")
 local TextureArray <const> = require("tecs2d.gfx.internal.sprite.TextureArray")
 local DropShadowComponent <const> = require("tecs2d.gfx.internal.DropShadow")
 local blend <const> = require("tecs2d.gfx.internal.blend")
 local MaterialComponent <const> = require("tecs2d.gfx.internal.Material")
-local base <const> = require("tecs2d.gfx.internal.shape_sync_base")
+local shapesyncbase <const> = require("tecs2d.gfx.internal.shapesyncbase")
 local retire <const> = require("tecs2d.gfx.internal.gpu.retire")
 
 local Transform <const> = tecs.builtins.Transform
@@ -57,11 +57,11 @@ local record DropShadowData
     opacity: number
 end
 
-local type MaterialData = base.MaterialData
-local type MaterialGroup = base.MaterialGroup
-local type BlendGroup = base.BlendGroup
-local trackMaterialGroup <const> = base.trackMaterialGroup
-local trackBlendGroup <const> = base.trackBlendGroup
+local type MaterialData = shapesyncbase.MaterialData
+local type MaterialGroup = shapesyncbase.MaterialGroup
+local type BlendGroup = shapesyncbase.BlendGroup
+local trackMaterialGroup <const> = shapesyncbase.trackMaterialGroup
+local trackBlendGroup <const> = shapesyncbase.trackBlendGroup
 
 local record SpriteDataFFI
     pivotX: number
@@ -147,7 +147,7 @@ local record bucket_sync
         spriteComponent: tecs.Component
         spriteDataComponent: tecs.Component
         repeatedSpriteComponent: tecs.Component
-        bucketManager: bucket_manager.Manager
+        bucketManager: bucketmanager.Manager
         -- Material group tracking (across all tiers/arrays)
         materialGroups: {MaterialGroup}
         materialGroupCount: integer
@@ -277,7 +277,7 @@ function bucket_sync.new(
     repeatedSpriteComponent?: tecs.Component,
     spriteSizeHint?: integer
 ): bucket_sync.SpriteBucketSync
-    local bucketMgr = bucket_manager.get()
+    local bucketMgr = bucketmanager.get()
 
     -- Initial per-bucket output capacity. sizeHints.sprites is a global
     -- sprite capacity hint, not a per-texture-bucket reservation, so use it

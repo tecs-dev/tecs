@@ -3,8 +3,8 @@
 --- Source columns (Transform / Color / ClipBounds / Pivot / Material
 --- + the Mesh row's `_definitionId`) flow through per-archetype
 --- shadow buffers held by `shadow_state` instances (registered via
---- `mesh/shadow_setup.tl`). The cull dispatch
---- (`mesh/shadow_dispatch.tl`) issues one compute pass per
+--- `mesh/shadowsetup.tl`). The cull dispatch
+--- (`mesh/shadowdispatch.tl`) issues one compute pass per
 --- (definition, archetype) and writes per-instance results into the
 --- definition's own output / indirect / material-params buffers.
 --- Each MeshDefinition draws with its own `love.graphics.Mesh` so
@@ -16,12 +16,12 @@ local ClipBounds <const> = require("tecs2d.gfx.internal.ClipBounds")
 local Pivot <const> = require("tecs2d.gfx.internal.Pivot")
 local Material <const> = require("tecs2d.gfx.internal.Material")
 local Unlit <const> = require("tecs2d.gfx.internal.Unlit")
-local pipeline_key <const> = require("tecs2d.gfx.internal.pipeline_key")
+local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
 local meshDefinition <const> = require("tecs2d.gfx.internal.mesh.definition")
-local material_compiler <const> = require("tecs2d.gfx.internal.material_compiler")
-local shadow_setup <const> = require("tecs2d.gfx.internal.mesh.shadow_setup")
-local shadow_dispatch <const> = require("tecs2d.gfx.internal.mesh.shadow_dispatch")
-local modifierBinding <const> = require("tecs2d.gfx.internal.gpu.modifier_binding")
+local materialcompiler <const> = require("tecs2d.gfx.internal.materialcompiler")
+local shadowsetup <const> = require("tecs2d.gfx.internal.mesh.shadowsetup")
+local shadowdispatch <const> = require("tecs2d.gfx.internal.mesh.shadowdispatch")
+local modifierbinding <const> = require("tecs2d.gfx.internal.gpu.modifierbinding")
 local gpuTypes <const> = require("tecs2d.gfx.internal.gpu.types")
 local shaderUtils <const> = require("tecs2d.gfx.internal.gpu.shaders")
 
@@ -31,7 +31,7 @@ local MESH_SHADERS <const> = "tecs2d/gfx/internal/mesh/"
 local meshRenderSource <const> = shaderUtils.loadRenderShader("mesh", MESH_SHADERS)
 local meshRenderShader <const> = lg.newShader(meshRenderSource)
 local meshCullShader <const> = lg.newComputeShader(shaderUtils.loadCullShader("mesh_cull", MESH_SHADERS))
-material_compiler.registerBaseSource("mesh", meshRenderSource)
+materialcompiler.registerBaseSource("mesh", meshRenderSource)
 
 local LOGGER <const> = require("tecs.utils.logging").getLogger("tecs2d.gfx.mesh")
 
@@ -94,7 +94,7 @@ tecs.newFFIComponent({
 })
 
 function mesh.plugin(world: tecs.World)
-    local pipelineInstance <const> = world.resources[pipeline_key.PIPELINE as tecs.Key<gpuTypes.PipelineInternal>]
+    local pipelineInstance <const> = world.resources[pipelinekey.PIPELINE as tecs.Key<gpuTypes.PipelineInternal>]
     if not pipelineInstance then
         LOGGER:error("No render pipeline found in world resources")
         return
@@ -106,13 +106,13 @@ function mesh.plugin(world: tecs.World)
     -- shared registry so they can't drift from cull_common.glsl. The
     -- mesh shadow modules declare their own structurally identical
     -- OptionalBinding records, hence the casts.
-    local meshModifiers <const> = modifierBinding.bind({
+    local meshModifiers <const> = modifierbinding.bind({
         ColorComponent, ClipBounds, Pivot, Material,
     })
 
-    local shadowCtx = shadow_setup.register(world, {
+    local shadowCtx = shadowsetup.register(world, {
         meshComponent = Mesh as tecs.Component,
-        optional = meshModifiers as {shadow_setup.OptionalBinding},
+        optional = meshModifiers as {shadowsetup.OptionalBinding},
         registryName = "mesh.shadows",
         renderStateSystemName = "mesh.ShadowRenderState",
         uploadSystemName = "mesh.ShadowUpload",
@@ -122,11 +122,11 @@ function mesh.plugin(world: tecs.World)
     -- shadow buffers are bound; the dispatch sets `TargetDefinitionId`
     -- + `MeshBounds` per definition so the cull shader skips rows with
     -- mismatched mesh ids.
-    local cullDispatch <const> = shadow_dispatch.new({
+    local cullDispatch <const> = shadowdispatch.new({
         shader = meshCullShader,
         registry = shadowCtx.registry,
         meshComponent = Mesh as tecs.Component,
-        optional = meshModifiers as {shadow_dispatch.OptionalBinding},
+        optional = meshModifiers as {shadowdispatch.OptionalBinding},
         tagFlags = {
             {component = Unlit, flag = gpuTypes.FLAG_UNLIT},
         },
@@ -211,7 +211,7 @@ function mesh.plugin(world: tecs.World)
                 if syncRef and syncRef.materialGroupCount > 0 then
                     for i = 1, syncRef.materialGroupCount do
                         local matGroup = syncRef.materialGroups[i]
-                        local variantShader = material_compiler.compile(matGroup.materialId, "mesh")
+                        local variantShader = materialcompiler.compile(matGroup.materialId, "mesh")
                         if variantShader then
                             lg.setShader(variantShader)
                             variantShader:send("RenderParams", renderParamsBuffer)

@@ -5,8 +5,8 @@
 local tecs <const> = require("tecs")
 local bmfont <const> = require("tecs2d.gfx.bmfont")
 local types <const> = require("tecs2d.gfx.types")
-local glyph_slab <const> = require("tecs2d.gfx.internal.text.glyph_slab")
-local glyph_block <const> = require("tecs2d.gfx.internal.text.glyph_block")
+local glyphslab <const> = require("tecs2d.gfx.internal.text.glyphslab")
+local glyphblock <const> = require("tecs2d.gfx.internal.text.glyphblock")
 
 local record text
     --- FFI Text component (40 bytes)
@@ -59,10 +59,10 @@ local record text
     end
 
     --- Resource key for the slab allocator
-    SLAB_ALLOCATOR: tecs.Key<glyph_slab.SlabAllocator>
+    SLAB_ALLOCATOR: tecs.Key<glyphslab.SlabAllocator>
 
     --- Resource key for the glyph block allocator (stable GPU slots)
-    BLOCK_ALLOCATOR: tecs.Key<glyph_block.GlyphBlockAllocator>
+    BLOCK_ALLOCATOR: tecs.Key<glyphblock.GlyphBlockAllocator>
 
     --- Resource key for Text metadata (non-FFI data like font reference)
     TEXT_META: tecs.Key<TextMetaRegistry>
@@ -84,7 +84,7 @@ local record text
         --- Origin offset Y per entity
         originY: {integer: number}
         --- Slab entry per entity (for reference counting)
-        slabEntries: {integer: glyph_slab.SlabEntry}
+        slabEntries: {integer: glyphslab.SlabEntry}
         --- Glyph block ID per entity (for stable GPU slots)
         glyphBlockIds: {integer: integer}
     end
@@ -106,12 +106,12 @@ local record PendingSpawn
     textStr: string
     sx: number
     sy: number
-    entry: glyph_slab.SlabEntry
+    entry: glyphslab.SlabEntry
 end
 local pendingSpawns: {integer: PendingSpawn} = {}
 
 -- Global slab reference (set by plugin)
-local globalSlab: glyph_slab.SlabAllocator = nil
+local globalSlab: glyphslab.SlabAllocator = nil
 
 -- Auto-incrementing text ID and context lookup
 local NEXT_TEXT_ID: integer = 1
@@ -337,12 +337,12 @@ tecs.newFFIComponent({
 
 function text.plugin(world: tecs.World)
     -- Initialize slab allocator resource
-    local slab = glyph_slab.new()
+    local slab = glyphslab.new()
     world.resources[text.SLAB_ALLOCATOR] = slab
     globalSlab = slab  -- Make available to initializer
 
     -- Initialize block allocator resource (for stable GPU slots)
-    world.resources[text.BLOCK_ALLOCATOR] = glyph_block.new()
+    world.resources[text.BLOCK_ALLOCATOR] = glyphblock.new()
 
     -- Initialize metadata registry resource
     local meta: text.TextMetaRegistry = {

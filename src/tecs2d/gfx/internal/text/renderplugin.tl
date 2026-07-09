@@ -21,13 +21,13 @@
 local tecs <const> = require("tecs")
 local buffer <const> = require("tecs2d.gfx.internal.gpu.buffer")
 local types <const> = require("tecs2d.gfx.internal.gpu.types")
-local material_compiler <const> = require("tecs2d.gfx.internal.material_compiler")
-local material_registry <const> = require("tecs2d.gfx.internal.material_registry")
-local shadow_dispatch <const> = require("tecs2d.gfx.internal.text.shadow_dispatch")
-local shadow_render_state <const> = require("tecs2d.gfx.internal.gpu.shadow_render_state")
-local archetype_registry <const> = require("tecs2d.gfx.internal.archetype_registry")
-local shadow_state_mod <const> = require("tecs2d.gfx.internal.gpu.shadow_state")
-local forward_blend <const> = require("tecs2d.gfx.internal.gpu.forward_blend")
+local materialcompiler <const> = require("tecs2d.gfx.internal.materialcompiler")
+local materialregistry <const> = require("tecs2d.gfx.internal.materialregistry")
+local shadowdispatch <const> = require("tecs2d.gfx.internal.text.shadowdispatch")
+local shadowrenderstate <const> = require("tecs2d.gfx.internal.gpu.shadowrenderstate")
+local archetyperegistry <const> = require("tecs2d.gfx.internal.archetyperegistry")
+local shadowstate <const> = require("tecs2d.gfx.internal.gpu.shadowstate")
+local forwardblend <const> = require("tecs2d.gfx.internal.gpu.forwardblend")
 
 local lg <const> = love.graphics
 
@@ -50,18 +50,18 @@ local record render_plugin
         --- buffers can grow ahead of the cull's atomicAdds.
         ensureCapacity: function(integer, integer)
         --- Shadow-pipeline output buffers (cull writes, render reads).
-        shadowBuffers: shadow_dispatch.Buffers
+        shadowBuffers: shadowdispatch.Buffers
         --- The persistent glyph slab buffer (shared with the slot path).
         glyphBuffer: buffer.GPUBuffer
         --- Atlas textures (shared with the slot path's growable).
         growable: TextGrowable
         --- Render-state syncRef from the shadow pipeline; provides
         --- blend / material group lists for this frame.
-        syncRef: shadow_render_state.Frame
+        syncRef: shadowrenderstate.Frame
         --- Live-entity / live-glyph counters used to gate the draw and
         --- size the cull output buffers. Walked by the plugin from the
         --- shadow registry on each cull pass.
-        registry: archetype_registry.Registry
+        registry: archetyperegistry.Registry
         textComponent: tecs.Component
     end
 
@@ -73,13 +73,13 @@ local record TextFFIRead
 end
 
 local function countLive(
-    registry: archetype_registry.Registry,
+    registry: archetyperegistry.Registry,
     textComponent: tecs.Component
 ): integer, integer
     local entities = 0
     local glyphs = 0
     for arch, _state in registry:archetypes() do
-        local state = _state as shadow_state_mod.ArchetypeState
+        local state = _state as shadowstate.ArchetypeState
         if state.destroyed then goto continue end
         local archAny = arch as {string:any}
         local rowCount = (archAny.entities as {integer})[0] as integer
@@ -176,13 +176,13 @@ function render_plugin.create(config: render_plugin.Config): types.RenderPlugin
 
         lg.drawFromShaderIndirect("triangles", shadowBuffers.indirectBuffer, 1, tex or growable.sdfAtlasArray)
 
-        -- Material variants. shadow_render_state populated
+        -- Material variants. shadowrenderstate populated
         -- syncRef.materialGroups during the PreRender phase.
         if syncRef.materialGroupCount > 0 then
             for i = 1, syncRef.materialGroupCount do
                 local matGroup = syncRef.materialGroups[i]
                 local matId = matGroup.materialId
-                local variantShader = material_compiler.compile(matId, "text")
+                local variantShader = materialcompiler.compile(matId, "text")
                 if variantShader then
                     lg.setShader(variantShader)
                     variantShader:send("RenderParams", renderParamsBuffer)
@@ -203,7 +203,7 @@ function render_plugin.create(config: render_plugin.Config): types.RenderPlugin
                     end
                     sendSDFUniforms(variantShader)
 
-                    local def = material_registry.getById(matId)
+                    local def = materialregistry.getById(matId)
                     if def then
                         for uniformName, t in pairs(def.textures) do
                             if variantShader:hasUniform(uniformName) then
@@ -235,7 +235,7 @@ function render_plugin.create(config: render_plugin.Config): types.RenderPlugin
         subPixelX = subPixelX or 0.0
         subPixelY = subPixelY or 0.0
 
-        forward_blend.populateRenderParams(renderer, cameraX, cameraY, cameraZoom, subPixelX, subPixelY, rw, rh, 0.0)
+        forwardblend.populateRenderParams(renderer, cameraX, cameraY, cameraZoom, subPixelX, subPixelY, rw, rh, 0.0)
 
         local tex = growable.atlasArray
         local shader = renderShader
@@ -275,7 +275,7 @@ function render_plugin.create(config: render_plugin.Config): types.RenderPlugin
             for m = 1, syncRef.materialGroupCount do
                 local matGroup = syncRef.materialGroups[m]
                 local matId = matGroup.materialId
-                local variantShader = material_compiler.compile(matId, "text")
+                local variantShader = materialcompiler.compile(matId, "text")
                 if variantShader then
                     lg.setShader(variantShader)
                     variantShader:send("RenderParams", renderer.renderParamsBuffer)
@@ -292,7 +292,7 @@ function render_plugin.create(config: render_plugin.Config): types.RenderPlugin
                     end
                     sendSDFUniforms(variantShader)
 
-                    local def = material_registry.getById(matId)
+                    local def = materialregistry.getById(matId)
                     if def then
                         for uniformName, t in pairs(def.textures) do
                             if variantShader:hasUniform(uniformName) then

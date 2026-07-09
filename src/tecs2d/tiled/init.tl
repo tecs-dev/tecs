@@ -19,7 +19,7 @@ local table_clear <const> = require("table.clear")
 local tecs <const> = require("tecs")
 local tecs_assets <const> = require("tecs2d.assets")
 local json <const> = require("tecs.utils.json")
-local pipeline_key <const> = require("tecs2d.gfx.internal.pipeline_key")
+local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
 
 local types <const> = require("tecs2d.tiled.types")
 local loader <const> = require("tecs2d.tiled.internal.loader")
@@ -251,7 +251,7 @@ function tiled.plugin(world: tecs.World)
 
     -- Get dependencies
     local assetManager = world.resources[tecs_assets]
-    local pipelineInstance = world.resources[pipeline_key.PIPELINE]
+    local pipelineInstance = world.resources[pipelinekey.PIPELINE]
 
     if not pipelineInstance then
         error("tecs2d.tiled requires tecs2d.gfx pipeline to be registered")

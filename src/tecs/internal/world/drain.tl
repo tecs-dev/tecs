@@ -5,7 +5,7 @@ Commit drain: despawn -> spawn -> move -> batch -> sparse -> reset.
 local types <const> = require("tecs.types")
 local internal <const> = require("tecs.internal.types")
 local IdAllocator <const> = require("tecs.internal.IdAllocator")
-local BundleCodegen <const> = require("tecs.internal.BundleCodegen")
+local bundlecodegen <const> = require("tecs.internal.bundlecodegen")
 local pool <const> = require("tecs.utils.pool")
 local table_clear <const> = require("table.clear")
 local shared <const> = require("tecs.internal.world.shared")
@@ -322,7 +322,7 @@ function WorldImpl:_codegenBundleSpawn(
     factoryArray: {function(): Component},
     requiredCount: integer
 ): function(any, ...: Component): integer
-    return BundleCodegen.codegenBundleSpawn(self, typeArray, factoryArray, requiredCount)
+    return bundlecodegen.codegenBundleSpawn(self, typeArray, factoryArray, requiredCount)
 end
 
 local function resetTransaction(self: WorldImpl)

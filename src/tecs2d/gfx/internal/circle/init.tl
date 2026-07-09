@@ -1,6 +1,6 @@
 local tecs <const> = require("tecs")
 local types <const> = require("tecs2d.gfx.types")
-local defineShape <const> = require("tecs2d.gfx.internal.gpu.define_shape")
+local defineshape <const> = require("tecs2d.gfx.internal.gpu.defineshape")
 
 local ColorComponent <const> = require("tecs2d.gfx.internal.Color")
 local ClipBounds <const> = require("tecs2d.gfx.internal.ClipBounds")
@@ -12,7 +12,7 @@ local LayoutBox <const> = require("tecs2d.ui.internal.LayoutBox")
 -- Circle uses the renderer-owned shadow-column path: per-archetype
 -- dispatch, std430 source SSBOs read directly by the cull shader, no
 -- slot management. Wiring is provided by `shadow_plugin`.
-local shaders <const> = defineShape.loadShaders({
+local shaders <const> = defineshape.loadShaders({
     name = "circle",
     dir = "tecs2d/gfx/internal/circle/",
     shadowMask = "circle",
@@ -54,7 +54,7 @@ tecs.newFFIComponent({
 })
 
 function circle.plugin(world: tecs.World)
-    defineShape.register(world, {
+    defineshape.register(world, {
         name = "Circle",
         component = Circle as tecs.Component,
         render = shaders.render,

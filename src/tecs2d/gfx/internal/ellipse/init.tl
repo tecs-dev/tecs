@@ -1,6 +1,6 @@
 local tecs <const> = require("tecs")
 local types <const> = require("tecs2d.gfx.types")
-local defineShape <const> = require("tecs2d.gfx.internal.gpu.define_shape")
+local defineshape <const> = require("tecs2d.gfx.internal.gpu.defineshape")
 
 local ColorComponent <const> = require("tecs2d.gfx.internal.Color")
 local ClipBounds <const> = require("tecs2d.gfx.internal.ClipBounds")
@@ -11,7 +11,7 @@ local Pivot <const> = require("tecs2d.gfx.internal.Pivot")
 -- Ellipse uses the renderer-owned shadow-column path; wiring is
 -- provided by `shadow_plugin`. No shadow-mask shader: ellipses do not
 -- cast raymarched shadows.
-local shaders <const> = defineShape.loadShaders({
+local shaders <const> = defineshape.loadShaders({
     name = "ellipse",
     dir = "tecs2d/gfx/internal/ellipse/",
 })
@@ -55,7 +55,7 @@ tecs.newFFIComponent({
 })
 
 function ellipse.plugin(world: tecs.World)
-    defineShape.register(world, {
+    defineshape.register(world, {
         name = "Ellipse",
         component = Ellipse as tecs.Component,
         render = shaders.render,

@@ -10,9 +10,9 @@ local levents <const> = require("tecs2d.events")
 local gpuModule <const> = require("tecs2d.gfx.internal.gpu")
 local gpuTypes <const> = require("tecs2d.gfx.internal.gpu.types")
 local gpuShaders <const> = require("tecs2d.gfx.internal.gpu.shaders")
-local pipeline_key <const> = require("tecs2d.gfx.internal.pipeline_key")
+local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
 local phases <const> = tecs.phases
-local layerEffects <const> = require("tecs2d.gfx.internal.layer_effects")
+local layereffects <const> = require("tecs2d.gfx.internal.layereffects")
 local Camera <const> = require("tecs2d.gfx.Camera")
 local sprite_sheet <const> = require("tecs2d.gfx.internal.sprite.sheet")
 local Occluder <const> = require("tecs2d.gfx.internal.Occluder")
@@ -240,7 +240,7 @@ local record PipelineImpl is Pipeline, gpuTypes.PipelineInternal
     _worldShaderState: types.WorldShaderState
 
     -- Layer effects manager
-    layerEffectsManager: layerEffects.Manager
+    layerEffectsManager: layereffects.Manager
 
     -- Current layer range being rendered (for CPU draw filtering)
     currentLayerMin: integer
@@ -523,7 +523,7 @@ function pipeline.newPipeline(config: pipeline.RenderConfig): Pipeline
     end
 
     -- Layer effects manager
-    self.layerEffectsManager = layerEffects.new(MAX_LAYERS, screenWidth, screenHeight)
+    self.layerEffectsManager = layereffects.new(MAX_LAYERS, screenWidth, screenHeight)
 
     local pipelineInstance = setmetatable(self, PIPELINE_MT) as Pipeline
 
@@ -551,7 +551,7 @@ function pipeline.newPipeline(config: pipeline.RenderConfig): Pipeline
     w:registerPhase(phases.Draw)
 
     -- Register pipeline with world
-    w.resources[pipeline_key.PIPELINE] = pipelineInstance
+    w.resources[pipelinekey.PIPELINE] = pipelineInstance
 
     -- Persist camera view state (position, zoom, rotation, bounds) across
     -- snapshots. The camera is a pipeline resource, so it lives outside the
@@ -1037,7 +1037,7 @@ end
 
 function PipelineImpl:setLayerEffect(layer: integer | string, shader: any, uniforms?: {string: any}, options?: types.LayerEffectOptions)
     local layerNum = resolveLayer(self, layer)
-    self.layerEffectsManager:setEffect(layerNum, shader, uniforms, options as layerEffects.EffectOptions)
+    self.layerEffectsManager:setEffect(layerNum, shader, uniforms, options as layereffects.EffectOptions)
 end
 
 function PipelineImpl:clearLayerEffect(layer: integer | string)
@@ -1464,7 +1464,7 @@ end
 --- scene below is the pre-effect accumulator).
 --- @return The canvas holding the final result.
 local function runEffectPasses(
-    effect: layerEffects.LayerEffect,
+    effect: layereffects.LayerEffect,
     src: love.graphics.Canvas,
     dst: love.graphics.Canvas,
     sceneBelow: love.graphics.Canvas,

@@ -1,6 +1,6 @@
 local tecs <const> = require("tecs")
 local tecs_assets <const> = require("tecs2d.assets")
-local pipeline_key <const> = require("tecs2d.gfx.internal.pipeline_key")
+local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
 local Unlit <const> = require("tecs2d.gfx.internal.Unlit")
 
 local Transform <const> = tecs.builtins.Transform
@@ -249,7 +249,7 @@ tecs.newComponent({
 })
 
 function particles.plugin(world: tecs.World)
-    local pipelineInstance <const> = world.resources[pipeline_key.PIPELINE]
+    local pipelineInstance <const> = world.resources[pipelinekey.PIPELINE]
     if not pipelineInstance then
         LOGGER:error("No render pipeline found in world resources")
         return

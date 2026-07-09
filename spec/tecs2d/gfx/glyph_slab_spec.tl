@@ -1,7 +1,7 @@
 require("busted")
 
 local luassert <const> = require("luassert")
-local glyph_slab <const> = require("tecs2d.gfx.internal.text.glyph_slab")
+local glyphslab <const> = require("tecs2d.gfx.internal.text.glyphslab")
 local bmfontMod <const> = require("tecs2d.gfx.bmfont")
 
 --- Build a minimal font table with one 8x8 glyph per given codepoint.
@@ -42,7 +42,7 @@ end
 
 describe("glyph slab registry", function()
     it("dedups identical (font, text, scale) requests", function()
-        local slab = glyph_slab.new(256)
+        local slab = glyphslab.new(256)
         local font = makeFont({65}, 9)
         local a = slab:acquire(font, "A", 1, 1)
         local b = slab:acquire(font, "A", 1, 1)
@@ -54,7 +54,7 @@ describe("glyph slab registry", function()
     end)
 
     it("does not share layouts between fonts with identical face and page names", function()
-        local slab = glyph_slab.new(256)
+        local slab = glyphslab.new(256)
         local fontA = makeFont({65}, 9)
         local fontB = makeFont({65}, 20)  -- same face/page, different metrics
         local a = slab:acquire(fontA, "A", 1, 1)
@@ -66,7 +66,7 @@ describe("glyph slab registry", function()
     end)
 
     it("released entries can be re-acquired after churn", function()
-        local slab = glyph_slab.new(256)
+        local slab = glyphslab.new(256)
         local font = makeFont({65, 66}, 9)
         for _ = 1, 20 do
             local e = slab:acquire(font, "AB", 1, 1)
@@ -78,7 +78,7 @@ describe("glyph slab registry", function()
     end)
 
     it("lays out UTF-8 text by codepoint", function()
-        local slab = glyph_slab.new(256)
+        local slab = glyphslab.new(256)
         -- U+00E9 as the only glyph; the two UTF-8 bytes must decode to it.
         local font = makeFont({233}, 9)
         local e = slab:acquire(font, "\195\169\195\169", 1, 1)

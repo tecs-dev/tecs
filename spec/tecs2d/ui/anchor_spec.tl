@@ -1,7 +1,7 @@
 require("busted")
 local tecs <const> = require("tecs")
 local luassert <const> = require("luassert")
-local pipeline_key <const> = require("tecs2d.gfx.internal.pipeline_key")
+local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
 local Anchor <const> = require("tecs2d.ui.internal.Anchor")
 local bit <const> = require("bit")
 
@@ -78,7 +78,7 @@ end
 local function setupWorld(mockPipeline: MockPipeline): tecs.World
     local w = tecs.newWorld()
     -- Use rawset to bypass the typed Context __newindex
-    rawset(w.resources as {string: any}, pipeline_key.PIPELINE, mockPipeline)
+    rawset(w.resources as {string: any}, pipelinekey.PIPELINE, mockPipeline)
     Anchor.plugin(w)
     return w
 end

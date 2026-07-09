@@ -14,12 +14,12 @@
 
 local tecs <const> = require("tecs")
 local tecsInternal <const> = require("tecs.internal.types")
-local archetype_registry <const> = require("tecs2d.gfx.internal.archetype_registry")
-local shadow_state <const> = require("tecs2d.gfx.internal.gpu.shadow_state")
+local archetyperegistry <const> = require("tecs2d.gfx.internal.archetyperegistry")
+local shadowstate <const> = require("tecs2d.gfx.internal.gpu.shadowstate")
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
 local blend <const> = require("tecs2d.gfx.internal.blend")
 local meshDefinition <const> = require("tecs2d.gfx.internal.mesh.definition")
-local dummyFor <const> = require("tecs2d.gfx.internal.gpu.dummy_ssbo").dummyFor
+local dummyFor <const> = require("tecs2d.gfx.internal.gpu.dummyssbo").dummyFor
 
 local Transform <const> = tecs.builtins.Transform
 
@@ -47,7 +47,7 @@ local record shadow_dispatch
         --- The compute cull shader. Pass nil to set up bookkeeping
         --- without enabling dispatch (useful while authoring).
         shader: love.graphics.ComputeShader
-        registry: archetype_registry.Registry
+        registry: archetyperegistry.Registry
         meshComponent: tecs.Component
         optional: {OptionalBinding}
         --- Tag-to-flag bindings (see TagFlagBinding). Defaults to none.
@@ -98,7 +98,7 @@ function shadow_dispatch.new(config: shadow_dispatch.Config): function(any, love
             local meshBounds = {def.boundsCenterX, def.boundsCenterY, def.boundsHalfW, def.boundsHalfH}
 
             for arch, stateAny in registry:archetypes() do
-                local state = stateAny as shadow_state.ArchetypeState
+                local state = stateAny as shadowstate.ArchetypeState
                 if state.destroyed then goto continue_arch end
 
                 local rowCount = ((arch as {string:any}).entities as {integer})[0] as integer

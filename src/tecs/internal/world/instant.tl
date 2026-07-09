@@ -8,7 +8,7 @@ local internal <const> = require("tecs.internal.types")
 local events <const> = require("tecs.internal.events")
 local IdAllocator <const> = require("tecs.internal.IdAllocator")
 local builtins <const> = require("tecs.internal.builtins")
-local frameworkBehavior <const> = require("tecs.internal.frameworkBehavior")
+local frameworkbehavior <const> = require("tecs.internal.frameworkbehavior")
 local shared <const> = require("tecs.internal.world.shared")
 local bit <const> = require("bit")
 
@@ -166,11 +166,11 @@ end
 -- fall through to the raw body.
 function WorldImpl:_instantSet(id: integer, componentType: Component, value: any)
     local behaviorBits = (componentType as ComponentInternal).frameworkBehaviorBits or 0
-    if band(behaviorBits, frameworkBehavior.MustDeferSet) ~= 0 then
+    if band(behaviorBits, frameworkbehavior.MustDeferSet) ~= 0 then
         return deferSetScoped(self, id, componentType, value)
     end
-    if band(behaviorBits, frameworkBehavior.NeedsSet) ~= 0 then
-        return frameworkBehavior.set(self, id, componentType, value)
+    if band(behaviorBits, frameworkbehavior.NeedsSet) ~= 0 then
+        return frameworkbehavior.set(self, id, componentType, value)
     end
     return self:instantSetRaw(id, componentType, value)
 end
@@ -284,11 +284,11 @@ end
 -- fall through to the raw body.
 function WorldImpl:_instantRemove(id: integer, component: Component)
     local behaviorBits = (component as ComponentInternal).frameworkBehaviorBits or 0
-    if band(behaviorBits, frameworkBehavior.MustDeferRemove) ~= 0 then
+    if band(behaviorBits, frameworkbehavior.MustDeferRemove) ~= 0 then
         return deferRemoveScoped(self, id, component)
     end
-    if band(behaviorBits, frameworkBehavior.NeedsRemove) ~= 0 then
-        return frameworkBehavior.remove(self, id, component)
+    if band(behaviorBits, frameworkbehavior.NeedsRemove) ~= 0 then
+        return frameworkbehavior.remove(self, id, component)
     end
     return self:instantRemoveRaw(id, component)
 end

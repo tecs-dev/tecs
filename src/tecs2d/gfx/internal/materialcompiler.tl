@@ -2,7 +2,7 @@
 --- Takes a shape type's base render shader source, injects the user's material() function,
 --- and compiles a variant shader. Variants are compiled lazily and cached.
 
-local registry <const> = require("tecs2d.gfx.internal.material_registry")
+local materialregistry <const> = require("tecs2d.gfx.internal.materialregistry")
 local StringBuffer <const> = require("string.buffer")
 
 local lg <const> = love.graphics
@@ -203,7 +203,7 @@ vec2 materialVertex(vec2 worldPos, float time, vec4 params) {
 
 -- Build the material variant source in a single forward pass through baseSource.
 -- Finds all injection points first, then assembles with StringBuffer.
-local function buildVariantSource(baseSource: string, def: registry.MaterialDef, shapeType: string): string
+local function buildVariantSource(baseSource: string, def: materialregistry.MaterialDef, shapeType: string): string
     local materialCommon = getMaterialCommon()
 
     local beginMarker <const> = "// -- MATERIAL_BEGIN --"
@@ -317,12 +317,12 @@ end
 
 function material_compiler.compile(materialId: integer, shapeType: string): love.graphics.Shader
     -- Check cache first
-    local cached = registry.getVariant(materialId, shapeType)
+    local cached = materialregistry.getVariant(materialId, shapeType)
     if cached then
         return cached
     end
 
-    local def = registry.getById(materialId)
+    local def = materialregistry.getById(materialId)
     if not def then
         return nil
     end
@@ -333,7 +333,7 @@ function material_compiler.compile(materialId: integer, shapeType: string): love
     end
 
     -- Load textures if not already loaded
-    registry.loadTextures(def)
+    materialregistry.loadTextures(def)
 
     -- Build variant source
     local variantSource = buildVariantSource(baseSource, def, shapeType)
@@ -350,13 +350,13 @@ function material_compiler.compile(materialId: integer, shapeType: string): love
     local shader = shaderOrErr as love.graphics.Shader
 
     -- Cache the compiled variant
-    registry.setVariant(materialId, shapeType, shader)
+    materialregistry.setVariant(materialId, shapeType, shader)
 
     return shader
 end
 
 function material_compiler.precompileAll()
-    local allDefs = registry.getAll()
+    local allDefs = materialregistry.getAll()
     for _, def in pairs(allDefs) do
         for _, shapeType in ipairs(ALL_SHAPE_TYPES) do
             material_compiler.compile(def.id, shapeType)

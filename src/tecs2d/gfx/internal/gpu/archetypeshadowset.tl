@@ -1,4 +1,4 @@
---- A collection of `shadow_buffer` instances attached to one archetype,
+--- A collection of `shadowbuffer` instances attached to one archetype,
 --- each backing one of the archetype's component columns. Encapsulates:
 ---
 --- - Pointer-drift detection at flush time. If the archetype's column
@@ -19,12 +19,12 @@
 
 local C <const> = require("ffi")
 local tecs <const> = require("tecs")
-local shadow_buffer <const> = require("tecs2d.gfx.internal.gpu.shadow_buffer")
+local shadowbuffer <const> = require("tecs2d.gfx.internal.gpu.shadowbuffer")
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
 local FFIStorage <const> = require("tecs.internal.ffi.FFIStorage") as {string:any}
 
 local type LayoutDescriptor = std430.Descriptor
-local type ShadowBuffer = shadow_buffer.ShadowBuffer
+local type ShadowBuffer = shadowbuffer.ShadowBuffer
 
 local record archetype_shadow_set
     record Entry
@@ -95,7 +95,7 @@ function archetype_shadow_set.new(
     for comp, layout in pairs(specs) do
         local canonical = columns[comp]
         if canonical ~= nil then
-            local buf = shadow_buffer.new(
+            local buf = shadowbuffer.new(
                 cap,
                 layout.elementSize,
                 layout.shadowCtype,

@@ -5,9 +5,9 @@
 --- individual Sprite entities instead.
 
 local tecs <const> = require("tecs")
-local pipeline_key <const> = require("tecs2d.gfx.internal.pipeline_key")
+local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
 local gpuTypes <const> = require("tecs2d.gfx.internal.gpu.types")
-local tilechunk_plugin <const> = require("tecs2d.gfx.internal.tilechunk.render_plugin")
+local renderplugin <const> = require("tecs2d.gfx.internal.tilechunk.renderplugin")
 local SlotManager <const> = require("tecs2d.gfx.internal.gpu.SlotManager")
 local Color <const> = require("tecs2d.gfx.internal.Color")
 local Occluder <const> = require("tecs2d.gfx.internal.Occluder")
@@ -211,7 +211,7 @@ do
 end
 
 function tileChunk.plugin(world: tecs.World)
-    local pipelineInstance <const> = world.resources[pipeline_key.PIPELINE as tecs.Key<gpuTypes.PipelineInternal>]
+    local pipelineInstance <const> = world.resources[pipelinekey.PIPELINE as tecs.Key<gpuTypes.PipelineInternal>]
     if not pipelineInstance then
         LOGGER:error("No render pipeline found in world resources")
         return
@@ -257,7 +257,7 @@ function tileChunk.plugin(world: tecs.World)
 
     local capacity = initialCapacity
     local byteData, shadowPtr = newShadow(capacity)
-    local inputBufferRef: tilechunk_plugin.InputBufferRef = {
+    local inputBufferRef: renderplugin.InputBufferRef = {
         handle = newGpuHandle(capacity),
     }
     local slotManager = SlotManager.new()
@@ -268,7 +268,7 @@ function tileChunk.plugin(world: tecs.World)
     -- Growable output buffers (replaced on growth, shared via stable table ref).
     -- The cull writes compact TileChunkVis records; render passes read
     -- tile data from the input buffer via srcIndex.
-    local growable: tilechunk_plugin.TileChunkGrowable = {
+    local growable: renderplugin.TileChunkGrowable = {
         outputBuffer = lg.newBuffer(gpuTypes.TILECHUNK_VIS_FORMAT, initialCapacity, {usage = "dynamic", shaderstorage = true}),
         shadowOutputBuffer = lg.newBuffer(gpuTypes.TILECHUNK_VIS_FORMAT, initialCapacity, {usage = "dynamic", shaderstorage = true}),
         textureSize = {1, 1},
@@ -484,7 +484,7 @@ function tileChunk.plugin(world: tecs.World)
     end
 
     -- Register tilechunk render plugin.
-    gpuRenderer:registerPlugin(tilechunk_plugin.create({
+    gpuRenderer:registerPlugin(renderplugin.create({
         renderShader = tileChunkRenderShader,
         cullShader = tileChunkCullShader,
         shadowMaskShader = tileChunkShadowMaskShader,

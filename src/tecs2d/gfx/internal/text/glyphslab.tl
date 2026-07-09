@@ -6,7 +6,7 @@
 local C <const> = require("ffi")
 local bit <const> = require("bit")
 local bmfont <const> = require("tecs2d.gfx.bmfont")
-local free_range <const> = require("tecs2d.gfx.internal.text.free_range")
+local freerange <const> = require("tecs2d.gfx.internal.text.freerange")
 
 -- Define the slab entry struct (32 bytes per glyph, matches GPUGlyphData exactly)
 C.cdef[[
@@ -274,7 +274,7 @@ function SlabAllocator:acquire(
     local maxGlyphs = #text
 
     -- Try to find a free range first
-    local startOffset, allocatedCapacity = free_range.find(self.freeRanges, maxGlyphs)
+    local startOffset, allocatedCapacity = freerange.find(self.freeRanges, maxGlyphs)
 
     if startOffset < 0 then
         -- No suitable free range, allocate from end
@@ -323,7 +323,7 @@ function SlabAllocator:release(entry: glyph_slab.SlabEntry)
     entry.refCount = entry.refCount - 1
     if entry.refCount <= 0 then
         self.registry[entry.key] = nil
-        free_range.insert(self.freeRanges, entry.offset, entry.capacity)
+        freerange.insert(self.freeRanges, entry.offset, entry.capacity)
     end
 end
 

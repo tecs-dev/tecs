@@ -20,13 +20,13 @@ local MaterialComponent <const> = require("tecs2d.gfx.internal.Material")
 local TextEffectsComponent <const> = require("tecs2d.gfx.internal.text.effects")
 local textModule <const> = require("tecs2d.gfx.internal.text")
 local bmfontMod <const> = require("tecs2d.gfx.bmfont")
-local render_plugin <const> = require("tecs2d.gfx.internal.text.render_plugin")
+local renderplugin <const> = require("tecs2d.gfx.internal.text.renderplugin")
 local ColorComponent = require("tecs2d.gfx.internal.Color") as tecs.Component
 local shaderUtils <const> = require("tecs2d.gfx.internal.gpu.shaders")
-local material_compiler <const> = require("tecs2d.gfx.internal.material_compiler")
-local shadow_setup <const> = require("tecs2d.gfx.internal.text.shadow_setup")
-local shadow_dispatch <const> = require("tecs2d.gfx.internal.text.shadow_dispatch")
-local modifier_binding <const> = require("tecs2d.gfx.internal.gpu.modifier_binding")
+local materialcompiler <const> = require("tecs2d.gfx.internal.materialcompiler")
+local shadowsetup <const> = require("tecs2d.gfx.internal.text.shadowsetup")
+local shadowdispatch <const> = require("tecs2d.gfx.internal.text.shadowdispatch")
+local modifierbinding <const> = require("tecs2d.gfx.internal.gpu.modifierbinding")
 
 local lg <const> = love.graphics
 local TEXT_SHADERS <const> = "tecs2d/gfx/internal/text/"
@@ -34,14 +34,14 @@ local textRenderSource <const> = shaderUtils.insertAfterPragma(
     shaderUtils.loadShader("text", TEXT_SHADERS), shaderUtils.RENDER_COMMON .. shaderUtils.DEPTH_COMMON)
 local textRenderShader <const> = lg.newShader(textRenderSource)
 local textCullShader <const> = lg.newComputeShader(shaderUtils.loadCullShader("text_cull", TEXT_SHADERS))
-material_compiler.registerBaseSource("text", textRenderSource)
+materialcompiler.registerBaseSource("text", textRenderSource)
 
 local Transform <const> = tecs.builtins.Transform
 local type Query = tecs.Query
 local type GPUBuffer = gpuBuffer.GPUBuffer
 
-local glyph_slab <const> = require("tecs2d.gfx.internal.text.glyph_slab")
-local glyph_block <const> = require("tecs2d.gfx.internal.text.glyph_block")
+local glyphslab <const> = require("tecs2d.gfx.internal.text.glyphslab")
+local glyphblock <const> = require("tecs2d.gfx.internal.text.glyphblock")
 local C <const> = require("ffi")
 
 -- Pointer arithmetic helper. `+ offset * 32` because glyph slab entries
@@ -138,8 +138,8 @@ local function initEntityGlyphs(
     local pivots = archetype:get(PivotComponent) as {PivotData}
 
     local meta = world.resources[textModule.TEXT_META] as textModule.TextMetaRegistry
-    local slab = world.resources[textModule.SLAB_ALLOCATOR] as glyph_slab.SlabAllocator
-    local blockAlloc = world.resources[textModule.BLOCK_ALLOCATOR] as glyph_block.GlyphBlockAllocator
+    local slab = world.resources[textModule.SLAB_ALLOCATOR] as glyphslab.SlabAllocator
+    local blockAlloc = world.resources[textModule.BLOCK_ALLOCATOR] as glyphblock.GlyphBlockAllocator
     local entities = archetype.entities as {integer}
 
     local txt = texts[entityIndex]
@@ -243,7 +243,7 @@ function text_sync.plugin(_world: tecs.World, renderer: gpuTypes.Renderer, TextC
             return params
         end
 
-        local growable: render_plugin.TextGrowable = {
+        local growable: renderplugin.TextGrowable = {
             atlasArray = nil,
             sdfAtlasArray = placeholderSdfArray as love.graphics.Texture,
             sdfFontParams = defaultFontParams(),
@@ -366,18 +366,18 @@ function text_sync.plugin(_world: tecs.World, renderer: gpuTypes.Renderer, TextC
 
         local syncSystem = text_sync.new(w, registerFont, glyphBuffer, textQuery, TextComponent)
 
-        local optional <const> = modifier_binding.bind({
+        local optional <const> = modifierbinding.bind({
             ColorComponent,
             ClipBoundsComponent as tecs.Component,
             MaterialComponent as tecs.Component,
             TextEffectsComponent as tecs.Component,
-        }) as {shadow_setup.OptionalBinding}
+        }) as {shadowsetup.OptionalBinding}
 
-        local tagFlags: {shadow_dispatch.TagFlagBinding} = {
+        local tagFlags: {shadowdispatch.TagFlagBinding} = {
             {component = Unlit, flag = gpuTypes.FLAG_UNLIT},
         }
 
-        local shadowCtx = shadow_setup.register(w, {
+        local shadowCtx = shadowsetup.register(w, {
             text = TextComponent,
             optional = optional,
             registryName = "text.shadows",
@@ -390,19 +390,19 @@ function text_sync.plugin(_world: tecs.World, renderer: gpuTypes.Renderer, TextC
             uploadAfter = {"text_sync.Sync"},
         })
 
-        local shadowBuffers = shadow_dispatch.newBuffers(initialTextEntities, initialTextGlyphs)
-        local cullDispatch, ensureShadowCapacity = shadow_dispatch.new({
+        local shadowBuffers = shadowdispatch.newBuffers(initialTextEntities, initialTextGlyphs)
+        local cullDispatch, ensureShadowCapacity = shadowdispatch.new({
             shader = textCullShader,
             registry = shadowCtx.registry,
             textComponent = TextComponent,
-            optional = optional as {shadow_dispatch.OptionalBinding},
+            optional = optional as {shadowdispatch.OptionalBinding},
             tagFlags = tagFlags,
             buffers = shadowBuffers,
             initialEntityCapacity = initialTextEntities,
             initialGlyphCapacity = initialTextGlyphs,
         })
 
-        gpuRenderer:registerPlugin(render_plugin.create({
+        gpuRenderer:registerPlugin(renderplugin.create({
             renderShader = textRenderShader,
             cullDispatch = cullDispatch,
             ensureCapacity = ensureShadowCapacity,

@@ -6,26 +6,26 @@
 local tecs <const> = require("tecs")
 local types <const> = require("tecs2d.gfx.types")
 local ColorComponent = require("tecs2d.gfx.internal.Color")
-local timingBuffer <const> = require("tecs2d.gfx.internal.gpu.timing_buffer")
+local timingbuffer <const> = require("tecs2d.gfx.internal.gpu.timingbuffer")
 local sprite_sheet <const> = require("tecs2d.gfx.internal.sprite.sheet")
-local sprite_sheet_types <const> = require("tecs2d.gfx.sprite_sheet")
+local spritesheet <const> = require("tecs2d.gfx.spritesheet")
 local sprite_events <const> = require("tecs2d.gfx.internal.sprite.events")
 local sprite_collision <const> = require("tecs2d.gfx.internal.sprite.collision")
 local sprite_instance <const> = require("tecs2d.gfx.internal.sprite.instance")
-local pipeline_key <const> = require("tecs2d.gfx.internal.pipeline_key")
-local bucketSync <const> = require("tecs2d.gfx.internal.sprite.bucket_sync")
-local bucket_manager <const> = require("tecs2d.gfx.internal.sprite.bucket_manager")
+local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
+local bucketsync <const> = require("tecs2d.gfx.internal.sprite.bucketsync")
+local bucketmanager <const> = require("tecs2d.gfx.internal.sprite.bucketmanager")
 local gpuTypes <const> = require("tecs2d.gfx.internal.gpu.types")
-local sprite_plugin <const> = require("tecs2d.gfx.internal.sprite.render_plugin")
+local renderplugin <const> = require("tecs2d.gfx.internal.sprite.renderplugin")
 local TextureArray <const> = require("tecs2d.gfx.internal.sprite.TextureArray")
 local shaderUtils <const> = require("tecs2d.gfx.internal.gpu.shaders")
-local material_compiler <const> = require("tecs2d.gfx.internal.material_compiler")
+local materialcompiler <const> = require("tecs2d.gfx.internal.materialcompiler")
 local floor <const> = math.floor
 
 -- Shadow-pipeline modules for the renderer-owned shadow-column path.
-local shadow_setup <const> = require("tecs2d.gfx.internal.sprite.shadow_setup")
-local shadow_dispatch <const> = require("tecs2d.gfx.internal.sprite.shadow_dispatch")
-local modifier_binding <const> = require("tecs2d.gfx.internal.gpu.modifier_binding")
+local shadowsetup <const> = require("tecs2d.gfx.internal.sprite.shadowsetup")
+local shadowdispatch <const> = require("tecs2d.gfx.internal.sprite.shadowdispatch")
+local modifierbinding <const> = require("tecs2d.gfx.internal.gpu.modifierbinding")
 local ClipBoundsComponent <const> = require("tecs2d.gfx.internal.ClipBounds")
 local Unlit <const> = require("tecs2d.gfx.internal.Unlit")
 local PivotComponent <const> = require("tecs2d.gfx.internal.Pivot")
@@ -41,7 +41,7 @@ local spriteRenderShader <const> = lg.newShader(spriteRenderSource)
 local spriteCullShader <const> = lg.newComputeShader(shaderUtils.loadCullShader("sprite_cull", SPRITE_SHADERS))
 local spriteShadowMaskShader <const> = lg.newShader(shaderUtils.loadShadowMaskShader("shadow_mask_sprite"))
 local spriteDropShadowShader <const> = lg.newShader(shaderUtils.loadRenderShader("drop_shadow_sprite", SPRITE_SHADERS))
-material_compiler.registerBaseSource("sprite", spriteRenderSource)
+materialcompiler.registerBaseSource("sprite", spriteRenderSource)
 
 -- Cache for GPU timing data to avoid redundant work per sprite
 -- Structure: timingCache[sheetId][tagId][speed] = {offset, totalDuration, frameCount, columnCount, frameHeight}
@@ -59,7 +59,7 @@ local getInstance <const> = sprite_instance.get
 local function getGameTime(): number
     local world = sprite_instance.getWorld() as tecs.World
     if world then
-        local rp = world.resources[pipeline_key.PIPELINE] as {string: any}
+        local rp = world.resources[pipelinekey.PIPELINE] as {string: any}
         if rp and rp.gameTime ~= nil then
             return rp.gameTime as number
         end
@@ -223,7 +223,7 @@ local record sprite
         --- @param options Optional configuration (centered, pivotSlice, speed, startTime)
         --- @return A new Sprite instance
         fromSheet: function(
-            sheet: sprite_sheet_types.SpriteSheet,
+            sheet: spritesheet.SpriteSheet,
             tag?: string,
             options?: {string: any}
         ): Sprite
@@ -406,7 +406,7 @@ local function populateInstanceFromConfig(inst: SpriteInstance, sheetVal: sprite
             -- Register with timing buffer
             local sheetPath = sheetVal:getPath() or "unknown"
             local tagName = sheetVal:getTagName(tagId)
-            local timingOffsetVal, totalDuration = timingBuffer.global:registerTag(
+            local timingOffsetVal, totalDuration = timingbuffer.global:registerTag(
                 sheetPath, tagName, frameDurations
             )
 
@@ -557,7 +557,7 @@ function Sprite:setTag(tag: string)
 
     -- Reset per-entity animation state
     local world = sprite_instance.getWorld() as tecs.World
-    local renderPipeline = world.resources[pipeline_key.PIPELINE] as {string: any}
+    local renderPipeline = world.resources[pipelinekey.PIPELINE] as {string: any}
     local currentTime = renderPipeline and renderPipeline.gameTime as number or 0
     self.animStartTime = currentTime
     self.pausedFrame = -1  -- Not paused
@@ -577,7 +577,7 @@ function Sprite:playOnce(tag: string, onComplete?: function(any))
     clearPlayOnceCallback(self._entity)
 
     if sameTag then
-        local renderPipeline = world.resources[pipeline_key.PIPELINE] as {string: any}
+        local renderPipeline = world.resources[pipelinekey.PIPELINE] as {string: any}
         local currentTime = renderPipeline and renderPipeline.gameTime as number or 0
         self.animStartTime = currentTime
         self.pausedFrame = -1
@@ -605,7 +605,7 @@ function Sprite:pause(time?: number)
     end
     local currentTime = time or getGameTime()
     local localTime = (currentTime - self.animStartTime) % inst.animTotalDuration
-    local frame = timingBuffer.global:getFrameAtTime(
+    local frame = timingbuffer.global:getFrameAtTime(
         inst.animTimingOffset,
         inst.animFrameCount,
         localTime
@@ -631,7 +631,7 @@ function Sprite:resume()
         return  -- Instance already released (entity being despawned)
     end
 
-    local frameTime = timingBuffer.global:getFrameStartTime(
+    local frameTime = timingbuffer.global:getFrameStartTime(
         inst.animTimingOffset,
         self.pausedFrame
     )
@@ -673,7 +673,7 @@ function Sprite:gotoFrame(frame: integer)
     if frame < 0 then frame = 0 end
     if frame > maxFrame then frame = maxFrame end
 
-    local frameTime = timingBuffer.global:getFrameStartTime(inst.animTimingOffset, frame)
+    local frameTime = timingbuffer.global:getFrameStartTime(inst.animTimingOffset, frame)
 
     if self.pausedFrame >= 0 then
         self.pausedFrame = frame
@@ -698,7 +698,7 @@ function Sprite:getFrame(): integer
     else
         localTime = elapsed % inst.animTotalDuration
     end
-    local frame = timingBuffer.global:getFrameAtTime(
+    local frame = timingbuffer.global:getFrameAtTime(
         inst.animTimingOffset,
         inst.animFrameCount,
         localTime
@@ -936,7 +936,7 @@ tecs.newFFIComponent({
             end
             sheetCacheByPath[path] = sheet
         end
-        local inst = Sprite.fromSheet(sheet as sprite_sheet_types.SpriteSheet, data.tag as string, {
+        local inst = Sprite.fromSheet(sheet as spritesheet.SpriteSheet, data.tag as string, {
             speed      = data.speed,
             centered   = data.centered,
             pivotSlice = data.pivotSlice,
@@ -963,7 +963,7 @@ local function onSpriteAdded(world: tecs.World, entityId: integer, self: sprite.
     local inst = getInstance(self.spriteId)
     if not inst then return end
 
-    local bucketMgr = bucket_manager.get()
+    local bucketMgr = bucketmanager.get()
 
     local allocation = bucketMgr:getAllocation(inst.sheetId)
     if not allocation then
@@ -1137,7 +1137,7 @@ local TIER_TO_COMPONENT: {string: tecs.Component} = {
 -------------------------------------------------------------------------------
 
 function Sprite.fromSheet(
-    sheet: sprite_sheet_types.SpriteSheet,
+    sheet: spritesheet.SpriteSheet,
     tag?: string,
     options?: {string: any}
 ): sprite.Sprite
@@ -1162,7 +1162,7 @@ end
 
 function Sprite.fromAseprite(path: string, tag?: string, options?: {string: any}): sprite.Sprite
     return Sprite.fromSheet(
-        sprite_sheet.SpriteSheet.fromFile(path) as sprite_sheet_types.SpriteSheet, tag, options)
+        sprite_sheet.SpriteSheet.fromFile(path) as spritesheet.SpriteSheet, tag, options)
 end
 
 function Sprite.fromTexture(texture: love.graphics.Texture, options?: {string: any}): sprite.Sprite
@@ -1171,7 +1171,7 @@ function Sprite.fromTexture(texture: love.graphics.Texture, options?: {string: a
     -- responsible for keeping the texture and path in sync.
     local path = options and (options.path as string) or nil
     return Sprite.fromSheet(
-        sprite_sheet.SpriteSheet.fromTexture(texture, path) as sprite_sheet_types.SpriteSheet, "", options)
+        sprite_sheet.SpriteSheet.fromTexture(texture, path) as spritesheet.SpriteSheet, "", options)
 end
 
 -------------------------------------------------------------------------------
@@ -1186,11 +1186,11 @@ function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(worl
         local renderer = renderPipeline:getRenderer()
 
         -- Initialize bucket manager (global singleton)
-        local bucketMgr = bucket_manager.init()
+        local bucketMgr = bucketmanager.init()
 
         -- Create the bucket-based sync system (handles both normal and blend mode sprites via groupBy)
         local spriteSizeHint = (renderer as gpuTypes.Renderer).config.sizeHints["sprites"]
-        local sync = bucketSync.new(world, Sprite, SpriteData as tecs.Component, TIER_TO_COMPONENT, DirectSprite, RepeatedSprite, spriteSizeHint)
+        local sync = bucketsync.new(world, Sprite, SpriteData as tecs.Component, TIER_TO_COMPONENT, DirectSprite, RepeatedSprite, spriteSizeHint)
 
         -- In-place Sprite replacement (world:set over an existing Sprite, or
         -- a batch-spawned zero sprite receiving its first value) causes no
@@ -1230,7 +1230,7 @@ function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(worl
                 "Tiny", "Small", "Medium", "Large", "XL", "XXL",
             }
 
-            local optional <const> = modifier_binding.bind({
+            local optional <const> = modifierbinding.bind({
                 ColorComponent as tecs.Component,
                 ClipBoundsComponent as tecs.Component,
                 MaterialComponent as tecs.Component,
@@ -1239,13 +1239,13 @@ function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(worl
                 DropShadowComponent as tecs.Component,
                 RepeatedSprite as tecs.Component,
                 SpriteData as tecs.Component,
-            }) as {shadow_setup.OptionalBinding}
+            }) as {shadowsetup.OptionalBinding}
 
-            local tagFlags: {shadow_dispatch.TagFlagBinding} = {
+            local tagFlags: {shadowdispatch.TagFlagBinding} = {
                 {component = Unlit, flag = gpuTypes.FLAG_UNLIT},
             }
 
-            local shadowCtx = shadow_setup.register(world, {
+            local shadowCtx = shadowsetup.register(world, {
                 sprite = Sprite as tecs.Component,
                 bucketMarkers = bucketMarkers,
                 optional = optional,
@@ -1258,14 +1258,14 @@ function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(worl
             -- bucketProvider returns the arraySync object cast to
             -- BucketBuffers. The field names line up post-rename
             -- (materialParamsOutputBuffer, indirectBuffer, etc.).
-            local bucketProvider = function(tierIdx: integer, arrayIdx: integer): shadow_dispatch.BucketBuffers
+            local bucketProvider = function(tierIdx: integer, arrayIdx: integer): shadowdispatch.BucketBuffers
                 local tierName = tierIdxToName[tierIdx]
                 if not tierName then return nil end
                 local tierSync = sync.tiers[tierName]
                 if not tierSync then return nil end
                 local arrSync = tierSync.arraySyncs[arrayIdx] as {string: any}
                 if not arrSync then return nil end
-                return arrSync as shadow_dispatch.BucketBuffers
+                return arrSync as shadowdispatch.BucketBuffers
             end
 
             -- Binds the per-frame globals the cull shader needs:
@@ -1281,14 +1281,14 @@ function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(worl
                     shader:send("SlicePackingBits", 16)
                 end
                 if shader:hasUniform("FrameTimings") then
-                    shader:send("FrameTimings", timingBuffer.global:getBuffer())
+                    shader:send("FrameTimings", timingbuffer.global:getBuffer())
                 end
                 if shader:hasUniform("ShadowMargin") then
                     local rConfig = r.config as {string:any}
                     shader:send("ShadowMargin", (rConfig.shadowMargin as number) or 200.0)
                 end
                 -- MaxDropShadows is per bucket (each bucket owns its own
-                -- drop-shadow buffer), so shadow_dispatch sends it next to
+                -- drop-shadow buffer), so shadowdispatch sends it next to
                 -- the DropShadowOutput binding rather than here.
                 local tileLightsBound = 0
                 if r.lightOutputBuffer and shader:hasUniform("LightBuffer") then
@@ -1324,12 +1324,12 @@ function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(worl
                 end
             end
 
-            local dispatchCtx = shadow_dispatch.new({
+            local dispatchCtx = shadowdispatch.new({
                 shader = spriteCullShader,
                 registry = shadowCtx.registry,
                 spriteComponent = Sprite as tecs.Component,
                 bucketMarkers = bucketMarkers,
-                optional = optional as {shadow_dispatch.OptionalBinding},
+                optional = optional as {shadowdispatch.OptionalBinding},
                 tagFlags = tagFlags,
                 bucketProvider = bucketProvider,
                 bindGlobals = bindGlobals,
@@ -1342,14 +1342,14 @@ function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(worl
         end
 
         -- Register sprite render plugin
-        gpuRenderer:registerPlugin(sprite_plugin.create({
+        gpuRenderer:registerPlugin(renderplugin.create({
             renderShader = spriteRenderShader,
             shadowMaskShader = spriteShadowMaskShader,
             dropShadowShader = spriteDropShadowShader,
             bucketSync = sync,
             bucketManager = bucketMgr,
             cullDispatch = cullDispatch,
-        } as sprite_plugin.SpritePluginConfig))
+        } as renderplugin.SpritePluginConfig))
 
         -- GPU sync system (bucket-based, includes blend mode handling via groupBy)
         world:addSystem({

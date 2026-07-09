@@ -6,7 +6,7 @@
 
 local ffi <const> = require("ffi")
 local ChunkedArray <const> = require("tecs.internal.ffi.StableChunkedArray")
-local free_range <const> = require("tecs2d.gfx.internal.text.free_range")
+local freerange <const> = require("tecs2d.gfx.internal.text.freerange")
 
 -- Define the block metadata struct
 ffi.cdef[[
@@ -68,7 +68,7 @@ local MIN_BLOCK_CAPACITY <const> = 16
 
 -- Add range to free list, merging with adjacent ranges
 local function addFreeRange(self: glyph_block.GlyphBlockAllocator, start: integer, capacity: integer)
-    free_range.insert(self.freeRanges, start, capacity)
+    freerange.insert(self.freeRanges, start, capacity)
 end
 
 function GlyphBlockAllocator:alloc(glyphCount: integer): integer, glyph_block.GlyphBlock
@@ -79,7 +79,7 @@ function GlyphBlockAllocator:alloc(glyphCount: integer): integer, glyph_block.Gl
     )
 
     -- Try to find existing free range
-    local gpuStart, actualCapacity = free_range.find(self.freeRanges, capacity)
+    local gpuStart, actualCapacity = freerange.find(self.freeRanges, capacity)
 
     if gpuStart < 0 then
         -- Allocate new GPU slots at end
@@ -133,7 +133,7 @@ function GlyphBlockAllocator:resize(blockId: integer, newCount: integer): boolea
     )
 
     -- Try to find existing free range
-    local gpuStart, actualCapacity = free_range.find(self.freeRanges, newCapacity)
+    local gpuStart, actualCapacity = freerange.find(self.freeRanges, newCapacity)
 
     if gpuStart < 0 then
         -- Allocate at end

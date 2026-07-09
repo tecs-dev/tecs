@@ -1,7 +1,7 @@
 require("busted")
 local tecs <const> = require("tecs")
 local internal <const> = require("tecs.internal.types")
-local frameworkBehavior <const> = require("tecs.internal.frameworkBehavior")
+local frameworkbehavior <const> = require("tecs.internal.frameworkbehavior")
 local luassert <const> = require("luassert")
 local describe <const> = describe
 local it <const> = it
@@ -35,9 +35,9 @@ describe("Dense Relationships with reverseIndex", function()
             })
             local instance = Follows(123) as tecs.Component
 
-            luassert.is_equal(Follows, frameworkBehavior.behaviorOwner(instance))
-            luassert.is_true(frameworkBehavior.hasBits(instance, frameworkBehavior.NeedsSet))
-            luassert.is_true(frameworkBehavior.hasBits(instance, frameworkBehavior.NoBulkBatch))
+            luassert.is_equal(Follows, frameworkbehavior.behaviorOwner(instance))
+            luassert.is_true(frameworkbehavior.hasBits(instance, frameworkbehavior.NeedsSet))
+            luassert.is_true(frameworkbehavior.hasBits(instance, frameworkbehavior.NoBulkBatch))
         end)
 
         it("should isolate dense reverse-index data between worlds reusing the same relationship", function()

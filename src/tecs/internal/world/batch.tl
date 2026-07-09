@@ -18,7 +18,7 @@ local types <const> = require("tecs.types")
 local internal <const> = require("tecs.internal.types")
 local IdAllocator <const> = require("tecs.internal.IdAllocator")
 local builtins <const> = require("tecs.internal.builtins")
-local frameworkBehavior <const> = require("tecs.internal.frameworkBehavior")
+local frameworkbehavior <const> = require("tecs.internal.frameworkbehavior")
 local shared <const> = require("tecs.internal.world.shared")
 
 local type Component = types.components.Component
@@ -678,7 +678,7 @@ function WorldImpl:_deferBatchDespawn(archetypes: {Archetype})
 end
 
 local function canBulkBatchComponent(componentType: Component): boolean
-    return not frameworkBehavior.hasBits(componentType, frameworkBehavior.NoBulkBatch)
+    return not frameworkbehavior.hasBits(componentType, frameworkbehavior.NoBulkBatch)
 end
 
 local function batchMutationSlot(self: WorldImpl, c: integer): BatchMutation

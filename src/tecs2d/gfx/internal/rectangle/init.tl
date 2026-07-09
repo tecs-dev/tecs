@@ -1,6 +1,6 @@
 local tecs <const> = require("tecs")
 local types <const> = require("tecs2d.gfx.types")
-local defineShape <const> = require("tecs2d.gfx.internal.gpu.define_shape")
+local defineshape <const> = require("tecs2d.gfx.internal.gpu.defineshape")
 
 local ColorComponent <const> = require("tecs2d.gfx.internal.Color")
 local ClipBounds <const> = require("tecs2d.gfx.internal.ClipBounds")
@@ -13,7 +13,7 @@ local RoundedCorners <const> = require("tecs2d.gfx.internal.rectangle.RoundedCor
 
 -- Rectangle uses the renderer-owned shadow-column path; wiring is
 -- provided by `shadow_plugin`.
-local shaders <const> = defineShape.loadShaders({
+local shaders <const> = defineshape.loadShaders({
     name = "rectangle",
     dir = "tecs2d/gfx/internal/rectangle/",
     cull = "rect_cull",
@@ -70,7 +70,7 @@ tecs.newFFIComponent({
 })
 
 function rectangle.plugin(world: tecs.World)
-    defineShape.register(world, {
+    defineshape.register(world, {
         name = "Rectangle",
         prefix = "Rect",                 -- gpuTypes constants are RECT_*
         component = Rectangle as tecs.Component,

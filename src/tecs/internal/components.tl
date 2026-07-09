@@ -1,9 +1,9 @@
 local types <const> = require("tecs.types")
 local internal <const> = require("tecs.internal.types")
 local storage <const> = require("tecs.internal.storage")
-local ComponentCodegen <const> = require("tecs.internal.ComponentCodegen")
-local componentIds <const> = require("tecs.internal.componentIds")
-local frameworkBehavior <const> = require("tecs.internal.frameworkBehavior")
+local componentcodegen <const> = require("tecs.internal.componentcodegen")
+local componentids <const> = require("tecs.internal.componentids")
+local frameworkbehavior <const> = require("tecs.internal.frameworkbehavior")
 local bit <const> = require("bit")
 
 local assert, table_concat <const> = assert, table.concat
@@ -106,7 +106,7 @@ function components.registerComponent<T is Component>(container: Component): T
     -- through their metatable, and inheriting the container's id would give
     -- every instance one shared signature bit and clobber componentsById.
     if not rawget(container as {any: any}, "componentId") then
-        container.componentId = componentIds.allocate()
+        container.componentId = componentids.allocate()
     end
 
     local componentI = container as ComponentInternal
@@ -196,7 +196,7 @@ function components.newComponent<C is Component>(options: ComponentOptions<C>): 
     local containerI = container as ComponentInternal
     container.componentType = container
     container.componentName = name
-    container.componentId = componentIds.allocate()
+    container.componentId = componentids.allocate()
     container.init = opts.init or NOOP_INIT
     containerI.requires = opts.requires
     containerI._hasRequires = opts.requires ~= nil and #opts.requires > 0
@@ -322,7 +322,7 @@ function components.newComponent<C is Component>(options: ComponentOptions<C>): 
                 return instance
             end
         else
-            local ffiAlloc = ComponentCodegen.createCallFn({
+            local ffiAlloc = componentcodegen.createCallFn({
                 backend = "allocatorCall",
                 fields = ffiFields,
                 defaults = ffiDefaults,
@@ -362,7 +362,7 @@ function components.newComponent<C is Component>(options: ComponentOptions<C>): 
             local baseCall: function(C, ...: any): C
             if opts.fields then
                 local tableFields = opts.fields
-                local generated = ComponentCodegen.createCallFn({
+                local generated = componentcodegen.createCallFn({
                     backend = "tableLiteral",
                     fields = tableFields,
                     defaults = opts.defaults,
@@ -406,7 +406,7 @@ function components.newComponent<C is Component>(options: ComponentOptions<C>): 
             container.new = userNew
         end
     elseif opts.fields then
-        container.new = ComponentCodegen.createNewFn(container, opts.fields) as function(data: {string: any}): C
+        container.new = componentcodegen.createNewFn(container, opts.fields) as function(data: {string: any}): C
     elseif storageType == "scalar" then
         -- `.new({value=...})` routes through `__call` so it produces the
         -- same wrapper the positional form does.
@@ -540,7 +540,7 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
                 return instance
             end
         else
-            ctor = ComponentCodegen.createCallFn({
+            ctor = componentcodegen.createCallFn({
                 backend = "allocatorCall",
                 fields = relationshipFields,
                 defaults = cfg.defaults,
@@ -563,7 +563,7 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
                 return instance
             end
         else
-            ctor = ComponentCodegen.createCallFn({
+            ctor = componentcodegen.createCallFn({
                 backend = "tableLiteral",
                 fields = relationshipFields,
                 defaults = cfg.defaults,
@@ -648,7 +648,7 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
             return userNew(data)
         end
     elseif cfg.fields then
-        relContainer.new = ComponentCodegen.createNewFn(
+        relContainer.new = componentcodegen.createNewFn(
             relContainer,
             cfg.fields as {string},
             {"target"},
@@ -758,19 +758,19 @@ function components.newRelationship<R is Relationship>(config: RelationshipOptio
     end
 
     if isSparse then
-        relContainerI.frameworkBehavior = frameworkBehavior.SparseRelationship
-        relContainerI.frameworkBehaviorBits = frameworkBehavior.sparseRelationshipBits()
+        relContainerI.frameworkBehavior = frameworkbehavior.SparseRelationship
+        relContainerI.frameworkBehaviorBits = frameworkbehavior.sparseRelationshipBits()
     else
         -- Every dense relationship dispatches removes so the wildcard
         -- container drops with the last sibling instance, matching
         -- sparse semantics (marker present == at least one target).
-        relContainerI.frameworkBehavior = frameworkBehavior.DenseRelationship
+        relContainerI.frameworkBehavior = frameworkbehavior.DenseRelationship
         if hasReverseIndex then
-            relContainerI.frameworkBehaviorBits = frameworkBehavior.denseReverseIndexRelationshipBits()
+            relContainerI.frameworkBehaviorBits = frameworkbehavior.denseReverseIndexRelationshipBits()
         elseif isExclusive then
-            relContainerI.frameworkBehaviorBits = frameworkBehavior.denseExclusiveRelationshipBits()
+            relContainerI.frameworkBehaviorBits = frameworkbehavior.denseExclusiveRelationshipBits()
         else
-            relContainerI.frameworkBehaviorBits = frameworkBehavior.densePlainRelationshipBits()
+            relContainerI.frameworkBehaviorBits = frameworkbehavior.densePlainRelationshipBits()
         end
     end
 
@@ -925,7 +925,7 @@ function components.newFFIComponent<C is Component>(options: FFIComponentOptions
         for i = 1, #fieldNames do
             names[i] = fieldNames[i][1]
         end
-        newFn = ComponentCodegen.createNewFn(container, names) as function(data: {string: any}): C
+        newFn = componentcodegen.createNewFn(container, names) as function(data: {string: any}): C
     end
 
     -- Structured serialize/deserialize fall through to FFIStorage unless the

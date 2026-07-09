@@ -5,15 +5,15 @@
 
 local buffer <const> = require("tecs2d.gfx.internal.gpu.buffer")
 local types <const> = require("tecs2d.gfx.internal.gpu.types")
-local forward_blend <const> = require("tecs2d.gfx.internal.gpu.forward_blend")
-local material_compiler <const> = require("tecs2d.gfx.internal.material_compiler")
-local material_registry <const> = require("tecs2d.gfx.internal.material_registry")
-local shape_sync_base <const> = require("tecs2d.gfx.internal.shape_sync_base")
+local forwardblend <const> = require("tecs2d.gfx.internal.gpu.forwardblend")
+local materialcompiler <const> = require("tecs2d.gfx.internal.materialcompiler")
+local materialregistry <const> = require("tecs2d.gfx.internal.materialregistry")
+local shapesyncbase <const> = require("tecs2d.gfx.internal.shapesyncbase")
 
 local lg <const> = love.graphics
 local ceil <const> = math.ceil
 
-local type SyncRecord = shape_sync_base.SyncRecord
+local type SyncRecord = shapesyncbase.SyncRecord
 
 local record shape_utils
     --- Holder for buffers that get replaced on growth.
@@ -48,7 +48,7 @@ local record shape_utils
         cullShader: love.graphics.ComputeShader
         renderShader: love.graphics.Shader
 
-        --- Sync module reference. Must implement shape_sync_base.SyncRecord.
+        --- Sync module reference. Must implement shapesyncbase.SyncRecord.
         syncRef: SyncRecord
 
         --- Optional shadow support (nil = no shadows)
@@ -192,7 +192,7 @@ function shape_utils.simpleShapePlugin(config: shape_utils.SimpleShapeConfig): t
         if syncRef and syncRef.materialGroupCount > 0 then
             for i = 1, syncRef.materialGroupCount do
                 local matGroup = syncRef.materialGroups[i]
-                local variantShader = material_compiler.compile(matGroup.materialId, config.materialShapeName)
+                local variantShader = materialcompiler.compile(matGroup.materialId, config.materialShapeName)
                 if variantShader then
                     lg.setShader(variantShader)
                     variantShader:send("RenderParams", renderParamsBuffer)
@@ -213,7 +213,7 @@ function shape_utils.simpleShapePlugin(config: shape_utils.SimpleShapeConfig): t
                     end
                     variantShader:send(outputUniform, growable.outputBuffer)
                     variantShader:send("MaterialParamsBuffer", growable.materialParamsOutBuffer)
-                    local def = material_registry.getById(matGroup.materialId)
+                    local def = materialregistry.getById(matGroup.materialId)
                     if def then
                         for uniformName, tex in pairs(def.textures) do
                             if variantShader:hasUniform(uniformName) then
@@ -241,7 +241,7 @@ function shape_utils.simpleShapePlugin(config: shape_utils.SimpleShapeConfig): t
         subPixelX = subPixelX or 0.0
         subPixelY = subPixelY or 0.0
 
-        forward_blend.populateRenderParams(renderer, cameraX, cameraY, cameraZoom, subPixelX, subPixelY, rw, rh, 0.0)
+        forwardblend.populateRenderParams(renderer, cameraX, cameraY, cameraZoom, subPixelX, subPixelY, rw, rh, 0.0)
 
         local shader = config.renderShader
         lg.setShader(shader)

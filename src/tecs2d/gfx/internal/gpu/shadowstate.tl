@@ -5,7 +5,7 @@
 --- One instance per archetype that contains the shape's required
 --- components. Owns:
 ---
---- - An `archetype_shadow_set` covering whatever components were passed
+--- - An `archetypeshadowset` covering whatever components were passed
 ---   in via `specs`. Components not present on the archetype are
 ---   skipped silently; the cull shader reads them via `ComponentMask`.
 --- - An archetype observer for the destruction signal. Dirty signalling
@@ -17,13 +17,13 @@
 --- archetype. Lifecycle is driven by `archetype_registry`.
 
 local tecs <const> = require("tecs")
-local archetype_shadow_set <const> = require("tecs2d.gfx.internal.gpu.archetype_shadow_set")
+local archetypeshadowset <const> = require("tecs2d.gfx.internal.gpu.archetypeshadowset")
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
 
 local record shadow_state
     record ArchetypeState
         archetype: tecs.Archetype
-        shadows: archetype_shadow_set.ShadowSet
+        shadows: archetypeshadowset.ShadowSet
         --- Set when the archetype is destroyed; the registry treats
         --- this as the cleanup signal and removes the state from its
         --- map.
@@ -61,7 +61,7 @@ function shadow_state.new(
 ): shadow_state.ArchetypeState
     local self: shadow_state.ArchetypeState = {
         archetype = archetype,
-        shadows = archetype_shadow_set.new(archetype, specs),
+        shadows = archetypeshadowset.new(archetype, specs),
         destroyed = false,
     }
     return setmetatable(self, STATE_MT)

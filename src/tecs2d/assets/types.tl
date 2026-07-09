@@ -1,10 +1,10 @@
-local sprite_sheet <const> = require("tecs2d.gfx.sprite_sheet")
+local spritesheet <const> = require("tecs2d.gfx.spritesheet")
 local bmfont_module <const> = require("tecs2d.gfx.bmfont")
 local tiled_types <const> = require("tecs2d.tiled.types")
 
 local record types
     --- Re-export SpriteSheet type for convenience
-    SpriteSheet: sprite_sheet.SpriteSheet
+    SpriteSheet: spritesheet.SpriteSheet
 
     --- Re-export BMFont type for convenience
     BMFont: bmfont_module.BMFont
@@ -156,14 +156,14 @@ local record types
         --- @param path Path to the image file (JSON file must have same base name)
         --- @param options Optional load options. Async loading does not generate missing normal maps.
         --- @return A handle that loads the sprite sheet with all material maps
-        loadSpriteSheet: function(self, path: string, options?: SpriteSheetLoadOptions): Handle<sprite_sheet.SpriteSheet>
+        loadSpriteSheet: function(self, path: string, options?: SpriteSheetLoadOptions): Handle<spritesheet.SpriteSheet>
 
         --- Load a static sprite sheet from a single image (no JSON required).
         --- Automatically loads material maps (_n.png, _e.png, _orm.png) if they exist.
         --- @param path Path to the image file
         --- @param options Optional load options. Async loading does not generate missing normal maps.
         --- @return A handle that loads a single-frame sprite sheet with material maps
-        loadStaticSheet: function(self, path: string, options?: SpriteSheetLoadOptions): Handle<sprite_sheet.SpriteSheet>
+        loadStaticSheet: function(self, path: string, options?: SpriteSheetLoadOptions): Handle<spritesheet.SpriteSheet>
 
         --- Load a BMFont from a .fnt or .json file.
         --- Automatically detects format by extension and loads the atlas image.

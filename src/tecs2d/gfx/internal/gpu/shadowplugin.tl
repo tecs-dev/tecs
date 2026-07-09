@@ -20,17 +20,17 @@
 
 local tecs <const> = require("tecs")
 local tecsInternal <const> = require("tecs.internal.types")
-local pipeline_key <const> = require("tecs2d.gfx.internal.pipeline_key")
+local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
 local gpuBuffer <const> = require("tecs2d.gfx.internal.gpu.buffer")
 local gpuTypes <const> = require("tecs2d.gfx.internal.gpu.types")
-local shape_utils <const> = require("tecs2d.gfx.internal.gpu.shape_utils")
-local shape_sync_base <const> = require("tecs2d.gfx.internal.shape_sync_base")
-local archetype_registry <const> = require("tecs2d.gfx.internal.archetype_registry")
-local shadow_state <const> = require("tecs2d.gfx.internal.gpu.shadow_state")
-local shadow_render_state <const> = require("tecs2d.gfx.internal.gpu.shadow_render_state")
-local shadow_dispatch <const> = require("tecs2d.gfx.internal.gpu.shadow_dispatch")
+local shapeutils <const> = require("tecs2d.gfx.internal.gpu.shapeutils")
+local shapesyncbase <const> = require("tecs2d.gfx.internal.shapesyncbase")
+local archetyperegistry <const> = require("tecs2d.gfx.internal.archetyperegistry")
+local shadowstate <const> = require("tecs2d.gfx.internal.gpu.shadowstate")
+local shadowrenderstate <const> = require("tecs2d.gfx.internal.gpu.shadowrenderstate")
+local shadowdispatch <const> = require("tecs2d.gfx.internal.gpu.shadowdispatch")
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
-local gpu_backing <const> = require("tecs2d.gfx.internal.gpu.gpu_backing")
+local gpubacking <const> = require("tecs2d.gfx.internal.gpu.gpubacking")
 local retire <const> = require("tecs2d.gfx.internal.gpu.retire")
 local Material <const> = require("tecs2d.gfx.internal.Material")
 
@@ -38,14 +38,14 @@ local lg <const> = love.graphics
 
 local Transform <const> = tecs.builtins.Transform
 
-local LOGGER <const> = require("tecs.utils.logging").getLogger("tecs2d.gfx.shadow_plugin")
+local LOGGER <const> = require("tecs.utils.logging").getLogger("tecs2d.gfx.shadowplugin")
 
 local record shadow_plugin
-    --- See `shadow_dispatch.OptionalBinding`. Re-exported here so
+    --- See `shadowdispatch.OptionalBinding`. Re-exported here so
     --- callers building a descriptor don't need to import both
     --- modules.
-    type OptionalBinding = shadow_dispatch.OptionalBinding
-    type TagFlagBinding = shadow_dispatch.TagFlagBinding
+    type OptionalBinding = shadowdispatch.OptionalBinding
+    type TagFlagBinding = shadowdispatch.TagFlagBinding
 
     record StubFormats
         transformFormat: love.graphics.BufferFormat
@@ -103,7 +103,7 @@ local record shadow_plugin
 end
 
 function shadow_plugin.register(world: tecs.World, descriptor: shadow_plugin.ShapeDescriptor)
-    local pipelineInstance <const> = world.resources[pipeline_key.PIPELINE as tecs.Key<gpuTypes.PipelineInternal>]
+    local pipelineInstance <const> = world.resources[pipelinekey.PIPELINE as tecs.Key<gpuTypes.PipelineInternal>]
     if not pipelineInstance then
         LOGGER:error("No render pipeline found in world resources")
         return
@@ -119,11 +119,11 @@ function shadow_plugin.register(world: tecs.World, descriptor: shadow_plugin.Sha
     -- uploads them straight to their SSBO with no staging copy. Runs at install
     -- (before the game plugin spawns), so the columns are ByteData from the
     -- start. Non-identity layouts and non-FFI storages are skipped.
-    gpu_backing.enable(Transform, std430.layouts.Transform as {string:any})
-    gpu_backing.enable(descriptor.primary, descriptor.primaryLayout as {string:any})
+    gpubacking.enable(Transform, std430.layouts.Transform as {string:any})
+    gpubacking.enable(descriptor.primary, descriptor.primaryLayout as {string:any})
     for i = 1, #descriptor.optional do
         local b = descriptor.optional[i]
-        gpu_backing.enable(b.component, b.layout as {string:any})
+        gpubacking.enable(b.component, b.layout as {string:any})
     end
 
     local DEFAULT_CAPACITY <const> = 4096
@@ -138,7 +138,7 @@ function shadow_plugin.register(world: tecs.World, descriptor: shadow_plugin.Sha
             {usage = "dynamic", shaderstorage = true, indirectarguments = true})
     end
 
-    local growable: shape_utils.GrowableBuffers = {
+    local growable: shapeutils.GrowableBuffers = {
         outputBuffer = lg.newBuffer(descriptor.outputFormat, initialCapacity,
             {usage = "dynamic", shaderstorage = true}),
         shadowOutputBuffer = nil,
@@ -176,7 +176,7 @@ function shadow_plugin.register(world: tecs.World, descriptor: shadow_plugin.Sha
         growableCapacity = newCap
     end
 
-    local syncRef: shape_sync_base.SyncRecord = {
+    local syncRef: shapesyncbase.SyncRecord = {
         hasAlphaBlend = false,
         blendGroups = {},
         blendGroupCount = 0,
@@ -192,7 +192,7 @@ function shadow_plugin.register(world: tecs.World, descriptor: shadow_plugin.Sha
     local stubMetadata  = gpuBuffer.new(descriptor.stub.metadataFormat, 1, descriptor.stub.metadataCtype)
     local stubInput     = gpuBuffer.new(descriptor.stub.inputFormat, 1, descriptor.stub.inputCtype)
 
-    local plugin <const> = shape_utils.simpleShapePlugin({
+    local plugin <const> = shapeutils.simpleShapePlugin({
         prefix = descriptor.prefix,
         plural = descriptor.plural,
         materialShapeName = descriptor.materialShapeName,
@@ -227,18 +227,18 @@ function shadow_plugin.register(world: tecs.World, descriptor: shadow_plugin.Sha
     end
 
     local primary <const> = descriptor.primary
-    local shadowRegistry = archetype_registry.new(world, {
+    local shadowRegistry = archetyperegistry.new(world, {
         name = descriptor.registryName,
         matches = function(arch: tecs.Archetype): boolean
             local cols = (arch as tecsInternal.ArchetypeInternal).columns
             return cols[Transform] ~= nil and cols[primary] ~= nil
         end,
         create = function(arch: tecs.Archetype): any
-            return shadow_state.new(arch, buildSpecs())
+            return shadowstate.new(arch, buildSpecs())
         end,
     })
 
-    local dispatch <const> = shadow_dispatch.new({
+    local dispatch <const> = shadowdispatch.new({
         shader = descriptor.cullShader,
         registry = shadowRegistry,
         growable = growable,
@@ -262,9 +262,9 @@ function shadow_plugin.register(world: tecs.World, descriptor: shadow_plugin.Sha
         name = descriptor.renderStateSystemName,
         phase = tecs.phases.PreRender,
         run = function()
-            shadow_render_state.run(
+            shadowrenderstate.run(
                 shadowRegistry,
-                syncRef as shadow_render_state.Frame,
+                syncRef as shadowrenderstate.Frame,
                 Material as tecs.Component
             )
         end,

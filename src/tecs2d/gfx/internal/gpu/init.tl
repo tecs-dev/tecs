@@ -3,7 +3,7 @@
 
 local types <const> = require("tecs2d.gfx.internal.gpu.types")
 local shaderCode <const> = require("tecs2d.gfx.internal.gpu.shaders")
-local forward_blend <const> = require("tecs2d.gfx.internal.gpu.forward_blend")
+local forwardblend <const> = require("tecs2d.gfx.internal.gpu.forwardblend")
 local retire <const> = require("tecs2d.gfx.internal.gpu.retire")
 local C <const> = require("ffi")
 
@@ -449,7 +449,7 @@ function RendererMethods:renderGBuffer(cameraX: number, cameraY: number, cameraZ
     subPixelY = subPixelY or 0.0
 
     -- Populate RenderParams SSBO (uploaded once, sent to all render shaders)
-    forward_blend.populateRenderParams(self, cameraX, cameraY, cameraZoom, subPixelX, subPixelY, rw, rh, rotation or 0.0)
+    forwardblend.populateRenderParams(self, cameraX, cameraY, cameraZoom, subPixelX, subPixelY, rw, rh, rotation or 0.0)
     local renderParamsBuffer <const> = self.renderParamsBuffer
 
     zone("clear")

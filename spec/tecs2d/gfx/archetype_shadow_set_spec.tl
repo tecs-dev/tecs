@@ -1,4 +1,4 @@
--- archetype_shadow_set: integration test exercising pointer-drift
+-- archetypeshadowset: integration test exercising pointer-drift
 -- detection, dirty-page derivation from _dirtyBits, and flush against
 -- multiple component columns. Uses the LÖVE 12 mock for ByteData/Buffer.
 
@@ -9,7 +9,7 @@ rawset(_G, "love", love2d_mock)
 
 local C <const> = require("ffi")
 local tecs <const> = require("tecs")
-local archetype_shadow_set <const> = require("tecs2d.gfx.internal.gpu.archetype_shadow_set")
+local archetypeshadowset <const> = require("tecs2d.gfx.internal.gpu.archetypeshadowset")
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
 
 local Transform <const> = tecs.builtins.Transform
@@ -50,13 +50,13 @@ local function findArchetype(world: tecs.World, components: {tecs.Component}): t
     return match
 end
 
-describe("archetype_shadow_set", function()
+describe("archetypeshadowset", function()
     it("constructs entries only for components present on the archetype", function()
         local world = tecs.newWorld()
         world:spawn(Transform(1, 2, 0))
 
         local arch = findArchetype(world, {Transform})
-        local set = archetype_shadow_set.new(arch, {
+        local set = archetypeshadowset.new(arch, {
             [Transform] = std430.layouts.Transform,
             [Color]     = ColorLayout,  -- not on this archetype
         })
@@ -74,7 +74,7 @@ describe("archetype_shadow_set", function()
         world:spawn(Transform(30, 40, 0))
 
         local arch = findArchetype(world, {Transform})
-        local set = archetype_shadow_set.new(arch, {
+        local set = archetypeshadowset.new(arch, {
             [Transform] = std430.layouts.Transform,
         })
 
@@ -99,7 +99,7 @@ describe("archetype_shadow_set", function()
         world:spawn(Transform(1, 2, 0))
 
         local arch = findArchetype(world, {Transform})
-        local set = archetype_shadow_set.new(arch, {
+        local set = archetypeshadowset.new(arch, {
             [Transform] = std430.layouts.Transform,
         })
         set:flush()
@@ -129,7 +129,7 @@ describe("archetype_shadow_set", function()
         world:spawn(Transform(1, 2, 0))
 
         local arch = findArchetype(world, {Transform})
-        local set = archetype_shadow_set.new(arch, {
+        local set = archetypeshadowset.new(arch, {
             [Transform] = std430.layouts.Transform,
         })
         set:flush()
@@ -149,7 +149,7 @@ describe("archetype_shadow_set", function()
         world:spawn(Transform(1, 2, 0))
 
         local arch = findArchetype(world, {Transform})
-        local set = archetype_shadow_set.new(arch, {
+        local set = archetypeshadowset.new(arch, {
             [Transform] = std430.layouts.Transform,
         })
         set:flush()
@@ -174,7 +174,7 @@ describe("archetype_shadow_set", function()
         world:spawn(Transform(3, 4, 0))
 
         local arch = findArchetype(world, {Transform})
-        local set = archetype_shadow_set.new(arch, {
+        local set = archetypeshadowset.new(arch, {
             [Transform] = std430.layouts.Transform,
         })
         set:flush()
@@ -200,7 +200,7 @@ describe("archetype_shadow_set", function()
         local e = world:spawn(Transform(1, 2, 0))
 
         local arch = findArchetype(world, {Transform})
-        local set = archetype_shadow_set.new(arch, {
+        local set = archetypeshadowset.new(arch, {
             [Transform] = std430.layouts.Transform,
         })
         set:flush()

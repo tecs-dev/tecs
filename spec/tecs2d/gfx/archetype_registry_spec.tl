@@ -1,10 +1,10 @@
--- archetype_registry: renderer-owned per-archetype state. Validates that
+-- archetyperegistry: renderer-owned per-archetype state. Validates that
 -- the registry walks existing archetypes, subscribes to ArchetypeCreated
 -- for future ones, attaches the state as an entity observer, and cleans
 -- up on archetype destruction.
 
 local tecs <const> = require("tecs")
-local archetype_registry <const> = require("tecs2d.gfx.internal.archetype_registry")
+local archetyperegistry <const> = require("tecs2d.gfx.internal.archetyperegistry")
 
 local Pos = tecs.newComponent({
     name = "RegistrySpecPos",
@@ -41,14 +41,14 @@ local function makeState(arch: tecs.Archetype): {string:any}
     }
 end
 
-describe("archetype_registry", function()
+describe("archetyperegistry", function()
     it("registers archetypes that match the predicate", function()
         local world = tecs.newWorld()
         world:spawn(Pos(1, 2))
         world:spawn(Pos(3, 4), Tag)
         world:spawn(Vel(1, 1))  -- doesn't match (no Pos)
 
-        local registry = archetype_registry.new(world, {
+        local registry = archetyperegistry.new(world, {
             name = "test",
             matches = function(arch: tecs.Archetype): boolean
                 return arch:get(Pos) ~= nil
@@ -63,7 +63,7 @@ describe("archetype_registry", function()
 
     it("registers archetypes created after the registry was built", function()
         local world = tecs.newWorld()
-        local registry = archetype_registry.new(world, {
+        local registry = archetyperegistry.new(world, {
             name = "test",
             matches = function(arch: tecs.Archetype): boolean
                 return arch:get(Pos) ~= nil
@@ -85,7 +85,7 @@ describe("archetype_registry", function()
 
     it("attaches state as observer; mutations flow into onEntitiesAdded", function()
         local world = tecs.newWorld()
-        local registry = archetype_registry.new(world, {
+        local registry = archetyperegistry.new(world, {
             name = "test",
             matches = function(arch: tecs.Archetype): boolean
                 return arch:get(Pos) ~= nil
@@ -116,7 +116,7 @@ describe("archetype_registry", function()
         world:spawn(Pos(1, 1))
         world:spawn(Pos(2, 2), Tag)
 
-        local registry = archetype_registry.new(world, {
+        local registry = archetyperegistry.new(world, {
             name = "test",
             matches = function(arch: tecs.Archetype): boolean
                 return arch:get(Pos) ~= nil
@@ -137,7 +137,7 @@ describe("archetype_registry", function()
 
     it("removes state from tracking when archetype is destroyed", function()
         local world = tecs.newWorld()
-        local registry = archetype_registry.new(world, {
+        local registry = archetyperegistry.new(world, {
             name = "test",
             matches = function(arch: tecs.Archetype): boolean
                 return arch:get(Pos) ~= nil

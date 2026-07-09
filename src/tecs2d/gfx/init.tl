@@ -1,10 +1,10 @@
 local tecs <const> = require("tecs")
 local pipeline <const> = require("tecs2d.gfx.internal.pipeline")
 local types <const> = require("tecs2d.gfx.types")
-local pipeline_key <const> = require("tecs2d.gfx.internal.pipeline_key")
+local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
 local sprite <const> = require("tecs2d.gfx.internal.sprite")
 local sprite_sheet <const> = require("tecs2d.gfx.internal.sprite.sheet")
-local sprite_sheet_types <const> = require("tecs2d.gfx.sprite_sheet")
+local spritesheet <const> = require("tecs2d.gfx.spritesheet")
 local circle <const> = require("tecs2d.gfx.internal.circle")
 local ellipse <const> = require("tecs2d.gfx.internal.ellipse")
 local arc <const> = require("tecs2d.gfx.internal.arc")
@@ -25,13 +25,13 @@ local Occluder <const> = require("tecs2d.gfx.internal.Occluder")
 local DropShadow <const> = require("tecs2d.gfx.internal.DropShadow")
 local lightMod <const> = require("tecs2d.gfx.internal.Light")
 local cameratarget <const> = require("tecs2d.gfx.internal.CameraTarget")
-local physicsDebug <const> = require("tecs2d.gfx.internal.physicsDebug")
+local physicsdebug <const> = require("tecs2d.gfx.internal.physicsdebug")
 local tileChunkMod <const> = require("tecs2d.gfx.internal.tilechunk")
 local text_sync <const> = require("tecs2d.gfx.internal.text.sync")
 local gpu_types <const> = require("tecs2d.gfx.internal.gpu.types")
 local Material <const> = require("tecs2d.gfx.internal.Material")
-local material_registry <const> = require("tecs2d.gfx.internal.material_registry")
-local material_compiler <const> = require("tecs2d.gfx.internal.material_compiler")
+local materialregistry <const> = require("tecs2d.gfx.internal.materialregistry")
+local materialcompiler <const> = require("tecs2d.gfx.internal.materialcompiler")
 local ClipBounds <const> = require("tecs2d.gfx.internal.ClipBounds")
 
 local CameraClass <const> = require("tecs2d.gfx.Camera")
@@ -69,7 +69,7 @@ local record gfx
 
     --- SpriteSheet record for sprite frame data, textures, and animations.
     --- Factory methods: fromFile, fromImage, fromTexture, fromTextureFile
-    SpriteSheet: sprite_sheet_types.SpriteSheet
+    SpriteSheet: spritesheet.SpriteSheet
 
     --- SpriteCollision component for slice-based physics.
     --- Add alongside a Sprite to enable collision from Aseprite slices.
@@ -186,7 +186,7 @@ local record gfx
     --- @param name Unique name for this material
     --- @param opts Material options (fragment shader path, optional textures, unlit flag)
     --- @return Material component value ready to add to entities
-    newMaterial: function(name: string, opts: material_registry.MaterialOpts): Material
+    newMaterial: function(name: string, opts: materialregistry.MaterialOpts): Material
 
     --- Precompile all registered materials for all shape types.
     --- Call during a loading screen to avoid first-frame compilation hitches.
@@ -198,10 +198,10 @@ local record gfx
 
     --- Optional physics debug rendering plugin.
     --- Add after both physics and render pipeline are initialized.
-    physicsDebug: physicsDebug
+    physicsDebug: physicsdebug
 
     --- Event to toggle physics debug shapes on/off. Emit to world address 0.
-    PhysicsDebugToggle: physicsDebug.PhysicsDebugToggle
+    PhysicsDebugToggle: physicsdebug.PhysicsDebugToggle
 
     --- TileChunk component for GPU-driven 16x16 tile grid rendering.
     --- Use this for static tiles. Animated tiles should use Sprite instead.
@@ -224,7 +224,7 @@ local record gfx
 end
 
 gfx.Sprite = sprite.Sprite
-gfx.SpriteSheet = sprite_sheet.SpriteSheet as sprite_sheet_types.SpriteSheet
+gfx.SpriteSheet = sprite_sheet.SpriteSheet as spritesheet.SpriteSheet
 gfx.SpriteCollision = sprite.SpriteCollision
 gfx.RepeatedSprite = sprite.RepeatedSprite
 gfx.ChangeTag = sprite.ChangeTag
@@ -251,14 +251,14 @@ gfx.DropShadow = DropShadow
 gfx.Light = lightMod.Light
 gfx.Material = Material
 gfx.CameraTarget = cameratarget.CameraTarget
-gfx.physicsDebug = physicsDebug
-gfx.PhysicsDebugToggle = physicsDebug.PhysicsDebugToggle
+gfx.physicsDebug = physicsdebug
+gfx.PhysicsDebugToggle = physicsdebug.PhysicsDebugToggle
 gfx.TileChunk = tileChunkMod.TileChunk
 gfx.DirtyTileChunk = tileChunkMod.DirtyTileChunk
 gfx.TILE_CHUNK_SIZE = tileChunkMod.CHUNK_SIZE
 gfx.ClipBounds = ClipBounds
 -- Re-export the pipeline key for external access
-gfx.PIPELINE = pipeline_key.PIPELINE
+gfx.PIPELINE = pipelinekey.PIPELINE
 
 function gfx.newPipeline(config: pipeline.RenderConfig): types.Pipeline
     -- newPipeline stores the pipeline in resources under gfx.PIPELINE
@@ -295,12 +295,12 @@ function gfx.newPipeline(config: pipeline.RenderConfig): types.Pipeline
     return result
 end
 
-function gfx.newMaterial(name: string, opts: material_registry.MaterialOpts): Material
-    return material_registry.register(name, opts)
+function gfx.newMaterial(name: string, opts: materialregistry.MaterialOpts): Material
+    return materialregistry.register(name, opts)
 end
 
 function gfx.precompileMaterials()
-    material_compiler.precompileAll()
+    materialcompiler.precompileAll()
 end
 
 function gfx.newCamera(config: CameraClass.CameraConfig): CameraClass

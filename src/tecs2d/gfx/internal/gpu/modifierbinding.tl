@@ -20,7 +20,7 @@
 local tecs <const> = require("tecs")
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
 local gpuTypes <const> = require("tecs2d.gfx.internal.gpu.types")
-local shadow_dispatch <const> = require("tecs2d.gfx.internal.gpu.shadow_dispatch")
+local shadowdispatch <const> = require("tecs2d.gfx.internal.gpu.shadowdispatch")
 
 local layoutsByName <const> = std430.layouts as {string: std430.Descriptor}
 
@@ -34,7 +34,7 @@ local record modifier_binding
 
     --- Derive a full `{OptionalBinding}` list from a list of modifier
     --- component handles (layout + ssboName + mask all derived).
-    bind: function(components: {tecs.Component}): {shadow_dispatch.OptionalBinding}
+    bind: function(components: {tecs.Component}): {shadowdispatch.OptionalBinding}
 end
 
 -- Global canonical modifier -> mask bit. The value MUST equal the
@@ -89,8 +89,8 @@ function modifier_binding.flagFor(component: tecs.Component): integer
     return flag
 end
 
-function modifier_binding.bind(components: {tecs.Component}): {shadow_dispatch.OptionalBinding}
-    local out: {shadow_dispatch.OptionalBinding} = {}
+function modifier_binding.bind(components: {tecs.Component}): {shadowdispatch.OptionalBinding}
+    local out: {shadowdispatch.OptionalBinding} = {}
     for i = 1, #components do
         local c <const> = components[i]
         out[i] = {
