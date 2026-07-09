@@ -60,7 +60,6 @@ local record LightingState
     lightCount: integer
     circlesText: integer
     zoomText: integer
-    showNormals: boolean
     cookieIndex: integer
     cookieIds: {integer}
     cookieNames: {string}
@@ -653,11 +652,6 @@ local function lightingPlugin(world: tecs.World)
                 p:setPixelMode(s.pixelMode)
             end
 
-            -- N: Toggle normal buffer visualization
-            if input.isKeyReleased("n") then
-                s.showNormals = not s.showNormals
-            end
-
             -- , / . or mouse back/forward: Adjust light height
             if input.isKeyDown(",") or input.isMouseDown(5) then
                 s.mouseLightHeight = math.max(0.01, s.mouseLightHeight - 0.02)
@@ -723,36 +717,12 @@ local function lightingPlugin(world: tecs.World)
             if zoomTextComp then
                 local zoom = s.pipeline:getCamera():getZoom()
                 local cookieName = s.cookieNames[s.cookieIndex] or "none"
-                zoomTextComp:setText(string.format("Zoom: %.2fx | Cookie: %s | I=%.1f R=%.0f H=%.2f%s",
-                    zoom, cookieName, s.mouseLightIntensity, s.mouseLightRadius, s.mouseLightHeight,
-                    s.showNormals and " [NORMALS]" or ""))
+                zoomTextComp:setText(string.format("Zoom: %.2fx | Cookie: %s | I=%.1f R=%.0f H=%.2f",
+                    zoom, cookieName, s.mouseLightIntensity, s.mouseLightRadius, s.mouseLightHeight))
             end
         end
     })
 
-    -- Debug: Draw normal buffer overlay when showNormals is enabled
-    world:addSystem({
-        name = "DebugNormals",
-        phase = tecs.phases.PostRender,
-        run = function()
-            local s = world.resources[STATE_KEY]
-            if not s or not s.showNormals then return end
-
-            -- Get the renderer's normal buffer
-            local renderer = s.pipeline:getRenderer()
-            local rendererTable = renderer as {string: any}
-            local normalCanvas = rendererTable.gBufferNormal as love.graphics.Canvas
-            if not normalCanvas then return end
-
-            -- Draw normal buffer fullscreen
-            love.graphics.setColor(1, 1, 1, 1)
-            love.graphics.setBlendMode("replace")
-            love.graphics.draw(normalCanvas, 0, 0, 0,
-                love.graphics.getWidth() / normalCanvas:getWidth(),
-                love.graphics.getHeight() / normalCanvas:getHeight())
-            love.graphics.setBlendMode("alpha")
-        end
-    })
 end
 
 love.run = tecs2d.run({

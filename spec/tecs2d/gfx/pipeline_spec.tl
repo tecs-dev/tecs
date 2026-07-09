@@ -12,6 +12,7 @@ end
 
 local tecs <const> = require("tecs")
 local gfx <const> = require("tecs2d.gfx")
+local gpuTypes <const> = require("tecs2d.gfx.internal.gpu.types")
 local luassert <const> = require("luassert")
 
 -- Mock camera for testing that implements Camera interface
@@ -236,7 +237,7 @@ describe("tecs2d.gfx Pipeline", function()
 
     describe("G-buffer auto-uniforms", function()
         it("should have G-buffer canvas fields on the renderer", function()
-            local renderer = pipeline:getRenderer()
+            local renderer = (pipeline as gpuTypes.PipelineInternal):getRenderer()
             luassert.is_not_nil(renderer)
             -- These are created during resize() and should be valid canvases
             luassert.is_not_nil(renderer.gBufferNormal)

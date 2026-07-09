@@ -19,7 +19,7 @@
 --- mechanical (shader paths, format constants, naming).
 
 local tecs <const> = require("tecs")
-local pipeline <const> = require("tecs2d.gfx.internal.pipeline")
+local pipeline_key <const> = require("tecs2d.gfx.internal.pipeline_key")
 local gpuBuffer <const> = require("tecs2d.gfx.internal.gpu.buffer")
 local gpuTypes <const> = require("tecs2d.gfx.internal.gpu.types")
 local shape_utils <const> = require("tecs2d.gfx.internal.gpu.shape_utils")
@@ -102,7 +102,7 @@ local record shadow_plugin
 end
 
 function shadow_plugin.register(world: tecs.World, descriptor: shadow_plugin.ShapeDescriptor)
-    local pipelineInstance <const> = world.resources[pipeline._contextKey as tecs.Key<pipeline.Pipeline>]
+    local pipelineInstance <const> = world.resources[pipeline_key.PIPELINE as tecs.Key<gpuTypes.PipelineInternal>]
     if not pipelineInstance then
         LOGGER:error("No render pipeline found in world resources")
         return

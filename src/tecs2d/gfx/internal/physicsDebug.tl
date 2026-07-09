@@ -24,7 +24,7 @@
 
 local C <const> = require("ffi")
 local tecs <const> = require("tecs")
-local pipeline_mod <const> = require("tecs2d.gfx.internal.pipeline")
+local pipeline_key <const> = require("tecs2d.gfx.internal.pipeline_key")
 local physics <const> = require("tecs2d.physics")
 local retire <const> = require("tecs2d.gfx.internal.gpu.retire")
 
@@ -88,7 +88,7 @@ function physicsDebug.new(options?: physicsDebug.Options): tecs.Plugin
             error("physicsDebug requires physics plugin to be initialized first")
         end
 
-        local pipelineInstance = world.resources[pipeline_mod._contextKey as tecs.Key<pipeline_mod.Pipeline>]
+        local pipelineInstance = world.resources[pipeline_key.PIPELINE]
         if not pipelineInstance then
             error("physicsDebug requires tecs2d.gfx pipeline to be initialized first")
         end

@@ -31,14 +31,10 @@ local gpu_types <const> = require("tecs2d.gfx.internal.gpu.types")
 local Material <const> = require("tecs2d.gfx.internal.Material")
 local material_registry <const> = require("tecs2d.gfx.internal.material_registry")
 local material_compiler <const> = require("tecs2d.gfx.internal.material_compiler")
-local shaderUtils <const> = require("tecs2d.gfx.internal.gpu.shaders")
-local gpuBuffer <const> = require("tecs2d.gfx.internal.gpu.buffer")
-local shape_utils <const> = require("tecs2d.gfx.internal.gpu.shape_utils")
-local shape_sync_base <const> = require("tecs2d.gfx.internal.shape_sync_base")
 
 local CameraClass <const> = require("tecs2d.gfx.Camera")
 
-local record gfx is tecs.Key<pipeline.Pipeline>
+local record gfx
 
     --- Create a new render pipeline, automatically register it with the world, and return it.
     --- The pipeline includes a default camera. Access it via pipeline:getCamera().
@@ -49,7 +45,6 @@ local record gfx is tecs.Key<pipeline.Pipeline>
     -- Type re-exports from internal modules
     type Rect = types.Rect
     type Pipeline = types.Pipeline
-    type RenderPlugin = types.RenderPlugin
     type Layer = types.Layer
     type RenderConfig = pipeline.RenderConfig
     type Camera = CameraClass
@@ -220,29 +215,7 @@ local record gfx is tecs.Key<pipeline.Pipeline>
     --- Chunk size constant (16)
     TILE_CHUNK_SIZE: integer
 
-    --- Shader utilities for compiling custom shape shaders.
-    --- Provides loadShader, loadRenderShader, loadCullShader, insertAfterPragma,
-    --- and common GLSL include strings (CULL_COMMON, RENDER_COMMON, TILE_COMMON, etc.).
-    shaders: shaderUtils
-
-    --- GPU buffer module for creating managed SSBO wrappers.
-    --- Use GPUBuffer.new(format, capacity, ctypeName) to create buffers with
-    --- slot allocation, dirty tracking, and automatic growth.
-    GPUBuffer: gpuBuffer
-
-    --- Simple shape plugin factory. Pass a SimpleShapeConfig to generate
-    --- a complete RenderPlugin with upload, cull, render, blend, and shadow hooks.
-    shapePlugin: shape_utils
-
-    --- Shared sync base types and helpers for building shape sync systems.
-    --- Includes SyncRecord, BlendGroup, MaterialGroup, and helper functions
-    --- (syncColor, syncClipBounds, syncPivot, etc.).
-    syncBase: shape_sync_base
-
 end
-
--- Set the context key for pipeline to use
-pipeline._contextKey = gfx
 
 gfx.Sprite = sprite.Sprite
 gfx.SpriteSheet = sprite_sheet.SpriteSheet
@@ -279,19 +252,13 @@ gfx.DirtyTileChunk = tileChunkMod.DirtyTileChunk
 gfx.TILE_CHUNK_SIZE = tileChunkMod.CHUNK_SIZE
 -- Re-export the pipeline key for external access
 gfx.PIPELINE = pipeline_key.PIPELINE
--- Re-export GPU utilities for custom shape plugins
-gfx.shaders = shaderUtils
-gfx.GPUBuffer = gpuBuffer
-gfx.shapePlugin = shape_utils
-gfx.syncBase = shape_sync_base
 
 function gfx.newPipeline(config: pipeline.RenderConfig): types.Pipeline
+    -- newPipeline stores the pipeline in resources under gfx.PIPELINE
     local result = pipeline.newPipeline(config)
 
-    -- Store render pipeline in resources for gameTime updates and sprite animation
-    config.world.resources[pipeline_key.PIPELINE] = result
-
-    config.world:addPlugin(sprite.plugin(result))
+    local resultInternal = result as gpu_types.PipelineInternal
+    config.world:addPlugin(sprite.plugin(resultInternal))
     config.world:addPlugin(circle.plugin)
     config.world:addPlugin(ellipse.plugin)
     config.world:addPlugin(arc.plugin)
@@ -299,7 +266,7 @@ function gfx.newPipeline(config: pipeline.RenderConfig): types.Pipeline
     config.world:addPlugin(rectangle.plugin)
     config.world:addPlugin(meshMod.plugin)
     config.world:addPlugin(text.plugin)
-    config.world:addPlugin(text_sync.plugin(config.world, result:getRenderer() as gpu_types.Renderer, text.Text))
+    config.world:addPlugin(text_sync.plugin(config.world, resultInternal:getRenderer(), text.Text))
     config.world:addPlugin(particles.plugin)
     config.world:addPlugin(cameratarget.plugin(result))
     config.world:addPlugin(Color.plugin)

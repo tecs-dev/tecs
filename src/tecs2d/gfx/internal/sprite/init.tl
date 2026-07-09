@@ -244,7 +244,7 @@ local record sprite
     --- Plugin to add sprite rendering and collision systems to a TECS world.
     --- Returns a plugin function that should be passed to world:addPlugin().
     --- @param pipeline The render pipeline (passed to avoid circular dependency)
-    plugin: function(pipeline: types.Pipeline): function(world: tecs.World)
+    plugin: function(pipeline: gpuTypes.PipelineInternal): function(world: tecs.World)
 
     --- RepeatedSprite component for tiling sprites across an area.
     --- Add this to an entity with a Sprite to enable tiling/repeating.
@@ -1175,7 +1175,7 @@ end
 -- Plugin
 -------------------------------------------------------------------------------
 
-function sprite.plugin(renderPipeline: types.Pipeline): function(world: tecs.World)
+function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(world: tecs.World)
     return function(world: tecs.World)
         -- Store world reference for Sprite methods
         sprite_instance.setWorld(world)

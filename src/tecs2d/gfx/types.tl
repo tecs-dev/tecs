@@ -95,30 +95,6 @@ local record types
         attach: function(WorldShaderState)
     end
 
-    --- A modular render plugin that hooks into the renderer's phase loop.
-    --- All methods are optional; nil methods are skipped.
-    --- The first parameter of each hook is the opaque renderer context.
-    interface RenderPlugin
-        --- Plugin name (for debugging)
-        name: string
-        --- Upload dirty buffers to GPU
-        upload: function(any)
-        --- Reset indirect draw buffers before culling
-        resetIndirect: function(any)
-        --- Run culling compute shaders
-        cull: function(any, cullParamsBuffer: love.graphics.Buffer)
-        --- Render to G-buffer (opaque/alpha-blend entities)
-        renderGBuffer: function(any, renderParamsBuffer: love.graphics.Buffer, globalTime: number)
-        --- Render blend-mode batches to G-buffer (depth test, no write)
-        renderGBufferBlend: function(any, renderParamsBuffer: love.graphics.Buffer)
-        --- Render shapes with non-alpha blend modes (forward pass after lighting)
-        renderForwardBlend: function(any, cameraX: number, cameraY: number, cameraZoom: number, useLowRes: boolean, subPixelX: number, subPixelY: number)
-        --- Render shadow mask (occluder shapes)
-        renderShadowMask: function(any, shadowTransform: love.math.Transform)
-        --- Set layer range on this plugin's render shader(s)
-        setLayerRange: function(any, range: {number})
-    end
-
     --- Configuration for bloom post-processing.
     record BloomConfig
         --- Enable bloom. Defaults to false.
@@ -194,13 +170,6 @@ local record types
 
         --- Render the scene (GPU-only implementation).
         render: function(self)
-
-        --- Register a render plugin with the GPU renderer.
-        --- Plugins implement optional phase hooks (upload, cull, renderGBuffer, etc.).
-        registerPlugin: function(self, plugin: RenderPlugin)
-
-        --- Get the GPU renderer directly.
-        getRenderer: function(self): any
 
         --- Create and register a new camera.
         --- @param name Unique name for the camera.

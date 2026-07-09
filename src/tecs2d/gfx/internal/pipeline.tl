@@ -10,6 +10,7 @@ local levents <const> = require("tecs2d.events")
 local gpuModule <const> = require("tecs2d.gfx.internal.gpu")
 local gpuTypes <const> = require("tecs2d.gfx.internal.gpu.types")
 local gpuShaders <const> = require("tecs2d.gfx.internal.gpu.shaders")
+local pipeline_key <const> = require("tecs2d.gfx.internal.pipeline_key")
 local phases <const> = tecs.phases
 local layerEffects <const> = require("tecs2d.gfx.internal.layer_effects")
 local Camera <const> = require("tecs2d.gfx.Camera")
@@ -84,9 +85,6 @@ end
 
 --- The pipeline module provides a GPU-accelerated render pipeline.
 local record pipeline
-    --- The key to use for storing the pipeline in world resources
-    _contextKey: tecs.Key<Pipeline>
-
     --- Create a new render pipeline.
     newPipeline: function(config: RenderConfig): Pipeline
 
@@ -176,7 +174,7 @@ end
 
 local type Pipeline = types.Pipeline
 
-local record PipelineImpl is Pipeline
+local record PipelineImpl is Pipeline, gpuTypes.PipelineInternal
     world: tecs.World
     renderer: gpuTypes.Renderer
 
@@ -553,7 +551,7 @@ function pipeline.newPipeline(config: pipeline.RenderConfig): Pipeline
     w:registerPhase(phases.Draw)
 
     -- Register pipeline with world
-    w.resources[pipeline._contextKey] = pipelineInstance
+    w.resources[pipeline_key.PIPELINE] = pipelineInstance
 
     -- Persist camera view state (position, zoom, rotation, bounds) across
     -- snapshots. The camera is a pipeline resource, so it lives outside the
@@ -862,11 +860,11 @@ end
 -- GPU renderer access
 -------------------------------------------------------------------------------
 
-function PipelineImpl:registerPlugin(plugin: types.RenderPlugin)
-    self.renderer:registerPlugin(plugin as gpuTypes.RenderPlugin)
+function PipelineImpl:registerPlugin(plugin: gpuTypes.RenderPlugin)
+    self.renderer:registerPlugin(plugin)
 end
 
-function PipelineImpl:getRenderer(): any
+function PipelineImpl:getRenderer(): gpuTypes.Renderer
     return self.renderer
 end
 

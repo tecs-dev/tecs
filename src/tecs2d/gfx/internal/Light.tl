@@ -1,5 +1,5 @@
 local tecs <const> = require("tecs")
-local pipeline <const> = require("tecs2d.gfx.internal.pipeline")
+local pipeline_key <const> = require("tecs2d.gfx.internal.pipeline_key")
 local gpuBuffer <const> = require("tecs2d.gfx.internal.gpu.buffer")
 local gpuTypes <const> = require("tecs2d.gfx.internal.gpu.types")
 local shaderUtils <const> = require("tecs2d.gfx.internal.gpu.shaders")
@@ -171,7 +171,7 @@ local record LightInstanceFFI
 end
 
 function light.plugin(world: tecs.World)
-    local pipelineInstance <const> = world.resources[pipeline._contextKey as tecs.Key<pipeline.Pipeline>]
+    local pipelineInstance <const> = world.resources[pipeline_key.PIPELINE as tecs.Key<gpuTypes.PipelineInternal>]
     if not pipelineInstance then
         LOGGER:error("No render pipeline found in world resources")
         return

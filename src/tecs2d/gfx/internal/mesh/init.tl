@@ -16,7 +16,7 @@ local ClipBounds <const> = require("tecs2d.gfx.internal.ClipBounds")
 local Pivot <const> = require("tecs2d.gfx.internal.Pivot")
 local Material <const> = require("tecs2d.gfx.internal.Material")
 local Unlit <const> = require("tecs2d.gfx.internal.Unlit")
-local pipeline <const> = require("tecs2d.gfx.internal.pipeline")
+local pipeline_key <const> = require("tecs2d.gfx.internal.pipeline_key")
 local meshDefinition <const> = require("tecs2d.gfx.internal.mesh.definition")
 local material_compiler <const> = require("tecs2d.gfx.internal.material_compiler")
 local shadow_setup <const> = require("tecs2d.gfx.internal.mesh.shadow_setup")
@@ -94,7 +94,7 @@ tecs.newFFIComponent({
 })
 
 function mesh.plugin(world: tecs.World)
-    local pipelineInstance <const> = world.resources[pipeline._contextKey as tecs.Key<pipeline.Pipeline>]
+    local pipelineInstance <const> = world.resources[pipeline_key.PIPELINE as tecs.Key<gpuTypes.PipelineInternal>]
     if not pipelineInstance then
         LOGGER:error("No render pipeline found in world resources")
         return

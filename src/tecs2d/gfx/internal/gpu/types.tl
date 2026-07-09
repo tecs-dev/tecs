@@ -368,6 +368,15 @@ local record types
         setLayerRange: function(Renderer, range: {number})
     end
 
+    --- Internal pipeline handle for plugin installers. The public
+    --- Pipeline interface hides renderer access; internal code casts
+    --- a pipeline to this interface to register render plugins and
+    --- reach the GPU renderer.
+    interface PipelineInternal
+        registerPlugin: function(self, plugin: RenderPlugin)
+        getRenderer: function(self): Renderer
+    end
+
     --- The GPU renderer instance.
     --- Shape-specific buffers are owned by each shape plugin (closure-captured locals).
     --- The Renderer holds only shared resources: G-buffer, lighting, camera params, config.
