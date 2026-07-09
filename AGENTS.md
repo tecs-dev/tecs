@@ -146,6 +146,23 @@ tecs/
 - Prefer early returns over deep nesting.
 - Keep comments sparse and informational.
 
+### Naming
+
+Naming mirrors Love2D, which uses camelCase functions, PascalCase types, and
+lowercase modules (never snake_case).
+
+- **Identifiers** (functions, methods, record fields, option keys, non-import
+  locals): `camelCase`. No `snake_case`.
+- **Filenames and their import bindings** follow a class/module split:
+  - The whole file *is* a class (one dominant type you construct and call
+    methods on, including component records): **PascalCase**, e.g. `Camera.tl`
+    → `local Camera = require("tecs2d.gfx.Camera")`.
+  - The file is a *module* that contains a class or is a namespace of
+    functions/data: **luacase** (all lowercase, no separators, no camelCase),
+    e.g. `spritesheet.tl` → `local spritesheet = require("tecs2d.gfx.spritesheet")`.
+    Multi-word module files drop their underscores (`sprite_sheet` → `spritesheet`).
+- The `require` path mirrors the filename; the local binding mirrors it too.
+
 ### Performance
 
 - Avoid allocations in hot paths when possible.
