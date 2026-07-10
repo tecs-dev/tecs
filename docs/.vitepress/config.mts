@@ -127,6 +127,17 @@ export default defineConfig({
           { text: 'Love2D Integration', link: '/tecs2d/love2d' },
           { text: 'Love2D Events', link: '/tecs2d/events' },
           {
+            text: 'Runtime Introspection',
+            collapsed: false,
+            items: [
+              { text: 'Overview', link: '/tecs2d/introspection' },
+              { text: 'Debugger', link: '/tecs2d/debug' },
+              { text: 'MCP', link: '/tecs2d/mcp/' },
+              { text: 'MCP Tools', link: '/tecs2d/mcp/tools' },
+              { text: 'Custom Commands', link: '/tecs2d/custom-debug-commands' },
+            ]
+          },
+          {
             text: 'Input & Controls',
             collapsed: true,
             items: [
@@ -226,15 +237,6 @@ export default defineConfig({
             ]
           },
           { text: 'Tween', link: '/tecs2d/tween' },
-          { text: 'Stats Overlay', link: '/tecs2d/stats' },
-          {
-            text: 'MCP',
-            collapsed: true,
-            items: [
-              { text: 'Overview', link: '/tecs2d/mcp/' },
-              { text: 'Tools', link: '/tecs2d/mcp/tools' },
-            ]
-          },
         ]
       },
     ],

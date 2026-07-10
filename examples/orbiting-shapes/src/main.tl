@@ -2,7 +2,6 @@ local tecs <const> = require("tecs")
 local tecs2d <const> = require("tecs2d")
 local gfx <const> = require("tecs2d.gfx")
 local mcp <const> = require("tecs2d.mcp")
-local stats <const> = require("tecs2d.stats")
 local input <const> = require("tecs2d.input")
 
 local Text <const> = gfx.Text
@@ -128,7 +127,7 @@ end
 -- Game plugin function that sets up the world
 local function orbitingShapesPlugin(world: tecs.World)
     -- Add stats plugin for debug info
-    world:addPlugin(stats.newStatsPlugin())
+    world:addPlugin(require("tecs2d.debug").new())
     world:addPlugin(mcp.new())
 
     local pipeline = world.resources[gfx.PIPELINE] as gfx.Pipeline

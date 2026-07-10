@@ -17,6 +17,9 @@ hero:
       link: /tecs2d/
 
 features:
+  - title: Build with AI
+    details: A <a href="/tecs2d/debug">runtime debugger</a> and <a href="/tecs2d/mcp/">built-in MCP server</a> lets humans and agents inspect, freeze, rewind, diff, edit, and replay a running game.
+    icon: 🤖
   - title: ECS built for LuaJIT
     details: Tecs is a fast, <a href="/tecs/">archetype-based ECS</a> with easy to create LuaJIT FFI components, handling 4M entities at 200 FPS.<sup>[1]</sup>
     icon: ⚡
@@ -28,9 +31,6 @@ features:
     details: Catch errors at compile time, not runtime. Tecs is designed from the ground up for static typing with <a href="https://github.com/teal-language/tl"><u>Teal</u></a>.
     icon:
       src: /images/teal.svg
-  - title: Build with AI
-    details: <a href="/tecs2d/mcp/">Builtin MCP server</a> lets agents see, query, and control your game. Ask AI "why is the player invisible?" or "what is slowing the game down?"
-    icon: 🤖
 ---
 <small><sup>[1]</sup> On an M1 Mac Mini, running `make example-shape-bench SHAPE=rectangle ENTITIES=4000000`</small>
 

@@ -6,14 +6,22 @@
 ---   world:addPlugin(mcp.new())              -- default port 19999
 ---   world:addPlugin(mcp.new({port = 12345})) -- custom port
 ---
+--- The in-game debugger overlay lives in the debug plugin
+--- (require("tecs2d.debug").new()); the get_debug_context tool reads the
+--- DebugContext resource that plugin publishes, and the debugger's command
+--- registry is projected as debug_* tools (see tecs2d.debug.context).
+---
 --- End users configure Claude Code with: {"type":"http","url":"http://localhost:19999/mcp"}
 
 local tecs <const> = require("tecs")
 local socket <const> = require("socket")
 local json <const> = require("tecs.utils.json")
 local mcpTools <const> = require("tecs2d.mcp.tools")
-local IdAllocator <const> = require("tecs.internal.IdAllocator")
+local entityinfo <const> = require("tecs2d.internal.entityinfo")
+local systemcontrol <const> = require("tecs2d.internal.systemcontrol")
 local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
+local debugapi <const> = require("tecs2d.debug.context")
+local mcpinfo <const> = require("tecs2d.internal.mcpinfo")
 local logging <const> = require("tecs.utils.logging")
 local StringBuffer <const> = require("string.buffer")
 
@@ -62,53 +70,45 @@ local pendingScreenshotId: number = nil
 -- deferred response is sent, mirroring the screenshot keep-alive above.
 local pendingWorldOpResponse: boolean = false
 
--- Pause/step state
-local paused = false
-local savedTimeScale: number = nil
-local stepsRemaining = 0
+-- Pause/step goes through the shared freeze controller (one owner of
+-- "gameplay is stopped" for both MCP pause and the debugger's open panel).
 
--- Debug draw state
-local enum DebugDrawType
-    "rect"
-    "circle"
-    "text"
-    "line"
-end
+-- Log capture for the get_logs tool: a tee sink forwards every line to the
+-- original sink and keeps a bounded ring. Installed once per process at
+-- mcp.new(); log writes are level-gated and not hot, so the extra table
+-- insert per line is negligible.
+local LOG_CAP <const> = 500
+local capturedLogs: {{string: any}} = {}
+local logsDropped = 0
+local logSeq = 0
+local logTapInstalled = false
 
-local record DebugDrawCommand
-    id: integer
-    type: DebugDrawType
-    x: number
-    y: number
-    w: number
-    h: number
-    radius: number
-    text: string
-    x2: number
-    y2: number
-    color: {number}
-    tag: string
-    expiresAt: number  -- wall-clock time, nil = persistent
-    lineWidth: number
-    fontSize: number
-end
-
-local debugDrawCommands: {DebugDrawCommand} = {}
-local nextDebugDrawId = 1
-
--- Cache of fonts keyed by pixel size. Debug text commands persist across
--- frames, so without this cache the DebugDraw system would call
--- love.graphics.newFont(size) every frame per text draw and churn font
--- objects in a hot path.
-local debugFontCache: {number: love.graphics.Font} = {}
-
-local function getDebugFont(size: number): love.graphics.Font
-    local f = debugFontCache[size]
-    if not f then
-        f = lg.newFont(size)
-        debugFontCache[size] = f
-    end
-    return f
+local function installLogTap()
+    if logTapInstalled then return end
+    logTapInstalled = true
+    local original = logging.sink
+    local tee: {string: any} = {
+        write = function(_self: any, ...: string): any
+            original:write(...)
+            -- Logger writes (dateStr, "name LEVEL: ", message, "\n").
+            local dateStr, prefix, msg = ...
+            local loggerName, level = (prefix or ""):match("^(.-) (%u+): $")
+            logSeq = logSeq + 1
+            capturedLogs[#capturedLogs + 1] = {
+                seq = logSeq,
+                time = (dateStr or ""):gsub("%s+$", ""),
+                logger = loggerName or "",
+                level = level or "",
+                message = msg or "",
+            }
+            if #capturedLogs > LOG_CAP then
+                table.remove(capturedLogs, 1)
+                logsDropped = logsDropped + 1
+            end
+            return original
+        end,
+    }
+    logging.setSink(tee as FILE)
 end
 
 -- HTTP response helpers
@@ -373,6 +373,77 @@ toolHandlers["get_stats"] = function(_: {string:any}, id: number)
     }, nil)
 end
 
+-- Cap the artifact lists returned by get_debug_context so a long-running session
+-- does not ship an unbounded history to the agent on every call.
+local CONTEXT_LIST_LIMIT <const> = 5
+
+local function lastN<T>(list: {T}, n: integer): {T}
+    local total = #list
+    if total <= n then return list end
+    local out: {T} = {}
+    for i = total - n + 1, total do
+        out[#out + 1] = list[i]
+    end
+    return out
+end
+
+toolHandlers["get_debug_context"] = function(_: {string:any}, id: number)
+    if not requireWorld(id) then return end
+    local ctx = world.resources[debugapi.KEY]
+    if not ctx then
+        sendToolError(id, "debugger_disabled",
+            "In-game debugger is not enabled; add the debug plugin " ..
+            "(require(\"tecs2d.debug\").new()).", nil)
+        return
+    end
+    -- Drop annotations on entities the game has since despawned.
+    for eid in pairs(ctx.marks) do
+        if not world:isAlive(eid) then ctx.marks[eid] = nil end
+    end
+    for eid in pairs(ctx.notes) do
+        if not world:isAlive(eid) then ctx.notes[eid] = nil end
+    end
+    -- selection is an entity id; call get_entity with it for the components.
+    -- marks/notes are keyed by name/message with compact id-range values.
+    sendToolOK(id, {
+        open = ctx.open,
+        frozen = ctx.frozen,
+        mode = ctx.mode,
+        command = ctx.command,
+        message = ctx.message,
+        selected = ctx.selected,
+        statsShown = ctx.statsShown,
+        showIds = ctx.showIds,
+        showBounds = ctx.showBounds,
+        grid = ctx.gridEnabled and {w = ctx.gridW, h = ctx.gridH,
+            offsetX = ctx.gridOX, offsetY = ctx.gridOY} or nil,
+        rewind = {status = ctx.rewind.status, count = #ctx.rewind.entries,
+            interval = ctx.rewind.interval, cap = ctx.rewind.cap, bytes = ctx.rewind.bytes},
+        diffs = lastN(ctx.diffs as {any}, CONTEXT_LIST_LIMIT),
+        menu = {open = ctx.menuOpen, target = ctx.menuTarget},
+        marks = debugapi.encodeGroups(ctx.marks),
+        notes = debugapi.encodeGroups(ctx.notes),
+        snapshots = lastN(ctx.snapshots, CONTEXT_LIST_LIMIT),
+        profiles = lastN(ctx.profiles, CONTEXT_LIST_LIMIT),
+        screenshots = lastN(ctx.screenshots, CONTEXT_LIST_LIMIT),
+        recording = ctx.recording,
+        recordings = lastN(ctx.recordings, CONTEXT_LIST_LIMIT),
+        profileTop = (#ctx.profileTop > 0) and ctx.profileTop or nil,
+        entityCount = ctx.entityCount,
+        area = ctx.hasArea and {
+            x1 = ctx.areaX1, y1 = ctx.areaY1, x2 = ctx.areaX2, y2 = ctx.areaY2
+        } or nil,
+        mouse = {
+            screenX = ctx.mouseScreenX, screenY = ctx.mouseScreenY,
+            worldX = ctx.mouseWorldX, worldY = ctx.mouseWorldY
+        },
+        camera = {
+            x = ctx.cameraX, y = ctx.cameraY, zoom = ctx.cameraZoom,
+            rotation = ctx.cameraRotation, w = ctx.cameraW, h = ctx.cameraH
+        }
+    }, nil)
+end
+
 toolHandlers["get_components"] = function(_: {string:any}, id: number)
     if not requireWorld(id) then return end
     -- Access internal archetypeIndex (not on public interface)
@@ -414,21 +485,11 @@ end
 
 toolHandlers["get_systems"] = function(_: {string:any}, id: number)
     if not requireWorld(id) then return end
-    local pipeline = (world as {string:any}).pipeline as {string:any}
-    local pipelineSystems = pipeline.systems as {{tecs.SystemConfig}}
-
-    -- Systems are already organized by phase position in pipelineSystems array
+    local infos = systemcontrol.list(world)
     local systems: {{string: any}} = {}
-    for i = 1, #pipelineSystems do
-        local phaseSystems = pipelineSystems[i]
-        for j = 1, #phaseSystems do
-            local config = phaseSystems[j]
-            local name = config.name or "(anonymous)"
-            local phaseName = config.phase and config.phase.name or "(unknown)"
-            table.insert(systems, {name = name, phase = phaseName})
-        end
+    for i = 1, #infos do
+        systems[i] = {name = infos[i].name, phase = infos[i].phase, enabled = infos[i].enabled}
     end
-
     sendToolOK(id, {count = #systems, systems = systems}, nil)
 end
 
@@ -578,27 +639,7 @@ local function deserializeComponents(
     return instances
 end
 
---- Serialize the serializable components of one archetype row (1-based).
---- Non-serializable components (tag components, or components without a
---- serialize callback) are skipped so they never crash the tool.
-local function serializeRow(archetype: tecs.Archetype, compList: {tecs.Component}, row: integer): {string: any}
-    local components: {string: any} = {}
-    for i = 1, #compList do
-        local comp = compList[i]
-        if comp.componentName and comp.serialize then
-            local column = archetype:get(comp) as {any}
-            local instance = column and column[row]
-            if instance ~= nil then
-                local serialize = comp.serialize as function(any): {string: any}
-                local ok, serialized = pcall(serialize, instance)
-                if ok and serialized then
-                    components[comp.componentName] = serialized
-                end
-            end
-        end
-    end
-    return components
-end
+local serializeRow <const> = entityinfo.serializeRow
 
 toolHandlers["get_entity"] = function(args: {string:any}, id: number)
     if not requireWorld(id) then return end
@@ -609,29 +650,20 @@ toolHandlers["get_entity"] = function(args: {string:any}, id: number)
         return
     end
 
-    if not world:isAlive(entityId) then
-        sendToolError(id, "entity_not_found", "Entity not found", {id = entityId})
+    local archetype, row, why = entityinfo.locate(world, entityId)
+    if not archetype then
+        if why == "not_alive" then
+            sendToolError(id, "entity_not_found", "Entity not found", {id = entityId})
+        else
+            sendToolError(id, "entity_not_committed", "Entity not committed yet", {id = entityId})
+        end
         return
     end
-
-    -- Look up entity location via the allocator. Decode the packed id
-    -- to a slot (allocator.slots is indexed by slot, not packed id).
-    local worldAny = world as {string:any}
-    local allocator = worldAny.allocator as {string: any}
-    local archetypeIndex = worldAny.archetypeIndex as {tecs.Archetype}
-    local slot = IdAllocator.slotOf(entityId)
-    local s = (allocator.slots as {integer: {string: integer}})[slot]
-    local archetype = archetypeIndex[s.archetypeId]
-    if archetype == nil then
-        sendToolError(id, "entity_not_committed", "Entity not committed yet", {id = entityId})
-        return
-    end
-    -- serializeRow takes a 1-based row; the allocator's row is 0-based.
-    local components = serializeRow(archetype, archetype.componentList, s.row + 1)
+    local components = serializeRow(archetype, archetype.componentList, row)
 
     local result = {
         id = entityId,
-        archetypeId = s.archetypeId,
+        archetypeId = archetype.id,
         archetypeComponents = getArchetypeSignature(archetype),
         components = components
     }
@@ -1077,9 +1109,6 @@ toolHandlers["query_in_bounds"] = function(args: {string:any}, id: number)
     sendToolOK(id, response, {limit = limit, truncated = count >= limit})
 end
 
--- Track disabled systems for toggle_system
-local disabledSystems: {string: boolean} = {}
-
 toolHandlers["toggle_system"] = function(args: {string:any}, id: number)
     if not requireWorld(id) then return end
 
@@ -1094,58 +1123,12 @@ toolHandlers["toggle_system"] = function(args: {string:any}, id: number)
         return
     end
 
-    -- Check if system exists in pipeline
-    local pipeline = (world as {string:any}).pipeline as {string: any}
-    local registry = pipeline.systemNameRegistry as {string: integer}
-    if not registry[systemName] then
-        sendToolError(id, "system_not_found", "System not found", {system = systemName})
+    local ok, err = systemcontrol.setEnabled(world, systemName, isEnabled)
+    if not ok then
+        sendToolError(id, "system_not_found", err, {system = systemName})
         return
     end
-
-    -- Find the system config and wrap its runIf
-    local phasePosition = registry[systemName]
-    local systems = pipeline.systems as {{tecs.SystemConfig}}
-    local phaseSystems = systems[phasePosition]
-
-    for i = 1, #phaseSystems do
-        local config = phaseSystems[i]
-        if config.name == systemName then
-            if isEnabled then
-                -- Restore the original runIf if we wrapped it. Always
-                -- restore, even when the original was nil: leaving the
-                -- wrapper installed makes the next disable capture the
-                -- wrapper as the "original", nesting one closure per
-                -- disable/enable cycle forever.
-                if disabledSystems[systemName] then
-                    disabledSystems[systemName] = nil
-                    local configAny = config as {string:any}
-                    config.runIf = configAny._originalRunIf as function(number, tecs.World, string): boolean
-                    configAny._originalRunIf = nil
-                end
-                sendToolOK(id, {system = systemName, enabled = true}, nil)
-            else
-                -- Store original runIf and replace with disabled check
-                if not disabledSystems[systemName] then
-                    disabledSystems[systemName] = true
-                    local originalRunIf = config.runIf;
-                    (config as {string:any})._originalRunIf = originalRunIf
-                    config.runIf = function(_dt: number, _world: tecs.World, name: string): boolean
-                        if disabledSystems[name] then
-                            return false
-                        end
-                        if not originalRunIf then
-                            return true
-                        end
-                        return originalRunIf(_dt, _world, name)
-                    end
-                end
-                sendToolOK(id, {system = systemName, enabled = false}, nil)
-            end
-            return
-        end
-    end
-
-    sendToolError(id, "system_not_found", "System not found in phase", {system = systemName})
+    sendToolOK(id, {system = systemName, enabled = isEnabled}, nil)
 end
 
 toolHandlers["set_time_scale"] = function(args: {string:any}, id: number)
@@ -1178,210 +1161,113 @@ toolHandlers["set_time_scale"] = function(args: {string:any}, id: number)
     sendToolOK(id, {scale = scale, gameTime = renderPipeline.gameTime or 0}, nil)
 end
 
--- Helpers to disable/enable gameplay phases for pause/step
-local GAMEPLAY_PHASES <const> = {
-    tecs.phases.First,
-    tecs.phases.PreUpdate,
-    tecs.phases.FixedUpdateGroup,
-    tecs.phases.Update,
-    tecs.phases.PostUpdate,
-    tecs.phases.Last
-}
-
-local function disableGameplayPhases()
-    for i = 1, #GAMEPLAY_PHASES do
-        world:disablePhase(GAMEPLAY_PHASES[i])
-    end
-end
-
-local function enableGameplayPhases()
-    for i = 1, #GAMEPLAY_PHASES do
-        world:enablePhase(GAMEPLAY_PHASES[i])
-    end
-end
-
-local function setRenderTimeScale(scale: number)
-    local renderPipeline = world.resources[pipelinekey.PIPELINE] as {string: any}
-    if not renderPipeline then return end
-    if renderPipeline.setTimeScale then
-        (renderPipeline.setTimeScale as function(any, number))(renderPipeline, scale)
-    else
-        renderPipeline.timeScale = scale
-    end
-end
-
-local function getRenderTimeScale(): number
-    local renderPipeline = world.resources[pipelinekey.PIPELINE] as {string: any}
-    if not renderPipeline then return 1.0 end
-    return (renderPipeline.timeScale as number) or 1.0
-end
-
 toolHandlers["pause"] = function(_: {string:any}, id: number)
     if not requireWorld(id) then return end
-    if paused then
+    local fz = debugapi.ensureFreeze(world)
+    if fz:heldBy("mcp") then
         sendToolOK(id, {paused = true, alreadyPaused = true}, nil)
         return
     end
-
-    savedTimeScale = getRenderTimeScale()
-    setRenderTimeScale(0.0)
-    disableGameplayPhases()
-    paused = true
-    stepsRemaining = 0
-
-    sendToolOK(id, {paused = true, savedTimeScale = savedTimeScale}, nil)
+    fz:acquire("mcp")
+    sendToolOK(id, {paused = true, savedTimeScale = fz.savedTimeScale}, nil)
 end
 
 toolHandlers["resume"] = function(_: {string:any}, id: number)
     if not requireWorld(id) then return end
-    if not paused then
+    local fz = debugapi.ensureFreeze(world)
+    if not fz:heldBy("mcp") then
         sendToolOK(id, {paused = false, alreadyResumed = true}, nil)
         return
     end
-
-    local restoredTimeScale = savedTimeScale
-    if savedTimeScale then
-        setRenderTimeScale(savedTimeScale)
-    end
-    savedTimeScale = nil
-    enableGameplayPhases()
-    paused = false
-    stepsRemaining = 0
-
-    sendToolOK(id, {paused = false, restoredTimeScale = restoredTimeScale}, nil)
+    local restoredTimeScale = fz.savedTimeScale
+    fz:release("mcp")
+    -- Still frozen when another holder (the open debugger) remains.
+    sendToolOK(id, {paused = false, restoredTimeScale = restoredTimeScale,
+        stillFrozen = fz:isFrozen()}, nil)
 end
 
 toolHandlers["step"] = function(args: {string:any}, id: number)
     if not requireWorld(id) then return end
-    if not paused then
+    local fz = debugapi.ensureFreeze(world)
+    if not fz:isFrozen() then
         sendToolError(id, "not_paused", "Must be paused to step", nil)
         return
     end
 
     local frames = (args.frames as integer) or 1
     if frames < 1 then frames = 1 end
-
-    -- Temporarily restore timeScale so stepped frames get real dt
-    if savedTimeScale then
-        setRenderTimeScale(savedTimeScale)
-    end
-    enableGameplayPhases()
-    stepsRemaining = frames
+    fz:step(frames)
 
     sendToolOK(id, {stepping = true, frames = frames}, nil)
 end
 
-local DEFAULT_COLOR <const>: {number} = {1, 1, 0, 0.8}
-
-toolHandlers["debug_draw"] = function(args: {string:any}, id: number)
-    -- Validate everything at the boundary: commands persist and are
-    -- consumed by the render system outside any pcall, where a bad value
-    -- would crash the frame every frame until cleared.
-    local drawType = args.type as DebugDrawType
-    if not drawType then
-        sendToolError(id, "missing_parameter", "Missing 'type' (rect, circle, text, line)", nil)
+toolHandlers["get_logs"] = function(args: {string:any}, id: number)
+    if args.clear == true then
+        local n = #capturedLogs
+        capturedLogs = {}
+        logsDropped = 0
+        sendToolOK(id, {cleared = n}, nil)
         return
     end
-    if drawType ~= "rect" and drawType ~= "circle" and drawType ~= "text" and drawType ~= "line" then
-        sendToolError(id, "invalid_parameter",
-            "Unknown draw type (expected rect, circle, text, or line)",
-            {type = tostring(drawType)})
-        return
-    end
-
-    local numericArgs <const> = {"x", "y", "w", "h", "radius", "x2", "y2", "duration", "lineWidth", "fontSize"}
-    for i = 1, #numericArgs do
-        local name = numericArgs[i]
-        local value = args[name]
-        if value ~= nil and type(value) ~= "number" then
+    local rank <const>: {string: integer} = {DEBUG = 1, INFO = 2, WARN = 3, ERROR = 4}
+    local minRank = 1
+    local level = args.level as string
+    if level then
+        minRank = rank[level:upper()]
+        if not minRank then
             sendToolError(id, "invalid_parameter",
-                "'" .. name .. "' must be a number", {value = tostring(value)})
+                "'level' must be DEBUG, INFO, WARN, or ERROR", {value = level})
             return
         end
     end
+    local contains = args.contains as string
+    local after = (args.after as integer) or 0
+    local limit = (args.limit as integer) or 50
+    if limit < 1 then limit = 1 elseif limit > LOG_CAP then limit = LOG_CAP end
 
-    local color = DEFAULT_COLOR
-    if args.color ~= nil then
-        if type(args.color) ~= "table" then
-            sendToolError(id, "invalid_parameter", "'color' must be an array of numbers", nil)
-            return
+    local matched: {{string: any}} = {}
+    for i = 1, #capturedLogs do
+        local e = capturedLogs[i]
+        local r = rank[e.level as string] or 2
+        if (e.seq as integer) > after and r >= minRank and (not contains
+            or (e.message as string):find(contains, 1, true)
+            or (e.logger as string):find(contains, 1, true)) then
+            matched[#matched + 1] = e
         end
-        local colorArr = args.color as {any}
-        for i = 1, math.max(#colorArr, 3) do
-            local channel = colorArr[i]
-            if i <= 3 and type(channel) ~= "number" then
-                sendToolError(id, "invalid_parameter",
-                    "'color' must have at least numeric r, g, b entries", nil)
-                return
-            end
-            if channel ~= nil and type(channel) ~= "number" then
-                sendToolError(id, "invalid_parameter",
-                    "'color' entries must be numbers", nil)
-                return
-            end
-        end
-        color = colorArr as {number}
     end
-    if args.text ~= nil and type(args.text) ~= "string" then
-        sendToolError(id, "invalid_parameter", "'text' must be a string", nil)
-        return
+    -- Newest last; return at most `limit` from the tail. `latest` is the
+    -- newest captured seq: pass it back as `after` for incremental polling.
+    local total = #matched
+    local out = matched
+    if total > limit then
+        out = {}
+        for i = total - limit + 1, total do out[#out + 1] = matched[i] end
     end
-    if args.tag ~= nil and type(args.tag) ~= "string" then
-        sendToolError(id, "invalid_parameter", "'tag' must be a string", nil)
-        return
-    end
-    local duration = args.duration as number
-    local expiresAt: number = nil
-    if duration and duration > 0 then
-        expiresAt = lt.getTime() + duration
-    elseif duration == 0 then
-        -- Single frame: expire almost immediately, but render once
-        expiresAt = lt.getTime() + 0.001
-    end
-
-    local cmd: DebugDrawCommand = {
-        id = nextDebugDrawId,
-        type = drawType,
-        x = (args.x as number) or 0,
-        y = (args.y as number) or 0,
-        w = (args.w as number) or 0,
-        h = (args.h as number) or 0,
-        radius = (args.radius as number) or 0,
-        text = (args.text as string) or "",
-        x2 = (args.x2 as number) or 0,
-        y2 = (args.y2 as number) or 0,
-        color = color,
-        tag = args.tag as string,
-        expiresAt = expiresAt,
-        lineWidth = (args.lineWidth as number) or 4,
-        fontSize = (args.fontSize as number) or 14
-    }
-    nextDebugDrawId = nextDebugDrawId + 1
-
-    table.insert(debugDrawCommands, cmd)
-    sendToolOK(id, {id = cmd.id, type = cmd.type, tag = cmd.tag}, nil)
+    sendToolOK(id, {logs = out, returned = #out, matched = total,
+        captured = #capturedLogs, dropped = logsDropped, latest = logSeq}, nil)
 end
 
-toolHandlers["clear_debug_draw"] = function(args: {string:any}, id: number)
-    local tag = args.tag as string
-    local clearId = args.id as integer
-
-    if not tag and not clearId then
-        local count = #debugDrawCommands
-        debugDrawCommands = {}
-        sendToolOK(id, {cleared = count}, nil)
+toolHandlers["get_component_schema"] = function(args: {string:any}, id: number)
+    if not requireWorld(id) then return end
+    local name = args.name as string
+    if not name then
+        sendToolError(id, "missing_parameter", "Missing 'name' parameter", nil)
         return
     end
-
-    local removed = 0
-    for i = #debugDrawCommands, 1, -1 do
-        local cmd = debugDrawCommands[i]
-        if (tag and cmd.tag == tag) or (clearId and cmd.id == clearId) then
-            table.remove(debugDrawCommands, i)
-            removed = removed + 1
-        end
+    local comp = getComponentMap()[name]
+    if not comp then
+        sendToolError(id, "unknown_component", "Unknown component", {component = name})
+        return
     end
-    sendToolOK(id, {cleared = removed, id = clearId, tag = tag}, nil)
+    local schema = entityinfo.componentSchema(comp)
+    sendToolOK(id, {
+        name = schema.name,
+        id = schema.id,
+        kind = schema.kind,
+        fields = schema.fields,
+        defaults = schema.defaults,
+        serializable = schema.serializable,
+    }, nil)
 end
 
 -- Profiler: thin pass-through over tecs.utils.profile.sample.
@@ -1759,8 +1645,48 @@ local function handleInitialize(id: number, params: {string:any})
 end
 
 local function handleToolsList(id: number)
-    local body = '{"jsonrpc":"2.0","id":' .. tostring(id) .. ',"result":{"tools":' .. mcpTools.toJSON() .. '}}'
+    -- Compose lazily per request: the debug plugin may install (and register
+    -- its commands) after the MCP server starts, in either plugin order, and
+    -- games may register custom commands at any time.
+    local derived = world and debugapi.commandTools(world)
+    if not derived or #derived == 0 then
+        local body = '{"jsonrpc":"2.0","id":' .. tostring(id) .. ',"result":{"tools":' .. mcpTools.toJSON() .. '}}'
+        sendHttpResponse(200, "OK", body)
+        return
+    end
+    local all: {any} = {}
+    for i = 1, #mcpTools.list do all[#all + 1] = mcpTools.list[i] end
+    for i = 1, #derived do all[#all + 1] = derived[i] end
+    local body = '{"jsonrpc":"2.0","id":' .. tostring(id) .. ',"result":{"tools":' .. json.serialize(all) .. '}}'
     sendHttpResponse(200, "OK", body)
+end
+
+--- Dispatch a registry-derived debug_* tool call. Returns false when the name
+--- is not a debugger tool (so the caller reports unknown-tool).
+local function callDebugTool(toolName: string, args: {string:any}, id: number): boolean
+    if toolName:sub(1, 6) ~= "debug_" then return false end
+    if not requireWorld(id) then return true end
+    local result, err = debugapi.invokeCommand(world, toolName, args)
+    if not result then
+        if err == "disabled" then
+            sendToolError(id, "debugger_disabled",
+                "Debugger tools require the debug plugin (require(\"tecs2d.debug\").new()).", nil)
+        else
+            sendError(id, ERR_INVALID_PARAMS, err)
+        end
+        return true
+    end
+    if result.ok == false then
+        sendToolError(id, result.code or "command_failed", result.message or "command failed", nil)
+        return true
+    end
+    local payload: {string: any} = {}
+    if result.data then
+        for k, v in pairs(result.data) do payload[k] = v end
+    end
+    payload.message = result.message
+    sendToolOK(id, payload, nil)
+    return true
 end
 
 local function handleToolsCall(id: number, params: {string:any})
@@ -1773,12 +1699,19 @@ local function handleToolsCall(id: number, params: {string:any})
         sendError(id, ERR_INVALID_PARAMS, "params.name must be a string")
         return
     end
+    local args = (params.arguments as {string:any}) or {}
     local handler = toolHandlers[toolName as string]
     if not handler then
-        sendError(id, ERR_INVALID_PARAMS, "Unknown tool: " .. tostring(toolName))
+        local results = {pcall(callDebugTool, toolName as string, args, id)}
+        if not results[1] then
+            local errStr = tostring(results[2])
+            log:error("Tool execution failed: %s", errStr)
+            sendError(id, ERR_INTERNAL, "Tool execution failed: " .. errStr)
+        elseif results[2] == false then
+            sendError(id, ERR_INVALID_PARAMS, "Unknown tool: " .. tostring(toolName))
+        end
         return
     end
-    local args = (params.arguments as {string:any}) or {}
     local results = {pcall(handler, args, id)}
     if not results[1] then
         local errStr = tostring(results[2])
@@ -2021,10 +1954,24 @@ function mcp.new(config?: mcp.Config): function(world: tecs.World)
     end
 
     local port = (config and config.port) or mcp.DEFAULT_PORT
+    installLogTap()
     startServer(port)
 
     return function(w: tecs.World)
     world = w
+
+    -- Session info for the debugger's `agent` command.
+    w.resources[mcpinfo.KEY] = {
+        port = function(): integer
+            return (boundPort or 0) as integer
+        end,
+        toolCount = function(): integer
+            local n = #mcpTools.list
+            local derived = debugapi.commandTools(w)
+            if derived then n = n + #derived end
+            return n
+        end,
+    }
 
     -- The MCP frame systems run in RenderFirst, not a gameplay phase:
     -- pause disables the gameplay phases (First..Last), and the server must
@@ -2034,148 +1981,10 @@ function mcp.new(config?: mcp.Config): function(world: tecs.World)
     -- otherwise be cleared at the end of world:update before the next sync
     -- could see them.
     --
-    -- Order within RenderFirst: StepCounter -> ProcessCommands ->
-    -- DrainQueuedOps. StepCounter runs first so a step command processed
-    -- this frame is not decremented until the next frame's gameplay phases
-    -- actually ran, keeping `step N` at exactly N gameplay frames.
-    w:addSystem({
-        name = "mcp.StepCounter",
-        phase = tecs.phases.RenderFirst,
-        before = {"mcp.ProcessCommands"},
-        run = function()
-            if stepsRemaining > 0 then
-                stepsRemaining = stepsRemaining - 1
-                if stepsRemaining == 0 then
-                    setRenderTimeScale(0.0)
-                    disableGameplayPhases()
-                end
-            end
-        end
-    })
-
-    w:addSystem({
-        name = "mcp.DebugDraw",
-        phase = tecs.phases.PostRender,
-        run = function()
-            if #debugDrawCommands == 0 then return end
-
-            -- Find the active camera for world-to-screen conversion.
-            -- Cameras aren't stored directly in resources; instead the
-            -- render pipeline is, and it exposes getCamera(). A
-            -- toScreen-duck-type fallback covers non-gfx setups.
-            local resources = w.resources as {any: any}
-            local camera: any = nil
-            for _, value in pairs(resources) do
-                if type(value) == "table" then
-                    local tbl = value as {string: any}
-                    if type(tbl.getCamera) == "function" then
-                        local getCam = tbl.getCamera as function(any): any
-                        local cam = getCam(value)
-                        if cam and type((cam as {string: any}).toScreen) == "function" then
-                            camera = cam
-                            break
-                        end
-                    end
-                    if type(tbl.toScreen) == "function" then
-                        camera = value
-                        break
-                    end
-                end
-            end
-
-            local toScreen: function(any, number, number): (number, number) = nil
-            local worldScale = 1.0
-            if camera then
-                toScreen = (camera as {string: any}).toScreen as function(any, number, number): (number, number)
-                -- Get effective zoom for scaling sizes
-                local cam = camera as {string: any}
-                local zoom = (cam.zoom as number) or 1.0
-                local screenHeight = (cam.screenHeight as number) or lg.getHeight()
-                local virtualHeight = (cam.virtualHeight as number) or screenHeight
-                worldScale = zoom * (screenHeight / virtualHeight)
-            end
-
-            -- Save graphics state
-            local prevR, prevG, prevB, prevA = lg.getColor()
-            local prevLineWidth = lg.getLineWidth()
-            local prevFont = lg.getFont()
-            local prevBlendMode, prevAlphaMode = lg.getBlendMode()
-            local prevShader = lg.getShader()
-            local prevCanvas = lg.getCanvas()
-
-            -- The render pipeline leaves the final screen canvas bound but
-            -- may have a custom shader, blend mode, or even an offscreen
-            -- canvas active depending on which pass ran last. Reset those to
-            -- defaults so immediate-mode debug draws actually land on screen.
-            lg.setCanvas()
-            lg.setShader()
-            lg.setBlendMode("alpha", "alphamultiply")
-
-            local now <const> = lt.getTime()
-
-            for i = #debugDrawCommands, 1, -1 do
-                local cmd = debugDrawCommands[i]
-
-                -- Prune expired commands
-                if cmd.expiresAt and now >= cmd.expiresAt then
-                    table.remove(debugDrawCommands, i)
-                else
-                    local c <const> = cmd.color
-                    lg.setColor(c[1], c[2], c[3], c[4] or 0.8)
-                    lg.setLineWidth(cmd.lineWidth)
-
-                    if cmd.type == "rect" then
-                        local sx, sy: number, number
-                        local sw, sh: number, number
-                        if toScreen then
-                            sx, sy = toScreen(camera, cmd.x, cmd.y)
-                            sw = cmd.w * worldScale
-                            sh = cmd.h * worldScale
-                        else
-                            sx, sy = cmd.x, cmd.y
-                            sw, sh = cmd.w, cmd.h
-                        end
-                        lg.rectangle("line", sx, sy, sw, sh)
-                    elseif cmd.type == "circle" then
-                        local sx, sy: number, number
-                        if toScreen then
-                            sx, sy = toScreen(camera, cmd.x, cmd.y)
-                        else
-                            sx, sy = cmd.x, cmd.y
-                        end
-                        lg.circle("line", sx, sy, cmd.radius * worldScale)
-                    elseif cmd.type == "text" then
-                        local sx, sy: number, number
-                        if toScreen then
-                            sx, sy = toScreen(camera, cmd.x, cmd.y)
-                        else
-                            sx, sy = cmd.x, cmd.y
-                        end
-                        lg.setFont(getDebugFont(cmd.fontSize))
-                        lg.print(cmd.text, sx, sy)
-                    elseif cmd.type == "line" then
-                        local sx1, sy1, sx2, sy2: number, number, number, number
-                        if toScreen then
-                            sx1, sy1 = toScreen(camera, cmd.x, cmd.y)
-                            sx2, sy2 = toScreen(camera, cmd.x2, cmd.y2)
-                        else
-                            sx1, sy1 = cmd.x, cmd.y
-                            sx2, sy2 = cmd.x2, cmd.y2
-                        end
-                        lg.line(sx1, sy1, sx2, sy2)
-                    end
-                end
-            end
-
-            -- Restore graphics state
-            lg.setColor(prevR, prevG, prevB, prevA)
-            lg.setLineWidth(prevLineWidth)
-            lg.setFont(prevFont)
-            lg.setBlendMode(prevBlendMode, prevAlphaMode)
-            lg.setShader(prevShader)
-            lg.setCanvas(prevCanvas)
-        end
-    })
+    -- The freeze controller (shared with the debugger overlay) installs its
+    -- own step-counting system; ensuring it here keeps pause/step working
+    -- with or without the debug plugin.
+    debugapi.ensureFreeze(w)
 
     w:addSystem({
         name = "mcp.ProcessCommands",

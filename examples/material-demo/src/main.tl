@@ -16,8 +16,6 @@ local tecs <const> = require("tecs")
 local tecs2d <const> = require("tecs2d")
 local gfx <const> = require("tecs2d.gfx")
 local mcp <const> = require("tecs2d.mcp")
-local stats <const> = require("tecs2d.stats")
-
 local Transform <const> = tecs.builtins.Transform
 
 local VIRTUAL_HEIGHT <const> = 360
@@ -53,7 +51,7 @@ local STATE_KEY <const> = tecs.newKey() as tecs.Key<DemoState>
 local function demoPlugin(world: tecs.World)
     local pipeline = world.resources[gfx.PIPELINE] as gfx.Pipeline
 
-    world:addPlugin(stats.newStatsPlugin())
+    world:addPlugin(require("tecs2d.debug").new())
     world:addPlugin(mcp.new())
 
     local state: DemoState = {

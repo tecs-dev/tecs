@@ -461,6 +461,10 @@ local record types
         -- Drop shadow AO flag (set during cull by sprite plugin)
         _hasDropShadows: boolean
 
+        -- Synced from the pipeline's shadowsEnabled each phase; gates the
+        -- drop-shadow AO build alongside the raymarch shadows.
+        shadowsEnabled: boolean
+
         -- Cached cull-phase values (populated before plugin cull hooks)
         _cullViewport: {number}
         _tileViewport: {number}

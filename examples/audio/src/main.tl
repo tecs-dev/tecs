@@ -64,7 +64,7 @@ local Player <const> = tecs.newTagComponent({ name = "Player" }) as PlayerCompon
 -------------------------------------------------------------------------------
 
 local function audioExamplePlugin(world: tecs.World)
-    world:addPlugin(require("tecs2d.stats").newStatsPlugin())
+    world:addPlugin(require("tecs2d.debug").new())
 local input <const> = require("tecs2d.input")
 
     local pipeline = world.resources[gfx.PIPELINE] as gfx.Pipeline

@@ -1,5 +1,5 @@
 --- Love2D integration suite: MCP boundary hardening. Tools that store
---- state consumed on later frames (debug_draw, screenshot, patch_entities)
+--- state consumed on later frames (screenshot, patch_entities, debug_*)
 --- must validate input at the handler; nothing reachable from the socket
 --- may crash the frame after the client already got a reply. Also covers
 --- toggle_system's runIf restoration.
@@ -52,36 +52,21 @@ describe("mcp robustness: hostile input survives", function()
         fixture.stop(app)
     end)
 
-    it("rejects debug_draw with a non-array color", function()
-        expectToolError(app, "debug_draw",
-            {type = "rect", x = 10, y = 10, w = 20, h = 20, color = "red"},
-            "string color")
-        expectAlive(app, "after string color")
+    it("debug_* tools without the debug plugin fail cleanly", function()
+        -- This app installs only the MCP plugin; every registry-derived
+        -- debugger tool must answer with a debugger_disabled error rather
+        -- than crashing or hanging the connection.
+        expectToolError(app, "debug_draw_rect",
+            {x = 10, y = 10, w = 20, h = 20}, "draw without debug plugin")
+        expectToolError(app, "debug_select", {id = 1}, "select without debug plugin")
+        expectAlive(app, "after debugger-disabled calls")
     end)
 
-    it("rejects debug_draw with non-numeric color entries", function()
-        expectToolError(app, "debug_draw",
-            {type = "rect", x = 10, y = 10, w = 20, h = 20, color = {"red"}},
-            "string color entry")
-        sleep(0.3)  -- a poisoned persistent command would crash within a frame
-        expectAlive(app, "after string color entry")
-    end)
-
-    it("rejects debug_draw with an unknown type or bad coordinates", function()
-        expectToolError(app, "debug_draw", {type = "bogus"}, "unknown type")
-        expectToolError(app, "debug_draw",
-            {type = "rect", x = "left", y = 10}, "string coordinate")
-        expectAlive(app, "after bad type/coords")
-    end)
-
-    it("still accepts valid debug_draw commands", function()
-        local envelope, err = app.client:tryCall("debug_draw",
-            {type = "rect", x = 10, y = 10, w = 20, h = 20, color = {1, 0, 0}})
-        luassert.is_nil(err)
-        luassert.are.equal(true, envelope.ok as boolean)
-        sleep(0.2)
-        expectAlive(app, "after valid debug_draw")
-        app.client:call("clear_debug_draw")
+    it("unknown debug_* names still answer cleanly without the plugin", function()
+        -- Without the debug plugin the server cannot resolve debug_* names,
+        -- so even a bogus one gets the debugger_disabled envelope.
+        expectToolError(app, "debug_draw", {type = "rect"}, "retired debug_draw name")
+        expectAlive(app, "after unknown debug tool")
     end)
 
     it("rejects invalid screenshot regions and keeps the connection usable", function()

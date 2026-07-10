@@ -195,6 +195,9 @@ local record PipelineImpl is Pipeline, gpuTypes.PipelineInternal
     roughGeometry: boolean
     lightingMode: string
     shadowsEnabled: boolean
+    -- Bit i-1 set = layer i visible; maintained by setLayerVisibility and
+    -- ANDed with every camera's layer mask at cull time.
+    visibleLayerMask: integer
     ambientLight: {number, number, number}
     scaledWidth: integer
     scaledHeight: integer
@@ -421,6 +424,7 @@ function pipeline.newPipeline(config: pipeline.RenderConfig): Pipeline
         roughGeometry = config.roughGeometry == true,
         lightingMode = config.lightingMode or "deferred",
         shadowsEnabled = config.shadowsEnabled ~= false,
+        visibleLayerMask = 0xFFFF,
         -- Copied so setAmbientLight's in-place writes never mutate the
         -- caller's config table.
         ambientLight = config.ambientLight
@@ -979,6 +983,15 @@ end
 function PipelineImpl:setLayerVisibility(layer: integer | string, visible: boolean)
     local layerNum = resolveLayer(self, layer)
     self.layers[layerNum].visible = visible
+    -- Rebuild the cull-time visibility mask; the per-layer flags alone are
+    -- never consulted by the render path.
+    local mask = 0
+    for i = 1, MAX_LAYERS do
+        if self.layers[i].visible ~= false then
+            mask = bit.bor(mask, bit.lshift(1, i - 1))
+        end
+    end
+    self.visibleLayerMask = mask
 end
 
 function PipelineImpl:isLayerVisible(layer: integer | string): boolean
@@ -1149,12 +1162,13 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
     -- Phase 1: World/virtual layers (at scaled resolution)
     ---------------------------------------------------------------------------
     self.renderer._renderPhase = "world"
+    self.renderer.shadowsEnabled = self.shadowsEnabled
 
     -- Run culling compute shaders (uses scaled G-buffer dims for tile viewport).
     -- Restrict the cull's layer mask to the world layers: screen-layer
     -- entities are culled and drawn by the screen phase, and world
     -- entities must not survive into it.
-    local worldLayerMask = bit.band(cam._layerMask, bit.lshift(1, worldMaxLayer) - 1)
+    local worldLayerMask = bit.band(cam._layerMask, self.visibleLayerMask, bit.lshift(1, worldMaxLayer) - 1)
     zone("cull")
     self.renderer:cull(camX, camY, renderZoom, useLowRes, globalTime, self.screenSpaceMask, self.ignoreZoomMask, self.virtualCoordsMask, self.unlitMask, self.parallaxX, self.parallaxY, self.sortModes, rot, worldLayerMask)
     zone()
@@ -1271,7 +1285,7 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
         -- 1.0 and the viewport comes from the world camera's AABB, so
         -- zoomed-out views re-emit the whole world) and gets drawn just
         -- to be rejected by LayerRange in the vertex shader.
-        local screenLayerMask = bit.band(cam._layerMask, bit.band(0xFFFF, bit.bnot(bit.lshift(1, self._firstScreenLayer - 1) - 1)))
+        local screenLayerMask = bit.band(cam._layerMask, self.visibleLayerMask, bit.band(0xFFFF, bit.bnot(bit.lshift(1, self._firstScreenLayer - 1) - 1)))
         self.renderer:cull(0, 0, 1.0, false, globalTime, self.screenSpaceMask, self.ignoreZoomMask, self.virtualCoordsMask, self.unlitMask, self.parallaxX, self.parallaxY, self.sortModes, 0.0, screenLayerMask)
 
         -- Render G-buffer at native resolution (screen-phase canvases)
@@ -1388,8 +1402,10 @@ function PipelineImpl:_renderSecondary(cam: Camera, globalTime: number)
     local pixelScale = cam._screenHeight / cam._virtualHeight
     local effectiveZoom = cam.zoom * pixelScale
 
+    self.renderer.shadowsEnabled = self.shadowsEnabled
+
     -- Run culling for this camera's view
-    self.renderer:cull(camX, camY, effectiveZoom, useLowRes, globalTime, self.screenSpaceMask, self.ignoreZoomMask, self.virtualCoordsMask, self.unlitMask, self.parallaxX, self.parallaxY, self.sortModes, rot, cam._layerMask)
+    self.renderer:cull(camX, camY, effectiveZoom, useLowRes, globalTime, self.screenSpaceMask, self.ignoreZoomMask, self.virtualCoordsMask, self.unlitMask, self.parallaxX, self.parallaxY, self.sortModes, rot, bit.band(cam._layerMask, self.visibleLayerMask))
 
     -- G-buffer callback if this camera runs Draw phase
     local gBufferCb = not cam._disableDrawPhase and self._gBufferCallback or nil

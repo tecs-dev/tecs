@@ -4,7 +4,6 @@
 local tecs <const> = require("tecs")
 local tecs2d <const> = require("tecs2d")
 local gfx <const> = require("tecs2d.gfx")
-local stats <const> = require("tecs2d.stats")
 local input <const> = require("tecs2d.input")
 
 local Transform <const> = tecs.builtins.Transform
@@ -47,7 +46,7 @@ tecs.newFFIComponent({
 -------------------------------------------------------------------------------
 
 local function circlesPlugin(world: tecs.World)
-    world:addPlugin(stats.newStatsPlugin()) -- so we can see FPS, memory, etc
+    world:addPlugin(require("tecs2d.debug").new()) -- so we can see FPS, memory, etc
 
     -- Setup the deferred rendering pipeline and camera.
     local pipeline = world.resources[gfx.PIPELINE] as gfx.Pipeline

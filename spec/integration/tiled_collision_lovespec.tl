@@ -77,6 +77,29 @@ describe("tiled collision: geometry follows the tilemap Transform", function()
         luassert.is_true(cleared == true, "debug overlay did not clear after toggling off")
     end)
 
+    it("debug map reports the tilemap and reads tiles at a point", function()
+        local m = app.client:call("debug_map", {})
+        luassert.is_true(m.loaded as boolean, "tilemap should be loaded")
+        luassert.is_true(tonumber(m.width) > 0)
+        luassert.is_true(tonumber(m.tilewidth) > 0)
+        luassert.is_true(#(m.layers as {any}) >= 1)
+
+        -- A point on the floor row must report a tile layer with a gid.
+        local mapX = tonumber(m.x)
+        local mapY = tonumber(m.y)
+        local tw = tonumber(m.tilewidth)
+        local th = tonumber(m.tileheight)
+        local floorY = mapY + (tonumber(m.height) - 1) * th + th / 2
+        local info = app.client:call("debug_map_info", {x = mapX + tw / 2, y = floorY})
+        luassert.is_true(info.inside as boolean, "probe point must be inside the map")
+        local sawGid = false
+        for _, layer in ipairs(info.layers as {any}) do
+            if tonumber((layer as {string: any}).gid) > 0 then sawGid = true end
+        end
+        luassert.is_true(sawGid, "floor tile should carry a gid on some layer")
+        app.client:call("debug_draw_clear", {tag = "tile"})
+    end)
+
     it("drops the ball onto the floor instead of through it", function()
         -- Wait for the ball to settle: two consecutive samples nearly equal.
         local settled = fixture.eventually(8, function(): number

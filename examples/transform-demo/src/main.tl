@@ -6,7 +6,6 @@ local tecs <const> = require("tecs")
 local tecs2d <const> = require("tecs2d")
 local gfx <const> = require("tecs2d.gfx")
 local SpriteSheet <const> = gfx.SpriteSheet
-local stats <const> = require("tecs2d.stats")
 local input <const> = require("tecs2d.input")
 local mcp <const> = require("tecs2d.mcp")
 
@@ -124,7 +123,7 @@ tecs.newComponent({
 
 local function transformDemoPlugin(world: tecs.World)
     world:addPlugin(mcp.new())
-    world:addPlugin(stats.newStatsPlugin())
+    world:addPlugin(require("tecs2d.debug").new())
 
     local pipeline = world.resources[gfx.PIPELINE] as gfx.Pipeline
 

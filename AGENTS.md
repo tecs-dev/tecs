@@ -55,13 +55,13 @@ tecs/
 │       ├── assets/
 │       ├── audio/
 │       ├── controller.tl
+│       ├── debug/
 │       ├── events.tl
 │       ├── gfx/
 │       ├── input.tl
 │       ├── internal/
 │       ├── mcp/
 │       ├── physics.tl
-│       ├── stats.tl
 │       ├── tiled/
 │       ├── tween.tl
 │       └── ui/
@@ -106,7 +106,19 @@ tecs/
 - Prefer high-level MCP world-operation tools over `run_lua` for live game edits. In particular, use
   `patch_entities` to add, update, or remove components on existing entities.
 - Useful live-debug tools include `get_debug_context`, `get_entity`, `query`, `query_in_bounds`,
-  `patch_entities`, and `set_debug_selection`.
+  and `patch_entities`.
+- When the debug plugin is installed, the in-game debugger's commands are also projected as
+  `debug_*` MCP tools (`debug_select`, `debug_mark`, `debug_goto`, `debug_note`, `debug_query`,
+  `debug_set`, `debug_spawn`, `debug_draw_*`, `debug_systems_*`, `debug_camera_*`,
+  `debug_snapshot_save`, `debug_record_start`, ...). They share the operator's selection, marks,
+  and notes, so use them to annotate or highlight entities the user can see in-game
+  (`debug_select` takes `replace = true` to swap the selection instead of adding).
+- `get_logs` returns captured engine log lines with a seq cursor (`after`); the operator-action
+  feed (selection, marks, notes, edits, artifacts) logs under `tecs2d.debug.events`, so poll it
+  with `get_logs {after = <seq>, contains = "debug.events"}`. `get_component_schema` gives field
+  names, C types, and defaults for building component payloads.
+- Games can register custom debugger commands via `require("tecs2d.debug.commands").register`;
+  registered commands appear as `debug_<name>` tools too.
 
 ## Development Guidelines
 

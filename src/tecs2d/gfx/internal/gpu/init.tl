@@ -87,6 +87,7 @@ function gpu.new(config: gpu.Config): gpu.Renderer
 
     -- Default layer range (all layers visible)
     renderer._layerRange = {0, 65535}
+    renderer.shadowsEnabled = true
 
     -- Smooth SDF rendering by default; pipeline flips this when
     -- roughGeometry is set in its config or via setRoughGeometry.
@@ -487,7 +488,7 @@ function RendererMethods:renderGBuffer(cameraX: number, cameraY: number, cameraZ
     lg.setCanvas()
 
     -- Drop shadow AO pass (two-pass: darken shadows, then lighten stamp-out)
-    if self._hasDropShadows then
+    if self._hasDropShadows and self.shadowsEnabled then
         zone("dropShadowAO")
         local aoBuf: love.graphics.Canvas
         if self._renderPhase == "screen" then
@@ -639,7 +640,7 @@ function RendererMethods:renderLighting(useLowRes: boolean, shadowsEnabled: bool
     shader:send("shadowMask", mask)
     shader:send("shadowsActive", shadowsEnabled)
     shader:send("ambient", ambient)
-    shader:send("dropShadowsActive", self._hasDropShadows == true)
+    shader:send("dropShadowsActive", shadowsEnabled and self._hasDropShadows == true)
     if self._hasDropShadows then
         local aoBuf: love.graphics.Canvas
         if self._renderPhase == "screen" then

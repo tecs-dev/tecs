@@ -158,6 +158,41 @@ local record input
     --- @return `true` if the key is released, `false` otherwise.
     isKeyReleased: function(key: string): boolean
 
+    --- A view of input for one layer of the input stack. It exposes the same
+    --- query surface as the module. The layer on top of the stack sees real
+    --- input; every layer below it (including the game at index 0) sees nothing.
+    record View
+        isKeyDown: function(key: string): boolean
+        isKeyPressed: function(key: string): boolean
+        isKeyReleased: function(key: string): boolean
+        isMouseDown: function(button: integer): boolean
+        isMousePressed: function(button: integer): boolean
+        isMouseReleased: function(button: integer): boolean
+        getMouseWheelMovement: function(): number, number, love.mouse.WheelDirection
+    end
+
+    --- The game's own input view. The module-level input.isKey*/isMouse*
+    --- delegate to this; it reports nothing while any UI layer is pushed on top.
+    base: View
+
+    --- The stack of pushed UI layers: a dense, 1-based array (never a hash). A
+    --- modal UI reads its own input through stack[token], and while it is on top
+    --- the game (base) and lower layers report nothing, so their hotkeys do not
+    --- fire. Forwarding to lower layers is intentionally not supported yet.
+    stack: {View}
+
+    --- Push an input layer, suppressing every layer below it. Returns the token
+    --- to read through (input.stack[token]) and to pass to popStack.
+    pushStack: function(): integer
+
+    --- Pop the top input layer. Only the top may be popped; token must be the
+    --- value returned by the matching pushStack.
+    popStack: function(token: integer)
+
+    --- Number of layers currently pushed (0 = only the game). The top layer's
+    --- token equals this value.
+    stackDepth: function(): integer
+
     --- Check if a mouse button is down.
     ---
     --- @param button The button to check.
@@ -236,52 +271,149 @@ local inFixedPhase = false
 -- Module functions
 -------------------------------------------------------------------------------
 
+-- The real input, read by whichever layer is on top of the stack.
+local realView: input.View = {
+    isKeyDown = function(key: string): boolean
+        return input.keys[key] == true
+    end,
+    isKeyPressed = function(key: string): boolean
+        if inFixedPhase then return input.keysLatchedPressed[key] == true end
+        return input.keysPressed[key] == true
+    end,
+    isKeyReleased = function(key: string): boolean
+        if inFixedPhase then return input.keysLatchedReleased[key] == true end
+        return input.keysReleased[key] == true
+    end,
+    isMouseDown = function(button: integer): boolean
+        return input.mouseButtons[button] == true
+    end,
+    isMousePressed = function(button: integer): boolean
+        if inFixedPhase then return input.mouseLatchedPressed[button] == true end
+        return input.mousePressed[button] == true
+    end,
+    isMouseReleased = function(button: integer): boolean
+        if inFixedPhase then return input.mouseLatchedReleased[button] == true end
+        return input.mouseReleased[button] == true
+    end,
+    getMouseWheelMovement = function(): number, number, love.mouse.WheelDirection
+        if inFixedPhase then
+            return input.mouseWheelLatchedMoved[1], input.mouseWheelLatchedMoved[2], input.mouseWheelLatchedDirection
+        end
+        return input.mouseWheelMoved[1], input.mouseWheelMoved[2], input.mouseWheelDirection
+    end,
+}
+
+-- The suppressed view: any layer that is not on top (and the game while a modal
+-- is active) sees this and reports no input.
+local emptyView: input.View = {
+    isKeyDown = function(_key: string): boolean return false end,
+    isKeyPressed = function(_key: string): boolean return false end,
+    isKeyReleased = function(_key: string): boolean return false end,
+    isMouseDown = function(_button: integer): boolean return false end,
+    isMousePressed = function(_button: integer): boolean return false end,
+    isMouseReleased = function(_button: integer): boolean return false end,
+    getMouseWheelMovement = function(): number, number, love.mouse.WheelDirection
+        return 0, 0, "standard"
+    end,
+}
+
+-- Exactly one view points at realView: the top layer, or the game base when the
+-- stack is empty. Everything else points at emptyView. push/pop just repoint,
+-- no allocation. stack stays a dense 1-based array (top-only pop never holes it).
+input.base = realView
+input.stack = {}
+local stackTop = 0
+
+-- Drop pending edge (pressed/released) and latched state at a capture boundary,
+-- so key/button/wheel/text that happened for one layer never leaks to the layer
+-- that gains input on the other side. Held state (input.keys, mouseButtons) is
+-- left alone: a key still physically down stays down. Without this, input taken
+-- while a layer was up (or the game frozen behind it) fires the instant the
+-- layer pops, e.g. an "f" typed into the debugger toggling the game's fullscreen.
+local function clearEdges()
+    input.textInput = ""
+    table_clear(input.keysPressed)
+    table_clear(input.keysReleased)
+    table_clear(input.keysLatchedPressed)
+    table_clear(input.keysLatchedReleased)
+    table_clear(input.mousePressed)
+    table_clear(input.mouseReleased)
+    table_clear(input.mouseLatchedPressed)
+    table_clear(input.mouseLatchedReleased)
+    input.mouseWheelMoved[1], input.mouseWheelMoved[2] = 0, 0
+    input.mouseWheelDirection = "standard"
+    input.mouseWheelLatchedMoved[1], input.mouseWheelLatchedMoved[2] = 0, 0
+    input.mouseWheelLatchedDirection = "standard"
+    for _, joystickInput in pairs(input.joysticks) do
+        table_clear(joystickInput.gamepadPressed)
+        table_clear(joystickInput.gamepadReleased)
+        table_clear(joystickInput.gamepadLatchedPressed)
+        table_clear(joystickInput.gamepadLatchedReleased)
+        table_clear(joystickInput.joystickPressed)
+        table_clear(joystickInput.joystickReleased)
+        table_clear(joystickInput.joystickLatchedPressed)
+        table_clear(joystickInput.joystickLatchedReleased)
+    end
+    latchedDirty = false
+end
+
+function input.pushStack(): integer
+    if stackTop == 0 then
+        input.base = emptyView
+    else
+        input.stack[stackTop] = emptyView
+    end
+    stackTop = stackTop + 1
+    input.stack[stackTop] = realView
+    clearEdges()
+    return stackTop
+end
+
+function input.popStack(token: integer)
+    if token ~= stackTop then
+        error("input.popStack: only the top layer may be popped (top=" ..
+            tostring(stackTop) .. ", got=" .. tostring(token) .. ")")
+    end
+    input.stack[stackTop] = nil
+    stackTop = stackTop - 1
+    if stackTop == 0 then
+        input.base = realView
+    else
+        input.stack[stackTop] = realView
+    end
+    clearEdges()
+end
+
+function input.stackDepth(): integer
+    return stackTop
+end
+
 function input.isKeyDown(key: string): boolean
-    return input.keys[key] == true
+    return input.base.isKeyDown(key)
 end
 
 function input.isKeyPressed(key: string): boolean
-    if inFixedPhase then
-        return input.keysLatchedPressed[key] == true
-    else
-        return input.keysPressed[key] == true
-    end
+    return input.base.isKeyPressed(key)
 end
 
 function input.isKeyReleased(key: string): boolean
-    if inFixedPhase then
-        return input.keysLatchedReleased[key] == true
-    else
-        return input.keysReleased[key] == true
-    end
+    return input.base.isKeyReleased(key)
 end
 
 function input.isMouseDown(button: integer): boolean
-    return input.mouseButtons[button] == true
+    return input.base.isMouseDown(button)
 end
 
 function input.isMousePressed(button: integer): boolean
-    if inFixedPhase then
-        return input.mouseLatchedPressed[button] == true
-    else
-        return input.mousePressed[button] == true
-    end
+    return input.base.isMousePressed(button)
 end
 
 function input.isMouseReleased(button: integer): boolean
-    if inFixedPhase then
-        return input.mouseLatchedReleased[button] == true
-    else
-        return input.mouseReleased[button] == true
-    end
+    return input.base.isMouseReleased(button)
 end
 
 function input.getMouseWheelMovement(): number, number, love.mouse.WheelDirection
-    if inFixedPhase then
-        return input.mouseWheelLatchedMoved[1], input.mouseWheelLatchedMoved[2], input.mouseWheelLatchedDirection
-    else
-        return input.mouseWheelMoved[1], input.mouseWheelMoved[2], input.mouseWheelDirection
-    end
+    return input.base.getMouseWheelMovement()
 end
 
 function input.update()

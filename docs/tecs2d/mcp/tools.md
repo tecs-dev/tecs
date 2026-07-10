@@ -49,9 +49,16 @@ malformed requests, use standard JSON-RPC `error` responses instead of MCP tool 
 
 ## Discovery
 
-MCP clients discover tools by calling `tools/list`. The server returns the tool list from
-`src/tecs2d/mcp/tools.tl`, including each tool's `name`, `description`, and `inputSchema`. The human-facing examples
-below document response payloads, but response schemas are not currently advertised through `tools/list`.
+MCP clients discover tools by calling `tools/list`. The response combines the
+core tools with the debugger command registry currently installed in the game,
+including game-defined commands. The live `tools/list` response is the exact
+source of truth; the families below explain the built-in workflow and response
+payloads. Response schemas are not currently advertised through `tools/list`.
+
+Use core tools for generic structured ECS operations. Use `debug_*` tools when
+an action should share the developer's selection, marks, notes, overlays,
+timeline, or capture artifacts. See [Runtime introspection](../introspection)
+for the complete investigation workflow.
 
 ## ping
 
@@ -544,7 +551,9 @@ Set the time scale for the game. Affects render pipeline time.
 Hard pause that disables all gameplay and physics systems while rendering continues. The game window stays responsive
 and MCP tools remain available. Different from `set_time_scale(0)` which still ticks every system with zero dt.
 
-The previous time scale is saved and restored on `resume`.
+Pausing goes through the freeze controller shared with the in-game debugger, so an MCP pause and an open debugger
+panel hold independent freezes: the game runs again only when both are released. The previous time scale is saved
+and restored on `resume`.
 
 **Input:** None
 
@@ -556,20 +565,22 @@ The previous time scale is saved and restored on `resume`.
 
 ## resume
 
-Resume gameplay after a pause, restoring the previous time scale and re-enabling all gameplay systems.
+Release the MCP pause, restoring the previous time scale and re-enabling all gameplay systems. `stillFrozen` is true
+when another holder (the open in-game debugger) keeps the game frozen.
 
 **Input:** None
 
 **Response:**
 
 ```json
-{"ok":true,"result":{"paused":false,"restoredTimeScale":1}}
+{"ok":true,"result":{"paused":false,"restoredTimeScale":1,"stillFrozen":false}}
 ```
 
 ## step
 
-Advance N frames while paused, then pause again. The game must be paused first. Gameplay systems run for the specified
-number of frames with the original pre-pause time scale, then are automatically disabled again.
+Advance N frames while frozen, then freeze again. The game must be frozen first, by `pause` or by an open in-game
+debugger. Gameplay systems run for the specified number of frames with the original pre-freeze time scale, then are
+automatically disabled again.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -581,48 +592,138 @@ number of frames with the original pre-pause time scale, then are automatically 
 {"ok":true,"result":{"stepping":true,"frames":5}}
 ```
 
-## debug_draw
+## get_debug_context
 
-Draw a debug overlay shape in world space. Renders on top of the game and works while paused. Uses wall-clock time for
-duration, so overlays appear and expire even during pause. Returns a command ID that can be used with
-`clear_debug_draw`.
+Get the in-game debugger context: open/frozen state, the current command and last message, the selection, the
+entity count, any drag area, mouse position (screen and world), and the camera.
+Marks and notes are keyed by name or message with compact entity-id range strings (`"8-12,20"`). Also carries
+`statsShown` (whether the stats HUD is visible) and the session's `snapshots`, `profiles`, `screenshots`, current
+`recording` state, and completed `recordings`, each list capped to the five most recent entries. Requires the debug
+plugin.
 
-| Parameter | Type | Required | Description |
-| --- | --- | --- | --- |
-| `type` | string | Yes | Shape type: `rect`, `circle`, `text`, `line` |
-| `x` | number | No | X position in world coordinates |
-| `y` | number | No | Y position in world coordinates |
-| `w` | number | No | Width, for `rect` |
-| `h` | number | No | Height, for `rect` |
-| `radius` | number | No | Radius, for `circle` |
-| `text` | string | No | Text to display, for `text` |
-| `x2` | number | No | End X position, for `line` |
-| `y2` | number | No | End Y position, for `line` |
-| `color` | number[] | No | RGBA color array, e.g. `[1,0,0,0.8]`; default yellow |
-| `tag` | string | No | Tag for grouped clearing |
-| `duration` | number | No | Seconds before auto-removal. `0` = single frame, omitted = persistent |
-| `lineWidth` | number | No | Line width in pixels (default: 4) |
-| `fontSize` | number | No | Font size for text (default: 14) |
+**Input:** None
 
 **Response:**
 
 ```json
-{"ok":true,"result":{"id":1,"type":"rect","tag":"selection"}}
+{"ok":true,"result":{"open":false,"frozen":false,"selected":[8],"marks":{"boss":"8-12"},"notes":{},"entityCount":412,
+  "mouse":{"screenX":100,"screenY":80,"worldX":52,"worldY":40},"camera":{"x":160,"y":120,"zoom":1}}}
 ```
 
-## clear_debug_draw
+## Debugger command tools (debug_*)
 
-Clear debug draw commands. With no arguments, clears all commands. Specify `tag` or `id` to clear selectively.
+Every in-game debugger command is declared once, in a schema-based registry shared by the command line and the MCP
+server. The registry is projected as `debug_*` tools: each command (and each subcommand verb) becomes one tool whose
+JSON input schema is generated from the command's argument schema, so `tools/list` always matches what the operator
+can type and validation is identical on both surfaces. These tools appear in the listing only when the debug plugin
+is installed.
+
+The built-in projected families are summarized below. Games may add more at
+runtime; inspect `tools/list` for the exact set and generated input schemas.
+
+- Selection and annotation: `debug_select` (with a `replace` flag to swap instead of adding), `debug_clear`,
+  `debug_mark` (plus `_list` / `_clear`), `debug_goto`, `debug_note`, `debug_query` (with `invert` to de-select the
+  matches from the selection), `debug_ids` (entity id labels).
+- Entity editing: `debug_set` (one component, Lua-table `value` string), `debug_remove` (components off a target),
+  `debug_spawn` (bundle and/or components with Lua-table values), `debug_despawn`. Targets are an entity `id`, a
+  mark `name`, or the literal `@selection`.
+- Drawing: `debug_draw_rect` / `debug_draw_circle` / `debug_draw_line` / `debug_draw_text` (world-space, optional
+  `entity` pin and wall-clock `seconds` expiry) and `debug_draw_clear` (by `id` or `tag`, or everything).
+- Engine introspection: `debug_archetypes_list` / `_info` / `_select`, `debug_components_list` / `_info`,
+  `debug_states_info` / `_push` / `_pop`, `debug_physics_info` / `_debug` / `_raycast` / `_query` (`_debug`
+  installs the collision-shape drawer on first use; the probes draw annotations and select their hits),
+  `debug_layers_list` / `_info` / `_all` / `_toggle` / `_solo` / `_unlit`, `debug_controllers_list` / `_info` / `_rumble`,
+  `debug_materials_list` / `_info` (info returns the material's GLSL), `debug_sprites_info`,
+  `debug_assets_list` / `_info` / `_reload` (reload re-reads a cached asset from disk in place), and
+  `debug_audio_info` / `_stop` / `_mute`.
+- World control: `debug_grid` (world-space grid with optional `size`, `offsetX`, and `offsetY`; tile-chunk matched by default), `debug_map` / `debug_map_info` (tilemap details and per-layer tiles at a world point, with grid-coordinate fallback), and `debug_bounds`
+  (size outlines), the `debug_light_*` verbs (`info`, `color`, `toggle` for lighting, `shadows`, `bloom`),
+  the `debug_camera_*` verbs (`info`, `move`, `timescale`, `toggle` for named cameras), and the
+  `debug_systems_*` verbs (`list`, `stop`, `start`, `toggle`, `info`).
+- Session: `debug_agent_info` (MCP URL, tool count, save dir), `debug_agent_skills` (lists the agent skill docs
+  in a tecs source checkout; a `name` copies that SKILL.md path to the host clipboard), and `debug_agent_connect`
+  (copies the MCP client config JSON to the host clipboard).
+- Artifacts: every artifact family also has a `_path` verb that copies the file's absolute path to the host
+  clipboard. `debug_screenshot` (plus `_list` / `_clear` / `_open` / `_path` / `_info`; `panel` keeps the debugger
+  visible and `delay` defers the capture), the `debug_snapshot_*` verbs
+  (`save`, `load`, `open`, `info`, `list`, `clear`), the `debug_profile_*` verbs (`list`, `clear`, `info` for a
+  regenerated summary, `open` to launch speedscope with the capture path in the clipboard), `debug_history` (plus
+  `_clear`), the `debug_rewind_*` verbs (`start`, `stop`, `pause`, `resume`, `list`, `info`, `load`, `keep`,
+  `clear`: a rolling snapshot ring; `load` rewinds the live world and pauses capture until resumed; capture
+  holds while the freeze controller is held), `debug_diff` (structural snapshot diff; refs are snapshot
+  number/name/latest, `rewind:<selector>`, or current; `limit = 0` returns the complete per-component summary alone,
+  the intended first call before filtering with `component`/`ignore`/`entity`) with `debug_diff_get` (RFC 6901
+  pointer into the last or a saved diff) and its `_list` / `_open` / `_path` / `_clear` artifact verbs over the
+  JSON file each run writes, and the `debug_record_*` verbs (`start`, `stop`, `cancel`, `status`, `info`, `list`, `open`). `debug_record_start` takes
+  `seconds`, `name`, `fps`, `scale`, `countdown`, `stopOnDebugOpen`, and a `debug` flag that keeps the debugger
+  visible and the game running during the capture. Host recording requires `ffmpeg` on PATH and a POSIX host
+  (macOS or Linux).
+
+Commands with a purpose-built MCP tool are not projected; use `step`, `pause`/`resume`,
+`profiler_start`/`profiler_stop`, `get_entity`, and `quit` instead of the debugger's `step`, `profile`, `info`,
+and `quit`.
+
+Games can extend the surface: a command registered with `require("tecs2d.debug.commands").register(world, cmd)`
+appears here as `debug_<name>` with a generated schema, exactly like the builtins. See
+[Custom debugger commands](../custom-debug-commands) for the complete registration API and examples.
+
+Arguments that share one positional slot on the command line (an entity id or a mark name) become separate optional
+JSON parameters with a "provide exactly one" constraint. For example `debug_select`:
+
+```json
+{"name":"debug_select","arguments":{"id":42}}
+{"name":"debug_select","arguments":{"name":"boss"}}
+```
+
+Results carry the command's structured data plus its human-readable `message`:
+
+```json
+{"ok":true,"result":{"selected":3,"added":[42],"message":"selected 1"}}
+```
+
+## get_logs
+
+Read recent engine log lines captured from `tecs.utils.logging` (a ring of the last 500). Filter by minimum level or
+by substring (matched against the message and the logger name); lines return newest last. Every captured line carries
+a monotonic `seq`, and `result.latest` is the newest captured seq: pass it back as `after` for cheap incremental
+polling. Pass `clear: true` to empty the buffer instead of reading.
+
+The debugger's operator-action feed rides this channel: every operator action (selection changes, marks, notes,
+edits, spawns, artifact writes, panel open/close) logs one `kind key=value ...` line under the
+`tecs2d.debug.events` logger, so "watch what the operator does" is
+`get_logs {after = <last seq>, contains = "debug.events"}`.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `tag` | string | No | Clear all commands with this tag |
-| `id` | number | No | Clear a specific command by ID |
+| `level` | string | No | Minimum severity: `DEBUG`, `INFO`, `WARN`, or `ERROR` |
+| `contains` | string | No | Only lines whose message or logger contains this text |
+| `after` | number | No | Only lines with `seq` greater than this (cursor; default 0) |
+| `limit` | number | No | Max lines to return (default 50) |
+| `clear` | boolean | No | Clear the captured buffer |
 
 **Response:**
 
 ```json
-{"ok":true,"result":{"cleared":3,"tag":"selection"}}
+{"ok":true,"result":{"returned":1,"matched":1,"captured":213,"dropped":0,"latest":213,
+  "logs":[{"seq":213,"time":"2026-07-10 17:20:11","logger":"tecs2d.debug.events","level":"INFO","message":"selection clicked=42 selected=2"}]}}
+```
+
+## get_component_schema
+
+Get a component's field names and types plus default values, for constructing `patch_entities`, `spawn`, and
+`debug_set` payloads without guessing. FFI components report exact C types from the storage fingerprint; table
+components report Lua types derived from a default-constructed instance.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `name` | string | Yes | Component name |
+
+**Response:**
+
+```json
+{"ok":true,"result":{"name":"Transform","id":3,"kind":"ffi","serializable":true,
+  "fields":[{"name":"x","type":"float"},{"name":"y","type":"float"},{"name":"layer","type":"int32_t"}],
+  "defaults":{"x":0,"y":0,"z":0,"layer":1,"rotation":0,"scaleX":1,"scaleY":1}}}
 ```
 
 ## profiler_start

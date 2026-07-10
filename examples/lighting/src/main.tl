@@ -26,7 +26,6 @@ local tecs2d <const> = require("tecs2d")
 local gfx <const> = require("tecs2d.gfx")
 local ui <const> = require("tecs2d.ui")
 local mcp <const> = require("tecs2d.mcp")
-local stats <const> = require("tecs2d.stats")
 local floor <const> = require("floor")
 
 local Text <const> = gfx.Text
@@ -194,7 +193,7 @@ local function lightingPlugin(world: tecs.World)
     local pipeline = world.resources[gfx.PIPELINE] as gfx.Pipeline
 
     -- Add plugins
-    world:addPlugin(stats.newStatsPlugin())
+    world:addPlugin(require("tecs2d.debug").new())
     world:addPlugin(mcp.new())
 
     local initialIntensity = 3.0

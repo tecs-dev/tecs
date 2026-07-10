@@ -7,7 +7,6 @@ local gfx = require("tecs2d.gfx")
 local mcp <const> = require("tecs2d.mcp")
 
 local physics = require("tecs2d.physics")
-local stats = require("tecs2d.stats")
 local input <const> = require("tecs2d.input")
 
 local common = require("scenes.common")
@@ -93,7 +92,7 @@ local function box2dExamplePlugin(w: tecs.World)
     world:addPlugin(mcp.new())
 
     -- Add stats display
-    world:addPlugin(stats.newStatsPlugin())
+    world:addPlugin(require("tecs2d.debug").new())
 
     -- Add physics debug renderer (toggle with F2)
     world:addPlugin(gfx.physicsDebug.new())

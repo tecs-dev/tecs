@@ -8,8 +8,6 @@ local tecs <const> = require("tecs")
 local tecs2d <const> = require("tecs2d")
 local gfx <const> = require("tecs2d.gfx")
 local mcp <const> = require("tecs2d.mcp")
-local stats <const> = require("tecs2d.stats")
-
 local lg <const> = love.graphics
 local sin <const> = math.sin
 local cos <const> = math.cos
@@ -70,7 +68,7 @@ local function loveInteropPlugin(world: tecs.World)
     world:addPlugin(mcp.new())
 
     -- Add stats plugin (F1 to toggle)
-    world:addPlugin(stats.newStatsPlugin())
+    world:addPlugin(require("tecs2d.debug").new())
 
     local pipeline = world.resources[gfx.PIPELINE] as gfx.Pipeline
 

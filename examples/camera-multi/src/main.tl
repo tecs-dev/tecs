@@ -8,7 +8,6 @@ local tecs2d <const> = require("tecs2d")
 local gfx <const> = require("tecs2d.gfx")
 local input <const> = require("tecs2d.input")
 local mcp <const> = require("tecs2d.mcp")
-local stats <const> = require("tecs2d.stats")
 local floor <const> = require("floor")
 local SpriteSheet <const> = gfx.SpriteSheet
 
@@ -57,7 +56,7 @@ tecs.newComponent({
 })
 
 local function multiCamPlugin(world: tecs.World)
-    world:addPlugin(stats.newStatsPlugin())
+    world:addPlugin(require("tecs2d.debug").new())
     world:addPlugin(mcp.new())
 
     local pipeline = world.resources[gfx.PIPELINE] as gfx.Pipeline

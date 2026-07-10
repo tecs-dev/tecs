@@ -3,6 +3,8 @@
 Tecs provides a GPU-accelerated 2.5D lighting system with dynamic shadows. The system supports point lights, spotlights,
 and height-based shadow occlusion.
 
+![Lighting demo](/images/lighting.png)
+
 ## Quick Start
 
 ```teal
@@ -43,6 +45,10 @@ gfx.Light.new({
     direction = 0,
     coneAngle = 0,
     innerConeAngle = 0,
+    cookie = 0,
+    cookieRotation = 0,
+    cookieScale = 1.0,
+    cookieAlignToCone = false,
 })
 ```
 
@@ -55,28 +61,35 @@ gfx.Light(200, 1.0, 0.3, 1.0, 0.9, 0.8)
 
 ### Properties
 
-| Property         | Default   | Description                                                                        |
-| ---------------- | --------- | ---------------------------------------------------------------------------------- |
-| `radius`         | 200       | Falloff distance in world units. Pixels beyond this receive no light               |
-| `intensity`      | 1.0       | Brightness multiplier. Values above 1.0 create overbright lighting                 |
-| `height`         | 0.15      | Height above the 2D plane (0-1). See [Light Height](#light-height-and-25d-shading) |
-| `r`, `g`, `b`    | 1.0       | Light color (0-1 per channel)                                                      |
-| `penumbra`       | 0.5       | Shadow edge softness (0-1). 0 = hard shadows, 1 = maximum softness                 |
-| `direction`      | 0         | Spotlight angle in radians (0 = right, pi/2 = down). Ignored for point lights      |
-| `coneAngle`      | 0         | Spotlight outer cone half-angle in radians. 0 = point light                        |
-| `innerConeAngle` | 0         | Spotlight inner cone half-angle. Full intensity inside, fades to outer cone        |
+| Property             | Default | Description                                                                        |
+| -------------------- | ------- | ---------------------------------------------------------------------------------- |
+| `radius`             | 200     | Falloff distance in world units. Pixels beyond this receive no light               |
+| `intensity`          | 1.0     | Brightness multiplier. Values above 1.0 create overbright lighting                 |
+| `height`             | 0.15    | Height above the 2D plane (0-1). See [Light Height](#light-height-and-25d-shading) |
+| `r`, `g`, `b`        | 1.0     | Light color (0-1 per channel)                                                      |
+| `penumbra`           | 0.5     | Shadow edge softness (0-1). 0 = hard shadows, 1 = maximum softness                 |
+| `direction`          | 0       | Spotlight angle in radians (0 = right, pi/2 = down). Ignored for point lights      |
+| `coneAngle`          | 0       | Spotlight outer cone half-angle in radians. 0 = point light                        |
+| `innerConeAngle`     | 0       | Spotlight inner cone half-angle. Full intensity inside, fades to outer cone        |
+| `cookie`             | 0       | Cookie ID or registered cookie name. 0 disables cookie projection                  |
+| `cookieRotation`     | 0       | Cookie rotation in radians                                                         |
+| `cookieScale`        | 1.0     | Cookie projection scale. 1.0 fills the light radius                                |
+| `cookieAlignToCone`  | false   | Add spotlight `direction` to `cookieRotation`                                      |
 
 ### Modifying Light Properties
 
 After spawning, you can modify light properties directly:
 
 ```teal
-local light = world:get(entity, gfx.Light)
-light.radius = 300
-light.intensity = 1.5
-light.height = 0.5
-light.r, light.g, light.b = 1.0, 0.8, 0.6  -- warm color
-light.penumbra = 0.5  -- harder shadow edges
+local light = world:getMut(entity, gfx.Light)
+if light then
+    light.radius = 300
+    light.intensity = 1.5
+    light.height = 0.5
+    light.r, light.g, light.b = 1.0, 0.8, 0.6  -- warm color
+    light.penumbra = 0.5  -- harder shadow edges
+    light.cookie = "window"
+end
 ```
 
 ## Point Lights vs Spotlights
@@ -121,6 +134,73 @@ world:spawn(
 
 The light intensity falls off smoothly between `innerConeAngle` and `coneAngle`.
 
+## Light Cookies
+
+Light cookies, also called gobos, project a texture through a light. Use them for shaped beams, window blinds,
+stained glass, animated light patterns, and other textured illumination.
+
+![Light cookies demo](/images/cookies.png)
+
+Register a cookie texture on the render pipeline, then reference it from a light by name or by the returned ID:
+
+```teal
+local cookieSheet = gfx.SpriteSheet.fromTextureFile("assets/window-cookie.png")
+local cookieId = pipeline:registerCookie("window", cookieSheet)
+
+world:spawn(
+    Transform(x, y),
+    gfx.Light.new({
+        radius = 320,
+        intensity = 1.4,
+        height = 0.25,
+        cookie = "window",        -- or cookieId
+        cookieScale = 1.0,
+        cookieRotation = 0,
+    })
+)
+```
+
+Cookie alpha controls how much light passes through the projection. Cookie RGB tints the projected light where alpha is
+present, so grayscale cookies act as masks and colored cookies act like stained glass.
+
+For spotlights, set `cookieAlignToCone = true` to rotate the cookie with the spotlight direction:
+
+```teal
+world:spawn(
+    Transform(x, y),
+    gfx.Light.new({
+        radius = 300,
+        direction = math.pi / 2,
+        coneAngle = math.pi / 6,
+        cookie = cookieId,
+        cookieAlignToCone = true,
+    })
+)
+```
+
+Use `getCookie` and `getCookieName` when you need to store IDs or display the active cookie:
+
+```teal
+local cookieId = pipeline:getCookie("window")
+local cookieName = pipeline:getCookieName(cookieId)
+```
+
+Animated sprite sheets can be registered with an animation tag. The lighting pass samples the current frame using the
+pipeline game time:
+
+```teal
+local runnerSheet = gfx.SpriteSheet.fromFile("assets/runner.png")
+local runnerCookie = pipeline:registerCookie("runner", runnerSheet, "run")
+
+world:spawn(
+    Transform(x, y),
+    gfx.Light.new({
+        radius = 260,
+        cookie = runnerCookie,
+    })
+)
+```
+
 ## Light Height and 2.5D Shading
 
 The `height` property (0.0 - 1.0, normalized) controls how lights interact with surfaces:
@@ -139,6 +219,17 @@ gfx.Light.new({ radius = 500, intensity = 0.8, height = 0.8, r = 1.0, g = 1.0, b
 
 Height also affects normal-based shading. Low lights create more pronounced directional shading on surfaces with
 normal maps.
+
+## Normal Maps
+
+Sprites and tiles with normal maps (`_n.png` suffix) receive per-pixel directional lighting. Normal maps make flat 2D
+art respond to light direction as if it had small surface details such as dents, bevels, folds, or stone texture.
+
+Normal maps are loaded automatically when a `sprite_n.png` file exists alongside the main sprite. For tilechunks, set
+the `normalMap` property directly.
+
+If no normal map is present, the renderer uses a flat upward normal. The surface still receives light, but it will not
+show per-pixel bumps or directional surface detail.
 
 ## Specular Highlights
 
@@ -161,6 +252,40 @@ Sprites and tiles with specular maps (`_s.png` suffix) display shiny highlights 
 Specular maps are loaded automatically when a `sprite_s.png` file exists alongside the main sprite. For tilechunks,
 set the `specularMap` property directly.
 
+## Emission and Bloom
+
+Sprites and tiles with emission maps (`_e.png` suffix) glow independently of direct lighting. Emission is added after
+ambient and dynamic lights, so emissive pixels stay visible in darkness and are not dimmed by drop shadows.
+
+Emission maps are loaded automatically when a `sprite_e.png` file exists alongside the main sprite. For tilechunks, set
+the `emissionMap` property directly.
+
+Bloom is an optional post-process that spreads bright emission beyond the source silhouette:
+
+```teal
+love.run = tecs2d.run({
+    render = {
+        bloom = {
+            enabled = true,
+            intensity = 0.5,
+            radius = 1.0,
+            threshold = 0.0,
+        },
+    },
+})
+
+-- Runtime updates are partial.
+pipeline:setBloom({ enabled = true, intensity = 0.8 })
+local bloom = pipeline:getBloom()
+```
+
+| Bloom field | Default | Description                                                |
+| ----------- | ------- | ---------------------------------------------------------- |
+| `enabled`   | false   | Enable or disable bloom                                    |
+| `intensity` | 0.5     | Bloom strength. Higher values create a brighter halo       |
+| `radius`    | 1.0     | Tent filter radius. Higher values create a wider glow      |
+| `threshold` | 0.0     | Brightness threshold. 0.0 allows all emission to bloom     |
+
 ::: tip Advanced Lighting Control
 For per-entity control over normals, specular, and emission in the G-buffer, use [Materials](./materials). Materials let
 you write custom fragment shaders that output to all G-buffer targets while staying fully GPU-batched.
@@ -169,6 +294,8 @@ you write custom fragment shaders that output to all G-buffer targets while stay
 ## Shadows and Occluders
 
 Entities with the `Occluder` component cast shadows. Without this component, entities are lit but don't block light.
+Raymarched occluder shadows are supported by sprites, circles, rectangles, and tile chunks. Meshes, ellipses, arcs, and
+lines render normally but do not cast raymarched occluder shadows.
 
 ### Basic Shadow Casting
 
@@ -321,13 +448,13 @@ world:spawn(
 | Property   | Default   | Description                                                 |
 | ---------- | --------- | ----------------------------------------------------------- |
 | `height`   | 0.5       | Entity height (0-1). Taller entities cast longer shadows    |
-| `opacity`  | 0.3       | Shadow darkness (0-1). Higher values produce darker shadows |
+| `opacity`  | 0.4       | Shadow darkness (0-1). Higher values produce darker shadows |
 
 You can use either table or positional syntax:
 
 ```teal
-gfx.DropShadow()                  -- defaults (height=0.5, opacity=0.3)
-gfx.DropShadow(0.8)               -- height=0.8, opacity=0.3
+gfx.DropShadow()                  -- defaults (height=0.5, opacity=0.4)
+gfx.DropShadow(0.8)               -- height=0.8, opacity=0.4
 gfx.DropShadow(0.5, 0.4)          -- height=0.5, opacity=0.4
 gfx.DropShadow({ height = 0.8 })  -- table style
 ```
@@ -382,7 +509,7 @@ love.run = tecs2d.run({
 
 ## Ambient Light
 
-Set the base illumination for unlit areas:
+Set the base illumination used before dynamic lights are added:
 
 ```teal
 -- Dark ambient for dramatic lighting
@@ -414,14 +541,31 @@ love.run = tecs2d.run({
         virtualHeight = 360,
         lightingMode = "deferred",  -- "deferred" (default) or "none"
         shadowsEnabled = true,      -- enable shadow casting (default: true)
+        ambientLight = {0.08, 0.08, 0.1},
+        shadowMaskScale = 1.0,
+        shadowSteps = 24,
+        shadowMargin = 200,
+        dropShadowScale = 0.5,
+        bloom = {
+            enabled = true,
+            intensity = 0.5,
+            radius = 1.0,
+            threshold = 0.0,
+        },
     },
 })
 ```
 
-| Option           | Values                 | Description                                                     |
-| ---------------- | ---------------------- | --------------------------------------------------------------- |
-| `lightingMode`   | `"deferred"`, `"none"` | Deferred enables full lighting; none renders at full brightness |
-| `shadowsEnabled` | `true`, `false`        | Whether occluders cast shadows                                  |
+| Option            | Default        | Description                                                     |
+| ----------------- | -------------- | --------------------------------------------------------------- |
+| `lightingMode`    | `"deferred"`   | `"deferred"` enables full lighting; `"none"` renders fullbright |
+| `shadowsEnabled`  | true           | Whether occluders cast raymarched shadows                       |
+| `ambientLight`    | `{1, 1, 1}`    | Base illumination before dynamic lights                         |
+| `shadowMaskScale` | 1.0            | Shadow mask resolution scale                                    |
+| `shadowSteps`     | 24             | Raymarch steps for shadow calculation                           |
+| `shadowMargin`    | 200            | Extra culling margin for off-screen lights and shadow continuity |
+| `dropShadowScale` | 0.5            | Drop shadow AO canvas resolution scale                          |
+| `bloom`           | disabled       | Bloom post-process config. See [Emission and Bloom](#emission-and-bloom) |
 
 ### Enabling/Disabling Lighting
 
@@ -496,8 +640,8 @@ self-shadow acne while still allowing cross-occluder shadows: ball A's shadow ca
 
 ## Querying Light at a Position
 
-You can query how much light hits a specific world position, including shadow occlusion. This is useful for stealth
-mechanics, AI awareness, or any gameplay that depends on whether a position is lit or in shadow.
+You can query how much light hits a specific world position, including shadow occlusion. This is useful for tooling,
+debug probes, and infrequent gameplay checks such as sampling whether a player has entered a dark area.
 
 ```teal
 -- Returns 0-1 luminance (0 = full darkness, 1 = full brightness)
@@ -507,6 +651,9 @@ if brightness < 0.1 then
     -- Player is hidden in shadow
 end
 ```
+
+`queryLightAt` performs a GPU readback, which can stall the render pipeline. Avoid calling it for many positions every
+frame; cache results or sample at a lower rate for gameplay systems.
 
 The first call lazily activates an intermediate render canvas. There is zero performance cost until `queryLightAt` is
 first called; after that, one extra full-screen blit per frame is added. The first frame after activation returns 0
@@ -538,7 +685,7 @@ local config = {
 
     -- Number of raymarch steps (higher = more accurate, lower = faster)
     -- Doubled automatically in pixel-perfect mode
-    shadowSteps = 32,
+    shadowSteps = 24,
 
     -- Expansion of the culling frustum
     -- Increase if shadows "pop in" at the edge of the screen
@@ -547,4 +694,3 @@ local config = {
 ```
 
 Lower `shadowMaskScale` reduces VRAM usage and improves performance at the cost of shadow precision.
-

@@ -3,8 +3,6 @@ local tecs2d <const> = require("tecs2d")
 local gfx <const> = require("tecs2d.gfx")
 local SpriteSheet <const> = gfx.SpriteSheet
 local mcp <const> = require("tecs2d.mcp")
-local stats <const> = require("tecs2d.stats")
-
 local Transform <const> = tecs.builtins.Transform
 local random <const> = love.math.random
 local min <const> = math.min
@@ -62,7 +60,7 @@ local function ballBenchPlugin(world: tecs.World)
     -- Position camera so (0,0) is at top-left
     pipeline:getCamera():setPosition(320, 240)
 
-    world:addPlugin(stats.newStatsPlugin())
+    world:addPlugin(require("tecs2d.debug").new())
 
     -- Create ball sprite sheet once and reuse for all sprites
     local ballTexture = createBallTexture()

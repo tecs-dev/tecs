@@ -50,7 +50,7 @@ local function demoPlugin(world: tecs.World)
     -- Add physics debug rendering (neon green)
     world:addPlugin(gfx.physicsDebug.new({ r = 0.2, g = 1.0, b = 0.2, a = 0.9 }))
 
-    world:addPlugin(require("tecs2d.stats").newStatsPlugin())
+    world:addPlugin(require("tecs2d.debug").new())
     world:addPlugin(mcp.new())
 
     local playerId: integer

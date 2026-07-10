@@ -2,8 +2,6 @@ local tecs <const> = require("tecs")
 local tecs2d <const> = require("tecs2d")
 local gfx <const> = require("tecs2d.gfx")
 local mcp <const> = require("tecs2d.mcp")
-local stats <const> = require("tecs2d.stats")
-
 local lg <const> = love.graphics
 
 local Text <const> = gfx.Text
@@ -63,7 +61,7 @@ local ParticleEmitter <const> = gfx.ParticleEmitter
 local function particlesPlugin(world: tecs.World)
     -- Add plugins
     world:addPlugin(mcp.new())
-    world:addPlugin(stats.newStatsPlugin())
+    world:addPlugin(require("tecs2d.debug").new())
 
     local pipeline = world.resources[gfx.PIPELINE] as gfx.Pipeline
 

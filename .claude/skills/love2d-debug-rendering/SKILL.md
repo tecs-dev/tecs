@@ -63,9 +63,10 @@ where they diverge is the bug.
    probes stay live. `set_time_scale` slows animations for observation.
 6. **`toggle_system`** — bisect which system produces an artifact by
    disabling systems (get names from `get_systems`).
-7. **`debug_draw`** — overlay expected geometry (rect/circle/text/line, world
-   coordinates, renders on top even while paused). Draw where the entity
-   *should* be and compare with where it renders. `clear_debug_draw` cleans up.
+7. **`debug_draw_rect` / `debug_draw_circle` / `debug_draw_line` / `debug_draw_text`** —
+   overlay expected geometry (world coordinates; pass `entity` to pin to a moving
+   entity). Draw where something *should* be and compare with where it renders.
+   `debug_draw_clear` (by `tag` or `id`, or everything) cleans up.
 8. **`profiler_start` / `profiler_stop`** — per-system timings when the
    symptom is cost rather than correctness. For deeper perf work, switch to
    the `love2d-bench` skill.

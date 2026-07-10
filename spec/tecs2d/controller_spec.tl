@@ -107,7 +107,7 @@ describe("tecs2d.controller", function()
         package.loaded["tecs2d.input"] = nil
         package.loaded["tecs2d.internal.handlers"] = nil
         package.loaded["tecs2d.events"] = nil
-        package.loaded["tecs2d.stats"] = nil
+        package.loaded["tecs2d.debug"] = nil
 
         -- Set up Love2D mock
         local globalEnv = _G as {string:any}

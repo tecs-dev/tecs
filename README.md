@@ -20,7 +20,8 @@ Full documentation is available at https://tecs.dev.
 * **State machines**: State management with enter, exit, and transition events.
 * **Plugin system**: Share and reuse game mechanics across projects.
 * **Events**: Decouple systems with type-safe events. React to spawn, despawn, state changes, and custom events.
-* **Build with AI**: Builtin MCP server lets AI assistants query, spawn, and control your game.
+* **Build with AI**: A runtime debugger and built-in MCP server let humans and agents inspect, freeze, rewind, diff,
+  edit, replay, and verify a running game through one shared command surface.
 * **LÖVE2D integration**: Integrates with LÖVE2D game loop, input handling, physics, audio, and events.
 * **Batteries included**: Pixel-perfect camera, rebindable controllers, async asset loading, component bundles,
   and more.

@@ -6,8 +6,6 @@ local tecs <const> = require("tecs")
 local tecs2d <const> = require("tecs2d")
 local gfx <const> = require("tecs2d.gfx")
 local mcp <const> = require("tecs2d.mcp")
-local stats <const> = require("tecs2d.stats")
-
 local Transform <const> = tecs.builtins.Transform
 local Mesh <const> = gfx.Mesh
 local MeshDefinition <const> = gfx.MeshDefinition
@@ -112,7 +110,7 @@ local function meshDemoPlugin(world: tecs.World)
 
     -- Add plugins
     world:addPlugin(mcp.new())
-    world:addPlugin(stats.newStatsPlugin())
+    world:addPlugin(require("tecs2d.debug").new())
 
     local goldColor <const> = Color(0.95, 0.65, 0.25, 1)
 

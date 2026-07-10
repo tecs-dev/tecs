@@ -37,6 +37,13 @@ end
 local record threaded
 
     --- An asset manager used to asynchronously load assets in threads.
+    record AssetLogEntry
+        action: string
+        path: string
+        -- "loading" | "loaded" | "failed: <err>" | "custom"
+        status: string
+    end
+
     record AssetManager is types.AssetManager
         _root: string
         _dispatcher: tecs.MessageBus
@@ -54,6 +61,11 @@ local record threaded
         _hasEmittedInitialLoad: boolean
         _hasCalledUpdate: boolean
         _getNextId: function(self): integer
+        -- Strong, append-only record of every load keyed like _cache, for
+        -- introspection (the debugger's `assets` command). _cache is
+        -- weak-valued, so entries there vanish once nothing holds the
+        -- handle; this log is what "everything this game has loaded" means.
+        _assetLog: {string: AssetLogEntry}
     end
 
     --- Event emitted when the initial load completes.
@@ -319,6 +331,7 @@ function AssetManager.new(root: string): AssetManager
         _loaderRegistry = setmetatable({}, {__mode = "k"}),
         _hasEmittedInitialLoad = false,
         _hasCalledUpdate = false,
+        _assetLog = {},
     }
 
     -- Start worker threads
@@ -376,6 +389,7 @@ function AssetManager:load<T>(handler: types.AssetHandler<T>, path: string): Han
     if not cached then
         cached = loader(resolvedPath)
         self._cache[key] = cached as Handle<any>
+        self._assetLog[key] = {action = "(custom)", path = resolvedPath, status = "custom"}
     end
 
     return cached
@@ -407,6 +421,7 @@ local function createHandle<T>(self: AssetManager, args: {any}): Handle<T>
         local handle = handleResult as Handle<T>
         -- Add to the cache (weak table will allow GC when not referenced elsewhere)
         self._cache[cacheKey] = handle as Handle<any>
+        self._assetLog[cacheKey] = {action = action, path = path, status = "loading"}
         return handle
     end
 end
@@ -595,6 +610,11 @@ local function processHandle(self: threaded.AssetManager)
     -- failed attempt). createHandle inserts into the cache at creation.
     if err and handle._cacheKey then
         self._cache[handle._cacheKey] = nil
+    end
+    -- The log entry outlives the cache entry either way.
+    local logged = handle._cacheKey and self._assetLog[handle._cacheKey]
+    if logged then
+        logged.status = err and ("failed: " .. tostring(err)) or "loaded"
     end
 
     settleHandle(handle, result, err, "")

@@ -346,41 +346,34 @@ tools.list = {
         }
     },
     {
-        name = "debug_draw",
-        description = "Draw a debug overlay shape in world space. Renders on top of the game, works while paused. " ..
-            "Returns the command ID for later clearing." .. JSON_TEXT_RESPONSE,
+        name = "get_logs",
+        description = "Read recent engine log lines captured from tecs logging (ring of 500), including the " ..
+            "tecs2d.debug.events operator-action feed. Each line carries a monotonic seq; poll incrementally " ..
+            "with after=<last seen seq> (result.latest). Filter by minimum level or substring; newest last. " ..
+            "Pass clear=true to empty the buffer." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {
-                type = {type = "string", description = "Shape type: rect, circle, text, line"},
-                x = {type = "number", description = "X position in world coordinates"},
-                y = {type = "number", description = "Y position in world coordinates"},
-                w = {type = "number", description = "Width (rect only)"},
-                h = {type = "number", description = "Height (rect only)"},
-                radius = {type = "number", description = "Radius (circle only)"},
-                text = {type = "string", description = "Text to display (text only)"},
-                x2 = {type = "number", description = "End X position (line only)"},
-                y2 = {type = "number", description = "End Y position (line only)"},
-                color = {type = "array", description = "RGBA color array, e.g. [1,0,0,0.8] for red", items = {type = "number"}},
-                tag = {type = "string", description = "Optional tag for grouped clearing"},
-                duration = {type = "number", description = "Seconds before auto-removal (wall clock). 0 = single frame, omit = persistent"},
-                lineWidth = {type = "number", description = "Line width in pixels (default: 4)"},
-                fontSize = {type = "number", description = "Font size for text (default: 14)"}
+                level = {type = "string", description = "Minimum severity: DEBUG, INFO, WARN, or ERROR"},
+                contains = {type = "string", description = "Only lines whose message or logger contains this text"},
+                after = {type = "number", description = "Only lines with seq greater than this (cursor; default 0)"},
+                limit = {type = "number", description = "Max lines to return, newest last (default 50)"},
+                clear = {type = "boolean", description = "Clear the captured buffer instead of reading"}
             },
-            required = {"type"},
             additionalProperties = false
         }
     },
     {
-        name = "clear_debug_draw",
-        description = "Clear debug draw commands. No args = clear all. Specify tag or id to clear selectively." ..
+        name = "get_component_schema",
+        description = "Get a component's field names and types (exact C types for FFI components) " ..
+            "plus default values, for constructing patch_entities / spawn / debug_set payloads." ..
             JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {
-                tag = {type = "string", description = "Clear all commands with this tag"},
-                id = {type = "number", description = "Clear a specific command by ID"}
+                name = {type = "string", description = "Component name"}
             },
+            required = {"name"},
             additionalProperties = false
         }
     },
@@ -447,6 +440,14 @@ tools.list = {
             },
             additionalProperties = false
         }
+    },
+    {
+        name = "get_debug_context",
+        description = "Get the in-game debugger context: selection, mode, camera, and mouse " ..
+            "(screen and world). Drive it with the debug_* command tools " ..
+            "(debug_select, debug_mark, debug_record_start, ...). " ..
+            "Requires the debug plugin (require(\"tecs2d.debug\").new())." .. JSON_TEXT_RESPONSE,
+        inputSchema = EMPTY_SCHEMA
     }
 }
 

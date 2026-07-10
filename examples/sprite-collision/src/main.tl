@@ -8,7 +8,6 @@ local SpriteSheet <const> = gfx.SpriteSheet
 local mcp <const> = require("tecs2d.mcp")
 
 local physics = require("tecs2d.physics")
-local stats = require("tecs2d.stats")
 local input <const> = require("tecs2d.input")
 
 local lg = love.graphics
@@ -37,7 +36,7 @@ local function examplePlugin(w: tecs.World)
     w:addPlugin(mcp.new())
 
     -- Add stats display
-    w:addPlugin(stats.newStatsPlugin())
+    w:addPlugin(require("tecs2d.debug").new())
 
     -- Add physics debug renderer (toggle with F2)
     w:addPlugin(gfx.physicsDebug.new())

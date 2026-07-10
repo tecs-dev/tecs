@@ -103,6 +103,9 @@ local record love2d_mock
         getInfo: function(path: string): any
         write: function(path: string, contents: string): boolean, string
         remove: function(path: string): boolean, string
+        createDirectory: function(path: string): boolean
+        getDirectoryItems: function(path: string): {string}
+        getSaveDirectory: function(): string
         newFileData: function(contents: string, name: string): love.filesystem.FileData
     end
     filesystem: FilesystemModule
@@ -328,6 +331,15 @@ love.filesystem = {
     end,
     remove = function(_path: string): boolean, string
         return true, nil
+    end,
+    createDirectory = function(_path: string): boolean
+        return true
+    end,
+    getDirectoryItems = function(_path: string): {string}
+        return {}
+    end,
+    getSaveDirectory = function(): string
+        return "/mock-save"
     end,
     newFileData = function(contents: string, name: string): any
         return {

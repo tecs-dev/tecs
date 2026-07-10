@@ -3,8 +3,6 @@ local tecs2d <const> = require("tecs2d")
 local gfx <const> = require("tecs2d.gfx")
 local SpriteSheet <const> = gfx.SpriteSheet
 local mcp <const> = require("tecs2d.mcp")
-local stats <const> = require("tecs2d.stats")
-
 local min <const> = math.min
 local allPaused = false
 local Text <const> = gfx.Text
@@ -29,7 +27,7 @@ local function benchPlugin(world: tecs.World)
     local pipeline = world.resources[gfx.PIPELINE] as gfx.Pipeline
     local runnerSheet = SpriteSheet.fromFile("assets/running.png")
 
-    world:addPlugin(stats.newStatsPlugin())
+    world:addPlugin(require("tecs2d.debug").new())
 
     -- Spawn N runners in a grid pattern using bulk spawn
     -- Note: Each entity gets its own Sprite via Animation component's onAdd hook

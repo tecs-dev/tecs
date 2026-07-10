@@ -6,7 +6,6 @@ local tecs2d <const> = require("tecs2d")
 local gfx <const> = require("tecs2d.gfx")
 local input <const> = require("tecs2d.input")
 local mcp <const> = require("tecs2d.mcp")
-local stats <const> = require("tecs2d.stats")
 local tween <const> = require("tecs2d.tween")
 
 local Transform <const> = tecs.builtins.Transform
@@ -44,7 +43,7 @@ local EASINGS: {EasingEntry} = {
 
 local function tweenDemoPlugin(world: tecs.World)
     world:addPlugin(mcp.new())
-    world:addPlugin(stats.newStatsPlugin())
+    world:addPlugin(require("tecs2d.debug").new())
 
     -- Background
     world:spawn(

@@ -91,6 +91,38 @@ describe("drop shadow: AO darkens ground beside the caster", function()
             "no candidate ground pixel darkened after spawning a DropShadow sprite")
     end)
 
+    it("disabling pipeline shadows also disables drop-shadow AO", function()
+        -- The debugger's `light shadows off` flips this same field; drop
+        -- shadows must go dark with the raymarch shadows, not outlive them.
+        fixture.runLua(app, [[
+            local pipelinekey = require("tecs2d.gfx.internal.pipelinekey")
+            world.resources[pipelinekey.PIPELINE].shadowsEnabled = false
+            return true
+        ]])
+        local cleared = fixture.eventually(fixture.callTimeout, function(): boolean
+            local levels = brightnessLevels(app)
+            for i = 1, #levels do
+                if levels[i] < litLevels[i] * 0.9 then return nil end
+            end
+            return true
+        end)
+        luassert.is_true(cleared == true, "drop shadow survived shadowsEnabled = false")
+
+        fixture.runLua(app, [[
+            local pipelinekey = require("tecs2d.gfx.internal.pipelinekey")
+            world.resources[pipelinekey.PIPELINE].shadowsEnabled = true
+            return true
+        ]])
+        local back = fixture.eventually(fixture.callTimeout, function(): boolean
+            local levels = brightnessLevels(app)
+            for i = 1, #levels do
+                if levels[i] < litLevels[i] * 0.85 then return true end
+            end
+            return nil
+        end)
+        luassert.is_true(back == true, "drop shadow did not return after re-enabling shadows")
+    end)
+
     it("removing DropShadow restores the ground", function()
         fixture.runLua(app, [[
             local gfx = require("tecs2d.gfx")
