@@ -113,6 +113,16 @@ tecs/
   `debug_snapshot_save`, `debug_record_start`, ...). They share the operator's selection, marks,
   and notes, so use them to annotate or highlight entities the user can see in-game
   (`debug_select` takes `replace = true` to swap the selection instead of adding).
+- Call `debug_capabilities` once after connecting to learn which plugins and tool families the
+  session supports, and `debug_describe {command = "<name>"}` for a command's full contract.
+  Tool results carry the payload as MCP `structuredContent`, and every tool declares safety
+  annotations (read-only, destructive, idempotent).
+- Time-travel debugging: `debug_rewind_start` keeps a rolling snapshot ring while the game runs;
+  after something goes wrong, `debug_diff {from = "rewind:10s", ignore = "Transform", limit = 0}`
+  shows a per-component summary of what changed, `debug_diff_get` dereferences a JSON Pointer
+  into the result, `debug_rewind_load` restores an entry, and the `step` tool replays frame by
+  frame. `debug_map_info` reads tiles at a world point; `debug_set` takes the component value as
+  a JSON object.
 - `get_logs` returns captured engine log lines with a seq cursor (`after`); the operator-action
   feed (selection, marks, notes, edits, artifacts) logs under `tecs2d.debug.events`, so poll it
   with `get_logs {after = <seq>, contains = "debug.events"}`. `get_component_schema` gives field
