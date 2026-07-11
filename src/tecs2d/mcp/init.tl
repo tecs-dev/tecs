@@ -142,7 +142,14 @@ local function sendError(id: number | nil, code: number, message: string)
 end
 
 local function sendToolJSON(id: number, payload: {string: any}, isError: boolean)
-    sendResponse(id, {content = {{type = "text", text = json.serialize(payload)}}, isError = isError})
+    -- The payload rides twice: serialized text for older clients, and the
+    -- same object as structuredContent for clients that consume typed
+    -- results directly.
+    sendResponse(id, {
+        content = {{type = "text", text = json.serialize(payload)}},
+        structuredContent = payload,
+        isError = isError,
+    })
 end
 
 local function sendToolOK(id: number, result: any, meta?: {string: any})

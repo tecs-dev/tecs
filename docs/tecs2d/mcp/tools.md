@@ -6,8 +6,9 @@ outline: deep
 
 The MCP server provides tools for AI assistants to inspect and control a running game.
 
-Except for `screenshot`, tool calls return an MCP `result` with one text content item. The text is a compact JSON
-envelope. Successful tool payloads use:
+Except for `screenshot`, tool calls return an MCP `result` with one text content item plus the same envelope as
+`structuredContent`, so typed clients consume the object directly while text-only clients parse the JSON. Successful
+tool payloads use:
 
 ```json
 {"ok":true,"result":{}}

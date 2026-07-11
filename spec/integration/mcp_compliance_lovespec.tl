@@ -10,6 +10,7 @@ local socket <const> = require("socket")
 local mcp_client <const> = require("spec.integration.harness.mcp_client")
 local love_process <const> = require("spec.integration.harness.love_process")
 local png_util <const> = require("spec.integration.harness.png_util")
+local json <const> = require("tecs.utils.json")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/compliance"
 local LOG_DIR <const> = "build/test_deps/love_test_logs"
@@ -145,6 +146,17 @@ describe("mcp compliance: boot and introspection", function()
         local values = runLua(app, "return 1 + 1, 'two'")
         luassert.are.equal("2", values[1])
         luassert.are.equal("two", values[2])
+    end)
+
+    it("tool results carry structuredContent matching the text envelope", function()
+        local response = app.client:rpc("tools/call", {name = "ping", arguments = {}})
+        local result = response.result as {string: any}
+        local sc = result.structuredContent as {string: any}
+        luassert.is_not_nil(sc, "structuredContent missing from the tool result")
+        luassert.is_true(sc.ok as boolean)
+        local content = result.content as {{string: any}}
+        local envelope = json.parse(content[1].text as string) as {string: any}
+        luassert.same(envelope, sc)
     end)
 
     it("sees the fixture world state", function()
