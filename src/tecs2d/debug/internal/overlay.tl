@@ -1123,14 +1123,15 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             lg.setColor(0.6549, 0.7529, 0.5020, 1)
             lg.rectangle("fill", 0, 0, sw, rowH)
             if cycling and #completions > 0 then
-                -- Section separators render as " | Name | " in an accent
-                -- color; commands render as before.
+                -- Section separators render as pills in the section's dark
+                -- shade with a white label; commands render as plain text.
                 local labels: {string} = {}
-                local isSection: {boolean} = {}
+                local sectionOf: {integer: string} = {}
                 for i = 1, #completions do
                     if completions[i]:sub(1, 1) == SECTION_MARK then
-                        labels[i] = "| " .. completions[i]:sub(2) .. " |"
-                        isSection[i] = true
+                        local section = completions[i]:sub(2)
+                        labels[i] = " " .. section .. " "
+                        sectionOf[i] = section
                     else
                         labels[i] = completions[i]
                     end
@@ -1152,8 +1153,13 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                         lg.setColor(0.1804, 0.2157, 0.2353, 1)
                         lg.rectangle("fill", x - 6, 0, cw + 12, rowH)
                         lg.setColor(0.8275, 0.7765, 0.6667, 1)
-                    elseif isSection[i] then
-                        lg.setColor(0.35, 0.42, 0.30, 1)
+                    elseif sectionOf[i] then
+                        -- Pill in the section's dark shade, white label.
+                        local accent = commands.SECTION_COLORS_BAR[sectionOf[i]]
+                            or {0.22, 0.27, 0.30}
+                        lg.setColor(accent[1], accent[2], accent[3], 1)
+                        lg.rectangle("fill", x - 6, 0, cw + 12, rowH)
+                        lg.setColor(1, 1, 1, 1)
                     else
                         lg.setColor(0.1804, 0.2157, 0.2353, 1)
                     end
@@ -1340,7 +1346,13 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                         else
                             local br, bg, bb = 0.8275, 0.7765, 0.6667  -- content (tan)
                             if line:sub(1, 1) ~= " " then
-                                br, bg, bb = 0.498, 0.733, 0.702       -- section (aqua)
+                                br, bg, bb = 0.498, 0.733, 0.702       -- heading (aqua)
+                                -- Command-section headings ("Edit:") take the
+                                -- section's accent color, matching the strip.
+                                local accent = commands.SECTION_COLORS[line:match("^(%w+):")]
+                                if accent then
+                                    br, bg, bb = accent[1], accent[2], accent[3]
+                                end
                             end
                             local cols = blk.rows[i]
                             -- Blue the first (name) column of an indented

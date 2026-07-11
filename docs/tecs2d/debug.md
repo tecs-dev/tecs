@@ -96,7 +96,9 @@ full usage block that pops up automatically once you have typed the bare command
 name, and is also available any time with `help <command>`.
 
 Commands are grouped into sections, mirrored by `help` and the Tab-completion
-strip (which separates sections with colored `| Section |` markers). The tables
+strip, which separates sections with `| Section |` markers; each section has
+its own accent color (shared with the section headings in `help`) so the
+transitions stand out while cycling. The tables
 below are a one-line summary per command; the [Command Reference](./debug-reference)
 is generated from the command registry and covers every command's full
 signature, arguments, examples, and MCP projection.
@@ -506,18 +508,15 @@ and drives it:
   is declared once (schema, help, subcommands, action) in a shared registry;
   the overlay dispatches typed command lines through it, and the MCP server
   exposes the same registry with JSON schemas generated from the command
-  schemas: `debug_select` (its `replace` flag swaps the selection),
-  `debug_clear`, `debug_mark` (plus `_list` / `_clear`), `debug_goto`,
-  `debug_note`, `debug_despawn`, `debug_query`, `debug_light` / `debug_light_bloom`,
-  `debug_screenshot` (plus `_list` / `_clear` / `_open`), the
-  `debug_snapshot_*` verbs, `debug_profile_list` / `debug_profile_clear`, and
-  the `debug_record_*` verbs.
+  schemas. The [MCP Tools](./mcp/tools) page carries the generated index of
+  every projected tool, and the [Command Reference](./debug-reference)
+  documents each one.
 
-Anything the operator can type, the agent can call with the same validation and
-the same effects, including the on-screen highlights. Commands that already
-have a purpose-built MCP tool are not duplicated: use `step`, `pause`/`resume`,
-`profiler_start`/`profiler_stop`, `get_entity`, and `quit` instead of debugger
-`step`, `profile`, `info`, and `quit`.
+A command called over MCP runs the same validation and produces the same
+effects as the typed command, including the on-screen highlights. Commands
+that already have a purpose-built MCP tool are not duplicated: use `step`,
+`pause`/`resume`, `profiler_start`/`profiler_stop`, `get_entity`, and `quit`
+instead of debugger `step`, `profile`, `info`, and `quit`.
 
 Pausing is shared: the debugger's freeze and the MCP `pause` tool go through
 one freeze controller, so an agent pause survives the operator opening and

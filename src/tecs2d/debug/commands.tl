@@ -155,9 +155,15 @@ local record commands
 
     commandSignature: function(c: Command): string
 
+    subSignature: function(c: Command, sub: Subcommand): string
+
     --- Popup lines describing a command: signature, help, arguments,
     --- subcommands, and examples. Used by `help <name>` and the live preview.
     usagePopup: function(c: Command): {string}
+
+    SECTIONS: {string}
+    SECTION_COLORS: {string: {number}}
+    SECTION_COLORS_BAR: {string: {number}}
 end
 
 commands.HRULE = cmdtypes.HRULE
@@ -167,10 +173,13 @@ commands.KEY = tecs.newKey()
 --- overlay renders it as " | Name | " and skips it while cycling.
 commands.SECTION_MARK = cmdtypes.SECTION_MARK
 
--- Display order of command sections in help and completion.
-local SECTION_ORDER <const>: {string} = {
-    "Select", "Edit", "Render", "Engine", "Capture", "Custom", "Session",
-}
+--- Canonical section order and accent colors, shared with the overlay and
+--- the docs generator.
+commands.SECTIONS = cmdtypes.SECTIONS
+commands.SECTION_COLORS = cmdtypes.SECTION_COLORS
+commands.SECTION_COLORS_BAR = cmdtypes.SECTION_COLORS_BAR
+
+local SECTION_ORDER <const>: {string} = cmdtypes.SECTIONS
 
 local HISTORY_FILE <const> = "debug-history.txt"
 local HISTORY_CAP <const> = 100
@@ -376,12 +385,33 @@ cmdargs.validate(spawnSchema)
 -- Presentation helpers
 -------------------------------------------------------------------------------
 
-function commands.commandSignature(c: commands.Command): string
-    if c.schema then
-        local sig = cmdargs.signature(c.schema)
-        if sig ~= "" then return c.name .. " " .. sig end
+-- Signature lines cap at 120 characters so a wide argument list cannot
+-- flood the help popup or the generated reference headings.
+local SIGNATURE_CAP <const> = 120
+
+local function capSignature(sig: string): string
+    if #sig > SIGNATURE_CAP then
+        return sig:sub(1, SIGNATURE_CAP - 3) .. "..."
     end
-    return c.name
+    return sig
+end
+
+function commands.commandSignature(c: commands.Command): string
+    local sig = c.name
+    if c.schema then
+        local s = cmdargs.signature(c.schema)
+        if s ~= "" then sig = c.name .. " " .. s end
+    end
+    return capSignature(sig)
+end
+
+function commands.subSignature(c: commands.Command, sub: commands.Subcommand): string
+    local sig = c.name .. " " .. sub.name
+    if sub.schema then
+        local s = cmdargs.signature(sub.schema)
+        if s ~= "" then sig = sig .. " " .. s end
+    end
+    return capSignature(sig)
 end
 
 function commands.usagePopup(c: commands.Command): {string}
@@ -398,8 +428,7 @@ function commands.usagePopup(c: commands.Command): {string}
     if c.subcommands then
         popup[#popup + 1] = "Subcommands:"
         for _, sub in ipairs(c.subcommands) do
-            local sig = sub.schema and (" " .. cmdargs.signature(sub.schema)) or ""
-            popup[#popup + 1] = "  " .. c.name .. " " .. sub.name .. sig .. "\t" .. sub.shortHelp
+            popup[#popup + 1] = "  " .. commands.subSignature(c, sub) .. "\t" .. sub.shortHelp
         end
     end
     if c.examples and #c.examples > 0 then

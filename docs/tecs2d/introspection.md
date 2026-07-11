@@ -4,24 +4,22 @@ outline: deep
 
 # Runtime introspection
 
-Tecs2D treats a running game as an inspectable system. The in-game debugger and
-the built-in MCP server share one command registry, one debug context, and one
-freeze controller. A developer can point at something in the game; an agent can
-inspect the same selection, annotate it on screen, change it, replay the scene,
-and leave evidence behind.
+The in-game debugger and the built-in MCP server share one command registry,
+one debug context, and one freeze controller. A selection made by clicking in
+the game is the same selection an agent reads over MCP; a command typed in the
+overlay and the matching `debug_*` tool run the same code against the same
+state.
 
-This is not a separate AI console layered over the engine. It is the same
-runtime debugging surface presented in two forms:
+- The [debugger](./debug) is an in-game command line with selection, overlays,
+  capture tools, and time travel.
+- The [MCP server](./mcp/) exposes structured tools for the running world,
+  including every debugger command projected as a typed `debug_*` tool.
+- Games [register their own commands](./custom-debug-commands) once; the
+  registration serves both surfaces.
 
-- The [debugger](./debug) gives a developer an in-game command line, selection,
-  overlays, capture tools, and time travel without requiring an IDE.
-- The [MCP server](./mcp/) gives an agent structured tools for the same running
-  world, including every debugger command projected as a typed `debug_*` tool.
-- Games can add their own commands once and expose them to both surfaces.
+## Investigation workflow
 
-## One shared investigation
-
-A typical investigation moves between visual evidence, structured state, and
+An investigation moves between visual evidence, structured state, and
 controlled replay:
 
 ```text
@@ -36,19 +34,17 @@ Something goes wrong in the running game
 → capture a screenshot, recording, profile, or diff as evidence
 ```
 
-The developer and agent do not need to translate between two debugging models.
 Selection, marks, notes, annotations, snapshots, rewind entries, diffs, and
-artifacts are shared runtime state.
+artifacts are shared runtime state, so work started on one surface continues
+on the other.
 
-## Human and agent roles
+## Handing work between surfaces
 
-The in-game surface is particularly good at spatial context: clicking an entity,
-dragging over an area, seeing bounds, toggling layers, or noticing a visual
-artifact. MCP is particularly good at structured inspection: querying
-components, comparing many entities, reading logs, applying a precise patch, or
-drilling into a snapshot diff.
-
-They are designed to hand work back and forth:
+In-game input carries spatial context: clicking an entity, dragging over an
+area, seeing bounds, toggling layers, noticing a visual artifact. MCP carries
+structured access: querying components, comparing many entities, reading
+logs, applying a precise patch, drilling into a snapshot diff. The shared
+state connects the two:
 
 | Developer action | Agent view or action |
 | --- | --- |
@@ -62,9 +58,9 @@ They are designed to hand work back and forth:
 
 ## Time travel and evidence
 
-`rewind` captures a bounded ring of world snapshots while the game runs. Opening
-the debugger or pausing through MCP holds the ring, preserving the moments before
-the failure. From there, a developer or agent can:
+`rewind` captures a bounded ring of world snapshots while the game runs.
+Opening the debugger or pausing through MCP holds the ring, preserving the
+moments before the failure. From there, a developer or agent can:
 
 ```text
 rewind list
@@ -75,24 +71,22 @@ rewind keep latest before-bug
 ```
 
 Snapshots are durable checkpoints. Rewind entries are disposable recent
-history. Diffs explain structural changes between either kind of checkpoint and
-the live world. Screenshots and recordings preserve the visual result; profiles
-preserve performance evidence.
+history. Diffs explain structural changes between either kind of checkpoint
+and the live world. Screenshots and recordings preserve the visual result;
+profiles preserve performance evidence.
 
-See [Snapshots, time travel, and timeline diffs](./debug#snapshots) for the full
-operator workflow.
+See [Snapshots, time travel, and timeline diffs](./debug#snapshots) for the
+full operator workflow.
 
-## One extensible command surface
+## Custom commands
 
 Debugger commands are declared in a schema-based registry. The schema drives
-command-line parsing, help, completion, MCP JSON Schema, validation, and
-dispatch. The action returns both overlay presentation and structured agent
-data.
-The developer can type a game-defined command such as `wave 12 elite`; an agent
-discovers the corresponding `debug_wave` tool with typed arguments. There is no
-second integration to maintain. See [Custom debugger commands](./custom-debug-commands)
-for schemas, structured results, shared context, subcommands, completion, and
-surface scoping.
+command-line parsing, help, completion, the MCP JSON Schema, validation, and
+dispatch; the action returns overlay presentation and structured agent data.
+A game-defined command such as `wave 12 elite` is typeable in the overlay and
+appears to agents as a `debug_wave` tool with typed arguments. See
+[Custom debugger commands](./custom-debug-commands) for schemas, structured
+results, shared context, subcommands, completion, and surface scoping.
 
 ## Next steps
 

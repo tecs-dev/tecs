@@ -607,6 +607,18 @@
   border-color: var(--tecs-surface-outline) !important;
 }
 
+.vp-doc a > code:not(pre code) {
+  color: var(--tecs-c-logo-red) !important;
+}
+
+.vp-doc a:hover > code:not(pre code) {
+  color: #f08980 !important;
+}
+
+.vp-doc a:active > code:not(pre code) {
+  color: #ffaaa3 !important;
+}
+
 .custom-block {
   border-color: transparent !important;
 }

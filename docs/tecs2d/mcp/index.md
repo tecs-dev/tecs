@@ -4,11 +4,9 @@ outline: deep
 
 # Tecs MCP server
 
-Tecs MCP connects an AI agent directly to the running game. With the debug
-plugin installed, the agent and developer share the same selection, marks,
-notes, freeze state, annotations, debugger commands, and capture history. The
-agent can inspect what the developer points at in-game, investigate a past
-moment, patch the world, replay it, and verify the result visually.
+Tecs MCP connects an AI agent to the running game. With the debug plugin
+installed, the agent and developer share the same selection, marks, notes,
+freeze state, annotations, debugger commands, and capture history.
 
 Read [Runtime introspection](../introspection) for the complete human-agent
 debugging model. This page covers setup and the MCP workflow.
@@ -30,7 +28,7 @@ the shared in-game debugger and all registry-derived `debug_*` tools.
 
 ## Choose the right tool layer
 
-Tecs exposes two complementary MCP surfaces:
+Tecs exposes two MCP tool layers:
 
 | Surface | Use it for |
 | --- | --- |

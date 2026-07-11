@@ -501,7 +501,9 @@ end
 
 function cmdargs.signature(schema: cmdargs.Schema): string
     local parts: {string} = {}
-    for _, slot in ipairs(schema.positional) do
+    local inPositional: {string: boolean} = {}
+    for _, slot in ipairs(schema.positional or {}) do
+        inPositional[slot] = true
         local spec = schema.args[slot]
         local label: string
         if isSynthetic(spec) then
@@ -510,6 +512,43 @@ function cmdargs.signature(schema: cmdargs.Schema): string
             label = slot
         end
         if spec.rest then label = label .. "..." end
+        if spec.required then
+            parts[#parts + 1] = "<" .. label .. ">"
+        else
+            parts[#parts + 1] = "[" .. label .. "]"
+        end
+    end
+    -- key=value-only arguments follow the positional slots, sorted, with a
+    -- hint for the value shape. Members of a synthetic slot are already
+    -- shown by that slot; booleans read as bare flags.
+    local named: {string} = {}
+    for name, spec in pairs(schema.args) do
+        if not inPositional[name] and not isSynthetic(spec) and not spec.forward then
+            named[#named + 1] = name
+        end
+    end
+    table.sort(named)
+    for _, name in ipairs(named) do
+        local spec = schema.args[name]
+        local hint: string
+        if spec.enum then
+            hint = table.concat(spec.enum, "|")
+        else
+            local kind = spec.kind
+            if not kind and spec.default ~= nil then kind = type(spec.default) end
+            if kind == "number" then
+                hint = "N"
+            elseif kind == "boolean" then
+                hint = nil
+            elseif kind == "list" then
+                hint = "a,b"
+            elseif kind == "table" then
+                hint = "{}"
+            else
+                hint = "..."
+            end
+        end
+        local label = hint and (name .. "=" .. hint) or name
         if spec.required then
             parts[#parts + 1] = "<" .. label .. ">"
         else

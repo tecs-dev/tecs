@@ -20,7 +20,7 @@ This page is generated: run `make docs-debug` after changing a command.
 
 Find, select, mark, and annotate entities.
 
-### `select <id|name>` {#cmd-select}
+### `select <id|name> [replace]` {#cmd-select}
 
 Select an entity by id, or all entities with a mark name.
 
@@ -289,7 +289,7 @@ MCP tool: `debug_despawn` (destructive)
 ```
 :::
 
-### `query <expr...>` {#cmd-query}
+### `query <expr...> [invert]` {#cmd-query}
 
 Aliases: `q`
 
@@ -559,7 +559,7 @@ draw text 5 -30 spawn point here
 draw clear paths
 ```
 
-#### `draw rect [x] [y] <w> <h>` {#cmd-draw-rect}
+#### `draw rect [x] [y] <w> <h> [a=N] [b=N] [entity=N] [g=N] [r=N] [seconds=N] [stroke=N] [tag=...]` {#cmd-draw-rect}
 
 Outline a rectangle (x y w h in world units).
 
@@ -600,7 +600,7 @@ MCP tool: `debug_draw_rect`
 ```
 :::
 
-#### `draw circle [x] [y] <radius>` {#cmd-draw-circle}
+#### `draw circle [x] [y] <radius> [a=N] [b=N] [entity=N] [g=N] [r=N] [seconds=N] [stroke=N] [tag=...]` {#cmd-draw-circle}
 
 Outline a circle (x y radius in world units).
 
@@ -640,7 +640,7 @@ MCP tool: `debug_draw_circle`
 ```
 :::
 
-#### `draw line [x] [y] <x2> <y2>` {#cmd-draw-line}
+#### `draw line [x] [y] <x2> <y2> [a=N] [b=N] [entity=N] [g=N] [r=N] [seconds=N] [stroke=N] [tag=...]` {#cmd-draw-line}
 
 Draw a line (x y x2 y2 in world units).
 
@@ -681,7 +681,7 @@ MCP tool: `debug_draw_line`
 ```
 :::
 
-#### `draw text [x] [y] <msg...>` {#cmd-draw-text}
+#### `draw text [x] [y] <msg...> [a=N] [b=N] [entity=N] [fontSize=N] [g=N] [r=N] [seconds=N] [stroke=N] [tag=...]` {#cmd-draw-text}
 
 Print text at a world position.
 
@@ -848,7 +848,7 @@ Show camera position, zoom, time scale, and registered cameras.
 
 MCP tool: `debug_camera_info` (read-only, idempotent)
 
-#### `camera move [x] [y] [r] [z]` {#cmd-camera-move}
+#### `camera move [x] [y] [r] [z] [name=...]` {#cmd-camera-move}
 
 Set camera position (and optionally rotation and zoom).
 
@@ -947,7 +947,7 @@ MCP tool: `debug_layers_unlit`
 | --- | --- | --- |
 | `layer` | string | layer name or number (required) |
 
-### `grid [on]` {#cmd-grid}
+### `grid [on] [offsetX=N] [offsetY=N] [size=N]` {#cmd-grid}
 
 Toggle a world-space grid matched to the tile grid.
 
@@ -1559,7 +1559,7 @@ Show the session state: interval, cap, window, cost.
 
 MCP tool: `debug_rewind_info` (read-only, idempotent)
 
-#### `rewind load [ref]` {#cmd-rewind-load}
+#### `rewind load [ref] [ago=N]` {#cmd-rewind-load}
 
 Restore a ring entry; capture pauses until resumed.
 
@@ -1572,7 +1572,7 @@ MCP tool: `debug_rewind_load` (destructive)
 | `ref` | string | entry index (newest first), latest, or Ns for seconds back |
 | `ago` | number | seconds back; picks the closest at or before |
 
-#### `rewind keep [ref] [name]` {#cmd-rewind-keep}
+#### `rewind keep [ref] [name] [ago=N]` {#cmd-rewind-keep}
 
 Promote a ring entry into the snapshot history.
 
@@ -1592,7 +1592,7 @@ Delete the ring files and reset to idle.
 
 MCP tool: `debug_rewind_clear` (destructive)
 
-### `diff <from> [to]` {#cmd-diff}
+### `diff <from> [to] [component=...] [entity=...] [epsilon=N] [ignore=a,b] [limit=N]` {#cmd-diff}
 
 Structural diff between snapshots, rewind entries, and the live world.
 
@@ -1663,7 +1663,7 @@ MCP tool: `debug_diff_get` (read-only, idempotent)
 | `pointer` | string | RFC 6901 pointer, e.g. /summary/byComponent (required) |
 | `ref` | string | diff artifact index or latest; omit for the last diff |
 
-### `screenshot [name]` {#cmd-screenshot}
+### `screenshot [name] [delay=N] [panel]` {#cmd-screenshot}
 
 Capture the screen (or drag area) to a PNG.
 
@@ -1735,7 +1735,7 @@ record stop
 record ls
 ```
 
-#### `record start [seconds] [name]` {#cmd-record-start}
+#### `record start [seconds] [name] [countdown=N] [debug] [fps=N] [scale=N] [stopOnDebugOpen]` {#cmd-record-start}
 
 Start recording the window.
 

@@ -19,6 +19,18 @@ local record cmdtypes
     --- Prefix marking a section separator entry in completion candidates.
     SECTION_MARK: string
 
+    --- Display order of command sections in help, completion, and the
+    --- generated reference. Unset sections group as "Custom".
+    SECTIONS: {string}
+
+    --- Section accent colors ({r, g, b}, 0-1), tuned for dark surfaces
+    --- (popup section headings). One entry per SECTIONS name.
+    SECTION_COLORS: {string: {number}}
+
+    --- The same hues as muted pastel fills: the completion strip draws
+    --- each section marker as a pill in this shade with a white label.
+    SECTION_COLORS_BAR: {string: {number}}
+
     --- The toggle keys, used by the help command's key listing.
     record Keys
         leader: string
@@ -218,5 +230,32 @@ end
 
 cmdtypes.HRULE = "\1"
 cmdtypes.SECTION_MARK = "\2"
+
+cmdtypes.SECTIONS = {
+    "Select", "Edit", "Render", "Engine", "Capture", "Custom", "Session",
+}
+
+-- One hue per section, in two shades: Everforest-style pastels for dark
+-- surfaces and muted pastel fills for the strip's section pills.
+-- Adjacent sections must stay distinguishable in both palettes.
+cmdtypes.SECTION_COLORS = {
+    Select = {0.498, 0.733, 0.702},    -- blue
+    Edit = {0.902, 0.494, 0.502},      -- red
+    Render = {0.839, 0.600, 0.714},    -- purple
+    Engine = {0.902, 0.596, 0.459},    -- orange
+    Capture = {0.514, 0.753, 0.573},   -- teal
+    Custom = {0.859, 0.737, 0.498},    -- gold
+    Session = {0.616, 0.663, 0.627},   -- grey
+}
+
+cmdtypes.SECTION_COLORS_BAR = {
+    Select = {0.36, 0.53, 0.51},       -- blue
+    Edit = {0.65, 0.36, 0.37},         -- red
+    Render = {0.60, 0.43, 0.51},       -- purple
+    Engine = {0.65, 0.43, 0.33},       -- orange
+    Capture = {0.37, 0.54, 0.41},      -- teal
+    Custom = {0.62, 0.53, 0.35},       -- gold
+    Session = {0.44, 0.48, 0.45},      -- grey
+}
 
 return cmdtypes

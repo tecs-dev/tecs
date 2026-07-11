@@ -17,7 +17,7 @@ local record docgen
     toolIndex: function(reg: commands.Registry): string
 end
 
-local SECTION_ORDER <const> = {"Select", "Edit", "Render", "Engine", "Capture", "Session", "Custom"}
+local SECTION_ORDER <const>: {string} = cmdtypes.SECTIONS
 
 local SECTION_INTRO <const>: {string: string} = {
     Select = "Find, select, mark, and annotate entities.",
@@ -245,12 +245,8 @@ local function renderCommand(out: {string}, c: cmdtypes.Command, toolFor: {strin
     renderOutputSchema(out, c.outputSchema)
     renderExamples(out, c.examples)
     for _, sub in ipairs(c.subcommands or {}) do
-        local sig = c.name .. " " .. sub.name
-        if sub.schema then
-            local s = cmdargs.signature(sub.schema)
-            if s ~= "" then sig = sig .. " " .. s end
-        end
-        out[#out + 1] = "#### `" .. sig .. "` {#cmd-" .. c.name .. "-" .. sub.name .. "}"
+        out[#out + 1] = "#### `" .. commands.subSignature(c, sub) .. "` {#cmd-" ..
+            c.name .. "-" .. sub.name .. "}"
         out[#out + 1] = ""
         out[#out + 1] = sentence(sub.shortHelp)
         out[#out + 1] = ""

@@ -75,8 +75,24 @@ describe("tecs2d.debug.internal.cmdargs", function()
             luassert.equals("<name|id>", cmdargs.signature(gotoSchema))
         end)
 
-        it("brackets optional positionals", function()
-            luassert.equals("[seconds] [name]", cmdargs.signature(recordSchema))
+        it("brackets optional positionals and appends sorted named args", function()
+            luassert.equals("[seconds] [name] [debug] [fps=N] [scale=N]",
+                cmdargs.signature(recordSchema))
+        end)
+
+        it("hints named-arg values by kind", function()
+            local schema: cmdargs.Schema = {
+                args = {
+                    mode = {enum = {"fast", "slow"}, help = "speed"},
+                    tags = {kind = "list", help = "tag list"},
+                    fields = {kind = "table", help = "field object"},
+                    label = {help = "free text"},
+                },
+                positional = {},
+            }
+            cmdargs.validate(schema)
+            luassert.equals("[fields={}] [label=...] [mode=fast|slow] [tags=a,b]",
+                cmdargs.signature(schema))
         end)
     end)
 

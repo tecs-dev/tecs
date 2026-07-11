@@ -7,6 +7,7 @@ local cmdharness <const> = require("spec.tecs2d.debug.cmdharness")
 local tecs <const> = require("tecs")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
 local commands <const> = require("tecs2d.debug.commands")
+local cmdargs <const> = require("tecs2d.debug.internal.cmdargs")
 
 local makeRegistry <const> = cmdharness.makeRegistry
 local SpecPos <const> = cmdharness.SpecPos
@@ -111,6 +112,49 @@ describe("tecs2d.debug.commands registry", function()
         local pos = w:get(eid, SpecPos) as {string: number}
         luassert.equals(9, pos.x)
         luassert.equals(2, pos.y)
+    end)
+
+    it("caps signature lines at 120 characters", function()
+        local args: {string: cmdargs.ArgSpec} = {}
+        for i = 1, 20 do
+            args["longargumentname" .. string.format("%02d", i)] = {help = "filler"}
+        end
+        local reg = makeRegistry()
+        reg:add({
+            name = "widecmd",
+            shortHelp = "a command with a very wide signature",
+            schema = {args = args, positional = {}},
+            run = function(_v: {string: any}, _p: {string}): commands.Result
+                return {ok = true}
+            end,
+        })
+        local sig = commands.commandSignature(reg.byName["widecmd"])
+        luassert.equals(120, #sig)
+        luassert.equals("...", sig:sub(-3))
+    end)
+
+    it("gives every section a defined accent color and vice versa", function()
+        local seen: {string: boolean} = {}
+        for _, section in ipairs(commands.SECTIONS) do
+            seen[section] = true
+            for _, palette in ipairs({commands.SECTION_COLORS, commands.SECTION_COLORS_BAR}) do
+                local accent = palette[section]
+                luassert.is_truthy(accent, "section '" .. section .. "' has no color")
+                luassert.equals(3, #accent)
+            end
+        end
+        for _, palette in ipairs({commands.SECTION_COLORS, commands.SECTION_COLORS_BAR}) do
+            for section in pairs(palette) do
+                luassert.is_true(seen[section] == true,
+                    "color for unknown section '" .. section .. "'")
+            end
+        end
+        local reg = makeRegistry()
+        for _, name in ipairs(reg.names) do
+            local c = reg.byName[name]
+            luassert.is_truthy(seen[c.section or "Custom"],
+                "command '" .. name .. "' uses unlisted section '" .. tostring(c.section) .. "'")
+        end
     end)
 
     it("projects outputSchema wrapped in the {ok, result} envelope", function()
