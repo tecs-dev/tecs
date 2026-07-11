@@ -96,7 +96,10 @@ full usage block that pops up automatically once you have typed the bare command
 name, and is also available any time with `help <command>`.
 
 Commands are grouped into sections, mirrored by `help` and the Tab-completion
-strip (which separates sections with colored `| Section |` markers).
+strip (which separates sections with colored `| Section |` markers). The tables
+below are a one-line summary per command; the [Command Reference](./debug-reference)
+is generated from the command registry and covers every command's full
+signature, arguments, examples, and MCP projection.
 
 **Select**
 

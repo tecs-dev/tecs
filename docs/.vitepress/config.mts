@@ -132,6 +132,7 @@ export default defineConfig({
             items: [
               { text: 'Overview', link: '/tecs2d/introspection' },
               { text: 'Debugger', link: '/tecs2d/debug' },
+              { text: 'Command Reference', link: '/tecs2d/debug-reference' },
               { text: 'MCP', link: '/tecs2d/mcp/' },
               { text: 'MCP Tools', link: '/tecs2d/mcp/tools' },
               { text: 'Custom Commands', link: '/tecs2d/custom-debug-commands' },

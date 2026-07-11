@@ -7,7 +7,7 @@
 	example-sprite-onloop example-tiled example-transform-demo example-ui example-mesh-demo example-layer-fx \
 	example-camera-target example-material-demo example-camera-multi example-msdf-text example-tween-demo \
 	example-save-game \
-	newrock test-rockspec typecheck rebuild help rockspecs docs docs-dev \
+	newrock test-rockspec typecheck rebuild help rockspecs docs docs-dev docs-debug \
 	json-bench ecs-bench snapshot-bench bitset-bench download-love12 check-love12
 
 .SILENT: clean test test-no-ffi find-busted
@@ -460,6 +460,13 @@ docs: build
 	@$(TEAL_ENV) tealdoc html src/tecs/init.tl src/tecs/types.tl -o build/docs/tecs.html
 	@echo "Documentation generated in build/docs/"
 
+# Regenerate the debugger command reference from the live command registry.
+# A spec compares the committed page against a fresh render, so run this
+# after adding or changing a debugger command.
+docs-debug: compile
+	@LUA_PATH="$(LUA_DIR)/?.lua;$(LUA_DIR)/?/init.lua;$(TEST_BUILD_DIR)/?.lua;$(TEST_BUILD_DIR)/?/init.lua;$(VENDOR_LUA)/?.lua;$(VENDOR_LUA)/?/init.lua;;" \
+		luajit scripts/gen_debug_docs.lua
+
 # Run Vite documentation dev server with hot reload
 docs-dev:
 	@cd docs && [ -d node_modules ] || npm install
@@ -538,6 +545,7 @@ help:
 	@echo "  typecheck      - Type check source files only"
 	@echo "  check-examples - Type check all examples"
 	@echo "  build-examples - Build all examples"
+	@echo "  docs-debug     - Regenerate docs/tecs2d/debug-reference.md from the command registry"
 	@echo "  clean          - Remove build directory"
 	@echo ""
 	@echo "Love2D 12 (GPU features):"

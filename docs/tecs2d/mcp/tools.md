@@ -621,8 +621,10 @@ JSON input schema is generated from the command's argument schema, so `tools/lis
 can type and validation is identical on both surfaces. These tools appear in the listing only when the debug plugin
 is installed.
 
-The built-in projected families are summarized below. Games may add more at
-runtime; inspect `tools/list` for the exact set and generated input schemas.
+The built-in projected families are summarized below; the
+[Command Reference](../debug-reference) is generated from the registry and documents every tool's
+arguments, examples, and safety annotations. Games may add more at runtime; inspect `tools/list`
+for the exact set and generated input schemas.
 
 - Selection and annotation: `debug_select` (with a `replace` flag to swap instead of adding), `debug_clear`,
   `debug_mark` (plus `_list` / `_clear`), `debug_goto`, `debug_note`, `debug_query` (with `invert` to de-select the
