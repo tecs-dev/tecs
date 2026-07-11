@@ -1614,6 +1614,120 @@ function commands.build(env: commands.Env): commands.Registry
             },
         },
         {
+            name = "capabilities",
+            section = "Session",
+            shortHelp = "installed plugins, command families, and host features",
+            mcpHelp = "What this game session supports: installed plugins (render pipeline, physics, tilemaps, controllers, audio, assets, recorder), command sections with counts, capture facilities, host OS, and the MCP port. Call once after connecting to learn which tool families apply.",
+            examples = {"capabilities"},
+            run = function(_v: {string: any}, _parts: {string}): commands.Result
+                -- Plugin presence by resource probe, never by requiring the
+                -- plugin modules (that would register their components).
+                local function hasPhysics(): boolean
+                    for _, value in pairs(w.resources as {any: any}) do
+                        if type(value) == "table" then
+                            local t = value as {string: any}
+                            if t.world ~= nil and t.smoothing ~= nil then
+                                return true
+                            end
+                        end
+                    end
+                    return false
+                end
+                local tilemapComp = componentFor("Tilemap")
+                local tilemapCount = 0
+                if tilemapComp then
+                    w:forEachArchetype(function(arch: tecs.Archetype)
+                        local col = arch:get(tilemapComp)
+                        if col then
+                            tilemapCount = tilemapCount + (arch.entities[0] as integer)
+                        end
+                    end)
+                end
+                local controllerkey = require("tecs2d.controller")
+                local assetsmod = require("tecs2d.assets")
+                local audiomod = require("tecs2d.audio")
+                local plugins: {string: any} = {
+                    pipeline = pipeline() ~= nil,
+                    physics = hasPhysics(),
+                    tilemaps = tilemapCount,
+                    controllers = w.resources[controllerkey as tecs.Key<any>] ~= nil,
+                    assets = w.resources[assetsmod] ~= nil,
+                    audio = w.resources[audiomod] ~= nil,
+                    recorder = env.recorder ~= nil,
+                }
+                local sections: {string: integer} = {}
+                for _, c in ipairs(reg.list) do
+                    local section = c.section or "Custom"
+                    sections[section] = (sections[section] or 0) + 1
+                end
+                local osName = love.system.getOS()
+                local info = w.resources[mcpinfo.KEY]
+                local popup: {string} = {"capabilities:"}
+                local names: {string} = {}
+                for nm in pairs(plugins) do names[#names + 1] = nm end
+                table.sort(names)
+                for _, nm in ipairs(names) do
+                    popup[#popup + 1] = "  " .. nm .. "\t" .. tostring(plugins[nm])
+                end
+                popup[#popup + 1] = "  commands\t" .. tostring(#reg.list)
+                popup[#popup + 1] = "  host\t" .. tostring(osName)
+                return {ok = true, popup = popup, data = {
+                    plugins = plugins,
+                    commands = {count = #reg.list, sections = sections},
+                    capture = {snapshots = true, diff = true, rewind = ctx.rewind.status},
+                    host = {os = osName,
+                        posix = osName == "OS X" or osName == "Linux"},
+                    mcp = info and {port = info.port(), tools = info.toolCount()} or nil,
+                }}
+            end,
+        },
+        {
+            name = "describe",
+            section = "Session",
+            overlay = false,   -- the typed surface has `help <command>`
+            complete = {[1] = "commands"},
+            shortHelp = "one command's full contract as structured data",
+            mcpHelp = "The complete contract of one debugger command: signature, help, argument schema, subcommand verbs with their schemas and safety annotations, and examples. Use it before calling an unfamiliar debug_* tool, or to discover verbs of a family.",
+            schema = { args = { command = {required = true, help = "command name"} },
+                positional = {"command"} },
+            run = function(v: {string: any}, _parts: {string}): commands.Result
+                local q = v.command as string
+                local c = reg.byName[q]
+                if not c then
+                    return {ok = false, code = "unknown_command",
+                        message = "describe: no such command '" .. q .. "'"}
+                end
+                local emptySchema: {string: any} = {
+                    type = "object",
+                    properties = json.EMPTY_OBJECT,
+                    additionalProperties = false,
+                }
+                local subs: {{string: any}} = {}
+                for _, sub in ipairs(c.subcommands or {}) do
+                    subs[#subs + 1] = {
+                        name = sub.name,
+                        shortHelp = sub.shortHelp,
+                        mcpHelp = sub.mcpHelp,
+                        tool = (sub.mcp ~= false) and ("debug_" .. c.name .. "_" .. sub.name) or nil,
+                        inputSchema = sub.schema and cmdargs.toolSchema(sub.schema) or emptySchema,
+                        annotations = toolAnnotations(c.name, sub.name, sub.annotations),
+                    }
+                end
+                return {ok = true, popup = commands.usagePopup(c), data = {
+                    name = c.name,
+                    signature = commands.commandSignature(c),
+                    section = c.section or "Custom",
+                    shortHelp = c.shortHelp,
+                    mcpHelp = c.mcpHelp,
+                    tool = (c.mcp ~= false and c.run ~= nil) and ("debug_" .. c.name) or nil,
+                    inputSchema = c.schema and cmdargs.toolSchema(c.schema) or emptySchema,
+                    annotations = toolAnnotations(c.name, nil, c.annotations),
+                    subcommands = subs,
+                    examples = c.examples,
+                }}
+            end,
+        },
+        {
             name = "step",
             section = "Session",
             mcp = false,   -- agents use the step MCP tool (same freeze controller)

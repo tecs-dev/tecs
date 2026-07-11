@@ -1436,6 +1436,14 @@ describe("in-game debugger overlay", function()
         luassert.is_not_nil((app.client:call("debug_audio_info", {})).active)
         luassert.is_not_nil((app.client:call("debug_assets_list", {})).count)
 
+        -- Capabilities and describe answer over MCP.
+        local caps = app.client:call("debug_capabilities", {})
+        luassert.is_true((caps.plugins as {string: any}).pipeline as boolean)
+        luassert.is_true((caps.plugins as {string: any}).physics as boolean)
+        luassert.is_not_nil((caps.mcp as {string: any}).port)
+        local described = app.client:call("debug_describe", {command = "rewind"})
+        luassert.is_true(#(described.subcommands as {any}) >= 8)
+
         -- Agent session reflects the fixture's own MCP port.
         local agent = app.client:call("debug_agent_info", {})
         luassert.equals(app.client.port, tonumber(agent.port), "agent session port mismatch")

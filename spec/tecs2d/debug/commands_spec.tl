@@ -81,6 +81,43 @@ describe("tecs2d.debug.commands registry", function()
         luassert.matches("^layers list: list named or modified layers", byName.debug_layers_list.description)
     end)
 
+    it("capabilities reports plugins, sections, and capture support", function()
+        local reg = makeRegistry()
+        local r = reg:execute("capabilities")
+        luassert.is_true(r.ok, tostring(r.message))
+        local plugins = r.data.plugins as {string: any}
+        luassert.is_false(plugins.pipeline as boolean, "headless world has no pipeline")
+        luassert.is_false(plugins.physics as boolean)
+        local cmds = r.data.commands as {string: any}
+        luassert.is_true((cmds.count as integer) > 30)
+        luassert.is_not_nil((cmds.sections as {string: integer}).Capture)
+        luassert.is_true((r.data.capture as {string: any}).snapshots as boolean)
+    end)
+
+    it("describe returns one command's full contract", function()
+        local reg = makeRegistry()
+        local r = reg:invokeMcp("debug_describe", {command = "diff"})
+        luassert.is_true(r.ok, tostring(r.message))
+        luassert.equals("diff", r.data.name)
+        luassert.equals("Capture", r.data.section)
+        luassert.equals("debug_diff", r.data.tool)
+        luassert.is_not_nil((r.data.inputSchema as {string: any}).properties)
+        local subs = r.data.subcommands as {any}
+        local sawGet = false
+        for _, sub in ipairs(subs) do
+            local sc = sub as {string: any}
+            if sc.name == "get" then
+                sawGet = true
+                luassert.equals("debug_diff_get", sc.tool)
+                luassert.is_true((sc.annotations as {string: any}).readOnlyHint as boolean)
+            end
+        end
+        luassert.is_true(sawGet, "diff get missing from the description")
+        -- MCP-only: the typed surface uses `help` instead.
+        luassert.equals("unknown_command", (reg:execute("describe diff")).code)
+        luassert.is_false((reg:invokeMcp("debug_describe", {command = "nope"})).ok)
+    end)
+
     it("projects derived and overridden safety annotations", function()
         local reg = makeRegistry()
         local cmd = helloCommand()

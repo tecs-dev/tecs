@@ -386,7 +386,9 @@ love.thread = {
 
 -- Initialize system module for tecs_assets
 love.system = {
-    getProcessorCount = function(): integer return 4 end
+    getProcessorCount = function(): integer return 4 end,
+    getOS = function(): string return "OS X" end,
+    setClipboardText = function(_text: string) end,
 }
 
 -- Initialize graphics module

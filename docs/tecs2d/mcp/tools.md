@@ -643,7 +643,9 @@ runtime; inspect `tools/list` for the exact set and generated input schemas.
   (size outlines), the `debug_light_*` verbs (`info`, `color`, `toggle` for lighting, `shadows`, `bloom`),
   the `debug_camera_*` verbs (`info`, `move`, `timescale`, `toggle` for named cameras), and the
   `debug_systems_*` verbs (`list`, `stop`, `start`, `toggle`, `info`).
-- Session: `debug_agent_info` (MCP URL, tool count, save dir) and `debug_agent_connect`
+- Session: `debug_capabilities` (installed plugins, command sections, capture support, host, and MCP port;
+  call once after connecting), `debug_describe` (one command's full contract: signature, schemas, verbs,
+  and safety annotations), `debug_agent_info` (MCP URL, tool count, save dir) and `debug_agent_connect`
   (copies the MCP client config JSON to the host clipboard).
 - Artifacts: every artifact family also has a `_path` verb that copies the file's absolute path to the host
   clipboard. `debug_screenshot` (plus `_list` / `_clear` / `_open` / `_path` / `_info`; `panel` keeps the debugger
