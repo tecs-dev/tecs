@@ -616,7 +616,7 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         local raycaster = st.world as {string: any}
                         local rayFn = raycaster.rayCast as function(any, number, number, number, number,
                             function(any, number, number, number, number, number): number)
-                        local castResults = {pcall(rayFn, st.world, x1, y1, x2, y2,
+                        local castOk, castErr = pcall(rayFn, st.world, x1, y1, x2, y2,
                             function(shape: any, hx: number, hy: number,
                                     _nx: number, _ny: number, fraction: number): number
                                 local shapeAny = shape as {string: any}
@@ -625,10 +625,10 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                                 local eid = data and (data.entity as integer) or 0
                                 hits[#hits + 1] = {entity = eid, x = hx, y = hy, fraction = fraction}
                                 return 1   -- keep going: collect every hit
-                            end)}
-                        if not castResults[1] then
+                            end) as (boolean, any)
+                        if not castOk then
                             return {ok = false, code = "raycast_failed",
-                                message = "physics raycast: " .. tostring(castResults[2])}
+                                message = "physics raycast: " .. tostring(castErr)}
                         end
                         table.sort(hits, function(a: {string: number}, b: {string: number}): boolean
                             return a.fraction < b.fraction

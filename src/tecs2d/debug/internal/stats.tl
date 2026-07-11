@@ -51,6 +51,14 @@ function stats.install(w: tecs.World, opts: stats.Options)
     local lastStats = {}
     w:getStats(lastStats)
 
+    -- Backdrop measurement cache: the profile text changes once per sample
+    -- period, so the widest line and line count are remeasured only when the
+    -- text (or the active font) changes.
+    local measuredProfile = ""
+    local measuredFont: love.graphics.Font = nil
+    local measuredWidth: number = 0
+    local measuredLines = 0
+
     -- Leader + statsToggleKey toggles the HUD. Read at the game layer (stack 0),
     -- so an open debugger command line suppresses the toggle.
     local function toggledOn(): boolean
@@ -71,7 +79,6 @@ function stats.install(w: tecs.World, opts: stats.Options)
             if lastGCTime >= gcFrequency then
                 lastMemoryUsage = collectgarbage("count") / 1024
                 lastGCTime = 0
-                w:getStats(lastStats)
             end
 
             lastMemoryProfileTime = lastMemoryProfileTime + dt
@@ -118,15 +125,19 @@ function stats.install(w: tecs.World, opts: stats.Options)
             local lineHeight = textFont:getHeight()
             -- Size the backdrop from the text itself: widest line and the
             -- actual line count, so adding a stat line never overflows it.
-            local textWidth = 0.0
-            local lineCount = 0
-            for line in (lastMemoryProfile .. "\n"):gmatch("(.-)\n") do
-                lineCount = lineCount + 1
-                local lw = textFont:getWidth(line)
-                if lw > textWidth then textWidth = lw end
+            if lastMemoryProfile ~= measuredProfile or textFont ~= measuredFont then
+                measuredProfile = lastMemoryProfile
+                measuredFont = textFont
+                measuredWidth = 0
+                measuredLines = 0
+                for line in (lastMemoryProfile .. "\n"):gmatch("(.-)\n") do
+                    measuredLines = measuredLines + 1
+                    local lw = textFont:getWidth(line)
+                    if lw > measuredWidth then measuredWidth = lw end
+                end
             end
             lg.setColor(0, 0, 0, 0.6)
-            lg.rectangle("fill", 0, 0, textWidth + 16, lineCount * lineHeight + 8)
+            lg.rectangle("fill", 0, 0, measuredWidth + 16, measuredLines * lineHeight + 8)
             lg.setColor(1, 1, 1, 1)
             lg.print(lastMemoryProfile, 8, 4)
 

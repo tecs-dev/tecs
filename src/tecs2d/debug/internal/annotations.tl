@@ -24,6 +24,18 @@ local MAX_BOUNDS <const> = 200
 -- Grid lines per axis before the step doubles to stay readable when zoomed out.
 local MAX_GRID_LINES <const> = 200
 
+-- Size-bearing gfx components in resolution priority order, each paired with
+-- how its size is read: "wh" (width/height), "r" (radius), "rr"
+-- (radiusX/radiusY). Sprite dimensions live in renderer-owned metadata
+-- (SpriteData), not the Sprite component itself.
+local SIZE_SHAPES <const>: {{string}} = {
+    {"RepeatedSprite", "wh"},
+    {"SpriteData", "wh"},
+    {"Rectangle", "wh"},
+    {"Circle", "r"},
+    {"Ellipse", "rr"},
+}
+
 local record annotations
     enum Kind
         "rect"
@@ -164,42 +176,29 @@ function annotations.install(w: tecs.World, ctx: debugcontext.Context): annotati
         return comp
     end
 
-    -- Axis-aligned size of one row from whichever shape component the
-    -- archetype carries. Sprite dimensions live in renderer-owned metadata,
-    -- not the Sprite component itself. Returns 0, 0 when nothing declares a size.
-    local function rowSize(archetype: tecs.Archetype, row: integer, sx: number, sy: number): number, number
+    -- First size-bearing column the archetype carries plus how to read it,
+    -- resolved once per archetype (not per row). nil when nothing declares
+    -- a size.
+    local function sizeColumn(archetype: tecs.Archetype): {any}, string
+        for i = 1, #SIZE_SHAPES do
+            local shape = SIZE_SHAPES[i]
+            local comp = sizeComp(shape[1])
+            local col = comp and archetype:get(comp) as {any}
+            if col then return col, shape[2] end
+        end
+        return nil, nil
+    end
+
+    -- Axis-aligned size of one row from a resolved size column.
+    local function rowSize(col: {any}, kind: string, row: integer, sx: number, sy: number): number, number
         sx, sy = math.abs(sx), math.abs(sy)
-        local repeatedSprite = sizeComp("RepeatedSprite")
-        local col = repeatedSprite and archetype:get(repeatedSprite) as {any}
-        if col then
-            local s = col[row] as {string: number}
+        local s = col[row] as {string: number}
+        if kind == "wh" then
             return s.width * sx, s.height * sy
+        elseif kind == "r" then
+            return s.radius * 2 * sx, s.radius * 2 * sy
         end
-        local spriteData = sizeComp("SpriteData")
-        col = spriteData and archetype:get(spriteData) as {any}
-        if col then
-            local s = col[row] as {string: number}
-            return s.width * sx, s.height * sy
-        end
-        local rectangle = sizeComp("Rectangle")
-        col = rectangle and archetype:get(rectangle) as {any}
-        if col then
-            local s = col[row] as {string: number}
-            return s.width * sx, s.height * sy
-        end
-        local circle = sizeComp("Circle")
-        col = circle and archetype:get(circle) as {any}
-        if col then
-            local r = (col[row] as {string: number}).radius
-            return r * 2 * sx, r * 2 * sy
-        end
-        local ellipse = sizeComp("Ellipse")
-        col = ellipse and archetype:get(ellipse) as {any}
-        if col then
-            local s = col[row] as {string: number}
-            return s.radiusX * 2 * sx, s.radiusY * 2 * sy
-        end
-        return 0, 0
+        return s.radiusX * 2 * sx, s.radiusY * 2 * sy
     end
 
     local function drawGrid(ctxRef: debugcontext.Context, cam: gfxtypes.Camera, sw: number, sh: number)
@@ -285,20 +284,26 @@ function annotations.install(w: tecs.World, ctx: debugcontext.Context): annotati
                 lg.setColor(0.35, 0.85, 1.0, 0.6)
                 lg.setLineWidth(1)
                 local shown = 0
+                -- The outer query loop must run to completion; only the row
+                -- loop stops once the cap is reached.
                 for archetype, len in idQuery:iter() do
-                    local transforms = archetype:get(Transform)
-                    for row = 1, len do
-                        if shown < MAX_BOUNDS then
-                            local t = transforms[row]
-                            local bw, bh = rowSize(archetype, row, t.scaleX, t.scaleY)
-                            if bw > 0 and bh > 0 then
-                                local cxs, cys = cam:toScreen(t.x, t.y)
-                                if cxs >= -bw * worldScale and cxs <= sw + bw * worldScale
-                                    and cys >= -bh * worldScale and cys <= sh + bh * worldScale then
-                                    lg.rectangle("line",
-                                        cxs - bw * worldScale / 2, cys - bh * worldScale / 2,
-                                        bw * worldScale, bh * worldScale)
-                                    shown = shown + 1
+                    if shown < MAX_BOUNDS then
+                        local col, kind = sizeColumn(archetype)
+                        if col then
+                            local transforms = archetype:get(Transform)
+                            for row = 1, len do
+                                if shown >= MAX_BOUNDS then break end
+                                local t = transforms[row]
+                                local bw, bh = rowSize(col, kind, row, t.scaleX, t.scaleY)
+                                if bw > 0 and bh > 0 then
+                                    local cxs, cys = cam:toScreen(t.x, t.y)
+                                    if cxs >= -bw * worldScale and cxs <= sw + bw * worldScale
+                                        and cys >= -bh * worldScale and cys <= sh + bh * worldScale then
+                                        lg.rectangle("line",
+                                            cxs - bw * worldScale / 2, cys - bh * worldScale / 2,
+                                            bw * worldScale, bh * worldScale)
+                                        shown = shown + 1
+                                    end
                                 end
                             end
                         end
@@ -341,10 +346,13 @@ function annotations.install(w: tecs.World, ctx: debugcontext.Context): annotati
                 lg.setFont(font)
                 local fh = font:getHeight()
                 local shown = 0
+                -- The outer query loop must run to completion; only the row
+                -- loop stops once the cap is reached.
                 for archetype, len, entities in idQuery:iter() do
-                    local transforms = archetype:get(Transform)
-                    for row = 1, len do
-                        if shown < MAX_ID_LABELS then
+                    if shown < MAX_ID_LABELS then
+                        local transforms = archetype:get(Transform)
+                        for row = 1, len do
+                            if shown >= MAX_ID_LABELS then break end
                             local t = transforms[row]
                             local sx, sy = cam:toScreen(t.x, t.y)
                             if sx >= -40 and sx <= sw + 40 and sy >= -20 and sy <= sh + 20 then

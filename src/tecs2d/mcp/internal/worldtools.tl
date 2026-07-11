@@ -248,11 +248,11 @@ handlers["despawn"] = function(args: {string:any}, id: number)
     local failed: {{string: any}} = {}
     for i = 1, #entityIds do
         local entityId = entityIds[i]
-        local results = {pcall(world.despawn, world, entityId)}
-        if results[1] then
+        local ok, err = pcall(world.despawn, world, entityId) as (boolean, any)
+        if ok then
             table.insert(succeeded, entityId)
         else
-            table.insert(failed, {id = entityId, error = tostring(results[2])})
+            table.insert(failed, {id = entityId, error = tostring(err)})
         end
     end
 

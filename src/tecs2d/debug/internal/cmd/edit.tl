@@ -304,11 +304,9 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     if w:isAlive(eid) then
                         -- A fresh instance per entity: FFI cdata must never be
                         -- shared across rows.
-                        local results = {pcall(function()
+                        local ok2, err2 = pcall(function()
                             w:set(eid, comp.deserialize(w, dataTbl))
-                        end)}
-                        local ok2 = results[1]
-                        local err2 = results[2]
+                        end) as (boolean, any)
                         if ok2 then
                             count = count + 1
                         elseif not firstError then
@@ -374,13 +372,13 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         else
                             -- getMut marks the component dirty so GPU syncs
                             -- and other dirty-gated consumers see the write.
-                            local results = {pcall(function()
+                            local ok2, err2 = pcall(function()
                                 applyFields(w:getMut(eid, comp), dataTbl)
-                            end)}
-                            if results[1] then
+                            end) as (boolean, any)
+                            if ok2 then
                                 count = count + 1
                             elseif not firstError then
-                                firstError = tostring(results[2])
+                                firstError = tostring(err2)
                             end
                         end
                     end

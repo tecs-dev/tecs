@@ -38,7 +38,10 @@ local record PopupBlock
 end
 
 -- Popup panel state (lines, visibility, paging, optional thumbnail), one
--- table so the overlay closures stay under LuaJIT's 60-upvalue limit.
+-- table so the overlay closures stay under LuaJIT's 60-upvalue limit. Also
+-- carries the overlay's per-frame draw caches (popup layout, auto-preview,
+-- wrapped prompt rows, Tab-cycle bar) so the render path allocates nothing
+-- while its inputs are unchanged.
 local record PopupState
     lines: {string}
     shown: boolean
@@ -46,6 +49,30 @@ local record PopupState
     -- Thumbnail drawn under the popup (screenshot info); lives exactly as
     -- long as the popup does and is released on dismissal.
     image: love.graphics.Image
+    -- Measured popup layout, valid while the lines table reference, screen
+    -- width, and per-page row count are unchanged; paging reuses it.
+    measuredLines: {string}
+    measuredSw: number
+    measuredPerPage: integer
+    blocks: {PopupBlock}
+    pageGroups: {{integer}}
+    -- Auto-preview: the last seen command line, the command it names, and
+    -- the usage popup built for that command.
+    lastCommandLine: string
+    previewCmd: commands.Command
+    previewFor: commands.Command
+    previewLines: {string}
+    -- Wrapped command-line rows keyed on prompt text and screen width; the
+    -- input pass (bar height) and the draw pass share one getWrap call.
+    cmdRowsText: string
+    cmdRowsSw: number
+    cmdRows: {string}
+    -- Tab-cycle bar layout, rebuilt when completions are assigned: display
+    -- labels, section names for pills, per-label widths, and x offsets.
+    barLabels: {string}
+    barSectionOf: {integer: string}
+    barWidths: {number}
+    barX: {number}
 end
 
 -- One row of the right-click context menu: a label plus what activating it
@@ -102,6 +129,9 @@ end
 
 local MENU_HINT <const> = "menu: arrows + enter run a row, esc closes"
 
+-- Pill shade for completion sections without an accent color.
+local DEFAULT_PILL <const>: {number} = {0.22, 0.27, 0.30}
+
 local format <const> = string.format
 local getTime <const> = love.timer.getTime
 
@@ -121,6 +151,7 @@ end
 
 local function dismissPopup(popup: PopupState)
     popup.shown = false
+    popup.measuredLines = nil
     releasePopupImage(popup)
 end
 
@@ -129,6 +160,7 @@ local function showPopup(popup: PopupState, lines: {string})
     popup.lines = lines
     popup.shown = true
     popup.page = 0
+    popup.measuredLines = nil
 end
 
 -- Measure one popup column block: split lines on tabs and align the tab
@@ -173,6 +205,8 @@ local function measurePopupBlock(font: love.graphics.Font, gap: number, lines: {
     return {lines = lines, rows = rows, colX = colX, width = width}
 end
 
+local EMPTY_GROUP <const>: {integer} = {}
+
 -- Draw the popup panel below the command line (goto targets, info, ...).
 -- popup.lines[1] is a green header; the body flows into as many perPage-tall
 -- columns as the screen width permits, and popup.page (clamped here) picks
@@ -187,10 +221,16 @@ local function drawPopup(popup: PopupState, font: love.graphics.Font,
     local gutter = font:getWidth("        ")
     local popupLines = popup.lines
 
-    -- Slice the body into perPage-tall blocks, then group blocks into pages
-    -- by available width. Short popups are one block.
-    local blocks: {PopupBlock} = {}
-    do
+    -- Layout cache: measuring is skipped while the lines table reference,
+    -- screen width, and per-page row count are unchanged (paging reuses it).
+    if popup.measuredLines ~= popupLines or popup.measuredSw ~= sw
+        or popup.measuredPerPage ~= perPage then
+        popup.measuredLines = popupLines
+        popup.measuredSw = sw
+        popup.measuredPerPage = perPage
+        -- Slice the body into perPage-tall blocks, then group blocks into
+        -- pages by available width. Short popups are one block.
+        local blocks: {PopupBlock} = {}
         local slice: {string} = {}
         for i = 2, #popupLines do
             slice[#slice + 1] = popupLines[i]
@@ -199,10 +239,8 @@ local function drawPopup(popup: PopupState, font: love.graphics.Font,
                 slice = {}
             end
         end
-    end
-    local maxContentW = sw - PAD_X * 4
-    local pageGroups: {{integer}} = {}
-    do
+        local maxContentW = sw - PAD_X * 4
+        local pageGroups: {{integer}} = {}
         local cur: {integer} = {}
         local curW: number = 0
         for k = 1, #blocks do
@@ -218,11 +256,15 @@ local function drawPopup(popup: PopupState, font: love.graphics.Font,
             end
         end
         if #cur > 0 then pageGroups[#pageGroups + 1] = cur end
+        popup.blocks = blocks
+        popup.pageGroups = pageGroups
     end
+    local blocks = popup.blocks
+    local pageGroups = popup.pageGroups
     local pages = math.max(1, #pageGroups)
     if popup.page < 0 then popup.page = 0 end
     if popup.page >= pages then popup.page = pages - 1 end
-    local group = pageGroups[popup.page + 1] or {}
+    local group = pageGroups[popup.page + 1] or EMPTY_GROUP
 
     local header = popupLines[1]
     if pages > 1 then
@@ -303,6 +345,77 @@ local function drawPopup(popup: PopupState, font: love.graphics.Font,
         end
         bx = bx + blk.width + gutter
     end
+end
+
+-- Tab-cycle bar layout: display labels (section entries become padded pill
+-- names), per-label widths, and x offsets. Built when completions are
+-- assigned, so the per-frame draw only does scroll/highlight math.
+local function buildCompletionBar(popup: PopupState, completions: {string},
+        font: love.graphics.Font)
+    local labels: {string} = {}
+    local sectionOf: {integer: string} = {}
+    local widths: {number} = {}
+    local xs: {number} = {}
+    local gap = font:getWidth("   ")
+    local x: number = PAD_X
+    for i = 1, #completions do
+        local entry = completions[i]
+        if entry:sub(1, 1) == SECTION_MARK then
+            local section = entry:sub(2)
+            labels[i] = " " .. section .. " "
+            sectionOf[i] = section
+        else
+            labels[i] = entry
+        end
+        xs[i] = x
+        widths[i] = font:getWidth(labels[i])
+        x = x + widths[i] + gap
+    end
+    popup.barLabels = labels
+    popup.barSectionOf = sectionOf
+    popup.barWidths = widths
+    popup.barX = xs
+end
+
+-- Entities already labeled this frame (a mark and a note can hit the same
+-- entity); cleared at the start of each label pass so drawing allocates
+-- nothing per frame.
+local labelSeen: {integer: boolean} = {}
+
+-- Mark name / note star above one annotated entity.
+local function drawEntityLabel(w: tecs.World, ctx: debugcontext.Context,
+        cam: gfxtypes.Camera, font: love.graphics.Font, fh: number, eid: integer)
+    if labelSeen[eid] then return end
+    labelSeen[eid] = true
+    if not w:isAlive(eid) then return end
+    local t = w:get(eid, Transform)
+    if not t then return end
+    local label = ctx.marks[eid] or ""
+    if ctx.notes[eid] then
+        label = (label ~= "") and (label .. " *") or "*"
+    end
+    if label == "" then return end
+    local sx, sy = cam:toScreen(t.x, t.y)
+    local tw = font:getWidth(label)
+    lg.setColor(0.11, 0.13, 0.16, 0.85)
+    lg.rectangle("fill", sx - tw / 2 - 5, sy - 40, tw + 10, fh + 4, 3, 3)
+    lg.setColor(0.8275, 0.7765, 0.6667, 1)
+    lg.print(label, sx - tw / 2, sy - 38)
+end
+
+-- Name-bearing components for the context-menu header, resolved by name so
+-- the overlay never forces those modules to load. Misses retry (games may
+-- register them after the first menu opens); successes are memoized.
+local HEADER_COMPONENTS <const>: {string} = {"Name", "Key"}
+local headerComps: {string: tecs.Component} = {}
+local function headerComponent(name: string): tecs.Component
+    local comp = headerComps[name]
+    if comp == nil then
+        local ok, resolved = pcall(tecs.componentByName, name)
+        comp = ok and resolved or nil
+        if comp then headerComps[name] = comp end
+    end
+    return comp
 end
 
 -- Mouse gestures while no context menu owns the mouse: a left press in the
@@ -661,14 +774,22 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
         completionIndex = 0
         completions = {}
         completionBase = ""
+        popup.barLabels = nil
     end
 
     -- Wrapped command-line rows at the current window width, so long commands
     -- (set/spawn with Lua tables) wrap instead of running off screen. Used by
-    -- both the draw pass and the input pass (click-through guard).
+    -- both the draw pass and the input pass (click-through guard); cached on
+    -- the prompt text and screen width so both passes share one getWrap call.
     local function commandLineRows(sw: number): {string}
+        if popup.cmdRows and popup.cmdRowsText == ctx.command and popup.cmdRowsSw == sw then
+            return popup.cmdRows
+        end
         local _, wrapped = overlayFont:getWrap("> " .. ctx.command, sw - PAD_X * 3)
         if #wrapped == 0 then wrapped = {"> "} end
+        popup.cmdRowsText = ctx.command
+        popup.cmdRowsSw = sw
+        popup.cmdRows = wrapped
         return wrapped
     end
 
@@ -718,9 +839,9 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
         local label = "#" .. tostring(eid)
         local markName = ctx.marks[eid]
         if markName then label = label .. " " .. markName end
-        for _, compName in ipairs({"Name", "Key"}) do
-            local okC, comp = pcall(tecs.componentByName, compName)
-            if okC and comp then
+        for ci = 1, #HEADER_COMPONENTS do
+            local comp = headerComponent(HEADER_COMPONENTS[ci])
+            if comp then
                 local v = w:get(eid, comp) as any
                 local text: string = nil
                 if type(v) == "string" then
@@ -1071,6 +1192,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 local backward = reader().isKeyDown("lshift") or reader().isKeyDown("rshift")
                 if not cycling then
                     completionBase, completions = registry:complete(ctx.command)
+                    buildCompletionBar(popup, completions, overlayFont)
                     completionIndex = 0
                     -- On an empty line, start the cycle at the last used
                     -- command (whichever direction) so Tab-Enter repeats
@@ -1141,11 +1263,23 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             -- command's generated popup (how to use it), including as arguments
             -- are typed and while Tab-cycling. Running the command (Enter) may
             -- replace it: `help`, for example, swaps in the full command listing.
-            local previewWord = ctx.command:match("^(%S+)")
-            local previewCmd = previewWord and registry.byName[previewWord]
+            -- The named command and its usage lines are cached; the preview
+            -- reasserts whenever the popup shows anything else.
+            if ctx.command ~= popup.lastCommandLine then
+                popup.lastCommandLine = ctx.command
+                local previewWord = ctx.command:match("^(%S+)")
+                popup.previewCmd = previewWord and registry.byName[previewWord]
+            end
+            local previewCmd = popup.previewCmd
             if previewCmd then
-                popup.lines = commands.usagePopup(previewCmd)
-                popup.shown = true
+                if popup.previewFor ~= previewCmd then
+                    popup.previewFor = previewCmd
+                    popup.previewLines = commands.usagePopup(previewCmd)
+                end
+                if popup.lines ~= popup.previewLines or not popup.shown then
+                    popup.lines = popup.previewLines
+                    popup.shown = true
+                end
             end
 
             -- A command run this frame may have raised exit/quit.
@@ -1339,27 +1473,13 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             -- visible in-game which entities carry marks or notes.
             if pipeline then
                 local cam = pipeline:getCamera()
-                local seen: {integer: boolean} = {}
-                local function drawLabel(eid: integer)
-                    if seen[eid] then return end
-                    seen[eid] = true
-                    if not w:isAlive(eid) then return end
-                    local t = w:get(eid, Transform)
-                    if not t then return end
-                    local label = ctx.marks[eid] or ""
-                    if ctx.notes[eid] then
-                        label = (label ~= "") and (label .. " *") or "*"
-                    end
-                    if label == "" then return end
-                    local sx, sy = cam:toScreen(t.x, t.y)
-                    local tw = overlayFont:getWidth(label)
-                    lg.setColor(0.11, 0.13, 0.16, 0.85)
-                    lg.rectangle("fill", sx - tw / 2 - 5, sy - 40, tw + 10, fh + 4, 3, 3)
-                    lg.setColor(0.8275, 0.7765, 0.6667, 1)
-                    lg.print(label, sx - tw / 2, sy - 38)
+                for k in pairs(labelSeen) do labelSeen[k] = nil end
+                for eid in pairs(ctx.marks) do
+                    drawEntityLabel(w, ctx, cam, overlayFont, fh, eid)
                 end
-                for eid in pairs(ctx.marks) do drawLabel(eid) end
-                for eid in pairs(ctx.notes) do drawLabel(eid) end
+                for eid in pairs(ctx.notes) do
+                    drawEntityLabel(w, ctx, cam, overlayFont, fh, eid)
+                end
             end
 
             -- Status/top bar (bg #a7c080): coordinates, or the command list
@@ -1369,30 +1489,22 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             if cycling and #completions > 0 then
                 -- Section separators render as pills in the section's dark
                 -- shade with a white label; commands render as plain text.
-                local labels: {string} = {}
-                local sectionOf: {integer: string} = {}
-                for i = 1, #completions do
-                    if completions[i]:sub(1, 1) == SECTION_MARK then
-                        local section = completions[i]:sub(2)
-                        labels[i] = " " .. section .. " "
-                        sectionOf[i] = section
-                    else
-                        labels[i] = completions[i]
-                    end
+                -- Layout comes from the completion-time cache; only the
+                -- scroll/highlight math runs per frame.
+                if not popup.barLabels then
+                    buildCompletionBar(popup, completions, overlayFont)
                 end
-                local gap = overlayFont:getWidth("   ")
-                local hx = 0.0
-                local cur: number = PAD_X
-                for i = 1, #labels do
-                    if i == completionIndex then hx = cur end
-                    cur = cur + overlayFont:getWidth(labels[i]) + gap
-                end
+                local labels = popup.barLabels
+                local sectionOf = popup.barSectionOf
+                local widths = popup.barWidths
+                local xs = popup.barX
+                local hx = xs[completionIndex] or 0.0
                 local scrollX = 0.0
                 if hx > sw * 0.6 then scrollX = hx - sw * 0.4 end
                 lg.setScissor(0, 0, sw, rowH)
-                local x = PAD_X - scrollX
                 for i = 1, #labels do
-                    local cw = overlayFont:getWidth(labels[i])
+                    local x = xs[i] - scrollX
+                    local cw = widths[i]
                     if i == completionIndex then
                         lg.setColor(0.1804, 0.2157, 0.2353, 1)
                         lg.rectangle("fill", x - 6, 0, cw + 12, rowH)
@@ -1400,7 +1512,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                     elseif sectionOf[i] then
                         -- Pill in the section's dark shade, white label.
                         local accent = commands.SECTION_COLORS_BAR[sectionOf[i]]
-                            or {0.22, 0.27, 0.30}
+                            or DEFAULT_PILL
                         lg.setColor(accent[1], accent[2], accent[3], 1)
                         lg.rectangle("fill", x - 6, 0, cw + 12, rowH)
                         lg.setColor(1, 1, 1, 1)
@@ -1408,7 +1520,6 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                         lg.setColor(0.1804, 0.2157, 0.2353, 1)
                     end
                     lg.print(labels[i], x, PAD_Y)
-                    x = x + cw + gap
                 end
                 lg.setScissor()
             else

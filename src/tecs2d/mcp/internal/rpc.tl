@@ -178,19 +178,19 @@ local function handleToolsCall(id: number, params: {string:any})
     local args = (params.arguments as {string:any}) or {}
     local handler = rpc.handlers[toolName as string]
     if not handler then
-        local results = {pcall(callDebugTool, toolName as string, args, id)}
-        if not results[1] then
-            local errStr = tostring(results[2])
+        local ok, ret = pcall(callDebugTool, toolName as string, args, id) as (boolean, any)
+        if not ok then
+            local errStr = tostring(ret)
             log:error("Tool execution failed: %s", errStr)
             rpc.sendError(id, ERR_INTERNAL, "Tool execution failed: " .. errStr)
-        elseif results[2] == false then
+        elseif ret == false then
             rpc.sendError(id, ERR_INVALID_PARAMS, "Unknown tool: " .. tostring(toolName))
         end
         return
     end
-    local results = {pcall(handler, args, id)}
-    if not results[1] then
-        local errStr = tostring(results[2])
+    local ok, err = pcall(handler, args, id) as (boolean, any)
+    if not ok then
+        local errStr = tostring(err)
         log:error("Tool execution failed: %s", errStr)
         rpc.sendError(id, ERR_INTERNAL, "Tool execution failed: " .. errStr)
     end
