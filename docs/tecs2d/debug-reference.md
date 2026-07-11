@@ -26,6 +26,8 @@ Select an entity by id, or all entities with a mark name.
 
 Add an entity (by id) or a marked group (by name) to the operator-visible selection; replace=true swaps the selection instead. Selected entities are highlighted in-game. Returns the selection size. Follow with debug_info for component data or debug_note to annotate.
 
+![The debugger with a select command typed: the usage popup shows the signature and arguments, and the selected entity is ringed by gold markers](./assets/debug/select.png)
+
 MCP tool: `debug_select`
 
 | Argument | Type | Description |
