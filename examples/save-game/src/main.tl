@@ -456,18 +456,20 @@ local function plugin(world: tecs.World)
 
     -- Return the swatch index at (mx, my), or nil if the mouse isn't over one.
     local function swatchAt(mx: number, my: number): integer
+        local picked: integer
         for archetype, len in swatchQuery:iter() do
             local swatches = archetype:get(Swatch) as {Swatch}
             local transforms = archetype:get(Transform) as {Transform}
             for i = 1, len do
                 local t = transforms[i]
-                if mx >= t.x and mx < t.x + SWATCH_PX
+                if not picked
+                        and mx >= t.x and mx < t.x + SWATCH_PX
                         and my >= t.y and my < t.y + SWATCH_PX then
-                    return swatches[i].idx
+                    picked = swatches[i].idx
                 end
             end
         end
-        return nil
+        return picked
     end
 
     -- Mouse painting: press + drag both work. `paintAt` / `eraseAt` skip the
@@ -526,12 +528,10 @@ local function plugin(world: tecs.World)
                 local swatches = archetype:get(Swatch) as {Swatch}
                 local transforms = archetype:get(Transform) as {Transform}
                 for i = 1, len do
-                    if swatches[i].idx == currentColorIdx then
+                    if not targetX and swatches[i].idx == currentColorIdx then
                         targetX, targetY = transforms[i].x, transforms[i].y
-                        break
                     end
                 end
-                if targetX then break end
             end
             if not targetX then return end
 
