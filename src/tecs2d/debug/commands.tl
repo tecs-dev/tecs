@@ -151,6 +151,8 @@ local record commands
     register: function(w: tecs.World, cmd: Command)
 
     --- The command's name plus its generated signature, e.g. "goto <id|name>".
+    wrapOutputSchema: function(dataSchema: {string: any}): {string: any}
+
     commandSignature: function(c: Command): string
 
     --- Popup lines describing a command: signature, help, arguments,
@@ -279,6 +281,15 @@ local drawClearSchema <const>: cmdargs.Schema = {
     positional = {"which"},
 }
 cmdargs.validate(drawClearSchema)
+
+local drawOutputSchema <const>: {string: any} = {
+    type = "object",
+    properties = {
+        id = {type = "integer", description = "annotation id for draw clear"},
+        tag = {type = "string"},
+    },
+    required = {"id"},
+}
 
 local querySchema <const>: cmdargs.Schema = {
     args = {
@@ -500,6 +511,32 @@ local function toolAnnotations(cmdName: string, verb: string,
     return a
 end
 
+-- The server spreads Result.data into `result` next to `message` and sends
+-- {ok = true, result = ...}; failures arrive as {ok = false, error}. A
+-- command declares the schema of its data payload; the projected MCP
+-- outputSchema wraps it in that envelope so structuredContent validates.
+function commands.wrapOutputSchema(dataSchema: {string: any}): {string: any}
+    if not dataSchema then return nil end
+    local props: {string: any} = {}
+    for k, v in pairs((dataSchema.properties as {string: any}) or {}) do props[k] = v end
+    props.message = {type = "string", description = "human-readable summary"}
+    local result: {string: any} = {}
+    for k, v in pairs(dataSchema) do result[k] = v end
+    result.properties = props
+    return {
+        type = "object",
+        properties = {
+            ok = {type = "boolean"},
+            result = result,
+            error = {type = "object", properties = {
+                code = {type = "string"},
+                message = {type = "string"},
+            }},
+        },
+        required = {"ok"},
+    }
+end
+
 function commands.Registry:mcpTools(): {commands.McpTool}
     local out: {commands.McpTool} = {}
     local emptySchema: {string: any} = {
@@ -515,6 +552,7 @@ function commands.Registry:mcpTools(): {commands.McpTool}
                 name = "debug_" .. cmd.name,
                 description = (cmd.mcpHelp or (cmd.shortHelp .. ".")) .. suffix,
                 inputSchema = cmd.schema and cmdargs.toolSchema(cmd.schema) or emptySchema,
+                outputSchema = commands.wrapOutputSchema(cmd.outputSchema),
                 annotations = toolAnnotations(cmd.name, nil, cmd.annotations),
             }
         end
@@ -526,6 +564,7 @@ function commands.Registry:mcpTools(): {commands.McpTool}
                         description = (sub.mcpHelp or (cmd.name .. " " .. sub.name .. ": " ..
                             sub.shortHelp .. ".")) .. suffix,
                         inputSchema = sub.schema and cmdargs.toolSchema(sub.schema) or emptySchema,
+                        outputSchema = commands.wrapOutputSchema(sub.outputSchema),
                         annotations = toolAnnotations(cmd.name, sub.name, sub.annotations),
                     }
                 end
@@ -1081,6 +1120,15 @@ function commands.build(env: commands.Env): commands.Registry
             shortHelp = "select an entity by id, or all entities with a mark name",
             mcpHelp = "Add an entity (by id) or a marked group (by name) to the operator-visible selection; replace=true swaps the selection instead. Selected entities are highlighted in-game. Returns the selection size. Follow with debug_info for component data or debug_note to annotate.",
             schema = selectSchema,
+            outputSchema = {
+                type = "object",
+                properties = {
+                    selected = {type = "integer", description = "selection size after the call"},
+                    added = {type = "array", items = {type = "integer"},
+                        description = "entity ids added to the selection"},
+                },
+                required = {"added", "selected"},
+            },
             run = function(v: {string: any}, _parts: {string}): commands.Result
                 local ids = resolveTargets(v)
                 local live: {integer} = {}
@@ -1106,6 +1154,13 @@ function commands.build(env: commands.Env): commands.Registry
             name = "clear",
             section = "Select",
             shortHelp = "clear the selection, message, and drag area",
+            outputSchema = {
+                type = "object",
+                properties = {
+                    selected = {type = "integer", description = "always 0"},
+                },
+                required = {"selected"},
+            },
             run = function(_v: {string: any}, _parts: {string}): commands.Result
                 ctx.selected = {}
                 ctx.hasArea = false
@@ -1120,11 +1175,28 @@ function commands.build(env: commands.Env): commands.Registry
             mcpHelp = "Name the currently selected entities so later commands (select, goto, despawn, diff entity=) can address the group by that name. Marks survive until cleared. Returns the marked count.",
             schema = { args = { name = {help = "mark name; omit to unmark the selection"} }, positional = {"name"} },
             examples = {"mark boss", "mark \"big boss\"", "mark  (unmark selection)", "mark ls"},
+            outputSchema = {
+                type = "object",
+                properties = {
+                    marked = {type = "integer", description = "entities marked"},
+                    name = {type = "string"},
+                    unmarked = {type = "integer", description = "entities unmarked when no name given"},
+                },
+            },
             subcommands = {
                 {
                     name = "list",
                     aliases = {"ls"},
                     shortHelp = "show every mark with its count and first id",
+                    outputSchema = {
+                        type = "object",
+                        properties = {
+                            marks = {type = "object",
+                                additionalProperties = {type = "string"},
+                                description = "mark name to compact entity id-range string"},
+                        },
+                        required = {"marks"},
+                    },
                     run = function(_v: {string: any}, _parts: {string}): commands.Result
                         local groups = markGroups()
                         local lines = markLines(groups)
@@ -1177,6 +1249,15 @@ function commands.build(env: commands.Env): commands.Registry
             examples = {"goto 5", "goto boss"},
             shortHelp = "move the camera to an entity by id, or the first with a mark name",
             schema = targetSchema,
+            outputSchema = {
+                type = "object",
+                properties = {
+                    id = {type = "integer", description = "the entity moved to"},
+                    x = {type = "number"},
+                    y = {type = "number"},
+                },
+                required = {"id", "x", "y"},
+            },
             run = function(v: {string: any}, _parts: {string}): commands.Result
                 local ids = resolveTargets(v)
                 local firstId = 0
@@ -1204,6 +1285,14 @@ function commands.build(env: commands.Env): commands.Registry
             mcpHelp = "Attach a note to the selected entities, visible in-game above them and in get_debug_context. Use it to flag findings for the operator. An empty message clears notes on the selection.",
             schema = noteSchema,
             examples = {"note flickers when hit", "note  (clear notes)"},
+            outputSchema = {
+                type = "object",
+                properties = {
+                    noted = {type = "integer", description = "entities annotated"},
+                    msg = {type = "string"},
+                    cleared = {type = "integer", description = "entities whose notes were cleared"},
+                },
+            },
             run = function(v: {string: any}, _parts: {string}): commands.Result
                 local msg = (v.msg as string) or ""
                 if #ctx.selected == 0 then
@@ -1253,6 +1342,15 @@ function commands.build(env: commands.Env): commands.Registry
             shortHelp = "despawn an entity by id or mark name, or the whole selection",
             mcpHelp = "Despawn the target entities (an id, a mark name, or the current selection when no target is given). Destructive and immediate. Take debug_snapshot_save first if the state matters.",
             schema = optionalTargetSchema,
+            outputSchema = {
+                type = "object",
+                properties = {
+                    despawned = {type = "integer"},
+                    ids = {type = "array", items = {type = "integer"},
+                        description = "despawned entity ids (absent for selection despawns)"},
+                },
+                required = {"despawned"},
+            },
             run = function(v: {string: any}, _parts: {string}): commands.Result
                 if v.target == nil then
                     local n = reg:despawnSelected()
@@ -1288,6 +1386,15 @@ function commands.build(env: commands.Env): commands.Registry
             mcpHelp = "Strip the named components from the target entities (an id, a mark name, or @selection). Destructive to component data; the entities survive. Returns how many entities were changed.",
             schema = removeSchema,
             examples = {"remove 5 Velocity", "remove @selection Burning Stunned", "remove boss Shield"},
+            outputSchema = {
+                type = "object",
+                properties = {
+                    entities = {type = "integer", description = "entities touched"},
+                    components = {type = "array", items = {type = "string"}},
+                    errors = {type = "integer", description = "failed removals"},
+                },
+                required = {"components", "entities", "errors"},
+            },
             run = function(v: {string: any}, _parts: {string}): commands.Result
                 local ids, terr = resolveEditTargets(v)
                 if not ids then
@@ -1339,6 +1446,14 @@ function commands.build(env: commands.Env): commands.Registry
             schema = setSchema,
             examples = {"set 5 Transform {x = 10, y = 20}", "set @selection Color {r = 1, g = 0, b = 0}",
                 "set boss Shield"},
+            outputSchema = {
+                type = "object",
+                properties = {
+                    set = {type = "integer", description = "entities written"},
+                    component = {type = "string"},
+                },
+                required = {"component", "set"},
+            },
             run = function(v: {string: any}, _parts: {string}): commands.Result
                 local ids, terr = resolveEditTargets(v)
                 if not ids then
@@ -1400,6 +1515,15 @@ function commands.build(env: commands.Env): commands.Registry
             schema = modifySchema,
             examples = {"modify 5 Transform {x = 10}", "modify @selection Color {a = 0.5}",
                 "modify boss Health {hp = 1}"},
+            outputSchema = {
+                type = "object",
+                properties = {
+                    modified = {type = "integer", description = "entities changed"},
+                    skipped = {type = "integer", description = "live targets lacking the component"},
+                    component = {type = "string"},
+                },
+                required = {"component", "modified", "skipped"},
+            },
             run = function(v: {string: any}, _parts: {string}): commands.Result
                 local ids, terr = resolveEditTargets(v)
                 if not ids then
@@ -1468,6 +1592,14 @@ function commands.build(env: commands.Env): commands.Registry
             schema = spawnSchema,
             examples = {"spawn Transform {x = 100, y = 50}", "spawn enemy Transform {x = 0, y = 0}",
                 "spawn ball"},
+            outputSchema = {
+                type = "object",
+                properties = {
+                    id = {type = "integer", description = "the new entity, now selected"},
+                    bundle = {type = "string", description = "bundle used, when one matched"},
+                },
+                required = {"id"},
+            },
             run = function(v: {string: any}, _parts: {string}): commands.Result
                 local toks, terr = cmdargs.tokenize(v.spec as string)
                 if not toks then
@@ -1551,6 +1683,15 @@ function commands.build(env: commands.Env): commands.Registry
             schema = querySchema,
             examples = {"query Position Velocity -Dead",
                 "query Dead invert=true  (de-select dead entities)"},
+            outputSchema = {
+                type = "object",
+                properties = {
+                    matched = {type = "integer", description = "entities matching the expression"},
+                    deselected = {type = "integer", description = "matches removed when invert=true"},
+                    selected = {type = "integer", description = "selection size after the call"},
+                },
+                required = {"selected"},
+            },
             run = function(v: {string: any}, _parts: {string}): commands.Result
                 return runQuery(v.expr as string, v.invert as boolean)
             end,
@@ -1566,6 +1707,7 @@ function commands.build(env: commands.Env): commands.Registry
                     name = "rect",
                     shortHelp = "outline a rectangle (x y w h in world units)",
                     schema = drawRectSchema,
+                    outputSchema = drawOutputSchema,
                     run = function(v: {string: any}, _parts: {string}): commands.Result
                         local id = env.annotations:add(makeAnnotation(v, "rect"))
                         return {ok = true, message = "drew rect #" .. tostring(id),
@@ -1576,6 +1718,7 @@ function commands.build(env: commands.Env): commands.Registry
                     name = "circle",
                     shortHelp = "outline a circle (x y radius in world units)",
                     schema = drawCircleSchema,
+                    outputSchema = drawOutputSchema,
                     run = function(v: {string: any}, _parts: {string}): commands.Result
                         local id = env.annotations:add(makeAnnotation(v, "circle"))
                         return {ok = true, message = "drew circle #" .. tostring(id),
@@ -1586,6 +1729,7 @@ function commands.build(env: commands.Env): commands.Registry
                     name = "line",
                     shortHelp = "draw a line (x y x2 y2 in world units)",
                     schema = drawLineSchema,
+                    outputSchema = drawOutputSchema,
                     run = function(v: {string: any}, _parts: {string}): commands.Result
                         local id = env.annotations:add(makeAnnotation(v, "line"))
                         return {ok = true, message = "drew line #" .. tostring(id),
@@ -1596,6 +1740,7 @@ function commands.build(env: commands.Env): commands.Registry
                     name = "text",
                     shortHelp = "print text at a world position",
                     schema = drawTextSchema,
+                    outputSchema = drawOutputSchema,
                     run = function(v: {string: any}, _parts: {string}): commands.Result
                         local id = env.annotations:add(makeAnnotation(v, "text"))
                         return {ok = true, message = "drew text #" .. tostring(id),
@@ -1607,6 +1752,13 @@ function commands.build(env: commands.Env): commands.Registry
                     aliases = {"rm"},
                     shortHelp = "remove annotations by id or tag; everything when omitted",
                     schema = drawClearSchema,
+                    outputSchema = {
+                        type = "object",
+                        properties = {
+                            cleared = {type = "integer", description = "annotations removed"},
+                        },
+                        required = {"cleared"},
+                    },
                     run = function(v: {string: any}, _parts: {string}): commands.Result
                         local id: integer = nil
                         if v.id ~= nil then id = math.floor(v.id as number) as integer end
@@ -1623,6 +1775,13 @@ function commands.build(env: commands.Env): commands.Registry
             shortHelp = "toggle entity id labels over on-screen entities",
             schema = idsSchema,
             examples = {"ids", "ids on", "ids off"},
+            outputSchema = {
+                type = "object",
+                properties = {
+                    shown = {type = "boolean", description = "label state after the call"},
+                },
+                required = {"shown"},
+            },
             run = function(v: {string: any}, _parts: {string}): commands.Result
                 local want = v.on as boolean
                 if want == nil then want = not ctx.showIds end
@@ -1806,7 +1965,9 @@ function commands.build(env: commands.Env): commands.Registry
                         mcpHelp = sub.mcpHelp,
                         tool = (sub.mcp ~= false) and ("debug_" .. c.name .. "_" .. sub.name) or nil,
                         inputSchema = sub.schema and cmdargs.toolSchema(sub.schema) or emptySchema,
+                        outputSchema = commands.wrapOutputSchema(sub.outputSchema),
                         annotations = toolAnnotations(c.name, sub.name, sub.annotations),
+                        metadata = sub.metadata,
                     }
                 end
                 return {ok = true, popup = commands.usagePopup(c), data = {
@@ -1817,9 +1978,11 @@ function commands.build(env: commands.Env): commands.Registry
                     mcpHelp = c.mcpHelp,
                     tool = (c.mcp ~= false and c.run ~= nil) and ("debug_" .. c.name) or nil,
                     inputSchema = c.schema and cmdargs.toolSchema(c.schema) or emptySchema,
+                    outputSchema = commands.wrapOutputSchema(c.outputSchema),
                     annotations = toolAnnotations(c.name, nil, c.annotations),
                     subcommands = subs,
                     examples = c.examples,
+                    metadata = c.metadata,
                 }}
             end,
         },
@@ -1948,6 +2111,12 @@ function commands.Registry:add(cmd: commands.Command)
         error("commands: '" .. cmd.name .. "' is already registered")
     end
     if cmd.schema then cmdargs.validate(cmd.schema) end
+    if cmd.metadata ~= nil and type(cmd.metadata) ~= "table" then
+        error("commands: '" .. cmd.name .. "' metadata must be a table")
+    end
+    if cmd.outputSchema ~= nil and type(cmd.outputSchema) ~= "table" then
+        error("commands: '" .. cmd.name .. "' outputSchema must be a table")
+    end
     if cmd.subcommands then
         local seen: {string: boolean} = {}
         for _, sub in ipairs(cmd.subcommands) do
@@ -1959,6 +2128,12 @@ function commands.Registry:add(cmd: commands.Command)
             end
             seen[sub.name] = true
             if sub.schema then cmdargs.validate(sub.schema) end
+            if sub.metadata ~= nil and type(sub.metadata) ~= "table" then
+                error("commands: '" .. cmd.name .. " " .. sub.name .. "' metadata must be a table")
+            end
+            if sub.outputSchema ~= nil and type(sub.outputSchema) ~= "table" then
+                error("commands: '" .. cmd.name .. " " .. sub.name .. "' outputSchema must be a table")
+            end
         end
     end
     if cmd.aliases then

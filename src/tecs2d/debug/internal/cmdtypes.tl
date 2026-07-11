@@ -79,6 +79,15 @@ local record cmdtypes
         -- names: "components", "marks", "targets", "edittargets", "bundles",
         -- "systems", "cameras", "commands".
         complete: {integer: string}
+        -- JSON Schema for the Result.data payload. Projected over MCP as the
+        -- tool's outputSchema (wrapped in the {ok, result} envelope) and
+        -- rendered in the generated command reference.
+        outputSchema: {string: any}
+        -- Application-specific metadata; the engine never interprets it
+        -- beyond documented keys. `screenshots` is a list of
+        -- {file, alt, docs} entries; those with docs = true render as images
+        -- in the generated command reference.
+        metadata: {string: any}
         run: function(v: {string: any}, parts: {string}): Result
     end
 
@@ -106,6 +115,10 @@ local record cmdtypes
         -- Help/completion grouping: "Select", "Edit", "Render", "Engine",
         -- "Capture", or "Session". Unset (custom commands) groups as "Custom".
         section: string
+        -- JSON Schema for the Result.data payload; see Subcommand.outputSchema.
+        outputSchema: {string: any}
+        -- Application-specific metadata; see Subcommand.metadata.
+        metadata: {string: any}
         run: function(v: {string: any}, parts: {string}): Result
     end
 
@@ -125,6 +138,7 @@ local record cmdtypes
         name: string
         description: string
         inputSchema: {string: any}
+        outputSchema: {string: any}
         annotations: ToolAnnotations
     end
 

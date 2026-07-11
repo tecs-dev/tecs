@@ -323,6 +323,15 @@ Use these presentation fields to make commands discoverable:
 | `aliases` | Alternate command-line names |
 | `section` | Help group; omitted custom commands appear under `Custom` |
 | `complete` | Built-in live completion sources by argument position |
+| `outputSchema` | JSON Schema for the `data` payload; projected as the MCP tool's `outputSchema` (wrapped in the `{ok, result}` envelope) and rendered in the generated command reference |
+| `metadata` | Free-form application metadata; the engine only interprets documented keys |
+
+The one documented `metadata` key is `screenshots`: a list of
+`{file = "path", alt = "alt text", docs = true}` entries. Entries with
+`docs = true` render as images in the generated
+[Command Reference](./debug-reference) (`file` is resolved from that page, so
+use paths like `./assets/debug/select.png`). Other entries, and any other
+`metadata` keys, ride along untouched in `debug_describe` for your own tooling.
 
 Completion positions start at `1` after the command or subcommand. Position `0`
 applies to any later argument. Available sources are `components`, `marks`,

@@ -113,6 +113,71 @@ describe("tecs2d.debug.commands registry", function()
         luassert.equals(2, pos.y)
     end)
 
+    it("projects outputSchema wrapped in the {ok, result} envelope", function()
+        local reg = makeRegistry()
+        local tool: commands.McpTool = nil
+        for _, t in ipairs(reg:mcpTools()) do
+            if t.name == "debug_modify" then tool = t end
+        end
+        luassert.is_truthy(tool)
+        local props = tool.outputSchema.properties as {string: {string: any}}
+        luassert.equals("boolean", (props.ok as {string: any}).type)
+        local result = props.result as {string: any}
+        local rprops = result.properties as {string: {string: any}}
+        luassert.equals("integer", (rprops.modified as {string: any}).type)
+        luassert.is_truthy(rprops.message, "the envelope adds message next to the data fields")
+        luassert.is_truthy(props.error, "failures arrive as {ok = false, error}")
+    end)
+
+    it("keeps outputSchema absent for commands that declare none", function()
+        local reg = makeRegistry()
+        for _, t in ipairs(reg:mcpTools()) do
+            if t.name == "debug_capabilities" then
+                luassert.is_nil(t.outputSchema)
+            end
+        end
+    end)
+
+    it("carries metadata and outputSchema through describe", function()
+        local reg = makeRegistry()
+        reg:add({
+            name = "metacmd",
+            shortHelp = "a command with metadata",
+            metadata = {screenshots = {{file = "shot.png", alt = "alt", docs = true}}},
+            outputSchema = {type = "object",
+                properties = {hits = {type = "integer"}}, required = {"hits"}},
+            run = function(_v: {string: any}, _p: {string}): commands.Result
+                return {ok = true, data = {hits = 1}}
+            end,
+        })
+        local r = reg:invokeMcp("debug_describe", {command = "metacmd"})
+        luassert.is_true(r.ok, tostring(r.message))
+        local d = r.data as {string: any}
+        local meta = d.metadata as {string: any}
+        luassert.is_truthy((meta.screenshots as {any})[1])
+        local out = d.outputSchema as {string: any}
+        local oprops = out.properties as {string: any}
+        luassert.is_truthy((oprops.result as {string: any}).properties)
+    end)
+
+    it("rejects non-table metadata and outputSchema at registration", function()
+        local reg = makeRegistry()
+        luassert.has_error(function()
+            reg:add({name = "badmeta", shortHelp = "x",
+                metadata = "nope" as any as {string: any},
+                run = function(_v: {string: any}, _p: {string}): commands.Result
+                    return {ok = true}
+                end})
+        end)
+        luassert.has_error(function()
+            reg:add({name = "badout", shortHelp = "x",
+                outputSchema = 5 as any as {string: any},
+                run = function(_v: {string: any}, _p: {string}): commands.Result
+                    return {ok = true}
+                end})
+        end)
+    end)
+
     it("capabilities reports plugins, sections, and capture support", function()
         local reg = makeRegistry()
         local r = reg:execute("capabilities")

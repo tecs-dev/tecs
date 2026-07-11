@@ -10,6 +10,11 @@ local cmdtypes <const> = require("tecs2d.debug.internal.cmdtypes")
 
 local record docgen
     markdown: function(reg: commands.Registry): string
+
+    --- A compact index of every projected debug_* tool (name, one-line
+    --- description, link into the reference page) for splicing into the
+    --- MCP tools doc between GENERATED markers.
+    toolIndex: function(reg: commands.Registry): string
 end
 
 local SECTION_ORDER <const> = {"Select", "Edit", "Render", "Engine", "Capture", "Session", "Custom"}
@@ -60,6 +65,40 @@ local function sentence(s: string): string
     local out = s:gsub("^%l", string.upper)
     if not out:match("%.$") then out = out .. "." end
     return escapeProse(out)
+end
+
+-- JSON with sorted object keys and stable layout: the page is committed and
+-- drift-checked, so rendering must be deterministic across runs.
+local function stableJson(v: any, indent: string): string
+    local t = type(v)
+    if t == "string" then
+        local s = (v as string):gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\n", "\\n")
+        return '"' .. s .. '"'
+    elseif t == "number" or t == "boolean" then
+        return tostring(v)
+    elseif t == "table" then
+        local tbl = v as {any: any}
+        local total = 0
+        for _ in pairs(tbl) do total = total + 1 end
+        if total == 0 then return "{}" end
+        local inner = indent .. "  "
+        if #(v as {any}) == total then
+            local items: {string} = {}
+            for _, item in ipairs(v as {any}) do
+                items[#items + 1] = inner .. stableJson(item, inner)
+            end
+            return "[\n" .. table.concat(items, ",\n") .. "\n" .. indent .. "]"
+        end
+        local keys: {string} = {}
+        for k in pairs(tbl) do keys[#keys + 1] = tostring(k) end
+        table.sort(keys)
+        local fields: {string} = {}
+        for _, k in ipairs(keys) do
+            fields[#fields + 1] = inner .. '"' .. k .. '": ' .. stableJson(tbl[k], inner)
+        end
+        return "{\n" .. table.concat(fields, ",\n") .. "\n" .. indent .. "}"
+    end
+    return "null"
 end
 
 local function typeLabel(spec: cmdargs.ArgSpec): string
@@ -157,8 +196,36 @@ local function renderExamples(out: {string}, examples: {string})
     out[#out + 1] = ""
 end
 
+-- metadata.screenshots entries with docs = true render as images. `file` is
+-- a path usable from the reference page (e.g. ./assets/debug/select.png).
+local function renderScreenshots(out: {string}, metadata: {string: any})
+    if not metadata then return end
+    local shots = metadata.screenshots
+    if type(shots) ~= "table" then return end
+    for _, entry in ipairs(shots as {any}) do
+        local shot = entry as {string: any}
+        if shot.docs == true and type(shot.file) == "string" then
+            local alt = type(shot.alt) == "string" and (shot.alt as string) or ""
+            out[#out + 1] = "![" .. escapeProse(alt) .. "](" .. (shot.file as string) .. ")"
+            out[#out + 1] = ""
+        end
+    end
+end
+
+-- The declared Result.data schema, collapsed by default. Over MCP the same
+-- object arrives wrapped as {ok = true, result = {...data, message}}.
+local function renderOutputSchema(out: {string}, outputSchema: {string: any})
+    if not outputSchema then return end
+    out[#out + 1] = "::: details Result data schema"
+    out[#out + 1] = "```json"
+    out[#out + 1] = stableJson(outputSchema, "")
+    out[#out + 1] = "```"
+    out[#out + 1] = ":::"
+    out[#out + 1] = ""
+end
+
 local function renderCommand(out: {string}, c: cmdtypes.Command, toolFor: {string: cmdtypes.McpTool})
-    out[#out + 1] = "### `" .. commands.commandSignature(c) .. "`"
+    out[#out + 1] = "### `" .. commands.commandSignature(c) .. "` {#cmd-" .. c.name .. "}"
     out[#out + 1] = ""
     if c.aliases and #c.aliases > 0 then
         out[#out + 1] = "Aliases: `" .. table.concat(c.aliases, "`, `") .. "`"
@@ -170,10 +237,12 @@ local function renderCommand(out: {string}, c: cmdtypes.Command, toolFor: {strin
         out[#out + 1] = escapeProse(c.mcpHelp)
         out[#out + 1] = ""
     end
+    renderScreenshots(out, c.metadata)
     if c.run then
         toolLine(out, toolFor["debug_" .. c.name], c.overlay)
     end
     if c.schema then renderArgs(out, c.schema) end
+    renderOutputSchema(out, c.outputSchema)
     renderExamples(out, c.examples)
     for _, sub in ipairs(c.subcommands or {}) do
         local sig = c.name .. " " .. sub.name
@@ -181,7 +250,7 @@ local function renderCommand(out: {string}, c: cmdtypes.Command, toolFor: {strin
             local s = cmdargs.signature(sub.schema)
             if s ~= "" then sig = sig .. " " .. s end
         end
-        out[#out + 1] = "#### `" .. sig .. "`"
+        out[#out + 1] = "#### `" .. sig .. "` {#cmd-" .. c.name .. "-" .. sub.name .. "}"
         out[#out + 1] = ""
         out[#out + 1] = sentence(sub.shortHelp)
         out[#out + 1] = ""
@@ -189,8 +258,10 @@ local function renderCommand(out: {string}, c: cmdtypes.Command, toolFor: {strin
             out[#out + 1] = escapeProse(sub.mcpHelp)
             out[#out + 1] = ""
         end
+        renderScreenshots(out, sub.metadata)
         toolLine(out, toolFor["debug_" .. c.name .. "_" .. sub.name], c.overlay)
         if sub.schema then renderArgs(out, sub.schema) end
+        renderOutputSchema(out, sub.outputSchema)
         renderExamples(out, sub.examples)
     end
 end
@@ -211,6 +282,10 @@ function docgen.markdown(reg: commands.Registry): string
     end
 
     local out: {string} = {
+        "---",
+        "outline: [2, 3]",
+        "---",
+        "",
         "<!-- Generated by `make docs-debug` from the debugger command registry. Do not edit by hand. -->",
         "",
         "# Debugger Commands",
@@ -219,7 +294,9 @@ function docgen.markdown(reg: commands.Registry): string
         "MCP tool name are also projected over [MCP](./mcp/tools) as `debug_*` tools that share the",
         "operator's selection, marks, and notes; the safety hints in parentheses are the tool's",
         "declared MCP annotations. Arguments are positional or `key=value` in the overlay and JSON",
-        "parameters over MCP.",
+        "parameters over MCP. Result data schemas describe the command's structured payload; over MCP",
+        "it arrives wrapped as `{ok = true, result = {...data, message}}` and is also declared as the",
+        "tool's `outputSchema`.",
         "",
         "This page is generated: run `make docs-debug` after changing a command.",
         "",
@@ -234,6 +311,27 @@ function docgen.markdown(reg: commands.Registry): string
                 out[#out + 1] = ""
             end
             for _, c in ipairs(bucket) do renderCommand(out, c, toolFor) end
+        end
+    end
+    return table.concat(out, "\n")
+end
+
+function docgen.toolIndex(reg: commands.Registry): string
+    local out: {string} = {
+        "| Tool | Description |",
+        "| --- | --- |",
+    }
+    for _, c in ipairs(reg.list) do
+        if c.mcp ~= false and c.run then
+            out[#out + 1] = "| [`debug_" .. c.name .. "`](../debug-reference#cmd-" .. c.name ..
+                ") | " .. escapeCell(sentence(c.shortHelp)) .. " |"
+        end
+        for _, sub in ipairs(c.subcommands or {}) do
+            if sub.mcp ~= false then
+                out[#out + 1] = "| [`debug_" .. c.name .. "_" .. sub.name ..
+                    "`](../debug-reference#cmd-" .. c.name .. "-" .. sub.name .. ") | " ..
+                    escapeCell(sentence(sub.shortHelp)) .. " |"
+            end
         end
     end
     return table.concat(out, "\n")
