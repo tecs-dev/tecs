@@ -676,16 +676,9 @@ at runtime; inspect `tools/list` for the exact set and generated schemas.
 | [`debug_materials_list`](../debug-reference#cmd-materials-list) | List registered materials. |
 | [`debug_materials_info`](../debug-reference#cmd-materials-info) | Show a material's GLSL sources by name or id. |
 | [`debug_sprites_info`](../debug-reference#cmd-sprites-info) | Show bucket instance counts and texture memory. |
-| [`debug_systems_list`](../debug-reference#cmd-systems-list) | List every system with its phase and state. |
-| [`debug_systems_stop`](../debug-reference#cmd-systems-stop) | Disable a system by name. |
-| [`debug_systems_start`](../debug-reference#cmd-systems-start) | Re-enable a stopped system. |
-| [`debug_systems_toggle`](../debug-reference#cmd-systems-toggle) | Flip a system between stopped and running. |
 | [`debug_systems_info`](../debug-reference#cmd-systems-info) | Show one system's phase, order, and state. |
-| [`debug_archetypes_list`](../debug-reference#cmd-archetypes-list) | List archetypes by entity count. |
 | [`debug_archetypes_info`](../debug-reference#cmd-archetypes-info) | Show one archetype's entity count and components. |
 | [`debug_archetypes_select`](../debug-reference#cmd-archetypes-select) | Select every entity in an archetype. |
-| [`debug_components_list`](../debug-reference#cmd-components-list) | List registered component types. |
-| [`debug_components_info`](../debug-reference#cmd-components-info) | Show a component's schema by name or id. |
 | [`debug_states_info`](../debug-reference#cmd-states-info) | Show the state stack, top last. |
 | [`debug_states_push`](../debug-reference#cmd-states-push) | Push a created state onto the stack. |
 | [`debug_states_pop`](../debug-reference#cmd-states-pop) | Pop the top state off the stack. |

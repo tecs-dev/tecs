@@ -205,6 +205,7 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "list",
                     aliases = {"ls"},
+                    mcp = false,   -- agents use the get_systems MCP tool
                     shortHelp = "list every system with its phase and state",
                     run = function(_v: {string: any}, _parts: {string}): cmdtypes.Result
                         return systemsList()
@@ -213,6 +214,7 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "stop",
                     complete = {[1] = "systems"},
+                    mcp = false,   -- agents use the toggle_system MCP tool
                     shortHelp = "disable a system by name",
                     schema = systemNameSchema,
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
@@ -222,6 +224,7 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "start",
                     complete = {[1] = "systems"},
+                    mcp = false,   -- agents use the toggle_system MCP tool
                     shortHelp = "re-enable a stopped system",
                     schema = systemNameSchema,
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
@@ -231,6 +234,7 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "toggle",
                     complete = {[1] = "systems"},
+                    mcp = false,   -- agents use the toggle_system MCP tool
                     shortHelp = "flip a system between stopped and running",
                     schema = systemNameSchema,
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
@@ -275,6 +279,7 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             subcommands = {
                 {
                     name = "list",
+                    mcp = false,   -- agents use the get_archetypes MCP tool
                     shortHelp = "list archetypes by entity count",
                     run = function(_v: {string: any}, _parts: {string}): cmdtypes.Result
                         local rows: {{string: any}} = {}
@@ -378,6 +383,7 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             subcommands = {
                 {
                     name = "list",
+                    mcp = false,   -- agents use the get_components MCP tool
                     shortHelp = "list registered component types",
                     run = function(_v: {string: any}, _parts: {string}): cmdtypes.Result
                         local names: {string} = {}
@@ -402,6 +408,7 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "info",
                     complete = {[1] = "components"},
+                    mcp = false,   -- agents use the get_component_schema MCP tool
                     shortHelp = "show a component's schema by name or id",
                     schema = { args = { name = {required = true, help = "component name or id"} },
                         positional = {"name"} },

@@ -4,6 +4,7 @@
 --- shared queued-op drain.
 
 local tecs <const> = require("tecs")
+local componentregistry <const> = require("tecs.internal.components")
 local logging <const> = require("tecs.utils.logging")
 local entityinfo <const> = require("tecs2d.internal.entityinfo")
 local systemcontrol <const> = require("tecs2d.internal.systemcontrol")
@@ -165,6 +166,14 @@ handlers["get_components"] = function(_: {string:any}, id: number)
             end
         end
     end)
+    -- Registered components with no live rows still list, at zero entities,
+    -- so agents can discover every spawnable component here.
+    for name, c in pairs(componentregistry.registeredComponents) do
+        if not componentIds[name] then
+            componentIds[name] = (c as tecs.Component).componentId
+            componentCounts[name] = 0
+        end
+    end
     local names: {string} = {}
     for name in pairs(componentIds) do
         table.insert(names, name)

@@ -269,9 +269,9 @@ describe("tecs2d.debug.commands registry", function()
         for _, tool in ipairs(reg:mcpTools()) do byName[tool.name] = tool end
 
         -- Read verbs derive read-only and idempotent.
-        luassert.is_true(byName.debug_archetypes_list.annotations.readOnlyHint)
-        luassert.is_true(byName.debug_archetypes_list.annotations.idempotentHint)
-        luassert.is_false(byName.debug_archetypes_list.annotations.destructiveHint)
+        luassert.is_true(byName.debug_archetypes_info.annotations.readOnlyHint)
+        luassert.is_true(byName.debug_archetypes_info.annotations.idempotentHint)
+        luassert.is_false(byName.debug_archetypes_info.annotations.destructiveHint)
         -- World loads and despawns derive destructive.
         luassert.is_true(byName.debug_rewind_load.annotations.destructiveHint)
         luassert.is_true(byName.debug_despawn.annotations.destructiveHint)

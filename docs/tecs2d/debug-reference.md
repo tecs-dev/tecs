@@ -1076,13 +1076,13 @@ systems info debug.Overlay
 
 List every system with its phase and state.
 
-MCP tool: `debug_systems_list` (read-only, idempotent)
+Overlay only; not projected over MCP.
 
 #### `systems stop <name>` {#cmd-systems-stop}
 
 Disable a system by name.
 
-MCP tool: `debug_systems_stop`
+Overlay only; not projected over MCP.
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1092,7 +1092,7 @@ MCP tool: `debug_systems_stop`
 
 Re-enable a stopped system.
 
-MCP tool: `debug_systems_start`
+Overlay only; not projected over MCP.
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1102,7 +1102,7 @@ MCP tool: `debug_systems_start`
 
 Flip a system between stopped and running.
 
-MCP tool: `debug_systems_toggle`
+Overlay only; not projected over MCP.
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1132,7 +1132,7 @@ archetypes select 12
 
 List archetypes by entity count.
 
-MCP tool: `debug_archetypes_list` (read-only, idempotent)
+Overlay only; not projected over MCP.
 
 #### `archetypes info <id>` {#cmd-archetypes-info}
 
@@ -1167,13 +1167,13 @@ components info Transform
 
 List registered component types.
 
-MCP tool: `debug_components_list` (read-only, idempotent)
+Overlay only; not projected over MCP.
 
 #### `components info <name>` {#cmd-components-info}
 
 Show a component's schema by name or id.
 
-MCP tool: `debug_components_info` (read-only, idempotent)
+Overlay only; not projected over MCP.
 
 | Argument | Type | Description |
 | --- | --- | --- |

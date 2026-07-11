@@ -1214,7 +1214,7 @@ describe("in-game debugger overlay", function()
             "unknown component should error")
     end)
 
-    it("debug_systems verbs stop and restart a system", function()
+    it("toggle_system stops and restarts a system; debug_systems_info reports it", function()
         local function frames(): number
             return tonumber(fixture.runLua(app, "return _G.rec.frames")[1])
         end
@@ -1225,14 +1225,14 @@ describe("in-game debugger overlay", function()
         end)
         luassert.is_true(running == true, "frame counter is not running")
 
-        app.client:call("debug_systems_stop", {name = "test.FrameCounter"})
+        app.client:call("toggle_system", {name = "test.FrameCounter", enabled = false})
         local f1 = frames()
         fixture.eventually(0.3, function(): boolean return nil end)
         luassert.equals(f1, frames(), "stopped system still ran")
         local info = app.client:call("debug_systems_info", {name = "test.FrameCounter"})
         luassert.is_false(info.enabled as boolean)
 
-        app.client:call("debug_systems_start", {name = "test.FrameCounter"})
+        app.client:call("toggle_system", {name = "test.FrameCounter", enabled = true})
         local resumed = fixture.eventually(fixture.callTimeout, function(): boolean
             if frames() > f1 then return true end
             return nil
@@ -1315,10 +1315,11 @@ describe("in-game debugger overlay", function()
     end)
 
     it("engine command groups answer over MCP in a live app", function()
-        -- Archetypes and components.
-        local archs = app.client:call("debug_archetypes_list", {})
+        -- Archetypes and components (via the builtin tools; the registry
+        -- verbs are overlay-only for these).
+        local archs = app.client:call("get_archetypes", {})
         luassert.is_true(tonumber(archs.count) >= 1, "no archetypes listed")
-        local comp = app.client:call("debug_components_info", {name = "Transform"})
+        local comp = app.client:call("get_component_schema", {name = "Transform"})
         luassert.equals("ffi", comp.kind as string)
 
         -- States.

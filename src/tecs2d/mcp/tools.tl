@@ -144,7 +144,8 @@ tools.list = {
     {
         name = "get_components",
         annotations = {readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false},
-        description = "Get list of all component types used in the game." .. JSON_TEXT_RESPONSE,
+        description = "Get every registered component type with its id and live entity count " ..
+            "(0 when registered but unused)." .. JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
@@ -348,8 +349,9 @@ tools.list = {
     {
         name = "set_time_scale",
         annotations = {readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false},
-        description = "Set the time scale for the game. 1.0 is normal speed, 0.5 is half speed, 2.0 is double speed." ..
-            JSON_TEXT_RESPONSE,
+        description = "Set the time scale for the game. 1.0 is normal speed, 0.5 is half speed, 2.0 is double speed. " ..
+            "While the debugger freeze is held, prefer debug_camera_timescale, which reads and writes " ..
+            "the scale that resumes." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {
