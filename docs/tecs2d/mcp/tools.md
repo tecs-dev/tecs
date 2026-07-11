@@ -627,9 +627,10 @@ runtime; inspect `tools/list` for the exact set and generated input schemas.
 - Selection and annotation: `debug_select` (with a `replace` flag to swap instead of adding), `debug_clear`,
   `debug_mark` (plus `_list` / `_clear`), `debug_goto`, `debug_note`, `debug_query` (with `invert` to de-select the
   matches from the selection), `debug_ids` (entity id labels).
-- Entity editing: `debug_set` (one component, Lua-table `value` string), `debug_remove` (components off a target),
-  `debug_spawn` (bundle and/or components with Lua-table values), `debug_despawn`. Targets are an entity `id`, a
-  mark `name`, or the literal `@selection`.
+- Entity editing: `debug_set` (one component; adds it when missing and resets omitted fields to defaults),
+  `debug_modify` (changes only the given fields of a component the target already has; targets without it are
+  skipped), `debug_remove` (components off a target), `debug_spawn` (bundle and/or components with Lua-table
+  values), `debug_despawn`. Targets are an entity `id`, a mark `name`, or the literal `@selection`.
 - Drawing: `debug_draw_rect` / `debug_draw_circle` / `debug_draw_line` / `debug_draw_text` (world-space, optional
   `entity` pin and wall-clock `seconds` expiry) and `debug_draw_clear` (by `id` or `tag`, or everything).
 - Engine introspection: `debug_archetypes_list` / `_info` / `_select`, `debug_components_list` / `_info`,
@@ -673,7 +674,8 @@ appears here as `debug_<name>` with a generated schema, exactly like the builtin
 [Custom debugger commands](../custom-debug-commands) for the complete registration API and examples.
 
 Argument schemas project faithfully: enums, numeric minimum/maximum, arrays (comma-separated on the command
-line), and objects (`debug_set`'s `value` takes a real JSON object; the Lua-expression string also still works).
+line), and objects (the `value` of `debug_set` and `debug_modify` takes a real JSON object; the Lua-expression
+string also still works).
 Arguments that share one positional slot on the command line (an entity id or a mark name) become separate optional
 JSON parameters with a "provide exactly one" constraint. For example `debug_select`:
 

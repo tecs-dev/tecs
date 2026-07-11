@@ -121,8 +121,10 @@ tecs/
   after something goes wrong, `debug_diff {from = "rewind:10s", ignore = "Transform", limit = 0}`
   shows a per-component summary of what changed, `debug_diff_get` dereferences a JSON Pointer
   into the result, `debug_rewind_load` restores an entry, and the `step` tool replays frame by
-  frame. `debug_map_info` reads tiles at a world point; `debug_set` takes the component value as
-  a JSON object.
+  frame. `debug_map_info` reads tiles at a world point. `debug_set` and `debug_modify` take the
+  component value as a JSON object: `set` replaces the whole component (adds it when missing,
+  omitted fields reset to defaults) while `modify` changes only the named fields and skips
+  targets that lack the component, so prefer `modify` for tweaking live values.
 - `get_logs` returns captured engine log lines with a seq cursor (`after`); the operator-action
   feed (selection, marks, notes, edits, artifacts) logs under `tecs2d.debug.events`, so poll it
   with `get_logs {after = <seq>, contains = "debug.events"}`. `get_component_schema` gives field

@@ -100,6 +100,19 @@ describe("tecs2d.debug.commands registry", function()
         luassert.equals(4, (w:get(eid, SpecPos) as {string: number}).x)
     end)
 
+    it("debug_modify merges a JSON object value over MCP", function()
+        local reg, w = makeRegistry()
+        local eid = w:spawn(SpecPos(1, 2))
+        w:commit()
+        local r = reg:invokeMcp("debug_modify",
+            {id = eid, comp = "DbgCmdPos", value = {x = 9}})
+        w:commit()
+        luassert.is_true(r.ok, tostring(r.message))
+        local pos = w:get(eid, SpecPos) as {string: number}
+        luassert.equals(9, pos.x)
+        luassert.equals(2, pos.y)
+    end)
+
     it("capabilities reports plugins, sections, and capture support", function()
         local reg = makeRegistry()
         local r = reg:execute("capabilities")
@@ -265,6 +278,71 @@ describe("tecs2d.debug.commands registry", function()
             luassert.equals(2, r.data.set)
             luassert.equals(3, (w:get(a, SpecPos) as {string: number}).x)
             luassert.equals(3, (w:get(b, SpecPos) as {string: number}).x)
+        end)
+
+        it("modify changes only the given fields and keeps the rest", function()
+            local reg, w = makeRegistry()
+            local eid = w:spawn(SpecPos(1, 2))
+            w:commit()
+
+            local r = reg:execute("modify " .. tostring(eid) .. " DbgCmdPos {x = 5}")
+            w:commit()
+            luassert.is_true(r.ok, tostring(r.message))
+            luassert.equals(1, r.data.modified)
+            local pos = w:get(eid, SpecPos) as {string: number}
+            luassert.equals(5, pos.x)
+            luassert.equals(2, pos.y)   -- set would have reset this to the default
+        end)
+
+        it("modify writes FFI component fields in place", function()
+            local reg, w = makeRegistry()
+            local eid = w:spawn(tecs.builtins.Transform(10, 20))
+            w:commit()
+
+            local r = reg:execute("modify " .. tostring(eid) .. " Transform {x = 99, scaleX = 2}")
+            w:commit()
+            luassert.is_true(r.ok, tostring(r.message))
+            local t = w:get(eid, tecs.builtins.Transform) as {string: number}
+            luassert.equals(99, t.x)
+            luassert.equals(20, t.y)
+            luassert.equals(2, t.scaleX)
+        end)
+
+        it("modify skips targets that lack the component", function()
+            local reg, w, ctx = makeRegistry()
+            local with = w:spawn(SpecPos(1, 1))
+            local without = w:spawn(SpecTag())
+            w:commit()
+            ctx.selected = {with, without}
+
+            local r = reg:execute("modify @selection DbgCmdPos {x = 9}")
+            w:commit()
+            luassert.is_true(r.ok, tostring(r.message))
+            luassert.equals(1, r.data.modified)
+            luassert.equals(1, r.data.skipped)
+            luassert.equals(9, (w:get(with, SpecPos) as {string: number}).x)
+            luassert.is_nil(w:get(without, SpecPos))
+        end)
+
+        it("modify fails when no target has the component", function()
+            local reg, w = makeRegistry()
+            local eid = w:spawn(SpecTag())
+            w:commit()
+
+            local r = reg:execute("modify " .. tostring(eid) .. " DbgCmdPos {x = 1}")
+            luassert.is_false(r.ok)
+            luassert.equals("modify_failed", r.code)
+            luassert.matches("no target has DbgCmdPos", r.message)
+        end)
+
+        it("modify requires at least one field", function()
+            local reg, w = makeRegistry()
+            local eid = w:spawn(SpecPos(0, 0))
+            w:commit()
+
+            local r = reg:execute("modify " .. tostring(eid) .. " DbgCmdPos {}")
+            luassert.is_false(r.ok)
+            luassert.equals("invalid_arguments", r.code)
         end)
 
         it("does not accept the selected spelling as a selection alias", function()

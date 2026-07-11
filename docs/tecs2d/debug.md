@@ -116,7 +116,8 @@ strip (which separates sections with colored `| Section |` markers).
 
 | Command | Description |
 | --- | --- |
-| `set <id\|name\|@selection> Comp {lua}` | Set one component from a Lua table value |
+| `set <id\|name\|@selection> Comp {lua}` | Set one component from a Lua table value; adds it when missing and resets omitted fields to defaults |
+| `modify <id\|name\|@selection> Comp {lua}` | Change only the given fields of a component the target already has; targets without it are skipped |
 | `remove <id\|name\|@selection> Comp ...` | Remove components from the target entities |
 | `spawn [bundle] Comp {lua} ...` | Spawn an entity from a bundle and/or components |
 | `draw rect\|circle\|line\|text\|clear ...` | Draw world-space annotations over the game (see below) |

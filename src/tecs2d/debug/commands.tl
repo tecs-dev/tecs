@@ -342,6 +342,16 @@ local setSchema <const>: cmdargs.Schema = (function(): cmdargs.Schema
     return schema
 end)()
 
+local modifySchema <const>: cmdargs.Schema = (function(): cmdargs.Schema
+    local args = editTargetArgs()
+    args.comp = {required = true, help = "component name"}
+    args.value = {rest = true, required = true, kind = "table",
+        help = "fields to change: a Lua table expression, e.g. {x = 10}, or a JSON object over MCP"}
+    local schema: cmdargs.Schema = {args = args, positional = {"target", "comp", "value"}}
+    cmdargs.validate(schema)
+    return schema
+end)()
+
 local spawnSchema <const>: cmdargs.Schema = {
     args = {
         spec = {rest = true, required = true,
@@ -894,6 +904,20 @@ function commands.build(env: commands.Env): commands.Registry
         return result as {string: any}, nil
     end
 
+    -- Merge fields into a live component instance. Nested tables recurse into
+    -- the existing sub-value (a table or an FFI struct reference) so siblings
+    -- of the named fields survive; anything else assigns directly.
+    local function applyFields(target: any, fields: {string: any})
+        local tgt = target as {string: any}
+        for k, fv in pairs(fields) do
+            if type(fv) == "table" and tgt[k] ~= nil then
+                applyFields(tgt[k], fv as {string: any})
+            else
+                tgt[k] = fv
+            end
+        end
+    end
+
     local function componentFor(nm: string): tecs.Component, string
         local ok, resolved = pcall(tecs.componentByName, nm)
         local comp = (ok and resolved) as tecs.Component
@@ -1311,7 +1335,7 @@ function commands.build(env: commands.Env): commands.Registry
             complete = {[1] = "edittargets", [2] = "components"},
             shortHelp = "set one component on an entity, marked group, or " ..
                 EDIT_SELECTION_TARGET .. " (Lua table value)",
-            mcpHelp = "Write one component on the target entities (an id, a mark name, or the literal @selection). The value is a Lua table expression, e.g. {x = 10, y = {n = 2}}; omitted fields keep their values. Mutates the live world immediately. Returns how many entities were written.",
+            mcpHelp = "Write one component on the target entities (an id, a mark name, or the literal @selection). The value is a JSON object or a Lua table expression, e.g. {x = 10, y = {n = 2}}; omitted fields reset to the component's defaults (use debug_modify to change fields in place). Adds the component when missing. Mutates the live world immediately. Returns how many entities were written.",
             schema = setSchema,
             examples = {"set 5 Transform {x = 10, y = 20}", "set @selection Color {r = 1, g = 0, b = 0}",
                 "set boss Shield"},
@@ -1365,6 +1389,74 @@ function commands.build(env: commands.Env): commands.Registry
                     message = "set " .. compName .. " on " .. tostring(count) .. " entities" ..
                         (firstError and (" (some failed: " .. firstError .. ")") or ""),
                     data = {set = count, component = compName}}
+            end,
+        },
+        {
+            name = "modify",
+            section = "Edit",
+            complete = {[1] = "edittargets", [2] = "components"},
+            shortHelp = "change only the given fields of a component the target already has",
+            mcpHelp = "Update only the provided fields of one component on the target entities (an id, a mark name, or @selection). Unlike debug_set it never adds the component and never resets omitted fields: targets missing the component are skipped and unnamed fields keep their current values. Returns modified and skipped counts.",
+            schema = modifySchema,
+            examples = {"modify 5 Transform {x = 10}", "modify @selection Color {a = 0.5}",
+                "modify boss Health {hp = 1}"},
+            run = function(v: {string: any}, _parts: {string}): commands.Result
+                local ids, terr = resolveEditTargets(v)
+                if not ids then
+                    return {ok = false, code = "no_match", message = "modify: " .. terr}
+                end
+                local compName = v.comp as string
+                local comp, cerr = componentFor(compName)
+                if not comp then
+                    return {ok = false, code = "unknown_component", message = "modify: " .. cerr}
+                end
+                local dataTbl: {string: any}
+                if type(v.value) == "table" then
+                    dataTbl = v.value as {string: any}
+                elseif type(v.value) == "string" and (v.value as string) ~= "" then
+                    local parsed, verr = evalTable(v.value as string)
+                    if not parsed then
+                        return {ok = false, code = "invalid_arguments", message = "modify: " .. verr}
+                    end
+                    dataTbl = parsed
+                end
+                if not dataTbl or next(dataTbl) == nil then
+                    return {ok = false, code = "invalid_arguments",
+                        message = "modify: provide at least one field, e.g. {x = 10}"}
+                end
+                local count = 0
+                local skipped = 0
+                local firstError: string = nil
+                for i = 1, #ids do
+                    local eid = ids[i]
+                    if w:isAlive(eid) then
+                        if not w:has(eid, comp) then
+                            skipped = skipped + 1
+                        else
+                            -- getMut marks the component dirty so GPU syncs
+                            -- and other dirty-gated consumers see the write.
+                            local results = {pcall(function()
+                                applyFields(w:getMut(eid, comp), dataTbl)
+                            end)}
+                            if results[1] then
+                                count = count + 1
+                            elseif not firstError then
+                                firstError = tostring(results[2])
+                            end
+                        end
+                    end
+                end
+                if count == 0 then
+                    local why = firstError
+                        or ((skipped > 0) and ("no target has " .. compName) or "no live targets")
+                    return {ok = false, code = "modify_failed", message = "modify: " .. why}
+                end
+                debugcontext.pushEvent(ctx, "edit", {component = compName, modified = count})
+                return {ok = true,
+                    message = "modified " .. compName .. " on " .. tostring(count) .. " entities" ..
+                        ((skipped > 0) and (" (" .. tostring(skipped) .. " lacked it)") or "") ..
+                        (firstError and (" (some failed: " .. firstError .. ")") or ""),
+                    data = {modified = count, skipped = skipped, component = compName}}
             end,
         },
         {
