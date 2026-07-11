@@ -18,23 +18,31 @@
 local tecs <const> = require("tecs")
 local componentregistry <const> = require("tecs.internal.components")
 local json <const> = require("tecs.utils.json")
-local entityinfo <const> = require("tecs2d.internal.entityinfo")
 local systemcontrol <const> = require("tecs2d.internal.systemcontrol")
 local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
 local gfxtypes <const> = require("tecs2d.gfx.types")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
 local annotations <const> = require("tecs2d.debug.internal.annotations")
-local mcpinfo <const> = require("tecs2d.internal.mcpinfo")
 local cmdargs <const> = require("tecs2d.debug.internal.cmdargs")
 local cmdtypes <const> = require("tecs2d.debug.internal.cmdtypes")
 local capturecmds <const> = require("tecs2d.debug.internal.cmd.capture")
+local editcmds <const> = require("tecs2d.debug.internal.cmd.edit")
 local enginecmds <const> = require("tecs2d.debug.internal.cmd.engine")
 local rendercmds <const> = require("tecs2d.debug.internal.cmd.render")
+local selectcmds <const> = require("tecs2d.debug.internal.cmd.select")
+local sessioncmds <const> = require("tecs2d.debug.internal.cmd.session")
 
 local format <const> = string.format
 local getTime <const> = love.timer.getTime
 
 local Transform <const> = tecs.builtins.Transform
+
+--- The action a projected debug_* tool name dispatches to: the argument
+--- schema (nil when the action takes none) and the run function.
+local record ToolEntry
+    schema: cmdargs.Schema
+    run: function(v: {string: any}, parts: {string}): cmdtypes.Result
+end
 
 local record commands
     --- Sentinel popup line drawn as a horizontal rule rather than text.
@@ -45,9 +53,9 @@ local record commands
     flattenOutput: function(lines: {string}): string
 
     --- Tile grid at a world point: the first TileChunk's size and origin,
-    --- else the enabled debug grid. Returns tile x, tile y, tile size, and
-    --- grid origin, or nil when no grid source exists. Shared by the `tile`
-    --- command and the overlay's context menu.
+    --- else the enabled debug grid. Returns tile x, tile y, tile width and
+    --- height, and grid origin x and y, or nil when no grid source exists.
+    --- Shared by the `tile` command and the overlay's context menu.
     tileAt: function(w: tecs.World, ctx: debugcontext.Context, wx: number, wy: number): integer, integer, number, number, number, number
 
     --- Prefix marking a section separator entry in completion candidates.
@@ -68,7 +76,12 @@ local record commands
     record Registry
         env: Env
         list: {Command}
+        --- Overlay dispatch by name or alias; excludes MCP-only commands
+        --- (overlay = false).
         byName: {string: Command}
+        --- Every registered command and alias regardless of surface; backs
+        --- `describe` and the duplicate-registration check.
+        allByName: {string: Command}
         names: {string}
         signals: Signals
         profiler: ProfilerState
@@ -110,6 +123,10 @@ local record commands
         --- return the results popup (nil when no session is active).
         finishProfile: function(self: Registry): {string}
 
+        --- debug_* tool name to its dispatch entry; built lazily on the
+        --- first invokeMcp and appended by add().
+        byToolName: {string: ToolEntry}
+
         --- The registry projected as MCP tool definitions (debug_* names).
         mcpTools: function(self: Registry): {McpTool}
 
@@ -150,9 +167,11 @@ local record commands
     --- invalid.
     register: function(w: tecs.World, cmd: Command)
 
-    --- The command's name plus its generated signature, e.g. "goto <id|name>".
+    --- Wrap a command's data schema in the {ok, result, error} envelope the
+    --- MCP server sends, so projected structuredContent validates against it.
     wrapOutputSchema: function(dataSchema: {string: any}): {string: any}
 
+    --- The command's name plus its generated signature, e.g. "goto <id|name>".
     commandSignature: function(c: Command): string
 
     subSignature: function(c: Command, sub: Subcommand): string
@@ -179,8 +198,6 @@ commands.SECTIONS = cmdtypes.SECTIONS
 commands.SECTION_COLORS = cmdtypes.SECTION_COLORS
 commands.SECTION_COLORS_BAR = cmdtypes.SECTION_COLORS_BAR
 
-local SECTION_ORDER <const>: {string} = cmdtypes.SECTIONS
-
 local HISTORY_FILE <const> = "debug-history.txt"
 local HISTORY_CAP <const> = 100
 
@@ -188,45 +205,24 @@ local HISTORY_CAP <const> = 100
 -- Schemas
 -------------------------------------------------------------------------------
 
--- A target given as an entity id or a mark name, sharing one positional slot.
-local function makeTargetSchema(required: boolean): cmdargs.Schema
-    local schema: cmdargs.Schema = {
-        args = {
-            id = {default = 0, forward = "target", help = "entity id"},
-            name = {forward = "target", help = "mark name"},
-            target = {synthetic = {"id", "name"}, required = required, help = "entity id or mark name"},
-        },
-        positional = {"target"},
+-- A target given as an entity id or a mark name, sharing one positional
+-- slot. Entries of `extra` (may be nil) merge into the argument specs.
+local function makeTargetSchema(required: boolean, extra: {string: cmdargs.ArgSpec}): cmdargs.Schema
+    local args: {string: cmdargs.ArgSpec} = {
+        id = {kind = "number", forward = "target", help = "entity id"},
+        name = {forward = "target", help = "mark name"},
+        target = {synthetic = {"id", "name"}, required = required, help = "entity id or mark name"},
     }
+    if extra then
+        for k, v in pairs(extra) do args[k] = v end
+    end
+    local schema: cmdargs.Schema = {args = args, positional = {"target"}}
     cmdargs.validate(schema)
     return schema
 end
 
-local targetSchema <const> = makeTargetSchema(true)
-local optionalTargetSchema <const> = makeTargetSchema(false)
-
--- select's target plus a replace flag (replace the selection instead of adding).
-local selectSchema <const>: cmdargs.Schema = {
-    args = {
-        id = {default = 0, forward = "target", help = "entity id"},
-        name = {forward = "target", help = "mark name"},
-        target = {synthetic = {"id", "name"}, required = true, help = "entity id or mark name"},
-        replace = {default = false, help = "replace the selection instead of adding to it"},
-    },
-    positional = {"target"},
-}
-cmdargs.validate(selectSchema)
-
-
-local stepSchema <const>: cmdargs.Schema = {
-    args = { n = {default = 1, help = "number of frames to tick"} },
-    positional = {"n"},
-}
-cmdargs.validate(stepSchema)
-
-
-
--- r/g/b default to nil: an omitted channel keeps its current value.
+local targetSchema <const> = makeTargetSchema(true, nil)
+local optionalTargetSchema <const> = makeTargetSchema(false, nil)
 
 local nameSchema <const>: cmdargs.Schema = {
     args = { name = {help = "output filename"} },
@@ -240,146 +236,15 @@ local refSchema <const>: cmdargs.Schema = {
 }
 cmdargs.validate(refSchema)
 
--- Shared arguments of every draw verb, plus the verb's own positionals.
-local function makeDrawSchema(extra: {string: cmdargs.ArgSpec}, positional: {string}): cmdargs.Schema
-    local args: {string: cmdargs.ArgSpec} = {
-        x = {default = 0, help = "world x (an offset when entity is set)"},
-        y = {default = 0, help = "world y (an offset when entity is set)"},
-        r = {kind = "number", help = "red 0-1 (default 1)"},
-        g = {kind = "number", help = "green 0-1 (default 1)"},
-        b = {kind = "number", help = "blue 0-1 (default 0)"},
-        a = {kind = "number", help = "alpha 0-1 (default 0.8)"},
-        tag = {help = "tag for grouped clearing"},
-        seconds = {kind = "number", help = "auto-remove after N wall-clock seconds; 0 = one frame"},
-        entity = {kind = "number", help = "pin to this entity: positions become offsets; removed when it dies"},
-        -- Named stroke, not width: rect already has a `w` size argument.
-        stroke = {default = 4, help = "outline width in pixels"},
-    }
-    for k, v in pairs(extra) do args[k] = v end
-    local schema: cmdargs.Schema = {args = args, positional = positional}
-    cmdargs.validate(schema)
-    return schema
-end
-
-local drawRectSchema <const> = makeDrawSchema({
-    w = {required = true, kind = "number", help = "width in world units"},
-    h = {required = true, kind = "number", help = "height in world units"},
-}, {"x", "y", "w", "h"})
-
-local drawCircleSchema <const> = makeDrawSchema({
-    radius = {required = true, kind = "number", help = "radius in world units"},
-}, {"x", "y", "radius"})
-
-local drawLineSchema <const> = makeDrawSchema({
-    x2 = {required = true, kind = "number", help = "end world x (an offset when entity is set)"},
-    y2 = {required = true, kind = "number", help = "end world y (an offset when entity is set)"},
-}, {"x", "y", "x2", "y2"})
-
-local drawTextSchema <const> = makeDrawSchema({
-    msg = {rest = true, required = true, help = "text to display"},
-    fontSize = {default = 14, help = "font size in pixels"},
-}, {"x", "y", "msg"})
-
--- Clear by tag or id, or everything when omitted.
-local drawClearSchema <const>: cmdargs.Schema = {
-    args = {
-        id = {default = 0, forward = "which", help = "annotation id"},
-        tag = {forward = "which", help = "annotation tag"},
-        which = {synthetic = {"id", "tag"}, help = "an annotation id or tag; omit to clear all"},
-    },
-    positional = {"which"},
-}
-cmdargs.validate(drawClearSchema)
-
-local drawOutputSchema <const>: {string: any} = {
-    type = "object",
-    properties = {
-        id = {type = "integer", description = "annotation id for draw clear"},
-        tag = {type = "string"},
-    },
-    required = {"id"},
-}
-
-local querySchema <const>: cmdargs.Schema = {
-    args = {
-        expr = {rest = true, required = true,
-            help = "component names separated by spaces; -Foo excludes"},
-        invert = {default = false,
-            help = "de-select the selected entities that match, instead of adding"},
-    },
-    positional = {"expr"},
-}
-cmdargs.validate(querySchema)
-
-local noteSchema <const>: cmdargs.Schema = {
-    args = {
-        msg = {rest = true, help = "note text; omit to clear notes on the selection"},
-    },
-    positional = {"msg"},
-}
-cmdargs.validate(noteSchema)
-
-local idsSchema <const>: cmdargs.Schema = {
-    args = { on = {kind = "boolean", help = "show or hide; omit to toggle"} },
-    positional = {"on"},
-}
-cmdargs.validate(idsSchema)
-
 local onOffSchema <const>: cmdargs.Schema = {
     args = { on = {kind = "boolean", help = "enable or disable; omit to toggle"} },
     positional = {"on"},
 }
 cmdargs.validate(onOffSchema)
 
+--- The literal target meaning "the current selection" in entity-edit
+--- commands and their Tab completion.
 local EDIT_SELECTION_TARGET <const> = "@selection"
-
--- Entity-edit commands take an explicit target: an id, a mark name, or the
--- literal @selection (explicit, because component names follow it).
-local function editTargetArgs(): {string: cmdargs.ArgSpec}
-    return {
-        id = {default = 0, forward = "target", help = "entity id"},
-        name = {forward = "target", help = "mark name, or " .. EDIT_SELECTION_TARGET},
-        target = {synthetic = {"id", "name"}, required = true,
-            help = "entity id, mark name, or " .. EDIT_SELECTION_TARGET},
-    }
-end
-
-local removeSchema <const>: cmdargs.Schema = (function(): cmdargs.Schema
-    local args = editTargetArgs()
-    args.comps = {rest = true, required = true, help = "component names to remove"}
-    local schema: cmdargs.Schema = {args = args, positional = {"target", "comps"}}
-    cmdargs.validate(schema)
-    return schema
-end)()
-
-local setSchema <const>: cmdargs.Schema = (function(): cmdargs.Schema
-    local args = editTargetArgs()
-    args.comp = {required = true, help = "component name"}
-    args.value = {rest = true, kind = "table",
-        help = "component fields: a Lua table expression, e.g. {x = 10, y = 20}, or a JSON object over MCP; omit for defaults"}
-    local schema: cmdargs.Schema = {args = args, positional = {"target", "comp", "value"}}
-    cmdargs.validate(schema)
-    return schema
-end)()
-
-local modifySchema <const>: cmdargs.Schema = (function(): cmdargs.Schema
-    local args = editTargetArgs()
-    args.comp = {required = true, help = "component name"}
-    args.value = {rest = true, required = true, kind = "table",
-        help = "fields to change: a Lua table expression, e.g. {x = 10}, or a JSON object over MCP"}
-    local schema: cmdargs.Schema = {args = args, positional = {"target", "comp", "value"}}
-    cmdargs.validate(schema)
-    return schema
-end)()
-
-local spawnSchema <const>: cmdargs.Schema = {
-    args = {
-        spec = {rest = true, required = true,
-            help = "[bundle] Component {lua table} ..., e.g. enemy Transform {x = 10}"},
-    },
-    positional = {"spec"},
-}
-cmdargs.validate(spawnSchema)
 
 -------------------------------------------------------------------------------
 -- Presentation helpers
@@ -566,36 +431,63 @@ function commands.wrapOutputSchema(dataSchema: {string: any}): {string: any}
     }
 end
 
+-- The projected input schema of an action that takes no arguments.
+local EMPTY_SCHEMA <const>: {string: any} = {
+    type = "object",
+    properties = json.EMPTY_OBJECT,
+    additionalProperties = false,
+}
+
+-- Appended to every projected tool description.
+local TOOL_SUFFIX <const> = " In-game debugger command; requires the debug plugin." ..
+    " Returns compact JSON text envelope."
+
+-- One command, or one of its subcommand verbs when `sub` is set, projected
+-- as an MCP tool definition. Shared by mcpTools and describe.
+local function projectTool(cmd: commands.Command, sub: commands.Subcommand): commands.McpTool
+    if sub then
+        return {
+            name = "debug_" .. cmd.name .. "_" .. sub.name,
+            description = (sub.mcpHelp or (cmd.name .. " " .. sub.name .. ": " ..
+                sub.shortHelp .. ".")) .. TOOL_SUFFIX,
+            inputSchema = sub.schema and cmdargs.toolSchema(sub.schema) or EMPTY_SCHEMA,
+            outputSchema = commands.wrapOutputSchema(sub.outputSchema),
+            annotations = toolAnnotations(cmd.name, sub.name, sub.annotations),
+        }
+    end
+    return {
+        name = "debug_" .. cmd.name,
+        description = (cmd.mcpHelp or (cmd.shortHelp .. ".")) .. TOOL_SUFFIX,
+        inputSchema = cmd.schema and cmdargs.toolSchema(cmd.schema) or EMPTY_SCHEMA,
+        outputSchema = commands.wrapOutputSchema(cmd.outputSchema),
+        annotations = toolAnnotations(cmd.name, nil, cmd.annotations),
+    }
+end
+
+-- Register one command's MCP-dispatchable actions in the tool-name index.
+local function indexTools(index: {string: ToolEntry}, cmd: commands.Command)
+    if cmd.mcp ~= false and cmd.run then
+        index["debug_" .. cmd.name] = {schema = cmd.schema, run = cmd.run}
+    end
+    if cmd.subcommands then
+        for _, sub in ipairs(cmd.subcommands) do
+            if sub.mcp ~= false then
+                index["debug_" .. cmd.name .. "_" .. sub.name] = {schema = sub.schema, run = sub.run}
+            end
+        end
+    end
+end
+
 function commands.Registry:mcpTools(): {commands.McpTool}
     local out: {commands.McpTool} = {}
-    local emptySchema: {string: any} = {
-        type = "object",
-        properties = json.EMPTY_OBJECT,
-        additionalProperties = false,
-    }
-    local suffix <const> = " In-game debugger command; requires the debug plugin." ..
-        " Returns compact JSON text envelope."
     for _, cmd in ipairs(self.list) do
         if cmd.mcp ~= false and cmd.run then
-            out[#out + 1] = {
-                name = "debug_" .. cmd.name,
-                description = (cmd.mcpHelp or (cmd.shortHelp .. ".")) .. suffix,
-                inputSchema = cmd.schema and cmdargs.toolSchema(cmd.schema) or emptySchema,
-                outputSchema = commands.wrapOutputSchema(cmd.outputSchema),
-                annotations = toolAnnotations(cmd.name, nil, cmd.annotations),
-            }
+            out[#out + 1] = projectTool(cmd, nil)
         end
         if cmd.subcommands then
             for _, sub in ipairs(cmd.subcommands) do
                 if sub.mcp ~= false then
-                    out[#out + 1] = {
-                        name = "debug_" .. cmd.name .. "_" .. sub.name,
-                        description = (sub.mcpHelp or (cmd.name .. " " .. sub.name .. ": " ..
-                            sub.shortHelp .. ".")) .. suffix,
-                        inputSchema = sub.schema and cmdargs.toolSchema(sub.schema) or emptySchema,
-                        outputSchema = commands.wrapOutputSchema(sub.outputSchema),
-                        annotations = toolAnnotations(cmd.name, sub.name, sub.annotations),
-                    }
+                    out[#out + 1] = projectTool(cmd, sub)
                 end
             end
         end
@@ -604,33 +496,29 @@ function commands.Registry:mcpTools(): {commands.McpTool}
 end
 
 function commands.Registry:invokeMcp(name: string, args: {string: any}): commands.Result, string
-    for _, cmd in ipairs(self.list) do
-        local schema: cmdargs.Schema = nil
-        local runFn: function({string: any}, {string}): commands.Result = nil
-        if cmd.mcp ~= false and name == "debug_" .. cmd.name then
-            schema, runFn = cmd.schema, cmd.run
-        elseif cmd.subcommands then
-            for _, sub in ipairs(cmd.subcommands) do
-                if sub.mcp ~= false and name == "debug_" .. cmd.name .. "_" .. sub.name then
-                    schema, runFn = sub.schema, sub.run
-                end
-            end
+    local index = self.byToolName
+    if not index then
+        index = {}
+        for _, cmd in ipairs(self.list) do
+            indexTools(index, cmd)
         end
-        if runFn then
-            local values: {string: any} = {}
-            if schema then
-                local v, err = cmdargs.parseValues(schema, args)
-                if not v then
-                    return {ok = false, code = "invalid_arguments", message = err}
-                end
-                values = v
-            elseif next(args) ~= nil then
-                return {ok = false, code = "invalid_arguments", message = "takes no arguments"}
-            end
-            return runFn(values, {})
-        end
+        self.byToolName = index
     end
-    return nil, "unknown debugger tool: " .. name
+    local entry = index[name]
+    if not entry then
+        return nil, "unknown debugger tool: " .. name
+    end
+    local values: {string: any} = {}
+    if entry.schema then
+        local v, err = cmdargs.parseValues(entry.schema, args)
+        if not v then
+            return {ok = false, code = "invalid_arguments", message = err}
+        end
+        values = v
+    elseif next(args) ~= nil then
+        return {ok = false, code = "invalid_arguments", message = "takes no arguments"}
+    end
+    return entry.run(values, {})
 end
 
 -------------------------------------------------------------------------------
@@ -714,6 +602,7 @@ function commands.build(env: commands.Env): commands.Registry
         env = env,
         list = {},
         byName = {},
+        allByName = {},
         names = {},
         signals = {action = "", hideOverlay = false},
         pendingShots = {},
@@ -744,7 +633,7 @@ function commands.build(env: commands.Env): commands.Registry
     -- entity; a name yields every live entity marked with it.
     local function resolveTargets(v: {string: any}): {integer}
         if v.id ~= nil then
-            return {v.id as integer}
+            return {math.floor(v.id as number)}
         end
         local nm = v.name as string
         local ids: {integer} = {}
@@ -754,163 +643,6 @@ function commands.build(env: commands.Env): commands.Registry
             end
         end
         return ids
-    end
-
-    -- Archetype signature membership by component identity. Column access
-    -- (arch:get) returns nil for tag components, so scan componentList.
-    local function archHas(arch: tecs.Archetype, comp: tecs.Component): boolean
-        local list = arch.componentList
-        for i = 1, #list do
-            if list[i] == comp then return true end
-        end
-        return false
-    end
-
-    -- query expr: bare names must be present, -Name must be absent. With
-    -- invert, refine instead of add: de-select the currently selected
-    -- entities that match the expression.
-    local function runQuery(expr: string, invert: boolean): commands.Result
-        local include: {tecs.Component} = {}
-        local exclude: {tecs.Component} = {}
-        for tok in expr:gmatch("%S+") do
-            local name = tok
-            local bucket = "include"
-            if tok:sub(1, 1) == "-" then
-                name = tok:sub(2)
-                bucket = "exclude"
-            elseif tok:sub(1, 1) == "+" then
-                name = tok:sub(2)
-            end
-            local ok, resolved = pcall(tecs.componentByName, name)
-            local comp = (ok and resolved) as tecs.Component
-            if not comp then
-                return {ok = false, code = "unknown_component",
-                    message = "query: unknown component '" .. name .. "'"}
-            end
-            if bucket == "include" then
-                include[#include + 1] = comp
-            else
-                exclude[#exclude + 1] = comp
-            end
-        end
-        if #include == 0 then
-            return {ok = false, code = "invalid_arguments",
-                message = "query: needs at least one component to include"}
-        end
-
-        local function archMatches(arch: tecs.Archetype): boolean
-            for i = 1, #include do
-                if not archHas(arch, include[i]) then return false end
-            end
-            for i = 1, #exclude do
-                if archHas(arch, exclude[i]) then return false end
-            end
-            return true
-        end
-
-        if invert then
-            -- Refinement: drop selected entities whose archetype matches.
-            local kept: {integer} = {}
-            local removed = 0
-            for i = 1, #ctx.selected do
-                local eid = ctx.selected[i]
-                local arch = entityinfo.locate(w, eid)
-                if arch and archMatches(arch) then
-                    removed = removed + 1
-                else
-                    kept[#kept + 1] = eid
-                end
-            end
-            ctx.selected = kept
-            debugcontext.pushEvent(ctx, "selection",
-                {selected = #kept, deselected = removed})
-            return {ok = true, message = "deselected " .. tostring(removed),
-                data = {deselected = removed, selected = #kept}}
-        end
-
-        local seen: {integer: boolean} = {}
-        for i = 1, #ctx.selected do seen[ctx.selected[i]] = true end
-        local count = 0
-        w:forEachArchetype(function(arch: tecs.Archetype)
-            local n = arch.entities[0] as integer
-            if n == 0 or not archMatches(arch) then return end
-            for row = 1, n do
-                local eid = arch.entities[row] as integer
-                if not seen[eid] then
-                    seen[eid] = true
-                    ctx.selected[#ctx.selected + 1] = eid
-                end
-                count = count + 1
-            end
-        end)
-        debugcontext.pushEvent(ctx, "selection", {selected = #ctx.selected, matched = count})
-        return {ok = true, message = "query matched " .. tostring(count),
-            data = {matched = count, selected = #ctx.selected}}
-    end
-
-    -- Build display lines for an entity: a header plus one line per component
-    -- with its serialized field values.
-    local function inspectEntity(eid: integer): {string}
-        local archetype, row, why = entityinfo.locate(w, eid)
-        if not archetype then
-            return {"#" .. tostring(eid) ..
-                (why == "not_alive" and " is not alive" or " is not committed")}
-        end
-        local lines: {string} = {"entity #" .. tostring(eid)}
-        local compList = archetype.componentList
-        for i = 1, #compList do
-            local comp = compList[i]
-            local cname = comp.componentName
-            if cname then
-                local rendered = false
-                if comp.serialize then
-                    local column = archetype:get(comp) as {any}
-                    local instance = column and column[row]
-                    if instance ~= nil then
-                        local serfn = comp.serialize as function(any): {string: any}
-                        local ok, serialized = pcall(serfn, instance)
-                        if ok and serialized then
-                            lines[#lines + 1] = cname .. ":"
-                            local pretty = json.serializePretty(serialized, true)
-                            for jline in (pretty .. "\n"):gmatch("(.-)\n") do
-                                lines[#lines + 1] = "  " .. jline
-                            end
-                            rendered = true
-                        end
-                    end
-                end
-                if not rendered then
-                    lines[#lines + 1] = cname
-                end
-            end
-        end
-        return lines
-    end
-
-    -- Marks grouped for display and data: name -> {count, first id}.
-    local function markGroups(): {string: {string: integer}}
-        local groups: {string: {string: integer}} = {}
-        for eid, mn in pairs(ctx.marks) do
-            if w:isAlive(eid) then
-                local g = groups[mn]
-                if not g then
-                    g = {count = 0, first = eid}
-                    groups[mn] = g
-                end
-                g.count = g.count + 1
-                if eid < g.first then g.first = eid end
-            end
-        end
-        return groups
-    end
-
-    local function markLines(groups: {string: {string: integer}}): {string}
-        local lines: {string} = {}
-        for mn, g in pairs(groups) do
-            lines[#lines + 1] = "  " .. mn .. "\t(" .. tostring(g.count) .. ")\t#" .. tostring(g.first)
-        end
-        table.sort(lines)
-        return lines
     end
 
     -- Build an annotation from parsed draw args (default color: yellow).
@@ -941,49 +673,6 @@ function commands.build(env: commands.Env): commands.Registry
             fontSize = (v.fontSize as number) or 14,
             entity = math.floor((v.entity as number) or 0) as integer,
         }
-    end
-
-    -- Resolve an edit target; the literal @selection means the current
-    -- selection. Returns nil plus a reason when nothing matches.
-    local function resolveEditTargets(v: {string: any}): {integer}, string
-        if v.name == EDIT_SELECTION_TARGET then
-            if #ctx.selected == 0 then return nil, "nothing selected" end
-            local ids: {integer} = {}
-            for i = 1, #ctx.selected do ids[i] = ctx.selected[i] end
-            return ids, nil
-        end
-        local ids = resolveTargets(v)
-        if #ids == 0 then
-            return nil, "no live match for '" .. tostring(v.target) .. "'"
-        end
-        return ids, nil
-    end
-
-    -- Evaluate a Lua table expression from the command line. Same trust level
-    -- as the run_lua MCP tool: the debugger is a developer surface.
-    local function evalTable(expr: string): {string: any}, string
-        local chunk, err = load("return " .. expr, "debug-expr", "t")
-        if not chunk then return nil, "bad expression: " .. tostring(err) end
-        local ok, result = pcall(chunk)
-        if not ok then return nil, "expression failed: " .. tostring(result) end
-        if type(result) ~= "table" then
-            return nil, "expression must be a table, got " .. type(result)
-        end
-        return result as {string: any}, nil
-    end
-
-    -- Merge fields into a live component instance. Nested tables recurse into
-    -- the existing sub-value (a table or an FFI struct reference) so siblings
-    -- of the named fields survive; anything else assigns directly.
-    local function applyFields(target: any, fields: {string: any})
-        local tgt = target as {string: any}
-        for k, fv in pairs(fields) do
-            if type(fv) == "table" and tgt[k] ~= nil then
-                applyFields(tgt[k], fv as {string: any})
-            else
-                tgt[k] = fv
-            end
-        end
     end
 
     local function componentFor(nm: string): tecs.Component, string
@@ -1048,6 +737,48 @@ function commands.build(env: commands.Env): commands.Registry
         return out
     end
 
+    -- Shared context for the command groups (internal/cmd/*). The registry
+    -- itself is passed as the narrower RegSlice view.
+    local d: cmdtypes.Deps = {
+        world = w,
+        ctx = ctx,
+        env = env,
+        reg = (reg as any) as cmdtypes.RegSlice,
+        pipeline = pipeline,
+        componentFor = componentFor,
+        resolveTargets = resolveTargets,
+        makeAnnotation = makeAnnotation,
+        tileAt = commands.tileAt,
+        summarizeProfile = summarizeProfile,
+        systemZoneIds = systemZoneIds,
+        onOffSchema = onOffSchema,
+        nameSchema = nameSchema,
+        refSchema = refSchema,
+        targetSchema = targetSchema,
+        optionalTargetSchema = optionalTargetSchema,
+        makeTargetSchema = makeTargetSchema,
+        selectionTarget = EDIT_SELECTION_TARGET,
+        historyFile = HISTORY_FILE,
+    }
+
+    -- The Select, Edit, and Session groups own these builtin definitions;
+    -- the cmds list below owns the registration order, which drives help
+    -- listing, completion cycling, the MCP tool listing, and the generated
+    -- reference.
+    local groupCmds: {string: commands.Command} = {}
+    for _, group in ipairs({selectcmds.commands(d), editcmds.commands(d),
+            sessioncmds.commands(d)}) do
+        for _, c in ipairs(group) do
+            groupCmds[c.name] = c
+        end
+    end
+    local function grouped(nm: string): commands.Command
+        local c = groupCmds[nm]
+        if not c then
+            error("commands: builtin '" .. nm .. "' is missing from its command group")
+        end
+        return c
+    end
 
     local cmds: {commands.Command} = {
         {
@@ -1099,7 +830,7 @@ function commands.build(env: commands.Env): commands.Registry
                 }
                 -- Group by section, wrapping each section's names (one long
                 -- line overflows the popup).
-                for _, section in ipairs(SECTION_ORDER) do
+                for _, section in ipairs(cmdtypes.SECTIONS) do
                     local names: {string} = {}
                     for i = 1, #reg.names do
                         local c = reg.byName[reg.names[i]]
@@ -1141,834 +872,23 @@ function commands.build(env: commands.Env): commands.Registry
                 return {ok = true, popup = lines}
             end,
         },
-        {
-            name = "select",
-            section = "Select",
-            complete = {[1] = "targets"},
-            examples = {"select 5", "select boss", "select 5 replace", "select name=\"big boss\""},
-            shortHelp = "select an entity by id, or all entities with a mark name",
-            mcpHelp = "Add an entity (by id) or a marked group (by name) to the operator-visible selection; replace=true swaps the selection instead. Selected entities are highlighted in-game. Returns the selection size. Follow with debug_info for component data or debug_note to annotate.",
-            schema = selectSchema,
-            metadata = {screenshots = {
-                {file = "./assets/debug/select.png", docs = true,
-                    alt = "The debugger with a select command typed: the usage popup shows the signature and arguments, and the selected entity is ringed by gold markers"},
-            }},
-            outputSchema = {
-                type = "object",
-                properties = {
-                    selected = {type = "integer", description = "selection size after the call"},
-                    added = {type = "array", items = {type = "integer"},
-                        description = "entity ids added to the selection"},
-                },
-                required = {"added", "selected"},
-            },
-            run = function(v: {string: any}, _parts: {string}): commands.Result
-                local ids = resolveTargets(v)
-                local live: {integer} = {}
-                for i = 1, #ids do
-                    if w:isAlive(ids[i]) then live[#live + 1] = ids[i] end
-                end
-                if #live == 0 then
-                    return {ok = false, code = "no_match",
-                        message = "select: no live match for '" .. tostring(v.target) .. "'. Use `mark list`."}
-                end
-                if v.replace as boolean then
-                    ctx.selected = {}
-                end
-                for i = 1, #live do
-                    debugcontext.addSelected(ctx, live[i])
-                end
-                debugcontext.pushEvent(ctx, "selection", {selected = #ctx.selected})
-                return {ok = true, message = "selected " .. tostring(#live),
-                    data = {selected = #ctx.selected, added = live}}
-            end,
-        },
-        {
-            name = "clear",
-            section = "Select",
-            shortHelp = "clear the selection, message, and drag area",
-            outputSchema = {
-                type = "object",
-                properties = {
-                    selected = {type = "integer", description = "always 0"},
-                },
-                required = {"selected"},
-            },
-            run = function(_v: {string: any}, _parts: {string}): commands.Result
-                ctx.selected = {}
-                ctx.hasArea = false
-                debugcontext.pushEvent(ctx, "selection", {selected = 0})
-                return {ok = true, message = "", data = {selected = 0}}
-            end,
-        },
-        {
-            name = "mark",
-            section = "Select",
-            shortHelp = "name the selected entities so select, goto, and despawn can recall them by name",
-            mcpHelp = "Name the currently selected entities so later commands (select, goto, despawn, diff entity=) can address the group by that name. Marks survive until cleared. Returns the marked count.",
-            schema = { args = { name = {help = "mark name; omit to unmark the selection"} }, positional = {"name"} },
-            examples = {"mark boss", "mark \"big boss\"", "mark  (unmark selection)", "mark ls"},
-            outputSchema = {
-                type = "object",
-                properties = {
-                    marked = {type = "integer", description = "entities marked"},
-                    name = {type = "string"},
-                    unmarked = {type = "integer", description = "entities unmarked when no name given"},
-                },
-            },
-            subcommands = {
-                {
-                    name = "list",
-                    aliases = {"ls"},
-                    shortHelp = "show every mark with its count and first id",
-                    outputSchema = {
-                        type = "object",
-                        properties = {
-                            marks = {type = "object",
-                                additionalProperties = {type = "string"},
-                                description = "mark name to compact entity id-range string"},
-                        },
-                        required = {"marks"},
-                    },
-                    run = function(_v: {string: any}, _parts: {string}): commands.Result
-                        local groups = markGroups()
-                        local lines = markLines(groups)
-                        if #lines == 0 then
-                            return {ok = true, message = "no marks yet", data = {marks = json.EMPTY_OBJECT as {string: any}}}
-                        end
-                        local popup: {string} = {"marks  (type to dismiss):"}
-                        for i = 1, #lines do popup[#popup + 1] = lines[i] end
-                        return {ok = true, popup = popup, data = {marks = groups}}
-                    end,
-                },
-                {
-                    name = "clear",
-                    aliases = {"rm"},
-                    shortHelp = "remove all marks",
-                    run = function(_v: {string: any}, _parts: {string}): commands.Result
-                        ctx.marks = {}
-                        debugcontext.pushEvent(ctx, "mark", {cleared = true})
-                        return {ok = true, message = "cleared all marks", data = {}}
-                    end,
-                },
-            },
-            run = function(v: {string: any}, _parts: {string}): commands.Result
-                if #ctx.selected == 0 then
-                    return {ok = false, code = "nothing_selected", message = "mark: nothing selected"}
-                end
-                local name = v.name as string
-                if not name then
-                    for i = 1, #ctx.selected do ctx.marks[ctx.selected[i]] = nil end
-                    debugcontext.pushEvent(ctx, "mark", {unmarked = #ctx.selected})
-                    return {ok = true, message = "unmarked " .. tostring(#ctx.selected),
-                        data = {unmarked = #ctx.selected}}
-                end
-                -- Numeric names are unreachable later: target resolution binds
-                -- numbers to entity ids before mark names.
-                if tonumber(name) then
-                    return {ok = false, code = "invalid_name",
-                        message = "mark: numeric names collide with entity ids; pick a word"}
-                end
-                for i = 1, #ctx.selected do ctx.marks[ctx.selected[i]] = name end
-                debugcontext.pushEvent(ctx, "mark", {name = name, marked = #ctx.selected})
-                return {ok = true, message = "marked " .. tostring(#ctx.selected) .. " as " .. name,
-                    data = {marked = #ctx.selected, name = name}}
-            end,
-        },
-        {
-            name = "goto",
-            section = "Select",
-            complete = {[1] = "targets"},
-            examples = {"goto 5", "goto boss"},
-            shortHelp = "move the camera to an entity by id, or the first with a mark name",
-            schema = targetSchema,
-            outputSchema = {
-                type = "object",
-                properties = {
-                    id = {type = "integer", description = "the entity moved to"},
-                    x = {type = "number"},
-                    y = {type = "number"},
-                },
-                required = {"id", "x", "y"},
-            },
-            run = function(v: {string: any}, _parts: {string}): commands.Result
-                local ids = resolveTargets(v)
-                local firstId = 0
-                for i = 1, #ids do
-                    local eid = ids[i]
-                    if w:isAlive(eid) and (firstId == 0 or eid < firstId) then firstId = eid end
-                end
-                if firstId == 0 then
-                    return {ok = false, code = "no_match",
-                        message = "goto: no live entity for '" .. tostring(v.target) .. "'. Use `mark list`."}
-                end
-                local t = w:get(firstId, Transform)
-                local p = pipeline()
-                if t and p then
-                    p:getCamera():setPosition(t.x, t.y)
-                end
-                return {ok = true, message = "goto -> #" .. tostring(firstId),
-                    data = {id = firstId, x = t and t.x or 0, y = t and t.y or 0}}
-            end,
-        },
-        {
-            name = "note",
-            section = "Select",
-            shortHelp = "annotate the selected entities for the agent; empty message clears",
-            mcpHelp = "Attach a note to the selected entities, visible in-game above them and in get_debug_context. Use it to flag findings for the operator. An empty message clears notes on the selection.",
-            schema = noteSchema,
-            examples = {"note flickers when hit", "note  (clear notes)"},
-            outputSchema = {
-                type = "object",
-                properties = {
-                    noted = {type = "integer", description = "entities annotated"},
-                    msg = {type = "string"},
-                    cleared = {type = "integer", description = "entities whose notes were cleared"},
-                },
-            },
-            run = function(v: {string: any}, _parts: {string}): commands.Result
-                local msg = (v.msg as string) or ""
-                if #ctx.selected == 0 then
-                    return {ok = false, code = "nothing_selected", message = "note: nothing selected"}
-                elseif msg == "" then
-                    for i = 1, #ctx.selected do ctx.notes[ctx.selected[i]] = nil end
-                    debugcontext.pushEvent(ctx, "note", {cleared = #ctx.selected})
-                    return {ok = true, message = "cleared notes on " .. tostring(#ctx.selected),
-                        data = {cleared = #ctx.selected}}
-                end
-                for i = 1, #ctx.selected do ctx.notes[ctx.selected[i]] = msg end
-                debugcontext.pushEvent(ctx, "note", {noted = #ctx.selected, msg = msg})
-                return {ok = true, message = "noted " .. tostring(#ctx.selected),
-                    data = {noted = #ctx.selected, msg = msg}}
-            end,
-        },
-        {
-            name = "info",
-            section = "Select",
-            mcp = false,   -- agents use the get_entity MCP tool instead
-            complete = {[1] = "targets"},
-            shortHelp = "show an entity's components; defaults to the first selected",
-            schema = optionalTargetSchema,
-            run = function(v: {string: any}, _parts: {string}): commands.Result
-                local target = 0
-                if v.target == nil then
-                    target = ctx.selected[1] or 0
-                else
-                    local ids = resolveTargets(v)
-                    for i = 1, #ids do
-                        local eid = ids[i]
-                        if w:isAlive(eid) and (target == 0 or eid < target) then target = eid end
-                    end
-                end
-                if target == 0 then
-                    return {ok = false, code = "no_match",
-                        message = (v.target ~= nil) and ("info: no match for '" .. tostring(v.target) .. "'")
-                            or "info: nothing selected"}
-                end
-                return {ok = true, popup = inspectEntity(target)}
-            end,
-        },
-        {
-            name = "despawn",
-            section = "Select",
-            complete = {[1] = "targets"},
-            shortHelp = "despawn an entity by id or mark name, or the whole selection",
-            mcpHelp = "Despawn the target entities (an id, a mark name, or the current selection when no target is given). Destructive and immediate. Take debug_snapshot_save first if the state matters.",
-            schema = optionalTargetSchema,
-            outputSchema = {
-                type = "object",
-                properties = {
-                    despawned = {type = "integer"},
-                    ids = {type = "array", items = {type = "integer"},
-                        description = "despawned entity ids (absent for selection despawns)"},
-                },
-                required = {"despawned"},
-            },
-            run = function(v: {string: any}, _parts: {string}): commands.Result
-                if v.target == nil then
-                    local n = reg:despawnSelected()
-                    return {ok = true, message = "despawned " .. tostring(n) .. " selected",
-                        data = {despawned = n}}
-                end
-                local ids = resolveTargets(v)
-                local killed: {integer} = {}
-                for i = 1, #ids do
-                    local eid = ids[i]
-                    if w:isAlive(eid) then
-                        debugcontext.removeSelected(ctx, eid)
-                        w:despawn(eid)
-                        ctx.marks[eid] = nil
-                        ctx.notes[eid] = nil
-                        killed[#killed + 1] = eid
-                    end
-                end
-                if #killed == 0 then
-                    return {ok = false, code = "no_match",
-                        message = "despawn: no live match for '" .. tostring(v.target) .. "'"}
-                end
-                debugcontext.pushEvent(ctx, "selection", {selected = #ctx.selected, despawned = #killed})
-                return {ok = true, message = "despawned " .. tostring(#killed),
-                    data = {despawned = #killed, ids = killed}}
-            end,
-        },
-        {
-            name = "remove",
-            section = "Edit",
-            complete = {[1] = "edittargets", [0] = "components"},
-            shortHelp = "remove components from an entity, marked group, or " .. EDIT_SELECTION_TARGET,
-            mcpHelp = "Strip the named components from the target entities (an id, a mark name, or @selection). Destructive to component data; the entities survive. Returns how many entities were changed.",
-            schema = removeSchema,
-            examples = {"remove 5 Velocity", "remove @selection Burning Stunned", "remove boss Shield"},
-            outputSchema = {
-                type = "object",
-                properties = {
-                    entities = {type = "integer", description = "entities touched"},
-                    components = {type = "array", items = {type = "string"}},
-                    errors = {type = "integer", description = "failed removals"},
-                },
-                required = {"components", "entities", "errors"},
-            },
-            run = function(v: {string: any}, _parts: {string}): commands.Result
-                local ids, terr = resolveEditTargets(v)
-                if not ids then
-                    return {ok = false, code = "no_match", message = "remove: " .. terr}
-                end
-                local comps: {tecs.Component} = {}
-                local names: {string} = {}
-                for nm in (v.comps as string):gmatch("%S+") do
-                    local comp, cerr = componentFor(nm)
-                    if not comp then
-                        return {ok = false, code = "unknown_component", message = "remove: " .. cerr}
-                    end
-                    comps[#comps + 1] = comp
-                    names[#names + 1] = nm
-                end
-                if #comps == 0 then
-                    return {ok = false, code = "invalid_arguments",
-                        message = "remove: name at least one component"}
-                end
-                local touched = 0
-                local errors = 0
-                for i = 1, #ids do
-                    local eid = ids[i]
-                    if w:isAlive(eid) then
-                        for j = 1, #comps do
-                            if not pcall(w.remove, w, eid, comps[j]) then
-                                errors = errors + 1
-                            end
-                        end
-                        touched = touched + 1
-                    end
-                end
-                debugcontext.pushEvent(ctx, "edit",
-                    {removed = table.concat(names, ","), entities = touched})
-                return {ok = true,
-                    message = "removed " .. table.concat(names, ", ") .. " from " ..
-                        tostring(touched) .. " entities" ..
-                        ((errors > 0) and (" (" .. tostring(errors) .. " errors)") or ""),
-                    data = {entities = touched, components = names, errors = errors}}
-            end,
-        },
-        {
-            name = "set",
-            section = "Edit",
-            complete = {[1] = "edittargets", [2] = "components"},
-            shortHelp = "set one component on an entity, marked group, or " ..
-                EDIT_SELECTION_TARGET .. " (Lua table value)",
-            mcpHelp = "Write one component on the target entities (an id, a mark name, or the literal @selection). The value is a JSON object or a Lua table expression, e.g. {x = 10, y = {n = 2}}; omitted fields reset to the component's defaults (use debug_modify to change fields in place). Adds the component when missing. Mutates the live world immediately. Returns how many entities were written.",
-            schema = setSchema,
-            examples = {"set 5 Transform {x = 10, y = 20}", "set @selection Color {r = 1, g = 0, b = 0}",
-                "set boss Shield"},
-            outputSchema = {
-                type = "object",
-                properties = {
-                    set = {type = "integer", description = "entities written"},
-                    component = {type = "string"},
-                },
-                required = {"component", "set"},
-            },
-            run = function(v: {string: any}, _parts: {string}): commands.Result
-                local ids, terr = resolveEditTargets(v)
-                if not ids then
-                    return {ok = false, code = "no_match", message = "set: " .. terr}
-                end
-                local compName = v.comp as string
-                local comp, cerr = componentFor(compName)
-                if not comp then
-                    return {ok = false, code = "unknown_component", message = "set: " .. cerr}
-                end
-                -- The value arrives as a JSON object over MCP or as a Lua
-                -- table expression from the command line.
-                local dataTbl: {string: any} = {}
-                if type(v.value) == "table" then
-                    dataTbl = v.value as {string: any}
-                elseif type(v.value) == "string" and (v.value as string) ~= "" then
-                    local parsed, verr = evalTable(v.value as string)
-                    if not parsed then
-                        return {ok = false, code = "invalid_arguments", message = "set: " .. verr}
-                    end
-                    dataTbl = parsed
-                end
-                local count = 0
-                local firstError: string = nil
-                for i = 1, #ids do
-                    local eid = ids[i]
-                    if w:isAlive(eid) then
-                        -- A fresh instance per entity: FFI cdata must never be
-                        -- shared across rows.
-                        local results = {pcall(function()
-                            w:set(eid, comp.deserialize(w, dataTbl))
-                        end)}
-                        local ok2 = results[1]
-                        local err2 = results[2]
-                        if ok2 then
-                            count = count + 1
-                        elseif not firstError then
-                            firstError = tostring(err2)
-                        end
-                    end
-                end
-                if count == 0 then
-                    return {ok = false, code = "set_failed",
-                        message = "set: " .. (firstError or "no live targets")}
-                end
-                debugcontext.pushEvent(ctx, "edit", {component = compName, set = count})
-                return {ok = true,
-                    message = "set " .. compName .. " on " .. tostring(count) .. " entities" ..
-                        (firstError and (" (some failed: " .. firstError .. ")") or ""),
-                    data = {set = count, component = compName}}
-            end,
-        },
-        {
-            name = "modify",
-            section = "Edit",
-            complete = {[1] = "edittargets", [2] = "components"},
-            shortHelp = "change only the given fields of a component the target already has",
-            mcpHelp = "Update only the provided fields of one component on the target entities (an id, a mark name, or @selection). Unlike debug_set it never adds the component and never resets omitted fields: targets missing the component are skipped and unnamed fields keep their current values. Returns modified and skipped counts.",
-            schema = modifySchema,
-            examples = {"modify 5 Transform {x = 10}", "modify @selection Color {a = 0.5}",
-                "modify boss Health {hp = 1}"},
-            outputSchema = {
-                type = "object",
-                properties = {
-                    modified = {type = "integer", description = "entities changed"},
-                    skipped = {type = "integer", description = "live targets lacking the component"},
-                    component = {type = "string"},
-                },
-                required = {"component", "modified", "skipped"},
-            },
-            run = function(v: {string: any}, _parts: {string}): commands.Result
-                local ids, terr = resolveEditTargets(v)
-                if not ids then
-                    return {ok = false, code = "no_match", message = "modify: " .. terr}
-                end
-                local compName = v.comp as string
-                local comp, cerr = componentFor(compName)
-                if not comp then
-                    return {ok = false, code = "unknown_component", message = "modify: " .. cerr}
-                end
-                local dataTbl: {string: any}
-                if type(v.value) == "table" then
-                    dataTbl = v.value as {string: any}
-                elseif type(v.value) == "string" and (v.value as string) ~= "" then
-                    local parsed, verr = evalTable(v.value as string)
-                    if not parsed then
-                        return {ok = false, code = "invalid_arguments", message = "modify: " .. verr}
-                    end
-                    dataTbl = parsed
-                end
-                if not dataTbl or next(dataTbl) == nil then
-                    return {ok = false, code = "invalid_arguments",
-                        message = "modify: provide at least one field, e.g. {x = 10}"}
-                end
-                local count = 0
-                local skipped = 0
-                local firstError: string = nil
-                for i = 1, #ids do
-                    local eid = ids[i]
-                    if w:isAlive(eid) then
-                        if not w:has(eid, comp) then
-                            skipped = skipped + 1
-                        else
-                            -- getMut marks the component dirty so GPU syncs
-                            -- and other dirty-gated consumers see the write.
-                            local results = {pcall(function()
-                                applyFields(w:getMut(eid, comp), dataTbl)
-                            end)}
-                            if results[1] then
-                                count = count + 1
-                            elseif not firstError then
-                                firstError = tostring(results[2])
-                            end
-                        end
-                    end
-                end
-                if count == 0 then
-                    local why = firstError
-                        or ((skipped > 0) and ("no target has " .. compName) or "no live targets")
-                    return {ok = false, code = "modify_failed", message = "modify: " .. why}
-                end
-                debugcontext.pushEvent(ctx, "edit", {component = compName, modified = count})
-                return {ok = true,
-                    message = "modified " .. compName .. " on " .. tostring(count) .. " entities" ..
-                        ((skipped > 0) and (" (" .. tostring(skipped) .. " lacked it)") or "") ..
-                        (firstError and (" (some failed: " .. firstError .. ")") or ""),
-                    data = {modified = count, skipped = skipped, component = compName}}
-            end,
-        },
-        {
-            name = "spawn",
-            section = "Edit",
-            complete = {[1] = "bundles,components", [0] = "components"},
-            shortHelp = "spawn an entity from a bundle and/or components with Lua table values",
-            mcpHelp = "Spawn one entity from a bundle name and/or component list with Lua table values, e.g. 'Transform {x = 10, y = 20}'. The new entity becomes selected. Returns its id.",
-            schema = spawnSchema,
-            examples = {"spawn Transform {x = 100, y = 50}", "spawn enemy Transform {x = 0, y = 0}",
-                "spawn ball"},
-            outputSchema = {
-                type = "object",
-                properties = {
-                    id = {type = "integer", description = "the new entity, now selected"},
-                    bundle = {type = "string", description = "bundle used, when one matched"},
-                },
-                required = {"id"},
-            },
-            run = function(v: {string: any}, _parts: {string}): commands.Result
-                local toks, terr = cmdargs.tokenize(v.spec as string)
-                if not toks then
-                    return {ok = false, code = "parse_error", message = "spawn: " .. terr}
-                end
-                local bundles = w:getBundles()
-                local idx = 1
-                local bundleName: string = nil
-                if toks[1] and bundles[toks[1]] ~= nil then
-                    bundleName = toks[1]
-                    idx = 2
-                end
-                local instances: {tecs.Component} = {}
-                while idx <= #toks do
-                    local nm = toks[idx]
-                    if nm:sub(1, 1) == "{" then
-                        return {ok = false, code = "invalid_arguments",
-                            message = "spawn: a component name must precede '" .. nm .. "'"}
-                    end
-                    local comp, cerr = componentFor(nm)
-                    if not comp then
-                        local hint = (idx == 1 and not bundleName)
-                            and " (and no bundle has that name)" or ""
-                        return {ok = false, code = "unknown_component",
-                            message = "spawn: " .. cerr .. hint}
-                    end
-                    local expr: string = nil
-                    if toks[idx + 1] and toks[idx + 1]:sub(1, 1) == "{" then
-                        expr = toks[idx + 1]
-                        idx = idx + 1
-                    end
-                    local dataTbl: {string: any} = {}
-                    if expr then
-                        local parsed, verr = evalTable(expr)
-                        if not parsed then
-                            return {ok = false, code = "invalid_arguments",
-                                message = "spawn: " .. nm .. ": " .. verr}
-                        end
-                        dataTbl = parsed
-                    end
-                    local okD, res = pcall(function(): tecs.Component
-                        return comp.deserialize(w, dataTbl)
-                    end)
-                    if not okD then
-                        return {ok = false, code = "component_deserialize_failed",
-                            message = "spawn: " .. nm .. ": " .. tostring(res)}
-                    end
-                    instances[#instances + 1] = res as tecs.Component
-                    idx = idx + 1
-                end
-                if not bundleName and #instances == 0 then
-                    return {ok = false, code = "invalid_arguments",
-                        message = "spawn: give a bundle name and/or components. See `help spawn`."}
-                end
-                local okS, spawnedOrErr = pcall(function(): integer
-                    if bundleName then
-                        return w:spawnBundle(bundleName, table.unpack(instances))
-                    end
-                    return w:spawn(table.unpack(instances))
-                end)
-                if not okS then
-                    return {ok = false, code = "spawn_failed",
-                        message = "spawn failed: " .. tostring(spawnedOrErr)}
-                end
-                local id = spawnedOrErr as integer
-                debugcontext.addSelected(ctx, id)
-                debugcontext.pushEvent(ctx, "spawn", {id = id, bundle = bundleName})
-                return {ok = true,
-                    message = "spawned #" .. tostring(id) ..
-                        (bundleName and (" from " .. bundleName) or ""),
-                    data = {id = id, bundle = bundleName}}
-            end,
-        },
-        {
-            name = "query",
-            section = "Select",
-            aliases = {"q"},
-            complete = {[0] = "components"},
-            shortHelp = "select entities matching a component query: Foo has it, -Foo lacks it",
-            mcpHelp = "Select every entity matching a component expression ('Enemy -Dead' means has Enemy, lacks Dead); invert=true instead de-selects matching entities from the current selection. Returns the match count. Follow with debug_info or debug_set on @selection.",
-            schema = querySchema,
-            examples = {"query Position Velocity -Dead",
-                "query Dead invert=true  (de-select dead entities)"},
-            outputSchema = {
-                type = "object",
-                properties = {
-                    matched = {type = "integer", description = "entities matching the expression"},
-                    deselected = {type = "integer", description = "matches removed when invert=true"},
-                    selected = {type = "integer", description = "selection size after the call"},
-                },
-                required = {"selected"},
-            },
-            run = function(v: {string: any}, _parts: {string}): commands.Result
-                return runQuery(v.expr as string, v.invert as boolean)
-            end,
-        },
-        {
-            name = "draw",
-            section = "Edit",
-            shortHelp = "draw a world-space annotation over the game",
-            examples = {"draw rect 10 10 64 48", "draw circle 0 0 20 entity=42 r=0 b=1",
-                "draw text 5 -30 spawn point here", "draw clear paths"},
-            subcommands = {
-                {
-                    name = "rect",
-                    shortHelp = "outline a rectangle (x y w h in world units)",
-                    schema = drawRectSchema,
-                    outputSchema = drawOutputSchema,
-                    run = function(v: {string: any}, _parts: {string}): commands.Result
-                        local id = env.annotations:add(makeAnnotation(v, "rect"))
-                        return {ok = true, message = "drew rect #" .. tostring(id),
-                            data = {id = id, tag = v.tag}}
-                    end,
-                },
-                {
-                    name = "circle",
-                    shortHelp = "outline a circle (x y radius in world units)",
-                    schema = drawCircleSchema,
-                    outputSchema = drawOutputSchema,
-                    run = function(v: {string: any}, _parts: {string}): commands.Result
-                        local id = env.annotations:add(makeAnnotation(v, "circle"))
-                        return {ok = true, message = "drew circle #" .. tostring(id),
-                            data = {id = id, tag = v.tag}}
-                    end,
-                },
-                {
-                    name = "line",
-                    shortHelp = "draw a line (x y x2 y2 in world units)",
-                    schema = drawLineSchema,
-                    outputSchema = drawOutputSchema,
-                    run = function(v: {string: any}, _parts: {string}): commands.Result
-                        local id = env.annotations:add(makeAnnotation(v, "line"))
-                        return {ok = true, message = "drew line #" .. tostring(id),
-                            data = {id = id, tag = v.tag}}
-                    end,
-                },
-                {
-                    name = "text",
-                    shortHelp = "print text at a world position",
-                    schema = drawTextSchema,
-                    outputSchema = drawOutputSchema,
-                    run = function(v: {string: any}, _parts: {string}): commands.Result
-                        local id = env.annotations:add(makeAnnotation(v, "text"))
-                        return {ok = true, message = "drew text #" .. tostring(id),
-                            data = {id = id, tag = v.tag}}
-                    end,
-                },
-                {
-                    name = "clear",
-                    aliases = {"rm"},
-                    shortHelp = "remove annotations by id or tag; everything when omitted",
-                    schema = drawClearSchema,
-                    outputSchema = {
-                        type = "object",
-                        properties = {
-                            cleared = {type = "integer", description = "annotations removed"},
-                        },
-                        required = {"cleared"},
-                    },
-                    run = function(v: {string: any}, _parts: {string}): commands.Result
-                        local id: integer = nil
-                        if v.id ~= nil then id = math.floor(v.id as number) as integer end
-                        local n = env.annotations:clear(v.tag as string, id)
-                        return {ok = true, message = "cleared " .. tostring(n) .. " annotation(s)",
-                            data = {cleared = n}}
-                    end,
-                },
-            },
-        },
-        {
-            name = "ids",
-            section = "Select",
-            shortHelp = "toggle entity id labels over on-screen entities",
-            schema = idsSchema,
-            examples = {"ids", "ids on", "ids off"},
-            outputSchema = {
-                type = "object",
-                properties = {
-                    shown = {type = "boolean", description = "label state after the call"},
-                },
-                required = {"shown"},
-            },
-            run = function(v: {string: any}, _parts: {string}): commands.Result
-                local want = v.on as boolean
-                if want == nil then want = not ctx.showIds end
-                ctx.showIds = want
-                return {ok = true,
-                    message = want and "entity ids on (up to 200 labels)" or "entity ids off",
-                    data = {shown = want}}
-            end,
-        },
-        {
-            name = "history",
-            section = "Session",
-            shortHelp = "show the command history (persisted across sessions)",
-            examples = {"history", "history clear"},
-            subcommands = {
-                {
-                    name = "clear",
-                    aliases = {"rm"},
-                    shortHelp = "forget the history and delete its file",
-                    run = function(_v: {string: any}, _parts: {string}): commands.Result
-                        local n = #reg.history
-                        reg.history = {}
-                        love.filesystem.remove(HISTORY_FILE)
-                        return {ok = true, message = "cleared " .. tostring(n) .. " history entries",
-                            data = {cleared = n}}
-                    end,
-                },
-            },
-            run = function(_v: {string: any}, _parts: {string}): commands.Result
-                if #reg.history == 0 then
-                    return {ok = true, message = "no history yet", data = {history = reg.history}}
-                end
-                local popup: {string} = {"history  (newest last; up/down to walk):"}
-                local first = math.max(1, #reg.history - 30 + 1)
-                for i = first, #reg.history do
-                    popup[#popup + 1] = "  " .. reg.history[i]
-                end
-                return {ok = true, popup = popup, data = {history = reg.history}}
-            end,
-        },
-        {
-            name = "agent",
-            section = "Session",
-            shortHelp = "MCP session info and client config",
-            examples = {"agent info", "agent connect"},
-            subcommands = {
-                {
-                    name = "info",
-                    shortHelp = "show the MCP URL, tool count, and save directory",
-                    run = function(_v: {string: any}, _parts: {string}): commands.Result
-                        local info = w.resources[mcpinfo.KEY]
-                        if not info then
-                            return {ok = false, code = "no_mcp", message = "agent: MCP plugin not installed"}
-                        end
-                        local port = info.port()
-                        local url = (port ~= 0) and ("http://localhost:" .. tostring(port) .. "/mcp") or "(binding...)"
-                        return {ok = true, popup = {
-                            "agent session",
-                            "  mcp url\t" .. url,
-                            "  tools\t" .. tostring(info.toolCount()),
-                            "  save dir\t" .. love.filesystem.getSaveDirectory(),
-                            "  identity\t" .. tostring(love.filesystem.getIdentity()),
-                        }, data = {url = url, port = port, tools = info.toolCount(),
-                            saveDir = love.filesystem.getSaveDirectory()}}
-                    end,
-                },
-                {
-                    name = "connect",
-                    shortHelp = "copy the MCP client config JSON to the clipboard",
-                    run = function(_v: {string: any}, _parts: {string}): commands.Result
-                        local info = w.resources[mcpinfo.KEY]
-                        if not info then
-                            return {ok = false, code = "no_mcp", message = "agent: MCP plugin not installed"}
-                        end
-                        local port = info.port()
-                        if port == 0 then
-                            return {ok = false, code = "not_bound", message = "agent: MCP port not bound yet"}
-                        end
-                        local cfg = '{"type":"http","url":"http://localhost:' .. tostring(port) .. '/mcp"}'
-                        love.system.setClipboardText(cfg)
-                        return {ok = true, message = "MCP client config copied to clipboard: " .. cfg,
-                            data = {config = cfg, port = port}}
-                    end,
-                },
-            },
-        },
-        {
-            name = "capabilities",
-            section = "Session",
-            shortHelp = "installed plugins, command families, and host features",
-            mcpHelp = "What this game session supports: installed plugins (render pipeline, physics, tilemaps, controllers, audio, assets, recorder), command sections with counts, capture facilities, host OS, and the MCP port. Call once after connecting to learn which tool families apply.",
-            examples = {"capabilities"},
-            run = function(_v: {string: any}, _parts: {string}): commands.Result
-                -- Plugin presence by resource probe, never by requiring the
-                -- plugin modules (that would register their components).
-                local function hasPhysics(): boolean
-                    for _, value in pairs(w.resources as {any: any}) do
-                        if type(value) == "table" then
-                            local t = value as {string: any}
-                            if t.world ~= nil and t.smoothing ~= nil then
-                                return true
-                            end
-                        end
-                    end
-                    return false
-                end
-                local tilemapComp = componentFor("Tilemap")
-                local tilemapCount = 0
-                if tilemapComp then
-                    w:forEachArchetype(function(arch: tecs.Archetype)
-                        local col = arch:get(tilemapComp)
-                        if col then
-                            tilemapCount = tilemapCount + (arch.entities[0] as integer)
-                        end
-                    end)
-                end
-                local controllerkey = require("tecs2d.controller")
-                local assetsmod = require("tecs2d.assets")
-                local audiomod = require("tecs2d.audio")
-                local plugins: {string: any} = {
-                    pipeline = pipeline() ~= nil,
-                    physics = hasPhysics(),
-                    tilemaps = tilemapCount,
-                    controllers = w.resources[controllerkey as tecs.Key<any>] ~= nil,
-                    assets = w.resources[assetsmod] ~= nil,
-                    audio = w.resources[audiomod] ~= nil,
-                    recorder = env.recorder ~= nil,
-                }
-                local sections: {string: integer} = {}
-                for _, c in ipairs(reg.list) do
-                    local section = c.section or "Custom"
-                    sections[section] = (sections[section] or 0) + 1
-                end
-                local osName = love.system.getOS()
-                local info = w.resources[mcpinfo.KEY]
-                local popup: {string} = {"capabilities:"}
-                local names: {string} = {}
-                for nm in pairs(plugins) do names[#names + 1] = nm end
-                table.sort(names)
-                for _, nm in ipairs(names) do
-                    popup[#popup + 1] = "  " .. nm .. "\t" .. tostring(plugins[nm])
-                end
-                popup[#popup + 1] = "  commands\t" .. tostring(#reg.list)
-                popup[#popup + 1] = "  host\t" .. tostring(osName)
-                return {ok = true, popup = popup, data = {
-                    plugins = plugins,
-                    commands = {count = #reg.list, sections = sections},
-                    capture = {snapshots = true, diff = true, rewind = ctx.rewind.status},
-                    host = {os = osName,
-                        posix = osName == "OS X" or osName == "Linux"},
-                    mcp = info and {port = info.port(), tools = info.toolCount()} or nil,
-                }}
-            end,
-        },
+        grouped("select"),
+        grouped("clear"),
+        grouped("mark"),
+        grouped("goto"),
+        grouped("note"),
+        grouped("info"),
+        grouped("despawn"),
+        grouped("remove"),
+        grouped("set"),
+        grouped("modify"),
+        grouped("spawn"),
+        grouped("query"),
+        grouped("draw"),
+        grouped("ids"),
+        grouped("history"),
+        grouped("agent"),
+        grouped("capabilities"),
         {
             name = "describe",
             section = "Session",
@@ -1980,104 +900,47 @@ function commands.build(env: commands.Env): commands.Registry
                 positional = {"command"} },
             run = function(v: {string: any}, _parts: {string}): commands.Result
                 local q = v.command as string
-                local c = reg.byName[q]
+                local c = reg.allByName[q]
                 if not c then
                     return {ok = false, code = "unknown_command",
                         message = "describe: no such command '" .. q .. "'"}
                 end
-                local emptySchema: {string: any} = {
-                    type = "object",
-                    properties = json.EMPTY_OBJECT,
-                    additionalProperties = false,
-                }
                 local subs: {{string: any}} = {}
                 for _, sub in ipairs(c.subcommands or {}) do
+                    local tool = projectTool(c, sub)
                     subs[#subs + 1] = {
                         name = sub.name,
                         shortHelp = sub.shortHelp,
                         mcpHelp = sub.mcpHelp,
-                        tool = (sub.mcp ~= false) and ("debug_" .. c.name .. "_" .. sub.name) or nil,
-                        inputSchema = sub.schema and cmdargs.toolSchema(sub.schema) or emptySchema,
-                        outputSchema = commands.wrapOutputSchema(sub.outputSchema),
-                        annotations = toolAnnotations(c.name, sub.name, sub.annotations),
+                        tool = (sub.mcp ~= false) and tool.name or nil,
+                        inputSchema = tool.inputSchema,
+                        outputSchema = tool.outputSchema,
+                        annotations = tool.annotations,
                         metadata = sub.metadata,
                     }
                 end
+                local tool = projectTool(c, nil)
                 return {ok = true, popup = commands.usagePopup(c), data = {
                     name = c.name,
                     signature = commands.commandSignature(c),
                     section = c.section or "Custom",
                     shortHelp = c.shortHelp,
                     mcpHelp = c.mcpHelp,
-                    tool = (c.mcp ~= false and c.run ~= nil) and ("debug_" .. c.name) or nil,
-                    inputSchema = c.schema and cmdargs.toolSchema(c.schema) or emptySchema,
-                    outputSchema = commands.wrapOutputSchema(c.outputSchema),
-                    annotations = toolAnnotations(c.name, nil, c.annotations),
+                    tool = (c.mcp ~= false and c.run ~= nil) and tool.name or nil,
+                    inputSchema = tool.inputSchema,
+                    outputSchema = tool.outputSchema,
+                    annotations = tool.annotations,
                     subcommands = subs,
                     examples = c.examples,
                     metadata = c.metadata,
                 }}
             end,
         },
-        {
-            name = "step",
-            section = "Session",
-            mcp = false,   -- agents use the step MCP tool (same freeze controller)
-            shortHelp = "tick the game forward N frames while otherwise frozen",
-            schema = stepSchema,
-            run = function(v: {string: any}, _parts: {string}): commands.Result
-                local n = math.max(1, math.floor(v.n as number)) as integer
-                local ok, err = env.freeze:step(n)
-                if not ok then
-                    return {ok = false, code = "not_frozen", message = "step: " .. err}
-                end
-                return {ok = true, message = "stepping " .. tostring(n) .. " frame(s)",
-                    data = {frames = n}}
-            end,
-        },
-        {
-            name = "exit",
-            section = "Session",
-            mcp = false,
-            shortHelp = "close the debugger (same as the toggle key)",
-            run = function(_v: {string: any}, _parts: {string}): commands.Result
-                reg.signals.action = "exit"
-                return {ok = true, message = ""}
-            end,
-        },
-        {
-            name = "quit",
-            section = "Session",
-            mcp = false,   -- the quit MCP tool exists
-            shortHelp = "quit the game",
-            run = function(_v: {string: any}, _parts: {string}): commands.Result
-                reg.signals.action = "quit"
-                return {ok = true}
-            end,
-        },
+        grouped("step"),
+        grouped("exit"),
+        grouped("quit"),
     }
 
-    -- Shared context for the command groups (internal/cmd/*). The registry
-    -- itself is passed as the narrower RegSlice view.
-    local d: cmdtypes.Deps = {
-        world = w,
-        ctx = ctx,
-        env = env,
-        reg = (reg as any) as cmdtypes.RegSlice,
-        pipeline = pipeline,
-        componentFor = componentFor,
-        resolveTargets = resolveTargets,
-        makeAnnotation = makeAnnotation,
-        tileAt = commands.tileAt,
-        summarizeProfile = summarizeProfile,
-        systemZoneIds = systemZoneIds,
-        onOffSchema = onOffSchema,
-        nameSchema = nameSchema,
-        refSchema = refSchema,
-        targetSchema = targetSchema,
-        optionalTargetSchema = optionalTargetSchema,
-        selectionTarget = EDIT_SELECTION_TARGET,
-    }
     for _, group in ipairs({rendercmds.commands(d), enginecmds.commands(d),
             capturecmds.commands(d)}) do
         for _, c in ipairs(group) do
@@ -2140,7 +1003,7 @@ function commands.Registry:add(cmd: commands.Command)
     if not cmd.run and not cmd.subcommands then
         error("commands: '" .. cmd.name .. "' needs a run action or subcommands")
     end
-    if self.byName[cmd.name] then
+    if self.allByName[cmd.name] then
         error("commands: '" .. cmd.name .. "' is already registered")
     end
     if cmd.schema then cmdargs.validate(cmd.schema) end
@@ -2171,12 +1034,22 @@ function commands.Registry:add(cmd: commands.Command)
     end
     if cmd.aliases then
         for _, a in ipairs(cmd.aliases) do
-            if self.byName[a] then
+            if self.allByName[a] then
                 error("commands: alias '" .. a .. "' of '" .. cmd.name .. "' is already registered")
             end
         end
     end
     self.list[#self.list + 1] = cmd
+    self.allByName[cmd.name] = cmd
+    if cmd.aliases then
+        for _, a in ipairs(cmd.aliases) do
+            self.allByName[a] = cmd
+        end
+    end
+    -- Keep the lazy MCP dispatch index current once it exists.
+    if self.byToolName then
+        indexTools(self.byToolName, cmd)
+    end
     -- overlay = false keeps the command out of the typed surface entirely
     -- (no dispatch, no help listing, no completion): an MCP-only command.
     if cmd.overlay ~= false then
@@ -2236,7 +1109,7 @@ function commands.Registry:complete(text: string): string, {string}
         -- prefix returns plain matches.
         prefix = text
         if prefix == "" then
-            for _, section in ipairs(SECTION_ORDER) do
+            for _, section in ipairs(cmdtypes.SECTIONS) do
                 local start = #out
                 for i = 1, #self.names do
                     local c = self.byName[self.names[i]]
@@ -2303,7 +1176,6 @@ function commands.Registry:complete(text: string): string, {string}
     return head, out
 end
 
-
 -- Stop the active sampler, write the collapsed stacks, summarize the top
 -- self-sample frames (and derived zones), and publish the path to the context.
 -- Returns the results popup for the overlay to show, or nil with no session.
@@ -2325,7 +1197,9 @@ function commands.Registry:finishProfile(): {string}
 
     local popup, top = summarizeProfile(text, name, systemZoneIds(self.env.world))
     ctx.profileTop = top
-    debugcontext.setStatus(ctx, "profile saved at " .. debugcontext.savePath(name))
+    -- io.open writes to the process working directory, not the LÖVE save dir.
+    debugcontext.setStatus(ctx, "profile saved at " ..
+        love.filesystem.getWorkingDirectory() .. "/" .. name)
     debugcontext.pushEvent(ctx, "profile", {path = name})
     self.env.world:emit(0, debugcontext.OnDebugContext("profile", name, 0))
     return popup

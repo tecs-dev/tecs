@@ -24,7 +24,7 @@ local record framecapture
     record Options
         dir: string          -- save-dir-relative directory for the frame images
         format: string       -- "png" (default) | "tga" | "jpg" | "bmp"
-        ringSize: integer     -- max frames in flight before dropping (default 8)
+        ringSize: integer    -- max frames in flight before dropping (default 8)
         token: string        -- unique suffix so channels never cross recordings
     end
 
@@ -43,9 +43,9 @@ local record framecapture
         finished: boolean
         error: string
 
-        --- Queue one frame. Returns false (and counts a drop) if the ring is
-        --- full or the encoder is already finishing. Consumes a contiguous
-        --- on-disk index only on success.
+        --- Queue one frame. Returns false if the ring is full (counted as a
+        --- drop) or the encoder is already finishing (ignored, not counted).
+        --- Consumes a contiguous on-disk index only on success.
         submit: function(self: Encoder, img: love.image.ImageData): boolean
         --- Non-blocking: apply worker acknowledgements to the in-flight/written
         --- counters. Call once per frame.
@@ -92,6 +92,13 @@ while true do
     end
 end
 ]]
+
+-- Frame filename stem shared by submit() (real indices) and pattern() (the
+-- ffmpeg %06d input pattern), so the on-disk names and the demux glob cannot
+-- drift apart.
+local FRAME_STEM <const> = "frame_%06d"
+local FRAME_PATH_FORMAT <const> = "%s/" .. FRAME_STEM .. ".%s"
+local FRAME_PATTERN_FORMAT <const> = "%s/" .. FRAME_STEM:gsub("%%", "%%%%") .. ".%s"
 
 local function extFor(format: string): string
     if format == "jpg" then return "jpg" end
@@ -143,7 +150,7 @@ function framecapture.Encoder:submit(img: love.image.ImageData): boolean
     end
     local idx = self.nextIndex
     self.nextIndex = idx + 1
-    local path = string.format("%s/frame_%06d.%s", self.dir, idx, extFor(self.format))
+    local path = string.format(FRAME_PATH_FORMAT, self.dir, idx, extFor(self.format))
     self.frames:push({i = idx, img = img, fmt = self.format, path = path})
     self.inFlight = self.inFlight + 1
     return true
@@ -177,7 +184,7 @@ function framecapture.Encoder:isDone(): boolean
 end
 
 function framecapture.Encoder:pattern(): string
-    return string.format("%s/frame_%%06d.%s", self.dir, extFor(self.format))
+    return string.format(FRAME_PATTERN_FORMAT, self.dir, extFor(self.format))
 end
 
 function framecapture.Encoder:shutdown()

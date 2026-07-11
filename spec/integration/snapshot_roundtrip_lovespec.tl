@@ -77,7 +77,7 @@ describe("snapshot round-trip: world and pixels restore", function()
     it("saves a snapshot to the save directory", function()
         local result = app.client:call("snapshot_save", {
             format = "json",
-            save_to = SNAPSHOT_FILE,
+            saveTo = SNAPSHOT_FILE,
         })
         luassert.is_string(result.path as string, "snapshot_save returned no path")
     end)
@@ -105,7 +105,7 @@ describe("snapshot round-trip: world and pixels restore", function()
     it("loading the snapshot restores entities and pixels", function()
         app.client:call("snapshot_load", {
             format = "json",
-            load_from = SNAPSHOT_FILE,
+            loadFrom = SNAPSHOT_FILE,
         })
         -- The saved scene: red rect back, green circle back, extra gone
         -- (load clears the world first).

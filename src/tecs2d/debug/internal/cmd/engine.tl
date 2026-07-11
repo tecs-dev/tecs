@@ -1,17 +1,16 @@
 --- Engine-section debugger commands: systems, archetypes, components,
 --- states, physics, controllers, assets, and audio, plus the subsystem
---- lookups they share (the duck-typed physics state, controller and audio
+--- lookups they share (the physics state, the controller/audio/asset
 --- managers, and the asset manager's strong load log).
 ---
 --- Everything shared with the core registry arrives through cmdtypes.Deps;
 --- this module must not require tecs2d.debug.commands (a load cycle).
 
 local tecs <const> = require("tecs")
+local gfxtypes <const> = require("tecs2d.gfx.types")
 local componentregistry <const> = require("tecs.internal.components")
 local entityinfo <const> = require("tecs2d.internal.entityinfo")
 local systemcontrol <const> = require("tecs2d.internal.systemcontrol")
-local assetskey <const> = require("tecs2d.assets")
-local audiokey <const> = require("tecs2d.audio")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
 local cmdargs <const> = require("tecs2d.debug.internal.cmdargs")
 local cmdtypes <const> = require("tecs2d.debug.internal.cmdtypes")
@@ -28,7 +27,6 @@ local systemNameSchema <const>: cmdargs.Schema = {
     args = { name = {required = true, help = "system name (see `systems`)"} },
     positional = {"name"},
 }
-cmdargs.validate(systemNameSchema)
 
 function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
     -- The shared context, aliased once so command bodies stay terse.
@@ -45,19 +43,28 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
     -- Pre-mute master volume for `audio mute off`.
     local preMuteVolume: number = nil
 
-    -- The physics plugin's state resource, found by shape rather than by key:
-    -- requiring tecs2d.physics here would register its components in every
-    -- game, plugin installed or not.
+    -- Resolve the pipeline, or produce the standard failure Result. Call
+    -- sites early-return the second value.
+    local function needPipeline(message: string): gfxtypes.Pipeline, cmdtypes.Result
+        local p = pipeline()
+        if p then return p, nil end
+        return nil, {ok = false, code = "no_pipeline", message = message}
+    end
+
+    -- Plugin modules (physics, controller, assets, audio) double as their
+    -- resource keys. They are read from package.loaded, never required here:
+    -- a require would register their components in every game the debugger
+    -- runs in, plugin installed or not. A module that was never required
+    -- cannot have been installed as a plugin, so a package.loaded miss means
+    -- the plugin is absent.
+    local function pluginResource(modname: string): any
+        local key = package.loaded[modname]
+        if key == nil then return nil end
+        return w.resources[key as tecs.Key<any>]
+    end
+
     local function physicsState(): {string: any}
-        for _, value in pairs(w.resources as {any: any}) do
-            if type(value) == "table" then
-                local t = value as {string: any}
-                if t.world ~= nil and t.smoothing ~= nil and type(t.world) == "userdata" then
-                    return t
-                end
-            end
-        end
-        return nil
+        return pluginResource("tecs2d.physics") as {string: any}
     end
 
     -- Find an entity's Box2D body by scanning shape user data.
@@ -83,12 +90,15 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
     end
 
     local function controllerManager(): {string: any}
-        local controllerkey = require("tecs2d.controller")
-        return w.resources[controllerkey as tecs.Key<any>] as {string: any}
+        return pluginResource("tecs2d.controller") as {string: any}
     end
 
     local function audioManager(): any
-        return w.resources[audiokey]
+        return pluginResource("tecs2d.audio")
+    end
+
+    local function assetManager(): {string: any}
+        return pluginResource("tecs2d.assets") as {string: any}
     end
 
     -- Sorted asset keys, optionally filtered by a plain substring. Reads the
@@ -96,7 +106,7 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
     -- vanish once the game drops its handles) unioned with the live cache.
     -- Returns nil + reason when the manager is missing.
     local function assetKeys(filter: string): {string}, string
-        local mgr = w.resources[assetskey] as {string: any}
+        local mgr = assetManager()
         if not mgr then
             return nil, "manager not installed"
         end
@@ -119,7 +129,7 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
     -- One asset's action/path/status plus whether a live handle is still
     -- cached, from the log entry or the handle (whichever exists).
     local function assetEntry(key: string): {string: any}
-        local mgr = w.resources[assetskey] as {string: any}
+        local mgr = assetManager()
         local logTable = mgr._assetLog as {string: any}
         local logged = logTable and logTable[key] as {string: any}
         local cache = mgr._cache as {string: any}
@@ -329,30 +339,33 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         positional = {"id"} },
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
                         local wanted = math.floor(v.id as number)
-                        local count = 0
+                        local total = 0
+                        local added = 0
                         local seen: {integer: boolean} = {}
                         for i = 1, #ctx.selected do seen[ctx.selected[i]] = true end
                         w:forEachArchetype(function(arch: tecs.Archetype)
                             if arch.id ~= wanted then return end
                             local n = arch.entities[0] as integer
+                            total = total + n
                             for row = 1, n do
                                 local eid = arch.entities[row] as integer
                                 if not seen[eid] then
                                     seen[eid] = true
+                                    added = added + 1
                                     ctx.selected[#ctx.selected + 1] = eid
                                 end
-                                count = count + 1
                             end
                         end)
-                        if count == 0 then
+                        if total == 0 then
                             return {ok = false, code = "no_match",
                                 message = "archetypes select: archetype " .. tostring(wanted) ..
                                     " is empty or unknown"}
                         end
                         debugcontext.pushEvent(ctx, "selection", {selected = #ctx.selected})
-                        return {ok = true, message = "selected " .. tostring(count) ..
-                            " entities from archetype " .. tostring(wanted),
-                            data = {selected = #ctx.selected, archetype = wanted}}
+                        return {ok = true, message = "selected " .. tostring(added) ..
+                            " of " .. tostring(total) .. " entities from archetype " .. tostring(wanted),
+                            data = {selected = #ctx.selected, added = added,
+                                total = total, archetype = wanted}}
                     end,
                 },
             },
@@ -523,10 +536,8 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                             as {string: any}
                         -- Install the debug drawer on demand.
                         if not systemcontrol.info(w, "tecs2d.gfx.physicsdebug") then
-                            if not pipeline() then
-                                return {ok = false, code = "no_pipeline",
-                                    message = "physics debug: the drawer needs a render pipeline"}
-                            end
+                            local p, perr = needPipeline("physics debug: the drawer needs a render pipeline")
+                            if not p then return perr end
                             local newPlugin = physicsdebug.new as function(): tecs.Plugin
                             w:addPlugin(newPlugin())
                         end
@@ -703,6 +714,7 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         end
                         local list = mgr.controllers as {any}
                         local popup: {string} = {"controllers  (" .. tostring(#list) .. "):"}
+                        local rows: {{string: any}} = {}
                         for i = 1, #list do
                             local ctrl = list[i] as {string: any}
                             local js = ctrl.joystick as {string: any}
@@ -713,8 +725,10 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                                 jsName = okName and nm or "(unknown)"
                             end
                             popup[#popup + 1] = "  " .. tostring(i) .. "\t" .. jsName
+                            rows[#rows + 1] = {index = i, joystick = jsName}
                         end
-                        return {ok = true, popup = popup, data = {count = #list}}
+                        return {ok = true, popup = popup,
+                            data = {count = #list, controllers = rows}}
                     end,
                 },
                 {
@@ -862,7 +876,7 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                             return {ok = false, code = "no_match",
                                 message = "assets reload: nothing cached matching '" .. wanted .. "'"}
                         end
-                        local mgr = w.resources[assetskey] as {string: any}
+                        local mgr = assetManager()
                         local cache = mgr._cache as {string: any}
                         local assetLog = mgr._assetLog as {string: {string: any}}
                         local reloaded: {string} = {}

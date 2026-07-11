@@ -824,7 +824,7 @@ Start LuaJIT's sampling profiler. Errors if a session is already active. Auto-st
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `seconds` | number | No | Record for this many seconds, clamped to 0.1-60 |
-| `interval_ms` | number | No | Sampler interval in ms. Default 1; raise to 5 or 10 for long sessions |
+| `intervalMs` | number | No | Sampler interval in ms. Default 1; raise to 5 or 10 for long sessions |
 | `zone` | string | No | Zone-path prefix filter, e.g. `afterFixed/Render` |
 
 **Response:**
@@ -847,7 +847,7 @@ by the next `profiler_stop` call.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `save_to` | string | No | File path to write output to instead of returning it inline |
+| `saveTo` | string | No | File path to write output to instead of returning it inline |
 
 **Inline response:**
 
@@ -864,12 +864,12 @@ by the next `profiler_stop` call.
 ## snapshot_save
 
 Capture a snapshot of the world. Returns the snapshot inline, or writes it to a file under Love2D's save directory when
-`save_to` is provided. See [Save games](/tecs/save-games) for the snapshot model.
+`saveTo` is provided. See [Save games](/tecs/save-games) for the snapshot model.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `format` | string | No | `"json"` (default) or `"luajit"` |
-| `save_to` | string | No | Filename inside Love2D's save directory |
+| `saveTo` | string | No | Filename inside Love2D's save directory |
 | `pretty` | boolean | No | Pretty-print JSON when saving or measuring JSON output (default: false) |
 | `layers` | number[] | No | Allow-list of `Transform.layer` values, 0..31 |
 
@@ -900,9 +900,9 @@ directory. The `format` must match how the snapshot was saved.
 | --- | --- | --- | --- |
 | `format` | string | No | `"json"` (default) or `"luajit"` |
 | `payload` | string | No* | Inline snapshot payload. JSON is passed as-is; `luajit` payloads must be base64-encoded |
-| `load_from` | string | No* | Filename inside Love2D's save directory to read from. Ignored when `payload` is supplied |
+| `loadFrom` | string | No* | Filename inside Love2D's save directory to read from. Ignored when `payload` is supplied |
 
-*Provide either `payload` or `load_from`.
+*Provide either `payload` or `loadFrom`.
 
 **Response:**
 

@@ -21,6 +21,15 @@ local record render
     commands: function(d: cmdtypes.Deps): {cmdtypes.Command}
 end
 
+-- One live Tilemap entity: its id, the tilemap component instance (opaque;
+-- the debugger never loads the tiled module), and its Transform position.
+local record TilemapEntry
+    entity: integer
+    map: any
+    x: number
+    y: number
+end
+
 local lightSchema <const>: cmdargs.Schema = {
     args = {
         r = {kind = "number", help = "red 0-1 (unchanged if omitted)"},
@@ -29,7 +38,6 @@ local lightSchema <const>: cmdargs.Schema = {
     },
     positional = {"r", "g", "b"},
 }
-cmdargs.validate(lightSchema)
 
 -- First slot is `<intensity|on>`: a number sets the glow strength, on/off toggles.
 -- Numbers are tried first so `bloom 1` means intensity 1, not on=true.
@@ -43,9 +51,6 @@ local bloomSchema <const>: cmdargs.Schema = {
     },
     positional = {"level", "radius", "threshold"},
 }
-cmdargs.validate(bloomSchema)
-
-
 
 local cameraMoveSchema <const>: cmdargs.Schema = {
     args = {
@@ -57,19 +62,16 @@ local cameraMoveSchema <const>: cmdargs.Schema = {
     },
     positional = {"x", "y", "r", "z"},
 }
-cmdargs.validate(cameraMoveSchema)
 
 local cameraTimescaleSchema <const>: cmdargs.Schema = {
     args = { scale = {required = true, kind = "number", help = "0 = frozen, 1 = normal, 2 = double speed"} },
     positional = {"scale"},
 }
-cmdargs.validate(cameraTimescaleSchema)
 
 local cameraToggleSchema <const>: cmdargs.Schema = {
     args = { name = {required = true, help = "camera name (see `camera`)"} },
     positional = {"name"},
 }
-cmdargs.validate(cameraToggleSchema)
 
 function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
     -- The shared context, aliased once so command bodies stay terse.
@@ -86,6 +88,15 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
     -- by a bare `layers solo`.
     local soloRestore: {integer: boolean} = nil
 
+    -- Resolve the pipeline, or produce the standard failure Result for the
+    -- given message prefix. Call sites early-return the second value.
+    local function needPipeline(prefix: string): gfxtypes.Pipeline, cmdtypes.Result
+        local p = pipeline()
+        if p then return p, nil end
+        return nil, {ok = false, code = "no_pipeline",
+            message = prefix .. ": no render pipeline"}
+    end
+
     -- A layer argument is a name or a number typed as text.
     local function layerRef(raw: string): integer | string
         local n = tonumber(raw)
@@ -93,10 +104,24 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
         return raw
     end
 
+    -- Resolve a layer reference to its number via the same validation path
+    -- the setters use, or nil when the layer is unknown.
+    local function resolveLayerNum(p: gfxtypes.Pipeline, ref: integer | string): integer
+        local okRef, target = pcall(function(): integer
+            p:isLayerVisible(ref)
+            if ref is string then
+                return ((p as {string: any}).layerNames as {string: integer})[ref]
+            end
+            return ref as integer
+        end)
+        if not okRef then return nil end
+        return target
+    end
+
     -- Live Tilemap entities resolved by component name, so the debugger
     -- never loads the tiled module. Oldest entity first.
-    local function tilemaps(): {{string: any}}
-        local list: {{string: any}} = {}
+    local function tilemaps(): {TilemapEntry}
+        local list: {TilemapEntry} = {}
         local comp = componentFor("Tilemap")
         if not comp then return list end
         w:forEachArchetype(function(arch: tecs.Archetype)
@@ -107,21 +132,21 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             for row = 1, n do
                 local t = tcol and tcol[row]
                 list[#list + 1] = {
-                    entity = arch.entities[row],
+                    entity = arch.entities[row] as integer,
                     map = col[row],
                     x = t and t.x or 0,
                     y = t and t.y or 0,
                 }
             end
         end)
-        table.sort(list, function(a: {string: any}, b: {string: any}): boolean
-            return (a.entity as integer) < (b.entity as integer)
+        table.sort(list, function(a: TilemapEntry, b: TilemapEntry): boolean
+            return a.entity < b.entity
         end)
         return list
     end
 
     -- One tilemap by entity id, or the first when id is nil.
-    local function mapByRef(id: number): {string: any}, string
+    local function mapByRef(id: number): TilemapEntry, string
         local maps = tilemaps()
         if #maps == 0 then
             return nil, "no tilemaps loaded"
@@ -136,10 +161,8 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
 
     -- Camera summary shared by `camera` and `camera info`.
     local function cameraInfo(): cmdtypes.Result
-        local p = pipeline()
-        if not p then
-            return {ok = false, code = "no_pipeline", message = "camera: no render pipeline"}
-        end
+        local p, perr = needPipeline("camera")
+        if not p then return perr end
         local cam = p:getCamera()
         local cx, cy = cam:getPosition()
         local vw, vh = cam:getVisibleDimensions()
@@ -151,14 +174,17 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 cams[#cams + 1] = {name = c:getName(), active = c:isActive()}
             end
         end
+        -- While frozen the live pipeline scale is 0; report the scale that
+        -- resumes, in the popup and the structured payload alike.
+        local frozen = env.freeze:isFrozen()
+        local timescale = frozen and env.freeze.savedTimeScale or p:getTimeScale()
         local popup: {string} = {
             "camera",
             format("  position\t%.1f, %.1f", cx, cy),
             format("  zoom\t%.2f", cam:getZoom()),
             format("  rotation\t%.2f", cam:getRotation()),
             format("  visible\t%.0f x %.0f", vw, vh),
-            format("  timescale\t%.2f%s", env.freeze:isFrozen() and env.freeze.savedTimeScale
-                or p:getTimeScale(), env.freeze:isFrozen() and " (frozen)" or ""),
+            format("  timescale\t%.2f%s", timescale, frozen and " (frozen)" or ""),
         }
         if #cams > 1 then
             popup[#popup + 1] = "Cameras:"
@@ -169,7 +195,7 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
         end
         return {ok = true, popup = popup,
             data = {x = cx, y = cy, zoom = cam:getZoom(), rotation = cam:getRotation(),
-                w = vw, h = vh, timescale = p:getTimeScale(), cameras = cams}}
+                w = vw, h = vh, timescale = timescale, frozen = frozen, cameras = cams}}
     end
 
 
@@ -224,10 +250,8 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     name = "info",
                     shortHelp = "show ambient color, lighting, shadows, and bloom state",
                     run = function(_v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local p = pipeline()
-                        if not p then
-                            return {ok = false, code = "no_pipeline", message = "light: no render pipeline"}
-                        end
+                        local p, perr = needPipeline("light")
+                        if not p then return perr end
                         local cr, cg, cb = p:getAmbientLight()
                         local pAny = p as {string: any}
                         local bloom = p:getBloom()
@@ -253,10 +277,8 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     schema = lightSchema,
                     examples = {"light color", "light color 0.3 0.3 0.4", "light color b=0.8"},
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local p = pipeline()
-                        if not p then
-                            return {ok = false, code = "no_pipeline", message = "light: no render pipeline"}
-                        end
+                        local p, perr = needPipeline("light")
+                        if not p then return perr end
                         local cr, cg, cb = p:getAmbientLight()
                         if v.r == nil and v.g == nil and v.b == nil then
                             return {ok = true,
@@ -277,10 +299,8 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     shortHelp = "enable or disable lighting entirely",
                     schema = onOffSchema,
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local p = pipeline()
-                        if not p then
-                            return {ok = false, code = "no_pipeline", message = "light: no render pipeline"}
-                        end
+                        local p, perr = needPipeline("light")
+                        if not p then return perr end
                         local want = v.on as boolean
                         if want == nil then want = not p:isLightingEnabled() end
                         if want then p:enableLighting() else p:disableLighting() end
@@ -293,10 +313,8 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     shortHelp = "enable or disable shadow rendering",
                     schema = onOffSchema,
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local p = pipeline()
-                        if not p then
-                            return {ok = false, code = "no_pipeline", message = "light: no render pipeline"}
-                        end
+                        local p, perr = needPipeline("light")
+                        if not p then return perr end
                         -- shadowsEnabled is a live-read pipeline field (checked
                         -- every frame before the shadow passes).
                         local pAny = p as {string: any}
@@ -314,10 +332,8 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     examples = {"light bloom on", "light bloom off",
                         "light bloom 3 1 0.8", "light bloom radius=2"},
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local p = pipeline()
-                        if not p then
-                            return {ok = false, code = "no_pipeline", message = "bloom: no render pipeline"}
-                        end
+                        local p, perr = needPipeline("bloom")
+                        if not p then return perr end
                         local function state(prefix: string): cmdtypes.Result
                             local now = p:getBloom()
                             return {ok = true,
@@ -361,10 +377,8 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     shortHelp = "set camera position (and optionally rotation and zoom)",
                     schema = cameraMoveSchema,
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local p = pipeline()
-                        if not p then
-                            return {ok = false, code = "no_pipeline", message = "camera: no render pipeline"}
-                        end
+                        local p, perr = needPipeline("camera")
+                        if not p then return perr end
                         local cam = p:getCamera(v.name as string)
                         if not cam then
                             return {ok = false, code = "no_match",
@@ -392,10 +406,8 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     shortHelp = "set the game time scale (0 = frozen, 1 = normal)",
                     schema = cameraTimescaleSchema,
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local p = pipeline()
-                        if not p then
-                            return {ok = false, code = "no_pipeline", message = "camera: no render pipeline"}
-                        end
+                        local p, perr = needPipeline("camera")
+                        if not p then return perr end
                         local scale = v.scale as number
                         -- While frozen, the controller owns the live time scale
                         -- (it is 0); update what it restores instead.
@@ -416,10 +428,8 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     shortHelp = "toggle a named camera's active flag",
                     schema = cameraToggleSchema,
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local p = pipeline()
-                        if not p then
-                            return {ok = false, code = "no_pipeline", message = "camera: no render pipeline"}
-                        end
+                        local p, perr = needPipeline("camera")
+                        if not p then return perr end
                         local nm = v.name as string
                         local cam = p:getCamera(nm)
                         if not cam then
@@ -449,10 +459,8 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     name = "list",
                     shortHelp = "list named or modified layers with their flags",
                     run = function(_v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local p = pipeline()
-                        if not p then
-                            return {ok = false, code = "no_pipeline", message = "layers: no render pipeline"}
-                        end
+                        local p, perr = needPipeline("layers")
+                        if not p then return perr end
                         local names = (p as {string: any}).layerNames as {string: integer}
                         local byNum: {integer: string} = {}
                         for nm, num in pairs(names) do byNum[num] = nm end
@@ -485,19 +493,11 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     schema = { args = { layer = {required = true, help = "layer name or number"} },
                         positional = {"layer"} },
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local p = pipeline()
-                        if not p then
-                            return {ok = false, code = "no_pipeline", message = "layers: no render pipeline"}
-                        end
+                        local p, perr = needPipeline("layers")
+                        if not p then return perr end
                         local ref = layerRef(v.layer as string)
-                        local okRef, target = pcall(function(): integer
-                            p:isLayerVisible(ref)
-                            if ref is string then
-                                return ((p as {string: any}).layerNames as {string: integer})[ref]
-                            end
-                            return ref as integer
-                        end)
-                        if not okRef or not target then
+                        local target = resolveLayerNum(p, ref)
+                        if not target then
                             return {ok = false, code = "no_match",
                                 message = "layers info: unknown layer '" .. tostring(v.layer) .. "'"}
                         end
@@ -532,10 +532,8 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     name = "all",
                     shortHelp = "show every layer (undo toggles and solo)",
                     run = function(_v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local p = pipeline()
-                        if not p then
-                            return {ok = false, code = "no_pipeline", message = "layers: no render pipeline"}
-                        end
+                        local p, perr = needPipeline("layers")
+                        if not p then return perr end
                         for layerNum = 1, 16 do
                             p:setLayerVisibility(layerNum, true)
                         end
@@ -551,10 +549,8 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     schema = { args = { layer = {required = true, help = "layer name or number"} },
                         positional = {"layer"} },
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local p = pipeline()
-                        if not p then
-                            return {ok = false, code = "no_pipeline", message = "layers: no render pipeline"}
-                        end
+                        local p, perr = needPipeline("layers")
+                        if not p then return perr end
                         local ref = layerRef(v.layer as string)
                         local ok, err = pcall(function(): boolean
                             p:setLayerVisibility(ref, not p:isLayerVisible(ref))
@@ -575,10 +571,8 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     schema = { args = { layer = {help = "layer name or number; omit to restore"} },
                         positional = {"layer"} },
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local p = pipeline()
-                        if not p then
-                            return {ok = false, code = "no_pipeline", message = "layers: no render pipeline"}
-                        end
+                        local p, perr = needPipeline("layers")
+                        if not p then return perr end
                         if v.layer == nil then
                             if not soloRestore then
                                 return {ok = false, code = "no_match", message = "layers solo: nothing soloed"}
@@ -590,15 +584,8 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                             return {ok = true, message = "solo off; layer visibility restored", data = {}}
                         end
                         local ref = layerRef(v.layer as string)
-                        local okRef, target = pcall(function(): integer
-                            -- Resolve names via the same path the setters use.
-                            p:isLayerVisible(ref)
-                            if ref is string then
-                                return ((p as {string: any}).layerNames as {string: integer})[ref]
-                            end
-                            return ref as integer
-                        end)
-                        if not okRef or not target then
+                        local target = resolveLayerNum(p, ref)
+                        if not target then
                             return {ok = false, code = "no_match",
                                 message = "layers solo: unknown layer '" .. tostring(v.layer) .. "'"}
                         end
@@ -621,10 +608,8 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     schema = { args = { layer = {required = true, help = "layer name or number"} },
                         positional = {"layer"} },
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local p = pipeline()
-                        if not p then
-                            return {ok = false, code = "no_pipeline", message = "layers: no render pipeline"}
-                        end
+                        local p, perr = needPipeline("layers")
+                        if not p then return perr end
                         local ref = layerRef(v.layer as string)
                         local ok, err = pcall(function(): boolean
                             p:setLayerUnlit(ref, not p:isLayerUnlit(ref))
@@ -779,29 +764,29 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         end
                         local tw = data.tilewidth as number
                         local th = data.tileheight as number
-                        local tx = math.floor((wx - (entry.x as number)) / tw)
-                        local ty = math.floor((wy - (entry.y as number)) / th)
+                        local tx = math.floor((wx - entry.x) / tw)
+                        local ty = math.floor((wy - entry.y) / th)
                         local inside = tx >= 0 and ty >= 0
                             and tx < (data.width as integer) and ty < (data.height as integer)
                         local popup: {string} = {
                             format("tile %d, %d  (map #%s%s)", tx, ty,
                                 tostring(entry.entity), inside and "" or ", outside the map"),
                             format("  world\t%g, %g  (%gx%g)",
-                                (entry.x as number) + tx * tw, (entry.y as number) + ty * th, tw, th),
+                                entry.x + tx * tw, entry.y + ty * th, tw, th),
                         }
                         local layerLines, layerHits = readTileLayers(data, tx, ty)
                         for i = 1, #layerLines do
                             popup[#popup + 1] = layerLines[i]
                         end
                         env.annotations:add(makeAnnotation({
-                            x = (entry.x as number) + tx * tw, y = (entry.y as number) + ty * th,
+                            x = entry.x + tx * tw, y = entry.y + ty * th,
                             w = tw, h = th, seconds = 3, tag = "tile", r = 0.3, g = 1, b = 0.4,
                         }, "rect"))
                         return {ok = true, popup = popup,
                             data = {x = tx, y = ty, map = entry.entity, inside = inside,
                                 w = tw, h = th, layers = layerHits,
-                                worldX = (entry.x as number) + tx * tw,
-                                worldY = (entry.y as number) + ty * th}}
+                                worldX = entry.x + tx * tw,
+                                worldY = entry.y + ty * th}}
                     end,
                 },
             },
@@ -841,7 +826,7 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     (data.height as integer) * (data.tileheight as integer))
                 popup[#popup + 1] = format("  tile\t%dx%d px",
                     data.tilewidth as integer, data.tileheight as integer)
-                popup[#popup + 1] = format("  origin\t%g, %g", entry.x as number, entry.y as number)
+                popup[#popup + 1] = format("  origin\t%g, %g", entry.x, entry.y)
                 local kindBits: {string} = {}
                 for kind, count in pairs(kinds) do
                     kindBits[#kindBits + 1] = tostring(count) .. " " .. kind

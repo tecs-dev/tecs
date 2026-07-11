@@ -32,7 +32,7 @@ MCP tool: `debug_select`
 
 | Argument | Type | Description |
 | --- | --- | --- |
-| `id` | number | entity id (default: 0) |
+| `id` | number | entity id |
 | `name` | string | mark name |
 | `replace` | boolean | replace the selection instead of adding to it (default: false) |
 
@@ -143,9 +143,19 @@ MCP tool: `debug_mark_list` (read-only, idempotent)
   "properties": {
     "marks": {
       "additionalProperties": {
-        "type": "string"
+        "properties": {
+          "count": {
+            "description": "live entities with the mark",
+            "type": "integer"
+          },
+          "first": {
+            "description": "lowest live entity id",
+            "type": "integer"
+          }
+        },
+        "type": "object"
       },
-      "description": "mark name to compact entity id-range string",
+      "description": "mark name to its live count and first entity id",
       "type": "object"
     }
   },
@@ -171,7 +181,7 @@ MCP tool: `debug_goto`
 
 | Argument | Type | Description |
 | --- | --- | --- |
-| `id` | number | entity id (default: 0) |
+| `id` | number | entity id |
 | `name` | string | mark name |
 
 ::: details Result data schema
@@ -250,7 +260,7 @@ Overlay only; not projected over MCP.
 
 | Argument | Type | Description |
 | --- | --- | --- |
-| `id` | number | entity id (default: 0) |
+| `id` | number | entity id |
 | `name` | string | mark name |
 
 ### `despawn [id|name]` {#cmd-despawn}
@@ -263,7 +273,7 @@ MCP tool: `debug_despawn` (destructive)
 
 | Argument | Type | Description |
 | --- | --- | --- |
-| `id` | number | entity id (default: 0) |
+| `id` | number | entity id |
 | `name` | string | mark name |
 
 ::: details Result data schema
@@ -381,7 +391,7 @@ MCP tool: `debug_remove` (destructive)
 
 | Argument | Type | Description |
 | --- | --- | --- |
-| `id` | number | entity id (default: 0) |
+| `id` | number | entity id |
 | `name` | string | mark name, or @selection |
 | `comps` | string | component names to remove (required) |
 
@@ -430,7 +440,7 @@ MCP tool: `debug_set`
 
 | Argument | Type | Description |
 | --- | --- | --- |
-| `id` | number | entity id (default: 0) |
+| `id` | number | entity id |
 | `name` | string | mark name, or @selection |
 | `comp` | string | component name (required) |
 | `value` | table | component fields: a Lua table expression, e.g. {x = 10, y = 20}, or a JSON object over MCP; omit for defaults |
@@ -472,7 +482,7 @@ MCP tool: `debug_modify`
 
 | Argument | Type | Description |
 | --- | --- | --- |
-| `id` | number | entity id (default: 0) |
+| `id` | number | entity id |
 | `name` | string | mark name, or @selection |
 | `comp` | string | component name (required) |
 | `value` | table | fields to change: a Lua table expression, e.g. {x = 10}, or a JSON object over MCP (required) |
@@ -730,7 +740,7 @@ MCP tool: `debug_draw_clear`
 
 | Argument | Type | Description |
 | --- | --- | --- |
-| `id` | number | annotation id (default: 0) |
+| `id` | number | annotation id |
 | `tag` | string | annotation tag |
 
 ::: details Result data schema
@@ -1227,7 +1237,7 @@ MCP tool: `debug_physics_info` (read-only, idempotent)
 
 | Argument | Type | Description |
 | --- | --- | --- |
-| `id` | number | entity id (default: 0) |
+| `id` | number | entity id |
 | `name` | string | mark name |
 
 #### `physics raycast <x1> <y1> <x2> <y2>` {#cmd-physics-raycast}

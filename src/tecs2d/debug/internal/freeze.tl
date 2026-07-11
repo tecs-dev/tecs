@@ -61,19 +61,15 @@ local GAMEPLAY_PHASES <const>: {tecs.Phase} = {
 }
 
 local function setRenderTimeScale(w: tecs.World, scale: number)
-    local rp = w.resources[pipelinekey.PIPELINE] as {string: any}
+    local rp = w.resources[pipelinekey.PIPELINE]
     if not rp then return end
-    if rp.setTimeScale then
-        (rp.setTimeScale as function(any, number))(rp, scale)
-    else
-        rp.timeScale = scale
-    end
+    rp:setTimeScale(scale)
 end
 
 local function getRenderTimeScale(w: tecs.World): number
-    local rp = w.resources[pipelinekey.PIPELINE] as {string: any}
+    local rp = w.resources[pipelinekey.PIPELINE]
     if not rp then return 1.0 end
-    return (rp.timeScale as number) or 1.0
+    return rp:getTimeScale()
 end
 
 local function disableGameplay(w: tecs.World)

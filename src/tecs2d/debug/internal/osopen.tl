@@ -17,7 +17,8 @@ function osopen.shellQuote(s: string): string
 end
 
 local function doubleQuote(s: string): string
-    return '"' .. s:gsub('"', '\\"') .. '"'
+    -- cmd.exe ignores backslash escapes; a doubled quote is the escape it honors.
+    return '"' .. s:gsub('"', '""') .. '"'
 end
 
 local function fileUrl(absPath: string): string

@@ -14,6 +14,7 @@
 --- and (unless opted out) a debug_<name> MCP tool.
 
 local tecs <const> = require("tecs")
+local leader <const> = require("tecs2d.debug.internal.leader")
 local overlay <const> = require("tecs2d.debug.internal.overlay")
 local stats <const> = require("tecs2d.debug.internal.stats")
 
@@ -52,7 +53,7 @@ local record debugplugin
         --- Default recording output scale multiplier (default 1).
         recordingScale: number
 
-        --- Captured image format: "png" (default), "tga", or "jpg".
+        --- Captured image format: "png" (default), "tga", "jpg", or "bmp".
         recordingFrameFormat: string
 
         --- Max frames in flight before dropping (default 8).
@@ -66,6 +67,10 @@ end
 function debugplugin.new(config?: debugplugin.Config): tecs.Plugin
     local cfg = config or {}
     local leaderKey = cfg.leaderKey or "ctrl"
+    if not leader.isValid(leaderKey) then
+        error("debug: unknown leaderKey '" .. leaderKey ..
+            "'; use ctrl, alt, shift, or gui/cmd/super")
+    end
     local statsToggleKey = cfg.statsToggleKey or "."
     return function(w: tecs.World)
         overlay.install(w, {

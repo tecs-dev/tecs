@@ -9,7 +9,7 @@ local record socket
         listen: function(self: tcp, backlog: number)
         accept: function(self: tcp): tcp
         send: function(self: tcp, data: string): number, string
-        receive: function(self: tcp, pattern: string): string, string
+        receive: function(self: tcp, pattern: string | number): string, string
         close: function(self: tcp)
 
         -- Make the record callable (socket.tcp() constructor)

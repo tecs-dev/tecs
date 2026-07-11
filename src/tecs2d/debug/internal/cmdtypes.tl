@@ -173,6 +173,9 @@ local record cmdtypes
     --- Registry lives in tecs2d.debug.commands; build() passes itself here
     --- through a cast (same table, narrower type).
     record RegSlice
+        --- Registered commands in registration order. Groups read it for
+        --- counts and section summaries; only the core registry appends.
+        list: {Command}
         signals: Signals
         profiler: ProfilerState
         saveCounter: integer
@@ -223,8 +226,17 @@ local record cmdtypes
         refSchema: cmdargs.Schema
         targetSchema: cmdargs.Schema
         optionalTargetSchema: cmdargs.Schema
+
+        --- Build a validated `<id|name>` target schema; entries of `extra`
+        --- (may be nil) merge into its argument specs.
+        makeTargetSchema: function(required: boolean, extra: {string: cmdargs.ArgSpec}): cmdargs.Schema
+
         --- The literal "@selection" edit target.
         selectionTarget: string
+
+        --- The command-history file in the save directory, shared with the
+        --- registry's history persistence.
+        historyFile: string
     end
 end
 

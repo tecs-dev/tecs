@@ -40,14 +40,23 @@ local recordSchema <const>: cmdargs.Schema = {
     },
     positional = {"seconds", "name"},
 }
-cmdargs.validate(recordSchema)
 
 -- seconds 0 samples until you reopen the debugger.
 local profileSchema <const>: cmdargs.Schema = {
     args = { seconds = {default = 0, help = "sample duration; 0 samples until reopen"} },
     positional = {"seconds"},
 }
-cmdargs.validate(profileSchema)
+
+-- Shared ref schemas for the artifact verbs (profile/screenshot vs record).
+local captureRefSchema <const>: cmdargs.Schema = {
+    args = { ref = {help = "capture name or list index"} },
+    positional = {"ref"},
+}
+
+local recordingRefSchema <const>: cmdargs.Schema = {
+    args = { ref = {help = "recording name or list index"} },
+    positional = {"ref"},
+}
 
 function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
     -- The shared context, aliased once so command bodies stay terse.
@@ -84,7 +93,8 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
         end
         local n = tonumber(a)
         if n then
-            return reg.saves[n as integer] or ("debug-save-" .. tostring(n as integer) .. ".snapshot")
+            local wanted = math.floor(n)
+            return reg.saves[wanted] or ("debug-save-" .. tostring(wanted) .. ".snapshot")
         end
         return a
     end
@@ -189,7 +199,6 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             args = { [argName] = {help = argHelp} },
             positional = {argName},
         }
-        cmdargs.validate(schema)
         return {
             name = "open",
             shortHelp = "open with the OS default handler (latest if omitted)",
@@ -214,7 +223,6 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             args = { [argName] = {help = argHelp} },
             positional = {argName},
         }
-        cmdargs.validate(schema)
         return {
             name = "path",
             shortHelp = "copy the file's absolute path to the clipboard (latest if omitted)",
@@ -229,6 +237,28 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 love.system.setClipboardText(abs)
                 return {ok = true, message = "path copied to clipboard: " .. abs,
                     data = {path = abs}}
+            end,
+        }
+    end
+
+    -- Shared `info` verb: resolve the ref against the artifact history (with
+    -- the standard "no X for '...'" miss), then hand the entry to `detail`
+    -- for the type-specific popup lines and payload.
+    local function artifactInfo(cmdName: string, noun: string, shortHelp: string,
+            schema: cmdargs.Schema, items: function(): {any}, byNumber: boolean,
+            detail: function({string: any}): cmdtypes.Result): cmdtypes.Subcommand
+        return {
+            name = "info",
+            shortHelp = shortHelp,
+            schema = schema,
+            run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
+                local e = findArtifact(items(), v.ref as string, byNumber)
+                if not e then
+                    return {ok = false, code = "no_match",
+                        message = cmdName .. " info: no " .. noun .. " for '" ..
+                            tostring(v.ref) .. "'. Use `" .. cmdName .. " ls`."}
+                end
+                return detail(e)
             end,
         }
     end
@@ -464,16 +494,10 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     function(): {any} return ctx.profiles as {any} end,
                     function(path: string) os.remove(path) end,
                     function() ctx.profiles = {} end),
-                {
-                    name = "info",
-                    shortHelp = "re-show a capture's summary (latest if omitted)",
-                    schema = { args = { ref = {help = "capture name or list index"} }, positional = {"ref"} },
-                    run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local e = findArtifact(ctx.profiles as {any}, v.ref as string)
-                        if not e then
-                            return {ok = false, code = "no_match",
-                                message = "profile info: no capture for '" .. tostring(v.ref) .. "'. Use `profile ls`."}
-                        end
+                artifactInfo("profile", "capture", "re-show a capture's summary (latest if omitted)",
+                    captureRefSchema,
+                    function(): {any} return ctx.profiles as {any} end, false,
+                    function(e: {string: any}): cmdtypes.Result
                         local f = io.open(e.path as string, "r")
                         if not f then
                             return {ok = false, code = "read_failed",
@@ -484,8 +508,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         local popup, top = summarizeProfile(text, e.path as string, systemZoneIds(w))
                         return {ok = true, popup = popup,
                             data = {path = e.path, size = e.size, summary = top}}
-                    end,
-                },
+                    end),
                 artifactPath("profile", "ref", "capture name or list index",
                     function(ref: string): string
                         local e = findArtifact(ctx.profiles as {any}, ref)
@@ -498,7 +521,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "open",
                     shortHelp = "open speedscope and copy the capture's path to the clipboard",
-                    schema = { args = { ref = {help = "capture name or list index"} }, positional = {"ref"} },
+                    schema = captureRefSchema,
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
                         local e = findArtifact(ctx.profiles as {any}, v.ref as string)
                         if not e then
@@ -639,16 +662,10 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         ctx.snapshots = {}
                         invalidateDiffCache()
                     end),
-                {
-                    name = "info",
-                    shortHelp = "show one save's details (latest if omitted)",
-                    schema = refSchema,
-                    run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local e = findArtifact(ctx.snapshots as {any}, v.ref as string, true)
-                        if not e then
-                            return {ok = false, code = "no_match",
-                                message = "snapshot info: no save for '" .. tostring(v.ref) .. "'. Use `snapshot ls`."}
-                        end
+                artifactInfo("snapshot", "save", "show one save's details (latest if omitted)",
+                    refSchema,
+                    function(): {any} return ctx.snapshots as {any} end, true,
+                    function(e: {string: any}): cmdtypes.Result
                         local abs = debugcontext.savePath(e.path as string)
                         local lines = artifactInfoLines("snapshot #" .. tostring(e.number), e, abs)
                         if e.entities then
@@ -660,8 +677,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                             data = {number = e.number, path = e.path, full = abs,
                                 size = e.size, time = e.time, entities = e.entities,
                                 exists = onDisk ~= nil}}
-                    end,
-                },
+                    end),
             },
         },
         {
@@ -918,7 +934,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 artifactList("diffs",
                     function(): {any} return ctx.diffs as {any} end,
                     function(e: any): string
-                        local entry = e as debugcontext.Context.DiffEntry
+                        local entry = e as debugcontext.DiffEntry
                         return format("  %d changes\t%.1f KB\t%s\t%s",
                             entry.changes, entry.size / 1024,
                             os.date("%Y-%m-%d %H:%M:%S", entry.time) as string, entry.path)
@@ -995,13 +1011,13 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 local t0 = getTime()
                 local entityFilter, ignoreSet, filterErr = parseDiffFilters(v)
                 if filterErr then return filterErr end
-                local fromSnap, fromMeta, fec, fem = decodeDiffRef(v.from as string)
+                local fromSnap, fromMeta, fromCode, fromErr = decodeDiffRef(v.from as string)
                 if not fromSnap then
-                    return {ok = false, code = fec, message = fem}
+                    return {ok = false, code = fromCode, message = fromErr}
                 end
-                local toSnap, toMeta, tec2, tem = decodeDiffRef(v.to as string)
+                local toSnap, toMeta, toCode, toErr = decodeDiffRef(v.to as string)
                 if not toSnap then
-                    return {ok = false, code = tec2, message = tem}
+                    return {ok = false, code = toCode, message = toErr}
                 end
 
                 local fromEntities, fromM = snapdiff.normalize(fromSnap)
@@ -1018,7 +1034,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     limit = math.max(0, math.floor(v.limit as number)) as integer,
                 })
                 result.from = fromMeta
-                result["to"] = toMeta
+                result.to = toMeta
                 result.elapsedMs = (getTime() - t0) * 1000
                 reg.lastDiff = result
 
@@ -1084,16 +1100,11 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         return e and e.path as string
                     end,
                     debugcontext.savePath),
-                {
-                    name = "info",
-                    shortHelp = "show one capture's details with a thumbnail (latest if omitted)",
-                    schema = { args = { ref = {help = "capture name or list index"} }, positional = {"ref"} },
-                    run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local e = findArtifact(ctx.screenshots as {any}, v.ref as string)
-                        if not e then
-                            return {ok = false, code = "no_match",
-                                message = "screenshot info: no capture for '" .. tostring(v.ref) .. "'. Use `screenshot ls`."}
-                        end
+                artifactInfo("screenshot", "capture",
+                    "show one capture's details with a thumbnail (latest if omitted)",
+                    captureRefSchema,
+                    function(): {any} return ctx.screenshots as {any} end, false,
+                    function(e: {string: any}): cmdtypes.Result
                         local abs = debugcontext.savePath(e.path as string)
                         local lines = artifactInfoLines("screenshot", e, abs)
                         return {ok = true, popup = lines,
@@ -1101,8 +1112,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                             -- the popup's lifetime.
                             popupImagePath = e.path as string,
                             data = {path = e.path, full = abs, size = e.size, time = e.time}}
-                    end,
-                },
+                    end),
             },
             run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
                 reg.shotCounter = reg.shotCounter + 1
@@ -1117,7 +1127,6 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 end
                 local keepPanel = v.panel == true
                 local delay = (v.delay as number) or 0
-                local lg = love.graphics
                 local function fire()
                     -- Hide the overlay chrome for this one frame so the shot is
                     -- the game only (unless panel=true); the capture runs at
@@ -1132,8 +1141,8 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                             if hasArea then
                                 local pw = imageData:getWidth()
                                 local ph = imageData:getHeight()
-                                local scaleX = pw / lg.getWidth()
-                                local scaleY = ph / lg.getHeight()
+                                local scaleX = pw / love.graphics.getWidth()
+                                local scaleY = ph / love.graphics.getHeight()
                                 local cx = math.max(0, math.min(math.floor(math.min(ax1, ax2) * scaleX) as integer, pw - 1))
                                 local cy = math.max(0, math.min(math.floor(math.min(ay1, ay2) * scaleY) as integer, ph - 1))
                                 local cw = math.max(1, math.min(math.floor(math.abs(ax2 - ax1) * scaleX) as integer, pw - cx))
@@ -1253,7 +1262,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "open",
                     shortHelp = "open a completed recording (latest if omitted)",
-                    schema = { args = { ref = {help = "recording name or list index"} }, positional = {"ref"} },
+                    schema = recordingRefSchema,
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
                         local ref = v.ref as string
                         local e = findArtifact(ctx.recordings as {any}, ref)
@@ -1267,16 +1276,11 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         return e and e.path as string
                     end,
                     debugcontext.savePath),
-                {
-                    name = "info",
-                    shortHelp = "show one completed recording's details (latest if omitted)",
-                    schema = { args = { ref = {help = "recording name or list index"} }, positional = {"ref"} },
-                    run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local e = findArtifact(ctx.recordings as {any}, v.ref as string)
-                        if not e then
-                            return {ok = false, code = "no_match",
-                                message = "record info: no recording for '" .. tostring(v.ref) .. "'. Use `record ls`."}
-                        end
+                artifactInfo("record", "recording",
+                    "show one completed recording's details (latest if omitted)",
+                    recordingRefSchema,
+                    function(): {any} return ctx.recordings as {any} end, false,
+                    function(e: {string: any}): cmdtypes.Result
                         local abs = debugcontext.savePath(e.path as string)
                         local lines = artifactInfoLines("recording", e, abs)
                         lines[#lines + 1] = format("  duration\t%.1fs", e.duration as number)
@@ -1285,8 +1289,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         return {ok = true, popup = lines,
                             data = {path = e.path, full = abs, size = e.size, time = e.time,
                                 duration = e.duration, stopReason = e.stopReason}}
-                    end,
-                },
+                    end),
             },
         },
     }

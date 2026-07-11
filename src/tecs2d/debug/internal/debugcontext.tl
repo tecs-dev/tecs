@@ -15,7 +15,7 @@ local record debugcontext
         number: integer
         path: string
         size: integer
-        time: number
+        time: integer
         entities: integer
     end
 
@@ -23,23 +23,32 @@ local record debugcontext
     record ProfileEntry
         path: string
         size: integer
-        time: number
+        time: integer
     end
 
     --- A captured screenshot: save-dir file path, byte size, unix timestamp.
     record ScreenshotEntry
         path: string
         size: integer
-        time: number
+        time: integer
     end
 
     --- A completed host recording: save-dir file path, byte size, unix timestamp.
     record RecordingEntry
         path: string
         size: integer
-        time: number
+        time: integer
         duration: number
         stopReason: string
+    end
+
+    --- A diff artifact written by the `diff` command: save-dir file path,
+    --- byte size, unix timestamp, and total change count.
+    record DiffEntry
+        path: string
+        size: integer
+        time: integer
+        changes: integer
     end
 
     --- Current host-recording state, controlled by debugger commands or MCP.
@@ -74,13 +83,6 @@ local record debugcontext
         menuOpen: boolean
         menuTarget: integer
 
-        record DiffEntry
-            path: string
-            size: integer
-            time: integer
-            changes: integer
-        end
-
         --- Diff artifacts written by the `diff` command, oldest first.
         diffs: {DiffEntry}
 
@@ -96,18 +98,18 @@ local record debugcontext
         --- driven by the overlay's input system on wall-clock time and skip
         --- while the freeze controller is held.
         record RewindState
-            -- "idle" | "running" | "paused" | "stopped"
+            --- "idle" | "running" | "paused" | "stopped"
             status: string
-            -- "" | "manual" | "loaded" | "error"
+            --- "" | "manual" | "loaded" | "error"
             pauseReason: string
             interval: number
             cap: integer
-            -- love.timer clock (monotonic), unrelated to entry times.
+            --- love.timer clock (monotonic), unrelated to entry times.
             nextDueAt: number
             entries: {RewindEntry}
-            -- Monotonic capture number for filenames.
+            --- Monotonic capture number for filenames.
             counter: integer
-            -- Total bytes currently held by the ring.
+            --- Total bytes currently held by the ring.
             bytes: integer
             lastCaptureMs: number
             lastError: string
@@ -317,6 +319,8 @@ function debugcontext.removeSelected(ctx: debugcontext.Context, id: integer)
     end
 end
 
+-- The Context parameter is unused today; it keeps the call shape stable for a
+-- future per-context event feed (every caller already has one in hand).
 function debugcontext.pushEvent(_ctx: debugcontext.Context, kind: string, data?: {string: any})
     if not data or next(data) == nil then
         EVENTS:info("%s", kind)

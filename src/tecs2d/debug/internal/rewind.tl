@@ -45,6 +45,19 @@ local function state(ctx: debugcontext.Context): debugcontext.Context.RewindStat
     return ctx.rewind
 end
 
+-- Delete every file under the ring directory (all of them are ours by
+-- construction), returning how many were removed.
+local function sweepDir(): integer
+    local files = love.filesystem.getDirectoryItems(rewind.DIR)
+    local removed = 0
+    for i = 1, (files and #files or 0) do
+        if love.filesystem.remove(rewind.DIR .. "/" .. files[i]) then
+            removed = removed + 1
+        end
+    end
+    return removed
+end
+
 function rewind.start(ctx: debugcontext.Context, now: number, interval: number, cap: integer): boolean, string
     local st = state(ctx)
     if st.status == "running" or st.status == "paused" then
@@ -60,12 +73,8 @@ function rewind.start(ctx: debugcontext.Context, now: number, interval: number, 
     if cap < 1 then
         return false, "cap must be at least 1"
     end
-    -- Sweep leftovers from a crashed previous session: everything under the
-    -- ring directory is ours by construction.
-    local stale = love.filesystem.getDirectoryItems(rewind.DIR)
-    for i = 1, (stale and #stale or 0) do
-        love.filesystem.remove(rewind.DIR .. "/" .. stale[i])
-    end
+    -- Sweep leftovers from a crashed previous session.
+    sweepDir()
     love.filesystem.createDirectory(rewind.DIR)
     st.status = "running"
     st.pauseReason = ""
@@ -123,12 +132,7 @@ function rewind.clear(ctx: debugcontext.Context): integer
         end
     end
     -- Also sweep files a crashed session left that never made it into entries.
-    local leftovers = love.filesystem.getDirectoryItems(rewind.DIR)
-    for i = 1, (leftovers and #leftovers or 0) do
-        if love.filesystem.remove(rewind.DIR .. "/" .. leftovers[i]) then
-            removed = removed + 1
-        end
-    end
+    removed = removed + sweepDir()
     st.status = "idle"
     st.pauseReason = ""
     st.entries = {}

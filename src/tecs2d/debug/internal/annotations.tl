@@ -10,6 +10,7 @@
 --- game is frozen.
 
 local tecs <const> = require("tecs")
+local gfxtypes <const> = require("tecs2d.gfx.types")
 local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
 
@@ -201,15 +202,12 @@ function annotations.install(w: tecs.World, ctx: debugcontext.Context): annotati
         return 0, 0
     end
 
-    local function drawGrid(ctxRef: debugcontext.Context, cam: any, sw: number, sh: number)
-        local camAny = cam as {string: any}
-        local toWorld = camAny.toWorld as function(any, number, number): number, number
-        local toScreen = camAny.toScreen as function(any, number, number): number, number
+    local function drawGrid(ctxRef: debugcontext.Context, cam: gfxtypes.Camera, sw: number, sh: number)
         -- Cover the visible view under any rotation by boxing all four corners.
-        local x1, y1 = toWorld(cam, 0, 0)
-        local x2, y2 = toWorld(cam, sw, 0)
-        local x3, y3 = toWorld(cam, 0, sh)
-        local x4, y4 = toWorld(cam, sw, sh)
+        local x1, y1 = cam:toWorld(0, 0)
+        local x2, y2 = cam:toWorld(sw, 0)
+        local x3, y3 = cam:toWorld(0, sh)
+        local x4, y4 = cam:toWorld(sw, sh)
         local minX = math.min(x1, x2, x3, x4)
         local maxX = math.max(x1, x2, x3, x4)
         local minY = math.min(y1, y2, y3, y4)
@@ -226,16 +224,16 @@ function annotations.install(w: tecs.World, ctx: debugcontext.Context): annotati
         local startX = math.floor((minX - ctxRef.gridOX) / gw) * gw + ctxRef.gridOX
         local x = startX
         while x <= maxX do
-            local ax, ay = toScreen(cam, x, minY)
-            local bx, by = toScreen(cam, x, maxY)
+            local ax, ay = cam:toScreen(x, minY)
+            local bx, by = cam:toScreen(x, maxY)
             lg.line(ax, ay, bx, by)
             x = x + gw
         end
         local startY = math.floor((minY - ctxRef.gridOY) / gh) * gh + ctxRef.gridOY
         local y = startY
         while y <= maxY do
-            local ax, ay = toScreen(cam, minX, y)
-            local bx, by = toScreen(cam, maxX, y)
+            local ax, ay = cam:toScreen(minX, y)
+            local bx, by = cam:toScreen(maxX, y)
             lg.line(ax, ay, bx, by)
             y = y + gh
         end

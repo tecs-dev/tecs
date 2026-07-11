@@ -205,8 +205,10 @@ end
 
 local function complete(self: recording.Controller, reason: string)
     local ctx = self.ctx
-    local elapsed = 0.0
-    if ctx.recording.startedAt > 0 then
+    -- recordedElapsed is the capture time measured when the stop was requested;
+    -- wall clock here would also count frame flushing and the ffmpeg assembly wait.
+    local elapsed = self.recordedElapsed
+    if elapsed <= 0 and ctx.recording.startedAt > 0 then
         elapsed = love.timer.getTime() - ctx.recording.startedAt
     end
     local size = fileSize(self.outputPath)
@@ -275,10 +277,6 @@ local function launchCapture(self: recording.Controller): boolean, string
     return true, ""
 end
 
--- Assemble the captured frame sequence into the output video. Runs ffmpeg as a
--- finite job (it exits on its own at end of input); the stopping state machine
--- watches its pid to know when the video is ready. The scale filter also rounds
--- dimensions to even numbers, which yuv420p requires.
 -- The capture rate actually achieved. Frames are dropped when the encoder
 -- cannot keep up (common at high-DPI resolutions), so the number written is
 -- usually below currentFps * duration. Assembling at this real rate keeps the
@@ -290,6 +288,10 @@ local function achievedFps(self: recording.Controller): number
     return self.currentFps
 end
 
+-- Assemble the captured frame sequence into the output video. Runs ffmpeg as a
+-- finite job (it exits on its own at end of input); the stopping state machine
+-- watches its pid to know when the video is ready. The scale filter also rounds
+-- dimensions to even numbers, which yuv420p requires.
 local function buildAssembleCommand(self: recording.Controller): string
     local s = tostring(self.currentScale)
     local vf = "scale=trunc(iw*" .. s .. "/2)*2:trunc(ih*" .. s .. "/2)*2,format=yuv420p"
@@ -317,6 +319,19 @@ local function buildAssembleCommand(self: recording.Controller): string
     return table.concat(cmd, " ")
 end
 
+-- Launch the encoder and flip the state machine to "recording". Fails the
+-- recording and returns false + the error when the encoder cannot start.
+local function beginCapture(self: recording.Controller): boolean, string
+    local ok, err = launchCapture(self)
+    if not ok then
+        fail(self, err)
+        return false, err
+    end
+    self.ctx.recording.status = "recording"
+    self.ctx.recording.startedAt = love.timer.getTime()
+    return true, ""
+end
+
 local function launchAssemble(self: recording.Controller): boolean, string
     local command = buildAssembleCommand(self)
     LOGGER:info("assembling frames dir=%s frames=%d dropped=%d framesBytes=%.1fMB elapsed=%.2fs achievedFps=%.2f output=%s",
@@ -337,15 +352,20 @@ function recording.new(ctx: debugcontext.Context, opts?: recording.Options): rec
     local cfg = opts or {}
     local ffmpegPath = cfg.ffmpegPath or "ffmpeg"
     local outputDir = cfg.outputDir or "recordings"
+    -- Each configured default seeds both its defaultX and currentX field.
+    local fps = cfg.fps or 30
+    local scale = cfg.scale and cfg.scale > 0 and cfg.scale or 1.0
+    local frameFormat = cfg.frameFormat or "png"
+    local ringSize = cfg.ringSize and cfg.ringSize > 0 and cfg.ringSize or 8
     local self: recording.Controller = {
         ctx = ctx,
         ffmpegPath = ffmpegPath,
         outputDir = outputDir,
         defaultCountdown = cfg.countdown or 3.0,
-        defaultFps = cfg.fps or 30,
-        defaultScale = cfg.scale and cfg.scale > 0 and cfg.scale or 1.0,
-        defaultFrameFormat = cfg.frameFormat or "png",
-        defaultRingSize = cfg.ringSize and cfg.ringSize > 0 and cfg.ringSize or 8,
+        defaultFps = fps,
+        defaultScale = scale,
+        defaultFrameFormat = frameFormat,
+        defaultRingSize = ringSize,
         outputPath = "",
         outputAbsPath = "",
         logPath = "",
@@ -354,10 +374,10 @@ function recording.new(ctx: debugcontext.Context, opts?: recording.Options): rec
         pidAbsPath = "",
         processPid = 0,
         hideDebuggerOnStart = true,
-        currentFps = cfg.fps or 30,
-        currentScale = cfg.scale and cfg.scale > 0 and cfg.scale or 1.0,
-        currentFrameFormat = cfg.frameFormat or "png",
-        currentRingSize = cfg.ringSize and cfg.ringSize > 0 and cfg.ringSize or 8,
+        currentFps = fps,
+        currentScale = scale,
+        currentFrameFormat = frameFormat,
+        currentRingSize = ringSize,
         encoder = nil,
         framesDir = "",
         lastCaptureAt = 0,
@@ -374,7 +394,7 @@ end
 function recording.Controller:start(opts?: recording.StartOptions): recording.Result
     local cfg = opts or {}
     local status = self.ctx.recording.status
-    if status == "preparing" or status == "countdown" or status == "recording" or status == "stopping" then
+    if status == "countdown" or status == "recording" or status == "stopping" then
         return result(self, false, "recording already active")
     end
     -- The capture pipeline shells out POSIX-style (command -v, kill, $!), so
@@ -400,6 +420,7 @@ function recording.Controller:start(opts?: recording.StartOptions): recording.Re
     self.pidPath = self.outputDir .. "/" .. name .. ".ffmpeg.pid"
     self.pidAbsPath = absSavePath(self.pidPath)
     self.processPid = 0
+    self.recordedElapsed = 0
     -- Per-recording settings fall back to the controller defaults without
     -- mutating them: a one-off frameFormat or ringSize on one start() must not
     -- change what later recordings use.
@@ -427,13 +448,10 @@ function recording.Controller:start(opts?: recording.StartOptions): recording.Re
         self.currentScale, self.logPath)
     if ctx.recording.countdown <= 0 then
         ctx.recording.countdown = 0
-        local ok, err = launchCapture(self)
+        local ok, err = beginCapture(self)
         if not ok then
-            fail(self, err)
             return result(self, false, err)
         end
-        ctx.recording.status = "recording"
-        ctx.recording.startedAt = love.timer.getTime()
         return result(self, true, "recording started: " .. self.outputPath)
     end
     return result(self, true, "recording starts in " .. tostring(math.ceil(ctx.recording.countdown)) .. "s")
@@ -465,7 +483,7 @@ end
 
 function recording.Controller:cancel(): recording.Result
     local status = self.ctx.recording.status
-    if status ~= "countdown" and status ~= "preparing" then
+    if status ~= "countdown" then
         LOGGER:warn("recording cancel ignored status=%s", status)
         return result(self, false, "no armed recording")
     end
@@ -537,13 +555,9 @@ function recording.Controller:update(dt: number)
     if ctx.recording.status == "countdown" then
         ctx.recording.countdown = math.max(0, ctx.recording.countdown - dt)
         if ctx.recording.countdown <= 0 then
-            local ok, err = launchCapture(self)
-            if not ok then
-                fail(self, err)
+            if not beginCapture(self) then
                 return
             end
-            ctx.recording.status = "recording"
-            ctx.recording.startedAt = love.timer.getTime()
             ctx.message = "recording: " .. self.outputPath
         else
             ctx.message = "recording in " .. tostring(math.ceil(ctx.recording.countdown)) .. "..."

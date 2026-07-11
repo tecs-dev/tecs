@@ -11,16 +11,17 @@
 
 local tecs <const> = require("tecs")
 local input <const> = require("tecs2d.input")
+local gfxtypes <const> = require("tecs2d.gfx.types")
 local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
 local recording <const> = require("tecs2d.debug.internal.recording")
 local freeze <const> = require("tecs2d.debug.internal.freeze")
 local annotations <const> = require("tecs2d.debug.internal.annotations")
 local leader <const> = require("tecs2d.debug.internal.leader")
+local rewind <const> = require("tecs2d.debug.internal.rewind")
 local commands <const> = require("tecs2d.debug.commands")
 
 local HRULE <const> = commands.HRULE
-local rewind <const> = require("tecs2d.debug.internal.rewind")
 local SECTION_MARK <const> = commands.SECTION_MARK
 
 local Transform <const> = tecs.builtins.Transform
@@ -34,6 +35,17 @@ local record PopupBlock
     rows: {{string}}
     colX: {number}
     width: number
+end
+
+-- Popup panel state (lines, visibility, paging, optional thumbnail), one
+-- table so the overlay closures stay under LuaJIT's 60-upvalue limit.
+local record PopupState
+    lines: {string}
+    shown: boolean
+    page: integer
+    -- Thumbnail drawn under the popup (screenshot info); lives exactly as
+    -- long as the popup does and is released on dismissal.
+    image: love.graphics.Image
 end
 
 -- One row of the right-click context menu: a label plus what activating it
@@ -61,13 +73,376 @@ local record MenuState
     swallow: boolean
 end
 
+-- Mouse-gesture state (drag select, shift-move, middle-pan), one table so the
+-- input closure stays under LuaJIT's 60-upvalue limit.
+local record GestureState
+    dragStartX: number
+    dragStartY: number
+    dragging: boolean
+    -- True while the current left-button gesture began inside the world view;
+    -- presses on the toolbar rows (or swallowed by the menu) must not drag.
+    pressInView: boolean
+    moving: boolean
+    moveStartWX: number
+    moveStartWY: number
+    moveOrigins: {integer: {number}}
+    panning: boolean
+    panLastX: number
+    panLastY: number
+end
+
+-- Selection/menu callbacks the mouse-gesture handler raises back into the
+-- overlay; they carry the pick-query and menu wiring that stays inside
+-- install(). Built once per install, never per frame.
+local record GestureCallbacks
+    selectArea: function()
+    clickSelect: function()
+    openMenuUnderMouse: function()
+end
+
 local MENU_HINT <const> = "menu: arrows + enter run a row, esc closes"
 
 local format <const> = string.format
 local getTime <const> = love.timer.getTime
 
 local UNDER_MOUSE_PX <const> = 24         -- pick radius in screen pixels
-local ENTITY_COUNT_HZ <const> = 0.5       -- refresh the status-bar entity count
+local ENTITY_COUNT_INTERVAL <const> = 0.5 -- seconds between status-bar entity-count refreshes
+local PAD_X <const> = 18                  -- horizontal padding inside the bars
+local PAD_Y <const> = 8                   -- vertical padding inside the bars
+
+local function releasePopupImage(popup: PopupState)
+    if popup.image then
+        -- Free the GPU texture now rather than at the next GC cycle.
+        local obj = popup.image as love.Object
+        obj:release()
+        popup.image = nil
+    end
+end
+
+local function dismissPopup(popup: PopupState)
+    popup.shown = false
+    releasePopupImage(popup)
+end
+
+local function showPopup(popup: PopupState, lines: {string})
+    if not lines then return end
+    popup.lines = lines
+    popup.shown = true
+    popup.page = 0
+end
+
+-- Measure one popup column block: split lines on tabs and align the tab
+-- columns within the block (proportional overlay font).
+local function measurePopupBlock(font: love.graphics.Font, gap: number, lines: {string}): PopupBlock
+    local rows: {{string}} = {}
+    local colW: {number} = {}
+    for i = 1, #lines do
+        if lines[i] == HRULE then
+            rows[i] = {}
+        else
+            local cols: {string} = {}
+            for seg in (lines[i] .. "\t"):gmatch("(.-)\t") do
+                cols[#cols + 1] = seg
+            end
+            rows[i] = cols
+            -- Only tab-separated (name<tab>desc) lines drive column
+            -- alignment, so a long single-column line does not push the
+            -- description column right.
+            if #cols > 1 then
+                for j = 1, #cols do
+                    local wj = font:getWidth(cols[j])
+                    if not colW[j] or wj > colW[j] then colW[j] = wj end
+                end
+            end
+        end
+    end
+    local colX: {number} = {0}
+    for j = 2, #colW do colX[j] = colX[j - 1] + colW[j - 1] + gap end
+    local width: number = 0
+    for i = 1, #lines do
+        if lines[i] ~= HRULE then
+            local cols = rows[i]
+            local nc = #cols
+            if nc >= 1 then
+                local ci = (nc < #colX and nc or #colX) as integer
+                local xEnd = colX[ci] + font:getWidth(cols[nc])
+                if xEnd > width then width = xEnd end
+            end
+        end
+    end
+    return {lines = lines, rows = rows, colX = colX, width = width}
+end
+
+-- Draw the popup panel below the command line (goto targets, info, ...).
+-- popup.lines[1] is a green header; the body flows into as many perPage-tall
+-- columns as the screen width permits, and popup.page (clamped here) picks
+-- which column group is visible. py is the panel's top edge; sw/sh are the
+-- screen dimensions.
+local function drawPopup(popup: PopupState, font: love.graphics.Font,
+        sw: number, sh: number, py: number)
+    local fh = font:getHeight()
+    local lineH = fh + 6
+    local perPage = math.max(1, math.floor((sh - py - 24) / lineH) - 1)
+    local gap = font:getWidth("  ")
+    local gutter = font:getWidth("        ")
+    local popupLines = popup.lines
+
+    -- Slice the body into perPage-tall blocks, then group blocks into pages
+    -- by available width. Short popups are one block.
+    local blocks: {PopupBlock} = {}
+    do
+        local slice: {string} = {}
+        for i = 2, #popupLines do
+            slice[#slice + 1] = popupLines[i]
+            if #slice == perPage or i == #popupLines then
+                blocks[#blocks + 1] = measurePopupBlock(font, gap, slice)
+                slice = {}
+            end
+        end
+    end
+    local maxContentW = sw - PAD_X * 4
+    local pageGroups: {{integer}} = {}
+    do
+        local cur: {integer} = {}
+        local curW: number = 0
+        for k = 1, #blocks do
+            local bw = blocks[k].width
+            local addW = (#cur == 0) and bw or (curW + gutter + bw)
+            if #cur > 0 and addW > maxContentW then
+                pageGroups[#pageGroups + 1] = cur
+                cur = {k}
+                curW = bw
+            else
+                cur[#cur + 1] = k
+                curW = addW
+            end
+        end
+        if #cur > 0 then pageGroups[#pageGroups + 1] = cur end
+    end
+    local pages = math.max(1, #pageGroups)
+    if popup.page < 0 then popup.page = 0 end
+    if popup.page >= pages then popup.page = pages - 1 end
+    local group = pageGroups[popup.page + 1] or {}
+
+    local header = popupLines[1]
+    if pages > 1 then
+        header = header .. format("   (page %d/%d  <- ->)", popup.page + 1, pages)
+    end
+
+    local contentW: number = font:getWidth(header)
+    local maxRows = 0
+    for gi = 1, #group do
+        local blk = blocks[group[gi]]
+        local groupW: number = 0
+        for gj = 1, gi do
+            groupW = groupW + blocks[group[gj]].width + ((gj > 1) and gutter or 0)
+        end
+        if groupW > contentW then contentW = groupW end
+        if #blk.lines > maxRows then maxRows = #blk.lines end
+    end
+    local panelW = contentW + PAD_X + 8
+    local panelH = lineH * (maxRows + 1) + 12
+    lg.setColor(0.09, 0.11, 0.14, 0.96)
+    lg.rectangle("fill", PAD_X, py, panelW, panelH, 4, 4)
+    -- Thumbnail (screenshot info): scaled to fit under the panel.
+    if popup.image then
+        local iw = popup.image:getWidth()
+        local ih = popup.image:getHeight()
+        local maxW = sw - PAD_X * 2
+        local maxH = sh - (py + panelH) - PAD_X * 2
+        if iw > 0 and ih > 0 and maxH > 24 then
+            local scale = math.min(maxW / iw, maxH / ih, 1)
+            local ty = py + panelH + 8
+            lg.setColor(0.09, 0.11, 0.14, 0.96)
+            lg.rectangle("fill", PAD_X, ty, iw * scale + 8, ih * scale + 8, 4, 4)
+            lg.setColor(1, 1, 1, 1)
+            lg.draw(popup.image, PAD_X + 4, ty + 4, 0, scale, scale)
+            lg.setColor(0.4, 0.8, 1.0, 0.9)
+            lg.setLineWidth(1)
+            lg.rectangle("line", PAD_X + 4, ty + 4, iw * scale, ih * scale)
+        end
+    end
+    lg.setColor(0.6549, 0.7529, 0.5020, 1)                 -- header (green)
+    lg.print(header, PAD_X * 2, py + 8)
+
+    local bx: number = PAD_X * 2
+    for gi = 1, #group do
+        local blk = blocks[group[gi]]
+        for i = 1, #blk.lines do
+            local yy = py + 8 + lineH * i
+            local line = blk.lines[i]
+            if line == HRULE then
+                lg.setColor(0.35, 0.40, 0.46, 0.8)
+                lg.setLineWidth(1)
+                lg.line(bx, yy + lineH * 0.5, bx + blk.width, yy + lineH * 0.5)
+            else
+                local br, bg, bb = 0.8275, 0.7765, 0.6667  -- content (tan)
+                if line:sub(1, 1) ~= " " then
+                    br, bg, bb = 0.498, 0.733, 0.702       -- heading (aqua)
+                    -- Command-section headings ("Edit:") take the section's
+                    -- accent color, matching the strip.
+                    local accent = commands.SECTION_COLORS[line:match("^(%w+):")]
+                    if accent then
+                        br, bg, bb = accent[1], accent[2], accent[3]
+                    end
+                end
+                local cols = blk.rows[i]
+                -- Blue the first (name) column of an indented
+                -- "name<tab>desc" line: parameter names, subcommand names,
+                -- mark names.
+                local nameCol = line:sub(1, 1) == " " and #cols > 1
+                for j = 1, #cols do
+                    if nameCol and j == 1 then
+                        lg.setColor(0.45, 0.70, 1.0, 1)    -- name (blue)
+                    else
+                        lg.setColor(br, bg, bb, 1)
+                    end
+                    lg.print(cols[j], bx + blk.colX[j], yy)
+                end
+            end
+        end
+        bx = bx + blk.width + gutter
+    end
+end
+
+-- Mouse gestures while no context menu owns the mouse: a left press in the
+-- world view starts a box-select drag (or a shift-move of the selection),
+-- release commits it, right-click opens the menu (or cancels a move),
+-- middle-drag pans, and the wheel zooms toward the cursor. `view` is the
+-- debugger's input layer; a press swallowed by the menu or on the toolbar
+-- rows never starts a drag (gesture.pressInView).
+local function handleMouseGestures(gesture: GestureState, menu: MenuState, popup: PopupState,
+        ctx: debugcontext.Context, w: tecs.World, view: input.View,
+        pipeline: gfxtypes.Pipeline, inView: boolean, cb: GestureCallbacks)
+    local shiftHeld = view.isKeyDown("lshift") or view.isKeyDown("rshift")
+
+    -- A press that closed the menu stays swallowed until release.
+    local swallowing = menu.swallow
+    if swallowing and not view.isMouseDown(1) then
+        menu.swallow = false
+    end
+
+    if view.isMousePressed(1) then
+        gesture.pressInView = not swallowing and inView
+    end
+    if not swallowing and view.isMousePressed(1) and inView then
+        -- Interacting with the world replaces reading the popup.
+        dismissPopup(popup)
+        if shiftHeld and #ctx.selected > 0 then
+            -- Begin moving the selection; record originals so a
+            -- right-click can put them back.
+            gesture.moving = true
+            gesture.moveStartWX, gesture.moveStartWY = ctx.mouseWorldX, ctx.mouseWorldY
+            gesture.moveOrigins = {}
+            for i = 1, #ctx.selected do
+                local eid = ctx.selected[i]
+                if w:isAlive(eid) then
+                    local t = w:get(eid, Transform)
+                    if t then gesture.moveOrigins[eid] = {t.x, t.y} end
+                end
+            end
+        else
+            gesture.dragStartX = input.mouseX
+            gesture.dragStartY = input.mouseY
+            gesture.dragging = false
+            ctx.hasArea = false
+        end
+    end
+    if gesture.moving and view.isMouseDown(1) then
+        -- Drag the selection to follow the cursor's world-space delta.
+        local dx = ctx.mouseWorldX - gesture.moveStartWX
+        local dy = ctx.mouseWorldY - gesture.moveStartWY
+        for eid, origin in pairs(gesture.moveOrigins) do
+            if w:isAlive(eid) then
+                local t = w:getMut(eid, Transform)
+                if t then
+                    t.x = origin[1] + dx
+                    t.y = origin[2] + dy
+                end
+            end
+        end
+    elseif gesture.pressInView and view.isMouseDown(1) then
+        local moved = math.abs(input.mouseX - gesture.dragStartX) + math.abs(input.mouseY - gesture.dragStartY)
+        if moved > 4 then
+            gesture.dragging = true
+        end
+        if gesture.dragging and pipeline then
+            local cam = pipeline:getCamera()
+            ctx.hasArea = true
+            ctx.areaX1, ctx.areaY1 = cam:toWorld(gesture.dragStartX, gesture.dragStartY)
+            ctx.areaX2, ctx.areaY2 = ctx.mouseWorldX, ctx.mouseWorldY
+        end
+    end
+    if not swallowing and view.isMouseReleased(1) then
+        if gesture.moving then
+            gesture.moving = false
+            gesture.moveOrigins = {}
+        elseif gesture.dragging then
+            -- ctx.hasArea stays set: the released box keeps
+            -- drawing and is the crop region for `screenshot`
+            -- until the next left press clears it.
+            cb.selectArea()
+        elseif gesture.pressInView and inView then
+            cb.clickSelect()
+        end
+        gesture.dragging = false
+        gesture.pressInView = false
+    end
+    -- Right-click opens the context menu on the entity under the
+    -- cursor, or the world position when nothing is there.
+    if view.isMousePressed(2) and not gesture.moving and inView then
+        cb.openMenuUnderMouse()
+    end
+    -- Right-click during a move cancels it, restoring the originals.
+    if view.isMousePressed(2) and gesture.moving then
+        for eid, origin in pairs(gesture.moveOrigins) do
+            if w:isAlive(eid) then
+                local t = w:getMut(eid, Transform)
+                if t then
+                    t.x = origin[1]
+                    t.y = origin[2]
+                end
+            end
+        end
+        gesture.moving = false
+        gesture.moveOrigins = {}
+    end
+    -- Middle-drag pans the camera: keep the grabbed world point under
+    -- the cursor by moving the camera the opposite of the cursor's
+    -- world-space delta (correct under any zoom/rotation).
+    if view.isMousePressed(3) then
+        gesture.panning = true
+        gesture.panLastX = input.mouseX
+        gesture.panLastY = input.mouseY
+    end
+    if view.isMouseReleased(3) then
+        gesture.panning = false
+    end
+    if gesture.panning and view.isMouseDown(3) and pipeline then
+        local cam = pipeline:getCamera()
+        local wx1, wy1 = cam:toWorld(gesture.panLastX, gesture.panLastY)
+        local wx2, wy2 = cam:toWorld(input.mouseX, input.mouseY)
+        local cx, cy = cam:getPosition()
+        cam:setPosition(cx - (wx2 - wx1), cy - (wy2 - wy1))
+        gesture.panLastX = input.mouseX
+        gesture.panLastY = input.mouseY
+    end
+
+    -- Mouse wheel zooms toward the cursor: keep the world point under
+    -- the cursor fixed while scaling the zoom.
+    local _, wheelY = view.getMouseWheelMovement()
+    if wheelY ~= 0 and pipeline then
+        dismissPopup(popup)
+        local cam = pipeline:getCamera()
+        local bx, by = cam:toWorld(input.mouseX, input.mouseY)
+        local z = cam:getZoom() * (1.1 ^ wheelY)
+        if z < 0.05 then z = 0.05 elseif z > 50 then z = 50 end
+        cam:setZoom(z)
+        local ax, ay = cam:toWorld(input.mouseX, input.mouseY)
+        local cx, cy = cam:getPosition()
+        cam:setPosition(cx + (bx - ax), cy + (by - ay))
+    end
+end
 
 local record overlay
     --- Overlay options.
@@ -154,23 +529,25 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
     local tabHeldFor = 0.0
     local tabRepeatIn = 0.0
     local entityCountAt = 0.0
-    local dragStartX = 0.0
-    local dragStartY = 0.0
-    local dragging = false
-    local moving = false
-    local moveStartWX = 0.0
-    local moveStartWY = 0.0
-    local moveOrigins: {integer: {number}} = {}
-    local panning = false
-    local panLastX = 0.0
-    local panLastY = 0.0
+    local gesture: GestureState = {
+        dragStartX = 0.0,
+        dragStartY = 0.0,
+        dragging = false,
+        pressInView = false,
+        moving = false,
+        moveStartWX = 0.0,
+        moveStartWY = 0.0,
+        moveOrigins = {},
+        panning = false,
+        panLastX = 0.0,
+        panLastY = 0.0,
+    }
     local historyPos = 0
-    local popupLines: {string} = {}
-    local popupShown = false
-    local popupPage = 0
-    -- Thumbnail shown under the popup (screenshot info); lives exactly as
-    -- long as the popup does and is released on dismissal.
-    local popupImage: love.graphics.Image = nil
+    local popup: PopupState = {
+        lines = {},
+        shown = false,
+        page = 0,
+    }
     -- Right-click context menu state.
     local menu: MenuState = {
         open = false, rows = {}, header = "",
@@ -289,33 +666,10 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
     -- Wrapped command-line rows at the current window width, so long commands
     -- (set/spawn with Lua tables) wrap instead of running off screen. Used by
     -- both the draw pass and the input pass (click-through guard).
-    local PAD_X <const> = 18
-    local PAD_Y <const> = 8
     local function commandLineRows(sw: number): {string}
         local _, wrapped = overlayFont:getWrap("> " .. ctx.command, sw - PAD_X * 3)
         if #wrapped == 0 then wrapped = {"> "} end
         return wrapped
-    end
-
-    local function releasePopupImage()
-        if popupImage then
-            -- Free the GPU texture now rather than at the next GC cycle.
-            local obj = popupImage as love.Object
-            obj:release()
-            popupImage = nil
-        end
-    end
-
-    local function dismissPopup()
-        popupShown = false
-        releasePopupImage()
-    end
-
-    local function showPopup(lines: {string})
-        if not lines then return end
-        popupLines = lines
-        popupShown = true
-        popupPage = 0
     end
 
     local function executeCommand(text: string)
@@ -323,14 +677,14 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
         if not result then
             return
         end
-        dismissPopup()
+        dismissPopup(popup)
         if result.popup then
-            showPopup(result.popup)
+            showPopup(popup, result.popup)
             ctx.message = ""
             if result.popupImagePath then
                 local ok, img = pcall(love.graphics.newImage, result.popupImagePath)
                 if ok then
-                    popupImage = img as love.graphics.Image
+                    popup.image = img as love.graphics.Image
                 end
             end
         end
@@ -444,7 +798,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
         ctx.menuTarget = eid or 0
         -- The menu replaces whatever popup was up, and the status bar says
         -- how to leave it.
-        dismissPopup()
+        dismissPopup(popup)
         ctx.message = MENU_HINT
     end
 
@@ -472,14 +826,25 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
         return nil
     end
 
+    -- Raised by handleMouseGestures; built once so the per-frame mouse path
+    -- allocates nothing.
+    local gestureCallbacks: GestureCallbacks = {
+        selectArea = selectArea,
+        clickSelect = clickSelect,
+        openMenuUnderMouse = function()
+            openMenu(underMouse()[1])
+        end,
+    }
+
     local function doOpen()
         recorder:stopForDebugOpen()
         ctx.open = true
         wasTextInput = love.keyboard.hasTextInput()
         love.keyboard.setTextInput(true)
         ctx.command = ""
+        historyPos = 0
         resetCompletions()
-        dismissPopup()
+        dismissPopup(popup)
         ctx.message = "Hit [TAB] to see commands"
         if captureToken == 0 then
             captureToken = input.pushStack()
@@ -494,7 +859,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
     local function doClose()
         closeMenu()
         ctx.open = false
-        releasePopupImage()
+        releasePopupImage(popup)
         love.keyboard.setTextInput(wasTextInput)
         if captureToken ~= 0 then
             input.popStack(captureToken)
@@ -558,7 +923,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 else
                     doOpen()
                     if registry.profiler.session then
-                        showPopup(registry:finishProfile())
+                        showPopup(popup, registry:finishProfile())
                     end
                 end
             end
@@ -567,7 +932,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             local prof = registry.profiler
             if prof.session and prof.deadline > 0 and now >= prof.deadline then
                 if not ctx.open then doOpen() end
-                showPopup(registry:finishProfile())
+                showPopup(popup, registry:finishProfile())
             end
 
             -- Commands invoked over MCP may raise signals while the panel is
@@ -607,7 +972,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             end
 
             -- Refresh the status-bar entity count on a throttle.
-            if now - entityCountAt >= ENTITY_COUNT_HZ then
+            if now - entityCountAt >= ENTITY_COUNT_INTERVAL then
                 entityCountAt = now
                 ctx.entityCount = w:getStats().entities
             end
@@ -645,16 +1010,18 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
 
             -- Ctrl+C clears prompt state. Escape clears the same state first,
             -- then closes the debugger once there is nothing left to clear.
-            local hasPromptState = ctx.command ~= "" or popupShown or cycling
+            local hasPromptState = ctx.command ~= "" or popup.shown or cycling
             if leaderDown() and reader().isKeyPressed("c") then
                 ctx.command = ""
-                dismissPopup()
+                historyPos = 0
+                dismissPopup(popup)
                 resetCompletions()
             end
             if not menuTookInput and reader().isKeyPressed("escape") then
                 if hasPromptState then
                     ctx.command = ""
-                    dismissPopup()
+                    historyPos = 0
+                    dismissPopup(popup)
                     resetCompletions()
                 else
                     registry.signals.action = "exit"
@@ -667,13 +1034,13 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             if not menuTookInput and not leaderDown() and input.textInput ~= "" then
                 ctx.command = ctx.command .. input.textInput
                 ctx.message = ""
-                dismissPopup()
+                dismissPopup(popup)
                 resetCompletions()
             end
             if not menuTookInput and reader().isKeyPressed("backspace") then
                 ctx.command = ctx.command:sub(1, -2)
                 ctx.message = ""
-                dismissPopup()
+                dismissPopup(popup)
                 resetCompletions()
             end
             -- Delete despawns the current selection outright.
@@ -700,7 +1067,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             end
             if tabStep and not menuTookInput then
                 ctx.message = ""
-                dismissPopup()
+                dismissPopup(popup)
                 local backward = reader().isKeyDown("lshift") or reader().isKeyDown("rshift")
                 if not cycling then
                     completionBase, completions = registry:complete(ctx.command)
@@ -743,20 +1110,20 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 if historyPos < #history then historyPos = historyPos + 1 end
                 ctx.command = history[#history - historyPos + 1]
                 ctx.message = ""
-                dismissPopup()
+                dismissPopup(popup)
                 resetCompletions()
             end
             if not menuTookInput and reader().isKeyPressed("down") then
                 if historyPos > 0 then historyPos = historyPos - 1 end
                 ctx.command = (historyPos == 0) and "" or history[#history - historyPos + 1]
                 ctx.message = ""
-                dismissPopup()
+                dismissPopup(popup)
                 resetCompletions()
             end
             -- Left/Right page a multi-page popup (does not dismiss it).
-            if popupShown then
-                if reader().isKeyPressed("left") then popupPage = popupPage - 1 end
-                if reader().isKeyPressed("right") then popupPage = popupPage + 1 end
+            if popup.shown then
+                if reader().isKeyPressed("left") then popup.page = popup.page - 1 end
+                if reader().isKeyPressed("right") then popup.page = popup.page + 1 end
             end
             -- Enter runs the line once; an empty line is a no-op so mashing
             -- Enter after a command cannot re-run anything.
@@ -773,12 +1140,12 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             -- Auto-preview: once the command line names a command, show that
             -- command's generated popup (how to use it), including as arguments
             -- are typed and while Tab-cycling. Running the command (Enter) may
-            -- replace it -- e.g. `help` swaps in the full command listing.
+            -- replace it: `help`, for example, swaps in the full command listing.
             local previewWord = ctx.command:match("^(%S+)")
             local previewCmd = previewWord and registry.byName[previewWord]
             if previewCmd then
-                popupLines = commands.usagePopup(previewCmd)
-                popupShown = true
+                popup.lines = commands.usagePopup(previewCmd)
+                popup.shown = true
             end
 
             -- A command run this frame may have raised exit/quit.
@@ -813,129 +1180,8 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 end
             end
             if not menuAteMouse then
-                local shiftHeld = reader().isKeyDown("lshift") or reader().isKeyDown("rshift")
-
-                -- A press that closed the menu stays swallowed until release.
-                local swallowing = menu.swallow
-                if swallowing and not reader().isMouseDown(1) then
-                    menu.swallow = false
-                end
-
-                if not swallowing and reader().isMousePressed(1) and inView then
-                    -- Interacting with the world replaces reading the popup.
-                    dismissPopup()
-                    if shiftHeld and #ctx.selected > 0 then
-                        -- Begin moving the selection; record originals so a
-                        -- right-click can put them back.
-                        moving = true
-                        moveStartWX, moveStartWY = ctx.mouseWorldX, ctx.mouseWorldY
-                        moveOrigins = {}
-                        for i = 1, #ctx.selected do
-                            local eid = ctx.selected[i]
-                            if w:isAlive(eid) then
-                                local t = w:get(eid, Transform)
-                                if t then moveOrigins[eid] = {t.x, t.y} end
-                            end
-                        end
-                    else
-                        dragStartX = input.mouseX
-                        dragStartY = input.mouseY
-                        dragging = false
-                        ctx.hasArea = false
-                    end
-                end
-                if swallowing then
-                    local _ = nil   -- swallowed press: no drag, move, or click
-                elseif moving and reader().isMouseDown(1) then
-                    -- Drag the selection to follow the cursor's world-space delta.
-                    local dx = ctx.mouseWorldX - moveStartWX
-                    local dy = ctx.mouseWorldY - moveStartWY
-                    for eid, origin in pairs(moveOrigins) do
-                        if w:isAlive(eid) then
-                            local t = w:getMut(eid, Transform)
-                            if t then
-                                t.x = origin[1] + dx
-                                t.y = origin[2] + dy
-                            end
-                        end
-                    end
-                elseif reader().isMouseDown(1) then
-                    local moved = math.abs(input.mouseX - dragStartX) + math.abs(input.mouseY - dragStartY)
-                    if moved > 4 then
-                        dragging = true
-                    end
-                    if dragging and pipeline then
-                        local cam = pipeline:getCamera()
-                        ctx.hasArea = true
-                        ctx.areaX1, ctx.areaY1 = cam:toWorld(dragStartX, dragStartY)
-                        ctx.areaX2, ctx.areaY2 = ctx.mouseWorldX, ctx.mouseWorldY
-                    end
-                end
-                if not swallowing and reader().isMouseReleased(1) then
-                    if moving then
-                        moving = false
-                        moveOrigins = {}
-                    elseif dragging then
-                        selectArea()
-                    elseif inView then
-                        clickSelect()
-                    end
-                    dragging = false
-                end
-                -- Right-click opens the context menu on the entity under the
-                -- cursor, or the world position when nothing is there.
-                if reader().isMousePressed(2) and not moving and inView then
-                    openMenu(underMouse()[1])
-                end
-                -- Right-click during a move cancels it, restoring the originals.
-                if reader().isMousePressed(2) and moving then
-                    for eid, origin in pairs(moveOrigins) do
-                        if w:isAlive(eid) then
-                            local t = w:getMut(eid, Transform)
-                            if t then
-                                t.x = origin[1]
-                                t.y = origin[2]
-                            end
-                        end
-                    end
-                    moving = false
-                    moveOrigins = {}
-                end
-                -- Middle-drag pans the camera: keep the grabbed world point under
-                -- the cursor by moving the camera the opposite of the cursor's
-                -- world-space delta (correct under any zoom/rotation).
-                if reader().isMousePressed(3) then
-                    panning = true
-                    panLastX = input.mouseX
-                    panLastY = input.mouseY
-                end
-                if reader().isMouseReleased(3) then
-                    panning = false
-                end
-                if panning and reader().isMouseDown(3) and pipeline then
-                    local cam = pipeline:getCamera()
-                    local wx1, wy1 = cam:toWorld(panLastX, panLastY)
-                    local wx2, wy2 = cam:toWorld(input.mouseX, input.mouseY)
-                    local cx, cy = cam:getPosition()
-                    cam:setPosition(cx - (wx2 - wx1), cy - (wy2 - wy1))
-                    panLastX = input.mouseX
-                    panLastY = input.mouseY
-                end
-
-                -- Mouse wheel zooms toward the cursor: keep the world point under
-                -- the cursor fixed while scaling the zoom.
-                local _, wheelY = reader().getMouseWheelMovement()
-                if wheelY ~= 0 and pipeline then
-                    dismissPopup()
-                    local cam = pipeline:getCamera()
-                    local bx, by = cam:toWorld(input.mouseX, input.mouseY)
-                    local z = cam:getZoom() * (1.1 ^ wheelY)
-                    if z < 0.05 then z = 0.05 elseif z > 50 then z = 50 end
-                    cam:setZoom(z)
-                    local ax, ay = cam:toWorld(input.mouseX, input.mouseY)
-                    local cx, cy = cam:getPosition()
-                    cam:setPosition(cx + (bx - ax), cy + (by - ay))
-                end
+                handleMouseGestures(gesture, menu, popup, ctx, w, reader(),
+                    pipeline, inView, gestureCallbacks)
             end
         end
     })
@@ -1018,9 +1264,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             lg.setFont(overlayFont)
 
             local fh = overlayFont:getHeight()
-            local padX = PAD_X
-            local padY = PAD_Y
-            local rowH = fh + padY * 2
+            local rowH = fh + PAD_Y * 2
             local sw = lg.getWidth()
             local pipeline = w.resources[pipelinekey.PIPELINE]
 
@@ -1029,12 +1273,12 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 lg.setColor(0, 0, 0, 0.72)
                 lg.rectangle("fill", 0, 0, sw, rowH * 2)
                 lg.setColor(1, 0.18, 0.12, 1)
-                lg.printf(label, 0, padY, sw, "center")
+                lg.printf(label, 0, PAD_Y, sw, "center")
             elseif ctx.recording.status == "stopping" then
                 lg.setColor(0, 0, 0, 0.72)
                 lg.rectangle("fill", 0, 0, sw, rowH * 2)
                 lg.setColor(1, 0.85, 0.2, 1)
-                lg.printf("STOPPING RECORDING", 0, padY, sw, "center")
+                lg.printf("STOPPING RECORDING", 0, PAD_Y, sw, "center")
             end
 
             -- Drag-selected area (world -> screen).
@@ -1138,7 +1382,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 end
                 local gap = overlayFont:getWidth("   ")
                 local hx = 0.0
-                local cur: number = padX
+                local cur: number = PAD_X
                 for i = 1, #labels do
                     if i == completionIndex then hx = cur end
                     cur = cur + overlayFont:getWidth(labels[i]) + gap
@@ -1146,7 +1390,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 local scrollX = 0.0
                 if hx > sw * 0.6 then scrollX = hx - sw * 0.4 end
                 lg.setScissor(0, 0, sw, rowH)
-                local x = padX - scrollX
+                local x = PAD_X - scrollX
                 for i = 1, #labels do
                     local cw = overlayFont:getWidth(labels[i])
                     if i == completionIndex then
@@ -1163,7 +1407,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                     else
                         lg.setColor(0.1804, 0.2157, 0.2353, 1)
                     end
-                    lg.print(labels[i], x, padY)
+                    lg.print(labels[i], x, PAD_Y)
                     x = x + cw + gap
                 end
                 lg.setScissor()
@@ -1175,7 +1419,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                     ctx.cameraX, ctx.cameraY, ctx.cameraZoom, love.timer.getFPS(),
                     ctx.entityCount,
                     (#ctx.selected > 0) and ("   sel: " .. tostring(#ctx.selected)) or ""
-                ), padX, padY)
+                ), PAD_X, PAD_Y)
             end
 
             -- Command line (below status, flush): bg #2e373c, text #d3c6aa.
@@ -1186,11 +1430,11 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             lg.rectangle("fill", 0, rowH, sw, cmdBarH)
             lg.setColor(0.8275, 0.7765, 0.6667, 1)
             for i = 1, #cmdLines do
-                lg.print(cmdLines[i], padX, rowH + padY + (i - 1) * fh)
+                lg.print(cmdLines[i], PAD_X, rowH + PAD_Y + (i - 1) * fh)
             end
             -- Tall block cursor at the end of the last wrapped row.
-            local cursorX = padX + overlayFont:getWidth(cmdLines[#cmdLines])
-            local cursorY = rowH + padY + (#cmdLines - 1) * fh
+            local cursorX = PAD_X + overlayFont:getWidth(cmdLines[#cmdLines])
+            local cursorY = rowH + PAD_Y + (#cmdLines - 1) * fh
             local blockW = overlayFont:getWidth("0")
             lg.rectangle("fill", cursorX + 1, cursorY, blockW, fh)
             -- Status line: reserved for the initial hint and notifications; the
@@ -1199,178 +1443,13 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             local hint = ctx.message
             if hint ~= "" and #cmdLines == 1 then
                 lg.setColor(0.522, 0.573, 0.537, 1)
-                lg.print(hint, cursorX + blockW + padX * 2, cursorY)
+                lg.print(hint, cursorX + blockW + PAD_X * 2, cursorY)
             end
 
-            -- Popup panel below the command line (goto targets, info, ...).
-            -- popupLines[1] is a green header; the body flows into as many
-            -- perPage-tall columns as the screen width permits, and Left/Right
-            -- page through the remaining column groups.
-            if popupShown and #popupLines > 0 then
-                local lineH = fh + 6
-                local py = rowH + cmdBarH + 10
-                local perPage = math.max(1, math.floor((lg.getHeight() - py - 24) / lineH) - 1)
-                local gap = overlayFont:getWidth("  ")
-                local gutter = overlayFont:getWidth("        ")
-
-                -- Measure one column block: split lines on tabs and align the
-                -- tab columns within the block (proportional overlay font).
-                local function measureBlock(lines: {string}): PopupBlock
-                    local rows: {{string}} = {}
-                    local colW: {number} = {}
-                    for i = 1, #lines do
-                        if lines[i] == HRULE then
-                            rows[i] = {}
-                        else
-                            local cols: {string} = {}
-                            for seg in (lines[i] .. "\t"):gmatch("(.-)\t") do
-                                cols[#cols + 1] = seg
-                            end
-                            rows[i] = cols
-                            -- Only tab-separated (name<tab>desc) lines drive
-                            -- column alignment, so a long single-column line
-                            -- does not push the description column right.
-                            if #cols > 1 then
-                                for j = 1, #cols do
-                                    local wj = overlayFont:getWidth(cols[j])
-                                    if not colW[j] or wj > colW[j] then colW[j] = wj end
-                                end
-                            end
-                        end
-                    end
-                    local colX: {number} = {0}
-                    for j = 2, #colW do colX[j] = colX[j - 1] + colW[j - 1] + gap end
-                    local width: number = 0
-                    for i = 1, #lines do
-                        if lines[i] ~= HRULE then
-                            local cols = rows[i]
-                            local nc = #cols
-                            if nc >= 1 then
-                                local ci = (nc < #colX and nc or #colX) as integer
-                                local xEnd = colX[ci] + overlayFont:getWidth(cols[nc])
-                                if xEnd > width then width = xEnd end
-                            end
-                        end
-                    end
-                    return {lines = lines, rows = rows, colX = colX, width = width}
-                end
-
-                -- Slice the body into perPage-tall blocks, then group blocks
-                -- into pages by available width. Short popups are one block.
-                local blocks: {PopupBlock} = {}
-                do
-                    local slice: {string} = {}
-                    for i = 2, #popupLines do
-                        slice[#slice + 1] = popupLines[i]
-                        if #slice == perPage or i == #popupLines then
-                            blocks[#blocks + 1] = measureBlock(slice)
-                            slice = {}
-                        end
-                    end
-                end
-                local maxContentW = sw - padX * 4
-                local pageGroups: {{integer}} = {}
-                do
-                    local cur: {integer} = {}
-                    local curW: number = 0
-                    for k = 1, #blocks do
-                        local bw = blocks[k].width
-                        local addW = (#cur == 0) and bw or (curW + gutter + bw)
-                        if #cur > 0 and addW > maxContentW then
-                            pageGroups[#pageGroups + 1] = cur
-                            cur = {k}
-                            curW = bw
-                        else
-                            cur[#cur + 1] = k
-                            curW = addW
-                        end
-                    end
-                    if #cur > 0 then pageGroups[#pageGroups + 1] = cur end
-                end
-                local pages = math.max(1, #pageGroups)
-                if popupPage < 0 then popupPage = 0 end
-                if popupPage >= pages then popupPage = pages - 1 end
-                local group = pageGroups[popupPage + 1] or {}
-
-                local header = popupLines[1]
-                if pages > 1 then
-                    header = header .. format("   (page %d/%d  <- ->)", popupPage + 1, pages)
-                end
-
-                local contentW: number = overlayFont:getWidth(header)
-                local maxRows = 0
-                for gi = 1, #group do
-                    local blk = blocks[group[gi]]
-                    local groupW: number = 0
-                    for gj = 1, gi do
-                        groupW = groupW + blocks[group[gj]].width + ((gj > 1) and gutter or 0)
-                    end
-                    if groupW > contentW then contentW = groupW end
-                    if #blk.lines > maxRows then maxRows = #blk.lines end
-                end
-                local panelW = contentW + padX + 8
-                local panelH = lineH * (maxRows + 1) + 12
-                lg.setColor(0.09, 0.11, 0.14, 0.96)
-                lg.rectangle("fill", padX, py, panelW, panelH, 4, 4)
-                -- Thumbnail (screenshot info): scaled to fit under the panel.
-                if popupImage then
-                    local iw = popupImage:getWidth()
-                    local ih = popupImage:getHeight()
-                    local maxW = sw - padX * 2
-                    local maxH = lg.getHeight() - (py + panelH) - padX * 2
-                    if iw > 0 and ih > 0 and maxH > 24 then
-                        local scale = math.min(maxW / iw, maxH / ih, 1)
-                        local ty = py + panelH + 8
-                        lg.setColor(0.09, 0.11, 0.14, 0.96)
-                        lg.rectangle("fill", padX, ty, iw * scale + 8, ih * scale + 8, 4, 4)
-                        lg.setColor(1, 1, 1, 1)
-                        lg.draw(popupImage, padX + 4, ty + 4, 0, scale, scale)
-                        lg.setColor(0.4, 0.8, 1.0, 0.9)
-                        lg.setLineWidth(1)
-                        lg.rectangle("line", padX + 4, ty + 4, iw * scale, ih * scale)
-                    end
-                end
-                lg.setColor(0.6549, 0.7529, 0.5020, 1)                 -- header (green)
-                lg.print(header, padX * 2, py + 8)
-
-                local bx: number = padX * 2
-                for gi = 1, #group do
-                    local blk = blocks[group[gi]]
-                    for i = 1, #blk.lines do
-                        local yy = py + 8 + lineH * i
-                        local line = blk.lines[i]
-                        if line == HRULE then
-                            lg.setColor(0.35, 0.40, 0.46, 0.8)
-                            lg.setLineWidth(1)
-                            lg.line(bx, yy + lineH * 0.5, bx + blk.width, yy + lineH * 0.5)
-                        else
-                            local br, bg, bb = 0.8275, 0.7765, 0.6667  -- content (tan)
-                            if line:sub(1, 1) ~= " " then
-                                br, bg, bb = 0.498, 0.733, 0.702       -- heading (aqua)
-                                -- Command-section headings ("Edit:") take the
-                                -- section's accent color, matching the strip.
-                                local accent = commands.SECTION_COLORS[line:match("^(%w+):")]
-                                if accent then
-                                    br, bg, bb = accent[1], accent[2], accent[3]
-                                end
-                            end
-                            local cols = blk.rows[i]
-                            -- Blue the first (name) column of an indented
-                            -- "name<tab>desc" line: parameter names,
-                            -- subcommand names, mark names.
-                            local nameCol = line:sub(1, 1) == " " and #cols > 1
-                            for j = 1, #cols do
-                                if nameCol and j == 1 then
-                                    lg.setColor(0.45, 0.70, 1.0, 1)    -- name (blue)
-                                else
-                                    lg.setColor(br, bg, bb, 1)
-                                end
-                                lg.print(cols[j], bx + blk.colX[j], yy)
-                            end
-                        end
-                    end
-                    bx = bx + blk.width + gutter
-                end
+            -- Popup panel below the command line; Left/Right page through
+            -- the column groups.
+            if popup.shown and #popup.lines > 0 then
+                drawPopup(popup, overlayFont, sw, lg.getHeight(), rowH + cmdBarH + 10)
             end
 
             -- Context menu: dark panel, header row, hover/keyboard highlight.

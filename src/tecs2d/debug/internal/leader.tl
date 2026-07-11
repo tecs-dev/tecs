@@ -6,6 +6,9 @@ local input <const> = require("tecs2d.input")
 
 local record leader
     isDown: function(view: input.View, name: string): boolean
+
+    --- True when name is a recognized leader modifier.
+    isValid: function(name: string): boolean
 end
 
 local PAIRS <const>: {string: {string}} = {
@@ -16,6 +19,10 @@ local PAIRS <const>: {string: {string}} = {
     cmd = {"lgui", "rgui"},
     super = {"lgui", "rgui"},
 }
+
+function leader.isValid(name: string): boolean
+    return PAIRS[name] ~= nil
+end
 
 -- Read through the caller's input-stack view, so the debugger detects the leader
 -- through its own layer while the game (a lower layer) does not.

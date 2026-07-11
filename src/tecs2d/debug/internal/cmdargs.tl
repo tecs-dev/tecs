@@ -12,7 +12,7 @@
 ---     synthetic : source arg names; presence marks this arg synthetic (hidden).
 ---                 A synthetic's value comes from a positional slot or a forward.
 ---     rest      : the arg captures the remainder of the line as free text; it
----                 must be the last positional slot and string-typed.
+---                 must be the last positional slot and string- or table-typed.
 ---   positional: ordered arg names bound by position (may be synthetic).
 ---
 --- Forwarding must be reciprocal: if a.forward == s then s must be synthetic and
@@ -265,8 +265,8 @@ local function resolveSynthetic(args: {string: cmdargs.ArgSpec}, spec: cmdargs.A
         local v = coerce(src, args[src], raw)
         if v ~= nil then return src, v end
     end
-    for _, src in ipairs(strings) do
-        return src, raw
+    if strings[1] then
+        return strings[1], raw
     end
     return nil, nil, "invalid value '" .. raw .. "'"
 end
@@ -463,7 +463,9 @@ function cmdargs.toolSchema(schema: cmdargs.Schema): {string: any}
     for name, spec in pairs(schema.args) do
         if not isSynthetic(spec) then
             local desc = spec.help or ""
-            if spec.default ~= nil then
+            -- Forwarding args never receive their default (it only infers the
+            -- type), so advertising one would be false.
+            if spec.default ~= nil and not spec.forward then
                 desc = desc .. " (default: " .. tostring(spec.default) .. ")"
             end
             if groupNote[name] then
@@ -571,7 +573,7 @@ function cmdargs.argHelp(schema: cmdargs.Schema): {string}
     for _, name in ipairs(names) do
         local spec = schema.args[name]
         local line = "  " .. name .. "\t" .. (spec.help or "")
-        if spec.default ~= nil then
+        if spec.default ~= nil and not spec.forward then
             line = line .. " (default: " .. tostring(spec.default) .. ")"
         elseif spec.required then
             line = line .. " (required)"

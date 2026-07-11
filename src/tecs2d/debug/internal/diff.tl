@@ -338,10 +338,11 @@ end
 
 --- Walk an RFC 6901 pointer segment by segment. Integer segments try the
 --- 0-based array position first (matching the pointers this module emits),
---- then the literal key. On a miss, the second return names the deepest
+--- then the literal key. An empty pointer (or a bare "/", accepted leniently)
+--- names the whole document. On a miss, the second return names the deepest
 --- path that did resolve, which the caller reports as a hint.
 function diff.resolvePointer(doc: any, pointer: string): any, string
-    if pointer == "" or pointer == "/" and doc ~= nil then
+    if (pointer == "" or pointer == "/") and doc ~= nil then
         return doc, ""
     end
     if pointer:sub(1, 1) ~= "/" then

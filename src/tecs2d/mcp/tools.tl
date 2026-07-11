@@ -11,13 +11,21 @@ local record tools
         description: string
     end
 
+    --- MCP safety hints, declared explicitly because the protocol's
+    --- defaults are pessimistic. A closed record so a typo'd hint key
+    --- fails typecheck.
+    record Annotations
+        readOnlyHint: boolean
+        destructiveHint: boolean
+        idempotentHint: boolean
+        openWorldHint: boolean
+    end
+
     record Tool
         name: string
         description: string
         inputSchema: Schema
-        -- MCP safety hints, declared explicitly because the protocol's
-        -- defaults are pessimistic.
-        annotations: {string: boolean}
+        annotations: Annotations
     end
 
     list: {Tool}
@@ -44,7 +52,7 @@ tools.list = {
     },
     {
         name = "screenshot",
-        annotations = {readOnlyHint = false, destructiveHint = false, idempotentHint = false, openWorldHint = false},
+        annotations = {readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false},
         description = "Capture a screenshot of the game window. Returns MCP image content.",
         inputSchema = {
             type = "object",
@@ -345,7 +353,7 @@ tools.list = {
         inputSchema = {
             type = "object",
             properties = {
-                scale = {type = "number", description = "Time scale multiplier (0.1 to 10.0)"}
+                scale = {type = "number", description = "Time scale multiplier, clamped to 0.0-10.0 (0 = fully paused)"}
             },
             required = {"scale"},
             additionalProperties = false
@@ -420,7 +428,7 @@ tools.list = {
             type = "object",
             properties = {
                 seconds = {type = "number", description = "Record for this many seconds (0.1-60), then auto-stop"},
-                interval_ms = {type = "number", description = "Sampler interval in ms (default 1; raise to 5 or 10 for long sessions)"},
+                intervalMs = {type = "number", description = "Sampler interval in ms (default 1; raise to 5 or 10 for long sessions)"},
                 zone = {type = "string", description = "Restrict output to samples whose zone path starts with this prefix. " ..
                     "E.g. 'afterFixed/Render' keeps only the render subtree."}
             },
@@ -431,13 +439,13 @@ tools.list = {
         name = "profiler_stop",
         annotations = {readOnlyHint = false, destructiveHint = false, idempotentHint = false, openWorldHint = false},
         description = "Stop the profiler. Inline results include collapsed-stack text in result.payload; " ..
-            "save_to results include result.path. " ..
+            "saveTo results include result.path. " ..
             "If profiler_start was called with `seconds` and the auto-stop has already fired, " ..
             "the captured recording is returned here." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {
-                save_to = {type = "string", description = "File path to write output to instead of returning it"}
+                saveTo = {type = "string", description = "File path to write output to instead of returning it"}
             },
             additionalProperties = false
         }
@@ -446,13 +454,15 @@ tools.list = {
         name = "snapshot_save",
         annotations = {readOnlyHint = false, destructiveHint = false, idempotentHint = false, openWorldHint = false},
         description = "Capture a snapshot of the world. Inline results include result.snapshot for JSON or " ..
-            "base64 result.payload for LuaJIT; save_to results include result.path. " ..
+            "base64 result.payload for LuaJIT; saveTo results include result.path. " ..
             "The format picks between JSON and compact LuaJIT string.buffer binary." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {
-                format = {type = "string", description = "'json' (default) or 'luajit'. JSON is human-readable; luajit is a compact binary via string.buffer, returned base64-encoded when no `save_to` is given."},
-                save_to = {type = "string", description = "Optional filename inside the LOVE save directory. When set, the snapshot is written to disk and the file path is returned instead of the payload."},
+                format = {type = "string", description = "'json' (default) or 'luajit'. JSON is human-readable; " ..
+                    "luajit is a compact binary via string.buffer, returned base64-encoded when no `saveTo` is given."},
+                saveTo = {type = "string", description = "Optional filename inside the LOVE save directory. When set, " ..
+                    "the snapshot is written to disk and the file path is returned instead of the payload."},
                 pretty = {type = "boolean", description = "Pretty-print JSON output (json format only; default: false)."},
                 layers = {
                     type = "array",
@@ -471,9 +481,12 @@ tools.list = {
         inputSchema = {
             type = "object",
             properties = {
-                format = {type = "string", description = "'json' (default) or 'luajit'. Must match the format the snapshot was saved with."},
-                payload = {type = "string", description = "Inline snapshot payload. JSON is passed as-is; luajit binary payloads must be base64-encoded."},
-                load_from = {type = "string", description = "Filename inside the LOVE save directory to read the snapshot from. Ignored when `payload` is supplied."}
+                format = {type = "string", description = "'json' (default) or 'luajit'. Must match the format " ..
+                    "the snapshot was saved with."},
+                payload = {type = "string", description = "Inline snapshot payload. JSON is passed as-is; " ..
+                    "luajit binary payloads must be base64-encoded."},
+                loadFrom = {type = "string", description = "Filename inside the LOVE save directory to read " ..
+                    "the snapshot from. Ignored when `payload` is supplied."}
             },
             additionalProperties = false
         }
