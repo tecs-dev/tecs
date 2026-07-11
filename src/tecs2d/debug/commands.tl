@@ -311,61 +311,6 @@ local onOffSchema <const>: cmdargs.Schema = {
 }
 cmdargs.validate(onOffSchema)
 
--- Locate the agent skill docs shipped with the tecs sources (.claude/skills).
--- Walks up from every plausible base: this module's own file (absolute when
--- loaded through package.path, mount-relative under LOVE's loader), the
--- process working directory, and the game source directory. Returns skill
--- names + the skills directory, or nil + reason (packaged games have no
--- checkout).
-local function findSkills(): {string}, string, string
-    local osName = love.system.getOS()
-    if osName ~= "OS X" and osName ~= "Linux" then
-        return nil, nil, "skill listing needs a POSIX system"
-    end
-    local cwd: string = nil
-    local okCwd, cwdResult = pcall(love.filesystem.getWorkingDirectory)
-    if okCwd and cwdResult and #cwdResult > 0 then cwd = cwdResult end
-
-    local bases: {string} = {}
-    local source = debug.getinfo(findSkills, "S").source or ""
-    local modPath = source:match("^@(.*)$")
-    if modPath then
-        bases[#bases + 1] = modPath:gsub("[^/]*$", "")
-    end
-    if cwd then bases[#bases + 1] = cwd .. "/" end
-    local okSrc, src = pcall(love.filesystem.getSource)
-    if okSrc and src and #src > 0 then bases[#bases + 1] = src .. "/" end
-
-    for b = 1, #bases do
-        local dir = bases[b]
-        if dir:sub(1, 1) ~= "/" and cwd then
-            dir = cwd .. "/" .. dir
-        end
-        -- A base that stays relative (no cwd API available) still works:
-        -- io.popen resolves it against the process working directory.
-        local steps = 0
-        while true do
-            local candidate = dir .. ".claude/skills"
-            local quoted = "'" .. candidate:gsub("'", "'\\''") .. "'"
-            local proc = io.popen("ls -1 " .. quoted .. " 2>/dev/null")
-            if proc then
-                local names: {string} = {}
-                for line in proc:lines() do
-                    names[#names + 1] = line
-                end
-                proc:close()
-                if #names > 0 then
-                    return names, candidate, nil
-                end
-            end
-            steps = steps + 1
-            if dir == "/" or dir == "" or steps >= 12 then break end
-            dir = dir:gsub("[^/]*/$", "")
-        end
-    end
-    return nil, nil, "no .claude/skills found near the tecs sources or working directory"
-end
-
 local EDIT_SELECTION_TARGET <const> = "@selection"
 
 -- Entity-edit commands take an explicit target: an id, a mark name, or the
@@ -507,6 +452,43 @@ function commands.Registry:execute(text: string): commands.Result
     return result
 end
 
+-- Verbs that only read state: safe, repeatable, world untouched.
+local READ_VERBS <const>: {string: boolean} = {
+    list = true, ls = true, info = true, status = true, get = true,
+}
+-- Commands whose action removes data outright.
+local DESTRUCTIVE_CMDS <const>: {string: boolean} = {
+    despawn = true, remove = true, quit = true,
+}
+-- Parents whose `clear` verb deletes files, not just UI state.
+local ARTIFACT_PARENTS <const>: {string: boolean} = {
+    snapshot = true, screenshot = true, record = true, profile = true,
+    diff = true, rewind = true, history = true,
+}
+
+-- Safety hints for one projected tool: derived from the command and verb,
+-- then overridden key by key with any explicit annotations.
+local function toolAnnotations(cmdName: string, verb: string,
+        explicit: cmdtypes.ToolAnnotations): cmdtypes.ToolAnnotations
+    local readOnly = (verb ~= nil and READ_VERBS[verb] == true)
+    local destructive = DESTRUCTIVE_CMDS[cmdName] == true
+        or verb == "load"
+        or (verb == "clear" and ARTIFACT_PARENTS[cmdName] == true)
+    local a: cmdtypes.ToolAnnotations = {
+        readOnlyHint = readOnly,
+        destructiveHint = destructive,
+        idempotentHint = readOnly,
+        openWorldHint = false,
+    }
+    if explicit then
+        if explicit.readOnlyHint ~= nil then a.readOnlyHint = explicit.readOnlyHint end
+        if explicit.destructiveHint ~= nil then a.destructiveHint = explicit.destructiveHint end
+        if explicit.idempotentHint ~= nil then a.idempotentHint = explicit.idempotentHint end
+        if explicit.openWorldHint ~= nil then a.openWorldHint = explicit.openWorldHint end
+    end
+    return a
+end
+
 function commands.Registry:mcpTools(): {commands.McpTool}
     local out: {commands.McpTool} = {}
     local emptySchema: {string: any} = {
@@ -522,6 +504,7 @@ function commands.Registry:mcpTools(): {commands.McpTool}
                 name = "debug_" .. cmd.name,
                 description = cmd.shortHelp .. "." .. suffix,
                 inputSchema = cmd.schema and cmdargs.toolSchema(cmd.schema) or emptySchema,
+                annotations = toolAnnotations(cmd.name, nil, cmd.annotations),
             }
         end
         if cmd.subcommands then
@@ -532,6 +515,7 @@ function commands.Registry:mcpTools(): {commands.McpTool}
                         description = cmd.name .. " " .. sub.name .. ": " ..
                             sub.shortHelp .. "." .. suffix,
                         inputSchema = sub.schema and cmdargs.toolSchema(sub.schema) or emptySchema,
+                        annotations = toolAnnotations(cmd.name, sub.name, sub.annotations),
                     }
                 end
             end
@@ -1578,8 +1562,8 @@ function commands.build(env: commands.Env): commands.Registry
         {
             name = "agent",
             section = "Session",
-            shortHelp = "MCP session info, agent skill docs, and client config",
-            examples = {"agent info", "agent connect", "agent skills", "agent skills love2d-bench"},
+            shortHelp = "MCP session info and client config",
+            examples = {"agent info", "agent connect"},
             subcommands = {
                 {
                     name = "info",
@@ -1599,36 +1583,6 @@ function commands.build(env: commands.Env): commands.Registry
                             "  identity\t" .. tostring(love.filesystem.getIdentity()),
                         }, data = {url = url, port = port, tools = info.toolCount(),
                             saveDir = love.filesystem.getSaveDirectory()}}
-                    end,
-                },
-                {
-                    name = "skills",
-                    shortHelp = "list tecs agent skills; `skills <name>` copies its doc path",
-                    schema = { args = { name = {help = "skill whose SKILL.md path to copy"} },
-                        positional = {"name"} },
-                    run = function(v: {string: any}, _parts: {string}): commands.Result
-                        local names, dir, serr = findSkills()
-                        if not names then
-                            return {ok = false, code = "no_skills", message = "agent skills: " .. serr}
-                        end
-                        local wanted = v.name as string
-                        if wanted then
-                            local path = dir .. "/" .. wanted .. "/SKILL.md"
-                            local fh = io.open(path, "r")
-                            if not fh then
-                                return {ok = false, code = "no_match",
-                                    message = "agent skills: no skill named '" .. wanted .. "'"}
-                            end
-                            fh:close()
-                            love.system.setClipboardText(path)
-                            return {ok = true, message = "skill doc path copied to clipboard: " .. path,
-                                data = {name = wanted, path = path}}
-                        end
-                        local popup: {string} = {"agent skills  (" .. dir .. "):"}
-                        for i = 1, #names do
-                            popup[#popup + 1] = "  " .. names[i]
-                        end
-                        return {ok = true, popup = popup, data = {skills = names, dir = dir}}
                     end,
                 },
                 {

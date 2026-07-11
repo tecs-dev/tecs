@@ -159,6 +159,20 @@ describe("mcp compliance: boot and introspection", function()
         luassert.same(envelope, sc)
     end)
 
+    it("tools/list declares safety annotations", function()
+        local response = app.client:rpc("tools/list", {})
+        local tools = (response.result as {string: any}).tools as {{string: any}}
+        local found: {string: {string: any}} = {}
+        for _, t in ipairs(tools) do
+            found[t.name as string] = t.annotations as {string: any}
+        end
+        luassert.is_true(found.get_stats.readOnlyHint as boolean)
+        luassert.is_false(found.get_stats.destructiveHint as boolean)
+        luassert.is_true(found.despawn.destructiveHint as boolean)
+        luassert.is_false(found.pause.destructiveHint as boolean)
+        luassert.is_true(found.pause.idempotentHint as boolean)
+    end)
+
     it("sees the fixture world state", function()
         local stats = app.client:call("get_stats")
         luassert.is_true((stats.entities as number) >= 1)

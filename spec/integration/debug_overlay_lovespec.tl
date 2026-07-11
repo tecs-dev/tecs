@@ -1440,16 +1440,6 @@ describe("in-game debugger overlay", function()
         local agent = app.client:call("debug_agent_info", {})
         luassert.equals(app.client.port, tonumber(agent.port), "agent session port mismatch")
         luassert.is_true(tonumber(agent.tools) > 40, "tool count looks wrong")
-
-        -- Skill docs resolve from the repo checkout the fixture runs from.
-        local skills = app.client:call("debug_agent_skills", {})
-        local foundSkill = false
-        for _, nm in ipairs(skills.skills as {any}) do
-            if nm == "love2d-integration-test" then foundSkill = true end
-        end
-        luassert.is_true(foundSkill, "agent skills did not list love2d-integration-test")
-        local copied = app.client:call("debug_agent_skills", {name = "love2d-integration-test"})
-        luassert.matches("SKILL%.md$", copied.path as string)
     end)
 
     it("rewind captures a ring, loads the past, and holds while frozen", function()

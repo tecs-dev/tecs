@@ -67,6 +67,33 @@ describe("tecs2d.debug.commands registry", function()
         luassert.equals("invalid_arguments", bad.code)
     end)
 
+    it("projects derived and overridden safety annotations", function()
+        local reg = makeRegistry()
+        local cmd = helloCommand()
+        cmd.annotations = {readOnlyHint = true, idempotentHint = true}
+        reg:add(cmd)
+
+        local byName: {string: commands.McpTool} = {}
+        for _, tool in ipairs(reg:mcpTools()) do byName[tool.name] = tool end
+
+        -- Read verbs derive read-only and idempotent.
+        luassert.is_true(byName.debug_archetypes_list.annotations.readOnlyHint)
+        luassert.is_true(byName.debug_archetypes_list.annotations.idempotentHint)
+        luassert.is_false(byName.debug_archetypes_list.annotations.destructiveHint)
+        -- World loads and despawns derive destructive.
+        luassert.is_true(byName.debug_rewind_load.annotations.destructiveHint)
+        luassert.is_true(byName.debug_despawn.annotations.destructiveHint)
+        luassert.is_true(byName.debug_snapshot_clear.annotations.destructiveHint,
+            "artifact clears delete files")
+        luassert.is_false(byName.debug_mark_clear.annotations.destructiveHint,
+            "mark clear only touches UI state")
+        -- Everything declares a closed world.
+        luassert.is_false(byName.debug_select.annotations.openWorldHint)
+        -- Explicit annotations override the derivation.
+        luassert.is_true(byName.debug_hello.annotations.readOnlyHint)
+        luassert.is_true(byName.debug_hello.annotations.idempotentHint)
+    end)
+
     it("registers through commands.register on a world with the plugin", function()
         local reg, w = makeRegistry()
         commands.register(w, helloCommand())
@@ -334,7 +361,7 @@ describe("tecs2d.debug.commands registry", function()
         end)
     end)
 
-    describe("yank memory and agent skills", function()
+    describe("yank memory", function()
         it("remembers the last output for yank and flattens it", function()
             local reg = makeRegistry()
             luassert.is_nil(reg.lastOutput)
@@ -349,34 +376,6 @@ describe("tecs2d.debug.commands registry", function()
             -- Message-only results are remembered too.
             luassert.is_true((reg:execute("bounds on")).ok)
             luassert.equals("bounds on", reg.lastOutput[1])
-        end)
-
-        it("agent skills lists repo skill docs and copies a path", function()
-            local reg = makeRegistry()
-            local sys = love.system as {string: any}
-            local oldOS = sys.getOS
-            local oldClip = sys.setClipboardText
-            local clip: string = nil
-            sys.getOS = function(): string return "OS X" end
-            sys.setClipboardText = function(t: string) clip = t end
-
-            local listed = reg:execute("agent skills")
-            sys.getOS = oldOS
-            sys.setClipboardText = oldClip
-            luassert.is_true(listed.ok, tostring(listed.message))
-            local found = false
-            for _, nm in ipairs(listed.data.skills as {string}) do
-                if nm == "love2d-integration-test" then found = true end
-            end
-            luassert.is_true(found, "expected love2d-integration-test in the skill list")
-
-            sys.getOS = function(): string return "OS X" end
-            sys.setClipboardText = function(t: string) clip = t end
-            local copied = reg:execute("agent skills love2d-integration-test")
-            sys.getOS = oldOS
-            sys.setClipboardText = oldClip
-            luassert.is_true(copied.ok, tostring(copied.message))
-            luassert.matches("SKILL%.md$", clip)
         end)
     end)
 

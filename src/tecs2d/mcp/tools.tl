@@ -15,6 +15,9 @@ local record tools
         name: string
         description: string
         inputSchema: Schema
+        -- MCP safety hints, declared explicitly because the protocol's
+        -- defaults are pessimistic.
+        annotations: {string: boolean}
     end
 
     list: {Tool}
@@ -35,11 +38,13 @@ local JSON_TEXT_RESPONSE <const> = " Returns compact JSON text envelope."
 tools.list = {
     {
         name = "ping",
+        annotations = {readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false},
         description = "Check if the game is running." .. JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
         name = "screenshot",
+        annotations = {readOnlyHint = false, destructiveHint = false, idempotentHint = false, openWorldHint = false},
         description = "Capture a screenshot of the game window. Returns MCP image content.",
         inputSchema = {
             type = "object",
@@ -54,6 +59,7 @@ tools.list = {
     },
     {
         name = "sample_pixels",
+        annotations = {readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false},
         description = "Sample framebuffer pixel colors at one or more points without transferring a " ..
             "full screenshot. Returns RGBA floats in 0..1 per point plus the framebuffer size." ..
             JSON_TEXT_RESPONSE,
@@ -86,6 +92,7 @@ tools.list = {
     },
     {
         name = "send_love_event",
+        annotations = {readOnlyHint = false, destructiveHint = false, idempotentHint = false, openWorldHint = false},
         description = "Send a Love2D event to the game." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
@@ -110,36 +117,43 @@ tools.list = {
     },
     {
         name = "get_window_size",
+        annotations = {readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false},
         description = "Get the game window dimensions." .. JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
         name = "get_fps",
+        annotations = {readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false},
         description = "Get the current frames per second." .. JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
         name = "get_stats",
+        annotations = {readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false},
         description = "Get ECS world stats (entities, archetypes, components, systems, memory)." .. JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
         name = "get_components",
+        annotations = {readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false},
         description = "Get list of all component types used in the game." .. JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
         name = "get_systems",
+        annotations = {readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false},
         description = "Get list of all systems and their phases." .. JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
         name = "get_resources",
+        annotations = {readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false},
         description = "Get list of all world resources (keys and type names)." .. JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
         name = "despawn",
+        annotations = {readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false},
         description = "Despawn entities by ID." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
@@ -152,16 +166,19 @@ tools.list = {
     },
     {
         name = "quit",
+        annotations = {readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false},
         description = "Quit the game." .. JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
         name = "restart",
+        annotations = {readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false},
         description = "Restart the game." .. JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
         name = "get_entity",
+        annotations = {readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false},
         description = "Get a single entity by ID with all serializable components." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
@@ -174,6 +191,7 @@ tools.list = {
     },
     {
         name = "query",
+        annotations = {readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false},
         description = "Query entities by component composition and return serializable included components." ..
             JSON_TEXT_RESPONSE,
         inputSchema = {
@@ -195,12 +213,14 @@ tools.list = {
     },
     {
         name = "get_archetypes",
+        annotations = {readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false},
         description = "Get list of all archetypes with their component composition and entity counts." ..
             JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
         name = "spawn",
+        annotations = {readOnlyHint = false, destructiveHint = false, idempotentHint = false, openWorldHint = false},
         description = "Spawn an entity with the specified components." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
@@ -213,11 +233,13 @@ tools.list = {
     },
     {
         name = "get_bundles",
+        annotations = {readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false},
         description = "Get registered bundles as a map of name to component requirements." .. JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
         name = "spawn_bundle",
+        annotations = {readOnlyHint = false, destructiveHint = false, idempotentHint = false, openWorldHint = false},
         description = "Spawn entity from a registered bundle." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
@@ -231,6 +253,7 @@ tools.list = {
     },
     {
         name = "run_lua",
+        annotations = {readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false},
         description = "Run Lua code in the game. " ..
             "Code is wrapped in function(world) ... end automatically. " ..
             "Use 'world' directly to access the ECS world." .. JSON_TEXT_RESPONSE,
@@ -245,6 +268,7 @@ tools.list = {
     },
     {
         name = "patch_entities",
+        annotations = {readOnlyHint = false, destructiveHint = false, idempotentHint = false, openWorldHint = false},
         description = "Update components on existing entities. Each patch can set (add/update) or remove components." ..
             JSON_TEXT_RESPONSE,
         inputSchema = {
@@ -263,6 +287,7 @@ tools.list = {
     },
     {
         name = "screen_to_world",
+        annotations = {readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false},
         description = "Convert screen coordinates to world coordinates using the active camera." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
@@ -276,6 +301,7 @@ tools.list = {
     },
     {
         name = "query_in_bounds",
+        annotations = {readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false},
         description = "Query entities within a world-space bounding box. " ..
             "Uses the Position component if registered, otherwise falls back to Transform." .. JSON_TEXT_RESPONSE,
         inputSchema = {
@@ -298,6 +324,7 @@ tools.list = {
     },
     {
         name = "toggle_system",
+        annotations = {readOnlyHint = false, destructiveHint = false, idempotentHint = false, openWorldHint = false},
         description = "Enable or disable a system by name. Disabled systems are skipped during update." ..
             JSON_TEXT_RESPONSE,
         inputSchema = {
@@ -312,6 +339,7 @@ tools.list = {
     },
     {
         name = "set_time_scale",
+        annotations = {readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false},
         description = "Set the time scale for the game. 1.0 is normal speed, 0.5 is half speed, 2.0 is double speed." ..
             JSON_TEXT_RESPONSE,
         inputSchema = {
@@ -325,17 +353,20 @@ tools.list = {
     },
     {
         name = "pause",
+        annotations = {readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false},
         description = "Hard pause: disable all gameplay/physics systems while rendering continues. " ..
             "Different from set_time_scale(0) which still ticks systems with zero dt." .. JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
         name = "resume",
+        annotations = {readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false},
         description = "Resume gameplay after a pause, restoring the previous time scale." .. JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
         name = "step",
+        annotations = {readOnlyHint = false, destructiveHint = false, idempotentHint = false, openWorldHint = false},
         description = "Advance N frames while paused, then pause again. Must be paused first." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
@@ -347,6 +378,7 @@ tools.list = {
     },
     {
         name = "get_logs",
+        annotations = {readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false},
         description = "Read recent engine log lines captured from tecs logging (ring of 500), including the " ..
             "tecs2d.debug.events operator-action feed. Each line carries a monotonic seq; poll incrementally " ..
             "with after=<last seen seq> (result.latest). Filter by minimum level or substring; newest last. " ..
@@ -365,6 +397,7 @@ tools.list = {
     },
     {
         name = "get_component_schema",
+        annotations = {readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false},
         description = "Get a component's field names and types (exact C types for FFI components) " ..
             "plus default values, for constructing patch_entities / spawn / debug_set payloads." ..
             JSON_TEXT_RESPONSE,
@@ -379,6 +412,7 @@ tools.list = {
     },
     {
         name = "profiler_start",
+        annotations = {readOnlyHint = false, destructiveHint = false, idempotentHint = false, openWorldHint = false},
         description = "Start the LuaJIT sampling profiler. Auto-stops after `seconds` elapses; " ..
             "omit `seconds` to record until profiler_stop is called. Filtering and interval " ..
             "are fixed at start; you cannot change them at stop time." .. JSON_TEXT_RESPONSE,
@@ -395,6 +429,7 @@ tools.list = {
     },
     {
         name = "profiler_stop",
+        annotations = {readOnlyHint = false, destructiveHint = false, idempotentHint = false, openWorldHint = false},
         description = "Stop the profiler. Inline results include collapsed-stack text in result.payload; " ..
             "save_to results include result.path. " ..
             "If profiler_start was called with `seconds` and the auto-stop has already fired, " ..
@@ -409,6 +444,7 @@ tools.list = {
     },
     {
         name = "snapshot_save",
+        annotations = {readOnlyHint = false, destructiveHint = false, idempotentHint = false, openWorldHint = false},
         description = "Capture a snapshot of the world. Inline results include result.snapshot for JSON or " ..
             "base64 result.payload for LuaJIT; save_to results include result.path. " ..
             "The format picks between JSON and compact LuaJIT string.buffer binary." .. JSON_TEXT_RESPONSE,
@@ -429,6 +465,7 @@ tools.list = {
     },
     {
         name = "snapshot_load",
+        annotations = {readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false},
         description = "Restore a world snapshot. Accepts either an inline payload or a filename in LOVE's save " ..
             "directory. Set format to match how the snapshot was produced." .. JSON_TEXT_RESPONSE,
         inputSchema = {
@@ -443,6 +480,7 @@ tools.list = {
     },
     {
         name = "get_debug_context",
+        annotations = {readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false},
         description = "Get the in-game debugger context: selection, mode, camera, and mouse " ..
             "(screen and world). Drive it with the debug_* command tools " ..
             "(debug_select, debug_mark, debug_record_start, ...). " ..

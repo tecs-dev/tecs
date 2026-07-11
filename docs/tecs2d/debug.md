@@ -164,7 +164,7 @@ strip (which separates sections with colored `| Section |` markers).
 | --- | --- |
 | `help [command]` | List everything in a paged popup, or one command's detailed usage |
 | `history [clear]` | Show the persisted command history |
-| `agent info\|skills\|connect` | MCP session info; `skills [name]` lists the tecs agent skill docs or copies one's path, `connect` copies the client config JSON |
+| `agent info\|connect` | MCP session info; `connect` copies the client config JSON |
 | `step [n]` | Tick the game `n` frames while otherwise frozen (default 1) |
 | `exit` | Close the debugger (same as Ctrl+/ or Escape) |
 | `quit` | Quit the game |

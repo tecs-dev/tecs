@@ -7,7 +7,9 @@ outline: deep
 The MCP server provides tools for AI assistants to inspect and control a running game.
 
 Except for `screenshot`, tool calls return an MCP `result` with one text content item plus the same envelope as
-`structuredContent`, so typed clients consume the object directly while text-only clients parse the JSON. Successful
+`structuredContent`, so typed clients consume the object directly while text-only clients parse the JSON. Every
+tool declares MCP safety annotations (readOnlyHint, destructiveHint, idempotentHint, openWorldHint); reads derive
+read-only and idempotent, world loads and despawns derive destructive, and commands can override per key. Successful
 tool payloads use:
 
 ```json
@@ -641,8 +643,7 @@ runtime; inspect `tools/list` for the exact set and generated input schemas.
   (size outlines), the `debug_light_*` verbs (`info`, `color`, `toggle` for lighting, `shadows`, `bloom`),
   the `debug_camera_*` verbs (`info`, `move`, `timescale`, `toggle` for named cameras), and the
   `debug_systems_*` verbs (`list`, `stop`, `start`, `toggle`, `info`).
-- Session: `debug_agent_info` (MCP URL, tool count, save dir), `debug_agent_skills` (lists the agent skill docs
-  in a tecs source checkout; a `name` copies that SKILL.md path to the host clipboard), and `debug_agent_connect`
+- Session: `debug_agent_info` (MCP URL, tool count, save dir) and `debug_agent_connect`
   (copies the MCP client config JSON to the host clipboard).
 - Artifacts: every artifact family also has a `_path` verb that copies the file's absolute path to the host
   clipboard. `debug_screenshot` (plus `_list` / `_clear` / `_open` / `_path` / `_info`; `panel` keeps the debugger

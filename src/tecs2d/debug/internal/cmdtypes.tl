@@ -67,6 +67,9 @@ local record cmdtypes
         examples: {string}
         -- When false the verb is not projected as an MCP tool.
         mcp: boolean
+        -- Overrides for the derived MCP safety hints (partial; unset keys
+        -- keep the derived value).
+        annotations: ToolAnnotations
         -- Optional Tab-completion sources by argument position (1 = the word
         -- after the verb; 0 = any later position). Comma-separated source
         -- names: "components", "marks", "targets", "edittargets", "bundles",
@@ -87,6 +90,9 @@ local record cmdtypes
         -- When false the command is not typeable in the overlay (no name in
         -- help or completion): an MCP-only command.
         overlay: boolean
+        -- Overrides for the derived MCP safety hints (partial; unset keys
+        -- keep the derived value).
+        annotations: ToolAnnotations
         -- Optional Tab-completion sources by argument position (1 = the word
         -- after the command name; 0 = any later position). Subcommand names
         -- complete implicitly at position 1. Same sources as Subcommand.
@@ -97,11 +103,23 @@ local record cmdtypes
         run: function(v: {string: any}, parts: {string}): Result
     end
 
-    --- A registry-derived MCP tool: name, description, and JSON input schema.
+    --- MCP tool safety hints. The protocol's defaults are pessimistic
+    --- (destructive and open-world default to true), so every projected tool
+    --- declares all four explicitly.
+    record ToolAnnotations
+        readOnlyHint: boolean
+        destructiveHint: boolean
+        idempotentHint: boolean
+        openWorldHint: boolean
+    end
+
+    --- A registry-derived MCP tool: name, description, JSON input schema,
+    --- and safety annotations.
     record McpTool
         name: string
         description: string
         inputSchema: {string: any}
+        annotations: ToolAnnotations
     end
 
     --- Profiler session state shared between the profile command and the
