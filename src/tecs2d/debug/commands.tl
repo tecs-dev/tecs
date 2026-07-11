@@ -502,7 +502,7 @@ function commands.Registry:mcpTools(): {commands.McpTool}
         if cmd.mcp ~= false and cmd.run then
             out[#out + 1] = {
                 name = "debug_" .. cmd.name,
-                description = cmd.shortHelp .. "." .. suffix,
+                description = (cmd.mcpHelp or (cmd.shortHelp .. ".")) .. suffix,
                 inputSchema = cmd.schema and cmdargs.toolSchema(cmd.schema) or emptySchema,
                 annotations = toolAnnotations(cmd.name, nil, cmd.annotations),
             }
@@ -512,8 +512,8 @@ function commands.Registry:mcpTools(): {commands.McpTool}
                 if sub.mcp ~= false then
                     out[#out + 1] = {
                         name = "debug_" .. cmd.name .. "_" .. sub.name,
-                        description = cmd.name .. " " .. sub.name .. ": " ..
-                            sub.shortHelp .. "." .. suffix,
+                        description = (sub.mcpHelp or (cmd.name .. " " .. sub.name .. ": " ..
+                            sub.shortHelp .. ".")) .. suffix,
                         inputSchema = sub.schema and cmdargs.toolSchema(sub.schema) or emptySchema,
                         annotations = toolAnnotations(cmd.name, sub.name, sub.annotations),
                     }
@@ -1054,6 +1054,7 @@ function commands.build(env: commands.Env): commands.Registry
             complete = {[1] = "targets"},
             examples = {"select 5", "select boss", "select 5 replace", "select name=\"big boss\""},
             shortHelp = "select an entity by id, or all entities with a mark name",
+            mcpHelp = "Add an entity (by id) or a marked group (by name) to the operator-visible selection; replace=true swaps the selection instead. Selected entities are highlighted in-game. Returns the selection size. Follow with debug_info for component data or debug_note to annotate.",
             schema = selectSchema,
             run = function(v: {string: any}, _parts: {string}): commands.Result
                 local ids = resolveTargets(v)
@@ -1091,6 +1092,7 @@ function commands.build(env: commands.Env): commands.Registry
             name = "mark",
             section = "Select",
             shortHelp = "name the selected entities so select, goto, and despawn can recall them by name",
+            mcpHelp = "Name the currently selected entities so later commands (select, goto, despawn, diff entity=) can address the group by that name. Marks survive until cleared. Returns the marked count.",
             schema = { args = { name = {help = "mark name; omit to unmark the selection"} }, positional = {"name"} },
             examples = {"mark boss", "mark \"big boss\"", "mark  (unmark selection)", "mark ls"},
             subcommands = {
@@ -1174,6 +1176,7 @@ function commands.build(env: commands.Env): commands.Registry
             name = "note",
             section = "Select",
             shortHelp = "annotate the selected entities for the agent; empty message clears",
+            mcpHelp = "Attach a note to the selected entities, visible in-game above them and in get_debug_context. Use it to flag findings for the operator. An empty message clears notes on the selection.",
             schema = noteSchema,
             examples = {"note flickers when hit", "note  (clear notes)"},
             run = function(v: {string: any}, _parts: {string}): commands.Result
@@ -1223,6 +1226,7 @@ function commands.build(env: commands.Env): commands.Registry
             section = "Select",
             complete = {[1] = "targets"},
             shortHelp = "despawn an entity by id or mark name, or the whole selection",
+            mcpHelp = "Despawn the target entities (an id, a mark name, or the current selection when no target is given). Destructive and immediate. Take debug_snapshot_save first if the state matters.",
             schema = optionalTargetSchema,
             run = function(v: {string: any}, _parts: {string}): commands.Result
                 if v.target == nil then
@@ -1256,6 +1260,7 @@ function commands.build(env: commands.Env): commands.Registry
             section = "Edit",
             complete = {[1] = "edittargets", [0] = "components"},
             shortHelp = "remove components from an entity, marked group, or " .. EDIT_SELECTION_TARGET,
+            mcpHelp = "Strip the named components from the target entities (an id, a mark name, or @selection). Destructive to component data; the entities survive. Returns how many entities were changed.",
             schema = removeSchema,
             examples = {"remove 5 Velocity", "remove @selection Burning Stunned", "remove boss Shield"},
             run = function(v: {string: any}, _parts: {string}): commands.Result
@@ -1305,6 +1310,7 @@ function commands.build(env: commands.Env): commands.Registry
             complete = {[1] = "edittargets", [2] = "components"},
             shortHelp = "set one component on an entity, marked group, or " ..
                 EDIT_SELECTION_TARGET .. " (Lua table value)",
+            mcpHelp = "Write one component on the target entities (an id, a mark name, or the literal @selection). The value is a Lua table expression, e.g. {x = 10, y = {n = 2}}; omitted fields keep their values. Mutates the live world immediately. Returns how many entities were written.",
             schema = setSchema,
             examples = {"set 5 Transform {x = 10, y = 20}", "set @selection Color {r = 1, g = 0, b = 0}",
                 "set boss Shield"},
@@ -1362,6 +1368,7 @@ function commands.build(env: commands.Env): commands.Registry
             section = "Edit",
             complete = {[1] = "bundles,components", [0] = "components"},
             shortHelp = "spawn an entity from a bundle and/or components with Lua table values",
+            mcpHelp = "Spawn one entity from a bundle name and/or component list with Lua table values, e.g. 'Transform {x = 10, y = 20}'. The new entity becomes selected. Returns its id.",
             schema = spawnSchema,
             examples = {"spawn Transform {x = 100, y = 50}", "spawn enemy Transform {x = 0, y = 0}",
                 "spawn ball"},
@@ -1444,6 +1451,7 @@ function commands.build(env: commands.Env): commands.Registry
             aliases = {"q"},
             complete = {[0] = "components"},
             shortHelp = "select entities matching a component query: Foo has it, -Foo lacks it",
+            mcpHelp = "Select every entity matching a component expression ('Enemy -Dead' means has Enemy, lacks Dead); invert=true instead de-selects matching entities from the current selection. Returns the match count. Follow with debug_info or debug_set on @selection.",
             schema = querySchema,
             examples = {"query Position Velocity -Dead",
                 "query Dead invert=true  (de-select dead entities)"},

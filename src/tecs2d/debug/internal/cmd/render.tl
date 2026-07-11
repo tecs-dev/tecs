@@ -741,6 +741,7 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "info",
                     shortHelp = "tile coordinates and per-layer tiles at a world point",
+                    mcpHelp = "The tile at a world point: coordinates against the tilemap origin plus each tile layer's gid and tileset there (map picks a tilemap by entity id, first map by default). Falls back to debug-grid coordinates when no tilemaps are loaded. Read-only; briefly outlines the tile in-game.",
                     schema = { args = {
                         x = {required = true, kind = "number", help = "world x"},
                         y = {required = true, kind = "number", help = "world y"},

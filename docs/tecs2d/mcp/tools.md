@@ -666,6 +666,7 @@ Commands with a purpose-built MCP tool are not projected; use `step`, `pause`/`r
 and `quit`.
 
 Games can extend the surface: a command registered with `require("tecs2d.debug.commands").register(world, cmd)`
+(set `mcpHelp` for an agent-facing description and `annotations` to override the derived safety hints)
 appears here as `debug_<name>` with a generated schema, exactly like the builtins. See
 [Custom debugger commands](../custom-debug-commands) for the complete registration API and examples.
 

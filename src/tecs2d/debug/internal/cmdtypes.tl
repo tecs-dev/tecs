@@ -70,6 +70,10 @@ local record cmdtypes
         -- Overrides for the derived MCP safety hints (partial; unset keys
         -- keep the derived value).
         annotations: ToolAnnotations
+        -- Agent-facing tool description: when to use it, what it changes,
+        -- what it returns, and what to call next. Falls back to shortHelp,
+        -- which is written for the overlay's one-line hint.
+        mcpHelp: string
         -- Optional Tab-completion sources by argument position (1 = the word
         -- after the verb; 0 = any later position). Comma-separated source
         -- names: "components", "marks", "targets", "edittargets", "bundles",
@@ -93,6 +97,8 @@ local record cmdtypes
         -- Overrides for the derived MCP safety hints (partial; unset keys
         -- keep the derived value).
         annotations: ToolAnnotations
+        -- Agent-facing tool description; see Subcommand.mcpHelp.
+        mcpHelp: string
         -- Optional Tab-completion sources by argument position (1 = the word
         -- after the command name; 0 = any later position). Subcommand names
         -- complete implicitly at position 1. Same sources as Subcommand.

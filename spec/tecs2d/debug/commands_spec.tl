@@ -67,6 +67,20 @@ describe("tecs2d.debug.commands registry", function()
         luassert.equals("invalid_arguments", bad.code)
     end)
 
+    it("uses mcpHelp for tool descriptions when declared", function()
+        local reg = makeRegistry()
+        local cmd = helloCommand()
+        cmd.mcpHelp = "Greets a target and returns who was greeted."
+        reg:add(cmd)
+
+        local byName: {string: commands.McpTool} = {}
+        for _, tool in ipairs(reg:mcpTools()) do byName[tool.name] = tool end
+        luassert.matches("^Greets a target", byName.debug_hello.description)
+        luassert.matches("^Compare two moments structurally", byName.debug_diff.description)
+        -- Undeclared tools keep the shortHelp form.
+        luassert.matches("^layers list: list named or modified layers", byName.debug_layers_list.description)
+    end)
+
     it("projects derived and overridden safety annotations", function()
         local reg = makeRegistry()
         local cmd = helloCommand()

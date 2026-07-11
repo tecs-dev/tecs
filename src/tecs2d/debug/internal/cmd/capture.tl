@@ -547,6 +547,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "save",
                     shortHelp = "save the world; reports a number for load/open",
+                    mcpHelp = "Save the whole world to a snapshot file in the save directory. Returns a snapshot number usable as a debug_snapshot_load and debug_diff ref. Does not disturb the running game.",
                     schema = nameSchema,
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
                         reg.saveCounter = reg.saveCounter + 1
@@ -588,6 +589,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "load",
                     shortHelp = "restore a save (the last if omitted)",
+                    mcpHelp = "Replace the live world with a saved snapshot (ref is a number, name, or latest). Destructive to current state; selection, marks, and notes clear. Loads are rate limited, so retry on a busy error after a moment.",
                     schema = refSchema,
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
                         local held, heldErr = loadCooldown("snapshot load")
@@ -671,6 +673,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "start",
                     shortHelp = "begin capturing; refuses over a stopped ring",
+                    mcpHelp = "Start the time-travel ring: a rolling window of world snapshots captured every interval seconds (cap entries) while the game runs unfrozen. Capture holds automatically while the game is paused. Refuses if a stopped ring still holds entries. Start this early; debug_rewind_load and debug_diff feed on it.",
                     schema = { args = {
                         interval = {default = 5, help = "seconds between captures"},
                         cap = {default = 10, kind = "number", help = "entries kept before the oldest is dropped"},
@@ -790,6 +793,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "load",
                     shortHelp = "restore a ring entry; capture pauses until resumed",
+                    mcpHelp = "Rewind the live world to a ring entry: ref is a newest-first index or latest, or use ago=N seconds. Overwrites current world state (selection, marks, and notes clear) and pauses capture until debug_rewind_resume. Pair with the step tool to replay toward a bug.",
                     schema = { args = {
                         ref = {help = "entry index (newest first), latest, or Ns for seconds back"},
                         ago = {kind = "number", help = "seconds back; picks the closest at or before"},
@@ -832,6 +836,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "keep",
                     shortHelp = "promote a ring entry into the snapshot history",
+                    mcpHelp = "Copy a ring entry into the permanent snapshot history with a snapshot number, preserving its capture time. Use it to keep pre-bug evidence before the ring evicts it. Returns the new snapshot number.",
                     schema = { args = {
                         ref = {help = "entry index (newest first), latest, or Ns for seconds back"},
                         name = {help = "snapshot filename for the copy"},
@@ -891,6 +896,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             name = "diff",
             section = "Capture",
             shortHelp = "structural diff between snapshots, rewind entries, and the live world",
+            mcpHelp = "Compare two moments structurally: from/to are a snapshot number, name, or latest; rewind:<idx|latest|Ns|ago=N>; or current (default to). Call with limit=0 first: the per-component summary always covers the whole diff and tells you what to filter (component=, ignore=, entity=). Read-only. Returns summary, changes with JSON Pointer paths, and the path of a JSON artifact holding the full result. Drill in with debug_diff_get.",
             schema = {
                 args = {
                     from = {required = true,
@@ -937,6 +943,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "get",
                     shortHelp = "dereference a JSON Pointer into a diff result",
+                    mcpHelp = "Dereference an RFC 6901 pointer (e.g. /summary/byComponent or /changes/0/after) into the last diff result, or into a saved diff artifact when ref is given. Use after debug_diff to fetch payloads its truncated change list omitted.",
                     schema = { args = {
                         pointer = {required = true, help = "RFC 6901 pointer, e.g. /summary/byComponent"},
                         ref = {help = "diff artifact index or latest; omit for the last diff"},
