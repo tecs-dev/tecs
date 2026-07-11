@@ -81,6 +81,25 @@ describe("tecs2d.debug.commands registry", function()
         luassert.matches("^layers list: list named or modified layers", byName.debug_layers_list.description)
     end)
 
+    it("debug_set accepts a JSON object value over MCP", function()
+        local reg, w = makeRegistry()
+        local eid = w:spawn(SpecPos(1, 2))
+        w:commit()
+        local r = reg:invokeMcp("debug_set",
+            {id = eid, comp = "DbgCmdPos", value = {x = 9, y = 3}})
+        w:commit()
+        luassert.is_true(r.ok, tostring(r.message))
+        local pos = w:get(eid, SpecPos) as {string: number}
+        luassert.equals(9, pos.x)
+        luassert.equals(3, pos.y)
+        -- The legacy Lua-expression string keeps working over MCP too.
+        local legacy = reg:invokeMcp("debug_set",
+            {id = eid, comp = "DbgCmdPos", value = "{x = 4}"})
+        w:commit()
+        luassert.is_true(legacy.ok, tostring(legacy.message))
+        luassert.equals(4, (w:get(eid, SpecPos) as {string: number}).x)
+    end)
+
     it("capabilities reports plugins, sections, and capture support", function()
         local reg = makeRegistry()
         local r = reg:execute("capabilities")

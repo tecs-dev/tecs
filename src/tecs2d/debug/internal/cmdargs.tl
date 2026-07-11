@@ -27,10 +27,19 @@ local record cmdargs
         help: string
         forward: string
         synthetic: {string}
-        -- Explicit value type ("number" / "boolean" / "string"). When omitted it
-        -- is inferred from `default`. Set it for an optional typed arg that has
-        -- no default, e.g. a number that defaults to nil (leave unchanged).
+        -- Explicit value type ("number" / "boolean" / "string" / "list" /
+        -- "table"). When omitted it is inferred from `default`. Set it for an
+        -- optional typed arg that has no default, e.g. a number that defaults
+        -- to nil (leave unchanged). A "list" is a comma-separated string on
+        -- the command line and a JSON string array over MCP; a "table" is a
+        -- brace-balanced Lua expression on the command line and a JSON object
+        -- over MCP (actions receive a string or a table and handle both).
         kind: string
+        -- Allowed values for a string arg; projected as a JSON Schema enum.
+        enum: {string}
+        -- Inclusive bounds for a number arg.
+        min: number
+        max: number
         -- Free-text tail: the slot consumes every remaining token, joined with
         -- single spaces (quoted spans keep their inner spacing).
         rest: boolean
@@ -88,26 +97,56 @@ local function parseBool(raw: string): boolean, boolean
     return false, false
 end
 
+-- Value constraints shared by both parse paths: enum membership for strings
+-- and inclusive bounds for numbers.
+local function checkConstraints(name: string, spec: cmdargs.ArgSpec, value: any): string
+    if spec.enum and type(value) == "string" then
+        for _, allowed in ipairs(spec.enum) do
+            if value == allowed then return nil end
+        end
+        return name .. " must be one of " .. table.concat(spec.enum, ", ")
+    end
+    if type(value) == "number" then
+        if spec.min and (value as number) < spec.min then
+            return name .. " must be at least " .. tostring(spec.min)
+        end
+        if spec.max and (value as number) > spec.max then
+            return name .. " must be at most " .. tostring(spec.max)
+        end
+    end
+    return nil
+end
+
 -- Convert a raw token to the arg's value type, or return nil + error.
 local function coerce(name: string, spec: cmdargs.ArgSpec, raw: string): any, string
     local t = argType(spec)
+    local value: any = raw
     if t == "number" then
         local n = tonumber(raw)
         if not n then return nil, name .. " must be a number, got '" .. raw .. "'" end
-        return n
+        value = n
     elseif t == "boolean" then
         local b, ok = parseBool(raw)
         if not ok then return nil, name .. " must be true or false, got '" .. raw .. "'" end
-        return b
+        value = b
+    elseif t == "list" then
+        local items: {string} = {}
+        for item in raw:gmatch("[^,]+") do
+            items[#items + 1] = item
+        end
+        value = items
     end
-    return raw
+    -- A "table" stays the raw brace expression; the action parses it.
+    local cerr = checkConstraints(name, spec, value)
+    if cerr then return nil, cerr end
+    return value
 end
 
 function cmdargs.validate(schema: cmdargs.Schema)
     local args = schema.args
     for name, spec in pairs(args) do
         if spec.rest then
-            if argType(spec) ~= "string" then
+            if argType(spec) ~= "string" and argType(spec) ~= "table" then
                 error("cmdargs: rest arg '" .. name .. "' must be string-typed")
             end
             if isSynthetic(spec) or spec.forward then
@@ -357,9 +396,33 @@ function cmdargs.parseValues(schema: cmdargs.Schema, given: {string: any}): {str
         end
         local want = argType(spec)
         local got = type(v)
-        if got ~= want then
+        if want == "list" or want == "table" then
+            -- JSON arrays/objects arrive as tables; strings stay accepted
+            -- (the comma form for lists, a Lua expression for tables).
+            if got ~= "table" and got ~= "string" then
+                return nil, name .. " must be a JSON " ..
+                    ((want == "list") and "array" or "object") .. ", got " .. got
+            end
+            if want == "list" then
+                if got == "string" then
+                    local items: {string} = {}
+                    for item in (v as string):gmatch("[^,]+") do
+                        items[#items + 1] = item
+                    end
+                    v = items
+                else
+                    for _, item in ipairs(v as {any}) do
+                        if type(item) ~= "string" then
+                            return nil, name .. " must be an array of strings"
+                        end
+                    end
+                end
+            end
+        elseif got ~= want then
             return nil, name .. " must be a " .. want .. ", got " .. got
         end
+        local cerr = checkConstraints(name, spec, v)
+        if cerr then return nil, cerr end
         local ferr = forwardValue(name, v)
         if ferr then return nil, ferr end
     end
@@ -406,7 +469,19 @@ function cmdargs.toolSchema(schema: cmdargs.Schema): {string: any}
             if groupNote[name] then
                 desc = (desc ~= "") and (desc .. ". " .. groupNote[name]) or groupNote[name]
             end
-            props[name] = {type = argType(spec), description = desc}
+            local prop: {string: any}
+            local t = argType(spec)
+            if t == "list" then
+                prop = {type = "array", items = {type = "string"}, description = desc}
+            elseif t == "table" then
+                prop = {type = "object", description = desc}
+            else
+                prop = {type = t, description = desc}
+            end
+            if spec.enum then prop.enum = spec.enum end
+            if spec.min then prop.minimum = spec.min end
+            if spec.max then prop.maximum = spec.max end
+            props[name] = prop
             hasProps = true
             if spec.required then required[#required + 1] = name end
         end

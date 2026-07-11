@@ -351,3 +351,64 @@ describe("tecs2d.debug.internal.cmdargs", function()
         end)
     end)
 end)
+
+describe("cmdargs rich kinds", function()
+    local schema <const>: cmdargs.Schema = {
+        args = {
+            mode = {enum = {"fast", "slow"}, help = "speed"},
+            tags = {kind = "list", help = "names"},
+            data = {kind = "table", rest = true, help = "fields"},
+            count = {kind = "number", min = 0, max = 10, help = "bounded"},
+        },
+        positional = {"mode", "count", "data"},
+    }
+    cmdargs.validate(schema)
+
+    it("enforces enums on both parse paths", function()
+        local v = cmdargs.parse(schema, {"fast"})
+        luassert.equals("fast", v.mode)
+        local _, err = cmdargs.parse(schema, {"turbo"})
+        luassert.matches("must be one of fast, slow", err)
+        local _, jerr = cmdargs.parseValues(schema, {mode = "turbo"})
+        luassert.matches("must be one of", jerr)
+    end)
+
+    it("enforces numeric bounds on both parse paths", function()
+        luassert.equals(10, (cmdargs.parse(schema, {"fast", "10"})).count)
+        local _, err = cmdargs.parse(schema, {"fast", "11"})
+        luassert.matches("at most 10", err)
+        local _, jerr = cmdargs.parseValues(schema, {count = -1})
+        luassert.matches("at least 0", jerr)
+    end)
+
+    it("lists split from commas and accept JSON arrays", function()
+        local typed = cmdargs.parse(schema, {"fast", "1", "tags=a,b,c"})
+        luassert.same({"a", "b", "c"}, typed.tags)
+        local viaArray = cmdargs.parseValues(schema, {tags = {"a", "b"}})
+        luassert.same({"a", "b"}, viaArray.tags)
+        local viaString = cmdargs.parseValues(schema, {tags = "a,b"})
+        luassert.same({"a", "b"}, viaString.tags)
+        local _, err = cmdargs.parseValues(schema, {tags = {1, 2}})
+        luassert.matches("array of strings", err)
+    end)
+
+    it("tables stay raw expressions on the line and accept JSON objects", function()
+        local typed = cmdargs.parse(schema, {"fast", "1", "{x = 5}"})
+        luassert.equals("{x = 5}", typed.data)
+        local viaObject = cmdargs.parseValues(schema, {data = {x = 5}})
+        luassert.equals(5, (viaObject.data as {string: any}).x)
+        local _, err = cmdargs.parseValues(schema, {data = 7})
+        luassert.matches("JSON object", err)
+    end)
+
+    it("projects the new kinds into the tool schema", function()
+        local tool = cmdargs.toolSchema(schema)
+        local props = tool.properties as {string: {string: any}}
+        luassert.same({"fast", "slow"}, props.mode.enum)
+        luassert.equals("array", props.tags.type)
+        luassert.equals("object", props.data.type)
+        luassert.equals(0, props.count.minimum)
+        luassert.equals(10, props.count.maximum)
+    end)
+end)
+

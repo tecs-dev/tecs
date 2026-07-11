@@ -378,6 +378,10 @@ describe("tecs2d.debug.internal.cmd.capture", function()
             -- Filters.
             local only = reg:execute("diff 1 2 entity=" .. tostring(a))
             luassert.equals(1, only.data.totalChanges)
+            local viaArray = reg:invokeMcp("debug_diff",
+                {from = "1", to = "2", ignore = {"DbgCmdPos"}})
+            luassert.is_nil(((viaArray.data.summary as {string: any}).byComponent
+                as {string: any}).DbgCmdPos, "JSON array ignore= must apply")
             local ignored = reg:execute("diff 1 2 ignore=DbgCmdPos")
             luassert.is_nil((ignored.data.summary as {string: any}).byComponent
                 and ((ignored.data.summary as {string: any}).byComponent as {string: any}).DbgCmdPos)

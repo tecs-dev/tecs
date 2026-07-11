@@ -672,6 +672,8 @@ Games can extend the surface: a command registered with `require("tecs2d.debug.c
 appears here as `debug_<name>` with a generated schema, exactly like the builtins. See
 [Custom debugger commands](../custom-debug-commands) for the complete registration API and examples.
 
+Argument schemas project faithfully: enums, numeric minimum/maximum, arrays (comma-separated on the command
+line), and objects (`debug_set`'s `value` takes a real JSON object; the Lua-expression string also still works).
 Arguments that share one positional slot on the command line (an entity id or a mark name) become separate optional
 JSON parameters with a "provide exactly one" constraint. For example `debug_select`:
 

@@ -335,7 +335,8 @@ end)()
 local setSchema <const>: cmdargs.Schema = (function(): cmdargs.Schema
     local args = editTargetArgs()
     args.comp = {required = true, help = "component name"}
-    args.value = {rest = true, help = "Lua table expression, e.g. {x = 10, y = 20}; omit for defaults"}
+    args.value = {rest = true, kind = "table",
+        help = "component fields: a Lua table expression, e.g. {x = 10, y = 20}, or a JSON object over MCP; omit for defaults"}
     local schema: cmdargs.Schema = {args = args, positional = {"target", "comp", "value"}}
     cmdargs.validate(schema)
     return schema
@@ -1324,10 +1325,13 @@ function commands.build(env: commands.Env): commands.Registry
                 if not comp then
                     return {ok = false, code = "unknown_component", message = "set: " .. cerr}
                 end
-                local valueExpr = (v.value as string) or ""
+                -- The value arrives as a JSON object over MCP or as a Lua
+                -- table expression from the command line.
                 local dataTbl: {string: any} = {}
-                if valueExpr ~= "" then
-                    local parsed, verr = evalTable(valueExpr)
+                if type(v.value) == "table" then
+                    dataTbl = v.value as {string: any}
+                elseif type(v.value) == "string" and (v.value as string) ~= "" then
+                    local parsed, verr = evalTable(v.value as string)
                     if not parsed then
                         return {ok = false, code = "invalid_arguments", message = "set: " .. verr}
                     end

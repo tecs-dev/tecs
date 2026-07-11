@@ -365,7 +365,8 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
         end
         local ignoreSet: {string: boolean} = {}
         if v.ignore ~= nil then
-            for nm in (v.ignore as string):gmatch("[^,]+") do
+            for _, raw in ipairs(v.ignore as {string}) do
+                local nm = raw:match("^%s*(.-)%s*$")
                 if not componentFor(nm) then
                     return nil, nil, {ok = false, code = "invalid_filter",
                         message = "diff: unknown component '" .. nm .. "' in ignore="}
@@ -904,9 +905,10 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     to = {help = "second reference; defaults to current"},
                     entity = {help = "restrict to an entity id, mark, or @selection"},
                     component = {help = "restrict to one component"},
-                    ignore = {help = "comma-separated components to exclude"},
-                    epsilon = {kind = "number", help = "numeric tolerance (default exact)"},
-                    limit = {default = 100, help = "max detailed changes; 0 = summary only"},
+                    ignore = {kind = "list",
+                        help = "components to exclude (comma separated, or a JSON array)"},
+                    epsilon = {kind = "number", min = 0, help = "numeric tolerance (default exact)"},
+                    limit = {default = 100, min = 0, help = "max detailed changes; 0 = summary only"},
                 },
                 positional = {"from", "to"},
             },
