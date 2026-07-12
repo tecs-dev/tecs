@@ -1,20 +1,21 @@
---- Engine-facing MCP tool handlers: ping, screenshots and pixel sampling,
---- LÖVE events and window info, pause/resume/step through the shared freeze
---- controller, time scale, camera conversion, log reads, and the debugger
---- context snapshot.
+--- Kernel MCP tool handlers: ping, screenshots and pixel sampling, LÖVE
+--- events, log reads, and run_lua. Every other capability is served by the
+--- debugger command registry's cmd_* tools (see tecs2d.debug.commands);
+--- run_lua executes inside the frame through the shared queued-op drain.
 
+local tecs <const> = require("tecs")
+local logging <const> = require("tecs.utils.logging")
 local rpc <const> = require("tecs2d.mcp.internal.rpc")
 local state <const> = require("tecs2d.mcp.internal.state")
 local logtap <const> = require("tecs2d.mcp.internal.logtap")
 local transport <const> = require("tecs2d.mcp.internal.transport")
-local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
-local debugapi <const> = require("tecs2d.debug.context")
 
 local lg <const> = love.graphics
 local le <const> = love.event
 local lt <const> = love.timer
+local log <const> = logging.getLogger("tecs-mcp")
 
-local record enginetools
+local record handlers
     install: function(ctx: state.Context)
 end
 
@@ -26,9 +27,9 @@ local sendToolError <const> = rpc.sendToolError
 local requireWorld <const> = rpc.requireWorld
 local requireArg <const> = rpc.requireArg
 
-local handlers: {string: rpc.Handler} = {}
+local byName: {string: rpc.Handler} = {}
 
-handlers["ping"] = function(_: {string:any}, id: number)
+byName["ping"] = function(_: {string:any}, id: number)
     sendToolOK(id, {
         running = true,
         port = (transport.getBoundPort() or 0) as integer,
@@ -36,7 +37,7 @@ handlers["ping"] = function(_: {string:any}, id: number)
     })
 end
 
-handlers["screenshot"] = function(args: {string:any}, id: number)
+byName["screenshot"] = function(args: {string:any}, id: number)
     -- Validate region params at the boundary: the capture callback runs
     -- during present, outside the tool-handler pcall, so bad values there
     -- crash the frame and wedge the connection.
@@ -92,7 +93,7 @@ handlers["screenshot"] = function(args: {string:any}, id: number)
     end)
 end
 
-handlers["sample_pixels"] = function(args: {string:any}, id: number)
+byName["sample_pixels"] = function(args: {string:any}, id: number)
     local points = args.points as {{string: any}}
     if type(points) ~= "table" or #points == 0 then
         sendToolError(id, "missing_parameter", "Missing or empty 'points' array")
@@ -148,7 +149,7 @@ handlers["sample_pixels"] = function(args: {string:any}, id: number)
     end)
 end
 
-handlers["send_love_event"] = function(args: {string:any}, id: number)
+byName["send_love_event"] = function(args: {string:any}, id: number)
     local eventName = requireArg(args, "event", id) as string
     if not eventName then return end
     -- Accept mixed-type payloads (numbers, booleans, strings). LÖVE events
@@ -163,170 +164,7 @@ handlers["send_love_event"] = function(args: {string:any}, id: number)
     sendToolOK(id, {event = eventName, args = eventArgs or {}})
 end
 
-handlers["get_window_size"] = function(_: {string:any}, id: number)
-    local w, h = lg.getDimensions()
-    sendToolOK(id, {width = w, height = h})
-end
-
-handlers["get_fps"] = function(_: {string:any}, id: number)
-    sendToolOK(id, {fps = lt.getFPS()})
-end
-
-handlers["get_debug_context"] = function(_: {string:any}, id: number)
-    local world = requireWorld(id)
-    if not world then return end
-    -- The payload is built by the shared debug-context report so this tool
-    -- and the `context` debugger command can never drift apart.
-    local payload = debugapi.report(world)
-    if not payload then
-        sendToolError(id, "debugger_disabled",
-            "In-game debugger is not enabled; add the debug plugin " ..
-            "(require(\"tecs2d.debug\").new()).")
-        return
-    end
-    sendToolOK(id, payload)
-end
-
-handlers["quit"] = function(_: {string:any}, id: number)
-    sendToolOK(id, {quitting = true})
-    le.push("quit")
-end
-
-handlers["restart"] = function(_: {string:any}, id: number)
-    sendToolOK(id, {restarting = true})
-    -- Abort this connection with RST so the restarted instance can
-    -- rebind the port immediately (see the transport's close rules).
-    ctx.rstOnClose = true
-    le.quit("restart")
-end
-
-handlers["screen_to_world"] = function(args: {string:any}, id: number)
-    local world = requireWorld(id)
-    if not world then return end
-
-    local screenX = args.x as number
-    local screenY = args.y as number
-    if not screenX or not screenY then
-        sendToolError(id, "missing_parameter", "Missing x or y coordinate")
-        return
-    end
-
-    -- The render pipeline resource is the canonical camera owner; scanning
-    -- all resources is a fallback for games without the standard pipeline
-    -- (standalone Camera resources or custom pipelines under other keys).
-    local camera: any = nil
-    local renderPipeline = world.resources[pipelinekey.PIPELINE]
-    if renderPipeline then
-        camera = renderPipeline:getCamera()
-    end
-
-    if not camera then
-        local resources = world.resources as {any: any}
-        for _, value in pairs(resources) do
-            if type(value) == "table" then
-                local tbl = value as {string: any}
-                -- Look for pipeline with getCamera method
-                if type(tbl.getCamera) == "function" then
-                    local getCamFn = tbl.getCamera as function(any): any
-                    camera = getCamFn(value)
-                    break
-                -- Fallback: direct toWorld method (e.g., standalone Camera)
-                elseif type(tbl.toWorld) == "function" then
-                    camera = value
-                    break
-                end
-            end
-        end
-    end
-
-    if not camera then
-        sendToolError(id, "camera_not_found", "No camera found in resources")
-        return
-    end
-
-    local toWorldFn = (camera as {string: any}).toWorld as function(any, number, number): (number, number)
-    local worldX, worldY = toWorldFn(camera, screenX, screenY)
-    sendToolOK(id, {
-        screen = {x = screenX, y = screenY},
-        world = {x = worldX, y = worldY}
-    })
-end
-
-handlers["set_time_scale"] = function(args: {string:any}, id: number)
-    local world = requireWorld(id)
-    if not world then return end
-
-    local scale = requireArg(args, "scale", id) as number
-    if not scale then return end
-
-    -- Clamp to reasonable range (0.0 = fully paused, 10.0 = 10x speed)
-    scale = math.max(0.0, math.min(10.0, scale))
-
-    -- Get the render pipeline from resources (not world.pipeline which is the system scheduler)
-    local renderPipeline = world.resources[pipelinekey.PIPELINE] as {string: any}
-    if not renderPipeline then
-        sendToolError(id, "render_pipeline_not_found", "Render pipeline not found")
-        return
-    end
-
-    -- Set the pipeline's time scale (affects animation timing)
-    if renderPipeline.setTimeScale then
-        (renderPipeline.setTimeScale as function(any, number))(renderPipeline, scale)
-    else
-        -- Fallback: set directly
-        renderPipeline.timeScale = scale
-    end
-
-    sendToolOK(id, {scale = scale, gameTime = renderPipeline.gameTime or 0})
-end
-
--- Pause/step goes through the shared freeze controller (one owner of
--- "gameplay is stopped" for both MCP pause and the debugger's open panel).
-
-handlers["pause"] = function(_: {string:any}, id: number)
-    local world = requireWorld(id)
-    if not world then return end
-    local fz = debugapi.ensureFreeze(world)
-    if fz:heldBy("mcp") then
-        sendToolOK(id, {paused = true, alreadyPaused = true})
-        return
-    end
-    fz:acquire("mcp")
-    sendToolOK(id, {paused = true, savedTimeScale = fz.savedTimeScale})
-end
-
-handlers["resume"] = function(_: {string:any}, id: number)
-    local world = requireWorld(id)
-    if not world then return end
-    local fz = debugapi.ensureFreeze(world)
-    if not fz:heldBy("mcp") then
-        sendToolOK(id, {paused = false, alreadyResumed = true})
-        return
-    end
-    local restoredTimeScale = fz.savedTimeScale
-    fz:release("mcp")
-    -- Still frozen when another holder (the open debugger) remains.
-    sendToolOK(id, {paused = false, restoredTimeScale = restoredTimeScale,
-        stillFrozen = fz:isFrozen()})
-end
-
-handlers["step"] = function(args: {string:any}, id: number)
-    local world = requireWorld(id)
-    if not world then return end
-    local fz = debugapi.ensureFreeze(world)
-    if not fz:isFrozen() then
-        sendToolError(id, "not_paused", "Must be paused to step")
-        return
-    end
-
-    local frames = (args.frames as integer) or 1
-    if frames < 1 then frames = 1 end
-    fz:step(frames)
-
-    sendToolOK(id, {stepping = true, frames = frames})
-end
-
-handlers["get_logs"] = function(args: {string:any}, id: number)
+byName["get_logs"] = function(args: {string:any}, id: number)
     if args.clear == true then
         sendToolOK(id, {cleared = logtap.clear()})
         return
@@ -352,11 +190,68 @@ handlers["get_logs"] = function(args: {string:any}, id: number)
         captured = captured, dropped = dropped, latest = latest})
 end
 
-function enginetools.install(c: state.Context)
+byName["run_lua"] = function(args: {string:any}, id: number)
+    if not requireWorld(id) then return end
+
+    local code = requireArg(args, "code", id) as string
+    if not code then return end
+
+    -- Wrap user code in a function(world) body so they don't need boilerplate
+    -- Newline before "end" so code ending in a line comment still parses.
+    local wrapped <const> = "return function(world) " .. code .. "\nend"
+
+    -- Load the code
+    local loadOk, loadResult = pcall(function(): function(tecs.World)
+        local chunk, loadErr = load(wrapped, "mcp_lua", "t")
+        if not chunk then
+            error("Failed to load code: " .. tostring(loadErr))
+        end
+        local fn = chunk()
+        if type(fn) ~= "function" then
+            error("Code must return a function, got " .. type(fn))
+        end
+        return fn as function(tecs.World)
+    end)
+
+    if not loadOk then
+        local errMsg = tostring(loadResult)
+        log:error("run_lua load failed: %s", errMsg)
+        sendToolError(id, "lua_load_failed", "Lua load failed", {error = errMsg})
+        return
+    end
+
+    local fn = loadResult as function(tecs.World)
+
+    -- Run in the queued-op drain and return the chunk's results. Keep the client
+    -- socket open until this deferred response is sent (the request handler returns
+    -- before the queued op runs).
+    ctx.pendingWorldOpResponse = true
+    state.enqueue(ctx, function(w: tecs.World)
+        local pcallAny = pcall as function(any, ...: any): boolean, any
+        local results = {pcallAny(fn, w)} as {any}
+        if not results[1] then
+            local errMsg = tostring(results[2])
+            log:error("run_lua execution failed: %s", errMsg)
+            sendToolError(id, "lua_execution_failed", "Lua execution failed", {error = errMsg})
+            ctx.pendingWorldOpResponse = false
+            return
+        end
+        local n = #results
+        local values: {string} = {}
+        for i = 2, n do values[i - 1] = tostring(results[i]) end
+        sendToolOK(id, {
+            returned = n - 1,
+            values = values
+        })
+        ctx.pendingWorldOpResponse = false
+    end)
+end
+
+function handlers.install(c: state.Context)
     ctx = c
-    for name, fn in pairs(handlers) do
+    for name, fn in pairs(byName) do
         rpc.handlers[name] = fn
     end
 end
 
-return enginetools
+return handlers

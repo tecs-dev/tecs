@@ -6,8 +6,8 @@
 ---
 --- The commands themselves live in the shared registry (tecs2d.debug.commands);
 --- this module is the human surface: input, mouse gestures, completion,
---- history, and drawing. Agents reach the same registry over MCP
---- (get_debug_context and the debug_* command tools).
+--- history, and drawing. Agents reach the same registry over MCP through
+--- the cmd_* command tools (cmd_context, cmd_select, ...).
 
 local tecs <const> = require("tecs")
 local input <const> = require("tecs2d.input")
@@ -980,7 +980,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
     end
 
     -- Apply surface-directed side effects raised by commands (from the command
-    -- line or over MCP): panel close, quit, one-frame chrome hide.
+    -- line or over MCP): panel close and one-frame chrome hide.
     local function consumeSignals()
         local sig = registry.signals
         if sig.hideOverlay then
@@ -992,9 +992,6 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
         if sig.action == "exit" then
             sig.action = ""
             if ctx.open then doClose() end
-        elseif sig.action == "quit" then
-            sig.action = ""
-            love.event.quit()
         end
     end
 

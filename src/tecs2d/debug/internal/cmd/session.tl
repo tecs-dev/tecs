@@ -176,7 +176,7 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             name = "freeze",
             section = "Session",
             shortHelp = "freeze or unfreeze gameplay under the operator's hold",
-            mcpHelp = "Freeze gameplay through the shared freeze controller under the \"operator\" hold: on=true acquires, on=false releases, omit toggles. Rendering, input, and tools keep running; the world stays frozen while any other holder (the open debugger panel, MCP pause) remains. Returns the resulting frozen state. Use the step tool to advance frames while frozen.",
+            mcpHelp = "Freeze gameplay through the shared freeze controller under the \"operator\" hold: on=true acquires, on=false releases, omit toggles. Rendering, input, and tools keep running; the world stays frozen while any other holder (the open debugger panel) remains. Returns the resulting frozen state. Use cmd_step to advance frames while frozen.",
             schema = d.onOffSchema,
             examples = {"freeze", "freeze on", "freeze off"},
             annotations = {idempotentHint = true},
@@ -212,9 +212,16 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
         {
             name = "step",
             section = "Session",
-            mcp = false,   -- agents use the step MCP tool (same freeze controller)
             shortHelp = "tick the game forward N frames while otherwise frozen",
+            mcpHelp = "Advance gameplay by n frames while the freeze controller is held, then freeze again. Fails when nothing holds the freeze; acquire it with cmd_freeze on=true first.",
             schema = stepSchema,
+            outputSchema = {
+                type = "object",
+                properties = {
+                    frames = {type = "integer", description = "frames scheduled to tick"},
+                },
+                required = {"frames"},
+            },
             run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
                 local n = math.max(1, math.floor(v.n as number)) as integer
                 local ok, err = env.freeze:step(n)
@@ -275,7 +282,7 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             name = "context",
             section = "Session",
             shortHelp = "the live debugger context: selection, camera, artifacts",
-            mcpHelp = "The full debugger context snapshot: selection, marks, notes, mode, freeze state, camera, mouse, grid, rewind status, and the newest artifact entries (snapshots, diffs, profiles, screenshots, recordings). Same payload as the get_debug_context tool. Read-only.",
+            mcpHelp = "The full debugger context snapshot: selection, marks, notes, mode, freeze state, camera, mouse, grid, rewind status, and the newest artifact entries (snapshots, diffs, profiles, screenshots, recordings). Read-only; call it to orient before driving the other cmd_* tools.",
             examples = {"context"},
             annotations = {readOnlyHint = true, idempotentHint = true},
             outputSchema = {
@@ -332,7 +339,7 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             name = "restart",
             section = "Session",
             shortHelp = "restart the game process",
-            mcpHelp = "Restart the game via love.event.quit(\"restart\"). Unsaved state is lost and the MCP connection drops until the new instance binds. Take debug_snapshot_save first if the state matters.",
+            mcpHelp = "Restart the game via love.event.quit(\"restart\"). Unsaved state is lost and the MCP connection drops until the new instance binds. Take cmd_snapshot_save first if the state matters.",
             examples = {"restart"},
             annotations = {destructiveHint = true},
             outputSchema = {
@@ -343,6 +350,10 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 required = {"restarting"},
             },
             run = function(_v: {string: any}, _parts: {string}): cmdtypes.Result
+                -- Abort the MCP connection with RST so the restarted
+                -- instance can rebind the port immediately.
+                local info = w.resources[mcpinfo.KEY]
+                if info and info.prepareRestart then info.prepareRestart() end
                 love.event.quit("restart")
                 return {ok = true, message = "restarting", data = {restarting = true}}
             end,
@@ -360,11 +371,18 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
         {
             name = "quit",
             section = "Session",
-            mcp = false,   -- the quit MCP tool exists
             shortHelp = "quit the game",
+            mcpHelp = "Quit the game process via a LÖVE quit event. Unsaved state is lost and the MCP connection drops. Take cmd_snapshot_save first if the state matters.",
+            outputSchema = {
+                type = "object",
+                properties = {
+                    quitting = {type = "boolean"},
+                },
+                required = {"quitting"},
+            },
             run = function(_v: {string: any}, _parts: {string}): cmdtypes.Result
-                reg.signals.action = "quit"
-                return {ok = true}
+                love.event.quit()
+                return {ok = true, message = "quitting", data = {quitting = true}}
             end,
         },
     }

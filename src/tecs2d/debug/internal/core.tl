@@ -3,7 +3,7 @@
 --- systems that keep the registry's stateful commands working with no overlay
 --- (rewind ring capture, delayed screenshots, recording frame capture and
 --- shutdown). The overlay layers the human surface (input, drawing, menus)
---- on top; the MCP plugin ensures the core so debug_* tools exist in every
+--- on top; the MCP plugin ensures the core so cmd_* tools exist in every
 --- session.
 
 local tecs <const> = require("tecs")

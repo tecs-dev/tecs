@@ -76,7 +76,7 @@ end
 function fixture.stop(app: fixture.App)
     if not app then return end
     if app.proc:isRunning() then
-        pcall(function() app.client:tryCall("quit", nil, 2) end)
+        pcall(function() app.client:tryCall("cmd_quit", nil, 2) end)
         if not app.proc:waitExit(SHUTDOWN_TIMEOUT) then
             app.proc:stop()
         end

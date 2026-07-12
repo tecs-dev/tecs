@@ -19,8 +19,9 @@ local record state
         --- deferred response; keeps the socket open like a screenshot.
         pendingWorldOpResponse: boolean
         --- When set, the next client close aborts the connection with
-        --- linger 0 (RST) instead of a FIN close. The restart handler sets
-        --- this: a normal close leaves the accepted socket in
+        --- linger 0 (RST) instead of a FIN close. The MCP plugin's
+        --- prepareRestart hook sets this: a normal close leaves the
+        --- accepted socket in
         --- FIN_WAIT/TIME_WAIT, which can block rebinding the same port for
         --- many seconds after the engine restarts (SO_REUSEADDR does not
         --- bypass FIN_WAIT states).

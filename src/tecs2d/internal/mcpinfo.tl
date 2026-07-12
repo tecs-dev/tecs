@@ -8,8 +8,12 @@ local record mcpinfo
     record Info
         --- The bound MCP port, or 0 while binding is still pending.
         port: function(): integer
-        --- Total MCP tools currently exposed (static + registry-derived).
+        --- Total MCP tools currently exposed (kernel + registry-derived).
         toolCount: function(): integer
+        --- Marks the live MCP connection for an RST close so a restarted
+        --- instance can rebind the port immediately. The registry's restart
+        --- command calls it before love.event.quit("restart").
+        prepareRestart: function()
     end
 
     KEY: tecs.Key<Info>

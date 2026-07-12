@@ -22,10 +22,10 @@ describe("tecs2d.debug.internal.cmd.render", function()
                 luassert.is_false(r.ok, cmdLine)
                 luassert.equals("no_pipeline", r.code, cmdLine)
             end
-            luassert.equals("no_pipeline", (reg:invokeMcp("debug_light_bloom", {on = true})).code)
-            luassert.equals("no_pipeline", (reg:invokeMcp("debug_light_info", {})).code)
-            luassert.equals("no_pipeline", (reg:invokeMcp("debug_light_toggle", {})).code)
-            luassert.equals("no_pipeline", (reg:invokeMcp("debug_light_shadows", {on = false})).code)
+            luassert.equals("no_pipeline", (reg:invokeMcp("cmd_light_bloom", {on = true})).code)
+            luassert.equals("no_pipeline", (reg:invokeMcp("cmd_light_info", {})).code)
+            luassert.equals("no_pipeline", (reg:invokeMcp("cmd_light_toggle", {})).code)
+            luassert.equals("no_pipeline", (reg:invokeMcp("cmd_light_shadows", {on = false})).code)
 
             -- Bare `light` needs a verb now.
             local bare = reg:execute("light 0.3 0.3 0.3")
@@ -118,7 +118,7 @@ describe("tecs2d.debug.internal.cmd.render", function()
             luassert.same({x = 10, y = 20}, toWorld.data.screen)
             luassert.same({x = 110, y = 220}, toWorld.data.world)
 
-            local toScreen = reg:invokeMcp("debug_camera_screen", {x = 110, y = 220})
+            local toScreen = reg:invokeMcp("cmd_camera_screen", {x = 110, y = 220})
             luassert.is_true(toScreen.ok, tostring(toScreen.message))
             luassert.same({x = 110, y = 220}, toScreen.data.world)
             luassert.same({x = 10, y = 20}, toScreen.data.screen)

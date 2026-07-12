@@ -63,7 +63,7 @@ local record cmdtypes
     end
 
     --- Surface-directed side effects an action may raise instead of poking
-    --- overlay state: `action` is "exit" (close the panel) or "quit";
+    --- overlay state: `action` is "exit" (close the panel);
     --- hideOverlay hides the chrome for one frame (screenshots).
     record Signals
         action: string

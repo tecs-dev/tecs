@@ -1,14 +1,14 @@
 --- The debugger command registry: one declaration per command (schema, help,
 --- subcommands, action) shared by both surfaces. The overlay tokenizes a typed
 --- line and dispatches through execute(); the MCP server projects the same
---- registry to debug_* tools (mcpTools) and dispatches JSON args through
+--- registry to cmd_* tools (mcpTools) and dispatches JSON args through
 --- invokeMcp(). Actions receive parsed, typed values and return a Result whose
 --- `data` is the canonical structured payload; `popup` is overlay presentation.
 ---
 --- Games can add their own commands with commands.register(world, cmd) after
 --- installing the debug plugin. A registered command gets the same treatment
 --- as the builtins: schema-parsed arguments, generated help and completion in
---- the overlay, and a debug_<name> MCP tool. The `overlay` and `mcp` flags
+--- the overlay, and a cmd_<name> MCP tool. The `overlay` and `mcp` flags
 --- scope a command to one surface. Read the live debugger state (selection,
 --- marks, notes) through world.resources[require("tecs2d.debug.context").KEY].
 ---
@@ -37,7 +37,7 @@ local getTime <const> = love.timer.getTime
 
 local Transform <const> = tecs.builtins.Transform
 
---- The action a projected debug_* tool name dispatches to: the argument
+--- The action a projected cmd_* tool name dispatches to: the argument
 --- schema (nil when the action takes none) and the run function.
 local record ToolEntry
     schema: cmdargs.Schema
@@ -129,14 +129,14 @@ local record commands
         --- debugger if closed, show the popup, clear the field.
         profileResult: {string}
 
-        --- debug_* tool name to its dispatch entry; built lazily on the
+        --- cmd_* tool name to its dispatch entry; built lazily on the
         --- first invokeMcp and appended by add().
         byToolName: {string: ToolEntry}
 
-        --- The registry projected as MCP tool definitions (debug_* names).
+        --- The registry projected as MCP tool definitions (cmd_* names).
         mcpTools: function(self: Registry): {McpTool}
 
-        --- Dispatch an MCP tool call by its debug_* name with JSON args.
+        --- Dispatch an MCP tool call by its cmd_* name with JSON args.
         --- Returns nil + error when the name is unknown.
         invokeMcp: function(self: Registry, name: string, args: {string: any}): Result, string
 
@@ -167,7 +167,7 @@ local record commands
 
     --- Register a custom debugger command on a world that has the debug
     --- plugin installed. The command joins the builtins: schema-parsed args,
-    --- generated help and Tab completion in the overlay, and a debug_<name>
+    --- generated help and Tab completion in the overlay, and a cmd_<name>
     --- MCP tool (set mcp = false for overlay-only, overlay = false for
     --- MCP-only). Raises when the debug plugin is missing or the command is
     --- invalid.
@@ -453,7 +453,7 @@ local TOOL_SUFFIX <const> = " In-game debugger command; requires the debug plugi
 local function projectTool(cmd: commands.Command, sub: commands.Subcommand): commands.McpTool
     if sub then
         return {
-            name = "debug_" .. cmd.name .. "_" .. sub.name,
+            name = "cmd_" .. cmd.name .. "_" .. sub.name,
             description = (sub.mcpHelp or (cmd.name .. " " .. sub.name .. ": " ..
                 sub.shortHelp .. ".")) .. TOOL_SUFFIX,
             inputSchema = sub.schema and cmdargs.toolSchema(sub.schema) or EMPTY_SCHEMA,
@@ -462,7 +462,7 @@ local function projectTool(cmd: commands.Command, sub: commands.Subcommand): com
         }
     end
     return {
-        name = "debug_" .. cmd.name,
+        name = "cmd_" .. cmd.name,
         description = (cmd.mcpHelp or (cmd.shortHelp .. ".")) .. TOOL_SUFFIX,
         inputSchema = cmd.schema and cmdargs.toolSchema(cmd.schema) or EMPTY_SCHEMA,
         outputSchema = commands.wrapOutputSchema(cmd.outputSchema),
@@ -473,12 +473,12 @@ end
 -- Register one command's MCP-dispatchable actions in the tool-name index.
 local function indexTools(index: {string: ToolEntry}, cmd: commands.Command)
     if cmd.mcp ~= false and cmd.run then
-        index["debug_" .. cmd.name] = {schema = cmd.schema, run = cmd.run}
+        index["cmd_" .. cmd.name] = {schema = cmd.schema, run = cmd.run}
     end
     if cmd.subcommands then
         for _, sub in ipairs(cmd.subcommands) do
             if sub.mcp ~= false then
-                index["debug_" .. cmd.name .. "_" .. sub.name] = {schema = sub.schema, run = sub.run}
+                index["cmd_" .. cmd.name .. "_" .. sub.name] = {schema = sub.schema, run = sub.run}
             end
         end
     end
@@ -901,7 +901,7 @@ function commands.build(env: commands.Env): commands.Registry
             overlay = false,   -- the typed surface has `help <command>`
             complete = {[1] = "commands"},
             shortHelp = "one command's full contract as structured data",
-            mcpHelp = "The complete contract of one debugger command: signature, help, argument schema, subcommand verbs with their schemas and safety annotations, and examples. Use it before calling an unfamiliar debug_* tool, or to discover verbs of a family.",
+            mcpHelp = "The complete contract of one debugger command: signature, help, argument schema, subcommand verbs with their schemas and safety annotations, and examples. Use it before calling an unfamiliar cmd_* tool, or to discover verbs of a family.",
             schema = { args = { command = {required = true, help = "command name"} },
                 positional = {"command"} },
             run = function(v: {string: any}, _parts: {string}): commands.Result

@@ -7,11 +7,11 @@
 --- Press Ctrl+/ to open the modal debugger (freeze, select, mark, note, query,
 --- step, goto, ...) and Ctrl+. to toggle the FPS / memory stats HUD. When the
 --- MCP plugin is also present, agents inspect and drive the debugger through
---- get_debug_context and the registry-derived debug_* command tools.
+--- the registry-derived cmd_* command tools (cmd_context, cmd_select, ...).
 ---
 --- Games add their own commands with require("tecs2d.debug.commands").register;
 --- a registered command gets schema-parsed arguments, help, Tab completion,
---- and (unless opted out) a debug_<name> MCP tool.
+--- and (unless opted out) a cmd_<name> MCP tool.
 
 local tecs <const> = require("tecs")
 local leader <const> = require("tecs2d.debug.internal.leader")

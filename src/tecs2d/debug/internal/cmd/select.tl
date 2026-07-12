@@ -229,7 +229,7 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             complete = {[1] = "targets"},
             examples = {"select 5", "select boss", "select 5 replace", "select name=\"big boss\""},
             shortHelp = "select an entity by id, or all entities with a mark name",
-            mcpHelp = "Add an entity (by id) or a marked group (by name) to the operator-visible selection; replace=true swaps the selection instead. Selected entities are highlighted in-game. Returns the selection size. Follow with debug_info for component data or debug_note to annotate.",
+            mcpHelp = "Add an entity (by id) or a marked group (by name) to the operator-visible selection; replace=true swaps the selection instead. Selected entities are highlighted in-game. Returns the selection size. Follow with cmd_info for component data or cmd_note to annotate.",
             schema = selectSchema,
             metadata = {screenshots = {
                 {file = "./assets/debug/select.png", docs = true,
@@ -406,7 +406,7 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             name = "note",
             section = "Select",
             shortHelp = "annotate the selected entities for the agent; empty message clears",
-            mcpHelp = "Attach a note to the selected entities, visible in-game above them and in get_debug_context. Use it to flag findings for the operator. An empty message clears notes on the selection.",
+            mcpHelp = "Attach a note to the selected entities, visible in-game above them and in cmd_context. Use it to flag findings for the operator. An empty message clears notes on the selection.",
             schema = noteSchema,
             examples = {"note flickers when hit", "note  (clear notes)"},
             outputSchema = {
@@ -436,10 +436,23 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
         {
             name = "info",
             section = "Select",
-            mcp = false,   -- agents use the get_entity MCP tool instead
             complete = {[1] = "targets"},
             shortHelp = "show an entity's components; defaults to the first selected",
+            mcpHelp = "One entity's serialized component data by id or mark name; with no target, the first selected entity. Returns the entity id, its archetype id and sorted signature, and a map of component name to serialized fields. Read-only.",
             schema = optionalTargetSchema,
+            annotations = {readOnlyHint = true, idempotentHint = true},
+            outputSchema = {
+                type = "object",
+                properties = {
+                    id = {type = "integer", description = "the inspected entity"},
+                    archetypeId = {type = "integer"},
+                    archetypeComponents = {type = "string",
+                        description = "sorted archetype signature"},
+                    components = {type = "object",
+                        description = "component name to serialized data (true for tags)"},
+                },
+                required = {"archetypeComponents", "archetypeId", "components", "id"},
+            },
             run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
                 local target = 0
                 if v.target == nil then
@@ -456,7 +469,25 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         message = (v.target ~= nil) and ("info: no match for '" .. tostring(v.target) .. "'")
                             or "info: nothing selected"}
                 end
-                return {ok = true, popup = inspectEntity(target)}
+                local archetype, row, why = entityinfo.locate(w, target)
+                if not archetype then
+                    return {ok = false,
+                        code = (why == "not_alive") and "no_match" or "not_committed",
+                        message = "info: #" .. tostring(target) ..
+                            ((why == "not_alive") and " is not alive" or " is not committed")}
+                end
+                local names: {string} = {}
+                for i = 1, #archetype.componentList do
+                    local nm = archetype.componentList[i].componentName
+                    if nm then names[#names + 1] = nm end
+                end
+                table.sort(names)
+                return {ok = true, popup = inspectEntity(target), data = {
+                    id = target,
+                    archetypeId = archetype.id,
+                    archetypeComponents = table.concat(names, ", "),
+                    components = entityinfo.serializeRow(archetype, archetype.componentList, row),
+                }}
             end,
         },
         {
@@ -464,7 +495,7 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             section = "Select",
             complete = {[1] = "targets"},
             shortHelp = "despawn an entity by id or mark name, given ids, or the whole selection",
-            mcpHelp = "Despawn the target entities (an id, a mark name, an explicit ids list, or the current selection when no target is given). Destructive and immediate. Take debug_snapshot_save first if the state matters.",
+            mcpHelp = "Despawn the target entities (an id, a mark name, an explicit ids list, or the current selection when no target is given). Destructive and immediate. Take cmd_snapshot_save first if the state matters.",
             schema = despawnSchema,
             examples = {"despawn 5", "despawn boss", "despawn ids=5,6,7",
                 "despawn  (the selection)"},
@@ -548,7 +579,7 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             aliases = {"q"},
             complete = {[0] = "components"},
             shortHelp = "select entities matching a component query: Foo has it, -Foo lacks it",
-            mcpHelp = "Select every entity matching a component expression ('Enemy -Dead' means has Enemy, lacks Dead); invert=true instead de-selects matching entities from the current selection. Returns the match count. Follow with debug_info or debug_set on @selection.",
+            mcpHelp = "Select every entity matching a component expression ('Enemy -Dead' means has Enemy, lacks Dead); invert=true instead de-selects matching entities from the current selection. Returns the match count. Follow with cmd_info or cmd_set on @selection.",
             schema = querySchema,
             examples = {"query Position Velocity -Dead",
                 "query Dead invert=true  (de-select dead entities)"},

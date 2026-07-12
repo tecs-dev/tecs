@@ -69,7 +69,7 @@ end
 local function stopApp(app: App)
     if not app then return end
     if app.proc:isRunning() then
-        pcall(function() app.client:tryCall("quit", nil, 2) end)
+        pcall(function() app.client:tryCall("cmd_quit", nil, 2) end)
         if not app.proc:waitExit(SHUTDOWN_TIMEOUT) then
             app.proc:stop()
         end
@@ -137,9 +137,10 @@ describe("mcp compliance: boot and introspection", function()
     end)
 
     it("reports the configured window size", function()
-        local result = app.client:call("get_window_size")
-        luassert.are.equal(320, result.width as number)
-        luassert.are.equal(240, result.height as number)
+        local result = app.client:call("cmd_stats")
+        local window = result.window as {string: any}
+        luassert.are.equal(320, window.width as number)
+        luassert.are.equal(240, window.height as number)
     end)
 
     it("run_lua round-trips multiple return values", function()
@@ -166,22 +167,23 @@ describe("mcp compliance: boot and introspection", function()
         for _, t in ipairs(tools) do
             found[t.name as string] = t.annotations as {string: any}
         end
-        luassert.is_true(found.get_stats.readOnlyHint as boolean)
-        luassert.is_false(found.get_stats.destructiveHint as boolean)
-        luassert.is_true(found.despawn.destructiveHint as boolean)
-        luassert.is_false(found.pause.destructiveHint as boolean)
-        luassert.is_true(found.pause.idempotentHint as boolean)
+        luassert.is_true(found.ping.readOnlyHint as boolean)
+        luassert.is_true(found.cmd_stats.readOnlyHint as boolean)
+        luassert.is_false(found.cmd_stats.destructiveHint as boolean)
+        luassert.is_true(found.cmd_despawn.destructiveHint as boolean)
+        luassert.is_false(found.cmd_freeze.destructiveHint as boolean)
+        luassert.is_true(found.cmd_freeze.idempotentHint as boolean)
     end)
 
     it("sees the fixture world state", function()
-        local stats = app.client:call("get_stats")
+        local stats = app.client:call("cmd_stats")
         luassert.is_true((stats.entities as number) >= 1)
         local values = runLua(app, "return world:getStats().entities")
         luassert.is_true(tonumber(values[1]) >= 1)
     end)
 end)
 
-describe("mcp compliance: pause, step, resume", function()
+describe("mcp compliance: freeze, step, resume", function()
     local app: App
 
     setup(function()
@@ -192,8 +194,8 @@ describe("mcp compliance: pause, step, resume", function()
         stopApp(app)
     end)
 
-    it("pause freezes gameplay but keeps MCP responsive", function()
-        app.client:call("pause")
+    it("freeze stops gameplay but keeps MCP responsive", function()
+        app.client:call("cmd_freeze", {on = true})
         local before = readFrames(app)
         sleep(0.25)
         local after = readFrames(app)
@@ -202,7 +204,7 @@ describe("mcp compliance: pause, step, resume", function()
 
     it("step advances exactly the requested frames", function()
         local before = readFrames(app)
-        app.client:call("step", {frames = 3})
+        app.client:call("cmd_step", {n = 3})
         local stepped = eventually(CALL_TIMEOUT, function(): integer
             local frames = readFrames(app)
             if frames >= before + 3 then return frames end
@@ -214,9 +216,9 @@ describe("mcp compliance: pause, step, resume", function()
         luassert.are.equal(before + 3, readFrames(app))
     end)
 
-    it("resume restores gameplay", function()
+    it("releasing the freeze restores gameplay", function()
         local before = readFrames(app)
-        app.client:call("resume")
+        app.client:call("cmd_freeze", {on = false})
         local advanced = eventually(CALL_TIMEOUT, function(): integer
             local frames = readFrames(app)
             if frames > before then return frames end
@@ -324,7 +326,7 @@ end)
 describe("mcp compliance: shutdown", function()
     it("quit exits the process cleanly", function()
         local app = startApp()
-        app.client:tryCall("quit", nil, 2)
+        app.client:tryCall("cmd_quit", nil, 2)
         local exited = app.proc:waitExit(SHUTDOWN_TIMEOUT)
         if not exited then
             app.proc:stop()

@@ -19,7 +19,7 @@ local record context
     --- {5="a", 6="a", 9="b"} -> {a="5-6", b="9"}.
     encodeGroups: function({integer: string}): {string: string}
 
-    --- The debugger-context payload served by the get_debug_context MCP tool
+    --- The debugger-context payload served by the cmd_context MCP tool
     --- and the `context` debugger command: selection, marks, notes, camera,
     --- and the newest artifact history entries. Returns nil when the debug
     --- plugin is not installed.
@@ -33,11 +33,11 @@ local record context
     --- annotations, recorder, rewind; works without the overlay.
     ensureCore: function(w: tecs.World, opts?: core.Options): commands.Registry
 
-    --- The command registry projected as MCP tool definitions (debug_*
+    --- The command registry projected as MCP tool definitions (cmd_*
     --- names), or nil when the debug plugin is not installed.
     commandTools: function(w: tecs.World): {commands.McpTool}
 
-    --- Dispatch a debug_* tool call with JSON args. Returns nil plus
+    --- Dispatch a cmd_* tool call with JSON args. Returns nil plus
     --- "disabled" when the debug plugin is not installed, or nil plus an
     --- error message for an unknown tool name.
     invokeCommand: function(w: tecs.World, name: string, args: {string: any}): commands.Result, string

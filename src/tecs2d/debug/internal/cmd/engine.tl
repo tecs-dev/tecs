@@ -267,7 +267,6 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "list",
                     aliases = {"ls"},
-                    mcp = false,   -- agents use the get_systems MCP tool
                     shortHelp = "list every system with its phase and state",
                     run = function(_v: {string: any}, _parts: {string}): cmdtypes.Result
                         return systemsList()
@@ -276,7 +275,6 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "stop",
                     complete = {[1] = "systems"},
-                    mcp = false,   -- agents use the toggle_system MCP tool
                     shortHelp = "disable a system by name",
                     schema = systemNameSchema,
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
@@ -286,7 +284,6 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "start",
                     complete = {[1] = "systems"},
-                    mcp = false,   -- agents use the toggle_system MCP tool
                     shortHelp = "re-enable a stopped system",
                     schema = systemNameSchema,
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
@@ -296,7 +293,6 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "toggle",
                     complete = {[1] = "systems"},
-                    mcp = false,   -- agents use the toggle_system MCP tool
                     shortHelp = "flip a system between stopped and running",
                     schema = systemNameSchema,
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
@@ -341,7 +337,6 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             subcommands = {
                 {
                     name = "list",
-                    mcp = false,   -- agents use the get_archetypes MCP tool
                     shortHelp = "list archetypes by entity count",
                     run = function(_v: {string: any}, _parts: {string}): cmdtypes.Result
                         local rows: {{string: any}} = {}
@@ -445,7 +440,6 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             subcommands = {
                 {
                     name = "list",
-                    mcp = false,   -- agents use the get_components MCP tool
                     shortHelp = "list registered component types",
                     run = function(_v: {string: any}, _parts: {string}): cmdtypes.Result
                         local names: {string} = {}
@@ -470,7 +464,6 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "info",
                     complete = {[1] = "components"},
-                    mcp = false,   -- agents use the get_component_schema MCP tool
                     shortHelp = "show a component's schema by name or id",
                     schema = { args = { name = {required = true, help = "component name or id"} },
                         positional = {"name"} },
@@ -1059,7 +1052,7 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             section = "Engine",
             complete = {[0] = "components"},
             shortHelp = "fetch entities matching a component query, without selecting them",
-            mcpHelp = "Fetch entities matching a component expression ('Enemy -Dead' means has Enemy, lacks Dead) with their serialized component data, without touching the operator's selection. Give x, y, w, h to restrict to a world-space box (spatial filter via Position when registered, else Transform; the spatial component is always included). Returns up to limit entities plus a truncated flag. Use debug_query when you want to select the matches instead.",
+            mcpHelp = "Fetch entities matching a component expression ('Enemy -Dead' means has Enemy, lacks Dead) with their serialized component data, without touching the operator's selection. Give x, y, w, h to restrict to a world-space box (spatial filter via Position when registered, else Transform; the spatial component is always included). Returns up to limit entities plus a truncated flag. Use cmd_query when you want to select the matches instead.",
             schema = fetchSchema,
             examples = {"fetch Transform -Disabled", "fetch Enemy limit=10",
                 "fetch Transform x=0 y=0 w=640 h=360"},
@@ -1274,7 +1267,7 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     name = "list",
                     aliases = {"ls"},
                     shortHelp = "list bundles with their required and defaulted components",
-                    mcpHelp = "Registered bundles as a map of name to component requirements: required components must be provided at spawn, defaulted ones fill in automatically. Pair with debug_bundles_spawn.",
+                    mcpHelp = "Registered bundles as a map of name to component requirements: required components must be provided at spawn, defaulted ones fill in automatically. Pair with cmd_bundles_spawn.",
                     outputSchema = {
                         type = "object",
                         properties = {
@@ -1322,7 +1315,7 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     name = "spawn",
                     complete = {[1] = "bundles"},
                     shortHelp = "spawn an entity from a bundle with optional component overrides",
-                    mcpHelp = "Spawn one entity from a registered bundle. components is a map of component name to field data; the bundle's required components must be provided there. Returns the new entity id. Unlike debug_spawn this does not select the entity.",
+                    mcpHelp = "Spawn one entity from a registered bundle. components is a map of component name to field data; the bundle's required components must be provided there. Returns the new entity id. Unlike cmd_spawn this does not select the entity.",
                     schema = bundleSpawnSchema,
                     examples = {"bundles spawn enemy",
                         "bundles spawn enemy {Transform = {x = 10, y = 5}}"},

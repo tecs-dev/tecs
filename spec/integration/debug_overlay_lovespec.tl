@@ -27,7 +27,7 @@ describe("in-game debugger overlay", function()
     end)
 
     local function context(): {string: any}
-        return app.client:call("get_debug_context", {}) as {string: any}
+        return app.client:call("cmd_context", {}) as {string: any}
     end
 
     local function selectedList(): {number}
@@ -63,7 +63,7 @@ describe("in-game debugger overlay", function()
             tap()
             waitOpen(false)
         end
-        app.client:call("debug_clear", {})
+        app.client:call("cmd_clear", {})
     end)
 
     local function openDebugger()
@@ -241,16 +241,16 @@ describe("in-game debugger overlay", function()
         end
         local lit0 = flags()
 
-        local toggled = app.client:call("debug_light_toggle", {})
+        local toggled = app.client:call("cmd_light_toggle", {})
         luassert.equals(lit0 ~= "true", toggled.enabled as boolean)
         local litNow = flags()
         luassert.is_true(litNow ~= lit0, "light toggle did not flip lighting")
-        app.client:call("debug_light_toggle", {on = lit0 == "true"})
+        app.client:call("cmd_light_toggle", {on = lit0 == "true"})
 
-        app.client:call("debug_light_shadows", {on = false})
+        app.client:call("cmd_light_shadows", {on = false})
         local _, sh = flags()
         luassert.equals("false", sh, "shadows off did not apply")
-        app.client:call("debug_light_shadows", {on = true})
+        app.client:call("cmd_light_shadows", {on = true})
         local _, sh2 = flags()
         luassert.equals("true", sh2, "shadows on did not apply")
     end)
@@ -318,7 +318,7 @@ describe("in-game debugger overlay", function()
         openDebugger()
         local wx, wy = moveCursor(160, 150)
         local eid = spawnAt(wx, wy)
-        app.client:call("debug_select", {id = eid, replace = true})
+        app.client:call("cmd_select", {id = eid, replace = true})
         app.client:call("send_love_event", {event = "keypressed", args = {"lshift"}})
         app.client:call("send_love_event", {event = "mousepressed", args = {160, 150, 1}})
         app.client:call("send_love_event", {event = "mousemoved", args = {210, 150, 50, 0}})
@@ -335,7 +335,7 @@ describe("in-game debugger overlay", function()
         openDebugger()
         local wx, wy = moveCursor(160, 150)
         local eid = spawnAt(wx, wy)
-        app.client:call("debug_select", {id = eid, replace = true})
+        app.client:call("cmd_select", {id = eid, replace = true})
         app.client:call("send_love_event", {event = "keypressed", args = {"lshift"}})
         app.client:call("send_love_event", {event = "mousepressed", args = {160, 150, 1}})
         app.client:call("send_love_event", {event = "mousemoved", args = {220, 150, 60, 0}})
@@ -352,7 +352,7 @@ describe("in-game debugger overlay", function()
     it("despawn with no id despawns all selected and clears", function()
         local a = spawnAt(50, 50)
         local b = spawnAt(52, 52)
-        app.client:call("debug_select", {id = a, replace = true})
+        app.client:call("cmd_select", {id = a, replace = true})
         openDebugger()
         typeCommand("select " .. tostring(b))
         fixture.eventually(fixture.callTimeout, function(): boolean
@@ -426,7 +426,7 @@ describe("in-game debugger overlay", function()
 
     it("mark names entities and goto moves the camera to them", function()
         local a = spawnAt(300, 40)
-        app.client:call("debug_select", {id = a, replace = true})
+        app.client:call("cmd_select", {id = a, replace = true})
         openDebugger()
         typeCommand("mark boss")
         local marked = fixture.eventually(fixture.callTimeout, function(): boolean
@@ -485,7 +485,7 @@ describe("in-game debugger overlay", function()
     it("select and despawn accept a mark name", function()
         local a = spawnAt(25, 25)
         local b = spawnAt(26, 26)
-        app.client:call("debug_select", {id = a, replace = true})
+        app.client:call("cmd_select", {id = a, replace = true})
         openDebugger()
         typeCommand("select " .. tostring(b))
         typeCommand("mark crew")
@@ -508,7 +508,7 @@ describe("in-game debugger overlay", function()
 
     it("note annotates selected entities and clears on empty", function()
         local a = spawnAt(55, 55)
-        app.client:call("debug_select", {id = a, replace = true})
+        app.client:call("cmd_select", {id = a, replace = true})
         openDebugger()
         typeCommand("note needs review")
         local noted = fixture.eventually(fixture.callTimeout, function(): boolean
@@ -540,7 +540,7 @@ describe("in-game debugger overlay", function()
 
     it("info of a selected entity succeeds", function()
         local eid = spawnAt(90, 90)
-        app.client:call("debug_select", {id = eid, replace = true})
+        app.client:call("cmd_select", {id = eid, replace = true})
         openDebugger()
         typeCommand("info")
         local ok = fixture.eventually(fixture.callTimeout, function(): boolean
@@ -655,7 +655,7 @@ describe("in-game debugger overlay", function()
             return nil
         end)
         luassert.is_true(restored == true, "snapshot load did not restore the entity count")
-        local info = app.client:call("debug_snapshot_info", {ref = tostring(num)})
+        local info = app.client:call("cmd_snapshot_info", {ref = tostring(num)})
         luassert.equals(num, tonumber(info.number), "snapshot info did not find the save by number")
         luassert.is_true(info.exists as boolean, "snapshot info says the file is missing")
         luassert.equals(base, tonumber(info.entities),
@@ -674,7 +674,7 @@ describe("in-game debugger overlay", function()
 
     it("mark clear removes all marks and list reports empty", function()
         local a = spawnAt(15, 15)
-        app.client:call("debug_select", {id = a, replace = true})
+        app.client:call("cmd_select", {id = a, replace = true})
         openDebugger()
         typeCommand("mark crew2")
         typeCommand("mark clear")
@@ -702,7 +702,7 @@ describe("in-game debugger overlay", function()
             return nil
         end)
         luassert.is_true(ok == true, "timed profile did not reopen with results")
-        local info = app.client:call("debug_profile_info", {})
+        local info = app.client:call("cmd_profile_info", {})
         luassert.is_not_nil(info.summary, "profile info did not return a summary")
         typeCommand("profile clear")
         local pcleared = fixture.eventually(fixture.callTimeout, function(): boolean
@@ -736,9 +736,9 @@ describe("in-game debugger overlay", function()
             return nil
         end)
         luassert.is_true(infoShown == true, "screenshot info errored: " .. tostring(context().message))
-        local viaMcp = app.client:call("debug_screenshot_info", {})
+        local viaMcp = app.client:call("cmd_screenshot_info", {})
         luassert.equals("shottest.png", viaMcp.path as string)
-        local copied = app.client:call("debug_screenshot_path", {})
+        local copied = app.client:call("cmd_screenshot_path", {})
         luassert.matches("shottest%.png$", copied.path as string)
         -- Typing the next command dismisses the popup (and its thumbnail).
         typeCommand("screenshot clear")
@@ -767,7 +767,7 @@ describe("in-game debugger overlay", function()
 
     it("clear command clears the selection", function()
         local a = spawnAt(70, 70)
-        app.client:call("debug_select", {id = a, replace = true})
+        app.client:call("cmd_select", {id = a, replace = true})
         openDebugger()
         typeCommand("clear")
         local ok = fixture.eventually(fixture.callTimeout, function(): boolean
@@ -779,7 +779,7 @@ describe("in-game debugger overlay", function()
 
     it("delete key despawns the current selection", function()
         local a = spawnAt(60, 60)
-        app.client:call("debug_select", {id = a, replace = true})
+        app.client:call("cmd_select", {id = a, replace = true})
         openDebugger()
         app.client:call("send_love_event", {event = "keypressed", args = {"delete"}})
         app.client:call("send_love_event", {event = "keyreleased", args = {"delete"}})
@@ -837,86 +837,86 @@ describe("in-game debugger overlay", function()
     it("agent drives the selection: add, replace, and clear", function()
         local a = spawnAt(40, 40)
         local b = spawnAt(42, 42)
-        app.client:call("debug_select", {id = a})
-        app.client:call("debug_select", {id = b})
-        luassert.is_true(selectedHas(a) and selectedHas(b), "debug_select did not accumulate")
-        app.client:call("debug_select", {id = a, replace = true})
+        app.client:call("cmd_select", {id = a})
+        app.client:call("cmd_select", {id = b})
+        luassert.is_true(selectedHas(a) and selectedHas(b), "cmd_select did not accumulate")
+        app.client:call("cmd_select", {id = a, replace = true})
         local sel = selectedList()
         luassert.is_true(#sel == 1 and sel[1] == a, "replace did not swap the selection")
-        app.client:call("debug_clear", {})
+        app.client:call("cmd_clear", {})
         luassert.is_true(#selectedList() == 0, "clearing selection did not empty the set")
     end)
 
-    it("registry-derived debug_* tools drive the debugger over MCP", function()
+    it("registry-derived cmd_* tools drive the debugger over MCP", function()
         local eid = spawnAt(45, 45)
-        local sel = app.client:call("debug_select", {id = eid})
-        luassert.equals(1, tonumber(sel.selected), "debug_select did not report a selection")
-        luassert.is_true(selectedHas(eid), "debug_select did not select the entity")
+        local sel = app.client:call("cmd_select", {id = eid})
+        luassert.equals(1, tonumber(sel.selected), "cmd_select did not report a selection")
+        luassert.is_true(selectedHas(eid), "cmd_select did not select the entity")
 
-        local marked = app.client:call("debug_mark", {name = "mcpmark"})
+        local marked = app.client:call("cmd_mark", {name = "mcpmark"})
         luassert.equals("mcpmark", marked.name as string)
         local marks = context().marks as {string: string}
-        luassert.is_true(marks ~= nil and marks.mcpmark ~= nil, "debug_mark did not mark")
+        luassert.is_true(marks ~= nil and marks.mcpmark ~= nil, "cmd_mark did not mark")
 
-        app.client:call("debug_note", {msg = "seen by agent"})
+        app.client:call("cmd_note", {msg = "seen by agent"})
         local notes = context().notes as {string: string}
-        luassert.is_true(notes ~= nil and notes["seen by agent"] ~= nil, "debug_note did not note")
+        luassert.is_true(notes ~= nil and notes["seen by agent"] ~= nil, "cmd_note did not note")
 
-        local listed = app.client:call("debug_mark_list", {})
+        local listed = app.client:call("cmd_mark_list", {})
         local groups = listed.marks as {string: {string: number}}
         luassert.is_true(groups ~= nil and groups.mcpmark ~= nil and groups.mcpmark.count == 1,
-            "debug_mark_list did not return structured groups")
+            "cmd_mark_list did not return structured groups")
 
-        app.client:call("debug_mark_clear", {})
-        app.client:call("debug_clear", {})
-        luassert.equals(0, #selectedList(), "debug_clear did not clear the selection")
+        app.client:call("cmd_mark_clear", {})
+        app.client:call("cmd_clear", {})
+        luassert.equals(0, #selectedList(), "cmd_clear did not clear the selection")
     end)
 
-    it("debug_* tools validate arguments through the shared schemas", function()
-        local envMissing = app.client:tryCall("debug_select", {})
+    it("cmd_* tools validate arguments through the shared schemas", function()
+        local envMissing = app.client:tryCall("cmd_select", {})
         luassert.is_true(envMissing ~= nil and (envMissing.ok as boolean) == false,
-            "debug_select with no target should fail validation")
-        local envConflict = app.client:tryCall("debug_select", {id = 1, name = "x"})
+            "cmd_select with no target should fail validation")
+        local envConflict = app.client:tryCall("cmd_select", {id = 1, name = "x"})
         luassert.is_true(envConflict ~= nil and (envConflict.ok as boolean) == false,
-            "debug_select with two targets should fail validation")
-        local envType = app.client:tryCall("debug_goto", {id = "five"})
+            "cmd_select with two targets should fail validation")
+        local envType = app.client:tryCall("cmd_goto", {id = "five"})
         luassert.is_true(envType ~= nil and (envType.ok as boolean) == false,
-            "debug_goto with a string id should fail validation")
+            "cmd_goto with a string id should fail validation")
     end)
 
-    it("MCP pause survives a debugger open/close cycle and shares step", function()
-        app.client:call("pause")
+    it("an MCP freeze survives a debugger open/close cycle and shares step", function()
+        app.client:call("cmd_freeze", {on = true})
         local f0 = tonumber(fixture.runLua(app, "return _G.rec.frames")[1])
         fixture.eventually(0.2, function(): boolean return nil end)
         local f1 = tonumber(fixture.runLua(app, "return _G.rec.frames")[1])
-        luassert.is_true(f1 == f0, "game ran while MCP-paused")
+        luassert.is_true(f1 == f0, "game ran while MCP-frozen")
 
         -- Opening and closing the debugger must not clobber the MCP pause.
         tap()
-        luassert.is_true(waitOpen(true) == true, "debugger did not open while paused")
+        luassert.is_true(waitOpen(true) == true, "debugger did not open while frozen")
         tap()
-        luassert.is_true(waitOpen(false) == true, "debugger did not close while paused")
+        luassert.is_true(waitOpen(false) == true, "debugger did not close while frozen")
         local f2 = tonumber(fixture.runLua(app, "return _G.rec.frames")[1])
         fixture.eventually(0.3, function(): boolean return nil end)
         local f3 = tonumber(fixture.runLua(app, "return _G.rec.frames")[1])
-        luassert.is_true(f3 == f2, "closing the debugger broke the MCP pause")
+        luassert.is_true(f3 == f2, "closing the debugger broke the MCP freeze")
 
-        -- The MCP step tool and the debugger share one freeze controller.
-        app.client:call("step", {frames = 2})
+        -- The cmd_step tool and the debugger share one freeze controller.
+        app.client:call("cmd_step", {n = 2})
         local stepped = fixture.eventually(fixture.callTimeout, function(): boolean
             local now = tonumber(fixture.runLua(app, "return _G.rec.frames")[1])
             if now == f3 + 2 then return true end
             return nil
         end)
-        luassert.is_true(stepped == true, "step did not advance exactly 2 frames while paused")
+        luassert.is_true(stepped == true, "step did not advance exactly 2 frames while frozen")
 
-        app.client:call("resume")
+        app.client:call("cmd_freeze", {on = false})
         local resumed = fixture.eventually(fixture.callTimeout, function(): boolean
             local now = tonumber(fixture.runLua(app, "return _G.rec.frames")[1])
             if now > f3 + 2 then return true end
             return nil
         end)
-        luassert.is_true(resumed == true, "resume did not restart gameplay")
+        luassert.is_true(resumed == true, "releasing the freeze did not restart gameplay")
     end)
 
     -- Toggle the stats HUD: Ctrl+. (ctrl held while . is pressed).
@@ -990,8 +990,8 @@ describe("in-game debugger overlay", function()
         local wx, wy = moveCursor(160, 150)
         local a = spawnAt(wx, wy)
         local b = spawnAt(wx + 10, wy + 5)
-        app.client:call("debug_select", {id = a, replace = true})
-        app.client:call("debug_select", {id = b})
+        app.client:call("cmd_select", {id = a, replace = true})
+        app.client:call("cmd_select", {id = b})
         local ax0 = entityX(a)
         local bx0 = entityX(b)
         app.client:call("send_love_event", {event = "keypressed", args = {"lshift"}})
@@ -1084,7 +1084,7 @@ describe("in-game debugger overlay", function()
             return true
         ]])
 
-        local viaMcp = app.client:call("debug_hello", {who = "agent"})
+        local viaMcp = app.client:call("cmd_hello", {who = "agent"})
         luassert.equals("agent", viaMcp.who as string)
         luassert.equals("hello agent", viaMcp.message as string)
 
@@ -1101,8 +1101,8 @@ describe("in-game debugger overlay", function()
     it("draw annotations render on screen and clear over MCP", function()
         -- Earlier tests pan and zoom the camera; restore the identity mapping
         -- (camera at the window center, zoom 1) so world == screen.
-        app.client:call("debug_camera_move", {x = 160, y = 120, r = 0, z = 1})
-        app.client:call("debug_draw_line",
+        app.client:call("cmd_camera_move", {x = 160, y = 120, r = 0, z = 1})
+        app.client:call("cmd_draw_line",
             {x = 20, y = 60, x2 = 120, y2 = 60, r = 1, g = 0, b = 0, a = 1, stroke = 8, tag = "spec"})
         local seen = fixture.eventually(fixture.callTimeout, function(): boolean
             local px = fixture.probePixels(app, {{70 / 320, 60 / 240}})[1]
@@ -1111,7 +1111,7 @@ describe("in-game debugger overlay", function()
         end)
         luassert.is_true(seen == true, "annotation line did not render")
 
-        local cleared = app.client:call("debug_draw_clear", {tag = "spec"})
+        local cleared = app.client:call("cmd_draw_clear", {tag = "spec"})
         luassert.equals(1, tonumber(cleared.cleared))
         local gone = fixture.eventually(fixture.callTimeout, function(): boolean
             local px = fixture.probePixels(app, {{70 / 320, 60 / 240}})[1]
@@ -1123,7 +1123,7 @@ describe("in-game debugger overlay", function()
 
     it("entity-pinned annotations die with their entity", function()
         local eid = spawnAt(100, 100)
-        app.client:call("debug_draw_circle", {entity = eid, radius = 12, tag = "pin"})
+        app.client:call("cmd_draw_circle", {entity = eid, radius = 12, tag = "pin"})
         local function pinned(): number
             return tonumber(fixture.runLua(app, [[
                 local ann = require("tecs2d.debug.internal.annotations")
@@ -1135,7 +1135,7 @@ describe("in-game debugger overlay", function()
             ]])[1])
         end
         luassert.equals(1, pinned())
-        app.client:call("despawn", {id = eid})
+        app.client:call("cmd_despawn", {id = eid})
         local swept = fixture.eventually(fixture.callTimeout, function(): boolean
             if pinned() == 0 then return true end
             return nil
@@ -1144,17 +1144,17 @@ describe("in-game debugger overlay", function()
     end)
 
     it("ids toggles the id-label flag over MCP", function()
-        app.client:call("debug_ids", {on = true})
-        luassert.is_true(context().showIds as boolean, "debug_ids on did not set the flag")
-        app.client:call("debug_ids", {on = false})
-        luassert.is_false(context().showIds as boolean, "debug_ids off did not clear the flag")
+        app.client:call("cmd_ids", {on = true})
+        luassert.is_true(context().showIds as boolean, "cmd_ids on did not set the flag")
+        app.client:call("cmd_ids", {on = false})
+        luassert.is_false(context().showIds as boolean, "cmd_ids off did not clear the flag")
     end)
 
     it("history records typed commands and is readable over MCP", function()
         openDebugger()
         typeCommand("clear")
         typeCommand("mark ls")
-        local hist = app.client:call("debug_history", {})
+        local hist = app.client:call("cmd_history", {})
         local entries = hist.history as {string}
         luassert.is_true(#entries >= 2, "history did not record typed commands")
         luassert.equals("mark ls", entries[#entries])
@@ -1178,8 +1178,8 @@ describe("in-game debugger overlay", function()
         local base = app.client:call("get_logs", {limit = 1})
         local after = tonumber(base.latest)
         local eid = spawnAt(12, 12)
-        app.client:call("debug_select", {id = eid})
-        app.client:call("debug_mark", {name = "evmark"})
+        app.client:call("cmd_select", {id = eid})
+        app.client:call("cmd_mark", {name = "evmark"})
 
         local out = app.client:call("get_logs", {after = after, contains = "debug.events"})
         local sawSelection, sawMark = false, false
@@ -1194,11 +1194,11 @@ describe("in-game debugger overlay", function()
         local again = app.client:call("get_logs",
             {after = tonumber(out.latest), contains = "debug.events"})
         luassert.equals(0, #(again.logs as {any}), "cursor did not advance past seen lines")
-        app.client:call("debug_mark_clear", {})
+        app.client:call("cmd_mark_clear", {})
     end)
 
-    it("get_component_schema reports FFI fields and defaults", function()
-        local schema = app.client:call("get_component_schema", {name = "Transform"})
+    it("cmd_components_info reports FFI fields and defaults", function()
+        local schema = app.client:call("cmd_components_info", {name = "Transform"})
         luassert.equals("ffi", schema.kind as string)
         local byName: {string: string} = {}
         for _, f in ipairs(schema.fields as {any}) do
@@ -1209,12 +1209,12 @@ describe("in-game debugger overlay", function()
         luassert.equals("int32_t", byName.layer)
         luassert.equals(1, tonumber((schema.defaults as {string: any}).scaleX))
 
-        local unknown = app.client:tryCall("get_component_schema", {name = "Nope"})
+        local unknown = app.client:tryCall("cmd_components_info", {name = "Nope"})
         luassert.is_true(unknown ~= nil and (unknown.ok as boolean) == false,
             "unknown component should error")
     end)
 
-    it("toggle_system stops and restarts a system; debug_systems_info reports it", function()
+    it("cmd_systems stop/start control a system; cmd_systems_info reports it", function()
         local function frames(): number
             return tonumber(fixture.runLua(app, "return _G.rec.frames")[1])
         end
@@ -1225,14 +1225,14 @@ describe("in-game debugger overlay", function()
         end)
         luassert.is_true(running == true, "frame counter is not running")
 
-        app.client:call("toggle_system", {name = "test.FrameCounter", enabled = false})
+        app.client:call("cmd_systems_stop", {name = "test.FrameCounter"})
         local f1 = frames()
         fixture.eventually(0.3, function(): boolean return nil end)
         luassert.equals(f1, frames(), "stopped system still ran")
-        local info = app.client:call("debug_systems_info", {name = "test.FrameCounter"})
+        local info = app.client:call("cmd_systems_info", {name = "test.FrameCounter"})
         luassert.is_false(info.enabled as boolean)
 
-        app.client:call("toggle_system", {name = "test.FrameCounter", enabled = true})
+        app.client:call("cmd_systems_start", {name = "test.FrameCounter"})
         local resumed = fixture.eventually(fixture.callTimeout, function(): boolean
             if frames() > f1 then return true end
             return nil
@@ -1240,7 +1240,7 @@ describe("in-game debugger overlay", function()
         luassert.is_true(resumed == true, "restarted system did not run")
     end)
 
-    it("debug_camera verbs move, retime, and toggle cameras", function()
+    it("cmd_camera verbs move, retime, and toggle cameras", function()
         -- The context camera fields are sampled only while the panel is open;
         -- assert against the live pipeline camera instead.
         local function liveCamera(): number, number, number
@@ -1253,16 +1253,16 @@ describe("in-game debugger overlay", function()
             return tonumber(vals[1]), tonumber(vals[2]), tonumber(vals[3])
         end
 
-        app.client:call("debug_camera_move", {x = 200, y = 90, z = 2})
+        app.client:call("cmd_camera_move", {x = 200, y = 90, z = 2})
         local moved = fixture.eventually(fixture.callTimeout, function(): boolean
             local x, _, z = liveCamera()
             if math.abs(x - 200) < 1 and math.abs(z - 2) < 0.01 then return true end
             return nil
         end)
-        luassert.is_true(moved == true, "debug_camera_move did not move the camera")
+        luassert.is_true(moved == true, "cmd_camera_move did not move the camera")
 
         -- Partial move: only zoom changes, position keeps its current value.
-        app.client:call("debug_camera_move", {z = 1.5})
+        app.client:call("cmd_camera_move", {z = 1.5})
         local partial = fixture.eventually(fixture.callTimeout, function(): boolean
             local x, y, z = liveCamera()
             if math.abs(x - 200) < 1 and math.abs(y - 90) < 1 and math.abs(z - 1.5) < 0.01 then
@@ -1272,27 +1272,27 @@ describe("in-game debugger overlay", function()
         end)
         luassert.is_true(partial == true, "partial camera move clobbered the position")
 
-        local ts = app.client:call("debug_camera_timescale", {scale = 0.25})
+        local ts = app.client:call("cmd_camera_timescale", {scale = 0.25})
         luassert.equals(0.25, tonumber(ts.scale))
         local live = fixture.runLua(app, [[
             local gfx = require("tecs2d.gfx")
             return world.resources[gfx.PIPELINE]:getTimeScale()
         ]])[1]
         luassert.equals("0.25", live, "timescale did not apply to the pipeline")
-        app.client:call("debug_camera_timescale", {scale = 1})
+        app.client:call("cmd_camera_timescale", {scale = 1})
 
         fixture.runLua(app, [[
             local gfx = require("tecs2d.gfx")
             world.resources[gfx.PIPELINE]:newCamera("speccam", {})
             return true
         ]])
-        local off = app.client:call("debug_camera_toggle", {name = "speccam"})
+        local off = app.client:call("cmd_camera_toggle", {name = "speccam"})
         luassert.is_false(off.active as boolean)
-        local on = app.client:call("debug_camera_toggle", {name = "speccam"})
+        local on = app.client:call("cmd_camera_toggle", {name = "speccam"})
         luassert.is_true(on.active as boolean)
-        app.client:call("debug_camera_toggle", {name = "speccam"})
+        app.client:call("cmd_camera_toggle", {name = "speccam"})
 
-        app.client:call("debug_camera_move", {x = 160, y = 120, r = 0, z = 1})
+        app.client:call("cmd_camera_move", {x = 160, y = 120, r = 0, z = 1})
     end)
 
     it("tab completes arguments, not just command names", function()
@@ -1315,19 +1315,18 @@ describe("in-game debugger overlay", function()
     end)
 
     it("engine command groups answer over MCP in a live app", function()
-        -- Archetypes and components (via the builtin tools; the registry
-        -- verbs are overlay-only for these).
-        local archs = app.client:call("get_archetypes", {})
+        -- Archetypes and components.
+        local archs = app.client:call("cmd_archetypes_list", {})
         luassert.is_true(tonumber(archs.count) >= 1, "no archetypes listed")
-        local comp = app.client:call("get_component_schema", {name = "Transform"})
+        local comp = app.client:call("cmd_components_info", {name = "Transform"})
         luassert.equals("ffi", comp.kind as string)
 
         -- States.
         fixture.runLua(app, "world:createState('LoveSpecState') return true")
-        app.client:call("debug_states_push", {name = "LoveSpecState"})
-        local states = app.client:call("debug_states_info", {})
+        app.client:call("cmd_states_push", {name = "LoveSpecState"})
+        local states = app.client:call("cmd_states_info", {})
         luassert.equals("LoveSpecState", states.top as string)
-        app.client:call("debug_states_pop", {})
+        app.client:call("cmd_states_pop", {})
 
         -- Layers: hiding layer 1 removes pixels, not just the flag.
         fixture.runLua(app, [[
@@ -1351,43 +1350,43 @@ describe("in-game debugger overlay", function()
             return nil
         end)
         luassert.is_true(shown == true, "layer probe rectangle never rendered")
-        local toggled = app.client:call("debug_layers_toggle", {layer = "1"})
+        local toggled = app.client:call("cmd_layers_toggle", {layer = "1"})
         luassert.is_false(toggled.visible as boolean)
         local hidden = fixture.eventually(fixture.callTimeout, function(): boolean
             if centerRed() < baseline * 0.25 then return true end
             return nil
         end)
         luassert.is_true(hidden == true, "layers toggle did not hide the layer's pixels")
-        app.client:call("debug_layers_toggle", {layer = "1"})
+        app.client:call("cmd_layers_toggle", {layer = "1"})
         local restored = fixture.eventually(fixture.callTimeout, function(): boolean
             if centerRed() > baseline * 0.75 then return true end
             return nil
         end)
         luassert.is_true(restored == true, "layers toggle did not restore the layer")
         -- `layers all` is the escape hatch: hide again, then reset everything.
-        app.client:call("debug_layers_toggle", {layer = "1"})
-        app.client:call("debug_layers_all", {})
+        app.client:call("cmd_layers_toggle", {layer = "1"})
+        app.client:call("cmd_layers_all", {})
         local allBack = fixture.eventually(fixture.callTimeout, function(): boolean
             if centerRed() > baseline * 0.75 then return true end
             return nil
         end)
         luassert.is_true(allBack == true, "layers all did not restore visibility")
         fixture.runLua(app, "world:despawn(_G.layerProbe) world:commit() return true")
-        luassert.is_true((app.client:call("debug_layers_list", {})).layers ~= nil)
-        local layerInfo = app.client:call("debug_layers_info", {layer = "1"})
+        luassert.is_true((app.client:call("cmd_layers_list", {})).layers ~= nil)
+        local layerInfo = app.client:call("cmd_layers_info", {layer = "1"})
         luassert.is_true(layerInfo.visible as boolean)
         luassert.is_not_nil(layerInfo.entities)
 
         -- Lighting state answers through the info verb.
-        luassert.is_not_nil((app.client:call("debug_light_info", {})).lighting)
+        luassert.is_not_nil((app.client:call("cmd_light_info", {})).lighting)
 
         -- Grid and bounds overlays toggle and render without disturbing the app.
-        local grid = app.client:call("debug_grid", {size = 16, offsetX = 3, offsetY = -5})
+        local grid = app.client:call("cmd_grid", {size = 16, offsetX = 3, offsetY = -5})
         luassert.is_true(grid.enabled as boolean)
         luassert.equals(16, tonumber(grid.w))
         luassert.equals(3, tonumber(grid.offsetX))
         luassert.equals(-5, tonumber(grid.offsetY))
-        local gridContext = (app.client:call("get_debug_context", {})).grid as {string: any}
+        local gridContext = (app.client:call("cmd_context", {})).grid as {string: any}
         luassert.equals(3, tonumber(gridContext.offsetX))
         luassert.equals(-5, tonumber(gridContext.offsetY))
         fixture.runLua(app, [[
@@ -1401,64 +1400,64 @@ describe("in-game debugger overlay", function()
             world:commit()
             return _G.debugBoundsSprite
         ]])
-        app.client:call("debug_bounds", {})
-        luassert.is_true((app.client:call("get_debug_context", {})).showBounds as boolean)
+        app.client:call("cmd_bounds", {})
+        luassert.is_true((app.client:call("cmd_context", {})).showBounds as boolean)
         -- Leave bounds enabled long enough for PostRender to inspect SpriteData.
         fixture.eventually(0.3, function(): boolean return nil end)
-        luassert.is_true((app.client:call("get_debug_context", {})).showBounds as boolean)
+        luassert.is_true((app.client:call("cmd_context", {})).showBounds as boolean)
         -- Grid origin is (3, -5): tile x = floor((33-3)/16), y = floor((33+5)/16).
         -- No tilemaps in this fixture, so map info uses the grid fallback.
-        local tileInfo = app.client:call("debug_map_info", {x = 33, y = 33})
+        local tileInfo = app.client:call("cmd_map_info", {x = 33, y = 33})
         luassert.equals(1, tonumber(tileInfo.x), "map info must honor the grid origin on x")
         luassert.equals(2, tonumber(tileInfo.y), "map info must honor the grid origin on y")
-        app.client:call("debug_draw_clear", {tag = "tile"})
-        app.client:call("debug_grid", {on = false})
-        app.client:call("debug_bounds", {on = false})
+        app.client:call("cmd_draw_clear", {tag = "tile"})
+        app.client:call("cmd_grid", {on = false})
+        app.client:call("cmd_bounds", {on = false})
 
         -- Physics: empty Box2D world responds to status and probes.
-        local phys = app.client:call("debug_physics_info", {})
+        local phys = app.client:call("cmd_physics_info", {})
         luassert.equals(0, tonumber(phys.bodies))
-        local ray = app.client:call("debug_physics_raycast", {x1 = 0, y1 = 0, x2 = 100, y2 = 100})
+        local ray = app.client:call("cmd_physics_raycast", {x1 = 0, y1 = 0, x2 = 100, y2 = 100})
         luassert.equals(0, #(ray.hits as {any}))
-        app.client:call("debug_draw_clear", {tag = "physics"})
+        app.client:call("cmd_draw_clear", {tag = "physics"})
 
         -- physics debug installs the drawer plugin on first use.
-        app.client:call("debug_physics_debug", {})
+        app.client:call("cmd_physics_debug", {})
         local drawer = fixture.runLua(app, [[
             local systemcontrol = require("tecs2d.internal.systemcontrol")
             return tostring(systemcontrol.info(world, "tecs2d.gfx.physicsdebug") ~= nil)
         ]])[1]
         luassert.equals("true", drawer, "physics debug did not install the drawer system")
-        app.client:call("debug_physics_debug", {})
+        app.client:call("cmd_physics_debug", {})
 
         -- Controllers, materials, sprites, assets, audio: status shapes.
-        luassert.is_not_nil((app.client:call("debug_controllers_list", {})).count)
-        luassert.is_not_nil((app.client:call("debug_materials_list", {})).count)
-        luassert.is_not_nil((app.client:call("debug_audio_info", {})).active)
-        luassert.is_not_nil((app.client:call("debug_assets_list", {})).count)
+        luassert.is_not_nil((app.client:call("cmd_controllers_list", {})).count)
+        luassert.is_not_nil((app.client:call("cmd_materials_list", {})).count)
+        luassert.is_not_nil((app.client:call("cmd_audio_info", {})).active)
+        luassert.is_not_nil((app.client:call("cmd_assets_list", {})).count)
 
         -- Capabilities and describe answer over MCP.
-        local caps = app.client:call("debug_capabilities", {})
+        local caps = app.client:call("cmd_capabilities", {})
         luassert.is_true((caps.plugins as {string: any}).pipeline as boolean)
         luassert.is_true((caps.plugins as {string: any}).physics as boolean)
         luassert.is_not_nil((caps.mcp as {string: any}).port)
-        local described = app.client:call("debug_describe", {command = "rewind"})
+        local described = app.client:call("cmd_describe", {command = "rewind"})
         luassert.is_true(#(described.subcommands as {any}) >= 8)
 
         -- Agent session reflects the fixture's own MCP port.
-        local agent = app.client:call("debug_agent_info", {})
+        local agent = app.client:call("cmd_agent_info", {})
         luassert.equals(app.client.port, tonumber(agent.port), "agent session port mismatch")
         luassert.is_true(tonumber(agent.tools) > 40, "tool count looks wrong")
     end)
 
     it("rewind captures a ring, loads the past, and holds while frozen", function()
-        local started = app.client:call("debug_rewind_start", {interval = 0.15, cap = 8})
+        local started = app.client:call("cmd_rewind_start", {interval = 0.15, cap = 8})
         luassert.equals(8, tonumber(started.cap))
 
         -- Let the ring accumulate pre-marker history.
         local preCount = 0
         local pre = fixture.eventually(fixture.callTimeout, function(): boolean
-            local rw = (app.client:call("get_debug_context", {})).rewind as {string: any}
+            local rw = (app.client:call("cmd_context", {})).rewind as {string: any}
             preCount = tonumber(rw.count) as integer
             if preCount >= 2 then return true end
             return nil
@@ -1468,15 +1467,15 @@ describe("in-game debugger overlay", function()
         -- Spawn a marker, then wait for captures that include it.
         local marker = spawnAt(300, 300)
         local post = fixture.eventually(fixture.callTimeout, function(): boolean
-            local rw = (app.client:call("get_debug_context", {})).rewind as {string: any}
+            local rw = (app.client:call("cmd_context", {})).rewind as {string: any}
             if tonumber(rw.count) >= preCount + 2 then return true end
             return nil
         end)
         luassert.is_true(post == true, "ring did not keep capturing after the spawn")
 
         -- Load the oldest entry: it predates the marker, so the marker dies.
-        local count = tonumber(((app.client:call("get_debug_context", {})).rewind as {string: any}).count)
-        local loaded = app.client:call("debug_rewind_load", {ref = tostring(count)})
+        local count = tonumber(((app.client:call("cmd_context", {})).rewind as {string: any}).count)
+        local loaded = app.client:call("cmd_rewind_load", {ref = tostring(count)})
         luassert.is_not_nil(loaded.age)
         local gone = fixture.eventually(fixture.callTimeout, function(): boolean
             local alive = fixture.runLua(app, string.format(
@@ -1485,36 +1484,36 @@ describe("in-game debugger overlay", function()
             return nil
         end)
         luassert.is_true(gone == true, "rewind load did not restore the pre-marker world")
-        local rwAfter = (app.client:call("get_debug_context", {})).rewind as {string: any}
+        local rwAfter = (app.client:call("cmd_context", {})).rewind as {string: any}
         luassert.equals("paused", rwAfter.status as string)
 
         -- Keep the evidence as a normal snapshot, then resume.
-        local kept = app.client:call("debug_rewind_keep", {ref = "latest", name = "rewind-keep-test.snapshot"})
+        local kept = app.client:call("cmd_rewind_keep", {ref = "latest", name = "rewind-keep-test.snapshot"})
         luassert.is_not_nil(kept.number)
-        app.client:call("debug_rewind_resume", {})
+        app.client:call("cmd_rewind_resume", {})
 
         -- The freeze controller holds captures: open the debugger, wait past
         -- several intervals, and the count must not move.
         openDebugger()
-        local frozenCount = tonumber(((app.client:call("get_debug_context", {})).rewind as {string: any}).count)
+        local frozenCount = tonumber(((app.client:call("cmd_context", {})).rewind as {string: any}).count)
         fixture.eventually(0.6, function(): boolean return nil end)
-        local stillCount = tonumber(((app.client:call("get_debug_context", {})).rewind as {string: any}).count)
+        local stillCount = tonumber(((app.client:call("cmd_context", {})).rewind as {string: any}).count)
         luassert.equals(frozenCount, stillCount, "ring captured while frozen")
         tap()
         waitOpen(false)
 
-        app.client:call("debug_rewind_clear", {})
-        app.client:call("debug_snapshot_clear", {})
+        app.client:call("cmd_rewind_clear", {})
+        app.client:call("cmd_snapshot_clear", {})
         luassert.equals("idle",
-            (((app.client:call("get_debug_context", {})).rewind as {string: any}).status) as string)
+            (((app.client:call("cmd_context", {})).rewind as {string: any}).status) as string)
     end)
 
     it("diff spots a spawned entity between snapshots over MCP", function()
-        app.client:call("debug_snapshot_save", {name = "diff-one.snapshot"})
+        app.client:call("cmd_snapshot_save", {name = "diff-one.snapshot"})
         local marker = spawnAt(210, 210)
-        app.client:call("debug_snapshot_save", {name = "diff-two.snapshot"})
+        app.client:call("cmd_snapshot_save", {name = "diff-two.snapshot"})
 
-        local r = app.client:call("debug_diff",
+        local r = app.client:call("cmd_diff",
             {from = "diff-one.snapshot", to = "diff-two.snapshot"})
         luassert.is_true(tonumber((r.summary as {string: any}).entitiesAdded) >= 1,
             "diff missed the spawned entity")
@@ -1528,18 +1527,18 @@ describe("in-game debugger overlay", function()
         luassert.is_true(found, "spawned entity missing from the change list")
 
         -- Pointer drill-down against the last diff, then against the artifact.
-        local got = app.client:call("debug_diff_get", {pointer = "/summary/entitiesAdded"})
+        local got = app.client:call("cmd_diff_get", {pointer = "/summary/entitiesAdded"})
         luassert.is_true(tonumber(got.value) >= 1)
-        local fromFile = app.client:call("debug_diff_get",
+        local fromFile = app.client:call("cmd_diff_get",
             {pointer = "/totalChanges", ref = "latest"})
         luassert.is_not_nil(fromFile.value)
 
         -- The live world diffs empty against the snapshot just taken of it.
-        local same = app.client:call("debug_diff", {from = "diff-two.snapshot"})
+        local same = app.client:call("cmd_diff", {from = "diff-two.snapshot"})
         luassert.equals(0, tonumber(same.totalChanges), "current should equal the fresh snapshot")
 
-        app.client:call("debug_diff_clear", {})
-        app.client:call("debug_snapshot_clear", {})
+        app.client:call("cmd_diff_clear", {})
+        app.client:call("cmd_snapshot_clear", {})
     end)
 
     it("leader+y yanks the last output to the clipboard", function()

@@ -138,8 +138,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
     end
 
 
-    -- Count live entities and non-empty archetypes, matching the counts the
-    -- snapshot MCP tools report.
+    -- Count live entities and non-empty archetypes for snapshot reports.
     local function countEntities(): integer, integer
         local ec, ac = 0, 0
         w:forEachArchetype(function(arch: tecs.Archetype)
@@ -569,8 +568,8 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
         {
             name = "profile",
             section = "Capture",
-            mcp = false,   -- agents use the profiler_start / profiler_stop MCP tools
             shortHelp = "sample the running game with the LuaJIT profiler",
+            mcpHelp = "Start the LuaJIT sampling profiler for seconds (0.1-60; capped) and write a collapsed-stack capture when it finishes. The capture lands in the process working directory and its summary publishes to cmd_context; fetch details with cmd_profile_info and cmd_profile_path. Filtering (zone=) and intervalMs are fixed at start.",
             schema = profileSchema,
             examples = {"profile", "profile 5", "profile 5 intervalMs=5",
                 "profile zone=afterFixed/Render", "profile ls"},
@@ -672,7 +671,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "save",
                     shortHelp = "save the world; reports a number for load/open",
-                    mcpHelp = "Save the whole world to a snapshot file in the save directory (format luajit by default, or json; layers restricts to Transform layers). Returns a snapshot number usable as a debug_snapshot_load and debug_diff ref. inline=true instead returns the payload in the result (a json snapshot object, or a base64 luajit payload) and writes no artifact. Does not disturb the running game.",
+                    mcpHelp = "Save the whole world to a snapshot file in the save directory (format luajit by default, or json; layers restricts to Transform layers). Returns a snapshot number usable as a cmd_snapshot_load and cmd_diff ref. inline=true instead returns the payload in the result (a json snapshot object, or a base64 luajit payload) and writes no artifact. Does not disturb the running game.",
                     schema = snapshotSaveSchema,
                     examples = {"snapshot save", "snapshot save boss-fight",
                         "snapshot save format=json pretty=true",
@@ -711,9 +710,9 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         local pretty = v.pretty == true
 
                         if v.inline == true then
-                            -- Inline parity with the snapshot_save MCP tool: the
-                            -- payload rides in the result, no artifact is written,
-                            -- and no snapshot number is minted.
+                            -- Inline form: the payload rides in the result, no
+                            -- artifact is written, and no snapshot number is
+                            -- minted.
                             local tStart = getTime()
                             if fmt == "json" then
                                 local okS, snapOrErr = pcall(function(): {string: any}
@@ -975,7 +974,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "start",
                     shortHelp = "begin capturing; refuses over a stopped ring",
-                    mcpHelp = "Start the time-travel ring: a rolling window of world snapshots captured every interval seconds (cap entries) while the game runs unfrozen. Capture holds automatically while the game is paused. Refuses if a stopped ring still holds entries. Start this early; debug_rewind_load and debug_diff feed on it.",
+                    mcpHelp = "Start the time-travel ring: a rolling window of world snapshots captured every interval seconds (cap entries) while the game runs unfrozen. Capture holds automatically while the game is paused. Refuses if a stopped ring still holds entries. Start this early; cmd_rewind_load and cmd_diff feed on it.",
                     schema = { args = {
                         interval = {default = 5, help = "seconds between captures"},
                         cap = {default = 10, kind = "number", help = "entries kept before the oldest is dropped"},
@@ -1095,7 +1094,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "load",
                     shortHelp = "restore a ring entry; capture pauses until resumed",
-                    mcpHelp = "Rewind the live world to a ring entry: ref is a newest-first index or latest, or use ago=N seconds. Overwrites current world state (selection, marks, and notes clear) and pauses capture until debug_rewind_resume. Pair with the step tool to replay toward a bug.",
+                    mcpHelp = "Rewind the live world to a ring entry: ref is a newest-first index or latest, or use ago=N seconds. Overwrites current world state (selection, marks, and notes clear) and pauses capture until cmd_rewind_resume. Pair with cmd_step to replay toward a bug.",
                     schema = { args = {
                         ref = {help = "entry index (newest first), latest, or Ns for seconds back"},
                         ago = {kind = "number", help = "seconds back; picks the closest at or before"},
@@ -1198,7 +1197,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             name = "diff",
             section = "Capture",
             shortHelp = "structural diff between snapshots, rewind entries, and the live world",
-            mcpHelp = "Compare two moments structurally: from/to are a snapshot number, name, or latest; rewind:<idx|latest|Ns|ago=N>; or current (default to). Call with limit=0 first: the per-component summary always covers the whole diff and tells you what to filter (component=, ignore=, entity=). Read-only. Returns summary, changes with JSON Pointer paths, and the path of a JSON artifact holding the full result. Drill in with debug_diff_get.",
+            mcpHelp = "Compare two moments structurally: from/to are a snapshot number, name, or latest; rewind:<idx|latest|Ns|ago=N>; or current (default to). Call with limit=0 first: the per-component summary always covers the whole diff and tells you what to filter (component=, ignore=, entity=). Read-only. Returns summary, changes with JSON Pointer paths, and the path of a JSON artifact holding the full result. Drill in with cmd_diff_get.",
             schema = {
                 args = {
                     from = {required = true,
@@ -1246,7 +1245,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "get",
                     shortHelp = "dereference a JSON Pointer into a diff result",
-                    mcpHelp = "Dereference an RFC 6901 pointer (e.g. /summary/byComponent or /changes/0/after) into the last diff result, or into a saved diff artifact when ref is given. Use after debug_diff to fetch payloads its truncated change list omitted.",
+                    mcpHelp = "Dereference an RFC 6901 pointer (e.g. /summary/byComponent or /changes/0/after) into the last diff result, or into a saved diff artifact when ref is given. Use after cmd_diff to fetch payloads its truncated change list omitted.",
                     schema = { args = {
                         pointer = {required = true, help = "RFC 6901 pointer, e.g. /summary/byComponent"},
                         ref = {help = "diff artifact index or latest; omit for the last diff"},

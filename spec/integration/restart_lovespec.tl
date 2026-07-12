@@ -1,4 +1,4 @@
---- Love2D integration suite: engine restart. The MCP restart tool quits
+--- Love2D integration suite: engine restart. The cmd_restart tool quits
 --- with love's "restart" code, which re-runs the whole tecs2d loop in
 --- the same process: fresh world, rebuilt GPU resources, and a
 --- re-listening MCP server on the same port. Covers the restart
@@ -21,7 +21,7 @@ describe("restart: the loop reboots into a fresh, working world", function()
 
     setup(function()
         app = fixture.start(APP_DIR)
-        baselineEntities = tonumber(app.client:call("get_stats", {}).entities) as integer
+        baselineEntities = tonumber(app.client:call("cmd_stats", {}).entities) as integer
         fixture.runLua(app, [[
             local tecs = require("tecs")
             local gfx = require("tecs2d.gfx")
@@ -42,7 +42,7 @@ describe("restart: the loop reboots into a fresh, working world", function()
     end)
 
     it("restart produces a fresh world on the same MCP port", function()
-        local result = app.client:call("restart", {})
+        local result = app.client:call("cmd_restart", {})
         luassert.is_true(result.restarting == true, "restart tool did not acknowledge")
 
         -- The server drops and re-listens; poll with tryCall until the
@@ -56,7 +56,7 @@ describe("restart: the loop reboots into a fresh, working world", function()
             -- tryCall returns the raw envelope; use a pcall'd call for
             -- the unwrapped result (it raises while the server is down).
             local ok, stats = pcall(function(): {string: any}
-                return app.client:call("get_stats", {}, 2)
+                return app.client:call("cmd_stats", {}, 2)
             end)
             if ok and stats then
                 lastSeen = "entities=" .. tostring(stats.entities)

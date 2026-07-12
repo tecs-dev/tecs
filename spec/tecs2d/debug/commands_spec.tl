@@ -47,23 +47,23 @@ describe("tecs2d.debug.commands registry", function()
         luassert.equals("invalid_arguments", bad.code)
     end)
 
-    it("projects a registered command as a debug_* MCP tool", function()
+    it("projects a registered command as a cmd_* MCP tool", function()
         local reg = makeRegistry()
         reg:add(helloCommand())
 
         local found: commands.McpTool = nil
         for _, tool in ipairs(reg:mcpTools()) do
-            if tool.name == "debug_hello" then found = tool end
+            if tool.name == "cmd_hello" then found = tool end
         end
-        luassert.is_not_nil(found, "debug_hello missing from the projection")
+        luassert.is_not_nil(found, "cmd_hello missing from the projection")
         local props = found.inputSchema.properties as {string: {string: any}}
         luassert.equals("string", props.who.type)
 
-        local r = reg:invokeMcp("debug_hello", {who = "agent"})
+        local r = reg:invokeMcp("cmd_hello", {who = "agent"})
         luassert.is_true(r.ok)
         luassert.equals("agent", r.data.who)
 
-        local bad = reg:invokeMcp("debug_hello", {who = 5})
+        local bad = reg:invokeMcp("cmd_hello", {who = 5})
         luassert.is_false(bad.ok)
         luassert.equals("invalid_arguments", bad.code)
     end)
@@ -76,17 +76,17 @@ describe("tecs2d.debug.commands registry", function()
 
         local byName: {string: commands.McpTool} = {}
         for _, tool in ipairs(reg:mcpTools()) do byName[tool.name] = tool end
-        luassert.matches("^Greets a target", byName.debug_hello.description)
-        luassert.matches("^Compare two moments structurally", byName.debug_diff.description)
+        luassert.matches("^Greets a target", byName.cmd_hello.description)
+        luassert.matches("^Compare two moments structurally", byName.cmd_diff.description)
         -- Undeclared tools keep the shortHelp form.
-        luassert.matches("^layers list: list named or modified layers", byName.debug_layers_list.description)
+        luassert.matches("^layers list: list named or modified layers", byName.cmd_layers_list.description)
     end)
 
-    it("debug_set accepts a JSON object value over MCP", function()
+    it("cmd_set accepts a JSON object value over MCP", function()
         local reg, w = makeRegistry()
         local eid = w:spawn(SpecPos(1, 2))
         w:commit()
-        local r = reg:invokeMcp("debug_set",
+        local r = reg:invokeMcp("cmd_set",
             {id = eid, comp = "DbgCmdPos", value = {x = 9, y = 3}})
         w:commit()
         luassert.is_true(r.ok, tostring(r.message))
@@ -94,18 +94,18 @@ describe("tecs2d.debug.commands registry", function()
         luassert.equals(9, pos.x)
         luassert.equals(3, pos.y)
         -- The legacy Lua-expression string keeps working over MCP too.
-        local legacy = reg:invokeMcp("debug_set",
+        local legacy = reg:invokeMcp("cmd_set",
             {id = eid, comp = "DbgCmdPos", value = "{x = 4}"})
         w:commit()
         luassert.is_true(legacy.ok, tostring(legacy.message))
         luassert.equals(4, (w:get(eid, SpecPos) as {string: number}).x)
     end)
 
-    it("debug_modify merges a JSON object value over MCP", function()
+    it("cmd_modify merges a JSON object value over MCP", function()
         local reg, w = makeRegistry()
         local eid = w:spawn(SpecPos(1, 2))
         w:commit()
-        local r = reg:invokeMcp("debug_modify",
+        local r = reg:invokeMcp("cmd_modify",
             {id = eid, comp = "DbgCmdPos", value = {x = 9}})
         w:commit()
         luassert.is_true(r.ok, tostring(r.message))
@@ -161,7 +161,7 @@ describe("tecs2d.debug.commands registry", function()
         local reg = makeRegistry()
         local tool: commands.McpTool = nil
         for _, t in ipairs(reg:mcpTools()) do
-            if t.name == "debug_modify" then tool = t end
+            if t.name == "cmd_modify" then tool = t end
         end
         luassert.is_truthy(tool)
         local props = tool.outputSchema.properties as {string: {string: any}}
@@ -176,7 +176,7 @@ describe("tecs2d.debug.commands registry", function()
     it("keeps outputSchema absent for commands that declare none", function()
         local reg = makeRegistry()
         for _, t in ipairs(reg:mcpTools()) do
-            if t.name == "debug_capabilities" then
+            if t.name == "cmd_capabilities" then
                 luassert.is_nil(t.outputSchema)
             end
         end
@@ -194,7 +194,7 @@ describe("tecs2d.debug.commands registry", function()
                 return {ok = true, data = {hits = 1}}
             end,
         })
-        local r = reg:invokeMcp("debug_describe", {command = "metacmd"})
+        local r = reg:invokeMcp("cmd_describe", {command = "metacmd"})
         luassert.is_true(r.ok, tostring(r.message))
         local d = r.data as {string: any}
         local meta = d.metadata as {string: any}
@@ -237,11 +237,11 @@ describe("tecs2d.debug.commands registry", function()
 
     it("describe returns one command's full contract", function()
         local reg = makeRegistry()
-        local r = reg:invokeMcp("debug_describe", {command = "diff"})
+        local r = reg:invokeMcp("cmd_describe", {command = "diff"})
         luassert.is_true(r.ok, tostring(r.message))
         luassert.equals("diff", r.data.name)
         luassert.equals("Capture", r.data.section)
-        luassert.equals("debug_diff", r.data.tool)
+        luassert.equals("cmd_diff", r.data.tool)
         luassert.is_not_nil((r.data.inputSchema as {string: any}).properties)
         local subs = r.data.subcommands as {any}
         local sawGet = false
@@ -249,14 +249,14 @@ describe("tecs2d.debug.commands registry", function()
             local sc = sub as {string: any}
             if sc.name == "get" then
                 sawGet = true
-                luassert.equals("debug_diff_get", sc.tool)
+                luassert.equals("cmd_diff_get", sc.tool)
                 luassert.is_true((sc.annotations as {string: any}).readOnlyHint as boolean)
             end
         end
         luassert.is_true(sawGet, "diff get missing from the description")
         -- MCP-only: the typed surface uses `help` instead.
         luassert.equals("unknown_command", (reg:execute("describe diff")).code)
-        luassert.is_false((reg:invokeMcp("debug_describe", {command = "nope"})).ok)
+        luassert.is_false((reg:invokeMcp("cmd_describe", {command = "nope"})).ok)
     end)
 
     it("projects derived and overridden safety annotations", function()
@@ -269,21 +269,21 @@ describe("tecs2d.debug.commands registry", function()
         for _, tool in ipairs(reg:mcpTools()) do byName[tool.name] = tool end
 
         -- Read verbs derive read-only and idempotent.
-        luassert.is_true(byName.debug_archetypes_info.annotations.readOnlyHint)
-        luassert.is_true(byName.debug_archetypes_info.annotations.idempotentHint)
-        luassert.is_false(byName.debug_archetypes_info.annotations.destructiveHint)
+        luassert.is_true(byName.cmd_archetypes_info.annotations.readOnlyHint)
+        luassert.is_true(byName.cmd_archetypes_info.annotations.idempotentHint)
+        luassert.is_false(byName.cmd_archetypes_info.annotations.destructiveHint)
         -- World loads and despawns derive destructive.
-        luassert.is_true(byName.debug_rewind_load.annotations.destructiveHint)
-        luassert.is_true(byName.debug_despawn.annotations.destructiveHint)
-        luassert.is_true(byName.debug_snapshot_clear.annotations.destructiveHint,
+        luassert.is_true(byName.cmd_rewind_load.annotations.destructiveHint)
+        luassert.is_true(byName.cmd_despawn.annotations.destructiveHint)
+        luassert.is_true(byName.cmd_snapshot_clear.annotations.destructiveHint,
             "artifact clears delete files")
-        luassert.is_false(byName.debug_mark_clear.annotations.destructiveHint,
+        luassert.is_false(byName.cmd_mark_clear.annotations.destructiveHint,
             "mark clear only touches UI state")
         -- Everything declares a closed world.
-        luassert.is_false(byName.debug_select.annotations.openWorldHint)
+        luassert.is_false(byName.cmd_select.annotations.openWorldHint)
         -- Explicit annotations override the derivation.
-        luassert.is_true(byName.debug_hello.annotations.readOnlyHint)
-        luassert.is_true(byName.debug_hello.annotations.idempotentHint)
+        luassert.is_true(byName.cmd_hello.annotations.readOnlyHint)
+        luassert.is_true(byName.cmd_hello.annotations.idempotentHint)
     end)
 
     it("registers through commands.register on a world with the plugin", function()
@@ -304,7 +304,7 @@ describe("tecs2d.debug.commands registry", function()
         local r = reg:execute("hello")
         luassert.is_false(r.ok)
         luassert.equals("unknown_command", r.code)
-        luassert.is_true((reg:invokeMcp("debug_hello", {})).ok)
+        luassert.is_true((reg:invokeMcp("cmd_hello", {})).ok)
         for _, n in ipairs(reg.names) do
             luassert.is_true(n ~= "hello", "mcp-only command leaked into completion")
         end
@@ -317,7 +317,7 @@ describe("tecs2d.debug.commands registry", function()
         reg:add(cmd)
 
         luassert.is_true((reg:execute("hello")).ok)
-        local r, err = reg:invokeMcp("debug_hello", {})
+        local r, err = reg:invokeMcp("cmd_hello", {})
         luassert.is_nil(r)
         luassert.matches("unknown debugger tool", err)
     end)
@@ -543,7 +543,7 @@ describe("tecs2d.debug.commands registry", function()
             luassert.equals(2, #store.list)
             luassert.equals("spawn point here", store.list[2].text)
 
-            local viaMcp = reg:invokeMcp("debug_draw_circle", {x = 1, y = 2, radius = 8, entity = 42})
+            local viaMcp = reg:invokeMcp("cmd_draw_circle", {x = 1, y = 2, radius = 8, entity = 42})
             luassert.is_true(viaMcp.ok)
             luassert.equals(42, store.list[3].entity)
 
@@ -668,8 +668,8 @@ describe("tecs2d.debug.commands registry", function()
             luassert.is_true(fz:heldBy("operator"))
             luassert.is_true(fz:isFrozen())
 
-            -- Another holder (the MCP pause tool) keeps the world frozen
-            -- after the operator releases.
+            -- Another holder keeps the world frozen after the operator
+            -- releases.
             fz:acquire("mcp")
             local off = reg:execute("freeze off")
             luassert.is_true(off.ok, tostring(off.message))
@@ -788,7 +788,7 @@ describe("tecs2d.debug.commands registry", function()
             local b = w:spawn(SpecPos(2, 2))
             w:commit()
 
-            local r = reg:invokeMcp("debug_set",
+            local r = reg:invokeMcp("cmd_set",
                 {ids = {tostring(a), tostring(b)}, comp = "DbgCmdPos", value = {x = 7}})
             w:commit()
             luassert.is_true(r.ok, tostring(r.message))
@@ -807,7 +807,7 @@ describe("tecs2d.debug.commands registry", function()
             luassert.equals(9, (w:get(a, SpecPos) as {string: number}).y)
             luassert.equals(9, (w:get(b, SpecPos) as {string: number}).y)
 
-            local rm = reg:invokeMcp("debug_remove",
+            local rm = reg:invokeMcp("cmd_remove",
                 {ids = {tostring(a)}, comps = "DbgCmdPos"})
             w:commit()
             luassert.is_true(rm.ok, tostring(rm.message))
@@ -817,10 +817,10 @@ describe("tecs2d.debug.commands registry", function()
 
             -- Neither target nor ids is an argument error, and non-numeric
             -- ids are rejected.
-            local none = reg:invokeMcp("debug_set", {comp = "DbgCmdPos", value = {x = 1}})
+            local none = reg:invokeMcp("cmd_set", {comp = "DbgCmdPos", value = {x = 1}})
             luassert.is_false(none.ok)
             luassert.equals("invalid_arguments", none.code)
-            local bad = reg:invokeMcp("debug_modify",
+            local bad = reg:invokeMcp("cmd_modify",
                 {ids = {"nope"}, comp = "DbgCmdPos", value = {x = 1}})
             luassert.is_false(bad.ok)
             luassert.equals("invalid_arguments", bad.code)

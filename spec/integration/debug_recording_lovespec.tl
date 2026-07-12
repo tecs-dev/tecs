@@ -1,5 +1,5 @@
 --- Love2D integration suite: host recording driven through the debugger
---- command registry (typed commands and the debug_record_* MCP tools).
+--- command registry (typed commands and the cmd_record_* MCP tools).
 --- Recording assembles with ffmpeg, so the whole suite is skipped when
 --- ffmpeg is not on the host PATH.
 ---
@@ -45,7 +45,7 @@ describe("debugger host recording", function()
     end)
 
     local function context(): {string: any}
-        return app.client:call("get_debug_context", {}) as {string: any}
+        return app.client:call("cmd_context", {}) as {string: any}
     end
 
     local function recordingStatus(): string
@@ -99,32 +99,32 @@ describe("debugger host recording", function()
     end)
 
     it("arms a countdown over MCP and cancel disarms it", function()
-        local out = app.client:call("debug_record_start",
+        local out = app.client:call("cmd_record_start",
             {seconds = 5, name = "lovespec-arm", countdown = 30})
         local state = out.recording as {string: any}
         luassert.equals("countdown", state.status as string)
         luassert.equals("countdown", recordingStatus())
 
-        app.client:call("debug_record_cancel", {})
+        app.client:call("cmd_record_cancel", {})
         luassert.equals("idle", recordingStatus())
     end)
 
     it("records, assembles a video, and cleans up its scratch files", function()
-        app.client:call("debug_record_start",
+        app.client:call("cmd_record_start",
             {seconds = 0, countdown = 0, name = "lovespec-e2e", fps = 10, scale = 0.5})
         luassert.is_true(waitStatus("recording", fixture.callTimeout) == true,
             "recording did not start")
         -- Let it capture a few frames.
         fixture.eventually(0.7, function(): boolean return nil end)
-        app.client:call("debug_record_stop", {})
+        app.client:call("cmd_record_stop", {})
 
         luassert.is_true(waitStatus("completed", 15) == true,
             "recording did not complete; status=" .. recordingStatus())
-        local listed = app.client:call("debug_record_list", {})
+        local listed = app.client:call("cmd_record_list", {})
         local recs = listed.recordings as {any}
         luassert.is_true(recs ~= nil and #recs >= 1, "completed recording missing from list")
 
-        local info = app.client:call("debug_record_info", {})
+        local info = app.client:call("cmd_record_info", {})
         luassert.is_true(tonumber(info.duration) > 0, "record info lacks a duration")
         luassert.equals("manual", info.stopReason as string)
 

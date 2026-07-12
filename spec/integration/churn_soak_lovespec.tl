@@ -26,7 +26,7 @@ local SENTINEL_PROBE <const> = {{160 / W, 120 / H}}
 local FIELD_PROBE <const> = {{80 / W, 60 / H}}
 
 local function entityCount(app: fixture.App): integer
-    local result = app.client:call("get_stats", {})
+    local result = app.client:call("cmd_stats", {})
     return tonumber(result.entities) as integer
 end
 

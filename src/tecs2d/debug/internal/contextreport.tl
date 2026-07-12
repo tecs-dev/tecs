@@ -1,6 +1,6 @@
 --- Shared builder for the debugger-context report. One function produces the
---- exact payload served by both the get_debug_context MCP tool and the
---- `context` debugger command, so the two surfaces cannot drift.
+--- exact payload served by the `context` debugger command (the cmd_context
+--- MCP tool), so the two surfaces cannot drift.
 
 local tecs <const> = require("tecs")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
@@ -34,7 +34,7 @@ function contextreport.build(w: tecs.World, ctx: debugcontext.Context): {string:
     for eid in pairs(ctx.notes) do
         if not w:isAlive(eid) then ctx.notes[eid] = nil end
     end
-    -- selection is an entity id; call get_entity with it for the components.
+    -- selection is an entity id; call cmd_info with it for the components.
     -- marks/notes are keyed by name/message with compact id-range values.
     return {
         open = ctx.open,

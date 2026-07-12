@@ -75,11 +75,12 @@ describe("snapshot round-trip: world and pixels restore", function()
     end)
 
     it("saves a snapshot to the save directory", function()
-        local result = app.client:call("snapshot_save", {
+        local result = app.client:call("cmd_snapshot_save", {
             format = "json",
-            saveTo = SNAPSHOT_FILE,
+            name = SNAPSHOT_FILE,
         })
-        luassert.is_string(result.path as string, "snapshot_save returned no path")
+        luassert.is_string(result.path as string, "cmd_snapshot_save returned no path")
+        luassert.is_true(tonumber(result.number) >= 1, "cmd_snapshot_save returned no number")
     end)
 
     it("mutations change the world after the save", function()
@@ -103,9 +104,9 @@ describe("snapshot round-trip: world and pixels restore", function()
     end)
 
     it("loading the snapshot restores entities and pixels", function()
-        app.client:call("snapshot_load", {
+        app.client:call("cmd_snapshot_load", {
             format = "json",
-            loadFrom = SNAPSHOT_FILE,
+            ref = SNAPSHOT_FILE,
         })
         -- The saved scene: red rect back, green circle back, extra gone
         -- (load clears the world first).

@@ -1,7 +1,7 @@
 --- Debug annotations: world-space shapes and text drawn over the game, plus
 --- entity id labels. This is the single owner of ad-hoc debug drawing: the
 --- `draw` registry command writes the store (so both the operator and the
---- debug_draw_* MCP tools go through one path) and the debug.Annotations
+--- cmd_draw_* MCP tools go through one path) and the debug.Annotations
 --- system renders it every frame, panel open or closed.
 ---
 --- Annotations may be pinned to an entity: x/y (and x2/y2) become offsets

@@ -449,7 +449,7 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "world",
                     shortHelp = "convert screen coordinates to world through the active camera",
-                    mcpHelp = "Convert window pixel coordinates to world coordinates through the active camera, the same mapping a click at that pixel uses. Returns both the screen input and the world result. The reverse is debug_camera_screen.",
+                    mcpHelp = "Convert window pixel coordinates to world coordinates through the active camera, the same mapping a click at that pixel uses. Returns both the screen input and the world result. The reverse is cmd_camera_screen.",
                     schema = { args = {
                         x = {required = true, kind = "number", help = "screen x in pixels"},
                         y = {required = true, kind = "number", help = "screen y in pixels"},
@@ -480,7 +480,7 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "screen",
                     shortHelp = "convert world coordinates to screen through the active camera",
-                    mcpHelp = "Convert world coordinates to window pixel coordinates through the active camera. Returns both the world input and the screen result. The reverse is debug_camera_world.",
+                    mcpHelp = "Convert world coordinates to window pixel coordinates through the active camera. Returns both the world input and the screen result. The reverse is cmd_camera_world.",
                     schema = { args = {
                         x = {required = true, kind = "number", help = "world x"},
                         y = {required = true, kind = "number", help = "world y"},

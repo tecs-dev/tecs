@@ -1,6 +1,6 @@
 --- Debugger fixture: an empty deferred-lit scene with the debug plugin
 --- (overlay + stats HUD) plus the MCP server. Backs the overlay toggle,
---- freeze, and get_debug_context suite.
+--- freeze, and cmd_context suite.
 
 local tecs <const> = require("tecs")
 local tecs2d <const> = require("tecs2d")

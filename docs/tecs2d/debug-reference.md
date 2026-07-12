@@ -7,7 +7,7 @@ outline: [2, 3]
 # Debugger Commands
 
 Every command below is typeable in the [in-game debugger](./debug). Commands marked with an
-MCP tool name are also projected over [MCP](./mcp/tools) as `debug_*` tools that share the
+MCP tool name are also projected over [MCP](./mcp/tools) as `cmd_*` tools that share the
 operator's selection, marks, and notes; the safety hints in parentheses are the tool's
 declared MCP annotations. Arguments are positional or `key=value` in the overlay and JSON
 parameters over MCP. Result data schemas describe the command's structured payload; over MCP
@@ -24,11 +24,11 @@ Find, select, mark, and annotate entities.
 
 Select an entity by id, or all entities with a mark name.
 
-Add an entity (by id) or a marked group (by name) to the operator-visible selection; replace=true swaps the selection instead. Selected entities are highlighted in-game. Returns the selection size. Follow with debug_info for component data or debug_note to annotate.
+Add an entity (by id) or a marked group (by name) to the operator-visible selection; replace=true swaps the selection instead. Selected entities are highlighted in-game. Returns the selection size. Follow with cmd_info for component data or cmd_note to annotate.
 
 ![The debugger with a select command typed: the usage popup shows the signature and arguments, and the selected entity is ringed by gold markers](./assets/debug/select.png)
 
-MCP tool: `debug_select`
+MCP tool: `cmd_select`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -72,7 +72,7 @@ select name="big boss"
 
 Clear the selection, message, and drag area.
 
-MCP tool: `debug_clear`
+MCP tool: `cmd_clear`
 
 ::: details Result data schema
 ```json
@@ -97,7 +97,7 @@ Name the selected entities so select, goto, and despawn can recall them by name.
 
 Name the currently selected entities so later commands (select, goto, despawn, diff entity=) can address the group by that name. Marks survive until cleared. Returns the marked count.
 
-MCP tool: `debug_mark`
+MCP tool: `cmd_mark`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -135,7 +135,7 @@ mark ls
 
 Show every mark with its count and first id.
 
-MCP tool: `debug_mark_list` (read-only, idempotent)
+MCP tool: `cmd_mark_list` (read-only, idempotent)
 
 ::: details Result data schema
 ```json
@@ -171,13 +171,13 @@ MCP tool: `debug_mark_list` (read-only, idempotent)
 
 Remove all marks.
 
-MCP tool: `debug_mark_clear`
+MCP tool: `cmd_mark_clear`
 
 ### `goto <id|name>` {#cmd-goto}
 
 Move the camera to an entity by id, or the first with a mark name.
 
-MCP tool: `debug_goto`
+MCP tool: `cmd_goto`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -218,9 +218,9 @@ goto boss
 
 Annotate the selected entities for the agent; empty message clears.
 
-Attach a note to the selected entities, visible in-game above them and in get_debug_context. Use it to flag findings for the operator. An empty message clears notes on the selection.
+Attach a note to the selected entities, visible in-game above them and in cmd_context. Use it to flag findings for the operator. An empty message clears notes on the selection.
 
-MCP tool: `debug_note`
+MCP tool: `cmd_note`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -256,20 +256,53 @@ note  (clear notes)
 
 Show an entity's components; defaults to the first selected.
 
-Overlay only; not projected over MCP.
+One entity's serialized component data by id or mark name; with no target, the first selected entity. Returns the entity id, its archetype id and sorted signature, and a map of component name to serialized fields. Read-only.
+
+MCP tool: `cmd_info` (read-only, idempotent)
 
 | Argument | Type | Description |
 | --- | --- | --- |
 | `id` | number | entity id |
 | `name` | string | mark name |
 
+::: details Result data schema
+```json
+{
+  "properties": {
+    "archetypeComponents": {
+      "description": "sorted archetype signature",
+      "type": "string"
+    },
+    "archetypeId": {
+      "type": "integer"
+    },
+    "components": {
+      "description": "component name to serialized data (true for tags)",
+      "type": "object"
+    },
+    "id": {
+      "description": "the inspected entity",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "archetypeComponents",
+    "archetypeId",
+    "components",
+    "id"
+  ],
+  "type": "object"
+}
+```
+:::
+
 ### `despawn [id|name] [ids=a,b]` {#cmd-despawn}
 
 Despawn an entity by id or mark name, given ids, or the whole selection.
 
-Despawn the target entities (an id, a mark name, an explicit ids list, or the current selection when no target is given). Destructive and immediate. Take debug_snapshot_save first if the state matters.
+Despawn the target entities (an id, a mark name, an explicit ids list, or the current selection when no target is given). Destructive and immediate. Take cmd_snapshot_save first if the state matters.
 
-MCP tool: `debug_despawn` (destructive)
+MCP tool: `cmd_despawn` (destructive)
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -320,9 +353,9 @@ Aliases: `q`
 
 Select entities matching a component query: Foo has it, -Foo lacks it.
 
-Select every entity matching a component expression ('Enemy -Dead' means has Enemy, lacks Dead); invert=true instead de-selects matching entities from the current selection. Returns the match count. Follow with debug_info or debug_set on @selection.
+Select every entity matching a component expression ('Enemy -Dead' means has Enemy, lacks Dead); invert=true instead de-selects matching entities from the current selection. Returns the match count. Follow with cmd_info or cmd_set on @selection.
 
-MCP tool: `debug_query`
+MCP tool: `cmd_query`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -363,7 +396,7 @@ query Dead invert=true  (de-select dead entities)
 
 Toggle entity id labels over on-screen entities.
 
-MCP tool: `debug_ids`
+MCP tool: `cmd_ids`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -402,7 +435,7 @@ Remove components from an entity, marked group, or @selection.
 
 Strip the named components from the target entities (an id, a mark name, @selection, or an ids list). Destructive to component data; the entities survive. Returns how many entities were changed.
 
-MCP tool: `debug_remove` (destructive)
+MCP tool: `cmd_remove` (destructive)
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -451,9 +484,9 @@ remove ids=5,6 comps=Shield
 
 Set one component on an entity, marked group, or @selection (Lua table value).
 
-Write one component on the target entities (an id, a mark name, the literal @selection, or an ids list). The value is a JSON object or a Lua table expression, e.g. {x = 10, y = {n = 2}}; omitted fields reset to the component's defaults (use debug_modify to change fields in place). Adds the component when missing. Mutates the live world immediately. Returns how many entities were written.
+Write one component on the target entities (an id, a mark name, the literal @selection, or an ids list). The value is a JSON object or a Lua table expression, e.g. {x = 10, y = {n = 2}}; omitted fields reset to the component's defaults (use cmd_modify to change fields in place). Adds the component when missing. Mutates the live world immediately. Returns how many entities were written.
 
-MCP tool: `debug_set`
+MCP tool: `cmd_set`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -495,9 +528,9 @@ set ids=5,6 comp=Transform value={x = 0}
 
 Change only the given fields of a component the target already has.
 
-Update only the provided fields of one component on the target entities (an id, a mark name, @selection, or an ids list). Unlike debug_set it never adds the component and never resets omitted fields: targets missing the component are skipped and unnamed fields keep their current values. Returns modified and skipped counts.
+Update only the provided fields of one component on the target entities (an id, a mark name, @selection, or an ids list). Unlike cmd_set it never adds the component and never resets omitted fields: targets missing the component are skipped and unnamed fields keep their current values. Returns modified and skipped counts.
 
-MCP tool: `debug_modify`
+MCP tool: `cmd_modify`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -546,7 +579,7 @@ Spawn an entity from a bundle and/or components with Lua table values.
 
 Spawn one entity from a bundle name and/or component list with Lua table values, e.g. 'Transform {x = 10, y = 20}'. The new entity becomes selected. Returns its id.
 
-MCP tool: `debug_spawn`
+MCP tool: `cmd_spawn`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -594,7 +627,7 @@ draw clear paths
 
 Outline a rectangle (x y w h in world units).
 
-MCP tool: `debug_draw_rect`
+MCP tool: `cmd_draw_rect`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -635,7 +668,7 @@ MCP tool: `debug_draw_rect`
 
 Outline a circle (x y radius in world units).
 
-MCP tool: `debug_draw_circle`
+MCP tool: `cmd_draw_circle`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -675,7 +708,7 @@ MCP tool: `debug_draw_circle`
 
 Draw a line (x y x2 y2 in world units).
 
-MCP tool: `debug_draw_line`
+MCP tool: `cmd_draw_line`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -716,7 +749,7 @@ MCP tool: `debug_draw_line`
 
 Print text at a world position.
 
-MCP tool: `debug_draw_text`
+MCP tool: `cmd_draw_text`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -757,7 +790,7 @@ MCP tool: `debug_draw_text`
 
 Remove annotations by id or tag; everything when omitted.
 
-MCP tool: `debug_draw_clear`
+MCP tool: `cmd_draw_clear`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -801,13 +834,13 @@ light bloom 3 1 0.8
 
 Show ambient color, lighting, shadows, and bloom state.
 
-MCP tool: `debug_light_info` (read-only, idempotent)
+MCP tool: `cmd_light_info` (read-only, idempotent)
 
 #### `light color [r] [g] [b]` {#cmd-light-color}
 
 Set or show the ambient light color.
 
-MCP tool: `debug_light_color`
+MCP tool: `cmd_light_color`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -825,7 +858,7 @@ light color b=0.8
 
 Enable or disable lighting entirely.
 
-MCP tool: `debug_light_toggle`
+MCP tool: `cmd_light_toggle`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -835,7 +868,7 @@ MCP tool: `debug_light_toggle`
 
 Enable or disable shadow rendering.
 
-MCP tool: `debug_light_shadows`
+MCP tool: `cmd_light_shadows`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -845,7 +878,7 @@ MCP tool: `debug_light_shadows`
 
 Configure or show the bloom effect.
 
-MCP tool: `debug_light_bloom`
+MCP tool: `cmd_light_bloom`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -878,13 +911,13 @@ camera world 640 360
 
 Show camera position, zoom, time scale, and registered cameras.
 
-MCP tool: `debug_camera_info` (read-only, idempotent)
+MCP tool: `cmd_camera_info` (read-only, idempotent)
 
 #### `camera move [x] [y] [r] [z] [name=...]` {#cmd-camera-move}
 
 Set camera position (and optionally rotation and zoom).
 
-MCP tool: `debug_camera_move`
+MCP tool: `cmd_camera_move`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -898,7 +931,7 @@ MCP tool: `debug_camera_move`
 
 Set the game time scale (0 = frozen, 1 = normal).
 
-MCP tool: `debug_camera_timescale`
+MCP tool: `cmd_camera_timescale`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -908,7 +941,7 @@ MCP tool: `debug_camera_timescale`
 
 Toggle a named camera's active flag.
 
-MCP tool: `debug_camera_toggle`
+MCP tool: `cmd_camera_toggle`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -918,9 +951,9 @@ MCP tool: `debug_camera_toggle`
 
 Convert screen coordinates to world through the active camera.
 
-Convert window pixel coordinates to world coordinates through the active camera, the same mapping a click at that pixel uses. Returns both the screen input and the world result. The reverse is debug_camera_screen.
+Convert window pixel coordinates to world coordinates through the active camera, the same mapping a click at that pixel uses. Returns both the screen input and the world result. The reverse is cmd_camera_screen.
 
-MCP tool: `debug_camera_world` (read-only, idempotent)
+MCP tool: `cmd_camera_world` (read-only, idempotent)
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -971,9 +1004,9 @@ camera world 640 360
 
 Convert world coordinates to screen through the active camera.
 
-Convert world coordinates to window pixel coordinates through the active camera. Returns both the world input and the screen result. The reverse is debug_camera_world.
+Convert world coordinates to window pixel coordinates through the active camera. Returns both the world input and the screen result. The reverse is cmd_camera_world.
 
-MCP tool: `debug_camera_screen` (read-only, idempotent)
+MCP tool: `cmd_camera_screen` (read-only, idempotent)
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1037,13 +1070,13 @@ layers unlit hud
 
 List named or modified layers with their flags.
 
-MCP tool: `debug_layers_list` (read-only, idempotent)
+MCP tool: `cmd_layers_list` (read-only, idempotent)
 
 #### `layers info <layer>` {#cmd-layers-info}
 
 Show one layer's name, flags, and entity count.
 
-MCP tool: `debug_layers_info` (read-only, idempotent)
+MCP tool: `cmd_layers_info` (read-only, idempotent)
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1053,13 +1086,13 @@ MCP tool: `debug_layers_info` (read-only, idempotent)
 
 Show every layer (undo toggles and solo).
 
-MCP tool: `debug_layers_all`
+MCP tool: `cmd_layers_all`
 
 #### `layers toggle <layer>` {#cmd-layers-toggle}
 
 Show or hide a layer by name or number.
 
-MCP tool: `debug_layers_toggle`
+MCP tool: `cmd_layers_toggle`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1069,7 +1102,7 @@ MCP tool: `debug_layers_toggle`
 
 Hide every layer but one; bare `layers solo` restores.
 
-MCP tool: `debug_layers_solo`
+MCP tool: `cmd_layers_solo`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1079,7 +1112,7 @@ MCP tool: `debug_layers_solo`
 
 Toggle a layer between lit and unlit.
 
-MCP tool: `debug_layers_unlit`
+MCP tool: `cmd_layers_unlit`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1089,7 +1122,7 @@ MCP tool: `debug_layers_unlit`
 
 Toggle a world-space grid matched to the tile grid.
 
-MCP tool: `debug_grid`
+MCP tool: `cmd_grid`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1108,7 +1141,7 @@ grid off
 
 Toggle size outlines around entities with known bounds.
 
-MCP tool: `debug_bounds`
+MCP tool: `cmd_bounds`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1123,7 +1156,7 @@ bounds off
 
 Tilemap info; `info x y` shows the tile at a world point.
 
-MCP tool: `debug_map`
+MCP tool: `cmd_map`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1142,7 +1175,7 @@ Tile coordinates and per-layer tiles at a world point.
 
 The tile at a world point: coordinates against the tilemap origin plus each tile layer's gid and tileset there (map picks a tilemap by entity id, first map by default). Falls back to debug-grid coordinates when no tilemaps are loaded. Read-only; briefly outlines the tile in-game.
 
-MCP tool: `debug_map_info` (read-only, idempotent)
+MCP tool: `cmd_map_info` (read-only, idempotent)
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1163,13 +1196,13 @@ materials info testglow
 
 List registered materials.
 
-MCP tool: `debug_materials_list` (read-only, idempotent)
+MCP tool: `cmd_materials_list` (read-only, idempotent)
 
 #### `materials info <name>` {#cmd-materials-info}
 
 Show a material's GLSL sources by name or id.
 
-MCP tool: `debug_materials_info` (read-only, idempotent)
+MCP tool: `cmd_materials_info` (read-only, idempotent)
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1183,7 +1216,7 @@ Sprite renderer stats: buckets, texture arrays, instances.
 
 Show bucket instance counts and texture memory.
 
-MCP tool: `debug_sprites_info` (read-only, idempotent)
+MCP tool: `cmd_sprites_info` (read-only, idempotent)
 
 ## Engine
 
@@ -1204,13 +1237,13 @@ systems info debug.Overlay
 
 List every system with its phase and state.
 
-Overlay only; not projected over MCP.
+MCP tool: `cmd_systems_list` (read-only, idempotent)
 
 #### `systems stop <name>` {#cmd-systems-stop}
 
 Disable a system by name.
 
-Overlay only; not projected over MCP.
+MCP tool: `cmd_systems_stop`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1220,7 +1253,7 @@ Overlay only; not projected over MCP.
 
 Re-enable a stopped system.
 
-Overlay only; not projected over MCP.
+MCP tool: `cmd_systems_start`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1230,7 +1263,7 @@ Overlay only; not projected over MCP.
 
 Flip a system between stopped and running.
 
-Overlay only; not projected over MCP.
+MCP tool: `cmd_systems_toggle`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1240,7 +1273,7 @@ Overlay only; not projected over MCP.
 
 Show one system's phase, order, and state.
 
-MCP tool: `debug_systems_info` (read-only, idempotent)
+MCP tool: `cmd_systems_info` (read-only, idempotent)
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1260,13 +1293,13 @@ archetypes select 12
 
 List archetypes by entity count.
 
-Overlay only; not projected over MCP.
+MCP tool: `cmd_archetypes_list` (read-only, idempotent)
 
 #### `archetypes info <id>` {#cmd-archetypes-info}
 
 Show one archetype's entity count and components.
 
-MCP tool: `debug_archetypes_info` (read-only, idempotent)
+MCP tool: `cmd_archetypes_info` (read-only, idempotent)
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1276,7 +1309,7 @@ MCP tool: `debug_archetypes_info` (read-only, idempotent)
 
 Select every entity in an archetype.
 
-MCP tool: `debug_archetypes_select`
+MCP tool: `cmd_archetypes_select`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1295,13 +1328,13 @@ components info Transform
 
 List registered component types.
 
-Overlay only; not projected over MCP.
+MCP tool: `cmd_components_list` (read-only, idempotent)
 
 #### `components info <name>` {#cmd-components-info}
 
 Show a component's schema by name or id.
 
-Overlay only; not projected over MCP.
+MCP tool: `cmd_components_info` (read-only, idempotent)
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1321,13 +1354,13 @@ states pop
 
 Show the state stack, top last.
 
-MCP tool: `debug_states_info` (read-only, idempotent)
+MCP tool: `cmd_states_info` (read-only, idempotent)
 
 #### `states push <name>` {#cmd-states-push}
 
 Push a created state onto the stack.
 
-MCP tool: `debug_states_push`
+MCP tool: `cmd_states_push`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1337,7 +1370,7 @@ MCP tool: `debug_states_push`
 
 Pop the top state off the stack.
 
-MCP tool: `debug_states_pop`
+MCP tool: `cmd_states_pop`
 
 ### `physics` {#cmd-physics}
 
@@ -1355,13 +1388,13 @@ physics query 0 0 64 64
 
 Toggle collision-shape debug drawing (installs the drawer if needed).
 
-MCP tool: `debug_physics_debug`
+MCP tool: `cmd_physics_debug`
 
 #### `physics info [id|name]` {#cmd-physics-info}
 
 Physics state, or one entity's Box2D body properties.
 
-MCP tool: `debug_physics_info` (read-only, idempotent)
+MCP tool: `cmd_physics_info` (read-only, idempotent)
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1372,7 +1405,7 @@ MCP tool: `debug_physics_info` (read-only, idempotent)
 
 Cast a ray, draw it, and select the hits.
 
-MCP tool: `debug_physics_raycast`
+MCP tool: `cmd_physics_raycast`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1385,7 +1418,7 @@ MCP tool: `debug_physics_raycast`
 
 Select bodies inside a world-space box and draw it.
 
-MCP tool: `debug_physics_query`
+MCP tool: `cmd_physics_query`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1408,13 +1441,13 @@ controllers rumble 1
 
 List controllers and their joysticks.
 
-MCP tool: `debug_controllers_list` (read-only, idempotent)
+MCP tool: `cmd_controllers_list` (read-only, idempotent)
 
 #### `controllers info <id>` {#cmd-controllers-info}
 
 Show a controller's joystick, deadzone, and bindings.
 
-MCP tool: `debug_controllers_info` (read-only, idempotent)
+MCP tool: `cmd_controllers_info` (read-only, idempotent)
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1424,7 +1457,7 @@ MCP tool: `debug_controllers_info` (read-only, idempotent)
 
 Vibrate a controller's joystick to verify it.
 
-MCP tool: `debug_controllers_rumble`
+MCP tool: `cmd_controllers_rumble`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1445,7 +1478,7 @@ assets reload player.png
 
 List cached asset keys, optionally filtered.
 
-MCP tool: `debug_assets_list` (read-only, idempotent)
+MCP tool: `cmd_assets_list` (read-only, idempotent)
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1455,7 +1488,7 @@ MCP tool: `debug_assets_list` (read-only, idempotent)
 
 Show a cached asset's action, path, and load state.
 
-MCP tool: `debug_assets_info` (read-only, idempotent)
+MCP tool: `cmd_assets_info` (read-only, idempotent)
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1465,7 +1498,7 @@ MCP tool: `debug_assets_info` (read-only, idempotent)
 
 Re-read matching cached assets from disk in place.
 
-MCP tool: `debug_assets_reload`
+MCP tool: `cmd_assets_reload`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1486,19 +1519,19 @@ audio mute off
 
 Show active sources per group and the master volume.
 
-MCP tool: `debug_audio_info` (read-only, idempotent)
+MCP tool: `cmd_audio_info` (read-only, idempotent)
 
 #### `audio stop` {#cmd-audio-stop}
 
 Stop every active source.
 
-MCP tool: `debug_audio_stop`
+MCP tool: `cmd_audio_stop`
 
 #### `audio mute [on]` {#cmd-audio-mute}
 
 Silence the master group; `audio mute off` restores.
 
-MCP tool: `debug_audio_mute`
+MCP tool: `cmd_audio_mute`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1508,9 +1541,9 @@ MCP tool: `debug_audio_mute`
 
 Fetch entities matching a component query, without selecting them.
 
-Fetch entities matching a component expression ('Enemy -Dead' means has Enemy, lacks Dead) with their serialized component data, without touching the operator's selection. Give x, y, w, h to restrict to a world-space box (spatial filter via Position when registered, else Transform; the spatial component is always included). Returns up to limit entities plus a truncated flag. Use debug_query when you want to select the matches instead.
+Fetch entities matching a component expression ('Enemy -Dead' means has Enemy, lacks Dead) with their serialized component data, without touching the operator's selection. Give x, y, w, h to restrict to a world-space box (spatial filter via Position when registered, else Transform; the spatial component is always included). Returns up to limit entities plus a truncated flag. Use cmd_query when you want to select the matches instead.
 
-MCP tool: `debug_fetch` (read-only, idempotent)
+MCP tool: `cmd_fetch` (read-only, idempotent)
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1597,7 +1630,7 @@ List world resources with their key and type names.
 
 Every world resource as {key, type}: keys resolve to their registered name when available, values to their metatable type name. Read-only; use it to discover installed subsystems and custom game resources.
 
-MCP tool: `debug_resources` (read-only, idempotent)
+MCP tool: `cmd_resources` (read-only, idempotent)
 
 ::: details Result data schema
 ```json
@@ -1650,9 +1683,9 @@ bundles spawn enemy {Transform = {x = 10, y = 5}}
 
 List bundles with their required and defaulted components.
 
-Registered bundles as a map of name to component requirements: required components must be provided at spawn, defaulted ones fill in automatically. Pair with debug_bundles_spawn.
+Registered bundles as a map of name to component requirements: required components must be provided at spawn, defaulted ones fill in automatically. Pair with cmd_bundles_spawn.
 
-MCP tool: `debug_bundles_list` (read-only, idempotent)
+MCP tool: `cmd_bundles_list` (read-only, idempotent)
 
 ::: details Result data schema
 ```json
@@ -1694,9 +1727,9 @@ MCP tool: `debug_bundles_list` (read-only, idempotent)
 
 Spawn an entity from a bundle with optional component overrides.
 
-Spawn one entity from a registered bundle. components is a map of component name to field data; the bundle's required components must be provided there. Returns the new entity id. Unlike debug_spawn this does not select the entity.
+Spawn one entity from a registered bundle. components is a map of component name to field data; the bundle's required components must be provided there. Returns the new entity id. Unlike cmd_spawn this does not select the entity.
 
-MCP tool: `debug_bundles_spawn`
+MCP tool: `cmd_bundles_spawn`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1733,7 +1766,9 @@ Artifacts and time travel: screenshots, profiles, snapshots, recordings, rewind,
 
 Sample the running game with the LuaJIT profiler.
 
-Overlay only; not projected over MCP.
+Start the LuaJIT sampling profiler for seconds (0.1-60; capped) and write a collapsed-stack capture when it finishes. The capture lands in the process working directory and its summary publishes to cmd_context; fetch details with cmd_profile_info and cmd_profile_path. Filtering (zone=) and intervalMs are fixed at start.
+
+MCP tool: `cmd_profile`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1753,19 +1788,19 @@ profile ls
 
 List profiles with size and timestamp.
 
-MCP tool: `debug_profile_list` (read-only, idempotent)
+MCP tool: `cmd_profile_list` (read-only, idempotent)
 
 #### `profile clear` {#cmd-profile-clear}
 
 Delete all profiles this session.
 
-MCP tool: `debug_profile_clear` (destructive)
+MCP tool: `cmd_profile_clear` (destructive)
 
 #### `profile info [ref]` {#cmd-profile-info}
 
 Re-show a capture's summary (latest if omitted).
 
-MCP tool: `debug_profile_info` (read-only, idempotent)
+MCP tool: `cmd_profile_info` (read-only, idempotent)
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1775,7 +1810,7 @@ MCP tool: `debug_profile_info` (read-only, idempotent)
 
 Copy the file's absolute path to the clipboard (latest if omitted).
 
-MCP tool: `debug_profile_path`
+MCP tool: `cmd_profile_path`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1785,7 +1820,7 @@ MCP tool: `debug_profile_path`
 
 Open speedscope and copy the capture's path to the clipboard.
 
-MCP tool: `debug_profile_open`
+MCP tool: `cmd_profile_open`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1805,9 +1840,9 @@ snapshot ls
 
 Save the world; reports a number for load/open.
 
-Save the whole world to a snapshot file in the save directory (format luajit by default, or json; layers restricts to Transform layers). Returns a snapshot number usable as a debug_snapshot_load and debug_diff ref. inline=true instead returns the payload in the result (a json snapshot object, or a base64 luajit payload) and writes no artifact. Does not disturb the running game.
+Save the whole world to a snapshot file in the save directory (format luajit by default, or json; layers restricts to Transform layers). Returns a snapshot number usable as a cmd_snapshot_load and cmd_diff ref. inline=true instead returns the payload in the result (a json snapshot object, or a base64 luajit payload) and writes no artifact. Does not disturb the running game.
 
-MCP tool: `debug_snapshot_save`
+MCP tool: `cmd_snapshot_save`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1887,7 +1922,7 @@ Restore a save (the last if omitted) or an inline payload.
 
 Replace the live world with a saved snapshot (ref is a number, name, or latest) or an inline payload (json text, or base64 luajit binary; set format to match how it was produced). Destructive to current state; selection, marks, and notes clear. Loads are rate limited, so retry on a busy error after a moment.
 
-MCP tool: `debug_snapshot_load` (destructive)
+MCP tool: `cmd_snapshot_load` (destructive)
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1948,7 +1983,7 @@ snapshot load boss-fight format=json
 
 Open with the OS default handler (latest if omitted).
 
-MCP tool: `debug_snapshot_open`
+MCP tool: `cmd_snapshot_open`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1958,7 +1993,7 @@ MCP tool: `debug_snapshot_open`
 
 Copy the file's absolute path to the clipboard (latest if omitted).
 
-MCP tool: `debug_snapshot_path`
+MCP tool: `cmd_snapshot_path`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -1968,19 +2003,19 @@ MCP tool: `debug_snapshot_path`
 
 List snapshots with size and timestamp.
 
-MCP tool: `debug_snapshot_list` (read-only, idempotent)
+MCP tool: `cmd_snapshot_list` (read-only, idempotent)
 
 #### `snapshot clear` {#cmd-snapshot-clear}
 
 Delete all snapshots this session.
 
-MCP tool: `debug_snapshot_clear` (destructive)
+MCP tool: `cmd_snapshot_clear` (destructive)
 
 #### `snapshot info [ref]` {#cmd-snapshot-info}
 
 Show one save's details (latest if omitted).
 
-MCP tool: `debug_snapshot_info` (read-only, idempotent)
+MCP tool: `cmd_snapshot_info` (read-only, idempotent)
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -2002,9 +2037,9 @@ rewind info
 
 Begin capturing; refuses over a stopped ring.
 
-Start the time-travel ring: a rolling window of world snapshots captured every interval seconds (cap entries) while the game runs unfrozen. Capture holds automatically while the game is paused. Refuses if a stopped ring still holds entries. Start this early; debug_rewind_load and debug_diff feed on it.
+Start the time-travel ring: a rolling window of world snapshots captured every interval seconds (cap entries) while the game runs unfrozen. Capture holds automatically while the game is paused. Refuses if a stopped ring still holds entries. Start this early; cmd_rewind_load and cmd_diff feed on it.
 
-MCP tool: `debug_rewind_start`
+MCP tool: `cmd_rewind_start`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -2015,39 +2050,39 @@ MCP tool: `debug_rewind_start`
 
 Stop capturing; the ring stays for list/load/keep.
 
-MCP tool: `debug_rewind_stop`
+MCP tool: `cmd_rewind_stop`
 
 #### `rewind pause` {#cmd-rewind-pause}
 
 Hold capture without ending the session.
 
-MCP tool: `debug_rewind_pause`
+MCP tool: `cmd_rewind_pause`
 
 #### `rewind resume` {#cmd-rewind-resume}
 
 Resume after a pause (including after a load).
 
-MCP tool: `debug_rewind_resume`
+MCP tool: `cmd_rewind_resume`
 
 #### `rewind list` {#cmd-rewind-list}
 
 List ring entries, newest first.
 
-MCP tool: `debug_rewind_list` (read-only, idempotent)
+MCP tool: `cmd_rewind_list` (read-only, idempotent)
 
 #### `rewind info` {#cmd-rewind-info}
 
 Show the session state: interval, cap, window, cost.
 
-MCP tool: `debug_rewind_info` (read-only, idempotent)
+MCP tool: `cmd_rewind_info` (read-only, idempotent)
 
 #### `rewind load [ref] [ago=N]` {#cmd-rewind-load}
 
 Restore a ring entry; capture pauses until resumed.
 
-Rewind the live world to a ring entry: ref is a newest-first index or latest, or use ago=N seconds. Overwrites current world state (selection, marks, and notes clear) and pauses capture until debug_rewind_resume. Pair with the step tool to replay toward a bug.
+Rewind the live world to a ring entry: ref is a newest-first index or latest, or use ago=N seconds. Overwrites current world state (selection, marks, and notes clear) and pauses capture until cmd_rewind_resume. Pair with cmd_step to replay toward a bug.
 
-MCP tool: `debug_rewind_load` (destructive)
+MCP tool: `cmd_rewind_load` (destructive)
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -2060,7 +2095,7 @@ Promote a ring entry into the snapshot history.
 
 Copy a ring entry into the permanent snapshot history with a snapshot number, preserving its capture time. Use it to keep pre-bug evidence before the ring evicts it. Returns the new snapshot number.
 
-MCP tool: `debug_rewind_keep`
+MCP tool: `cmd_rewind_keep`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -2072,15 +2107,15 @@ MCP tool: `debug_rewind_keep`
 
 Delete the ring files and reset to idle.
 
-MCP tool: `debug_rewind_clear` (destructive)
+MCP tool: `cmd_rewind_clear` (destructive)
 
 ### `diff <from> [to] [component=...] [entity=...] [epsilon=N] [ignore=a,b] [limit=N]` {#cmd-diff}
 
 Structural diff between snapshots, rewind entries, and the live world.
 
-Compare two moments structurally: from/to are a snapshot number, name, or latest; rewind:&lt;idx|latest|Ns|ago=N>; or current (default to). Call with limit=0 first: the per-component summary always covers the whole diff and tells you what to filter (component=, ignore=, entity=). Read-only. Returns summary, changes with JSON Pointer paths, and the path of a JSON artifact holding the full result. Drill in with debug_diff_get.
+Compare two moments structurally: from/to are a snapshot number, name, or latest; rewind:&lt;idx|latest|Ns|ago=N>; or current (default to). Call with limit=0 first: the per-component summary always covers the whole diff and tells you what to filter (component=, ignore=, entity=). Read-only. Returns summary, changes with JSON Pointer paths, and the path of a JSON artifact holding the full result. Drill in with cmd_diff_get.
 
-MCP tool: `debug_diff`
+MCP tool: `cmd_diff`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -2104,19 +2139,19 @@ diff get /changes/0/after
 
 List diffs with size and timestamp.
 
-MCP tool: `debug_diff_list` (read-only, idempotent)
+MCP tool: `cmd_diff_list` (read-only, idempotent)
 
 #### `diff clear` {#cmd-diff-clear}
 
 Delete all diffs this session.
 
-MCP tool: `debug_diff_clear` (destructive)
+MCP tool: `cmd_diff_clear` (destructive)
 
 #### `diff open [ref]` {#cmd-diff-open}
 
 Open with the OS default handler (latest if omitted).
 
-MCP tool: `debug_diff_open`
+MCP tool: `cmd_diff_open`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -2126,7 +2161,7 @@ MCP tool: `debug_diff_open`
 
 Copy the file's absolute path to the clipboard (latest if omitted).
 
-MCP tool: `debug_diff_path`
+MCP tool: `cmd_diff_path`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -2136,9 +2171,9 @@ MCP tool: `debug_diff_path`
 
 Dereference a JSON Pointer into a diff result.
 
-Dereference an RFC 6901 pointer (e.g. /summary/byComponent or /changes/0/after) into the last diff result, or into a saved diff artifact when ref is given. Use after debug_diff to fetch payloads its truncated change list omitted.
+Dereference an RFC 6901 pointer (e.g. /summary/byComponent or /changes/0/after) into the last diff result, or into a saved diff artifact when ref is given. Use after cmd_diff to fetch payloads its truncated change list omitted.
 
-MCP tool: `debug_diff_get` (read-only, idempotent)
+MCP tool: `cmd_diff_get` (read-only, idempotent)
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -2149,7 +2184,7 @@ MCP tool: `debug_diff_get` (read-only, idempotent)
 
 Capture the screen (or drag area) to a PNG.
 
-MCP tool: `debug_screenshot`
+MCP tool: `cmd_screenshot`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -2168,19 +2203,19 @@ screenshot ls
 
 List screenshots with size and timestamp.
 
-MCP tool: `debug_screenshot_list` (read-only, idempotent)
+MCP tool: `cmd_screenshot_list` (read-only, idempotent)
 
 #### `screenshot clear` {#cmd-screenshot-clear}
 
 Delete all screenshots this session.
 
-MCP tool: `debug_screenshot_clear` (destructive)
+MCP tool: `cmd_screenshot_clear` (destructive)
 
 #### `screenshot open [ref]` {#cmd-screenshot-open}
 
 Open with the OS default handler (latest if omitted).
 
-MCP tool: `debug_screenshot_open`
+MCP tool: `cmd_screenshot_open`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -2190,7 +2225,7 @@ MCP tool: `debug_screenshot_open`
 
 Copy the file's absolute path to the clipboard (latest if omitted).
 
-MCP tool: `debug_screenshot_path`
+MCP tool: `cmd_screenshot_path`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -2200,7 +2235,7 @@ MCP tool: `debug_screenshot_path`
 
 Show one capture's details with a thumbnail (latest if omitted).
 
-MCP tool: `debug_screenshot_info` (read-only, idempotent)
+MCP tool: `cmd_screenshot_info` (read-only, idempotent)
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -2221,7 +2256,7 @@ record ls
 
 Start recording the window.
 
-MCP tool: `debug_record_start`
+MCP tool: `cmd_record_start`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -2237,31 +2272,31 @@ MCP tool: `debug_record_start`
 
 Stop the active recording.
 
-MCP tool: `debug_record_stop`
+MCP tool: `cmd_record_stop`
 
 #### `record cancel` {#cmd-record-cancel}
 
 Cancel an armed countdown.
 
-MCP tool: `debug_record_cancel`
+MCP tool: `cmd_record_cancel`
 
 #### `record status` {#cmd-record-status}
 
 Show the current recording state.
 
-MCP tool: `debug_record_status` (read-only, idempotent)
+MCP tool: `cmd_record_status` (read-only, idempotent)
 
 #### `record list` {#cmd-record-list}
 
 List recordings with size and timestamp.
 
-MCP tool: `debug_record_list` (read-only, idempotent)
+MCP tool: `cmd_record_list` (read-only, idempotent)
 
 #### `record open [ref]` {#cmd-record-open}
 
 Open a completed recording (latest if omitted).
 
-MCP tool: `debug_record_open`
+MCP tool: `cmd_record_open`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -2271,7 +2306,7 @@ MCP tool: `debug_record_open`
 
 Copy the file's absolute path to the clipboard (latest if omitted).
 
-MCP tool: `debug_record_path`
+MCP tool: `cmd_record_path`
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -2281,7 +2316,7 @@ MCP tool: `debug_record_path`
 
 Show one completed recording's details (latest if omitted).
 
-MCP tool: `debug_record_info` (read-only, idempotent)
+MCP tool: `cmd_record_info` (read-only, idempotent)
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -2311,7 +2346,7 @@ help select
 
 Show the command history (persisted across sessions).
 
-MCP tool: `debug_history`
+MCP tool: `cmd_history`
 
 ```
 history
@@ -2322,7 +2357,7 @@ history clear
 
 Forget the history and delete its file.
 
-MCP tool: `debug_history_clear` (destructive)
+MCP tool: `cmd_history_clear` (destructive)
 
 ### `agent` {#cmd-agent}
 
@@ -2337,13 +2372,13 @@ agent connect
 
 Show the MCP URL, tool count, and save directory.
 
-MCP tool: `debug_agent_info` (read-only, idempotent)
+MCP tool: `cmd_agent_info` (read-only, idempotent)
 
 #### `agent connect` {#cmd-agent-connect}
 
 Copy the MCP client config JSON to the clipboard.
 
-MCP tool: `debug_agent_connect`
+MCP tool: `cmd_agent_connect`
 
 ### `capabilities` {#cmd-capabilities}
 
@@ -2351,7 +2386,7 @@ Installed plugins, command families, and host features.
 
 What this game session supports: installed plugins (render pipeline, physics, tilemaps, controllers, audio, assets, recorder), command sections with counts, capture facilities, host OS, and the MCP port. Call once after connecting to learn which tool families apply.
 
-MCP tool: `debug_capabilities`
+MCP tool: `cmd_capabilities`
 
 ```
 capabilities
@@ -2361,9 +2396,9 @@ capabilities
 
 One command's full contract as structured data.
 
-The complete contract of one debugger command: signature, help, argument schema, subcommand verbs with their schemas and safety annotations, and examples. Use it before calling an unfamiliar debug_* tool, or to discover verbs of a family.
+The complete contract of one debugger command: signature, help, argument schema, subcommand verbs with their schemas and safety annotations, and examples. Use it before calling an unfamiliar cmd_* tool, or to discover verbs of a family.
 
-MCP tool: `debug_describe`. MCP only; not typeable in the overlay.
+MCP tool: `cmd_describe`. MCP only; not typeable in the overlay.
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -2373,9 +2408,9 @@ MCP tool: `debug_describe`. MCP only; not typeable in the overlay.
 
 Freeze or unfreeze gameplay under the operator's hold.
 
-Freeze gameplay through the shared freeze controller under the "operator" hold: on=true acquires, on=false releases, omit toggles. Rendering, input, and tools keep running; the world stays frozen while any other holder (the open debugger panel, MCP pause) remains. Returns the resulting frozen state. Use the step tool to advance frames while frozen.
+Freeze gameplay through the shared freeze controller under the "operator" hold: on=true acquires, on=false releases, omit toggles. Rendering, input, and tools keep running; the world stays frozen while any other holder (the open debugger panel) remains. Returns the resulting frozen state. Use cmd_step to advance frames while frozen.
 
-MCP tool: `debug_freeze` (idempotent)
+MCP tool: `cmd_freeze` (idempotent)
 
 | Argument | Type | Description |
 | --- | --- | --- |
@@ -2408,11 +2443,30 @@ freeze off
 
 Tick the game forward N frames while otherwise frozen.
 
-Overlay only; not projected over MCP.
+Advance gameplay by n frames while the freeze controller is held, then freeze again. Fails when nothing holds the freeze; acquire it with cmd_freeze on=true first.
+
+MCP tool: `cmd_step`
 
 | Argument | Type | Description |
 | --- | --- | --- |
 | `n` | number | number of frames to tick (default: 1) |
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "frames": {
+      "description": "frames scheduled to tick",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "frames"
+  ],
+  "type": "object"
+}
+```
+:::
 
 ### `stats` {#cmd-stats}
 
@@ -2420,7 +2474,7 @@ World stats: entities, archetypes, memory, fps, window.
 
 World and host stats in one call: entity, archetype, component, and system counts, Lua memory in KB and MB, the current FPS, and the window size in pixels. Read-only; use it as a quick health check.
 
-MCP tool: `debug_stats` (read-only, idempotent)
+MCP tool: `cmd_stats` (read-only, idempotent)
 
 ::: details Result data schema
 ```json
@@ -2487,9 +2541,9 @@ stats
 
 The live debugger context: selection, camera, artifacts.
 
-The full debugger context snapshot: selection, marks, notes, mode, freeze state, camera, mouse, grid, rewind status, and the newest artifact entries (snapshots, diffs, profiles, screenshots, recordings). Same payload as the get_debug_context tool. Read-only.
+The full debugger context snapshot: selection, marks, notes, mode, freeze state, camera, mouse, grid, rewind status, and the newest artifact entries (snapshots, diffs, profiles, screenshots, recordings). Read-only; call it to orient before driving the other cmd_* tools.
 
-MCP tool: `debug_context` (read-only, idempotent)
+MCP tool: `cmd_context` (read-only, idempotent)
 
 ::: details Result data schema
 ```json
@@ -2621,9 +2675,9 @@ context
 
 Restart the game process.
 
-Restart the game via love.event.quit("restart"). Unsaved state is lost and the MCP connection drops until the new instance binds. Take debug_snapshot_save first if the state matters.
+Restart the game via love.event.quit("restart"). Unsaved state is lost and the MCP connection drops until the new instance binds. Take cmd_snapshot_save first if the state matters.
 
-MCP tool: `debug_restart` (destructive)
+MCP tool: `cmd_restart` (destructive)
 
 ::: details Result data schema
 ```json
@@ -2655,5 +2709,23 @@ Overlay only; not projected over MCP.
 
 Quit the game.
 
-Overlay only; not projected over MCP.
+Quit the game process via a LÖVE quit event. Unsaved state is lost and the MCP connection drops. Take cmd_snapshot_save first if the state matters.
+
+MCP tool: `cmd_quit` (destructive)
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "quitting": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "quitting"
+  ],
+  "type": "object"
+}
+```
+:::
 

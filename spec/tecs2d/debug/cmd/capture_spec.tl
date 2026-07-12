@@ -241,7 +241,7 @@ describe("tecs2d.debug.internal.cmd.capture", function()
             w:commit()
 
             local payload = json.serialize(saved.data.snapshot as {string: any})
-            local loaded = reg:invokeMcp("debug_snapshot_load",
+            local loaded = reg:invokeMcp("cmd_snapshot_load",
                 {payload = payload, format = "json"})
             luassert.is_true(loaded.ok, tostring(loaded.message))
             luassert.equals("inline-payload", loaded.data.source)
@@ -418,7 +418,7 @@ describe("tecs2d.debug.internal.cmd.capture", function()
             -- Filters.
             local only = reg:execute("diff 1 2 entity=" .. tostring(a))
             luassert.equals(1, only.data.totalChanges)
-            local viaArray = reg:invokeMcp("debug_diff",
+            local viaArray = reg:invokeMcp("cmd_diff",
                 {from = "1", to = "2", ignore = {"DbgCmdPos"}})
             luassert.is_nil(((viaArray.data.summary as {string: any}).byComponent
                 as {string: any}).DbgCmdPos, "JSON array ignore= must apply")

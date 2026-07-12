@@ -136,10 +136,10 @@ local function handleToolsList(id: number)
         '{"jsonrpc":"2.0","id":' .. tostring(id) .. ',"result":{"tools":' .. toolsJSON .. '}}')
 end
 
---- Dispatch a registry-derived debug_* tool call. Returns false when the name
---- is not a debugger tool (so the caller reports unknown-tool).
-local function callDebugTool(toolName: string, args: {string:any}, id: number): boolean
-    if toolName:sub(1, 6) ~= "debug_" then return false end
+--- Dispatch a registry-derived cmd_* tool call. Returns false when the name
+--- is not a debugger command tool (so the caller reports unknown-tool).
+local function callCommandTool(toolName: string, args: {string:any}, id: number): boolean
+    if toolName:sub(1, 4) ~= "cmd_" then return false end
     local world = rpc.requireWorld(id)
     if not world then return true end
     local result, err = debugapi.invokeCommand(world, toolName, args)
@@ -160,7 +160,11 @@ local function callDebugTool(toolName: string, args: {string:any}, id: number): 
     if result.data then
         for k, v in pairs(result.data) do payload[k] = v end
     end
-    payload.message = result.message
+    -- Guarded: a nil assignment would delete a message field the command's
+    -- data provides (cmd_context carries the overlay status line there).
+    if result.message ~= nil then
+        payload.message = result.message
+    end
     rpc.sendToolOK(id, payload)
     return true
 end
@@ -178,7 +182,7 @@ local function handleToolsCall(id: number, params: {string:any})
     local args = (params.arguments as {string:any}) or {}
     local handler = rpc.handlers[toolName as string]
     if not handler then
-        local ok, ret = pcall(callDebugTool, toolName as string, args, id) as (boolean, any)
+        local ok, ret = pcall(callCommandTool, toolName as string, args, id) as (boolean, any)
         if not ok then
             local errStr = tostring(ret)
             log:error("Tool execution failed: %s", errStr)

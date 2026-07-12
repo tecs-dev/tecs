@@ -1,5 +1,5 @@
 --- Shared DebugContext resource and its world key.
---- Read by the get_debug_context MCP tool and written by the overlay systems.
+--- Read by the cmd_context MCP tool and written by the overlay systems.
 
 local tecs <const> = require("tecs")
 local logging <const> = require("tecs.utils.logging")

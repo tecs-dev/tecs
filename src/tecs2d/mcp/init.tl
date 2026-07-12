@@ -7,8 +7,8 @@
 ---   world:addPlugin(mcp.new({port = 12345})) -- custom port
 ---
 --- The plugin ensures the headless debugger core (see tecs2d.debug.context),
---- so the get_debug_context tool and the registry-derived debug_* command
---- tools work in every session; the debug plugin
+--- so the registry-derived cmd_* command tools (cmd_context,
+--- cmd_capabilities, ...) work in every session; the debug plugin
 --- (require("tecs2d.debug").new()) adds the in-game overlay on top of the
 --- same core. Set debugCore = false to ensure only the freeze controller.
 ---
@@ -16,9 +16,8 @@
 ---
 --- Server internals live under tecs2d.mcp.internal: state (shared context),
 --- logtap (log capture ring), transport (sockets and HTTP framing), rpc
---- (JSON-RPC envelope and tool dispatch), and the handler modules
---- (enginetools, worldtools, snapshots, profiler) that register their tools
---- into rpc.handlers.
+--- (JSON-RPC envelope and tool dispatch), and handlers (the kernel tools)
+--- registering into rpc.handlers.
 
 local tecs <const> = require("tecs")
 local mcpTools <const> = require("tecs2d.mcp.tools")
@@ -28,17 +27,14 @@ local state <const> = require("tecs2d.mcp.internal.state")
 local logtap <const> = require("tecs2d.mcp.internal.logtap")
 local transport <const> = require("tecs2d.mcp.internal.transport")
 local rpc <const> = require("tecs2d.mcp.internal.rpc")
-local enginetools <const> = require("tecs2d.mcp.internal.enginetools")
-local worldtools <const> = require("tecs2d.mcp.internal.worldtools")
-local snapshots <const> = require("tecs2d.mcp.internal.snapshots")
-local profiler <const> = require("tecs2d.mcp.internal.profiler")
+local handlers <const> = require("tecs2d.mcp.internal.handlers")
 
 local record mcp
     record Config
         port: number
 
         --- Ensure the headless debugger core (context, command registry,
-        --- freeze, annotations, recorder) so the debug_* tools work without
+        --- freeze, annotations, recorder) so the cmd_* tools work without
         --- the debug plugin. Default true; false ensures only the freeze
         --- controller.
         debugCore: boolean
@@ -65,10 +61,7 @@ function mcp.new(config?: mcp.Config): function(world: tecs.World)
     local ctx <const> = state.new()
     transport.install(ctx)
     rpc.install(ctx)
-    enginetools.install(ctx)
-    worldtools.install(ctx)
-    snapshots.install(ctx)
-    profiler.install(ctx)
+    handlers.install(ctx)
 
     local port = (config and config.port) or mcp.DEFAULT_PORT
     logtap.install()
@@ -88,11 +81,18 @@ function mcp.new(config?: mcp.Config): function(world: tecs.World)
                 if derived then n = n + #derived end
                 return n
             end,
+            -- The registry's restart command calls this before quitting so
+            -- the connection aborts with RST and the restarted instance can
+            -- rebind the port immediately (see the transport's close rules).
+            prepareRestart = function()
+                ctx.rstOnClose = true
+            end,
         }
 
         -- The MCP frame systems run in RenderFirst, not a gameplay phase:
-        -- pause disables the gameplay phases (First..Last), and the server must
-        -- keep answering resume/step/run_lua while paused. RenderFirst also runs
+        -- a freeze disables the gameplay phases (First..Last), and the server
+        -- must keep answering cmd_freeze/cmd_step/run_lua while frozen.
+        -- RenderFirst also runs
         -- before the render pipeline's PreRender sync, so world ops drained this
         -- frame render this frame; the component-dirty bits they set would
         -- otherwise be cleared at the end of world:update before the next sync
@@ -100,8 +100,8 @@ function mcp.new(config?: mcp.Config): function(world: tecs.World)
         --
         -- The debugger core (shared with the debug plugin) carries the command
         -- registry, freeze controller, and the always-on rewind/screenshot/
-        -- recording systems; ensuring it here keeps the debug_* tools and
-        -- pause/step working with or without the debug plugin. debugCore =
+        -- recording systems; ensuring it here keeps the cmd_* tools and
+        -- freeze/step working with or without the debug plugin. debugCore =
         -- false narrows this to the freeze controller alone.
         if config and config.debugCore == false then
             debugapi.ensureFreeze(w)

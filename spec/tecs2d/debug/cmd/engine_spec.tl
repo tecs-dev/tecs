@@ -204,7 +204,7 @@ describe("tecs2d.debug.internal.cmd.engine", function()
             luassert.is_true(w:has(id, SpecTag))
 
             -- The same call shape over MCP with a JSON object.
-            local viaMcp = reg:invokeMcp("debug_bundles_spawn",
+            local viaMcp = reg:invokeMcp("cmd_bundles_spawn",
                 {name = "specbundle", components = {DbgCmdPos = {x = 1, y = 2}}})
             w:commit()
             luassert.is_true(viaMcp.ok, tostring(viaMcp.message))

@@ -1,10 +1,10 @@
 --- Love2D integration suite: pause, step, and time-scale semantics. A
 --- tween drives an entity's Transform.x so motion is observable from
---- outside; MCP pause must freeze it exactly, step must advance it by a
---- bounded amount and freeze again, resume must restore motion, and a
---- higher time scale must move it proportionally faster. Covers the MCP
---- control surface, the pipeline's gameTime/timeScale plumbing, and the
---- tween plugin under the real frame loop.
+--- outside; cmd_freeze must freeze it exactly, cmd_step must advance it by
+--- a bounded amount and freeze again, releasing the freeze must restore
+--- motion, and a higher time scale must move it proportionally faster.
+--- Covers the MCP control surface, the pipeline's gameTime/timeScale
+--- plumbing, and the tween plugin under the real frame loop.
 ---
 --- Run via `make test-love FILE_MATCH='pause_timescale'`.
 
@@ -56,8 +56,8 @@ describe("pause and time scale: motion control from MCP", function()
         fixture.stop(app)
     end)
 
-    it("pause freezes gameplay", function()
-        app.client:call("pause", {})
+    it("freeze stops gameplay", function()
+        app.client:call("cmd_freeze", {on = true})
         -- Let any in-flight frame drain, then sample twice.
         sleep(0.2)
         local x1 = markerX(app)
@@ -69,7 +69,7 @@ describe("pause and time scale: motion control from MCP", function()
 
     it("step advances a bounded number of frames and freezes again", function()
         local before = markerX(app)
-        app.client:call("step", {frames = 10})
+        app.client:call("cmd_step", {n = 10})
         -- Stepping spans ~10 frames of wall time; wait until the marker
         -- settles (two identical samples) before judging the distance.
         local settled = fixture.eventually(fixture.callTimeout, function(): number
@@ -91,9 +91,9 @@ describe("pause and time scale: motion control from MCP", function()
         luassert.equals(settled, markerX(app), "marker kept moving after step completed")
     end)
 
-    it("resume restores motion", function()
+    it("releasing the freeze restores motion", function()
         local before = markerX(app)
-        app.client:call("resume", {})
+        app.client:call("cmd_freeze", {on = false})
         local moving = fixture.eventually(fixture.callTimeout, function(): boolean
             if markerX(app) > before + 1 then return true end
             return nil
@@ -103,19 +103,19 @@ describe("pause and time scale: motion control from MCP", function()
 
     it("time scale changes motion speed proportionally", function()
         -- Measure drift over the same wall-clock window at 1x and 4x.
-        app.client:call("set_time_scale", {scale = 1.0})
+        app.client:call("cmd_camera_timescale", {scale = 1.0})
         sleep(0.1)
         local a1 = markerX(app)
         sleep(0.5)
         local slowDx = markerX(app) - a1
 
-        app.client:call("set_time_scale", {scale = 4.0})
+        app.client:call("cmd_camera_timescale", {scale = 4.0})
         sleep(0.1)
         local b1 = markerX(app)
         sleep(0.5)
         local fastDx = markerX(app) - b1
 
-        app.client:call("set_time_scale", {scale = 1.0})
+        app.client:call("cmd_camera_timescale", {scale = 1.0})
         luassert.is_true(slowDx > 0, "no motion at 1x time scale")
         luassert.is_true(fastDx > slowDx * 2, string.format(
             "4x time scale should move much faster than 1x (1x %.3f, 4x %.3f)",

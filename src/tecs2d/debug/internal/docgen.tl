@@ -11,7 +11,7 @@ local cmdtypes <const> = require("tecs2d.debug.internal.cmdtypes")
 local record docgen
     markdown: function(reg: commands.Registry): string
 
-    --- A compact index of every projected debug_* tool (name, one-line
+    --- A compact index of every projected cmd_* tool (name, one-line
     --- description, link into the reference page) for splicing into the
     --- MCP tools doc between GENERATED markers.
     toolIndex: function(reg: commands.Registry): string
@@ -239,7 +239,7 @@ local function renderCommand(out: {string}, c: cmdtypes.Command, toolFor: {strin
     end
     renderScreenshots(out, c.metadata)
     if c.run then
-        toolLine(out, toolFor["debug_" .. c.name], c.overlay)
+        toolLine(out, toolFor["cmd_" .. c.name], c.overlay)
     end
     if c.schema then renderArgs(out, c.schema) end
     renderOutputSchema(out, c.outputSchema)
@@ -255,7 +255,7 @@ local function renderCommand(out: {string}, c: cmdtypes.Command, toolFor: {strin
             out[#out + 1] = ""
         end
         renderScreenshots(out, sub.metadata)
-        toolLine(out, toolFor["debug_" .. c.name .. "_" .. sub.name], c.overlay)
+        toolLine(out, toolFor["cmd_" .. c.name .. "_" .. sub.name], c.overlay)
         if sub.schema then renderArgs(out, sub.schema) end
         renderOutputSchema(out, sub.outputSchema)
         renderExamples(out, sub.examples)
@@ -287,7 +287,7 @@ function docgen.markdown(reg: commands.Registry): string
         "# Debugger Commands",
         "",
         "Every command below is typeable in the [in-game debugger](./debug). Commands marked with an",
-        "MCP tool name are also projected over [MCP](./mcp/tools) as `debug_*` tools that share the",
+        "MCP tool name are also projected over [MCP](./mcp/tools) as `cmd_*` tools that share the",
         "operator's selection, marks, and notes; the safety hints in parentheses are the tool's",
         "declared MCP annotations. Arguments are positional or `key=value` in the overlay and JSON",
         "parameters over MCP. Result data schemas describe the command's structured payload; over MCP",
@@ -319,12 +319,12 @@ function docgen.toolIndex(reg: commands.Registry): string
     }
     for _, c in ipairs(reg.list) do
         if c.mcp ~= false and c.run then
-            out[#out + 1] = "| [`debug_" .. c.name .. "`](../debug-reference#cmd-" .. c.name ..
+            out[#out + 1] = "| [`cmd_" .. c.name .. "`](../debug-reference#cmd-" .. c.name ..
                 ") | " .. escapeCell(sentence(c.shortHelp)) .. " |"
         end
         for _, sub in ipairs(c.subcommands or {}) do
             if sub.mcp ~= false then
-                out[#out + 1] = "| [`debug_" .. c.name .. "_" .. sub.name ..
+                out[#out + 1] = "| [`cmd_" .. c.name .. "_" .. sub.name ..
                     "`](../debug-reference#cmd-" .. c.name .. "-" .. sub.name .. ") | " ..
                     escapeCell(sentence(sub.shortHelp)) .. " |"
             end
