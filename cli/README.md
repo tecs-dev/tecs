@@ -55,7 +55,6 @@ tecs run
 tecs build
 tecs check
 tecs clean
-tecs wipe-clean
 tecs love12
 ```
 

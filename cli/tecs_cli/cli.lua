@@ -1014,13 +1014,6 @@ function tasks.new(args)
     status("Project created. Next: cd " .. target .. " && tecs check")
 end
 
-tasks["wipe-clean"] = function()
-    status("Removing build artifacts, vendored dependencies, and Love2D...")
-    remove("build")
-    remove("src/vendor")
-    remove(love12_dir)
-end
-
 function tasks.love12()
     if os.getenv("TECS_LOVE_BIN") then
         status("Using cached LÖVE 12 runtime: " .. love_bin())
@@ -1093,12 +1086,6 @@ local commands = {
         summary = "Remove build artifacts",
         description = "Remove build/ while leaving vendored dependencies and the Love2D runtime in place.",
         action = tasks.clean,
-    },
-    {
-        name = "wipe-clean",
-        summary = "Remove build artifacts, vendored dependencies, and Love2D",
-        description = "Remove build/, src/vendor/, and the downloaded .love12 runtime.",
-        action = tasks["wipe-clean"],
     },
     {
         name = "love12",
