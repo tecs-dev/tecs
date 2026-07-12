@@ -6,13 +6,10 @@ outline: [2, 3]
 
 # Debugger Commands
 
-Every command below is typeable in the [in-game debugger](./debug). Commands marked with an
-MCP tool name are also projected over [MCP](./mcp/tools) as `cmd_*` tools that share the
-operator's selection, marks, and notes; the safety hints in parentheses are the tool's
-declared MCP annotations. Arguments are positional or `key=value` in the overlay and JSON
-parameters over MCP. Result data schemas describe the command's structured payload; over MCP
-it arrives wrapped as `{ok = true, result = {...data, message}}` and is also declared as the
-tool's `outputSchema`.
+Every command below is typeable in the [in-game debugger](./debug) (see
+[command syntax](./debug#command-syntax)); those marked with a tool name are also callable
+over [MCP](./mcp/tools) as `cmd_*` tools, with the same arguments as JSON parameters and the
+result data wrapped as `{ok = true, result = {...data, message}}`.
 
 This page is generated: run `make docs-debug` after changing a command.
 

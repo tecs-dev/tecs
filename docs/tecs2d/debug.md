@@ -43,8 +43,29 @@ and resumes the game.
 
 The overlay draws two rows across the top of the screen. The upper row is a
 status line showing the cursor position (screen and world), the camera, the
-frame rate, and the entity count. The
-lower row is a command line.
+frame rate, the entity count, and the selection size. The lower row is a
+command line.
+
+![The debugger just opened over a running game](./assets/debug/open.png)
+
+### A first session
+
+1. Press **Ctrl+/**. The game freezes and the command line opens.
+2. Press **Tab** to browse. The strip cycles every command, grouped into
+   colored sections, and the popup previews the highlighted command's usage
+   live. Keep tabbing, or type to narrow; Enter runs the line.
+
+   ![Tab cycling the command strip with a live usage preview](./assets/debug/completions.png)
+
+3. Click an entity, or drag a box around several, to select them. The status
+   bar shows `sel: N` and the selection is highlighted in the world.
+4. Type `info` and press Enter: the selected entity's components appear as a
+   paged popup (Left/Right page long output).
+
+   ![info showing the selected entity's components](./assets/debug/info.png)
+
+5. Escape clears the popup and prompt; Escape on an empty prompt (or Ctrl+/)
+   closes the debugger and resumes the game.
 
 ### Bindings and controls
 
@@ -82,99 +103,44 @@ draw marker, physics query, and tile inspection actions.
 Selected entities are highlighted in the world. The selection is a set: Left
 Clicks and drags add to it, and Left Clicking a selected entity removes it.
 
+### Command syntax {#command-syntax}
+
+A command line is a name, an optional subcommand verb, and arguments:
+
+```text
+select 42                        positional argument
+select 42 replace                boolean flag, bare
+camera move z=0.3                key=value, any order after the positionals
+mark "big boss"                  quotes keep spaces in one value
+set 42 Transform {x = 100}       component values are Lua tables in braces
+note flickers when lit           free-text tails need no quotes
+```
+
+- Arguments are positional or `key=value`; positional ones come first.
+- Boolean flags are bare (`replace`) or explicit (`replace=false`; `on`, `off`,
+  `yes`, and `no` work too).
+- Entity targets accept an id or a mark name (edit commands also take
+  `@selection`). A numeric token always resolves as an id, which is why mark
+  names cannot be purely numeric.
+- Commands with a free-text tail (`note`, `query`, `set`) consume the rest of
+  the line; declared flags still parse after the text.
+
+As you type a command name, its full usage pops up automatically, and
+`help <command>` shows the same thing on demand. Tab completes command names,
+verbs, and per-argument sources such as component names, marks, systems, and
+cameras; on an empty line the cycle starts at the last used command, so
+Tab-Enter repeats recent work. History persists across sessions in the save
+directory (Up/Down browses it, `history` lists it, `history clear` forgets it).
+
 ### Commands
 
-Type a command and press Enter. As you type, its usage appears to the right. On
-an empty line, the completion cycle starts at the last used command, so
-Tab-Enter quickly repeats recent work. Command history persists across sessions
-in the save directory (`history` lists it, `history clear` forgets it). Long
-commands wrap onto additional rows instead of running off screen.
-
-The bar shows a short one-line hint as you type. Commands with richer usage
-(`snapshot`, `screenshot`, `profile`, `query`) keep that hint terse and carry a
-full usage block that pops up automatically once you have typed the bare command
-name, and is also available any time with `help <command>`.
-
-Commands are grouped into sections, mirrored by `help` and the Tab-completion
-strip, which separates sections with `| Section |` markers; each section has
-its own accent color (shared with the section headings in `help`) so the
-transitions stand out while cycling. The tables
-below are a one-line summary per command; the [Command Reference](./debug-reference)
-is generated from the command registry and covers every command's full
-signature, arguments, examples, and MCP projection.
-
-**Select**
-
-| Command | Description |
-| --- | --- |
-| `select <id\|name> [replace]` | Select an entity by id, or every entity with the mark `name`; `replace` swaps the selection instead of adding |
-| `clear` | Clear the selection, message, and drag area |
-| `mark [name\|list\|clear]` | Name all selected entities; `list` shows marks, `clear` removes all, an empty name unmarks the selected |
-| `goto <id\|name>` | Move the camera to the entity `id`, or the first entity marked `name` |
-| `note [msg]` | Annotate the selected entities for the agent; an empty message clears the note |
-| `info [id\|name]` | Show an entity's components as pretty-printed JSON; Left/Right page long output |
-| `despawn [id\|name]` | Despawn `id`, every entity marked `name`, or every selected entity |
-| `query <expr> [invert]` | Select entities matching a component query; `invert=true` de-selects the matches instead |
-| `ids [on\|off]` | Toggle entity id labels over on-screen entities (up to 200) |
-
-**Edit**
-
-| Command | Description |
-| --- | --- |
-| `set <id\|name\|@selection> Comp {lua}` | Set one component from a Lua table value; adds it when missing and resets omitted fields to defaults |
-| `modify <id\|name\|@selection> Comp {lua}` | Change only the given fields of a component the target already has; targets without it are skipped |
-| `remove <id\|name\|@selection> Comp ...` | Remove components from the target entities |
-| `spawn [bundle] Comp {lua} ...` | Spawn an entity from a bundle and/or components |
-| `draw rect\|circle\|line\|text\|clear ...` | Draw world-space annotations over the game (see below) |
-
-**Render**
-
-| Command | Description |
-| --- | --- |
-| `light info\|color\|toggle\|shadows\|bloom` | Lighting state; `color r g b` sets ambient, `toggle`/`shadows` flip lighting and shadows, `bloom` configures bloom |
-| `camera info\|move\|timescale\|toggle` | Inspect the camera, move it, set the time scale, toggle named cameras |
-| `layers list\|info\|all\|toggle\|solo\|unlit` | List render layers; `info` shows one layer's flags and entity count, `toggle` hides, `solo` isolates (bare `solo` restores), `all` shows everything again, `unlit` toggles lighting |
-| `grid [on\|off] [size=N] [offsetX=N] [offsetY=N]` | Toggle a world-space grid; matches the tile-chunk grid by default, with optional size and origin overrides |
-| `bounds [on\|off]` | Outline entities with known sizes (sprites, rectangles, circles, ellipses) |
-| `map [id]` | Tilemap info (first map or by entity id): size, tile size, origin, layers, tilesets; `map info x y [id]` shows the tile at a world point with per-layer gids, falling back to grid coordinates without maps |
-| `materials list\|info <name\|id>` | List registered materials; `info` shows a material's fragment and vertex GLSL |
-| `sprites info` | Sprite renderer stats: buckets, instance counts, texture memory |
-
-**Engine**
-
-| Command | Description |
-| --- | --- |
-| `systems list\|stop\|start\|toggle\|info` | List systems and stop or restart them by name |
-| `states info\|push\|pop` | Show the state stack; push a created state or pop the top |
-| `archetypes list\|info <id>\|select <id>` | List archetypes by entity count; show one, or select its entities |
-| `components list\|info <name>` | List component types; `info` shows a schema and defaults by name or id |
-| `physics info\|debug\|raycast\|query` | Physics state or one body's properties; `debug` toggles collision-shape drawing (installing the drawer on first use); `raycast`/`query` probe with a drawn ray/box that selects the hits |
-| `controllers list\|info <id>\|rumble <id>` | List controllers; `info` shows bindings, `rumble` test-vibrates |
-| `assets list\|info <path>\|reload <path>` | List every loaded asset with its status (even after the game drops its handle), show one, or re-read one from disk in place |
-| `audio info\|stop\|mute` | Audio status; stop every source or mute the master group |
-
-**Capture**
-
-| Command | Description |
-| --- | --- |
-| `profile [seconds\|info\|open\|path\|list\|clear]` | Sample the running game (see below); `info` re-shows a summary, `open` hands a capture to speedscope, `path` copies its absolute path |
-| `snapshot save\|load\|open\|path\|info\|list\|clear [ref]` | Save/load/open the whole world (`save` reports a number you can pass to the other verbs); `path` copies the file's absolute path |
-| `screenshot [name\|open\|path\|info\|list\|clear]` | Capture the screen (or the drag area) to a PNG; `panel=true` keeps the debugger visible, `delay=n` defers the capture; `info` shows details with a thumbnail, `path` copies the file's absolute path |
-| `rewind start\|stop\|pause\|resume\|list\|info\|load\|keep\|clear` | Time travel: a rolling snapshot ring captured on wall-clock intervals; `load` rewinds the world, `keep` promotes an entry into the snapshot history |
-| `diff <from> [to] [filters]` | Structural diff between snapshots, rewind entries, and the live world; `diff get <pointer>` drills into the result |
-| `record start\|stop\|status\|info\|list\|open\|path\|cancel` | Record the window by capturing frames, then assemble with ffmpeg; `path` copies the file's absolute path |
-
-**Session**
-
-| Command | Description |
-| --- | --- |
-| `help [command]` | List everything in a paged popup, or one command's detailed usage |
-| `history [clear]` | Show the persisted command history |
-| `capabilities` | Installed plugins, command sections, capture support, and host features |
-| `agent info\|connect` | MCP session info; `connect` copies the client config JSON |
-| `step [n]` | Tick the game `n` frames while otherwise frozen (default 1) |
-| `exit` | Close the debugger (same as Ctrl+/ or Escape) |
-| `quit` | Quit the game |
+Commands are grouped into colored sections: **Select**, **Edit**, **Render**,
+**Engine**, **Capture**, and **Session** (plus **Custom** for commands the
+game registers). The same grouping structures `help`, the Tab-completion
+strip, and the generated [Command Reference](./debug-reference), which
+documents every command's signature, arguments, examples, result schema, and
+MCP projection. The sections below walk the main workflows instead of
+repeating that reference.
 
 ### Marks and notes
 
@@ -196,6 +162,9 @@ target is accepted.
 
 Marked and noted entities carry a small label in the world (the mark name, plus
 `*` when a note is present) so it is visible which entities are annotated.
+Right-clicking an entity opens the context menu with the same actions:
+
+![A marked entity with its label and the right-click context menu](./assets/debug/menu.png)
 
 ### Queries
 
@@ -250,6 +219,8 @@ draw text 5 -30 spawn point here seconds=10
 draw clear zone
 ```
 
+![Rect, circle, and text annotations drawn over the running game](./assets/debug/annotations.png)
+
 Every verb takes color channels (`r= g= b= a=`), a `tag` for grouped clearing,
 `seconds` for a wall-clock expiry (0 = one frame), `stroke` for outline width, and
 `entity` to pin the annotation to an entity: positions become offsets from its
@@ -299,15 +270,13 @@ file picker.
 ### Snapshots
 
 `snapshot save [name]` writes the whole world to the game's save directory and
-reports a save number; `snapshot load [name|number]` restores it (loading clears
-the selection, marks, and notes since entity ids change). `snapshot open
-[name|number]` opens the file with the OS default handler. With no name, `save`
-auto-names by number and `load`/`open` use the most recent save. `snapshot list`
-shows every save with its size and timestamp, `snapshot info [name|number]`
-shows one save's details (number, paths, size, time, the entity count captured
-at save time, and whether the file is still on disk), and `snapshot clear` deletes the files and wipes the history.
-Every save is recorded in the debug context with its number, path, size, and
-timestamp. `profile list` and `profile clear` work the same way for captures.
+reports a save number; `snapshot load [name|number]` restores it (loading
+clears the selection, marks, and notes since entity ids change). With no
+argument, `save` auto-names by number and the other verbs use the most recent
+save. Every capture family (snapshots, profiles, screenshots, diffs,
+recordings) shares the same bookkeeping verbs: `list`, `info`, `open`, `path`
+(copies the absolute path to the clipboard), and `clear`; see the
+[Command Reference](./debug-reference#capture) for each family's details.
 
 ### Time travel
 
@@ -371,15 +340,11 @@ pointers dereference.
 ### Screenshots
 
 `screenshot [name]` captures the frozen screen to a PNG in the game's save
-directory (the debugger chrome is hidden for that one frame, so the shot is the
-game only; pass `panel=true` to keep it visible). `delay=n` waits `n` seconds
-before capturing, which pairs well with `panel=true` for shots of the debugger
-itself. If a drag area is active, only that region is captured. `screenshot
-list` shows every capture with its size and timestamp, `screenshot open [name]`
-opens one (the most recent with no name) in the OS image viewer, and `screenshot
-info [name]` shows a capture's details along with a scaled thumbnail rendered
-in the game view for as long as the popup is up. `screenshot clear` deletes
-them. Each capture is recorded in the debug context.
+directory. The debugger chrome is hidden for that one frame so the shot is the
+game only; `panel=true` keeps it visible, `delay=n` defers the capture (the
+two pair well for shots of the debugger itself, which is how the images on
+this page were taken), and an active drag area crops the shot to that region.
+`screenshot info` shows a capture's details with a scaled thumbnail.
 
 ### Recordings
 
@@ -407,27 +372,18 @@ entities or run commands with the overlay on camera. The captured frames include
 the debug overlay. When the recording ends, an open panel re-freezes the game as
 usual.
 
-Recording captures the game's own framebuffer with `love.graphics.captureScreenshot`
-each frame and hands it to a worker thread that writes numbered images to disk;
-on stop, a single `ffmpeg` pass assembles them into the video and the intermediate
-images are deleted. This needs no macOS Screen Recording permission, works headless,
-and captures exactly the window. `ffmpeg` must be on `PATH` (only for the offline
-assembly), and the capture pipeline shells out POSIX-style, so host recording is
-supported on macOS and Linux only. Its stdout/stderr is written next to the recording as `<name>.ffmpeg.log`;
-use `record status` to see the log path.
-
-Frames beyond the in-flight ring (`recordingRingSize`, default 8) are dropped
-rather than stalling the game loop, so a slow encoder lowers the effective frame
-rate instead of hitching gameplay. The video is always assembled at the rate
-actually achieved (frames written divided by the recorded duration), so playback
-stays at real-time speed even when frames are dropped; heavy dropping shows up as
-choppiness, not as a fast-forwarded clip.
-
-Image encoding is the usual bottleneck, and `captureScreenshot` returns the full
-pixel framebuffer, so on a high-DPI (Retina) display the frames are several times
-larger and drops are more likely. If a recording comes out choppy, lower the
-capture rate (`fps=15`) or use a faster image format (`recordingFrameFormat =
-"tga"`, larger on disk but much faster to encode).
+Recording captures the game's own framebuffer each frame and hands it to a
+worker thread that writes numbered images to disk; on stop, a single `ffmpeg`
+pass assembles the video and deletes the intermediates. It needs no macOS
+Screen Recording permission, works headless, and captures exactly the window;
+`ffmpeg` must be on `PATH` and the pipeline shells out POSIX-style, so host
+recording is macOS and Linux only. Frames beyond the in-flight ring
+(`recordingRingSize`, default 8) are dropped rather than stalling the game
+loop, and the video is assembled at the rate actually achieved, so drops show
+up as choppiness, never as a fast-forwarded clip. If a recording comes out
+choppy (likely on high-DPI displays, where frames are several times larger),
+lower the capture rate (`fps=15`) or switch to a faster image format
+(`recordingFrameFormat = "tga"`).
 
 ## Stats HUD
 
@@ -440,7 +396,7 @@ Press **Ctrl+.** to toggle the stats HUD. It samples once per second and shows:
 - **Canvas** / **Shader** switches: render-target and shader-program changes
 - **E / C / S / A**: entities, component types, systems, and archetypes
 
-<img src="/images/debug-overlay.jpeg" alt="Stats HUD"/>
+![The stats HUD in the top-left corner of a running game](./assets/debug/stats.png)
 
 ## Configuration
 
