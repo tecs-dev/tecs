@@ -14,11 +14,8 @@ local input <const> = require("tecs2d.input")
 local gfxtypes <const> = require("tecs2d.gfx.types")
 local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
-local recording <const> = require("tecs2d.debug.internal.recording")
-local freeze <const> = require("tecs2d.debug.internal.freeze")
-local annotations <const> = require("tecs2d.debug.internal.annotations")
+local core <const> = require("tecs2d.debug.internal.core")
 local leader <const> = require("tecs2d.debug.internal.leader")
-local rewind <const> = require("tecs2d.debug.internal.rewind")
 local commands <const> = require("tecs2d.debug.commands")
 
 local HRULE <const> = commands.HRULE
@@ -592,8 +589,8 @@ local record overlay
         recordingRingSize: integer
     end
 
-    --- Create the DebugContext resource, build the command registry, and
-    --- install the overlay systems.
+    --- Ensure the headless debugger core (context, registry, freeze,
+    --- annotations, recorder) and install the overlay systems on top of it.
     install: function(w: tecs.World, opts: Options): debugcontext.Context
 end
 
@@ -603,9 +600,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
     local statsToggleKey = opts.statsToggleKey
     local overlayFont = lg.newFont(20)
     local wasTextInput = false
-    local ctx = debugcontext.new()
-    w.resources[debugcontext.KEY] = ctx
-    local recorder = recording.new(ctx, {
+    local registry = core.ensure(w, {
         ffmpegPath = opts.recordingFfmpegPath,
         outputDir = opts.recordingOutputDir,
         countdown = opts.recordingCountdown,
@@ -614,19 +609,12 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
         frameFormat = opts.recordingFrameFormat,
         ringSize = opts.recordingRingSize,
     })
-    w.resources[recording.KEY] = recorder
-    local fz = freeze.ensure(w)
-    local store = annotations.install(w, ctx)
-
-    local registry = commands.build({
-        world = w,
-        ctx = ctx,
-        recorder = recorder,
-        freeze = fz,
-        annotations = store,
-        keys = {leader = leaderKey, debugToggle = debugToggleKey, statsToggle = statsToggleKey},
-    })
-    w.resources[commands.KEY] = registry
+    -- The help command reads env.keys at run time; install the configured
+    -- bindings over the core's defaults.
+    registry.env.keys = {leader = leaderKey, debugToggle = debugToggleKey, statsToggle = statsToggleKey}
+    local ctx = registry.env.ctx
+    local recorder = registry.env.recorder
+    local fz = registry.env.freeze
 
     local pickQuery = w:query({name = "debug.Pick", include = {Transform}})
 
@@ -1060,21 +1048,6 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             -- closed (e.g. a screenshot's chrome hide); honor them every frame.
             consumeSignals()
 
-            -- Time-travel ring capture: wall-clock interval, and never while
-            -- the freeze controller is held (whoever holds it).
-            rewind.tick(ctx, w, now, fz:isFrozen())
-
-            -- Delayed screenshots count down on wall-clock time and fire even
-            -- while the panel is closed or the game is frozen.
-            for i = #registry.pendingShots, 1, -1 do
-                local shot = registry.pendingShots[i]
-                shot.dueIn = shot.dueIn - frameDt
-                if shot.dueIn <= 0 then
-                    table.remove(registry.pendingShots, i)
-                    shot.fire()
-                end
-            end
-
             if not ctx.open then
                 return
             end
@@ -1320,29 +1293,10 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
         end
     })
 
-    w:addSystem({
-        name = "debug.RecordingShutdown",
-        phase = tecs.phases.PreShutdown,
-        run = function()
-            recorder:shutdown()
-        end,
-    })
-
-    -- Frame capture for the permission-free "frames" recording backend. Runs
-    -- every frame regardless of overlay visibility, grabbing the finished frame
-    -- after the world has rendered (PostRender) and before present.
-    w:addSystem({
-        name = "debug.RecordingCapture",
-        phase = tecs.phases.PostRender,
-        run = function()
-            recorder:captureFrame()
-        end,
-    })
-
     -- Recording indicator (remaining/elapsed time). Drawn only on frames that
     -- are NOT being captured, so the game renders it for the operator but it
-    -- never appears in the recorded video. Runs after the capture system so
-    -- capturedThisFrame is current.
+    -- never appears in the recorded video. Runs after the core's capture
+    -- system so capturedThisFrame is current.
     w:addSystem({
         name = "debug.RecordingIndicator",
         phase = tecs.phases.PostRender,

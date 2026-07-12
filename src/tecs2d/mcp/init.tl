@@ -6,10 +6,11 @@
 ---   world:addPlugin(mcp.new())              -- default port 19999
 ---   world:addPlugin(mcp.new({port = 12345})) -- custom port
 ---
---- The in-game debugger overlay lives in the debug plugin
---- (require("tecs2d.debug").new()); the get_debug_context tool reads the
---- DebugContext resource that plugin publishes, and the debugger's command
---- registry is projected as debug_* tools (see tecs2d.debug.context).
+--- The plugin ensures the headless debugger core (see tecs2d.debug.context),
+--- so the get_debug_context tool and the registry-derived debug_* command
+--- tools work in every session; the debug plugin
+--- (require("tecs2d.debug").new()) adds the in-game overlay on top of the
+--- same core. Set debugCore = false to ensure only the freeze controller.
 ---
 --- End users configure Claude Code with: {"type":"http","url":"http://localhost:19999/mcp"}
 ---
@@ -35,6 +36,12 @@ local profiler <const> = require("tecs2d.mcp.internal.profiler")
 local record mcp
     record Config
         port: number
+
+        --- Ensure the headless debugger core (context, command registry,
+        --- freeze, annotations, recorder) so the debug_* tools work without
+        --- the debug plugin. Default true; false ensures only the freeze
+        --- controller.
+        debugCore: boolean
     end
     new: function(config?: Config): function(world: tecs.World)
     DEFAULT_PORT: integer
@@ -91,10 +98,16 @@ function mcp.new(config?: mcp.Config): function(world: tecs.World)
         -- otherwise be cleared at the end of world:update before the next sync
         -- could see them.
         --
-        -- The freeze controller (shared with the debugger overlay) installs its
-        -- own step-counting system; ensuring it here keeps pause/step working
-        -- with or without the debug plugin.
-        debugapi.ensureFreeze(w)
+        -- The debugger core (shared with the debug plugin) carries the command
+        -- registry, freeze controller, and the always-on rewind/screenshot/
+        -- recording systems; ensuring it here keeps the debug_* tools and
+        -- pause/step working with or without the debug plugin. debugCore =
+        -- false narrows this to the freeze controller alone.
+        if config and config.debugCore == false then
+            debugapi.ensureFreeze(w)
+        else
+            debugapi.ensureCore(w)
+        end
 
         w:addSystem({
             name = "mcp.ProcessCommands",

@@ -52,20 +52,25 @@ describe("mcp robustness: hostile input survives", function()
         fixture.stop(app)
     end)
 
-    it("debug_* tools without the debug plugin fail cleanly", function()
-        -- This app installs only the MCP plugin; every registry-derived
-        -- debugger tool must answer with a debugger_disabled error rather
-        -- than crashing or hanging the connection.
-        expectToolError(app, "debug_draw_rect",
-            {x = 10, y = 10, w = 20, h = 20}, "draw without debug plugin")
-        expectToolError(app, "debug_select", {id = 1}, "select without debug plugin")
-        expectAlive(app, "after debugger-disabled calls")
+    it("debug_* tools work without the debug plugin", function()
+        -- This app installs only the MCP plugin, which ensures the headless
+        -- debugger core: registry-derived debugger tools answer normally, and
+        -- a hostile call still gets a tool-level error rather than crashing
+        -- or hanging the connection.
+        local drawn = app.client:call("debug_draw_rect", {x = 10, y = 10, w = 20, h = 20})
+        luassert.is_number(drawn.id as number, "draw without debug plugin: no annotation id")
+        local caps = app.client:call("debug_capabilities")
+        luassert.is_table(caps.commands, "capabilities without debug plugin: no command info")
+        expectToolError(app, "debug_select", {id = 999999}, "select of a dead id")
+        expectAlive(app, "after headless debugger calls")
     end)
 
-    it("unknown debug_* names still answer cleanly without the plugin", function()
-        -- Without the debug plugin the server cannot resolve debug_* names,
-        -- so even a bogus one gets the debugger_disabled envelope.
-        expectToolError(app, "debug_draw", {type = "rect"}, "retired debug_draw name")
+    it("unknown debug_* names still answer cleanly", function()
+        -- A debug_* name the registry does not project (draw only has
+        -- subcommand verbs) gets a JSON-RPC error naming the unknown tool.
+        local envelope, err = app.client:tryCall("debug_draw", {type = "rect"})
+        luassert.is_nil(envelope, "unprojected debug_draw name: expected no envelope")
+        luassert.matches("unknown debugger tool", tostring(err))
         expectAlive(app, "after unknown debug tool")
     end)
 

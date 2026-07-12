@@ -6,6 +6,7 @@
 local tecs <const> = require("tecs")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
 local commands <const> = require("tecs2d.debug.commands")
+local core <const> = require("tecs2d.debug.internal.core")
 local freeze <const> = require("tecs2d.debug.internal.freeze")
 
 local record context
@@ -21,6 +22,10 @@ local record context
     --- without the debug plugin installed.
     ensureFreeze: function(w: tecs.World): freeze.Controller
 
+    --- Get or create the headless debugger core: context, registry, freeze,
+    --- annotations, recorder, rewind; works without the overlay.
+    ensureCore: function(w: tecs.World, opts?: core.Options): commands.Registry
+
     --- The command registry projected as MCP tool definitions (debug_*
     --- names), or nil when the debug plugin is not installed.
     commandTools: function(w: tecs.World): {commands.McpTool}
@@ -34,6 +39,7 @@ end
 context.KEY = debugcontext.KEY
 context.encodeGroups = debugcontext.encodeGroups
 context.ensureFreeze = freeze.ensure
+context.ensureCore = core.ensure
 
 function context.commandTools(w: tecs.World): {commands.McpTool}
     local registry = w.resources[commands.KEY]

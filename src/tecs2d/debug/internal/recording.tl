@@ -69,6 +69,12 @@ local record recording
         capturedThisFrame: boolean
         recordedElapsed: number
         assembleLaunched: boolean
+        --- Overwrite the controller defaults for exactly the fields present
+        --- in cfg; each field seeds its default and current value the same
+        --- way construction does, and ffmpegPath also updates the context
+        --- mirror.
+        configure: function(self: Controller, cfg: Options)
+
         start: function(self: Controller, opts?: StartOptions): Result
         stop: function(self: Controller, reason?: string): Result
         cancel: function(self: Controller): Result
@@ -389,6 +395,35 @@ function recording.new(ctx: debugcontext.Context, opts?: recording.Options): rec
     ctx.recording.backend = "frames"
     ctx.recording.ffmpegPath = ffmpegPath
     return self
+end
+
+function recording.Controller:configure(cfg: recording.Options)
+    if cfg.ffmpegPath then
+        self.ffmpegPath = cfg.ffmpegPath
+        self.ctx.recording.ffmpegPath = cfg.ffmpegPath
+    end
+    if cfg.outputDir then
+        self.outputDir = cfg.outputDir
+    end
+    if cfg.countdown then
+        self.defaultCountdown = cfg.countdown
+    end
+    if cfg.fps then
+        self.defaultFps = cfg.fps
+        self.currentFps = cfg.fps
+    end
+    if cfg.scale and cfg.scale > 0 then
+        self.defaultScale = cfg.scale
+        self.currentScale = cfg.scale
+    end
+    if cfg.frameFormat then
+        self.defaultFrameFormat = cfg.frameFormat
+        self.currentFrameFormat = cfg.frameFormat
+    end
+    if cfg.ringSize and cfg.ringSize > 0 then
+        self.defaultRingSize = cfg.ringSize
+        self.currentRingSize = cfg.ringSize
+    end
 end
 
 function recording.Controller:start(opts?: recording.StartOptions): recording.Result
