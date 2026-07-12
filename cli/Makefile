@@ -16,8 +16,10 @@ package: build
 lint:
 	luacheck tecs_cli/cli.lua loveapp spec
 
+# Specs that exercise --json need framework sources; default to a sibling
+# Tecs checkout like scripts/build_love.sh does and skip when it is absent.
 test:
-	luajit spec/run.lua
+	TECS_DIR="$${TECS_DIR:-$(abspath ..)/tecs}" luajit spec/run.lua
 
 check: lint test build
 

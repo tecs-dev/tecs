@@ -12,6 +12,7 @@ same LuaJIT used by games.
 
 ```sh
 make build              # Assemble dist/tecs-cli.love and launcher/install files
+make package            # Build, then bundle dist/ into versioned release archives
 make lint               # Check authored Lua files with Luacheck
 make test               # Run the Lua CLI unit tests
 make check              # Test and build the release payload
@@ -26,6 +27,7 @@ make clean              # Remove build/ and dist/
 
 - `tecs_cli/cli.lua`: command parsing and implementation.
 - `tecs_cli/templates/default/`: source copied by `tecs new`.
+- `tecs_cli/agents/`: agent guides served by `tecs agent`.
 - `tecs_cli/vendor/`: private CLI Lua modules.
 - `tecs_cli/runtime/teal/`: canonical `teal.*`, `tlcli.*`, and `compat53.*` modules.
 - `tecs_cli/runtime/types/`: declarations copied into generated projects.
@@ -37,7 +39,8 @@ make clean              # Remove build/ and dist/
 ## Distribution Model
 
 - Do not add a CLI rockspec or runtime dependency on Lua, LuaRocks, or a C
-  compiler. The release consists of `tecs-cli.love`, launchers, and installers.
+  compiler. The release consists of `tecs-cli.love`, launchers, installers,
+  and versioned archives for package managers (Homebrew tarball, Scoop zip).
 - Keep the LÖVE application headless. CLI launchers set dummy SDL video/audio
   drivers; `tecs run` clears them before starting the user's game.
 - Preserve macOS, Linux, and Windows behavior. CI must prove a cold-cache

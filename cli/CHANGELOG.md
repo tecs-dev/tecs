@@ -12,6 +12,25 @@ payload, launchers, and installers as GitHub release assets.
 
 - Post-publication smoke tests install the exact tagged GitHub Release and run
   a clean project build on Linux, macOS, and Windows.
+- `tecs check --json` and `tecs info --json` print machine-readable output,
+  serialized with the framework's `tecs.utils.json` module.
+- `tecs agent list` and `tecs agent path <name>` expose the agent guides
+  bundled with the CLI for AI coding tools.
+- `tecs completions bash|zsh|fish` prints shell completion scripts.
+- `TECS_TEAL_DIR` loads the Teal compiler from a local `teal-language/tl`
+  checkout instead of the embedded copy.
+
+### Fixed
+
+- The macOS/Linux launcher resolves symlinks before locating its payload, so
+  package managers can link `tecs` onto `PATH`.
+
+### Distribution
+
+- Releases additionally publish versioned archives for package managers:
+  `tecs-cli-<version>.tar.gz` (launcher, payload, license) and
+  `tecs-cli-<version>-windows.zip`, both covered by `SHA256SUMS` and verified
+  by the post-publication smoke tests.
 
 ## [0.1.0] - 2026-07-12
 

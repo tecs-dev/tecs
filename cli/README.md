@@ -56,6 +56,8 @@ tecs run
 tecs build
 tecs check
 tecs clean
+tecs agent list
+tecs completions zsh
 ```
 
 `tecs run` builds the project and launches it with the same cached LÖVE runtime
@@ -63,6 +65,19 @@ that hosts the CLI. `tecs build` compiles Teal source into a self-contained
 `build/`. `tecs check` runs the embedded Teal compiler in-process. Pass
 `--quiet` (or `-q`) to suppress progress output. `tecs --version` prints only
 the CLI version; `tecs info` reports the LÖVE/LuaJIT runtime and current project.
+
+`tecs check --json` and `tecs info --json` print machine-readable JSON on
+stdout for editors, CI, and coding agents. Check output has the shape
+`{"ok": boolean, "diagnostics": [{"file", "line", "column", "severity",
+"kind", "message"}]}` and exits non-zero when errors are reported.
+
+`tecs agent list` shows the guides bundled for AI coding agents, and
+`tecs agent path <name>` writes one to the per-user data directory and prints
+its absolute path, ready to reference from agent configuration
+(`CLAUDE.md`, `AGENTS.md`, and similar).
+
+`tecs completions bash|zsh|fish` prints a shell completion script; source its
+output from your shell profile.
 
 ## Development Commands
 
@@ -74,6 +89,15 @@ TECS_DIR=../tecs tecs dev
 
 Run it again after changing the local framework, then run `tecs check` or
 `tecs build`.
+
+To try a local Teal compiler instead of the embedded one, point
+`TECS_TEAL_DIR` at a `teal-language/tl` checkout (its generated `teal/`,
+`tlcli/`, and `compat53/` Lua modules are loaded in place of the bundled
+copies):
+
+```sh
+TECS_TEAL_DIR=../tl tecs check
+```
 
 ## Embedded Toolchain
 

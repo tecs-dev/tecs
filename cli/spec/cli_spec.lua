@@ -260,6 +260,111 @@ describe("tecs CLI", function()
         end)
     end)
 
+    describe("agent docs", function()
+        local function capture_print(argv)
+            local printed = {}
+            local real_print = print
+            _G.print = function(...)
+                printed[#printed + 1] = table.concat({...}, "\t")
+            end
+            local ok, err = cli.run(argv)
+            _G.print = real_print
+            return ok, err, printed
+        end
+
+        it("lists bundled docs with descriptions", function()
+            local ok, _, printed = capture_print({"agent", "list"})
+            assert.is_true(ok)
+            assert.matches("tecs%-project%s+Working guide", table.concat(printed, "\n"))
+        end)
+
+        it("materializes a doc into the data directory and prints its path", function()
+            local root = make_temp("agent-path")
+            cli._internal.set_data_dir(root)
+            local run_ok, run_err = pcall(function()
+                local ok, _, printed = capture_print({"agent", "path", "tecs-project"})
+                assert.is_true(ok)
+                assert.equals(1, #printed)
+                assert.matches("agents", printed[1])
+                assert.matches("Tecs project guide", read_file(printed[1]))
+            end)
+            cli._internal.set_data_dir(nil)
+            assert(run_ok, run_err)
+        end)
+
+        it("rejects unknown doc names without writing anything", function()
+            local root = make_temp("agent-unknown")
+            cli._internal.set_data_dir(root)
+            local ok, err = cli.run({"agent", "path", "nope"})
+            cli._internal.set_data_dir(nil)
+            assert.is_true(not ok)
+            assert.matches("unknown agent 'nope'", err)
+            assert.is_true(not exists(join(root, "agents", "nope.md")))
+        end)
+    end)
+
+    describe("completions", function()
+        it("prints a completion function for bash", function()
+            local captured = {}
+            local real_write = io.write
+            io.write = function(...)
+                captured[#captured + 1] = table.concat({...})
+                return true
+            end
+            local ok = cli.run({"completions", "bash"})
+            io.write = real_write
+            assert.is_true(ok)
+            local script = table.concat(captured)
+            assert.matches("_tecs%(%)", script)
+            assert.matches("completions", script)
+        end)
+
+        it("rejects unsupported shells", function()
+            local ok, err = cli.run({"completions", "tcsh"})
+            assert.is_true(not ok)
+            assert.matches("argument 'shell' must be one of 'bash', 'zsh', 'fish'", err)
+        end)
+    end)
+
+    describe("json output", function()
+        local framework_dir = os.getenv("TECS_DIR")
+        local has_framework = framework_dir and framework_dir ~= ""
+            and exists(join(framework_dir, "src", "tecs", "utils", "json", "init.tl"))
+
+        local function capture_print(argv)
+            local printed = {}
+            local real_print = print
+            _G.print = function(...)
+                printed[#printed + 1] = table.concat({...}, "\t")
+            end
+            local ok, err = cli.run(argv)
+            _G.print = real_print
+            return ok, err, printed
+        end
+
+        if has_framework then
+            it("emits runtime info as sorted JSON", function()
+                local ok, _, printed = capture_print({"info", "--json"})
+                assert.is_true(ok)
+                assert.equals(1, #printed)
+                assert.matches('"version":"%d+%.%d+%.%d+"', printed[1])
+                assert.matches('"love":null', printed[1])
+                assert.matches('"project":null', printed[1])
+            end)
+
+            it("lists agent docs as JSON", function()
+                local ok, _, printed = capture_print({"agent", "list", "--json"})
+                assert.is_true(ok)
+                assert.matches('"name":"tecs%-project"', printed[1])
+                assert.matches('"description":"Working guide', printed[1])
+            end)
+        else
+            it("skips JSON specs without a Tecs checkout (set TECS_DIR)", function()
+                assert.is_true(true)
+            end)
+        end
+    end)
+
     describe("path helpers", function()
         local internal = cli._internal
         local windows = {sep = "\\", is_windows = true, is_msys = false}
