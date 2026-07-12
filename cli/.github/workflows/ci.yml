@@ -185,6 +185,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
     steps:
       - name: Download option 1 package
         uses: actions/download-artifact@v8
@@ -209,3 +210,10 @@ jobs:
             dist/SHA256SUMS
             dist/tecs-cli-*.tar.gz
             dist/tecs-cli-*-windows.zip
+
+      # Releases published with GITHUB_TOKEN do not fire `release` triggers,
+      # so start the post-publication smoke run explicitly.
+      - name: Dispatch release smoke
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run "Release smoke" --repo "$GITHUB_REPOSITORY" -f tag="$GITHUB_REF_NAME"
