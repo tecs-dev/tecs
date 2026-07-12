@@ -7,6 +7,31 @@ end
 package.preload.lfs = function()
     return require("tecs_cli.vendor.lfs_love")
 end
+-- Shims for the vendored busted runner's C dependencies: luasystem maps to
+-- love.timer and lua-term reports no TTY (color output stays disabled).
+package.preload.system = function()
+    return {
+        gettime = function() return love.timer.getTime() end,
+        monotime = function() return love.timer.getTime() end,
+        sleep = function(seconds) love.timer.sleep(seconds) end,
+    }
+end
+package.preload.term = function()
+    return {
+        isatty = function() return false end,
+    }
+end
+package.preload["term.colors"] = function()
+    local identity = setmetatable({}, {
+        __call = function(_, value) return tostring(value) end,
+        __tostring = function() return "" end,
+        __concat = function(a, b)
+            if type(a) == "string" then return a end
+            return tostring(b)
+        end,
+    })
+    return setmetatable({}, {__index = function() return identity end})
+end
 
 local lfs = require("tecs_cli.vendor.lfs_love")
 local cli = require("tecs_cli.cli")

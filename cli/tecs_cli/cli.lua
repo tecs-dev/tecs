@@ -1712,6 +1712,77 @@ function tasks.update(args)
     write_rocks_manifest(manifest)
 end
 
+-- Run project specs with the vendored busted runner. Files matching
+-- *_lovespec.tl launch the built game under real LÖVE and drive it over the
+-- tecs2d MCP server, so this is intentionally not headless.
+function tasks.integ()
+    ensure_project()
+    if is_windows then
+        fail("tecs integ requires macOS or Linux; the test harness drives POSIX processes")
+    end
+    if not exists("spec") then
+        fail("no spec/ directory; create spec/<name>_spec.tl or spec/<name>_lovespec.tl first")
+    end
+
+    -- The specs exercise the built game, so build first.
+    tasks.build()
+
+    status("Compiling specs...")
+    local spec_sources = list_files("spec", ".tl")
+    local tl_args = {"-q", "--global-env-def", "busted", "gen",
+        "--root", ".", "--output-dir", "build"}
+    local found = false
+    for _, source in ipairs(spec_sources) do
+        if not source:match("%.d%.tl$") then
+            tl_args[#tl_args + 1] = source
+            found = true
+        end
+    end
+    if not found then
+        fail("no Teal specs found under spec/")
+    end
+    run_tl(tl_args)
+
+    -- The CLI itself runs under dummy SDL drivers; launched games need real
+    -- ones, and the fixture harness finds the runtime through LOVE.
+    local ffi = require("ffi")
+    ffi.cdef([[
+        int setenv(const char *name, const char *value, int overwrite);
+        int unsetenv(const char *name);
+    ]])
+    ffi.C.unsetenv("SDL_VIDEODRIVER")
+    ffi.C.unsetenv("SDL_AUDIODRIVER")
+    ffi.C.setenv("LOVE", love_bin(), 1)
+
+    status("Running specs...")
+    local previousPath = package.path
+    local previousArg = rawget(_G, "arg")
+    local previousExit = os.exit
+    local exitSignal = {}
+    package.path = table.concat({
+        "build/?.lua",
+        "build/?/init.lua",
+        "build/vendor/share/lua/5.1/?.lua",
+        "build/vendor/share/lua/5.1/?/init.lua",
+    }, ";") .. ";" .. package.path
+    rawset(_G, "arg", {"--output", "plainTerminal", "--pattern", "_%a*spec", "build/spec"})
+    rawset(os, "exit", function(code)
+        exitSignal.code = tonumber(code) or 0
+        error(exitSignal, 0)
+    end)
+
+    local ok, err = pcall(function()
+        require("busted.runner")({standalone = false})
+    end)
+    rawset(os, "exit", previousExit)
+    rawset(_G, "arg", previousArg)
+    package.path = previousPath
+    if not ok and err ~= exitSignal then error(err, 0) end
+    if (exitSignal.code or 0) ~= 0 then
+        fail("specs failed")
+    end
+end
+
 function tasks.agent(args)
     local docs = list_agent_docs()
 
@@ -1892,6 +1963,13 @@ local commands = {
         setup = function(subcommand)
             subcommand:flag("--json", "Print diagnostics as JSON on stdout.")
         end,
+    },
+    {
+        name = "integ",
+        summary = "Run project specs against the built game",
+        description = "Compile spec/ and run it with the bundled busted runner; *_lovespec.tl "
+            .. "specs launch the built game under real LÖVE and drive it over MCP.",
+        action = tasks.integ,
     },
     {
         name = "clean",

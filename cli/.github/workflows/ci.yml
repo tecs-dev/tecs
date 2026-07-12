@@ -76,6 +76,9 @@ jobs:
           (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" remove inspect)
           test ! -e "$project/src/vendor/share/lua/5.1/inspect.lua"
           test ! -e "$project/src/vendor/share/lua/5.1/inspect.d.tl"
+          if [ "$(uname -s)" = Darwin ]; then
+            (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" integ)
+          fi
           (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" check --json | grep -F '"ok":true')
           (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" info --json | grep -F '"built":true')
           launcher/tecs agent list | grep -F tecs-project

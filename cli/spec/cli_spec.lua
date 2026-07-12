@@ -119,6 +119,8 @@ describe("tecs CLI", function()
             assert.is_true(exists(join(project, "tlconfig.lua")))
             assert.matches("Tecs project guide", read_file(join(project, "AGENTS.md")))
             assert.equals("@AGENTS.md\n", read_file(join(project, "CLAUDE.md")))
+            assert.matches("tecs2d%.testing%.fixture",
+                read_file(join(project, "spec", "game_lovespec.tl")))
             assert.is_false(exists(join(project, "game-dev-1.rockspec")))
             assert.is_true(exists(join(project, "src", "conf.tl")))
             assert.is_true(exists(join(project, "src", "main.tl")))
@@ -412,6 +414,20 @@ describe("tecs CLI", function()
                 assert.is_true(true)
             end)
         end
+
+        it("points integ at the installed launcher outside LÖVE", function()
+            local root = make_temp("integ-nolove")
+            mkdir_p(join(root, "src"))
+            mkdir_p(join(root, "spec"))
+            write_file(join(root, "tlconfig.lua"), "return {}\n")
+
+            local ok, err
+            with_cwd(root, function()
+                ok, err = cli.run({"integ"})
+            end)
+            assert.is_true(not ok)
+            assert.matches("installed launcher", err)
+        end)
 
         it("points check --json at the installed launcher outside LÖVE", function()
             local root = make_temp("check-json-nolove")

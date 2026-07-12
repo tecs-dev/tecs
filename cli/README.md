@@ -94,6 +94,21 @@ stdout for editors, CI, and coding agents. Check output has the shape
 its absolute path, ready to reference from agent configuration
 (`CLAUDE.md`, `AGENTS.md`, and similar).
 
+## Testing
+
+```sh
+tecs integ
+```
+
+`tecs integ` compiles `spec/**/*.tl` and runs it with the bundled
+[busted](https://lunarmodules.github.io/busted/) runner — no busted or
+LuaRocks installation required. Specs named `*_lovespec.tl` are integration
+tests: through `tecs2d.testing.fixture` they launch the built game under real
+LÖVE on a free MCP port and drive it live (run Lua inside the game, sample
+pixels, send input). New projects include a working example in
+`spec/game_lovespec.tl`. Integration runs are not headless; macOS and Linux
+only.
+
 `tecs completions bash|zsh|fish` prints a shell completion script. Install it
 per shell:
 

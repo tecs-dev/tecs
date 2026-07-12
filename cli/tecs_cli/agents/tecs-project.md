@@ -9,6 +9,10 @@ Run these from the project root (the directory containing `tlconfig.lua`):
 - `tecs check` — type-check every Teal source under `src/`. Add `--json` for machine-readable diagnostics: `{"ok": boolean, "diagnostics": [{"file", "line", "column", "severity", "kind", "message"}]}`.
 - `tecs build` — compile Teal to `build/`, copy assets, and stage the runtime vendor tree. Incremental; safe to rerun.
 - `tecs run` — build, then launch the game with the cached LÖVE 12 runtime.
+- `tecs integ` — compile `spec/**/*.tl` and run it with the bundled busted runner.
+  `*_lovespec.tl` specs use `tecs2d.testing.fixture` to launch the built game under real
+  LÖVE and drive it over MCP (`fixture.runLua`, `fixture.probePixels`, `fixture.eventually`).
+  Not headless; macOS and Linux only.
 - `tecs info --json` — CLI, LÖVE, and LuaJIT versions plus project status as JSON.
 - `tecs add <rock>[@version]` / `tecs remove <rock>` / `tecs update` — vendor pure-Lua
   rocks from luarocks.org into `src/vendor/` (with Teal type declarations when a
