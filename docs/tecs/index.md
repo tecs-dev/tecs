@@ -20,18 +20,23 @@ You do not need a separate Lua, LuaRocks, Teal, or compiler installation.
 ::: code-group
 
 ```bash [macOS]
-curl -fsSL https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.sh | sh
+brew install tecs-dev/tap/tecs-cli
 ```
 
 ```powershell [Windows]
-irm https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.ps1 | iex
+scoop bucket add tecs https://github.com/tecs-dev/scoop-bucket
+scoop install tecs
 ```
 
 ```bash [Linux]
-curl -fsSL https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.sh | sh
+brew install tecs-dev/tap/tecs-cli
 ```
 
 :::
+
+Prefer a standalone installer? Use the scripts from
+[tecs-cli releases](https://github.com/tecs-dev/tecs-cli/releases/latest):
+`install.sh` (macOS/Linux) or `install.ps1` (Windows).
 
 Create a project, then type-check it:
 

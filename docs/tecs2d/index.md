@@ -18,18 +18,23 @@ LuaRocks, Teal, LÖVE, or a C compiler separately.
 ::: code-group
 
 ```bash [macOS]
-curl -fsSL https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.sh | sh
+brew install tecs-dev/tap/tecs-cli
 ```
 
 ```powershell [Windows]
-irm https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.ps1 | iex
+scoop bucket add tecs https://github.com/tecs-dev/scoop-bucket
+scoop install tecs
 ```
 
 ```bash [Linux]
-curl -fsSL https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.sh | sh
+brew install tecs-dev/tap/tecs-cli
 ```
 
 :::
+
+Prefer a standalone installer? Use the scripts from
+[tecs-cli releases](https://github.com/tecs-dev/tecs-cli/releases/latest):
+`install.sh` (macOS/Linux) or `install.ps1` (Windows).
 
 Open a new terminal after installing on Windows.
 
@@ -62,7 +67,7 @@ my-game/
 ├── src/
 │   ├── main.tl           # Game entry point
 │   ├── conf.tl           # Love2D configuration
-│   └── vendor/           # Prepared framework sources and declarations
+│   └── vendor/           # Framework sources, declarations, and rocks added with `tecs add`
 ├── assets/               # Images, sounds, fonts
 └── build/                # Self-contained compiled game (generated)
 ```
@@ -102,12 +107,17 @@ adds the engine layer: rendering, audio, input, and more. Projects created by
 ### CLI commands
 
 | Command          | Description                                      |
-| ---------------- | ------------------------------------------------ |
-| `tecs run`       | Build and run the game                           |
-| `tecs build`     | Compile a self-contained game without running it |
-| `tecs check`     | Type-check all project Teal sources              |
-| `tecs clean`     | Remove generated build output                    |
-| `tecs info`      | Show CLI/runtime versions and project status     |
+| ------------------- | ------------------------------------------------ |
+| `tecs run`          | Build and run the game                           |
+| `tecs build`        | Compile a self-contained game without running it |
+| `tecs check`        | Type-check all project Teal sources (`--json` for tooling) |
+| `tecs add <rock>`   | Vendor a pure-Lua rock and its Teal types from luarocks.org |
+| `tecs remove <rock>` | Remove a vendored rock                          |
+| `tecs update`       | Update vendored rocks to their newest versions   |
+| `tecs clean`        | Remove generated build output                    |
+| `tecs info`         | Show CLI/runtime versions and project status (`--json` for tooling) |
+| `tecs agent`        | List bundled agent guides or print one's installed path |
+| `tecs completions`  | Print a bash, zsh, or fish completion script     |
 
 ## Next steps
 

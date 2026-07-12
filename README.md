@@ -28,16 +28,28 @@ Full documentation is available at https://tecs.dev.
 
 ## Installation
 
-Install the Tecs CLI, then create a project:
+Install the Tecs CLI with Homebrew (macOS and Linux), then create a project:
 
 ```bash
-curl -fsSL https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.sh | sh
+brew install tecs-dev/tap/tecs-cli
 tecs new my-game
 cd my-game
 tecs run
 ```
 
-On Windows, install from PowerShell:
+On Windows, install with Scoop:
+
+```powershell
+scoop bucket add tecs https://github.com/tecs-dev/scoop-bucket
+scoop install tecs
+```
+
+Standalone installers are also available if you prefer not to use a package
+manager:
+
+```bash
+curl -fsSL https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.sh | sh
+```
 
 ```powershell
 irm https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.ps1 | iex
