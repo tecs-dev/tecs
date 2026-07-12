@@ -126,6 +126,7 @@ export default defineConfig({
           { text: 'Getting Started', link: '/tecs2d/' },
           { text: 'Love2D Integration', link: '/tecs2d/love2d' },
           { text: 'Love2D Events', link: '/tecs2d/events' },
+          { text: 'Integration Testing', link: '/tecs2d/integration-testing' },
           {
             text: 'Runtime Introspection',
             collapsed: false,
