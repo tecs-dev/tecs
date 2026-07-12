@@ -273,7 +273,7 @@ jobs:
         export LUA_CPATH="$(luarocks path --lr-cpath);;"
         make VENDOR_LUA="$(cygpath -m "$PWD/vendor/share/lua/5.1")" test
 
-  starter-compat:
+  example-compat:
     runs-on: ubuntu-latest
     needs: [test, test-macos, test-windows, lint]
     steps:
