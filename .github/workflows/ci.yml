@@ -12,6 +12,17 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    # LuaJIT cannot compile LuaRocks.org's root manifest after it grew past
+    # 65,536 constants. Run the LuaRocks frontend with Lua 5.4, while the
+    # LuaJIT setup below remains the Lua 5.1 target for installed rocks.
+    - name: Setup Lua 5.4 for LuaRocks
+      uses: leafo/gh-actions-lua@v11
+      with:
+        luaVersion: "5.4"
+
+    - name: Remember Lua 5.4
+      run: echo "TECS_LUA54=$(command -v lua)" >> "$GITHUB_ENV"
+
     - name: Setup LuaJIT
       uses: leafo/gh-actions-lua@v11
       with:
@@ -20,13 +31,14 @@ jobs:
     - name: Setup LuaRocks
       uses: leafo/gh-actions-luarocks@v4
       with:
-        luarocksVersion: "3.11.1"
+        luarocksVersion: "3.12.2"
 
     - name: Install dependencies
       run: |
-        luarocks install busted
-        luarocks install luacov
-        luarocks --dev install tl
+        lr() { "$TECS_LUA54" "$(command -v luarocks)" --lua-version=5.1 "$@"; }
+        lr install busted
+        lr install luacov
+        lr --dev install tl
         make install-type-deps
 
     - name: Build project
@@ -45,6 +57,16 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    # Lua 5.4 parses the oversized LuaRocks manifest; LuaJIT below remains
+    # the target VM and ABI for every installed rock.
+    - name: Setup Lua 5.4 for LuaRocks
+      uses: leafo/gh-actions-lua@v11
+      with:
+        luaVersion: "5.4"
+
+    - name: Remember Lua 5.4
+      run: echo "TECS_LUA54=$(command -v lua)" >> "$GITHUB_ENV"
+
     - name: Setup LuaJIT
       uses: leafo/gh-actions-lua@v11
       with:
@@ -53,13 +75,14 @@ jobs:
     - name: Setup LuaRocks
       uses: leafo/gh-actions-luarocks@v4
       with:
-        luarocksVersion: "3.11.1"
+        luarocksVersion: "3.12.2"
 
     - name: Install dependencies
       run: |
-        luarocks install busted
-        luarocks install luacov
-        luarocks --dev install tl
+        lr() { "$TECS_LUA54" "$(command -v luarocks)" --lua-version=5.1 "$@"; }
+        lr install busted
+        lr install luacov
+        lr --dev install tl
         make install-type-deps
 
     - name: Build project
@@ -84,6 +107,16 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    # Lua 5.4 parses the oversized LuaRocks manifest; LuaJIT below remains
+    # the target VM and ABI for every installed rock.
+    - name: Setup Lua 5.4 for LuaRocks
+      uses: leafo/gh-actions-lua@v11
+      with:
+        luaVersion: "5.4"
+
+    - name: Remember Lua 5.4
+      run: echo "TECS_LUA54=$(command -v lua)" >> "$GITHUB_ENV"
+
     - name: Setup LuaJIT
       uses: leafo/gh-actions-lua@v11
       with:
@@ -92,15 +125,16 @@ jobs:
     - name: Setup LuaRocks
       uses: leafo/gh-actions-luarocks@v4
       with:
-        luarocksVersion: "3.11.1"
+        luarocksVersion: "3.12.2"
 
     - name: Install dependencies
       run: |
-        luarocks install busted
+        lr() { "$TECS_LUA54" "$(command -v luarocks)" --lua-version=5.1 "$@"; }
+        lr install busted
         # test-love resolves LuaSocket from the vendor tree (see the
         # target's LUA_CPATH), so install it there like `make dev` does.
-        luarocks install --tree=vendor --lua-version=5.1 luasocket
-        luarocks --dev install tl
+        lr install --tree=vendor luasocket
+        lr --dev install tl
         make install-type-deps
 
     - name: Build project
@@ -128,6 +162,8 @@ jobs:
   # on Windows (it builds from source via ./configure, absent on Windows).
   test-windows:
     runs-on: windows-latest
+    env:
+      TECS_LUA54: /mingw64/bin/lua5.4.exe
     defaults:
       run:
         shell: msys2 {0}
@@ -148,6 +184,7 @@ jobs:
           zip
           mingw-w64-x86_64-gcc
           mingw-w64-x86_64-7zip
+          mingw-w64-x86_64-lua54
           mingw-w64-x86_64-luajit
 
     # MSYS2 has no luarocks package for MinGW64, but its POSIX shell + gcc can
@@ -155,7 +192,7 @@ jobs:
     # is what broke the leafo action). Point it at the MinGW64 LuaJIT.
     - name: Install LuaRocks from source
       run: |
-        ver=3.11.1
+        ver=3.12.2
         curl -L -o luarocks.tar.gz "https://luarocks.org/releases/luarocks-${ver}.tar.gz"
         tar xzf luarocks.tar.gz
         cd "luarocks-${ver}"
@@ -170,12 +207,14 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/.luarocks
-        key: windows-luarocks-3.11.1-teal-dev-v2
+        key: windows-luarocks-3.12.2-teal-dev-v2
 
     - name: Install dependencies
       run: |
         # MinGW LuaJIT makes LuaRocks use its win32 filesystem backend, which
         # extracts rocks via SEVENZ and copies with Windows-style globs.
+        # Lua 5.4 runs LuaRocks only to parse the oversized registry manifest;
+        # the configured target and every installed rock remain LuaJIT 5.1.
         mkdir -p "$HOME/bin"
         printf '%s\n' \
           '#!/usr/bin/env bash' \
@@ -189,12 +228,13 @@ jobs:
         chmod +x "$HOME/bin/cp-luarocks"
         luarocks config --scope user variables.SEVENZ /mingw64/bin/7z
         luarocks config --scope user variables.CP "$(cygpath -m /usr/bin/bash.exe) $(cygpath -m "$HOME/bin/cp-luarocks")"
+        lr() { "$TECS_LUA54" "$(command -v luarocks)" --lua-version=5.1 "$@"; }
         if [ ! -f "$HOME/.luarocks/bin/tl.bat" ] || \
            [ ! -f "$HOME/.luarocks/bin/busted.bat" ] || \
            [ ! -f "$HOME/.luarocks/bin/luacov.bat" ]; then
-          luarocks install busted
-          luarocks install luacov
-          luarocks --dev install tl
+          lr install busted
+          lr install luacov
+          lr --dev install tl
         fi
         make install-type-deps
         for exe in tl busted luacov; do
@@ -268,6 +308,18 @@ jobs:
         repository: tecs-dev/tecs-starter
         path: tecs-starter
 
+    # LuaRocks stays configured for LuaJIT 5.1; only its manifest-loading
+    # frontend runs with Lua 5.4 to avoid LuaJIT's constant limit.
+    - name: Setup Lua 5.4 for LuaRocks
+      if: steps.changes.outputs.run == 'true'
+      uses: leafo/gh-actions-lua@v11
+      with:
+        luaVersion: "5.4"
+
+    - name: Remember Lua 5.4
+      if: steps.changes.outputs.run == 'true'
+      run: echo "TECS_LUA54=$(command -v lua)" >> "$GITHUB_ENV"
+
     - name: Setup LuaJIT
       if: steps.changes.outputs.run == 'true'
       uses: leafo/gh-actions-lua@v11
@@ -278,12 +330,12 @@ jobs:
       if: steps.changes.outputs.run == 'true'
       uses: leafo/gh-actions-luarocks@v4
       with:
-        luarocksVersion: "3.11.1"
+        luarocksVersion: "3.12.2"
 
     - name: Install Teal
       if: steps.changes.outputs.run == 'true'
       run: |
-        luarocks --dev install tl
+        "$TECS_LUA54" "$(command -v luarocks)" --lua-version=5.1 --dev install tl
         make install-type-deps
 
     - name: Type-check starter against this Tecs commit
@@ -305,6 +357,16 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    # Parse the LuaRocks registry with Lua 5.4, but install and type-check for
+    # the LuaJIT/Lua 5.1 runtime configured below.
+    - name: Setup Lua 5.4 for LuaRocks
+      uses: leafo/gh-actions-lua@v11
+      with:
+        luaVersion: "5.4"
+
+    - name: Remember Lua 5.4
+      run: echo "TECS_LUA54=$(command -v lua)" >> "$GITHUB_ENV"
+
     - name: Setup Lua
       uses: leafo/gh-actions-lua@v11
       with:
@@ -313,11 +375,11 @@ jobs:
     - name: Setup LuaRocks
       uses: leafo/gh-actions-luarocks@v4
       with:
-        luarocksVersion: "3.11.1"
+        luarocksVersion: "3.12.2"
 
     - name: Install Teal
       run: |
-        luarocks --dev install tl
+        "$TECS_LUA54" "$(command -v luarocks)" --lua-version=5.1 --dev install tl
         make install-type-deps
 
     - name: Type check
