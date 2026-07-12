@@ -42,7 +42,7 @@ test = {
 
 build = {
     type = "make",
-    build_target = "build",
+    build_target = "build-tecs",
     install_variables = {
         LUADIR = "$(LUADIR)",
         ROCK = "tecs",

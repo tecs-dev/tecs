@@ -26,6 +26,7 @@ dependencies = {
     "lua >= 5.1, < 5.5",
     "tl == dev-1",
     "tecs == dev-1",
+    "luasocket",
     "luasocket-tl-type == 0.0.2",
     "tecs-love2d-tl-type >= 0.1.0",
 }
@@ -43,7 +44,7 @@ test = {
 
 build = {
     type = "make",
-    build_target = "build",
+    build_target = "build-tecs2d",
     install_variables = {
         LUADIR = "$(LUADIR)",
         ROCK = "tecs2d",

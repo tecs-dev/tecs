@@ -1,4 +1,4 @@
-.PHONY: all build test test-love test-no-ffi clean dev install-type-deps compile check find-busted trim-whitespace \
+.PHONY: all build build-tecs build-tecs2d test test-love test-no-ffi clean dev install-type-deps compile compile-tecs compile-tecs2d check find-busted trim-whitespace \
 	coverage coverage-report coverage-xml coverage-lcov coverage-html \
 	check-examples build-examples new-example \
 	example-text-bench example-sprite-collision example-assets example-audio example-ball-bench example-circles \
@@ -56,7 +56,10 @@ COVERAGE_LUA_CPATH="$(VENDOR_CLIB)/?.so;"
 
 # Source files for dependency tracking
 SOURCE_TL := $(shell find $(TL_SRC_DIR) -name "*.tl" 2>/dev/null || true)
+TECS_SOURCE_TL := $(shell find $(TL_SRC_DIR)/tecs -name "*.tl" 2>/dev/null || true)
+TECS2D_SOURCE_TL := $(shell find $(TL_SRC_DIR)/tecs2d -name "*.tl" 2>/dev/null || true)
 SOURCE_GLSL := $(shell find $(TL_SRC_DIR) -name "*.glsl" 2>/dev/null || true)
+TECS2D_FONT_ASSETS := examples/shared/assets/tiny-font.fnt examples/shared/assets/tiny-font.png
 
 # Test deps live under build/test_deps and are compiled by the post-build
 # script scripts/compile_specs.tl in a single Lua process (much faster than
@@ -66,6 +69,41 @@ TEST_BUILD_DIR=$(LUA_DIR)/test_deps
 all: build test
 
 build: compile
+
+# The core rock must not require Tecs2D's LÖVE global environment while
+# LuaRocks is still resolving the tecs2d dependency tree.
+build-tecs: compile-tecs
+
+compile-tecs: $(TECS_SOURCE_TL) tlconfig.lua
+	@if $(TEAL_ENV) tl gen --help 2>&1 | grep -q -- '--root'; then \
+		$(TEAL_ENV) tl --global-env-def teal.default.prelude -q gen \
+			--root src --output-dir build $(TECS_SOURCE_TL); \
+	else \
+		for src in $(TECS_SOURCE_TL); do \
+			out="$(LUA_DIR)/$${src#$(TL_SRC_DIR)/}"; \
+			out="$${out%.tl}.lua"; \
+			mkdir -p "$$(dirname "$$out")"; \
+			$(TEAL_ENV) tl --global-env-def teal.default.prelude -q gen "$$src" -o "$$out"; \
+		done; \
+	fi
+
+build-tecs2d: compile-tecs2d
+
+compile-tecs2d: $(TECS2D_SOURCE_TL) $(SOURCE_GLSL) $(TECS2D_FONT_ASSETS) tlconfig.lua
+	@if $(TEAL_ENV) tl gen --help 2>&1 | grep -q -- '--root'; then \
+		$(TEAL_ENV) tl -q gen --root src --output-dir build $(TECS2D_SOURCE_TL); \
+	else \
+		for src in $(TECS2D_SOURCE_TL); do \
+			out="$(LUA_DIR)/$${src#$(TL_SRC_DIR)/}"; \
+			out="$${out%.tl}.lua"; \
+			mkdir -p "$$(dirname "$$out")"; \
+			$(TEAL_ENV) tl -q gen "$$src" -o "$$out"; \
+		done; \
+	fi
+	@cd src && find tecs2d/gfx/internal -name "*.glsl" -exec sh -c 'mkdir -p "../$(LUA_DIR)/$$(dirname {})" && cp {} "../$(LUA_DIR)/{}"' \;
+	@mkdir -p $(LUA_DIR)/tecs2d/assets/fonts
+	@cp $(TECS2D_FONT_ASSETS) $(LUA_DIR)/tecs2d/assets/fonts/
+	@echo "Synced $(words $(SOURCE_GLSL)) shader files"
 
 install-type-deps:
 	luarocks install --tree=vendor --lua-version=5.1 luajit-tl-type 0.0.2-1
@@ -98,7 +136,7 @@ find-busted:
 check:
 	$(TEAL_ENV) tl check $(SOURCE_TL)
 
-compile: $(SOURCE_TL) $(SOURCE_GLSL) tlconfig.lua
+compile: $(SOURCE_TL) $(SOURCE_GLSL) $(TECS2D_FONT_ASSETS) tlconfig.lua
 	@if $(TEAL_ENV) tl gen --help 2>&1 | grep -q -- '--root'; then \
 		$(TEAL_ENV) tl -q gen --root src --output-dir build $(SOURCE_TL); \
 	else \
@@ -111,6 +149,8 @@ compile: $(SOURCE_TL) $(SOURCE_GLSL) tlconfig.lua
 	fi
 	@# Copy shader files (always sync from source, preserving directory structure)
 	@cd src && find tecs2d/gfx/internal -name "*.glsl" -exec sh -c 'mkdir -p "../$(LUA_DIR)/$$(dirname {})" && cp {} "../$(LUA_DIR)/{}"' \;
+	@mkdir -p $(LUA_DIR)/tecs2d/assets/fonts
+	@cp $(TECS2D_FONT_ASSETS) $(LUA_DIR)/tecs2d/assets/fonts/
 	@echo "Synced $(words $(SOURCE_GLSL)) shader files"
 	@$(TEAL_ENV) luajit scripts/compile_specs.lua
 
