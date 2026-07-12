@@ -360,6 +360,14 @@ jobs:
         (cd tecs-cli && lr make --local --deps-mode=none tecs-cli-0.1.0-1.rockspec)
         lr --dev install tl
         make -C tecs install-type-deps
+        starter_tree="$GITHUB_WORKSPACE/tecs-starter/src/vendor"
+        lr install --tree="$starter_tree" luajit-tl-type 0.0.2-1
+        lr install --tree="$starter_tree" luasocket-tl-type 0.0.2-1
+        lr install --tree="$starter_tree" tecs-love2d-tl-type
+        # Install the checked-out rocks so this job tests this exact commit,
+        # rather than the previously published dev-rock metadata.
+        (cd tecs && lr make --tree="$starter_tree" --deps-mode=none tecs-dev-1.rockspec)
+        (cd tecs && lr make --tree="$starter_tree" --deps-mode=none tecs2d-dev-1.rockspec)
         # The CLI installs project rocks itself, so keep its ordinary
         # `luarocks` calls behind the same CI-only Lua 5.4 frontend.
         mkdir -p "$RUNNER_TEMP/lua54-bin"

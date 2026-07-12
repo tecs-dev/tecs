@@ -27,14 +27,14 @@ dependencies = {
     "tl == dev",
     "tecs == dev-1",
     "luasocket",
-    "luasocket-tl-type == 0.0.2",
+    "luasocket-tl-type >= 0.0.2",
     "tecs-love2d-tl-type >= 0.1.0",
 }
 
 test_dependencies = {
     "busted",
-    "busted-tl-type == 0.0.1",
-    "luassert-tl-type == 0.0.1",
+    "busted-tl-type >= 0.0.1",
+    "luassert-tl-type >= 0.0.1",
 }
 
 test = {
