@@ -27,7 +27,6 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     env:
       GH_TOKEN: ${{ github.token }}
-      TECS_CACHE_DIR: ${{ runner.temp }}/tecs-cache
 
     steps:
       - name: Download and verify published assets
@@ -47,6 +46,8 @@ jobs:
         run: bash release/install.sh
 
       - name: Prove published CLI
+        env:
+          TECS_CACHE_DIR: ${{ runner.temp }}/tecs-cache
         run: |
           tecs="$RUNNER_TEMP/tecs-bin/tecs"
           project="$RUNNER_TEMP/published-tecs-game"
@@ -65,7 +66,6 @@ jobs:
     runs-on: windows-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      TECS_CACHE_DIR: ${{ runner.temp }}\tecs-cache
 
     steps:
       - name: Download published assets
@@ -81,6 +81,8 @@ jobs:
 
       - name: Prove published CLI
         shell: pwsh
+        env:
+          TECS_CACHE_DIR: ${{ runner.temp }}\tecs-cache
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           $tecs = Join-Path $env:RUNNER_TEMP "tecs-bin\tecs.ps1"
