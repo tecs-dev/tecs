@@ -8,6 +8,14 @@ payload, launchers, and installers as GitHub release assets.
 
 ## [Unreleased]
 
+### Changed
+
+- The vendored-rock manifest moved from `src/vendor/rocks.lua` to
+  `tecs-rocks.lua` at the project root so it survives gitignored vendor
+  trees; the old location is still read. `tecs check` and `tecs build` now
+  restore missing recorded rocks at their pinned versions, so fresh clones
+  build without re-running `tecs add`.
+
 ### Fixed
 
 - Fish completion scripts now complete positional argument choices (e.g. the

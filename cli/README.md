@@ -115,8 +115,10 @@ tecs update               # re-resolve every added rock (or: tecs update inspect
 `tecs add` vendors a pure-Lua rock from luarocks.org into
 `src/vendor/share/lua/5.1/`, along with its dependencies, license files, and —
 when luarocks.org publishes a `<rock>-tl-type` package — the matching Teal
-type declarations, so `tecs check` keeps working. The files are meant to be
-committed; `src/vendor/rocks.lua` records what was installed and why.
+type declarations, so `tecs check` keeps working. `tecs-rocks.lua` at the
+project root records exactly what was installed; commit it. `src/vendor/`
+stays generated (and gitignored): `tecs check` and `tecs build` restore any
+missing recorded rocks at their pinned versions, so fresh clones just work.
 
 Rocks that need a C compiler (or any non-`builtin` build) are rejected: the
 game runtime is LÖVE's LuaJIT with no toolchain, and builds must stay

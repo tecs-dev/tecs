@@ -66,6 +66,11 @@ jobs:
             '}' \
             'return debugutil' > "$project/src/debugutil.tl"
           (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" check)
+          test -f "$project/tecs-rocks.lua"
+          rm -rf "$project/src/vendor"
+          (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" check)
+          test -f "$project/src/vendor/share/lua/5.1/inspect.lua"
+          test -f "$project/src/vendor/share/lua/5.1/inspect.d.tl"
           rm "$project/src/debugutil.tl"
           (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" remove inspect)
           test ! -e "$project/src/vendor/share/lua/5.1/inspect.lua"

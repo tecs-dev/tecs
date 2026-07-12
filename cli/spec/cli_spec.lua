@@ -504,7 +504,7 @@ describe("tecs CLI", function()
             assert.matches("only pure%-Lua rocks", err.message)
         end)
 
-        it("round-trips the vendored rock manifest", function()
+        it("round-trips the vendored rock manifest at the project root", function()
             local root = make_temp("rocks-manifest")
             with_cwd(root, function()
                 internal.write_rocks_manifest({
@@ -515,11 +515,26 @@ describe("tecs CLI", function()
                         files = {"share/lua/5.1/inspect.lua"},
                     },
                 })
+                assert.is_true(exists(join(root, "tecs-rocks.lua")))
                 local manifest = internal.read_rocks_manifest()
                 assert.equals("3.1.1-0", manifest.inspect.version)
                 assert.is_true(manifest.inspect.direct)
                 assert.equals("inspect-tl-type", manifest.inspect.deps[1])
                 assert.equals("share/lua/5.1/inspect.lua", manifest.inspect.files[1])
+            end)
+        end)
+
+        it("reads the pre-0.3 manifest location and migrates it on write", function()
+            local root = make_temp("rocks-legacy")
+            with_cwd(root, function()
+                mkdir_p(join(root, "src", "vendor"))
+                write_file(join(root, "src", "vendor", "rocks.lua"),
+                    'return {inspect = {version = "2.0-1", direct = true, deps = {}, files = {}}}\n')
+                local manifest = internal.read_rocks_manifest()
+                assert.equals("2.0-1", manifest.inspect.version)
+                internal.write_rocks_manifest(manifest)
+                assert.is_true(exists(join(root, "tecs-rocks.lua")))
+                assert.is_true(not exists(join(root, "src", "vendor", "rocks.lua")))
             end)
         end)
 

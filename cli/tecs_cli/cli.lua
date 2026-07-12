@@ -984,7 +984,11 @@ end
 -- never involved.
 --------------------------------------------------------------------------------
 
-local ROCKS_MANIFEST = "src/vendor/rocks.lua"
+-- The manifest lives at the project root so it is committed (src/vendor/ is
+-- generated and typically gitignored); check/build restore missing rocks
+-- from it on fresh clones.
+local ROCKS_MANIFEST = "tecs-rocks.lua"
+local LEGACY_ROCKS_MANIFEST = "src/vendor/rocks.lua"
 local LUAROCKS_SERVER = "https://luarocks.org"
 
 local function fetch_url(url)
@@ -1189,22 +1193,28 @@ local function plan_rock_files(spec)
     return plan
 end
 
--- Vendored-rock bookkeeping, stored as a Lua table in src/vendor/rocks.lua.
+-- Vendored-rock bookkeeping, stored as a committed Lua table at the project
+-- root (with a fallback read of the pre-0.3 location under src/vendor/).
 local function read_rocks_manifest()
-    if not exists(ROCKS_MANIFEST) then return {} end
-    local file = assert(io.open(normalize(ROCKS_MANIFEST), "rb"))
+    local path = ROCKS_MANIFEST
+    if not exists(path) then path = LEGACY_ROCKS_MANIFEST end
+    if not exists(path) then return {} end
+    local file = assert(io.open(normalize(path), "rb"))
     local content = file:read("*a")
     file:close()
-    local manifest = load_lua_table(content, "@" .. ROCKS_MANIFEST)
+    local manifest = load_lua_table(content, "@" .. path)
     return type(manifest) == "table" and manifest or {}
 end
 
 local function write_rocks_manifest(manifest)
+    remove(LEGACY_ROCKS_MANIFEST)
     local names = {}
     for name in pairs(manifest) do names[#names + 1] = name end
     table.sort(names)
     local out = {
         "-- Rocks vendored by `tecs add`; managed by tecs add/remove/update.",
+        "-- Commit this file: `tecs check` and `tecs build` restore the recorded",
+        "-- rocks into src/vendor/ when they are missing.",
         "return {",
     }
     for _, name in ipairs(names) do
@@ -1399,9 +1409,18 @@ local function install_rock(repository, name, wanted, manifest, direct, seen)
     local version = resolve_rock_version(repository, name, wanted)
     local existing = manifest[name]
     if existing and existing.version == version then
-        if direct then existing.direct = true end
-        status(name .. " " .. version .. " is already vendored.")
-        return
+        local complete = true
+        for _, file in ipairs(existing.files or {}) do
+            if not exists(path_join("src/vendor", file)) then
+                complete = false
+                break
+            end
+        end
+        if complete then
+            if direct then existing.direct = true end
+            status(name .. " " .. version .. " is already vendored.")
+            return
+        end
     end
     if existing then
         remove_rock_files(existing)
@@ -1476,6 +1495,38 @@ local function install_rock(repository, name, wanted, manifest, direct, seen)
     status("Vendored " .. name .. " " .. version .. " (" .. #files .. " files).")
 end
 
+-- Reinstall manifest-recorded rocks whose files are missing (fresh clones:
+-- src/vendor/ is generated and typically gitignored). Versions are pinned to
+-- the manifest so a restore never upgrades anything.
+local function restore_missing_rocks()
+    local manifest = read_rocks_manifest()
+    local missing = {}
+    for name, entry in pairs(manifest) do
+        for _, file in ipairs(entry.files or {}) do
+            if not exists(path_join("src/vendor", file)) then
+                missing[#missing + 1] = name
+                break
+            end
+        end
+    end
+    if #missing == 0 then return end
+    table.sort(missing)
+
+    status("Restoring vendored rocks...")
+    local repository = luarocks_repository(false)
+    -- Pre-seed `seen` so dependency recursion cannot re-resolve (and upgrade)
+    -- rocks the manifest already records; each rock is restored pinned.
+    local seen = {}
+    for name in pairs(manifest) do seen[name] = true end
+    for _, name in ipairs(missing) do
+        local entry = manifest[name]
+        seen[name] = nil
+        install_rock(repository, name, entry.version, manifest, entry.direct, seen)
+        seen[name] = true
+    end
+    write_rocks_manifest(manifest)
+end
+
 local function ensure_project()
     if not exists("tlconfig.lua") then
         fail("not a Tecs project: tlconfig.lua not found in the current directory")
@@ -1490,6 +1541,7 @@ local parser
 
 function tasks.check(args)
     ensure_vendor()
+    restore_missing_rocks()
     local sources = list_teal_sources()
     if args and args.json then
         local json = json_module()
@@ -1509,6 +1561,7 @@ end
 function tasks.build()
     status("Building...")
     ensure_vendor()
+    restore_missing_rocks()
     local changed = compile_sources() > 0
     if copy_assets() then changed = true end
     if copy_vendor() then changed = true end

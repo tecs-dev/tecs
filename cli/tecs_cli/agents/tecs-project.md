@@ -12,8 +12,9 @@ Run these from the project root (the directory containing `tlconfig.lua`):
 - `tecs info --json` — CLI, LÖVE, and LuaJIT versions plus project status as JSON.
 - `tecs add <rock>[@version]` / `tecs remove <rock>` / `tecs update` — vendor pure-Lua
   rocks from luarocks.org into `src/vendor/` (with Teal type declarations when a
-  `<rock>-tl-type` package exists). Vendored files are committed; `src/vendor/rocks.lua`
-  records them. C rocks are rejected by design.
+  `<rock>-tl-type` package exists). `tecs-rocks.lua` at the project root records them
+  and must be committed; `tecs check`/`tecs build` restore missing rocks from it at
+  pinned versions. C rocks are rejected by design.
 - `tecs clean` — remove `build/`.
 
 Always run `tecs check` after editing Teal sources, and make sure it passes before finishing a task.
