@@ -193,7 +193,7 @@ describe("tecs CLI", function()
             assert.matches("unknown command", err)
         end)
 
-        it("prints runtime versions and a next step with --version", function()
+        it("prints only the semantic version with --version", function()
             local printed = {}
             local real_print = print
             _G.print = function(...)
@@ -203,13 +203,27 @@ describe("tecs CLI", function()
             _G.print = real_print
 
             assert.is_true(ok)
+            assert.equals(1, #printed)
+            assert.matches("^%d+%.%d+%.%d+$", printed[1])
+        end)
+
+        it("prints runtime versions and a next step with info", function()
+            local printed = {}
+            local real_print = print
+            _G.print = function(...)
+                printed[#printed + 1] = table.concat({...}, "\t")
+            end
+            local ok = cli.run({"info"})
+            _G.print = real_print
+
+            assert.is_true(ok)
             local output = table.concat(printed, "\n")
             assert.matches("Tecs CLI %d+%.%d+%.%d+", output)
             assert.matches("LuaJIT %d+%.%d+", output)
             assert.matches("Next: tecs new hello", output)
         end)
 
-        it("includes current project information with --version", function()
+        it("includes current project information with info", function()
             local root = make_temp("version-project")
             mkdir_p(join(root, "src"))
             mkdir_p(join(root, "build"))
@@ -222,7 +236,7 @@ describe("tecs CLI", function()
                 printed[#printed + 1] = table.concat({...}, "\t")
             end
             with_cwd(root, function()
-                assert.is_true(cli.run({"--version"}))
+                assert.is_true(cli.run({"info"}))
             end)
             _G.print = real_print
 

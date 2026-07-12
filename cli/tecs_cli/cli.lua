@@ -5,7 +5,7 @@ local argparse = require("tecs_cli.vendor.argparse")
 local ansicolors = require("tecs_cli.vendor.ansicolors")
 local have_lfs, lfs = pcall(require, "lfs")
 
-local VERSION = "0.1.0" -- keep in sync with the rockspec version
+local VERSION = "0.1.0"
 local is_love_cli = rawget(_G, "TECS_LOVE_CLI") == true
 local love_api = rawget(_G, "love")
 
@@ -1077,7 +1077,42 @@ end
 
 local M = {}
 
+local function print_info()
+    print("Tecs CLI " .. VERSION)
+
+    if love_api and love_api.getVersion then
+        local major, minor, revision, codename = love_api.getVersion()
+        local loveVersion = table.concat({major, minor, revision}, ".")
+        if codename and codename ~= "" then loveVersion = loveVersion .. " (" .. codename .. ")" end
+        print("LÖVE " .. loveVersion)
+    end
+
+    local jitApi = rawget(_G, "jit")
+    print(jitApi and jitApi.version or _VERSION)
+
+    if exists("tlconfig.lua") and is_dir("src") then
+        local root = cwd()
+        print("")
+        print("Project " .. basename(root))
+        print("  Path: " .. root)
+        print("  Build: " .. (exists("build/main.lua") and "ready" or "not built"))
+        print("")
+        print("Next: tecs run")
+    else
+        print("")
+        print("Next: tecs new hello")
+    end
+end
+
+tasks.info = print_info
+
 local commands = {
+    {
+        name = "info",
+        summary = "Show runtime and project information",
+        description = "Show CLI, Love2D, and LuaJIT versions plus current project status and a next step.",
+        action = print_info,
+    },
     {
         name = "new",
         summary = "Create a new Tecs project",
@@ -1158,33 +1193,6 @@ snapshot, restart, and restore state automatically.
 ]])
 end
 
-local function print_version()
-    print("Tecs CLI " .. VERSION)
-
-    if love_api and love_api.getVersion then
-        local major, minor, revision, codename = love_api.getVersion()
-        local loveVersion = table.concat({major, minor, revision}, ".")
-        if codename and codename ~= "" then loveVersion = loveVersion .. " (" .. codename .. ")" end
-        print("LÖVE " .. loveVersion)
-    end
-
-    local jitApi = rawget(_G, "jit")
-    print(jitApi and jitApi.version or _VERSION)
-
-    if exists("tlconfig.lua") and is_dir("src") then
-        local root = cwd()
-        print("")
-        print("Project " .. basename(root))
-        print("  Path: " .. root)
-        print("  Build: " .. (exists("build/main.lua") and "ready" or "not built"))
-        print("")
-        print("Next: tecs run")
-    else
-        print("")
-        print("Next: tecs new hello")
-    end
-end
-
 local function parser()
     local p = argparse("tecs", "Build, check, run, and manage fixed-layout Tecs starter projects.")
     p:help_max_width(88)
@@ -1226,7 +1234,7 @@ function M.run(argv)
         end
         quiet = args.quiet or false
         if args.version then
-            print_version()
+            print(VERSION)
             return
         end
 
