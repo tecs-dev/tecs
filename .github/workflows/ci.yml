@@ -20,7 +20,7 @@ jobs:
     - name: Setup LuaRocks
       uses: leafo/gh-actions-luarocks@v4
       with:
-        luarocksVersion: "3.12.2"
+        luarocksVersion: "3.11.1"
 
     - name: Install dependencies
       run: |
@@ -53,7 +53,7 @@ jobs:
     - name: Setup LuaRocks
       uses: leafo/gh-actions-luarocks@v4
       with:
-        luarocksVersion: "3.12.2"
+        luarocksVersion: "3.11.1"
 
     - name: Install dependencies
       run: |
@@ -92,7 +92,7 @@ jobs:
     - name: Setup LuaRocks
       uses: leafo/gh-actions-luarocks@v4
       with:
-        luarocksVersion: "3.12.2"
+        luarocksVersion: "3.11.1"
 
     - name: Install dependencies
       run: |
@@ -155,7 +155,7 @@ jobs:
     # is what broke the leafo action). Point it at the MinGW64 LuaJIT.
     - name: Install LuaRocks from source
       run: |
-        ver=3.12.2
+        ver=3.11.1
         curl -L -o luarocks.tar.gz "https://luarocks.org/releases/luarocks-${ver}.tar.gz"
         tar xzf luarocks.tar.gz
         cd "luarocks-${ver}"
@@ -170,7 +170,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/.luarocks
-        key: windows-luarocks-3.12.2-teal-dev-v2
+        key: windows-luarocks-3.11.1-teal-dev-v2
 
     - name: Install dependencies
       run: |
@@ -278,7 +278,7 @@ jobs:
       if: steps.changes.outputs.run == 'true'
       uses: leafo/gh-actions-luarocks@v4
       with:
-        luarocksVersion: "3.12.2"
+        luarocksVersion: "3.11.1"
 
     - name: Install Teal
       if: steps.changes.outputs.run == 'true'
@@ -313,7 +313,7 @@ jobs:
     - name: Setup LuaRocks
       uses: leafo/gh-actions-luarocks@v4
       with:
-        luarocksVersion: "3.12.2"
+        luarocksVersion: "3.11.1"
 
     - name: Install Teal
       run: |
