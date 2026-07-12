@@ -723,6 +723,25 @@ local function compile_vendor_tecs_sources()
     end
 end
 
+-- Keep runtime modules and native libraries, but discard compiler inputs,
+-- LuaRocks bookkeeping, and duplicate framework copies from the game bundle.
+local function prune_runtime_vendor()
+    local vendor = path_join("build", "vendor")
+    local luaRoot = path_join(vendor, "share/lua/5.1")
+
+    remove(path_join(vendor, "bin"))
+    remove(path_join(vendor, "lib/luarocks"))
+    remove(path_join(luaRoot, "teal"))
+    remove(path_join(luaRoot, "tlcli"))
+    remove(path_join(luaRoot, "tl.lua"))
+    remove(path_join(luaRoot, "tecs"))
+    remove(path_join(luaRoot, "tecs2d"))
+
+    for _, source in ipairs(list_files("build", ".tl")) do
+        remove(source)
+    end
+end
+
 -- Copy assets/ into build/, skipping source-only files; stamp guards reruns.
 -- Returns true when anything was copied.
 local function copy_assets()
@@ -742,8 +761,8 @@ end
 -- tecs/tecs2d builds and their bundled internal assets. Stamp guards reruns.
 -- Returns true when anything was staged.
 local function copy_vendor()
-    local required = path_join("build/vendor/share/lua/5.1/tecs2d/init.lua")
-    local stamp = path_join("build/vendor/.copy-stamp")
+    local required = path_join("build/tecs2d/init.lua")
+    local stamp = path_join("build/.vendor-copy-stamp")
     local tecs_build = path_join(tecs_dir, "build/tecs")
     local tecs2d_build = path_join(tecs_dir, "build/tecs2d")
     local vendor_time = math.max(
@@ -786,6 +805,7 @@ local function copy_vendor()
         remove("build/internal")
         copy_dir(internal, "build/internal")
     end
+    prune_runtime_vendor()
     write_file(stamp, tostring(os.time()) .. "\n")
     return true
 end
@@ -1070,6 +1090,7 @@ M._internal = {
     should_exclude = should_exclude,
     needs_update = needs_update,
     copy_dir = copy_dir,
+    prune_runtime_vendor = prune_runtime_vendor,
     q = q,
 }
 

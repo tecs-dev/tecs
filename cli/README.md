@@ -57,7 +57,8 @@ tecs love12
 ```
 
 `tecs run` builds the project and launches Love2D. `tecs build` compiles Teal
-source into `build/` and stages vendored runtime files. `tecs check` runs the
+source into a self-contained `build/`, retaining runtime dependencies while
+pruning compiler sources and LuaRocks metadata. `tecs check` runs the
 Teal type checker. Pass `--quiet` (or `-q`) to any command to suppress
 progress output.
 
