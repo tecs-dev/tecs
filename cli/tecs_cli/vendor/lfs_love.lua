@@ -44,6 +44,10 @@ local function clean(path)
     return joined
 end
 
+local function native(path)
+    return isWindows and path:gsub("/", "\\") or path
+end
+
 local function cwd_native()
     local buffer = ffi.new("char[?]", 32768)
     if isWindows then
@@ -116,7 +120,7 @@ function M.setRoot(path)
     local full = absolute(path)
     local changed
     if isWindows then
-        changed = kernel32.SetCurrentDirectoryA(full) ~= 0
+        changed = kernel32.SetCurrentDirectoryA(native(full)) ~= 0
     else
         changed = ffi.C.chdir(full) == 0
     end
@@ -169,14 +173,24 @@ function M.mkdir(path)
     -- Writes must use the host API: this adapter intentionally mounts project
     -- directories read-only so filesystem discovery never broadens access.
     local full = absolute(path)
-    local ok = isWindows and kernel32.CreateDirectoryA(full, nil) ~= 0 or ffi.C.mkdir(full, 493) == 0
+    local ok
+    if isWindows then
+        ok = kernel32.CreateDirectoryA(native(full), nil) ~= 0
+    else
+        ok = ffi.C.mkdir(full, 493) == 0
+    end
     if ok then return true end
     return nil, "mkdir failed: " .. tostring(ffi.errno())
 end
 
 function M.rmdir(path)
     local full = absolute(path)
-    local ok = isWindows and kernel32.RemoveDirectoryA(full) ~= 0 or ffi.C.rmdir(full) == 0
+    local ok
+    if isWindows then
+        ok = kernel32.RemoveDirectoryA(native(full)) ~= 0
+    else
+        ok = ffi.C.rmdir(full) == 0
+    end
     if ok then return true end
     return nil, "rmdir failed: " .. tostring(ffi.errno())
 end
