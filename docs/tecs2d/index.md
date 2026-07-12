@@ -74,8 +74,8 @@ my-game/
 
 ### Larger reference project
 
-The [tecs-starter repository](https://github.com/tecs-dev/tecs-starter) is a
-larger game example with multiple plugins and states. Use it as reference
+The [tecs-space-example repository](https://github.com/tecs-dev/tecs-space-example)
+is a larger game example with multiple plugins and states. Use it as reference
 material; install the CLI and use `tecs new` when creating a project.
 
 ### Wiring up Tecs2D

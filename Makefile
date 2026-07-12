@@ -222,7 +222,7 @@ clean:
 install:
 ifdef LUADIR
 	@# SAFETY: refuse to install if LUADIR/tecs is a symlink. Some downstream
-	@# projects (e.g. tecs-starter) symlink their vendor/tecs to this repo's
+	@# projects (e.g. tecs-space-example) symlink their vendor/tecs to this repo's
 	@# src/tecs for fast dev iteration. luarocks's install-time cleanup
 	@# resolves through such symlinks and would destroy this source tree.
 	@if [ -L "$(LUADIR)/tecs" ] || [ -L "$(LUADIR)/tecs2d" ]; then \

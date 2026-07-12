@@ -314,12 +314,12 @@ jobs:
           echo "run=false" >> "$GITHUB_OUTPUT"
         fi
 
-    - name: Check out starter
+    - name: Check out the space example
       if: steps.changes.outputs.run == 'true'
       uses: actions/checkout@v4
       with:
-        repository: tecs-dev/tecs-starter
-        path: tecs-starter
+        repository: tecs-dev/tecs-space-example
+        path: tecs-space-example
 
     - name: Check out CLI
       if: steps.changes.outputs.run == 'true'
@@ -334,17 +334,17 @@ jobs:
         TECS_DIR: ${{ github.workspace }}/tecs
       run: tecs-cli/scripts/build_love.sh
 
-    - name: Type-check starter against this Tecs commit
+    - name: Type-check the space example against this Tecs commit
       if: steps.changes.outputs.run == 'true'
-      working-directory: tecs-starter
+      working-directory: tecs-space-example
       env:
         TECS_CACHE_DIR: ${{ runner.temp }}/tecs-cache
         TECS_CLI_LOVE: ${{ github.workspace }}/tecs-cli/dist/tecs-cli.love
       run: ../tecs-cli/launcher/tecs check
 
-    - name: Build starter against this Tecs commit
+    - name: Build the space example against this Tecs commit
       if: steps.changes.outputs.run == 'true'
-      working-directory: tecs-starter
+      working-directory: tecs-space-example
       env:
         TECS_CACHE_DIR: ${{ runner.temp }}/tecs-cache
         TECS_CLI_LOVE: ${{ github.workspace }}/tecs-cli/dist/tecs-cli.love
