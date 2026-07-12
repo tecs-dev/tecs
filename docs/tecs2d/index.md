@@ -114,6 +114,7 @@ adds the engine layer: rendering, audio, input, and more. Projects created by
 | `tecs build`        | Compile a self-contained game without running it |
 | `tecs check`        | Type-check all project Teal sources (`--json` for tooling) |
 | `tecs integ`        | Run project specs; `*_lovespec.tl` files drive the built game over MCP |
+| `tecs dist`         | Package the game: `.love`, macOS app bundle, fused Windows executable |
 | `tecs add <rock>`   | Vendor a pure-Lua rock and its Teal types from luarocks.org |
 | `tecs remove <rock>` | Remove a vendored rock                          |
 | `tecs update`       | Update vendored rocks to their newest versions   |
