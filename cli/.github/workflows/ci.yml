@@ -17,13 +17,20 @@ jobs:
 
     steps:
       - name: Check out CLI
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Check out Tecs
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: tecs-dev/tecs
           path: tecs
+
+      - name: Validate release metadata
+        if: startsWith(github.ref, 'refs/tags/v') && matrix.os == 'ubuntu-latest'
+        run: |
+          version=$(sed -n 's/^local VERSION = "\([^"]*\)"/\1/p' tecs_cli/cli.lua)
+          test "$GITHUB_REF_NAME" = "v$version"
+          grep -F "## [$version] -" CHANGELOG.md
 
       - name: Build tecs-cli.love
         env:
@@ -38,7 +45,9 @@ jobs:
           project="$RUNNER_TEMP/hello-tecs"
           rm -rf "$project" "$TECS_CACHE_DIR"
           launcher/tecs --version
+          launcher/tecs info
           launcher/tecs new "$project"
+          (cd "$project" && TECS_DIR="$GITHUB_WORKSPACE/tecs" "$GITHUB_WORKSPACE/launcher/tecs" dev)
           (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" check)
           (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" build)
           test -f "$project/build/main.lua"
@@ -47,9 +56,14 @@ jobs:
           test -f "$project/build/tecs2d/assets/fonts/tiny-font.png"
           launcher/tecs --version
 
+      - name: Create release checksums
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: dist
+        run: sha256sum tecs tecs.cmd tecs.ps1 tecs-cli.love install.sh install.ps1 LICENSE CHANGELOG.md > SHA256SUMS
+
       - name: Upload option 1 package
         if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tecs-cli-option1
           path: |
@@ -59,6 +73,9 @@ jobs:
             dist/tecs-cli.love
             dist/install.sh
             dist/install.ps1
+            dist/LICENSE
+            dist/CHANGELOG.md
+            dist/SHA256SUMS
 
   windows:
     name: windows-latest
@@ -66,10 +83,10 @@ jobs:
 
     steps:
       - name: Check out CLI
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Check out Tecs
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: tecs-dev/tecs
           path: tecs
@@ -90,8 +107,11 @@ jobs:
           $project = Join-Path $env:RUNNER_TEMP "hello-tecs"
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $project, $env:TECS_CACHE_DIR
           & launcher/tecs.ps1 --version
+          & launcher/tecs.ps1 info
           & launcher/tecs.ps1 new $project
           Push-Location $project
+          $env:TECS_DIR = Join-Path $env:GITHUB_WORKSPACE "tecs"
+          & "$env:GITHUB_WORKSPACE\launcher\tecs.ps1" dev
           Remove-Item Env:TECS_DIR -ErrorAction SilentlyContinue
           & "$env:GITHUB_WORKSPACE\launcher\tecs.ps1" check
           & "$env:GITHUB_WORKSPACE\launcher\tecs.ps1" build
@@ -110,13 +130,13 @@ jobs:
       contents: write
     steps:
       - name: Download option 1 package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: tecs-cli-option1
           path: dist
 
       - name: Publish release assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
           fail_on_unmatched_files: true
@@ -127,3 +147,6 @@ jobs:
             dist/tecs-cli.love
             dist/install.sh
             dist/install.ps1
+            dist/LICENSE
+            dist/CHANGELOG.md
+            dist/SHA256SUMS

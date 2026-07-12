@@ -10,7 +10,7 @@ output="$root/dist/tecs-cli.love"
 if [ ! -f "$tecs_dir/src/tecs/init.tl" ] || [ ! -f "$tecs_dir/src/tecs2d/init.tl" ] \
     || [ ! -f "$tecs_dir/examples/shared/assets/tiny-font.fnt" ] \
     || [ ! -f "$tecs_dir/examples/shared/assets/tiny-font.png" ]; then
-    echo "Tecs checkout not found: $tecs_dir" >&2
+    echo "Complete Tecs checkout not found: $tecs_dir" >&2
     exit 1
 fi
 
@@ -54,6 +54,8 @@ cp "$root/launcher/tecs.ps1" "$root/dist/tecs.ps1"
 cp "$root/launcher/tecs.cmd" "$root/dist/tecs.cmd"
 cp "$root/install.sh" "$root/dist/install.sh"
 cp "$root/install.ps1" "$root/dist/install.ps1"
+cp "$root/LICENSE" "$root/dist/LICENSE"
+cp "$root/CHANGELOG.md" "$root/dist/CHANGELOG.md"
 chmod +x "$root/dist/tecs"
 chmod +x "$root/dist/install.sh"
 echo "$output"
