@@ -595,9 +595,6 @@ exec luajit "$script" "$@"
     return true
 end
 
-local TEAL_UPSTREAM_ROCKSPEC =
-    "https://raw.githubusercontent.com/teal-language/tl/master/tl-dev-1.rockspec"
-
 local function teal_compiler_complete()
     return exists(path_join("src/vendor/bin/tl"))
         and exists(path_join(vendor_lua, "teal/init.lua"))
@@ -613,15 +610,6 @@ local function ensure_teal_compiler()
     local tree = q(path_join(cwd(), "src/vendor"))
     status("Installing Teal development release...")
     run(with_vendor_env("luarocks --dev --lua-version=5.1 install --tree=" .. tree .. " tl"))
-
-    if not teal_compiler_complete() then
-        -- Temporary workaround: LuaRocks still serves a stale tl-dev-1
-        -- rockspec that omits the teal.* and tlcli.* modules. Remove this
-        -- fallback once the corrected upstream rockspec is republished there.
-        status("LuaRocks served an incomplete Teal dev rock; installing the current upstream rockspec...")
-        run(with_vendor_env("luarocks --lua-version=5.1 install --force --tree=" .. tree
-            .. " " .. q(TEAL_UPSTREAM_ROCKSPEC)))
-    end
 
     if not teal_compiler_complete() then
         fail("Teal installed without its teal/tlcli modules")
