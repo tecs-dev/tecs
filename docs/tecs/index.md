@@ -46,12 +46,6 @@ cd my-game
 tecs check
 ```
 
-Require Tecs from your Teal code:
-
-```teal
-local tecs = require("tecs")
-```
-
 ::: tip Building a game?
 Projects created by `tecs new` include Tecs2D, which provides rendering,
 audio, input, physics, UI, and LÖVE loop integration on top of Tecs. See
@@ -59,6 +53,12 @@ audio, input, physics, UI, and LÖVE loop integration on top of Tecs. See
 :::
 
 ## Tecs in a nutshell
+
+Require Tecs from your Teal code:
+
+```teal
+local tecs = require("tecs")
+```
 
 ### World
 
