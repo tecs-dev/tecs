@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- `tecs new` generates a Claude Code skill
+  (`.claude/skills/integration-testing/SKILL.md`) covering how to write and
+  run integration specs with `tecs integ`.
+
 ## [0.4.0] - 2026-07-12
 
 ### Added

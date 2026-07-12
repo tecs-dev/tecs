@@ -121,6 +121,8 @@ describe("tecs CLI", function()
             assert.equals("@AGENTS.md\n", read_file(join(project, "CLAUDE.md")))
             assert.matches("tecs2d%.testing%.fixture",
                 read_file(join(project, "spec", "game_lovespec.tl")))
+            assert.matches("name: integration%-testing",
+                read_file(join(project, ".claude", "skills", "integration-testing", "SKILL.md")))
             assert.is_false(exists(join(project, "game-dev-1.rockspec")))
             assert.is_true(exists(join(project, "src", "conf.tl")))
             assert.is_true(exists(join(project, "src", "main.tl")))
