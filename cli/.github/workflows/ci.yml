@@ -54,6 +54,13 @@ jobs:
           test -f "$project/build/tecs2d/init.lua"
           test -f "$project/build/tecs2d/assets/fonts/tiny-font.fnt"
           test -f "$project/build/tecs2d/assets/fonts/tiny-font.png"
+          (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" check --json | grep -F '"ok":true')
+          (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" info --json | grep -F '"built":true')
+          launcher/tecs agent list | grep -F tecs-project
+          test -f "$(launcher/tecs agent path tecs-project)"
+          launcher/tecs completions bash | grep -F '_tecs()'
+          launcher/tecs completions zsh > /dev/null
+          launcher/tecs completions fish > /dev/null
           launcher/tecs --version
 
       - name: Package versioned archives
@@ -123,11 +130,21 @@ jobs:
           Remove-Item Env:TECS_DIR -ErrorAction SilentlyContinue
           & "$env:GITHUB_WORKSPACE\launcher\tecs.ps1" check
           & "$env:GITHUB_WORKSPACE\launcher\tecs.ps1" build
+          $checkJson = (& "$env:GITHUB_WORKSPACE\launcher\tecs.ps1" check --json | Out-String)
+          if ($checkJson -notmatch '"ok":true') { throw "check --json did not report ok" }
+          $infoJson = (& "$env:GITHUB_WORKSPACE\launcher\tecs.ps1" info --json | Out-String)
+          if ($infoJson -notmatch '"built":true') { throw "info --json did not report a built project" }
           Pop-Location
           if (-not (Test-Path "$project\build\main.lua")) { throw "main.lua was not built" }
           if (-not (Test-Path "$project\build\tecs2d\init.lua")) { throw "tecs2d was not built" }
           if (-not (Test-Path "$project\build\tecs2d\assets\fonts\tiny-font.fnt")) { throw "BMFont descriptor was not built" }
           if (-not (Test-Path "$project\build\tecs2d\assets\fonts\tiny-font.png")) { throw "BMFont texture was not built" }
+          $agents = (& launcher/tecs.ps1 agent list | Out-String)
+          if ($agents -notmatch 'tecs-project') { throw "agent list is missing tecs-project" }
+          $agentPath = (& launcher/tecs.ps1 agent path tecs-project | Out-String).Trim()
+          if (-not (Test-Path $agentPath)) { throw "agent path did not write $agentPath" }
+          $completions = (& launcher/tecs.ps1 completions bash | Out-String)
+          if ($completions -notmatch '_tecs') { throw "completions bash did not print a script" }
           & launcher/tecs.ps1 --version
 
   release:

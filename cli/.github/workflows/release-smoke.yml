@@ -60,6 +60,11 @@ jobs:
           test -f "$project/build/tecs2d/init.lua"
           test -f "$project/build/tecs2d/assets/fonts/tiny-font.fnt"
           test -f "$project/build/tecs2d/assets/fonts/tiny-font.png"
+          (cd "$project" && "$tecs" check --json | grep -F '"ok":true')
+          (cd "$project" && "$tecs" info --json | grep -F '"built":true')
+          "$tecs" agent list | grep -F tecs-project
+          test -f "$("$tecs" agent path tecs-project)"
+          "$tecs" completions bash | grep -F '_tecs()'
 
       - name: Prove package-manager tarball through a symlinked launcher
         env:
@@ -106,7 +111,17 @@ jobs:
           Push-Location $project
           & $tecs check
           & $tecs build
+          $checkJson = (& $tecs check --json | Out-String)
+          if ($checkJson -notmatch '"ok":true') { throw "check --json did not report ok" }
+          $infoJson = (& $tecs info --json | Out-String)
+          if ($infoJson -notmatch '"built":true') { throw "info --json did not report a built project" }
           Pop-Location
+          $agents = (& $tecs agent list | Out-String)
+          if ($agents -notmatch 'tecs-project') { throw "agent list is missing tecs-project" }
+          $agentPath = (& $tecs agent path tecs-project | Out-String).Trim()
+          if (-not (Test-Path $agentPath)) { throw "agent path did not write $agentPath" }
+          $completions = (& $tecs completions bash | Out-String)
+          if ($completions -notmatch '_tecs') { throw "completions bash did not print a script" }
           if (-not (Test-Path "$project\build\main.lua")) { throw "main.lua was not built" }
           if (-not (Test-Path "$project\build\tecs2d\init.lua")) { throw "tecs2d was not built" }
           if (-not (Test-Path "$project\build\tecs2d\assets\fonts\tiny-font.fnt")) { throw "BMFont descriptor was not built" }
