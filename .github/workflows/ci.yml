@@ -196,6 +196,10 @@ jobs:
           --with-lua-include=/mingw64/include/luajit-2.1
         make
         make install
+        # The LuaRocks frontend modules are pure Lua. Mirror them where the
+        # Lua 5.4 loader expects them; rock trees and native builds stay 5.1.
+        mkdir -p /mingw64/share/lua/5.4
+        cp -R /mingw64/share/lua/5.1/luarocks /mingw64/share/lua/5.4/
 
     - name: Cache LuaRocks dependencies
       uses: actions/cache@v4
