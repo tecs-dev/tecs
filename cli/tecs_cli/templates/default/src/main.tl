@@ -3,10 +3,15 @@ package.cpath = package.cpath .. ";./vendor/lib/lua/5.1/?.so"
 
 local tecs <const> = require("tecs")
 local tecs2d <const> = require("tecs2d")
+local mcp <const> = require("tecs2d.mcp")
+local debugPlugin <const> = require("tecs2d.debug")
 
 local lg <const> = love.graphics
 
 local function gamePlugin(world: tecs.World)
+    world:addPlugin(mcp.new())
+    world:addPlugin(debugPlugin.new())
+
     local font = lg.newFont(48)
 
     world:addSystem({

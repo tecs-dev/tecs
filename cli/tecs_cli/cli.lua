@@ -595,6 +595,60 @@ exec luajit "$script" "$@"
     return true
 end
 
+local TEAL_UPSTREAM_ROCKSPEC =
+    "https://raw.githubusercontent.com/teal-language/tl/master/tl-dev-1.rockspec"
+
+local function teal_compiler_complete()
+    return exists(path_join("src/vendor/bin/tl"))
+        and exists(path_join(vendor_lua, "teal/init.lua"))
+        and exists(path_join(vendor_lua, "tlcli/main.lua"))
+end
+
+local function ensure_teal_compiler()
+    if teal_compiler_complete() then
+        ensure_msys_teal_wrapper()
+        return
+    end
+
+    local tree = q(path_join(cwd(), "src/vendor"))
+    status("Installing Teal development release...")
+    run(with_vendor_env("luarocks --dev --lua-version=5.1 install --tree=" .. tree .. " tl"))
+
+    if not teal_compiler_complete() then
+        -- Temporary workaround: LuaRocks still serves a stale tl-dev-1
+        -- rockspec that omits the teal.* and tlcli.* modules. Remove this
+        -- fallback once the corrected upstream rockspec is republished there.
+        status("LuaRocks served an incomplete Teal dev rock; installing the current upstream rockspec...")
+        run(with_vendor_env("luarocks --lua-version=5.1 install --force --tree=" .. tree
+            .. " " .. q(TEAL_UPSTREAM_ROCKSPEC)))
+    end
+
+    if not teal_compiler_complete() then
+        fail("Teal installed without its teal/tlcli modules")
+    end
+    ensure_msys_teal_wrapper()
+end
+
+local function ensure_love_type_environment()
+    if exists(path_join(vendor_lua, "love2d.d.tl")) then return end
+
+    -- LuaRocks may build the transitive tecs dependency before it installs
+    -- tecs2d's remaining dependencies. Preinstall the global environment so
+    -- source-based dev rocks can type-check regardless of resolver order.
+    local tree = q(path_join(cwd(), "src/vendor"))
+    status("Installing LÖVE type environment...")
+    run(with_vendor_env("luarocks --lua-version=5.1 install --tree=" .. tree
+        .. " tecs-love2d-tl-type"))
+end
+
+local function ensure_mcp_runtime()
+    if exists(path_join(vendor_lua, "socket.lua")) then return end
+
+    local tree = q(path_join(cwd(), "src/vendor"))
+    status("Installing LuaSocket runtime...")
+    run(with_vendor_env("luarocks --lua-version=5.1 install --tree=" .. tree .. " luasocket"))
+end
+
 -- Path to the downloaded Love2D executable for this platform.
 local function love_bin()
     if is_windows then
@@ -638,6 +692,9 @@ end
 
 -- Install Tecs/Tecs2D into src/vendor via luarocks on first use.
 local function ensure_vendor()
+    ensure_teal_compiler()
+    ensure_love_type_environment()
+    ensure_mcp_runtime()
     if exists(path_join(vendor_lua, "tecs2d/init.tl"))
         and exists(path_join(vendor_lua, "love2d.d.tl"))
         and exists(path_join(vendor_lua, "ffi.d.tl"))
@@ -1091,6 +1148,7 @@ M._internal = {
     needs_update = needs_update,
     copy_dir = copy_dir,
     prune_runtime_vendor = prune_runtime_vendor,
+    teal_compiler_complete = teal_compiler_complete,
     q = q,
 }
 
