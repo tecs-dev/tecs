@@ -42,6 +42,8 @@ make clean              # Remove build/ and dist/
   drivers; `tecs run` clears them before starting the user's game.
 - Preserve macOS, Linux, and Windows behavior. CI must prove a cold-cache
   `--version`, `info`, `new`, `check`, and `build` flow on all three platforms.
+- Post-publication smoke CI must repeat that flow using the exact assets from
+  the tagged GitHub Release.
 - The final game build is self-contained. Framework runtime modules and built-in
   assets belong under `build/`; compiler inputs and metadata do not.
 

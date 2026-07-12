@@ -8,6 +8,11 @@ payload, launchers, and installers as GitHub release assets.
 
 ## [Unreleased]
 
+### Added
+
+- Post-publication smoke tests install the exact tagged GitHub Release and run
+  a clean project build on Linux, macOS, and Windows.
+
 ## [0.1.0] - 2026-07-12
 
 ### Added
