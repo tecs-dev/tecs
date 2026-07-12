@@ -18,7 +18,7 @@ scoop bucket add tecs https://github.com/tecs-dev/scoop-bucket
 scoop install tecs
 ```
 
-Or use the standalone installers — macOS and Linux:
+Or use the standalone installers. macOS and Linux:
 
 ```sh
 curl -fsSL https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.sh | sh
@@ -102,8 +102,8 @@ tecs integ
 ```
 
 `tecs integ` compiles `spec/**/*.tl` and runs it with the bundled
-[busted](https://lunarmodules.github.io/busted/) runner — no busted or
-LuaRocks installation required. Specs named `*_lovespec.tl` are integration
+[busted](https://lunarmodules.github.io/busted/) runner; no busted or
+LuaRocks installation is required. Specs named `*_lovespec.tl` are integration
 tests: through `tecs2d.testing.fixture` they launch the built game under real
 LÖVE on a free MCP port and drive it live (run Lua inside the game, sample
 pixels, send input). New projects include a working example in
@@ -134,16 +134,16 @@ tecs update               # re-resolve every added rock (or: tecs update inspect
 ```
 
 `tecs add` vendors a pure-Lua rock from luarocks.org into
-`src/vendor/share/lua/5.1/`, along with its dependencies, license files, and —
-when luarocks.org publishes a `<rock>-tl-type` package — the matching Teal
-type declarations, so `tecs check` keeps working. `tecs-rocks.lua` at the
+`src/vendor/share/lua/5.1/`, along with its dependencies and license files.
+When luarocks.org publishes a `<rock>-tl-type` package, the matching Teal
+type declarations are vendored too, so `tecs check` keeps working. `tecs-rocks.lua` at the
 project root records exactly what was installed; commit it. `src/vendor/`
 stays generated (and gitignored): `tecs check` and `tecs build` restore any
 missing recorded rocks at their pinned versions, so fresh clones just work.
 
 Rocks that need a C compiler (or any non-`builtin` build) are rejected: the
 game runtime is LÖVE's LuaJIT with no toolchain, and builds must stay
-self-contained. The LuaRocks client is never used — the CLI talks to
+self-contained. The LuaRocks client is never used; the CLI talks to
 luarocks.org directly over the LÖVE runtime's HTTPS support.
 
 ## Development Commands
