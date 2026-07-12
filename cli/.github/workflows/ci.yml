@@ -56,10 +56,16 @@ jobs:
           test -f "$project/build/tecs2d/assets/fonts/tiny-font.png"
           launcher/tecs --version
 
+      - name: Package versioned archives
+        if: matrix.os == 'ubuntu-latest'
+        run: scripts/package_dist.sh
+
       - name: Create release checksums
         if: matrix.os == 'ubuntu-latest'
         working-directory: dist
-        run: sha256sum tecs tecs.cmd tecs.ps1 tecs-cli.love install.sh install.ps1 LICENSE CHANGELOG.md > SHA256SUMS
+        run: |
+          sha256sum tecs tecs.cmd tecs.ps1 tecs-cli.love install.sh install.ps1 \
+            LICENSE CHANGELOG.md tecs-cli-*.tar.gz tecs-cli-*-windows.zip > SHA256SUMS
 
       - name: Upload option 1 package
         if: matrix.os == 'ubuntu-latest'
@@ -76,6 +82,8 @@ jobs:
             dist/LICENSE
             dist/CHANGELOG.md
             dist/SHA256SUMS
+            dist/tecs-cli-*.tar.gz
+            dist/tecs-cli-*-windows.zip
 
   windows:
     name: windows-latest
@@ -150,3 +158,5 @@ jobs:
             dist/LICENSE
             dist/CHANGELOG.md
             dist/SHA256SUMS
+            dist/tecs-cli-*.tar.gz
+            dist/tecs-cli-*-windows.zip

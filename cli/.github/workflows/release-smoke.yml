@@ -61,6 +61,17 @@ jobs:
           test -f "$project/build/tecs2d/assets/fonts/tiny-font.fnt"
           test -f "$project/build/tecs2d/assets/fonts/tiny-font.png"
 
+      - name: Prove package-manager tarball through a symlinked launcher
+        env:
+          TECS_CACHE_DIR: ${{ runner.temp }}/tecs-cache
+        run: |
+          version="${RELEASE_TAG#v}"
+          stage="$RUNNER_TEMP/tecs-tarball"
+          mkdir -p "$stage/pkg" "$stage/bin"
+          tar -xzf "release/tecs-cli-$version.tar.gz" -C "$stage/pkg"
+          ln -s "$stage/pkg/tecs" "$stage/bin/tecs"
+          "$stage/bin/tecs" --version | grep -Fx "$version"
+
   windows:
     name: windows-latest published release
     runs-on: windows-latest
@@ -100,3 +111,15 @@ jobs:
           if (-not (Test-Path "$project\build\tecs2d\init.lua")) { throw "tecs2d was not built" }
           if (-not (Test-Path "$project\build\tecs2d\assets\fonts\tiny-font.fnt")) { throw "BMFont descriptor was not built" }
           if (-not (Test-Path "$project\build\tecs2d\assets\fonts\tiny-font.png")) { throw "BMFont texture was not built" }
+
+      - name: Prove package-manager zip
+        shell: pwsh
+        env:
+          TECS_CACHE_DIR: ${{ runner.temp }}\tecs-cache
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $version = $env:RELEASE_TAG.TrimStart("v")
+          $stage = Join-Path $env:RUNNER_TEMP "tecs-zip"
+          Expand-Archive "release\tecs-cli-$version-windows.zip" $stage
+          $actual = & (Join-Path $stage "tecs.cmd") --version
+          if ($actual -ne $version) { throw "expected CLI $version from zip, got $actual" }
