@@ -23,7 +23,9 @@ local externalSource
 local mountedProject
 
 local function slash(path)
-    return tostring(path):gsub("\\", "/"):gsub("/+$", "")
+    path = tostring(path):gsub("\\", "/")
+    if path == "/" or path:match("^%a:/$") then return path end
+    return path:gsub("/+$", "")
 end
 
 local function clean(path)
@@ -69,6 +71,7 @@ end
 
 local function dirname(path)
     local dir = slash(path):gsub("/[^/]+$", "")
+    if dir:match("^%a:$") then dir = dir .. "/" end
     return dir ~= "" and dir or "/"
 end
 
