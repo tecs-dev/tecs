@@ -25,7 +25,7 @@ declared as a dependency.
 dependencies = {
     "lua >= 5.1, < 5.5",
     "tl == dev-1",
-    "mtdowling/tecs == dev-1",
+    "tecs == dev-1",
 }
 
 test_dependencies = {

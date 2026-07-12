@@ -21,10 +21,6 @@ on:
         description: 'Seed window offset (empty derives from the date)'
         default: ''
 
-# Same Teal compiler pin as ci.yml.
-env:
-  TL_REF: 4b97e8d4c743795cb148c898fb19e14b6f3b8f2d
-
 jobs:
   fuzz:
     runs-on: ubuntu-latest
@@ -45,9 +41,7 @@ jobs:
       run: |
         luarocks install busted
         luarocks install luacov
-        git clone https://github.com/teal-language/tl.git /tmp/tl-dev
-        cd /tmp/tl-dev && git checkout "$TL_REF"
-        luarocks make tl-dev-1.rockspec
+        luarocks --dev install tl
 
     - name: Build project
       run: |
