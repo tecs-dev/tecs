@@ -116,13 +116,13 @@ jobs:
           lr() { "$TECS_LUA54" "$TECS_LUAROCKS" --lua-version=5.1 "$@"; }
           lr install --local luafilesystem
           lr make --local --deps-mode=none tecs-cli-0.1.0-1.rockspec
-          eval "$(luarocks path --local --bin)"
+          eval "$(luarocks --lua-version=5.1 path --local --bin)"
           tecs --version
 
       - name: Run CLI tests
         shell: bash
         run: |
-          eval "$(luarocks path --local --bin)"
+          eval "$(luarocks --lua-version=5.1 path --local --bin)"
           luajit spec/run.lua
 
       - name: Create and build a starter app
@@ -130,7 +130,7 @@ jobs:
         env:
           TECS_DIR: ${{ github.workspace }}/tecs
         run: |
-          eval "$(luarocks path --local --bin)"
+          eval "$(luarocks --lua-version=5.1 path --local --bin)"
           tecs new "$RUNNER_TEMP/hello-tecs"
           cd "$RUNNER_TEMP/hello-tecs"
           tecs love12
@@ -175,7 +175,12 @@ jobs:
           $lua54Root = Split-Path (Split-Path $env:TECS_LUA54)
           $lua54Modules = Join-Path $lua54Root "share\lua\5.4"
           New-Item -ItemType Directory -Force -Path $lua54Modules | Out-Null
-          Copy-Item -Recurse -Force "$env:RUNNER_TEMP\lua\share\lua\5.1\luarocks" $lua54Modules
+          $cfg = Get-ChildItem "$env:RUNNER_TEMP\lua" -Recurse -Filter cfg.lua |
+            Where-Object FullName -Like "*luarocks*core*cfg.lua" |
+            Select-Object -First 1
+          if (-not $cfg) { throw "LuaRocks modules were not installed by hererocks" }
+          $luarocksModules = Split-Path (Split-Path $cfg.FullName)
+          Copy-Item -Recurse -Force $luarocksModules $lua54Modules
 
       # Put a cmd wrapper ahead of hererocks so CLI-spawned `luarocks`
       # commands run the same LuaJIT-targeted launcher under Lua 5.4.
@@ -201,14 +206,14 @@ jobs:
         run: |
           "%TECS_LUA54%" "%TECS_LUAROCKS%" --lua-version=5.1 install --local luafilesystem
           "%TECS_LUA54%" "%TECS_LUAROCKS%" --lua-version=5.1 make --local --deps-mode=none tecs-cli-0.1.0-1.rockspec
-          luarocks path --local --bin > luarocks-path.bat
+          luarocks --lua-version=5.1 path --local --bin > luarocks-path.bat
           call luarocks-path.bat
           tecs --version
 
       - name: Run CLI tests
         shell: cmd
         run: |
-          luarocks path --local --bin > luarocks-path.bat
+          luarocks --lua-version=5.1 path --local --bin > luarocks-path.bat
           call luarocks-path.bat
           luajit spec\run.lua
 
@@ -217,7 +222,7 @@ jobs:
         env:
           TECS_DIR: ${{ github.workspace }}\tecs
         run: |
-          luarocks path --local --bin > luarocks-path.bat
+          luarocks --lua-version=5.1 path --local --bin > luarocks-path.bat
           call luarocks-path.bat
           tecs new "%RUNNER_TEMP%\hello-tecs"
           cd /D "%RUNNER_TEMP%\hello-tecs"
