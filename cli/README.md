@@ -50,6 +50,7 @@ The default app renders `Hello Tecs2D!`.
 
 ```sh
 tecs help
+tecs info
 tecs new hello
 tecs run
 tecs build
@@ -61,7 +62,8 @@ tecs love12
 `tecs run` builds the project and launches it with the same cached LÖVE runtime
 that hosts the CLI. `tecs build` compiles Teal source into a self-contained
 `build/`. `tecs check` runs the embedded Teal compiler in-process. Pass
-`--quiet` (or `-q`) to suppress progress output.
+`--quiet` (or `-q`) to suppress progress output. `tecs --version` prints only
+the CLI version; `tecs info` reports the LÖVE/LuaJIT runtime and current project.
 
 ## Development Commands
 
@@ -113,7 +115,5 @@ provides the same LuaJIT and LuaSocket implementation used by the game.
 
 ## License
 
-Licensed under either of:
-
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-- MIT license ([LICENSE-MIT](LICENSE-MIT))
+Licensed under the [MIT license](LICENSE). Embedded third-party components
+retain their upstream license notices in `tecs_cli/runtime/licenses/`.
