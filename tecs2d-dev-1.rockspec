@@ -24,7 +24,7 @@ declared as a dependency.
 
 dependencies = {
     "lua >= 5.1, < 5.5",
-    "tl == dev-1",
+    "tl == dev",
     "tecs == dev-1",
     "luasocket",
     "luasocket-tl-type == 0.0.2",

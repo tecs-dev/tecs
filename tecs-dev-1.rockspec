@@ -25,7 +25,7 @@ companion `tecs2d` rock.
 
 dependencies = {
     "lua >= 5.1, < 5.5",
-    "tl == dev-1",
+    "tl == dev",
     "luajit-tl-type == 0.0.2",
 }
 
