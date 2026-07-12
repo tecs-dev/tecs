@@ -6,6 +6,9 @@
 ---   world:addPlugin(mcp.new())              -- default port 19999
 ---   world:addPlugin(mcp.new({port = 12345})) -- custom port
 ---
+--- Without an explicit port, the TECS_MCP_PORT environment variable is
+--- honored so test harnesses can assign a free port per game instance.
+---
 --- The plugin ensures the headless debugger core (see tecs2d.debug.context),
 --- so the registry-derived cmd_* command tools (cmd_context,
 --- cmd_capabilities, ...) work in every session; the debug plugin
@@ -63,7 +66,11 @@ function mcp.new(config?: mcp.Config): function(world: tecs.World)
     rpc.install(ctx)
     handlers.install(ctx)
 
-    local port = (config and config.port) or mcp.DEFAULT_PORT
+    -- TECS_MCP_PORT lets test harnesses (tecs2d.testing.fixture, `tecs
+    -- integ`) assign a free port without the game wiring one explicitly.
+    local port = (config and config.port)
+        or tonumber(os.getenv("TECS_MCP_PORT"))
+        or mcp.DEFAULT_PORT
     logtap.install()
     transport.startServer(port)
 
