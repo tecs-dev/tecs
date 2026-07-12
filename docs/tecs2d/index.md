@@ -57,6 +57,8 @@ MCP server so a developer or coding agent can inspect the running world.
 - **`src/conf.tl`** - LÖVE application configuration
 - **`tlconfig.lua`** - Teal compiler configuration
 - **`assets/`** - Project-owned game assets
+- **`.github/workflows/ci.yml`** - CI that type-checks and builds the game on Linux, macOS, and Windows
+- **Agent tooling** - `AGENTS.md`/`CLAUDE.md` guidance plus MCP client config for Claude Code (`.mcp.json`) and Codex (`.codex/config.toml`)
 - **Prepared dependencies** - Tecs/Tecs2D sources and type declarations are copied automatically on first check or build
 
 ### Project structure
