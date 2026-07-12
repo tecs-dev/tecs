@@ -28,16 +28,24 @@ Full documentation is available at https://tecs.dev.
 
 ## Installation
 
-The fastest path to a working game is the [starter template](https://github.com/tecs-dev/tecs-starter):
+Install the Tecs CLI, then create a project:
 
 ```bash
-git clone https://github.com/tecs-dev/tecs-starter.git my-game
+curl -fsSL https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.sh | sh
+tecs new my-game
 cd my-game
-make run
+tecs run
 ```
 
-It pre-wires LÖVE 12, Teal, and the Tecs build. Full install instructions and
-prerequisites are in the [Tecs2D Getting Started guide](https://tecs.dev/tecs2d/).
+On Windows, install from PowerShell:
+
+```powershell
+irm https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.ps1 | iex
+```
+
+The CLI supplies Teal, Tecs/Tecs2D, type definitions, project setup, builds,
+and a cached LÖVE 12 runtime. See the
+[Tecs2D Getting Started guide](https://tecs.dev/tecs2d/) for the full workflow.
 
 To hack on Tecs itself, run `make dev` to install LuaRocks and docs dev dependencies.
 

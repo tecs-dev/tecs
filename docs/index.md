@@ -34,6 +34,36 @@ features:
 ---
 <small><sup>[1]</sup> On an M1 Mac Mini, running `make example-shape-bench SHAPE=rectangle ENTITIES=4000000`</small>
 
+## Install Tecs CLI
+
+The Tecs CLI includes the compiler, engine sources, type definitions, and
+project template. It downloads LÖVE 12 on first use, so you do not need to
+install Lua, LuaRocks, Teal, or a C compiler.
+
+::: code-group
+
+```bash [macOS]
+curl -fsSL https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.sh | sh
+```
+
+```powershell [Windows]
+irm https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.ps1 | iex
+```
+
+```bash [Linux]
+curl -fsSL https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.sh | sh
+```
+
+:::
+
+Create and run a game:
+
+```bash
+tecs new my-game
+cd my-game
+tecs run
+```
+
 ## Example code
 
 ::: code-group
