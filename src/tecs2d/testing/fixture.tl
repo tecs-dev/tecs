@@ -4,7 +4,6 @@
 --- eventually-polling).
 
 local socket <const> = require("socket")
-local luassert <const> = require("luassert")
 local mcp_client <const> = require("tecs2d.testing.mcp_client")
 local love_process <const> = require("tecs2d.testing.love_process")
 
@@ -100,7 +99,9 @@ function fixture.probePixels(app: fixture.App, points: {{number, number}}): {{nu
     local result = app.client:call("sample_pixels",
         {points = requestPoints, normalized = true}, 10)
     local pixels = result.pixels as {{string: number}}
-    luassert.is_table(pixels, "sample_pixels returned no pixels")
+    if pixels is nil then
+        error("sample_pixels returned no pixels")
+    end
 
     local triples: {{number}} = {}
     for i = 1, #points do
