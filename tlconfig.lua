@@ -3,7 +3,7 @@ return {
     source_dir = "src",
     gen_target = "5.1",
     gen_compat = "off",
-    include_dir = { "types/", "types/luajit", "src/" },
+    include_dir = { "src/" },
     global_env_def = "love2d",
     dont_prune = {
         "test_deps",

@@ -25,8 +25,8 @@ local record transport
 end
 
 local ctx: state.Context = nil
-local server: socket.tcp = nil
-local client: socket.tcp = nil
+local server: socket.TCP = nil
+local client: socket.TCP = nil
 local boundPort: number = nil   -- The port we successfully bound to
 -- Port the server still needs to bind (set when startServer exhausts
 -- its retries after a restart); processCommands retries once per second.
@@ -61,7 +61,7 @@ end
 
 -- Read a complete HTTP request from a socket.
 -- Returns method, path, headers, body (or nil on error).
-local function readHttpRequest(sock: socket.tcp): (string, string, {string:string}, string)
+local function readHttpRequest(sock: socket.TCP): (string, string, {string:string}, string)
     -- Read request line with short blocking timeout (full request arrives as one packet)
     sock:settimeout(0.05)
 
@@ -94,7 +94,7 @@ local function readHttpRequest(sock: socket.tcp): (string, string, {string:strin
     local body = ""
     local contentLength = tonumber(headers["content-length"])
     if contentLength and contentLength > 0 then
-        body = sock:receive(contentLength) or ""
+        body = sock:receive(contentLength as integer) or ""
     end
 
     return httpMethod, path, headers, body
@@ -122,7 +122,10 @@ local function tryBind(port: number): boolean, string
     server = socket.tcp()
     server:setoption("reuseaddr", true)
     pcall(function() server:setoption("reuseport", true) end)
-    local ok, bindErr = server:bind("127.0.0.1", port)
+    -- luasocket-tl-type currently omits bind's return values. Keep the cast
+    -- at this dynamic boundary until its declaration exposes them.
+    local bind = server.bind as function(socket.TCP, string, integer): integer, string
+    local ok, bindErr = bind(server, "127.0.0.1", port as integer)
     if not ok then
         server:close()
         server = nil

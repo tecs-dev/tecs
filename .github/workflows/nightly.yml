@@ -42,6 +42,7 @@ jobs:
         luarocks install busted
         luarocks install luacov
         luarocks --dev install tl
+        make install-type-deps
 
     - name: Build project
       run: |

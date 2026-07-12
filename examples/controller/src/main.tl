@@ -3,6 +3,7 @@ local tecs2d <const> = require("tecs2d")
 local controller <const> = require("tecs2d.controller")
 local events <const> = require("tecs2d.events")
 local gfx <const> = require("tecs2d.gfx")
+local mcp <const> = require("tecs2d.mcp")
 
 local lg <const> = love.graphics
 
@@ -48,6 +49,8 @@ function GamepadDemoPlugin:init(world: tecs.World)
 
     local screenW, screenH = lg.getWidth(), lg.getHeight()
     local centerX = screenW / 2
+    local pipeline = world.resources[gfx.PIPELINE] as gfx.Pipeline
+    pipeline:getCamera():setPosition(centerX, screenH / 2)
 
     -- Background
     world:spawn(
@@ -235,6 +238,9 @@ love.run = tecs2d.run({
     fps = 60,
     quitOnEscape = true,
     game = function(world: tecs.World)
+        world:addPlugin(mcp.new())
+        world:addPlugin(require("tecs2d.debug").new())
+
         local demo = GamepadDemoPlugin.new()
         demo:init(world)
     end,

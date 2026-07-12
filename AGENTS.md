@@ -72,7 +72,7 @@ tecs/
 ├── benches/               # Benchmarks
 ├── spec/                  # Test sources in Teal
 ├── scripts/               # Build/test helper scripts
-├── types/                 # Ambient type definitions for external libs
+├── vendor/                # Project-local LuaRocks dependencies and type definitions
 └── build/                 # Generated Lua output
 ```
 

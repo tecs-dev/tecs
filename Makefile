@@ -1,4 +1,4 @@
-.PHONY: all build test test-love test-no-ffi clean dev compile check find-busted trim-whitespace \
+.PHONY: all build test test-love test-no-ffi clean dev install-type-deps compile check find-busted trim-whitespace \
 	coverage coverage-report coverage-xml coverage-lcov coverage-html \
 	check-examples build-examples new-example \
 	example-text-bench example-sprite-collision example-assets example-audio example-ball-bench example-circles \
@@ -67,7 +67,14 @@ all: build test
 
 build: compile
 
-dev:
+install-type-deps:
+	luarocks install --tree=vendor --lua-version=5.1 luajit-tl-type 0.0.2-1
+	luarocks install --tree=vendor --lua-version=5.1 luasocket-tl-type 0.0.2-1
+	luarocks install --tree=vendor --lua-version=5.1 busted-tl-type 0.0.1-1
+	luarocks install --tree=vendor --lua-version=5.1 luassert-tl-type 0.0.1-1
+	luarocks install --tree=vendor --lua-version=5.1 tecs-love2d-tl-type
+
+dev: install-type-deps
 	@echo "Installing development dependencies..."
 	@echo "Installing Teal development release..."
 	luarocks --dev install --tree=vendor --lua-version=5.1 tl

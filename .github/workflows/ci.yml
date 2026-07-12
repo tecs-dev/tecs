@@ -27,6 +27,7 @@ jobs:
         luarocks install busted
         luarocks install luacov
         luarocks --dev install tl
+        make install-type-deps
 
     - name: Build project
       run: |
@@ -59,6 +60,7 @@ jobs:
         luarocks install busted
         luarocks install luacov
         luarocks --dev install tl
+        make install-type-deps
 
     - name: Build project
       run: |
@@ -99,6 +101,7 @@ jobs:
         # target's LUA_CPATH), so install it there like `make dev` does.
         luarocks install --tree=vendor --lua-version=5.1 luasocket
         luarocks --dev install tl
+        make install-type-deps
 
     - name: Build project
       run: |
@@ -193,6 +196,7 @@ jobs:
           luarocks install luacov
           luarocks --dev install tl
         fi
+        make install-type-deps
         for exe in tl busted luacov; do
           printf '%s\n' \
             '#!/usr/bin/env bash' \
@@ -280,6 +284,7 @@ jobs:
       if: steps.changes.outputs.run == 'true'
       run: |
         luarocks --dev install tl
+        make install-type-deps
 
     - name: Type-check starter against this Tecs commit
       if: steps.changes.outputs.run == 'true'
@@ -313,6 +318,7 @@ jobs:
     - name: Install Teal
       run: |
         luarocks --dev install tl
+        make install-type-deps
 
     - name: Type check
       run: make check

@@ -26,10 +26,14 @@ dependencies = {
     "lua >= 5.1, < 5.5",
     "tl == dev-1",
     "tecs == dev-1",
+    "luasocket-tl-type == 0.0.2",
+    "tecs-love2d-tl-type >= 0.1.0",
 }
 
 test_dependencies = {
     "busted",
+    "busted-tl-type == 0.0.1",
+    "luassert-tl-type == 0.0.1",
 }
 
 test = {

@@ -70,7 +70,6 @@ my-game/
 │       ├── shared.tl     # Components, constants, and asset preload
 │       └── states/       # Focused state/gameplay plugins
 ├── assets/               # Images, sounds, fonts
-├── types/                # Type definitions (generated)
 ├── build/                # Compiled output (generated)
 └── src/vendor/           # Dependencies (generated)
 ```

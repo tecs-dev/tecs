@@ -26,10 +26,13 @@ companion `tecs2d` rock.
 dependencies = {
     "lua >= 5.1, < 5.5",
     "tl == dev-1",
+    "luajit-tl-type == 0.0.2",
 }
 
 test_dependencies = {
     "busted",
+    "busted-tl-type == 0.0.1",
+    "luassert-tl-type == 0.0.1",
 }
 
 test = {
