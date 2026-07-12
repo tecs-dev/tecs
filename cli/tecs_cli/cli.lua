@@ -855,6 +855,10 @@ local function compile_vendor_tecs_sources()
         local args = {"-q", "gen", "--root", root, "--output-dir", root}
         for _, src in ipairs(pending) do args[#args + 1] = src end
         run_tl(args)
+        -- Teal's readers can remain pending finalization after an in-process
+        -- compile. Windows will not delete those source files while their
+        -- handles are open, so finalize them before pruning compiler inputs.
+        collectgarbage("collect")
     end
 end
 
