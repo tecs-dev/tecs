@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- `tecs dist` packages the built game into `dist/`: a `.love` file, a fused
+  Windows executable with LÖVE's DLLs (buildable on any host), and a macOS
+  app bundle with a patched Info.plist (macOS/Linux hosts). Runtimes come
+  from the launcher cache or a one-time download.
+
 ## [0.5.0] - 2026-07-12
 
 ### Added

@@ -110,6 +110,24 @@ pixels, send input). New projects include a working example in
 `spec/game_lovespec.tl`. Integration runs are not headless; macOS and Linux
 only.
 
+## Distribute
+
+```sh
+tecs dist            # .love file, macOS app bundle, and Windows executable
+tecs dist windows    # or one target: love, macos, windows
+```
+
+`tecs dist` zips the self-contained `build/` into `dist/<name>.love`, fuses a
+Windows executable with LÖVE's DLLs and license into
+`dist/<name>-windows.zip`, and assembles a macOS app bundle with the game's
+name and bundle identifier into `dist/<name>-macos.zip`. The LÖVE runtime
+comes from the launcher cache when present and is downloaded once otherwise.
+
+Windows packages build on any host. The macOS bundle needs macOS or Linux
+(the app's symlinks require a POSIX filesystem), and it ships unsigned: sign
+and notarize it before wide distribution. Packaged games use the same pinned
+LÖVE 12 nightly the CLI runs.
+
 `tecs completions bash|zsh|fish` prints a shell completion script. Install it
 per shell:
 

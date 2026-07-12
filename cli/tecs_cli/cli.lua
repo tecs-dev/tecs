@@ -1543,6 +1543,210 @@ local function ensure_project()
     end
 end
 
+--------------------------------------------------------------------------------
+-- Distribution: package the built game as a .love file, a fused Windows
+-- executable, and a macOS app bundle. Runtimes come from the launcher cache
+-- when present, otherwise from the same pinned LÖVE nightly the launchers use.
+--------------------------------------------------------------------------------
+
+local DIST_RUNTIME_BASE = "https://nightly.link/love2d/love/workflows/main/main"
+
+-- The distributable name, from the project directory.
+local function dist_name()
+    local name = basename(cwd()):gsub("[^%w%-_%. ]", ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if name == "" then name = "game" end
+    return name
+end
+
+-- Rebrand LÖVE's Info.plist for the game and drop its claim on .love files.
+local function patch_plist(plist, name)
+    plist = plist:gsub("(<key>CFBundleIdentifier</key>%s*<string>)[^<]*", "%1org.tecs2d." .. name, 1)
+    plist = plist:gsub("(<key>CFBundleName</key>%s*<string>)[^<]*", "%1" .. name, 1)
+    plist = plist:gsub("%s*<key>UTExportedTypeDeclarations</key>%s*<array>.-</array>", "", 1)
+    return plist
+end
+
+local function read_binary(path)
+    local file = assert(io.open(normalize(path), "rb"))
+    local content = file:read("*a")
+    file:close()
+    return content
+end
+
+-- Zip entries (paths relative to base_dir) into zip_target, preserving
+-- symlinks on POSIX. Uses Info-ZIP when available, else Windows' bsdtar.
+local function create_zip(base_dir, zip_target, entries)
+    remove(zip_target)
+    local zip_abs = path_join(cwd(), zip_target)
+    local quoted = {}
+    for _, entry in ipairs(entries) do quoted[#quoted + 1] = q(entry) end
+    local list = table.concat(quoted, " ")
+    if is_windows then
+        local bsdtar = path_join(os.getenv("WINDIR") or "C:\\Windows", "System32/tar.exe")
+        run('cmd /C "cd /D ' .. q(path_join(cwd(), base_dir)) .. " && " .. q(bsdtar)
+            .. " --format zip -cf " .. q(zip_abs) .. " " .. list .. '"')
+    else
+        run("cd " .. q(path_join(cwd(), base_dir)) .. " && zip -q -r -y " .. q(zip_abs) .. " " .. list)
+    end
+end
+
+-- Copy every file under a mounted archive directory to dest.
+local function copy_mount_tree(mount, dest)
+    local fs = love_api.filesystem
+    local function walk(dir, prefix)
+        for _, entry in ipairs(fs.getDirectoryItems(dir)) do
+            local source = dir .. "/" .. entry
+            local info = fs.getInfo(source)
+            if info and info.type == "directory" then
+                walk(source, prefix .. entry .. "/")
+            elseif info and info.type == "file" then
+                write_file(path_join(dest, prefix .. entry), (fs.read(source)))
+            end
+        end
+    end
+    walk(mount, "")
+end
+
+-- Directory containing love.exe and its DLLs, reusing the host launcher's
+-- cache on Windows and downloading the runtime zip elsewhere.
+local function dist_windows_runtime()
+    local launcher_cache = path_join(cache_root(), "love12-main")
+    if exists(launcher_cache) then
+        for _, file in ipairs(walk_files(launcher_cache, {})) do
+            if basename(file) == "love.exe" then
+                return dirname(file)
+            end
+        end
+    end
+    local dir = path_join(cache_root(), "dist/love-windows")
+    for _, file in ipairs(walk_files(dir, {})) do
+        if basename(file) == "love.exe" then
+            return dirname(file)
+        end
+    end
+
+    status("Downloading the Windows LÖVE runtime...")
+    mkdir(dir)
+    local outer = path_join(cache_root(), "dist/love-windows-outer.zip")
+    write_file(outer, fetch_url(DIST_RUNTIME_BASE .. "/love-windows-x64.zip"))
+    local inner = path_join(cache_root(), "dist/love-windows-inner.zip")
+    with_mounted_rock(outer, function(mount)
+        local fs = love_api.filesystem
+        local inner_name
+        for _, entry in ipairs(fs.getDirectoryItems(mount)) do
+            if entry:match("%.zip$") then
+                inner_name = entry
+                break
+            end
+        end
+        if not inner_name then
+            error("unexpected Windows LÖVE runtime archive layout", 0)
+        end
+        write_file(inner, (fs.read(mount .. "/" .. inner_name)))
+    end)
+    with_mounted_rock(inner, function(mount)
+        copy_mount_tree(mount, dir)
+    end)
+    remove(outer)
+    remove(inner)
+
+    for _, file in ipairs(walk_files(dir, {})) do
+        if basename(file) == "love.exe" then
+            return dirname(file)
+        end
+    end
+    error("Windows LÖVE runtime did not contain love.exe", 0)
+end
+
+-- Path to love.app, reusing the host launcher's cache on macOS and
+-- downloading the runtime zip elsewhere. POSIX hosts only (unzip preserves
+-- the bundle's symlinks and permissions; archive mounting does not).
+local function dist_macos_runtime()
+    local cached = path_join(cache_root(), "love12-main/love.app")
+    if exists(path_join(cached, "Contents/MacOS/love")) then
+        return cached
+    end
+    local base_dir = path_join(cache_root(), "dist/love-macos")
+    local app = path_join(base_dir, "love.app")
+    if exists(path_join(app, "Contents/MacOS/love")) then
+        return app
+    end
+
+    status("Downloading the macOS LÖVE runtime...")
+    remove(base_dir)
+    mkdir(base_dir)
+    write_file(path_join(base_dir, "outer.zip"), fetch_url(DIST_RUNTIME_BASE .. "/love-macos.zip"))
+    run("cd " .. q(base_dir) .. " && unzip -q outer.zip && unzip -q love-macos.zip"
+        .. " && rm -f outer.zip love-macos.zip")
+    if not exists(path_join(app, "Contents/MacOS/love")) then
+        error("macOS LÖVE runtime did not contain love.app", 0)
+    end
+    return app
+end
+
+-- Zip build/ into dist/<name>.love.
+local function dist_love(name)
+    local love_file = path_join("dist", name .. ".love")
+    -- Compiled specs and their scratch output are development artifacts.
+    local excluded = {spec = true, test_deps = true}
+    local entries = {}
+    for entry in require_lfs().dir("build") do
+        if entry ~= "." and entry ~= ".." and not entry:match("^%.") and not excluded[entry] then
+            entries[#entries + 1] = entry
+        end
+    end
+    table.sort(entries)
+    create_zip("build", love_file, entries)
+    status("Wrote " .. love_file)
+    return love_file
+end
+
+-- Assemble dist/macos/<name>.app and dist/<name>-macos.zip.
+local function dist_macos(name, love_file)
+    local runtime = dist_macos_runtime()
+    local out_dir = path_join("dist", "macos")
+    local app = path_join(out_dir, name .. ".app")
+    remove(app)
+    mkdir(out_dir)
+    run("cp -R " .. q(runtime) .. " " .. q(app))
+
+    copy_file(love_file, path_join(app, "Contents/Resources", name .. ".love"))
+    local plist_path = path_join(app, "Contents/Info.plist")
+    write_file(plist_path, patch_plist(read_binary(plist_path), name))
+
+    local bundle_zip = path_join("dist", name .. "-macos.zip")
+    create_zip(out_dir, bundle_zip, {name .. ".app"})
+    status("Wrote " .. app)
+    status("Wrote " .. bundle_zip .. " (unsigned; sign and notarize before wide distribution)")
+end
+
+-- Assemble dist/windows/<name>/ (fused exe plus DLLs) and dist/<name>-windows.zip.
+local function dist_windows(name, love_file)
+    local runtime = dist_windows_runtime()
+    local out_root = path_join("dist", "windows")
+    local out = path_join(out_root, name)
+    remove(out)
+    mkdir(out)
+
+    write_file(path_join(out, name .. ".exe"),
+        read_binary(path_join(runtime, "love.exe")) .. read_binary(love_file))
+    for _, file in ipairs(walk_files(runtime, {})) do
+        local base = basename(file)
+        if dirname(file) == normalize(runtime) then
+            if base:lower():match("%.dll$") then
+                copy_file(file, path_join(out, base))
+            elseif base:lower():match("^license") then
+                copy_file(file, path_join(out, "love-" .. base:lower()))
+            end
+        end
+    end
+
+    local bundle_zip = path_join("dist", name .. "-windows.zip")
+    create_zip(out_root, bundle_zip, {name})
+    status("Wrote " .. path_join(out, name .. ".exe"))
+    status("Wrote " .. bundle_zip)
+end
+
 -- Task table: each entry implements one `tecs <target>` command.
 local tasks = {}
 
@@ -1783,6 +1987,34 @@ function tasks.integ()
     end
 end
 
+-- Package the built game for distribution.
+function tasks.dist(args)
+    ensure_project()
+    if not is_love_cli then
+        error("packaging requires LÖVE; run tecs through its installed launcher", 0)
+    end
+    if args.target == "macos" and is_windows then
+        fail("the macOS bundle cannot be assembled on Windows; its symlinks need a POSIX host")
+    end
+    tasks.build()
+
+    mkdir("dist")
+    local name = dist_name()
+    local love_file = dist_love(name)
+    if args.target == "love" then return end
+
+    if not args.target or args.target == "macos" then
+        if is_windows then
+            status("Skipping the macOS bundle: assemble it on macOS or Linux.")
+        else
+            dist_macos(name, love_file)
+        end
+    end
+    if not args.target or args.target == "windows" then
+        dist_windows(name, love_file)
+    end
+end
+
 function tasks.agent(args)
     local docs = list_agent_docs()
 
@@ -1962,6 +2194,18 @@ local commands = {
         action = tasks.check,
         setup = function(subcommand)
             subcommand:flag("--json", "Print diagnostics as JSON on stdout.")
+        end,
+    },
+    {
+        name = "dist",
+        summary = "Package the game for distribution",
+        description = "Zip the built game into a .love file, assemble a macOS app bundle, and "
+            .. "fuse a Windows executable, using the cached LÖVE runtimes.",
+        action = tasks.dist,
+        setup = function(subcommand)
+            subcommand:argument("target", "Optional target: love, macos, or windows; omit for all.")
+                :choices({"love", "macos", "windows"})
+                :args("?")
         end,
     },
     {
@@ -2162,6 +2406,8 @@ M._internal = {
     list_agent_docs = list_agent_docs,
     agent_doc_description = agent_doc_description,
     json_module = json_module,
+    dist_name = dist_name,
+    patch_plist = patch_plist,
     parse_rock_arg = parse_rock_arg,
     parse_luarocks_manifest = parse_luarocks_manifest,
     rock_version_less = rock_version_less,

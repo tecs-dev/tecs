@@ -78,7 +78,16 @@ jobs:
           test ! -e "$project/src/vendor/share/lua/5.1/inspect.d.tl"
           if [ "$(uname -s)" = Darwin ]; then
             (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" integ)
+            (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" dist)
+            test -f "$project/dist/hello-tecs.love"
+            test -f "$project/dist/macos/hello-tecs.app/Contents/Resources/hello-tecs.love"
+            grep -q "org.tecs2d.hello-tecs" "$project/dist/macos/hello-tecs.app/Contents/Info.plist"
+            test -f "$project/dist/hello-tecs-macos.zip"
+          else
+            (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" dist windows)
           fi
+          test -f "$project/dist/windows/hello-tecs/hello-tecs.exe"
+          test -f "$project/dist/hello-tecs-windows.zip"
           (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" check --json | grep -F '"ok":true')
           (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" info --json | grep -F '"built":true')
           launcher/tecs agent list | grep -F tecs-project
@@ -175,6 +184,9 @@ jobs:
           if ($checkJson -notmatch '"ok":true') { throw "check --json did not report ok" }
           $infoJson = (& "$env:GITHUB_WORKSPACE\launcher\tecs.ps1" info --json | Out-String)
           if ($infoJson -notmatch '"built":true') { throw "info --json did not report a built project" }
+          & "$env:GITHUB_WORKSPACE\launcher\tecs.ps1" dist windows
+          if (-not (Test-Path "dist\windows\hello-tecs\hello-tecs.exe")) { throw "dist did not fuse the exe" }
+          if (-not (Test-Path "dist\hello-tecs-windows.zip")) { throw "dist did not zip the Windows build" }
           Pop-Location
           if (-not (Test-Path "$project\build\main.lua")) { throw "main.lua was not built" }
           if (-not (Test-Path "$project\build\tecs2d\init.lua")) { throw "tecs2d was not built" }

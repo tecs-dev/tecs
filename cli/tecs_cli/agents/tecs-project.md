@@ -13,6 +13,9 @@ Run these from the project root (the directory containing `tlconfig.lua`):
   `*_lovespec.tl` specs use `tecs2d.testing.fixture` to launch the built game under real
   LÖVE and drive it over MCP (`fixture.runLua`, `fixture.probePixels`, `fixture.eventually`).
   Not headless; macOS and Linux only.
+- `tecs dist [love|macos|windows]`: package the built game into `dist/` as a `.love`
+  file, a macOS app bundle, and a fused Windows executable. The macOS bundle needs a
+  POSIX host; Windows packages build anywhere.
 - `tecs info --json`: CLI, LÖVE, and LuaJIT versions plus project status as JSON.
 - `tecs add <rock>[@version]` / `tecs remove <rock>` / `tecs update`: vendor pure-Lua
   rocks from luarocks.org into `src/vendor/` (with Teal type declarations when a

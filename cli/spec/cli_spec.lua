@@ -445,6 +445,39 @@ describe("tecs CLI", function()
         end)
     end)
 
+    describe("dist", function()
+        local internal = cli._internal
+
+        it("derives a sanitized name from the project directory", function()
+            local root = make_temp("Cool Game!!")
+            with_cwd(root, function()
+                local name = internal.dist_name()
+                assert.matches("Cool Game", name)
+                assert.equals(nil, name:match("!"))
+            end)
+        end)
+
+        it("patches the LÖVE Info.plist for the game", function()
+            local plist = table.concat({
+                "<dict>",
+                "    <key>CFBundleIdentifier</key>",
+                "    <string>org.love2d.love</string>",
+                "    <key>CFBundleName</key>",
+                "    <string>LÖVE</string>",
+                "    <key>UTExportedTypeDeclarations</key>",
+                "    <array>",
+                "        <dict><key>a</key><string>b</string></dict>",
+                "    </array>",
+                "</dict>",
+            }, "\n")
+            local patched = internal.patch_plist(plist, "mygame")
+            assert.matches("org%.tecs2d%.mygame", patched)
+            assert.matches("<string>mygame</string>", patched)
+            assert.equals(nil, patched:match("UTExportedTypeDeclarations"))
+            assert.equals(nil, patched:match("org%.love2d%.love"))
+        end)
+    end)
+
     describe("rock vendoring", function()
         local internal = cli._internal
 
