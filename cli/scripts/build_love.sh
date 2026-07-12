@@ -33,8 +33,13 @@ if command -v zip >/dev/null 2>&1; then
 else
     archive="$output.zip"
     rm -f "$archive"
+    # Git Bash rewrites POSIX-looking arguments passed to native Windows
+    # programs. Give PowerShell native paths explicitly so the fallback works
+    # on the stock windows-latest runner, which does not provide zip.
+    stage_windows="$(cygpath -w "$stage")"
+    archive_windows="$(cygpath -w "$archive")"
     powershell.exe -NoProfile -Command \
-        "Compress-Archive -Force -Path '$stage\\*' -DestinationPath '$archive'"
+        "Compress-Archive -Force -Path '$stage_windows\\*' -DestinationPath '$archive_windows'"
     mv "$archive" "$output"
 fi
 cp "$root/launcher/tecs" "$root/dist/tecs"
