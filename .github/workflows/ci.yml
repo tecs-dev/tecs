@@ -262,14 +262,16 @@ jobs:
         export LUA_PATH="$(luarocks path --lr-path);;"
         export LUA_CPATH="$(luarocks path --lr-cpath);;"
         make clean
-        make compile
+        # tl ultimately runs as a native Windows process, so its vendor search
+        # path must be a Windows path even though make runs under MSYS2.
+        make VENDOR_LUA="$(cygpath -m "$PWD/vendor/share/lua/5.1")" compile
 
     - name: Run tests
       run: |
         export PATH="$HOME/bin:$HOME/.luarocks/bin:$PATH"
         export LUA_PATH="$(luarocks path --lr-path);;"
         export LUA_CPATH="$(luarocks path --lr-cpath);;"
-        make test
+        make VENDOR_LUA="$(cygpath -m "$PWD/vendor/share/lua/5.1")" test
 
   starter-compat:
     runs-on: ubuntu-latest
