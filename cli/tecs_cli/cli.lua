@@ -974,9 +974,11 @@ function tasks.run()
     tasks.build()
     status("Launching game...")
     if is_windows then
-        run('cmd /C "cd /D build && ' .. q(path_join("..", love_bin())) .. ' ."')
+        run('cmd /C "set SDL_VIDEODRIVER=&& set SDL_AUDIODRIVER=&& cd /D build && '
+            .. q(path_join("..", love_bin())) .. ' ."')
     else
-        run("cd build && " .. q(path_join("..", love_bin())) .. " .")
+        run("cd build && env -u SDL_VIDEODRIVER -u SDL_AUDIODRIVER "
+            .. q(path_join("..", love_bin())) .. " .")
     end
 end
 

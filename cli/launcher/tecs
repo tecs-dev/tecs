@@ -53,4 +53,6 @@ case "$(uname -s)" in
 esac
 
 export TECS_LOVE_BIN="$love"
+export SDL_VIDEODRIVER=dummy
+export SDL_AUDIODRIVER=dummy
 exec "$love" "$payload" --tecs-project "$PWD" "$@"

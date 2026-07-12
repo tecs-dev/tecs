@@ -40,5 +40,7 @@ if (-not $love -or -not (Test-Path $love)) {
 Set-Content -Path $marker -Value $love -NoNewline
 
 $env:TECS_LOVE_BIN = $love
+$env:SDL_VIDEODRIVER = "dummy"
+$env:SDL_AUDIODRIVER = "dummy"
 & $love $payload --tecs-project (Get-Location).Path @args
 exit $LASTEXITCODE

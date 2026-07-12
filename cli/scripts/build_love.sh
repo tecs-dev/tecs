@@ -28,7 +28,15 @@ cp "$tecs_dir/LICENSE-MIT" "$stage/payload/licenses/tecs-LICENSE-MIT"
 cp "$tecs_dir/LICENSE-APACHE" "$stage/payload/licenses/tecs-LICENSE-APACHE"
 
 rm -f "$output"
-(cd "$stage" && zip -q -r "$output" .)
+if command -v zip >/dev/null 2>&1; then
+    (cd "$stage" && zip -q -r "$output" .)
+else
+    archive="$output.zip"
+    rm -f "$archive"
+    powershell.exe -NoProfile -Command \
+        "Compress-Archive -Force -Path '$stage\\*' -DestinationPath '$archive'"
+    mv "$archive" "$output"
+fi
 cp "$root/launcher/tecs" "$root/dist/tecs"
 cp "$root/launcher/tecs.ps1" "$root/dist/tecs.ps1"
 cp "$root/launcher/tecs.cmd" "$root/dist/tecs.cmd"
