@@ -57,7 +57,10 @@ tools.list = {
     {
         name = "screenshot",
         annotations = {readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false},
-        description = "Capture a screenshot of the game window. Returns MCP image content.",
+        description = "Capture a screenshot of the game window and return it inline as MCP image content, " ..
+            "in one call. With filesystem access to the game host, cmd_screenshot is usually better: it " ..
+            "writes a persistent session artifact instead of a base64 payload (the capture lands at end " ..
+            "of frame; poll cmd_screenshot_info before reading the file).",
         inputSchema = {
             type = "object",
             properties = {

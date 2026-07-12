@@ -107,6 +107,11 @@ tecs/
   `send_love_event`, `run_lua`, `get_logs`) plus every debugger registry command projected as a
   `cmd_*` tool. `docs/tecs2d/mcp/tools.md` and `docs/tecs2d/debug-reference.md` are generated
   from those definitions by `make docs-debug`.
+- Screenshots: with filesystem access to the game host, prefer `cmd_screenshot` and read the
+  artifact file (cheaper than inline base64, and it persists in the session for the user); the
+  capture lands at end of frame, so poll `cmd_screenshot_info` before reading. The kernel
+  `screenshot` returns the image inline in one call; use it for a quick look or from a remote
+  client.
 - Prefer the structured `cmd_*` tools over `run_lua` for live game edits. In particular, use
   `cmd_set`, `cmd_modify`, and `cmd_remove` to add, update, or remove components on existing
   entities.

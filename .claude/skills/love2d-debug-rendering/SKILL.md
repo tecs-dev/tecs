@@ -28,7 +28,13 @@ where they diverge is the bug.
    `sample_pixels` takes up to 256 `{x, y}` points (`normalized: true` for
    0..1 fractions) and returns RGBA. To *locate* content, scan a grid or row
    and search for the expected channel signature rather than betting on one
-   pixel.
+   pixel. When you have filesystem access to the game host (the usual local
+   dev loop), prefer `cmd_screenshot` and Read the artifact instead: no
+   base64 payload, and the file persists in the session for the user. The
+   capture lands at end of frame, so poll `cmd_screenshot_info` before
+   reading (`cmd_screenshot_path` gives the absolute path). The kernel
+   `screenshot` returns the image inline in one call; use it for a quick
+   look or when the client is remote.
 2. **`cmd_fetch` / `cmd_info` / `cmd_stats`** — CPU-side truth. Is the entity
    alive, what are its Transform/Color/layer values, do counts match
    expectations?
