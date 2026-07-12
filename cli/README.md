@@ -56,6 +56,11 @@ tecs run
 - `tlconfig.lua`
 - bundled Love2D/Teal type definitions
 - empty `assets/`
+- a GitHub Actions workflow that type-checks and builds on Linux, macOS, and
+  Windows with the published CLI
+- agent tooling: `AGENTS.md`/`CLAUDE.md` guidance plus MCP client
+  configuration for Claude Code (`.mcp.json`) and Codex
+  (`.codex/config.toml`) pointing at the game's built-in MCP server
 
 The default app renders `Hello Tecs2D!`.
 

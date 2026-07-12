@@ -8,6 +8,15 @@ payload, launchers, and installers as GitHub release assets.
 
 ## [Unreleased]
 
+### Added
+
+- `tecs new` generates a GitHub Actions workflow that type-checks and builds
+  the project on Linux, macOS, and Windows using the published CLI
+  (Homebrew, Scoop, or the installer script per platform).
+- `tecs new` generates agent tooling: `AGENTS.md`/`CLAUDE.md` from the bundled
+  guide, plus MCP client configuration for Claude Code (`.mcp.json`) and
+  Codex (`.codex/config.toml`) pointing at the game's MCP server.
+
 ### Changed
 
 - The vendored-rock manifest moved from `src/vendor/rocks.lua` to

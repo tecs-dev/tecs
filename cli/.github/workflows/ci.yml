@@ -47,6 +47,7 @@ jobs:
           launcher/tecs --version
           launcher/tecs info
           launcher/tecs new "$project"
+          test -f "$project/.github/workflows/ci.yml"
           (cd "$project" && TECS_DIR="$GITHUB_WORKSPACE/tecs" "$GITHUB_WORKSPACE/launcher/tecs" dev)
           (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" check)
           (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" build)

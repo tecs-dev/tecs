@@ -1,0 +1,4 @@
+# Codex project configuration: connect to the game's built-in MCP server.
+# Launch the game first (`tecs run`); the server listens while it runs.
+[mcp_servers.tecs-game]
+url = "http://127.0.0.1:19999/mcp"

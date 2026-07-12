@@ -1609,6 +1609,15 @@ function tasks.new(args)
     end
     mkdir(path_join(target, "assets"))
 
+    -- Agent guidance ships from the bundled doc so `tecs agent` and generated
+    -- projects stay in sync; CLAUDE.md defers to AGENTS.md.
+    for _, doc in ipairs(list_agent_docs()) do
+        if doc.name == "tecs-project" then
+            write_file(path_join(target, "AGENTS.md"), doc.content)
+            write_file(path_join(target, "CLAUDE.md"), "@AGENTS.md\n")
+        end
+    end
+
     status("Project created. Next: cd " .. target .. " && tecs check")
 end
 

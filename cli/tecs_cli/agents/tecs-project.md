@@ -26,6 +26,8 @@ Always run `tecs check` after editing Teal sources, and make sure it passes befo
 - `assets/` — game assets copied into the build (`.ase`/`.aseprite` source files are excluded).
 - `build/` — generated output. Never edit; regenerate with `tecs build`.
 - `tlconfig.lua` — Teal configuration; marks the project root.
+- `.github/workflows/ci.yml` — generated CI that installs the published CLI and runs
+  `tecs check` and `tecs build` on Linux, macOS, and Windows.
 
 ## Hot reload
 
@@ -33,7 +35,9 @@ While the game is running, rerun `tecs build` after editing sources. A successfu
 
 ## MCP server
 
-The default project wires the Tecs2D MCP plugin into the game world (`world:addPlugin(mcp.new())` in `src/main.tl`). While the game runs it serves MCP over local HTTP with tools to screenshot the game, sample pixels, send input events, run Lua inside the game, read logs, and invoke `cmd_*` debug commands. Prefer observing the live game through MCP over guessing at runtime behavior: `tecs build`, launch with `tecs run`, then connect.
+The default project wires the Tecs2D MCP plugin into the game world (`world:addPlugin(mcp.new())` in `src/main.tl`). While the game runs it serves MCP over local HTTP at `http://127.0.0.1:19999/mcp` (Streamable HTTP) with tools to screenshot the game, sample pixels, send input events, run Lua inside the game, read logs, and invoke `cmd_*` debug commands. Prefer observing the live game through MCP over guessing at runtime behavior: `tecs build`, launch with `tecs run`, then connect.
+
+Generated projects ship ready-made client configuration: `.mcp.json` for Claude Code and `.codex/config.toml` for Codex, both pointing at that endpoint. The server only listens while the game is running.
 
 ## Environment variables
 
