@@ -7,9 +7,9 @@
 require("busted")
 local luassert <const> = require("luassert")
 local socket <const> = require("socket")
-local mcp_client <const> = require("spec.integration.harness.mcp_client")
-local love_process <const> = require("spec.integration.harness.love_process")
-local png_util <const> = require("spec.integration.harness.png_util")
+local mcp_client <const> = require("tecs2d.testing.mcp_client")
+local love_process <const> = require("tecs2d.testing.love_process")
+local png_util <const> = require("tecs2d.testing.png_util")
 local json <const> = require("tecs.utils.json")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/compliance"

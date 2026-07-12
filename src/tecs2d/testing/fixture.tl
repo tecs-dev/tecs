@@ -5,8 +5,8 @@
 
 local socket <const> = require("socket")
 local luassert <const> = require("luassert")
-local mcp_client <const> = require("spec.integration.harness.mcp_client")
-local love_process <const> = require("spec.integration.harness.love_process")
+local mcp_client <const> = require("tecs2d.testing.mcp_client")
+local love_process <const> = require("tecs2d.testing.love_process")
 
 local LOG_DIR <const> = "build/test_deps/love_test_logs"
 local STARTUP_TIMEOUT <const> = 10

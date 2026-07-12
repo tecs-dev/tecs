@@ -10,7 +10,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("spec.integration.harness.fixture")
+local fixture <const> = require("tecs2d.testing.fixture")
 
 local socket <const> = require("socket")
 local sleep <const> = socket.sleep as function(number)
