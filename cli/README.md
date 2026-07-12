@@ -5,7 +5,20 @@ Tecs2D projects.
 
 ## Install
 
-macOS and Linux:
+Homebrew (macOS and Linux):
+
+```sh
+brew install tecs-dev/tap/tecs-cli
+```
+
+Scoop (Windows):
+
+```powershell
+scoop bucket add tecs https://github.com/tecs-dev/scoop-bucket
+scoop install tecs
+```
+
+Or use the standalone installers — macOS and Linux:
 
 ```sh
 curl -fsSL https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.sh | sh
