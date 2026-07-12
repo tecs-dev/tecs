@@ -236,7 +236,7 @@ the in-game `stampPath` is `.tecs-reload-stamp`.
 The following example watches game assets for changes and then triggers a hot reload:
 
 ```bash
-watchexec -w src -w assets './tecs build && touch build/.tecs-reload-stamp'
+watchexec -w src -w assets 'tecs build && touch build/.tecs-reload-stamp'
 ```
 
 ## Basic game setup

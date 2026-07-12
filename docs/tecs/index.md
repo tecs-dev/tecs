@@ -13,55 +13,44 @@ Tecs is not yet stable and may change as development progresses.
 
 ## Installation
 
-First, install LuaJIT and LuaRocks if you haven't already:
+Install the Tecs CLI. It bundles the Teal compiler, Tecs and Tecs2D sources,
+type definitions, and a project template. LÖVE 12 is downloaded on first use.
+You do not need a separate Lua, LuaRocks, Teal, or compiler installation.
 
 ::: code-group
 
 ```bash [macOS]
-brew install luajit luarocks
-```
-
-```bash [Debian/Ubuntu]
-sudo apt install luajit libluajit-5.1-dev luarocks
-```
-
-```bash [Arch]
-sudo pacman -S luajit luarocks
+curl -fsSL https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.sh | sh
 ```
 
 ```powershell [Windows]
-scoop install luajit luarocks
+irm https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.ps1 | iex
 ```
 
-```bash [Source]
-# LuaJIT build guide: https://luajit.org/install.html
-git clone https://github.com/LuaJIT/LuaJIT.git
-cd LuaJIT && make && sudo make install
-
-# Then install LuaRocks:
-# https://github.com/luarocks/luarocks/blob/main/docs/download.md
+```bash [Linux]
+curl -fsSL https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.sh | sh
 ```
 
 :::
 
-Install Tecs via [LuaRocks](https://luarocks.org). For typical gamedev, you'll want a self-contained build:
+Create a project, then type-check it:
 
 ```bash
-luarocks install --dev --tree=vendor --lua-version=5.1 tecs
+tecs new my-game
+cd my-game
+tecs check
 ```
 
-*While Tecs is in preview, `--dev` is required. There are no tagged releases yet.*
-
-Require Tecs in your code:
+Require Tecs from your Teal code:
 
 ```teal
 local tecs = require("tecs")
 ```
 
 ::: tip Building a game?
-If you are building a Love2D game and want the engine layer as well, install `tecs2d` instead. It depends on `tecs`
-automatically and provides rendering, audio, input, physics, UI, and the Love2D loop integration.
-See [Tecs2D Getting Started](/tecs2d/) for the starter template and build commands.
+Projects created by `tecs new` include Tecs2D, which provides rendering,
+audio, input, physics, UI, and LÖVE loop integration on top of Tecs. See
+[Tecs2D Getting Started](/tecs2d/) for the game workflow and build commands.
 :::
 
 ## Tecs in a nutshell
