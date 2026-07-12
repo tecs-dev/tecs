@@ -17,7 +17,7 @@ Windows PowerShell:
 irm https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.ps1 | iex
 ```
 
-The first `tecs` command downloads the tested LÖVE 12 runtime into the user
+The first `tecs` command downloads the current LÖVE 12 nightly into the user
 cache. Later commands reuse it. Lua, LuaRocks, and a compiler toolchain are not
 required.
 
@@ -56,7 +56,6 @@ tecs run
 tecs build
 tecs check
 tecs clean
-tecs love12
 ```
 
 `tecs run` builds the project and launches it with the same cached LÖVE runtime
@@ -67,13 +66,14 @@ the CLI version; `tecs info` reports the LÖVE/LuaJIT runtime and current projec
 
 ## Development Commands
 
-These commands work against a local Tecs checkout, found via `TECS_DIR` or a
-sibling `../tecs` directory:
+This command copies framework sources from a local Tecs checkout:
 
 ```sh
-tecs dev        # copy local Tecs/Tecs2D sources into src/vendor/ for iteration
-tecs sync-tecs  # reinstall Tecs/Tecs2D into src/vendor/ from local rockspecs
+TECS_DIR=../tecs tecs dev
 ```
+
+Run it again after changing the local framework, then run `tecs check` or
+`tecs build`.
 
 ## Embedded Toolchain
 
@@ -81,7 +81,7 @@ tecs sync-tecs  # reinstall Tecs/Tecs2D into src/vendor/ from local rockspecs
 
 - the Teal compiler
 - compatible Tecs and Tecs2D sources
-- LuaJIT, LuaSocket, LÖVE, and project type declarations
+- project type declarations for LuaJIT, LuaSocket, and LÖVE
 - the starter template
 
 The CLI stages the required declarations and framework sources into

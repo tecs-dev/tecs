@@ -114,15 +114,7 @@ describe("tecs CLI", function()
             assert.is_true(exists(join(project, ".gitignore")))
             assert.is_true(exists(join(project, "README.md")))
             assert.is_true(exists(join(project, "tlconfig.lua")))
-            assert.is_true(exists(join(project, "game-dev-1.rockspec")))
-            assert.is_false(exists(join(project, "project-dev-1.rockspec.in")))
-            local rockspec = read_file(join(project, "game-dev-1.rockspec"))
-            assert.matches('"tecs2d == dev%-1"', rockspec)
-            assert.equals(nil, rockspec:match('"tl == dev%-1"'))
-            assert.equals(nil, rockspec:match('"tecs == dev%-1"'))
-            assert.equals(nil, rockspec:match('"luajit%-tl%-type'))
-            assert.equals(nil, rockspec:match('"luasocket%-tl%-type'))
-            assert.equals(nil, rockspec:match('"tecs%-love2d%-tl%-type'))
+            assert.is_false(exists(join(project, "game-dev-1.rockspec")))
             assert.is_true(exists(join(project, "src", "conf.tl")))
             assert.is_true(exists(join(project, "src", "main.tl")))
             assert.is_true(is_dir(join(project, "assets")))
@@ -270,9 +262,9 @@ describe("tecs CLI", function()
 
     describe("path helpers", function()
         local internal = cli._internal
-        local windows = {sep = "\\", is_windows = true, is_msys = false, uses_cmd_shell = true}
-        local msys = {sep = "/", is_windows = false, is_msys = true, uses_cmd_shell = true}
-        local posix = {sep = "/", is_windows = false, is_msys = false, uses_cmd_shell = false}
+        local windows = {sep = "\\", is_windows = true, is_msys = false}
+        local msys = {sep = "/", is_windows = false, is_msys = true}
+        local posix = {sep = "/", is_windows = false, is_msys = false}
 
         after_each(function()
             internal.set_platform(internal.detect_platform())
@@ -306,11 +298,11 @@ describe("tecs CLI", function()
         it("preserves absolute runtime paths when running from build", function()
             internal.set_platform(posix)
             assert.equals("/Users/me/.cache/love", internal.path_from_build("/Users/me/.cache/love"))
-            assert.equals("../.love12/love", internal.path_from_build(".love12/love"))
+            assert.equals("../tools/love", internal.path_from_build("tools/love"))
 
             internal.set_platform(windows)
             assert.equals("C:\\cache\\lovec.exe", internal.path_from_build("C:/cache/lovec.exe"))
-            assert.equals("..\\.love12\\love.exe", internal.path_from_build(".love12/love.exe"))
+            assert.equals("..\\tools\\love.exe", internal.path_from_build("tools/love.exe"))
         end)
 
         it("computes dirname and relative paths", function()
@@ -418,24 +410,6 @@ describe("tecs CLI", function()
             assert.is_false(exists(join(root, "build", "vendor", "lib", "luarocks")))
             assert.is_false(exists(join(root, "build", "vendor", "bin")))
             assert.is_false(exists(join(root, "build", "tecs", "init.tl")))
-        end)
-    end)
-
-    describe("Teal installation validation", function()
-        it("requires the launcher and both namespaced module trees", function()
-            local root = make_temp("teal-complete")
-            mkdir_p(join(root, "src", "vendor", "bin"))
-            mkdir_p(join(root, "src", "vendor", "share", "lua", "5.1", "teal"))
-            mkdir_p(join(root, "src", "vendor", "share", "lua", "5.1", "tlcli"))
-
-            with_cwd(root, function()
-                assert.is_false(cli._internal.teal_compiler_complete())
-                write_file(join("src", "vendor", "bin", "tl"), "launcher")
-                write_file(join("src", "vendor", "share", "lua", "5.1", "teal", "init.lua"), "return {}")
-                assert.is_false(cli._internal.teal_compiler_complete())
-                write_file(join("src", "vendor", "share", "lua", "5.1", "tlcli", "main.lua"), "return {}")
-                assert.is_true(cli._internal.teal_compiler_complete())
-            end)
         end)
     end)
 

@@ -1,4 +1,0 @@
-#!/usr/bin/env luajit
-
-local cli = require("tecs_cli.cli")
-cli.main(arg)

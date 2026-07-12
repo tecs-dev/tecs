@@ -11,7 +11,7 @@ local love_api = rawget(_G, "love")
 
 -- Platform traits detected from the OS path separator. Held in mutable locals
 -- so specs can substitute another platform via M._internal.set_platform.
-local sep, is_msys, is_windows, uses_cmd_shell
+local sep, is_msys, is_windows
 
 local function detect_platform()
     local host_sep = package.config:sub(1, 1)
@@ -21,7 +21,6 @@ local function detect_platform()
         sep = separator,
         is_msys = msys,
         is_windows = separator == "\\" and not msys,
-        uses_cmd_shell = host_sep == "\\",
     }
 end
 
@@ -29,22 +28,13 @@ local function set_platform(platform)
     sep = platform.sep
     is_msys = platform.is_msys or false
     is_windows = platform.is_windows or false
-    uses_cmd_shell = platform.uses_cmd_shell or false
 end
 
 set_platform(detect_platform())
 
--- Local Tecs/Tecs2D checkout used for installs and dev mode. Override with
--- TECS_DIR; otherwise use a sibling checkout, matching the CI layout.
-local function default_tecs_dir()
-    return sep == "\\" and "..\\tecs" or "../tecs"
-end
-
-local tecs_dir = os.getenv("TECS_DIR") or default_tecs_dir()
-
-local vendor_lua = "src/vendor/share/lua/5.1"  -- installed LuaRocks module tree
-local love12_dir = ".love12"                   -- downloaded Love2D 12 runtime
-local nightly_base = "https://nightly.link/love2d/love/workflows/main/main"
+-- TECS_DIR opts into copying framework sources from a local checkout.
+local tecs_dir = os.getenv("TECS_DIR")
+local vendor_lua = "src/vendor/share/lua/5.1"
 
 -- Source-only asset extensions to exclude from build output and mtime checks.
 local exclude_assets = {
@@ -67,7 +57,7 @@ local quiet = false
 
 local function require_lfs()
     if not have_lfs then
-        error("luafilesystem is required. Install tecs-cli with LuaRocks or install the `luafilesystem` rock.", 0)
+        error("filesystem adapter unavailable; run tecs through its installed launcher", 0)
     end
     return lfs
 end
@@ -122,26 +112,12 @@ local function q(path)
     return '"' .. path:gsub('"', '\\"') .. '"'
 end
 
--- Quote text for a single-quoted POSIX shell string.
-local function shq(text)
-    return "'" .. tostring(text):gsub("'", "'\\''") .. "'"
-end
-
 local function source_path()
     local source = debug.getinfo(1, "S").source
     if source:sub(1, 1) == "@" then
         return source:sub(2)
     end
     return nil
-end
-
--- Run a POSIX shell command explicitly when Lua is a Windows binary inside
--- MSYS2. MinGW LuaJIT's os.execute uses cmd.exe even though MSYS tools exist.
-local function posix_cmd(cmd)
-    if is_msys and uses_cmd_shell then
-        return "bash -lc " .. shq('export PATH="$HOME/bin:$HOME/.luarocks/bin:/mingw64/bin:/usr/bin:$PATH"; ' .. cmd)
-    end
-    return cmd
 end
 
 -- Convert path separators to the current platform's convention.
@@ -186,8 +162,6 @@ local function path_join(...)
 end
 
 -- Resolve an executable path after the run command changes into build/.
--- Option 1 supplies a user-cache absolute path; legacy project-local runtimes
--- are relative to the project root and need one parent traversal.
 local function path_from_build(path)
     path = normalize(path)
     if path:match("^%a:[/\\]") or path:match("^[/\\]") then return path end
@@ -225,11 +199,6 @@ local function run(cmd)
     error("command failed with exit code " .. tostring(code), 0)
 end
 
-local function command_ok(cmd)
-    local a = os.execute(cmd)
-    return a == true or a == 0
-end
-
 local function mkdir(path)
     path = normalize(path)
     if exists(path) then return end
@@ -263,26 +232,6 @@ local function write_file(path, content)
     local f = assert(io.open(path, "wb"))
     f:write(content)
     f:close()
-end
-
-local function read_file(path)
-    local f = io.open(path, "rb")
-    if not f then return nil end
-    local content = f:read("*a")
-    f:close()
-    return content
-end
-
-local function stamp_project_rockspec(target)
-    local template_path = path_join(target, "project-dev-1.rockspec.in")
-    local template = read_file(template_path)
-    if not template then return end
-
-    local title = basename(target)
-    local rockspec = "game-dev-1.rockspec"
-    template = template:gsub("@PACKAGE@", "game"):gsub("@TITLE@", title)
-    write_file(path_join(target, rockspec), template)
-    os.remove(normalize(template_path))
 end
 
 local function is_dir(path)
@@ -442,27 +391,6 @@ local function template_dir()
     error("could not find embedded default template", 0)
 end
 
--- Run a command and return its non-empty output lines, normalized and sorted.
-local function popen_lines(cmd)
-    local p = assert(io.popen(cmd))
-    local lines = {}
-    for line in p:lines() do
-        if line ~= "" then lines[#lines + 1] = normalize(line) end
-    end
-    p:close()
-    table.sort(lines)
-    return lines
-end
-
--- Cache `uname -s`; used only for platform-specific Love2D runtime selection.
-local uname_cache
-local function uname_s()
-    if not uname_cache then
-        uname_cache = popen_lines("uname -s 2>/dev/null")[1] or ""
-    end
-    return uname_cache
-end
-
 -- Modification time of a path (platform-specific units), or 0 if it is missing.
 local function file_mtime(path)
     path = normalize(path)
@@ -538,53 +466,22 @@ end
 -- LUA_PATH entries letting `tl` resolve type defs and the vendored modules.
 local function lua_path()
     local paths = {
-        lua_module_path(tecs_dir) .. "/src/?.tl",
-        lua_module_path(tecs_dir) .. "/src/?/init.tl",
-        lua_module_path(tecs_dir) .. "/build/?.lua",
-        lua_module_path(tecs_dir) .. "/build/?/init.lua",
         vendor_lua .. "/?.tl",
         vendor_lua .. "/?/init.tl",
         vendor_lua .. "/?.lua",
         vendor_lua .. "/?/init.lua",
         "",
     }
+    if tecs_dir then
+        table.insert(paths, 1, lua_module_path(tecs_dir) .. "/src/?.tl")
+        table.insert(paths, 2, lua_module_path(tecs_dir) .. "/src/?/init.tl")
+    end
     return table.concat(paths, ";")
-end
-
--- Prefix a command with the LUA_PATH the Teal compiler needs.
-local function with_lua_path(cmd)
-    local bin = path_join("src/vendor/bin")
-    if is_msys and uses_cmd_shell then
-        return posix_cmd("PATH=" .. q(bin) .. ':$PATH LUA_PATH=' .. q(lua_path()) .. " " .. cmd)
-    end
-    if uses_cmd_shell then
-        return 'cmd /C "set PATH=' .. normalize(bin) .. ';%PATH%&& set LUA_PATH=' .. lua_path() .. '&& ' .. cmd .. '"'
-    end
-    return "PATH=" .. q(bin) .. ':$PATH LUA_PATH=' .. q(lua_path()) .. " " .. cmd
-end
-
-local function with_vendor_env(cmd)
-    local root = assert(require_lfs().currentdir())
-    local bin = path_join(root, "src/vendor/bin")
-    local lua = path_join(root, "src/vendor/share/lua/5.1")
-    local clib = path_join(root, "src/vendor/lib/lua/5.1")
-    if uses_cmd_shell then
-        return 'cmd /C "set PATH=' .. normalize(bin) .. ';%PATH%&& set LUA_PATH='
-            .. lua_module_path(lua) .. '/?.lua;' .. lua_module_path(lua) .. '/?/init.lua;%LUA_PATH%&& set LUA_CPATH='
-            .. lua_module_path(clib) .. '/?.dll;' .. lua_module_path(clib) .. '/?.so;%LUA_CPATH%&& ' .. cmd .. '"'
-    end
-    return posix_cmd("PATH=" .. q(bin) .. ':$PATH LUA_PATH='
-        .. q(lua_module_path(lua) .. "/?.lua;" .. lua_module_path(lua) .. "/?/init.lua;;$LUA_PATH")
-        .. " LUA_CPATH=" .. q(lua_module_path(clib) .. "/?.so;;$LUA_CPATH")
-        .. " " .. cmd)
 end
 
 local function run_tl(args)
     if not is_love_cli then
-        local quoted = {}
-        for i = 1, #args do quoted[i] = q(args[i]) end
-        run(with_lua_path("tl " .. table.concat(quoted, " ")))
-        return
+        error("embedded Teal compiler unavailable; run tecs through its installed launcher", 0)
     end
 
     local previousPath = package.path
@@ -607,220 +504,55 @@ local function run_tl(args)
     end
 end
 
--- Run a command from inside the local Tecs checkout with its luarocks bin
--- (where the `tl`/`luarocks` shims live) prepended to PATH.
-local function tecs_cmd(cmd)
-    local bin = path_join(tecs_dir, "vendor/bin")
-    if is_windows then
-        return 'cmd /C "cd /D ' .. q(tecs_dir) .. " && set PATH=" .. normalize(bin) .. ';%PATH%&& ' .. cmd .. '"'
-    end
-    return posix_cmd("cd " .. q(normalize(tecs_dir)) .. " && PATH=" .. q(bin) .. ':$PATH ' .. cmd)
-end
-
-local function ensure_msys_teal_wrapper()
-    if not is_msys then return false end
-    if not command_ok(posix_cmd('[ -f src/vendor/lib/luarocks/rocks-5.1/tl/*/bin/tl ]')) then
-        return false
-    end
-    local bin = path_join("src/vendor/bin")
-    mkdir(bin)
-    write_file(path_join(bin, "tl"), [[#!/usr/bin/env bash
-root="$(cygpath -m "$PWD")"
-script="$(find "$root/src/vendor/lib/luarocks/rocks-5.1/tl" -path '*/bin/tl' | sort -r | head -n 1)"
-export LUA_PATH="$root/src/vendor/share/lua/5.1/?.lua;$root/src/vendor/share/lua/5.1/?/init.lua;$LUA_PATH"
-export LUA_CPATH="$root/src/vendor/lib/lua/5.1/?.dll;$root/src/vendor/lib/lua/5.1/?.so;$LUA_CPATH"
-exec luajit "$script" "$@"
-]])
-    run(posix_cmd("chmod +x " .. q(path_join(bin, "tl"))))
-    return true
-end
-
-local function teal_compiler_complete()
-    return exists(path_join("src/vendor/bin/tl"))
-        and exists(path_join(vendor_lua, "teal/init.lua"))
-        and exists(path_join(vendor_lua, "tlcli/main.lua"))
-end
-
-local function ensure_teal_compiler()
-    if teal_compiler_complete() then
-        ensure_msys_teal_wrapper()
-        return
-    end
-
-    local tree = q(path_join(cwd(), "src/vendor"))
-    status("Installing Teal development release...")
-    run(with_vendor_env("luarocks --dev --lua-version=5.1 install --tree=" .. tree .. " tl"))
-
-    if not teal_compiler_complete() then
-        fail("Teal installed without its teal/tlcli modules")
-    end
-    ensure_msys_teal_wrapper()
-end
-
-local function ensure_love_type_environment()
-    if exists(path_join(vendor_lua, "love2d.d.tl")) then return end
-
-    -- LuaRocks may build the transitive tecs dependency before it installs
-    -- tecs2d's remaining dependencies. Preinstall the global environment so
-    -- source-based dev rocks can type-check regardless of resolver order.
-    local tree = q(path_join(cwd(), "src/vendor"))
-    status("Installing LÖVE type environment...")
-    run(with_vendor_env("luarocks --lua-version=5.1 install --tree=" .. tree
-        .. " tecs-love2d-tl-type"))
-end
-
-local function ensure_mcp_runtime()
-    if exists(path_join(vendor_lua, "socket.lua")) then return end
-
-    local tree = q(path_join(cwd(), "src/vendor"))
-    status("Installing LuaSocket runtime...")
-    run(with_vendor_env("luarocks --lua-version=5.1 install --tree=" .. tree .. " luasocket"))
-end
-
-local function ensure_teal_type_dependencies()
-    local haveFfi = exists(path_join(vendor_lua, "ffi.d.tl"))
-    local haveSocket = exists(path_join(vendor_lua, "socket.d.tl"))
-    if haveFfi and haveSocket then return end
-
-    local tree = q(path_join(cwd(), "src/vendor"))
-    status("Installing Teal dependency types...")
-    if not haveFfi then
-        run(with_vendor_env("luarocks --lua-version=5.1 install --tree=" .. tree
-            .. " luajit-tl-type 0.0.2-1"))
-    end
-    if not haveSocket then
-        run(with_vendor_env("luarocks --lua-version=5.1 install --tree=" .. tree
-            .. " luasocket-tl-type 0.0.2-1"))
-    end
-end
-
--- Path to the downloaded Love2D executable for this platform.
 local function love_bin()
     local supplied = os.getenv("TECS_LOVE_BIN")
     if supplied and supplied ~= "" then return normalize(supplied) end
-    if is_windows then
-        return path_join(love12_dir, "love.exe")
-    elseif uname_s() == "Darwin" then
-        return path_join(love12_dir, "love.app/Contents/MacOS/love")
-    end
-    return path_join(love12_dir, "love")
+    error("LÖVE runtime unavailable; run tecs through its installed launcher", 0)
 end
 
--- Use the local checkout directly when LuaRocks cannot reliably install into
--- the starter vendor tree, which can happen under MinGW/MSYS path translation.
-local function sync_local_tecs()
-    local tecs_src = path_join(tecs_dir, "src/tecs")
-    local tecs2d_src = path_join(tecs_dir, "src/tecs2d")
-    if not exists(tecs_src) or not exists(tecs2d_src) then return false end
+local function embedded_dependencies_complete()
+    return exists(path_join(vendor_lua, "tecs2d/init.tl"))
+        and exists(path_join(vendor_lua, "love2d.d.tl"))
+        and exists(path_join(vendor_lua, "ffi.d.tl"))
+        and exists(path_join(vendor_lua, "socket.d.tl"))
+        and exists(path_join(vendor_lua, "tecs2d/assets/fonts/tiny-font.fnt"))
+        and exists(path_join(vendor_lua, "tecs2d/assets/fonts/tiny-font.png"))
+end
 
-    status("Syncing Tecs from local checkout...")
-    copy_dir(tecs_src, path_join(vendor_lua, "tecs"))
-    copy_dir(tecs2d_src, path_join(vendor_lua, "tecs2d"))
+local function copy_local_framework()
+    if not tecs_dir then return false end
+    local tecsSource = path_join(tecs_dir, "src/tecs")
+    local tecs2dSource = path_join(tecs_dir, "src/tecs2d")
+    local fonts = path_join(tecs_dir, "examples/shared/assets")
+    if not exists(path_join(tecsSource, "init.tl"))
+        or not exists(path_join(tecs2dSource, "init.tl"))
+        or not exists(path_join(fonts, "tiny-font.fnt"))
+        or not exists(path_join(fonts, "tiny-font.png")) then
+        error("TECS_DIR is not a complete Tecs checkout: " .. tecs_dir, 0)
+    end
+
+    copy_dir(tecsSource, path_join(vendor_lua, "tecs"))
+    copy_dir(tecs2dSource, path_join(vendor_lua, "tecs2d"))
+    copy_file(path_join(fonts, "tiny-font.fnt"),
+        path_join(vendor_lua, "tecs2d/assets/fonts/tiny-font.fnt"))
+    copy_file(path_join(fonts, "tiny-font.png"),
+        path_join(vendor_lua, "tecs2d/assets/fonts/tiny-font.png"))
     return true
 end
 
-local function project_rockspec()
-    local fs = require_lfs()
-    for entry in fs.dir(".") do
-        if entry:match("%-dev%-1%.rockspec$") then
-            return entry
-        end
-    end
-    return nil
-end
-
-local function install_project_rock()
-    local rockspec = project_rockspec()
-    if not rockspec then return end
-    local tree = q(path_join(cwd(), "src/vendor"))
-    run(with_vendor_env("luarocks --dev --lua-version=5.1 make --tree=" .. tree
-        .. " " .. q(rockspec)))
-    ensure_msys_teal_wrapper()
-end
-
--- Install Tecs/Tecs2D into src/vendor via luarocks on first use.
 local function ensure_vendor()
-    if is_love_cli then
-        if exists(path_join(vendor_lua, "tecs2d/init.tl"))
-            and exists(path_join(vendor_lua, "love2d.d.tl"))
-            and exists(path_join(vendor_lua, "ffi.d.tl"))
-            and exists(path_join(vendor_lua, "socket.d.tl"))
-            and exists(path_join(vendor_lua, "tecs2d/assets/fonts/tiny-font.fnt"))
-            and exists(path_join(vendor_lua, "tecs2d/assets/fonts/tiny-font.png")) then return end
-
-        status("Preparing embedded Tecs dependencies...")
-        mkdir(vendor_lua)
-        if exists(path_join(tecs_dir, "src/tecs/init.tl"))
-            and exists(path_join(tecs_dir, "src/tecs2d/init.tl")) then
-            copy_dir(path_join(tecs_dir, "src/tecs"), path_join(vendor_lua, "tecs"))
-            copy_dir(path_join(tecs_dir, "src/tecs2d"), path_join(vendor_lua, "tecs2d"))
-        else
-            copy_love_dir("payload/framework/tecs", path_join(vendor_lua, "tecs"))
-            copy_love_dir("payload/framework/tecs2d", path_join(vendor_lua, "tecs2d"))
-        end
-        local localFonts = path_join(tecs_dir, "examples/shared/assets")
-        local targetFonts = path_join(vendor_lua, "tecs2d/assets/fonts")
-        if exists(path_join(localFonts, "tiny-font.fnt"))
-            and exists(path_join(localFonts, "tiny-font.png")) then
-            mkdir(targetFonts)
-            copy_file(path_join(localFonts, "tiny-font.fnt"), path_join(targetFonts, "tiny-font.fnt"))
-            copy_file(path_join(localFonts, "tiny-font.png"), path_join(targetFonts, "tiny-font.png"))
-        else
-            copy_love_dir("payload/framework/tecs2d/assets/fonts", targetFonts)
-        end
-        copy_love_dir("payload/types", vendor_lua)
-        return
+    if not is_love_cli then
+        error("embedded dependencies unavailable; run tecs through its installed launcher", 0)
     end
+    if not tecs_dir and embedded_dependencies_complete() then return end
 
-    ensure_teal_compiler()
-    ensure_love_type_environment()
-    ensure_mcp_runtime()
-    ensure_teal_type_dependencies()
-    if exists(path_join(vendor_lua, "tecs2d/init.tl"))
-        and exists(path_join(vendor_lua, "love2d.d.tl"))
-        and exists(path_join(vendor_lua, "ffi.d.tl"))
-        and exists(path_join(vendor_lua, "socket.d.tl")) then return end
-    if sync_local_tecs() then return end
-    status("Installing project dependencies...")
-    install_project_rock()
-end
-
--- Download and unpack the Love2D 12 nightly for this platform into .love12.
-local function download_love12()
-    remove(love12_dir)
-    mkdir(love12_dir)
-    if is_windows then
-        status("Downloading Love2D 12 for Windows...")
-        local outer = path_join(love12_dir, "outer.zip")
-        run("curl -sL -o " .. q(outer) .. " " .. q(nightly_base .. "/love-windows-x64.zip"))
-        run('powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Force '
-            .. q(outer) .. " " .. q(love12_dir) .. '"')
-        local inner = path_join(love12_dir, "love-windows-x64.zip")
-        if exists(inner) then
-            run('powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Force '
-                .. q(inner) .. " " .. q(love12_dir) .. '"')
-        end
-    else
-        local outer = path_join(love12_dir, "outer.zip")
-        if uname_s() == "Darwin" then
-            status("Downloading Love2D 12 for macOS...")
-            run("curl -sL -o " .. q(outer) .. " " .. q(nightly_base .. "/love-macos.zip"))
-            run("cd " .. q(love12_dir)
-                .. " && unzip -q outer.zip && unzip -q love-macos.zip && rm -f outer.zip love-macos.zip")
-        else
-            status("Downloading Love2D 12 for Linux...")
-            run("curl -sL -o " .. q(outer) .. " " .. q(nightly_base .. "/love-linux-X64.AppImage.zip"))
-            run("cd " .. q(love12_dir)
-                .. " && unzip -q outer.zip && rm -f outer.zip && mv love-* love && chmod +x love")
-        end
+    status(tecs_dir and "Preparing local Tecs dependencies..." or "Preparing embedded Tecs dependencies...")
+    mkdir(vendor_lua)
+    if not copy_local_framework() then
+        copy_love_dir("payload/framework/tecs", path_join(vendor_lua, "tecs"))
+        copy_love_dir("payload/framework/tecs2d", path_join(vendor_lua, "tecs2d"))
     end
-    status("Love2D 12 installed to " .. love12_dir)
-end
-
--- Download Love2D 12 only if it is not already present.
-local function ensure_love12()
-    if exists(love_bin()) then return end
-    download_love12()
+    copy_love_dir("payload/types", vendor_lua)
 end
 
 -- Compile each changed Teal source to build/, mirroring the src/ layout.
@@ -917,19 +649,12 @@ local function copy_assets()
     return true
 end
 
--- Stage the runtime Lua tree into build/: the vendored rocks plus the latest
--- tecs/tecs2d builds and their bundled internal assets. Stamp guards reruns.
+-- Stage the runtime Lua tree into build/ and compile framework sources.
 -- Returns true when anything was staged.
 local function copy_vendor()
     local required = path_join("build/tecs2d/init.lua")
     local stamp = path_join("build/.vendor-copy-stamp")
-    local tecs_build = path_join(tecs_dir, "build/tecs")
-    local tecs2d_build = path_join(tecs_dir, "build/tecs2d")
-    local vendor_time = math.max(
-        tree_mtime("src/vendor"),
-        file_mtime(path_join(tecs_build, "init.lua")),
-        file_mtime(path_join(tecs2d_build, "init.lua"))
-    )
+    local vendor_time = tree_mtime("src/vendor")
     if exists(required) and exists(stamp) and file_mtime(stamp) >= vendor_time then
         status("Runtime vendor tree is up to date.")
         return false
@@ -942,12 +667,6 @@ local function copy_vendor()
         mkdir("build/vendor")
     end
 
-    if exists(path_join(tecs_build, "init.lua")) and exists(path_join(tecs2d_build, "init.lua")) then
-        -- Local rock builds can contain package self-links that point outside the
-        -- build tree, so skip those generated links.
-        copy_dir(tecs_build, path_join("build/vendor/share/lua/5.1/tecs"), {"tecs"})
-        copy_dir(tecs2d_build, path_join("build/vendor/share/lua/5.1/tecs2d"), {"tecs2d", "assets/internal/internal"})
-    end
     compile_vendor_tecs_sources()
 
     local tecs = path_join("build/vendor/share/lua/5.1/tecs")
@@ -995,7 +714,6 @@ function tasks.build()
 end
 
 function tasks.run()
-    ensure_love12()
     tasks.build()
     status("Launching game...")
     local executable = path_from_build(love_bin())
@@ -1030,49 +748,18 @@ function tasks.new(args)
     else
         copy_dir(template_dir(), target)
     end
-    stamp_project_rockspec(target)
     mkdir(path_join(target, "assets"))
 
     status("Project created. Next: cd " .. target .. " && tecs check")
 end
 
-function tasks.love12()
-    if os.getenv("TECS_LOVE_BIN") then
-        status("Using cached LÖVE 12 runtime: " .. love_bin())
-    else
-        download_love12()
-    end
-end
-
 function tasks.dev()
-    local tecs_build = path_join(tecs_dir, "build/tecs")
-    local tecs2d_build = path_join(tecs_dir, "build/tecs2d")
-    if not exists(tecs_build) or not exists(tecs2d_build) then
-        error("Tecs build output not found. Build Tecs first: " .. tecs_dir, 0)
+    if not tecs_dir then
+        error("set TECS_DIR to a local Tecs checkout before running `tecs dev`", 0)
     end
-    install_project_rock()
-    mkdir(path_join(vendor_lua))
-    remove(path_join(vendor_lua, "tecs"))
-    remove(path_join(vendor_lua, "tecs2d"))
     status("Preparing local Tecs development source...")
-    copy_dir(path_join(tecs_dir, "src/tecs"), path_join(vendor_lua, "tecs"))
-    copy_dir(path_join(tecs_dir, "src/tecs2d"), path_join(vendor_lua, "tecs2d"))
-    status("Dev mode prepared. Re-run `tecs build` after changes.")
-end
-
-tasks["sync-tecs"] = function()
-    status("Reinstalling Tecs and Tecs2D from " .. tecs_dir .. "...")
-    if not exists(path_join(tecs_dir, "tecs-dev-1.rockspec")) then
-        error("rockspec not found at " .. path_join(tecs_dir, "tecs-dev-1.rockspec"), 0)
-    end
-    remove(path_join(vendor_lua, "tecs"))
-    remove(path_join(vendor_lua, "tecs2d"))
-    install_project_rock()
-    run(tecs_cmd("luarocks make --tree=" .. q(path_join(cwd(), "src/vendor"))
-        .. " --lua-version=5.1 tecs-dev-1.rockspec"))
-    run(tecs_cmd("luarocks make --tree=" .. q(path_join(cwd(), "src/vendor"))
-        .. " --lua-version=5.1 tecs2d-dev-1.rockspec"))
-    status("Sync complete.")
+    ensure_vendor()
+    status("Dev source copied. Re-run `tecs dev` after local framework changes.")
 end
 
 local M = {}
@@ -1122,46 +809,33 @@ local commands = {
     {
         name = "run",
         summary = "Build and run the game",
-        description = "Download Love2D if needed, build the project, then launch the game from build/.",
+        description = "Build the project, then launch the game from build/ with the cached LÖVE runtime.",
         action = tasks.run,
     },
     {
         name = "build",
         summary = "Compile without running",
-        description = "Install project dependencies if needed, compile Teal sources, copy assets, "
+        description = "Prepare embedded dependencies, compile Teal sources, copy assets, "
             .. "and refresh build output.",
         action = tasks.build,
     },
     {
         name = "check",
         summary = "Type-check all Teal source files",
-        description = "Install project dependencies if needed and run the Teal type checker over src/.",
+        description = "Prepare embedded dependencies and run the Teal type checker over src/.",
         action = tasks.check,
     },
     {
         name = "clean",
         summary = "Remove build artifacts",
-        description = "Remove build/ while leaving vendored dependencies and the Love2D runtime in place.",
+        description = "Remove build/ while leaving prepared source dependencies in place.",
         action = tasks.clean,
-    },
-    {
-        name = "love12",
-        summary = "Re-download Love2D 12",
-        description = "Download and unpack the Love2D 12 nightly runtime for this platform into .love12/.",
-        action = tasks.love12,
     },
     {
         name = "dev",
         summary = "Prepare local Tecs source for development",
-        description = "Copy local Tecs/Tecs2D sources from TECS_DIR or ../tecs into src/vendor/ "
-            .. "for development iteration.",
+        description = "Copy local Tecs/Tecs2D sources from TECS_DIR into src/vendor/ for development iteration.",
         action = tasks.dev,
-    },
-    {
-        name = "sync-tecs",
-        summary = "Reinstall Tecs/Tecs2D from local rockspecs",
-        description = "Reinstall Tecs and Tecs2D into src/vendor/ from the local Tecs checkout rockspecs.",
-        action = tasks["sync-tecs"],
     },
 }
 
@@ -1286,7 +960,6 @@ M._internal = {
     needs_update = needs_update,
     copy_dir = copy_dir,
     prune_runtime_vendor = prune_runtime_vendor,
-    teal_compiler_complete = teal_compiler_complete,
     q = q,
 }
 

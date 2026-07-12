@@ -1,5 +1,5 @@
 package.path = package.path .. ";./vendor/share/lua/5.1/?.lua;./vendor/share/lua/5.1/?/init.lua"
-package.cpath = package.cpath .. ";./vendor/lib/lua/5.1/?.so"
+package.cpath = package.cpath .. ";./vendor/lib/lua/5.1/?.so;./vendor/lib/lua/5.1/?.dll"
 
 local tecs <const> = require("tecs")
 local tecs2d <const> = require("tecs2d")
@@ -13,7 +13,7 @@ local VIRTUAL_WIDTH <const> = 480
 local VIRTUAL_HEIGHT <const> = 360
 
 local function gamePlugin(world: tecs.World)
-    -- Adds a debug console and an integrated MCP tools to your game.
+    -- Adds a debug console and integrated MCP tools to your game.
     -- Turn these off in production builds.
     world:addPlugin(mcp.new())
     world:addPlugin(debugPlugin.new())
