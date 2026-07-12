@@ -39,11 +39,13 @@ rm -f "$output"
 if command -v zip >/dev/null 2>&1; then
     (cd "$stage" && zip -q -r "$output" .)
 else
-    # Stock windows-latest runners lack Info-ZIP. bsdtar ships with Windows
-    # and writes standard forward-slash zip entries (Compress-Archive emits
+    # Stock windows-latest runners lack Info-ZIP, and Git Bash resolves tar
+    # to GNU tar, which cannot write zips. Windows ships bsdtar in System32;
+    # it writes standard forward-slash zip entries (Compress-Archive emits
     # entries that break directory listing inside the payload).
     output_windows="$(cygpath -w "$output")"
-    (cd "$stage" && shopt -s dotglob && tar --format zip -cf "$output_windows" -- *)
+    bsdtar="$(cygpath -u "${WINDIR:-C:\\Windows}")/System32/tar.exe"
+    (cd "$stage" && shopt -s dotglob && "$bsdtar" --format zip -cf "$output_windows" -- *)
 fi
 cp "$root/launcher/tecs" "$root/dist/tecs"
 cp "$root/launcher/tecs.ps1" "$root/dist/tecs.ps1"
