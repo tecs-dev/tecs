@@ -34,6 +34,9 @@ set_platform(detect_platform())
 
 -- TECS_DIR opts into copying framework sources from a local checkout.
 local tecs_dir = os.getenv("TECS_DIR")
+-- TECS_TEAL_DIR opts into loading the Teal compiler from a local
+-- teal-language/tl checkout instead of the embedded copy.
+local teal_dir = os.getenv("TECS_TEAL_DIR")
 local vendor_lua = "src/vendor/share/lua/5.1"
 
 -- Source-only asset extensions to exclude from build output and mtime checks.
@@ -101,6 +104,7 @@ end
 local function fail(message)
     error({tecs_exit = true, message = message}, 0)
 end
+
 
 -- Quote a path so it survives as a single shell argument. cmd.exe expects
 -- doubled quotes inside a quoted string; POSIX shells use backslash escapes.
@@ -391,6 +395,68 @@ local function template_dir()
     error("could not find embedded default template", 0)
 end
 
+-- Per-user data directory where `tecs agent path` materializes bundled docs.
+local data_dir_override
+local function user_data_dir()
+    if data_dir_override then return data_dir_override end
+    if is_windows then
+        local base = os.getenv("LOCALAPPDATA")
+        if not base or base == "" then
+            base = path_join(os.getenv("USERPROFILE") or ".", "AppData/Local")
+        end
+        return path_join(base, "tecs")
+    end
+    local xdg = os.getenv("XDG_DATA_HOME")
+    if xdg and xdg ~= "" then
+        return path_join(xdg, "tecs")
+    end
+    return path_join(os.getenv("HOME") or ".", ".local/share/tecs")
+end
+
+-- First non-heading paragraph line of a doc, used as its list description.
+local function agent_doc_description(content)
+    for line in content:gmatch("[^\r\n]+") do
+        if not line:match("^#") and line:match("%S") then
+            return (line:gsub("^%s+", ""):gsub("%s+$", ""))
+        end
+    end
+    return ""
+end
+
+-- Bundled agent docs as {name, content}, sorted by name. Docs live in
+-- tecs_cli/agents/ in the payload and the source tree.
+local function list_agent_docs()
+    local docs = {}
+    if is_love_cli and love_api then
+        for _, entry in ipairs(love_api.filesystem.getDirectoryItems("tecs_cli/agents")) do
+            local name = entry:match("^(.+)%.md$")
+            if name then
+                local content, err = love_api.filesystem.read("tecs_cli/agents/" .. entry)
+                if not content then
+                    error("could not read embedded agent doc " .. entry .. ": " .. tostring(err), 0)
+                end
+                docs[#docs + 1] = {name = name, content = content}
+            end
+        end
+    else
+        local module_path = source_path()
+        local dir = module_path and path_join(dirname(module_path), "agents")
+        if dir and is_dir(dir) then
+            for _, file in ipairs(walk_files(dir, {})) do
+                local name = basename(file):match("^(.+)%.md$")
+                if name then
+                    local handle = assert(io.open(file, "rb"))
+                    local content = handle:read("*a")
+                    handle:close()
+                    docs[#docs + 1] = {name = name, content = content}
+                end
+            end
+        end
+    end
+    table.sort(docs, function(a, b) return a.name < b.name end)
+    return docs
+end
+
 -- Modification time of a path (platform-specific units), or 0 if it is missing.
 local function file_mtime(path)
     path = normalize(path)
@@ -479,11 +545,47 @@ local function lua_path()
     return table.concat(paths, ";")
 end
 
-local function run_tl(args)
+-- When TECS_TEAL_DIR points at a teal-language/tl checkout, resolve the
+-- compiler modules from that checkout ahead of the copy embedded in the
+-- payload. The loader only claims teal/tlcli/compat53 module names and only
+-- when the checkout provides the file, so everything else is untouched.
+local teal_override_installed = false
+local function install_teal_override()
+    if not teal_dir or teal_override_installed then return end
+    teal_override_installed = true
+    local loaders = package.loaders or package.searchers
+    table.insert(loaders, 1, function(name)
+        if not (name:match("^teal$") or name:match("^teal%.")
+            or name:match("^tlcli%.")
+            or name:match("^compat53$") or name:match("^compat53%.")) then
+            return nil
+        end
+        local base = lua_module_path(teal_dir)
+        local rel = name:gsub("%.", "/")
+        for _, candidate in ipairs({base .. "/" .. rel .. ".lua", base .. "/" .. rel .. "/init.lua"}) do
+            local file = io.open(candidate, "rb")
+            if file then
+                local content = file:read("*a")
+                file:close()
+                local chunk, err = loadstring(content, "@" .. candidate)
+                if not chunk then
+                    error("TECS_TEAL_DIR module " .. candidate .. " failed to load: " .. tostring(err), 0)
+                end
+                return chunk
+            end
+        end
+        return nil
+    end)
+end
+
+-- Run fn with the embedded (or TECS_TEAL_DIR) Teal compiler importable and
+-- os.exit trapped, restoring both afterwards. Returns the trapped exit code.
+local function with_teal_env(fn)
     if not is_love_cli then
         error("embedded Teal compiler unavailable; run tecs through its installed launcher", 0)
     end
 
+    install_teal_override()
     local previousPath = package.path
     local previousExit = os.exit
     local exitSignal = {}
@@ -493,15 +595,182 @@ local function run_tl(args)
         error(exitSignal, 0)
     end)
 
-    local ok, err = pcall(function()
-        return require("tlcli.main")(args)
-    end)
+    local ok, err = pcall(fn)
     rawset(os, "exit", previousExit)
     package.path = previousPath
     if not ok and err ~= exitSignal then error(err, 0) end
-    if not ok and exitSignal.code ~= 0 then
-        error("Teal failed with exit code " .. tostring(exitSignal.code), 0)
+    return exitSignal.code or 0
+end
+
+local function run_tl(args)
+    local code = with_teal_env(function()
+        return require("tlcli.main")(args)
+    end)
+    if code ~= 0 then
+        error("Teal failed with exit code " .. tostring(code), 0)
     end
+end
+
+-- Teal compiler API, importable from both the LÖVE payload and a source
+-- checkout (specs); a TECS_TEAL_DIR checkout wins through the loader above.
+local teal_api
+local function load_teal_api()
+    if teal_api then return teal_api end
+    install_teal_override()
+    if not is_love_cli then
+        local module_path = source_path()
+        local runtime = module_path and path_join(dirname(module_path), "runtime/teal")
+        if runtime and is_dir(runtime) then
+            local base = lua_module_path(runtime)
+            package.path = base .. "/?.lua;" .. base .. "/?/init.lua;" .. package.path
+        end
+    end
+    local ok, api = pcall(require, "teal.api.v2")
+    if not ok then
+        error("Teal compiler unavailable: " .. tostring(api), 0)
+    end
+    teal_api = api
+    return teal_api
+end
+
+-- Read a framework module's Teal source from TECS_DIR or the embedded payload.
+local function read_framework_source(name)
+    local rel = name:gsub("%.", "/")
+    for _, candidate in ipairs({rel .. ".tl", rel .. "/init.tl"}) do
+        if tecs_dir then
+            local file = io.open(path_join(tecs_dir, "src", candidate), "rb")
+            if file then
+                local content = file:read("*a")
+                file:close()
+                return content, path_join(tecs_dir, "src", candidate)
+            end
+        end
+        if is_love_cli and love_api then
+            local path = "payload/framework/" .. candidate
+            local info = love_api.filesystem.getInfo(path)
+            if info and info.type == "file" then
+                return (love_api.filesystem.read(path)), path
+            end
+        end
+    end
+    return nil
+end
+
+-- Let require() resolve tecs.*/tecs2d.* by compiling framework Teal sources
+-- in memory, so the CLI reuses framework modules (e.g. tecs.utils.json)
+-- instead of shipping second implementations.
+local framework_loader_installed = false
+local function install_framework_loader()
+    if framework_loader_installed then return end
+    framework_loader_installed = true
+    local loaders = package.loaders or package.searchers
+    loaders[#loaders + 1] = function(name)
+        if not (name == "tecs" or name:match("^tecs%.")
+            or name == "tecs2d" or name:match("^tecs2d%.")) then
+            return nil
+        end
+        local source, origin = read_framework_source(name)
+        if not source then
+            return "\n\tno framework source for '" .. name
+                .. "' (set TECS_DIR or run tecs through its installed launcher)"
+        end
+        local lua_code = load_teal_api().gen(source)
+        if not lua_code then
+            error("framework module " .. name .. " failed to compile", 0)
+        end
+        local chunk, err = loadstring(lua_code, "@" .. lua_module_path(origin))
+        if not chunk then
+            error("framework module " .. name .. " failed to load: " .. tostring(err), 0)
+        end
+        return chunk
+    end
+end
+
+-- The framework's JSON module backs all --json output.
+local function json_module()
+    install_framework_loader()
+    local ok, json = pcall(require, "tecs.utils.json")
+    if not ok then
+        error("JSON output unavailable: " .. tostring(json), 0)
+    end
+    return json
+end
+
+-- Type-check sources through the Teal compiler API and return ok plus a flat
+-- diagnostic list, instead of tlcli's human-readable report. Mirrors tlcli's
+-- rules: syntax errors suppress a file's other diagnostics, disabled warnings
+-- are dropped, and warnings promoted by warning_error fail the check.
+local function collect_check_diagnostics(sources)
+    local diagnostics = {}
+    local check_ok = true
+
+    local function add(err, severity, diag_kind)
+        diagnostics[#diagnostics + 1] = {
+            file = lua_module_path(err.filename or ""),
+            line = tonumber(err.y) or 0,
+            column = tonumber(err.x) or 0,
+            severity = severity,
+            kind = diag_kind,
+            message = err.msg or "",
+        }
+        if err.tag then
+            diagnostics[#diagnostics].tag = err.tag
+        end
+    end
+
+    local code = with_teal_env(function()
+        local configuration = require("tlcli.configuration")
+        local driver = require("tlcli.driver")
+        local tlconfig = configuration.get()
+        configuration.merge_config_and_args(tlconfig, {include_dir = {}})
+        local compiler = driver.setup_compiler(tlconfig)
+
+        for _, source in ipairs(sources) do
+            local _, _, err = driver.process_module(compiler, source)
+            if err then
+                check_ok = false
+                add({filename = source, msg = err}, "error", "load")
+            end
+        end
+
+        for name in compiler:loaded_files() do
+            local _, errs = compiler:recall(name)
+            if errs then
+                if errs.syntax_errors and #errs.syntax_errors > 0 then
+                    check_ok = false
+                    for _, err in ipairs(errs.syntax_errors) do
+                        add(err, "error", "syntax")
+                    end
+                else
+                    for _, err in ipairs(errs.type_errors or {}) do
+                        check_ok = false
+                        add(err, "error", "type")
+                    end
+                    for _, warning in ipairs(errs.warnings or {}) do
+                        if not tlconfig._disabled_warnings_set[warning.tag] then
+                            if tlconfig._warning_errors_set[warning.tag] then
+                                check_ok = false
+                                add(warning, "error", "type")
+                            else
+                                add(warning, "warning", "warning")
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+    if code ~= 0 then
+        error("Teal failed with exit code " .. tostring(code), 0)
+    end
+
+    table.sort(diagnostics, function(a, b)
+        if a.file ~= b.file then return a.file < b.file end
+        if a.line ~= b.line then return a.line < b.line end
+        if a.column ~= b.column then return a.column < b.column end
+        return a.message < b.message
+    end)
+    return check_ok, diagnostics
 end
 
 local function love_bin()
@@ -692,12 +961,25 @@ end
 -- Task table: each entry implements one `tecs <target>` command.
 local tasks = {}
 
-function tasks.check()
+-- Forward declaration; assigned after the command table below.
+local parser
+
+function tasks.check(args)
     ensure_vendor()
+    local sources = list_teal_sources()
+    if args and args.json then
+        local json = json_module()
+        local check_ok, diagnostics = collect_check_diagnostics(sources)
+        print(json.serialize({ok = check_ok, diagnostics = diagnostics}, true))
+        if not check_ok then
+            fail("typecheck reported errors")
+        end
+        return
+    end
     status("Typechecking...")
-    local args = {"check"}
-    for _, source in ipairs(list_teal_sources()) do args[#args + 1] = source end
-    run_tl(args)
+    local tl_args = {"check"}
+    for _, source in ipairs(sources) do tl_args[#tl_args + 1] = source end
+    run_tl(tl_args)
 end
 
 function tasks.build()
@@ -762,27 +1044,119 @@ function tasks.dev()
     status("Dev source copied. Re-run `tecs dev` after local framework changes.")
 end
 
+function tasks.agent(args)
+    local docs = list_agent_docs()
+
+    if args.agent_action == "list" then
+        if args.json then
+            local json = json_module()
+            local listed = {}
+            for _, doc in ipairs(docs) do
+                listed[#listed + 1] = {
+                    name = doc.name,
+                    description = agent_doc_description(doc.content),
+                }
+            end
+            print(json.serialize(listed, true))
+            return
+        end
+        local width = 0
+        for _, doc in ipairs(docs) do
+            width = math.max(width, #doc.name)
+        end
+        for _, doc in ipairs(docs) do
+            print(string.format("%-" .. width .. "s  %s", doc.name, agent_doc_description(doc.content)))
+        end
+        return
+    end
+
+    local name = args.name
+    if not name or name == "" then
+        fail("missing agent name; run `tecs agent list` to see what is available")
+    end
+    local names = {}
+    for _, doc in ipairs(docs) do
+        names[#names + 1] = doc.name
+        if doc.name == name then
+            local target = path_join(user_data_dir(), "agents", doc.name .. ".md")
+            write_file(target, doc.content)
+            print(target)
+            return
+        end
+    end
+    fail("unknown agent '" .. tostring(name) .. "'. Expected one of: " .. table.concat(names, ", "))
+end
+
+function tasks.completions(args)
+    local p = parser()
+    io.write(p["get_" .. args.shell .. "_complete"](p))
+end
+
 local M = {}
 
-local function print_info()
-    print("Tecs CLI " .. VERSION)
-
+-- Runtime and project facts backing both info renderings.
+local function gather_info()
+    local love_version
     if love_api and love_api.getVersion then
         local major, minor, revision, codename = love_api.getVersion()
-        local loveVersion = table.concat({major, minor, revision}, ".")
-        if codename and codename ~= "" then loveVersion = loveVersion .. " (" .. codename .. ")" end
-        print("LÖVE " .. loveVersion)
+        love_version = table.concat({major, minor, revision}, ".")
+        if codename and codename ~= "" then love_version = love_version .. " (" .. codename .. ")" end
     end
 
     local jitApi = rawget(_G, "jit")
-    print(jitApi and jitApi.version or _VERSION)
-
+    local project
     if exists("tlconfig.lua") and is_dir("src") then
         local root = cwd()
+        project = {
+            name = basename(root),
+            path = root,
+            built = exists("build/main.lua"),
+        }
+    end
+
+    return {
+        version = VERSION,
+        love = love_version,
+        lua = jitApi and jitApi.version or _VERSION,
+        love_bin = os.getenv("TECS_LOVE_BIN"),
+        tecs_dir = tecs_dir,
+        teal_dir = teal_dir,
+        project = project,
+    }
+end
+
+local function print_info(args)
+    local info = gather_info()
+
+    if args and args.json then
+        local json = json_module()
+        print(json.serialize({
+            version = info.version,
+            love = info.love or json.NULL,
+            lua = info.lua,
+            love_bin = info.love_bin and lua_module_path(info.love_bin) or json.NULL,
+            tecs_dir = info.tecs_dir and lua_module_path(info.tecs_dir) or json.NULL,
+            teal_dir = info.teal_dir and lua_module_path(info.teal_dir) or json.NULL,
+            project = info.project and {
+                name = info.project.name,
+                path = lua_module_path(info.project.path),
+                built = info.project.built,
+            } or json.NULL,
+        }, true))
+        return
+    end
+
+    print("Tecs CLI " .. info.version)
+    if info.love then
+        print("LÖVE " .. info.love)
+    end
+    print(info.lua)
+
+    if info.project then
         print("")
-        print("Project " .. basename(root))
-        print("  Path: " .. root)
-        print("  Build: " .. (exists("build/main.lua") and "ready" or "not built"))
+        print("Project " .. info.project.name)
+        print("  Path: " .. info.project.path)
+        print("  Build: " .. (info.project.built and "ready" or "not built"))
         print("")
         print("Next: tecs run")
     else
@@ -799,12 +1173,18 @@ local commands = {
         summary = "Show runtime and project information",
         description = "Show CLI, Love2D, and LuaJIT versions plus current project status and a next step.",
         action = print_info,
+        setup = function(subcommand)
+            subcommand:flag("--json", "Print runtime and project information as JSON on stdout.")
+        end,
     },
     {
         name = "new",
         summary = "Create a new Tecs project",
         description = "Create a new fixed-layout Tecs project from the bundled starter source.",
         action = tasks.new,
+        setup = function(subcommand)
+            subcommand:argument("project", "Directory to create for the new project.")
+        end,
     },
     {
         name = "run",
@@ -824,6 +1204,9 @@ local commands = {
         summary = "Type-check all Teal source files",
         description = "Prepare embedded dependencies and run the Teal type checker over src/.",
         action = tasks.check,
+        setup = function(subcommand)
+            subcommand:flag("--json", "Print diagnostics as JSON on stdout.")
+        end,
     },
     {
         name = "clean",
@@ -836,6 +1219,30 @@ local commands = {
         summary = "Prepare local Tecs source for development",
         description = "Copy local Tecs/Tecs2D sources from TECS_DIR into src/vendor/ for development iteration.",
         action = tasks.dev,
+    },
+    {
+        name = "agent",
+        summary = "List bundled agent docs or print one's path",
+        description = "List the agent guides bundled with the CLI, or write one to the user data "
+            .. "directory and print its absolute path for use in agent configuration.",
+        action = tasks.agent,
+        setup = function(subcommand)
+            subcommand:argument("action", "Either `list` or `path`.")
+                :target("agent_action")
+                :choices({"list", "path"})
+            subcommand:argument("name", "Agent doc name, required for `path`."):args("?")
+            subcommand:flag("--json", "Print the listing as JSON on stdout.")
+        end,
+    },
+    {
+        name = "completions",
+        summary = "Print a shell completion script",
+        description = "Print a completion script for the given shell. Source it from your shell profile, "
+            .. "e.g. `tecs completions zsh > ~/.config/tecs/completions.zsh`.",
+        action = tasks.completions,
+        setup = function(subcommand)
+            subcommand:argument("shell", "Target shell."):choices({"bash", "zsh", "fish"})
+        end,
     },
 }
 
@@ -853,7 +1260,7 @@ local function print_help()
         .. " [--version] [--quiet] " .. color("cyan", "<command>") .. "\n\n")
     io.write(color("bright", "Commands:") .. "\n")
     for _, command in ipairs(commands) do
-        io.write("  " .. color("cyan", string.format("%-11s", command.name)) .. command.summary .. "\n")
+        io.write("  " .. color("cyan", string.format("%-13s", command.name)) .. command.summary .. "\n")
     end
     io.write("\n")
     io.write(color("magenta", "Tip:") .. [[ You can connect to your game using the built-in MCP server. Tell your
@@ -867,7 +1274,7 @@ snapshot, restart, and restore state automatically.
 ]])
 end
 
-local function parser()
+function parser()
     local p = argparse("tecs", "Build, check, run, and manage fixed-layout Tecs starter projects.")
     p:help_max_width(88)
     p:flag("--version", "Show version and exit")
@@ -881,8 +1288,8 @@ local function parser()
             :action(function(args)
                 args.command = command.name
             end)
-        if command.name == "new" then
-            subcommand:argument("project", "Directory to create for the new project.")
+        if command.setup then
+            command.setup(subcommand)
         end
     end
 
@@ -923,11 +1330,7 @@ function M.run(argv)
             fail("unknown command '" .. tostring(target) .. "'. Expected one of: " .. command_names())
         end
 
-        if target == "new" then
-            task(args)
-        else
-            task()
-        end
+        task(args)
     end)
     if not ok then
         if type(err) == "table" and err.tecs_exit then
@@ -961,6 +1364,10 @@ M._internal = {
     copy_dir = copy_dir,
     prune_runtime_vendor = prune_runtime_vendor,
     q = q,
+    set_data_dir = function(path) data_dir_override = path end,
+    list_agent_docs = list_agent_docs,
+    agent_doc_description = agent_doc_description,
+    json_module = json_module,
 }
 
 return M
