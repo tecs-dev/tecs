@@ -5,7 +5,7 @@ local argparse = require("tecs_cli.vendor.argparse")
 local ansicolors = require("tecs_cli.vendor.ansicolors")
 local have_lfs, lfs = pcall(require, "lfs")
 
-local VERSION = "0.3.0"
+local VERSION = "0.4.0"
 local is_love_cli = rawget(_G, "TECS_LOVE_CLI") == true
 local love_api = rawget(_G, "love")
 
