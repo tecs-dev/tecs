@@ -1685,7 +1685,24 @@ end
 
 function tasks.completions(args)
     local p = parser()
-    io.write(p["get_" .. args.shell .. "_complete"](p))
+    local script = p["get_" .. args.shell .. "_complete"](p)
+    if args.shell == "fish" then
+        -- argparse's fish generator omits positional-argument choices (the
+        -- zsh one includes them), so emit them from the parser definition.
+        local extra = {}
+        for _, command in ipairs(p._commands) do
+            for _, argument in ipairs(command._arguments or {}) do
+                if argument._choices then
+                    extra[#extra + 1] = ("complete -c tecs -n '__fish_tecs_seen_command %s' -f -a '%s'")
+                        :format(command._name, table.concat(argument._choices, " "))
+                end
+            end
+        end
+        if #extra > 0 then
+            script = script .. table.concat(extra, "\n") .. "\n"
+        end
+    end
+    io.write(script)
 end
 
 local M = {}
@@ -1863,8 +1880,9 @@ local commands = {
     {
         name = "completions",
         summary = "Print a shell completion script",
-        description = "Print a completion script for the given shell. Source it from your shell profile, "
-            .. "e.g. `tecs completions zsh > ~/.config/tecs/completions.zsh`.",
+        description = "Print a completion script for the given shell. bash: eval it from ~/.bashrc; "
+            .. "zsh: write it to a file named _tecs on your fpath; "
+            .. "fish: write it to ~/.config/fish/completions/tecs.fish.",
         action = tasks.completions,
         setup = function(subcommand)
             subcommand:argument("shell", "Target shell."):choices({"bash", "zsh", "fish"})

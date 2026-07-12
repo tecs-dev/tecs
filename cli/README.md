@@ -89,8 +89,19 @@ stdout for editors, CI, and coding agents. Check output has the shape
 its absolute path, ready to reference from agent configuration
 (`CLAUDE.md`, `AGENTS.md`, and similar).
 
-`tecs completions bash|zsh|fish` prints a shell completion script; source its
-output from your shell profile.
+`tecs completions bash|zsh|fish` prints a shell completion script. Install it
+per shell:
+
+```sh
+# bash (~/.bashrc)
+eval "$(tecs completions bash)"
+
+# zsh: write to a directory on your fpath, named _tecs
+tecs completions zsh > "$(brew --prefix 2>/dev/null || echo /usr/local)/share/zsh/site-functions/_tecs"
+
+# fish
+tecs completions fish > ~/.config/fish/completions/tecs.fish
+```
 
 ## Dependencies
 

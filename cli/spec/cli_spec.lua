@@ -334,6 +334,21 @@ describe("tecs CLI", function()
             assert.matches("completions", script)
         end)
 
+        it("adds positional choices to the fish script", function()
+            local captured = {}
+            local real_write = io.write
+            io.write = function(...)
+                captured[#captured + 1] = table.concat({...})
+                return true
+            end
+            local ok = cli.run({"completions", "fish"})
+            io.write = real_write
+            assert.is_true(ok)
+            local script = table.concat(captured)
+            assert.matches("__fish_tecs_seen_command completions' %-f %-a 'bash zsh fish'", script)
+            assert.matches("__fish_tecs_seen_command agent' %-f %-a 'list path'", script)
+        end)
+
         it("rejects unsupported shells", function()
             local ok, err = cli.run({"completions", "tcsh"})
             assert.is_true(not ok)
