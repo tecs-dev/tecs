@@ -43,6 +43,8 @@ jobs:
           (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" build)
           test -f "$project/build/main.lua"
           test -f "$project/build/tecs2d/init.lua"
+          test -f "$project/build/tecs2d/assets/fonts/tiny-font.fnt"
+          test -f "$project/build/tecs2d/assets/fonts/tiny-font.png"
           launcher/tecs --version
 
       - name: Upload option 1 package
@@ -96,6 +98,8 @@ jobs:
           Pop-Location
           if (-not (Test-Path "$project\build\main.lua")) { throw "main.lua was not built" }
           if (-not (Test-Path "$project\build\tecs2d\init.lua")) { throw "tecs2d was not built" }
+          if (-not (Test-Path "$project\build\tecs2d\assets\fonts\tiny-font.fnt")) { throw "BMFont descriptor was not built" }
+          if (-not (Test-Path "$project\build\tecs2d\assets\fonts\tiny-font.png")) { throw "BMFont texture was not built" }
           & launcher/tecs.ps1 --version
 
   release:

@@ -7,7 +7,9 @@ tecs_dir="${TECS_DIR:-$root/../tecs}"
 stage="$root/build/loveapp"
 output="$root/dist/tecs-cli.love"
 
-if [ ! -f "$tecs_dir/src/tecs/init.tl" ] || [ ! -f "$tecs_dir/src/tecs2d/init.tl" ]; then
+if [ ! -f "$tecs_dir/src/tecs/init.tl" ] || [ ! -f "$tecs_dir/src/tecs2d/init.tl" ] \
+    || [ ! -f "$tecs_dir/examples/shared/assets/tiny-font.fnt" ] \
+    || [ ! -f "$tecs_dir/examples/shared/assets/tiny-font.png" ]; then
     echo "Tecs checkout not found: $tecs_dir" >&2
     exit 1
 fi
@@ -25,6 +27,10 @@ cp -R "$root/tecs_cli/runtime/types/"* "$stage/payload/types/"
 cp -R "$root/tecs_cli/runtime/licenses" "$stage/payload/licenses"
 cp -R "$tecs_dir/src/tecs" "$stage/payload/framework/tecs"
 cp -R "$tecs_dir/src/tecs2d" "$stage/payload/framework/tecs2d"
+mkdir -p "$stage/payload/framework/tecs2d/assets/fonts"
+cp "$tecs_dir/examples/shared/assets/tiny-font.fnt" \
+    "$tecs_dir/examples/shared/assets/tiny-font.png" \
+    "$stage/payload/framework/tecs2d/assets/fonts/"
 cp "$tecs_dir/LICENSE-MIT" "$stage/payload/licenses/tecs-LICENSE-MIT"
 cp "$tecs_dir/LICENSE-APACHE" "$stage/payload/licenses/tecs-LICENSE-APACHE"
 

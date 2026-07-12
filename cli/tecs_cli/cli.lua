@@ -744,7 +744,9 @@ local function ensure_vendor()
         if exists(path_join(vendor_lua, "tecs2d/init.tl"))
             and exists(path_join(vendor_lua, "love2d.d.tl"))
             and exists(path_join(vendor_lua, "ffi.d.tl"))
-            and exists(path_join(vendor_lua, "socket.d.tl")) then return end
+            and exists(path_join(vendor_lua, "socket.d.tl"))
+            and exists(path_join(vendor_lua, "tecs2d/assets/fonts/tiny-font.fnt"))
+            and exists(path_join(vendor_lua, "tecs2d/assets/fonts/tiny-font.png")) then return end
 
         status("Preparing embedded Tecs dependencies...")
         mkdir(vendor_lua)
@@ -755,6 +757,16 @@ local function ensure_vendor()
         else
             copy_love_dir("payload/framework/tecs", path_join(vendor_lua, "tecs"))
             copy_love_dir("payload/framework/tecs2d", path_join(vendor_lua, "tecs2d"))
+        end
+        local localFonts = path_join(tecs_dir, "examples/shared/assets")
+        local targetFonts = path_join(vendor_lua, "tecs2d/assets/fonts")
+        if exists(path_join(localFonts, "tiny-font.fnt"))
+            and exists(path_join(localFonts, "tiny-font.png")) then
+            mkdir(targetFonts)
+            copy_file(path_join(localFonts, "tiny-font.fnt"), path_join(targetFonts, "tiny-font.fnt"))
+            copy_file(path_join(localFonts, "tiny-font.png"), path_join(targetFonts, "tiny-font.png"))
+        else
+            copy_love_dir("payload/framework/tecs2d/assets/fonts", targetFonts)
         end
         copy_love_dir("payload/types", vendor_lua)
         return
@@ -1146,6 +1158,33 @@ snapshot, restart, and restore state automatically.
 ]])
 end
 
+local function print_version()
+    print("Tecs CLI " .. VERSION)
+
+    if love_api and love_api.getVersion then
+        local major, minor, revision, codename = love_api.getVersion()
+        local loveVersion = table.concat({major, minor, revision}, ".")
+        if codename and codename ~= "" then loveVersion = loveVersion .. " (" .. codename .. ")" end
+        print("LÖVE " .. loveVersion)
+    end
+
+    local jitApi = rawget(_G, "jit")
+    print(jitApi and jitApi.version or _VERSION)
+
+    if exists("tlconfig.lua") and is_dir("src") then
+        local root = cwd()
+        print("")
+        print("Project " .. basename(root))
+        print("  Path: " .. root)
+        print("  Build: " .. (exists("build/main.lua") and "ready" or "not built"))
+        print("")
+        print("Next: tecs run")
+    else
+        print("")
+        print("Next: tecs new hello")
+    end
+end
+
 local function parser()
     local p = argparse("tecs", "Build, check, run, and manage fixed-layout Tecs starter projects.")
     p:help_max_width(88)
@@ -1187,7 +1226,7 @@ function M.run(argv)
         end
         quiet = args.quiet or false
         if args.version then
-            print(VERSION)
+            print_version()
             return
         end
 
