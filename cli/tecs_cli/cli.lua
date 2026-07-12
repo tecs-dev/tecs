@@ -637,6 +637,23 @@ local function ensure_mcp_runtime()
     run(with_vendor_env("luarocks --lua-version=5.1 install --tree=" .. tree .. " luasocket"))
 end
 
+local function ensure_teal_type_dependencies()
+    local haveFfi = exists(path_join(vendor_lua, "ffi.d.tl"))
+    local haveSocket = exists(path_join(vendor_lua, "socket.d.tl"))
+    if haveFfi and haveSocket then return end
+
+    local tree = q(path_join(cwd(), "src/vendor"))
+    status("Installing Teal dependency types...")
+    if not haveFfi then
+        run(with_vendor_env("luarocks --lua-version=5.1 install --tree=" .. tree
+            .. " luajit-tl-type 0.0.2-1"))
+    end
+    if not haveSocket then
+        run(with_vendor_env("luarocks --lua-version=5.1 install --tree=" .. tree
+            .. " luasocket-tl-type 0.0.2-1"))
+    end
+end
+
 -- Path to the downloaded Love2D executable for this platform.
 local function love_bin()
     if is_windows then
@@ -652,11 +669,12 @@ end
 local function sync_local_tecs()
     local tecs_src = path_join(tecs_dir, "src/tecs")
     local tecs2d_src = path_join(tecs_dir, "src/tecs2d")
-    if not exists(tecs_src) or not exists(tecs2d_src) then return end
+    if not exists(tecs_src) or not exists(tecs2d_src) then return false end
 
     status("Syncing Tecs from local checkout...")
     copy_dir(tecs_src, path_join(vendor_lua, "tecs"))
     copy_dir(tecs2d_src, path_join(vendor_lua, "tecs2d"))
+    return true
 end
 
 local function project_rockspec()
@@ -683,15 +701,14 @@ local function ensure_vendor()
     ensure_teal_compiler()
     ensure_love_type_environment()
     ensure_mcp_runtime()
+    ensure_teal_type_dependencies()
     if exists(path_join(vendor_lua, "tecs2d/init.tl"))
         and exists(path_join(vendor_lua, "love2d.d.tl"))
         and exists(path_join(vendor_lua, "ffi.d.tl"))
         and exists(path_join(vendor_lua, "socket.d.tl")) then return end
+    if sync_local_tecs() then return end
     status("Installing project dependencies...")
     install_project_rock()
-    if not exists(path_join(vendor_lua, "tecs2d/init.tl")) then
-        sync_local_tecs()
-    end
 end
 
 -- Download and unpack the Love2D 12 nightly for this platform into .love12.
