@@ -15,13 +15,11 @@ jobs:
     # LuaJIT cannot compile LuaRocks.org's root manifest after it grew past
     # 65,536 constants. Run the LuaRocks frontend with Lua 5.4, while the
     # LuaJIT setup below remains the Lua 5.1 target for installed rocks.
-    - name: Setup Lua 5.4 for LuaRocks
-      uses: leafo/gh-actions-lua@v11
-      with:
-        luaVersion: "5.4"
-
-    - name: Remember Lua 5.4
-      run: echo "TECS_LUA54=$(command -v lua)" >> "$GITHUB_ENV"
+    - name: Setup isolated Lua 5.4 for LuaRocks
+      run: |
+        curl -fsSL https://www.lua.org/ftp/lua-5.4.8.tar.gz | tar xz -C "$RUNNER_TEMP"
+        make -C "$RUNNER_TEMP/lua-5.4.8/src" posix
+        echo "TECS_LUA54=$RUNNER_TEMP/lua-5.4.8/src/lua" >> "$GITHUB_ENV"
 
     - name: Setup LuaJIT
       uses: leafo/gh-actions-lua@v11
@@ -59,13 +57,11 @@ jobs:
 
     # Lua 5.4 parses the oversized LuaRocks manifest; LuaJIT below remains
     # the target VM and ABI for every installed rock.
-    - name: Setup Lua 5.4 for LuaRocks
-      uses: leafo/gh-actions-lua@v11
-      with:
-        luaVersion: "5.4"
-
-    - name: Remember Lua 5.4
-      run: echo "TECS_LUA54=$(command -v lua)" >> "$GITHUB_ENV"
+    - name: Setup isolated Lua 5.4 for LuaRocks
+      run: |
+        curl -fsSL https://www.lua.org/ftp/lua-5.4.8.tar.gz | tar xz -C "$RUNNER_TEMP"
+        make -C "$RUNNER_TEMP/lua-5.4.8/src" posix
+        echo "TECS_LUA54=$RUNNER_TEMP/lua-5.4.8/src/lua" >> "$GITHUB_ENV"
 
     - name: Setup LuaJIT
       uses: leafo/gh-actions-lua@v11
@@ -109,13 +105,11 @@ jobs:
 
     # Lua 5.4 parses the oversized LuaRocks manifest; LuaJIT below remains
     # the target VM and ABI for every installed rock.
-    - name: Setup Lua 5.4 for LuaRocks
-      uses: leafo/gh-actions-lua@v11
-      with:
-        luaVersion: "5.4"
-
-    - name: Remember Lua 5.4
-      run: echo "TECS_LUA54=$(command -v lua)" >> "$GITHUB_ENV"
+    - name: Setup isolated Lua 5.4 for LuaRocks
+      run: |
+        curl -fsSL https://www.lua.org/ftp/lua-5.4.8.tar.gz | tar xz -C "$RUNNER_TEMP"
+        make -C "$RUNNER_TEMP/lua-5.4.8/src" posix
+        echo "TECS_LUA54=$RUNNER_TEMP/lua-5.4.8/src/lua" >> "$GITHUB_ENV"
 
     - name: Setup LuaJIT
       uses: leafo/gh-actions-lua@v11
@@ -310,15 +304,12 @@ jobs:
 
     # LuaRocks stays configured for LuaJIT 5.1; only its manifest-loading
     # frontend runs with Lua 5.4 to avoid LuaJIT's constant limit.
-    - name: Setup Lua 5.4 for LuaRocks
+    - name: Setup isolated Lua 5.4 for LuaRocks
       if: steps.changes.outputs.run == 'true'
-      uses: leafo/gh-actions-lua@v11
-      with:
-        luaVersion: "5.4"
-
-    - name: Remember Lua 5.4
-      if: steps.changes.outputs.run == 'true'
-      run: echo "TECS_LUA54=$(command -v lua)" >> "$GITHUB_ENV"
+      run: |
+        curl -fsSL https://www.lua.org/ftp/lua-5.4.8.tar.gz | tar xz -C "$RUNNER_TEMP"
+        make -C "$RUNNER_TEMP/lua-5.4.8/src" posix
+        echo "TECS_LUA54=$RUNNER_TEMP/lua-5.4.8/src/lua" >> "$GITHUB_ENV"
 
     - name: Setup LuaJIT
       if: steps.changes.outputs.run == 'true'
@@ -359,13 +350,11 @@ jobs:
 
     # Parse the LuaRocks registry with Lua 5.4, but install and type-check for
     # the LuaJIT/Lua 5.1 runtime configured below.
-    - name: Setup Lua 5.4 for LuaRocks
-      uses: leafo/gh-actions-lua@v11
-      with:
-        luaVersion: "5.4"
-
-    - name: Remember Lua 5.4
-      run: echo "TECS_LUA54=$(command -v lua)" >> "$GITHUB_ENV"
+    - name: Setup isolated Lua 5.4 for LuaRocks
+      run: |
+        curl -fsSL https://www.lua.org/ftp/lua-5.4.8.tar.gz | tar xz -C "$RUNNER_TEMP"
+        make -C "$RUNNER_TEMP/lua-5.4.8/src" posix
+        echo "TECS_LUA54=$RUNNER_TEMP/lua-5.4.8/src/lua" >> "$GITHUB_ENV"
 
     - name: Setup Lua
       uses: leafo/gh-actions-lua@v11
