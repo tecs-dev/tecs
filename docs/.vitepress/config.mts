@@ -126,7 +126,6 @@ export default defineConfig({
           { text: 'Getting Started', link: '/tecs2d/' },
           { text: 'Love2D Integration', link: '/tecs2d/love2d' },
           { text: 'Love2D Events', link: '/tecs2d/events' },
-          { text: 'Integration Testing', link: '/tecs2d/integration-testing' },
           {
             text: 'Runtime Introspection',
             collapsed: false,
@@ -137,6 +136,7 @@ export default defineConfig({
               { text: 'MCP', link: '/tecs2d/mcp/' },
               { text: 'MCP Tools', link: '/tecs2d/mcp/tools' },
               { text: 'Custom Commands', link: '/tecs2d/custom-debug-commands' },
+              { text: 'Integration Testing', link: '/tecs2d/integration-testing' },
             ]
           },
           {

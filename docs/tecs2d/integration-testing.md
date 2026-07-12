@@ -12,7 +12,8 @@ Specs named `*_lovespec.tl` are integration tests: they launch the built game
 under a real LÖVE process and drive it over the game's
 [MCP server](/tecs2d/mcp/). A spec can run Lua inside the game, send input
 events, read entity and component state, sample framebuffer pixels, and take
-screenshots — the same tools available to a debugger session or coding agent.
+screenshots. These are the same tools available to a debugger session or
+coding agent.
 
 ![The space example under test: the screenshot was captured through the same MCP tools the specs use](/images/integration-testing.png)
 
@@ -124,26 +125,26 @@ end)
 ```
 
 The [tecs-space-example](https://github.com/tecs-dev/tecs-space-example)
-repository walks its shooter through the full state machine this way — boot to
-the ready screen, start gameplay, spawn the player, hold Space to fire, pause
-and resume — in about four seconds of wall clock. Its
+repository walks its shooter through the full state machine this way: boot to
+the ready screen, start gameplay, spawn the player, hold Space to fire, then
+pause and resume. The whole run takes about four seconds. Its
 [`spec/game_lovespec.tl`](https://github.com/tecs-dev/tecs-space-example/blob/main/spec/game_lovespec.tl)
 is a complete reference.
 
 ## Assertions
 
 Specs use the bundled [luassert](https://github.com/lunarmodules/luassert)
-through its flat API — `luassert.equal`, `luassert.same`, `luassert.is_true`,
+through its flat API: `luassert.equal`, `luassert.same`, `luassert.is_true`,
 and friends. Type declarations for busted's globals (`describe`, `it`,
 `setup`, ...) and luassert ship with the CLI, so `tecs integ` type-checks
 specs before running them.
 
 ## Conventions
 
-- `spec/**/*_lovespec.tl` — integration specs; each `fixture.start` boots a
-  real game process.
-- `spec/**/*_spec.tl` — plain busted specs; they run in the same pass without
-  launching anything.
+- `spec/**/*_lovespec.tl` files are integration specs; each `fixture.start`
+  boots a real game process.
+- `spec/**/*_spec.tl` files are plain busted specs; they run in the same pass
+  without launching anything.
 - Specs in one `describe` block share state and run in order. Booting a game
   per `describe` (in `setup`/`teardown`) keeps runs fast; walk the game
   through its states in sequence rather than restarting per test.
