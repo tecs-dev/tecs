@@ -93,6 +93,37 @@ describe("tecs2d.debug.internal.cmd.render", function()
             reg:execute("grid off")
         end)
 
+        it("camera world and screen convert through the active camera", function()
+            local reg, w = makeRegistry()
+            luassert.equals("no_pipeline", (reg:execute("camera world 10 20")).code)
+            luassert.equals("no_pipeline", (reg:execute("camera screen 10 20")).code)
+
+            -- A minimal fake pipeline: the camera shifts by a fixed offset so
+            -- the conversion is observable both ways.
+            local pipelinekey = require("tecs2d.gfx.internal.pipelinekey")
+            local fakeCam: {string: any} = {}
+            fakeCam.toWorld = function(_self: any, x: number, y: number): number, number
+                return x + 100, y + 200
+            end
+            fakeCam.toScreen = function(_self: any, x: number, y: number): number, number
+                return x - 100, y - 200
+            end
+            local fakePipeline: {string: any} = {
+                getCamera = function(_self: any, _name?: string): any return fakeCam end,
+            }
+            (w.resources as {any: any})[pipelinekey.PIPELINE] = fakePipeline
+
+            local toWorld = reg:execute("camera world 10 20")
+            luassert.is_true(toWorld.ok, tostring(toWorld.message))
+            luassert.same({x = 10, y = 20}, toWorld.data.screen)
+            luassert.same({x = 110, y = 220}, toWorld.data.world)
+
+            local toScreen = reg:invokeMcp("debug_camera_screen", {x = 110, y = 220})
+            luassert.is_true(toScreen.ok, tostring(toScreen.message))
+            luassert.same({x = 110, y = 220}, toScreen.data.world)
+            luassert.same({x = 10, y = 20}, toScreen.data.screen)
+        end)
+
         it("bounds toggles the outline overlay", function()
             local reg, _, ctx = makeRegistry()
             luassert.is_true((reg:execute("bounds")).ok)

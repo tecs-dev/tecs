@@ -7,9 +7,11 @@
 --- this module must not require tecs2d.debug.commands (a load cycle).
 
 local tecs <const> = require("tecs")
+local bit <const> = require("bit")
 local json <const> = require("tecs.utils.json")
 local profile <const> = require("tecs.utils.profile")
 local logging <const> = require("tecs.utils.logging")
+local StringBuffer <const> = require("string.buffer")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
 local rewind <const> = require("tecs2d.debug.internal.rewind")
 local snapdiff <const> = require("tecs2d.debug.internal.diff")
@@ -21,6 +23,8 @@ local cmdtypes <const> = require("tecs2d.debug.internal.cmdtypes")
 local LOGGER <const> = logging.getLogger("tecs2d.debug.commands")
 local format <const> = string.format
 local getTime <const> = love.timer.getTime
+
+local Transform <const> = tecs.builtins.Transform
 
 local record capture
     --- The Capture-section commands, in display order.
@@ -43,9 +47,60 @@ local recordSchema <const>: cmdargs.Schema = {
 
 -- seconds 0 samples until you reopen the debugger.
 local profileSchema <const>: cmdargs.Schema = {
-    args = { seconds = {default = 0, help = "sample duration; 0 samples until reopen"} },
+    args = {
+        seconds = {default = 0, help = "sample duration; 0 samples until reopen"},
+        intervalMs = {kind = "number",
+            help = "sampler interval in ms (sampler default if omitted; raise for long sessions)"},
+        zone = {help = "restrict output to samples whose zone path starts with this prefix"},
+    },
     positional = {"seconds"},
 }
+cmdargs.validate(profileSchema)
+
+local snapshotSaveSchema <const>: cmdargs.Schema = {
+    args = {
+        name = {help = "output filename"},
+        format = {default = "luajit", enum = {"json", "luajit"},
+            help = "snapshot encoding: compact luajit binary or json"},
+        layers = {kind = "list",
+            help = "only save entities whose Transform.layer is in this set (values 0-31)"},
+        pretty = {default = false, help = "pretty-print json output (json format only)"},
+        inline = {default = false,
+            help = "return the payload in the result instead of writing a numbered artifact"},
+    },
+    positional = {"name"},
+}
+cmdargs.validate(snapshotSaveSchema)
+
+local snapshotLoadSchema <const>: cmdargs.Schema = {
+    args = {
+        ref = {help = "save name or number"},
+        payload = {help = "inline snapshot payload: json text, or base64 luajit binary"},
+        format = {default = "luajit", enum = {"json", "luajit"},
+            help = "encoding of the payload or file"},
+    },
+    positional = {"ref"},
+}
+cmdargs.validate(snapshotLoadSchema)
+
+-- Parse and validate the snapshot layer filter (numeric strings, 0..31).
+-- Returns nil + nil for an absent filter, nil + error for a bad one.
+local function parseLayers(raw: any): {integer}, string
+    if raw == nil then return nil, nil end
+    local out: {integer} = {}
+    for _, item in ipairs(raw as {string}) do
+        local n = tonumber(item)
+        if not n then
+            return nil, "layers must be numbers, got '" .. item .. "'"
+        end
+        local layer = math.floor(n)
+        if layer < 0 or layer > 31 then
+            return nil, "layer values must be in 0..31, got " .. item
+        end
+        out[#out + 1] = layer as integer
+    end
+    return out, nil
+end
 
 -- Shared ref schemas for the artifact verbs (profile/screenshot vs record).
 local captureRefSchema <const>: cmdargs.Schema = {
@@ -68,7 +123,6 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
     local componentFor <const> = d.componentFor
     local summarizeProfile <const> = d.summarizeProfile
     local systemZoneIds <const> = d.systemZoneIds
-    local nameSchema <const> = d.nameSchema
     local refSchema <const> = d.refSchema
     local EDIT_SELECTION_TARGET <const> = d.selectionTarget
 
@@ -83,6 +137,45 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
         return false, nil
     end
 
+
+    -- Count live entities and non-empty archetypes, matching the counts the
+    -- snapshot MCP tools report.
+    local function countEntities(): integer, integer
+        local ec, ac = 0, 0
+        w:forEachArchetype(function(arch: tecs.Archetype)
+            local c = arch.entities[0] as integer
+            if c > 0 then
+                ec = ec + c
+                ac = ac + 1
+            end
+        end)
+        return ec, ac
+    end
+
+    -- The same counts under a layer filter: what saveSnapshot will actually
+    -- emit, so the reported numbers stay truthful.
+    local function countLayerFiltered(layers: {integer}): integer, integer
+        local mask = 0
+        for i = 1, #layers do mask = bit.bor(mask, bit.lshift(1, layers[i])) end
+        local ec, ac = 0, 0
+        w:forEachArchetype(function(arch: tecs.Archetype)
+            local c = arch.entities[0] as integer
+            local transforms = arch:get(Transform) as {{string: integer}}
+            if c == 0 or not transforms then return end
+            local matched = 0
+            for row = 1, c do
+                local layer = transforms[row].layer
+                if bit.band(bit.rshift(mask, layer), 1) == 1 then
+                    matched = matched + 1
+                end
+            end
+            if matched > 0 then
+                ec = ec + matched
+                ac = ac + 1
+            end
+        end)
+        return ec, ac
+    end
 
     -- Resolve a snapshot argument to a save-dir filename: a number is that save,
     -- a name is used as-is, and no argument is the last save.
@@ -479,7 +572,8 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             mcp = false,   -- agents use the profiler_start / profiler_stop MCP tools
             shortHelp = "sample the running game with the LuaJIT profiler",
             schema = profileSchema,
-            examples = {"profile", "profile 5", "profile ls"},
+            examples = {"profile", "profile 5", "profile 5 intervalMs=5",
+                "profile zone=afterFixed/Render", "profile ls"},
             subcommands = {
                 artifactList("profiles",
                     function(): {any} return ctx.profiles as {any} end,
@@ -544,7 +638,14 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     return {ok = false, code = "already_running", message = "profile: already running"}
                 end
                 local secs = v.seconds as number
-                local ok, sess = pcall(profile.sample, {})
+                local opts: profile.SampleOptions = {}
+                if v.intervalMs ~= nil then
+                    opts.intervalMs = math.floor(v.intervalMs as number) as integer
+                end
+                if v.zone ~= nil then
+                    opts.zone = v.zone as string
+                end
+                local ok, sess = pcall(profile.sample, opts)
                 if not ok or not sess then
                     return {ok = false, code = "start_failed",
                         message = "profile: could not start (already sampling?)"}
@@ -571,14 +672,129 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "save",
                     shortHelp = "save the world; reports a number for load/open",
-                    mcpHelp = "Save the whole world to a snapshot file in the save directory. Returns a snapshot number usable as a debug_snapshot_load and debug_diff ref. Does not disturb the running game.",
-                    schema = nameSchema,
+                    mcpHelp = "Save the whole world to a snapshot file in the save directory (format luajit by default, or json; layers restricts to Transform layers). Returns a snapshot number usable as a debug_snapshot_load and debug_diff ref. inline=true instead returns the payload in the result (a json snapshot object, or a base64 luajit payload) and writes no artifact. Does not disturb the running game.",
+                    schema = snapshotSaveSchema,
+                    examples = {"snapshot save", "snapshot save boss-fight",
+                        "snapshot save format=json pretty=true",
+                        "snapshot save inline=true format=json", "snapshot save layers=0,1"},
+                    outputSchema = {
+                        type = "object",
+                        properties = {
+                            number = {type = "integer",
+                                description = "snapshot number (artifact form only)"},
+                            path = {type = "string",
+                                description = "save-dir filename (artifact form only)"},
+                            size = {type = "integer", description = "file size in bytes (artifact form only)"},
+                            format = {type = "string"},
+                            snapshot = {type = "object",
+                                description = "the snapshot object (inline json form only)"},
+                            payload = {type = "string",
+                                description = "base64 snapshot binary (inline luajit form only)"},
+                            encoding = {type = "string",
+                                description = "always base64 in the inline luajit form"},
+                            bytes = {type = "integer",
+                                description = "payload size in bytes (inline forms only)"},
+                            entities = {type = "integer", description = "entities saved"},
+                            archetypes = {type = "integer",
+                                description = "archetypes saved (inline forms only)"},
+                            elapsedMs = {type = "number", description = "inline forms only"},
+                        },
+                        required = {"entities"},
+                    },
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
+                        local fmt = v.format as string
+                        local layers, lerr = parseLayers(v.layers)
+                        if lerr then
+                            return {ok = false, code = "invalid_arguments",
+                                message = "snapshot save: " .. lerr}
+                        end
+                        local pretty = v.pretty == true
+
+                        if v.inline == true then
+                            -- Inline parity with the snapshot_save MCP tool: the
+                            -- payload rides in the result, no artifact is written,
+                            -- and no snapshot number is minted.
+                            local tStart = getTime()
+                            if fmt == "json" then
+                                local okS, snapOrErr = pcall(function(): {string: any}
+                                    local out = w:saveSnapshot({format = "table", layers = layers})
+                                        as {string: any}
+                                    return out.snapshot as {string: any}
+                                end)
+                                if not okS then
+                                    return {ok = false, code = "save_failed",
+                                        message = "snapshot save failed: " .. tostring(snapOrErr)}
+                                end
+                                local snap = snapOrErr as {string: any}
+                                local archs = snap.archetypes as {{string: any}}
+                                local archCount = #archs
+                                local entityCount = 0
+                                for i = 1, archCount do
+                                    entityCount = entityCount + #(archs[i].entities as {any})
+                                end
+                                local payload: string
+                                if pretty then
+                                    payload = json.serializePretty(snap, true)
+                                else
+                                    payload = json.serialize(snap)
+                                end
+                                return {ok = true,
+                                    message = format("inline json snapshot: %d entities, %.1f KB",
+                                        entityCount, #payload / 1024),
+                                    data = {format = "json", snapshot = snap,
+                                        entities = entityCount, archetypes = archCount,
+                                        bytes = #payload,
+                                        elapsedMs = (getTime() - tStart) * 1000}}
+                            end
+                            local entityCount: integer
+                            local archCount: integer
+                            if layers then
+                                entityCount, archCount = countLayerFiltered(layers)
+                            else
+                                entityCount, archCount = countEntities()
+                            end
+                            local okS, binOrErr = pcall(function(): string
+                                local buf = StringBuffer.new()
+                                local out = w:saveSnapshot({buffer = buf, layers = layers})
+                                return tostring(out.buffer)
+                            end)
+                            if not okS then
+                                return {ok = false, code = "save_failed",
+                                    message = "snapshot save failed: " .. tostring(binOrErr)}
+                            end
+                            local binary = binOrErr as string
+                            local encoded = love.data.encode("string", "base64", binary) as string
+                            return {ok = true,
+                                message = format("inline luajit snapshot: %d entities, %.1f KB",
+                                    entityCount, #binary / 1024),
+                                data = {format = "luajit", encoding = "base64", payload = encoded,
+                                    entities = entityCount, archetypes = archCount,
+                                    bytes = #binary,
+                                    elapsedMs = (getTime() - tStart) * 1000}}
+                        end
+
                         reg.saveCounter = reg.saveCounter + 1
                         local name = (v.name as string) or ("debug-save-" .. tostring(reg.saveCounter) .. ".snapshot")
                         local ok, err = pcall(function(): boolean
-                            local out = w:saveSnapshot()
-                            local wok, werr = love.filesystem.write(name, tostring(out.buffer))
+                            local payload: string
+                            if fmt == "json" then
+                                local out = w:saveSnapshot({format = "table", layers = layers})
+                                    as {string: any}
+                                local snap = out.snapshot as {string: any}
+                                if pretty then
+                                    payload = json.serializePretty(snap, true)
+                                else
+                                    payload = json.serialize(snap)
+                                end
+                            elseif layers then
+                                local buf = StringBuffer.new()
+                                local out = w:saveSnapshot({buffer = buf, layers = layers})
+                                payload = tostring(out.buffer)
+                            else
+                                local out = w:saveSnapshot()
+                                payload = tostring(out.buffer)
+                            end
+                            local wok, werr = love.filesystem.write(name, payload)
                             if not wok then
                                 error(werr or "write failed", 0)
                             end
@@ -593,7 +809,12 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         end
                         local info = love.filesystem.getInfo(name)
                         local sz = (info and info.size) or 0
-                        local entityCount = w:getStats().entities
+                        local entityCount: integer
+                        if layers then
+                            entityCount = (countLayerFiltered(layers))
+                        else
+                            entityCount = w:getStats().entities
+                        end
                         reg.saves[reg.saveCounter] = name
                         ctx.snapshots[#ctx.snapshots + 1] = {
                             number = reg.saveCounter, path = name,
@@ -607,40 +828,104 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                             message = "snapshot #" .. tostring(reg.saveCounter) ..
                                 " saved at " .. debugcontext.savePath(name),
                             data = {number = reg.saveCounter, path = name, size = sz,
-                                entities = entityCount}}
+                                format = fmt, entities = entityCount}}
                     end,
                 },
                 {
                     name = "load",
-                    shortHelp = "restore a save (the last if omitted)",
-                    mcpHelp = "Replace the live world with a saved snapshot (ref is a number, name, or latest). Destructive to current state; selection, marks, and notes clear. Loads are rate limited, so retry on a busy error after a moment.",
-                    schema = refSchema,
+                    shortHelp = "restore a save (the last if omitted) or an inline payload",
+                    mcpHelp = "Replace the live world with a saved snapshot (ref is a number, name, or latest) or an inline payload (json text, or base64 luajit binary; set format to match how it was produced). Destructive to current state; selection, marks, and notes clear. Loads are rate limited, so retry on a busy error after a moment.",
+                    schema = snapshotLoadSchema,
+                    examples = {"snapshot load", "snapshot load 3",
+                        "snapshot load boss-fight format=json"},
+                    outputSchema = {
+                        type = "object",
+                        properties = {
+                            path = {type = "string",
+                                description = "loaded filename (file form only)"},
+                            format = {type = "string"},
+                            source = {type = "string",
+                                description = "the filename, or inline-payload"},
+                            bytes = {type = "integer", description = "payload size in bytes"},
+                            entities = {type = "integer", description = "entities after the load"},
+                            archetypes = {type = "integer",
+                                description = "non-empty archetypes after the load"},
+                            elapsedMs = {type = "number"},
+                        },
+                        required = {"archetypes", "bytes", "entities", "format", "source"},
+                    },
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
                         local held, heldErr = loadCooldown("snapshot load")
                         if held then
                             return {ok = false, code = "busy", message = heldErr}
                         end
-                        local name = snapshotNameFor(v.ref as string)
-                        if not name or name == "" then
-                            return {ok = false, code = "no_match",
-                                message = "snapshot load: nothing to load. Use `snapshot ls`."}
+                        local fmt = v.format as string
+                        local payload = v.payload as string
+                        local source: string
+                        local name: string = nil
+                        if payload then
+                            source = "inline-payload"
+                        else
+                            name = snapshotNameFor(v.ref as string)
+                            if not name or name == "" then
+                                return {ok = false, code = "no_match",
+                                    message = "snapshot load: nothing to load. Use `snapshot ls`."}
+                            end
+                            payload = love.filesystem.read(name)
+                            if not payload then
+                                return {ok = false, code = "read_failed",
+                                    message = "snapshot load: cannot read " .. name .. ". Use `snapshot ls`."}
+                            end
+                            source = name
                         end
-                        local bytes = love.filesystem.read(name)
-                        if not bytes then
-                            return {ok = false, code = "read_failed",
-                                message = "snapshot load: cannot read " .. name .. ". Use `snapshot ls`."}
-                        end
-                        local ok, err = pcall(w.loadSnapshot, w, bytes)
-                        if not ok then
-                            return {ok = false, code = "load_failed",
-                                message = "snapshot load failed: " .. tostring(err)}
+                        local tStart = getTime()
+                        local bytes = #payload
+                        if fmt == "json" then
+                            local okParse, parsed = pcall(json.parse, payload)
+                            if not okParse then
+                                return {ok = false, code = "json_parse_failed",
+                                    message = "snapshot load: JSON parse failed: " .. tostring(parsed)}
+                            end
+                            local ok, err = pcall(function(): boolean
+                                w:loadSnapshot(parsed as tecs.Snapshot)
+                                return true
+                            end)
+                            if not ok then
+                                return {ok = false, code = "load_failed",
+                                    message = "snapshot load failed: " .. tostring(err)}
+                            end
+                        else
+                            -- Inline luajit payloads arrive base64-encoded; file
+                            -- reads are raw bytes.
+                            local binary = payload
+                            if name == nil then
+                                local decodedOk, decoded = pcall(function(): string
+                                    return love.data.decode("string", "base64", payload) as string
+                                end)
+                                if not decodedOk then
+                                    return {ok = false, code = "base64_decode_failed",
+                                        message = "snapshot load: base64 decode failed: " ..
+                                            tostring(decoded)}
+                                end
+                                binary = decoded as string
+                                bytes = #binary
+                            end
+                            local ok, err = pcall(w.loadSnapshot, w, binary)
+                            if not ok then
+                                return {ok = false, code = "load_failed",
+                                    message = "snapshot load failed: " .. tostring(err)}
+                            end
                         end
                         reg.lastWorldLoadAt = getTime()
                         ctx.selected = {}
                         ctx.marks = {}
                         ctx.notes = {}
-                        debugcontext.pushEvent(ctx, "snapshot", {path = name, loaded = true})
-                        return {ok = true, message = "loaded: " .. name, data = {path = name}}
+                        local entityCount, archCount = countEntities()
+                        debugcontext.pushEvent(ctx, "snapshot", {path = source, loaded = true})
+                        return {ok = true, message = "loaded: " .. source,
+                            data = {path = name, format = fmt, source = source, bytes = bytes,
+                                entities = entityCount, archetypes = archCount,
+                                elapsedMs = (getTime() - tStart) * 1000}}
                     end,
                 },
                 artifactOpen("snapshot", "ref", "save name or number", snapshotNameFor),

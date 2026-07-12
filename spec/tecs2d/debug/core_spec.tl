@@ -79,6 +79,48 @@ describe("tecs2d.debug.internal.core", function()
         luassert.equals("ffmpeg", rec.ffmpegPath)
     end)
 
+    it("finishes a timed profile from CoreTick and stashes the popup", function()
+        local w = tecs.newWorld()
+        local reg = core.ensure(w)
+        local fsAny = love.filesystem as {string: any}
+        local oldWd = fsAny.getWorkingDirectory
+        fsAny.getWorkingDirectory = function(): string return "/work" end
+        local timer = love.timer as {string: any}
+        local t0 = timer.currentTime as number
+        finally(function()
+            fsAny.getWorkingDirectory = oldWd
+            os.remove("debug-profile-" .. tostring(reg.profiler.counter) .. ".collapsed")
+        end)
+
+        local stopped = false
+        local fake = {
+            stop = function(_self: any): string
+                stopped = true
+                return "root;Update:spec.Sys;hot 5\n"
+            end,
+        }
+        reg.profiler.session = fake as any
+        reg.profiler.deadline = t0 + 5
+
+        w:update(0.016)
+        luassert.is_false(stopped, "deadline not reached yet")
+        luassert.is_nil(reg.profileResult)
+
+        timer.currentTime = t0 + 10
+        w:update(0.016)
+        luassert.is_true(stopped, "CoreTick must finish the timed profile")
+        luassert.is_nil(reg.profiler.session)
+        luassert.equals(0, reg.profiler.deadline)
+        luassert.is_not_nil(reg.profileResult, "the results popup must be stashed")
+        luassert.matches("samples: 5", table.concat(reg.profileResult, "\n"))
+        luassert.equals(1, #reg.env.ctx.profiles, "the capture must join the profile history")
+
+        -- The stash stays until a consumer (the overlay) clears it.
+        reg.profileResult = nil
+        w:update(0.016)
+        luassert.is_nil(reg.profileResult)
+    end)
+
     it("context.ensureCore delegates to core.ensure", function()
         luassert.equals(core.ensure, context.ensureCore)
         local w = tecs.newWorld()

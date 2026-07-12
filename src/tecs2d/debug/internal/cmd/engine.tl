@@ -1,12 +1,13 @@
 --- Engine-section debugger commands: systems, archetypes, components,
---- states, physics, controllers, assets, and audio, plus the subsystem
---- lookups they share (the physics state, the controller/audio/asset
---- managers, and the asset manager's strong load log).
+--- states, physics, controllers, assets, audio, fetch, resources, and
+--- bundles, plus the subsystem lookups they share (the physics state, the
+--- controller/audio/asset managers, and the asset manager's strong load log).
 ---
 --- Everything shared with the core registry arrives through cmdtypes.Deps;
 --- this module must not require tecs2d.debug.commands (a load cycle).
 
 local tecs <const> = require("tecs")
+local json <const> = require("tecs.utils.json")
 local gfxtypes <const> = require("tecs2d.gfx.types")
 local componentregistry <const> = require("tecs.internal.components")
 local entityinfo <const> = require("tecs2d.internal.entityinfo")
@@ -27,6 +28,67 @@ local systemNameSchema <const>: cmdargs.Schema = {
     args = { name = {required = true, help = "system name (see `systems`)"} },
     positional = {"name"},
 }
+
+local fetchSchema <const>: cmdargs.Schema = {
+    args = {
+        expr = {rest = true, required = true,
+            help = "component names separated by spaces; -Foo excludes"},
+        limit = {default = 100, min = 0, help = "max entities returned"},
+        x = {kind = "number", help = "bounds left world x (give all of x, y, w, h or none)"},
+        y = {kind = "number", help = "bounds top world y"},
+        w = {kind = "number", help = "bounds width in world units"},
+        h = {kind = "number", help = "bounds height in world units"},
+    },
+    positional = {"expr"},
+}
+cmdargs.validate(fetchSchema)
+
+local bundleSpawnSchema <const>: cmdargs.Schema = {
+    args = {
+        name = {required = true, help = "bundle name"},
+        components = {kind = "table",
+            help = "component overrides: {Name = {field = value}, ...} (a JSON object over MCP)"},
+    },
+    positional = {"name", "components"},
+}
+cmdargs.validate(bundleSpawnSchema)
+
+-- Evaluate a Lua table expression from the command line. Same trust level
+-- as the run_lua MCP tool: the debugger is a developer surface.
+local function evalTable(expr: string): {string: any}, string
+    local chunk, cerr = load("return " .. expr, "debug-expr", "t")
+    if not chunk then return nil, "bad expression: " .. tostring(cerr) end
+    local ok, result = pcall(chunk)
+    if not ok then return nil, "expression failed: " .. tostring(result) end
+    if type(result) ~= "table" then
+        return nil, "expression must be a table, got " .. type(result)
+    end
+    return result as {string: any}, nil
+end
+
+-- A table-kind argument value: a table passes through (a JSON object over
+-- MCP); a nonempty string evaluates as a Lua table expression. Returns nil
+-- with no error when the value is absent.
+local function parseTableArg(value: any): {string: any}, string
+    if type(value) == "table" then
+        return value as {string: any}, nil
+    end
+    if type(value) == "string" and (value as string) ~= "" then
+        return evalTable(value as string)
+    end
+    return nil, nil
+end
+
+-- Archetype signature (sorted component names) as one display string.
+local function archetypeSignature(arch: tecs.Archetype): string
+    local names: {string} = {}
+    for i = 1, #arch.componentList do
+        local nm = arch.componentList[i].componentName
+        if nm then names[#names + 1] = nm end
+    end
+    table.sort(names)
+    return table.concat(names, ", ")
+end
 
 function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
     -- The shared context, aliased once so command bodies stay terse.
@@ -988,6 +1050,324 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         end
                         return {ok = true, message = want and "audio muted" or "audio unmuted",
                             data = {muted = want}}
+                    end,
+                },
+            },
+        },
+        {
+            name = "fetch",
+            section = "Engine",
+            complete = {[0] = "components"},
+            shortHelp = "fetch entities matching a component query, without selecting them",
+            mcpHelp = "Fetch entities matching a component expression ('Enemy -Dead' means has Enemy, lacks Dead) with their serialized component data, without touching the operator's selection. Give x, y, w, h to restrict to a world-space box (spatial filter via Position when registered, else Transform; the spatial component is always included). Returns up to limit entities plus a truncated flag. Use debug_query when you want to select the matches instead.",
+            schema = fetchSchema,
+            examples = {"fetch Transform -Disabled", "fetch Enemy limit=10",
+                "fetch Transform x=0 y=0 w=640 h=360"},
+            annotations = {readOnlyHint = true, idempotentHint = true},
+            outputSchema = {
+                type = "object",
+                properties = {
+                    count = {type = "integer", description = "entities returned"},
+                    entities = {type = "array", items = {type = "object", properties = {
+                        id = {type = "integer"},
+                        archetypeId = {type = "integer",
+                            description = "absent in the bounds form"},
+                        archetypeComponents = {type = "string",
+                            description = "sorted archetype signature; absent in the bounds form"},
+                        components = {type = "object",
+                            description = "serialized data of the included components"},
+                    }}},
+                    truncated = {type = "boolean", description = "true when the limit cut the results"},
+                    bounds = {type = "object", properties = {
+                        x = {type = "number"},
+                        y = {type = "number"},
+                        width = {type = "number"},
+                        height = {type = "number"},
+                    }, description = "the spatial filter, when one was given"},
+                },
+                required = {"count", "entities", "truncated"},
+            },
+            run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
+                local given = 0
+                if v.x ~= nil then given = given + 1 end
+                if v.y ~= nil then given = given + 1 end
+                if v.w ~= nil then given = given + 1 end
+                if v.h ~= nil then given = given + 1 end
+                if given ~= 0 and given ~= 4 then
+                    return {ok = false, code = "invalid_arguments",
+                        message = "fetch: bounds need all of x, y, w, h (or none)"}
+                end
+
+                local include: {tecs.Component} = {}
+                local includeNames: {string} = {}
+                local exclude: {tecs.Component} = {}
+                for tok in (v.expr as string):gmatch("%S+") do
+                    local nm = tok
+                    local bucket = "include"
+                    if tok:sub(1, 1) == "-" then
+                        nm = tok:sub(2)
+                        bucket = "exclude"
+                    elseif tok:sub(1, 1) == "+" then
+                        nm = tok:sub(2)
+                    end
+                    local comp, cerr = componentFor(nm)
+                    if not comp then
+                        return {ok = false, code = "unknown_component", message = "fetch: " .. cerr}
+                    end
+                    if bucket == "include" then
+                        include[#include + 1] = comp
+                        includeNames[#includeNames + 1] = nm
+                    else
+                        exclude[#exclude + 1] = comp
+                    end
+                end
+                if #include == 0 then
+                    return {ok = false, code = "invalid_arguments",
+                        message = "fetch: needs at least one component to include"}
+                end
+                local limit = math.max(0, math.floor(v.limit as number))
+
+                if given == 0 then
+                    -- Component-only form. temp avoids registering a persistent
+                    -- query for every call; the loop runs to exhaustion because
+                    -- breaking out of query:iter() leaks the query scope.
+                    local query = w:query({temp = true, include = include, exclude = exclude})
+                    local results: {{string: any}} = {}
+                    local count = 0
+                    for archetype, len, entityList in query:iter() do
+                        if count < limit then
+                            local sig = archetypeSignature(archetype)
+                            local archetypeId = archetype.id
+                            for row = 1, len do
+                                if count >= limit then break end
+                                results[#results + 1] = {
+                                    id = entityList[row],
+                                    archetypeId = archetypeId,
+                                    archetypeComponents = sig,
+                                    components = entityinfo.serializeRow(archetype, include, row),
+                                }
+                                count = count + 1
+                            end
+                        end
+                    end
+                    return {ok = true,
+                        message = "fetch matched " .. tostring(count) ..
+                            ((count >= limit) and " (truncated)" or ""),
+                        data = {count = count, entities = results, truncated = count >= limit}}
+                end
+
+                -- Bounds form. Prefer a game-registered Position component;
+                -- tecs's Transform is the ubiquitous fallback.
+                local spatial = componentFor("Position")
+                local spatialName = "Position"
+                if not spatial then
+                    spatial = componentFor("Transform")
+                    spatialName = "Transform"
+                end
+                if not spatial then
+                    return {ok = false, code = "spatial_component_not_found",
+                        message = "fetch: neither Position nor Transform is registered;" ..
+                            " bounds need one"}
+                end
+                local includeComponents: {tecs.Component} = {spatial}
+                for i = 1, #include do
+                    if includeNames[i] ~= spatialName then
+                        includeComponents[#includeComponents + 1] = include[i]
+                    end
+                end
+                local bx = v.x as number
+                local by = v.y as number
+                local bw = v.w as number
+                local bh = v.h as number
+                local bx2, by2 = bx + bw, by + bh
+                local query = w:query({temp = true, include = includeComponents, exclude = exclude})
+                local results: {{string: any}} = {}
+                local count = 0
+                for archetype, len, entityList in query:iter() do
+                    local posColumn = (count < limit) and archetype:get(spatial) or nil
+                    if posColumn then
+                        for row = 1, len do
+                            if count >= limit then break end
+                            local pos = posColumn[row] as {string: number}
+                            local px, py = pos.x, pos.y
+                            if px >= bx and px <= bx2 and py >= by and py <= by2 then
+                                results[#results + 1] = {
+                                    id = entityList[row],
+                                    components = entityinfo.serializeRow(
+                                        archetype, includeComponents, row),
+                                }
+                                count = count + 1
+                            end
+                        end
+                    end
+                end
+                return {ok = true,
+                    message = "fetch matched " .. tostring(count) .. " in bounds" ..
+                        ((count >= limit) and " (truncated)" or ""),
+                    data = {count = count, entities = results, truncated = count >= limit,
+                        bounds = {x = bx, y = by, width = bw, height = bh}}}
+            end,
+        },
+        {
+            name = "resources",
+            section = "Engine",
+            shortHelp = "list world resources with their key and type names",
+            mcpHelp = "Every world resource as {key, type}: keys resolve to their registered name when available, values to their metatable type name. Read-only; use it to discover installed subsystems and custom game resources.",
+            examples = {"resources"},
+            annotations = {readOnlyHint = true, idempotentHint = true},
+            outputSchema = {
+                type = "object",
+                properties = {
+                    count = {type = "integer"},
+                    resources = {type = "array", items = {type = "object", properties = {
+                        key = {type = "string", description = "resource key name"},
+                        type = {type = "string", description = "value type name"},
+                    }}},
+                },
+                required = {"count", "resources"},
+            },
+            run = function(_v: {string: any}, _parts: {string}): cmdtypes.Result
+                local resources = w.resources as {any: any}
+                local rows: {{string: any}} = {}
+                for key, value in pairs(resources) do
+                    local keyStr: string
+                    if type(key) == "table" and (key as {string: any}).name then
+                        keyStr = (key as {string: any}).name as string
+                    else
+                        keyStr = tostring(key)
+                    end
+                    local valueType: string
+                    if type(value) == "table" and getmetatable(value) then
+                        local mt = getmetatable(value) as {string: any}
+                        if mt.__name then
+                            valueType = mt.__name as string
+                        elseif mt.__index and type(mt.__index) == "table"
+                            and (mt.__index as {string: any}).__name then
+                            valueType = (mt.__index as {string: any}).__name as string
+                        else
+                            valueType = "table"
+                        end
+                    else
+                        valueType = type(value)
+                    end
+                    rows[#rows + 1] = {key = keyStr, type = valueType}
+                end
+                table.sort(rows, function(a: {string: any}, b: {string: any}): boolean
+                    return (a.key as string) < (b.key as string)
+                end)
+                local popup: {string} = {"resources  (" .. tostring(#rows) .. "):"}
+                for i = 1, #rows do
+                    popup[#popup + 1] = "  " .. tostring(rows[i].key) .. "\t" ..
+                        tostring(rows[i].type)
+                end
+                return {ok = true, popup = popup, data = {count = #rows, resources = rows}}
+            end,
+        },
+        {
+            name = "bundles",
+            section = "Engine",
+            shortHelp = "list registered bundles or spawn an entity from one",
+            examples = {"bundles list", "bundles spawn enemy",
+                "bundles spawn enemy {Transform = {x = 10, y = 5}}"},
+            subcommands = {
+                {
+                    name = "list",
+                    aliases = {"ls"},
+                    shortHelp = "list bundles with their required and defaulted components",
+                    mcpHelp = "Registered bundles as a map of name to component requirements: required components must be provided at spawn, defaulted ones fill in automatically. Pair with debug_bundles_spawn.",
+                    outputSchema = {
+                        type = "object",
+                        properties = {
+                            bundles = {type = "object",
+                                additionalProperties = {type = "object", properties = {
+                                    required = {type = "array", items = {type = "string"},
+                                        description = "components that must be provided at spawn"},
+                                    defaulted = {type = "array", items = {type = "string"},
+                                        description = "components filled from defaults"},
+                                }},
+                                description = "bundle name to its component requirements"},
+                        },
+                        required = {"bundles"},
+                    },
+                    run = function(_v: {string: any}, _parts: {string}): cmdtypes.Result
+                        local bundles = w:getBundles()
+                        local result: {string: {string: any}} = {}
+                        local names: {string} = {}
+                        for name, bundle in pairs(bundles) do
+                            local bndl = bundle as tecs.Bundle
+                            result[name] = {required = bndl.required, defaulted = bndl.defaulted}
+                            names[#names + 1] = name
+                        end
+                        if #names == 0 then
+                            return {ok = true, message = "no bundles registered",
+                                data = {bundles = json.EMPTY_OBJECT as {string: any}}}
+                        end
+                        table.sort(names)
+                        local popup: {string} = {"bundles  (" .. tostring(#names) .. "):"}
+                        for i = 1, #names do
+                            local b = bundles[names[i]] as tecs.Bundle
+                            local bits: {string} = {}
+                            if #b.required > 0 then
+                                bits[#bits + 1] = "required: " .. table.concat(b.required, ", ")
+                            end
+                            if #b.defaulted > 0 then
+                                bits[#bits + 1] = "defaulted: " .. table.concat(b.defaulted, ", ")
+                            end
+                            popup[#popup + 1] = "  " .. names[i] .. "\t" .. table.concat(bits, "; ")
+                        end
+                        return {ok = true, popup = popup, data = {bundles = result}}
+                    end,
+                },
+                {
+                    name = "spawn",
+                    complete = {[1] = "bundles"},
+                    shortHelp = "spawn an entity from a bundle with optional component overrides",
+                    mcpHelp = "Spawn one entity from a registered bundle. components is a map of component name to field data; the bundle's required components must be provided there. Returns the new entity id. Unlike debug_spawn this does not select the entity.",
+                    schema = bundleSpawnSchema,
+                    examples = {"bundles spawn enemy",
+                        "bundles spawn enemy {Transform = {x = 10, y = 5}}"},
+                    outputSchema = {
+                        type = "object",
+                        properties = {
+                            id = {type = "integer", description = "the new entity"},
+                        },
+                        required = {"id"},
+                    },
+                    run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
+                        local bundleName = v.name as string
+                        local overrides, verr = parseTableArg(v.components)
+                        if verr then
+                            return {ok = false, code = "invalid_arguments",
+                                message = "bundles spawn: " .. verr}
+                        end
+                        local instances: {tecs.Component} = {}
+                        for compName, compData in pairs(overrides or {}) do
+                            local comp, cerr = componentFor(compName)
+                            if not comp then
+                                return {ok = false, code = "unknown_component",
+                                    message = "bundles spawn: " .. cerr}
+                            end
+                            local okD, res = pcall(function(): tecs.Component
+                                return comp.deserialize(w, compData as {string: any})
+                            end)
+                            if not okD then
+                                return {ok = false, code = "component_deserialize_failed",
+                                    message = "bundles spawn: " .. compName .. ": " .. tostring(res)}
+                            end
+                            instances[#instances + 1] = res as tecs.Component
+                        end
+                        local okS, spawnedOrErr = pcall(function(): integer
+                            return w:spawnBundle(bundleName, table.unpack(instances))
+                        end)
+                        if not okS then
+                            return {ok = false, code = "spawn_bundle_failed",
+                                message = "bundles spawn failed: " .. tostring(spawnedOrErr)}
+                        end
+                        local id = spawnedOrErr as integer
+                        debugcontext.pushEvent(ctx, "spawn", {id = id, bundle = bundleName})
+                        return {ok = true,
+                            message = "spawned #" .. tostring(id) .. " from " .. bundleName,
+                            data = {id = id}}
                     end,
                 },
             },

@@ -657,6 +657,176 @@ describe("tecs2d.debug.commands registry", function()
         end)
     end)
 
+    describe("freeze command", function()
+        it("toggles the operator hold and interoperates with other holders", function()
+            local reg, w = makeRegistry()
+            local fz = reg.env.freeze
+
+            local on = reg:execute("freeze")
+            luassert.is_true(on.ok, tostring(on.message))
+            luassert.is_true(on.data.frozen as boolean)
+            luassert.is_true(fz:heldBy("operator"))
+            luassert.is_true(fz:isFrozen())
+
+            -- Another holder (the MCP pause tool) keeps the world frozen
+            -- after the operator releases.
+            fz:acquire("mcp")
+            local off = reg:execute("freeze off")
+            luassert.is_true(off.ok, tostring(off.message))
+            luassert.is_false(fz:heldBy("operator"))
+            luassert.is_true(off.data.frozen as boolean, "mcp holder must keep the freeze")
+            fz:release("mcp")
+            luassert.is_false(fz:isFrozen())
+
+            -- Bare freeze toggles; on/off are idempotent.
+            luassert.is_true((reg:execute("freeze")).data.frozen as boolean)
+            luassert.is_false((reg:execute("freeze")).data.frozen as boolean)
+            luassert.is_true((reg:execute("freeze on")).data.frozen as boolean)
+            luassert.is_true((reg:execute("freeze on")).data.frozen as boolean)
+            luassert.is_false((reg:execute("freeze off")).data.frozen as boolean)
+
+            -- Frozen gameplay phases actually stop.
+            local ticks = 0
+            w:addSystem({
+                name = "spec.FreezeTickable",
+                phase = tecs.phases.Update,
+                run = function() ticks = ticks + 1 end,
+            })
+            w:update(0.016)
+            luassert.equals(1, ticks)
+            reg:execute("freeze on")
+            w:update(0.016)
+            luassert.equals(1, ticks, "frozen gameplay still ran")
+            reg:execute("freeze off")
+            w:update(0.016)
+            luassert.equals(2, ticks)
+        end)
+    end)
+
+    describe("stats command", function()
+        it("reports world stats, fps, and window size in one payload", function()
+            local reg, w = makeRegistry()
+            w:spawn(SpecPos(0, 0))
+            w:commit()
+
+            local r = reg:execute("stats")
+            luassert.is_true(r.ok, tostring(r.message))
+            local s = w:getStats()
+            luassert.equals(s.entities, r.data.entities)
+            luassert.equals(s.archetypes, r.data.archetypes)
+            luassert.equals(s.components, r.data.components)
+            luassert.equals(s.systems, r.data.systems)
+            luassert.is_true((r.data.memoryKB as number) > 0)
+            luassert.equals((r.data.memoryKB as number) / 1024, r.data.memoryMB)
+            luassert.equals(60, r.data.fps, "mock fps")
+            local window = r.data.window as {string: number}
+            luassert.equals(1920, window.width)
+            luassert.equals(1080, window.height)
+            luassert.matches("entities", table.concat(r.popup, "\n"))
+        end)
+    end)
+
+    describe("context command", function()
+        it("returns the shared context-report payload", function()
+            local contextreport = require("tecs2d.debug.internal.contextreport")
+            local reg, w, ctx = makeRegistry()
+            local eid = w:spawn(SpecPos(1, 2))
+            local dead = w:spawn(SpecPos(0, 0))
+            w:commit()
+            ctx.selected = {eid}
+            ctx.marks[eid] = "boss"
+            ctx.notes[eid] = "check this"
+            ctx.marks[dead] = "gone"
+            ctx.mode = "select"
+            w:despawn(dead)
+            w:commit()
+
+            local r = reg:execute("context")
+            luassert.is_true(r.ok, tostring(r.message))
+            luassert.same(contextreport.build(w, ctx), r.data)
+            luassert.equals(tostring(eid), (r.data.marks as {string: string}).boss)
+            luassert.is_nil((r.data.marks as {string: string}).gone,
+                "marks on despawned entities must prune")
+            luassert.equals("select", r.data.mode)
+            luassert.same({eid}, r.data.selected)
+            luassert.matches("selected", table.concat(r.popup, "\n"))
+        end)
+    end)
+
+    describe("despawn ids", function()
+        it("despawns exactly the given ids and reports the dead ones", function()
+            local reg, w, ctx = makeRegistry()
+            local a = w:spawn(SpecPos(0, 0))
+            local b = w:spawn(SpecPos(0, 0))
+            local gone = w:spawn(SpecPos(0, 0))
+            w:commit()
+            w:despawn(gone)
+            w:commit()
+            ctx.selected = {a}
+            ctx.marks[b] = "victim"
+
+            local r = reg:execute("despawn ids=" .. tostring(a) .. "," ..
+                tostring(b) .. "," .. tostring(gone))
+            w:commit()
+            luassert.is_true(r.ok, tostring(r.message))
+            luassert.equals(2, r.data.despawned)
+            luassert.same({a, b}, r.data.ids)
+            luassert.same({gone}, r.data.missing)
+            luassert.is_false(w:isAlive(a))
+            luassert.is_false(w:isAlive(b))
+            luassert.equals(0, #ctx.selected, "despawned ids must leave the selection")
+            luassert.is_nil(ctx.marks[b], "despawned ids must drop their marks")
+
+            luassert.equals("invalid_arguments", (reg:execute("despawn ids=abc")).code)
+        end)
+    end)
+
+    describe("edit ids batching", function()
+        it("set and modify apply to an explicit ids list", function()
+            local reg, w = makeRegistry()
+            local a = w:spawn(SpecPos(1, 1))
+            local b = w:spawn(SpecPos(2, 2))
+            w:commit()
+
+            local r = reg:invokeMcp("debug_set",
+                {ids = {tostring(a), tostring(b)}, comp = "DbgCmdPos", value = {x = 7}})
+            w:commit()
+            luassert.is_true(r.ok, tostring(r.message))
+            luassert.equals(2, r.data.set)
+            luassert.equals(7, (w:get(a, SpecPos) as {string: number}).x)
+            luassert.equals(7, (w:get(b, SpecPos) as {string: number}).x)
+
+            -- The typed surface takes ids= as a named argument.
+            local m = reg:execute("modify ids=" .. tostring(a) .. "," .. tostring(b) ..
+                " comp=DbgCmdPos value={y = 9}")
+            w:commit()
+            luassert.is_true(m.ok, tostring(m.message))
+            luassert.equals(2, m.data.modified)
+            luassert.equals(7, (w:get(a, SpecPos) as {string: number}).x,
+                "modify must keep unnamed fields")
+            luassert.equals(9, (w:get(a, SpecPos) as {string: number}).y)
+            luassert.equals(9, (w:get(b, SpecPos) as {string: number}).y)
+
+            local rm = reg:invokeMcp("debug_remove",
+                {ids = {tostring(a)}, comps = "DbgCmdPos"})
+            w:commit()
+            luassert.is_true(rm.ok, tostring(rm.message))
+            luassert.equals(1, rm.data.entities)
+            luassert.is_nil(w:get(a, SpecPos))
+            luassert.is_not_nil(w:get(b, SpecPos))
+
+            -- Neither target nor ids is an argument error, and non-numeric
+            -- ids are rejected.
+            local none = reg:invokeMcp("debug_set", {comp = "DbgCmdPos", value = {x = 1}})
+            luassert.is_false(none.ok)
+            luassert.equals("invalid_arguments", none.code)
+            local bad = reg:invokeMcp("debug_modify",
+                {ids = {"nope"}, comp = "DbgCmdPos", value = {x = 1}})
+            luassert.is_false(bad.ok)
+            luassert.equals("invalid_arguments", bad.code)
+        end)
+    end)
+
     describe("history", function()
         it("persists across registry builds and skips repeats", function()
             local files: {string: string} = {}

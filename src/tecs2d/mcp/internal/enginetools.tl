@@ -172,76 +172,19 @@ handlers["get_fps"] = function(_: {string:any}, id: number)
     sendToolOK(id, {fps = lt.getFPS()})
 end
 
--- Cap the artifact lists returned by get_debug_context so a long-running session
--- does not ship an unbounded history to the agent on every call.
-local CONTEXT_LIST_LIMIT <const> = 5
-
-local function lastN<T>(list: {T}, n: integer): {T}
-    local total = #list
-    if total <= n then return list end
-    local out: {T} = {}
-    for i = total - n + 1, total do
-        out[#out + 1] = list[i]
-    end
-    return out
-end
-
 handlers["get_debug_context"] = function(_: {string:any}, id: number)
     local world = requireWorld(id)
     if not world then return end
-    local dbg = world.resources[debugapi.KEY]
-    if not dbg then
+    -- The payload is built by the shared debug-context report so this tool
+    -- and the `context` debugger command can never drift apart.
+    local payload = debugapi.report(world)
+    if not payload then
         sendToolError(id, "debugger_disabled",
             "In-game debugger is not enabled; add the debug plugin " ..
             "(require(\"tecs2d.debug\").new()).")
         return
     end
-    -- Drop annotations on entities the game has since despawned.
-    for eid in pairs(dbg.marks) do
-        if not world:isAlive(eid) then dbg.marks[eid] = nil end
-    end
-    for eid in pairs(dbg.notes) do
-        if not world:isAlive(eid) then dbg.notes[eid] = nil end
-    end
-    -- selection is an entity id; call get_entity with it for the components.
-    -- marks/notes are keyed by name/message with compact id-range values.
-    sendToolOK(id, {
-        open = dbg.open,
-        frozen = dbg.frozen,
-        mode = dbg.mode,
-        command = dbg.command,
-        message = dbg.message,
-        selected = dbg.selected,
-        statsShown = dbg.statsShown,
-        showIds = dbg.showIds,
-        showBounds = dbg.showBounds,
-        grid = dbg.gridEnabled and {w = dbg.gridW, h = dbg.gridH,
-            offsetX = dbg.gridOX, offsetY = dbg.gridOY} or nil,
-        rewind = {status = dbg.rewind.status, count = #dbg.rewind.entries,
-            interval = dbg.rewind.interval, cap = dbg.rewind.cap, bytes = dbg.rewind.bytes},
-        diffs = lastN(dbg.diffs, CONTEXT_LIST_LIMIT),
-        menu = {open = dbg.menuOpen, target = dbg.menuTarget},
-        marks = debugapi.encodeGroups(dbg.marks),
-        notes = debugapi.encodeGroups(dbg.notes),
-        snapshots = lastN(dbg.snapshots, CONTEXT_LIST_LIMIT),
-        profiles = lastN(dbg.profiles, CONTEXT_LIST_LIMIT),
-        screenshots = lastN(dbg.screenshots, CONTEXT_LIST_LIMIT),
-        recording = dbg.recording,
-        recordings = lastN(dbg.recordings, CONTEXT_LIST_LIMIT),
-        profileTop = (#dbg.profileTop > 0) and dbg.profileTop or nil,
-        entityCount = dbg.entityCount,
-        area = dbg.hasArea and {
-            x1 = dbg.areaX1, y1 = dbg.areaY1, x2 = dbg.areaX2, y2 = dbg.areaY2
-        } or nil,
-        mouse = {
-            screenX = dbg.mouseScreenX, screenY = dbg.mouseScreenY,
-            worldX = dbg.mouseWorldX, worldY = dbg.mouseWorldY
-        },
-        camera = {
-            x = dbg.cameraX, y = dbg.cameraY, zoom = dbg.cameraZoom,
-            rotation = dbg.cameraRotation, w = dbg.cameraW, h = dbg.cameraH
-        }
-    })
+    sendToolOK(id, payload)
 end
 
 handlers["quit"] = function(_: {string:any}, id: number)

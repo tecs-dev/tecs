@@ -5,6 +5,7 @@
 
 local tecs <const> = require("tecs")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
+local contextreport <const> = require("tecs2d.debug.internal.contextreport")
 local commands <const> = require("tecs2d.debug.commands")
 local core <const> = require("tecs2d.debug.internal.core")
 local freeze <const> = require("tecs2d.debug.internal.freeze")
@@ -17,6 +18,12 @@ local record context
     --- Invert an entity->value map to value->compact id-range string, e.g.
     --- {5="a", 6="a", 9="b"} -> {a="5-6", b="9"}.
     encodeGroups: function({integer: string}): {string: string}
+
+    --- The debugger-context payload served by the get_debug_context MCP tool
+    --- and the `context` debugger command: selection, marks, notes, camera,
+    --- and the newest artifact history entries. Returns nil when the debug
+    --- plugin is not installed.
+    report: function(w: tecs.World): {string: any}
 
     --- Get or create the world's freeze/step controller. Works with or
     --- without the debug plugin installed.
@@ -40,6 +47,12 @@ context.KEY = debugcontext.KEY
 context.encodeGroups = debugcontext.encodeGroups
 context.ensureFreeze = freeze.ensure
 context.ensureCore = core.ensure
+
+function context.report(w: tecs.World): {string: any}
+    local dbg = w.resources[debugcontext.KEY]
+    if not dbg then return nil end
+    return contextreport.build(w, dbg)
+end
 
 function context.commandTools(w: tecs.World): {commands.McpTool}
     local registry = w.resources[commands.KEY]

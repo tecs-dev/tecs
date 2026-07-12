@@ -1,14 +1,17 @@
---- Session-section debugger commands: history, agent, capabilities, step,
---- exit, and quit. They read registry state (history, signals, the command
---- list) and the MCP session info resource.
+--- Session-section debugger commands: history, agent, capabilities, freeze,
+--- step, stats, context, restart, exit, and quit. They read registry state
+--- (history, signals, the command list) and the MCP session info resource.
 ---
 --- Everything shared with the core registry arrives through cmdtypes.Deps;
 --- this module must not require tecs2d.debug.commands (a load cycle).
 
 local tecs <const> = require("tecs")
 local mcpinfo <const> = require("tecs2d.internal.mcpinfo")
+local contextreport <const> = require("tecs2d.debug.internal.contextreport")
 local cmdargs <const> = require("tecs2d.debug.internal.cmdargs")
 local cmdtypes <const> = require("tecs2d.debug.internal.cmdtypes")
+
+local format <const> = string.format
 
 local record session
     --- The Session-section commands, in display order.
@@ -170,6 +173,43 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             end,
         },
         {
+            name = "freeze",
+            section = "Session",
+            shortHelp = "freeze or unfreeze gameplay under the operator's hold",
+            mcpHelp = "Freeze gameplay through the shared freeze controller under the \"operator\" hold: on=true acquires, on=false releases, omit toggles. Rendering, input, and tools keep running; the world stays frozen while any other holder (the open debugger panel, MCP pause) remains. Returns the resulting frozen state. Use the step tool to advance frames while frozen.",
+            schema = d.onOffSchema,
+            examples = {"freeze", "freeze on", "freeze off"},
+            annotations = {idempotentHint = true},
+            outputSchema = {
+                type = "object",
+                properties = {
+                    frozen = {type = "boolean",
+                        description = "whether gameplay is frozen after the call (any holder)"},
+                },
+                required = {"frozen"},
+            },
+            run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
+                local fz = env.freeze
+                local want = v.on as boolean
+                if want == nil then want = not fz:heldBy("operator") end
+                if want then
+                    fz:acquire("operator")
+                else
+                    fz:release("operator")
+                end
+                local frozen = fz:isFrozen()
+                local msg: string
+                if want then
+                    msg = "frozen"
+                elseif frozen then
+                    msg = "operator hold released; still frozen by another holder"
+                else
+                    msg = "resumed"
+                end
+                return {ok = true, message = msg, data = {frozen = frozen}}
+            end,
+        },
+        {
             name = "step",
             section = "Session",
             mcp = false,   -- agents use the step MCP tool (same freeze controller)
@@ -183,6 +223,128 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 end
                 return {ok = true, message = "stepping " .. tostring(n) .. " frame(s)",
                     data = {frames = n}}
+            end,
+        },
+        {
+            name = "stats",
+            section = "Session",
+            shortHelp = "world stats: entities, archetypes, memory, fps, window",
+            mcpHelp = "World and host stats in one call: entity, archetype, component, and system counts, Lua memory in KB and MB, the current FPS, and the window size in pixels. Read-only; use it as a quick health check.",
+            examples = {"stats"},
+            annotations = {readOnlyHint = true, idempotentHint = true},
+            outputSchema = {
+                type = "object",
+                properties = {
+                    entities = {type = "integer", description = "live entity count"},
+                    archetypes = {type = "integer"},
+                    components = {type = "integer", description = "registered component types"},
+                    systems = {type = "integer"},
+                    memoryKB = {type = "number", description = "Lua heap from collectgarbage"},
+                    memoryMB = {type = "number"},
+                    fps = {type = "integer", description = "frames per second"},
+                    window = {type = "object", properties = {
+                        width = {type = "integer"},
+                        height = {type = "integer"},
+                    }, description = "window size in pixels"},
+                },
+                required = {"archetypes", "components", "entities", "fps",
+                    "memoryKB", "memoryMB", "systems", "window"},
+            },
+            run = function(_v: {string: any}, _parts: {string}): cmdtypes.Result
+                local s = w:getStats()
+                local memoryKB = collectgarbage("count")
+                local fps = love.timer.getFPS()
+                local width = love.graphics.getWidth()
+                local height = love.graphics.getHeight()
+                return {ok = true, popup = {
+                    "stats",
+                    "  entities\t" .. tostring(s.entities),
+                    "  archetypes\t" .. tostring(s.archetypes),
+                    "  components\t" .. tostring(s.components),
+                    "  systems\t" .. tostring(s.systems),
+                    format("  memory\t%.1f KB (%.2f MB)", memoryKB, memoryKB / 1024),
+                    "  fps\t" .. tostring(fps),
+                    format("  window\t%dx%d", math.floor(width), math.floor(height)),
+                }, data = {entities = s.entities, archetypes = s.archetypes,
+                    components = s.components, systems = s.systems,
+                    memoryKB = memoryKB, memoryMB = memoryKB / 1024, fps = fps,
+                    window = {width = width, height = height}}}
+            end,
+        },
+        {
+            name = "context",
+            section = "Session",
+            shortHelp = "the live debugger context: selection, camera, artifacts",
+            mcpHelp = "The full debugger context snapshot: selection, marks, notes, mode, freeze state, camera, mouse, grid, rewind status, and the newest artifact entries (snapshots, diffs, profiles, screenshots, recordings). Same payload as the get_debug_context tool. Read-only.",
+            examples = {"context"},
+            annotations = {readOnlyHint = true, idempotentHint = true},
+            outputSchema = {
+                type = "object",
+                properties = {
+                    open = {type = "boolean", description = "whether the debugger panel is open"},
+                    frozen = {type = "boolean"},
+                    mode = {type = "string"},
+                    command = {type = "string", description = "the typed command line"},
+                    message = {type = "string", description = "the status line"},
+                    selected = {type = "array", items = {type = "integer"},
+                        description = "selected entity ids"},
+                    statsShown = {type = "boolean"},
+                    showIds = {type = "boolean"},
+                    showBounds = {type = "boolean"},
+                    grid = {type = "object",
+                        description = "grid size and origin; absent when the grid is off"},
+                    rewind = {type = "object",
+                        description = "ring status, count, interval, cap, bytes"},
+                    diffs = {type = "array", description = "newest diff artifacts"},
+                    menu = {type = "object", description = "context-menu open flag and target"},
+                    marks = {type = "object", description = "mark name to compact id ranges"},
+                    notes = {type = "object", description = "note text to compact id ranges"},
+                    snapshots = {type = "array", description = "newest snapshot entries"},
+                    profiles = {type = "array", description = "newest profile captures"},
+                    screenshots = {type = "array", description = "newest screenshots"},
+                    recording = {type = "object", description = "current recording state"},
+                    recordings = {type = "array", description = "newest completed recordings"},
+                    profileTop = {type = "array", items = {type = "string"},
+                        description = "hot spots from the last profile; absent when none"},
+                    entityCount = {type = "integer"},
+                    area = {type = "object",
+                        description = "drag-selection rectangle; absent when none"},
+                    mouse = {type = "object",
+                        description = "pointer position in screen and world space"},
+                    camera = {type = "object",
+                        description = "camera position, zoom, rotation, and view size"},
+                },
+                required = {"camera", "entityCount", "frozen", "menu", "mode",
+                    "mouse", "open", "recording", "rewind", "selected"},
+            },
+            run = function(_v: {string: any}, _parts: {string}): cmdtypes.Result
+                local data = contextreport.build(w, ctx)
+                return {ok = true, popup = {
+                    "context",
+                    "  selected\t" .. tostring(#ctx.selected),
+                    "  mode\t" .. ((ctx.mode ~= "") and ctx.mode or "(none)"),
+                    "  frozen\t" .. (ctx.frozen and "yes" or "no"),
+                    format("  camera\t%.1f, %.1f  z%.2f", ctx.cameraX, ctx.cameraY, ctx.cameraZoom),
+                }, data = data}
+            end,
+        },
+        {
+            name = "restart",
+            section = "Session",
+            shortHelp = "restart the game process",
+            mcpHelp = "Restart the game via love.event.quit(\"restart\"). Unsaved state is lost and the MCP connection drops until the new instance binds. Take debug_snapshot_save first if the state matters.",
+            examples = {"restart"},
+            annotations = {destructiveHint = true},
+            outputSchema = {
+                type = "object",
+                properties = {
+                    restarting = {type = "boolean"},
+                },
+                required = {"restarting"},
+            },
+            run = function(_v: {string: any}, _parts: {string}): cmdtypes.Result
+                love.event.quit("restart")
+                return {ok = true, message = "restarting", data = {restarting = true}}
             end,
         },
         {

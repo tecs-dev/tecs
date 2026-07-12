@@ -137,12 +137,14 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
 
     -- Entity-edit commands take an explicit target: an id, a mark name, or
     -- the literal @selection (explicit, because component names follow it).
+    -- ids= is the batch alternative and overrides the positional target.
     local function editTargetArgs(): {string: cmdargs.ArgSpec}
         return {
             id = {kind = "number", forward = "target", help = "entity id"},
             name = {forward = "target", help = "mark name, or " .. selectionTarget},
-            target = {synthetic = {"id", "name"}, required = true,
-                help = "entity id, mark name, or " .. selectionTarget},
+            target = {synthetic = {"id", "name"},
+                help = "entity id, mark name, or " .. selectionTarget .. " (or give ids=)"},
+            ids = {kind = "list", help = "entity ids to target instead (overrides target)"},
         }
     end
 
@@ -174,20 +176,38 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
         return schema
     end)()
 
-    -- Resolve an edit target; the literal @selection means the current
-    -- selection. Returns nil plus a reason when nothing matches.
-    local function resolveEditTargets(v: {string: any}): {integer}, string
+    -- Resolve an edit target: an explicit ids= list wins, and the literal
+    -- @selection means the current selection. Returns nil plus a reason and
+    -- a machine-readable code when nothing matches.
+    local function resolveEditTargets(v: {string: any}): {integer}, string, string
+        if v.ids ~= nil then
+            local ids: {integer} = {}
+            for _, raw in ipairs(v.ids as {string}) do
+                local n = tonumber(raw)
+                if not n then
+                    return nil, "ids must be numeric entity ids, got '" .. raw .. "'",
+                        "invalid_arguments"
+                end
+                ids[#ids + 1] = math.floor(n)
+            end
+            if #ids == 0 then return nil, "ids is empty", "invalid_arguments" end
+            return ids, nil, nil
+        end
+        if v.target == nil then
+            return nil, "give an entity id, mark name, " .. selectionTarget .. ", or ids=",
+                "invalid_arguments"
+        end
         if v.name == selectionTarget then
-            if #ctx.selected == 0 then return nil, "nothing selected" end
+            if #ctx.selected == 0 then return nil, "nothing selected", "no_match" end
             local ids: {integer} = {}
             for i = 1, #ctx.selected do ids[i] = ctx.selected[i] end
-            return ids, nil
+            return ids, nil, nil
         end
         local ids = resolveTargets(v)
         if #ids == 0 then
-            return nil, "no live match for '" .. tostring(v.target) .. "'"
+            return nil, "no live match for '" .. tostring(v.target) .. "'", "no_match"
         end
-        return ids, nil
+        return ids, nil, nil
     end
 
     -- One draw verb: the name doubles as the annotation kind.
@@ -211,9 +231,10 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             section = "Edit",
             complete = {[1] = "edittargets", [0] = "components"},
             shortHelp = "remove components from an entity, marked group, or " .. selectionTarget,
-            mcpHelp = "Strip the named components from the target entities (an id, a mark name, or @selection). Destructive to component data; the entities survive. Returns how many entities were changed.",
+            mcpHelp = "Strip the named components from the target entities (an id, a mark name, @selection, or an ids list). Destructive to component data; the entities survive. Returns how many entities were changed.",
             schema = removeSchema,
-            examples = {"remove 5 Velocity", "remove @selection Burning Stunned", "remove boss Shield"},
+            examples = {"remove 5 Velocity", "remove @selection Burning Stunned", "remove boss Shield",
+                "remove ids=5,6 comps=Shield"},
             outputSchema = {
                 type = "object",
                 properties = {
@@ -224,9 +245,9 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 required = {"components", "entities", "errors"},
             },
             run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                local ids, terr = resolveEditTargets(v)
+                local ids, terr, tcode = resolveEditTargets(v)
                 if not ids then
-                    return {ok = false, code = "no_match", message = "remove: " .. terr}
+                    return {ok = false, code = tcode, message = "remove: " .. terr}
                 end
                 local comps: {tecs.Component} = {}
                 local names: {string} = {}
@@ -270,10 +291,10 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             complete = {[1] = "edittargets", [2] = "components"},
             shortHelp = "set one component on an entity, marked group, or " ..
                 selectionTarget .. " (Lua table value)",
-            mcpHelp = "Write one component on the target entities (an id, a mark name, or the literal @selection). The value is a JSON object or a Lua table expression, e.g. {x = 10, y = {n = 2}}; omitted fields reset to the component's defaults (use debug_modify to change fields in place). Adds the component when missing. Mutates the live world immediately. Returns how many entities were written.",
+            mcpHelp = "Write one component on the target entities (an id, a mark name, the literal @selection, or an ids list). The value is a JSON object or a Lua table expression, e.g. {x = 10, y = {n = 2}}; omitted fields reset to the component's defaults (use debug_modify to change fields in place). Adds the component when missing. Mutates the live world immediately. Returns how many entities were written.",
             schema = setSchema,
             examples = {"set 5 Transform {x = 10, y = 20}", "set @selection Color {r = 1, g = 0, b = 0}",
-                "set boss Shield"},
+                "set boss Shield", "set ids=5,6 comp=Transform value={x = 0}"},
             outputSchema = {
                 type = "object",
                 properties = {
@@ -283,9 +304,9 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 required = {"component", "set"},
             },
             run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                local ids, terr = resolveEditTargets(v)
+                local ids, terr, tcode = resolveEditTargets(v)
                 if not ids then
-                    return {ok = false, code = "no_match", message = "set: " .. terr}
+                    return {ok = false, code = tcode, message = "set: " .. terr}
                 end
                 local compName = v.comp as string
                 local comp, cerr = componentFor(compName)
@@ -330,10 +351,10 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             section = "Edit",
             complete = {[1] = "edittargets", [2] = "components"},
             shortHelp = "change only the given fields of a component the target already has",
-            mcpHelp = "Update only the provided fields of one component on the target entities (an id, a mark name, or @selection). Unlike debug_set it never adds the component and never resets omitted fields: targets missing the component are skipped and unnamed fields keep their current values. Returns modified and skipped counts.",
+            mcpHelp = "Update only the provided fields of one component on the target entities (an id, a mark name, @selection, or an ids list). Unlike debug_set it never adds the component and never resets omitted fields: targets missing the component are skipped and unnamed fields keep their current values. Returns modified and skipped counts.",
             schema = modifySchema,
             examples = {"modify 5 Transform {x = 10}", "modify @selection Color {a = 0.5}",
-                "modify boss Health {hp = 1}"},
+                "modify boss Health {hp = 1}", "modify ids=5,6 comp=Health value={hp = 1}"},
             outputSchema = {
                 type = "object",
                 properties = {
@@ -344,9 +365,9 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 required = {"component", "modified", "skipped"},
             },
             run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                local ids, terr = resolveEditTargets(v)
+                local ids, terr, tcode = resolveEditTargets(v)
                 if not ids then
-                    return {ok = false, code = "no_match", message = "modify: " .. terr}
+                    return {ok = false, code = tcode, message = "modify: " .. terr}
                 end
                 local compName = v.comp as string
                 local comp, cerr = componentFor(compName)

@@ -59,6 +59,12 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
         replace = {default = false, help = "replace the selection instead of adding to it"},
     })
 
+    -- despawn's optional target plus an exact id list (overrides the target
+    -- and the selection).
+    local despawnSchema <const> = d.makeTargetSchema(false, {
+        ids = {kind = "list", help = "entity ids to despawn (overrides target and the selection)"},
+    })
+
     -- Archetype signature membership by component identity. Column access
     -- (arch:get) returns nil for tag components, so scan componentList.
     local function archHas(arch: tecs.Archetype, comp: tecs.Component): boolean
@@ -457,19 +463,59 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             name = "despawn",
             section = "Select",
             complete = {[1] = "targets"},
-            shortHelp = "despawn an entity by id or mark name, or the whole selection",
-            mcpHelp = "Despawn the target entities (an id, a mark name, or the current selection when no target is given). Destructive and immediate. Take debug_snapshot_save first if the state matters.",
-            schema = optionalTargetSchema,
+            shortHelp = "despawn an entity by id or mark name, given ids, or the whole selection",
+            mcpHelp = "Despawn the target entities (an id, a mark name, an explicit ids list, or the current selection when no target is given). Destructive and immediate. Take debug_snapshot_save first if the state matters.",
+            schema = despawnSchema,
+            examples = {"despawn 5", "despawn boss", "despawn ids=5,6,7",
+                "despawn  (the selection)"},
             outputSchema = {
                 type = "object",
                 properties = {
                     despawned = {type = "integer"},
                     ids = {type = "array", items = {type = "integer"},
                         description = "despawned entity ids (absent for selection despawns)"},
+                    missing = {type = "array", items = {type = "integer"},
+                        description = "requested ids that were not alive (ids= form)"},
                 },
                 required = {"despawned"},
             },
             run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
+                if v.ids ~= nil then
+                    local wanted: {integer} = {}
+                    for _, raw in ipairs(v.ids as {string}) do
+                        local n = tonumber(raw)
+                        if not n then
+                            return {ok = false, code = "invalid_arguments",
+                                message = "despawn: ids must be numeric entity ids, got '" ..
+                                    raw .. "'"}
+                        end
+                        wanted[#wanted + 1] = math.floor(n)
+                    end
+                    if #wanted == 0 then
+                        return {ok = false, code = "invalid_arguments",
+                            message = "despawn: ids is empty"}
+                    end
+                    local killed: {integer} = {}
+                    local missing: {integer} = {}
+                    for i = 1, #wanted do
+                        local eid = wanted[i]
+                        if w:isAlive(eid) then
+                            debugcontext.removeSelected(ctx, eid)
+                            w:despawn(eid)
+                            ctx.marks[eid] = nil
+                            ctx.notes[eid] = nil
+                            killed[#killed + 1] = eid
+                        else
+                            missing[#missing + 1] = eid
+                        end
+                    end
+                    debugcontext.pushEvent(ctx, "selection",
+                        {selected = #ctx.selected, despawned = #killed})
+                    return {ok = true,
+                        message = "despawned " .. tostring(#killed) ..
+                            ((#missing > 0) and (" (" .. tostring(#missing) .. " not alive)") or ""),
+                        data = {despawned = #killed, ids = killed, missing = missing}}
+                end
                 if v.target == nil then
                     local n = reg:despawnSelected()
                     return {ok = true, message = "despawned " .. tostring(n) .. " selected",

@@ -263,11 +263,11 @@ Overlay only; not projected over MCP.
 | `id` | number | entity id |
 | `name` | string | mark name |
 
-### `despawn [id|name]` {#cmd-despawn}
+### `despawn [id|name] [ids=a,b]` {#cmd-despawn}
 
-Despawn an entity by id or mark name, or the whole selection.
+Despawn an entity by id or mark name, given ids, or the whole selection.
 
-Despawn the target entities (an id, a mark name, or the current selection when no target is given). Destructive and immediate. Take debug_snapshot_save first if the state matters.
+Despawn the target entities (an id, a mark name, an explicit ids list, or the current selection when no target is given). Destructive and immediate. Take debug_snapshot_save first if the state matters.
 
 MCP tool: `debug_despawn` (destructive)
 
@@ -275,6 +275,7 @@ MCP tool: `debug_despawn` (destructive)
 | --- | --- | --- |
 | `id` | number | entity id |
 | `name` | string | mark name |
+| `ids` | list | entity ids to despawn (overrides target and the selection) |
 
 ::: details Result data schema
 ```json
@@ -289,6 +290,13 @@ MCP tool: `debug_despawn` (destructive)
         "type": "integer"
       },
       "type": "array"
+    },
+    "missing": {
+      "description": "requested ids that were not alive (ids= form)",
+      "items": {
+        "type": "integer"
+      },
+      "type": "array"
     }
   },
   "required": [
@@ -298,6 +306,13 @@ MCP tool: `debug_despawn` (destructive)
 }
 ```
 :::
+
+```
+despawn 5
+despawn boss
+despawn ids=5,6,7
+despawn  (the selection)
+```
 
 ### `query <expr...> [invert]` {#cmd-query}
 
@@ -381,11 +396,11 @@ ids off
 
 Mutate the live world: components, spawning, world-space drawing.
 
-### `remove <id|name> <comps...>` {#cmd-remove}
+### `remove [id|name] <comps...> [ids=a,b]` {#cmd-remove}
 
 Remove components from an entity, marked group, or @selection.
 
-Strip the named components from the target entities (an id, a mark name, or @selection). Destructive to component data; the entities survive. Returns how many entities were changed.
+Strip the named components from the target entities (an id, a mark name, @selection, or an ids list). Destructive to component data; the entities survive. Returns how many entities were changed.
 
 MCP tool: `debug_remove` (destructive)
 
@@ -394,6 +409,7 @@ MCP tool: `debug_remove` (destructive)
 | `id` | number | entity id |
 | `name` | string | mark name, or @selection |
 | `comps` | string | component names to remove (required) |
+| `ids` | list | entity ids to target instead (overrides target) |
 
 ::: details Result data schema
 ```json
@@ -428,13 +444,14 @@ MCP tool: `debug_remove` (destructive)
 remove 5 Velocity
 remove @selection Burning Stunned
 remove boss Shield
+remove ids=5,6 comps=Shield
 ```
 
-### `set <id|name> <comp> [value...]` {#cmd-set}
+### `set [id|name] <comp> [value...] [ids=a,b]` {#cmd-set}
 
 Set one component on an entity, marked group, or @selection (Lua table value).
 
-Write one component on the target entities (an id, a mark name, or the literal @selection). The value is a JSON object or a Lua table expression, e.g. {x = 10, y = {n = 2}}; omitted fields reset to the component's defaults (use debug_modify to change fields in place). Adds the component when missing. Mutates the live world immediately. Returns how many entities were written.
+Write one component on the target entities (an id, a mark name, the literal @selection, or an ids list). The value is a JSON object or a Lua table expression, e.g. {x = 10, y = {n = 2}}; omitted fields reset to the component's defaults (use debug_modify to change fields in place). Adds the component when missing. Mutates the live world immediately. Returns how many entities were written.
 
 MCP tool: `debug_set`
 
@@ -444,6 +461,7 @@ MCP tool: `debug_set`
 | `name` | string | mark name, or @selection |
 | `comp` | string | component name (required) |
 | `value` | table | component fields: a Lua table expression, e.g. {x = 10, y = 20}, or a JSON object over MCP; omit for defaults |
+| `ids` | list | entity ids to target instead (overrides target) |
 
 ::: details Result data schema
 ```json
@@ -470,13 +488,14 @@ MCP tool: `debug_set`
 set 5 Transform {x = 10, y = 20}
 set @selection Color {r = 1, g = 0, b = 0}
 set boss Shield
+set ids=5,6 comp=Transform value={x = 0}
 ```
 
-### `modify <id|name> <comp> <value...>` {#cmd-modify}
+### `modify [id|name] <comp> <value...> [ids=a,b]` {#cmd-modify}
 
 Change only the given fields of a component the target already has.
 
-Update only the provided fields of one component on the target entities (an id, a mark name, or @selection). Unlike debug_set it never adds the component and never resets omitted fields: targets missing the component are skipped and unnamed fields keep their current values. Returns modified and skipped counts.
+Update only the provided fields of one component on the target entities (an id, a mark name, @selection, or an ids list). Unlike debug_set it never adds the component and never resets omitted fields: targets missing the component are skipped and unnamed fields keep their current values. Returns modified and skipped counts.
 
 MCP tool: `debug_modify`
 
@@ -486,6 +505,7 @@ MCP tool: `debug_modify`
 | `name` | string | mark name, or @selection |
 | `comp` | string | component name (required) |
 | `value` | table | fields to change: a Lua table expression, e.g. {x = 10}, or a JSON object over MCP (required) |
+| `ids` | list | entity ids to target instead (overrides target) |
 
 ::: details Result data schema
 ```json
@@ -517,6 +537,7 @@ MCP tool: `debug_modify`
 modify 5 Transform {x = 10}
 modify @selection Color {a = 0.5}
 modify boss Health {hp = 1}
+modify ids=5,6 comp=Health value={hp = 1}
 ```
 
 ### `spawn <spec...>` {#cmd-spawn}
@@ -850,6 +871,7 @@ camera move 100 50
 camera move z=0.3
 camera timescale 0.5
 camera toggle minimap
+camera world 640 360
 ```
 
 #### `camera info` {#cmd-camera-info}
@@ -891,6 +913,112 @@ MCP tool: `debug_camera_toggle`
 | Argument | Type | Description |
 | --- | --- | --- |
 | `name` | string | camera name (see `camera`) (required) |
+
+#### `camera world <x> <y>` {#cmd-camera-world}
+
+Convert screen coordinates to world through the active camera.
+
+Convert window pixel coordinates to world coordinates through the active camera, the same mapping a click at that pixel uses. Returns both the screen input and the world result. The reverse is debug_camera_screen.
+
+MCP tool: `debug_camera_world` (read-only, idempotent)
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `x` | number | screen x in pixels (required) |
+| `y` | number | screen y in pixels (required) |
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "screen": {
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "world": {
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "required": [
+    "screen",
+    "world"
+  ],
+  "type": "object"
+}
+```
+:::
+
+```
+camera world 640 360
+```
+
+#### `camera screen <x> <y>` {#cmd-camera-screen}
+
+Convert world coordinates to screen through the active camera.
+
+Convert world coordinates to window pixel coordinates through the active camera. Returns both the world input and the screen result. The reverse is debug_camera_world.
+
+MCP tool: `debug_camera_screen` (read-only, idempotent)
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `x` | number | world x (required) |
+| `y` | number | world y (required) |
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "screen": {
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "world": {
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "required": [
+    "screen",
+    "world"
+  ],
+  "type": "object"
+}
+```
+:::
+
+```
+camera screen 100 -40
+```
 
 ### `layers` {#cmd-layers}
 
@@ -1376,11 +1504,232 @@ MCP tool: `debug_audio_mute`
 | --- | --- | --- |
 | `on` | boolean | enable or disable; omit to toggle |
 
+### `fetch <expr...> [h=N] [limit=N] [w=N] [x=N] [y=N]` {#cmd-fetch}
+
+Fetch entities matching a component query, without selecting them.
+
+Fetch entities matching a component expression ('Enemy -Dead' means has Enemy, lacks Dead) with their serialized component data, without touching the operator's selection. Give x, y, w, h to restrict to a world-space box (spatial filter via Position when registered, else Transform; the spatial component is always included). Returns up to limit entities plus a truncated flag. Use debug_query when you want to select the matches instead.
+
+MCP tool: `debug_fetch` (read-only, idempotent)
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `expr` | string | component names separated by spaces; -Foo excludes (required) |
+| `h` | number | bounds height in world units |
+| `limit` | number (min 0) | max entities returned (default: 100) |
+| `w` | number | bounds width in world units |
+| `x` | number | bounds left world x (give all of x, y, w, h or none) |
+| `y` | number | bounds top world y |
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "bounds": {
+      "description": "the spatial filter, when one was given",
+      "properties": {
+        "height": {
+          "type": "number"
+        },
+        "width": {
+          "type": "number"
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "count": {
+      "description": "entities returned",
+      "type": "integer"
+    },
+    "entities": {
+      "items": {
+        "properties": {
+          "archetypeComponents": {
+            "description": "sorted archetype signature; absent in the bounds form",
+            "type": "string"
+          },
+          "archetypeId": {
+            "description": "absent in the bounds form",
+            "type": "integer"
+          },
+          "components": {
+            "description": "serialized data of the included components",
+            "type": "object"
+          },
+          "id": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "truncated": {
+      "description": "true when the limit cut the results",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "count",
+    "entities",
+    "truncated"
+  ],
+  "type": "object"
+}
+```
+:::
+
+```
+fetch Transform -Disabled
+fetch Enemy limit=10
+fetch Transform x=0 y=0 w=640 h=360
+```
+
+### `resources` {#cmd-resources}
+
+List world resources with their key and type names.
+
+Every world resource as {key, type}: keys resolve to their registered name when available, values to their metatable type name. Read-only; use it to discover installed subsystems and custom game resources.
+
+MCP tool: `debug_resources` (read-only, idempotent)
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "count": {
+      "type": "integer"
+    },
+    "resources": {
+      "items": {
+        "properties": {
+          "key": {
+            "description": "resource key name",
+            "type": "string"
+          },
+          "type": {
+            "description": "value type name",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "count",
+    "resources"
+  ],
+  "type": "object"
+}
+```
+:::
+
+```
+resources
+```
+
+### `bundles` {#cmd-bundles}
+
+List registered bundles or spawn an entity from one.
+
+```
+bundles list
+bundles spawn enemy
+bundles spawn enemy {Transform = {x = 10, y = 5}}
+```
+
+#### `bundles list` {#cmd-bundles-list}
+
+List bundles with their required and defaulted components.
+
+Registered bundles as a map of name to component requirements: required components must be provided at spawn, defaulted ones fill in automatically. Pair with debug_bundles_spawn.
+
+MCP tool: `debug_bundles_list` (read-only, idempotent)
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "bundles": {
+      "additionalProperties": {
+        "properties": {
+          "defaulted": {
+            "description": "components filled from defaults",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "required": {
+            "description": "components that must be provided at spawn",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "description": "bundle name to its component requirements",
+      "type": "object"
+    }
+  },
+  "required": [
+    "bundles"
+  ],
+  "type": "object"
+}
+```
+:::
+
+#### `bundles spawn <name> [components]` {#cmd-bundles-spawn}
+
+Spawn an entity from a bundle with optional component overrides.
+
+Spawn one entity from a registered bundle. components is a map of component name to field data; the bundle's required components must be provided there. Returns the new entity id. Unlike debug_spawn this does not select the entity.
+
+MCP tool: `debug_bundles_spawn`
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `name` | string | bundle name (required) |
+| `components` | table | component overrides: {Name = {field = value}, ...} (a JSON object over MCP) |
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "id": {
+      "description": "the new entity",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "type": "object"
+}
+```
+:::
+
+```
+bundles spawn enemy
+bundles spawn enemy {Transform = {x = 10, y = 5}}
+```
+
 ## Capture
 
 Artifacts and time travel: screenshots, profiles, snapshots, recordings, rewind, diff.
 
-### `profile [seconds]` {#cmd-profile}
+### `profile [seconds] [intervalMs=N] [zone=...]` {#cmd-profile}
 
 Sample the running game with the LuaJIT profiler.
 
@@ -1389,10 +1738,14 @@ Overlay only; not projected over MCP.
 | Argument | Type | Description |
 | --- | --- | --- |
 | `seconds` | number | sample duration; 0 samples until reopen (default: 0) |
+| `intervalMs` | number | sampler interval in ms (sampler default if omitted; raise for long sessions) |
+| `zone` | string | restrict output to samples whose zone path starts with this prefix |
 
 ```
 profile
 profile 5
+profile 5 intervalMs=5
+profile zone=afterFixed/Render
 profile ls
 ```
 
@@ -1448,29 +1801,148 @@ snapshot load 3
 snapshot ls
 ```
 
-#### `snapshot save [name]` {#cmd-snapshot-save}
+#### `snapshot save [name] [format=json|luajit] [inline] [layers=a,b] [pretty]` {#cmd-snapshot-save}
 
 Save the world; reports a number for load/open.
 
-Save the whole world to a snapshot file in the save directory. Returns a snapshot number usable as a debug_snapshot_load and debug_diff ref. Does not disturb the running game.
+Save the whole world to a snapshot file in the save directory (format luajit by default, or json; layers restricts to Transform layers). Returns a snapshot number usable as a debug_snapshot_load and debug_diff ref. inline=true instead returns the payload in the result (a json snapshot object, or a base64 luajit payload) and writes no artifact. Does not disturb the running game.
 
 MCP tool: `debug_snapshot_save`
 
 | Argument | Type | Description |
 | --- | --- | --- |
 | `name` | string | output filename |
+| `format` | json \| luajit | snapshot encoding: compact luajit binary or json (default: luajit) |
+| `inline` | boolean | return the payload in the result instead of writing a numbered artifact (default: false) |
+| `layers` | list | only save entities whose Transform.layer is in this set (values 0-31) |
+| `pretty` | boolean | pretty-print json output (json format only) (default: false) |
 
-#### `snapshot load [ref]` {#cmd-snapshot-load}
+::: details Result data schema
+```json
+{
+  "properties": {
+    "archetypes": {
+      "description": "archetypes saved (inline forms only)",
+      "type": "integer"
+    },
+    "bytes": {
+      "description": "payload size in bytes (inline forms only)",
+      "type": "integer"
+    },
+    "elapsedMs": {
+      "description": "inline forms only",
+      "type": "number"
+    },
+    "encoding": {
+      "description": "always base64 in the inline luajit form",
+      "type": "string"
+    },
+    "entities": {
+      "description": "entities saved",
+      "type": "integer"
+    },
+    "format": {
+      "type": "string"
+    },
+    "number": {
+      "description": "snapshot number (artifact form only)",
+      "type": "integer"
+    },
+    "path": {
+      "description": "save-dir filename (artifact form only)",
+      "type": "string"
+    },
+    "payload": {
+      "description": "base64 snapshot binary (inline luajit form only)",
+      "type": "string"
+    },
+    "size": {
+      "description": "file size in bytes (artifact form only)",
+      "type": "integer"
+    },
+    "snapshot": {
+      "description": "the snapshot object (inline json form only)",
+      "type": "object"
+    }
+  },
+  "required": [
+    "entities"
+  ],
+  "type": "object"
+}
+```
+:::
 
-Restore a save (the last if omitted).
+```
+snapshot save
+snapshot save boss-fight
+snapshot save format=json pretty=true
+snapshot save inline=true format=json
+snapshot save layers=0,1
+```
 
-Replace the live world with a saved snapshot (ref is a number, name, or latest). Destructive to current state; selection, marks, and notes clear. Loads are rate limited, so retry on a busy error after a moment.
+#### `snapshot load [ref] [format=json|luajit] [payload=...]` {#cmd-snapshot-load}
+
+Restore a save (the last if omitted) or an inline payload.
+
+Replace the live world with a saved snapshot (ref is a number, name, or latest) or an inline payload (json text, or base64 luajit binary; set format to match how it was produced). Destructive to current state; selection, marks, and notes clear. Loads are rate limited, so retry on a busy error after a moment.
 
 MCP tool: `debug_snapshot_load` (destructive)
 
 | Argument | Type | Description |
 | --- | --- | --- |
 | `ref` | string | save name or number |
+| `format` | json \| luajit | encoding of the payload or file (default: luajit) |
+| `payload` | string | inline snapshot payload: json text, or base64 luajit binary |
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "archetypes": {
+      "description": "non-empty archetypes after the load",
+      "type": "integer"
+    },
+    "bytes": {
+      "description": "payload size in bytes",
+      "type": "integer"
+    },
+    "elapsedMs": {
+      "type": "number"
+    },
+    "entities": {
+      "description": "entities after the load",
+      "type": "integer"
+    },
+    "format": {
+      "type": "string"
+    },
+    "path": {
+      "description": "loaded filename (file form only)",
+      "type": "string"
+    },
+    "source": {
+      "description": "the filename, or inline-payload",
+      "type": "string"
+    }
+  },
+  "required": [
+    "archetypes",
+    "bytes",
+    "entities",
+    "format",
+    "source"
+  ],
+  "type": "object"
+}
+```
+:::
+
+```
+snapshot load
+snapshot load 3
+snapshot load boss-fight format=json
+```
 
 #### `snapshot open [ref]` {#cmd-snapshot-open}
 
@@ -1897,6 +2369,41 @@ MCP tool: `debug_describe`. MCP only; not typeable in the overlay.
 | --- | --- | --- |
 | `command` | string | command name (required) |
 
+### `freeze [on]` {#cmd-freeze}
+
+Freeze or unfreeze gameplay under the operator's hold.
+
+Freeze gameplay through the shared freeze controller under the "operator" hold: on=true acquires, on=false releases, omit toggles. Rendering, input, and tools keep running; the world stays frozen while any other holder (the open debugger panel, MCP pause) remains. Returns the resulting frozen state. Use the step tool to advance frames while frozen.
+
+MCP tool: `debug_freeze` (idempotent)
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `on` | boolean | enable or disable; omit to toggle |
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "frozen": {
+      "description": "whether gameplay is frozen after the call (any holder)",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "frozen"
+  ],
+  "type": "object"
+}
+```
+:::
+
+```
+freeze
+freeze on
+freeze off
+```
+
 ### `step [n]` {#cmd-step}
 
 Tick the game forward N frames while otherwise frozen.
@@ -1906,6 +2413,237 @@ Overlay only; not projected over MCP.
 | Argument | Type | Description |
 | --- | --- | --- |
 | `n` | number | number of frames to tick (default: 1) |
+
+### `stats` {#cmd-stats}
+
+World stats: entities, archetypes, memory, fps, window.
+
+World and host stats in one call: entity, archetype, component, and system counts, Lua memory in KB and MB, the current FPS, and the window size in pixels. Read-only; use it as a quick health check.
+
+MCP tool: `debug_stats` (read-only, idempotent)
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "archetypes": {
+      "type": "integer"
+    },
+    "components": {
+      "description": "registered component types",
+      "type": "integer"
+    },
+    "entities": {
+      "description": "live entity count",
+      "type": "integer"
+    },
+    "fps": {
+      "description": "frames per second",
+      "type": "integer"
+    },
+    "memoryKB": {
+      "description": "Lua heap from collectgarbage",
+      "type": "number"
+    },
+    "memoryMB": {
+      "type": "number"
+    },
+    "systems": {
+      "type": "integer"
+    },
+    "window": {
+      "description": "window size in pixels",
+      "properties": {
+        "height": {
+          "type": "integer"
+        },
+        "width": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "required": [
+    "archetypes",
+    "components",
+    "entities",
+    "fps",
+    "memoryKB",
+    "memoryMB",
+    "systems",
+    "window"
+  ],
+  "type": "object"
+}
+```
+:::
+
+```
+stats
+```
+
+### `context` {#cmd-context}
+
+The live debugger context: selection, camera, artifacts.
+
+The full debugger context snapshot: selection, marks, notes, mode, freeze state, camera, mouse, grid, rewind status, and the newest artifact entries (snapshots, diffs, profiles, screenshots, recordings). Same payload as the get_debug_context tool. Read-only.
+
+MCP tool: `debug_context` (read-only, idempotent)
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "area": {
+      "description": "drag-selection rectangle; absent when none",
+      "type": "object"
+    },
+    "camera": {
+      "description": "camera position, zoom, rotation, and view size",
+      "type": "object"
+    },
+    "command": {
+      "description": "the typed command line",
+      "type": "string"
+    },
+    "diffs": {
+      "description": "newest diff artifacts",
+      "type": "array"
+    },
+    "entityCount": {
+      "type": "integer"
+    },
+    "frozen": {
+      "type": "boolean"
+    },
+    "grid": {
+      "description": "grid size and origin; absent when the grid is off",
+      "type": "object"
+    },
+    "marks": {
+      "description": "mark name to compact id ranges",
+      "type": "object"
+    },
+    "menu": {
+      "description": "context-menu open flag and target",
+      "type": "object"
+    },
+    "message": {
+      "description": "the status line",
+      "type": "string"
+    },
+    "mode": {
+      "type": "string"
+    },
+    "mouse": {
+      "description": "pointer position in screen and world space",
+      "type": "object"
+    },
+    "notes": {
+      "description": "note text to compact id ranges",
+      "type": "object"
+    },
+    "open": {
+      "description": "whether the debugger panel is open",
+      "type": "boolean"
+    },
+    "profileTop": {
+      "description": "hot spots from the last profile; absent when none",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "profiles": {
+      "description": "newest profile captures",
+      "type": "array"
+    },
+    "recording": {
+      "description": "current recording state",
+      "type": "object"
+    },
+    "recordings": {
+      "description": "newest completed recordings",
+      "type": "array"
+    },
+    "rewind": {
+      "description": "ring status, count, interval, cap, bytes",
+      "type": "object"
+    },
+    "screenshots": {
+      "description": "newest screenshots",
+      "type": "array"
+    },
+    "selected": {
+      "description": "selected entity ids",
+      "items": {
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "showBounds": {
+      "type": "boolean"
+    },
+    "showIds": {
+      "type": "boolean"
+    },
+    "snapshots": {
+      "description": "newest snapshot entries",
+      "type": "array"
+    },
+    "statsShown": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "camera",
+    "entityCount",
+    "frozen",
+    "menu",
+    "mode",
+    "mouse",
+    "open",
+    "recording",
+    "rewind",
+    "selected"
+  ],
+  "type": "object"
+}
+```
+:::
+
+```
+context
+```
+
+### `restart` {#cmd-restart}
+
+Restart the game process.
+
+Restart the game via love.event.quit("restart"). Unsaved state is lost and the MCP connection drops until the new instance binds. Take debug_snapshot_save first if the state matters.
+
+MCP tool: `debug_restart` (destructive)
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "restarting": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "restarting"
+  ],
+  "type": "object"
+}
+```
+:::
+
+```
+restart
+```
 
 ### `exit` {#cmd-exit}
 

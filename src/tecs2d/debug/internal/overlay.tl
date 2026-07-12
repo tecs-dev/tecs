@@ -1037,11 +1037,13 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 end
             end
 
-            -- A timed profile auto-finishes: reopen the debugger with results.
-            local prof = registry.profiler
-            if prof.session and prof.deadline > 0 and now >= prof.deadline then
+            -- A timed profile auto-finishes in debug.CoreTick; surface its
+            -- results here, reopening the debugger so the operator sees them.
+            if registry.profileResult then
+                local profPopup = registry.profileResult
+                registry.profileResult = nil
                 if not ctx.open then doOpen() end
-                showPopup(popup, registry:finishProfile())
+                showPopup(popup, profPopup)
             end
 
             -- Commands invoked over MCP may raise signals while the panel is

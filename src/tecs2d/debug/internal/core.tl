@@ -82,6 +82,14 @@ function core.ensure(w: tecs.World, opts?: core.Options): commands.Registry
                     shot.fire()
                 end
             end
+
+            -- Timed profiles auto-finish on their wall-clock deadline even
+            -- with no overlay; the overlay's input system consumes
+            -- registry.profileResult to show the results popup.
+            local prof = registry.profiler
+            if prof.session and prof.deadline > 0 and now >= prof.deadline then
+                registry.profileResult = registry:finishProfile()
+            end
         end,
     })
 

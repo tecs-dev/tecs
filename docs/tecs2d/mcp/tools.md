@@ -636,7 +636,7 @@ at runtime; inspect `tools/list` for the exact set and generated schemas.
 | [`debug_mark_clear`](../debug-reference#cmd-mark-clear) | Remove all marks. |
 | [`debug_goto`](../debug-reference#cmd-goto) | Move the camera to an entity by id, or the first with a mark name. |
 | [`debug_note`](../debug-reference#cmd-note) | Annotate the selected entities for the agent; empty message clears. |
-| [`debug_despawn`](../debug-reference#cmd-despawn) | Despawn an entity by id or mark name, or the whole selection. |
+| [`debug_despawn`](../debug-reference#cmd-despawn) | Despawn an entity by id or mark name, given ids, or the whole selection. |
 | [`debug_remove`](../debug-reference#cmd-remove) | Remove components from an entity, marked group, or @selection. |
 | [`debug_set`](../debug-reference#cmd-set) | Set one component on an entity, marked group, or @selection (Lua table value). |
 | [`debug_modify`](../debug-reference#cmd-modify) | Change only the given fields of a component the target already has. |
@@ -654,6 +654,10 @@ at runtime; inspect `tools/list` for the exact set and generated schemas.
 | [`debug_agent_connect`](../debug-reference#cmd-agent-connect) | Copy the MCP client config JSON to the clipboard. |
 | [`debug_capabilities`](../debug-reference#cmd-capabilities) | Installed plugins, command families, and host features. |
 | [`debug_describe`](../debug-reference#cmd-describe) | One command's full contract as structured data. |
+| [`debug_freeze`](../debug-reference#cmd-freeze) | Freeze or unfreeze gameplay under the operator's hold. |
+| [`debug_stats`](../debug-reference#cmd-stats) | World stats: entities, archetypes, memory, fps, window. |
+| [`debug_context`](../debug-reference#cmd-context) | The live debugger context: selection, camera, artifacts. |
+| [`debug_restart`](../debug-reference#cmd-restart) | Restart the game process. |
 | [`debug_light_info`](../debug-reference#cmd-light-info) | Show ambient color, lighting, shadows, and bloom state. |
 | [`debug_light_color`](../debug-reference#cmd-light-color) | Set or show the ambient light color. |
 | [`debug_light_toggle`](../debug-reference#cmd-light-toggle) | Enable or disable lighting entirely. |
@@ -663,6 +667,8 @@ at runtime; inspect `tools/list` for the exact set and generated schemas.
 | [`debug_camera_move`](../debug-reference#cmd-camera-move) | Set camera position (and optionally rotation and zoom). |
 | [`debug_camera_timescale`](../debug-reference#cmd-camera-timescale) | Set the game time scale (0 = frozen, 1 = normal). |
 | [`debug_camera_toggle`](../debug-reference#cmd-camera-toggle) | Toggle a named camera's active flag. |
+| [`debug_camera_world`](../debug-reference#cmd-camera-world) | Convert screen coordinates to world through the active camera. |
+| [`debug_camera_screen`](../debug-reference#cmd-camera-screen) | Convert world coordinates to screen through the active camera. |
 | [`debug_layers_list`](../debug-reference#cmd-layers-list) | List named or modified layers with their flags. |
 | [`debug_layers_info`](../debug-reference#cmd-layers-info) | Show one layer's name, flags, and entity count. |
 | [`debug_layers_all`](../debug-reference#cmd-layers-all) | Show every layer (undo toggles and solo). |
@@ -695,13 +701,17 @@ at runtime; inspect `tools/list` for the exact set and generated schemas.
 | [`debug_audio_info`](../debug-reference#cmd-audio-info) | Show active sources per group and the master volume. |
 | [`debug_audio_stop`](../debug-reference#cmd-audio-stop) | Stop every active source. |
 | [`debug_audio_mute`](../debug-reference#cmd-audio-mute) | Silence the master group; `audio mute off` restores. |
+| [`debug_fetch`](../debug-reference#cmd-fetch) | Fetch entities matching a component query, without selecting them. |
+| [`debug_resources`](../debug-reference#cmd-resources) | List world resources with their key and type names. |
+| [`debug_bundles_list`](../debug-reference#cmd-bundles-list) | List bundles with their required and defaulted components. |
+| [`debug_bundles_spawn`](../debug-reference#cmd-bundles-spawn) | Spawn an entity from a bundle with optional component overrides. |
 | [`debug_profile_list`](../debug-reference#cmd-profile-list) | List profiles with size and timestamp. |
 | [`debug_profile_clear`](../debug-reference#cmd-profile-clear) | Delete all profiles this session. |
 | [`debug_profile_info`](../debug-reference#cmd-profile-info) | Re-show a capture's summary (latest if omitted). |
 | [`debug_profile_path`](../debug-reference#cmd-profile-path) | Copy the file's absolute path to the clipboard (latest if omitted). |
 | [`debug_profile_open`](../debug-reference#cmd-profile-open) | Open speedscope and copy the capture's path to the clipboard. |
 | [`debug_snapshot_save`](../debug-reference#cmd-snapshot-save) | Save the world; reports a number for load/open. |
-| [`debug_snapshot_load`](../debug-reference#cmd-snapshot-load) | Restore a save (the last if omitted). |
+| [`debug_snapshot_load`](../debug-reference#cmd-snapshot-load) | Restore a save (the last if omitted) or an inline payload. |
 | [`debug_snapshot_open`](../debug-reference#cmd-snapshot-open) | Open with the OS default handler (latest if omitted). |
 | [`debug_snapshot_path`](../debug-reference#cmd-snapshot-path) | Copy the file's absolute path to the clipboard (latest if omitted). |
 | [`debug_snapshot_list`](../debug-reference#cmd-snapshot-list) | List snapshots with size and timestamp. |

@@ -218,6 +218,46 @@ describe("tecs2d.debug.internal.cmd.capture", function()
             end
         end)
 
+        it("snapshot save inline json round-trips through snapshot load payload", function()
+            local reg, w, ctx = makeRegistry()
+            local json = require("tecs.utils.json")
+            local eid = w:spawn(SpecPos(3, 4))
+            w:commit()
+
+            local saved = reg:execute("snapshot save inline=true format=json")
+            luassert.is_true(saved.ok, tostring(saved.message))
+            luassert.equals("json", saved.data.format)
+            luassert.is_not_nil(saved.data.snapshot)
+            luassert.equals(1, saved.data.entities)
+            luassert.is_true((saved.data.archetypes as integer) >= 1)
+            luassert.is_true((saved.data.bytes as integer) > 0)
+            luassert.equals(0, reg.saveCounter, "inline must not mint a snapshot number")
+            luassert.equals(0, #ctx.snapshots, "inline must not register an artifact")
+
+            -- Mutate the world, then restore the inline payload.
+            local pos = w:getMut(eid, SpecPos) as {string: number}
+            pos.x = 99
+            local extra = w:spawn(SpecPos(8, 8))
+            w:commit()
+
+            local payload = json.serialize(saved.data.snapshot as {string: any})
+            local loaded = reg:invokeMcp("debug_snapshot_load",
+                {payload = payload, format = "json"})
+            luassert.is_true(loaded.ok, tostring(loaded.message))
+            luassert.equals("inline-payload", loaded.data.source)
+            luassert.equals("json", loaded.data.format)
+            luassert.equals(1, loaded.data.entities)
+            luassert.equals(3, (w:get(eid, SpecPos) as {string: number}).x,
+                "load must restore the saved field value")
+            luassert.is_false(w:isAlive(extra), "load must drop entities born after the save")
+
+            -- Layer validation matches the snapshot_save builtin.
+            luassert.equals("invalid_arguments",
+                (reg:execute("snapshot save inline=true format=json layers=99")).code)
+            luassert.equals("invalid_arguments",
+                (reg:execute("snapshot save inline=true layers=a,b")).code)
+        end)
+
         it("diff sees JSON kind changes and honors sentinel values", function()
             local snapdiff = require("tecs2d.debug.internal.diff")
             local json = require("tecs.utils.json")

@@ -123,6 +123,12 @@ local record commands
         --- return the results popup (nil when no session is active).
         finishProfile: function(self: Registry): {string}
 
+        --- The results popup of a timed profile's auto-finish, stored by
+        --- debug.CoreTick when the deadline passes so timed profiles finish
+        --- headless. The overlay's input system consumes it: reopen the
+        --- debugger if closed, show the popup, clear the field.
+        profileResult: {string}
+
         --- debug_* tool name to its dispatch entry; built lazily on the
         --- first invokeMcp and appended by add().
         byToolName: {string: ToolEntry}
@@ -936,7 +942,11 @@ function commands.build(env: commands.Env): commands.Registry
                 }}
             end,
         },
+        grouped("freeze"),
         grouped("step"),
+        grouped("stats"),
+        grouped("context"),
+        grouped("restart"),
         grouped("exit"),
         grouped("quit"),
     }
