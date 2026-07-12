@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+When cutting a release, bump `VERSION` in `tecs_cli/cli.lua`, update this file,
+and push the matching `v*` tag. CI publishes the self-contained `.love`
+payload, launchers, and installers as GitHub release assets.
+
 ## [0.6.0] - 2026-07-12
 
 ### Added
@@ -28,10 +32,6 @@ All notable changes to this project will be documented in this file.
   the built game under real LÖVE via `tecs2d.testing.fixture` and drive it
   over MCP. New projects include `spec/game_lovespec.tl` and run `tecs integ`
   on macOS in their generated CI.
-
-When cutting a release, bump `VERSION` in `tecs_cli/cli.lua`, update this file,
-and push the matching `v*` tag. CI publishes the self-contained `.love`
-payload, launchers, and installers as GitHub release assets.
 
 ## [0.3.0] - 2026-07-12
 
