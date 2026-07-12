@@ -5,13 +5,14 @@
 This repository builds the cross-platform `tecs` command for creating,
 checking, building, and running Tecs2D projects. The distributed CLI is a
 headless LÖVE 12 application, not a LuaRocks package. Its launcher downloads a
-tested LÖVE runtime into the user cache and executes `tecs-cli.love` with the
+LÖVE 12 nightly into the user cache and executes `tecs-cli.love` with the
 same LuaJIT used by games.
 
 ## Key Commands
 
 ```sh
 make build              # Assemble dist/tecs-cli.love and launcher/install files
+make lint               # Check authored Lua files with Luacheck
 make test               # Run the Lua CLI unit tests
 make check              # Test and build the release payload
 make update-vendor      # Refresh every embedded third-party dependency
@@ -40,7 +41,7 @@ make clean              # Remove build/ and dist/
 - Keep the LÖVE application headless. CLI launchers set dummy SDL video/audio
   drivers; `tecs run` clears them before starting the user's game.
 - Preserve macOS, Linux, and Windows behavior. CI must prove a cold-cache
-  `--version`, `new`, `check`, and `build` flow on all three platforms.
+  `--version`, `info`, `new`, `check`, and `build` flow on all three platforms.
 - The final game build is self-contained. Framework runtime modules and built-in
   assets belong under `build/`; compiler inputs and metadata do not.
 
@@ -53,3 +54,4 @@ make clean              # Remove build/ and dist/
   concise top-level comment describing its role.
 - Keep vendored dependency licenses under `tecs_cli/runtime/licenses/`.
 - Update `README.md` and this guide when commands or distribution behavior change.
+- Keep `CHANGELOG.md` versioned and verify a release tag matches `VERSION`.

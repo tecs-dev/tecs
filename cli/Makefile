@@ -5,15 +5,18 @@ LOVE_TYPES_REF ?= main
 ARGPARSE_REF ?= 0.7.2
 ANSICOLORS_REF ?= v1.0.2
 
-.PHONY: build test check update-vendor update-teal update-types update-lua-vendor clean
+.PHONY: build lint test check update-vendor update-teal update-types update-lua-vendor clean
 
 build:
 	./scripts/build_love.sh
 
+lint:
+	luacheck tecs_cli/cli.lua loveapp spec
+
 test:
 	luajit spec/run.lua
 
-check: test build
+check: lint test build
 
 update-vendor: update-teal update-types update-lua-vendor
 
