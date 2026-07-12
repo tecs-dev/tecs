@@ -5,24 +5,27 @@ Tecs2D projects.
 
 ## Install
 
-Tecs targets LuaJIT, so install with a LuaRocks tree configured for LuaJIT
-(Lua 5.1):
+macOS and Linux:
 
 ```sh
-luarocks --lua-version=5.1 install tecs-cli
+curl -fsSL https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.sh | sh
 ```
 
-If your shell cannot find `tecs` after installing with LuaRocks, add your
-LuaRocks user bin directory to `PATH`. On Unix-like shells this is usually:
+Windows PowerShell:
 
-```sh
-eval "$(luarocks path --bin)"
+```powershell
+irm https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.ps1 | iex
 ```
 
-For local checkout development:
+The first `tecs` command downloads the tested LÖVE 12 runtime into the user
+cache. Later commands reuse it. Lua, LuaRocks, and a compiler toolchain are not
+required.
+
+For local checkout development, build the same payload used by releases:
 
 ```sh
-luarocks --lua-version=5.1 make tecs-cli-0.1.0-1.rockspec
+TECS_DIR=../tecs scripts/build_love.sh
+TECS_CLI_LOVE="$PWD/dist/tecs-cli.love" launcher/tecs --version
 ```
 
 ## Create A Project
@@ -56,11 +59,10 @@ tecs wipe-clean
 tecs love12
 ```
 
-`tecs run` builds the project and launches Love2D. `tecs build` compiles Teal
-source into a self-contained `build/`, retaining runtime dependencies while
-pruning compiler sources and LuaRocks metadata. `tecs check` runs the
-Teal type checker. Pass `--quiet` (or `-q`) to any command to suppress
-progress output.
+`tecs run` builds the project and launches it with the same cached LÖVE runtime
+that hosts the CLI. `tecs build` compiles Teal source into a self-contained
+`build/`. `tecs check` runs the embedded Teal compiler in-process. Pass
+`--quiet` (or `-q`) to suppress progress output.
 
 ## Development Commands
 
@@ -72,27 +74,26 @@ tecs dev        # copy local Tecs/Tecs2D sources into src/vendor/ for iteration
 tecs sync-tecs  # reinstall Tecs/Tecs2D into src/vendor/ from local rockspecs
 ```
 
-## Project Dependencies
+## Embedded Toolchain
 
-The CLI installs project-local dependencies under `src/vendor/`:
+`tecs-cli.love` contains:
 
-- pinned Teal compiler
-- `tecs`
-- `tecs2d`
+- the Teal compiler
+- compatible Tecs and Tecs2D sources
+- LuaJIT, LuaSocket, LÖVE, and project type declarations
+- the starter template
 
-If `TECS_DIR` is set, or if `../tecs` exists, the CLI can use that local checkout
-for development commands. Otherwise it installs `tecs` and `tecs2d` with
-LuaRocks.
+The CLI stages the required declarations and framework sources into
+`src/vendor/`; it does not resolve or build rocks at runtime. A `TECS_DIR`
+checkout can replace the embedded framework sources during development.
 
 ## System Requirements
 
-- LuaJIT and LuaRocks
-- Git
 - curl
 - unzip on macOS/Linux, or PowerShell `Expand-Archive` on Windows
-- a C compiler toolchain for LuaRocks native dependencies
 
-Love2D 12 is downloaded per project with `tecs love12` or on first `tecs run`.
+LÖVE 12 is downloaded once per user on the first command. The cached runtime
+provides the same LuaJIT and LuaSocket implementation used by the game.
 
 ## License
 

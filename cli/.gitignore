@@ -1,6 +1,7 @@
 /.luarocks
 /lua_modules
 /build
+/dist
 /src/vendor
 /types
 /.tecs-tmp

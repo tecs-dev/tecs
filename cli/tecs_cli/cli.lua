@@ -6,6 +6,8 @@ local ansicolors = require("tecs_cli.vendor.ansicolors")
 local have_lfs, lfs = pcall(require, "lfs")
 
 local VERSION = "0.1.0" -- keep in sync with the rockspec version
+local is_love_cli = rawget(_G, "TECS_LOVE_CLI") == true
+local love_api = rawget(_G, "love")
 
 -- Platform traits detected from the OS path separator. Held in mutable locals
 -- so specs can substitute another platform via M._internal.set_platform.
@@ -391,6 +393,25 @@ local function copy_dir(src, dst, exclude)
     end
 end
 
+local function copy_love_dir(src, dst)
+    assert(love_api, "embedded copy requires LÖVE")
+    mkdir(dst)
+    for _, entry in ipairs(love_api.filesystem.getDirectoryItems(src)) do
+        local source = src .. "/" .. entry
+        local target = path_join(dst, entry)
+        local info = love_api.filesystem.getInfo(source)
+        if info and info.type == "directory" then
+            copy_love_dir(source, target)
+        elseif info and info.type == "file" then
+            local content, err = love_api.filesystem.read(source)
+            if not content then
+                error("could not read embedded file " .. source .. ": " .. tostring(err), 0)
+            end
+            write_file(target, content)
+        end
+    end
+end
+
 local function template_dir()
     local candidates = {}
     local module_path = source_path()
@@ -549,6 +570,34 @@ local function with_vendor_env(cmd)
         .. " " .. cmd)
 end
 
+local function run_tl(args)
+    if not is_love_cli then
+        local quoted = {}
+        for i = 1, #args do quoted[i] = q(args[i]) end
+        run(with_lua_path("tl " .. table.concat(quoted, " ")))
+        return
+    end
+
+    local previousPath = package.path
+    local previousExit = os.exit
+    local exitSignal = {}
+    package.path = lua_path() .. ";" .. package.path
+    rawset(os, "exit", function(code)
+        exitSignal.code = tonumber(code) or 0
+        error(exitSignal, 0)
+    end)
+
+    local ok, err = pcall(function()
+        return require("tlcli.main")(args)
+    end)
+    rawset(os, "exit", previousExit)
+    package.path = previousPath
+    if not ok and err ~= exitSignal then error(err, 0) end
+    if not ok and exitSignal.code ~= 0 then
+        error("Teal failed with exit code " .. tostring(exitSignal.code), 0)
+    end
+end
+
 -- Run a command from inside the local Tecs checkout with its luarocks bin
 -- (where the `tl`/`luarocks` shims live) prepended to PATH.
 local function tecs_cmd(cmd)
@@ -638,6 +687,8 @@ end
 
 -- Path to the downloaded Love2D executable for this platform.
 local function love_bin()
+    local supplied = os.getenv("TECS_LOVE_BIN")
+    if supplied and supplied ~= "" then return normalize(supplied) end
     if is_windows then
         return path_join(love12_dir, "love.exe")
     elseif uname_s() == "Darwin" then
@@ -680,6 +731,26 @@ end
 
 -- Install Tecs/Tecs2D into src/vendor via luarocks on first use.
 local function ensure_vendor()
+    if is_love_cli then
+        if exists(path_join(vendor_lua, "tecs2d/init.tl"))
+            and exists(path_join(vendor_lua, "love2d.d.tl"))
+            and exists(path_join(vendor_lua, "ffi.d.tl"))
+            and exists(path_join(vendor_lua, "socket.d.tl")) then return end
+
+        status("Preparing embedded Tecs dependencies...")
+        mkdir(vendor_lua)
+        if exists(path_join(tecs_dir, "src/tecs/init.tl"))
+            and exists(path_join(tecs_dir, "src/tecs2d/init.tl")) then
+            copy_dir(path_join(tecs_dir, "src/tecs"), path_join(vendor_lua, "tecs"))
+            copy_dir(path_join(tecs_dir, "src/tecs2d"), path_join(vendor_lua, "tecs2d"))
+        else
+            copy_love_dir("payload/framework/tecs", path_join(vendor_lua, "tecs"))
+            copy_love_dir("payload/framework/tecs2d", path_join(vendor_lua, "tecs2d"))
+        end
+        copy_love_dir("payload/types", vendor_lua)
+        return
+    end
+
     ensure_teal_compiler()
     ensure_love_type_environment()
     ensure_mcp_runtime()
@@ -734,6 +805,7 @@ end
 -- Compile each changed Teal source to build/, mirroring the src/ layout.
 local function compile_sources()
     local compiled = 0
+    local pending = {}
     for _, src in ipairs(list_teal_sources()) do
         local rel = src:gsub("^src[/\\]", "")
         local lua_file = rel:gsub("%.tl$", ".lua")
@@ -741,9 +813,18 @@ local function compile_sources()
         if needs_update(out, src, "tlconfig.lua") then
             if compiled == 0 then status("Compiling Teal...") end
             mkdir(dirname(out))
-            run(with_lua_path("tl gen " .. q(src) .. " -o " .. q(out)))
+            if is_love_cli then
+                pending[#pending + 1] = src
+            else
+                run_tl({"gen", src, "-o", out})
+            end
             compiled = compiled + 1
         end
+    end
+    if #pending > 0 then
+        local args = {"-q", "gen", "--root", "src", "--output-dir", "build"}
+        for _, src in ipairs(pending) do args[#args + 1] = src end
+        run_tl(args)
     end
     if compiled == 0 then status("Teal output is up to date.") end
     return compiled
@@ -754,16 +835,26 @@ end
 local function compile_vendor_tecs_sources()
     local root = path_join("build/vendor/share/lua/5.1")
     local compiled = 0
+    local pending = {}
     for _, src in ipairs(list_files(root, ".tl")) do
         local n = normalize(src)
         if (n:match("[/\\]tecs[/\\]") or n:match("[/\\]tecs2d[/\\]")) and not n:match("%.d%.tl$") then
             local out = n:gsub("%.tl$", ".lua")
             if needs_update(out, n, "tlconfig.lua") then
                 if compiled == 0 then status("Compiling vendored Tecs...") end
-                run(with_lua_path("tl gen " .. q(n) .. " -o " .. q(out)))
+                if is_love_cli then
+                    pending[#pending + 1] = n
+                else
+                    run_tl({"gen", n, "-o", out})
+                end
                 compiled = compiled + 1
             end
         end
+    end
+    if #pending > 0 then
+        local args = {"-q", "gen", "--root", root, "--output-dir", root}
+        for _, src in ipairs(pending) do args[#args + 1] = src end
+        run_tl(args)
     end
 end
 
@@ -860,8 +951,9 @@ local tasks = {}
 function tasks.check()
     ensure_vendor()
     status("Typechecking...")
-    local sources = table.concat(list_teal_sources(), " ")
-    run(with_lua_path("tl check " .. sources))
+    local args = {"check"}
+    for _, source in ipairs(list_teal_sources()) do args[#args + 1] = source end
+    run_tl(args)
 end
 
 function tasks.build()
@@ -905,7 +997,11 @@ function tasks.new(args)
 
     status("Creating project " .. target .. "...")
     mkdir(target)
-    copy_dir(template_dir(), target)
+    if is_love_cli then
+        copy_love_dir("tecs_cli/templates/default", target)
+    else
+        copy_dir(template_dir(), target)
+    end
     stamp_project_rockspec(target)
     mkdir(path_join(target, "assets"))
 
@@ -920,7 +1016,11 @@ tasks["wipe-clean"] = function()
 end
 
 function tasks.love12()
-    download_love12()
+    if os.getenv("TECS_LOVE_BIN") then
+        status("Using cached LÖVE 12 runtime: " .. love_bin())
+    else
+        download_love12()
+    end
 end
 
 function tasks.dev()

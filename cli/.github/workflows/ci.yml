@@ -3,71 +3,20 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
 
 jobs:
-  lint:
-    name: luacheck
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      # Lua 5.4 runs LuaRocks's manifest parser; LuaJIT below remains the
-      # target VM and ABI for the CLI and every installed dependency.
-      - name: Set up Lua 5.4 for LuaRocks
-        run: |
-          curl -fsSL https://www.lua.org/ftp/lua-5.4.8.tar.gz | tar xz -C "$RUNNER_TEMP"
-          make -C "$RUNNER_TEMP/lua-5.4.8/src" posix
-          echo "TECS_LUA54=$RUNNER_TEMP/lua-5.4.8/src/lua" >> "$GITHUB_ENV"
-
-      - name: Set up LuaJIT
-        uses: leafo/gh-actions-lua@v11
-        with:
-          luaVersion: "luajit-2.1"
-
-      - name: Set up LuaRocks
-        uses: leafo/gh-actions-luarocks@v5
-
-      # Keep all ordinary `luarocks` commands, including those spawned by the
-      # CLI, but parse the oversized registry manifest with Lua 5.4.
-      - name: Wrap LuaRocks with Lua 5.4
-        run: |
-          real_luarocks="$(command -v luarocks)"
-          mkdir -p "$RUNNER_TEMP/lua54-bin"
-          printf '%s\n' '#!/usr/bin/env bash' \
-            "exec \"$TECS_LUA54\" \"$real_luarocks\" \"\$@\"" \
-            > "$RUNNER_TEMP/lua54-bin/luarocks"
-          chmod +x "$RUNNER_TEMP/lua54-bin/luarocks"
-          echo "TECS_LUAROCKS=$real_luarocks" >> "$GITHUB_ENV"
-          echo "$RUNNER_TEMP/lua54-bin" >> "$GITHUB_PATH"
-
-      - name: Clear LuaRocks cache
-        run: rm -rf "$HOME/.cache/luarocks"
-
-      - name: Run luacheck
-        run: |
-          lr() { "$TECS_LUA54" "$TECS_LUAROCKS" --lua-version=5.1 "$@"; }
-          lr install argparse
-          lr install luafilesystem
-          lr install --deps-mode=none luacheck
-          eval "$(luarocks --lua-version=5.1 path --bin)"
-          luacheck tecs_cli spec bin/tecs --codes
-
   unix:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
+        os: [ubuntu-latest, macos-latest]
 
     steps:
-      - name: Check out repository
+      - name: Check out CLI
         uses: actions/checkout@v4
 
       - name: Check out Tecs
@@ -76,73 +25,45 @@ jobs:
           repository: tecs-dev/tecs
           path: tecs
 
-      # Lua 5.4 parses the oversized registry manifest; LuaJIT below remains
-      # the Lua 5.1 target used by the generated game.
-      - name: Set up Lua 5.4 for LuaRocks
-        run: |
-          curl -fsSL https://www.lua.org/ftp/lua-5.4.8.tar.gz | tar xz -C "$RUNNER_TEMP"
-          make -C "$RUNNER_TEMP/lua-5.4.8/src" posix
-          echo "TECS_LUA54=$RUNNER_TEMP/lua-5.4.8/src/lua" >> "$GITHUB_ENV"
-
-      - name: Set up LuaJIT
-        uses: leafo/gh-actions-lua@v11
-        with:
-          luaVersion: "luajit-2.1"
-
-      - name: Set up LuaRocks
-        uses: leafo/gh-actions-luarocks@v5
-
-      # The wrapper is inherited by generated projects, so their normal
-      # package-name installs avoid LuaJIT's manifest compiler limit too.
-      - name: Wrap LuaRocks with Lua 5.4
-        shell: bash
-        run: |
-          real_luarocks="$(command -v luarocks)"
-          mkdir -p "$RUNNER_TEMP/lua54-bin"
-          printf '%s\n' '#!/usr/bin/env bash' \
-            "exec \"$TECS_LUA54\" \"$real_luarocks\" \"\$@\"" \
-            > "$RUNNER_TEMP/lua54-bin/luarocks"
-          chmod +x "$RUNNER_TEMP/lua54-bin/luarocks"
-          echo "TECS_LUAROCKS=$real_luarocks" >> "$GITHUB_ENV"
-          echo "$RUNNER_TEMP/lua54-bin" >> "$GITHUB_PATH"
-
-      - name: Clear LuaRocks cache
-        shell: bash
-        run: rm -rf "$HOME/.cache/luarocks"
-
-      - name: Install tecs-cli
-        shell: bash
-        run: |
-          lr() { "$TECS_LUA54" "$TECS_LUAROCKS" --lua-version=5.1 "$@"; }
-          lr install --local luafilesystem
-          lr make --local --deps-mode=none tecs-cli-0.1.0-1.rockspec
-          eval "$(luarocks --lua-version=5.1 path --local --bin)"
-          tecs --version
-
-      - name: Run CLI tests
-        shell: bash
-        run: |
-          eval "$(luarocks --lua-version=5.1 path --local --bin)"
-          luajit spec/run.lua
-
-      - name: Create and build a starter app
-        shell: bash
+      - name: Build tecs-cli.love
         env:
           TECS_DIR: ${{ github.workspace }}/tecs
+        run: scripts/build_love.sh
+
+      - name: Prove option 1 from a cold cache
+        env:
+          TECS_CACHE_DIR: ${{ runner.temp }}/tecs-cache
+          TECS_CLI_LOVE: ${{ github.workspace }}/dist/tecs-cli.love
         run: |
-          eval "$(luarocks --lua-version=5.1 path --local --bin)"
-          tecs new "$RUNNER_TEMP/hello-tecs"
-          cd "$RUNNER_TEMP/hello-tecs"
-          tecs love12
-          tecs build
-          tecs check
+          project="$RUNNER_TEMP/hello-tecs"
+          rm -rf "$project" "$TECS_CACHE_DIR"
+          launcher/tecs --version
+          launcher/tecs new "$project"
+          (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" check)
+          (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" build)
+          test -f "$project/build/main.lua"
+          test -f "$project/build/tecs2d/init.lua"
+          launcher/tecs --version
+
+      - name: Upload option 1 package
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tecs-cli-option1
+          path: |
+            dist/tecs
+            dist/tecs.cmd
+            dist/tecs.ps1
+            dist/tecs-cli.love
+            dist/install.sh
+            dist/install.ps1
 
   windows:
     name: windows-latest
     runs-on: windows-latest
 
     steps:
-      - name: Check out repository
+      - name: Check out CLI
         uses: actions/checkout@v4
 
       - name: Check out Tecs
@@ -151,85 +72,52 @@ jobs:
           repository: tecs-dev/tecs
           path: tecs
 
-      - name: Set up MSVC
-        uses: ilammy/msvc-dev-cmd@v1
-
-      # Keep this Lua 5.4 executable when hererocks makes LuaJIT active below.
-      # It runs LuaRocks's frontend only; installed rocks still target 5.1.
-      - name: Set up Lua 5.4 for LuaRocks
-        uses: leafo/gh-actions-lua@v11
-        with:
-          luaVersion: "5.4"
-
-      - name: Remember Lua 5.4
-        shell: pwsh
-        run: '"TECS_LUA54=$((Get-Command lua).Source)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append'
-
-      - name: Set up LuaJIT and LuaRocks
-        shell: pwsh
-        run: |
-          python -m pip install hererocks
-          hererocks "$env:RUNNER_TEMP\lua" -j 2.1 -r latest
-          "$env:RUNNER_TEMP\lua\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          $luarocksScript = Get-ChildItem "$env:RUNNER_TEMP\lua" -Recurse -File |
-            Where-Object Name -EQ "luarocks" |
-            Select-Object -First 1
-          if (-not $luarocksScript) { throw "LuaRocks script was not installed by hererocks" }
-          "TECS_LUAROCKS=$($luarocksScript.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          $lua54Root = Split-Path (Split-Path $env:TECS_LUA54)
-          $lua54Modules = Join-Path $lua54Root "share\lua\5.4"
-          New-Item -ItemType Directory -Force -Path $lua54Modules | Out-Null
-          $cfg = Get-ChildItem "$env:RUNNER_TEMP\lua" -Recurse -Filter cfg.lua |
-            Where-Object FullName -Like "*luarocks*core*cfg.lua" |
-            Select-Object -First 1
-          if (-not $cfg) { throw "LuaRocks modules were not installed by hererocks" }
-          $luarocksModules = Split-Path (Split-Path $cfg.FullName)
-          Copy-Item -Recurse -Force $luarocksModules $lua54Modules
-
-      # Put a cmd wrapper ahead of hererocks so CLI-spawned `luarocks`
-      # commands run the same LuaJIT-targeted launcher under Lua 5.4.
-      - name: Wrap LuaRocks with Lua 5.4
-        shell: pwsh
-        run: |
-          $dir = "$env:RUNNER_TEMP\lua54-bin"
-          New-Item -ItemType Directory -Force -Path $dir | Out-Null
-          @'
-          @echo off
-          "%TECS_LUA54%" "%TECS_LUAROCKS%" %*
-          '@ | Set-Content -Path "$dir\luarocks.cmd" -Encoding ascii
-          $dir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      - name: Clear LuaRocks cache
-        shell: cmd
-        run: |
-          if exist "%USERPROFILE%\.cache\luarocks" rmdir /S /Q "%USERPROFILE%\.cache\luarocks"
-          if exist "%LOCALAPPDATA%\LuaRocks\Cache" rmdir /S /Q "%LOCALAPPDATA%\LuaRocks\Cache"
-
-      - name: Install tecs-cli
-        shell: cmd
-        run: |
-          "%TECS_LUA54%" "%TECS_LUAROCKS%" --lua-version=5.1 install --local luafilesystem
-          "%TECS_LUA54%" "%TECS_LUAROCKS%" --lua-version=5.1 make --local --deps-mode=none tecs-cli-0.1.0-1.rockspec
-          luarocks --lua-version=5.1 path --local --bin > luarocks-path.bat
-          call luarocks-path.bat
-          tecs --version
-
-      - name: Run CLI tests
-        shell: cmd
-        run: |
-          luarocks --lua-version=5.1 path --local --bin > luarocks-path.bat
-          call luarocks-path.bat
-          luajit spec\run.lua
-
-      - name: Create and build a starter app
-        shell: cmd
+      - name: Build tecs-cli.love
+        shell: bash
         env:
-          TECS_DIR: ${{ github.workspace }}\tecs
+          TECS_DIR: ${{ github.workspace }}/tecs
+        run: scripts/build_love.sh
+
+      - name: Prove option 1 from a cold cache
+        shell: pwsh
+        env:
+          TECS_CACHE_DIR: ${{ runner.temp }}\tecs-cache
+          TECS_CLI_LOVE: ${{ github.workspace }}\dist\tecs-cli.love
         run: |
-          luarocks --lua-version=5.1 path --local --bin > luarocks-path.bat
-          call luarocks-path.bat
-          tecs new "%RUNNER_TEMP%\hello-tecs"
-          cd /D "%RUNNER_TEMP%\hello-tecs"
-          tecs love12
-          tecs build
-          tecs check
+          $PSNativeCommandUseErrorActionPreference = $true
+          $project = Join-Path $env:RUNNER_TEMP "hello-tecs"
+          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $project, $env:TECS_CACHE_DIR
+          & launcher/tecs.ps1 --version
+          & launcher/tecs.ps1 new $project
+          Push-Location $project
+          Remove-Item Env:TECS_DIR -ErrorAction SilentlyContinue
+          & "$env:GITHUB_WORKSPACE\launcher\tecs.ps1" check
+          & "$env:GITHUB_WORKSPACE\launcher\tecs.ps1" build
+          Pop-Location
+          if (-not (Test-Path "$project\build\main.lua")) { throw "main.lua was not built" }
+          if (-not (Test-Path "$project\build\tecs2d\init.lua")) { throw "tecs2d was not built" }
+          & launcher/tecs.ps1 --version
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [unix, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download option 1 package
+        uses: actions/download-artifact@v4
+        with:
+          name: tecs-cli-option1
+          path: dist
+
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/tecs
+            dist/tecs.cmd
+            dist/tecs.ps1
+            dist/tecs-cli.love
+            dist/install.sh
+            dist/install.ps1

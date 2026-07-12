@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "$0")" && pwd)"
+payload="${TECS_CLI_LOVE:-$script_dir/tecs-cli.love}"
+if [ ! -f "$payload" ] && [ -f "$HOME/.local/share/tecs/tecs-cli.love" ]; then
+    payload="$HOME/.local/share/tecs/tecs-cli.love"
+fi
+cache="${TECS_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/tecs}/love12-main"
+base="https://nightly.link/love2d/love/workflows/main/main"
+
+if [ ! -f "$payload" ]; then
+    echo "tecs: CLI payload not found: $payload" >&2
+    exit 1
+fi
+
+case "$(uname -s)" in
+    Darwin)
+        love="$cache/love.app/Contents/MacOS/love"
+        if [ ! -x "$love" ]; then
+            echo "Downloading LÖVE 12 runtime..." >&2
+            rm -rf "$cache"
+            mkdir -p "$cache"
+            curl -fsSL "$base/love-macos.zip" -o "$cache/outer.zip"
+            unzip -q "$cache/outer.zip" -d "$cache"
+            unzip -q "$cache/love-macos.zip" -d "$cache"
+            rm -f "$cache/outer.zip" "$cache/love-macos.zip"
+        fi
+        ;;
+    Linux)
+        love="$cache/squashfs-root/AppRun"
+        if [ ! -x "$love" ]; then
+            echo "Downloading LÖVE 12 runtime..." >&2
+            rm -rf "$cache"
+            mkdir -p "$cache"
+            curl -fsSL "$base/love-linux-X64.AppImage.zip" -o "$cache/outer.zip"
+            unzip -q "$cache/outer.zip" -d "$cache"
+            rm -f "$cache/outer.zip"
+            appimage="$(find "$cache" -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+            if [ -z "$appimage" ]; then
+                echo "tecs: LÖVE archive did not contain an AppImage" >&2
+                exit 1
+            fi
+            chmod +x "$appimage"
+            (cd "$cache" && "$appimage" --appimage-extract >/dev/null)
+            rm -f "$appimage"
+        fi
+        ;;
+    *)
+        echo "tecs: unsupported operating system: $(uname -s)" >&2
+        exit 1
+        ;;
+esac
+
+export TECS_LOVE_BIN="$love"
+exec "$love" "$payload" --tecs-project "$PWD" "$@"

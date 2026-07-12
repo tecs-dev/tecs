@@ -1,6 +1,6 @@
 std = "max"
 max_line_length = 120
-exclude_files = {"tecs_cli/vendor"}
+exclude_files = {"tecs_cli/vendor", "tecs_cli/runtime"}
 
 files["spec"] = {
     std = "+busted",
