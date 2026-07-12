@@ -2,7 +2,17 @@
 # macOS/Linux entry point: cache LÖVE 12 and run the CLI payload headlessly.
 set -euo pipefail
 
-script_dir="$(cd "$(dirname "$0")" && pwd)"
+# Resolve $0 through symlinks so the payload is found beside the real script
+# even when package managers (e.g. Homebrew) link the launcher onto PATH.
+launcher_path="$0"
+while [ -L "$launcher_path" ]; do
+    link_target="$(readlink "$launcher_path")"
+    case "$link_target" in
+        /*) launcher_path="$link_target" ;;
+        *) launcher_path="$(dirname "$launcher_path")/$link_target" ;;
+    esac
+done
+script_dir="$(cd "$(dirname "$launcher_path")" && pwd)"
 payload="${TECS_CLI_LOVE:-$script_dir/tecs-cli.love}"
 if [ ! -f "$payload" ] && [ -f "$HOME/.local/share/tecs/tecs-cli.love" ]; then
     payload="$HOME/.local/share/tecs/tecs-cli.love"
