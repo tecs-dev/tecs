@@ -20,6 +20,18 @@ This page is generated: run `make docs-debug` after changing a command.
 
 Find, select, mark, and annotate entities.
 
+| Command | Description |
+| --- | --- |
+| [`select`](#cmd-select) | Select an entity by id, or all entities with a mark name. |
+| [`clear`](#cmd-clear) | Clear the selection, message, and drag area. |
+| [`mark`](#cmd-mark) | Name the selected entities so select, goto, and despawn can recall them by name. |
+| [`goto`](#cmd-goto) | Move the camera to an entity by id, or the first with a mark name. |
+| [`note`](#cmd-note) | Annotate the selected entities for the agent; empty message clears. |
+| [`info`](#cmd-info) | Show an entity's components; defaults to the first selected. |
+| [`despawn`](#cmd-despawn) | Despawn an entity by id or mark name, given ids, or the whole selection. |
+| [`query`](#cmd-query) | Select entities matching a component query: Foo has it, -Foo lacks it. |
+| [`ids`](#cmd-ids) | Toggle entity id labels over on-screen entities. |
+
 ### `select <id|name> [replace]` {#cmd-select}
 
 Select an entity by id, or all entities with a mark name.
@@ -429,6 +441,14 @@ ids off
 
 Mutate the live world: components, spawning, world-space drawing.
 
+| Command | Description |
+| --- | --- |
+| [`remove`](#cmd-remove) | Remove components from an entity, marked group, or @selection. |
+| [`set`](#cmd-set) | Set one component on an entity, marked group, or @selection (Lua table value). |
+| [`modify`](#cmd-modify) | Change only the given fields of a component the target already has. |
+| [`spawn`](#cmd-spawn) | Spawn an entity from a bundle and/or components with Lua table values. |
+| [`draw`](#cmd-draw) | Draw a world-space annotation over the game. |
+
 ### `remove [id|name] <comps...> [ids=a,b]` {#cmd-remove}
 
 Remove components from an entity, marked group, or @selection.
@@ -817,6 +837,17 @@ MCP tool: `cmd_draw_clear`
 ## Render
 
 Inspect and toggle the render pipeline.
+
+| Command | Description |
+| --- | --- |
+| [`light`](#cmd-light) | Lighting state; verbs set color, bloom, lighting, and shadows. |
+| [`camera`](#cmd-camera) | Inspect and control the camera and time scale. |
+| [`layers`](#cmd-layers) | List render layers; show, toggle, solo, or unlight one. |
+| [`grid`](#cmd-grid) | Toggle a world-space grid matched to the tile grid. |
+| [`bounds`](#cmd-bounds) | Toggle size outlines around entities with known bounds. |
+| [`map`](#cmd-map) | Tilemap info; `info x y` shows the tile at a world point. |
+| [`materials`](#cmd-materials) | List registered materials or show one material's GLSL. |
+| [`sprites`](#cmd-sprites) | Sprite renderer stats: buckets, texture arrays, instances. |
 
 ### `light` {#cmd-light}
 
@@ -1221,6 +1252,20 @@ MCP tool: `cmd_sprites_info` (read-only, idempotent)
 ## Engine
 
 Engine introspection: systems, archetypes, components, states, physics, controllers, assets, audio.
+
+| Command | Description |
+| --- | --- |
+| [`systems`](#cmd-systems) | List systems and stop, start, or inspect them. |
+| [`archetypes`](#cmd-archetypes) | List archetypes, show one, or select its entities. |
+| [`components`](#cmd-components) | List component types or show one component's schema. |
+| [`states`](#cmd-states) | Show the state stack; `push <name>` / `pop` change it. |
+| [`physics`](#cmd-physics) | Physics info; debug draw, body info, raycast, and area query. |
+| [`controllers`](#cmd-controllers) | List controllers; `info <n>` shows bindings, `rumble` tests one. |
+| [`assets`](#cmd-assets) | List cached assets, show one, or reload one from disk. |
+| [`audio`](#cmd-audio) | Audio info; stop everything or mute the master group. |
+| [`fetch`](#cmd-fetch) | Fetch entities matching a component query, without selecting them. |
+| [`resources`](#cmd-resources) | List world resources with their key and type names. |
+| [`bundles`](#cmd-bundles) | List registered bundles or spawn an entity from one. |
 
 ### `systems` {#cmd-systems}
 
@@ -1761,6 +1806,15 @@ bundles spawn enemy {Transform = {x = 10, y = 5}}
 ## Capture
 
 Artifacts and time travel: screenshots, profiles, snapshots, recordings, rewind, diff.
+
+| Command | Description |
+| --- | --- |
+| [`profile`](#cmd-profile) | Sample the running game with the LuaJIT profiler. |
+| [`snapshot`](#cmd-snapshot) | Save and restore the whole world. |
+| [`rewind`](#cmd-rewind) | Time travel: keep a rolling snapshot ring and load back into it. |
+| [`diff`](#cmd-diff) | Structural diff between snapshots, rewind entries, and the live world. |
+| [`screenshot`](#cmd-screenshot) | Capture the screen (or drag area) to a PNG. |
+| [`record`](#cmd-record) | Record the window to a video. |
 
 ### `profile [seconds] [intervalMs=N] [zone=...]` {#cmd-profile}
 
@@ -2325,6 +2379,21 @@ MCP tool: `cmd_record_info` (read-only, idempotent)
 ## Session
 
 The debugger session itself.
+
+| Command | Description |
+| --- | --- |
+| [`help`](#cmd-help) | List all commands, or show one command's arguments. |
+| [`history`](#cmd-history) | Show the command history (persisted across sessions). |
+| [`agent`](#cmd-agent) | MCP session info and client config. |
+| [`capabilities`](#cmd-capabilities) | Installed plugins, command families, and host features. |
+| [`describe`](#cmd-describe) | One command's full contract as structured data. |
+| [`freeze`](#cmd-freeze) | Freeze or unfreeze gameplay under the operator's hold. |
+| [`step`](#cmd-step) | Tick the game forward N frames while otherwise frozen. |
+| [`stats`](#cmd-stats) | World stats: entities, archetypes, memory, fps, window. |
+| [`context`](#cmd-context) | The live debugger context: selection, camera, artifacts. |
+| [`restart`](#cmd-restart) | Restart the game process. |
+| [`exit`](#cmd-exit) | Close the debugger (same as the toggle key). |
+| [`quit`](#cmd-quit) | Quit the game. |
 
 ### `help [command]` {#cmd-help}
 

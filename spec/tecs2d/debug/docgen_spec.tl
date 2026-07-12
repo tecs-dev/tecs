@@ -72,12 +72,16 @@ describe("tecs2d.debug.internal.docgen", function()
     it("escapes markdown hazards outside code spans", function()
         local reg = makeRegistry()
         local md = docgen.markdown(reg)
-        for line in md:gmatch("[^\n]+") do
+        -- Every row must have as many unescaped pipes as its table's header;
+        -- a stray pipe from an unescaped help string breaks the row apart.
+        local headerPipes: integer = nil
+        for line in md:gmatch("[^\n]*") do
             if line:sub(1, 1) == "|" then
-                -- Three columns means exactly four unescaped pipes; a stray
-                -- pipe from an unescaped help string would add a fifth.
                 local _, pipes = (" " .. line):gsub("[^\\]|", "")
-                luassert.equals(4, pipes, "table row with stray pipe: " .. line)
+                if not headerPipes then headerPipes = pipes as integer end
+                luassert.equals(headerPipes, pipes, "table row with stray pipe: " .. line)
+            else
+                headerPipes = nil
             end
         end
     end)

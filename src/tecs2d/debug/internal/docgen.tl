@@ -313,6 +313,13 @@ function docgen.markdown(reg: commands.Registry): string
                 out[#out + 1] = SECTION_INTRO[section]
                 out[#out + 1] = ""
             end
+            out[#out + 1] = "| Command | Description |"
+            out[#out + 1] = "| --- | --- |"
+            for _, c in ipairs(bucket) do
+                out[#out + 1] = "| [`" .. c.name .. "`](#cmd-" .. c.name .. ") | " ..
+                    escapeCell(sentence(c.shortHelp)) .. " |"
+            end
+            out[#out + 1] = ""
             for _, c in ipairs(bucket) do renderCommand(out, c, toolFor) end
         end
     end
