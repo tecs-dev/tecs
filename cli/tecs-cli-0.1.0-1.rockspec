@@ -21,8 +21,6 @@ new projects can be bootstrapped with `tecs new` and `tecs run`.
 -- Tecs targets LuaJIT, which implements Lua 5.1.
 dependencies = {
     "lua == 5.1",
-    "ansicolors",
-    "argparse",
     "luafilesystem",
 }
 
@@ -30,6 +28,8 @@ build = {
     type = "builtin",
     modules = {
         ["tecs_cli.cli"] = "tecs_cli/cli.lua",
+        ["tecs_cli.vendor.ansicolors"] = "tecs_cli/vendor/ansicolors.lua",
+        ["tecs_cli.vendor.argparse"] = "tecs_cli/vendor/argparse.lua",
     },
     copy_directories = {
         "tecs_cli/templates",

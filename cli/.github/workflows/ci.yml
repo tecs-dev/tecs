@@ -40,6 +40,7 @@ jobs:
             "exec \"$TECS_LUA54\" \"$real_luarocks\" \"\$@\"" \
             > "$RUNNER_TEMP/lua54-bin/luarocks"
           chmod +x "$RUNNER_TEMP/lua54-bin/luarocks"
+          echo "TECS_LUAROCKS=$real_luarocks" >> "$GITHUB_ENV"
           echo "$RUNNER_TEMP/lua54-bin" >> "$GITHUB_PATH"
 
       - name: Clear LuaRocks cache
@@ -47,7 +48,7 @@ jobs:
 
       - name: Run luacheck
         run: |
-          lr() { "$TECS_LUA54" "$(command -v luarocks)" --lua-version=5.1 "$@"; }
+          lr() { "$TECS_LUA54" "$TECS_LUAROCKS" --lua-version=5.1 "$@"; }
           lr install argparse
           lr install luafilesystem
           lr install --deps-mode=none luacheck
@@ -102,6 +103,7 @@ jobs:
             "exec \"$TECS_LUA54\" \"$real_luarocks\" \"\$@\"" \
             > "$RUNNER_TEMP/lua54-bin/luarocks"
           chmod +x "$RUNNER_TEMP/lua54-bin/luarocks"
+          echo "TECS_LUAROCKS=$real_luarocks" >> "$GITHUB_ENV"
           echo "$RUNNER_TEMP/lua54-bin" >> "$GITHUB_PATH"
 
       - name: Clear LuaRocks cache
@@ -111,9 +113,7 @@ jobs:
       - name: Install tecs-cli
         shell: bash
         run: |
-          lr() { "$TECS_LUA54" "$(command -v luarocks)" --lua-version=5.1 "$@"; }
-          lr install --local ansicolors
-          lr install --local argparse
+          lr() { "$TECS_LUA54" "$TECS_LUAROCKS" --lua-version=5.1 "$@"; }
           lr install --local luafilesystem
           lr make --local --deps-mode=none tecs-cli-0.1.0-1.rockspec
           eval "$(luarocks path --local --bin)"
@@ -151,6 +151,9 @@ jobs:
           repository: tecs-dev/tecs
           path: tecs
 
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
       # Keep this Lua 5.4 executable when hererocks makes LuaJIT active below.
       # It runs LuaRocks's frontend only; installed rocks still target 5.1.
       - name: Set up Lua 5.4 for LuaRocks
@@ -162,9 +165,6 @@ jobs:
         shell: pwsh
         run: '"TECS_LUA54=$((Get-Command lua).Source)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append'
 
-      - name: Set up MSVC
-        uses: ilammy/msvc-dev-cmd@v1
-
       - name: Set up LuaJIT and LuaRocks
         shell: pwsh
         run: |
@@ -172,6 +172,10 @@ jobs:
           hererocks "$env:RUNNER_TEMP\lua" -j 2.1 -r latest
           "$env:RUNNER_TEMP\lua\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           "TECS_LUAROCKS=$env:RUNNER_TEMP\lua\bin\luarocks" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $lua54Root = Split-Path (Split-Path $env:TECS_LUA54)
+          $lua54Modules = Join-Path $lua54Root "share\lua\5.4"
+          New-Item -ItemType Directory -Force -Path $lua54Modules | Out-Null
+          Copy-Item -Recurse -Force "$env:RUNNER_TEMP\lua\share\lua\5.1\luarocks" $lua54Modules
 
       # Put a cmd wrapper ahead of hererocks so CLI-spawned `luarocks`
       # commands run the same LuaJIT-targeted launcher under Lua 5.4.
@@ -195,8 +199,6 @@ jobs:
       - name: Install tecs-cli
         shell: cmd
         run: |
-          "%TECS_LUA54%" "%TECS_LUAROCKS%" --lua-version=5.1 install --local ansicolors
-          "%TECS_LUA54%" "%TECS_LUAROCKS%" --lua-version=5.1 install --local argparse
           "%TECS_LUA54%" "%TECS_LUAROCKS%" --lua-version=5.1 install --local luafilesystem
           "%TECS_LUA54%" "%TECS_LUAROCKS%" --lua-version=5.1 make --local --deps-mode=none tecs-cli-0.1.0-1.rockspec
           luarocks path --local --bin > luarocks-path.bat

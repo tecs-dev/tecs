@@ -1,8 +1,8 @@
 -- Cross-platform task runner for Tecs starter projects.
 -- Usage: tecs [--version] [--quiet] <command>
 
-local argparse = require("argparse")
-local have_ansicolors, ansicolors = pcall(require, "ansicolors")
+local argparse = require("tecs_cli.vendor.argparse")
+local ansicolors = require("tecs_cli.vendor.ansicolors")
 local have_lfs, lfs = pcall(require, "lfs")
 
 local VERSION = "0.1.0" -- keep in sync with the rockspec version
@@ -97,25 +97,7 @@ end
 
 local function color(spec, text)
     if not supports_color() then return text end
-    if have_ansicolors then
-        return ansicolors("%{" .. spec .. "}" .. text .. "%{reset}")
-    end
-    local codes = {
-        blue = "34",
-        cyan = "36",
-        green = "32",
-        magenta = "35",
-        red = "31",
-        yellow = "33",
-        bright = "1",
-        black = "90",
-    }
-    local out = {}
-    for token in spec:gmatch("%S+") do
-        out[#out + 1] = codes[token]
-    end
-    if #out == 0 then return text end
-    return "\27[" .. table.concat(out, ";") .. "m" .. text .. "\27[0m"
+    return ansicolors("%{" .. spec .. "}" .. text .. "%{reset}")
 end
 
 -- Print a progress message to stderr (stdout is reserved for echoed commands).
