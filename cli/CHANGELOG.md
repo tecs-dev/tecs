@@ -19,6 +19,9 @@ payload, launchers, and installers as GitHub release assets.
 - `tecs completions bash|zsh|fish` prints shell completion scripts.
 - `TECS_TEAL_DIR` loads the Teal compiler from a local `teal-language/tl`
   checkout instead of the embedded copy.
+- `tecs add`, `tecs remove`, and `tecs update` vendor pure-Lua rocks (plus
+  dependencies, licenses, and `<rock>-tl-type` Teal declarations) from
+  luarocks.org into `src/vendor/` without a LuaRocks installation.
 
 ### Fixed
 

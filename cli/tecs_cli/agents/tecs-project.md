@@ -10,6 +10,10 @@ Run these from the project root (the directory containing `tlconfig.lua`):
 - `tecs build` — compile Teal to `build/`, copy assets, and stage the runtime vendor tree. Incremental; safe to rerun.
 - `tecs run` — build, then launch the game with the cached LÖVE 12 runtime.
 - `tecs info --json` — CLI, LÖVE, and LuaJIT versions plus project status as JSON.
+- `tecs add <rock>[@version]` / `tecs remove <rock>` / `tecs update` — vendor pure-Lua
+  rocks from luarocks.org into `src/vendor/` (with Teal type declarations when a
+  `<rock>-tl-type` package exists). Vendored files are committed; `src/vendor/rocks.lua`
+  records them. C rocks are rejected by design.
 - `tecs clean` — remove `build/`.
 
 Always run `tecs check` after editing Teal sources, and make sure it passes before finishing a task.

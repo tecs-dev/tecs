@@ -79,6 +79,26 @@ its absolute path, ready to reference from agent configuration
 `tecs completions bash|zsh|fish` prints a shell completion script; source its
 output from your shell profile.
 
+## Dependencies
+
+```sh
+tecs add inspect          # newest version with a source rock
+tecs add inspect@2.0-1    # pin a version
+tecs remove inspect
+tecs update               # re-resolve every added rock (or: tecs update inspect)
+```
+
+`tecs add` vendors a pure-Lua rock from luarocks.org into
+`src/vendor/share/lua/5.1/`, along with its dependencies, license files, and —
+when luarocks.org publishes a `<rock>-tl-type` package — the matching Teal
+type declarations, so `tecs check` keeps working. The files are meant to be
+committed; `src/vendor/rocks.lua` records what was installed and why.
+
+Rocks that need a C compiler (or any non-`builtin` build) are rejected: the
+game runtime is LÖVE's LuaJIT with no toolchain, and builds must stay
+self-contained. The LuaRocks client is never used — the CLI talks to
+luarocks.org directly over the LÖVE runtime's HTTPS support.
+
 ## Development Commands
 
 This command copies framework sources from a local Tecs checkout:
@@ -109,7 +129,8 @@ TECS_TEAL_DIR=../tl tecs check
 - the starter template
 
 The CLI stages the required declarations and framework sources into
-`src/vendor/`; it does not resolve or build rocks at runtime. A `TECS_DIR`
+`src/vendor/`; it never builds rocks and has no LuaRocks dependency. Third
+party pure-Lua rocks are vendored explicitly with `tecs add`. A `TECS_DIR`
 checkout can replace the embedded framework sources during development.
 
 The repository keeps private CLI libraries in `tecs_cli/vendor/`. Teal lives
