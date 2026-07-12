@@ -43,7 +43,6 @@ local tecs_dir = os.getenv("TECS_DIR") or default_tecs_dir()
 local vendor_lua = "src/vendor/share/lua/5.1"  -- installed LuaRocks module tree
 local love12_dir = ".love12"                   -- downloaded Love2D 12 runtime
 local nightly_base = "https://nightly.link/love2d/love/workflows/main/main"
-local pinned_tl_ref = "4b97e8d4c743795cb148c898fb19e14b6f3b8f2d"
 
 -- Source-only asset extensions to exclude from build output and mtime checks.
 local exclude_assets = {
@@ -212,6 +211,10 @@ local function dirname(path)
     return dir
 end
 
+local function basename(path)
+    return normalize(path):match("[^/\\]+$") or normalize(path)
+end
+
 -- True if a file or directory exists.
 local function exists(path)
     return require_lfs().attributes(normalize(path)) ~= nil
@@ -275,6 +278,18 @@ local function read_file(path)
     local content = f:read("*a")
     f:close()
     return content
+end
+
+local function stamp_project_rockspec(target)
+    local template_path = path_join(target, "project-dev-1.rockspec.in")
+    local template = read_file(template_path)
+    if not template then return end
+
+    local title = basename(target)
+    local rockspec = "game-dev-1.rockspec"
+    template = template:gsub("@PACKAGE@", "game"):gsub("@TITLE@", title)
+    write_file(path_join(target, rockspec), template)
+    os.remove(normalize(template_path))
 end
 
 local function is_dir(path)
@@ -511,9 +526,6 @@ end
 -- LUA_PATH entries letting `tl` resolve type defs and the vendored modules.
 local function lua_path()
     local paths = {
-        "types/?.d.tl",
-        "types/string/?.d.tl",
-        "types/table/?.d.tl",
         lua_module_path(tecs_dir) .. "/src/?.tl",
         lua_module_path(tecs_dir) .. "/src/?/init.tl",
         lua_module_path(tecs_dir) .. "/build/?.lua",
@@ -539,6 +551,22 @@ local function with_lua_path(cmd)
     return "PATH=" .. q(bin) .. ':$PATH LUA_PATH=' .. q(lua_path()) .. " " .. cmd
 end
 
+local function with_vendor_env(cmd)
+    local root = assert(require_lfs().currentdir())
+    local bin = path_join(root, "src/vendor/bin")
+    local lua = path_join(root, "src/vendor/share/lua/5.1")
+    local clib = path_join(root, "src/vendor/lib/lua/5.1")
+    if uses_cmd_shell then
+        return 'cmd /C "set PATH=' .. normalize(bin) .. ';%PATH%&& set LUA_PATH='
+            .. lua_module_path(lua) .. '/?.lua;' .. lua_module_path(lua) .. '/?/init.lua;%LUA_PATH%&& set LUA_CPATH='
+            .. lua_module_path(clib) .. '/?.dll;' .. lua_module_path(clib) .. '/?.so;%LUA_CPATH%&& ' .. cmd .. '"'
+    end
+    return posix_cmd("PATH=" .. q(bin) .. ':$PATH LUA_PATH='
+        .. q(lua_module_path(lua) .. "/?.lua;" .. lua_module_path(lua) .. "/?/init.lua;;$LUA_PATH")
+        .. " LUA_CPATH=" .. q(lua_module_path(clib) .. "/?.so;;$LUA_CPATH")
+        .. " " .. cmd)
+end
+
 -- Run a command from inside the local Tecs checkout with its luarocks bin
 -- (where the `tl`/`luarocks` shims live) prepended to PATH.
 local function tecs_cmd(cmd)
@@ -549,48 +577,22 @@ local function tecs_cmd(cmd)
     return posix_cmd("cd " .. q(normalize(tecs_dir)) .. " && PATH=" .. q(bin) .. ':$PATH ' .. cmd)
 end
 
-local function tecs_tl_ref()
-    local env_ref = os.getenv("TL_REF")
-    if env_ref and env_ref ~= "" then return env_ref end
-    local makefile = read_file(path_join(tecs_dir, "Makefile")) or ""
-    return makefile:match("\nTL_REF%s*%?=%s*([%w]+)") or makefile:match("^TL_REF%s*%?=%s*([%w]+)") or pinned_tl_ref
-end
-
 local function ensure_msys_teal_wrapper()
     if not is_msys then return false end
-    if not command_ok(posix_cmd('[ -f src/vendor/lib/luarocks/rocks-5.1/tl/dev-1/bin/tl ]')) then
+    if not command_ok(posix_cmd('[ -f src/vendor/lib/luarocks/rocks-5.1/tl/*/bin/tl ]')) then
         return false
     end
     local bin = path_join("src/vendor/bin")
     mkdir(bin)
     write_file(path_join(bin, "tl"), [[#!/usr/bin/env bash
 root="$(cygpath -m "$PWD")"
-script="$root/src/vendor/lib/luarocks/rocks-5.1/tl/dev-1/bin/tl"
+script="$(find "$root/src/vendor/lib/luarocks/rocks-5.1/tl" -path '*/bin/tl' | sort -r | head -n 1)"
 export LUA_PATH="$root/src/vendor/share/lua/5.1/?.lua;$root/src/vendor/share/lua/5.1/?/init.lua;$LUA_PATH"
 export LUA_CPATH="$root/src/vendor/lib/lua/5.1/?.dll;$root/src/vendor/lib/lua/5.1/?.so;$LUA_CPATH"
 exec luajit "$script" "$@"
 ]])
     run(posix_cmd("chmod +x " .. q(path_join(bin, "tl"))))
     return true
-end
-
-local function ensure_teal_compiler()
-    local tl_bin = path_join("src/vendor/bin/tl")
-    if exists(tl_bin) and not is_msys
-        and command_ok(posix_cmd(q(tl_bin) .. " --version >/dev/null 2>&1")) then
-        return
-    end
-    if ensure_msys_teal_wrapper() then return end
-    local ref = tecs_tl_ref()
-    status("Installing Teal compiler at " .. ref .. "...")
-    local tmp = path_join(".tecs-tmp", "tl")
-    remove(tmp)
-    run(posix_cmd("git clone --branch main " .. q("https://github.com/teal-language/tl.git") .. " " .. q(tmp)))
-    run(posix_cmd("cd " .. q(tmp) .. " && git checkout --detach " .. q(ref)))
-    run(posix_cmd("cd " .. q(tmp)
-        .. " && luarocks make --tree=" .. q(path_join(cwd(), "src/vendor"))
-        .. " --lua-version=5.1 tl-dev-1.rockspec"))
-    remove(path_join(".tecs-tmp"))
 end
 
 -- Path to the downloaded Love2D executable for this platform.
@@ -601,29 +603,6 @@ local function love_bin()
         return path_join(love12_dir, "love.app/Contents/MacOS/love")
     end
     return path_join(love12_dir, "love")
-end
-
--- Copy Teal type definitions from the Tecs checkout on first use.
-local function ensure_types()
-    if exists("types/love2d.d.tl") then return end
-    local bundled = path_join(template_dir(), "types")
-    if exists(path_join(bundled, "love2d.d.tl")) then
-        status("Copying bundled type definitions...")
-        mkdir("types")
-        copy_dir(bundled, "types")
-        return
-    end
-    local source = path_join(tecs_dir, "types")
-    if not exists(source) then
-        error(
-            "Type definitions not found. Expected " .. source .. "\n" ..
-            "Set TECS_DIR to a current Tecs checkout, run `git pull` there, " ..
-            "or restore this starter's types/ directory.",
-            0
-        )
-    end
-    status("Copying type definitions...")
-    copy_dir(source, "types", {"luassert", "busted.d.tl"})
 end
 
 -- Use the local checkout directly when LuaRocks cannot reliably install into
@@ -638,25 +617,33 @@ local function sync_local_tecs()
     copy_dir(tecs2d_src, path_join(vendor_lua, "tecs2d"))
 end
 
-local function install_tecs_rocks()
-    local tree = q(path_join(cwd(), "src/vendor"))
-    if exists(path_join(tecs_dir, "tecs-dev-1.rockspec")) and exists(path_join(tecs_dir, "tecs2d-dev-1.rockspec")) then
-        run(tecs_cmd("luarocks make --tree=" .. tree .. " --lua-version=5.1 tecs-dev-1.rockspec"))
-        run(tecs_cmd("luarocks make --tree=" .. tree .. " --lua-version=5.1 tecs2d-dev-1.rockspec"))
-        return
+local function project_rockspec()
+    local fs = require_lfs()
+    for entry in fs.dir(".") do
+        if entry:match("%-dev%-1%.rockspec$") then
+            return entry
+        end
     end
-    run(posix_cmd("luarocks install --tree=" .. tree .. " --lua-version=5.1 tecs"))
-    run(posix_cmd("luarocks install --tree=" .. tree .. " --lua-version=5.1 tecs2d"))
+    return nil
+end
+
+local function install_project_rock()
+    local rockspec = project_rockspec()
+    if not rockspec then return end
+    local tree = q(path_join(cwd(), "src/vendor"))
+    run(with_vendor_env("luarocks --dev --lua-version=5.1 make --tree=" .. tree
+        .. " " .. q(rockspec)))
+    ensure_msys_teal_wrapper()
 end
 
 -- Install Tecs/Tecs2D into src/vendor via luarocks on first use.
 local function ensure_vendor()
-    ensure_teal_compiler()
-    if exists(path_join(vendor_lua, "tecs2d/init.tl")) then return end
-    sync_local_tecs()
-    if exists(path_join(vendor_lua, "tecs2d/init.tl")) then return end
-    status("Installing Tecs and Tecs2D dependencies...")
-    install_tecs_rocks()
+    if exists(path_join(vendor_lua, "tecs2d/init.tl"))
+        and exists(path_join(vendor_lua, "love2d.d.tl"))
+        and exists(path_join(vendor_lua, "ffi.d.tl"))
+        and exists(path_join(vendor_lua, "socket.d.tl")) then return end
+    status("Installing project dependencies...")
+    install_project_rock()
     if not exists(path_join(vendor_lua, "tecs2d/init.tl")) then
         sync_local_tecs()
     end
@@ -807,7 +794,6 @@ end
 local tasks = {}
 
 function tasks.check()
-    ensure_types()
     ensure_vendor()
     status("Typechecking...")
     local sources = table.concat(list_teal_sources(), " ")
@@ -816,7 +802,6 @@ end
 
 function tasks.build()
     status("Building...")
-    ensure_types()
     ensure_vendor()
     local changed = compile_sources() > 0
     if copy_assets() then changed = true end
@@ -857,8 +842,8 @@ function tasks.new(args)
     status("Creating project " .. target .. "...")
     mkdir(target)
     copy_dir(template_dir(), target)
+    stamp_project_rockspec(target)
     mkdir(path_join(target, "assets"))
-    mkdir(path_join(target, "types"))
 
     status("Project created. Next: cd " .. target .. " && tecs check")
 end
@@ -880,13 +865,13 @@ function tasks.dev()
     if not exists(tecs_build) or not exists(tecs2d_build) then
         error("Tecs build output not found. Build Tecs first: " .. tecs_dir, 0)
     end
+    install_project_rock()
     mkdir(path_join(vendor_lua))
     remove(path_join(vendor_lua, "tecs"))
     remove(path_join(vendor_lua, "tecs2d"))
     status("Preparing local Tecs development source...")
     copy_dir(path_join(tecs_dir, "src/tecs"), path_join(vendor_lua, "tecs"))
     copy_dir(path_join(tecs_dir, "src/tecs2d"), path_join(vendor_lua, "tecs2d"))
-    ensure_types()
     status("Dev mode prepared. Re-run `tecs build` after changes.")
 end
 
@@ -897,7 +882,7 @@ tasks["sync-tecs"] = function()
     end
     remove(path_join(vendor_lua, "tecs"))
     remove(path_join(vendor_lua, "tecs2d"))
-    ensure_types()
+    install_project_rock()
     run(tecs_cmd("luarocks make --tree=" .. q(path_join(cwd(), "src/vendor"))
         .. " --lua-version=5.1 tecs-dev-1.rockspec"))
     run(tecs_cmd("luarocks make --tree=" .. q(path_join(cwd(), "src/vendor"))
