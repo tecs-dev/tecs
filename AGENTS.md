@@ -103,34 +103,39 @@ tecs/
 
 - MCP tools may be exposed lazily by the agent environment. If a useful tool is not initially visible, search for
   the specific capability before falling back to `run_lua`.
-- Prefer high-level MCP world-operation tools over `run_lua` for live game edits. In particular, use
-  `patch_entities` to add, update, or remove components on existing entities.
-- Useful live-debug tools include `get_debug_context`, `get_entity`, `query`, `query_in_bounds`,
-  and `patch_entities`.
-- When the debug plugin is installed, the in-game debugger's commands are also projected as
-  `debug_*` MCP tools (`debug_select`, `debug_mark`, `debug_goto`, `debug_note`, `debug_query`,
-  `debug_set`, `debug_spawn`, `debug_draw_*`, `debug_systems_*`, `debug_camera_*`,
-  `debug_snapshot_save`, `debug_record_start`, ...). They share the operator's selection, marks,
-  and notes, so use them to annotate or highlight entities the user can see in-game
-  (`debug_select` takes `replace = true` to swap the selection instead of adding).
-- Call `debug_capabilities` once after connecting to learn which plugins and tool families the
-  session supports, and `debug_describe {command = "<name>"}` for a command's full contract.
+- The surface is two layers: six kernel tools (`ping`, `screenshot`, `sample_pixels`,
+  `send_love_event`, `run_lua`, `get_logs`) plus every debugger registry command projected as a
+  `cmd_*` tool. `docs/tecs2d/mcp/tools.md` and `docs/tecs2d/debug-reference.md` are generated
+  from those definitions by `make docs-debug`.
+- Prefer the structured `cmd_*` tools over `run_lua` for live game edits. In particular, use
+  `cmd_set`, `cmd_modify`, and `cmd_remove` to add, update, or remove components on existing
+  entities.
+- Useful live-debug tools include `cmd_context`, `cmd_info`, `cmd_stats`, and `cmd_fetch`
+  (component-query fetch, optionally restricted to a world-space box via `x`, `y`, `w`, `h`).
+- The debugger's commands share the operator's selection, marks, and notes (`cmd_select`,
+  `cmd_mark`, `cmd_goto`, `cmd_note`, `cmd_query`, `cmd_spawn`, `cmd_draw_*`, `cmd_systems_*`,
+  `cmd_camera_*`, `cmd_snapshot_save`, `cmd_record_start`, ...), so use them to annotate or
+  highlight entities the user can see in-game (`cmd_select` takes `replace = true` to swap the
+  selection instead of adding). Freeze with `cmd_freeze` and advance frame by frame with
+  `cmd_step`.
+- Call `cmd_capabilities` once after connecting to learn which plugins and tool families the
+  session supports, and `cmd_describe {command = "<name>"}` for a command's full contract.
   Tool results carry the payload as MCP `structuredContent`, and every tool declares safety
   annotations (read-only, destructive, idempotent).
-- Time-travel debugging: `debug_rewind_start` keeps a rolling snapshot ring while the game runs;
-  after something goes wrong, `debug_diff {from = "rewind:10s", ignore = "Transform", limit = 0}`
-  shows a per-component summary of what changed, `debug_diff_get` dereferences a JSON Pointer
-  into the result, `debug_rewind_load` restores an entry, and the `step` tool replays frame by
-  frame. `debug_map_info` reads tiles at a world point. `debug_set` and `debug_modify` take the
-  component value as a JSON object: `set` replaces the whole component (adds it when missing,
-  omitted fields reset to defaults) while `modify` changes only the named fields and skips
-  targets that lack the component, so prefer `modify` for tweaking live values.
+- Time-travel debugging: `cmd_rewind_start` keeps a rolling snapshot ring while the game runs;
+  after something goes wrong, `cmd_diff {from = "rewind:10s", ignore = "Transform", limit = 0}`
+  shows a per-component summary of what changed, `cmd_diff_get` dereferences a JSON Pointer
+  into the result, `cmd_rewind_load` restores an entry, and `cmd_step` replays frame by
+  frame. `cmd_map_info` reads tiles at a world point. `cmd_set` and `cmd_modify` take the
+  component value as a JSON object: `cmd_set` replaces the whole component (adds it when missing,
+  omitted fields reset to defaults) while `cmd_modify` changes only the named fields and skips
+  targets that lack the component, so prefer `cmd_modify` for tweaking live values.
 - `get_logs` returns captured engine log lines with a seq cursor (`after`); the operator-action
   feed (selection, marks, notes, edits, artifacts) logs under `tecs2d.debug.events`, so poll it
-  with `get_logs {after = <seq>, contains = "debug.events"}`. `get_component_schema` gives field
+  with `get_logs {after = <seq>, contains = "debug.events"}`. `cmd_components_info` gives field
   names, C types, and defaults for building component payloads.
 - Games can register custom debugger commands via `require("tecs2d.debug.commands").register`;
-  registered commands appear as `debug_<name>` tools too.
+  registered commands appear as `cmd_<name>` tools too.
 
 ## Development Guidelines
 

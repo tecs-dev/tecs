@@ -12,7 +12,7 @@ directly; otherwise POST JSON-RPC to `http://localhost:<port>/mcp`:
 
 ```bash
 curl -s -X POST localhost:PORT/mcp -H 'Content-Type: application/json' -d \
-  '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_stats","arguments":{}}}'
+  '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"cmd_stats","arguments":{}}}'
 ```
 
 Integration-test apps log to `build/test_deps/love_test_logs/`; a dead app
@@ -29,7 +29,7 @@ where they diverge is the bug.
    0..1 fractions) and returns RGBA. To *locate* content, scan a grid or row
    and search for the expected channel signature rather than betting on one
    pixel.
-2. **`query` / `get_entity` / `get_stats`** — CPU-side truth. Is the entity
+2. **`cmd_fetch` / `cmd_info` / `cmd_stats`** — CPU-side truth. Is the entity
    alive, what are its Transform/Color/layer values, do counts match
    expectations?
 3. **`run_lua`** — arbitrary inspection inside the app. The big three:
@@ -56,24 +56,23 @@ where they diverge is the bug.
 
    Run this on consecutive frames: a static scene with recurring dirty marks
    means an unconditional `getMut` is defeating dirty gates somewhere.
-4. **`screen_to_world` + `query_in_bounds`** — "what entity is at this
-   pixel"; the inverse of step 3's toScreen check.
-5. **`pause` + `step`** — freeze a transient glitch. Pause, screenshot,
-   `step {frames: 1}`, screenshot again; rendering continues while paused so
-   probes stay live. `set_time_scale` slows animations for observation.
-6. **`toggle_system`** — bisect which system produces an artifact by
-   disabling systems (get names from `get_systems`).
-7. **`debug_draw_rect` / `debug_draw_circle` / `debug_draw_line` / `debug_draw_text`** —
+4. **`cmd_camera_world` + `cmd_fetch` with `x`/`y`/`w`/`h` bounds** — "what
+   entity is at this pixel"; the inverse of step 3's toScreen check.
+5. **`cmd_freeze` + `cmd_step`** — freeze a transient glitch. Freeze, screenshot,
+   `cmd_step {frames: 1}`, screenshot again; rendering continues while frozen so
+   probes stay live. `cmd_camera_timescale` slows animations for observation.
+6. **`cmd_systems_stop` / `cmd_systems_start`** — bisect which system produces
+   an artifact by disabling systems (get names from `cmd_systems_list`).
+7. **`cmd_draw_rect` / `cmd_draw_circle` / `cmd_draw_line` / `cmd_draw_text`** —
    overlay expected geometry (world coordinates; pass `entity` to pin to a moving
    entity). Draw where something *should* be and compare with where it renders.
-   `debug_draw_clear` (by `tag` or `id`, or everything) cleans up.
-8. **`profiler_start` / `profiler_stop`** — per-system timings when the
-   symptom is cost rather than correctness. For deeper perf work, switch to
-   the `love2d-bench` skill.
+   `cmd_draw_clear` (by `tag` or `id`, or everything) cleans up.
+8. **`cmd_profile`** — per-system timings when the symptom is cost rather
+   than correctness. For deeper perf work, switch to the `love2d-bench` skill.
 
 ## Diagnosis recipes
 
-**Content missing.** Alive (`query`)? → in view (`toScreen` on its
+**Content missing.** Alive (`cmd_fetch`)? → in view (`toScreen` on its
 Transform)? → layer visible and inside the camera's layer mask
 (`isLayerVisibility`, camera `layerMask`)? → probe at the computed pixel. If
 CPU says visible but pixels disagree: check the dirty path — cdata writes
@@ -97,17 +96,17 @@ via run_lua removes lighting from the equation; toggling `Unlit` on the
 entity isolates the G-buffer vs compose; blend-tagged entities render in the
 forward pass after lighting.
 
-**Flicker/one-frame glitches.** pause + single-step with a screenshot per
-frame; then bisect systems with `toggle_system`.
+**Flicker/one-frame glitches.** freeze + single-step with a screenshot per
+frame; then bisect systems with `cmd_systems_stop`.
 
 ## Gotchas
 
 - `run_lua` executes in RenderFirst, after PostUpdate: mutations render next
   frame, and their dirty marks are cleared at frame end (PostUpdate-gated
   systems see them through the layout_dirty carryover sampler).
-- `pause` disables gameplay phases but MCP and rendering keep running —
-  probing while paused is the point. `set_time_scale(0)` is different: systems
-  still tick with zero dt.
+- `cmd_freeze` disables gameplay phases but MCP and rendering keep running —
+  probing while frozen is the point. `cmd_camera_timescale` with scale 0 is
+  different: systems still tick with zero dt.
 - Screenshot responses are deferred (the connection is held until the frame
   captures); allow a longer timeout than other tools.
 - Probes read the final composited frame: post-compose passes (forward blend,

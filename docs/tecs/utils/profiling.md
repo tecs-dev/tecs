@@ -335,4 +335,4 @@ local report = session:stop("/tmp/aborts.txt")
 [2]: https://www.brendangregg.com/flamegraphs.html
 [3]: https://speedscope.app
 [4]: https://github.com/brendangregg/FlameGraph
-[5]: /tecs2d/mcp/tools#profiler_start
+[5]: /tecs2d/debug-reference#cmd-profile

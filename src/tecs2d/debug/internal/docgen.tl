@@ -1,20 +1,27 @@
---- Render the debugger command registry as a Markdown reference page.
+--- Render the debugger command registry as a Markdown reference page, and
+--- the MCP tools page from the kernel tool definitions plus the registry.
 ---
---- `scripts/gen_debug_docs.lua` (via `make docs-debug`) writes the result to
---- docs/tecs2d/debug-reference.md, and a spec asserts the committed page
---- matches a fresh render, so the reference can never drift from the code.
+--- `scripts/gen_debug_docs.lua` (via `make docs-debug`) writes the results to
+--- docs/tecs2d/debug-reference.md and docs/tecs2d/mcp/tools.md, and a spec
+--- asserts the committed pages match a fresh render, so the docs can never
+--- drift from the code.
 
 local commands <const> = require("tecs2d.debug.commands")
 local cmdargs <const> = require("tecs2d.debug.internal.cmdargs")
 local cmdtypes <const> = require("tecs2d.debug.internal.cmdtypes")
+local tools <const> = require("tecs2d.mcp.tools")
 
 local record docgen
     markdown: function(reg: commands.Registry): string
 
     --- A compact index of every projected cmd_* tool (name, one-line
-    --- description, link into the reference page) for splicing into the
-    --- MCP tools doc between GENERATED markers.
+    --- description, link into the reference page).
     toolIndex: function(reg: commands.Registry): string
+
+    --- The full MCP tools page: intro and envelope conventions, a kernel
+    --- tools section generated from tecs2d.mcp.tools, and the cmd_* tool
+    --- index generated from the registry.
+    toolsPage: function(reg: commands.Registry): string
 end
 
 local SECTION_ORDER <const>: {string} = cmdtypes.SECTIONS
@@ -330,6 +337,177 @@ function docgen.toolIndex(reg: commands.Registry): string
             end
         end
     end
+    return table.concat(out, "\n")
+end
+
+local function kernelBadges(a: tools.Annotations): string
+    local b: {string} = {}
+    if a.readOnlyHint then b[#b + 1] = "read-only" end
+    if a.destructiveHint then b[#b + 1] = "destructive" end
+    if a.idempotentHint then b[#b + 1] = "idempotent" end
+    return table.concat(b, ", ")
+end
+
+local function kernelTypeLabel(schema: tools.Schema): string
+    local t = schema.type
+    if not t then return "any" end
+    if t == "array" then
+        local items = schema.items
+        if items and items.type then return items.type .. "[]" end
+        return "array"
+    end
+    return t
+end
+
+-- Property names in a stable order: required arguments first, then
+-- alphabetical within each group.
+local function sortedProperties(props: {string: tools.Schema}, required: {string: boolean}): {string}
+    local names: {string} = {}
+    if props then
+        for name in pairs(props) do names[#names + 1] = name end
+    end
+    table.sort(names, function(a: string, b: string): boolean
+        local ra, rb = required[a] or false, required[b] or false
+        if ra ~= rb then return ra end
+        return a < b
+    end)
+    return names
+end
+
+local function requiredSet(list: {string}): {string: boolean}
+    local set: {string: boolean} = {}
+    for _, name in ipairs(list or {}) do set[name] = true end
+    return set
+end
+
+local function kernelArgRow(out: {string}, name: string, schema: tools.Schema, required: boolean)
+    out[#out + 1] = "| `" .. name .. "` | " .. escapeCell(kernelTypeLabel(schema)) ..
+        " | " .. (required and "yes" or "no") ..
+        " | " .. escapeCell(schema.description or "") .. " |"
+end
+
+local function renderKernelArgs(out: {string}, schema: tools.Schema)
+    local required = requiredSet(schema.required)
+    local names = sortedProperties(schema.properties, required)
+    if #names == 0 then
+        out[#out + 1] = "No arguments."
+        out[#out + 1] = ""
+        return
+    end
+    out[#out + 1] = "| Argument | Type | Required | Description |"
+    out[#out + 1] = "| --- | --- | --- | --- |"
+    for _, name in ipairs(names) do
+        local prop = schema.properties[name]
+        kernelArgRow(out, name, prop, required[name])
+        -- One level into array item objects, so callers see the item shape
+        -- (e.g. points[].x) without reading the raw JSON Schema.
+        local items = prop.items
+        if items and items.properties then
+            local itemRequired = requiredSet(items.required)
+            for _, sub in ipairs(sortedProperties(items.properties, itemRequired)) do
+                kernelArgRow(out, name .. "[]." .. sub, items.properties[sub], itemRequired[sub])
+            end
+        end
+    end
+    out[#out + 1] = ""
+end
+
+local function renderKernelTool(out: {string}, tool: tools.Tool)
+    out[#out + 1] = "### `" .. tool.name .. "` {#" .. tool.name .. "}"
+    out[#out + 1] = ""
+    out[#out + 1] = escapeProse(tool.description)
+    out[#out + 1] = ""
+    local b = kernelBadges(tool.annotations)
+    out[#out + 1] = "Annotations: " .. (b ~= "" and b or "none") .. "."
+    out[#out + 1] = ""
+    renderKernelArgs(out, tool.inputSchema)
+end
+
+function docgen.toolsPage(reg: commands.Registry): string
+    local out: {string} = {
+        "---",
+        "outline: [2, 3]",
+        "---",
+        "",
+        "<!-- Generated by `make docs-debug` from the kernel tool definitions and the debugger command registry. Do not edit by hand. -->",
+        "",
+        "# MCP Tools",
+        "",
+        "The MCP server exposes two tool layers to agents connected to a running game:",
+        "",
+        "- **Kernel tools** are transport-level and always available: liveness, screenshots, pixel",
+        "  sampling, Love2D events, arbitrary Lua, and log capture.",
+        "- **Command tools** (`cmd_*`) project the debugger command registry, one tool per command or",
+        "  subcommand verb, including commands the game registers itself. Call `cmd_capabilities` after",
+        "  connecting to discover what the session supports, and `cmd_describe` for one command's full",
+        "  contract.",
+        "",
+        "The server listens on `http://localhost:19999/mcp` by default; an MCP client connects with",
+        '`{"type": "http", "url": "http://localhost:19999/mcp"}`. See the [MCP server guide](./) for',
+        "setup and the investigation workflow.",
+        "",
+        "This page is generated: run `make docs-debug` after changing a kernel tool or a debugger",
+        "command.",
+        "",
+        "## Response envelope",
+        "",
+        "Except for `screenshot`, tool calls return an MCP `result` with one text content item plus the",
+        "same envelope as `structuredContent`, so typed clients consume the object directly while",
+        "text-only clients parse the JSON. Every tool declares MCP safety annotations (readOnlyHint,",
+        "destructiveHint, idempotentHint, openWorldHint): kernel tools declare them explicitly, and",
+        "command tools derive them from the command (reads derive read-only and idempotent, world loads",
+        "and despawns derive destructive, and commands can override per key). Successful tool payloads",
+        "use:",
+        "",
+        "```json",
+        '{"ok":true,"result":{}}',
+        "```",
+        "",
+        "Command tools carry the command's structured data plus its human-readable `message` inside",
+        "`result`:",
+        "",
+        "```json",
+        '{"ok":true,"result":{"selected":3,"added":[42],"message":"selected 1"}}',
+        "```",
+        "",
+        "Tool-level failures still return a JSON-RPC `result`, not a JSON-RPC `error`. The MCP tool",
+        "result has `isError: true`, and its text content contains the structured error envelope:",
+        "",
+        "```json",
+        '{"ok":false,"error":{"code":"unknown_component","message":"Unknown component","details":{"component":"Health"}}}',
+        "```",
+        "",
+        "JSON-RPC protocol and dispatch errors, such as unknown tool names, invalid `tools/call`",
+        "params, unknown methods, or malformed requests, use standard JSON-RPC `error` responses",
+        "instead of MCP tool results.",
+        "",
+        "MCP clients discover the live tool set by calling `tools/list`. The response composes the",
+        "kernel tools with every command currently registered in the game, including game-defined",
+        "commands, so it is the exact source of truth for the session.",
+        "",
+        "## Kernel tools",
+        "",
+        "Kernel tools are defined by the MCP server itself and available in every session.",
+        "",
+    }
+    for _, tool in ipairs(tools.list) do
+        renderKernelTool(out, tool)
+    end
+    out[#out + 1] = "## Command tools"
+    out[#out + 1] = ""
+    out[#out + 1] = "Every debugger command that allows MCP projection appears as one `cmd_*` tool per command and"
+    out[#out + 1] = "subcommand verb. The tool's JSON input schema is generated from the command's argument schema,"
+    out[#out + 1] = "so `tools/list` always matches what the operator can type and validation is identical on both"
+    out[#out + 1] = "surfaces. These are the same commands typeable in the [in-game debugger](../debug); they share"
+    out[#out + 1] = "the operator's selection, marks, notes, and capture artifacts. Games extend the surface with"
+    out[#out + 1] = "`require(\"tecs2d.debug.commands\").register`; registered commands appear as `cmd_<name>` tools"
+    out[#out + 1] = "exactly like the builtins."
+    out[#out + 1] = ""
+    out[#out + 1] = "This index links each tool to its full contract (arguments, result data schema, examples,"
+    out[#out + 1] = "safety annotations) in the [Command Reference](../debug-reference); `cmd_describe` returns the"
+    out[#out + 1] = "same contract as structured data at runtime."
+    out[#out + 1] = ""
+    out[#out + 1] = docgen.toolIndex(reg)
     return table.concat(out, "\n")
 end
 

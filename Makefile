@@ -460,9 +460,10 @@ docs: build
 	@$(TEAL_ENV) tealdoc html src/tecs/init.tl src/tecs/types.tl -o build/docs/tecs.html
 	@echo "Documentation generated in build/docs/"
 
-# Regenerate the debugger command reference from the live command registry.
-# A spec compares the committed page against a fresh render, so run this
-# after adding or changing a debugger command.
+# Regenerate the debugger command reference and the MCP tools page from the
+# kernel tool definitions and the live command registry. A spec compares the
+# committed pages against a fresh render, so run this after adding or
+# changing a kernel tool or a debugger command.
 docs-debug: compile
 	@LUA_PATH="$(LUA_DIR)/?.lua;$(LUA_DIR)/?/init.lua;$(TEST_BUILD_DIR)/?.lua;$(TEST_BUILD_DIR)/?/init.lua;$(VENDOR_LUA)/?.lua;$(VENDOR_LUA)/?/init.lua;;" \
 		luajit scripts/gen_debug_docs.lua
@@ -545,7 +546,7 @@ help:
 	@echo "  typecheck      - Type check source files only"
 	@echo "  check-examples - Type check all examples"
 	@echo "  build-examples - Build all examples"
-	@echo "  docs-debug     - Regenerate docs/tecs2d/debug-reference.md from the command registry"
+	@echo "  docs-debug     - Regenerate docs/tecs2d/debug-reference.md and docs/tecs2d/mcp/tools.md"
 	@echo "  clean          - Remove build directory"
 	@echo ""
 	@echo "Love2D 12 (GPU features):"

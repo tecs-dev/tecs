@@ -7,13 +7,13 @@ outline: deep
 The in-game debugger and the built-in MCP server share one command registry,
 one debug context, and one freeze controller. A selection made by clicking in
 the game is the same selection an agent reads over MCP; a command typed in the
-overlay and the matching `debug_*` tool run the same code against the same
+overlay and the matching `cmd_*` tool run the same code against the same
 state.
 
 - The [debugger](./debug) is an in-game command line with selection, overlays,
   capture tools, and time travel.
 - The [MCP server](./mcp/) exposes structured tools for the running world,
-  including every debugger command projected as a typed `debug_*` tool.
+  including every debugger command projected as a typed `cmd_*` tool.
 - Games [register their own commands](./custom-debug-commands) once; the
   registration serves both surfaces.
 
@@ -48,10 +48,10 @@ state connects the two:
 
 | Developer action | Agent view or action |
 | --- | --- |
-| Click or drag to select entities | Read `get_debug_context`, then inspect the selected IDs |
-| Mark a group `boss` | Use the mark as a target for `debug_*` commands |
+| Click or drag to select entities | Read `cmd_context`, then inspect the selected IDs |
+| Mark a group `boss` | Use the mark as a target for `cmd_*` commands |
 | Add a note to an entity | Read the note with its compact entity range |
-| Freeze in the debugger | Inspect safely and advance with `step` |
+| Freeze in the debugger | Inspect safely and advance with `cmd_step` |
 | Start a rewind ring | Compare `rewind:<ref>` with `current`, then load and replay |
 | Draw a probe or toggle bounds | See the same annotation in screenshots and recordings |
 | Save a capture | Read its metadata or open the artifact by path |
@@ -84,7 +84,7 @@ Debugger commands are declared in a schema-based registry. The schema drives
 command-line parsing, help, completion, the MCP JSON Schema, validation, and
 dispatch; the action returns overlay presentation and structured agent data.
 A game-defined command such as `wave 12 elite` is typeable in the overlay and
-appears to agents as a `debug_wave` tool with typed arguments. See
+appears to agents as a `cmd_wave` tool with typed arguments. See
 [Custom debugger commands](./custom-debug-commands) for schemas, structured
 results, shared context, subcommands, completion, and surface scoping.
 

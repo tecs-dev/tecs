@@ -9,7 +9,7 @@ command once and Tecs2D uses the same declaration for:
 
 - Command-line parsing and validation in the in-game debugger
 - Generated usage, argument help, examples, and Tab completion
-- A `debug_<name>` MCP tool with a generated JSON input schema
+- A `cmd_<name>` MCP tool with a generated JSON input schema
 - Identical execution and structured results on both surfaces
 
 Custom commands are useful for operations that understand the game better than
@@ -62,10 +62,10 @@ wave count=20 kind=grunt
 wave 12 kind=elite
 ```
 
-An MCP client discovers the equivalent `debug_wave` tool:
+An MCP client discovers the equivalent `cmd_wave` tool:
 
 ```json
-{"name":"debug_wave","arguments":{"count":12,"kind":"elite"}}
+{"name":"cmd_wave","arguments":{"count":12,"kind":"elite"}}
 ```
 
 Registration raises immediately if the debug plugin is missing, the name or an
@@ -168,8 +168,8 @@ The overlay accepts `focus 42` or `focus boss`. MCP exposes `id` and `name` as
 separate optional properties and requires exactly one:
 
 ```json
-{"name":"debug_focus","arguments":{"id":42}}
-{"name":"debug_focus","arguments":{"name":"boss"}}
+{"name":"cmd_focus","arguments":{"id":42}}
+{"name":"cmd_focus","arguments":{"name":"boss"}}
 ```
 
 The chosen value is available as `v.target`; the source field (`v.id` or
@@ -256,7 +256,7 @@ commands.register(world, {
 })
 ```
 
-This state is shared with `get_debug_context`, so an operator can select entities
+This state is shared with `cmd_context`, so an operator can select entities
 in-game and ask an agent to run the project-specific command against that exact
 selection.
 
@@ -309,7 +309,7 @@ commands.register(world, {
 ```
 
 The debugger exposes `checkpoint list` and `checkpoint goto foundry`. MCP
-projects them as `debug_checkpoint_list` and `debug_checkpoint_goto`. Aliases
+projects them as `cmd_checkpoint_list` and `cmd_checkpoint_goto`. Aliases
 are command-line conveniences and do not create additional MCP tools.
 
 ## Help, sections, and completion
@@ -331,7 +331,7 @@ The one documented `metadata` key is `screenshots`: a list of
 `docs = true` render as images in the generated
 [Command Reference](./debug-reference) (`file` is resolved from that page, so
 use paths like `./assets/debug/select.png`). Other entries, and any other
-`metadata` keys, ride along untouched in `debug_describe` for your own tooling.
+`metadata` keys, ride along untouched in `cmd_describe` for your own tooling.
 
 Completion positions start at `1` after the command or subcommand. Position `0`
 applies to any later argument. Available sources are `components`, `marks`,
@@ -354,7 +354,7 @@ command line; MCP clients use the generated input schema.
 Commands are available to both surfaces by default:
 
 ```teal
-mcp = false      -- overlay-only; no debug_* MCP tool
+mcp = false      -- overlay-only; no cmd_* MCP tool
 overlay = false  -- MCP-only; hidden from debugger dispatch, help, and completion
 ```
 
@@ -378,6 +378,5 @@ use the parsed `v` values and must not depend on `parts`.
 - Use shared selection and marks when the operation benefits from visible operator context.
 
 See [Runtime introspection](./introspection) for the human-agent workflow and
-[MCP tools](./mcp/tools#debugger-command-tools-debug_) for projected tool
-behavior.
+[MCP tools](./mcp/tools#command-tools) for projected tool behavior.
 

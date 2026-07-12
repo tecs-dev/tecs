@@ -525,7 +525,7 @@ To reproduce:
 make example-shape-bench SHAPE=circle ENTITIES=10000
 ```
 
-then use the MCP integration to call `snapshot_save` against the running world.
+then use the MCP integration to call `cmd_snapshot_save` against the running world.
 
 ::: details Fast-path lower bound
 The synthetic `make snapshot-bench` hits a stricter fast path (three POD FFI components, no GPU handles, no

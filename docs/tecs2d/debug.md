@@ -235,8 +235,8 @@ spawn enemy Transform {x = 0, y = 0}
 
 `spawn` accepts an optional leading bundle name, then component name / value
 pairs (a bare component name uses its defaults); the new entity is added to the
-selection. Agents call the same actions as `debug_set`, `debug_remove`, and
-`debug_spawn`, passing the value expression as a string.
+selection. Agents call the same actions as `cmd_set`, `cmd_remove`, and
+`cmd_spawn`, passing the value expression as a string.
 
 ### Annotations and id labels
 
@@ -255,7 +255,7 @@ Every verb takes color channels (`r= g= b= a=`), a `tag` for grouped clearing,
 `entity` to pin the annotation to an entity: positions become offsets from its
 Transform and the annotation is removed when the entity dies. Durations use
 wall-clock time, so annotations appear and expire even while the game is
-frozen. Agents draw through the `debug_draw_*` tools.
+frozen. Agents draw through the `cmd_draw_*` tools.
 
 `ids` toggles small entity-id labels over every on-screen entity (capped at
 200 labels), so ids can be read off the screen and used in commands.
@@ -501,10 +501,10 @@ world:addPlugin(require("tecs2d.debug").new())
 The debug plugin publishes a `DebugContext` resource, and the MCP server reads
 and drives it:
 
-- **`get_debug_context`** returns the open and frozen state, the current
+- **`cmd_context`** returns the open and frozen state, the current
   command, the last message, the selection, the entity count, the stats HUD
   visibility, any drag area, and the marks and notes.
-- The debugger's commands are projected as **`debug_*` tools**. Every command
+- The debugger's commands are projected as **`cmd_*` tools**. Every command
   is declared once (schema, help, subcommands, action) in a shared registry;
   the overlay dispatches typed command lines through it, and the MCP server
   exposes the same registry with JSON schemas generated from the command
@@ -513,25 +513,23 @@ and drives it:
   documents each one.
 
 A command called over MCP runs the same validation and produces the same
-effects as the typed command, including the on-screen highlights. Commands
-that already have a purpose-built MCP tool are not duplicated: use `step`,
-`pause`/`resume`, `profiler_start`/`profiler_stop`, `get_entity`, and `quit`
-instead of debugger `step`, `profile`, `info`, and `quit`.
+effects as the typed command, including the on-screen highlights.
 
-Pausing is shared: the debugger's freeze and the MCP `pause` tool go through
-one freeze controller, so an agent pause survives the operator opening and
-closing the debugger, and `step` works no matter which side froze the game.
+Pausing is shared: the debugger's freeze and the `cmd_freeze` tool go through
+one freeze controller, so an agent freeze survives the operator opening and
+closing the debugger, and `cmd_step` works no matter which side froze the
+game.
 
 Agents follow what the operator does through the log feed: every action
 (selection changes, marks, notes, edits, spawns, artifact writes, panel
 open/close) logs a `kind key=value ...` line under `tecs2d.debug.events`, and
 **`get_logs`** reads it back with a seq cursor
 (`{after = <last seq>, contains = "debug.events"}`). Pair it with
-**`get_component_schema`** (field names, C types, and defaults for building
-`debug_set` / `patch_entities` payloads); both are documented with the
-[MCP tools](./mcp/tools).
+**`cmd_components_info`** (field names, C types, and defaults for building
+`cmd_set` / `cmd_modify` payloads); see the [MCP tools](./mcp/tools) page and
+the [Command Reference](./debug-reference).
 
-`get_debug_context` also carries the session's `snapshots`, `profiles`,
+`cmd_context` also carries the session's `snapshots`, `profiles`,
 `screenshots`, current `recording` state, and completed `recordings`. These
 lists are capped to the five most recent entries so a long session does not
 ship an unbounded history each call.

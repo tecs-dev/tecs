@@ -2,6 +2,7 @@ local luassert <const> = require("luassert")
 local cmdharness <const> = require("spec.tecs2d.debug.cmdharness")
 local commands <const> = require("tecs2d.debug.commands")
 local docgen <const> = require("tecs2d.debug.internal.docgen")
+local mcptools <const> = require("tecs2d.mcp.tools")
 
 local makeRegistry <const> = cmdharness.makeRegistry
 
@@ -91,19 +92,34 @@ describe("tecs2d.debug.internal.docgen", function()
             "debug-reference.md is stale; run `make docs-debug` and commit the result")
     end)
 
-    it("matches the committed tool index in mcp/tools.md", function()
+    it("renders every kernel tool from the MCP tool definitions", function()
+        local page = docgen.toolsPage(makeRegistry())
+        for _, tool in ipairs(mcptools.list) do
+            luassert.is_truthy(page:find("### `" .. tool.name .. "` {#" .. tool.name .. "}", 1, true),
+                "missing a kernel section for tool '" .. tool.name .. "'")
+        end
+        luassert.is_truthy(page:find("Annotations: read-only, idempotent.", 1, true))
+        luassert.is_truthy(page:find("Annotations: destructive.", 1, true))
+        -- Array item objects recurse one level into the arguments table.
+        luassert.is_truthy(page:find("| `points[].x` |", 1, true))
+        luassert.is_truthy(page:find("| `points` | object[] | yes |", 1, true))
+    end)
+
+    it("folds the projected tool index into the tools page", function()
+        local page = docgen.toolsPage(makeRegistry())
+        luassert.is_truthy(page:find("Do not edit by hand", 1, true))
+        luassert.is_truthy(page:find("\n## Command tools\n", 1, true))
+        luassert.is_truthy(page:find("| [`cmd_modify`](../debug-reference#cmd-modify) |", 1, true))
+        luassert.is_nil(page:find("cmd_help", 1, true), "mcp = false commands must not be indexed")
+    end)
+
+    it("matches the committed mcp/tools.md (run `make docs-debug` after tool or command changes)", function()
         local f = io.open("docs/tecs2d/mcp/tools.md", "r")
-        luassert.is_truthy(f, "docs/tecs2d/mcp/tools.md is missing")
+        luassert.is_truthy(f, "docs/tecs2d/mcp/tools.md is missing; run `make docs-debug`")
         local committed = f:read("*a")
         f:close()
-        local beginMark <const> = "<!-- BEGIN GENERATED debug-tools-index (make docs-debug) -->"
-        local endMark <const> = "<!-- END GENERATED debug-tools-index -->"
-        local head = committed:find(beginMark, 1, true)
-        local tail = committed:find(endMark, 1, true)
-        luassert.is_truthy(head and tail, "tools.md lost its GENERATED debug-tools-index markers")
-        local block = committed:sub(head as integer + #beginMark, tail as integer - 1)
-        local fresh = "\n" .. docgen.toolIndex(makeRegistry()) .. "\n"
-        luassert.equals(fresh, block,
-            "the tools.md debug tool index is stale; run `make docs-debug` and commit the result")
+        local fresh = docgen.toolsPage(makeRegistry()) .. "\n"
+        luassert.equals(fresh, committed,
+            "mcp/tools.md is stale; run `make docs-debug` and commit the result")
     end)
 end)

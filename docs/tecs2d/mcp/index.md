@@ -23,8 +23,9 @@ world:addPlugin(require("tecs2d.debug").new())
 ```
 
 MCP listens on port `19999` by default. Pass `mcp.new({port = 12345})` to use a
-different port. The debug plugin is optional for the core ECS tools, but it adds
-the shared in-game debugger and all registry-derived `debug_*` tools.
+different port. The MCP plugin ensures the headless debugger core, so the
+registry-derived `cmd_*` tools work in every session; the debug plugin adds the
+shared in-game overlay on top of the same state.
 
 ## Choose the right tool layer
 
@@ -32,26 +33,26 @@ Tecs exposes two MCP tool layers:
 
 | Surface | Use it for |
 | --- | --- |
-| Core MCP tools | Generic structured ECS operations: `query`, `get_entity`, `get_component_schema`, `patch_entities`, `pause`, `step`, screenshots, logs, and profiling |
-| `debug_*` tools | Operator-facing runtime workflows: shared selection and notes, overlays, systems, rendering, physics probes, snapshots, rewind, diffs, recordings, and game-defined commands |
+| Kernel tools | Transport-level operations: `ping`, `screenshot`, `sample_pixels`, `send_love_event`, `run_lua`, and `get_logs` |
+| `cmd_*` tools | Everything else, projected from the debugger command registry: queries and edits, shared selection and notes, overlays, systems, rendering, physics probes, snapshots, rewind, diffs, recordings, and game-defined commands |
 
-Prefer a purpose-built core tool when one exists. Use `patch_entities` for
-structured component edits and `get_entity` for entity inspection. Use
-`debug_*` when the action should participate in the visible debugger workflow,
-target `@selection` or a mark, create an annotation, or manage a debugger
-artifact.
+Prefer a structured `cmd_*` tool when one covers the operation. Use `cmd_set`
+and `cmd_modify` for component edits, `cmd_info` for entity inspection, and
+`cmd_fetch` for component queries; fall back to `run_lua` only when no command
+fits. Call `cmd_capabilities` after connecting to discover what the session
+supports.
 
 ## Investigation workflow
 
 Start by asking for context rather than immediately mutating the game:
 
-1. Use `screenshot` and `get_debug_context` to establish visual and operator context.
-2. Inspect selected entities with `get_entity`, or locate candidates with `query` and `query_in_bounds`.
-3. Use `get_component_schema` before constructing edits.
+1. Use `screenshot` and `cmd_context` to establish visual and operator context.
+2. Inspect selected entities with `cmd_info`, or locate candidates with `cmd_fetch` (optionally restricted to a world-space box).
+3. Use `cmd_components_info` before constructing edits.
 4. Read `get_logs` with `contains = "debug.events"` to follow operator actions.
-5. Freeze with `pause`, inspect safely, and advance deliberately with `step`.
-6. Use `debug_rewind_*`, `debug_diff`, and `debug_snapshot_*` to investigate a timeline.
-7. Apply the smallest structured change with `patch_entities` or a game-defined `debug_*` command.
+5. Freeze with `cmd_freeze`, inspect safely, and advance deliberately with `cmd_step`.
+6. Use `cmd_rewind_*`, `cmd_diff`, and `cmd_snapshot_*` to investigate a timeline.
+7. Apply the smallest structured change with `cmd_set`, `cmd_modify`, or a game-defined `cmd_*` command.
 8. Replay and verify with a screenshot, recording, profile, or diff artifact.
 
 Examples of useful prompts:
@@ -65,7 +66,7 @@ Examples of useful prompts:
 
 ## Shared debugger state
 
-`get_debug_context` is the handoff point between the developer and agent. It
+`cmd_context` is the handoff point between the developer and agent. It
 includes selection, marks, notes, mouse and camera coordinates, frozen state,
 visible overlays, rewind status, and recent artifacts. Debugger commands called
 through MCP update that same state and produce the same on-screen effects as
@@ -97,15 +98,15 @@ Add this to your project's `.mcp.json`:
 If you used a custom port, update the URL to match. The game must be running before Claude Code can connect.
 If you restart the game, use `/mcp` in Claude Code to reconnect.
 
-MCP clients discover the exact live tool set through `tools/list`. Debugger
-tools appear only when the debug plugin is installed; game-defined commands
-registered through the debugger registry appear as `debug_<name>` tools with
-generated argument schemas.
+MCP clients discover the exact live tool set through `tools/list`. It combines
+the kernel tools with every command currently registered in the debugger
+registry; game-defined commands appear as `cmd_<name>` tools with generated
+argument schemas.
 
 ## Component serialization
 
-For `spawn`, `query`, and `spawn_bundle` to work, components need serialization support. Most components work
-automatically:
+For `cmd_spawn`, `cmd_fetch`, and `cmd_bundles_spawn` to work, components need serialization support. Most
+components work automatically:
 
 - **Table components**: Serialize all fields by default
 - **FFI components**: Serialize based on field schema
