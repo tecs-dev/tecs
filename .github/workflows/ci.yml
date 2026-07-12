@@ -328,69 +328,27 @@ jobs:
         repository: tecs-dev/tecs-cli
         path: tecs-cli
 
-    # LuaRocks stays configured for LuaJIT 5.1; only its manifest-loading
-    # frontend runs with Lua 5.4 to avoid LuaJIT's constant limit.
-    - name: Setup isolated Lua 5.4 for LuaRocks
+    - name: Build CLI with this Tecs commit
       if: steps.changes.outputs.run == 'true'
-      run: |
-        curl -fsSL https://www.lua.org/ftp/lua-5.4.8.tar.gz | tar xz -C "$RUNNER_TEMP"
-        make -C "$RUNNER_TEMP/lua-5.4.8/src" posix
-        echo "TECS_LUA54=$RUNNER_TEMP/lua-5.4.8/src/lua" >> "$GITHUB_ENV"
-
-    - name: Setup LuaJIT
-      if: steps.changes.outputs.run == 'true'
-      uses: leafo/gh-actions-lua@v11
-      with:
-        luaVersion: "luajit"
-
-    - name: Setup LuaRocks
-      if: steps.changes.outputs.run == 'true'
-      uses: leafo/gh-actions-luarocks@v4
-      with:
-        luarocksVersion: "3.12.2"
-
-    - name: Install CLI and Teal
-      if: steps.changes.outputs.run == 'true'
-      run: |
-        real_luarocks="$(command -v luarocks)"
-        lr() { "$TECS_LUA54" "$real_luarocks" --lua-version=5.1 "$@"; }
-        lr install --local ansicolors
-        lr install --local argparse
-        lr install --local luafilesystem
-        (cd tecs-cli && lr make --local --deps-mode=none tecs-cli-0.1.0-1.rockspec)
-        lr --dev install tl
-        make -C tecs install-type-deps
-        starter_tree="$GITHUB_WORKSPACE/tecs-starter/src/vendor"
-        lr install --tree="$starter_tree" luajit-tl-type 0.0.2-1
-        lr install --tree="$starter_tree" luasocket-tl-type 0.0.2-1
-        lr install --tree="$starter_tree" tecs-love2d-tl-type
-        # Install the checked-out rocks so this job tests this exact commit,
-        # rather than the previously published dev-rock metadata.
-        (cd tecs && lr make --tree="$starter_tree" --deps-mode=none tecs-dev-1.rockspec)
-        (cd tecs && lr make --tree="$starter_tree" --deps-mode=none tecs2d-dev-1.rockspec)
-        # The CLI installs project rocks itself, so keep its ordinary
-        # `luarocks` calls behind the same CI-only Lua 5.4 frontend.
-        mkdir -p "$RUNNER_TEMP/lua54-bin"
-        printf '%s\n' '#!/usr/bin/env bash' \
-          "exec \"$TECS_LUA54\" \"$real_luarocks\" \"\$@\"" \
-          > "$RUNNER_TEMP/lua54-bin/luarocks"
-        chmod +x "$RUNNER_TEMP/lua54-bin/luarocks"
-        echo "$RUNNER_TEMP/lua54-bin" >> "$GITHUB_PATH"
-        echo "$HOME/.luarocks/bin" >> "$GITHUB_PATH"
+      env:
+        TECS_DIR: ${{ github.workspace }}/tecs
+      run: tecs-cli/scripts/build_love.sh
 
     - name: Type-check starter against this Tecs commit
       if: steps.changes.outputs.run == 'true'
       working-directory: tecs-starter
       env:
-        TECS_DIR: ${{ github.workspace }}/tecs
-      run: tecs check
+        TECS_CACHE_DIR: ${{ runner.temp }}/tecs-cache
+        TECS_CLI_LOVE: ${{ github.workspace }}/tecs-cli/dist/tecs-cli.love
+      run: ../tecs-cli/launcher/tecs check
 
     - name: Build starter against this Tecs commit
       if: steps.changes.outputs.run == 'true'
       working-directory: tecs-starter
       env:
-        TECS_DIR: ${{ github.workspace }}/tecs
-      run: tecs build
+        TECS_CACHE_DIR: ${{ runner.temp }}/tecs-cache
+        TECS_CLI_LOVE: ${{ github.workspace }}/tecs-cli/dist/tecs-cli.love
+      run: ../tecs-cli/launcher/tecs build
 
   lint:
     runs-on: ubuntu-latest
