@@ -355,21 +355,31 @@ local function copy_dir(src, dst, exclude)
     end
 end
 
-local function copy_love_dir(src, dst)
+local function copy_love_dir(src, dst, depth)
     assert(love_api, "embedded copy requires LÖVE")
+    depth = (depth or 0) + 1
+    if depth > 32 then
+        error("embedded directory nests too deep (malformed payload?): " .. src, 0)
+    end
     mkdir(dst)
     for _, entry in ipairs(love_api.filesystem.getDirectoryItems(src)) do
-        local source = src .. "/" .. entry
-        local target = path_join(dst, entry)
-        local info = love_api.filesystem.getInfo(source)
-        if info and info.type == "directory" then
-            copy_love_dir(source, target)
-        elseif info and info.type == "file" then
-            local content, err = love_api.filesystem.read(source)
-            if not content then
-                error("could not read embedded file " .. source .. ": " .. tostring(err), 0)
+        -- Guard against self-referential or path-shaped entries from
+        -- malformed zip archives, which would otherwise recurse forever.
+        local plain = entry ~= "" and entry ~= "." and entry ~= ".."
+            and not entry:match("[/\\]")
+        if plain then
+            local source = src .. "/" .. entry
+            local target = path_join(dst, entry)
+            local info = love_api.filesystem.getInfo(source)
+            if info and info.type == "directory" then
+                copy_love_dir(source, target, depth)
+            elseif info and info.type == "file" then
+                local content, err = love_api.filesystem.read(source)
+                if not content then
+                    error("could not read embedded file " .. source .. ": " .. tostring(err), 0)
+                end
+                write_file(target, content)
             end
-            write_file(target, content)
         end
     end
 end

@@ -39,16 +39,11 @@ rm -f "$output"
 if command -v zip >/dev/null 2>&1; then
     (cd "$stage" && zip -q -r "$output" .)
 else
-    archive="$output.zip"
-    rm -f "$archive"
-    # Git Bash rewrites POSIX-looking arguments passed to native Windows
-    # programs. Give PowerShell native paths explicitly so the fallback works
-    # on the stock windows-latest runner, which does not provide zip.
-    stage_windows="$(cygpath -w "$stage")"
-    archive_windows="$(cygpath -w "$archive")"
-    powershell.exe -NoProfile -Command \
-        "Compress-Archive -Force -Path '$stage_windows\\*' -DestinationPath '$archive_windows'"
-    mv "$archive" "$output"
+    # Stock windows-latest runners lack Info-ZIP. bsdtar ships with Windows
+    # and writes standard forward-slash zip entries (Compress-Archive emits
+    # entries that break directory listing inside the payload).
+    output_windows="$(cygpath -w "$output")"
+    (cd "$stage" && shopt -s dotglob && tar --format zip -cf "$output_windows" -- *)
 fi
 cp "$root/launcher/tecs" "$root/dist/tecs"
 cp "$root/launcher/tecs.ps1" "$root/dist/tecs.ps1"
