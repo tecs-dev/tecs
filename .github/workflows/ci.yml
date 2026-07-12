@@ -222,7 +222,12 @@ jobs:
         chmod +x "$HOME/bin/cp-luarocks"
         luarocks config --scope user variables.SEVENZ /mingw64/bin/7z
         luarocks config --scope user variables.CP "$(cygpath -m /usr/bin/bash.exe) $(cygpath -m "$HOME/bin/cp-luarocks")"
-        lr() { "$TECS_LUA54" "$(command -v luarocks)" --lua-version=5.1 "$@"; }
+        real_luarocks="$(cygpath -m "$(command -v luarocks)")"
+        rocks_lua="$(cygpath -m /mingw64/share/lua/5.1)"
+        lr() {
+          LUA_PATH="$rocks_lua/?.lua;$rocks_lua/?/init.lua;;" \
+            "$TECS_LUA54" "$real_luarocks" --lua-version=5.1 "$@"
+        }
         if [ ! -f "$HOME/.luarocks/bin/tl.bat" ] || \
            [ ! -f "$HOME/.luarocks/bin/busted.bat" ] || \
            [ ! -f "$HOME/.luarocks/bin/luacov.bat" ]; then
@@ -230,6 +235,14 @@ jobs:
           lr install luacov
           lr --dev install tl
         fi
+        printf '%s\n' \
+          '#!/usr/bin/env bash' \
+          'rocks_lua="$(cygpath -m /mingw64/share/lua/5.1)"' \
+          'export LUA_PATH="$rocks_lua/?.lua;$rocks_lua/?/init.lua;;$LUA_PATH"' \
+          'exec "$TECS_LUA54" '"\"$real_luarocks\""' --lua-version=5.1 "$@"' \
+          > "$HOME/bin/luarocks"
+        chmod +x "$HOME/bin/luarocks"
+        export PATH="$HOME/bin:$PATH"
         make install-type-deps
         for exe in tl busted luacov; do
           printf '%s\n' \
