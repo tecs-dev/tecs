@@ -263,6 +263,16 @@ describe("tecs CLI", function()
             assert.equals("a/b", internal.path_join("a//", "b"))
         end)
 
+        it("preserves absolute runtime paths when running from build", function()
+            internal.set_platform(posix)
+            assert.equals("/Users/me/.cache/love", internal.path_from_build("/Users/me/.cache/love"))
+            assert.equals("../.love12/love", internal.path_from_build(".love12/love"))
+
+            internal.set_platform(windows)
+            assert.equals("C:\\cache\\lovec.exe", internal.path_from_build("C:/cache/lovec.exe"))
+            assert.equals("..\\.love12\\love.exe", internal.path_from_build(".love12/love.exe"))
+        end)
+
         it("computes dirname and relative paths", function()
             internal.set_platform(posix)
             assert.equals("a/b", internal.dirname("a/b/c.txt"))

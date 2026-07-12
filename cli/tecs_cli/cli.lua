@@ -185,6 +185,15 @@ local function path_join(...)
     return normalize(table.concat(out, sep))
 end
 
+-- Resolve an executable path after the run command changes into build/.
+-- Option 1 supplies a user-cache absolute path; legacy project-local runtimes
+-- are relative to the project root and need one parent traversal.
+local function path_from_build(path)
+    path = normalize(path)
+    if path:match("^%a:[/\\]") or path:match("^[/\\]") then return path end
+    return path_join("..", path)
+end
+
 local HOT_RELOAD_STAMP = path_join("build", ".tecs-reload-stamp")
 
 -- Directory portion of a path, or "." when there is no parent.
@@ -977,12 +986,13 @@ function tasks.run()
     ensure_love12()
     tasks.build()
     status("Launching game...")
+    local executable = path_from_build(love_bin())
     if is_windows then
         run('cmd /C "set SDL_VIDEODRIVER=&& set SDL_AUDIODRIVER=&& cd /D build && '
-            .. q(path_join("..", love_bin())) .. ' ."')
+            .. q(executable) .. ' ."')
     else
         run("cd build && env -u SDL_VIDEODRIVER -u SDL_AUDIODRIVER "
-            .. q(path_join("..", love_bin())) .. " .")
+            .. q(executable) .. " .")
     end
 end
 
@@ -1222,6 +1232,7 @@ M._internal = {
     set_platform = set_platform,
     normalize = normalize,
     path_join = path_join,
+    path_from_build = path_from_build,
     dirname = dirname,
     relative_to = relative_to,
     should_exclude = should_exclude,
