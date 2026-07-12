@@ -24,7 +24,7 @@ required.
 For local checkout development, build the same payload used by releases:
 
 ```sh
-TECS_DIR=../tecs scripts/build_love.sh
+TECS_DIR=../tecs make build
 TECS_CLI_LOVE="$PWD/dist/tecs-cli.love" launcher/tecs --version
 ```
 
@@ -86,6 +86,23 @@ tecs sync-tecs  # reinstall Tecs/Tecs2D into src/vendor/ from local rockspecs
 The CLI stages the required declarations and framework sources into
 `src/vendor/`; it does not resolve or build rocks at runtime. A `TECS_DIR`
 checkout can replace the embedded framework sources during development.
+
+The repository keeps private CLI libraries in `tecs_cli/vendor/`. Teal lives
+under `tecs_cli/runtime/teal/` because its canonical `teal.*`, `tlcli.*`, and
+`compat53.*` modules are copied to the root of the `.love` archive. Type
+declarations under `tecs_cli/runtime/types/` are copied into generated projects.
+
+Maintainers can refresh every embedded dependency, or one group at a time:
+
+```sh
+make update-vendor
+make update-teal
+make update-types
+make update-lua-vendor
+```
+
+The refs are declared at the top of the Makefile and can be overridden, for
+example `make update-teal TEAL_REF=<commit>`.
 
 ## System Requirements
 

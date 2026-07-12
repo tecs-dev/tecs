@@ -124,7 +124,22 @@ local function adjust_code(ast: Node, needs_compat: {string:boolean}, gen_compat
       cbs = {}
    }
 
-   if gen_target <= "5.5" then
+   -- Statements that aren't supported in compat have already had errors raised or are ignored:
+   --
+   -- 5.1-only: Goto statements (and labels) aren't supported
+   --           (This isn't errored, since LuaJIT supports goto, but still reports as 5.1)
+   -- 5.1-5.3:  <close> on variables isn't supported
+   --
+   -- (search for gen_target under teal/check/visitors.tl)
+
+   -- Other items that are done below are:
+   --
+   -- 5.1-only: Various library functions and math operations are emulated with compat53
+   -- 5.1-5.4: Named varargs are emulated with table.pack
+   -- 5.4+: For loop control variables have an extra local declaration to allow modification
+
+   -- compat for named varargs
+   if gen_target < "5.5" then
       visit = true
       local functionvisit = {
          after = function(_self: nil, node: Node, _children: {nil}): nil
@@ -226,7 +241,8 @@ local function adjust_code(ast: Node, needs_compat: {string:boolean}, gen_compat
       }
    end
 
-   if gen_target == "5.4" then
+   -- compat for forin control variable modification
+   if gen_target == "5.4" or gen_target == "5.5" then
       visit = true
       visit_node.cbs["forin"] = {
          after = function(_: nil, node: Node, _children: {nil}): nil
@@ -235,14 +251,19 @@ local function adjust_code(ast: Node, needs_compat: {string:boolean}, gen_compat
             end
             if node.forin_modifies_control_var then
                local control_var = node.vars[1].tk
-               local localization = parser.parse("local " .. control_var .. " = " .. control_var, "@<internal>.lua") as Node
-               localization[1].y = node.y
-               localization[1].vars.y = node.y
-               localization[1].vars[1].y = node.y
-               localization[1].exps.y = node.y
-               localization[1].exps[1].y = node.y
-               table.insert(node.body, 1, localization[1])
-               node.body.y = node.y
+               local loc_at = node
+               local stmt = node_at(loc_at, {
+                  kind = "local_declaration",
+                  vars = node_at(loc_at, {
+                     kind = "variable_list",
+                     node_at(loc_at, { kind = "variable", is_lvalue = true, tk = control_var }),
+                  }),
+                  exps = node_at(loc_at, {
+                     kind = "expression_list",
+                     node_at(loc_at, { kind = "variable", tk = control_var }),
+                  }),
+               })
+               table.insert(node.body, 1, stmt)
             end
          end,
       }

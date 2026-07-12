@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Assemble the cross-platform tecs-cli.love payload and its launch/install files.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"

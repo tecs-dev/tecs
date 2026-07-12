@@ -1,3 +1,4 @@
+# Windows entry point: cache LÖVE 12 and run the CLI payload through lovec.exe.
 $ErrorActionPreference = "Stop"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -25,7 +26,11 @@ if (-not (Test-Path $love)) {
     Invoke-WebRequest "$base/love-windows-x64.zip" -OutFile $outer
     Expand-Archive -Force $outer $cache
     Remove-Item $outer
-    $inner = Join-Path $cache "love-windows-x64.zip"
+    # Nightly artifacts include the version in the inner archive name.
+    $inner = Get-ChildItem $cache -File -Filter "*.zip" | Select-Object -First 1 -ExpandProperty FullName
+    if (-not $inner) {
+        throw "tecs: LÖVE download did not contain a Windows runtime archive"
+    }
     Expand-Archive -Force $inner $cache
     Remove-Item $inner
 }

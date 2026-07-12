@@ -783,10 +783,33 @@ local function assert_is_a(ctx, w, t1, t2, ectx, name)
    return ok
 end
 
+local function count_scope_vars(self)
+   local n = 0
+   for i = 1, #self.st do
+      for _, _ in pairs(self.st[i].vars) do
+         n = n + 1
+      end
+   end
+   return n
+end
+
 visit_node.cbs = {
    ["statements"] = {
       before = function(self, node)
          self:begin_scope(node)
+
+
+
+
+
+         if not node.is_repeat then
+            for i = #node, 1, -1 do
+               if node[i].kind ~= "label" then
+                  break
+               end
+               node[i].is_end_of_block = true
+            end
+         end
       end,
       after = function(self, node, _children)
 
@@ -860,8 +883,8 @@ visit_node.cbs = {
          local infertypes = get_assignment_values(node, valtuple, #node.vars)
          for i, var in ipairs(node.vars) do
             if var.attribute == "close" then
-               if self.env.opts.gen_target ~= "5.4" then
-                  self.errs:add(var, "<close> attribute is only valid for Lua 5.4 (current target is " .. tostring(self.env.opts.gen_target) .. ")")
+               if self.env.opts.gen_target ~= "5.4" and self.env.opts.gen_target ~= "5.5" then
+                  self.errs:add(var, "<close> attribute is only valid for Lua 5.4+ (current target is " .. tostring(self.env.opts.gen_target) .. ")")
                end
                if encountered_close then
                   self.errs:add(var, "only one <close> per declaration is allowed")
@@ -1052,14 +1075,19 @@ visit_node.cbs = {
             end
          end
 
-
          local scope = self.st[#self.st]
          if scope.pending_labels and scope.pending_labels[label_id] then
+            if not node.is_end_of_block then
+               local n_scope_vars = count_scope_vars(self)
+               for _, goto_node in ipairs(scope.pending_labels[label_id]) do
+                  if n_scope_vars > goto_node.n_scope_vars then
+                     self.errs:add(goto_node, "goto jumps into scope of a local variable")
+                  end
+               end
+            end
             node.used_label = true
             scope.pending_labels[label_id] = nil
-
          end
-
       end,
       after = function()
          return NONE
@@ -1084,6 +1112,7 @@ visit_node.cbs = {
             scope.pending_labels = scope.pending_labels or {}
             scope.pending_labels[label_id] = scope.pending_labels[label_id] or {}
             table.insert(scope.pending_labels[label_id], node)
+            node.n_scope_vars = count_scope_vars(self)
          end
 
          return NONE

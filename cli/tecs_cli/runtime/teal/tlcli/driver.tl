@@ -1,16 +1,16 @@
-local _tl_compat; if (tonumber((_VERSION or ''):match('[%d.]*$')) or 0) < 5.3 then local p, m = pcall(require, 'compat53.module'); if p then _tl_compat = m end end; local io = _tl_compat and _tl_compat.io or io; local ipairs = _tl_compat and _tl_compat.ipairs or ipairs; local os = _tl_compat and _tl_compat.os or os; local package = _tl_compat and _tl_compat.package or package; local string = _tl_compat and _tl_compat.string or string; local table = _tl_compat and _tl_compat.table or table
+--------------------------------------------------------------------------------
+-- Drive the compiler with filenames given from CLI arguments
+--------------------------------------------------------------------------------
 
-
-
-
+local type TlConfig = require("tlcli.tlconfig")
 local common = require("tlcli.common")
 local teal = require("teal.init")
+local type Compiler = teal.Compiler
 
+local record driver
+end
 
-local driver = {}
-
-
-local function filename_to_module_name(filename)
+local function filename_to_module_name(filename: string): string
    local path = os.getenv("TL_PATH") or package.path
    for entry in path:gmatch("[^;]+") do
       entry = entry:gsub("%.", "%%.")
@@ -26,20 +26,20 @@ local function filename_to_module_name(filename)
       end
    end
 
-
+   -- fallback:
    return (filename:gsub("%.lua$", ""):gsub("%.d%.tl$", ""):gsub("%.tl$", ""):gsub("[/\\]", "."))
 end
 
-function driver.setup_compiler(tlconfig)
+function driver.setup_compiler(tlconfig: TlConfig): teal.Compiler
    tlconfig._init_env_modules = tlconfig._init_env_modules or {}
    if tlconfig.global_env_def then
       table.insert(tlconfig._init_env_modules, 1, tlconfig.global_env_def)
    end
 
-   local opts = {
-      feat_arity = tlconfig["feat_arity"],
-      gen_compat = tlconfig["gen_compat"],
-      gen_target = tlconfig["gen_target"],
+   local opts: teal.CompilerOptions = {
+      feat_arity = tlconfig["feat_arity"] as teal.Feat,
+      gen_compat = tlconfig["gen_compat"] as teal.GenCompat,
+      gen_target = tlconfig["gen_target"] as teal.GenTarget,
       no_stdlib = tlconfig["no_stdlib"] == true,
    }
 
@@ -59,7 +59,7 @@ function driver.setup_compiler(tlconfig)
    return compiler
 end
 
-local function already_loaded(compiler, input_file)
+local function already_loaded(compiler: Compiler, input_file: string): teal.Module, teal.CheckError
    input_file = common.normalize(input_file)
    for file in compiler:loaded_files() do
       if common.normalize(file) == input_file then
@@ -68,16 +68,16 @@ local function already_loaded(compiler, input_file)
    end
 end
 
-function driver.process_module(compiler, filename)
+function driver.process_module(compiler: Compiler, filename: string): teal.Module, teal.CheckError, string
    local module, check_err = already_loaded(compiler, filename)
    if module then
       return module, check_err
    end
 
    local is_stdin = filename == "-"
-   local module_name
-   local input
-   local err
+   local module_name: string
+   local input: teal.Input
+   local err: string
 
    if is_stdin then
       module_name = "stdin"

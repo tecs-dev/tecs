@@ -783,10 +783,33 @@ local function assert_is_a(ctx: Context, w: Where, t1: Type, t2: Type, ectx?: No
    return ok
 end
 
+local function count_scope_vars(self: Context): integer
+   local n = 0
+   for i = 1, #self.st do
+      for _, _ in pairs(self.st[i].vars) do
+         n = n + 1
+      end
+   end
+   return n
+end
+
 visit_node.cbs = {
    ["statements"] = {
       before = function(self: Context, node: Node)
          self:begin_scope(node)
+         -- a goto may jump to a label at the end of a block (followed only
+         -- by other labels) even across local declarations, because the
+         -- block's locals are already out of scope at that point. This does
+         -- not apply to a repeat body, whose locals remain visible in the
+         -- until condition.
+         if not node.is_repeat then
+            for i = #node, 1, -1 do
+               if node[i].kind ~= "label" then
+                  break
+               end
+               node[i].is_end_of_block = true
+            end
+         end
       end,
       after = function(self: Context, node: Node, _children: {Type}): Type
          -- if at the top level
@@ -860,8 +883,8 @@ visit_node.cbs = {
          local infertypes = get_assignment_values(node, valtuple, #node.vars)
          for i, var in ipairs(node.vars) do
             if var.attribute == "close" then
-               if self.env.opts.gen_target ~= "5.4" then
-                  self.errs:add(var, "<close> attribute is only valid for Lua 5.4 (current target is " .. tostring(self.env.opts.gen_target) .. ")")
+               if self.env.opts.gen_target ~= "5.4" and self.env.opts.gen_target ~= "5.5" then
+                  self.errs:add(var, "<close> attribute is only valid for Lua 5.4+ (current target is " .. tostring(self.env.opts.gen_target) .. ")")
                end
                if encountered_close then
                   self.errs:add(var, "only one <close> per declaration is allowed")
@@ -1052,14 +1075,19 @@ visit_node.cbs = {
             end
          end
 
-         --for i = #self.st, 1, -1 do
-            local scope = self.st[#self.st]
-            if scope.pending_labels and scope.pending_labels[label_id] then
-               node.used_label = true
-               scope.pending_labels[label_id] = nil
-               --break
+         local scope = self.st[#self.st]
+         if scope.pending_labels and scope.pending_labels[label_id] then
+            if not node.is_end_of_block then
+               local n_scope_vars = count_scope_vars(self)
+               for _, goto_node in ipairs(scope.pending_labels[label_id]) do
+                  if n_scope_vars > goto_node.n_scope_vars then
+                     self.errs:add(goto_node, "goto jumps into scope of a local variable")
+                  end
+               end
             end
-         --end
+            node.used_label = true
+            scope.pending_labels[label_id] = nil
+         end
       end,
       after = function(): Type
          return NONE
@@ -1084,6 +1112,7 @@ visit_node.cbs = {
             scope.pending_labels = scope.pending_labels or {}
             scope.pending_labels[label_id] = scope.pending_labels[label_id] or {}
             table.insert(scope.pending_labels[label_id], node)
+            node.n_scope_vars = count_scope_vars(self)
          end
 
          return NONE

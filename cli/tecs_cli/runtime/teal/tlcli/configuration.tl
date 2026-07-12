@@ -1,14 +1,14 @@
-local _tl_compat; if (tonumber((_VERSION or ''):match('[%d.]*$')) or 0) < 5.3 then local p, m = pcall(require, 'compat53.module'); if p then _tl_compat = m end end; local io = _tl_compat and _tl_compat.io or io; local ipairs = _tl_compat and _tl_compat.ipairs or ipairs; local load = _tl_compat and _tl_compat.load or load; local package = _tl_compat and _tl_compat.package or package; local pairs = _tl_compat and _tl_compat.pairs or pairs; local pcall = _tl_compat and _tl_compat.pcall or pcall; local string = _tl_compat and _tl_compat.string or string; local table = _tl_compat and _tl_compat.table or table; local type = type
-
+local type Args = require("tlcli.args")
+local type TlConfig = require("tlcli.tlconfig")
 local common = require("tlcli.common")
 local teal = require("teal.init")
 
 local warning_set = teal.warning_set()
 
-local configuration = {}
+local record configuration
+end
 
-
-local function find_file_in_parent_dirs(fname)
+local function find_file_in_parent_dirs(fname: string): string
    for _ = 1, 20 do
       local fd = io.open(fname, "rb")
       if fd then
@@ -19,7 +19,7 @@ local function find_file_in_parent_dirs(fname)
    end
 end
 
-local function find_in_sequence(seq, value)
+local function find_in_sequence<A>(seq: {A}, value: A): boolean
    for _, v in ipairs(seq) do
       if v == value then
          return true
@@ -28,7 +28,7 @@ local function find_in_sequence(seq, value)
    return false
 end
 
-local function prepend_to_lua_paths(directory)
+local function prepend_to_lua_paths(directory: string)
    local path_str = directory
    local shared_library_ext = package.cpath:match("%.(%w+)%s*$") or "so"
 
@@ -45,22 +45,22 @@ local function prepend_to_lua_paths(directory)
    package.cpath = lib_path_str .. package.cpath
 end
 
-local function validate_config(config)
+local function validate_config(config: {any:any}): TlConfig, {string}, {string}
    local errs, warnings = {}, {}
 
-   local function warn(k, fmt, ...)
+   local function warn(k: string, fmt: string, ...)
       table.insert(warnings, string.format("* in key \"" .. k .. "\": " .. fmt, ...))
    end
-   local function fail(k, fmt, ...)
+   local function fail(k: string, fmt: string, ...)
       table.insert(errs, string.format("* in key \"" .. k .. "\": " .. fmt, ...))
    end
 
-   local function check_warnings(key)
+   local function check_warnings(key: string)
       local ck = config[key]
-      if type(ck) == "table" then
+      if ck is {string} then
          local unknown = {}
          for _, warning in ipairs(ck) do
-            if not warning_set[warning] then
+            if not warning_set[warning as teal.WarningKind] then
                table.insert(unknown, string.format("%q", warning))
             end
          end
@@ -70,7 +70,7 @@ local function validate_config(config)
       end
    end
 
-   local valid_keys = {
+   local valid_keys: {string:(string|{string:boolean})} = {
       include_dir = "{string}",
       global_env_def = "string",
       quiet = "boolean",
@@ -80,11 +80,11 @@ local function validate_config(config)
       gen_target = { ["5.1"] = true, ["5.3"] = true, ["5.4"] = true, ["5.5"] = true },
       disable_warnings = "{string}",
       warning_error = "{string}",
-      no_stdlib = "boolean",
+      no_stdlib = "boolean"
    }
 
-   local function check_key(k, v)
-      if not (type(k) == "string") then
+   local function check_key(k: any, v: any)
+      if not k is string then
          fail(tostring(k), "expected a string key")
          return
       end
@@ -95,19 +95,19 @@ local function validate_config(config)
       end
 
       if not valid_keys[k] then
-
+         -- skip invalid keys, to be used by other tools
          return
       end
 
       local vk = valid_keys[k]
-      if type(vk) == "table" then
-         if not (type(v) == "string") or not vk[v] then
-            fail(k, "expected one of: %s", table.concat(common.keys(vk), ", "))
+      if vk is {string:boolean} then
+         if not v is string or not vk[v] then
+            fail(k, "expected one of: %s", table.concat(common.keys(vk) as {string}, ", "))
          end
       elseif vk == "{string}" then
-         if type(v) == "table" then
+         if v is {string} then
             for i, val in ipairs(v) do
-               if not (type(val) == "string") then
+               if not val is string then
                   fail(k, "expected an array of strings, got %s in position %d", type(val), i)
                end
             end
@@ -115,11 +115,11 @@ local function validate_config(config)
             fail(k, "expected an array of strings")
          end
       elseif vk == "string" then
-         if not (type(v) == "string") then
+         if not v is string then
             fail(k, "expected a string, got %s", type(v))
          end
       elseif vk == "boolean" then
-         if not (type(v) == "boolean") then
+         if not v is boolean then
             fail(k, "expected a boolean, got %s", type(v))
          end
       else
@@ -138,27 +138,27 @@ local function validate_config(config)
    check_warnings("disable_warnings")
    check_warnings("warning_error")
 
-   return config, errs, warnings
+   return config as TlConfig, errs, warnings
 end
 
-function configuration.get()
-   local default = {
+function configuration.get(): TlConfig, {string}
+   local default: {any:any} = {
       include_dir = {},
       disable_warnings = {},
       warning_error = {},
-      quiet = false,
+      quiet = false
    }
 
    local config_path = find_file_in_parent_dirs("tlconfig.lua") or "tlconfig.lua"
 
    local conf_fd = io.open(config_path, "r")
    if not conf_fd then
-      return default
+      return default as TlConfig
    end
 
    local conf_text = conf_fd:read("*a")
    if not conf_text then
-      return default
+      return default as TlConfig
    end
 
    local conf_fn, err = load(conf_text)
@@ -166,22 +166,22 @@ function configuration.get()
       common.die("Error loading tlconfig.lua:\n" .. err)
    end
 
-   local ok, user_config = pcall(conf_fn)
+   local ok, user_config = pcall(conf_fn) as (boolean, any)
    if not ok then
-      err = user_config
+      err = user_config as string
       common.die("Error loading tlconfig.lua:\n" .. err)
    end
-   if not (type(user_config) == "table") then
+   if not user_config is table then
       common.die("Error loading tlconfig.lua")
       return
    end
 
-
-   local merged = {}
+   -- Merge tlconfig with the default config
+   local merged: {any:any} = {}
    for k, v in pairs(default) do
       merged[k] = v
    end
-   for k, v in pairs(user_config) do
+   for k, v in pairs(user_config as {string:any}) do
       merged[k] = v
    end
 
@@ -194,10 +194,10 @@ function configuration.get()
    return conf, warnings
 end
 
-function configuration.merge_config_and_args(tlconfig, args)
+function configuration.merge_config_and_args(tlconfig: TlConfig, args: Args)
    do
-      local default_true_mt = { __index = function() return true end }
-      local function enable(tab, warning)
+      local default_true_mt = { __index = function(): boolean return true end }
+      local function enable(tab: {string:boolean}, warning: string)
          if warning == "all" then
             setmetatable(tab, default_true_mt)
          else
@@ -235,8 +235,8 @@ function configuration.merge_config_and_args(tlconfig, args)
    tlconfig["feat_arity"] = args["feat_arity"] or tlconfig["feat_arity"]
 
    tlconfig["gen_target"] = args["gen_target"] or tlconfig["gen_target"]
-   tlconfig["gen_compat"] = args["gen_compat"] or tlconfig["gen_compat"] or
-   (tlconfig["skip_compat53"] and "off")
+   tlconfig["gen_compat"] = args["gen_compat"] or tlconfig["gen_compat"]
+                                               or (tlconfig["skip_compat53"] and "off")
 
    tlconfig["no_stdlib"] = args["no_stdlib"] or tlconfig["no_stdlib"]
 
