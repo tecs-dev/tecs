@@ -84,8 +84,10 @@ function love_process.start(opts: love_process.Options): love_process.Proc
 end
 
 function ProcImpl.isRunning(self: love_process.Proc): boolean
-    local status = os.execute("kill -0 " .. tostring(self.pid) .. " 2>/dev/null")
-    return (status as integer) == 0
+    -- os.execute returns a number on plain LuaJIT and a boolean when LuaJIT
+    -- is built with 5.2 compatibility (as LÖVE's is); accept both.
+    local status = os.execute("kill -0 " .. tostring(self.pid) .. " 2>/dev/null") as any
+    return status == 0 or status == true
 end
 
 function ProcImpl.waitExit(self: love_process.Proc, seconds: number): boolean
