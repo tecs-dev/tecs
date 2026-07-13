@@ -41,7 +41,6 @@ each [tecs-cli release](https://github.com/tecs-dev/tecs-cli/releases/latest).
 | `tecs build` | Compile to `build/`; a running game hot-reloads the result |
 | `tecs run` | Build, then launch the game with the cached LÖVE runtime |
 | `tecs integ` | Run `spec/` with the bundled busted runner ([Integration Testing](/tecs2d/integration-testing)) |
-| `tecs add <rock>` | Vendor a pure-Lua rock and its Teal types ([Dependencies](/cli/dependencies)) |
 | `tecs dist` | Package the game for players ([Packaging](/cli/packaging)) |
 | `tecs mcp` | Serve the project to agent clients over stdio ([MCP Bridge](/cli/mcp)) |
 | `tecs info` | Runtime versions and project status (`--json` for tooling) |

@@ -69,7 +69,7 @@ my-game/
 ├── src/
 │   ├── main.tl           # Game entry point
 │   ├── conf.tl           # Love2D configuration
-│   └── vendor/           # Framework sources, declarations, and rocks added with `tecs add`
+│   └── vendor/           # Framework sources, declarations, and LuaRocks-vendored rocks
 ├── assets/               # Images, sounds, fonts
 └── build/                # Self-contained compiled game (generated)
 ```
@@ -117,9 +117,6 @@ The full reference lives in the [Tecs CLI section](/cli/).
 | `tecs check`        | Type-check all project Teal sources (`--json` for tooling) |
 | `tecs integ`        | Run project specs; `*_lovespec.tl` files drive the built game over MCP |
 | `tecs dist`         | Package the game: `.love`, macOS app bundle, fused Windows executable |
-| `tecs add <rock>`   | Vendor a pure-Lua rock and its Teal types from luarocks.org |
-| `tecs remove <rock>` | Remove a vendored rock                          |
-| `tecs update`       | Update vendored rocks to their newest versions   |
 | `tecs clean`        | Remove generated build output                    |
 | `tecs info`         | Show CLI/runtime versions and project status (`--json` for tooling) |
 | `tecs agent`        | List bundled agent guides or print one's installed path |
