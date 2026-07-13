@@ -14,6 +14,7 @@
 --- and (unless opted out) a cmd_<name> MCP tool.
 
 local tecs <const> = require("tecs")
+local buildinfo <const> = require("tecs2d.buildinfo")
 local leader <const> = require("tecs2d.debug.internal.leader")
 local overlay <const> = require("tecs2d.debug.internal.overlay")
 local stats <const> = require("tecs2d.debug.internal.stats")
@@ -58,6 +59,11 @@ local record debugplugin
 
         --- Max frames in flight before dropping (default 8).
         recordingRingSize: integer
+
+        --- Keep the debugger in builds packaged by `tecs dist`. By default
+        --- the plugin is a no-op when tecs2d.buildinfo reports a distributed
+        --- build.
+        enableInDist: boolean
     end
 
     --- Create the Debug plugin.
@@ -65,6 +71,11 @@ local record debugplugin
 end
 
 function debugplugin.new(config?: debugplugin.Config): tecs.Plugin
+    -- Distributed builds do not install the debugger unless the game opts in.
+    if not buildinfo.isDev() and not (config and config.enableInDist) then
+        return function(_w: tecs.World) end
+    end
+
     local cfg = config or {}
     local leaderKey = cfg.leaderKey or "ctrl"
     if not leader.isValid(leaderKey) then

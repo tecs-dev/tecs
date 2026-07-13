@@ -23,6 +23,8 @@
 --- registering into rpc.handlers.
 
 local tecs <const> = require("tecs")
+local buildinfo <const> = require("tecs2d.buildinfo")
+local logging <const> = require("tecs.utils.logging")
 local mcpTools <const> = require("tecs2d.mcp.tools")
 local debugapi <const> = require("tecs2d.debug.context")
 local mcpinfo <const> = require("tecs2d.internal.mcpinfo")
@@ -41,6 +43,11 @@ local record mcp
         --- the debug plugin. Default true; false ensures only the freeze
         --- controller.
         debugCore: boolean
+
+        --- Keep the MCP server in builds packaged by `tecs dist`. By default
+        --- the plugin is a no-op when tecs2d.buildinfo reports a distributed
+        --- build.
+        enableInDist: boolean
     end
     new: function(config?: Config): function(world: tecs.World)
     DEFAULT_PORT: integer
@@ -49,6 +56,13 @@ end
 mcp.DEFAULT_PORT = 19999
 
 function mcp.new(config?: mcp.Config): function(world: tecs.World)
+    -- Distributed builds do not serve MCP unless the game opts in.
+    if not buildinfo.isDev() and not (config and config.enableInDist) then
+        logging.getLogger("tecs-mcp"):info("MCP server disabled in this distributed build; " ..
+            "pass enableInDist to mcp.new() to keep it")
+        return function(_world: tecs.World) end
+    end
+
     -- The MCP server is a process-global singleton: server socket, world
     -- pointer, pause state, and screenshot state all live in module-level
     -- state. A second mcp.new() would silently stomp the first (second
