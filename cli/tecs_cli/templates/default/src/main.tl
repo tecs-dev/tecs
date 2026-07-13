@@ -13,8 +13,9 @@ local VIRTUAL_WIDTH <const> = 480
 local VIRTUAL_HEIGHT <const> = 360
 
 local function gamePlugin(world: tecs.World)
-    -- Adds a debug console and integrated MCP tools to your game.
-    -- Turn these off in production builds.
+    -- Adds a debug console and integrated MCP tools to your game. Both are
+    -- disabled automatically in `tecs dist` builds; construct with
+    -- {enableInDist = true} to keep them.
     world:addPlugin(mcp.new())
     world:addPlugin(debugPlugin.new())
 

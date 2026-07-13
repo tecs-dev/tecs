@@ -128,6 +128,13 @@ Windows packages build on any host. The macOS bundle needs macOS or Linux
 and notarize it before wide distribution. Packaged games use the same pinned
 LÖVE 12 nightly the CLI runs.
 
+Every build writes a `tecs_buildinfo.lua` module into `build/` recording the
+project name, build timestamp, tool versions, and a `dev` flag; `tecs dist`
+packages it with `dev = false`. The MCP server and debugger disable
+themselves in distributed builds unless constructed with
+`{enableInDist = true}`, and games can read the metadata through
+`require("tecs2d.buildinfo")`.
+
 `tecs completions bash|zsh|fish` prints a shell completion script. Install it
 per shell:
 

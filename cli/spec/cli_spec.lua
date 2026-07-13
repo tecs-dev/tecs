@@ -457,6 +457,21 @@ describe("tecs CLI", function()
             end)
         end)
 
+        it("generates build metadata with the dev flag", function()
+            local root = make_temp("buildinfo")
+            with_cwd(root, function()
+                local dev = internal.buildinfo_lua(true)
+                assert.matches("dev = true", dev)
+                assert.matches('cli = "%d+%.%d+%.%d+"', dev)
+                assert.matches('built = "%d%d%d%d%-%d%d%-%d%dT', dev)
+                assert.matches("tecs%-cli%-spec%-buildinfo", dev)
+                assert.matches("dev = false", internal.buildinfo_lua(false))
+                local chunk = assert(loadstring(dev))
+                local info = chunk()
+                assert.is_true(info.dev)
+            end)
+        end)
+
         it("patches the LÖVE Info.plist for the game", function()
             local plist = table.concat({
                 "<dict>",

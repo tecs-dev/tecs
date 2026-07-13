@@ -83,6 +83,19 @@ jobs:
             test -f "$project/dist/macos/hello-tecs.app/Contents/Resources/hello-tecs.love"
             grep -q "org.tecs2d.hello-tecs" "$project/dist/macos/hello-tecs.app/Contents/Info.plist"
             test -f "$project/dist/hello-tecs-macos.zip"
+            unzip -p "$project/dist/hello-tecs.love" tecs_buildinfo.lua | grep -q "dev = false"
+            grep -q "dev = true" "$project/build/tecs_buildinfo.lua"
+            SDL_MAC_BACKGROUND_APP=1 "$project/dist/macos/hello-tecs.app/Contents/MacOS/love" \
+              > "$RUNNER_TEMP/dist-app.log" 2>&1 &
+            APP_PID=$!
+            sleep 6
+            kill -0 "$APP_PID"
+            if lsof -iTCP:19999 -sTCP:LISTEN | grep -q love; then
+              echo "MCP unexpectedly listening in a distributed build" >&2
+              exit 1
+            fi
+            grep -q "MCP server disabled" "$RUNNER_TEMP/dist-app.log"
+            kill "$APP_PID"
           else
             (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" dist windows)
           fi

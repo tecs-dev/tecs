@@ -46,6 +46,8 @@ The default project wires the Tecs2D MCP plugin into the game world (`world:addP
 
 Generated projects ship ready-made client configuration: `.mcp.json` for Claude Code and `.codex/config.toml` for Codex, both pointing at that endpoint. The server only listens while the game is running.
 
+The MCP server and debugger disable themselves in `tecs dist` builds: `tecs build` writes a `build/tecs_buildinfo.lua` manifest (name, timestamp, tool versions, `dev` flag) that `tecs dist` packages with `dev = false`. Pass `{enableInDist = true}` to `mcp.new()` or `debug.new()` to keep them in distributed builds; read the manifest at runtime via `require("tecs2d.buildinfo")`.
+
 ## Environment variables
 
 - `TECS_DIR`: path to a local Tecs framework checkout; `tecs dev` copies its sources into `src/vendor/`.
