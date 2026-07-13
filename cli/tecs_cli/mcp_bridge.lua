@@ -10,7 +10,7 @@ local PROTOCOL_VERSION = "2025-06-18"
 local READY_TIMEOUT = 15
 local LOG_TAIL_BYTES = 8192
 
-local function tail_file(path, bytes)
+local function tailFile(path, bytes)
     local file = io.open(path, "rb")
     if not file then return "" end
     local size = file:seek("end")
@@ -23,15 +23,15 @@ end
 local Server = {}
 local serverMt = {__index = Server}
 
--- ctx supplies everything host-specific; see build_mcp_context in cli.lua.
--- Required: version, json, kernel_tools, check(), build(), reexec(task,
--- extra?), love_process, love_bin(), set_env(k, v), unset_env(k),
--- read_buildinfo(), log(msg).
+-- ctx supplies everything host-specific; see buildMcpContext in cli.lua.
+-- Required: version, json, kernelTools, check(), build(), reexec(task,
+-- extra?), loveProcess, loveBin(), setEnv(k, v), unsetEnv(k),
+-- readBuildinfo(), log(msg).
 function bridge.new(ctx)
     local server = setmetatable({
         ctx = ctx,
         game = nil,          -- {proc, port, url, logPath}
-        game_tools = nil,    -- last tools/list from a live game
+        gameTools = nil,    -- last tools/list from a live game
     }, serverMt)
     server.tools = server:cliTools()
     return server
@@ -41,7 +41,7 @@ end
 -- Game process management
 --------------------------------------------------------------------------------
 
-local function free_port()
+local function freePort()
     local socket = require("socket")
     local sock = assert(socket.tcp())
     assert(sock:bind("127.0.0.1", 0))
@@ -63,7 +63,7 @@ function Server:refreshGameTools()
     local ok, parsed = pcall(self.ctx.json.parse, body)
     if ok and type(parsed) == "table" and type(parsed.result) == "table"
         and type(parsed.result.tools) == "table" then
-        self.game_tools = parsed.result.tools
+        self.gameTools = parsed.result.tools
         return true
     end
     return false
@@ -75,16 +75,16 @@ function Server:startGame()
     end
     self.ctx.build()
 
-    local port = free_port()
+    local port = freePort()
     local logDir = "build/.tecs-mcp"
     os.execute("mkdir -p '" .. logDir .. "'")
     local logPath = logDir .. "/game-" .. tostring(port) .. ".log"
 
     -- The CLI runs under dummy SDL drivers; the game needs real ones.
-    self.ctx.unset_env("SDL_VIDEODRIVER")
-    self.ctx.unset_env("SDL_AUDIODRIVER")
-    local proc = self.ctx.love_process.start({
-        loveBin = self.ctx.love_bin(),
+    self.ctx.unsetEnv("SDL_VIDEODRIVER")
+    self.ctx.unsetEnv("SDL_AUDIODRIVER")
+    local proc = self.ctx.loveProcess.start({
+        loveBin = self.ctx.loveBin(),
         appDir = "build",
         logPath = logPath,
         env = {
@@ -92,16 +92,16 @@ function Server:startGame()
             SDL_MAC_BACKGROUND_APP = "1",
         },
     })
-    self.ctx.set_env("SDL_VIDEODRIVER", "dummy")
-    self.ctx.set_env("SDL_AUDIODRIVER", "dummy")
+    self.ctx.setEnv("SDL_VIDEODRIVER", "dummy")
+    self.ctx.setEnv("SDL_AUDIODRIVER", "dummy")
 
     self.game = {
         proc = proc,
         port = port,
-        client = self.ctx.mcp_client.new({port = port, timeout = 10}),
+        client = self.ctx.mcpClient.new({port = port, timeout = 10}),
         logPath = logPath,
     }
-    self.last_log_path = logPath
+    self.lastLogPath = logPath
 
     local ready = self.game.client:waitReady(READY_TIMEOUT)
     if ready then
@@ -109,12 +109,12 @@ function Server:startGame()
         return {
             port = port,
             pid = proc.pid,
-            buildinfo = self.ctx.read_buildinfo(),
-            tools = self.game_tools and #self.game_tools or 0,
+            buildinfo = self.ctx.readBuildinfo(),
+            tools = self.gameTools and #self.gameTools or 0,
         }
     end
 
-    local log = tail_file(logPath)
+    local log = tailFile(logPath)
     proc:stop()
     self.game = nil
     error("the game never became ready; log tail:\n" .. log, 0)
@@ -130,7 +130,7 @@ function Server:stopGame()
     if not self.game.proc:waitExit(5) then
         self.game.proc:stop()
     end
-    local result = {stopped = true, log_tail = tail_file(self.game.logPath, 2048)}
+    local result = {stopped = true, log_tail = tailFile(self.game.logPath, 2048)}
     self.game = nil
     return result
 end
@@ -200,7 +200,7 @@ function Server:cliTools()
             handler = function()
                 return self:startGame()
             end,
-            notifies_tools_changed = true,
+            notifiesToolsChanged = true,
         },
         {
             name = "stop_game",
@@ -219,7 +219,7 @@ function Server:cliTools()
                 self:stopGame()
                 return self:startGame()
             end,
-            notifies_tools_changed = true,
+            notifiesToolsChanged = true,
         },
         {
             name = "game_status",
@@ -232,9 +232,9 @@ function Server:cliTools()
                     running = running,
                     port = running and self.game.port or nil,
                     pid = running and self.game.proc.pid or nil,
-                    buildinfo = self.ctx.read_buildinfo(),
-                    log_tail = self.game and tail_file(self.game.logPath, 2048)
-                        or (self.last_log_path and tail_file(self.last_log_path, 2048)),
+                    buildinfo = self.ctx.readBuildinfo(),
+                    log_tail = self.game and tailFile(self.game.logPath, 2048)
+                        or (self.lastLogPath and tailFile(self.lastLogPath, 2048)),
                 }
             end,
         },
@@ -248,12 +248,12 @@ function Server:cliTools()
                 },
             },
             handler = function(args)
-                local path = (self.game and self.game.logPath) or self.last_log_path
+                local path = (self.game and self.game.logPath) or self.lastLogPath
                 if not path then
                     return {log = "", note = "no game has been started in this session"}
                 end
                 local bytes = math.min(tonumber(args and args.bytes) or LOG_TAIL_BYTES, 65536)
-                return {log = tail_file(path, bytes)}
+                return {log = tailFile(path, bytes)}
             end,
         },
     }
@@ -304,7 +304,7 @@ function Server:listTools()
     if self:gameRunning() then
         self:refreshGameTools()
     end
-    for _, tool in ipairs(self.game_tools or self.ctx.kernel_tools or {}) do
+    for _, tool in ipairs(self.gameTools or self.ctx.kernelTools or {}) do
         if not seen[tool.name] then
             listed[#listed + 1] = tool
             seen[tool.name] = true
@@ -356,12 +356,12 @@ function Server:handleLine(line)
             local callOk, result = pcall(tool.handler, message.params.arguments)
             if callOk then
                 out[#out + 1] = self:textResult(id, result)
-                if tool.notifies_tools_changed then
+                if tool.notifiesToolsChanged then
                     out[#out + 1] = self.ctx.json.serialize(
                         {jsonrpc = "2.0", method = "notifications/tools/list_changed"}, true)
                 end
                 if name == "start_game" or name == "restart_game" then
-                    self.last_log_path = self.game and self.game.logPath or self.last_log_path
+                    self.lastLogPath = self.game and self.game.logPath or self.lastLogPath
                 end
             else
                 out[#out + 1] = self:textResult(id, {error = tostring(result)}, true)
@@ -394,14 +394,14 @@ end
 function Server:serve()
     io.stdout:setvbuf("no")
     -- Anything that would write to stdout corrupts the protocol stream.
-    local real_print = _G.print
+    local realPrint = _G.print
     _G.print = function(...)
         local parts = {}
         for i = 1, select("#", ...) do parts[#parts + 1] = tostring(select(i, ...)) end
         io.stderr:write(table.concat(parts, "\t") .. "\n")
     end
 
-    self.ctx.log("MCP bridge serving on stdio; project " .. (self.ctx.project_name or ""))
+    self.ctx.log("MCP bridge serving on stdio; project " .. (self.ctx.projectName or ""))
     while true do
         local line = io.stdin:read("*l")
         if line == nil then break end
@@ -411,7 +411,7 @@ function Server:serve()
         end
     end
 
-    _G.print = real_print
+    _G.print = realPrint
     if self:gameRunning() then
         self:stopGame()
     end

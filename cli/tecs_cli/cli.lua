@@ -3,95 +3,95 @@
 
 local argparse = require("tecs_cli.vendor.argparse")
 local ansicolors = require("tecs_cli.vendor.ansicolors")
-local have_lfs, lfs = pcall(require, "lfs")
+local haveLfs, lfs = pcall(require, "lfs")
 
 local VERSION = "0.7.1"
-local is_love_cli = rawget(_G, "TECS_LOVE_CLI") == true
-local love_api = rawget(_G, "love")
+local isLoveCli = rawget(_G, "TECS_LOVE_CLI") == true
+local loveApi = rawget(_G, "love")
 
 -- Platform traits detected from the OS path separator. Held in mutable locals
--- so specs can substitute another platform via M._internal.set_platform.
-local sep, is_msys, is_windows
+-- so specs can substitute another platform via M._internal.setPlatform.
+local sep, isMsys, isWindows
 
-local function detect_platform()
-    local host_sep = package.config:sub(1, 1)
+local function detectPlatform()
+    local hostSep = package.config:sub(1, 1)
     local msys = os.getenv("MSYSTEM") ~= nil
-    local separator = msys and "/" or host_sep
+    local separator = msys and "/" or hostSep
     return {
         sep = separator,
-        is_msys = msys,
-        is_windows = separator == "\\" and not msys,
+        isMsys = msys,
+        isWindows = separator == "\\" and not msys,
     }
 end
 
-local function set_platform(platform)
+local function setPlatform(platform)
     sep = platform.sep
-    is_msys = platform.is_msys or false
-    is_windows = platform.is_windows or false
+    isMsys = platform.isMsys or false
+    isWindows = platform.isWindows or false
 end
 
-set_platform(detect_platform())
+setPlatform(detectPlatform())
 
 -- TECS_DIR opts into copying framework sources from a local checkout.
-local tecs_dir = os.getenv("TECS_DIR")
+local tecsDir = os.getenv("TECS_DIR")
 -- TECS_TEAL_DIR opts into loading the Teal compiler from a local
 -- teal-language/tl checkout instead of the embedded copy.
-local teal_dir = os.getenv("TECS_TEAL_DIR")
-local vendor_lua = "src/vendor/share/lua/5.1"
+local tealDir = os.getenv("TECS_TEAL_DIR")
+local vendorLua = "src/vendor/share/lua/5.1"
 
 -- Source-only asset extensions to exclude from build output and mtime checks.
-local exclude_assets = {
+local excludeAssets = {
     ["ase"] = true,
     ["aseprite"] = true,
 }
 
--- The same extensions as glob patterns, for copy_dir exclusion lists.
-local function exclude_asset_patterns()
+-- The same extensions as glob patterns, for copyDir exclusion lists.
+local function excludeAssetPatterns()
     local patterns = {}
-    for ext in pairs(exclude_assets) do
+    for ext in pairs(excludeAssets) do
         patterns[#patterns + 1] = "*." .. ext
     end
     table.sort(patterns)
     return patterns
 end
 
-local color_enabled
+local colorEnabled
 local quiet = false
 
-local function require_lfs()
-    if not have_lfs then
+local function requireLfs()
+    if not haveLfs then
         error("filesystem adapter unavailable; run tecs through its installed launcher", 0)
     end
     return lfs
 end
 
-local function env_flag(name)
+local function envFlag(name)
     local value = os.getenv(name)
     return value ~= nil and value ~= "" and value ~= "0"
 end
 
-local function supports_color()
-    if color_enabled ~= nil then return color_enabled end
+local function supportsColor()
+    if colorEnabled ~= nil then return colorEnabled end
     local term = os.getenv("TERM")
     if os.getenv("NO_COLOR") ~= nil then
-        color_enabled = false
-    elseif env_flag("FORCE_COLOR") or env_flag("CLICOLOR_FORCE") then
-        color_enabled = true
+        colorEnabled = false
+    elseif envFlag("FORCE_COLOR") or envFlag("CLICOLOR_FORCE") then
+        colorEnabled = true
     elseif term == "dumb" then
-        color_enabled = false
-    elseif is_windows then
+        colorEnabled = false
+    elseif isWindows then
         -- Plain cmd.exe consoles may not render ANSI codes, but ANSI-capable
         -- Windows environments (Windows Terminal, Git Bash) advertise
         -- themselves through these variables.
-        color_enabled = os.getenv("WT_SESSION") ~= nil or term ~= nil
+        colorEnabled = os.getenv("WT_SESSION") ~= nil or term ~= nil
     else
-        color_enabled = true
+        colorEnabled = true
     end
-    return color_enabled
+    return colorEnabled
 end
 
 local function color(spec, text)
-    if not supports_color() then return text end
+    if not supportsColor() then return text end
     return ansicolors("%{" .. spec .. "}" .. text .. "%{reset}")
 end
 
@@ -102,7 +102,7 @@ local function status(message)
 end
 
 local function fail(message)
-    error({tecs_exit = true, message = message}, 0)
+    error({tecsExit = true, message = message}, 0)
 end
 
 
@@ -110,13 +110,13 @@ end
 -- doubled quotes inside a quoted string; POSIX shells use backslash escapes.
 local function q(path)
     path = tostring(path)
-    if is_windows then
+    if isWindows then
         return '"' .. path:gsub('"', '""') .. '"'
     end
     return '"' .. path:gsub('"', '\\"') .. '"'
 end
 
-local function source_path()
+local function sourcePath()
     local source = debug.getinfo(1, "S").source
     if source:sub(1, 1) == "@" then
         return source:sub(2)
@@ -126,11 +126,11 @@ end
 
 -- Convert path separators to the current platform's convention.
 local function normalize(path)
-    if is_windows then
+    if isWindows then
         return (path:gsub("/", "\\"))
     end
     path = path:gsub("\\", "/")
-    if is_msys then
+    if isMsys then
         path = path:gsub("^(%a):", function(drive)
             return "/" .. drive:lower()
         end)
@@ -140,24 +140,24 @@ end
 
 -- Path spelling for Lua module search: forward slashes work for every tool we
 -- invoke, including Windows Lua, so just flip backslashes.
-local function lua_module_path(path)
+local function luaModulePath(path)
     path = tostring(path):gsub("\\", "/")
     return path
 end
 
 -- Join path segments, collapsing extra separators while preserving an
 -- absolute prefix (leading "/" on unix or a drive letter on Windows).
-local function path_join(...)
+local function pathJoin(...)
     local parts = {...}
     local out = {}
     for i = 1, #parts do
         local part = tostring(parts[i])
-        local unix_abs = i == 1 and part:match("^/")
+        local unixAbs = i == 1 and part:match("^/")
         part = part:gsub("[/\\]+$", "")
-        if not unix_abs then
+        if not unixAbs then
             part = part:gsub("^[/\\]+", "")
         end
-        if i == 1 and (part:match("^%a:[/\\]") or unix_abs) then
+        if i == 1 and (part:match("^%a:[/\\]") or unixAbs) then
             part = parts[i]:gsub("[/\\]+$", "")
         end
         if part ~= "" then out[#out + 1] = part end
@@ -166,13 +166,13 @@ local function path_join(...)
 end
 
 -- Resolve an executable path after the run command changes into build/.
-local function path_from_build(path)
+local function pathFromBuild(path)
     path = normalize(path)
     if path:match("^%a:[/\\]") or path:match("^[/\\]") then return path end
-    return path_join("..", path)
+    return pathJoin("..", path)
 end
 
-local HOT_RELOAD_STAMP = path_join("build", ".tecs-reload-stamp")
+local HOT_RELOAD_STAMP = pathJoin("build", ".tecs-reload-stamp")
 
 -- Directory portion of a path, or "." when there is no parent.
 local function dirname(path)
@@ -188,7 +188,7 @@ end
 
 -- True if a file or directory exists.
 local function exists(path)
-    return require_lfs().attributes(normalize(path)) ~= nil
+    return requireLfs().attributes(normalize(path)) ~= nil
 end
 
 -- Echo and run a shell command, raising on failure. Handles both the
@@ -220,10 +220,10 @@ local function mkdir(path)
         elseif current == sep then
             current = sep .. part
         else
-            current = path_join(current, part)
+            current = pathJoin(current, part)
         end
         if not exists(current) then
-            local ok, err = require_lfs().mkdir(current)
+            local ok, err = requireLfs().mkdir(current)
             if not ok and not exists(current) then
                 error("could not create directory " .. current .. ": " .. tostring(err), 0)
             end
@@ -231,20 +231,20 @@ local function mkdir(path)
     end
 end
 
-local function write_file(path, content)
+local function writeFile(path, content)
     mkdir(dirname(path))
     local f = assert(io.open(path, "wb"))
     f:write(content)
     f:close()
 end
 
-local function is_dir(path)
-    return require_lfs().attributes(normalize(path), "mode") == "directory"
+local function isDir(path)
+    return requireLfs().attributes(normalize(path), "mode") == "directory"
 end
 
-local function is_empty_dir(path)
-    if not is_dir(path) then return false end
-    for entry in require_lfs().dir(normalize(path)) do
+local function isEmptyDir(path)
+    if not isDir(path) then return false end
+    for entry in requireLfs().dir(normalize(path)) do
         if entry ~= "." and entry ~= ".." then
             return false
         end
@@ -255,14 +255,14 @@ end
 local function remove(path)
     path = normalize(path)
     if not exists(path) then return end
-    local mode = require_lfs().attributes(path, "mode")
+    local mode = requireLfs().attributes(path, "mode")
     if mode == "directory" then
-        for entry in require_lfs().dir(path) do
+        for entry in requireLfs().dir(path) do
             if entry ~= "." and entry ~= ".." then
-                remove(path_join(path, entry))
+                remove(pathJoin(path, entry))
             end
         end
-        local ok, err = require_lfs().rmdir(path)
+        local ok, err = requireLfs().rmdir(path)
         if not ok then
             error("could not remove directory " .. path .. ": " .. tostring(err), 0)
         end
@@ -275,25 +275,25 @@ local function remove(path)
 end
 
 -- Escape a string for safe use as a literal inside a Lua pattern.
-local function pattern_escape(s)
+local function patternEscape(s)
     return (s:gsub("([^%w])", "%%%1"))
 end
 
-local function should_exclude(rel, exclude)
+local function shouldExclude(rel, exclude)
     if not exclude then return false end
     for _, pattern in ipairs(exclude) do
-        if rel == pattern or rel:match("^" .. pattern_escape(pattern) .. "[/\\]") then
+        if rel == pattern or rel:match("^" .. patternEscape(pattern) .. "[/\\]") then
             return true
         end
         local suffix = pattern:match("^%*%.(.+)$")
-        if suffix and rel:match("%." .. pattern_escape(suffix) .. "$") then
+        if suffix and rel:match("%." .. patternEscape(suffix) .. "$") then
             return true
         end
     end
     return false
 end
 
-local function copy_file(src, dst)
+local function copyFile(src, dst)
     mkdir(dirname(dst))
     local input = assert(io.open(src, "rb"))
     local content = input:read("*a")
@@ -303,21 +303,21 @@ local function copy_file(src, dst)
     output:close()
 end
 
-local function walk_files(dir, out)
+local function walkFiles(dir, out)
     dir = normalize(dir)
     out = out or {}
-    local attr = require_lfs().attributes(dir)
+    local attr = requireLfs().attributes(dir)
     if not attr then return out end
     if attr.mode ~= "directory" then
         out[#out + 1] = dir
         return out
     end
-    for entry in require_lfs().dir(dir) do
+    for entry in requireLfs().dir(dir) do
         if entry ~= "." and entry ~= ".." then
-            local path = path_join(dir, entry)
-            local mode = require_lfs().attributes(path, "mode")
+            local path = pathJoin(dir, entry)
+            local mode = requireLfs().attributes(path, "mode")
             if mode == "directory" then
-                walk_files(path, out)
+                walkFiles(path, out)
             elseif mode == "file" then
                 out[#out + 1] = path
             end
@@ -326,79 +326,79 @@ local function walk_files(dir, out)
     return out
 end
 
-local function relative_to(path, base)
+local function relativeTo(path, base)
     path = normalize(path)
     base = normalize(base):gsub("[/\\]+$", "")
-    local prefix = pattern_escape(base) .. "[/\\]?"
+    local prefix = patternEscape(base) .. "[/\\]?"
     return path:gsub("^" .. prefix, "")
 end
 
 -- Mirror src into dst, deleting stale files in dst.
-local function copy_dir(src, dst, exclude)
+local function copyDir(src, dst, exclude)
     src = normalize(src)
     dst = normalize(dst)
     mkdir(dst)
     local seen = {}
-    for _, file in ipairs(walk_files(src, {})) do
-        local rel = relative_to(file, src)
-        if not should_exclude(rel, exclude) then
-            local target = path_join(dst, rel)
-            copy_file(file, target)
+    for _, file in ipairs(walkFiles(src, {})) do
+        local rel = relativeTo(file, src)
+        if not shouldExclude(rel, exclude) then
+            local target = pathJoin(dst, rel)
+            copyFile(file, target)
             seen[normalize(target)] = true
         end
     end
-    for _, file in ipairs(walk_files(dst, {})) do
-        local rel = relative_to(file, dst)
-        if should_exclude(rel, exclude) or not seen[normalize(file)] then
+    for _, file in ipairs(walkFiles(dst, {})) do
+        local rel = relativeTo(file, dst)
+        if shouldExclude(rel, exclude) or not seen[normalize(file)] then
             remove(file)
         end
     end
 end
 
-local function copy_love_dir(src, dst, depth)
-    assert(love_api, "embedded copy requires LÖVE")
+local function copyLoveDir(src, dst, depth)
+    assert(loveApi, "embedded copy requires LÖVE")
     depth = (depth or 0) + 1
     if depth > 32 then
         error("embedded directory nests too deep (malformed payload?): " .. src, 0)
     end
     mkdir(dst)
-    for _, entry in ipairs(love_api.filesystem.getDirectoryItems(src)) do
+    for _, entry in ipairs(loveApi.filesystem.getDirectoryItems(src)) do
         -- Guard against self-referential or path-shaped entries from
         -- malformed zip archives, which would otherwise recurse forever.
         local plain = entry ~= "" and entry ~= "." and entry ~= ".."
             and not entry:match("[/\\]")
         if plain then
             local source = src .. "/" .. entry
-            local target = path_join(dst, entry)
-            local info = love_api.filesystem.getInfo(source)
+            local target = pathJoin(dst, entry)
+            local info = loveApi.filesystem.getInfo(source)
             if info and info.type == "directory" then
-                copy_love_dir(source, target, depth)
+                copyLoveDir(source, target, depth)
             elseif info and info.type == "file" then
-                local content, err = love_api.filesystem.read(source)
+                local content, err = loveApi.filesystem.read(source)
                 if not content then
                     error("could not read embedded file " .. source .. ": " .. tostring(err), 0)
                 end
-                write_file(target, content)
+                writeFile(target, content)
             end
         end
     end
 end
 
-local function template_dir()
+local function templateDir()
     local candidates = {}
-    local module_path = source_path()
-    if module_path then
-        local module_dir = dirname(module_path)
-        candidates[#candidates + 1] = path_join(module_dir, "templates/default")
-        candidates[#candidates + 1] = path_join(module_dir, "../tecs_cli/templates/default")
+    local modulePath = sourcePath()
+    if modulePath then
+        local moduleDir = dirname(modulePath)
+        candidates[#candidates + 1] = pathJoin(moduleDir, "templates/default")
+        candidates[#candidates + 1] = pathJoin(moduleDir, "../tecs_cli/templates/default")
     end
     if arg and arg[0] then
-        local bin_dir = dirname(arg[0])
-        candidates[#candidates + 1] = path_join(bin_dir, "../tecs_cli/templates/default")
-        candidates[#candidates + 1] = path_join(bin_dir, "../templates/default")
+        local binDir = dirname(arg[0])
+        candidates[#candidates + 1] = pathJoin(binDir, "../tecs_cli/templates/default")
+        candidates[#candidates + 1] = pathJoin(binDir, "../templates/default")
     end
     for _, candidate in ipairs(candidates) do
-        if is_dir(candidate) then
+        if isDir(candidate) then
             return candidate
         end
     end
@@ -406,43 +406,43 @@ local function template_dir()
 end
 
 -- Per-user data directory where `tecs agent path` materializes bundled docs.
-local data_dir_override
-local function user_data_dir()
-    if data_dir_override then return data_dir_override end
-    if is_windows then
+local dataDirOverride
+local function userDataDir()
+    if dataDirOverride then return dataDirOverride end
+    if isWindows then
         local base = os.getenv("LOCALAPPDATA")
         if not base or base == "" then
-            base = path_join(os.getenv("USERPROFILE") or ".", "AppData/Local")
+            base = pathJoin(os.getenv("USERPROFILE") or ".", "AppData/Local")
         end
-        return path_join(base, "tecs")
+        return pathJoin(base, "tecs")
     end
     local xdg = os.getenv("XDG_DATA_HOME")
     if xdg and xdg ~= "" then
-        return path_join(xdg, "tecs")
+        return pathJoin(xdg, "tecs")
     end
-    return path_join(os.getenv("HOME") or ".", ".local/share/tecs")
+    return pathJoin(os.getenv("HOME") or ".", ".local/share/tecs")
 end
 
 -- Per-user cache directory, matching the launchers' TECS_CACHE_DIR handling.
-local function cache_root()
+local function cacheRoot()
     local override = os.getenv("TECS_CACHE_DIR")
     if override and override ~= "" then return normalize(override) end
-    if is_windows then
+    if isWindows then
         local base = os.getenv("LOCALAPPDATA")
         if not base or base == "" then
-            base = path_join(os.getenv("USERPROFILE") or ".", "AppData/Local")
+            base = pathJoin(os.getenv("USERPROFILE") or ".", "AppData/Local")
         end
-        return path_join(base, "tecs")
+        return pathJoin(base, "tecs")
     end
     local xdg = os.getenv("XDG_CACHE_HOME")
     if xdg and xdg ~= "" then
-        return path_join(xdg, "tecs")
+        return pathJoin(xdg, "tecs")
     end
-    return path_join(os.getenv("HOME") or ".", ".cache/tecs")
+    return pathJoin(os.getenv("HOME") or ".", ".cache/tecs")
 end
 
 -- First non-heading paragraph line of a doc, used as its list description.
-local function agent_doc_description(content)
+local function agentDocDescription(content)
     for line in content:gmatch("[^\r\n]+") do
         if not line:match("^#") and line:match("%S") then
             return (line:gsub("^%s+", ""):gsub("%s+$", ""))
@@ -453,13 +453,13 @@ end
 
 -- Bundled agent docs as {name, content}, sorted by name. Docs live in
 -- tecs_cli/agents/ in the payload and the source tree.
-local function list_agent_docs()
+local function listAgentDocs()
     local docs = {}
-    if is_love_cli and love_api then
-        for _, entry in ipairs(love_api.filesystem.getDirectoryItems("tecs_cli/agents")) do
+    if isLoveCli and loveApi then
+        for _, entry in ipairs(loveApi.filesystem.getDirectoryItems("tecs_cli/agents")) do
             local name = entry:match("^(.+)%.md$")
             if name then
-                local content, err = love_api.filesystem.read("tecs_cli/agents/" .. entry)
+                local content, err = loveApi.filesystem.read("tecs_cli/agents/" .. entry)
                 if not content then
                     error("could not read embedded agent doc " .. entry .. ": " .. tostring(err), 0)
                 end
@@ -467,10 +467,10 @@ local function list_agent_docs()
             end
         end
     else
-        local module_path = source_path()
-        local dir = module_path and path_join(dirname(module_path), "agents")
-        if dir and is_dir(dir) then
-            for _, file in ipairs(walk_files(dir, {})) do
+        local modulePath = sourcePath()
+        local dir = modulePath and pathJoin(dirname(modulePath), "agents")
+        if dir and isDir(dir) then
+            for _, file in ipairs(walkFiles(dir, {})) do
                 local name = basename(file):match("^(.+)%.md$")
                 if name then
                     local handle = assert(io.open(file, "rb"))
@@ -486,19 +486,19 @@ local function list_agent_docs()
 end
 
 -- Modification time of a path (platform-specific units), or 0 if it is missing.
-local function file_mtime(path)
+local function fileMtime(path)
     path = normalize(path)
-    local mtime = require_lfs().attributes(path, "modification")
+    local mtime = requireLfs().attributes(path, "modification")
     return tonumber(mtime) or 0
 end
 
 -- True if output is missing or older than any input (incremental rebuild gate).
-local function needs_update(output, ...)
+local function needsUpdate(output, ...)
     if not exists(output) then return true end
-    local out_time = file_mtime(output)
+    local outTime = fileMtime(output)
     local inputs = {...}
     for i = 1, #inputs do
-        if file_mtime(inputs[i]) > out_time then
+        if fileMtime(inputs[i]) > outTime then
             return true
         end
     end
@@ -507,15 +507,15 @@ end
 
 -- Current working directory, normalized.
 local function cwd()
-    return normalize(require_lfs().currentdir() or ".")
+    return normalize(requireLfs().currentdir() or ".")
 end
 
 -- All files under dir ending in suffix, as paths relative to the cwd.
-local function list_files(dir, suffix)
+local function listFiles(dir, suffix)
     local files = {}
-    for _, file in ipairs(walk_files(dir, {})) do
+    for _, file in ipairs(walkFiles(dir, {})) do
         if file:sub(-#suffix) == suffix then
-            files[#files + 1] = relative_to(file, cwd())
+            files[#files + 1] = relativeTo(file, cwd())
         end
     end
     table.sort(files)
@@ -523,30 +523,30 @@ local function list_files(dir, suffix)
 end
 
 -- Every file under dir (follows symlinks), as paths relative to the cwd.
-local function list_all_files(dir)
+local function listAllFiles(dir)
     local files = {}
-    for _, file in ipairs(walk_files(dir, {})) do
-        files[#files + 1] = relative_to(file, cwd())
+    for _, file in ipairs(walkFiles(dir, {})) do
+        files[#files + 1] = relativeTo(file, cwd())
     end
     table.sort(files)
     return files
 end
 
 -- Newest mtime anywhere under dir, ignoring source-only assets (e.g. .ase).
-local function tree_mtime(dir)
-    local latest = file_mtime(dir)
-    for _, file in ipairs(list_all_files(dir)) do
+local function treeMtime(dir)
+    local latest = fileMtime(dir)
+    for _, file in ipairs(listAllFiles(dir)) do
         local ext = file:match("%.([^%.]+)$")
-        if not exclude_assets[ext or ""] then
-            latest = math.max(latest, file_mtime(file))
+        if not excludeAssets[ext or ""] then
+            latest = math.max(latest, fileMtime(file))
         end
     end
     return latest
 end
 
 -- Buildable Teal sources under src/, excluding vendored code and .d.tl decls.
-local function list_teal_sources()
-    local files = list_files("src", ".tl")
+local function listTealSources()
+    local files = listFiles("src", ".tl")
     local out = {}
     for _, file in ipairs(files) do
         local n = normalize(file)
@@ -558,17 +558,17 @@ local function list_teal_sources()
 end
 
 -- LUA_PATH entries letting `tl` resolve type defs and the vendored modules.
-local function lua_path()
+local function luaPath()
     local paths = {
-        vendor_lua .. "/?.tl",
-        vendor_lua .. "/?/init.tl",
-        vendor_lua .. "/?.lua",
-        vendor_lua .. "/?/init.lua",
+        vendorLua .. "/?.tl",
+        vendorLua .. "/?/init.tl",
+        vendorLua .. "/?.lua",
+        vendorLua .. "/?/init.lua",
         "",
     }
-    if tecs_dir then
-        table.insert(paths, 1, lua_module_path(tecs_dir) .. "/src/?.tl")
-        table.insert(paths, 2, lua_module_path(tecs_dir) .. "/src/?/init.tl")
+    if tecsDir then
+        table.insert(paths, 1, luaModulePath(tecsDir) .. "/src/?.tl")
+        table.insert(paths, 2, luaModulePath(tecsDir) .. "/src/?/init.tl")
     end
     return table.concat(paths, ";")
 end
@@ -577,10 +577,10 @@ end
 -- compiler modules from that checkout ahead of the copy embedded in the
 -- payload. The loader only claims teal/tlcli/compat53 module names and only
 -- when the checkout provides the file, so everything else is untouched.
-local teal_override_installed = false
-local function install_teal_override()
-    if not teal_dir or teal_override_installed then return end
-    teal_override_installed = true
+local tealOverrideInstalled = false
+local function installTealOverride()
+    if not tealDir or tealOverrideInstalled then return end
+    tealOverrideInstalled = true
     local loaders = package.loaders or package.searchers
     table.insert(loaders, 1, function(name)
         if not (name:match("^teal$") or name:match("^teal%.")
@@ -588,7 +588,7 @@ local function install_teal_override()
             or name:match("^compat53$") or name:match("^compat53%.")) then
             return nil
         end
-        local base = lua_module_path(teal_dir)
+        local base = luaModulePath(tealDir)
         local rel = name:gsub("%.", "/")
         for _, candidate in ipairs({base .. "/" .. rel .. ".lua", base .. "/" .. rel .. "/init.lua"}) do
             local file = io.open(candidate, "rb")
@@ -608,16 +608,16 @@ end
 
 -- Run fn with the embedded (or TECS_TEAL_DIR) Teal compiler importable and
 -- os.exit trapped, restoring both afterwards. Returns the trapped exit code.
-local function with_teal_env(fn)
-    if not is_love_cli then
+local function withTealEnv(fn)
+    if not isLoveCli then
         error("embedded Teal compiler unavailable; run tecs through its installed launcher", 0)
     end
 
-    install_teal_override()
+    installTealOverride()
     local previousPath = package.path
     local previousExit = os.exit
     local exitSignal = {}
-    package.path = lua_path() .. ";" .. package.path
+    package.path = luaPath() .. ";" .. package.path
     rawset(os, "exit", function(code)
         exitSignal.code = tonumber(code) or 0
         error(exitSignal, 0)
@@ -630,8 +630,8 @@ local function with_teal_env(fn)
     return exitSignal.code or 0
 end
 
-local function run_tl(args)
-    local code = with_teal_env(function()
+local function runTl(args)
+    local code = withTealEnv(function()
         return require("tlcli.main")(args)
     end)
     if code ~= 0 then
@@ -641,15 +641,15 @@ end
 
 -- Teal compiler API, importable from both the LÖVE payload and a source
 -- checkout (specs); a TECS_TEAL_DIR checkout wins through the loader above.
-local teal_api
-local function load_teal_api()
-    if teal_api then return teal_api end
-    install_teal_override()
-    if not is_love_cli then
-        local module_path = source_path()
-        local runtime = module_path and path_join(dirname(module_path), "runtime/teal")
-        if runtime and is_dir(runtime) then
-            local base = lua_module_path(runtime)
+local tealApi
+local function loadTealApi()
+    if tealApi then return tealApi end
+    installTealOverride()
+    if not isLoveCli then
+        local modulePath = sourcePath()
+        local runtime = modulePath and pathJoin(dirname(modulePath), "runtime/teal")
+        if runtime and isDir(runtime) then
+            local base = luaModulePath(runtime)
             package.path = base .. "/?.lua;" .. base .. "/?/init.lua;" .. package.path
         end
     end
@@ -657,27 +657,27 @@ local function load_teal_api()
     if not ok then
         error("Teal compiler unavailable: " .. tostring(api), 0)
     end
-    teal_api = api
-    return teal_api
+    tealApi = api
+    return tealApi
 end
 
 -- Read a framework module's Teal source from TECS_DIR or the embedded payload.
-local function read_framework_source(name)
+local function readFrameworkSource(name)
     local rel = name:gsub("%.", "/")
     for _, candidate in ipairs({rel .. ".tl", rel .. "/init.tl"}) do
-        if tecs_dir then
-            local file = io.open(path_join(tecs_dir, "src", candidate), "rb")
+        if tecsDir then
+            local file = io.open(pathJoin(tecsDir, "src", candidate), "rb")
             if file then
                 local content = file:read("*a")
                 file:close()
-                return content, path_join(tecs_dir, "src", candidate)
+                return content, pathJoin(tecsDir, "src", candidate)
             end
         end
-        if is_love_cli and love_api then
+        if isLoveCli and loveApi then
             local path = "payload/framework/" .. candidate
-            local info = love_api.filesystem.getInfo(path)
+            local info = loveApi.filesystem.getInfo(path)
             if info and info.type == "file" then
-                return (love_api.filesystem.read(path)), path
+                return (loveApi.filesystem.read(path)), path
             end
         end
     end
@@ -687,26 +687,26 @@ end
 -- Let require() resolve tecs.*/tecs2d.* by compiling framework Teal sources
 -- in memory, so the CLI reuses framework modules (e.g. tecs.utils.json)
 -- instead of shipping second implementations.
-local framework_loader_installed = false
-local function install_framework_loader()
-    if framework_loader_installed then return end
-    framework_loader_installed = true
+local frameworkLoaderInstalled = false
+local function installFrameworkLoader()
+    if frameworkLoaderInstalled then return end
+    frameworkLoaderInstalled = true
     local loaders = package.loaders or package.searchers
     loaders[#loaders + 1] = function(name)
         if not (name == "tecs" or name:match("^tecs%.")
             or name == "tecs2d" or name:match("^tecs2d%.")) then
             return nil
         end
-        local source, origin = read_framework_source(name)
+        local source, origin = readFrameworkSource(name)
         if not source then
             return "\n\tno framework source for '" .. name
                 .. "' (set TECS_DIR or run tecs through its installed launcher)"
         end
-        local lua_code = load_teal_api().gen(source)
-        if not lua_code then
+        local luaCode = loadTealApi().gen(source)
+        if not luaCode then
             error("framework module " .. name .. " failed to compile", 0)
         end
-        local chunk, err = loadstring(lua_code, "@" .. lua_module_path(origin))
+        local chunk, err = loadstring(luaCode, "@" .. luaModulePath(origin))
         if not chunk then
             error("framework module " .. name .. " failed to load: " .. tostring(err), 0)
         end
@@ -715,8 +715,8 @@ local function install_framework_loader()
 end
 
 -- The framework's JSON module backs all --json output.
-local function json_module()
-    install_framework_loader()
+local function jsonModule()
+    installFrameworkLoader()
     local ok, json = pcall(require, "tecs.utils.json")
     if not ok then
         error("JSON output unavailable: " .. tostring(json), 0)
@@ -728,17 +728,17 @@ end
 -- diagnostic list, instead of tlcli's human-readable report. Mirrors tlcli's
 -- rules: syntax errors suppress a file's other diagnostics, disabled warnings
 -- are dropped, and warnings promoted by warning_error fail the check.
-local function collect_check_diagnostics(sources)
+local function collectCheckDiagnostics(sources)
     local diagnostics = {}
-    local check_ok = true
+    local checkOk = true
 
-    local function add(err, severity, diag_kind)
+    local function add(err, severity, diagKind)
         diagnostics[#diagnostics + 1] = {
-            file = lua_module_path(err.filename or ""),
+            file = luaModulePath(err.filename or ""),
             line = tonumber(err.y) or 0,
             column = tonumber(err.x) or 0,
             severity = severity,
-            kind = diag_kind,
+            kind = diagKind,
             message = err.msg or "",
         }
         if err.tag then
@@ -746,7 +746,7 @@ local function collect_check_diagnostics(sources)
         end
     end
 
-    local code = with_teal_env(function()
+    local code = withTealEnv(function()
         local configuration = require("tlcli.configuration")
         local driver = require("tlcli.driver")
         local tlconfig = configuration.get()
@@ -756,7 +756,7 @@ local function collect_check_diagnostics(sources)
         for _, source in ipairs(sources) do
             local _, _, err = driver.process_module(compiler, source)
             if err then
-                check_ok = false
+                checkOk = false
                 add({filename = source, msg = err}, "error", "load")
             end
         end
@@ -765,19 +765,19 @@ local function collect_check_diagnostics(sources)
             local _, errs = compiler:recall(name)
             if errs then
                 if errs.syntax_errors and #errs.syntax_errors > 0 then
-                    check_ok = false
+                    checkOk = false
                     for _, err in ipairs(errs.syntax_errors) do
                         add(err, "error", "syntax")
                     end
                 else
                     for _, err in ipairs(errs.type_errors or {}) do
-                        check_ok = false
+                        checkOk = false
                         add(err, "error", "type")
                     end
                     for _, warning in ipairs(errs.warnings or {}) do
                         if not tlconfig._disabled_warnings_set[warning.tag] then
                             if tlconfig._warning_errors_set[warning.tag] then
-                                check_ok = false
+                                checkOk = false
                                 add(warning, "error", "type")
                             else
                                 add(warning, "warning", "warning")
@@ -798,75 +798,75 @@ local function collect_check_diagnostics(sources)
         if a.column ~= b.column then return a.column < b.column end
         return a.message < b.message
     end)
-    return check_ok, diagnostics
+    return checkOk, diagnostics
 end
 
-local function love_bin()
+local function loveBin()
     local supplied = os.getenv("TECS_LOVE_BIN")
     if supplied and supplied ~= "" then return normalize(supplied) end
     error("LÖVE runtime unavailable; run tecs through its installed launcher", 0)
 end
 
-local function embedded_dependencies_complete()
-    return exists(path_join(vendor_lua, "tecs2d/init.tl"))
-        and exists(path_join(vendor_lua, "love2d.d.tl"))
-        and exists(path_join(vendor_lua, "ffi.d.tl"))
-        and exists(path_join(vendor_lua, "socket.d.tl"))
-        and exists(path_join(vendor_lua, "tecs2d/assets/fonts/tiny-font.fnt"))
-        and exists(path_join(vendor_lua, "tecs2d/assets/fonts/tiny-font.png"))
+local function embeddedDependenciesComplete()
+    return exists(pathJoin(vendorLua, "tecs2d/init.tl"))
+        and exists(pathJoin(vendorLua, "love2d.d.tl"))
+        and exists(pathJoin(vendorLua, "ffi.d.tl"))
+        and exists(pathJoin(vendorLua, "socket.d.tl"))
+        and exists(pathJoin(vendorLua, "tecs2d/assets/fonts/tiny-font.fnt"))
+        and exists(pathJoin(vendorLua, "tecs2d/assets/fonts/tiny-font.png"))
 end
 
-local function copy_local_framework()
-    if not tecs_dir then return false end
-    local tecsSource = path_join(tecs_dir, "src/tecs")
-    local tecs2dSource = path_join(tecs_dir, "src/tecs2d")
-    local fonts = path_join(tecs_dir, "examples/shared/assets")
-    if not exists(path_join(tecsSource, "init.tl"))
-        or not exists(path_join(tecs2dSource, "init.tl"))
-        or not exists(path_join(fonts, "tiny-font.fnt"))
-        or not exists(path_join(fonts, "tiny-font.png")) then
-        error("TECS_DIR is not a complete Tecs checkout: " .. tecs_dir, 0)
+local function copyLocalFramework()
+    if not tecsDir then return false end
+    local tecsSource = pathJoin(tecsDir, "src/tecs")
+    local tecs2dSource = pathJoin(tecsDir, "src/tecs2d")
+    local fonts = pathJoin(tecsDir, "examples/shared/assets")
+    if not exists(pathJoin(tecsSource, "init.tl"))
+        or not exists(pathJoin(tecs2dSource, "init.tl"))
+        or not exists(pathJoin(fonts, "tiny-font.fnt"))
+        or not exists(pathJoin(fonts, "tiny-font.png")) then
+        error("TECS_DIR is not a complete Tecs checkout: " .. tecsDir, 0)
     end
 
-    copy_dir(tecsSource, path_join(vendor_lua, "tecs"))
-    copy_dir(tecs2dSource, path_join(vendor_lua, "tecs2d"))
-    copy_file(path_join(fonts, "tiny-font.fnt"),
-        path_join(vendor_lua, "tecs2d/assets/fonts/tiny-font.fnt"))
-    copy_file(path_join(fonts, "tiny-font.png"),
-        path_join(vendor_lua, "tecs2d/assets/fonts/tiny-font.png"))
+    copyDir(tecsSource, pathJoin(vendorLua, "tecs"))
+    copyDir(tecs2dSource, pathJoin(vendorLua, "tecs2d"))
+    copyFile(pathJoin(fonts, "tiny-font.fnt"),
+        pathJoin(vendorLua, "tecs2d/assets/fonts/tiny-font.fnt"))
+    copyFile(pathJoin(fonts, "tiny-font.png"),
+        pathJoin(vendorLua, "tecs2d/assets/fonts/tiny-font.png"))
     return true
 end
 
-local function ensure_vendor()
-    if not is_love_cli then
+local function ensureVendor()
+    if not isLoveCli then
         error("embedded dependencies unavailable; run tecs through its installed launcher", 0)
     end
-    if not tecs_dir and embedded_dependencies_complete() then return end
+    if not tecsDir and embeddedDependenciesComplete() then return end
 
-    status(tecs_dir and "Preparing local Tecs dependencies..." or "Preparing embedded Tecs dependencies...")
-    mkdir(vendor_lua)
-    if not copy_local_framework() then
-        copy_love_dir("payload/framework/tecs", path_join(vendor_lua, "tecs"))
-        copy_love_dir("payload/framework/tecs2d", path_join(vendor_lua, "tecs2d"))
+    status(tecsDir and "Preparing local Tecs dependencies..." or "Preparing embedded Tecs dependencies...")
+    mkdir(vendorLua)
+    if not copyLocalFramework() then
+        copyLoveDir("payload/framework/tecs", pathJoin(vendorLua, "tecs"))
+        copyLoveDir("payload/framework/tecs2d", pathJoin(vendorLua, "tecs2d"))
     end
-    copy_love_dir("payload/types", vendor_lua)
+    copyLoveDir("payload/types", vendorLua)
 end
 
 -- Compile each changed Teal source to build/, mirroring the src/ layout.
-local function compile_sources()
+local function compileSources()
     local compiled = 0
     local pending = {}
-    for _, src in ipairs(list_teal_sources()) do
+    for _, src in ipairs(listTealSources()) do
         local rel = src:gsub("^src[/\\]", "")
-        local lua_file = rel:gsub("%.tl$", ".lua")
-        local out = path_join("build", lua_file)
-        if needs_update(out, src, "tlconfig.lua") then
+        local luaFile = rel:gsub("%.tl$", ".lua")
+        local out = pathJoin("build", luaFile)
+        if needsUpdate(out, src, "tlconfig.lua") then
             if compiled == 0 then status("Compiling Teal...") end
             mkdir(dirname(out))
-            if is_love_cli then
+            if isLoveCli then
                 pending[#pending + 1] = src
             else
-                run_tl({"gen", src, "-o", out})
+                runTl({"gen", src, "-o", out})
             end
             compiled = compiled + 1
         end
@@ -874,7 +874,7 @@ local function compile_sources()
     if #pending > 0 then
         local args = {"-q", "gen", "--root", "src", "--output-dir", "build"}
         for _, src in ipairs(pending) do args[#args + 1] = src end
-        run_tl(args)
+        runTl(args)
     end
     if compiled == 0 then status("Teal output is up to date.") end
     return compiled
@@ -882,20 +882,20 @@ end
 
 -- Compile vendored Tecs/Tecs2D sources after staging them into build/. This
 -- keeps the starter working with Teal releases that do not support `gen --root`.
-local function compile_vendor_tecs_sources()
-    local root = path_join("build/vendor/share/lua/5.1")
+local function compileVendorTecsSources()
+    local root = pathJoin("build/vendor/share/lua/5.1")
     local compiled = 0
     local pending = {}
-    for _, src in ipairs(list_files(root, ".tl")) do
+    for _, src in ipairs(listFiles(root, ".tl")) do
         local n = normalize(src)
         if (n:match("[/\\]tecs[/\\]") or n:match("[/\\]tecs2d[/\\]")) and not n:match("%.d%.tl$") then
             local out = n:gsub("%.tl$", ".lua")
-            if needs_update(out, n, "tlconfig.lua") then
+            if needsUpdate(out, n, "tlconfig.lua") then
                 if compiled == 0 then status("Compiling vendored Tecs...") end
-                if is_love_cli then
+                if isLoveCli then
                     pending[#pending + 1] = n
                 else
-                    run_tl({"gen", n, "-o", out})
+                    runTl({"gen", n, "-o", out})
                 end
                 compiled = compiled + 1
             end
@@ -904,7 +904,7 @@ local function compile_vendor_tecs_sources()
     if #pending > 0 then
         local args = {"-q", "gen", "--root", root, "--output-dir", root}
         for _, src in ipairs(pending) do args[#args + 1] = src end
-        run_tl(args)
+        runTl(args)
         -- Teal's readers can remain pending finalization after an in-process
         -- compile. Windows will not delete those source files while their
         -- handles are open, so finalize them before pruning compiler inputs.
@@ -914,76 +914,76 @@ end
 
 -- Keep runtime modules and native libraries, but discard compiler inputs,
 -- LuaRocks bookkeeping, and duplicate framework copies from the game bundle.
-local function prune_runtime_vendor()
-    local vendor = path_join("build", "vendor")
-    local luaRoot = path_join(vendor, "share/lua/5.1")
+local function pruneRuntimeVendor()
+    local vendor = pathJoin("build", "vendor")
+    local luaRoot = pathJoin(vendor, "share/lua/5.1")
 
-    remove(path_join(vendor, "bin"))
-    remove(path_join(vendor, "lib/luarocks"))
-    remove(path_join(vendor, "rocks.lua"))
-    remove(path_join(luaRoot, "teal"))
-    remove(path_join(luaRoot, "tlcli"))
-    remove(path_join(luaRoot, "tl.lua"))
-    remove(path_join(luaRoot, "tecs"))
-    remove(path_join(luaRoot, "tecs2d"))
+    remove(pathJoin(vendor, "bin"))
+    remove(pathJoin(vendor, "lib/luarocks"))
+    remove(pathJoin(vendor, "rocks.lua"))
+    remove(pathJoin(luaRoot, "teal"))
+    remove(pathJoin(luaRoot, "tlcli"))
+    remove(pathJoin(luaRoot, "tl.lua"))
+    remove(pathJoin(luaRoot, "tecs"))
+    remove(pathJoin(luaRoot, "tecs2d"))
 
-    for _, source in ipairs(list_files("build", ".tl")) do
+    for _, source in ipairs(listFiles("build", ".tl")) do
         remove(source)
     end
 end
 
 -- Copy assets/ into build/, skipping source-only files; stamp guards reruns.
 -- Returns true when anything was copied.
-local function copy_assets()
+local function copyAssets()
     if not exists("assets") then return false end
-    local stamp = path_join("build/assets/.copy-stamp")
-    if exists(stamp) and file_mtime(stamp) >= tree_mtime("assets") then
+    local stamp = pathJoin("build/assets/.copy-stamp")
+    if exists(stamp) and fileMtime(stamp) >= treeMtime("assets") then
         status("Assets are up to date.")
         return false
     end
     status("Copying assets...")
-    copy_dir("assets", "build/assets", exclude_asset_patterns())
-    write_file(stamp, tostring(os.time()) .. "\n")
+    copyDir("assets", "build/assets", excludeAssetPatterns())
+    writeFile(stamp, tostring(os.time()) .. "\n")
     return true
 end
 
 -- Stage the runtime Lua tree into build/ and compile framework sources.
 -- Returns true when anything was staged.
-local function copy_vendor()
-    local required = path_join("build/tecs2d/init.lua")
-    local stamp = path_join("build/.vendor-copy-stamp")
-    local vendor_time = tree_mtime("src/vendor")
-    if exists(required) and exists(stamp) and file_mtime(stamp) >= vendor_time then
+local function copyVendor()
+    local required = pathJoin("build/tecs2d/init.lua")
+    local stamp = pathJoin("build/.vendor-copy-stamp")
+    local vendorTime = treeMtime("src/vendor")
+    if exists(required) and exists(stamp) and fileMtime(stamp) >= vendorTime then
         status("Runtime vendor tree is up to date.")
         return false
     end
 
     status("Preparing runtime vendor tree...")
     if exists("src/vendor") then
-        copy_dir("src/vendor", "build/vendor")
+        copyDir("src/vendor", "build/vendor")
     else
         mkdir("build/vendor")
     end
 
-    compile_vendor_tecs_sources()
+    compileVendorTecsSources()
 
-    local tecs = path_join("build/vendor/share/lua/5.1/tecs")
-    local tecs2d = path_join("build/vendor/share/lua/5.1/tecs2d")
+    local tecs = pathJoin("build/vendor/share/lua/5.1/tecs")
+    local tecs2d = pathJoin("build/vendor/share/lua/5.1/tecs2d")
     if exists(tecs) then
         remove("build/tecs")
-        copy_dir(tecs, "build/tecs")
+        copyDir(tecs, "build/tecs")
     end
     if exists(tecs2d) then
         remove("build/tecs2d")
-        copy_dir(tecs2d, "build/tecs2d")
+        copyDir(tecs2d, "build/tecs2d")
     end
-    local internal = path_join(tecs2d, "assets/internal")
+    local internal = pathJoin(tecs2d, "assets/internal")
     if exists(internal) then
         remove("build/internal")
-        copy_dir(internal, "build/internal")
+        copyDir(internal, "build/internal")
     end
-    prune_runtime_vendor()
-    write_file(stamp, tostring(os.time()) .. "\n")
+    pruneRuntimeVendor()
+    writeFile(stamp, tostring(os.time()) .. "\n")
     return true
 end
 
@@ -1001,7 +1001,7 @@ local ROCKS_MANIFEST = "tecs-rocks.lua"
 local LEGACY_ROCKS_MANIFEST = "src/vendor/rocks.lua"
 local LUAROCKS_SERVER = "https://luarocks.org"
 
-local function fetch_url(url)
+local function fetchUrl(url)
     local ok, https = pcall(require, "https")
     if not ok then
         error("network access unavailable; run tecs through its installed launcher", 0)
@@ -1015,7 +1015,7 @@ end
 
 -- Run untrusted registry Lua (manifests, rockspecs) in an empty sandbox and
 -- return the globals it assigned.
-local function load_lua_table(content, chunkname)
+local function loadLuaTable(content, chunkname)
     local chunk, err = loadstring(content, chunkname)
     if not chunk then
         error(chunkname .. " failed to parse: " .. tostring(err), 0)
@@ -1033,13 +1033,13 @@ end
 -- machine-generated Lua file, but it is megabytes of one table constructor,
 -- which LuaJIT refuses to load (65536-constant limit) — and scanning also
 -- avoids executing a large download as code.
-local function parse_luarocks_manifest(content)
+local function parseLuarocksManifest(content)
     local repository = {}
-    local in_repository = false
+    local inRepository = false
     local rock, version
     for line in content:gmatch("[^\r\n]+") do
-        if not in_repository then
-            if line:match("^repository = {") then in_repository = true end
+        if not inRepository then
+            if line:match("^repository = {") then inRepository = true end
         elseif line:match("^}") then
             break
         else
@@ -1061,30 +1061,30 @@ local function parse_luarocks_manifest(content)
             end
         end
     end
-    if not in_repository then
+    if not inRepository then
         error("unexpected luarocks.org manifest format", 0)
     end
     return repository
 end
 
 -- The luarocks.org manifest for Lua 5.1, cached for a day in the user cache.
-local function luarocks_repository(force)
-    local path = path_join(cache_root(), "luarocks/manifest-5.1")
+local function luarocksRepository(force)
+    local path = pathJoin(cacheRoot(), "luarocks/manifest-5.1")
     local content
-    if not force and exists(path) and os.time() - file_mtime(path) < 86400 then
+    if not force and exists(path) and os.time() - fileMtime(path) < 86400 then
         local file = assert(io.open(path, "rb"))
         content = file:read("*a")
         file:close()
     else
         status("Fetching the luarocks.org manifest...")
-        content = fetch_url(LUAROCKS_SERVER .. "/manifest-5.1")
-        write_file(path, content)
+        content = fetchUrl(LUAROCKS_SERVER .. "/manifest-5.1")
+        writeFile(path, content)
     end
-    return parse_luarocks_manifest(content)
+    return parseLuarocksManifest(content)
 end
 
 -- Split "name@version" (version optional).
-local function parse_rock_arg(value)
+local function parseRockArg(value)
     local name, version = tostring(value):match("^([^@]+)@(.+)$")
     if not name then
         name, version = tostring(value), nil
@@ -1094,7 +1094,7 @@ end
 
 -- LuaRocks-style version order: dotted base compared piecewise (numeric
 -- segments above alphabetical tags like scm/rc), then the rockspec revision.
-local function parse_rock_version(v)
+local function parseRockVersion(v)
     local base, revision = v:match("^(.-)%-(%d+)$")
     if not base then
         base, revision = v, "0"
@@ -1104,9 +1104,9 @@ local function parse_rock_version(v)
     return parts, tonumber(revision) or 0
 end
 
-local function rock_version_less(a, b)
-    local ap, ar = parse_rock_version(a)
-    local bp, br = parse_rock_version(b)
+local function rockVersionLess(a, b)
+    local ap, ar = parseRockVersion(a)
+    local bp, br = parseRockVersion(b)
     for i = 1, math.max(#ap, #bp) do
         local x, y = ap[i], bp[i]
         if x ~= y then
@@ -1128,16 +1128,16 @@ local function rock_version_less(a, b)
 end
 
 -- Pick the requested (or newest) version that has a downloadable source rock.
-local function resolve_rock_version(repository, name, wanted)
+local function resolveRockVersion(repository, name, wanted)
     local entry = repository[name]
     if not entry then
         fail("rock not found on luarocks.org: " .. name)
     end
-    local with_source = {}
+    local withSource = {}
     for version, archs in pairs(entry) do
         for _, arch in ipairs(archs) do
             if arch.arch == "src" then
-                with_source[version] = true
+                withSource[version] = true
             end
         end
     end
@@ -1145,15 +1145,15 @@ local function resolve_rock_version(repository, name, wanted)
         if not entry[wanted] then
             fail("rock " .. name .. " has no version " .. wanted)
         end
-        if not with_source[wanted] then
+        if not withSource[wanted] then
             fail("rock " .. name .. " " .. wanted .. " has no source rock on luarocks.org; "
                 .. "pick a version that publishes one")
         end
         return wanted
     end
     local best
-    for version in pairs(with_source) do
-        if not best or rock_version_less(best, version) then
+    for version in pairs(withSource) do
+        if not best or rockVersionLess(best, version) then
             best = version
         end
     end
@@ -1165,20 +1165,20 @@ end
 
 -- Map a rockspec to vendored files, rejecting anything that is not pure Lua.
 -- Returns {{source = path-in-rock, dest = path-under-share/lua/5.1}, ...}.
-local function plan_rock_files(spec)
+local function planRockFiles(spec)
     local build = spec.build or {}
-    local build_type = build.type or "builtin"
-    if build_type ~= "builtin" and build_type ~= "none" then
-        fail("rock " .. tostring(spec.package) .. " uses build type '" .. build_type
+    local buildType = build.type or "builtin"
+    if buildType ~= "builtin" and buildType ~= "none" then
+        fail("rock " .. tostring(spec.package) .. " uses build type '" .. buildType
             .. "'; only pure-Lua rocks can be vendored (the game runtime has no C toolchain)")
     end
     local plan = {}
-    for module_name, file in pairs(build.modules or {}) do
+    for moduleName, file in pairs(build.modules or {}) do
         if type(file) ~= "string" or not file:match("%.lua$") then
             fail("rock " .. tostring(spec.package)
                 .. " contains native modules; only pure-Lua rocks can be vendored")
         end
-        local rel = module_name:gsub("%.", "/")
+        local rel = moduleName:gsub("%.", "/")
         local dest = file:match("init%.lua$") and (rel .. "/init.lua") or (rel .. ".lua")
         plan[#plan + 1] = {source = file, dest = dest}
     end
@@ -1205,18 +1205,18 @@ end
 
 -- Vendored-rock bookkeeping, stored as a committed Lua table at the project
 -- root (with a fallback read of the pre-0.3 location under src/vendor/).
-local function read_rocks_manifest()
+local function readRocksManifest()
     local path = ROCKS_MANIFEST
     if not exists(path) then path = LEGACY_ROCKS_MANIFEST end
     if not exists(path) then return {} end
     local file = assert(io.open(normalize(path), "rb"))
     local content = file:read("*a")
     file:close()
-    local manifest = load_lua_table(content, "@" .. path)
+    local manifest = loadLuaTable(content, "@" .. path)
     return type(manifest) == "table" and manifest or {}
 end
 
-local function write_rocks_manifest(manifest)
+local function writeRocksManifest(manifest)
     remove(LEGACY_ROCKS_MANIFEST)
     local names = {}
     for name in pairs(manifest) do names[#names + 1] = name end
@@ -1247,17 +1247,17 @@ local function write_rocks_manifest(manifest)
         out[#out + 1] = "    },"
     end
     out[#out + 1] = "}"
-    write_file(ROCKS_MANIFEST, table.concat(out, "\n") .. "\n")
+    writeFile(ROCKS_MANIFEST, table.concat(out, "\n") .. "\n")
 end
 
-local function remove_rock_files(entry)
+local function removeRockFiles(entry)
     local stop = normalize("src/vendor")
     for _, file in ipairs(entry.files or {}) do
-        local path = path_join("src/vendor", file)
+        local path = pathJoin("src/vendor", file)
         remove(path)
         -- Prune directories the file leaves empty, up to the vendor root.
         local dir = dirname(path)
-        while dir ~= stop and dir ~= "." and is_empty_dir(dir) do
+        while dir ~= stop and dir ~= "." and isEmptyDir(dir) do
             remove(dir)
             dir = dirname(dir)
         end
@@ -1265,7 +1265,7 @@ local function remove_rock_files(entry)
 end
 
 -- Drop manifest entries no direct rock needs, deleting their files.
-local function rocks_gc(manifest)
+local function rocksGc(manifest)
     local needed = {}
     local function mark(name)
         if needed[name] then return end
@@ -1279,7 +1279,7 @@ local function rocks_gc(manifest)
     local removed = {}
     for name, entry in pairs(manifest) do
         if not needed[name] then
-            remove_rock_files(entry)
+            removeRockFiles(entry)
             manifest[name] = nil
             removed[#removed + 1] = name
         end
@@ -1289,9 +1289,9 @@ local function rocks_gc(manifest)
 end
 
 -- Extract regular files from a ustar archive as {path = content}.
-local function parse_tar(data)
+local function parseTar(data)
     local files = {}
-    local long_name
+    local longName
     local pos = 1
     while pos + 512 <= #data + 1 do
         local header = data:sub(pos, pos + 511)
@@ -1303,11 +1303,11 @@ local function parse_tar(data)
         if prefix ~= "" then name = prefix .. "/" .. name end
         local content = data:sub(pos + 512, pos + 511 + size)
         if typeflag == "L" then
-            long_name = content:gsub("%z.*", "")
+            longName = content:gsub("%z.*", "")
         else
-            if long_name then
-                name = long_name
-                long_name = nil
+            if longName then
+                name = longName
+                longName = nil
             end
             if typeflag == "0" or typeflag == "\0" or typeflag == "" then
                 files[name] = content
@@ -1321,15 +1321,15 @@ end
 -- Expand the source archive packed inside a mounted .src.rock into
 -- {path = content}. Source rocks hold the rockspec plus the upstream release
 -- artifact, typically a .tar.gz or .zip that is expanded here in memory.
-local function expand_rock_source(mount)
-    local fs = love_api.filesystem
+local function expandRockSource(mount)
+    local fs = loveApi.filesystem
     local files = {}
-    local function add_tree(dir, prefix)
+    local function addTree(dir, prefix)
         for _, entry in ipairs(fs.getDirectoryItems(dir)) do
             local path = dir .. "/" .. entry
             local info = fs.getInfo(path)
             if info and info.type == "directory" then
-                add_tree(path, prefix .. entry .. "/")
+                addTree(path, prefix .. entry .. "/")
             elseif info and info.type == "file" then
                 files[prefix .. entry] = fs.read(path)
             end
@@ -1340,19 +1340,19 @@ local function expand_rock_source(mount)
         local info = fs.getInfo(path)
         local lower = entry:lower()
         if info and info.type == "directory" then
-            add_tree(path, entry .. "/")
+            addTree(path, entry .. "/")
         elseif info and info.type == "file" and not lower:match("%.rockspec$") then
             if lower:match("%.zip$") then
                 local data = fs.newFileData((fs.read(path)), entry)
                 if fs.mount(data, "tecs-rock-src") then
-                    add_tree("tecs-rock-src", "")
+                    addTree("tecs-rock-src", "")
                     pcall(fs.unmount, data)
                 end
             elseif lower:match("%.tar%.gz$") or lower:match("%.tgz$") then
-                local tar = love_api.data.decompress("string", "gzip", (fs.read(path)))
-                for name, content in pairs(parse_tar(tar)) do files[name] = content end
+                local tar = loveApi.data.decompress("string", "gzip", (fs.read(path)))
+                for name, content in pairs(parseTar(tar)) do files[name] = content end
             elseif lower:match("%.tar$") then
-                for name, content in pairs(parse_tar((fs.read(path)))) do files[name] = content end
+                for name, content in pairs(parseTar((fs.read(path)))) do files[name] = content end
             else
                 files[entry] = fs.read(path)
             end
@@ -1363,7 +1363,7 @@ end
 
 -- Find a rockspec-relative path in the expanded source tree: at the root, in
 -- the rockspec's source.dir, or (shallowest first) anywhere in the tree.
-local function find_rock_source(files, spec, rel)
+local function findRockSource(files, spec, rel)
     if files[rel] then return files[rel] end
     local dir = spec.source and spec.source.dir
     if dir and files[dir .. "/" .. rel] then return files[dir .. "/" .. rel] end
@@ -1381,11 +1381,11 @@ local function find_rock_source(files, spec, rel)
 end
 
 -- Mount a downloaded .src.rock (a zip) and call fn(mountpoint).
-local function with_mounted_rock(archive, fn)
-    if not (is_love_cli and love_api) then
+local function withMountedRock(archive, fn)
+    if not (isLoveCli and loveApi) then
         error("rock management requires LÖVE; run tecs through its installed launcher", 0)
     end
-    local fs = love_api.filesystem
+    local fs = loveApi.filesystem
     if not fs.mountFullPath then
         error("this LÖVE runtime cannot mount rock archives; update the cached runtime", 0)
     end
@@ -1399,7 +1399,7 @@ local function with_mounted_rock(archive, fn)
 end
 
 -- Names LuaRocks dependency strings resolve to, minus the Lua VM itself.
-local function dependency_names(spec)
+local function dependencyNames(spec)
     local names = {}
     for _, dep in ipairs(spec.dependencies or {}) do
         local name = tostring(dep):match("^%s*([%w_.-]+)")
@@ -1412,16 +1412,16 @@ end
 
 -- Download, validate, and vendor one rock (plus dependencies and its
 -- companion <name>-tl-type declarations when luarocks.org publishes them).
-local function install_rock(repository, name, wanted, manifest, direct, seen)
+local function installRock(repository, name, wanted, manifest, direct, seen)
     if seen[name] then return end
     seen[name] = true
 
-    local version = resolve_rock_version(repository, name, wanted)
+    local version = resolveRockVersion(repository, name, wanted)
     local existing = manifest[name]
     if existing and existing.version == version then
         local complete = true
         for _, file in ipairs(existing.files or {}) do
-            if not exists(path_join("src/vendor", file)) then
+            if not exists(pathJoin("src/vendor", file)) then
                 complete = false
                 break
             end
@@ -1433,67 +1433,67 @@ local function install_rock(repository, name, wanted, manifest, direct, seen)
         end
     end
     if existing then
-        remove_rock_files(existing)
+        removeRockFiles(existing)
     end
 
-    local file_name = name .. "-" .. version .. ".src.rock"
-    local archive = path_join(cache_root(), "luarocks/rocks", file_name)
+    local fileName = name .. "-" .. version .. ".src.rock"
+    local archive = pathJoin(cacheRoot(), "luarocks/rocks", fileName)
     if not exists(archive) then
-        status("Downloading " .. file_name .. "...")
-        write_file(archive, fetch_url(LUAROCKS_SERVER .. "/" .. file_name))
+        status("Downloading " .. fileName .. "...")
+        writeFile(archive, fetchUrl(LUAROCKS_SERVER .. "/" .. fileName))
     end
 
     local files = {}
     local deps
-    with_mounted_rock(archive, function(mount)
-        local fs = love_api.filesystem
-        local spec_file
+    withMountedRock(archive, function(mount)
+        local fs = loveApi.filesystem
+        local specFile
         for _, entry in ipairs(fs.getDirectoryItems(mount)) do
             if entry:match("%.rockspec$") then
-                spec_file = mount .. "/" .. entry
+                specFile = mount .. "/" .. entry
                 break
             end
         end
-        if not spec_file then
-            error("rock archive has no rockspec: " .. file_name, 0)
+        if not specFile then
+            error("rock archive has no rockspec: " .. fileName, 0)
         end
-        local _, spec = load_lua_table((fs.read(spec_file)), "@" .. name .. ".rockspec")
-        local sources = expand_rock_source(mount)
+        local _, spec = loadLuaTable((fs.read(specFile)), "@" .. name .. ".rockspec")
+        local sources = expandRockSource(mount)
 
-        for _, item in ipairs(plan_rock_files(spec)) do
-            local content = find_rock_source(sources, spec, item.source)
+        for _, item in ipairs(planRockFiles(spec)) do
+            local content = findRockSource(sources, spec, item.source)
             if not content then
                 error("rock " .. name .. " is missing packaged file " .. item.source, 0)
             end
-            write_file(path_join(vendor_lua, item.dest), content)
+            writeFile(pathJoin(vendorLua, item.dest), content)
             files[#files + 1] = "share/lua/5.1/" .. item.dest
         end
 
-        local license_paths = {}
-        for path in pairs(sources) do license_paths[#license_paths + 1] = path end
-        table.sort(license_paths)
+        local licensePaths = {}
+        for path in pairs(sources) do licensePaths[#licensePaths + 1] = path end
+        table.sort(licensePaths)
         local written = {}
-        for _, path in ipairs(license_paths) do
+        for _, path in ipairs(licensePaths) do
             local _, depth = path:gsub("/", "")
             local base = path:match("[^/]+$")
-            local is_license = base:upper():match("LICEN[CS]E") or base:upper():match("^COPYING")
-            if depth <= 1 and is_license and not written[base] then
+            local isLicense = base:upper():match("LICEN[CS]E") or base:upper():match("^COPYING")
+            if depth <= 1 and isLicense and not written[base] then
                 written[base] = true
-                write_file(path_join("src/vendor/licenses", name .. "-" .. base), sources[path])
+                writeFile(pathJoin("src/vendor/licenses", name .. "-" .. base), sources[path])
                 files[#files + 1] = "licenses/" .. name .. "-" .. base
             end
         end
 
-        deps = dependency_names(spec)
+        deps = dependencyNames(spec)
     end)
 
     for _, dep in ipairs(deps) do
-        install_rock(repository, dep, nil, manifest, false, seen)
+        installRock(repository, dep, nil, manifest, false, seen)
     end
-    local types_rock = name .. "-tl-type"
-    if not name:match("%-tl%-type$") and repository[types_rock] then
-        install_rock(repository, types_rock, nil, manifest, false, seen)
-        deps[#deps + 1] = types_rock
+    local typesRock = name .. "-tl-type"
+    if not name:match("%-tl%-type$") and repository[typesRock] then
+        installRock(repository, typesRock, nil, manifest, false, seen)
+        deps[#deps + 1] = typesRock
     end
 
     manifest[name] = {
@@ -1508,12 +1508,12 @@ end
 -- Reinstall manifest-recorded rocks whose files are missing (fresh clones:
 -- src/vendor/ is generated and typically gitignored). Versions are pinned to
 -- the manifest so a restore never upgrades anything.
-local function restore_missing_rocks()
-    local manifest = read_rocks_manifest()
+local function restoreMissingRocks()
+    local manifest = readRocksManifest()
     local missing = {}
     for name, entry in pairs(manifest) do
         for _, file in ipairs(entry.files or {}) do
-            if not exists(path_join("src/vendor", file)) then
+            if not exists(pathJoin("src/vendor", file)) then
                 missing[#missing + 1] = name
                 break
             end
@@ -1523,7 +1523,7 @@ local function restore_missing_rocks()
     table.sort(missing)
 
     status("Restoring vendored rocks...")
-    local repository = luarocks_repository(false)
+    local repository = luarocksRepository(false)
     -- Pre-seed `seen` so dependency recursion cannot re-resolve (and upgrade)
     -- rocks the manifest already records; each rock is restored pinned.
     local seen = {}
@@ -1531,13 +1531,13 @@ local function restore_missing_rocks()
     for _, name in ipairs(missing) do
         local entry = manifest[name]
         seen[name] = nil
-        install_rock(repository, name, entry.version, manifest, entry.direct, seen)
+        installRock(repository, name, entry.version, manifest, entry.direct, seen)
         seen[name] = true
     end
-    write_rocks_manifest(manifest)
+    writeRocksManifest(manifest)
 end
 
-local function ensure_project()
+local function ensureProject()
     if not exists("tlconfig.lua") then
         fail("not a Tecs project: tlconfig.lua not found in the current directory")
     end
@@ -1552,47 +1552,47 @@ end
 local DIST_RUNTIME_BASE = "https://nightly.link/love2d/love/workflows/main/main"
 
 -- The distributable name, from the project directory.
-local function dist_name()
+local function distName()
     local name = basename(cwd()):gsub("[^%w%-_%. ]", ""):gsub("^%s+", ""):gsub("%s+$", "")
     if name == "" then name = "game" end
     return name
 end
 
 -- Rebrand LÖVE's Info.plist for the game and drop its claim on .love files.
-local function patch_plist(plist, name)
+local function patchPlist(plist, name)
     plist = plist:gsub("(<key>CFBundleIdentifier</key>%s*<string>)[^<]*", "%1org.tecs2d." .. name, 1)
     plist = plist:gsub("(<key>CFBundleName</key>%s*<string>)[^<]*", "%1" .. name, 1)
     plist = plist:gsub("%s*<key>UTExportedTypeDeclarations</key>%s*<array>.-</array>", "", 1)
     return plist
 end
 
-local function read_binary(path)
+local function readBinary(path)
     local file = assert(io.open(normalize(path), "rb"))
     local content = file:read("*a")
     file:close()
     return content
 end
 
--- Zip entries (paths relative to base_dir) into zip_target, preserving
+-- Zip entries (paths relative to baseDir) into zipTarget, preserving
 -- symlinks on POSIX. Uses Info-ZIP when available, else Windows' bsdtar.
-local function create_zip(base_dir, zip_target, entries)
-    remove(zip_target)
-    local zip_abs = path_join(cwd(), zip_target)
+local function createZip(baseDir, zipTarget, entries)
+    remove(zipTarget)
+    local zipAbs = pathJoin(cwd(), zipTarget)
     local quoted = {}
     for _, entry in ipairs(entries) do quoted[#quoted + 1] = q(entry) end
     local list = table.concat(quoted, " ")
-    if is_windows then
-        local bsdtar = path_join(os.getenv("WINDIR") or "C:\\Windows", "System32/tar.exe")
-        run('cmd /C "cd /D ' .. q(path_join(cwd(), base_dir)) .. " && " .. q(bsdtar)
-            .. " --format zip -cf " .. q(zip_abs) .. " " .. list .. '"')
+    if isWindows then
+        local bsdtar = pathJoin(os.getenv("WINDIR") or "C:\\Windows", "System32/tar.exe")
+        run('cmd /C "cd /D ' .. q(pathJoin(cwd(), baseDir)) .. " && " .. q(bsdtar)
+            .. " --format zip -cf " .. q(zipAbs) .. " " .. list .. '"')
     else
-        run("cd " .. q(path_join(cwd(), base_dir)) .. " && zip -q -r -y " .. q(zip_abs) .. " " .. list)
+        run("cd " .. q(pathJoin(cwd(), baseDir)) .. " && zip -q -r -y " .. q(zipAbs) .. " " .. list)
     end
 end
 
 -- Copy every file under a mounted archive directory to dest.
-local function copy_mount_tree(mount, dest)
-    local fs = love_api.filesystem
+local function copyMountTree(mount, dest)
+    local fs = loveApi.filesystem
     local function walk(dir, prefix)
         for _, entry in ipairs(fs.getDirectoryItems(dir)) do
             local source = dir .. "/" .. entry
@@ -1600,7 +1600,7 @@ local function copy_mount_tree(mount, dest)
             if info and info.type == "directory" then
                 walk(source, prefix .. entry .. "/")
             elseif info and info.type == "file" then
-                write_file(path_join(dest, prefix .. entry), (fs.read(source)))
+                writeFile(pathJoin(dest, prefix .. entry), (fs.read(source)))
             end
         end
     end
@@ -1609,17 +1609,17 @@ end
 
 -- Directory containing love.exe and its DLLs, reusing the host launcher's
 -- cache on Windows and downloading the runtime zip elsewhere.
-local function dist_windows_runtime()
-    local launcher_cache = path_join(cache_root(), "love12-main")
-    if exists(launcher_cache) then
-        for _, file in ipairs(walk_files(launcher_cache, {})) do
+local function distWindowsRuntime()
+    local launcherCache = pathJoin(cacheRoot(), "love12-main")
+    if exists(launcherCache) then
+        for _, file in ipairs(walkFiles(launcherCache, {})) do
             if basename(file) == "love.exe" then
                 return dirname(file)
             end
         end
     end
-    local dir = path_join(cache_root(), "dist/love-windows")
-    for _, file in ipairs(walk_files(dir, {})) do
+    local dir = pathJoin(cacheRoot(), "dist/love-windows")
+    for _, file in ipairs(walkFiles(dir, {})) do
         if basename(file) == "love.exe" then
             return dirname(file)
         end
@@ -1627,30 +1627,30 @@ local function dist_windows_runtime()
 
     status("Downloading the Windows LÖVE runtime...")
     mkdir(dir)
-    local outer = path_join(cache_root(), "dist/love-windows-outer.zip")
-    write_file(outer, fetch_url(DIST_RUNTIME_BASE .. "/love-windows-x64.zip"))
-    local inner = path_join(cache_root(), "dist/love-windows-inner.zip")
-    with_mounted_rock(outer, function(mount)
-        local fs = love_api.filesystem
-        local inner_name
+    local outer = pathJoin(cacheRoot(), "dist/love-windows-outer.zip")
+    writeFile(outer, fetchUrl(DIST_RUNTIME_BASE .. "/love-windows-x64.zip"))
+    local inner = pathJoin(cacheRoot(), "dist/love-windows-inner.zip")
+    withMountedRock(outer, function(mount)
+        local fs = loveApi.filesystem
+        local innerName
         for _, entry in ipairs(fs.getDirectoryItems(mount)) do
             if entry:match("%.zip$") then
-                inner_name = entry
+                innerName = entry
                 break
             end
         end
-        if not inner_name then
+        if not innerName then
             error("unexpected Windows LÖVE runtime archive layout", 0)
         end
-        write_file(inner, (fs.read(mount .. "/" .. inner_name)))
+        writeFile(inner, (fs.read(mount .. "/" .. innerName)))
     end)
-    with_mounted_rock(inner, function(mount)
-        copy_mount_tree(mount, dir)
+    withMountedRock(inner, function(mount)
+        copyMountTree(mount, dir)
     end)
     remove(outer)
     remove(inner)
 
-    for _, file in ipairs(walk_files(dir, {})) do
+    for _, file in ipairs(walkFiles(dir, {})) do
         if basename(file) == "love.exe" then
             return dirname(file)
         end
@@ -1661,24 +1661,24 @@ end
 -- Path to love.app, reusing the host launcher's cache on macOS and
 -- downloading the runtime zip elsewhere. POSIX hosts only (unzip preserves
 -- the bundle's symlinks and permissions; archive mounting does not).
-local function dist_macos_runtime()
-    local cached = path_join(cache_root(), "love12-main/love.app")
-    if exists(path_join(cached, "Contents/MacOS/love")) then
+local function distMacosRuntime()
+    local cached = pathJoin(cacheRoot(), "love12-main/love.app")
+    if exists(pathJoin(cached, "Contents/MacOS/love")) then
         return cached
     end
-    local base_dir = path_join(cache_root(), "dist/love-macos")
-    local app = path_join(base_dir, "love.app")
-    if exists(path_join(app, "Contents/MacOS/love")) then
+    local baseDir = pathJoin(cacheRoot(), "dist/love-macos")
+    local app = pathJoin(baseDir, "love.app")
+    if exists(pathJoin(app, "Contents/MacOS/love")) then
         return app
     end
 
     status("Downloading the macOS LÖVE runtime...")
-    remove(base_dir)
-    mkdir(base_dir)
-    write_file(path_join(base_dir, "outer.zip"), fetch_url(DIST_RUNTIME_BASE .. "/love-macos.zip"))
-    run("cd " .. q(base_dir) .. " && unzip -q outer.zip && unzip -q love-macos.zip"
+    remove(baseDir)
+    mkdir(baseDir)
+    writeFile(pathJoin(baseDir, "outer.zip"), fetchUrl(DIST_RUNTIME_BASE .. "/love-macos.zip"))
+    run("cd " .. q(baseDir) .. " && unzip -q outer.zip && unzip -q love-macos.zip"
         .. " && rm -f outer.zip love-macos.zip")
-    if not exists(path_join(app, "Contents/MacOS/love")) then
+    if not exists(pathJoin(app, "Contents/MacOS/love")) then
         error("macOS LÖVE runtime did not contain love.app", 0)
     end
     return app
@@ -1688,21 +1688,21 @@ end
 -- and debugger plugins) use it to tell dev builds from distributed ones.
 local BUILDINFO_PATH = "build/tecs_buildinfo.lua"
 
-local function buildinfo_lua(dev)
-    local love_version = ""
-    if love_api and love_api.getVersion then
-        local major, minor, revision = love_api.getVersion()
-        love_version = table.concat({major, minor, revision}, ".")
+local function buildinfoLua(dev)
+    local loveVersion = ""
+    if loveApi and loveApi.getVersion then
+        local major, minor, revision = loveApi.getVersion()
+        loveVersion = table.concat({major, minor, revision}, ".")
     end
     local jitApi = rawget(_G, "jit")
     return table.concat({
         "-- Generated by `tecs build`; do not edit.",
         "return {",
         ("    dev = %s,"):format(tostring(dev == true)),
-        ("    name = %q,"):format(dist_name()),
+        ("    name = %q,"):format(distName()),
         ("    built = %q,"):format(os.date("!%Y-%m-%dT%H:%M:%SZ")),
         ("    cli = %q,"):format(VERSION),
-        ("    love = %q,"):format(love_version),
+        ("    love = %q,"):format(loveVersion),
         ("    luajit = %q,"):format((jitApi and jitApi.version) or _VERSION),
         "}",
     }, "\n") .. "\n"
@@ -1710,77 +1710,77 @@ end
 
 -- Write the manifest when the build changed, it is missing, or a `tecs dist`
 -- run left it marked as distributed.
-local function refresh_buildinfo(changed)
+local function refreshBuildinfo(changed)
     local stale = changed or not exists(BUILDINFO_PATH)
     if not stale then
-        stale = read_binary(BUILDINFO_PATH):match("dev = false") ~= nil
+        stale = readBinary(BUILDINFO_PATH):match("dev = false") ~= nil
     end
     if stale then
-        write_file(BUILDINFO_PATH, buildinfo_lua(true))
+        writeFile(BUILDINFO_PATH, buildinfoLua(true))
     end
 end
 
 -- Zip build/ into dist/<name>.love.
-local function dist_love(name)
-    local love_file = path_join("dist", name .. ".love")
+local function distLove(name)
+    local loveFile = pathJoin("dist", name .. ".love")
     -- Compiled specs and their scratch output are development artifacts.
     local excluded = {spec = true, test_deps = true}
     local entries = {}
-    for entry in require_lfs().dir("build") do
+    for entry in requireLfs().dir("build") do
         if entry ~= "." and entry ~= ".." and not entry:match("^%.") and not excluded[entry] then
             entries[#entries + 1] = entry
         end
     end
     table.sort(entries)
-    create_zip("build", love_file, entries)
-    status("Wrote " .. love_file)
-    return love_file
+    createZip("build", loveFile, entries)
+    status("Wrote " .. loveFile)
+    return loveFile
 end
 
 -- Assemble dist/macos/<name>.app and dist/<name>-macos.zip.
-local function dist_macos(name, love_file)
-    local runtime = dist_macos_runtime()
-    local out_dir = path_join("dist", "macos")
-    local app = path_join(out_dir, name .. ".app")
+local function distMacos(name, loveFile)
+    local runtime = distMacosRuntime()
+    local outDir = pathJoin("dist", "macos")
+    local app = pathJoin(outDir, name .. ".app")
     remove(app)
-    mkdir(out_dir)
+    mkdir(outDir)
     run("cp -R " .. q(runtime) .. " " .. q(app))
 
-    copy_file(love_file, path_join(app, "Contents/Resources", name .. ".love"))
-    local plist_path = path_join(app, "Contents/Info.plist")
-    write_file(plist_path, patch_plist(read_binary(plist_path), name))
+    copyFile(loveFile, pathJoin(app, "Contents/Resources", name .. ".love"))
+    local plistPath = pathJoin(app, "Contents/Info.plist")
+    writeFile(plistPath, patchPlist(readBinary(plistPath), name))
 
-    local bundle_zip = path_join("dist", name .. "-macos.zip")
-    create_zip(out_dir, bundle_zip, {name .. ".app"})
+    local bundleZip = pathJoin("dist", name .. "-macos.zip")
+    createZip(outDir, bundleZip, {name .. ".app"})
     status("Wrote " .. app)
-    status("Wrote " .. bundle_zip .. " (unsigned; sign and notarize before wide distribution)")
+    status("Wrote " .. bundleZip .. " (unsigned; sign and notarize before wide distribution)")
 end
 
 -- Assemble dist/windows/<name>/ (fused exe plus DLLs) and dist/<name>-windows.zip.
-local function dist_windows(name, love_file)
-    local runtime = dist_windows_runtime()
-    local out_root = path_join("dist", "windows")
-    local out = path_join(out_root, name)
+local function distWindows(name, loveFile)
+    local runtime = distWindowsRuntime()
+    local outRoot = pathJoin("dist", "windows")
+    local out = pathJoin(outRoot, name)
     remove(out)
     mkdir(out)
 
-    write_file(path_join(out, name .. ".exe"),
-        read_binary(path_join(runtime, "love.exe")) .. read_binary(love_file))
-    for _, file in ipairs(walk_files(runtime, {})) do
+    writeFile(pathJoin(out, name .. ".exe"),
+        readBinary(pathJoin(runtime, "love.exe")) .. readBinary(loveFile))
+    for _, file in ipairs(walkFiles(runtime, {})) do
         local base = basename(file)
         if dirname(file) == normalize(runtime) then
             if base:lower():match("%.dll$") then
-                copy_file(file, path_join(out, base))
+                copyFile(file, pathJoin(out, base))
             elseif base:lower():match("^license") then
-                copy_file(file, path_join(out, "love-" .. base:lower()))
+                copyFile(file, pathJoin(out, "love-" .. base:lower()))
             end
         end
     end
 
-    local bundle_zip = path_join("dist", name .. "-windows.zip")
-    create_zip(out_root, bundle_zip, {name})
-    status("Wrote " .. path_join(out, name .. ".exe"))
-    status("Wrote " .. bundle_zip)
+    local bundleZip = pathJoin("dist", name .. "-windows.zip")
+    createZip(outRoot, bundleZip, {name})
+    status("Wrote " .. pathJoin(out, name .. ".exe"))
+    status("Wrote " .. bundleZip)
 end
 
 -- Task table: each entry implements one `tecs <target>` command.
@@ -1790,44 +1790,44 @@ local tasks = {}
 local parser
 
 function tasks.check(args)
-    ensure_vendor()
-    restore_missing_rocks()
-    local sources = list_teal_sources()
+    ensureVendor()
+    restoreMissingRocks()
+    local sources = listTealSources()
     if args and args.json then
-        local json = json_module()
-        local check_ok, diagnostics = collect_check_diagnostics(sources)
-        print(json.serialize({ok = check_ok, diagnostics = diagnostics}, true))
-        if not check_ok then
+        local json = jsonModule()
+        local checkOk, diagnostics = collectCheckDiagnostics(sources)
+        print(json.serialize({ok = checkOk, diagnostics = diagnostics}, true))
+        if not checkOk then
             fail("typecheck reported errors")
         end
         return
     end
     status("Typechecking...")
-    local tl_args = {"check"}
-    for _, source in ipairs(sources) do tl_args[#tl_args + 1] = source end
-    run_tl(tl_args)
+    local tlArgs = {"check"}
+    for _, source in ipairs(sources) do tlArgs[#tlArgs + 1] = source end
+    runTl(tlArgs)
 end
 
 function tasks.build()
     status("Building...")
-    ensure_vendor()
-    restore_missing_rocks()
-    local changed = compile_sources() > 0
-    if copy_assets() then changed = true end
-    if copy_vendor() then changed = true end
-    refresh_buildinfo(changed)
+    ensureVendor()
+    restoreMissingRocks()
+    local changed = compileSources() > 0
+    if copyAssets() then changed = true end
+    if copyVendor() then changed = true end
+    refreshBuildinfo(changed)
     -- Only refresh the stamp when output changed, so a no-op rebuild does not
     -- trigger the running game's hot reload.
     if changed or not exists(HOT_RELOAD_STAMP) then
-        write_file(HOT_RELOAD_STAMP, tostring(os.time()) .. "\n")
+        writeFile(HOT_RELOAD_STAMP, tostring(os.time()) .. "\n")
     end
 end
 
 function tasks.run()
     tasks.build()
     status("Launching game...")
-    local executable = path_from_build(love_bin())
-    if is_windows then
+    local executable = pathFromBuild(loveBin())
+    if isWindows then
         run('cmd /C "set SDL_VIDEODRIVER=&& set SDL_AUDIODRIVER=&& cd /D build && '
             .. q(executable) .. ' ."')
     else
@@ -1847,25 +1847,25 @@ function tasks.new(args)
         fail("missing project path")
     end
     target = normalize(target)
-    if exists(target) and not is_empty_dir(target) then
+    if exists(target) and not isEmptyDir(target) then
         fail("target already exists and is not empty: " .. target)
     end
 
     status("Creating project " .. target .. "...")
     mkdir(target)
-    if is_love_cli then
-        copy_love_dir("tecs_cli/templates/default", target)
+    if isLoveCli then
+        copyLoveDir("tecs_cli/templates/default", target)
     else
-        copy_dir(template_dir(), target)
+        copyDir(templateDir(), target)
     end
-    mkdir(path_join(target, "assets"))
+    mkdir(pathJoin(target, "assets"))
 
     -- Agent guidance ships from the bundled doc so `tecs agent` and generated
     -- projects stay in sync; CLAUDE.md defers to AGENTS.md.
-    for _, doc in ipairs(list_agent_docs()) do
+    for _, doc in ipairs(listAgentDocs()) do
         if doc.name == "tecs-project" then
-            write_file(path_join(target, "AGENTS.md"), doc.content)
-            write_file(path_join(target, "CLAUDE.md"), "@AGENTS.md\n")
+            writeFile(pathJoin(target, "AGENTS.md"), doc.content)
+            writeFile(pathJoin(target, "CLAUDE.md"), "@AGENTS.md\n")
         end
     end
 
@@ -1873,32 +1873,32 @@ function tasks.new(args)
 end
 
 function tasks.dev()
-    if not tecs_dir then
+    if not tecsDir then
         error("set TECS_DIR to a local Tecs checkout before running `tecs dev`", 0)
     end
     status("Preparing local Tecs development source...")
-    ensure_vendor()
+    ensureVendor()
     status("Dev source copied. Re-run `tecs dev` after local framework changes.")
 end
 
 function tasks.add(args)
-    ensure_project()
-    local name, wanted = parse_rock_arg(args.rock)
-    local repository = luarocks_repository(false)
+    ensureProject()
+    local name, wanted = parseRockArg(args.rock)
+    local repository = luarocksRepository(false)
     if not repository[name] then
         -- The cached manifest may predate a new rock; refresh once before failing.
-        repository = luarocks_repository(true)
+        repository = luarocksRepository(true)
     end
-    local manifest = read_rocks_manifest()
-    install_rock(repository, name, wanted, manifest, true, {})
-    write_rocks_manifest(manifest)
+    local manifest = readRocksManifest()
+    installRock(repository, name, wanted, manifest, true, {})
+    writeRocksManifest(manifest)
     status("Vendored rocks are recorded in " .. ROCKS_MANIFEST .. ". Next: tecs check")
 end
 
 function tasks.remove(args)
-    ensure_project()
-    local name = parse_rock_arg(args.rock)
-    local manifest = read_rocks_manifest()
+    ensureProject()
+    local name = parseRockArg(args.rock)
+    local manifest = readRocksManifest()
     local entry = manifest[name]
     if not entry then
         fail("rock is not vendored: " .. name)
@@ -1915,8 +1915,8 @@ function tasks.remove(args)
             .. "; remove those rocks instead")
     end
     entry.direct = false
-    local removed = rocks_gc(manifest)
-    write_rocks_manifest(manifest)
+    local removed = rocksGc(manifest)
+    writeRocksManifest(manifest)
     if #removed > 0 then
         status("Removed " .. table.concat(removed, ", ") .. ".")
     end
@@ -1926,11 +1926,11 @@ function tasks.remove(args)
 end
 
 function tasks.update(args)
-    ensure_project()
-    local manifest = read_rocks_manifest()
+    ensureProject()
+    local manifest = readRocksManifest()
     local targets = {}
     if args.rock then
-        local name = parse_rock_arg(args.rock)
+        local name = parseRockArg(args.rock)
         if not manifest[name] then
             fail("rock is not vendored: " .. name)
         end
@@ -1945,20 +1945,20 @@ function tasks.update(args)
         status("No vendored rocks to update.")
         return
     end
-    local repository = luarocks_repository(true)
+    local repository = luarocksRepository(true)
     for _, name in ipairs(targets) do
-        install_rock(repository, name, nil, manifest, manifest[name].direct, {})
+        installRock(repository, name, nil, manifest, manifest[name].direct, {})
     end
-    rocks_gc(manifest)
-    write_rocks_manifest(manifest)
+    rocksGc(manifest)
+    writeRocksManifest(manifest)
 end
 
 -- Run project specs with the vendored busted runner. Files matching
 -- *_lovespec.tl launch the built game under real LÖVE and drive it over the
 -- tecs2d MCP server, so this is intentionally not headless.
 function tasks.integ()
-    ensure_project()
-    if is_windows then
+    ensureProject()
+    if isWindows then
         fail("tecs integ requires macOS or Linux; the test harness drives POSIX processes")
     end
     if not exists("spec") then
@@ -1969,20 +1969,20 @@ function tasks.integ()
     tasks.build()
 
     status("Compiling specs...")
-    local spec_sources = list_files("spec", ".tl")
-    local tl_args = {"-q", "--global-env-def", "busted", "gen",
+    local specSources = listFiles("spec", ".tl")
+    local tlArgs = {"-q", "--global-env-def", "busted", "gen",
         "--root", ".", "--output-dir", "build"}
     local found = false
-    for _, source in ipairs(spec_sources) do
+    for _, source in ipairs(specSources) do
         if not source:match("%.d%.tl$") then
-            tl_args[#tl_args + 1] = source
+            tlArgs[#tlArgs + 1] = source
             found = true
         end
     end
     if not found then
         fail("no Teal specs found under spec/")
     end
-    run_tl(tl_args)
+    runTl(tlArgs)
 
     -- The CLI itself runs under dummy SDL drivers; launched games need real
     -- ones, and the fixture harness finds the runtime through LOVE.
@@ -1993,7 +1993,7 @@ function tasks.integ()
     ]])
     ffi.C.unsetenv("SDL_VIDEODRIVER")
     ffi.C.unsetenv("SDL_AUDIODRIVER")
-    ffi.C.setenv("LOVE", love_bin(), 1)
+    ffi.C.setenv("LOVE", loveBin(), 1)
 
     status("Running specs...")
     local previousPath = package.path
@@ -2026,69 +2026,69 @@ end
 
 -- Package the built game for distribution.
 function tasks.dist(args)
-    ensure_project()
-    if not is_love_cli then
+    ensureProject()
+    if not isLoveCli then
         error("packaging requires LÖVE; run tecs through its installed launcher", 0)
     end
-    if args.target == "macos" and is_windows then
+    if args.target == "macos" and isWindows then
         fail("the macOS bundle cannot be assembled on Windows; its symlinks need a POSIX host")
     end
     tasks.build()
 
     mkdir("dist")
-    local name = dist_name()
+    local name = distName()
     -- Package with distributed-build metadata, then restore the dev manifest
     -- so later runs and specs keep the MCP server and debugger enabled.
-    write_file(BUILDINFO_PATH, buildinfo_lua(false))
+    writeFile(BUILDINFO_PATH, buildinfoLua(false))
     local ok, err = pcall(function()
-        local love_file = dist_love(name)
+        local loveFile = distLove(name)
         if args.target == "love" then return end
 
         if not args.target or args.target == "macos" then
-            if is_windows then
+            if isWindows then
                 status("Skipping the macOS bundle: assemble it on macOS or Linux.")
             else
-                dist_macos(name, love_file)
+                distMacos(name, loveFile)
             end
         end
         if not args.target or args.target == "windows" then
-            dist_windows(name, love_file)
+            distWindows(name, loveFile)
         end
     end)
-    write_file(BUILDINFO_PATH, buildinfo_lua(true))
+    writeFile(BUILDINFO_PATH, buildinfoLua(true))
     if not ok then error(err, 0) end
 end
 
 -- Everything host-specific the MCP bridge needs, kept injectable so the
 -- dispatcher stays unit-testable outside LÖVE.
-local function build_mcp_context()
+local function buildMcpContext()
     local ffi = require("ffi")
     pcall(ffi.cdef, [[
         int setenv(const char *name, const char *value, int overwrite);
         int unsetenv(const char *name);
     ]])
-    install_framework_loader()
+    installFrameworkLoader()
 
-    local kernel_tools = {}
+    local kernelTools = {}
     do
-        local ok, mcp_tools = pcall(require, "tecs2d.mcp.tools")
-        if ok and type(mcp_tools) == "table" and type(mcp_tools.list) == "table" then
-            kernel_tools = mcp_tools.list
+        local ok, mcpTools = pcall(require, "tecs2d.mcp.tools")
+        if ok and type(mcpTools) == "table" and type(mcpTools.list) == "table" then
+            kernelTools = mcpTools.list
         end
     end
 
     return {
         version = VERSION,
-        project_name = dist_name(),
-        json = json_module(),
-        kernel_tools = kernel_tools,
-        love_process = require("tecs2d.testing.love_process"),
-        mcp_client = require("tecs2d.testing.mcp_client"),
-        love_bin = love_bin,
+        projectName = distName(),
+        json = jsonModule(),
+        kernelTools = kernelTools,
+        loveProcess = require("tecs2d.testing.love_process"),
+        mcpClient = require("tecs2d.testing.mcp_client"),
+        loveBin = loveBin,
         check = function()
-            ensure_vendor()
-            restore_missing_rocks()
-            return collect_check_diagnostics(list_teal_sources())
+            ensureVendor()
+            restoreMissingRocks()
+            return collectCheckDiagnostics(listTealSources())
         end,
         build = function()
             tasks.build()
@@ -2097,7 +2097,7 @@ local function build_mcp_context()
         -- much global state (busted's runner, os.exit traps) to share the
         -- bridge's process.
         reexec = function(task, extra)
-            local command = q(love_bin()) .. " " .. q(love_api.filesystem.getSource())
+            local command = q(loveBin()) .. " " .. q(loveApi.filesystem.getSource())
                 .. " --tecs-project " .. q(cwd()) .. " " .. task
             if extra then command = command .. " " .. q(extra) end
             local pipe = io.popen(command .. " 2>&1")
@@ -2105,11 +2105,11 @@ local function build_mcp_context()
             local ok = pipe:close()
             return ok == true or ok == 0, output:sub(-8192)
         end,
-        set_env = function(name, value) ffi.C.setenv(name, value, 1) end,
-        unset_env = function(name) ffi.C.unsetenv(name) end,
-        read_buildinfo = function()
+        setEnv = function(name, value) ffi.C.setenv(name, value, 1) end,
+        unsetEnv = function(name) ffi.C.unsetenv(name) end,
+        readBuildinfo = function()
             if not exists("build/tecs_buildinfo.lua") then return nil end
-            local chunk = loadstring(read_binary("build/tecs_buildinfo.lua"))
+            local chunk = loadstring(readBinary("build/tecs_buildinfo.lua"))
             if not chunk then return nil end
             local ok, info = pcall(chunk)
             if ok then return info end
@@ -2122,27 +2122,27 @@ end
 -- Serve the project over MCP on stdio: toolchain tools, game lifecycle, and
 -- a proxy to the running game's own MCP tools.
 function tasks.mcp()
-    ensure_project()
-    if not is_love_cli then
+    ensureProject()
+    if not isLoveCli then
         error("the MCP bridge requires LÖVE; run tecs through its installed launcher", 0)
     end
-    if is_windows then
+    if isWindows then
         fail("tecs mcp requires macOS or Linux; the game process harness is POSIX-only")
     end
-    require("tecs_cli.mcp_bridge").serve(build_mcp_context())
+    require("tecs_cli.mcp_bridge").serve(buildMcpContext())
 end
 
 function tasks.agent(args)
-    local docs = list_agent_docs()
+    local docs = listAgentDocs()
 
-    if args.agent_action == "list" then
+    if args.agentAction == "list" then
         if args.json then
-            local json = json_module()
+            local json = jsonModule()
             local listed = {}
             for _, doc in ipairs(docs) do
                 listed[#listed + 1] = {
                     name = doc.name,
-                    description = agent_doc_description(doc.content),
+                    description = agentDocDescription(doc.content),
                 }
             end
             print(json.serialize(listed, true))
@@ -2153,7 +2153,7 @@ function tasks.agent(args)
             width = math.max(width, #doc.name)
         end
         for _, doc in ipairs(docs) do
-            print(string.format("%-" .. width .. "s  %s", doc.name, agent_doc_description(doc.content)))
+            print(string.format("%-" .. width .. "s  %s", doc.name, agentDocDescription(doc.content)))
         end
         return
     end
@@ -2166,8 +2166,8 @@ function tasks.agent(args)
     for _, doc in ipairs(docs) do
         names[#names + 1] = doc.name
         if doc.name == name then
-            local target = path_join(user_data_dir(), "agents", doc.name .. ".md")
-            write_file(target, doc.content)
+            local target = pathJoin(userDataDir(), "agents", doc.name .. ".md")
+            writeFile(target, doc.content)
             print(target)
             return
         end
@@ -2200,17 +2200,17 @@ end
 local M = {}
 
 -- Runtime and project facts backing both info renderings.
-local function gather_info()
-    local love_version
-    if love_api and love_api.getVersion then
-        local major, minor, revision, codename = love_api.getVersion()
-        love_version = table.concat({major, minor, revision}, ".")
-        if codename and codename ~= "" then love_version = love_version .. " (" .. codename .. ")" end
+local function gatherInfo()
+    local loveVersion
+    if loveApi and loveApi.getVersion then
+        local major, minor, revision, codename = loveApi.getVersion()
+        loveVersion = table.concat({major, minor, revision}, ".")
+        if codename and codename ~= "" then loveVersion = loveVersion .. " (" .. codename .. ")" end
     end
 
     local jitApi = rawget(_G, "jit")
     local project
-    if exists("tlconfig.lua") and is_dir("src") then
+    if exists("tlconfig.lua") and isDir("src") then
         local root = cwd()
         project = {
             name = basename(root),
@@ -2221,30 +2221,30 @@ local function gather_info()
 
     return {
         version = VERSION,
-        love = love_version,
+        love = loveVersion,
         lua = jitApi and jitApi.version or _VERSION,
-        love_bin = os.getenv("TECS_LOVE_BIN"),
-        tecs_dir = tecs_dir,
-        teal_dir = teal_dir,
+        loveBin = os.getenv("TECS_LOVE_BIN"),
+        tecsDir = tecsDir,
+        tealDir = tealDir,
         project = project,
     }
 end
 
-local function print_info(args)
-    local info = gather_info()
+local function printInfo(args)
+    local info = gatherInfo()
 
     if args and args.json then
-        local json = json_module()
+        local json = jsonModule()
         print(json.serialize({
             version = info.version,
             love = info.love or json.NULL,
             lua = info.lua,
-            love_bin = info.love_bin and lua_module_path(info.love_bin) or json.NULL,
-            tecs_dir = info.tecs_dir and lua_module_path(info.tecs_dir) or json.NULL,
-            teal_dir = info.teal_dir and lua_module_path(info.teal_dir) or json.NULL,
+            loveBin = info.loveBin and luaModulePath(info.loveBin) or json.NULL,
+            tecsDir = info.tecsDir and luaModulePath(info.tecsDir) or json.NULL,
+            tealDir = info.tealDir and luaModulePath(info.tealDir) or json.NULL,
             project = info.project and {
                 name = info.project.name,
-                path = lua_module_path(info.project.path),
+                path = luaModulePath(info.project.path),
                 built = info.project.built,
             } or json.NULL,
         }, true))
@@ -2270,14 +2270,14 @@ local function print_info(args)
     end
 end
 
-tasks.info = print_info
+tasks.info = printInfo
 
 local commands = {
     {
         name = "info",
         summary = "Show runtime and project information",
         description = "Show CLI, Love2D, and LuaJIT versions plus current project status and a next step.",
-        action = print_info,
+        action = printInfo,
         setup = function(subcommand)
             subcommand:flag("--json", "Print runtime and project information as JSON on stdout.")
         end,
@@ -2379,7 +2379,10 @@ local commands = {
         summary = "Serve the project over MCP on stdio",
         description = "Run an MCP server for agent clients: check/build/integ/dist as tools, "
             .. "game lifecycle (start_game, stop_game, restart_game, game_status, game_logs), "
-            .. "and a proxy to the running game's own MCP tools.",
+            .. "and a proxy to the running game's own MCP tools. Not the only way in: every "
+            .. "running game embeds an HTTP MCP server; use that to attach to a game that is "
+            .. "already running. The stdio bridge adds lifecycle control, toolchain tools, and "
+            .. "sessions that survive restarts and crashes.",
         action = tasks.mcp,
     },
     {
@@ -2390,7 +2393,7 @@ local commands = {
         action = tasks.agent,
         setup = function(subcommand)
             subcommand:argument("action", "Either `list` or `path`.")
-                :target("agent_action")
+                :target("agentAction")
                 :choices({"list", "path"})
             subcommand:argument("name", "Agent doc name, required for `path`."):args("?")
             subcommand:flag("--json", "Print the listing as JSON on stdout.")
@@ -2409,7 +2412,7 @@ local commands = {
     },
 }
 
-local function command_names()
+local function commandNames()
     local names = {}
     for _, command in ipairs(commands) do
         names[#names + 1] = command.name
@@ -2417,7 +2420,7 @@ local function command_names()
     return table.concat(names, ", ")
 end
 
-local function print_help()
+local function printHelp()
     io.write(color("bright cyan", "Tecs CLI ") .. color("black", VERSION) .. "\n\n")
     io.write(color("bright", "Usage: ") .. color("green", "tecs")
         .. " [--version] [--quiet] " .. color("cyan", "<command>") .. "\n\n")
@@ -2426,8 +2429,13 @@ local function print_help()
         io.write("  " .. color("cyan", string.format("%-13s", command.name)) .. command.summary .. "\n")
     end
     io.write("\n")
-    io.write(color("magenta", "Tip:") .. [[ You can connect to your game using the built-in MCP server. Tell your
-agent to launch the game and connect over MCP.
+    io.write(color("magenta", "MCP:") .. [[ there are two ways to connect agents. ]]
+        .. color("cyan", "tecs mcp") .. [[ serves the project over
+stdio: it can start and restart the game itself, exposes check/build/integ/
+dist as tools, and the session survives game restarts and crashes. Every
+running game also embeds its own MCP server over HTTP (port 19999 by
+default); connect to that directly to attach to a game that is already
+running, such as a distributed build with enableInDist.
 
 ]])
     io.write(color("magenta", "Hot reload:") .. [[ while the game is running, rerun ]]
@@ -2468,7 +2476,7 @@ function M.run(argv)
     argv = argv or {}
     local ok, err = pcall(function()
         if #argv == 1 and (argv[1] == "-h" or argv[1] == "--help") then
-            print_help()
+            printHelp()
             return
         end
 
@@ -2484,19 +2492,19 @@ function M.run(argv)
 
         local target = args.command or "help"
         if target == "help" then
-            print_help()
+            printHelp()
             return
         end
 
         local task = tasks[target]
         if not task then
-            fail("unknown command '" .. tostring(target) .. "'. Expected one of: " .. command_names())
+            fail("unknown command '" .. tostring(target) .. "'. Expected one of: " .. commandNames())
         end
 
         task(args)
     end)
     if not ok then
-        if type(err) == "table" and err.tecs_exit then
+        if type(err) == "table" and err.tecsExit then
             return false, err.message
         end
         return false, tostring(err)
@@ -2512,35 +2520,35 @@ function M.main(argv)
     end
 end
 
--- Test-only access to internal helpers; see spec/cli_spec.lua. set_platform
+-- Test-only access to internal helpers; see spec/cli_spec.lua. setPlatform
 -- lets specs exercise other platforms' path handling on any host.
 M._internal = {
-    detect_platform = detect_platform,
-    set_platform = set_platform,
+    detectPlatform = detectPlatform,
+    setPlatform = setPlatform,
     normalize = normalize,
-    path_join = path_join,
-    path_from_build = path_from_build,
+    pathJoin = pathJoin,
+    pathFromBuild = pathFromBuild,
     dirname = dirname,
-    relative_to = relative_to,
-    should_exclude = should_exclude,
-    needs_update = needs_update,
-    copy_dir = copy_dir,
-    prune_runtime_vendor = prune_runtime_vendor,
+    relativeTo = relativeTo,
+    shouldExclude = shouldExclude,
+    needsUpdate = needsUpdate,
+    copyDir = copyDir,
+    pruneRuntimeVendor = pruneRuntimeVendor,
     q = q,
-    set_data_dir = function(path) data_dir_override = path end,
-    list_agent_docs = list_agent_docs,
-    agent_doc_description = agent_doc_description,
-    json_module = json_module,
-    dist_name = dist_name,
-    patch_plist = patch_plist,
-    buildinfo_lua = buildinfo_lua,
-    parse_rock_arg = parse_rock_arg,
-    parse_luarocks_manifest = parse_luarocks_manifest,
-    rock_version_less = rock_version_less,
-    plan_rock_files = plan_rock_files,
-    read_rocks_manifest = read_rocks_manifest,
-    write_rocks_manifest = write_rocks_manifest,
-    rocks_gc = rocks_gc,
+    setDataDir = function(path) dataDirOverride = path end,
+    listAgentDocs = listAgentDocs,
+    agentDocDescription = agentDocDescription,
+    jsonModule = jsonModule,
+    distName = distName,
+    patchPlist = patchPlist,
+    buildinfoLua = buildinfoLua,
+    parseRockArg = parseRockArg,
+    parseLuarocksManifest = parseLuarocksManifest,
+    rockVersionLess = rockVersionLess,
+    planRockFiles = planRockFiles,
+    readRocksManifest = readRocksManifest,
+    writeRocksManifest = writeRocksManifest,
+    rocksGc = rocksGc,
 }
 
 return M

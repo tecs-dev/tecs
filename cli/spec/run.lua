@@ -5,7 +5,7 @@ local context = {
     after_each = {},
 }
 
-local function full_name(name)
+local function fullName(name)
     if context.name and context.name ~= "" then
         return context.name .. " " .. name
     end
@@ -15,7 +15,7 @@ end
 local function describe(name, fn)
     local parent = context
     context = {
-        name = full_name(name),
+        name = fullName(name),
         after_each = {unpack(parent.after_each)},
     }
     fn()
@@ -28,18 +28,18 @@ end
 
 local function it(name, fn)
     tests[#tests + 1] = {
-        name = full_name(name),
+        name = fullName(name),
         fn = fn,
         after_each = {unpack(context.after_each)},
     }
 end
 
-local raw_assert = _G.assert
+local rawAssert = _G.assert
 local assertions = {}
 
 setmetatable(assertions, {
     __call = function(_, ...)
-        return raw_assert(...)
+        return rawAssert(...)
     end,
 })
 
@@ -90,10 +90,10 @@ for _, test in ipairs(tests) do
     local ok, err = xpcall(test.fn, debug.traceback)
 
     for i = #test.after_each, 1, -1 do
-        local cleanup_ok, cleanup_err = xpcall(test.after_each[i], debug.traceback)
-        if ok and not cleanup_ok then
+        local cleanupOk, cleanupErr = xpcall(test.after_each[i], debug.traceback)
+        if ok and not cleanupOk then
             ok = false
-            err = cleanup_err
+            err = cleanupErr
         end
     end
 

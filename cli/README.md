@@ -125,6 +125,14 @@ screenshots, pixel probes, input events, `run_lua`, and the `cmd_*` debug
 commands. Sessions survive game restarts, and each launch gets a free port.
 macOS and Linux only, like `tecs integ`.
 
+The bridge is not the only way in: every running game embeds its own MCP
+server over HTTP (`http://127.0.0.1:19999/mcp` by default). Connect to that
+directly when you want to attach to a game that is already running — a play
+session, or a distributed build with `enableInDist`. Use the stdio bridge
+when the agent should drive the whole loop itself: it works from a cold
+checkout with nothing running, restarts the game without dropping the
+session, and reports crashes with the log tail instead of a dead connection.
+
 ## Distribute
 
 ```sh

@@ -14,24 +14,24 @@ local function exists(path)
     return lfs.attributes(path) ~= nil
 end
 
-local function is_dir(path)
+local function isDir(path)
     return lfs.attributes(path, "mode") == "directory"
 end
 
-local function read_file(path)
+local function readFile(path)
     local f = assert(io.open(path, "rb"))
     local content = f:read("*a")
     f:close()
     return content
 end
 
-local function write_file(path, content)
+local function writeFile(path, content)
     local f = assert(io.open(path, "wb"))
     f:write(content)
     f:close()
 end
 
-local function mkdir_p(path)
+local function mkdirP(path)
     local current = ""
     if path:match("^%a:[/\\]") then
         current = path:sub(1, 2)
@@ -54,13 +54,13 @@ local function mkdir_p(path)
     end
 end
 
-local function remove_tree(path)
+local function removeTree(path)
     local mode = lfs.attributes(path, "mode")
     if not mode then return end
     if mode == "directory" then
         for entry in lfs.dir(path) do
             if entry ~= "." and entry ~= ".." then
-                remove_tree(join(path, entry))
+                removeTree(join(path, entry))
             end
         end
         assert(lfs.rmdir(path))
@@ -69,18 +69,18 @@ local function remove_tree(path)
     end
 end
 
-local temp_counter = 0
-local function temp_dir(name)
-    temp_counter = temp_counter + 1
+local tempCounter = 0
+local function tempDir(name)
+    tempCounter = tempCounter + 1
     local base = os.getenv("TMPDIR") or os.getenv("TEMP") or os.getenv("TMP") or "/tmp"
     local root = join(base, "tecs-cli-spec-" .. name .. "-" .. tostring(os.time())
-        .. "-" .. tostring(temp_counter))
-    remove_tree(root)
-    mkdir_p(root)
+        .. "-" .. tostring(tempCounter))
+    removeTree(root)
+    mkdirP(root)
     return root
 end
 
-local function with_cwd(path, fn)
+local function withCwd(path, fn)
     local old = assert(lfs.currentdir())
     assert(lfs.chdir(path))
     local ok, err = pcall(fn)
@@ -93,20 +93,20 @@ describe("tecs CLI", function()
 
     after_each(function()
         for _, path in ipairs(temps) do
-            remove_tree(path)
+            removeTree(path)
         end
         temps = {}
     end)
 
-    local function make_temp(name)
-        local path = temp_dir(name)
+    local function makeTemp(name)
+        local path = tempDir(name)
         temps[#temps + 1] = path
         return path
     end
 
     describe("commands", function()
         it("creates a new fixed-layout project from checked-in template source", function()
-            local root = make_temp("new")
+            local root = makeTemp("new")
             local project = join(root, "sample-game")
 
             assert.is_true(cli.run({"--quiet", "new", project}))
@@ -117,19 +117,19 @@ describe("tecs CLI", function()
             assert.is_true(exists(join(project, ".codex", "config.toml")))
             assert.is_true(exists(join(project, "README.md")))
             assert.is_true(exists(join(project, "tlconfig.lua")))
-            assert.matches("Tecs project guide", read_file(join(project, "AGENTS.md")))
-            assert.equals("@AGENTS.md\n", read_file(join(project, "CLAUDE.md")))
+            assert.matches("Tecs project guide", readFile(join(project, "AGENTS.md")))
+            assert.equals("@AGENTS.md\n", readFile(join(project, "CLAUDE.md")))
             assert.matches("tecs2d%.testing%.fixture",
-                read_file(join(project, "spec", "game_lovespec.tl")))
+                readFile(join(project, "spec", "game_lovespec.tl")))
             assert.matches("name: integration%-testing",
-                read_file(join(project, ".claude", "skills", "integration-testing", "SKILL.md")))
+                readFile(join(project, ".claude", "skills", "integration-testing", "SKILL.md")))
             assert.is_false(exists(join(project, "game-dev-1.rockspec")))
             assert.is_true(exists(join(project, "src", "conf.tl")))
             assert.is_true(exists(join(project, "src", "main.tl")))
-            assert.is_true(is_dir(join(project, "assets")))
+            assert.is_true(isDir(join(project, "assets")))
             assert.is_false(exists(join(project, "types")))
 
-            local main = read_file(join(project, "src", "main.tl"))
+            local main = readFile(join(project, "src", "main.tl"))
             assert.matches('require%("tecs"%)', main)
             assert.matches('require%("tecs2d"%)', main)
             assert.matches('require%("tecs2d%.gfx"%)', main)
@@ -148,9 +148,9 @@ describe("tecs CLI", function()
         end)
 
         it("can create a project inside an existing empty directory", function()
-            local root = make_temp("empty")
+            local root = makeTemp("empty")
             local project = join(root, "empty-project")
-            mkdir_p(project)
+            mkdirP(project)
 
             assert.is_true(cli.run({"--quiet", "new", project}))
 
@@ -159,13 +159,13 @@ describe("tecs CLI", function()
         end)
 
         it("removes build artifacts without touching source files", function()
-            local root = make_temp("clean")
-            mkdir_p(join(root, "build", "nested"))
-            mkdir_p(join(root, "src"))
-            write_file(join(root, "build", "nested", "artifact.lua"), "return true\n")
-            write_file(join(root, "src", "main.tl"), "return true\n")
+            local root = makeTemp("clean")
+            mkdirP(join(root, "build", "nested"))
+            mkdirP(join(root, "src"))
+            writeFile(join(root, "build", "nested", "artifact.lua"), "return true\n")
+            writeFile(join(root, "src", "main.tl"), "return true\n")
 
-            with_cwd(root, function()
+            withCwd(root, function()
                 assert.is_true(cli.run({"clean", "--quiet"}))
             end)
 
@@ -174,16 +174,16 @@ describe("tecs CLI", function()
         end)
 
         it("rejects a non-empty target for new projects without modifying it", function()
-            local root = make_temp("existing")
+            local root = makeTemp("existing")
             local project = join(root, "already-here")
-            mkdir_p(project)
-            write_file(join(project, "keep.txt"), "do not overwrite\n")
+            mkdirP(project)
+            writeFile(join(project, "keep.txt"), "do not overwrite\n")
 
             local ok, err = cli.run({"--quiet", "new", project})
 
             assert.is_false(ok)
             assert.matches("not empty", err)
-            assert.equals("do not overwrite\n", read_file(join(project, "keep.txt")))
+            assert.equals("do not overwrite\n", readFile(join(project, "keep.txt")))
             assert.is_false(exists(join(project, "src", "main.tl")))
         end)
 
@@ -196,12 +196,12 @@ describe("tecs CLI", function()
 
         it("prints only the semantic version with --version", function()
             local printed = {}
-            local real_print = print
+            local realPrint = print
             _G.print = function(...)
                 printed[#printed + 1] = table.concat({...}, "\t")
             end
             local ok = cli.run({"--version"})
-            _G.print = real_print
+            _G.print = realPrint
 
             assert.is_true(ok)
             assert.equals(1, #printed)
@@ -210,12 +210,12 @@ describe("tecs CLI", function()
 
         it("prints runtime versions and a next step with info", function()
             local printed = {}
-            local real_print = print
+            local realPrint = print
             _G.print = function(...)
                 printed[#printed + 1] = table.concat({...}, "\t")
             end
             local ok = cli.run({"info"})
-            _G.print = real_print
+            _G.print = realPrint
 
             assert.is_true(ok)
             local output = table.concat(printed, "\n")
@@ -225,21 +225,21 @@ describe("tecs CLI", function()
         end)
 
         it("includes current project information with info", function()
-            local root = make_temp("version-project")
-            mkdir_p(join(root, "src"))
-            mkdir_p(join(root, "build"))
-            write_file(join(root, "tlconfig.lua"), "return {}\n")
-            write_file(join(root, "build", "main.lua"), "return true\n")
+            local root = makeTemp("version-project")
+            mkdirP(join(root, "src"))
+            mkdirP(join(root, "build"))
+            writeFile(join(root, "tlconfig.lua"), "return {}\n")
+            writeFile(join(root, "build", "main.lua"), "return true\n")
 
             local printed = {}
-            local real_print = print
+            local realPrint = print
             _G.print = function(...)
                 printed[#printed + 1] = table.concat({...}, "\t")
             end
-            with_cwd(root, function()
+            withCwd(root, function()
                 assert.is_true(cli.run({"info"}))
             end)
-            _G.print = real_print
+            _G.print = realPrint
 
             local output = table.concat(printed, "\n")
             assert.matches("Project .-version%-project", output)
@@ -249,78 +249,78 @@ describe("tecs CLI", function()
         end)
 
         it("suppresses status output with --quiet", function()
-            local root = make_temp("quiet")
-            mkdir_p(join(root, "build"))
+            local root = makeTemp("quiet")
+            mkdirP(join(root, "build"))
 
             local captured = {}
-            local real_stderr = io.stderr
+            local realStderr = io.stderr
             io.stderr = {
                 write = function(_, ...)
                     captured[#captured + 1] = table.concat({...})
                 end,
             }
-            local run_ok, run_err = pcall(with_cwd, root, function()
+            local runOk, runErr = pcall(withCwd, root, function()
                 assert.is_true(cli.run({"clean", "--quiet"}))
             end)
-            io.stderr = real_stderr
-            assert(run_ok, run_err)
+            io.stderr = realStderr
+            assert(runOk, runErr)
 
             assert.equals(0, #captured)
         end)
     end)
 
     describe("agent docs", function()
-        local function capture_print(argv)
+        local function capturePrint(argv)
             local printed = {}
-            local real_print = print
+            local realPrint = print
             _G.print = function(...)
                 printed[#printed + 1] = table.concat({...}, "\t")
             end
             local ok, err = cli.run(argv)
-            _G.print = real_print
+            _G.print = realPrint
             return ok, err, printed
         end
 
         it("lists bundled docs with descriptions", function()
-            local ok, _, printed = capture_print({"agent", "list"})
+            local ok, _, printed = capturePrint({"agent", "list"})
             assert.is_true(ok)
             assert.matches("tecs%-project%s+Working guide", table.concat(printed, "\n"))
         end)
 
         it("materializes a doc into the data directory and prints its path", function()
-            local root = make_temp("agent-path")
-            cli._internal.set_data_dir(root)
-            local run_ok, run_err = pcall(function()
-                local ok, _, printed = capture_print({"agent", "path", "tecs-project"})
+            local root = makeTemp("agent-path")
+            cli._internal.setDataDir(root)
+            local runOk, runErr = pcall(function()
+                local ok, _, printed = capturePrint({"agent", "path", "tecs-project"})
                 assert.is_true(ok)
                 assert.equals(1, #printed)
                 assert.matches("agents", printed[1])
-                assert.matches("Tecs project guide", read_file(printed[1]))
+                assert.matches("Tecs project guide", readFile(printed[1]))
             end)
-            cli._internal.set_data_dir(nil)
-            assert(run_ok, run_err)
+            cli._internal.setDataDir(nil)
+            assert(runOk, runErr)
         end)
 
         it("overwrites a stale materialized doc", function()
-            local root = make_temp("agent-refresh")
-            cli._internal.set_data_dir(root)
-            local run_ok, run_err = pcall(function()
-                local _, _, printed = capture_print({"agent", "path", "tecs-project"})
-                write_file(printed[1], "stale contents\n")
-                local ok, _, reprinted = capture_print({"agent", "path", "tecs-project"})
+            local root = makeTemp("agent-refresh")
+            cli._internal.setDataDir(root)
+            local runOk, runErr = pcall(function()
+                local _, _, printed = capturePrint({"agent", "path", "tecs-project"})
+                writeFile(printed[1], "stale contents\n")
+                local ok, _, reprinted = capturePrint({"agent", "path", "tecs-project"})
                 assert.is_true(ok)
                 assert.equals(printed[1], reprinted[1])
-                assert.matches("Tecs project guide", read_file(reprinted[1]))
+                assert.matches("Tecs project guide", readFile(reprinted[1]))
             end)
-            cli._internal.set_data_dir(nil)
-            assert(run_ok, run_err)
+            cli._internal.setDataDir(nil)
+            assert(runOk, runErr)
         end)
 
         it("rejects unknown doc names without writing anything", function()
-            local root = make_temp("agent-unknown")
-            cli._internal.set_data_dir(root)
+            local root = makeTemp("agent-unknown")
+            cli._internal.setDataDir(root)
             local ok, err = cli.run({"agent", "path", "nope"})
-            cli._internal.set_data_dir(nil)
+            cli._internal.setDataDir(nil)
             assert.is_true(not ok)
             assert.matches("unknown agent 'nope'", err)
             assert.is_true(not exists(join(root, "agents", "nope.md")))
@@ -330,13 +330,13 @@ describe("tecs CLI", function()
     describe("completions", function()
         it("prints a completion function for bash", function()
             local captured = {}
-            local real_write = io.write
+            local realWrite = io.write
             io.write = function(...)
                 captured[#captured + 1] = table.concat({...})
                 return true
             end
             local ok = cli.run({"completions", "bash"})
-            io.write = real_write
+            io.write = realWrite
             assert.is_true(ok)
             local script = table.concat(captured)
             assert.matches("_tecs%(%)", script)
@@ -345,13 +345,13 @@ describe("tecs CLI", function()
 
         it("adds positional choices to the fish script", function()
             local captured = {}
-            local real_write = io.write
+            local realWrite = io.write
             io.write = function(...)
                 captured[#captured + 1] = table.concat({...})
                 return true
             end
             local ok = cli.run({"completions", "fish"})
-            io.write = real_write
+            io.write = realWrite
             assert.is_true(ok)
             local script = table.concat(captured)
             assert.matches("__fish_tecs_seen_command completions' %-f %-a 'bash zsh fish'", script)
@@ -366,24 +366,24 @@ describe("tecs CLI", function()
     end)
 
     describe("json output", function()
-        local framework_dir = os.getenv("TECS_DIR")
-        local has_framework = framework_dir and framework_dir ~= ""
-            and exists(join(framework_dir, "src", "tecs", "utils", "json", "init.tl"))
+        local frameworkDir = os.getenv("TECS_DIR")
+        local hasFramework = frameworkDir and frameworkDir ~= ""
+            and exists(join(frameworkDir, "src", "tecs", "utils", "json", "init.tl"))
 
-        local function capture_print(argv)
+        local function capturePrint(argv)
             local printed = {}
-            local real_print = print
+            local realPrint = print
             _G.print = function(...)
                 printed[#printed + 1] = table.concat({...}, "\t")
             end
             local ok, err = cli.run(argv)
-            _G.print = real_print
+            _G.print = realPrint
             return ok, err, printed
         end
 
-        if has_framework then
+        if hasFramework then
             it("emits runtime info as sorted JSON", function()
-                local ok, _, printed = capture_print({"info", "--json"})
+                local ok, _, printed = capturePrint({"info", "--json"})
                 assert.is_true(ok)
                 assert.equals(1, #printed)
                 assert.matches('"version":"%d+%.%d+%.%d+"', printed[1])
@@ -392,20 +392,20 @@ describe("tecs CLI", function()
             end)
 
             it("lists agent docs as JSON", function()
-                local ok, _, printed = capture_print({"agent", "list", "--json"})
+                local ok, _, printed = capturePrint({"agent", "list", "--json"})
                 assert.is_true(ok)
                 assert.matches('"name":"tecs%-project"', printed[1])
                 assert.matches('"description":"Working guide', printed[1])
             end)
 
             it("describes the current project in info --json", function()
-                local root = make_temp("info-json")
-                mkdir_p(join(root, "src"))
-                write_file(join(root, "tlconfig.lua"), "return {}\n")
+                local root = makeTemp("info-json")
+                mkdirP(join(root, "src"))
+                writeFile(join(root, "tlconfig.lua"), "return {}\n")
 
                 local ok, _, printed
-                with_cwd(root, function()
-                    ok, _, printed = capture_print({"info", "--json"})
+                withCwd(root, function()
+                    ok, _, printed = capturePrint({"info", "--json"})
                 end)
                 assert.is_true(ok)
                 assert.matches('"name":"tecs%-cli%-spec%-info%-json', printed[1])
@@ -418,13 +418,13 @@ describe("tecs CLI", function()
         end
 
         it("points integ at the installed launcher outside LÖVE", function()
-            local root = make_temp("integ-nolove")
-            mkdir_p(join(root, "src"))
-            mkdir_p(join(root, "spec"))
-            write_file(join(root, "tlconfig.lua"), "return {}\n")
+            local root = makeTemp("integ-nolove")
+            mkdirP(join(root, "src"))
+            mkdirP(join(root, "spec"))
+            writeFile(join(root, "tlconfig.lua"), "return {}\n")
 
             local ok, err
-            with_cwd(root, function()
+            withCwd(root, function()
                 ok, err = cli.run({"integ"})
             end)
             assert.is_true(not ok)
@@ -432,12 +432,12 @@ describe("tecs CLI", function()
         end)
 
         it("points check --json at the installed launcher outside LÖVE", function()
-            local root = make_temp("check-json-nolove")
-            mkdir_p(join(root, "src"))
-            write_file(join(root, "tlconfig.lua"), "return {}\n")
+            local root = makeTemp("check-json-nolove")
+            mkdirP(join(root, "src"))
+            writeFile(join(root, "tlconfig.lua"), "return {}\n")
 
             local ok, err
-            with_cwd(root, function()
+            withCwd(root, function()
                 ok, err = cli.run({"check", "--json"})
             end)
             assert.is_true(not ok)
@@ -446,30 +446,30 @@ describe("tecs CLI", function()
     end)
 
     describe("mcp bridge", function()
-        local framework_dir = os.getenv("TECS_DIR")
-        local has_framework = framework_dir and framework_dir ~= ""
-            and exists(join(framework_dir, "src", "tecs", "utils", "json", "init.tl"))
+        local frameworkDir = os.getenv("TECS_DIR")
+        local hasFramework = frameworkDir and frameworkDir ~= ""
+            and exists(join(frameworkDir, "src", "tecs", "utils", "json", "init.tl"))
 
         local function newServer()
             local bridge = require("tecs_cli.mcp_bridge")
             return bridge.new({
                 version = "9.9.9",
-                project_name = "spec-game",
-                json = cli._internal.json_module(),
-                kernel_tools = {
+                projectName = "spec-game",
+                json = cli._internal.jsonModule(),
+                kernelTools = {
                     {name = "screenshot", description = "d", inputSchema = {type = "object"}},
                 },
                 check = function() return true, {} end,
                 build = function() end,
                 reexec = function() return true, "ran" end,
-                set_env = function() end,
-                unset_env = function() end,
-                read_buildinfo = function() return nil end,
+                setEnv = function() end,
+                unsetEnv = function() end,
+                readBuildinfo = function() return nil end,
                 log = function() end,
             })
         end
 
-        if has_framework then
+        if hasFramework then
             it("answers initialize with the server identity", function()
                 local out = newServer():handleLine(
                     '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}')
@@ -524,23 +524,23 @@ describe("tecs CLI", function()
         local internal = cli._internal
 
         it("derives a sanitized name from the project directory", function()
-            local root = make_temp("Cool Game!!")
-            with_cwd(root, function()
-                local name = internal.dist_name()
+            local root = makeTemp("Cool Game!!")
+            withCwd(root, function()
+                local name = internal.distName()
                 assert.matches("Cool Game", name)
                 assert.equals(nil, name:match("!"))
             end)
         end)
 
         it("generates build metadata with the dev flag", function()
-            local root = make_temp("buildinfo")
-            with_cwd(root, function()
-                local dev = internal.buildinfo_lua(true)
+            local root = makeTemp("buildinfo")
+            withCwd(root, function()
+                local dev = internal.buildinfoLua(true)
                 assert.matches("dev = true", dev)
                 assert.matches('cli = "%d+%.%d+%.%d+"', dev)
                 assert.matches('built = "%d%d%d%d%-%d%d%-%d%dT', dev)
                 assert.matches("tecs%-cli%-spec%-buildinfo", dev)
-                assert.matches("dev = false", internal.buildinfo_lua(false))
+                assert.matches("dev = false", internal.buildinfoLua(false))
                 local chunk = assert(loadstring(dev))
                 local info = chunk()
                 assert.is_true(info.dev)
@@ -560,7 +560,7 @@ describe("tecs CLI", function()
                 "    </array>",
                 "</dict>",
             }, "\n")
-            local patched = internal.patch_plist(plist, "mygame")
+            local patched = internal.patchPlist(plist, "mygame")
             assert.matches("org%.tecs2d%.mygame", patched)
             assert.matches("<string>mygame</string>", patched)
             assert.equals(nil, patched:match("UTExportedTypeDeclarations"))
@@ -572,25 +572,25 @@ describe("tecs CLI", function()
         local internal = cli._internal
 
         it("parses rock arguments with optional versions", function()
-            local name, version = internal.parse_rock_arg("Inspect")
+            local name, version = internal.parseRockArg("Inspect")
             assert.equals("inspect", name)
             assert.equals(nil, version)
-            name, version = internal.parse_rock_arg("inspect@3.1.1-0")
+            name, version = internal.parseRockArg("inspect@3.1.1-0")
             assert.equals("inspect", name)
             assert.equals("3.1.1-0", version)
         end)
 
         it("orders rock versions like LuaRocks", function()
-            assert.is_true(internal.rock_version_less("1.2-1", "1.10-1"))
-            assert.is_true(internal.rock_version_less("1.0-1", "1.0-2"))
-            assert.is_true(internal.rock_version_less("2.0-1", "3.1.1-0"))
-            assert.is_true(internal.rock_version_less("3.1-1", "3.1.1-0"))
-            assert.is_true(internal.rock_version_less("scm-1", "1.0-1"))
-            assert.is_true(not internal.rock_version_less("1.0-1", "scm-1"))
+            assert.is_true(internal.rockVersionLess("1.2-1", "1.10-1"))
+            assert.is_true(internal.rockVersionLess("1.0-1", "1.0-2"))
+            assert.is_true(internal.rockVersionLess("2.0-1", "3.1.1-0"))
+            assert.is_true(internal.rockVersionLess("3.1-1", "3.1.1-0"))
+            assert.is_true(internal.rockVersionLess("scm-1", "1.0-1"))
+            assert.is_true(not internal.rockVersionLess("1.0-1", "scm-1"))
         end)
 
         it("parses the repository section of a luarocks manifest", function()
-            local repository = internal.parse_luarocks_manifest(table.concat({
+            local repository = internal.parseLuarocksManifest(table.concat({
                 'commands = {}',
                 'modules = {}',
                 'repository = {',
@@ -618,7 +618,7 @@ describe("tecs CLI", function()
         end)
 
         it("plans pure-Lua modules and type declaration installs", function()
-            local plan = internal.plan_rock_files({
+            local plan = internal.planRockFiles({
                 package = "sample",
                 build = {
                     type = "builtin",
@@ -635,14 +635,14 @@ describe("tecs CLI", function()
         end)
 
         it("rejects rocks that are not pure Lua", function()
-            local ok, err = pcall(internal.plan_rock_files, {
+            local ok, err = pcall(internal.planRockFiles, {
                 package = "native",
                 build = {type = "builtin", modules = {core = "src/core.c"}},
             })
             assert.is_true(not ok)
             assert.matches("native modules", err.message)
 
-            ok, err = pcall(internal.plan_rock_files, {
+            ok, err = pcall(internal.planRockFiles, {
                 package = "cmake-rock",
                 build = {type = "cmake"},
             })
@@ -651,9 +651,9 @@ describe("tecs CLI", function()
         end)
 
         it("round-trips the vendored rock manifest at the project root", function()
-            local root = make_temp("rocks-manifest")
-            with_cwd(root, function()
-                internal.write_rocks_manifest({
+            local root = makeTemp("rocks-manifest")
+            withCwd(root, function()
+                internal.writeRocksManifest({
                     inspect = {
                         version = "3.1.1-0",
                         direct = true,
@@ -662,7 +662,7 @@ describe("tecs CLI", function()
                     },
                 })
                 assert.is_true(exists(join(root, "tecs-rocks.lua")))
-                local manifest = internal.read_rocks_manifest()
+                local manifest = internal.readRocksManifest()
                 assert.equals("3.1.1-0", manifest.inspect.version)
                 assert.is_true(manifest.inspect.direct)
                 assert.equals("inspect-tl-type", manifest.inspect.deps[1])
@@ -671,25 +671,25 @@ describe("tecs CLI", function()
         end)
 
         it("reads the pre-0.3 manifest location and migrates it on write", function()
-            local root = make_temp("rocks-legacy")
-            with_cwd(root, function()
-                mkdir_p(join(root, "src", "vendor"))
-                write_file(join(root, "src", "vendor", "rocks.lua"),
+            local root = makeTemp("rocks-legacy")
+            withCwd(root, function()
+                mkdirP(join(root, "src", "vendor"))
+                writeFile(join(root, "src", "vendor", "rocks.lua"),
                     'return {inspect = {version = "2.0-1", direct = true, deps = {}, files = {}}}\n')
-                local manifest = internal.read_rocks_manifest()
+                local manifest = internal.readRocksManifest()
                 assert.equals("2.0-1", manifest.inspect.version)
-                internal.write_rocks_manifest(manifest)
+                internal.writeRocksManifest(manifest)
                 assert.is_true(exists(join(root, "tecs-rocks.lua")))
                 assert.is_true(not exists(join(root, "src", "vendor", "rocks.lua")))
             end)
         end)
 
         it("garbage-collects rocks nothing depends on, deleting their files", function()
-            local root = make_temp("rocks-gc")
-            with_cwd(root, function()
-                mkdir_p(join(root, "src", "vendor", "share", "lua", "5.1"))
-                write_file(join(root, "src", "vendor", "share", "lua", "5.1", "keep.lua"), "return 1\n")
-                write_file(join(root, "src", "vendor", "share", "lua", "5.1", "drop.lua"), "return 2\n")
+            local root = makeTemp("rocks-gc")
+            withCwd(root, function()
+                mkdirP(join(root, "src", "vendor", "share", "lua", "5.1"))
+                writeFile(join(root, "src", "vendor", "share", "lua", "5.1", "keep.lua"), "return 1\n")
+                writeFile(join(root, "src", "vendor", "share", "lua", "5.1", "drop.lua"), "return 2\n")
                 local manifest = {
                     keeper = {version = "1.0-1", direct = true, deps = {"kept-dep"},
                         files = {"share/lua/5.1/keep.lua"}},
@@ -697,7 +697,7 @@ describe("tecs CLI", function()
                     orphan = {version = "1.0-1", direct = false, deps = {},
                         files = {"share/lua/5.1/drop.lua"}},
                 }
-                local removed = internal.rocks_gc(manifest)
+                local removed = internal.rocksGc(manifest)
                 assert.equals("orphan", table.concat(removed, " "))
                 assert.is_true(manifest.keeper ~= nil and manifest["kept-dep"] ~= nil)
                 assert.equals(nil, manifest.orphan)
@@ -709,175 +709,175 @@ describe("tecs CLI", function()
 
     describe("path helpers", function()
         local internal = cli._internal
-        local windows = {sep = "\\", is_windows = true, is_msys = false}
-        local msys = {sep = "/", is_windows = false, is_msys = true}
-        local posix = {sep = "/", is_windows = false, is_msys = false}
+        local windows = {sep = "\\", isWindows = true, isMsys = false}
+        local msys = {sep = "/", isWindows = false, isMsys = true}
+        local posix = {sep = "/", isWindows = false, isMsys = false}
 
         after_each(function()
-            internal.set_platform(internal.detect_platform())
+            internal.setPlatform(internal.detectPlatform())
         end)
 
         it("normalizes separators for the selected platform", function()
-            internal.set_platform(windows)
+            internal.setPlatform(windows)
             assert.equals("a\\b\\c", internal.normalize("a/b/c"))
             assert.equals("C:\\x\\y", internal.normalize("C:/x/y"))
 
-            internal.set_platform(posix)
+            internal.setPlatform(posix)
             assert.equals("a/b/c", internal.normalize("a\\b\\c"))
         end)
 
         it("converts drive letters to msys mount paths", function()
-            internal.set_platform(msys)
+            internal.setPlatform(msys)
             assert.equals("/d/work/game", internal.normalize("D:\\work\\game"))
             assert.equals("/c/tools", internal.normalize("C:/tools"))
         end)
 
         it("joins path segments with the platform separator", function()
-            internal.set_platform(windows)
-            assert.equals("C:\\x\\y\\z", internal.path_join("C:\\x", "y", "z"))
-            assert.equals("a\\b", internal.path_join("a/", "/b"))
+            internal.setPlatform(windows)
+            assert.equals("C:\\x\\y\\z", internal.pathJoin("C:\\x", "y", "z"))
+            assert.equals("a\\b", internal.pathJoin("a/", "/b"))
 
-            internal.set_platform(posix)
-            assert.equals("/a/b/c", internal.path_join("/a", "b/", "c"))
-            assert.equals("a/b", internal.path_join("a//", "b"))
+            internal.setPlatform(posix)
+            assert.equals("/a/b/c", internal.pathJoin("/a", "b/", "c"))
+            assert.equals("a/b", internal.pathJoin("a//", "b"))
         end)
 
         it("preserves absolute runtime paths when running from build", function()
-            internal.set_platform(posix)
-            assert.equals("/Users/me/.cache/love", internal.path_from_build("/Users/me/.cache/love"))
-            assert.equals("../tools/love", internal.path_from_build("tools/love"))
+            internal.setPlatform(posix)
+            assert.equals("/Users/me/.cache/love", internal.pathFromBuild("/Users/me/.cache/love"))
+            assert.equals("../tools/love", internal.pathFromBuild("tools/love"))
 
-            internal.set_platform(windows)
-            assert.equals("C:\\cache\\lovec.exe", internal.path_from_build("C:/cache/lovec.exe"))
-            assert.equals("..\\tools\\love.exe", internal.path_from_build("tools/love.exe"))
+            internal.setPlatform(windows)
+            assert.equals("C:\\cache\\lovec.exe", internal.pathFromBuild("C:/cache/lovec.exe"))
+            assert.equals("..\\tools\\love.exe", internal.pathFromBuild("tools/love.exe"))
         end)
 
         it("computes dirname and relative paths", function()
-            internal.set_platform(posix)
+            internal.setPlatform(posix)
             assert.equals("a/b", internal.dirname("a/b/c.txt"))
             assert.equals(".", internal.dirname("main.tl"))
-            assert.equals("y/z.tl", internal.relative_to("/x/y/z.tl", "/x"))
-            assert.equals("z.tl", internal.relative_to("/x/y/z.tl", "/x/y/"))
+            assert.equals("y/z.tl", internal.relativeTo("/x/y/z.tl", "/x"))
+            assert.equals("z.tl", internal.relativeTo("/x/y/z.tl", "/x/y/"))
         end)
 
         it("matches copy exclusion patterns", function()
-            assert.is_true(internal.should_exclude("art/sprite.ase", {"*.ase"}))
-            assert.is_false(internal.should_exclude("art/sprite.png", {"*.ase"}))
-            assert.is_true(internal.should_exclude("vendor", {"vendor"}))
-            assert.is_true(internal.should_exclude("vendor/init.lua", {"vendor"}))
-            assert.is_false(internal.should_exclude("vendored/init.lua", {"vendor"}))
-            assert.is_false(internal.should_exclude("anything", nil))
+            assert.is_true(internal.shouldExclude("art/sprite.ase", {"*.ase"}))
+            assert.is_false(internal.shouldExclude("art/sprite.png", {"*.ase"}))
+            assert.is_true(internal.shouldExclude("vendor", {"vendor"}))
+            assert.is_true(internal.shouldExclude("vendor/init.lua", {"vendor"}))
+            assert.is_false(internal.shouldExclude("vendored/init.lua", {"vendor"}))
+            assert.is_false(internal.shouldExclude("anything", nil))
         end)
 
         it("quotes shell arguments for each platform", function()
-            internal.set_platform(windows)
+            internal.setPlatform(windows)
             assert.equals('"a ""b"" c"', internal.q('a "b" c'))
 
-            internal.set_platform(posix)
+            internal.setPlatform(posix)
             assert.equals('"a \\"b\\" c"', internal.q('a "b" c'))
         end)
     end)
 
-    describe("copy_dir", function()
+    describe("copyDir", function()
         local internal = cli._internal
 
         it("mirrors a source tree, honoring exclusions and deleting stale files", function()
-            local root = make_temp("copydir")
+            local root = makeTemp("copydir")
             local src = join(root, "from")
             local dst = join(root, "to")
-            mkdir_p(join(src, "nested"))
-            write_file(join(src, "keep.txt"), "keep")
-            write_file(join(src, "nested", "deep.txt"), "deep")
-            write_file(join(src, "sprite.ase"), "raw")
-            mkdir_p(dst)
-            write_file(join(dst, "stale.txt"), "old")
+            mkdirP(join(src, "nested"))
+            writeFile(join(src, "keep.txt"), "keep")
+            writeFile(join(src, "nested", "deep.txt"), "deep")
+            writeFile(join(src, "sprite.ase"), "raw")
+            mkdirP(dst)
+            writeFile(join(dst, "stale.txt"), "old")
 
-            internal.copy_dir(src, dst, {"*.ase"})
+            internal.copyDir(src, dst, {"*.ase"})
 
-            assert.equals("keep", read_file(join(dst, "keep.txt")))
-            assert.equals("deep", read_file(join(dst, "nested", "deep.txt")))
+            assert.equals("keep", readFile(join(dst, "keep.txt")))
+            assert.equals("deep", readFile(join(dst, "nested", "deep.txt")))
             assert.is_false(exists(join(dst, "sprite.ase")))
             assert.is_false(exists(join(dst, "stale.txt")))
         end)
 
         it("overwrites changed files when mirroring again", function()
-            local root = make_temp("recopy")
+            local root = makeTemp("recopy")
             local src = join(root, "from")
             local dst = join(root, "to")
-            mkdir_p(src)
-            write_file(join(src, "file.txt"), "v1")
+            mkdirP(src)
+            writeFile(join(src, "file.txt"), "v1")
 
-            internal.copy_dir(src, dst)
-            write_file(join(src, "file.txt"), "v2")
-            internal.copy_dir(src, dst)
+            internal.copyDir(src, dst)
+            writeFile(join(src, "file.txt"), "v2")
+            internal.copyDir(src, dst)
 
-            assert.equals("v2", read_file(join(dst, "file.txt")))
+            assert.equals("v2", readFile(join(dst, "file.txt")))
         end)
     end)
 
     describe("runtime vendor pruning", function()
         it("keeps runtime modules while removing development-only files", function()
-            local root = make_temp("prune-vendor")
-            local lua_root = join(root, "build", "vendor", "share", "lua", "5.1")
-            mkdir_p(join(lua_root, "teal"))
-            mkdir_p(join(lua_root, "tlcli"))
-            mkdir_p(join(lua_root, "tecs"))
-            mkdir_p(join(lua_root, "tecs2d"))
-            mkdir_p(join(root, "build", "vendor", "lib", "luarocks"))
-            mkdir_p(join(root, "build", "vendor", "lib", "lua", "5.1"))
-            mkdir_p(join(root, "build", "vendor", "bin"))
-            mkdir_p(join(root, "build", "tecs"))
+            local root = makeTemp("prune-vendor")
+            local luaRoot = join(root, "build", "vendor", "share", "lua", "5.1")
+            mkdirP(join(luaRoot, "teal"))
+            mkdirP(join(luaRoot, "tlcli"))
+            mkdirP(join(luaRoot, "tecs"))
+            mkdirP(join(luaRoot, "tecs2d"))
+            mkdirP(join(root, "build", "vendor", "lib", "luarocks"))
+            mkdirP(join(root, "build", "vendor", "lib", "lua", "5.1"))
+            mkdirP(join(root, "build", "vendor", "bin"))
+            mkdirP(join(root, "build", "tecs"))
 
-            write_file(join(lua_root, "runtime.lua"), "return true\n")
-            write_file(join(lua_root, "runtime.tl"), "return true\n")
-            write_file(join(lua_root, "tl.lua"), "return true\n")
-            write_file(join(lua_root, "teal", "init.lua"), "return true\n")
-            write_file(join(lua_root, "tlcli", "main.lua"), "return true\n")
-            write_file(join(lua_root, "tecs", "init.lua"), "return true\n")
-            write_file(join(lua_root, "tecs2d", "init.lua"), "return true\n")
-            write_file(join(root, "build", "vendor", "lib", "lua", "5.1", "runtime.so"), "native")
-            write_file(join(root, "build", "vendor", "lib", "luarocks", "manifest"), "metadata")
-            write_file(join(root, "build", "vendor", "bin", "tl"), "compiler")
-            write_file(join(root, "build", "tecs", "init.lua"), "return true\n")
-            write_file(join(root, "build", "tecs", "init.tl"), "return true\n")
+            writeFile(join(luaRoot, "runtime.lua"), "return true\n")
+            writeFile(join(luaRoot, "runtime.tl"), "return true\n")
+            writeFile(join(luaRoot, "tl.lua"), "return true\n")
+            writeFile(join(luaRoot, "teal", "init.lua"), "return true\n")
+            writeFile(join(luaRoot, "tlcli", "main.lua"), "return true\n")
+            writeFile(join(luaRoot, "tecs", "init.lua"), "return true\n")
+            writeFile(join(luaRoot, "tecs2d", "init.lua"), "return true\n")
+            writeFile(join(root, "build", "vendor", "lib", "lua", "5.1", "runtime.so"), "native")
+            writeFile(join(root, "build", "vendor", "lib", "luarocks", "manifest"), "metadata")
+            writeFile(join(root, "build", "vendor", "bin", "tl"), "compiler")
+            writeFile(join(root, "build", "tecs", "init.lua"), "return true\n")
+            writeFile(join(root, "build", "tecs", "init.tl"), "return true\n")
 
-            with_cwd(root, function()
-                cli._internal.prune_runtime_vendor()
+            withCwd(root, function()
+                cli._internal.pruneRuntimeVendor()
             end)
 
-            assert.is_true(exists(join(lua_root, "runtime.lua")))
+            assert.is_true(exists(join(luaRoot, "runtime.lua")))
             assert.is_true(exists(join(root, "build", "vendor", "lib", "lua", "5.1", "runtime.so")))
             assert.is_true(exists(join(root, "build", "tecs", "init.lua")))
-            assert.is_false(exists(join(lua_root, "runtime.tl")))
-            assert.is_false(exists(join(lua_root, "tl.lua")))
-            assert.is_false(exists(join(lua_root, "teal")))
-            assert.is_false(exists(join(lua_root, "tlcli")))
-            assert.is_false(exists(join(lua_root, "tecs")))
-            assert.is_false(exists(join(lua_root, "tecs2d")))
+            assert.is_false(exists(join(luaRoot, "runtime.tl")))
+            assert.is_false(exists(join(luaRoot, "tl.lua")))
+            assert.is_false(exists(join(luaRoot, "teal")))
+            assert.is_false(exists(join(luaRoot, "tlcli")))
+            assert.is_false(exists(join(luaRoot, "tecs")))
+            assert.is_false(exists(join(luaRoot, "tecs2d")))
             assert.is_false(exists(join(root, "build", "vendor", "lib", "luarocks")))
             assert.is_false(exists(join(root, "build", "vendor", "bin")))
             assert.is_false(exists(join(root, "build", "tecs", "init.tl")))
         end)
     end)
 
-    describe("needs_update", function()
+    describe("needsUpdate", function()
         local internal = cli._internal
 
         it("reports missing or stale outputs", function()
-            local root = make_temp("mtime")
+            local root = makeTemp("mtime")
             local input = join(root, "input.tl")
             local output = join(root, "output.lua")
-            write_file(input, "in")
+            writeFile(input, "in")
 
-            assert.is_true(internal.needs_update(output, input))
+            assert.is_true(internal.needsUpdate(output, input))
 
-            write_file(output, "out")
+            writeFile(output, "out")
             assert(lfs.touch(input, 1000000, 1000000))
             assert(lfs.touch(output, 2000000, 2000000))
-            assert.is_false(internal.needs_update(output, input))
+            assert.is_false(internal.needsUpdate(output, input))
 
             assert(lfs.touch(input, 3000000, 3000000))
-            assert.is_true(internal.needs_update(output, input))
+            assert.is_true(internal.needsUpdate(output, input))
         end)
     end)
 end)
