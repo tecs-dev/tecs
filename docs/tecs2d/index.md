@@ -108,6 +108,8 @@ adds the engine layer: rendering, audio, input, and more. Projects created by
 
 ### CLI commands
 
+The full reference lives in the [Tecs CLI section](/cli/).
+
 | Command          | Description                                      |
 | ------------------- | ------------------------------------------------ |
 | `tecs run`          | Build and run the game                           |

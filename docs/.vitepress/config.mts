@@ -241,6 +241,16 @@ export default defineConfig({
           { text: 'Tween', link: '/tecs2d/tween' },
         ]
       },
+      {
+        text: 'Tecs CLI',
+        collapsed: false,
+        items: [
+          { text: 'Overview', link: '/cli/' },
+          { text: 'Dependencies', link: '/cli/dependencies' },
+          { text: 'MCP Bridge', link: '/cli/mcp' },
+          { text: 'Packaging', link: '/cli/packaging' },
+        ]
+      },
     ],
 
     socialLinks: [

@@ -23,7 +23,16 @@ world:addPlugin(require("tecs2d.debug").new())
 ```
 
 MCP listens on port `19999` by default. Pass `mcp.new({port = 12345})` to use a
-different port. The MCP plugin ensures the headless debugger core, so the
+different port. Without an explicit port, the `TECS_MCP_PORT` environment
+variable is honored, which is how test and agent harnesses assign free ports.
+
+::: tip Connecting through the CLI
+Agent clients usually reach this server through the
+[Tecs CLI's MCP bridge](/cli/mcp) (`tecs mcp`): a stdio session that starts
+and restarts the game itself, adds toolchain tools, and proxies everything
+documented here. Connect to the HTTP endpoint directly when attaching to a
+game that is already running.
+::: The MCP plugin ensures the headless debugger core, so the
 registry-derived `cmd_*` tools work in every session; the debug plugin adds the
 shared in-game overlay on top of the same state.
 
