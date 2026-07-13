@@ -2,6 +2,14 @@
 
 Working guide for AI coding agents contributing to a Tecs2D game project created by `tecs new`.
 
+## If the CLI is missing
+
+Install it with Homebrew on macOS/Linux (`brew install tecs-dev/tap/tecs-cli`) or Scoop on
+Windows (`scoop bucket add tecs https://github.com/tecs-dev/scoop-bucket`, then
+`scoop install tecs`). Standalone installer scripts live on the
+[tecs-cli releases page](https://github.com/tecs-dev/tecs-cli/releases/latest). No Lua,
+LuaRocks, or compiler toolchain is required; the CLI downloads its LÖVE runtime on first use.
+
 ## Commands
 
 Run these from the project root (the directory containing `tlconfig.lua`):

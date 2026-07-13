@@ -6,6 +6,14 @@ When cutting a release, bump `VERSION` in `tecs_cli/cli.lua`, update this file,
 and push the matching `v*` tag. CI publishes the self-contained `.love`
 payload, launchers, and installers as GitHub release assets.
 
+## [Unreleased]
+
+### Changed
+
+- Generated project READMEs document CLI installation (Homebrew, Scoop,
+  standalone installers) and the full command set, and the bundled agent
+  guide tells agents how to install a missing CLI.
+
 ## [0.7.0] - 2026-07-12
 
 ### Added
