@@ -123,6 +123,8 @@ describe("tecs CLI", function()
                 readFile(join(project, "spec", "game_lovespec.tl")))
             assert.matches("name: integration%-testing",
                 readFile(join(project, ".claude", "skills", "integration-testing", "SKILL.md")))
+            assert.matches("name: tecs%-cli",
+                readFile(join(project, ".claude", "skills", "tecs-cli", "SKILL.md")))
             assert.is_false(exists(join(project, "game-dev-1.rockspec")))
             assert.is_true(exists(join(project, "src", "conf.tl")))
             assert.is_true(exists(join(project, "src", "main.tl")))
@@ -565,145 +567,6 @@ describe("tecs CLI", function()
             assert.matches("<string>mygame</string>", patched)
             assert.equals(nil, patched:match("UTExportedTypeDeclarations"))
             assert.equals(nil, patched:match("org%.love2d%.love"))
-        end)
-    end)
-
-    describe("rock vendoring", function()
-        local internal = cli._internal
-
-        it("parses rock arguments with optional versions", function()
-            local name, version = internal.parseRockArg("Inspect")
-            assert.equals("inspect", name)
-            assert.equals(nil, version)
-            name, version = internal.parseRockArg("inspect@3.1.1-0")
-            assert.equals("inspect", name)
-            assert.equals("3.1.1-0", version)
-        end)
-
-        it("orders rock versions like LuaRocks", function()
-            assert.is_true(internal.rockVersionLess("1.2-1", "1.10-1"))
-            assert.is_true(internal.rockVersionLess("1.0-1", "1.0-2"))
-            assert.is_true(internal.rockVersionLess("2.0-1", "3.1.1-0"))
-            assert.is_true(internal.rockVersionLess("3.1-1", "3.1.1-0"))
-            assert.is_true(internal.rockVersionLess("scm-1", "1.0-1"))
-            assert.is_true(not internal.rockVersionLess("1.0-1", "scm-1"))
-        end)
-
-        it("parses the repository section of a luarocks manifest", function()
-            local repository = internal.parseLuarocksManifest(table.concat({
-                'commands = {}',
-                'modules = {}',
-                'repository = {',
-                '   inspect = {',
-                '      ["1.0-1"] = {',
-                '         {',
-                '            arch = "rockspec"',
-                '         }, {',
-                '            arch = "src"',
-                '         }',
-                '      }',
-                '   },',
-                '   ["inspect-tl-type"] = {',
-                '      ["0.0.1-1"] = {',
-                '         {',
-                '            arch = "rockspec"',
-                '         }',
-                '      }',
-                '   }',
-                '}',
-            }, "\n"))
-            assert.equals("src", repository["inspect"]["1.0-1"][2].arch)
-            assert.equals("rockspec", repository["inspect-tl-type"]["0.0.1-1"][1].arch)
-            assert.equals(nil, repository["inspect-tl-type"]["0.0.1-1"][2])
-        end)
-
-        it("plans pure-Lua modules and type declaration installs", function()
-            local plan = internal.planRockFiles({
-                package = "sample",
-                build = {
-                    type = "builtin",
-                    modules = {
-                        ["foo.bar"] = "src/foo/bar.lua",
-                        foo = "src/foo/init.lua",
-                    },
-                    install = {lua = {"types/sample/sample.d.tl"}},
-                },
-            })
-            local dests = {}
-            for _, item in ipairs(plan) do dests[#dests + 1] = item.dest end
-            assert.equals("foo/bar.lua foo/init.lua sample.d.tl", table.concat(dests, " "))
-        end)
-
-        it("rejects rocks that are not pure Lua", function()
-            local ok, err = pcall(internal.planRockFiles, {
-                package = "native",
-                build = {type = "builtin", modules = {core = "src/core.c"}},
-            })
-            assert.is_true(not ok)
-            assert.matches("native modules", err.message)
-
-            ok, err = pcall(internal.planRockFiles, {
-                package = "cmake-rock",
-                build = {type = "cmake"},
-            })
-            assert.is_true(not ok)
-            assert.matches("only pure%-Lua rocks", err.message)
-        end)
-
-        it("round-trips the vendored rock manifest at the project root", function()
-            local root = makeTemp("rocks-manifest")
-            withCwd(root, function()
-                internal.writeRocksManifest({
-                    inspect = {
-                        version = "3.1.1-0",
-                        direct = true,
-                        deps = {"inspect-tl-type"},
-                        files = {"share/lua/5.1/inspect.lua"},
-                    },
-                })
-                assert.is_true(exists(join(root, "tecs-rocks.lua")))
-                local manifest = internal.readRocksManifest()
-                assert.equals("3.1.1-0", manifest.inspect.version)
-                assert.is_true(manifest.inspect.direct)
-                assert.equals("inspect-tl-type", manifest.inspect.deps[1])
-                assert.equals("share/lua/5.1/inspect.lua", manifest.inspect.files[1])
-            end)
-        end)
-
-        it("reads the pre-0.3 manifest location and migrates it on write", function()
-            local root = makeTemp("rocks-legacy")
-            withCwd(root, function()
-                mkdirP(join(root, "src", "vendor"))
-                writeFile(join(root, "src", "vendor", "rocks.lua"),
-                    'return {inspect = {version = "2.0-1", direct = true, deps = {}, files = {}}}\n')
-                local manifest = internal.readRocksManifest()
-                assert.equals("2.0-1", manifest.inspect.version)
-                internal.writeRocksManifest(manifest)
-                assert.is_true(exists(join(root, "tecs-rocks.lua")))
-                assert.is_true(not exists(join(root, "src", "vendor", "rocks.lua")))
-            end)
-        end)
-
-        it("garbage-collects rocks nothing depends on, deleting their files", function()
-            local root = makeTemp("rocks-gc")
-            withCwd(root, function()
-                mkdirP(join(root, "src", "vendor", "share", "lua", "5.1"))
-                writeFile(join(root, "src", "vendor", "share", "lua", "5.1", "keep.lua"), "return 1\n")
-                writeFile(join(root, "src", "vendor", "share", "lua", "5.1", "drop.lua"), "return 2\n")
-                local manifest = {
-                    keeper = {version = "1.0-1", direct = true, deps = {"kept-dep"},
-                        files = {"share/lua/5.1/keep.lua"}},
-                    ["kept-dep"] = {version = "1.0-1", direct = false, deps = {}, files = {}},
-                    orphan = {version = "1.0-1", direct = false, deps = {},
-                        files = {"share/lua/5.1/drop.lua"}},
-                }
-                local removed = internal.rocksGc(manifest)
-                assert.equals("orphan", table.concat(removed, " "))
-                assert.is_true(manifest.keeper ~= nil and manifest["kept-dep"] ~= nil)
-                assert.equals(nil, manifest.orphan)
-                assert.is_true(exists(join(root, "src", "vendor", "share", "lua", "5.1", "keep.lua")))
-                assert.is_true(not exists(join(root, "src", "vendor", "share", "lua", "5.1", "drop.lua")))
-            end)
         end)
     end)
 

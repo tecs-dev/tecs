@@ -25,11 +25,10 @@ Run these from the project root (the directory containing `tlconfig.lua`):
   file, a macOS app bundle, and a fused Windows executable. The macOS bundle needs a
   POSIX host; Windows packages build anywhere.
 - `tecs info --json`: CLI, LÖVE, and LuaJIT versions plus project status as JSON.
-- `tecs add <rock>[@version]` / `tecs remove <rock>` / `tecs update`: vendor pure-Lua
-  rocks from luarocks.org into `src/vendor/` (with Teal type declarations when a
-  `<rock>-tl-type` package exists). `tecs-rocks.lua` at the project root records them
-  and must be committed; `tecs check`/`tecs build` restore missing rocks from it at
-  pinned versions. C rocks are rejected by design.
+- Dependencies: vendor pure-Lua rocks with LuaRocks into the project tree
+  (`luarocks install --tree src/vendor --lua-version=5.1 <rock>`, plus the matching
+  `<rock>-tl-type` rock for Teal declarations). `src/vendor/` is gitignored; record
+  installed rocks somewhere repeatable. C rocks do not work: the runtime has no toolchain.
 - `tecs clean`: remove `build/`.
 
 Always run `tecs check` after editing Teal sources, and make sure it passes before finishing a task.

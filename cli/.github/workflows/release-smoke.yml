@@ -60,11 +60,6 @@ jobs:
           test -f "$project/build/tecs2d/init.lua"
           test -f "$project/build/tecs2d/assets/fonts/tiny-font.fnt"
           test -f "$project/build/tecs2d/assets/fonts/tiny-font.png"
-          (cd "$project" && "$tecs" add inspect)
-          test -f "$project/src/vendor/share/lua/5.1/inspect.lua"
-          test -f "$project/src/vendor/share/lua/5.1/inspect.d.tl"
-          (cd "$project" && "$tecs" remove inspect)
-          test ! -e "$project/src/vendor/share/lua/5.1/inspect.lua"
           (cd "$project" && "$tecs" check --json | grep -F '"ok":true')
           (cd "$project" && "$tecs" info --json | grep -F '"built":true')
           "$tecs" agent list | grep -F tecs-project
@@ -116,11 +111,6 @@ jobs:
           Push-Location $project
           & $tecs check
           & $tecs build
-          & $tecs add inspect
-          if (-not (Test-Path "src\vendor\share\lua\5.1\inspect.lua")) { throw "inspect was not vendored" }
-          if (-not (Test-Path "src\vendor\share\lua\5.1\inspect.d.tl")) { throw "inspect types were not vendored" }
-          & $tecs remove inspect
-          if (Test-Path "src\vendor\share\lua\5.1\inspect.lua") { throw "inspect was not removed" }
           $checkJson = (& $tecs check --json | Out-String)
           if ($checkJson -notmatch '"ok":true') { throw "check --json did not report ok" }
           $infoJson = (& $tecs info --json | Out-String)

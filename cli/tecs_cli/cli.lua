@@ -988,18 +988,9 @@ local function copyVendor()
 end
 
 --------------------------------------------------------------------------------
--- Rock vendoring: a minimal luarocks.org client. Rocks are fetched over the
--- LÖVE runtime's HTTPS support, validated as pure Lua, and copied into
--- src/vendor/ so the game build stays self-contained. The LuaRocks client is
--- never involved.
 --------------------------------------------------------------------------------
-
--- The manifest lives at the project root so it is committed (src/vendor/ is
--- generated and typically gitignored); check/build restore missing rocks
--- from it on fresh clones.
-local ROCKS_MANIFEST = "tecs-rocks.lua"
-local LEGACY_ROCKS_MANIFEST = "src/vendor/rocks.lua"
-local LUAROCKS_SERVER = "https://luarocks.org"
+-- Shared download and archive helpers used by dist.
+--------------------------------------------------------------------------------
 
 local function fetchUrl(url)
     local ok, https = pcall(require, "https")
@@ -1013,528 +1004,22 @@ local function fetchUrl(url)
     return body
 end
 
--- Run untrusted registry Lua (manifests, rockspecs) in an empty sandbox and
--- return the globals it assigned.
-local function loadLuaTable(content, chunkname)
-    local chunk, err = loadstring(content, chunkname)
-    if not chunk then
-        error(chunkname .. " failed to parse: " .. tostring(err), 0)
-    end
-    local env = {}
-    setfenv(chunk, env)
-    local ok, result = pcall(chunk)
-    if not ok then
-        error(chunkname .. " failed to run: " .. tostring(result), 0)
-    end
-    return result, env
-end
-
--- Scan the manifest's `repository` section line by line. The manifest is a
--- machine-generated Lua file, but it is megabytes of one table constructor,
--- which LuaJIT refuses to load (65536-constant limit) — and scanning also
--- avoids executing a large download as code.
-local function parseLuarocksManifest(content)
-    local repository = {}
-    local inRepository = false
-    local rock, version
-    for line in content:gmatch("[^\r\n]+") do
-        if not inRepository then
-            if line:match("^repository = {") then inRepository = true end
-        elseif line:match("^}") then
-            break
-        else
-            local name = line:match('^   %["([^"]+)"%] = {') or line:match("^   ([%w_]+) = {")
-            if name then
-                rock, version = {}, nil
-                repository[name] = rock
-            elseif rock then
-                local v = line:match('^      %["([^"]+)"%] = {')
-                if v then
-                    version = {}
-                    rock[v] = version
-                elseif version then
-                    local arch = line:match('arch = "([%w_%-]+)"')
-                    if arch then
-                        version[#version + 1] = {arch = arch}
-                    end
-                end
-            end
-        end
-    end
-    if not inRepository then
-        error("unexpected luarocks.org manifest format", 0)
-    end
-    return repository
-end
-
--- The luarocks.org manifest for Lua 5.1, cached for a day in the user cache.
-local function luarocksRepository(force)
-    local path = pathJoin(cacheRoot(), "luarocks/manifest-5.1")
-    local content
-    if not force and exists(path) and os.time() - fileMtime(path) < 86400 then
-        local file = assert(io.open(path, "rb"))
-        content = file:read("*a")
-        file:close()
-    else
-        status("Fetching the luarocks.org manifest...")
-        content = fetchUrl(LUAROCKS_SERVER .. "/manifest-5.1")
-        writeFile(path, content)
-    end
-    return parseLuarocksManifest(content)
-end
-
--- Split "name@version" (version optional).
-local function parseRockArg(value)
-    local name, version = tostring(value):match("^([^@]+)@(.+)$")
-    if not name then
-        name, version = tostring(value), nil
-    end
-    return name:lower(), version
-end
-
--- LuaRocks-style version order: dotted base compared piecewise (numeric
--- segments above alphabetical tags like scm/rc), then the rockspec revision.
-local function parseRockVersion(v)
-    local base, revision = v:match("^(.-)%-(%d+)$")
-    if not base then
-        base, revision = v, "0"
-    end
-    local parts = {}
-    for piece in base:gmatch("[^%.]+") do parts[#parts + 1] = piece end
-    return parts, tonumber(revision) or 0
-end
-
-local function rockVersionLess(a, b)
-    local ap, ar = parseRockVersion(a)
-    local bp, br = parseRockVersion(b)
-    for i = 1, math.max(#ap, #bp) do
-        local x, y = ap[i], bp[i]
-        if x ~= y then
-            if x == nil then return true end
-            if y == nil then return false end
-            local nx, ny = tonumber(x), tonumber(y)
-            if nx and ny then
-                if nx ~= ny then return nx < ny end
-            elseif nx then
-                return false
-            elseif ny then
-                return true
-            else
-                return x < y
-            end
-        end
-    end
-    return ar < br
-end
-
--- Pick the requested (or newest) version that has a downloadable source rock.
-local function resolveRockVersion(repository, name, wanted)
-    local entry = repository[name]
-    if not entry then
-        fail("rock not found on luarocks.org: " .. name)
-    end
-    local withSource = {}
-    for version, archs in pairs(entry) do
-        for _, arch in ipairs(archs) do
-            if arch.arch == "src" then
-                withSource[version] = true
-            end
-        end
-    end
-    if wanted then
-        if not entry[wanted] then
-            fail("rock " .. name .. " has no version " .. wanted)
-        end
-        if not withSource[wanted] then
-            fail("rock " .. name .. " " .. wanted .. " has no source rock on luarocks.org; "
-                .. "pick a version that publishes one")
-        end
-        return wanted
-    end
-    local best
-    for version in pairs(withSource) do
-        if not best or rockVersionLess(best, version) then
-            best = version
-        end
-    end
-    if not best then
-        fail("rock " .. name .. " publishes no source rocks on luarocks.org")
-    end
-    return best
-end
-
--- Map a rockspec to vendored files, rejecting anything that is not pure Lua.
--- Returns {{source = path-in-rock, dest = path-under-share/lua/5.1}, ...}.
-local function planRockFiles(spec)
-    local build = spec.build or {}
-    local buildType = build.type or "builtin"
-    if buildType ~= "builtin" and buildType ~= "none" then
-        fail("rock " .. tostring(spec.package) .. " uses build type '" .. buildType
-            .. "'; only pure-Lua rocks can be vendored (the game runtime has no C toolchain)")
-    end
-    local plan = {}
-    for moduleName, file in pairs(build.modules or {}) do
-        if type(file) ~= "string" or not file:match("%.lua$") then
-            fail("rock " .. tostring(spec.package)
-                .. " contains native modules; only pure-Lua rocks can be vendored")
-        end
-        local rel = moduleName:gsub("%.", "/")
-        local dest = file:match("init%.lua$") and (rel .. "/init.lua") or (rel .. ".lua")
-        plan[#plan + 1] = {source = file, dest = dest}
-    end
-    local install = build.install or {}
-    for key, file in pairs(install.lua or {}) do
-        if type(file) ~= "string" then
-            fail("rock " .. tostring(spec.package) .. " has an unsupported install table")
-        end
-        local dest
-        if type(key) == "number" then
-            dest = basename(file)
-        else
-            local extension = file:match("(%.d%.tl)$") or file:match("(%.lua)$") or ""
-            dest = key:gsub("%.", "/") .. extension
-        end
-        plan[#plan + 1] = {source = file, dest = dest}
-    end
-    if #plan == 0 then
-        fail("rock " .. tostring(spec.package) .. " installs no Lua modules")
-    end
-    table.sort(plan, function(a, b) return a.dest < b.dest end)
-    return plan
-end
-
--- Vendored-rock bookkeeping, stored as a committed Lua table at the project
--- root (with a fallback read of the pre-0.3 location under src/vendor/).
-local function readRocksManifest()
-    local path = ROCKS_MANIFEST
-    if not exists(path) then path = LEGACY_ROCKS_MANIFEST end
-    if not exists(path) then return {} end
-    local file = assert(io.open(normalize(path), "rb"))
-    local content = file:read("*a")
-    file:close()
-    local manifest = loadLuaTable(content, "@" .. path)
-    return type(manifest) == "table" and manifest or {}
-end
-
-local function writeRocksManifest(manifest)
-    remove(LEGACY_ROCKS_MANIFEST)
-    local names = {}
-    for name in pairs(manifest) do names[#names + 1] = name end
-    table.sort(names)
-    local out = {
-        "-- Rocks vendored by `tecs add`; managed by tecs add/remove/update.",
-        "-- Commit this file: `tecs check` and `tecs build` restore the recorded",
-        "-- rocks into src/vendor/ when they are missing.",
-        "return {",
-    }
-    for _, name in ipairs(names) do
-        local entry = manifest[name]
-        out[#out + 1] = ("    [%q] = {"):format(name)
-        out[#out + 1] = ("        version = %q,"):format(entry.version)
-        out[#out + 1] = "        direct = " .. tostring(entry.direct == true) .. ","
-        local deps = {}
-        for _, dep in ipairs(entry.deps or {}) do deps[#deps + 1] = ("%q"):format(dep) end
-        table.sort(deps)
-        out[#out + 1] = "        deps = {" .. table.concat(deps, ", ") .. "},"
-        out[#out + 1] = "        files = {"
-        local files = {}
-        for _, file in ipairs(entry.files or {}) do files[#files + 1] = file end
-        table.sort(files)
-        for _, file in ipairs(files) do
-            out[#out + 1] = ("            %q,"):format(file)
-        end
-        out[#out + 1] = "        },"
-        out[#out + 1] = "    },"
-    end
-    out[#out + 1] = "}"
-    writeFile(ROCKS_MANIFEST, table.concat(out, "\n") .. "\n")
-end
-
-local function removeRockFiles(entry)
-    local stop = normalize("src/vendor")
-    for _, file in ipairs(entry.files or {}) do
-        local path = pathJoin("src/vendor", file)
-        remove(path)
-        -- Prune directories the file leaves empty, up to the vendor root.
-        local dir = dirname(path)
-        while dir ~= stop and dir ~= "." and isEmptyDir(dir) do
-            remove(dir)
-            dir = dirname(dir)
-        end
-    end
-end
-
--- Drop manifest entries no direct rock needs, deleting their files.
-local function rocksGc(manifest)
-    local needed = {}
-    local function mark(name)
-        if needed[name] then return end
-        needed[name] = true
-        local entry = manifest[name]
-        for _, dep in ipairs(entry and entry.deps or {}) do mark(dep) end
-    end
-    for name, entry in pairs(manifest) do
-        if entry.direct then mark(name) end
-    end
-    local removed = {}
-    for name, entry in pairs(manifest) do
-        if not needed[name] then
-            removeRockFiles(entry)
-            manifest[name] = nil
-            removed[#removed + 1] = name
-        end
-    end
-    table.sort(removed)
-    return removed
-end
-
--- Extract regular files from a ustar archive as {path = content}.
-local function parseTar(data)
-    local files = {}
-    local longName
-    local pos = 1
-    while pos + 512 <= #data + 1 do
-        local header = data:sub(pos, pos + 511)
-        if header:match("^%z") then break end
-        local name = header:sub(1, 100):gsub("%z.*", "")
-        local size = tonumber(header:sub(125, 136):gsub("[%z ]", ""), 8) or 0
-        local typeflag = header:sub(157, 157)
-        local prefix = header:sub(346, 500):gsub("%z.*", "")
-        if prefix ~= "" then name = prefix .. "/" .. name end
-        local content = data:sub(pos + 512, pos + 511 + size)
-        if typeflag == "L" then
-            longName = content:gsub("%z.*", "")
-        else
-            if longName then
-                name = longName
-                longName = nil
-            end
-            if typeflag == "0" or typeflag == "\0" or typeflag == "" then
-                files[name] = content
-            end
-        end
-        pos = pos + 512 + math.ceil(size / 512) * 512
-    end
-    return files
-end
-
--- Expand the source archive packed inside a mounted .src.rock into
--- {path = content}. Source rocks hold the rockspec plus the upstream release
--- artifact, typically a .tar.gz or .zip that is expanded here in memory.
-local function expandRockSource(mount)
-    local fs = loveApi.filesystem
-    local files = {}
-    local function addTree(dir, prefix)
-        for _, entry in ipairs(fs.getDirectoryItems(dir)) do
-            local path = dir .. "/" .. entry
-            local info = fs.getInfo(path)
-            if info and info.type == "directory" then
-                addTree(path, prefix .. entry .. "/")
-            elseif info and info.type == "file" then
-                files[prefix .. entry] = fs.read(path)
-            end
-        end
-    end
-    for _, entry in ipairs(fs.getDirectoryItems(mount)) do
-        local path = mount .. "/" .. entry
-        local info = fs.getInfo(path)
-        local lower = entry:lower()
-        if info and info.type == "directory" then
-            addTree(path, entry .. "/")
-        elseif info and info.type == "file" and not lower:match("%.rockspec$") then
-            if lower:match("%.zip$") then
-                local data = fs.newFileData((fs.read(path)), entry)
-                if fs.mount(data, "tecs-rock-src") then
-                    addTree("tecs-rock-src", "")
-                    pcall(fs.unmount, data)
-                end
-            elseif lower:match("%.tar%.gz$") or lower:match("%.tgz$") then
-                local tar = loveApi.data.decompress("string", "gzip", (fs.read(path)))
-                for name, content in pairs(parseTar(tar)) do files[name] = content end
-            elseif lower:match("%.tar$") then
-                for name, content in pairs(parseTar((fs.read(path)))) do files[name] = content end
-            else
-                files[entry] = fs.read(path)
-            end
-        end
-    end
-    return files
-end
-
--- Find a rockspec-relative path in the expanded source tree: at the root, in
--- the rockspec's source.dir, or (shallowest first) anywhere in the tree.
-local function findRockSource(files, spec, rel)
-    if files[rel] then return files[rel] end
-    local dir = spec.source and spec.source.dir
-    if dir and files[dir .. "/" .. rel] then return files[dir .. "/" .. rel] end
-    local suffix = "/" .. rel
-    local best
-    for path in pairs(files) do
-        if path:sub(-#suffix) == suffix then
-            local _, depth = path:gsub("/", "")
-            if not best or depth < best.depth or (depth == best.depth and path < best.path) then
-                best = {path = path, depth = depth}
-            end
-        end
-    end
-    return best and files[best.path] or nil
-end
-
--- Mount a downloaded .src.rock (a zip) and call fn(mountpoint).
-local function withMountedRock(archive, fn)
+-- Mount a zip archive and call fn(mountpoint).
+local function withMountedArchive(archive, fn)
     if not (isLoveCli and loveApi) then
-        error("rock management requires LÖVE; run tecs through its installed launcher", 0)
+        error("archive handling requires LÖVE; run tecs through its installed launcher", 0)
     end
     local fs = loveApi.filesystem
     if not fs.mountFullPath then
-        error("this LÖVE runtime cannot mount rock archives; update the cached runtime", 0)
+        error("this LÖVE runtime cannot mount archives; update the cached runtime", 0)
     end
-    local mount = "tecs-rock-mount"
+    local mount = "tecs-archive-mount"
     if not fs.mountFullPath(archive, mount) then
-        error("could not open rock archive " .. archive, 0)
+        error("could not open archive " .. archive, 0)
     end
     local ok, err = pcall(fn, mount)
     pcall(fs.unmountFullPath, archive)
     if not ok then error(err, 0) end
-end
-
--- Names LuaRocks dependency strings resolve to, minus the Lua VM itself.
-local function dependencyNames(spec)
-    local names = {}
-    for _, dep in ipairs(spec.dependencies or {}) do
-        local name = tostring(dep):match("^%s*([%w_.-]+)")
-        if name and name:lower() ~= "lua" then
-            names[#names + 1] = name:lower()
-        end
-    end
-    return names
-end
-
--- Download, validate, and vendor one rock (plus dependencies and its
--- companion <name>-tl-type declarations when luarocks.org publishes them).
-local function installRock(repository, name, wanted, manifest, direct, seen)
-    if seen[name] then return end
-    seen[name] = true
-
-    local version = resolveRockVersion(repository, name, wanted)
-    local existing = manifest[name]
-    if existing and existing.version == version then
-        local complete = true
-        for _, file in ipairs(existing.files or {}) do
-            if not exists(pathJoin("src/vendor", file)) then
-                complete = false
-                break
-            end
-        end
-        if complete then
-            if direct then existing.direct = true end
-            status(name .. " " .. version .. " is already vendored.")
-            return
-        end
-    end
-    if existing then
-        removeRockFiles(existing)
-    end
-
-    local fileName = name .. "-" .. version .. ".src.rock"
-    local archive = pathJoin(cacheRoot(), "luarocks/rocks", fileName)
-    if not exists(archive) then
-        status("Downloading " .. fileName .. "...")
-        writeFile(archive, fetchUrl(LUAROCKS_SERVER .. "/" .. fileName))
-    end
-
-    local files = {}
-    local deps
-    withMountedRock(archive, function(mount)
-        local fs = loveApi.filesystem
-        local specFile
-        for _, entry in ipairs(fs.getDirectoryItems(mount)) do
-            if entry:match("%.rockspec$") then
-                specFile = mount .. "/" .. entry
-                break
-            end
-        end
-        if not specFile then
-            error("rock archive has no rockspec: " .. fileName, 0)
-        end
-        local _, spec = loadLuaTable((fs.read(specFile)), "@" .. name .. ".rockspec")
-        local sources = expandRockSource(mount)
-
-        for _, item in ipairs(planRockFiles(spec)) do
-            local content = findRockSource(sources, spec, item.source)
-            if not content then
-                error("rock " .. name .. " is missing packaged file " .. item.source, 0)
-            end
-            writeFile(pathJoin(vendorLua, item.dest), content)
-            files[#files + 1] = "share/lua/5.1/" .. item.dest
-        end
-
-        local licensePaths = {}
-        for path in pairs(sources) do licensePaths[#licensePaths + 1] = path end
-        table.sort(licensePaths)
-        local written = {}
-        for _, path in ipairs(licensePaths) do
-            local _, depth = path:gsub("/", "")
-            local base = path:match("[^/]+$")
-            local isLicense = base:upper():match("LICEN[CS]E") or base:upper():match("^COPYING")
-            if depth <= 1 and isLicense and not written[base] then
-                written[base] = true
-                writeFile(pathJoin("src/vendor/licenses", name .. "-" .. base), sources[path])
-                files[#files + 1] = "licenses/" .. name .. "-" .. base
-            end
-        end
-
-        deps = dependencyNames(spec)
-    end)
-
-    for _, dep in ipairs(deps) do
-        installRock(repository, dep, nil, manifest, false, seen)
-    end
-    local typesRock = name .. "-tl-type"
-    if not name:match("%-tl%-type$") and repository[typesRock] then
-        installRock(repository, typesRock, nil, manifest, false, seen)
-        deps[#deps + 1] = typesRock
-    end
-
-    manifest[name] = {
-        version = version,
-        direct = direct or (existing and existing.direct) or false,
-        deps = deps,
-        files = files,
-    }
-    status("Vendored " .. name .. " " .. version .. " (" .. #files .. " files).")
-end
-
--- Reinstall manifest-recorded rocks whose files are missing (fresh clones:
--- src/vendor/ is generated and typically gitignored). Versions are pinned to
--- the manifest so a restore never upgrades anything.
-local function restoreMissingRocks()
-    local manifest = readRocksManifest()
-    local missing = {}
-    for name, entry in pairs(manifest) do
-        for _, file in ipairs(entry.files or {}) do
-            if not exists(pathJoin("src/vendor", file)) then
-                missing[#missing + 1] = name
-                break
-            end
-        end
-    end
-    if #missing == 0 then return end
-    table.sort(missing)
-
-    status("Restoring vendored rocks...")
-    local repository = luarocksRepository(false)
-    -- Pre-seed `seen` so dependency recursion cannot re-resolve (and upgrade)
-    -- rocks the manifest already records; each rock is restored pinned.
-    local seen = {}
-    for name in pairs(manifest) do seen[name] = true end
-    for _, name in ipairs(missing) do
-        local entry = manifest[name]
-        seen[name] = nil
-        installRock(repository, name, entry.version, manifest, entry.direct, seen)
-        seen[name] = true
-    end
-    writeRocksManifest(manifest)
 end
 
 local function ensureProject()
@@ -1630,7 +1115,7 @@ local function distWindowsRuntime()
     local outer = pathJoin(cacheRoot(), "dist/love-windows-outer.zip")
     writeFile(outer, fetchUrl(DIST_RUNTIME_BASE .. "/love-windows-x64.zip"))
     local inner = pathJoin(cacheRoot(), "dist/love-windows-inner.zip")
-    withMountedRock(outer, function(mount)
+    withMountedArchive(outer, function(mount)
         local fs = loveApi.filesystem
         local innerName
         for _, entry in ipairs(fs.getDirectoryItems(mount)) do
@@ -1644,7 +1129,7 @@ local function distWindowsRuntime()
         end
         writeFile(inner, (fs.read(mount .. "/" .. innerName)))
     end)
-    withMountedRock(inner, function(mount)
+    withMountedArchive(inner, function(mount)
         copyMountTree(mount, dir)
     end)
     remove(outer)
@@ -1791,7 +1276,6 @@ local parser
 
 function tasks.check(args)
     ensureVendor()
-    restoreMissingRocks()
     local sources = listTealSources()
     if args and args.json then
         local json = jsonModule()
@@ -1811,7 +1295,6 @@ end
 function tasks.build()
     status("Building...")
     ensureVendor()
-    restoreMissingRocks()
     local changed = compileSources() > 0
     if copyAssets() then changed = true end
     if copyVendor() then changed = true end
@@ -1879,78 +1362,6 @@ function tasks.dev()
     status("Preparing local Tecs development source...")
     ensureVendor()
     status("Dev source copied. Re-run `tecs dev` after local framework changes.")
-end
-
-function tasks.add(args)
-    ensureProject()
-    local name, wanted = parseRockArg(args.rock)
-    local repository = luarocksRepository(false)
-    if not repository[name] then
-        -- The cached manifest may predate a new rock; refresh once before failing.
-        repository = luarocksRepository(true)
-    end
-    local manifest = readRocksManifest()
-    installRock(repository, name, wanted, manifest, true, {})
-    writeRocksManifest(manifest)
-    status("Vendored rocks are recorded in " .. ROCKS_MANIFEST .. ". Next: tecs check")
-end
-
-function tasks.remove(args)
-    ensureProject()
-    local name = parseRockArg(args.rock)
-    local manifest = readRocksManifest()
-    local entry = manifest[name]
-    if not entry then
-        fail("rock is not vendored: " .. name)
-    end
-    if not entry.direct then
-        local dependents = {}
-        for owner, other in pairs(manifest) do
-            for _, dep in ipairs(other.deps or {}) do
-                if dep == name then dependents[#dependents + 1] = owner end
-            end
-        end
-        table.sort(dependents)
-        fail(name .. " was vendored as a dependency of " .. table.concat(dependents, ", ")
-            .. "; remove those rocks instead")
-    end
-    entry.direct = false
-    local removed = rocksGc(manifest)
-    writeRocksManifest(manifest)
-    if #removed > 0 then
-        status("Removed " .. table.concat(removed, ", ") .. ".")
-    end
-    if manifest[name] then
-        status(name .. " is still required by another vendored rock and was kept.")
-    end
-end
-
-function tasks.update(args)
-    ensureProject()
-    local manifest = readRocksManifest()
-    local targets = {}
-    if args.rock then
-        local name = parseRockArg(args.rock)
-        if not manifest[name] then
-            fail("rock is not vendored: " .. name)
-        end
-        targets[#targets + 1] = name
-    else
-        for name, entry in pairs(manifest) do
-            if entry.direct then targets[#targets + 1] = name end
-        end
-        table.sort(targets)
-    end
-    if #targets == 0 then
-        status("No vendored rocks to update.")
-        return
-    end
-    local repository = luarocksRepository(true)
-    for _, name in ipairs(targets) do
-        installRock(repository, name, nil, manifest, manifest[name].direct, {})
-    end
-    rocksGc(manifest)
-    writeRocksManifest(manifest)
 end
 
 -- Run project specs with the vendored busted runner. Files matching
@@ -2087,7 +1498,6 @@ local function buildMcpContext()
         loveBin = loveBin,
         check = function()
             ensureVendor()
-            restoreMissingRocks()
             return collectCheckDiagnostics(listTealSources())
         end,
         build = function()
@@ -2345,36 +1755,6 @@ local commands = {
         action = tasks.dev,
     },
     {
-        name = "add",
-        summary = "Vendor a rock from luarocks.org",
-        description = "Download a pure-Lua rock, its dependencies, and matching Teal type "
-            .. "declarations from luarocks.org into src/vendor/.",
-        action = tasks.add,
-        setup = function(subcommand)
-            subcommand:argument("rock", "Rock name, optionally versioned: name@1.0-1.")
-        end,
-    },
-    {
-        name = "remove",
-        summary = "Remove a vendored rock",
-        description = "Remove a rock installed by `tecs add`, along with any dependencies "
-            .. "no other vendored rock needs.",
-        action = tasks.remove,
-        setup = function(subcommand)
-            subcommand:argument("rock", "Rock name to remove.")
-        end,
-    },
-    {
-        name = "update",
-        summary = "Update vendored rocks",
-        description = "Re-resolve one vendored rock (or all of them) to the newest version "
-            .. "published on luarocks.org.",
-        action = tasks.update,
-        setup = function(subcommand)
-            subcommand:argument("rock", "Rock to update; omit to update everything."):args("?")
-        end,
-    },
-    {
         name = "mcp",
         summary = "Serve the project over MCP on stdio",
         description = "Run an MCP server for agent clients: check/build/integ/dist as tools, "
@@ -2436,6 +1816,15 @@ dist as tools, and the session survives game restarts and crashes. Every
 running game also embeds its own MCP server over HTTP (port 19999 by
 default); connect to that directly to attach to a game that is already
 running, such as a distributed build with enableInDist.
+
+]])
+    io.write(color("magenta", "Dependencies:") .. [[ vendor pure-Lua rocks with LuaRocks into the
+project tree, which already uses the LuaRocks layout:
+    luarocks install --tree src/vendor --lua-version=5.1 <rock>
+Teal declarations for popular rocks are published as <rock>-tl-type rocks.
+src/vendor is regenerated and usually gitignored, so record your rocks
+somewhere repeatable and reinstall after a fresh clone. Only pure-Lua rocks
+work: the game runtime has no C toolchain.
 
 ]])
     io.write(color("magenta", "Hot reload:") .. [[ while the game is running, rerun ]]
@@ -2542,13 +1931,6 @@ M._internal = {
     distName = distName,
     patchPlist = patchPlist,
     buildinfoLua = buildinfoLua,
-    parseRockArg = parseRockArg,
-    parseLuarocksManifest = parseLuarocksManifest,
-    rockVersionLess = rockVersionLess,
-    planRockFiles = planRockFiles,
-    readRocksManifest = readRocksManifest,
-    writeRocksManifest = writeRocksManifest,
-    rocksGc = rocksGc,
 }
 
 return M

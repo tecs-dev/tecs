@@ -6,6 +6,19 @@ When cutting a release, bump `VERSION` in `tecs_cli/cli.lua`, update this file,
 and push the matching `v*` tag. CI publishes the self-contained `.love`
 payload, launchers, and installers as GitHub release assets.
 
+## [Unreleased]
+
+### Removed
+
+- `tecs add`, `tecs remove`, and `tecs update`. Vendor rocks with LuaRocks
+  instead: `luarocks install --tree src/vendor --lua-version=5.1 <rock>`
+  (see `tecs help`).
+
+### Added
+
+- New projects include a `tecs-cli` Claude Code skill covering the command
+  workflow and LuaRocks-based dependencies.
+
 ## [0.8.0] - 2026-07-13
 
 ### Added

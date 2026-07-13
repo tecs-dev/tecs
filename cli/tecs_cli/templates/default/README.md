@@ -29,7 +29,6 @@ tecs run      # build and launch the game
 tecs build    # compile to build/ (hot-reloads a running game)
 tecs integ    # run spec/ against the built game
 tecs dist     # package a .love, macOS app bundle, and Windows executable
-tecs add      # vendor a pure-Lua rock from luarocks.org
 ```
 
 The hello demo enables the MCP server and runtime debugger; both disable

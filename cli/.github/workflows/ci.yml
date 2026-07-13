@@ -55,27 +55,6 @@ jobs:
           test -f "$project/build/tecs2d/init.lua"
           test -f "$project/build/tecs2d/assets/fonts/tiny-font.fnt"
           test -f "$project/build/tecs2d/assets/fonts/tiny-font.png"
-          (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" add inspect)
-          test -f "$project/src/vendor/share/lua/5.1/inspect.lua"
-          test -f "$project/src/vendor/share/lua/5.1/inspect.d.tl"
-          printf '%s\n' \
-            'local inspect <const> = require("inspect")' \
-            'local debugutil <const> = {' \
-            '    dump = function(value: any): string' \
-            '        return inspect(value)' \
-            '    end,' \
-            '}' \
-            'return debugutil' > "$project/src/debugutil.tl"
-          (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" check)
-          test -f "$project/tecs-rocks.lua"
-          rm -rf "$project/src/vendor"
-          (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" check)
-          test -f "$project/src/vendor/share/lua/5.1/inspect.lua"
-          test -f "$project/src/vendor/share/lua/5.1/inspect.d.tl"
-          rm "$project/src/debugutil.tl"
-          (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" remove inspect)
-          test ! -e "$project/src/vendor/share/lua/5.1/inspect.lua"
-          test ! -e "$project/src/vendor/share/lua/5.1/inspect.d.tl"
           if [ "$(uname -s)" = Darwin ]; then
             (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" integ)
             printf '%s\n' \
@@ -193,22 +172,6 @@ jobs:
           Remove-Item Env:TECS_DIR -ErrorAction SilentlyContinue
           & "$env:GITHUB_WORKSPACE\launcher\tecs.ps1" check
           & "$env:GITHUB_WORKSPACE\launcher\tecs.ps1" build
-          & "$env:GITHUB_WORKSPACE\launcher\tecs.ps1" add inspect
-          if (-not (Test-Path "src\vendor\share\lua\5.1\inspect.lua")) { throw "inspect was not vendored" }
-          if (-not (Test-Path "src\vendor\share\lua\5.1\inspect.d.tl")) { throw "inspect types were not vendored" }
-          @(
-            'local inspect <const> = require("inspect")'
-            'local debugutil <const> = {'
-            '    dump = function(value: any): string'
-            '        return inspect(value)'
-            '    end,'
-            '}'
-            'return debugutil'
-          ) | Set-Content "src\debugutil.tl"
-          & "$env:GITHUB_WORKSPACE\launcher\tecs.ps1" check
-          Remove-Item "src\debugutil.tl"
-          & "$env:GITHUB_WORKSPACE\launcher\tecs.ps1" remove inspect
-          if (Test-Path "src\vendor\share\lua\5.1\inspect.lua") { throw "inspect was not removed" }
           $checkJson = (& "$env:GITHUB_WORKSPACE\launcher\tecs.ps1" check --json | Out-String)
           if ($checkJson -notmatch '"ok":true') { throw "check --json did not report ok" }
           $infoJson = (& "$env:GITHUB_WORKSPACE\launcher\tecs.ps1" info --json | Out-String)

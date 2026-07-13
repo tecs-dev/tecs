@@ -174,25 +174,20 @@ tecs completions fish > ~/.config/fish/completions/tecs.fish
 
 ## Dependencies
 
+Vendor pure-Lua rocks with LuaRocks; the project tree already uses the
+LuaRocks layout:
+
 ```sh
-tecs add inspect          # newest version with a source rock
-tecs add inspect@2.0-1    # pin a version
-tecs remove inspect
-tecs update               # re-resolve every added rock (or: tecs update inspect)
+luarocks install --tree src/vendor --lua-version=5.1 inspect
+luarocks install --tree src/vendor --lua-version=5.1 inspect-tl-type
 ```
 
-`tecs add` vendors a pure-Lua rock from luarocks.org into
-`src/vendor/share/lua/5.1/`, along with its dependencies and license files.
-When luarocks.org publishes a `<rock>-tl-type` package, the matching Teal
-type declarations are vendored too, so `tecs check` keeps working. `tecs-rocks.lua` at the
-project root records exactly what was installed; commit it. `src/vendor/`
-stays generated (and gitignored): `tecs check` and `tecs build` restore any
-missing recorded rocks at their pinned versions, so fresh clones just work.
-
-Rocks that need a C compiler (or any non-`builtin` build) are rejected: the
-game runtime is LÖVE's LuaJIT with no toolchain, and builds must stay
-self-contained. The LuaRocks client is never used; the CLI talks to
-luarocks.org directly over the LÖVE runtime's HTTPS support.
+Teal declarations for popular rocks are published as `<rock>-tl-type`
+packages, so `tecs check` keeps type-checking code that requires them. Only
+pure-Lua rocks work: the game runtime is LÖVE's LuaJIT with no C toolchain,
+and `tecs build` prunes LuaRocks bookkeeping from the shipped game.
+`src/vendor/` is regenerated and gitignored, so record installed rocks
+somewhere repeatable and reinstall after a fresh clone.
 
 ## Development Commands
 
@@ -225,8 +220,9 @@ TECS_TEAL_DIR=../tl tecs check
 
 The CLI stages the required declarations and framework sources into
 `src/vendor/`; it never builds rocks and has no LuaRocks dependency. Third
-party pure-Lua rocks are vendored explicitly with `tecs add`. A `TECS_DIR`
-checkout can replace the embedded framework sources during development.
+party pure-Lua rocks can be vendored into the same tree with LuaRocks. A
+`TECS_DIR` checkout can replace the embedded framework sources during
+development.
 
 The repository keeps private CLI libraries in `tecs_cli/vendor/`. Teal lives
 under `tecs_cli/runtime/teal/` because its canonical `teal.*`, `tlcli.*`, and
