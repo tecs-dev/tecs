@@ -1,4 +1,10 @@
-# Codex project configuration: connect to the game's built-in MCP server.
-# Launch the game first (`tecs run`); the server listens while it runs.
-[mcp_servers.tecs-game]
-url = "http://127.0.0.1:19999/mcp"
+# Codex project configuration: the Tecs CLI serves this project over MCP.
+# `tecs mcp` provides toolchain tools (check, build, integ, dist), game
+# lifecycle (start_game, stop_game, restart_game, game_status, game_logs),
+# and proxies the running game's own MCP tools.
+#
+# To attach to an already-running game directly instead, use its HTTP
+# endpoint: url = "http://127.0.0.1:19999/mcp"
+[mcp_servers.tecs]
+command = "tecs"
+args = ["mcp"]

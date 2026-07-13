@@ -110,6 +110,21 @@ pixels, send input). New projects include a working example in
 `spec/game_lovespec.tl`. Integration runs are not headless; macOS and Linux
 only.
 
+## Serve over MCP
+
+```sh
+tecs mcp
+```
+
+`tecs mcp` runs an MCP server on stdio for agent clients (generated projects
+configure Claude Code and Codex to use it). It exposes `check`, `build`,
+`integ`, and `dist` as tools, manages the game process (`start_game`,
+`stop_game`, `restart_game`, `game_status`, and `game_logs`, which survives
+crashes), and proxies every tool of the running game's built-in MCP server —
+screenshots, pixel probes, input events, `run_lua`, and the `cmd_*` debug
+commands. Sessions survive game restarts, and each launch gets a free port.
+macOS and Linux only, like `tecs integ`.
+
 ## Distribute
 
 ```sh

@@ -78,6 +78,22 @@ jobs:
           test ! -e "$project/src/vendor/share/lua/5.1/inspect.d.tl"
           if [ "$(uname -s)" = Darwin ]; then
             (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" integ)
+            printf '%s\n' \
+              '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \
+              '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+              '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+              '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"check","arguments":{}}}' \
+              '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"start_game","arguments":{}}}' \
+              '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"run_lua","arguments":{"code":"return 1 + 1"}}}' \
+              '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"stop_game","arguments":{}}}' \
+              > "$RUNNER_TEMP/mcp-session.jsonl"
+            (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" mcp \
+              < "$RUNNER_TEMP/mcp-session.jsonl" > "$RUNNER_TEMP/mcp-out.jsonl")
+            grep -q '"name":"tecs"' "$RUNNER_TEMP/mcp-out.jsonl"
+            grep -q '"start_game"' "$RUNNER_TEMP/mcp-out.jsonl"
+            grep -q 'list_changed' "$RUNNER_TEMP/mcp-out.jsonl"
+            grep -q '"values":\["2"\]' "$RUNNER_TEMP/mcp-out.jsonl"
+            grep -F '\"stopped\":true' "$RUNNER_TEMP/mcp-out.jsonl" > /dev/null
             (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" dist)
             test -f "$project/dist/hello-tecs.love"
             test -f "$project/dist/macos/hello-tecs.app/Contents/Resources/hello-tecs.love"

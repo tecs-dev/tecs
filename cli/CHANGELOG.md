@@ -6,6 +6,16 @@ When cutting a release, bump `VERSION` in `tecs_cli/cli.lua`, update this file,
 and push the matching `v*` tag. CI publishes the self-contained `.love`
 payload, launchers, and installers as GitHub release assets.
 
+## [Unreleased]
+
+### Added
+
+- `tecs mcp` serves the project over MCP on stdio: `check`, `build`, `integ`,
+  and `dist` as tools, game lifecycle management (`start_game`, `stop_game`,
+  `restart_game`, `game_status`, `game_logs`), and a proxy to the running
+  game's own MCP tools. Generated `.mcp.json` and `.codex/config.toml` now
+  use it instead of the raw HTTP endpoint.
+
 ## [0.7.1] - 2026-07-12
 
 ### Changed

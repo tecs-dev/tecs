@@ -2059,6 +2059,79 @@ function tasks.dist(args)
     if not ok then error(err, 0) end
 end
 
+-- Everything host-specific the MCP bridge needs, kept injectable so the
+-- dispatcher stays unit-testable outside LÖVE.
+local function build_mcp_context()
+    local ffi = require("ffi")
+    pcall(ffi.cdef, [[
+        int setenv(const char *name, const char *value, int overwrite);
+        int unsetenv(const char *name);
+    ]])
+    install_framework_loader()
+
+    local kernel_tools = {}
+    do
+        local ok, mcp_tools = pcall(require, "tecs2d.mcp.tools")
+        if ok and type(mcp_tools) == "table" and type(mcp_tools.list) == "table" then
+            kernel_tools = mcp_tools.list
+        end
+    end
+
+    return {
+        version = VERSION,
+        project_name = dist_name(),
+        json = json_module(),
+        kernel_tools = kernel_tools,
+        love_process = require("tecs2d.testing.love_process"),
+        mcp_client = require("tecs2d.testing.mcp_client"),
+        love_bin = love_bin,
+        check = function()
+            ensure_vendor()
+            restore_missing_rocks()
+            return collect_check_diagnostics(list_teal_sources())
+        end,
+        build = function()
+            tasks.build()
+        end,
+        -- Run another CLI task in a child process: integ and dist mutate too
+        -- much global state (busted's runner, os.exit traps) to share the
+        -- bridge's process.
+        reexec = function(task, extra)
+            local command = q(love_bin()) .. " " .. q(love_api.filesystem.getSource())
+                .. " --tecs-project " .. q(cwd()) .. " " .. task
+            if extra then command = command .. " " .. q(extra) end
+            local pipe = io.popen(command .. " 2>&1")
+            local output = pipe:read("*a") or ""
+            local ok = pipe:close()
+            return ok == true or ok == 0, output:sub(-8192)
+        end,
+        set_env = function(name, value) ffi.C.setenv(name, value, 1) end,
+        unset_env = function(name) ffi.C.unsetenv(name) end,
+        read_buildinfo = function()
+            if not exists("build/tecs_buildinfo.lua") then return nil end
+            local chunk = loadstring(read_binary("build/tecs_buildinfo.lua"))
+            if not chunk then return nil end
+            local ok, info = pcall(chunk)
+            if ok then return info end
+            return nil
+        end,
+        log = status,
+    }
+end
+
+-- Serve the project over MCP on stdio: toolchain tools, game lifecycle, and
+-- a proxy to the running game's own MCP tools.
+function tasks.mcp()
+    ensure_project()
+    if not is_love_cli then
+        error("the MCP bridge requires LÖVE; run tecs through its installed launcher", 0)
+    end
+    if is_windows then
+        fail("tecs mcp requires macOS or Linux; the game process harness is POSIX-only")
+    end
+    require("tecs_cli.mcp_bridge").serve(build_mcp_context())
+end
+
 function tasks.agent(args)
     local docs = list_agent_docs()
 
@@ -2300,6 +2373,14 @@ local commands = {
         setup = function(subcommand)
             subcommand:argument("rock", "Rock to update; omit to update everything."):args("?")
         end,
+    },
+    {
+        name = "mcp",
+        summary = "Serve the project over MCP on stdio",
+        description = "Run an MCP server for agent clients: check/build/integ/dist as tools, "
+            .. "game lifecycle (start_game, stop_game, restart_game, game_status, game_logs), "
+            .. "and a proxy to the running game's own MCP tools.",
+        action = tasks.mcp,
     },
     {
         name = "agent",

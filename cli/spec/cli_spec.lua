@@ -445,6 +445,81 @@ describe("tecs CLI", function()
         end)
     end)
 
+    describe("mcp bridge", function()
+        local framework_dir = os.getenv("TECS_DIR")
+        local has_framework = framework_dir and framework_dir ~= ""
+            and exists(join(framework_dir, "src", "tecs", "utils", "json", "init.tl"))
+
+        local function newServer()
+            local bridge = require("tecs_cli.mcp_bridge")
+            return bridge.new({
+                version = "9.9.9",
+                project_name = "spec-game",
+                json = cli._internal.json_module(),
+                kernel_tools = {
+                    {name = "screenshot", description = "d", inputSchema = {type = "object"}},
+                },
+                check = function() return true, {} end,
+                build = function() end,
+                reexec = function() return true, "ran" end,
+                set_env = function() end,
+                unset_env = function() end,
+                read_buildinfo = function() return nil end,
+                log = function() end,
+            })
+        end
+
+        if has_framework then
+            it("answers initialize with the server identity", function()
+                local out = newServer():handleLine(
+                    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}')
+                assert.equals(1, #out)
+                assert.matches('"name":"tecs"', out[1])
+                assert.matches('"version":"9%.9%.9"', out[1])
+                assert.matches('"listChanged":true', out[1])
+            end)
+
+            it("lists CLI tools alongside the game's kernel tools", function()
+                local out = newServer():handleLine('{"jsonrpc":"2.0","id":2,"method":"tools/list"}')
+                assert.matches('"check"', out[1])
+                assert.matches('"start_game"', out[1])
+                assert.matches('"screenshot"', out[1])
+            end)
+
+            it("runs CLI tools and wraps structured results", function()
+                local out = newServer():handleLine(
+                    '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"check","arguments":{}}}')
+                assert.matches('\\"ok\\":true', out[1])
+                assert.equals(nil, out[1]:match("isError"))
+            end)
+
+            it("errors on game tools when no game is running", function()
+                local out = newServer():handleLine(
+                    '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"screenshot","arguments":{}}}')
+                assert.matches("start_game", out[1])
+                assert.matches('"isError":true', out[1])
+            end)
+
+            it("rejects unknown methods and malformed lines", function()
+                local server = newServer()
+                local out = server:handleLine('{"jsonrpc":"2.0","id":5,"method":"resources/list"}')
+                assert.matches("%-32601", out[1])
+                out = server:handleLine("this is not json")
+                assert.matches("%-32700", out[1])
+            end)
+
+            it("ignores notifications", function()
+                local out = newServer():handleLine(
+                    '{"jsonrpc":"2.0","method":"notifications/initialized"}')
+                assert.equals(0, #out)
+            end)
+        else
+            it("skips bridge specs without a Tecs checkout (set TECS_DIR)", function()
+                assert.is_true(true)
+            end)
+        end
+    end)
+
     describe("dist", function()
         local internal = cli._internal
 

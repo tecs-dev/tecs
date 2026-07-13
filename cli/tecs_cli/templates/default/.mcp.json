@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "tecs-game": {
-      "type": "http",
-      "url": "http://127.0.0.1:19999/mcp"
+    "tecs": {
+      "command": "tecs",
+      "args": ["mcp"]
     }
   }
 }
