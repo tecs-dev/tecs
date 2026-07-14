@@ -486,15 +486,57 @@ local function listBundledDocs(subdir, label)
     return docs
 end
 
--- Agent guides live in tecs_cli/agents/; authoring reference topics (for the
--- `docs` command) live in tecs_cli/docs/. Separate namespaces so the two
--- listings never bleed into each other.
 local function listAgentDocs()
     return listBundledDocs("agents", "agent doc")
 end
 
-local function listDocTopics()
-    return listBundledDocs("docs", "doc topic")
+-- The `docs` command serves an offline mirror of the framework documentation:
+-- llms.txt (the titled, described page index) and llms-full.txt (every page).
+-- `build_love.sh` copies both into the payload from the tecs checkout; from a
+-- source tree they are read from $TECS_DIR/docs/llms (mirroring build_love's
+-- default of ../tecs).
+local function readDocBundle(name)
+    if isLoveCli and loveApi then
+        local content, err = loveApi.filesystem.read("tecs_cli/docs/" .. name)
+        if not content then
+            error("could not read bundled doc " .. name .. ": " .. tostring(err), 0)
+        end
+        return content
+    end
+    local dir = tecsDir
+    if not dir then
+        local modulePath = sourcePath()
+        if modulePath then
+            dir = pathJoin(dirname(dirname(modulePath)), "..", "tecs")
+        end
+    end
+    local path = dir and pathJoin(dir, "docs", "llms", name)
+    local handle = path and io.open(path, "rb")
+    if not handle then
+        error("docs bundle not found; run `make docs-llms` in the tecs checkout or set TECS_DIR", 0)
+    end
+    local content = handle:read("*a")
+    handle:close()
+    return content
+end
+
+-- Split llms-full.txt into { url = pageMarkdown } by the per-page
+-- `---\nurl: /path.md\n...` frontmatter markers the docs build emits.
+local function docPagesByUrl(full)
+    local marks = {}
+    local init = 1
+    while true do
+        local s, e, url = full:find("\n?%-%-%-\nurl:%s*([^\n]+)\n", init)
+        if not s then break end
+        marks[#marks + 1] = {start = s, url = (url:gsub("%s+$", ""))}
+        init = e + 1
+    end
+    local pages = {}
+    for i = 1, #marks do
+        local stop = (marks[i + 1] and marks[i + 1].start - 1) or #full
+        pages[marks[i].url] = (full:sub(marks[i].start, stop):gsub("^\n", ""))
+    end
+    return pages
 end
 
 -- Modification time of a path (platform-specific units), or 0 if it is missing.
@@ -1625,61 +1667,53 @@ function tasks.agent(args)
 end
 
 function tasks.docs(args)
-    local topics = listDocTopics()
-
-    -- --json is a listing-only modifier; a topic or --full print raw Markdown.
-    if args.json and (args.topic or args.full) then
-        fail("--json is only valid when listing topics (drop the topic and --full)")
+    -- --json and --full are listing/whole-corpus modifiers; a page prints one page.
+    if args.page and args.full then
+        fail("pass either a page or --full, not both")
     end
-    if args.topic and args.full then
-        fail("pass either a topic or --full, not both")
+    if args.json and (args.page or args.full) then
+        fail("--json is only valid for the page index (drop the page and --full)")
     end
 
-    -- Print every topic, in listing (sorted) order, with a heading separator.
+    -- Whole corpus.
     if args.full then
-        for _, doc in ipairs(topics) do
-            io.write("\n\n# " .. doc.name .. "\n\n")
-            io.write((doc.content:gsub("%s+$", "")))
+        io.write(readDocBundle("llms-full.txt"))
+        return
+    end
+
+    -- One page, addressed by its index path (e.g. tecs2d/rendering/shapes or
+    -- /tecs2d/rendering/shapes.md).
+    if args.page and args.page ~= "" then
+        local url = "/" .. (args.page:gsub("^/", ""):gsub("%.md$", "")) .. ".md"
+        local page = docPagesByUrl(readDocBundle("llms-full.txt"))[url]
+        if not page then
+            fail("unknown page '" .. tostring(args.page) .. "'. Run `tecs docs` to list pages")
+        end
+        io.write(page)
+        if not page:match("\n$") then
             io.write("\n")
         end
         return
     end
 
-    -- Print one topic's Markdown to stdout.
-    if args.topic and args.topic ~= "" then
-        local names = {}
-        for _, doc in ipairs(topics) do
-            names[#names + 1] = doc.name
-            if doc.name == args.topic then
-                io.write(doc.content)
-                if not doc.content:match("\n$") then
-                    io.write("\n")
-                end
-                return
-            end
-        end
-        fail("unknown doc '" .. tostring(args.topic) .. "'. Expected one of: " .. table.concat(names, ", "))
-    end
-
-    -- List topics.
+    -- The page index (llms.txt): titled, described, sectioned tree.
+    local index = readDocBundle("llms.txt")
     if args.json then
         local json = jsonModule()
-        local listed = {}
-        for _, doc in ipairs(topics) do
-            listed[#listed + 1] = {
-                name = doc.name,
-                description = agentDocDescription(doc.content),
+        local pages = {}
+        for title, path, desc in index:gmatch("%-%s*%[(.-)%]%((/[%w%-%._/]+%.md)%):%s*([^\n]*)") do
+            pages[#pages + 1] = {
+                id = (path:gsub("^/", ""):gsub("%.md$", "")),
+                title = title,
+                description = (desc:gsub("%s+$", "")),
             }
         end
-        print(json.serialize(listed, true))
+        print(json.serialize(pages, true))
         return
     end
-    local width = 0
-    for _, doc in ipairs(topics) do
-        width = math.max(width, #doc.name)
-    end
-    for _, doc in ipairs(topics) do
-        print(string.format("%-" .. width .. "s  %s", doc.name, agentDocDescription(doc.content)))
+    io.write(index)
+    if not index:match("\n$") then
+        io.write("\n")
     end
 end
 
@@ -1879,17 +1913,16 @@ local commands = {
     },
     {
         name = "docs",
-        summary = "Print the bundled Tecs reference",
-        description = "List the bundled reference topics, or print one to stdout. Topics cover the "
-            .. "CLI workflow, integration testing, and the tecs2d rendering/component/system/input "
-            .. "surface plus Teal gotchas and the style guide, so agents and developers have one "
-            .. "always-current source of truth (versioned with the installed CLI) instead of "
-            .. "reading vendored sources under src/vendor/. Use --full to print every topic.",
+        summary = "Print the framework documentation offline",
+        description = "Offline mirror of the framework docs, versioned with the installed CLI. "
+            .. "`tecs docs` prints the page index (a titled, described tree); `tecs docs <page>` "
+            .. "prints one page by its index path (e.g. tecs2d/rendering/shapes); `tecs docs --full` "
+            .. "prints every page. Prefer this over reading vendored sources under src/vendor/.",
         action = tasks.docs,
         setup = function(subcommand)
-            subcommand:argument("topic", "Doc topic to print; omit to list topics."):args("?")
-            subcommand:flag("--full", "Print every topic concatenated, in listing order.")
-            subcommand:flag("--json", "Print the topic listing as JSON on stdout.")
+            subcommand:argument("page", "Page path to print, e.g. tecs/world; omit for the index."):args("?")
+            subcommand:flag("--full", "Print every page concatenated.")
+            subcommand:flag("--json", "Print the page index as JSON on stdout.")
         end,
     },
     {
@@ -2039,7 +2072,6 @@ M._internal = {
     q = q,
     setDataDir = function(path) dataDirOverride = path end,
     listAgentDocs = listAgentDocs,
-    listDocTopics = listDocTopics,
     agentDocDescription = agentDocDescription,
     jsonModule = jsonModule,
     distName = distName,

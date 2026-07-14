@@ -10,21 +10,18 @@ payload, launchers, and installers as GitHub release assets.
 
 ### Added
 
-- `tecs docs` command: prints the bundled Tecs reference — the CLI workflow,
-  integration testing, and the tecs2d rendering, components/systems/queries,
-  input, Teal gotchas, and style topics — so agents and developers have one
-  always-current source of truth, versioned with the installed CLI, instead of
-  reading vendored framework sources. `tecs docs` lists topics,
-  `tecs docs <topic>` prints one, `tecs docs --full` prints all, and
-  `tecs docs --json` lists them as JSON.
-
-### Changed
-
-- New projects no longer commit `.claude/skills/` copies of the CLI-workflow and
-  integration-testing guidance. That guidance now lives in `tecs docs`
-  (`cli-workflow`, `testing`), and `AGENTS.md` references `tecs docs` as the
-  source of truth. Committed skill copies drifted from the CLI and could describe
-  a version other than the one installed; the command always matches.
+- `tecs docs` command: an offline mirror of the framework documentation,
+  vendored from the Tecs checkout at build time and versioned with the installed
+  CLI. `tecs docs` prints the page index (titled, described tree); `tecs docs
+  <page>` prints one page by its index path (e.g. `tecs2d/rendering/shapes`);
+  `tecs docs --full` prints every page; `tecs docs --json` prints the index as
+  `{id, title, description}`. Agents can scan the index and pull the exact page
+  they need instead of reading vendored sources under `src/vendor/`.
+- A `tecs-conventions` Claude Code skill covering idiomatic Tecs/Teal
+  conventions and the pitfalls that break `tecs check`, alongside the existing
+  `tecs-cli` and `integration-testing` skills. Procedural guidance ships as
+  skills (surfaced automatically while you work); `tecs docs` is the pulled
+  reference.
 
 ## [0.9.0] - 2026-07-13
 

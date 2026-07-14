@@ -1,6 +1,11 @@
+---
+name: tecs-cli
+description: Drive this Tecs2D project with the tecs CLI — type-check, build, run, test, package — and the MCP bridge tools. Use for any build/test/run/package workflow.
+---
+
 # Tecs CLI workflow
 
-The command loop for a Tecs project — type-check, build, run, test, package — and the MCP bridge tools. Run everything from the project root (the directory with `tlconfig.lua`).
+Run everything from the project root (the directory with `tlconfig.lua`).
 
 ## Core loop
 
@@ -9,16 +14,18 @@ The command loop for a Tecs project — type-check, build, run, test, package �
 - `tecs build`: compile to `build/`. A running game hot-reloads a successful build automatically,
   so prefer building over restarting the game.
 - `tecs run`: build, then launch the game with the cached LÖVE runtime.
-- `tecs integ`: compile and run `spec/` with the bundled busted runner. See `tecs docs testing`.
+- `tecs integ`: compile and run `spec/` with the bundled busted runner. See the
+  integration-testing skill.
 - `tecs dist [love|macos|windows]`: package the game into `dist/`. The MCP server and debugger
   disable themselves in these builds unless constructed with `{enableInDist = true}`.
-- `tecs docs`: this reference. `tecs docs` lists topics; `tecs docs <topic>` prints one.
+- `tecs docs`: the offline mirror of the framework documentation. `tecs docs` lists the doc tree;
+  `tecs docs <page>` prints a page (e.g. `tecs docs tecs2d/rendering/shapes`). Look the API up
+  here instead of reading vendored sources under `src/vendor/`.
 
 ## MCP bridge
 
-Generated projects ship `.mcp.json` (Claude Code) and `.codex/config.toml` (Codex), both running
-`tecs mcp` — a stdio bridge that works even before the game exists. Prefer these MCP tools over
-shell commands when connected:
+`.mcp.json` (Claude Code) and `.codex/config.toml` (Codex) run `tecs mcp`, a stdio bridge that
+works even before the game exists. Prefer these MCP tools over shell commands when connected:
 
 - Toolchain as tools: `check`, `build`, `integ`, `dist`.
 - Game lifecycle: `start_game`, `stop_game`, `restart_game`, `game_status`, `game_logs`
@@ -32,15 +39,15 @@ endpoint on port 19999 is only for attaching to an already-running game (e.g. a 
 
 ## Dependencies
 
-Vendor pure-Lua rocks with LuaRocks into the project tree, which already uses the LuaRocks layout:
+Vendor pure-Lua rocks with LuaRocks into the project tree:
 
 ```sh
 luarocks install --tree src/vendor --lua-version=5.1 <rock>
 ```
 
 Install the matching `<rock>-tl-type` rock too so `tecs check` keeps passing. Only pure-Lua rocks
-work: the runtime is LÖVE's LuaJIT with no C toolchain. `src/vendor/` is regenerated and gitignored,
-so record installed rocks somewhere repeatable and reinstall after a fresh clone.
+work — the runtime is LÖVE's LuaJIT with no C toolchain. `src/vendor/` is regenerated and
+gitignored, so record installed rocks somewhere repeatable.
 
 ## Facts worth knowing
 
@@ -48,5 +55,3 @@ so record installed rocks somewhere repeatable and reinstall after a fresh clone
   runtime with `require("tecs2d.buildinfo")`.
 - `TECS_MCP_PORT` picks the game's MCP port; harnesses assign a free one.
 - `build/` and `src/vendor/` are generated; never edit them by hand.
-
-See also: `tecs docs testing`, `tecs docs tecs2d-quickstart`.

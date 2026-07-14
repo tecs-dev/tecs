@@ -1,6 +1,9 @@
-# Tecs integration testing
+---
+name: integration-testing
+description: Write and run integration specs that drive the built game over MCP with `tecs integ`. Use when adding, writing, or debugging game-behavior tests.
+---
 
-Write and run integration specs that drive the built game over MCP with `tecs integ`. Use when adding tests for game behavior or verifying a gameplay change end to end.
+# Tecs integration testing
 
 `tecs integ` builds the game, compiles `spec/**/*.tl`, and runs it with the bundled busted runner.
 Specs named `*_lovespec.tl` launch the built game under real LÖVE and drive it over MCP; `*_spec.tl`
@@ -27,12 +30,11 @@ end)
 ```
 
 Boot one game per `describe` (booting takes ~1s) and walk it through its states in test order
-instead of restarting per test. `fixture.start("build")` assigns a free MCP port automatically via
-`TECS_MCP_PORT`.
+instead of restarting per test. `fixture.start("build")` assigns a free MCP port automatically.
 
 ## Driving and reading the game
 
-- Send input through the event pipeline (reaches `tecs2d.input` and controller bindings):
+- Send input through the event pipeline:
 
   ```teal
   app.client:call("send_love_event", {event = "keypressed", args = {key, key, false}})
@@ -43,42 +45,20 @@ instead of restarting per test. `fixture.start("build")` assigns a free MCP port
 
 - Read state with `fixture.runLua(app, code)`: the code runs inside the game, `world` is in scope,
   `require` resolves game modules, and return values come back stringified. Count entities by
-  querying a component:
+  querying a component and returning `tostring(count)`.
 
-  ```teal
-  local shared = require("plugins.shared")
-  local query = world:query({include = {shared.Player}})
-  local count = 0
-  for _, len in query:iter() do count = count + len end
-  return tostring(count)
-  ```
+- The game advances frame by frame, so poll time-dependent assertions with `fixture.eventually`
+  rather than sleeping.
 
-- The game advances frame by frame, so poll time-dependent assertions:
-
-  ```teal
-  local state = fixture.eventually(fixture.callTimeout, function(): string
-      local values = fixture.runLua(app, "return world:peekState()")
-      if values[1] == "game" then return values[1] end
-      return nil
-  end)
-  ```
-
-- `fixture.probePixels(app, {{0.5, 0.5}})` samples framebuffer pixels (normalized coordinates,
-  `{r, g, b}` triples). `app.client:screenshot()` returns a base64 PNG; decode with
-  `tecs2d.testing.png_util.base64Decode`. Any MCP tool is reachable via
+- `fixture.probePixels(app, {{0.5, 0.5}})` samples framebuffer pixels (normalized coords,
+  `{r, g, b}`). `app.client:screenshot()` returns a base64 PNG. Any MCP tool is reachable via
   `app.client:call(tool, params)`.
 
 ## Rules and gotchas
 
 - Assertions use luassert's flat API: `luassert.equal`, `luassert.same`, `luassert.is_true`. There
   is no `luassert.are.*` in the type declarations.
-- Specs are Teal and type-checked before running: `socket.sleep(3)` compiles, `socket.sleep(3.0)`
-  does not (the declaration takes an integer).
-- On failure, `fixture.start` prints the game's log; later logs are under
-  `build/test_deps/love_test_logs/`.
-- Prefer polling (`fixture.eventually`) over sleeps; reserve `socket.sleep` for letting gameplay
-  visibly progress (e.g. before a screenshot).
+- Specs are Teal and type-checked: `socket.sleep(3)` compiles, `socket.sleep(3.0)` does not.
+- Prefer polling (`fixture.eventually`) over sleeps.
 - For deterministic assertions, seed randomness at startup and expose queryable state (a dedicated
   tag or a world resource) rather than guessing from pixels.
-
-See also: `tecs docs cli-workflow`, `tecs docs tecs-gotchas`.

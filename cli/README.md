@@ -97,15 +97,15 @@ stdout for editors, CI, and coding agents. Check output has the shape
 its absolute path, ready to reference from agent configuration
 (`CLAUDE.md`, `AGENTS.md`, and similar).
 
-`tecs docs` prints the bundled reference for building with Tecs — the CLI
-workflow, integration testing, and the tecs2d rendering, component, system,
-input, gotchas, and style topics — so agents and developers have one
-always-current source of truth (versioned with the installed CLI) instead of
-reading vendored framework sources. `tecs docs` lists the topics,
-`tecs docs <topic>` prints one to stdout, `tecs docs --full` prints them all,
-and `tecs docs --json` lists them as machine-readable JSON. Generated projects
-reference `tecs docs` from `AGENTS.md` rather than committing copies of this
-guidance, so it never drifts from the installed CLI.
+`tecs docs` is an offline mirror of the framework documentation, versioned with
+the installed CLI and vendored from the Tecs checkout at build time. `tecs docs`
+prints the page index (a titled, described tree); `tecs docs <page>` prints one
+page by its index path (e.g. `tecs docs tecs2d/rendering/shapes`);
+`tecs docs --full` prints every page; and `tecs docs --json` prints the index as
+machine-readable `{id, title, description}`. Generated projects reference
+`tecs docs` from `AGENTS.md` rather than committing copies, so it never drifts.
+Procedural guidance (the CLI workflow, integration testing, conventions) ships
+as Claude Code skills under `.claude/skills/`.
 
 ## Testing
 

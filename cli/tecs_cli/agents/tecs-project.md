@@ -24,11 +24,11 @@ Run these from the project root (the directory containing `tlconfig.lua`):
 - `tecs dist [love|macos|windows]`: package the built game into `dist/` as a `.love`
   file, a macOS app bundle, and a fused Windows executable. The macOS bundle needs a
   POSIX host; Windows packages build anywhere.
-- `tecs docs`: the bundled reference for building with Tecs, and the source of truth for how to
-  use this project. Run `tecs docs` to list topics (the CLI workflow, integration testing,
-  rendering, components/systems/queries, input, Teal gotchas, style) and `tecs docs <topic>` to
-  print one. It ships with the CLI, so it always matches the installed `tecs`; prefer it over
-  reading vendored sources under `src/vendor/`.
+- `tecs docs`: an offline mirror of the framework documentation, versioned with the installed
+  CLI. Run `tecs docs` for the page index (a titled, described tree), then `tecs docs <page>`
+  for the page you need — e.g. `tecs docs tecs2d/rendering/shapes`. `tecs docs --full` prints
+  every page. Prefer this over reading vendored sources under `src/vendor/`; the CLI/testing
+  workflow and conventions live in the bundled Claude Code skills.
 - `tecs info --json`: CLI, LÖVE, and LuaJIT versions plus project status as JSON.
 - Dependencies: vendor pure-Lua rocks with LuaRocks into the project tree
   (`luarocks install --tree src/vendor --lua-version=5.1 <rock>`, plus the matching
