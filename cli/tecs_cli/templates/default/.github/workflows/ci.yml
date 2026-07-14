@@ -17,66 +17,11 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
-      - name: Check out the game
-        uses: actions/checkout@v4
-
-      - name: Cache the LÖVE runtime
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/tecs-cache
-          key: tecs-cache-${{ runner.os }}
-
-      - name: Install the Tecs CLI (Homebrew)
-        if: runner.os == 'macOS'
-        run: |
-          brew install tecs-dev/tap/tecs-cli
-          echo "TECS=$(brew --prefix)/bin/tecs" >> "$GITHUB_ENV"
-
-      - name: Install the Tecs CLI (installer script)
-        if: runner.os == 'Linux'
-        env:
-          TECS_BIN_DIR: ${{ runner.temp }}/tecs-bin
-        run: |
-          curl -fsSL https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.sh -o install-tecs.sh
-          bash install-tecs.sh
-          echo "TECS=$TECS_BIN_DIR/tecs" >> "$GITHUB_ENV"
-
-      - name: Install the Tecs CLI (Scoop)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $PSNativeCommandUseErrorActionPreference = $true
-          Invoke-WebRequest get.scoop.sh -OutFile install-scoop.ps1
-          .\install-scoop.ps1 -RunAsAdmin
-          $shims = Join-Path $env:USERPROFILE "scoop\shims"
-          & (Join-Path $shims "scoop.ps1") bucket add tecs https://github.com/tecs-dev/scoop-bucket
-          & (Join-Path $shims "scoop.ps1") install tecs
-          "TECS=$(Join-Path $shims 'tecs.cmd')" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-
-      - name: Type-check and build
-        if: runner.os != 'Windows'
-        env:
-          TECS_CACHE_DIR: ${{ runner.temp }}/tecs-cache
-        run: |
-          "$TECS" check
-          "$TECS" build
-          test -f build/main.lua
-
-      # Integration specs launch the real game; macOS runners can create a
-      # window, Linux runners cannot without a display server.
-      - name: Integration tests
-        if: runner.os == 'macOS'
-        env:
-          TECS_CACHE_DIR: ${{ runner.temp }}/tecs-cache
-        run: '"$TECS" integ'
-
-      - name: Type-check and build (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          TECS_CACHE_DIR: ${{ runner.temp }}\tecs-cache
-        run: |
-          $PSNativeCommandUseErrorActionPreference = $true
-          & $env:TECS check
-          & $env:TECS build
-          if (-not (Test-Path "build\main.lua")) { throw "main.lua was not built" }
+      - uses: actions/checkout@v4
+      - uses: tecs-dev/setup-tecs@v1
+      - run: tecs check
+      - run: tecs build
+      # Integration specs launch a real game window; macOS runners have a
+      # display, Linux CI runners do not.
+      - if: runner.os == 'macOS'
+        run: tecs integ

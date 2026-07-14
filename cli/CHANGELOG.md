@@ -8,6 +8,13 @@ payload, launchers, and installers as GitHub release assets.
 
 ## [Unreleased]
 
+### Changed
+
+- New projects' CI uses the `tecs-dev/setup-tecs` action to install the CLI and
+  cache the LÖVE runtime, instead of inlining per-OS Homebrew/Scoop/installer
+  steps. Old projects that reference `@v1` track install-channel fixes
+  automatically. Requires the `tecs-dev/setup-tecs` repo tagged `v1`.
+
 ## [0.10.0] - 2026-07-14
 
 ### Added
