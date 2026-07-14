@@ -53,13 +53,19 @@ These cost iterations because the fix lives in a page you read *before* you hit 
   **not spawn order** — a full-bleed background on a gameplay layer can draw over things above it.
   Put backgrounds on their own lower layer, or order within a layer with `Transform.z`.
   (`tecs docs tecs2d/rendering/layers`, `tecs docs tecs2d/rendering/styling`)
+- **Text/shapes are centered by default:** `gfx.Text`, `gfx.Rectangle`, etc. default to
+  `Pivot(0.5, 0.5)`, so the `Transform` position is their **center**, not their top-left. Add
+  `gfx.Pivot(0, 0)` for a top-left anchor (e.g. a HUD label at a corner).
+  (`tecs docs tecs2d/rendering/styling`, `tecs docs tecs2d/rendering/text`)
 - **Observing events needs the VALUE, not the type:** `local events = require("tecs2d.events");
   world:observe(0, events.MousePressed, ...)`. `tecs2d.MousePressed` resolves to a *type* and won't
   type-check. (`tecs docs tecs2d/events`)
 - **Pointer → game coordinates:** put gameplay on a **world-space** layer and convert with
   `camera:toWorld(x, y)`; use `tecs2d.ui.Anchor` for HUD (it resolves the layer's coordinate space).
   Don't hand-roll screen→virtual math. (`tecs docs tecs2d/input`, `tecs docs tecs2d/rendering/camera`)
-- **Hot reload restores ECS state via snapshots.** State kept in `world.resources[...]` or closures
-  needs a snapshot handler to survive a reload; changing render/layer topology needs a full
-  `restart_game`, not just a rebuild. A frozen-looking frame after reload is often a leftover
-  debugger freeze, not a broken reload. (`tecs docs tecs/save-games`)
+- **Hot reload restores the world from a snapshot, so `Startup` systems do not re-run.** A change
+  that only runs at `Startup` (spawning an entity, setting a pivot) won't appear after a rebuild —
+  it's overwritten by the restored state; do a clean `restart_game` to see it. State in
+  `world.resources[...]` or closures likewise needs a snapshot handler to survive. A frozen-looking
+  frame after reload is often a leftover debugger freeze, not a broken reload.
+  (`tecs docs tecs/save-games`)

@@ -33,9 +33,21 @@ works even before the game exists. Prefer these MCP tools over shell commands wh
 - It proxies the running game's own tools.
 
 The game's own tools (`screenshot`, `run_lua`, `cmd_*`) become callable only **after** `start_game`.
-Prefer `build` over `restart_game` for code changes, since the running game hot-reloads. The HTTP
-endpoint on port 19999 is only for attaching to an already-running game (e.g. a dist build with
-`enableInDist`).
+Prefer `build` over `restart_game` for code changes, since the running game hot-reloads.
+
+Using the game tools:
+
+- **`send_love_event`** takes a single LÖVE event plus its args: `{event = "keypressed",
+  args = ["space", "space", false]}` — not an `events: [...]` array.
+- **`run_lua`** runs `function(world) ... end` and **stringifies** return values, so a returned table
+  becomes `"table: 0x..."`. Return a scalar or a delimited/JSON string you build yourself (e.g.
+  `return table.concat({count, score}, ",")`) for structured reads.
+- **Iterate entities** with `world:query({include = {Component}}):iter()` (there is no
+  `world:each`); see `tecs docs tecs/queries`.
+- **If the `tecs` MCP tools disconnect after `start_game`** (a client mis-reconciling the tool
+  list), attach to the running game's HTTP MCP directly: `game_status` reports the port, then POST
+  JSON-RPC to `http://127.0.0.1:<port>/mcp`. The `:19999` endpoint is also how you attach to a
+  dist build launched with `enableInDist`.
 
 ## Dependencies
 

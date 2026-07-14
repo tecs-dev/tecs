@@ -8,6 +8,14 @@ payload, launchers, and installers as GitHub release assets.
 
 ## [Unreleased]
 
+### Added
+
+- More entry-point guidance in the bundled skills: `tecs-conventions` now covers
+  the centered-default `Pivot` and that hot reload skips `Startup` systems; the
+  `tecs-cli` skill documents the `send_love_event` shape, that `run_lua`
+  stringifies tables, iterating with `world:query():iter()` (no `world:each`),
+  and attaching to the game's HTTP MCP if the bridge tools disconnect.
+
 ## [0.10.1] - 2026-07-14
 
 ### Added
