@@ -8,6 +8,24 @@ payload, launchers, and installers as GitHub release assets.
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-07-14
+
+### Fixed
+
+- New projects ship a `.claude/settings.json` that pre-approves their own
+  `tecs` MCP server (`enabledMcpjsonServers`), so `tecs mcp` connects with no
+  interactive approval once the folder is trusted. Without it, Claude Code left
+  the project's MCP server unapproved and its tools never appeared, forcing
+  agents onto a hand-rolled raw-HTTP client.
+
+### Changed
+
+- The `tecs-cli` skill documents the `run_lua` result envelope
+  (`{returned, values}`, values indexed in return order) and that `run_lua` is
+  sandboxed (love2d and the ECS world are in scope; the filesystem, network,
+  and module loading are blocked). Requires the bundled framework from this
+  release.
+
 ## [0.10.3] - 2026-07-14
 
 ### Fixed

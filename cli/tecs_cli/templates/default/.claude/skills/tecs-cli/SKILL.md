@@ -41,7 +41,10 @@ Using the game tools:
   args = ["space", "space", false]}` — not an `events: [...]` array.
 - **`run_lua`** runs `function(world) ... end` and returns values as **JSON by default** — return a
   table (e.g. `return {count = n, score = s}`) for a cheap structured read. Pass `lua = true` for the
-  raw Lua `tostring` form.
+  raw Lua `tostring` form. The result is an envelope `{returned, values}`: `values` is an array of
+  your return values in order, so `return snake.length` reads back as `values[0]` (not the bare
+  value). The code is **sandboxed**: love2d APIs, the ECS world, and `require("tecs2d.…")` work, but
+  the filesystem (`io`, `os.execute`) and module loading (`require("io")`, `load`) are blocked.
 - **Iterate entities** with `world:query({include = {Component}}):iter()` (there is no
   `world:each`); see `tecs docs tecs/queries`.
 - **Verify with data, not pixels.** Prefer reading ECS state (`run_lua` returning a table, or
