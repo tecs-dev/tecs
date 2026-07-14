@@ -774,6 +774,53 @@ end
 
 -- Type-check sources through the Teal compiler API and return ok plus a flat
 -- diagnostic list, instead of tlcli's human-readable report. Mirrors tlcli's
+-- Love2D events are re-exported from tecs2d as TYPES; passing one as a value
+-- (e.g. world:observe(0, tecs2d.MousePressed, ...)) fails to type-check. Used to
+-- attach a remediation hint to exactly that diagnostic.
+local EVENT_EXPORTS = {
+    Quit = true, KeyPressed = true, KeyReleased = true, MousePressed = true,
+    MouseReleased = true, MouseMoved = true, WheelMoved = true,
+    JoystickAdded = true, JoystickRemoved = true, DirectoryDropped = true,
+    FileDropped = true, Focus = true, MouseFocus = true, Resize = true,
+    Visible = true, Exposed = true, Occluded = true, LocaleChanged = true,
+    ThemeChanged = true, DropBegan = true, DropMoved = true, DropCompleted = true,
+    AudioDisconnected = true, SensorUpdated = true, JoystickSensorUpdated = true,
+    TouchPressed = true, TouchMoved = true, TouchReleased = true,
+}
+
+local function nthLine(path, n)
+    local file = io.open(path, "rb")
+    if not file then return nil end
+    local i = 0
+    for text in file:lines() do
+        i = i + 1
+        if i == n then file:close(); return text end
+    end
+    file:close()
+    return nil
+end
+
+-- Attach {hint, docs} remediation to diagnostics whose fix is well known, so an
+-- agent gets a fix at the moment of the error instead of only if it pre-read the
+-- right page. The same diagnostics flow through the MCP `check` tool, so this
+-- covers CLI and MCP agents. Matchers must be zero-false-positive: match the
+-- exact message and verify the offending source token.
+local function attachRemediation(diagnostics)
+    for _, d in ipairs(diagnostics) do
+        if d.kind == "type"
+            and d.message:find("type definition as a concrete value", 1, true) then
+            local line = nthLine(d.file, d.line)
+            local event = line and line:match("tecs2d%.(%u[%w]*)")
+            if event and EVENT_EXPORTS[event] then
+                d.hint = "Love2D events are exported as types; pass the value: "
+                    .. 'local events = require("tecs2d.events") -- then events.'
+                    .. event .. " as the observe argument."
+                d.docs = "tecs2d/events"
+            end
+        end
+    end
+end
+
 -- rules: syntax errors suppress a file's other diagnostics, disabled warnings
 -- are dropped, and warnings promoted by warning_error fail the check.
 local function collectCheckDiagnostics(sources)
@@ -840,6 +887,7 @@ local function collectCheckDiagnostics(sources)
         error("Teal failed with exit code " .. tostring(code), 0)
     end
 
+    attachRemediation(diagnostics)
     table.sort(diagnostics, function(a, b)
         if a.file ~= b.file then return a.file < b.file end
         if a.line ~= b.line then return a.line < b.line end
@@ -2096,6 +2144,7 @@ M._internal = {
     setDataDir = function(path) dataDirOverride = path end,
     listAgentDocs = listAgentDocs,
     agentDocDescription = agentDocDescription,
+    attachRemediation = attachRemediation,
     jsonModule = jsonModule,
     distName = distName,
     patchPlist = patchPlist,

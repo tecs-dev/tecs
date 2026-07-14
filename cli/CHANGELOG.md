@@ -8,8 +8,25 @@ payload, launchers, and installers as GitHub release assets.
 
 ## [Unreleased]
 
+### Added
+
+- `tecs check` diagnostics can carry a remediation slot (`hint` + a `tecs docs`
+  page in `docs`), surfaced at the moment of the error and through the MCP
+  `check` tool. Piloted on the "event used as a value" mistake
+  (`world:observe(0, tecs2d.MousePressed, ...)`), which points at
+  `require("tecs2d.events")`.
+- The `tecs-conventions` skill gained a "Gameplay & rendering pitfalls" section
+  (draw order within a layer, Transform's `(x, y, z, layer)` signature, events
+  as values, pointer→coordinate conversion, hot-reload state), each with a
+  `tecs docs` back-reference. The starter `main.tl` now spells out the Transform
+  signature and same-layer draw-order rule inline.
+
 ### Changed
 
+- The `tecs mcp` bridge front-loads the game's full tool set at initialize
+  (cached from the first `start_game`) and only fires `tools/list_changed` when
+  the set actually changes, so a large post-`start_game` tool-list swap no longer
+  makes some clients drop the `tecs` tools.
 - New projects' CI uses the `tecs-dev/setup-tecs` action to install the CLI and
   cache the LÖVE runtime, instead of inlining per-OS Homebrew/Scoop/installer
   steps. Old projects that reference `@v1` track install-channel fixes

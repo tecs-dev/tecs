@@ -41,3 +41,25 @@ first time. For the full API, run `tecs docs <page>` (offline mirror of the docs
   keyed by a typed key (no Lua globals); use `world:observe` for lifecycle instead of polling.
 - **Errors:** `error(msg, 0)` for user-actionable failures; validate options at construction, not
   on the first frame; log through `tecs.utils.logging`, not `print`.
+
+## Gameplay & rendering pitfalls
+
+These cost iterations because the fix lives in a page you read *before* you hit the problem. Run
+`tecs docs <page>` for detail.
+
+- **Transform args:** `Transform(x, y, z, layer, rotation?, scaleX?, scaleY?)` — the 4th arg is the
+  **layer**, not scale. (`tecs docs tecs/builtins`)
+- **Draw order:** within one layer, order follows that layer's `sortMode` (e.g. `topdown` y-sort),
+  **not spawn order** — a full-bleed background on a gameplay layer can draw over things above it.
+  Put backgrounds on their own lower layer, or order within a layer with `Transform.z`.
+  (`tecs docs tecs2d/rendering/layers`, `tecs docs tecs2d/rendering/styling`)
+- **Observing events needs the VALUE, not the type:** `local events = require("tecs2d.events");
+  world:observe(0, events.MousePressed, ...)`. `tecs2d.MousePressed` resolves to a *type* and won't
+  type-check. (`tecs docs tecs2d/events`)
+- **Pointer → game coordinates:** put gameplay on a **world-space** layer and convert with
+  `camera:toWorld(x, y)`; use `tecs2d.ui.Anchor` for HUD (it resolves the layer's coordinate space).
+  Don't hand-roll screen→virtual math. (`tecs docs tecs2d/input`, `tecs docs tecs2d/rendering/camera`)
+- **Hot reload restores ECS state via snapshots.** State kept in `world.resources[...]` or closures
+  needs a snapshot handler to survive a reload; changing render/layer topology needs a full
+  `restart_game`, not just a rebuild. A frozen-looking frame after reload is often a leftover
+  debugger freeze, not a broken reload. (`tecs docs tecs/save-games`)

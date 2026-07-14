@@ -24,15 +24,21 @@ local function gamePlugin(world: tecs.World)
         name = "SpawnHello",
         phase = tecs.phases.Startup,
         run = function()
-            -- Background
+            -- Background on layer 1: higher layers always draw on top, so a
+            -- full-bleed background belongs on its own lower layer. Within one
+            -- layer, draw order follows that layer's sortMode (see render.layers
+            -- below), not spawn order -- so keep backgrounds off gameplay layers
+            -- or order with Transform.z.
             world:spawn(
+                -- Transform is (x, y, z, layer, rotation?, scaleX?, scaleY?) --
+                -- the 4th arg is the layer, not scale.
                 Transform(VIRTUAL_WIDTH / 2, VIRTUAL_HEIGHT / 2, 0, 1),
                 gfx.Rectangle(VIRTUAL_WIDTH, VIRTUAL_HEIGHT),
                 gfx.Color(0.08, 0.09, 0.12, 1),
                 gfx.Pivot(0.5, 0.5)
             )
 
-            -- Greeting text
+            -- Greeting text on layer 2 (content), above the background.
             world:spawn(
                 Transform(VIRTUAL_WIDTH / 2, VIRTUAL_HEIGHT / 2, 0, 2),
                 gfx.Text(FONT, "HELLO TECS2D!", 4),

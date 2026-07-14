@@ -336,6 +336,36 @@ describe("tecs CLI", function()
         end)
     end)
 
+    describe("check remediation", function()
+        it("hints the events-as-value mistake with a docs pointer", function()
+            local root = makeTemp("remediation")
+            local file = join(root, "m.tl")
+            writeFile(file, "local tecs2d = require(\"tecs2d\")\n"
+                .. "world:observe(0, tecs2d.MousePressed, handler)\n")
+            local diags = {{
+                file = file, line = 2, column = 18, kind = "type",
+                message = "cannot use a type definition as a concrete value",
+            }}
+            cli._internal.attachRemediation(diags)
+            assert.matches('require%("tecs2d%.events"%)', diags[1].hint)
+            assert.matches("events%.MousePressed", diags[1].hint)
+            assert.equals("tecs2d/events", diags[1].docs)
+        end)
+
+        it("does not hint an unrelated type-as-value error", function()
+            local root = makeTemp("remediation-neg")
+            local file = join(root, "m.tl")
+            writeFile(file, "local x = SomeOtherType\n")
+            local diags = {{
+                file = file, line = 1, column = 11, kind = "type",
+                message = "cannot use a type definition as a concrete value",
+            }}
+            cli._internal.attachRemediation(diags)
+            assert.is_true(diags[1].hint == nil)
+            assert.is_true(diags[1].docs == nil)
+        end)
+    end)
+
     describe("docs command", function()
         local function capturePrint(argv)
             local printed = {}
