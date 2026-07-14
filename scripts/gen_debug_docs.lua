@@ -14,6 +14,7 @@ fresh render, so forgetting to rerun this fails `make test`.
 
 local REFERENCE = "docs/tecs2d/debug-reference.md"
 local TOOLS_DOC = "docs/tecs2d/mcp/tools.md"
+local MANIFEST = "docs/tecs2d/mcp/default-tools.json"
 
 local cmdharness = require("spec.tecs2d.debug.cmdharness")
 local docgen = require("tecs2d.debug.internal.docgen")
@@ -31,3 +32,9 @@ local tf = assert(io.open(TOOLS_DOC, "w"))
 tf:write(tools)
 tf:close()
 print(("Wrote %s (%d bytes)"):format(TOOLS_DOC, #tools))
+
+local manifest = docgen.mcpToolManifest(reg) .. "\n"
+local mf = assert(io.open(MANIFEST, "w"))
+mf:write(manifest)
+mf:close()
+print(("Wrote %s (%d bytes)"):format(MANIFEST, #manifest))

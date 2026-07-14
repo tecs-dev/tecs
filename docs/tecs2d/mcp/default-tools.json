@@ -1,0 +1,2334 @@
+[
+  {
+    "description": "agent connect: copy the MCP client config JSON to the clipboard. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_agent_connect"
+  },
+  {
+    "description": "agent info: show the MCP URL, tool count, and save directory. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_agent_info"
+  },
+  {
+    "description": "archetypes info: show one archetype's entity count and components. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "archetype id",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_archetypes_info"
+  },
+  {
+    "description": "archetypes list: list archetypes by entity count. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_archetypes_list"
+  },
+  {
+    "description": "archetypes select: select every entity in an archetype. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "archetype id",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_archetypes_select"
+  },
+  {
+    "description": "assets info: show a cached asset's action, path, and load state. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "asset path or key substring",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_assets_info"
+  },
+  {
+    "description": "assets list: list cached asset keys, optionally filtered. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "filter": {
+          "description": "substring to filter keys",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_assets_list"
+  },
+  {
+    "description": "assets reload: re-read matching cached assets from disk in place. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "asset path or key substring",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_assets_reload"
+  },
+  {
+    "description": "audio info: show active sources per group and the master volume. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_audio_info"
+  },
+  {
+    "description": "audio mute: silence the master group; `audio mute off` restores. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "on": {
+          "description": "enable or disable; omit to toggle",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_audio_mute"
+  },
+  {
+    "description": "audio stop: stop every active source. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_audio_stop"
+  },
+  {
+    "description": "toggle size outlines around entities with known bounds. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "on": {
+          "description": "enable or disable; omit to toggle",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_bounds"
+  },
+  {
+    "description": "Registered bundles as a map of name to component requirements: required components must be provided at spawn, defaulted ones fill in automatically. Pair with cmd_bundles_spawn. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_bundles_list"
+  },
+  {
+    "description": "Spawn one entity from a registered bundle. components is a map of component name to field data; the bundle's required components must be provided there. Returns the new entity id. Unlike cmd_spawn this does not select the entity. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "components": {
+          "description": "component overrides: {Name = {field = value}, ...} (a JSON object over MCP)",
+          "type": "object"
+        },
+        "name": {
+          "description": "bundle name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_bundles_spawn"
+  },
+  {
+    "description": "camera info: show camera position, zoom, time scale, and registered cameras. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_camera_info"
+  },
+  {
+    "description": "camera move: set camera position (and optionally rotation and zoom). In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "camera name (primary if omitted)",
+          "type": "string"
+        },
+        "r": {
+          "description": "rotation in radians (unchanged if omitted)",
+          "type": "number"
+        },
+        "x": {
+          "description": "world x (unchanged if omitted)",
+          "type": "number"
+        },
+        "y": {
+          "description": "world y (unchanged if omitted)",
+          "type": "number"
+        },
+        "z": {
+          "description": "zoom (unchanged if omitted)",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_camera_move"
+  },
+  {
+    "description": "Convert world coordinates to window pixel coordinates through the active camera. Returns both the world input and the screen result. The reverse is cmd_camera_world. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "description": "world x",
+          "type": "number"
+        },
+        "y": {
+          "description": "world y",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_camera_screen"
+  },
+  {
+    "description": "camera timescale: set the game time scale (0 = frozen, 1 = normal). In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "scale": {
+          "description": "0 = frozen, 1 = normal, 2 = double speed",
+          "type": "number"
+        }
+      },
+      "required": [
+        "scale"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_camera_timescale"
+  },
+  {
+    "description": "camera toggle: toggle a named camera's active flag. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "camera name (see `camera`)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_camera_toggle"
+  },
+  {
+    "description": "Convert window pixel coordinates to world coordinates through the active camera, the same mapping a click at that pixel uses. Returns both the screen input and the world result. The reverse is cmd_camera_screen. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "description": "screen x in pixels",
+          "type": "number"
+        },
+        "y": {
+          "description": "screen y in pixels",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_camera_world"
+  },
+  {
+    "description": "What this game session supports: installed plugins (render pipeline, physics, tilemaps, controllers, audio, assets, recorder), command sections with counts, capture facilities, host OS, and the MCP port. Call once after connecting to learn which tool families apply. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_capabilities"
+  },
+  {
+    "description": "clear the selection, message, and drag area. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_clear"
+  },
+  {
+    "description": "components info: show a component's schema by name or id. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "component name or id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_components_info"
+  },
+  {
+    "description": "components list: list registered component types. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_components_list"
+  },
+  {
+    "description": "The full debugger context snapshot: selection, marks, notes, mode, freeze state, camera, mouse, grid, rewind status, and the newest artifact entries (snapshots, diffs, profiles, screenshots, recordings). Read-only; call it to orient before driving the other cmd_* tools. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_context"
+  },
+  {
+    "description": "controllers info: show a controller's joystick, deadzone, and bindings. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "controller index",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_controllers_info"
+  },
+  {
+    "description": "controllers list: list controllers and their joysticks. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_controllers_list"
+  },
+  {
+    "description": "controllers rumble: vibrate a controller's joystick to verify it. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "controller index",
+          "type": "number"
+        },
+        "seconds": {
+          "description": "vibration duration (default: 0.5)",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_controllers_rumble"
+  },
+  {
+    "description": "The complete contract of one debugger command: signature, help, argument schema, subcommand verbs with their schemas and safety annotations, and examples. Use it before calling an unfamiliar cmd_* tool, or to discover verbs of a family. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "description": "command name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_describe"
+  },
+  {
+    "description": "Despawn the target entities (an id, a mark name, an explicit ids list, or the current selection when no target is given). Destructive and immediate. Take cmd_snapshot_save first if the state matters. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "entity id. Provide exactly one of: id, name.",
+          "type": "number"
+        },
+        "ids": {
+          "description": "entity ids to despawn (overrides target and the selection)",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "description": "mark name. Provide exactly one of: id, name.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_despawn"
+  },
+  {
+    "description": "Compare two moments structurally: from/to are a snapshot number, name, or latest; rewind:<idx|latest|Ns|ago=N>; or current (default to). Call with limit=0 first: the per-component summary always covers the whole diff and tells you what to filter (component=, ignore=, entity=). Read-only. Returns summary, changes with JSON Pointer paths, and the path of a JSON artifact holding the full result. Drill in with cmd_diff_get. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "component": {
+          "description": "restrict to one component",
+          "type": "string"
+        },
+        "entity": {
+          "description": "restrict to an entity id, mark, or @selection",
+          "type": "string"
+        },
+        "epsilon": {
+          "description": "numeric tolerance (default exact)",
+          "minimum": 0,
+          "type": "number"
+        },
+        "from": {
+          "description": "snapshot number/name/latest, rewind:<idx|latest|Ns|ago=N>, or current",
+          "type": "string"
+        },
+        "ignore": {
+          "description": "components to exclude (comma separated, or a JSON array)",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "limit": {
+          "description": "max detailed changes; 0 = summary only (default: 100)",
+          "minimum": 0,
+          "type": "number"
+        },
+        "to": {
+          "description": "second reference; defaults to current",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_diff"
+  },
+  {
+    "description": "diff clear: delete all diffs this session. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_diff_clear"
+  },
+  {
+    "description": "Dereference an RFC 6901 pointer (e.g. /summary/byComponent or /changes/0/after) into the last diff result, or into a saved diff artifact when ref is given. Use after cmd_diff to fetch payloads its truncated change list omitted. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "pointer": {
+          "description": "RFC 6901 pointer, e.g. /summary/byComponent",
+          "type": "string"
+        },
+        "ref": {
+          "description": "diff artifact index or latest; omit for the last diff",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pointer"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_diff_get"
+  },
+  {
+    "description": "diff list: list diffs with size and timestamp. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_diff_list"
+  },
+  {
+    "description": "diff open: open with the OS default handler (latest if omitted). In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "description": "diff name or list index",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_diff_open"
+  },
+  {
+    "description": "diff path: copy the file's absolute path to the clipboard (latest if omitted). In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "description": "diff name or list index",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_diff_path"
+  },
+  {
+    "description": "draw circle: outline a circle (x y radius in world units). In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "a": {
+          "description": "alpha 0-1 (default 0.8)",
+          "type": "number"
+        },
+        "b": {
+          "description": "blue 0-1 (default 0)",
+          "type": "number"
+        },
+        "entity": {
+          "description": "pin to this entity: positions become offsets; removed when it dies",
+          "type": "number"
+        },
+        "g": {
+          "description": "green 0-1 (default 1)",
+          "type": "number"
+        },
+        "r": {
+          "description": "red 0-1 (default 1)",
+          "type": "number"
+        },
+        "radius": {
+          "description": "radius in world units",
+          "type": "number"
+        },
+        "seconds": {
+          "description": "auto-remove after N wall-clock seconds; 0 = one frame",
+          "type": "number"
+        },
+        "stroke": {
+          "description": "outline width in pixels (default: 4)",
+          "type": "number"
+        },
+        "tag": {
+          "description": "tag for grouped clearing",
+          "type": "string"
+        },
+        "x": {
+          "description": "world x (an offset when entity is set) (default: 0)",
+          "type": "number"
+        },
+        "y": {
+          "description": "world y (an offset when entity is set) (default: 0)",
+          "type": "number"
+        }
+      },
+      "required": [
+        "radius"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_draw_circle"
+  },
+  {
+    "description": "draw clear: remove annotations by id or tag; everything when omitted. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "annotation id. Provide exactly one of: id, tag.",
+          "type": "number"
+        },
+        "tag": {
+          "description": "annotation tag. Provide exactly one of: id, tag.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_draw_clear"
+  },
+  {
+    "description": "draw line: draw a line (x y x2 y2 in world units). In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "a": {
+          "description": "alpha 0-1 (default 0.8)",
+          "type": "number"
+        },
+        "b": {
+          "description": "blue 0-1 (default 0)",
+          "type": "number"
+        },
+        "entity": {
+          "description": "pin to this entity: positions become offsets; removed when it dies",
+          "type": "number"
+        },
+        "g": {
+          "description": "green 0-1 (default 1)",
+          "type": "number"
+        },
+        "r": {
+          "description": "red 0-1 (default 1)",
+          "type": "number"
+        },
+        "seconds": {
+          "description": "auto-remove after N wall-clock seconds; 0 = one frame",
+          "type": "number"
+        },
+        "stroke": {
+          "description": "outline width in pixels (default: 4)",
+          "type": "number"
+        },
+        "tag": {
+          "description": "tag for grouped clearing",
+          "type": "string"
+        },
+        "x": {
+          "description": "world x (an offset when entity is set) (default: 0)",
+          "type": "number"
+        },
+        "x2": {
+          "description": "end world x (an offset when entity is set)",
+          "type": "number"
+        },
+        "y": {
+          "description": "world y (an offset when entity is set) (default: 0)",
+          "type": "number"
+        },
+        "y2": {
+          "description": "end world y (an offset when entity is set)",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x2",
+        "y2"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_draw_line"
+  },
+  {
+    "description": "draw rect: outline a rectangle (x y w h in world units). In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "a": {
+          "description": "alpha 0-1 (default 0.8)",
+          "type": "number"
+        },
+        "b": {
+          "description": "blue 0-1 (default 0)",
+          "type": "number"
+        },
+        "entity": {
+          "description": "pin to this entity: positions become offsets; removed when it dies",
+          "type": "number"
+        },
+        "g": {
+          "description": "green 0-1 (default 1)",
+          "type": "number"
+        },
+        "h": {
+          "description": "height in world units",
+          "type": "number"
+        },
+        "r": {
+          "description": "red 0-1 (default 1)",
+          "type": "number"
+        },
+        "seconds": {
+          "description": "auto-remove after N wall-clock seconds; 0 = one frame",
+          "type": "number"
+        },
+        "stroke": {
+          "description": "outline width in pixels (default: 4)",
+          "type": "number"
+        },
+        "tag": {
+          "description": "tag for grouped clearing",
+          "type": "string"
+        },
+        "w": {
+          "description": "width in world units",
+          "type": "number"
+        },
+        "x": {
+          "description": "world x (an offset when entity is set) (default: 0)",
+          "type": "number"
+        },
+        "y": {
+          "description": "world y (an offset when entity is set) (default: 0)",
+          "type": "number"
+        }
+      },
+      "required": [
+        "h",
+        "w"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_draw_rect"
+  },
+  {
+    "description": "draw text: print text at a world position. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "a": {
+          "description": "alpha 0-1 (default 0.8)",
+          "type": "number"
+        },
+        "b": {
+          "description": "blue 0-1 (default 0)",
+          "type": "number"
+        },
+        "entity": {
+          "description": "pin to this entity: positions become offsets; removed when it dies",
+          "type": "number"
+        },
+        "fontSize": {
+          "description": "font size in pixels (default: 14)",
+          "type": "number"
+        },
+        "g": {
+          "description": "green 0-1 (default 1)",
+          "type": "number"
+        },
+        "msg": {
+          "description": "text to display",
+          "type": "string"
+        },
+        "r": {
+          "description": "red 0-1 (default 1)",
+          "type": "number"
+        },
+        "seconds": {
+          "description": "auto-remove after N wall-clock seconds; 0 = one frame",
+          "type": "number"
+        },
+        "stroke": {
+          "description": "outline width in pixels (default: 4)",
+          "type": "number"
+        },
+        "tag": {
+          "description": "tag for grouped clearing",
+          "type": "string"
+        },
+        "x": {
+          "description": "world x (an offset when entity is set) (default: 0)",
+          "type": "number"
+        },
+        "y": {
+          "description": "world y (an offset when entity is set) (default: 0)",
+          "type": "number"
+        }
+      },
+      "required": [
+        "msg"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_draw_text"
+  },
+  {
+    "description": "Fetch entities matching a component expression ('Enemy -Dead' means has Enemy, lacks Dead) with their serialized component data, without touching the operator's selection. Give x, y, w, h to restrict to a world-space box (spatial filter via Position when registered, else Transform; the spatial component is always included). Returns up to limit entities plus a truncated flag. Use cmd_query when you want to select the matches instead. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "expr": {
+          "description": "component names separated by spaces; -Foo excludes",
+          "type": "string"
+        },
+        "h": {
+          "description": "bounds height in world units",
+          "type": "number"
+        },
+        "limit": {
+          "description": "max entities returned (default: 100)",
+          "minimum": 0,
+          "type": "number"
+        },
+        "w": {
+          "description": "bounds width in world units",
+          "type": "number"
+        },
+        "x": {
+          "description": "bounds left world x (give all of x, y, w, h or none)",
+          "type": "number"
+        },
+        "y": {
+          "description": "bounds top world y",
+          "type": "number"
+        }
+      },
+      "required": [
+        "expr"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_fetch"
+  },
+  {
+    "description": "Freeze gameplay through the shared freeze controller under the \"operator\" hold: on=true acquires, on=false releases, omit toggles. Rendering, input, and tools keep running; the world stays frozen while any other holder (the open debugger panel) remains. Returns the resulting frozen state. Use cmd_step to advance frames while frozen. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "on": {
+          "description": "enable or disable; omit to toggle",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_freeze"
+  },
+  {
+    "description": "move the camera to an entity by id, or the first with a mark name. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "entity id. Provide exactly one of: id, name (one is required).",
+          "type": "number"
+        },
+        "name": {
+          "description": "mark name. Provide exactly one of: id, name (one is required).",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_goto"
+  },
+  {
+    "description": "toggle a world-space grid matched to the tile grid. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "offsetX": {
+          "description": "grid origin X in world units",
+          "type": "number"
+        },
+        "offsetY": {
+          "description": "grid origin Y in world units",
+          "type": "number"
+        },
+        "on": {
+          "description": "enable or disable; omit to toggle",
+          "type": "boolean"
+        },
+        "size": {
+          "description": "grid cell size in world units; omit to match tile chunks",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_grid"
+  },
+  {
+    "description": "show the command history (persisted across sessions). In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_history"
+  },
+  {
+    "description": "history clear: forget the history and delete its file. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_history_clear"
+  },
+  {
+    "description": "toggle entity id labels over on-screen entities. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "on": {
+          "description": "show or hide; omit to toggle",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_ids"
+  },
+  {
+    "description": "One entity's serialized component data by id or mark name; with no target, the first selected entity. Returns the entity id, its archetype id and sorted signature, and a map of component name to serialized fields. Read-only. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "entity id. Provide exactly one of: id, name.",
+          "type": "number"
+        },
+        "name": {
+          "description": "mark name. Provide exactly one of: id, name.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_info"
+  },
+  {
+    "description": "layers all: show every layer (undo toggles and solo). In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_layers_all"
+  },
+  {
+    "description": "layers info: show one layer's name, flags, and entity count. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "layer": {
+          "description": "layer name or number",
+          "type": "string"
+        }
+      },
+      "required": [
+        "layer"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_layers_info"
+  },
+  {
+    "description": "layers list: list named or modified layers with their flags. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_layers_list"
+  },
+  {
+    "description": "layers solo: hide every layer but one; bare `layers solo` restores. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "layer": {
+          "description": "layer name or number; omit to restore",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_layers_solo"
+  },
+  {
+    "description": "layers toggle: show or hide a layer by name or number. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "layer": {
+          "description": "layer name or number",
+          "type": "string"
+        }
+      },
+      "required": [
+        "layer"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_layers_toggle"
+  },
+  {
+    "description": "layers unlit: toggle a layer between lit and unlit. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "layer": {
+          "description": "layer name or number",
+          "type": "string"
+        }
+      },
+      "required": [
+        "layer"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_layers_unlit"
+  },
+  {
+    "description": "light bloom: configure or show the bloom effect. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "intensity": {
+          "description": "glow strength 0-10. Provide exactly one of: intensity, on.",
+          "type": "number"
+        },
+        "on": {
+          "description": "turn bloom on or off. Provide exactly one of: intensity, on.",
+          "type": "boolean"
+        },
+        "radius": {
+          "description": "blur radius 0.1-5",
+          "type": "number"
+        },
+        "threshold": {
+          "description": "brightness cutoff 0+",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_light_bloom"
+  },
+  {
+    "description": "light color: set or show the ambient light color. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "b": {
+          "description": "blue 0-1 (unchanged if omitted)",
+          "type": "number"
+        },
+        "g": {
+          "description": "green 0-1 (unchanged if omitted)",
+          "type": "number"
+        },
+        "r": {
+          "description": "red 0-1 (unchanged if omitted)",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_light_color"
+  },
+  {
+    "description": "light info: show ambient color, lighting, shadows, and bloom state. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_light_info"
+  },
+  {
+    "description": "light shadows: enable or disable shadow rendering. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "on": {
+          "description": "enable or disable; omit to toggle",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_light_shadows"
+  },
+  {
+    "description": "light toggle: enable or disable lighting entirely. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "on": {
+          "description": "enable or disable; omit to toggle",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_light_toggle"
+  },
+  {
+    "description": "tilemap info; `info x y` shows the tile at a world point. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "tilemap entity id; omit for the first",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_map"
+  },
+  {
+    "description": "The tile at a world point: coordinates against the tilemap origin plus each tile layer's gid and tileset there (map picks a tilemap by entity id, first map by default). Falls back to debug-grid coordinates when no tilemaps are loaded. Read-only; briefly outlines the tile in-game. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "map": {
+          "description": "tilemap entity id; omit for the first",
+          "type": "number"
+        },
+        "x": {
+          "description": "world x",
+          "type": "number"
+        },
+        "y": {
+          "description": "world y",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_map_info"
+  },
+  {
+    "description": "Name the currently selected entities so later commands (select, goto, despawn, diff entity=) can address the group by that name. Marks survive until cleared. Returns the marked count. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "mark name; omit to unmark the selection",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_mark"
+  },
+  {
+    "description": "mark clear: remove all marks. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_mark_clear"
+  },
+  {
+    "description": "mark list: show every mark with its count and first id. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_mark_list"
+  },
+  {
+    "description": "materials info: show a material's GLSL sources by name or id. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "material name or id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_materials_info"
+  },
+  {
+    "description": "materials list: list registered materials. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_materials_list"
+  },
+  {
+    "description": "Update only the provided fields of one component on the target entities (an id, a mark name, @selection, or an ids list). Unlike cmd_set it never adds the component and never resets omitted fields: targets missing the component are skipped and unnamed fields keep their current values. Returns modified and skipped counts. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "comp": {
+          "description": "component name",
+          "type": "string"
+        },
+        "id": {
+          "description": "entity id. Provide exactly one of: id, name.",
+          "type": "number"
+        },
+        "ids": {
+          "description": "entity ids to target instead (overrides target)",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "description": "mark name, or @selection. Provide exactly one of: id, name.",
+          "type": "string"
+        },
+        "value": {
+          "description": "fields to change: a Lua table expression, e.g. {x = 10}, or a JSON object over MCP",
+          "type": "object"
+        }
+      },
+      "required": [
+        "comp",
+        "value"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_modify"
+  },
+  {
+    "description": "Attach a note to the selected entities, visible in-game above them and in cmd_context. Use it to flag findings for the operator. An empty message clears notes on the selection. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "msg": {
+          "description": "note text; omit to clear notes on the selection",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_note"
+  },
+  {
+    "description": "physics debug: toggle collision-shape debug drawing (installs the drawer if needed). In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_physics_debug"
+  },
+  {
+    "description": "physics info: physics state, or one entity's Box2D body properties. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "entity id. Provide exactly one of: id, name.",
+          "type": "number"
+        },
+        "name": {
+          "description": "mark name. Provide exactly one of: id, name.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_physics_info"
+  },
+  {
+    "description": "physics query: select bodies inside a world-space box and draw it. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "h": {
+          "description": "height",
+          "type": "number"
+        },
+        "w": {
+          "description": "width",
+          "type": "number"
+        },
+        "x": {
+          "description": "left world x",
+          "type": "number"
+        },
+        "y": {
+          "description": "top world y",
+          "type": "number"
+        }
+      },
+      "required": [
+        "h",
+        "w",
+        "x",
+        "y"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_physics_query"
+  },
+  {
+    "description": "physics raycast: cast a ray, draw it, and select the hits. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "x1": {
+          "description": "start world x",
+          "type": "number"
+        },
+        "x2": {
+          "description": "end world x",
+          "type": "number"
+        },
+        "y1": {
+          "description": "start world y",
+          "type": "number"
+        },
+        "y2": {
+          "description": "end world y",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x1",
+        "x2",
+        "y1",
+        "y2"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_physics_raycast"
+  },
+  {
+    "description": "Start the LuaJIT sampling profiler for seconds (0.1-60; capped) and write a collapsed-stack capture when it finishes. The capture lands in the process working directory and its summary publishes to cmd_context; fetch details with cmd_profile_info and cmd_profile_path. Filtering (zone=) and intervalMs are fixed at start. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "intervalMs": {
+          "description": "sampler interval in ms (sampler default if omitted; raise for long sessions)",
+          "type": "number"
+        },
+        "seconds": {
+          "description": "sample duration; 0 samples until reopen (default: 0)",
+          "type": "number"
+        },
+        "zone": {
+          "description": "restrict output to samples whose zone path starts with this prefix",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_profile"
+  },
+  {
+    "description": "profile clear: delete all profiles this session. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_profile_clear"
+  },
+  {
+    "description": "profile info: re-show a capture's summary (latest if omitted). In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "description": "capture name or list index",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_profile_info"
+  },
+  {
+    "description": "profile list: list profiles with size and timestamp. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_profile_list"
+  },
+  {
+    "description": "profile open: open speedscope and copy the capture's path to the clipboard. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "description": "capture name or list index",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_profile_open"
+  },
+  {
+    "description": "profile path: copy the file's absolute path to the clipboard (latest if omitted). In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "description": "capture name or list index",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_profile_path"
+  },
+  {
+    "description": "Select every entity matching a component expression ('Enemy -Dead' means has Enemy, lacks Dead); invert=true instead de-selects matching entities from the current selection. Returns the match count. Follow with cmd_info or cmd_set on @selection. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "expr": {
+          "description": "component names separated by spaces; -Foo excludes",
+          "type": "string"
+        },
+        "invert": {
+          "description": "de-select the selected entities that match, instead of adding (default: false)",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "expr"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_query"
+  },
+  {
+    "description": "Quit the game process via a LÖVE quit event. Unsaved state is lost and the MCP connection drops. Take cmd_snapshot_save first if the state matters. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_quit"
+  },
+  {
+    "description": "record cancel: cancel an armed countdown. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_record_cancel"
+  },
+  {
+    "description": "record info: show one completed recording's details (latest if omitted). In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "description": "recording name or list index",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_record_info"
+  },
+  {
+    "description": "record list: list recordings with size and timestamp. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_record_list"
+  },
+  {
+    "description": "record open: open a completed recording (latest if omitted). In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "description": "recording name or list index",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_record_open"
+  },
+  {
+    "description": "record path: copy the file's absolute path to the clipboard (latest if omitted). In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "description": "recording name or list index",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_record_path"
+  },
+  {
+    "description": "record start: start recording the window. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "countdown": {
+          "description": "seconds before recording starts (plugin default if omitted)",
+          "type": "number"
+        },
+        "debug": {
+          "description": "keep the debugger visible and the game running (default: false)",
+          "type": "boolean"
+        },
+        "fps": {
+          "description": "capture frame rate (default: 30)",
+          "type": "number"
+        },
+        "name": {
+          "description": "output filename",
+          "type": "string"
+        },
+        "scale": {
+          "description": "output size multiplier, e.g. 0.5 (default: 1)",
+          "type": "number"
+        },
+        "seconds": {
+          "description": "auto-stop after N seconds; 0 records until stopped (default: 0)",
+          "type": "number"
+        },
+        "stopOnDebugOpen": {
+          "description": "stop when the debugger opens (default: true only for untimed, non-debug recordings)",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_record_start"
+  },
+  {
+    "description": "record status: show the current recording state. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_record_status"
+  },
+  {
+    "description": "record stop: stop the active recording. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_record_stop"
+  },
+  {
+    "description": "Strip the named components from the target entities (an id, a mark name, @selection, or an ids list). Destructive to component data; the entities survive. Returns how many entities were changed. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "comps": {
+          "description": "component names to remove",
+          "type": "string"
+        },
+        "id": {
+          "description": "entity id. Provide exactly one of: id, name.",
+          "type": "number"
+        },
+        "ids": {
+          "description": "entity ids to target instead (overrides target)",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "description": "mark name, or @selection. Provide exactly one of: id, name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "comps"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_remove"
+  },
+  {
+    "description": "Every world resource as {key, type}: keys resolve to their registered name when available, values to their metatable type name. Read-only; use it to discover installed subsystems and custom game resources. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_resources"
+  },
+  {
+    "description": "Restart the game via love.event.quit(\"restart\"). Unsaved state is lost and the MCP connection drops until the new instance binds. Take cmd_snapshot_save first if the state matters. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_restart"
+  },
+  {
+    "description": "rewind clear: delete the ring files and reset to idle. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_rewind_clear"
+  },
+  {
+    "description": "rewind info: show the session state: interval, cap, window, cost. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_rewind_info"
+  },
+  {
+    "description": "Copy a ring entry into the permanent snapshot history with a snapshot number, preserving its capture time. Use it to keep pre-bug evidence before the ring evicts it. Returns the new snapshot number. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "ago": {
+          "description": "seconds back; picks the closest at or before",
+          "type": "number"
+        },
+        "name": {
+          "description": "snapshot filename for the copy",
+          "type": "string"
+        },
+        "ref": {
+          "description": "entry index (newest first), latest, or Ns for seconds back",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_rewind_keep"
+  },
+  {
+    "description": "rewind list: list ring entries, newest first. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_rewind_list"
+  },
+  {
+    "description": "Rewind the live world to a ring entry: ref is a newest-first index or latest, or use ago=N seconds. Overwrites current world state (selection, marks, and notes clear) and pauses capture until cmd_rewind_resume. Pair with cmd_step to replay toward a bug. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "ago": {
+          "description": "seconds back; picks the closest at or before",
+          "type": "number"
+        },
+        "ref": {
+          "description": "entry index (newest first), latest, or Ns for seconds back",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_rewind_load"
+  },
+  {
+    "description": "rewind pause: hold capture without ending the session. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_rewind_pause"
+  },
+  {
+    "description": "rewind resume: resume after a pause (including after a load). In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_rewind_resume"
+  },
+  {
+    "description": "Start the time-travel ring: a rolling window of world snapshots captured every interval seconds (cap entries) while the game runs unfrozen. Capture holds automatically while the game is paused. Refuses if a stopped ring still holds entries. Start this early; cmd_rewind_load and cmd_diff feed on it. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "cap": {
+          "description": "entries kept before the oldest is dropped (default: 10)",
+          "type": "number"
+        },
+        "interval": {
+          "description": "seconds between captures (default: 5)",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_rewind_start"
+  },
+  {
+    "description": "rewind stop: stop capturing; the ring stays for list/load/keep. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_rewind_stop"
+  },
+  {
+    "description": "capture the screen (or drag area) to a PNG. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "delay": {
+          "description": "seconds to wait before capturing",
+          "type": "number"
+        },
+        "name": {
+          "description": "output filename",
+          "type": "string"
+        },
+        "panel": {
+          "description": "keep the debug panel visible in the shot",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_screenshot"
+  },
+  {
+    "description": "screenshot clear: delete all screenshots this session. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_screenshot_clear"
+  },
+  {
+    "description": "screenshot info: show one capture's details with a thumbnail (latest if omitted). In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "description": "capture name or list index",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_screenshot_info"
+  },
+  {
+    "description": "screenshot list: list screenshots with size and timestamp. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_screenshot_list"
+  },
+  {
+    "description": "screenshot open: open with the OS default handler (latest if omitted). In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "description": "capture name or list index",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_screenshot_open"
+  },
+  {
+    "description": "screenshot path: copy the file's absolute path to the clipboard (latest if omitted). In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "description": "capture name or list index",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_screenshot_path"
+  },
+  {
+    "description": "Add an entity (by id) or a marked group (by name) to the operator-visible selection; replace=true swaps the selection instead. Selected entities are highlighted in-game. Returns the selection size. Follow with cmd_info for component data or cmd_note to annotate. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "entity id. Provide exactly one of: id, name (one is required).",
+          "type": "number"
+        },
+        "name": {
+          "description": "mark name. Provide exactly one of: id, name (one is required).",
+          "type": "string"
+        },
+        "replace": {
+          "description": "replace the selection instead of adding to it (default: false)",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_select"
+  },
+  {
+    "description": "Write one component on the target entities (an id, a mark name, the literal @selection, or an ids list). The value is a JSON object or a Lua table expression, e.g. {x = 10, y = {n = 2}}; omitted fields reset to the component's defaults (use cmd_modify to change fields in place). Adds the component when missing. Mutates the live world immediately. Returns how many entities were written. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "comp": {
+          "description": "component name",
+          "type": "string"
+        },
+        "id": {
+          "description": "entity id. Provide exactly one of: id, name.",
+          "type": "number"
+        },
+        "ids": {
+          "description": "entity ids to target instead (overrides target)",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "description": "mark name, or @selection. Provide exactly one of: id, name.",
+          "type": "string"
+        },
+        "value": {
+          "description": "component fields: a Lua table expression, e.g. {x = 10, y = 20}, or a JSON object over MCP; omit for defaults",
+          "type": "object"
+        }
+      },
+      "required": [
+        "comp"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_set"
+  },
+  {
+    "description": "snapshot clear: delete all snapshots this session. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_snapshot_clear"
+  },
+  {
+    "description": "snapshot info: show one save's details (latest if omitted). In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "description": "save name or number",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_snapshot_info"
+  },
+  {
+    "description": "snapshot list: list snapshots with size and timestamp. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_snapshot_list"
+  },
+  {
+    "description": "Replace the live world with a saved snapshot (ref is a number, name, or latest) or an inline payload (json text, or base64 luajit binary; set format to match how it was produced). Destructive to current state; selection, marks, and notes clear. Loads are rate limited, so retry on a busy error after a moment. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "description": "encoding of the payload or file (default: luajit)",
+          "enum": [
+            "json",
+            "luajit"
+          ],
+          "type": "string"
+        },
+        "payload": {
+          "description": "inline snapshot payload: json text, or base64 luajit binary",
+          "type": "string"
+        },
+        "ref": {
+          "description": "save name or number",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_snapshot_load"
+  },
+  {
+    "description": "snapshot open: open with the OS default handler (latest if omitted). In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "description": "save name or number",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_snapshot_open"
+  },
+  {
+    "description": "snapshot path: copy the file's absolute path to the clipboard (latest if omitted). In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "description": "save name or number",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_snapshot_path"
+  },
+  {
+    "description": "Save the whole world to a snapshot file in the save directory (format luajit by default, or json; layers restricts to Transform layers). Returns a snapshot number usable as a cmd_snapshot_load and cmd_diff ref. inline=true instead returns the payload in the result (a json snapshot object, or a base64 luajit payload) and writes no artifact. Does not disturb the running game. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "description": "snapshot encoding: compact luajit binary or json (default: luajit)",
+          "enum": [
+            "json",
+            "luajit"
+          ],
+          "type": "string"
+        },
+        "inline": {
+          "description": "return the payload in the result instead of writing a numbered artifact (default: false)",
+          "type": "boolean"
+        },
+        "layers": {
+          "description": "only save entities whose Transform.layer is in this set (values 0-31)",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "description": "output filename",
+          "type": "string"
+        },
+        "pretty": {
+          "description": "pretty-print json output (json format only) (default: false)",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_snapshot_save"
+  },
+  {
+    "description": "Spawn one entity from a bundle name and/or component list with Lua table values, e.g. 'Transform {x = 10, y = 20}'. The new entity becomes selected. Returns its id. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "spec": {
+          "description": "[bundle] Component {lua table} ..., e.g. enemy Transform {x = 10}",
+          "type": "string"
+        }
+      },
+      "required": [
+        "spec"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_spawn"
+  },
+  {
+    "description": "sprites info: show bucket instance counts and texture memory. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_sprites_info"
+  },
+  {
+    "description": "states info: show the state stack, top last. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_states_info"
+  },
+  {
+    "description": "states pop: pop the top state off the stack. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_states_pop"
+  },
+  {
+    "description": "states push: push a created state onto the stack. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "state name (created with createState)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_states_push"
+  },
+  {
+    "description": "World and host stats in one call: entity, archetype, component, and system counts, Lua memory in KB and MB, the current FPS, and the window size in pixels. Read-only; use it as a quick health check. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_stats"
+  },
+  {
+    "description": "Advance gameplay by n frames while the freeze controller is held, then freeze again. Fails when nothing holds the freeze; acquire it with cmd_freeze on=true first. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "n": {
+          "description": "number of frames to tick (default: 1)",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_step"
+  },
+  {
+    "description": "systems info: show one system's phase, order, and state. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "system name (see `systems`)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_systems_info"
+  },
+  {
+    "description": "systems list: list every system with its phase and state. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_systems_list"
+  },
+  {
+    "description": "systems start: re-enable a stopped system. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "system name (see `systems`)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_systems_start"
+  },
+  {
+    "description": "systems stop: disable a system by name. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "system name (see `systems`)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_systems_stop"
+  },
+  {
+    "description": "systems toggle: flip a system between stopped and running. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "system name (see `systems`)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_systems_toggle"
+  },
+  {
+    "description": "Read recent engine log lines captured from tecs logging (ring of 500), including the tecs2d.debug.events operator-action feed. Each line carries a monotonic seq; poll incrementally with after=<last seen seq> (result.latest). Filter by minimum level or substring; newest last. Pass clear=true to empty the buffer. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "description": "Only lines with seq greater than this (cursor; default 0)",
+          "type": "number"
+        },
+        "clear": {
+          "description": "Clear the captured buffer instead of reading",
+          "type": "boolean"
+        },
+        "contains": {
+          "description": "Only lines whose message or logger contains this text",
+          "type": "string"
+        },
+        "level": {
+          "description": "Minimum severity: DEBUG, INFO, WARN, or ERROR",
+          "type": "string"
+        },
+        "limit": {
+          "description": "Max lines to return, newest last (default 50)",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "name": "get_logs"
+  },
+  {
+    "description": "Check if the game is running. Call cmd_capabilities next to discover what the session's cmd_* command tools support. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "ping"
+  },
+  {
+    "description": "Run Lua code in the game. Code is wrapped in function(world) ... end automatically. Return values are serialized as JSON by default -- return a table (e.g. {count = ..., score = ...}) for a structured, cheap read; pass lua=true for the raw Lua tostring form instead. Use 'world' directly to access the ECS world. Prefer the structured cmd_* command tools (cmd_fetch, cmd_set, cmd_spawn, ...) when one covers the operation. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "description": "Lua code to execute with 'world' in scope",
+          "type": "string"
+        },
+        "lua": {
+          "description": "Return values as Lua tostring strings instead of JSON (default false)",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code"
+      ],
+      "type": "object"
+    },
+    "name": "run_lua"
+  },
+  {
+    "description": "Sample framebuffer pixel colors at one or more points without transferring a full screenshot. Returns RGBA floats in 0..1 per point plus the framebuffer size. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "normalized": {
+          "description": "When true, x and y are 0..1 fractions of the framebuffer size instead of pixel coordinates (resolution-independent).",
+          "type": "boolean"
+        },
+        "points": {
+          "description": "Points to sample, each an object with x and y. Pixel coordinates by default; out-of-range points are clamped.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "x": {
+                "description": "X coordinate",
+                "type": "number"
+              },
+              "y": {
+                "description": "Y coordinate",
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "points"
+      ],
+      "type": "object"
+    },
+    "name": "sample_pixels"
+  },
+  {
+    "description": "Capture a screenshot of the game window and return it inline as MCP image content, in one call. With filesystem access to the game host, cmd_screenshot is usually better: it writes a persistent session artifact instead of a base64 payload (the capture lands at end of frame; poll cmd_screenshot_info before reading the file).",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "height": {
+          "description": "Optional height for region capture",
+          "type": "number"
+        },
+        "width": {
+          "description": "Optional width for region capture",
+          "type": "number"
+        },
+        "x": {
+          "description": "Optional X coordinate for region capture",
+          "type": "number"
+        },
+        "y": {
+          "description": "Optional Y coordinate for region capture",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "name": "screenshot"
+  },
+  {
+    "description": "Send a Love2D event to the game. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "description": "Event arguments. Mixed types allowed; each item is passed through to love.event.push() with its original type so events like resize/mousepressed/wheelmoved receive numbers, focus receives booleans, etc.",
+          "items": {},
+          "type": "array"
+        },
+        "event": {
+          "description": "Event name: keypressed, keyreleased, mousepressed, mousereleased, mousemoved, wheelmoved, resize, focus",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event"
+      ],
+      "type": "object"
+    },
+    "name": "send_love_event"
+  }
+]

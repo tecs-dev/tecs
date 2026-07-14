@@ -127,4 +127,28 @@ describe("tecs2d.debug.internal.docgen", function()
         luassert.equals(fresh, committed,
             "mcp/tools.md is stale; run `make docs-debug` and commit the result")
     end)
+
+    it("manifests every kernel and cmd_* tool for the bridge front-load", function()
+        local manifest = docgen.mcpToolManifest(makeRegistry())
+        local names: {string: boolean} = {}
+        for name in manifest:gmatch('"name": "([^"]+)"') do names[name] = true end
+        for _, tool in ipairs(mcptools.list) do
+            luassert.is_truthy(names[tool.name],
+                "manifest missing kernel tool '" .. tool.name .. "'")
+        end
+        for _, tool in ipairs(makeRegistry():mcpTools()) do
+            luassert.is_truthy(names[tool.name],
+                "manifest missing command tool '" .. tool.name .. "'")
+        end
+    end)
+
+    it("matches the committed default-tools.json (run `make docs-debug` after tool or command changes)", function()
+        local f = io.open("docs/tecs2d/mcp/default-tools.json", "r")
+        luassert.is_truthy(f, "docs/tecs2d/mcp/default-tools.json is missing; run `make docs-debug`")
+        local committed = f:read("*a")
+        f:close()
+        local fresh = docgen.mcpToolManifest(makeRegistry()) .. "\n"
+        luassert.equals(fresh, committed,
+            "default-tools.json is stale; run `make docs-debug` and commit the result")
+    end)
 end)

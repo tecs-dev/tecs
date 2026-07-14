@@ -517,4 +517,33 @@ function docgen.toolsPage(reg: commands.Registry): string
     return table.concat(out, "\n")
 end
 
+--- The default MCP tool manifest, as a deterministic JSON array of
+--- {name, description, inputSchema} for every tool a game advertises over
+--- MCP: the kernel tools plus the projected cmd_* index. The tecs-cli bridge
+--- bundles this and front-loads it at initialize, so it can advertise the
+--- full tool set before the first start_game and never fire a large
+--- tools/list_changed that makes clients drop the tecs tools. Sorted by name
+--- so the committed file is stable and drift-checkable.
+function docgen.mcpToolManifest(reg: commands.Registry): string
+    local entries: {{string: any}} = {}
+    for _, t in ipairs(tools.list) do
+        entries[#entries + 1] = {
+            name = t.name,
+            description = t.description,
+            inputSchema = t.inputSchema,
+        }
+    end
+    for _, t in ipairs(reg:mcpTools()) do
+        entries[#entries + 1] = {
+            name = t.name,
+            description = t.description,
+            inputSchema = t.inputSchema,
+        }
+    end
+    table.sort(entries, function(a: {string: any}, b: {string: any}): boolean
+        return (a.name as string) < (b.name as string)
+    end)
+    return stableJson(entries, "")
+end
+
 return docgen
