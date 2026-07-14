@@ -7,7 +7,7 @@
 	example-sprite-onloop example-tiled example-transform-demo example-ui example-mesh-demo example-layer-fx \
 	example-camera-target example-material-demo example-camera-multi example-msdf-text example-tween-demo \
 	example-save-game \
-	newrock test-rockspec typecheck rebuild help rockspecs docs docs-dev docs-debug \
+	newrock test-rockspec typecheck rebuild help rockspecs docs docs-dev docs-debug docs-api \
 	docs-descriptions \
 	json-bench ecs-bench snapshot-bench bitset-bench download-love12 check-love12
 
@@ -509,6 +509,13 @@ docs: build
 docs-debug: compile
 	@LUA_PATH="$(LUA_DIR)/?.lua;$(LUA_DIR)/?/init.lua;$(TEST_BUILD_DIR)/?.lua;$(TEST_BUILD_DIR)/?/init.lua;$(VENDOR_LUA)/?.lua;$(VENDOR_LUA)/?/init.lua;;" \
 		luajit scripts/gen_debug_docs.lua
+
+# Regenerate the API-signature reference pages under docs/tecs2d/api/, one page
+# per public module, from the Teal type API (scripts/gen_api_docs.lua). A spec
+# (spec/tecs2d/api/docgen_spec.tl) compares the committed pages against a fresh
+# render, so run this after changing a public signature or doc comment.
+docs-api:
+	@$(TEAL_ENV) luajit scripts/gen_api_docs.lua
 
 # Run Vite documentation dev server with hot reload
 docs-dev:
