@@ -286,6 +286,7 @@ function docgen.markdown(reg: commands.Registry): string
 
     local out: {string} = {
         "---",
+        "description: \"Generated reference for every built-in debugger command and cmd_* MCP tool with arguments, result schemas, and examples\"",
         "outline: [2, 3]",
         "---",
         "",
@@ -430,6 +431,7 @@ end
 function docgen.toolsPage(reg: commands.Registry): string
     local out: {string} = {
         "---",
+        "description: \"Generated MCP tool reference: kernel tools (ping, screenshot, run_lua, get_logs) and the full cmd_* command tool index with response envelope\"",
         "outline: [2, 3]",
         "---",
         "",
