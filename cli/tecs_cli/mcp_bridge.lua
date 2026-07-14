@@ -168,7 +168,20 @@ function Server:cliTools()
             inputSchema = OBJECT_SCHEMA,
             handler = function()
                 ctx.build()
-                return {ok = true, hot_reload = self:gameRunning()}
+                local hotReloaded = self:gameRunning()
+                local result = {ok = true, hot_reload = hotReloaded}
+                if hotReloaded then
+                    -- Hot reload restores a world snapshot, which surprises agents
+                    -- when a change appears not to take effect. Ship the fix in the
+                    -- response so it is read at the moment, not only if pre-read.
+                    result.tips = "If a change did not take effect: hot reload restores the world "
+                        .. "from a snapshot, so Startup-only changes (spawns, pivots, layer/render "
+                        .. "topology) are overwritten -- use restart_game to see them. State in "
+                        .. "world.resources[...] or closures needs a snapshot handler to survive. A "
+                        .. "frozen-looking frame is often a leftover debugger freeze."
+                    result.docs = "tecs docs tecs/save-games"
+                end
+                return result
             end,
         },
         {

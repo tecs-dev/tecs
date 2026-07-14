@@ -8,13 +8,23 @@ payload, launchers, and installers as GitHub release assets.
 
 ## [Unreleased]
 
+### Changed
+
+- `run_lua` returns values as JSON by default (pass `lua = true` for the Lua
+  `tostring` form), so structured reads no longer need hand-built delimited
+  strings. Requires the bundled framework from this release.
+- The MCP `build` tool includes hot-reload tips in its response when the game is
+  running, pointing at `restart_game` / snapshot handlers for changes that a
+  reload appears to drop.
+
 ### Added
 
-- More entry-point guidance in the bundled skills: `tecs-conventions` now covers
-  the centered-default `Pivot` and that hot reload skips `Startup` systems; the
-  `tecs-cli` skill documents the `send_love_event` shape, that `run_lua`
-  stringifies tables, iterating with `world:query():iter()` (no `world:each`),
-  and attaching to the game's HTTP MCP if the bridge tools disconnect.
+- Entry-point guidance in the bundled skills: `tecs-conventions` covers the
+  centered-default `Pivot`, same-layer draw order, and that hot reload skips
+  `Startup` systems; the `tecs-cli` skill documents the `send_love_event` shape,
+  `run_lua` JSON returns, iterating with `world:query():iter()` (no `world:each`),
+  preferring ECS/data reads and clipped screenshots over full frames, and
+  attaching to the game's HTTP MCP if the bridge tools disconnect.
 
 ## [0.10.1] - 2026-07-14
 

@@ -39,11 +39,16 @@ Using the game tools:
 
 - **`send_love_event`** takes a single LÖVE event plus its args: `{event = "keypressed",
   args = ["space", "space", false]}` — not an `events: [...]` array.
-- **`run_lua`** runs `function(world) ... end` and **stringifies** return values, so a returned table
-  becomes `"table: 0x..."`. Return a scalar or a delimited/JSON string you build yourself (e.g.
-  `return table.concat({count, score}, ",")`) for structured reads.
+- **`run_lua`** runs `function(world) ... end` and returns values as **JSON by default** — return a
+  table (e.g. `return {count = n, score = s}`) for a cheap structured read. Pass `lua = true` for the
+  raw Lua `tostring` form.
 - **Iterate entities** with `world:query({include = {Component}}):iter()` (there is no
   `world:each`); see `tecs docs tecs/queries`.
+- **Verify with data, not pixels.** Prefer reading ECS state (`run_lua` returning a table, or
+  `cmd_fetch`) over screenshots — it's precise and cheap, and screenshots persist in context across
+  every later turn. When you do need pixels, use `sample_pixels` or a clipped `cmd_screenshot` (a
+  drag-area region) rather than a full-frame `screenshot`, and reserve full screenshots for tricky
+  visual debugging. In `tecs integ` specs, screenshots / `probePixels` are fine.
 - **If the `tecs` MCP tools disconnect after `start_game`** (a client mis-reconciling the tool
   list), attach to the running game's HTTP MCP directly: `game_status` reports the port, then POST
   JSON-RPC to `http://127.0.0.1:<port>/mcp`. The `:19999` endpoint is also how you attach to a
