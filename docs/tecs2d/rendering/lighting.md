@@ -1,3 +1,7 @@
+---
+description: "Deferred 2.5D lighting with point lights, spotlights, cookies, normal/specular/emission maps, bloom, occluders, and drop shadows"
+---
+
 # Lighting
 
 Tecs provides a GPU-accelerated 2.5D lighting system with dynamic shadows. The system supports point lights, spotlights,

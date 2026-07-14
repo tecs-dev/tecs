@@ -1,4 +1,5 @@
 ---
+description: "LuaJIT JSON parse, parseCData, serialize, serializePretty, and null and empty sentinels"
 outline: deep
 ---
 

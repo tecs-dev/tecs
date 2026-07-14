@@ -1,4 +1,5 @@
 ---
+description: "Shared human-agent debugging model connecting the debugger, MCP server, and custom commands over one selection and freeze state"
 outline: deep
 ---
 

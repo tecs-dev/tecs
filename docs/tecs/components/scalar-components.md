@@ -1,4 +1,5 @@
 ---
+description: "Single-value number, boolean, or string components via newScalarComponent with fast SoA columns"
 outline: deep
 ---
 

@@ -1,4 +1,5 @@
 ---
+description: "Dataless bitset presence tags via newTagComponent for flags, markers, and query filtering"
 outline: deep
 ---
 

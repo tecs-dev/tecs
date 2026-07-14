@@ -1,4 +1,5 @@
 ---
+description: "Archetype storage groups with row/column layout, get and getMut column access, set, relationship iteration, and dirty tracking"
 outline: deep
 ---
 

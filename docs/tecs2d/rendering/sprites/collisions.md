@@ -1,3 +1,7 @@
+---
+description: "Generating Box2D physics shapes from Aseprite slices via SpriteCollision templates, sensors, and body types"
+---
+
 # Sprite Collisions
 
 Tecs can automatically create physics collision shapes from Aseprite slices, allowing you to define collision boxes

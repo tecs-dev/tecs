@@ -1,4 +1,5 @@
 ---
+description: "Lua-table-backed components via newComponent with fields, init, custom __call, and new"
 outline: deep
 ---
 

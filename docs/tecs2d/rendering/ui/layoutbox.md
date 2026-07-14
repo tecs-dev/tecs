@@ -1,3 +1,7 @@
+---
+description: "The LayoutBox component defining layout dimensions and origin, including dynamic sizing from render components"
+---
+
 # LayoutBox
 
 Defines layout dimensions and origin for UI positioning. Supports both fixed dimensions and dynamic dimensions from

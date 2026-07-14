@@ -1,3 +1,7 @@
+---
+description: "GPU-batched per-entity fragment and vertex shader injection via newMaterial, MaterialInput/Output, and withParams"
+---
+
 # Materials
 
 Materials provide GPU-batched fragment shader injection for per-entity visual effects like dissolve, glow, and

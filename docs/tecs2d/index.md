@@ -1,4 +1,5 @@
 ---
+description: "Tecs2D overview, installing the tecs CLI, creating a game with tecs new, and wiring tecs2d.run"
 outline: deep
 ---
 

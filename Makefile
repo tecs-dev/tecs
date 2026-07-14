@@ -8,6 +8,7 @@
 	example-camera-target example-material-demo example-camera-multi example-msdf-text example-tween-demo \
 	example-save-game \
 	newrock test-rockspec typecheck rebuild help rockspecs docs docs-dev docs-debug \
+	docs-descriptions \
 	json-bench ecs-bench snapshot-bench bitset-bench download-love12 check-love12
 
 .SILENT: clean test test-no-ffi find-busted
@@ -513,6 +514,11 @@ docs-debug: compile
 docs-dev:
 	@cd docs && [ -d node_modules ] || npm install
 	@cd docs && npm run docs:dev
+
+# Fail if any docs page is missing a `description:` frontmatter key. Also run
+# in CI so a new page can't land without one.
+docs-descriptions:
+	@bash scripts/check-docs-descriptions.sh
 
 # ================= Benchmarks =================
 # All bench targets accept three optional filters (handy for targeted profiling):

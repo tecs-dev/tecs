@@ -1,4 +1,5 @@
 ---
+description: "Address-based event system with observe, emit, hasObservers, newEvent, newFFIEvent, and the MessageBus router"
 outline: deep
 ---
 

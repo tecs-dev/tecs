@@ -1,4 +1,5 @@
 ---
+description: "Per-archetype per-component dirty bits set by getMut and set, queried for incremental resync"
 outline: deep
 ---
 

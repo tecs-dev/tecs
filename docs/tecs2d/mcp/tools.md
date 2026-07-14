@@ -1,4 +1,5 @@
 ---
+description: "Generated MCP tool reference: kernel tools (ping, screenshot, run_lua, get_logs) and the full cmd_* command tool index with response envelope"
 outline: [2, 3]
 ---
 

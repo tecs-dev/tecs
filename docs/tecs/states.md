@@ -1,4 +1,5 @@
 ---
+description: "State stack with createState, pushState, popState, peekState, lifecycle policies, auto-tagging, and state-scoped entity cleanup"
 outline: deep
 ---
 

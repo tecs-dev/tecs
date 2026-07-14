@@ -1,4 +1,5 @@
 ---
+description: "Snapshot save and load with saveSnapshot, loadSnapshot, transient components, snapshot handlers, filtering, and the binary format spec"
 outline: deep
 ---
 

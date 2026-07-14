@@ -1,3 +1,7 @@
+---
+description: "GPU-instanced shape components Circle, Ellipse, Arc, Rectangle, Line, and Mesh, plus RoundedCorners and getRect bounds"
+---
+
 # Shapes
 
 Tecs provides GPU-accelerated shape components for rendering circles, ellipses, arcs, rectangles, lines, and custom

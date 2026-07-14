@@ -1,3 +1,7 @@
+---
+description: "Binding string formats (key, mouse, button, axis, hat) and button pairs for rebindable directional movement controls"
+---
+
 # Bindings
 
 Bindings are defined as strings in the format `source:value`. Each control can have multiple bindings, allowing

@@ -1,4 +1,5 @@
 ---
+description: "The tecs mcp stdio bridge exposing check, build, integ, dist, and game control tools to agents"
 outline: deep
 ---
 

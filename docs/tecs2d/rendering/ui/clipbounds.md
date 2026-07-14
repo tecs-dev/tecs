@@ -1,3 +1,7 @@
+---
+description: "The ClipBounds component masking any renderable to a rectangular world-space region"
+---
+
 # ClipBounds
 
 Clips (hides) any part of an entity's rendering that falls outside a rectangular region. Works on all renderable

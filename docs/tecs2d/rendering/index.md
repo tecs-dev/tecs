@@ -1,3 +1,7 @@
+---
+description: "Overview of the deferred rendering pipeline, drawable and styling components, and the RenderConfig options for tecs2d.run"
+---
+
 # Rendering
 
 Tecs provides a high-performance GPU-accelerated rendering pipeline designed for 2D games with advanced lighting and

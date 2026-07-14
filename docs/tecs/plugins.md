@@ -1,4 +1,5 @@
 ---
+description: "Plugin functions that configure a world with components, systems, and resources, plus configuration, dependency, and composition patterns"
 outline: deep
 ---
 

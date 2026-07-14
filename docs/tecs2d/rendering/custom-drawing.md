@@ -1,3 +1,7 @@
+---
+description: "CPU love.graphics drawing in the Draw and PostRender phases via worldShader, depth sorting, and MRT-aware custom shaders"
+---
+
 # Custom Drawing
 
 While Tecs uses a deferred, GPU-accelerated render pipeline for most things you'll need like

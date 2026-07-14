@@ -1,4 +1,5 @@
 ---
+description: "The tecs CLI commands for creating, checking, building, running, testing, and packaging Tecs2D projects"
 outline: deep
 ---
 

@@ -1,4 +1,5 @@
 ---
+description: "Directed entity relationships via newRelationship with exclusive, sparse, cascadeDelete, and traversal APIs"
 outline: deep
 ---
 

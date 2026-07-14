@@ -1,4 +1,5 @@
 ---
+description: "Shared component construction model covering __call, new, fields, defaults, and the init hook"
 outline: deep
 ---
 

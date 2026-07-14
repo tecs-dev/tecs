@@ -1,3 +1,7 @@
+---
+description: "Overview of the Tecs UI building blocks Anchor, LayoutBox, LayoutNode, FitContent, and helper functions"
+---
+
 # Tecs UI
 
 <img src="./intro-image.png" alt="Tecs UI" style="float: right; margin-left: 20px; margin-bottom: 20px; max-width: 300px; position: relative; z-index: 10;"/>

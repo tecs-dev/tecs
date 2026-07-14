@@ -1,3 +1,7 @@
+---
+description: "The Anchor component positioning entities relative to viewport bounds using anchor percentages and pixel offsets"
+---
+
 # Anchor
 
 Positions entities relative to viewport bounds using anchor percentages and pixel offsets. Automatically resolves the

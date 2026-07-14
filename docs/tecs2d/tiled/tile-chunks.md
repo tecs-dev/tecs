@@ -1,3 +1,7 @@
+---
+description: "The TileChunk component rendering 16x16 static tile grids per draw call, with properties and dirty marking"
+---
+
 # TileChunks
 
 The `TileChunk` component renders 16×16 grids of **static** tiles efficiently using GPU instancing. Each chunk is a

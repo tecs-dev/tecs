@@ -1,4 +1,5 @@
 ---
+description: "FFI struct-backed components via newFFIComponent with C field types and defaults"
 outline: deep
 ---
 

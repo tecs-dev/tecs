@@ -1,4 +1,5 @@
 ---
+description: "Batch onEntitiesAdded and onEntitiesRemoved query hooks with row ranges and deferred-drain semantics"
 outline: deep
 ---
 

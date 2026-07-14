@@ -1,3 +1,7 @@
+---
+description: "The 16-layer system covering coordinate spaces, visibility, parallax, sort modes, and post-processing layer effects"
+---
+
 # Layers
 
 The render pipeline organizes entities into 16 layers for controlling draw order, visibility, and coordinate spaces.

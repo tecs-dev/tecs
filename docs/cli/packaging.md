@@ -1,4 +1,5 @@
 ---
+description: "Packaging built games with tecs dist into love files, macOS bundles, and Windows executables"
 outline: deep
 ---
 

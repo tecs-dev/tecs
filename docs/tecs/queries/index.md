@@ -1,4 +1,5 @@
 ---
+description: "Creating and iterating queries with include, exclude, includeAny, temp, iter, and deferred mutations"
 outline: deep
 ---
 

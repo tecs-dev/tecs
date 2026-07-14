@@ -1,4 +1,5 @@
 ---
+description: "The tecs2d.debug plugin: in-game modal debugger overlay, stats HUD, selection, snapshots, rewind, diff, screenshots, and recordings"
 outline: deep
 ---
 

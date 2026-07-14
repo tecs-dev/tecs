@@ -1,3 +1,7 @@
+---
+description: "AudioManager API for groups, volume, voice limiting, cooldowns, effects, and play, stop, pause control"
+---
+
 # Audio API Reference
 
 ## Module: tecs2d.audio

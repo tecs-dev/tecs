@@ -1,3 +1,7 @@
+---
+description: "BMFont bitmap and MSDF text rendering via the Text component, plus TextEffects outline, glow, and drop shadow"
+---
+
 # Text
 
 Tecs provides GPU-accelerated text rendering using

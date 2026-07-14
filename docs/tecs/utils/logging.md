@@ -1,4 +1,5 @@
 ---
+description: "Fast leveled logging via getLogger with no-op disabled paths, configurable sink, and setLevel"
 outline: deep
 ---
 

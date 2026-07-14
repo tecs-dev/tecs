@@ -1,4 +1,5 @@
 ---
+description: "Physics components Collider, RigidBody, and StaticBody with shapes, mass, forces, and filtering"
 outline: deep
 ---
 

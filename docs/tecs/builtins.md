@@ -1,4 +1,5 @@
 ---
+description: "Built-in components like Name, Key, ChildOf, Transform, TTL, Disabled, Paused, and lifecycle events registered on every world"
 outline: deep
 ---
 

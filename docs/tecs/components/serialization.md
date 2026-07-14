@@ -1,4 +1,5 @@
 ---
+description: "Component serialize and deserialize hooks, transient, and automatic FFI schema fingerprint migration"
 outline: deep
 ---
 

@@ -1,4 +1,5 @@
 ---
+description: "Authoritative spec of instant versus staged mutation paths, entity lifecycle states, commit drain ordering, and visibility guarantees"
 outline: deep
 ---
 

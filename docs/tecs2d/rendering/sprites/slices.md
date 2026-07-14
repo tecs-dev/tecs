@@ -1,3 +1,7 @@
+---
+description: "Using Aseprite slices for pivot points, per-frame pivots, hitboxes, and pivot priority ordering"
+---
+
 # Slices and Pivots
 
 Aseprite slices define regions within sprite frames for pivot points, collision boxes, and custom metadata. Slices can

@@ -1,4 +1,5 @@
 ---
+description: "FFI struct-backed relationships via newFFIRelationship with packed field types and target semantics"
 outline: deep
 ---
 

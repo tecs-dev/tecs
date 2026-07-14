@@ -1,3 +1,7 @@
+---
+description: "The TileSource component exposing a tile's gid, class, and Tiled properties on animated tile entities"
+---
+
 # TileSource Component
 
 The `TileSource` component provides access to a tile's metadata from Tiled. It is automatically added to animated tile

@@ -1,3 +1,7 @@
+---
+description: "The FitContent component auto-sizing a LayoutBox container to fit its children with padding"
+---
+
 # FitContent
 
 Auto-sizes a container to fit its children with optional padding.

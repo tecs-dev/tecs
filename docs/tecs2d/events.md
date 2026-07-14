@@ -1,4 +1,5 @@
 ---
+description: "Type-safe Tecs event wrappers for Love2D callbacks (MousePressed, KeyPressed, Resize, JoystickAdded) observed at address 0"
 outline: deep
 ---
 

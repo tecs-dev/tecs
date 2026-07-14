@@ -1,4 +1,5 @@
 ---
+description: "Game-loop phase groups and the enablePhase, disablePhase, registerPhase, and runPhase world methods for controlling system execution"
 outline: deep
 ---
 

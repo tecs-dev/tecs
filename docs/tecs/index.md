@@ -1,4 +1,5 @@
 ---
+description: "Getting-started overview of Tecs covering install, worlds, entities, components, systems, queries, phases, and resources"
 outline: deep
 ---
 

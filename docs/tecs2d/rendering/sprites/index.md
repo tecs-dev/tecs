@@ -1,3 +1,7 @@
+---
+description: "Overview of the sprite system, creating sprites from sheets or textures, Sprite methods, and GPU rendering buckets"
+---
+
 # Sprites
 
 Tecs provides a complete sprite system with animated sprites from Aseprite, per-frame collision boxes, animation

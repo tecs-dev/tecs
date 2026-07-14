@@ -1,3 +1,7 @@
+---
+description: "The ParticleEmitter component and ParticleEmitterConfig for Love2D-based particle effects with color, size, and motion gradients"
+---
+
 # Particle Emitter
 
 The `ParticleEmitter` component creates particle effects using Love2D's particle system.

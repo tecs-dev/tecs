@@ -1,3 +1,7 @@
+---
+description: "The tecs2d.controller layer for rebindable logical controls, mapping physical inputs to actions with bindings and pairs"
+---
+
 # Tecs Controller
 
 Tecs Controller provides rebindable controls for Tecs games. It builds on top of Tecs's event-based

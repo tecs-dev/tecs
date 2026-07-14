@@ -1,3 +1,7 @@
+---
+description: "Tiled map integration overview covering Tilemap loading, layers, animated tiles, material maps, and supported features"
+---
+
 # Tecs Tiled
 
 Tecs Tiled integrates the [Tiled](https://www.mapeditor.org/) map editor with Tecs ECS. It parses Tiled's JSON export

@@ -1,4 +1,5 @@
 ---
+description: "The tecs2d.tween animation system: typed targets, timeline builder, easing, channels, events, presets, and snapshot-safe playback"
 outline: deep
 ---
 

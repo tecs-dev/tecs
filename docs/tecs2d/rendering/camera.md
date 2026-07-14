@@ -1,3 +1,7 @@
+---
+description: "Camera positioning, zoom, lerping, screenshake, layer masks, coordinate conversion, CameraTarget follow, and multi-camera minimap/split-screen setups"
+---
+
 # Camera
 
 The camera controls how the game world is presented on screen. It handles virtual resolution, viewport

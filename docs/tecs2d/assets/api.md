@@ -1,3 +1,7 @@
+---
+description: "Full AssetManager API for loading images, fonts, audio, and JSON plus Handle map, flatMap, and observe"
+---
+
 # API Reference
 
 Access the assets module:

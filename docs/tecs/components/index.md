@@ -1,4 +1,5 @@
 ---
+description: "Component overview with world get, getMut, set, remove, has, requires, and transient"
 outline: deep
 ---
 

@@ -1,3 +1,7 @@
+---
+description: "Frame-based sprite animation via Aseprite tags, covering setTag, playOnce, playback direction, speed, and timing"
+---
+
 # Animation
 
 Sprites support frame-based animation using Aseprite frame tags. Each tag defines a named sequence of frames with timing

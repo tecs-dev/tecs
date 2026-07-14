@@ -1,4 +1,5 @@
 ---
+description: "Tecs framework home overview of the typed LuaJIT ECS and GPU-driven Tecs2D engine with AI tooling"
 # https://vitepress.dev/reference/default-theme-home-page
 layout: home
 

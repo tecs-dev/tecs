@@ -1,3 +1,7 @@
+---
+description: "AudioListener and AudioSource components for spatial and relative positional sound with attenuation and pitch variance"
+---
+
 # Audio Components
 
 Tecs Audio provides two ECS components for attaching audio to entities: `AudioListener` and `AudioSource`.

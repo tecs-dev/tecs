@@ -1,3 +1,7 @@
+---
+description: "The gfx.ChangeTag event fired on animation tag changes, its properties, and observer lifetime caveats"
+---
+
 # Animation Events
 
 Sprites emit `gfx.ChangeTag` when their animation tag changes. Events are emitted to the entity's address in the

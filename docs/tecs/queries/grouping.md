@@ -1,4 +1,5 @@
 ---
+description: "Grouping matching archetypes by integer key with groupBy, groups, group, and getGroupCount"
 outline: deep
 ---
 

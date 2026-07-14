@@ -1,3 +1,7 @@
+---
+description: "The RepeatedSprite component for tiling a sprite across an area with repeatX, repeatY, width, and height"
+---
+
 # Sprite Tiling
 
 The `RepeatedSprite` component tiles a sprite across an area, useful for repeating textures like terrain, backgrounds,

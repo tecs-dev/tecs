@@ -1,4 +1,5 @@
 ---
+description: "Setting up the Box2D physics plugin, world config, state access, and debug drawing"
 outline: deep
 ---
 

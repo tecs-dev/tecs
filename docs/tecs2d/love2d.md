@@ -1,4 +1,5 @@
 ---
+description: "Love2D integration via tecs2d.run: game loop, RunConfig, phase mapping, quit, event observation, and hot reload"
 outline: deep
 ---
 

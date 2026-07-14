@@ -1,3 +1,7 @@
+---
+description: "Layout helper functions stackVertical, stackHorizontal, and measureContent for arranging and measuring UI children"
+---
+
 # Layout Helpers
 
 Utility functions for common layout patterns.

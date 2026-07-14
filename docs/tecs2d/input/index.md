@@ -1,4 +1,5 @@
 ---
+description: "Low-level tecs2d.input queries for keyboard, mouse, and gamepad state plus the latch-based input model"
 outline: deep
 ---
 

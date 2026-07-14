@@ -1,4 +1,5 @@
 ---
+description: "Core World API for entities, spawn and despawn, batch operations, deferred scopes, resources, plugins, phases, and stats"
 outline: deep
 ---
 

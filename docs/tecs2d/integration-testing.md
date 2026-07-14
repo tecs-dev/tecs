@@ -1,4 +1,5 @@
 ---
+description: "Writing tecs integ specs with the fixture harness to drive a built game over MCP for integration tests"
 outline: deep
 ---
 

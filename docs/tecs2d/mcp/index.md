@@ -1,4 +1,5 @@
 ---
+description: "Setting up the tecs2d.mcp server, kernel versus cmd_* tool layers, shared cmd_context state, and the agent investigation workflow"
 outline: deep
 ---
 

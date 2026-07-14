@@ -1,3 +1,7 @@
+---
+description: "Transform smoothing modes interpolate, extrapolate, and disabled for rendering between fixed physics steps"
+---
+
 # Transform Smoothing
 
 Physics runs on a fixed timestep (typically 60Hz) for determinism, but rendering runs at the display's refresh rate.

@@ -1,4 +1,5 @@
 ---
+description: "Non-blocking threaded asset loading with promise-like Handles, weak-reference caching, pinning, and preloading"
 outline: deep
 ---
 

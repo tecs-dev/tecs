@@ -1,4 +1,5 @@
 ---
+description: "Adding and removing systems with addSystem, phases, ordering via before and after, and runIf scheduling predicates"
 outline: deep
 ---
 

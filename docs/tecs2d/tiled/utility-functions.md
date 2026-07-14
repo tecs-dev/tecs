@@ -1,3 +1,7 @@
+---
+description: "TilemapData methods for coordinate conversion, tile get/set access, layer and property lookup, and toJSON export"
+---
+
 # Utility Functions
 
 `TilemapData` provides methods for coordinate conversion and tile access.

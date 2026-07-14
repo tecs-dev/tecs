@@ -1,3 +1,7 @@
+---
+description: "Loading Aseprite sprite sheets and material maps, plus the SpriteSheet API and non-Aseprite builder"
+---
+
 # Sprite Sheets
 
 Sprite sheets are single images containing multiple animation frames. Tecs uses Aseprite's JSON export format for frame

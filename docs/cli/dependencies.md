@@ -1,4 +1,5 @@
 ---
+description: "Vendoring pure-Lua LuaRocks dependencies into src/vendor with matching Teal type declarations"
 outline: deep
 ---
 

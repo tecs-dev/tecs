@@ -1,3 +1,7 @@
+---
+description: "Auto-generating merged Box2D chain-shape collision from Tiled tile shapes via the Tilemap collision config"
+---
+
 # Tile Collision
 
 Tecs Tiled supports automatic physics collision generation from per-tile collision shapes defined in Tiled tilesets.

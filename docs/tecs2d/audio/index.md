@@ -1,3 +1,7 @@
+---
+description: "Spatial audio overview covering sound groups, fading, voice limiting, cooldowns, effects, and static versus stream loading"
+---
+
 # Tecs Audio
 
 Tecs Audio integrates [love.audio](https://love2d.org/wiki/love.audio) into the ECS.

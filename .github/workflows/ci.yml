@@ -380,3 +380,10 @@ jobs:
 
     - name: Type check
       run: make check
+
+  docs-descriptions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every docs page has a description
+        run: bash scripts/check-docs-descriptions.sh

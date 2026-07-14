@@ -1,4 +1,5 @@
 ---
+description: "Reusable entity-spawning templates via world:newBundle, spawnBundle, and required-plus-with component definitions"
 outline: deep
 ---
 

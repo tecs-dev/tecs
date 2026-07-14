@@ -1,3 +1,7 @@
+---
+description: "The LayoutNode component providing clipping and scrolling containers for child entities"
+---
+
 # LayoutNode
 
 A container that provides clipping and scrolling for its children. Requires LayoutBox for dimensions.

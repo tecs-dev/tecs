@@ -1,3 +1,7 @@
+---
+description: "Visualizing Tiled object layers with debug shapes toggled via DebugToggle, using debugPlugin and createDebugPlugin"
+---
+
 # Debug Plugin
 
 The debug plugin visualizes Tiled objects by spawning colored shapes (rectangles, ellipses, circles) for each object

@@ -1,4 +1,5 @@
 ---
+description: "Registering project-specific debugger commands via commands.register with schemas, subcommands, structured Result, and cmd_* MCP projection"
 outline: deep
 ---
 

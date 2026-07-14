@@ -1,3 +1,7 @@
+---
+description: "Controller API reference: ControlManager, Controller methods (isPressed, getPair, rebind, rumble), JoystickConfig, and Bindings types"
+---
+
 # API Reference
 
 ## JoystickConfig

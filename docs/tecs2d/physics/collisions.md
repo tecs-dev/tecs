@@ -1,4 +1,5 @@
 ---
+description: "Observing Box2D collision events (BeginContact, EndContact, PreSolve, PostSolve) plus category and layer filtering"
 outline: deep
 ---
 

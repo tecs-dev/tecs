@@ -1,3 +1,7 @@
+---
+description: "The Tilemap component loading and rendering a Tiled map, its properties, TilemapData structure, and parallax"
+---
+
 # Tilemap Component
 
 The `Tilemap` component loads and renders a Tiled map.

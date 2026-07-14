@@ -1,4 +1,5 @@
 ---
+description: "Generated reference for every built-in debugger command and cmd_* MCP tool with arguments, result schemas, and examples"
 outline: [2, 3]
 ---
 

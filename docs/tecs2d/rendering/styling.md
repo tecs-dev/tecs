@@ -1,3 +1,7 @@
+---
+description: "Styling components Color, blend modes, Unlit, Pivot, and roughGeometry for tinting and render flags"
+---
+
 # Styling
 
 Styling components modify how entities are rendered without changing their shape or content. These components work

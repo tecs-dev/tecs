@@ -1,4 +1,5 @@
 ---
+description: "LuaJIT sampling profiler and trace-abort tracker via profile.sample and profile.trace"
 outline: deep
 ---
 

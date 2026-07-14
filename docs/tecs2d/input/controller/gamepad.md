@@ -1,3 +1,7 @@
+---
+description: "Gamepad support: auto-assignment, hot-plugging, switching joysticks, rumble vibration, and analog triggers on controllers"
+---
+
 # Gamepad Support
 
 Controller provides comprehensive gamepad support with automatic input mapping and hot-plugging capabilities.
