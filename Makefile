@@ -8,7 +8,7 @@
 	example-camera-target example-material-demo example-camera-multi example-msdf-text example-tween-demo \
 	example-save-game \
 	newrock test-rockspec typecheck rebuild help rockspecs docs docs-dev docs-debug \
-	docs-descriptions docs-llms \
+	docs-descriptions \
 	json-bench ecs-bench snapshot-bench bitset-bench download-love12 check-love12
 
 .SILENT: clean test test-no-ffi find-busted
@@ -520,16 +520,6 @@ docs-dev:
 docs-descriptions:
 	@bash scripts/check-docs-descriptions.sh
 
-# Export the offline docs bundle the tecs CLI vendors and serves via `tecs
-# docs`: llms.txt (the titled, described page index) and llms-full.txt (every
-# page). Regenerate after changing docs/**; the CLI copies these verbatim.
-docs-llms: docs-descriptions
-	@cd docs && [ -d node_modules ] || npm ci
-	@cd docs && npm run docs:build
-	@mkdir -p docs/llms
-	@cp docs/.vitepress/dist/llms.txt docs/llms/llms.txt
-	@cp docs/.vitepress/dist/llms-full.txt docs/llms/llms-full.txt
-	@echo "Wrote docs/llms/{llms.txt,llms-full.txt}"
 
 # ================= Benchmarks =================
 # All bench targets accept three optional filters (handy for targeted profiling):
