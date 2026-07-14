@@ -31,7 +31,11 @@ function bridge.new(ctx)
     local server = setmetatable({
         ctx = ctx,
         game = nil,          -- {proc, port, url, logPath}
-        gameTools = nil,    -- last tools/list from a live game
+        -- Front-load the cached default tool set (written on the first
+        -- successful start_game) so the full list is advertised at initialize;
+        -- start_game refreshes it from the live game and only fires
+        -- tools/list_changed if the set actually differs.
+        gameTools = (ctx.readDefaultTools and ctx.readDefaultTools()) or ctx.kernelTools,
     }, serverMt)
     server.tools = server:cliTools()
     return server
@@ -105,7 +109,11 @@ function Server:startGame()
 
     local ready = self.game.client:waitReady(READY_TIMEOUT)
     if ready then
-        self:refreshGameTools()
+        if self:refreshGameTools() and self.ctx.writeDefaultTools then
+            -- Persist the full tool set so future sessions front-load it and
+            -- avoid the post-start_game tools/list_changed entirely.
+            self.ctx.writeDefaultTools(self.gameTools)
+        end
         return {
             port = port,
             pid = proc.pid,
@@ -290,6 +298,25 @@ function Server:textResult(id, value, isError)
     return self:respond(id, result)
 end
 
+-- The set of tool names currently advertised (CLI tools plus game tools).
+function Server:advertisedNames()
+    local names = {}
+    for _, tool in ipairs(self.tools) do names[tool.name] = true end
+    for _, tool in ipairs(self.gameTools or {}) do names[tool.name] = true end
+    return names
+end
+
+-- True if the advertised tool names differ from `before`. Used to fire
+-- tools/list_changed only when the set actually changes -- with the default
+-- tools front-loaded, start_game usually leaves the set identical, so no
+-- notification is sent and the client keeps its registration.
+function Server:toolNamesChanged(before)
+    local after = self:advertisedNames()
+    for name in pairs(after) do if not before[name] then return true end end
+    for name in pairs(before) do if not after[name] then return true end end
+    return false
+end
+
 function Server:listTools()
     local listed = {}
     local seen = {}
@@ -353,10 +380,11 @@ function Server:handleLine(line)
         local tool = self:findCliTool(name)
         if tool then
             local out = {}
+            local before = tool.notifiesToolsChanged and self:advertisedNames() or nil
             local callOk, result = pcall(tool.handler, message.params.arguments)
             if callOk then
                 out[#out + 1] = self:textResult(id, result)
-                if tool.notifiesToolsChanged then
+                if before and self:toolNamesChanged(before) then
                     out[#out + 1] = self.ctx.json.serialize(
                         {jsonrpc = "2.0", method = "notifications/tools/list_changed"}, true)
                 end

@@ -1563,11 +1563,40 @@ local function buildMcpContext()
         end
     end
 
+    -- The game's full tool set (kernel + registry-derived cmd_*) only exists
+    -- once a game runs, but it is identical across projects, so cache it at a
+    -- user-level path the first time start_game succeeds and front-load it
+    -- thereafter. That lets the bridge advertise the full list at initialize
+    -- instead of firing a large tools/list_changed after start_game, which some
+    -- MCP clients mis-reconcile. (The CLI cannot enumerate cmd_* itself: it
+    -- loads the framework from .tl on the fly, and observe()'s slotOf macroexp
+    -- is not inlined on that path.)
+    local defaultToolsPath = pathJoin(userDataDir(), "mcp-default-tools.json")
+
     return {
         version = VERSION,
         projectName = distName(),
         json = jsonModule(),
         kernelTools = kernelTools,
+        readDefaultTools = function()
+            local fh = io.open(defaultToolsPath, "rb")
+            if not fh then return nil end
+            local data = fh:read("*a")
+            fh:close()
+            local ok, parsed = pcall(jsonModule().parse, data)
+            if ok and type(parsed) == "table" then return parsed end
+            return nil
+        end,
+        writeDefaultTools = function(tools)
+            pcall(function()
+                os.execute("mkdir -p " .. q(dirname(defaultToolsPath)))
+                local fh = io.open(defaultToolsPath, "wb")
+                if fh then
+                    fh:write(jsonModule().serialize(tools))
+                    fh:close()
+                end
+            end)
+        end,
         loveProcess = require("tecs2d.testing.love_process"),
         mcpClient = require("tecs2d.testing.mcp_client"),
         loveBin = loveBin,
