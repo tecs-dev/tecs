@@ -78,7 +78,7 @@ jobs:
             grep -q '"name":"tecs"' "$RUNNER_TEMP/mcp-out.jsonl"
             grep -q '"start_game"' "$RUNNER_TEMP/mcp-out.jsonl"
             grep -q 'list_changed' "$RUNNER_TEMP/mcp-out.jsonl"
-            grep -q '"values":\["2"\]' "$RUNNER_TEMP/mcp-out.jsonl"
+            grep -q '"values":\[2\]' "$RUNNER_TEMP/mcp-out.jsonl"
             grep -F '\"stopped\":true' "$RUNNER_TEMP/mcp-out.jsonl" > /dev/null
             (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" dist)
             test -f "$project/dist/hello-tecs.love"
