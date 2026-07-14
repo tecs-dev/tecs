@@ -1055,12 +1055,39 @@ local function distName()
     return name
 end
 
+-- Remove an array-valued plist key while respecting arrays nested in its value.
+local function removePlistArray(plist, key)
+    local declarationStart, keyEnd = plist:find("%s*<key>" .. key .. "</key>%s*")
+    if not declarationStart then return plist end
+
+    local arrayStart, arrayEnd = plist:find("<array%s*>", keyEnd + 1)
+    if not arrayStart or arrayStart ~= keyEnd + 1 then
+        error("Info.plist key " .. key .. " does not contain an array", 0)
+    end
+
+    local depth = 1
+    local position = arrayEnd + 1
+    while depth > 0 do
+        local tagStart, tagEnd, closing = plist:find("<(/?)array%s*>", position)
+        if not tagStart then
+            error("Info.plist key " .. key .. " contains an unterminated array", 0)
+        end
+        if closing == "/" then
+            depth = depth - 1
+        else
+            depth = depth + 1
+        end
+        position = tagEnd + 1
+    end
+
+    return plist:sub(1, declarationStart - 1) .. plist:sub(position)
+end
+
 -- Rebrand LÖVE's Info.plist for the game and drop its claim on .love files.
 local function patchPlist(plist, name)
     plist = plist:gsub("(<key>CFBundleIdentifier</key>%s*<string>)[^<]*", "%1org.tecs2d." .. name, 1)
     plist = plist:gsub("(<key>CFBundleName</key>%s*<string>)[^<]*", "%1" .. name, 1)
-    plist = plist:gsub("%s*<key>UTExportedTypeDeclarations</key>%s*<array>.-</array>", "", 1)
-    return plist
+    return removePlistArray(plist, "UTExportedTypeDeclarations")
 end
 
 local function readBinary(path)
@@ -1852,11 +1879,12 @@ local commands = {
     },
     {
         name = "docs",
-        summary = "Print the bundled authoring/API reference",
-        description = "List the bundled authoring reference topics, or print one to stdout. "
-            .. "Topics cover the tecs2d rendering/component/system/input surface, Teal gotchas, "
-            .. "and the style guide, so agents and developers can look up the API without reading "
-            .. "vendored framework sources under src/vendor/. Use --full to print every topic.",
+        summary = "Print the bundled Tecs reference",
+        description = "List the bundled reference topics, or print one to stdout. Topics cover the "
+            .. "CLI workflow, integration testing, and the tecs2d rendering/component/system/input "
+            .. "surface plus Teal gotchas and the style guide, so agents and developers have one "
+            .. "always-current source of truth (versioned with the installed CLI) instead of "
+            .. "reading vendored sources under src/vendor/. Use --full to print every topic.",
         action = tasks.docs,
         setup = function(subcommand)
             subcommand:argument("topic", "Doc topic to print; omit to list topics."):args("?")

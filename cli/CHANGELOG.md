@@ -10,12 +10,21 @@ payload, launchers, and installers as GitHub release assets.
 
 ### Added
 
-- `tecs docs` command: prints a bundled authoring/API reference (rendering,
-  components/systems/queries, input, Teal gotchas, and a style-guide subset) so
-  agents and developers can look up the API without reading vendored framework
-  sources. `tecs docs` lists topics, `tecs docs <topic>` prints one,
-  `tecs docs --full` prints all, and `tecs docs --json` lists them as JSON. The
-  bundled `tecs-cli` skill and the `tecs-project` agent guide point at it.
+- `tecs docs` command: prints the bundled Tecs reference — the CLI workflow,
+  integration testing, and the tecs2d rendering, components/systems/queries,
+  input, Teal gotchas, and style topics — so agents and developers have one
+  always-current source of truth, versioned with the installed CLI, instead of
+  reading vendored framework sources. `tecs docs` lists topics,
+  `tecs docs <topic>` prints one, `tecs docs --full` prints all, and
+  `tecs docs --json` lists them as JSON.
+
+### Changed
+
+- New projects no longer commit `.claude/skills/` copies of the CLI-workflow and
+  integration-testing guidance. That guidance now lives in `tecs docs`
+  (`cli-workflow`, `testing`), and `AGENTS.md` references `tecs docs` as the
+  source of truth. Committed skill copies drifted from the CLI and could describe
+  a version other than the one installed; the command always matches.
 
 ## [0.9.0] - 2026-07-13
 

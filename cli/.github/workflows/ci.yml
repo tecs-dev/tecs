@@ -77,6 +77,7 @@ jobs:
             test -f "$project/dist/hello-tecs.love"
             test -f "$project/dist/macos/hello-tecs.app/Contents/Resources/hello-tecs.love"
             grep -q "org.tecs2d.hello-tecs" "$project/dist/macos/hello-tecs.app/Contents/Info.plist"
+            plutil -lint "$project/dist/macos/hello-tecs.app/Contents/Info.plist"
             test -f "$project/dist/hello-tecs-macos.zip"
             unzip -p "$project/dist/hello-tecs.love" tecs_buildinfo.lua | grep -q "dev = false"
             grep -q "dev = true" "$project/build/tecs_buildinfo.lua"

@@ -117,14 +117,20 @@ describe("tecs CLI", function()
             assert.is_true(exists(join(project, ".codex", "config.toml")))
             assert.is_true(exists(join(project, "README.md")))
             assert.is_true(exists(join(project, "tlconfig.lua")))
-            assert.matches("Tecs project guide", readFile(join(project, "AGENTS.md")))
+            local agents = readFile(join(project, "AGENTS.md"))
+            assert.matches("Tecs project guide", agents)
+            -- Guidance lives in `tecs docs`, not committed skill copies; AGENTS.md
+            -- points at the command and no `.claude/` tree is scaffolded.
+            assert.matches("tecs docs", agents)
+            assert.is_false(isDir(join(project, ".claude")))
+            -- The human-facing README must also point at `tecs docs` and must
+            -- not advertise the removed `.claude/skills/` directory.
+            local readme = readFile(join(project, "README.md"))
+            assert.matches("tecs docs", readme)
+            assert.equals(nil, readme:match("%.claude"))
             assert.equals("@AGENTS.md\n", readFile(join(project, "CLAUDE.md")))
             assert.matches("tecs2d%.testing%.fixture",
                 readFile(join(project, "spec", "game_lovespec.tl")))
-            assert.matches("name: integration%-testing",
-                readFile(join(project, ".claude", "skills", "integration-testing", "SKILL.md")))
-            assert.matches("name: tecs%-cli",
-                readFile(join(project, ".claude", "skills", "tecs-cli", "SKILL.md")))
             assert.is_false(exists(join(project, "game-dev-1.rockspec")))
             assert.is_true(exists(join(project, "src", "conf.tl")))
             assert.is_true(exists(join(project, "src", "main.tl")))
@@ -359,6 +365,9 @@ describe("tecs CLI", function()
             local out = table.concat(printed, "\n")
             assert.matches("tecs%-gotchas%s+Sharp edges", out)
             assert.matches("tecs2d%-rendering%s+Drawing is data", out)
+            -- Workflow guidance ships as docs topics, not committed skills.
+            assert.matches("cli%-workflow%s+", out)
+            assert.matches("testing%s+", out)
         end)
 
         it("lists topics as JSON", function()
@@ -656,7 +665,15 @@ describe("tecs CLI", function()
                 "    <string>LÖVE</string>",
                 "    <key>UTExportedTypeDeclarations</key>",
                 "    <array>",
-                "        <dict><key>a</key><string>b</string></dict>",
+                "        <dict>",
+                "            <key>UTTypeTagSpecification</key>",
+                "            <dict>",
+                "                <key>public.filename-extension</key>",
+                "                <array>",
+                "                    <string>love</string>",
+                "                </array>",
+                "            </dict>",
+                "        </dict>",
                 "    </array>",
                 "</dict>",
             }, "\n")
@@ -665,6 +682,11 @@ describe("tecs CLI", function()
             assert.matches("<string>mygame</string>", patched)
             assert.equals(nil, patched:match("UTExportedTypeDeclarations"))
             assert.equals(nil, patched:match("org%.love2d%.love"))
+            assert.equals(nil, patched:match("UTTypeTagSpecification"))
+            assert.equals("<dict>\n    <key>CFBundleIdentifier</key>\n"
+                .. "    <string>org.tecs2d.mygame</string>\n"
+                .. "    <key>CFBundleName</key>\n"
+                .. "    <string>mygame</string>\n</dict>", patched)
         end)
     end)
 

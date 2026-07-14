@@ -58,10 +58,11 @@ tecs run
 - empty `assets/`
 - a GitHub Actions workflow that type-checks and builds on Linux, macOS, and
   Windows with the published CLI
-- agent tooling: `AGENTS.md`/`CLAUDE.md` guidance, MCP client configuration
+- agent tooling: `AGENTS.md`/`CLAUDE.md` guidance and MCP client configuration
   for Claude Code (`.mcp.json`) and Codex (`.codex/config.toml`) pointing at
-  the game's built-in MCP server, and a Claude Code skill for writing
-  integration specs (`.claude/skills/integration-testing/`)
+  the game's built-in MCP server. Workflow, testing, and authoring guidance is
+  not committed into the project; it lives in `tecs docs`, and `AGENTS.md`
+  points there so it always matches the installed CLI.
 
 The default app renders `Hello Tecs2D!`.
 
@@ -96,11 +97,15 @@ stdout for editors, CI, and coding agents. Check output has the shape
 its absolute path, ready to reference from agent configuration
 (`CLAUDE.md`, `AGENTS.md`, and similar).
 
-`tecs docs` prints the bundled authoring/API reference so agents and developers
-can look up the tecs2d rendering, component, system, input, and style surface
-without reading vendored framework sources. `tecs docs` lists the topics,
+`tecs docs` prints the bundled reference for building with Tecs — the CLI
+workflow, integration testing, and the tecs2d rendering, component, system,
+input, gotchas, and style topics — so agents and developers have one
+always-current source of truth (versioned with the installed CLI) instead of
+reading vendored framework sources. `tecs docs` lists the topics,
 `tecs docs <topic>` prints one to stdout, `tecs docs --full` prints them all,
-and `tecs docs --json` lists them as machine-readable JSON.
+and `tecs docs --json` lists them as machine-readable JSON. Generated projects
+reference `tecs docs` from `AGENTS.md` rather than committing copies of this
+guidance, so it never drifts from the installed CLI.
 
 ## Testing
 
