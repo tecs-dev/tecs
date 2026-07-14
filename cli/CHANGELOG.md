@@ -8,6 +8,18 @@ payload, launchers, and installers as GitHub release assets.
 
 ## [Unreleased]
 
+## [0.10.6] - 2026-07-14
+
+### Changed
+
+- The `run_lua` sandbox now also strips love2d escape hatches: `love.thread`
+  (spawns threads with a full stdlib), `love.filesystem.load` (runs Lua under
+  the real globals), `love.filesystem.mount`/`mountFullPath`/`unmount` (reach
+  arbitrary host paths), the `love.filesystem` write functions,
+  `love.system.openURL`, and `love.event.quit`. Ordinary love2d APIs
+  (rendering, `love.filesystem.read`, input) stay available, and the game's own
+  systems keep the real `love`. Requires the bundled framework from this release.
+
 ## [0.10.5] - 2026-07-14
 
 ### Added
