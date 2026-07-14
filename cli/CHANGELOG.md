@@ -8,6 +8,16 @@ payload, launchers, and installers as GitHub release assets.
 
 ## [Unreleased]
 
+## [0.10.5] - 2026-07-14
+
+### Added
+
+- `tecs docs` now includes a generated API signature reference under
+  `tecs2d/api/` (`gfx`, `world`, `input`, `events`): real argument and return
+  types, optionality, generic constraints, constructors, and methods, extracted
+  from the framework's Teal type definitions. Agents can pull exact signatures
+  (e.g. `tecs docs tecs2d/api/gfx`) instead of reading vendored sources.
+
 ## [0.10.4] - 2026-07-14
 
 ### Fixed
