@@ -8,6 +8,8 @@ payload, launchers, and installers as GitHub release assets.
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-07-14
+
 ### Changed
 
 - `run_lua` returns values as JSON by default (pass `lua = true` for the Lua
