@@ -28,6 +28,13 @@ TECS_DIR="$tecs_dir" GEN_DOCS_FORCE=1 "$root/scripts/gen-docs-bundle.sh"
 mkdir -p "$stage/tecs_cli/docs"
 cp "$root/tecs_cli/docs/llms.txt" "$stage/tecs_cli/docs/llms.txt"
 cp "$root/tecs_cli/docs/llms-full.txt" "$stage/tecs_cli/docs/llms-full.txt"
+# The default MCP tool manifest the bridge front-loads at initialize, generated
+# in the Tecs repo (`make docs-debug`) so it stays in sync with the framework.
+if [ ! -f "$tecs_dir/docs/tecs2d/mcp/default-tools.json" ]; then
+    echo "Missing $tecs_dir/docs/tecs2d/mcp/default-tools.json; run \`make docs-debug\` in the Tecs checkout" >&2
+    exit 1
+fi
+cp "$tecs_dir/docs/tecs2d/mcp/default-tools.json" "$stage/tecs_cli/mcp-default-tools.json"
 cp -R "$root/tecs_cli/vendor" "$stage/tecs_cli/vendor"
 cp -R "$root/tecs_cli/runtime/teal/"* "$stage/"
 cp -R "$root/tecs_cli/runtime/busted/"* "$stage/"

@@ -77,7 +77,15 @@ jobs:
               < "$RUNNER_TEMP/mcp-session.jsonl" > "$RUNNER_TEMP/mcp-out.jsonl")
             grep -q '"name":"tecs"' "$RUNNER_TEMP/mcp-out.jsonl"
             grep -q '"start_game"' "$RUNNER_TEMP/mcp-out.jsonl"
-            grep -q 'list_changed' "$RUNNER_TEMP/mcp-out.jsonl"
+            # The full game tool set is front-loaded from the bundled manifest at
+            # initialize (a cmd_* tool is advertised before start_game), so the
+            # first start_game does not swap the list and no tools/list_changed
+            # fires -- the swap is exactly what made some clients drop the tools.
+            grep -q '"cmd_archetypes_list"' "$RUNNER_TEMP/mcp-out.jsonl"
+            if grep -q 'list_changed' "$RUNNER_TEMP/mcp-out.jsonl"; then
+              echo "unexpected tools/list_changed: front-load should keep the set stable" >&2
+              exit 1
+            fi
             grep -q '"values":\[2\]' "$RUNNER_TEMP/mcp-out.jsonl"
             grep -F '\"stopped\":true' "$RUNNER_TEMP/mcp-out.jsonl" > /dev/null
             (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" dist)

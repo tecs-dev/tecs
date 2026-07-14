@@ -31,11 +31,16 @@ function bridge.new(ctx)
     local server = setmetatable({
         ctx = ctx,
         game = nil,          -- {proc, port, url, logPath}
-        -- Front-load the cached default tool set (written on the first
-        -- successful start_game) so the full list is advertised at initialize;
-        -- start_game refreshes it from the live game and only fires
-        -- tools/list_changed if the set actually differs.
-        gameTools = (ctx.readDefaultTools and ctx.readDefaultTools()) or ctx.kernelTools,
+        -- Front-load the full default tool set so it is advertised at
+        -- initialize; start_game refreshes it from the live game and only fires
+        -- tools/list_changed if the set actually differs. Prefer the user-level
+        -- cache (written on the first successful start_game, captures any
+        -- project-specific cmd_*); fall back to the manifest vendored into the
+        -- payload so even a machine's first-ever start_game does not swap the
+        -- whole list; kernel tools are the last resort.
+        gameTools = (ctx.readDefaultTools and ctx.readDefaultTools())
+            or (ctx.readBundledTools and ctx.readBundledTools())
+            or ctx.kernelTools,
     }, serverMt)
     server.tools = server:cliTools()
     return server

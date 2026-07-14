@@ -1611,6 +1611,29 @@ local function buildMcpContext()
         end
     end
 
+    -- The full default tool set (kernel + cmd_*) generated in the Tecs repo and
+    -- vendored into the payload at build time. Front-loading it lets the bridge
+    -- advertise everything at initialize on the very first run, before any
+    -- start_game has populated the user-level cache.
+    local function readBundledTools()
+        local data
+        if isLoveCli and loveApi then
+            data = loveApi.filesystem.read("tecs_cli/mcp-default-tools.json")
+        else
+            local modulePath = sourcePath()
+            local path = modulePath and pathJoin(dirname(modulePath), "mcp-default-tools.json")
+            local handle = path and io.open(path, "rb")
+            if handle then
+                data = handle:read("*a")
+                handle:close()
+            end
+        end
+        if not data then return nil end
+        local ok, parsed = pcall(jsonModule().parse, data)
+        if ok and type(parsed) == "table" and parsed[1] then return parsed end
+        return nil
+    end
+
     -- The game's full tool set (kernel + registry-derived cmd_*) only exists
     -- once a game runs, but it is identical across projects, so cache it at a
     -- user-level path the first time start_game succeeds and front-load it
@@ -1626,6 +1649,7 @@ local function buildMcpContext()
         projectName = distName(),
         json = jsonModule(),
         kernelTools = kernelTools,
+        readBundledTools = readBundledTools,
         readDefaultTools = function()
             local fh = io.open(defaultToolsPath, "rb")
             if not fh then return nil end

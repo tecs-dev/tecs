@@ -622,6 +622,36 @@ describe("tecs CLI", function()
                 assert.matches('"screenshot"', out[1])
             end)
 
+            it("front-loads the bundled tool manifest when the cache is empty", function()
+                local bridge = require("tecs_cli.mcp_bridge")
+                local server = bridge.new({
+                    version = "9.9.9",
+                    projectName = "spec-game",
+                    json = cli._internal.jsonModule(),
+                    kernelTools = {
+                        {name = "screenshot", description = "d", inputSchema = {type = "object"}},
+                    },
+                    -- No user-level cache yet (fresh machine): the manifest is
+                    -- the front-load source, so the full set is advertised at
+                    -- initialize before any start_game.
+                    readDefaultTools = function() return nil end,
+                    readBundledTools = function()
+                        return {{name = "cmd_from_manifest", description = "d",
+                            inputSchema = {type = "object"}}}
+                    end,
+                    check = function() return true, {} end,
+                    build = function() end,
+                    reexec = function() return true, "ran" end,
+                    setEnv = function() end,
+                    unsetEnv = function() end,
+                    readBuildinfo = function() return nil end,
+                    log = function() end,
+                })
+                local out = server:handleLine('{"jsonrpc":"2.0","id":2,"method":"tools/list"}')
+                assert.matches('"cmd_from_manifest"', out[1])
+                assert.matches('"start_game"', out[1])
+            end)
+
             it("runs CLI tools and wraps structured results", function()
                 local out = newServer():handleLine(
                     '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"check","arguments":{}}}')
