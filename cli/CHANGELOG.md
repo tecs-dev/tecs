@@ -6,6 +6,17 @@ When cutting a release, bump `VERSION` in `tecs_cli/cli.lua`, update this file,
 and push the matching `v*` tag. CI publishes the self-contained `.love`
 payload, launchers, and installers as GitHub release assets.
 
+## [Unreleased]
+
+### Added
+
+- `tecs docs` command: prints a bundled authoring/API reference (rendering,
+  components/systems/queries, input, Teal gotchas, and a style-guide subset) so
+  agents and developers can look up the API without reading vendored framework
+  sources. `tecs docs` lists topics, `tecs docs <topic>` prints one,
+  `tecs docs --full` prints all, and `tecs docs --json` lists them as JSON. The
+  bundled `tecs-cli` skill and the `tecs-project` agent guide point at it.
+
 ## [0.9.0] - 2026-07-13
 
 ### Removed

@@ -451,24 +451,25 @@ local function agentDocDescription(content)
     return ""
 end
 
--- Bundled agent docs as {name, content}, sorted by name. Docs live in
--- tecs_cli/agents/ in the payload and the source tree.
-local function listAgentDocs()
+-- Bundled Markdown docs as {name, content}, sorted by name, read from a
+-- subdirectory under tecs_cli/ (e.g. "agents" or "docs") in both the LÖVE
+-- payload and the source tree. `label` is used only in the read-error message.
+local function listBundledDocs(subdir, label)
     local docs = {}
     if isLoveCli and loveApi then
-        for _, entry in ipairs(loveApi.filesystem.getDirectoryItems("tecs_cli/agents")) do
+        for _, entry in ipairs(loveApi.filesystem.getDirectoryItems("tecs_cli/" .. subdir)) do
             local name = entry:match("^(.+)%.md$")
             if name then
-                local content, err = loveApi.filesystem.read("tecs_cli/agents/" .. entry)
+                local content, err = loveApi.filesystem.read("tecs_cli/" .. subdir .. "/" .. entry)
                 if not content then
-                    error("could not read embedded agent doc " .. entry .. ": " .. tostring(err), 0)
+                    error("could not read embedded " .. label .. " " .. entry .. ": " .. tostring(err), 0)
                 end
                 docs[#docs + 1] = {name = name, content = content}
             end
         end
     else
         local modulePath = sourcePath()
-        local dir = modulePath and pathJoin(dirname(modulePath), "agents")
+        local dir = modulePath and pathJoin(dirname(modulePath), subdir)
         if dir and isDir(dir) then
             for _, file in ipairs(walkFiles(dir, {})) do
                 local name = basename(file):match("^(.+)%.md$")
@@ -483,6 +484,17 @@ local function listAgentDocs()
     end
     table.sort(docs, function(a, b) return a.name < b.name end)
     return docs
+end
+
+-- Agent guides live in tecs_cli/agents/; authoring reference topics (for the
+-- `docs` command) live in tecs_cli/docs/. Separate namespaces so the two
+-- listings never bleed into each other.
+local function listAgentDocs()
+    return listBundledDocs("agents", "agent doc")
+end
+
+local function listDocTopics()
+    return listBundledDocs("docs", "doc topic")
 end
 
 -- Modification time of a path (platform-specific units), or 0 if it is missing.
@@ -1585,6 +1597,65 @@ function tasks.agent(args)
     fail("unknown agent '" .. tostring(name) .. "'. Expected one of: " .. table.concat(names, ", "))
 end
 
+function tasks.docs(args)
+    local topics = listDocTopics()
+
+    -- --json is a listing-only modifier; a topic or --full print raw Markdown.
+    if args.json and (args.topic or args.full) then
+        fail("--json is only valid when listing topics (drop the topic and --full)")
+    end
+    if args.topic and args.full then
+        fail("pass either a topic or --full, not both")
+    end
+
+    -- Print every topic, in listing (sorted) order, with a heading separator.
+    if args.full then
+        for _, doc in ipairs(topics) do
+            io.write("\n\n# " .. doc.name .. "\n\n")
+            io.write((doc.content:gsub("%s+$", "")))
+            io.write("\n")
+        end
+        return
+    end
+
+    -- Print one topic's Markdown to stdout.
+    if args.topic and args.topic ~= "" then
+        local names = {}
+        for _, doc in ipairs(topics) do
+            names[#names + 1] = doc.name
+            if doc.name == args.topic then
+                io.write(doc.content)
+                if not doc.content:match("\n$") then
+                    io.write("\n")
+                end
+                return
+            end
+        end
+        fail("unknown doc '" .. tostring(args.topic) .. "'. Expected one of: " .. table.concat(names, ", "))
+    end
+
+    -- List topics.
+    if args.json then
+        local json = jsonModule()
+        local listed = {}
+        for _, doc in ipairs(topics) do
+            listed[#listed + 1] = {
+                name = doc.name,
+                description = agentDocDescription(doc.content),
+            }
+        end
+        print(json.serialize(listed, true))
+        return
+    end
+    local width = 0
+    for _, doc in ipairs(topics) do
+        width = math.max(width, #doc.name)
+    end
+    for _, doc in ipairs(topics) do
+        print(string.format("%-" .. width .. "s  %s", doc.name, agentDocDescription(doc.content)))
+    end
+end
+
 function tasks.completions(args)
     local p = parser()
     local script = p["get_" .. args.shell .. "_complete"](p)
@@ -1780,6 +1851,20 @@ local commands = {
         end,
     },
     {
+        name = "docs",
+        summary = "Print the bundled authoring/API reference",
+        description = "List the bundled authoring reference topics, or print one to stdout. "
+            .. "Topics cover the tecs2d rendering/component/system/input surface, Teal gotchas, "
+            .. "and the style guide, so agents and developers can look up the API without reading "
+            .. "vendored framework sources under src/vendor/. Use --full to print every topic.",
+        action = tasks.docs,
+        setup = function(subcommand)
+            subcommand:argument("topic", "Doc topic to print; omit to list topics."):args("?")
+            subcommand:flag("--full", "Print every topic concatenated, in listing order.")
+            subcommand:flag("--json", "Print the topic listing as JSON on stdout.")
+        end,
+    },
+    {
         name = "completions",
         summary = "Print a shell completion script",
         description = "Print a completion script for the given shell. bash: eval it from ~/.bashrc; "
@@ -1926,6 +2011,7 @@ M._internal = {
     q = q,
     setDataDir = function(path) dataDirOverride = path end,
     listAgentDocs = listAgentDocs,
+    listDocTopics = listDocTopics,
     agentDocDescription = agentDocDescription,
     jsonModule = jsonModule,
     distName = distName,

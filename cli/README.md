@@ -75,6 +75,7 @@ tecs run
 tecs build
 tecs check
 tecs clean
+tecs docs
 tecs agent list
 tecs completions zsh
 ```
@@ -94,6 +95,12 @@ stdout for editors, CI, and coding agents. Check output has the shape
 `tecs agent path <name>` writes one to the per-user data directory and prints
 its absolute path, ready to reference from agent configuration
 (`CLAUDE.md`, `AGENTS.md`, and similar).
+
+`tecs docs` prints the bundled authoring/API reference so agents and developers
+can look up the tecs2d rendering, component, system, input, and style surface
+without reading vendored framework sources. `tecs docs` lists the topics,
+`tecs docs <topic>` prints one to stdout, `tecs docs --full` prints them all,
+and `tecs docs --json` lists them as machine-readable JSON.
 
 ## Testing
 

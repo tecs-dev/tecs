@@ -329,6 +329,104 @@ describe("tecs CLI", function()
         end)
     end)
 
+    describe("docs command", function()
+        local function capturePrint(argv)
+            local printed = {}
+            local realPrint = print
+            _G.print = function(...)
+                printed[#printed + 1] = table.concat({...}, "\t")
+            end
+            local ok, err = cli.run(argv)
+            _G.print = realPrint
+            return ok, err, printed
+        end
+
+        local function captureWrite(argv)
+            local chunks = {}
+            local realWrite = io.write
+            io.write = function(...)
+                chunks[#chunks + 1] = table.concat({...})
+                return true
+            end
+            local ok, err = cli.run(argv)
+            io.write = realWrite
+            return ok, err, table.concat(chunks)
+        end
+
+        it("lists reference topics with descriptions", function()
+            local ok, _, printed = capturePrint({"docs"})
+            assert.is_true(ok)
+            local out = table.concat(printed, "\n")
+            assert.matches("tecs%-gotchas%s+Sharp edges", out)
+            assert.matches("tecs2d%-rendering%s+Drawing is data", out)
+        end)
+
+        it("lists topics as JSON", function()
+            local ok, _, printed = capturePrint({"docs", "--json"})
+            assert.is_true(ok)
+            local out = table.concat(printed, "\n")
+            assert.matches('"name":"tecs%-ecs"', out)
+            assert.matches('"description":', out)
+        end)
+
+        it("prints a single topic's markdown", function()
+            local ok, _, out = captureWrite({"docs", "tecs-gotchas"})
+            assert.is_true(ok)
+            assert.matches("# Tecs / Teal gotchas", out)
+            assert.matches("love%.math%.random", out)
+        end)
+
+        it("prints every topic with --full", function()
+            local ok, _, out = captureWrite({"docs", "--full"})
+            assert.is_true(ok)
+            assert.matches("# tecs%-ecs", out)
+            assert.matches("# tecs2d%-rendering", out)
+            -- headings appear in sorted listing order
+            local a = out:find("# tecs%-ecs", 1, false)
+            local b = out:find("# tecs2d%-rendering", 1, false)
+            assert.is_true(a ~= nil and b ~= nil and a < b)
+        end)
+
+        it("rejects an unknown topic", function()
+            local ok, err = cli.run({"docs", "nope"})
+            assert.is_true(not ok)
+            assert.matches("unknown doc 'nope'", err)
+        end)
+
+        it("rejects --json combined with a topic", function()
+            local ok, err = cli.run({"docs", "tecs-ecs", "--json"})
+            assert.is_true(not ok)
+            assert.matches("only valid when listing", err)
+        end)
+
+        it("rejects a topic combined with --full", function()
+            local ok, err = cli.run({"docs", "tecs-ecs", "--full"})
+            assert.is_true(not ok)
+            assert.matches("either a topic or %-%-full", err)
+        end)
+
+        it("keeps docs topics out of `agent list`", function()
+            local _, _, printed = capturePrint({"agent", "list"})
+            local out = table.concat(printed, "\n")
+            assert.matches("tecs%-project", out)
+            assert.is_true(out:find("tecs%-gotchas") == nil)
+            assert.is_true(out:find("tecs2d%-rendering") == nil)
+        end)
+
+        it("exposes docs in the completion script", function()
+            local captured = {}
+            local realWrite = io.write
+            io.write = function(...)
+                captured[#captured + 1] = table.concat({...})
+                return true
+            end
+            local ok = cli.run({"completions", "bash"})
+            io.write = realWrite
+            assert.is_true(ok)
+            assert.matches("docs", table.concat(captured))
+        end)
+    end)
+
     describe("completions", function()
         it("prints a completion function for bash", function()
             local captured = {}

@@ -20,11 +20,18 @@ project root (the directory containing `tlconfig.lua`).
 - `tecs dist [love|macos|windows]`: package the game into `dist/`. The MCP
   server and debugger disable themselves in these builds unless constructed
   with `{enableInDist = true}`.
+- `tecs docs`: print the bundled authoring/API reference. `tecs docs` lists
+  topics (rendering, components/systems/queries, input, Teal gotchas, style);
+  `tecs docs <topic>` prints one. Look the API up here instead of reading
+  vendored sources under `src/vendor/`.
 
 Prefer the MCP bridge tools over shell commands when connected over MCP:
 `.mcp.json` runs `tecs mcp`, which exposes check/build/integ/dist plus
 `start_game`, `stop_game`, `restart_game`, `game_status`, and `game_logs`,
-and proxies the running game's own tools.
+and proxies the running game's own tools. The game's own tools (`screenshot`,
+`run_lua`, `cmd_*`) become callable only after `start_game`; prefer `build`
+over `restart_game` for code changes; the HTTP endpoint on port 19999 is only
+for attaching to an already-running game.
 
 ## Dependencies
 
