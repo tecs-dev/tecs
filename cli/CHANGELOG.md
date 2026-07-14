@@ -8,6 +8,8 @@ payload, launchers, and installers as GitHub release assets.
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-07-14
+
 ### Added
 
 - `tecs check` diagnostics can carry a remediation slot (`hint` + a `tecs docs`
