@@ -8,6 +8,8 @@ payload, launchers, and installers as GitHub release assets.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-14
+
 ### Added
 
 - `tecs docs` command: an offline mirror of the framework documentation,
