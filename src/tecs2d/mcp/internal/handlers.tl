@@ -190,6 +190,71 @@ byName["get_logs"] = function(args: {string:any}, id: number)
         captured = captured, dropped = dropped, latest = latest})
 end
 
+-- run_lua sandbox. User code runs with a restricted environment so an MCP
+-- client cannot touch the host filesystem, spawn processes, or open sockets.
+-- love2d APIs and the ECS world stay available (love.filesystem is itself
+-- jailed to the game directory by LÖVE). The escape vectors are simply absent
+-- from the environment: io, ffi, debug, package, collectgarbage, the
+-- load/loadstring/dofile/loadfile family, and getfenv/setfenv. os is narrowed
+-- to its clock functions, and require only resolves framework modules outside
+-- the process/network/filesystem-touching subtrees.
+local G <const> = (_G as any) as {string: any}
+local sandboxSetfenv <const> = G["setfenv"] as function(any, {string: any})
+local sandboxSetmt <const> = setmetatable as function(any, any): any
+local sandboxRawset <const> = rawset as function(any, any, any)
+
+-- Globals removed from the sandbox: filesystem (io), native/process escape
+-- (ffi, package, os process bits, load/loadstring/dofile/loadfile), and the
+-- introspection hooks that could rebuild them (debug, getfenv/setfenv, _G).
+local SAFE_OS <const>: {string} = {"time", "clock", "date", "difftime"}
+local DENIED_GLOBAL <const>: {string: boolean} = {
+    io = true, ffi = true, package = true,
+    load = true, loadstring = true, dofile = true, loadfile = true,
+    debug = true, collectgarbage = true, newproxy = true,
+    getfenv = true, setfenv = true, _G = true, _ENV = true,
+}
+
+local function sandboxRequire(name: string): any
+    if type(name) ~= "string" then
+        error("run_lua require expects a module name", 2)
+    end
+    local root = name:match("^([^.]+)") or name
+    local allowed = (root == "tecs" or root == "tecs2d")
+        and name:match("^tecs2d%.testing") == nil
+        and name:match("^tecs2d%.mcp") == nil
+        and name:match("^tecs2d%.debug") == nil
+    if not allowed then
+        error("require('" .. name .. "') is blocked in run_lua: the filesystem, "
+            .. "network, and process modules are unavailable. love2d APIs and the "
+            .. "ECS world are already in scope.", 2)
+    end
+    return (require as function(string): any)(name)
+end
+
+-- The environment reads through to the real globals (so run_lua can inspect
+-- love2d, the ECS world, and the game's own globals) but shadows the dangerous
+-- keys, replaces os with a clock-only subset, and swaps in the gated require.
+-- Assignments stay local to this table instead of leaking into real globals.
+local function makeSandboxEnv(): {string: any}
+    local realOs = G["os"] as {string: any}
+    local safeOs: {string: any} = {}
+    if realOs then
+        for _, k in ipairs(SAFE_OS) do safeOs[k] = realOs[k] end
+    end
+    local mt: {string: any} = {}
+    mt["__index"] = function(_: any, k: string): any
+        if k == "require" then return sandboxRequire end
+        if k == "os" then return safeOs end
+        if DENIED_GLOBAL[k] then return nil end
+        return G[k]
+    end
+    mt["__newindex"] = function(t: any, k: any, v: any)
+        sandboxRawset(t, k, v)
+    end
+    mt["__metatable"] = false
+    return sandboxSetmt({}, mt) as {string: any}
+end
+
 byName["run_lua"] = function(args: {string:any}, id: number)
     if not requireWorld(id) then return end
 
@@ -206,6 +271,10 @@ byName["run_lua"] = function(args: {string:any}, id: number)
         if not chunk then
             error("Failed to load code: " .. tostring(loadErr))
         end
+        -- Sandbox: the chunk (and the function it returns) runs with a
+        -- restricted environment. love2d and the ECS world stay reachable;
+        -- filesystem, network, and process access do not.
+        sandboxSetfenv(chunk, makeSandboxEnv())
         local fn = chunk()
         if type(fn) ~= "function" then
             error("Code must return a function, got " .. type(fn))

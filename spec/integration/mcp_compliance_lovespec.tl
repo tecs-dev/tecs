@@ -158,6 +158,25 @@ describe("mcp compliance: boot and introspection", function()
         luassert.are.equal("ok", first.tag as string)
     end)
 
+    it("run_lua sandboxes the filesystem, network, and module loading", function()
+        -- love2d and the ECS world stay reachable.
+        luassert.are.equal("table", runLua(app, "return type(love.graphics)")[1])
+        luassert.are.equal("true",
+            runLua(app, "return tostring(require('tecs2d.gfx') ~= nil)")[1])
+        -- Filesystem and process escape hatches are gone from the environment.
+        luassert.are.equal("nil", runLua(app, "return type(io)")[1])
+        luassert.are.equal("nil", runLua(app, "return type(os.execute)")[1])
+        luassert.are.equal("nil", runLua(app, "return type(load)")[1])
+        luassert.are.equal("nil", runLua(app, "return type(package)")[1])
+        -- os keeps its harmless clock functions.
+        luassert.are.equal("function", runLua(app, "return type(os.time)")[1])
+        -- require refuses non-framework and process/network/fs subtree modules.
+        luassert.are.equal("false", runLua(app, "return tostring((pcall(require, 'io')))")[1])
+        luassert.are.equal("false", runLua(app, "return tostring((pcall(require, 'ffi')))")[1])
+        luassert.are.equal("false",
+            runLua(app, "return tostring((pcall(require, 'tecs2d.testing.love_process')))")[1])
+    end)
+
     it("tool results carry structuredContent matching the text envelope", function()
         local response = app.client:rpc("tools/call", {name = "ping", arguments = {}})
         local result = response.result as {string: any}
