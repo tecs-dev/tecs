@@ -8,6 +8,18 @@ payload, launchers, and installers as GitHub release assets.
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-07-14
+
+### Fixed
+
+- The `tecs mcp` bridge front-loads a bundled default tool manifest (every
+  kernel and `cmd_*` tool, generated in the Tecs repo and vendored at build
+  time) at initialize, so even a machine's first-ever `start_game` finds the
+  advertised tool set unchanged and fires no `tools/list_changed`. Previously
+  only runs after the first `start_game` were covered by the user-level cache;
+  the first run still swapped ~15 tools for ~140 and could make some clients
+  drop the `tecs` tools.
+
 ## [0.10.2] - 2026-07-14
 
 ### Changed
