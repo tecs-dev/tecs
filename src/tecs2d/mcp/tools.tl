@@ -141,7 +141,8 @@ tools.list = {
             "{count = ..., score = ...}) for a structured, cheap read; pass lua=true for the raw " ..
             "Lua tostring form instead. " ..
             "The code is sandboxed: love2d APIs and the ECS world are available, but the " ..
-            "filesystem (io, os.execute) and module loading (require, load, dofile) are not. " ..
+            "filesystem (io, os.execute) and module loading (require, load, dofile) are not, " ..
+            "and love escape hatches are removed (love.thread, love.filesystem.load/mount/write). " ..
             "Use 'world' directly to access the ECS world. Prefer the structured cmd_* " ..
             "command tools (cmd_fetch, cmd_set, cmd_spawn, ...) when one covers the operation." ..
             JSON_TEXT_RESPONSE,

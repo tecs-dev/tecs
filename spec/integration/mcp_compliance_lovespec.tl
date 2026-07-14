@@ -175,6 +175,15 @@ describe("mcp compliance: boot and introspection", function()
         luassert.are.equal("false", runLua(app, "return tostring((pcall(require, 'ffi')))")[1])
         luassert.are.equal("false",
             runLua(app, "return tostring((pcall(require, 'tecs2d.testing.love_process')))")[1])
+        -- love escape hatches are stripped, but ordinary love APIs remain.
+        luassert.are.equal("nil", runLua(app, "return type(love.thread)")[1])
+        luassert.are.equal("nil", runLua(app, "return type(love.filesystem.load)")[1])
+        luassert.are.equal("nil", runLua(app, "return type(love.filesystem.mount)")[1])
+        luassert.are.equal("nil", runLua(app, "return type(love.filesystem.write)")[1])
+        luassert.are.equal("nil", runLua(app, "return type(love.system.openURL)")[1])
+        luassert.are.equal("nil", runLua(app, "return type(love.event.quit)")[1])
+        luassert.are.equal("function", runLua(app, "return type(love.filesystem.read)")[1])
+        luassert.are.equal("function", runLua(app, "return type(love.graphics.getWidth)")[1])
     end)
 
     it("tool results carry structuredContent matching the text envelope", function()

@@ -110,7 +110,7 @@ Annotations: none.
 
 ### `run_lua` {#run_lua}
 
-Run Lua code in the game. Code is wrapped in function(world) ... end automatically. The result is an envelope {returned: &lt;count>, values: [...]}: values holds your return values in order, so `return snake.length` reads back as values[0]. Return values are serialized as JSON by default -- return a table (e.g. {count = ..., score = ...}) for a structured, cheap read; pass lua=true for the raw Lua tostring form instead. The code is sandboxed: love2d APIs and the ECS world are available, but the filesystem (io, os.execute) and module loading (require, load, dofile) are not. Use 'world' directly to access the ECS world. Prefer the structured cmd_* command tools (cmd_fetch, cmd_set, cmd_spawn, ...) when one covers the operation. Returns compact JSON text envelope.
+Run Lua code in the game. Code is wrapped in function(world) ... end automatically. The result is an envelope {returned: &lt;count>, values: [...]}: values holds your return values in order, so `return snake.length` reads back as values[0]. Return values are serialized as JSON by default -- return a table (e.g. {count = ..., score = ...}) for a structured, cheap read; pass lua=true for the raw Lua tostring form instead. The code is sandboxed: love2d APIs and the ECS world are available, but the filesystem (io, os.execute) and module loading (require, load, dofile) are not, and love escape hatches are removed (love.thread, love.filesystem.load/mount/write). Use 'world' directly to access the ECS world. Prefer the structured cmd_* command tools (cmd_fetch, cmd_set, cmd_spawn, ...) when one covers the operation. Returns compact JSON text envelope.
 
 Annotations: destructive.
 

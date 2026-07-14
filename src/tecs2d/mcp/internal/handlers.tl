@@ -231,10 +231,53 @@ local function sandboxRequire(name: string): any
     return (require as function(string): any)(name)
 end
 
+-- love2d is exposed for rendering and world introspection, but a few love APIs
+-- are escape hatches: love.thread spawns threads with a full stdlib
+-- (io/os/ffi/luasocket), love.filesystem.load runs Lua under the real globals,
+-- and mount/mountFullPath reach arbitrary host paths. The sandbox gets a shallow
+-- copy of love with those removed. The game's own systems keep the real love
+-- (they run outside this environment), so their save/thread features still work.
+local DENIED_LOVE_TOP <const>: {string: boolean} = {thread = true}
+local DENIED_LOVE_FS <const>: {string: boolean} = {
+    load = true, mount = true, mountFullPath = true, unmount = true,
+    write = true, append = true, remove = true, createDirectory = true,
+    newFile = true, setIdentity = true, setSource = true,
+}
+local DENIED_LOVE_SYSTEM <const>: {string: boolean} = {openURL = true}
+local DENIED_LOVE_EVENT <const>: {string: boolean} = {quit = true}
+
+local function filteredCopy(t: {string: any}, denied: {string: boolean}): {string: any}
+    local out: {string: any} = {}
+    for k, v in pairs(t) do
+        if not denied[k] then out[k] = v end
+    end
+    return out
+end
+
+local sandboxLoveCache: {string: any} = nil
+local function sandboxLove(): any
+    if sandboxLoveCache then return sandboxLoveCache end
+    local L = G["love"] as {string: any}
+    if not L then return nil end
+    local out = filteredCopy(L, DENIED_LOVE_TOP)
+    if type(L["filesystem"]) == "table" then
+        out["filesystem"] = filteredCopy(L["filesystem"] as {string: any}, DENIED_LOVE_FS)
+    end
+    if type(L["system"]) == "table" then
+        out["system"] = filteredCopy(L["system"] as {string: any}, DENIED_LOVE_SYSTEM)
+    end
+    if type(L["event"]) == "table" then
+        out["event"] = filteredCopy(L["event"] as {string: any}, DENIED_LOVE_EVENT)
+    end
+    sandboxLoveCache = out
+    return out
+end
+
 -- The environment reads through to the real globals (so run_lua can inspect
 -- love2d, the ECS world, and the game's own globals) but shadows the dangerous
--- keys, replaces os with a clock-only subset, and swaps in the gated require.
--- Assignments stay local to this table instead of leaking into real globals.
+-- keys, hands out a filtered love, replaces os with a clock-only subset, and
+-- swaps in the gated require. Assignments stay local to this table instead of
+-- leaking into real globals.
 local function makeSandboxEnv(): {string: any}
     local realOs = G["os"] as {string: any}
     local safeOs: {string: any} = {}
@@ -245,6 +288,7 @@ local function makeSandboxEnv(): {string: any}
     mt["__index"] = function(_: any, k: string): any
         if k == "require" then return sandboxRequire end
         if k == "os" then return safeOs end
+        if k == "love" then return sandboxLove() end
         if DENIED_GLOBAL[k] then return nil end
         return G[k]
     end
