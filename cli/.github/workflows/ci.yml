@@ -32,6 +32,13 @@ jobs:
           test "$GITHUB_REF_NAME" = "v$version"
           grep -F "## [$version] -" CHANGELOG.md
 
+      - name: Set up Node (docs bundle)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tecs/docs/package-lock.json
+
       - name: Build tecs-cli.love
         env:
           TECS_DIR: ${{ github.workspace }}/tecs
@@ -148,6 +155,13 @@ jobs:
         with:
           repository: tecs-dev/tecs
           path: tecs
+
+      - name: Set up Node (docs bundle)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tecs/docs/package-lock.json
 
       - name: Build tecs-cli.love
         shell: bash

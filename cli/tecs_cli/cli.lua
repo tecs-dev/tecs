@@ -492,9 +492,9 @@ end
 
 -- The `docs` command serves an offline mirror of the framework documentation:
 -- llms.txt (the titled, described page index) and llms-full.txt (every page).
--- `build_love.sh` copies both into the payload from the tecs checkout; from a
--- source tree they are read from $TECS_DIR/docs/llms (mirroring build_love's
--- default of ../tecs).
+-- Both are generated from the Tecs docs by `scripts/gen-docs-bundle.sh` into
+-- tecs_cli/docs/ (gitignored) and vendored into the payload by build_love.sh, so
+-- reads resolve to the same tecs_cli/docs/ path in a source tree and in the .love.
 local function readDocBundle(name)
     if isLoveCli and loveApi then
         local content, err = loveApi.filesystem.read("tecs_cli/docs/" .. name)
@@ -503,17 +503,11 @@ local function readDocBundle(name)
         end
         return content
     end
-    local dir = tecsDir
-    if not dir then
-        local modulePath = sourcePath()
-        if modulePath then
-            dir = pathJoin(dirname(dirname(modulePath)), "..", "tecs")
-        end
-    end
-    local path = dir and pathJoin(dir, "docs", "llms", name)
+    local modulePath = sourcePath()
+    local path = modulePath and pathJoin(dirname(modulePath), "docs", name)
     local handle = path and io.open(path, "rb")
     if not handle then
-        error("docs bundle not found; run `make docs-llms` in the tecs checkout or set TECS_DIR", 0)
+        error("docs bundle missing; run `scripts/gen-docs-bundle.sh` (needs a Tecs checkout and Node)", 0)
     end
     local content = handle:read("*a")
     handle:close()

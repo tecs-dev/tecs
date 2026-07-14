@@ -6,7 +6,7 @@ ARGPARSE_REF ?= 0.7.2
 ANSICOLORS_REF ?= v1.0.2
 BUSTED_REF ?= 2.2.0-1
 
-.PHONY: build package lint test check update-vendor update-teal update-types update-lua-vendor clean
+.PHONY: build package lint test check docs-bundle update-vendor update-teal update-types update-lua-vendor clean
 
 build:
 	./scripts/build_love.sh
@@ -17,9 +17,15 @@ package: build
 lint:
 	luacheck tecs_cli/cli.lua loveapp spec
 
-# Specs that exercise --json need framework sources; default to a sibling
-# Tecs checkout like scripts/build_love.sh does and skip when it is absent.
-test:
+# Build the offline docs bundle the CLI serves via `tecs docs`, from the Tecs
+# docs source (needs Node). Reuses an existing docs build; run with
+# GEN_DOCS_FORCE=1 to rebuild.
+docs-bundle:
+	./scripts/gen-docs-bundle.sh
+
+# Specs that exercise --json and `tecs docs` need framework sources and the docs
+# bundle; default to a sibling Tecs checkout like scripts/build_love.sh does.
+test: docs-bundle
 	TECS_DIR="$${TECS_DIR:-$(abspath ..)/tecs}" luajit spec/run.lua
 
 check: lint test build
