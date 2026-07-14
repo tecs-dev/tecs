@@ -237,8 +237,25 @@ byName["run_lua"] = function(args: {string:any}, id: number)
             return
         end
         local n = #results
-        local values: {string} = {}
-        for i = 2, n do values[i - 1] = tostring(results[i]) end
+        -- JSON by default: keep JSON-representable values (numbers, strings,
+        -- booleans, serializable tables) as-is so the response carries native
+        -- JSON; fall back to tostring for anything else. `lua=true` opts into the
+        -- raw Lua tostring form for every value.
+        local raw = args.lua == true
+        local values: {any} = {}
+        for i = 2, n do
+            local v = results[i]
+            local vt = type(v)
+            if raw then
+                values[i - 1] = tostring(v)
+            elseif vt == "number" or vt == "string" or vt == "boolean" then
+                values[i - 1] = v
+            elseif vt == "table" and pcall(tecs.json.serialize, v) then
+                values[i - 1] = v
+            else
+                values[i - 1] = tostring(v)
+            end
+        end
         sendToolOK(id, {
             returned = n - 1,
             values = values

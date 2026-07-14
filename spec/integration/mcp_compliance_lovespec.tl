@@ -76,9 +76,10 @@ local function stopApp(app: App)
     end
 end
 
---- Run Lua in the app and return the stringified return values.
+--- Run Lua in the app and return the stringified return values (the run_lua
+--- tool returns JSON by default; pass lua=true for the tostring form).
 local function runLua(app: App, code: string, timeout?: number): {string}
-    local result = app.client:call("run_lua", {code = code}, timeout)
+    local result = app.client:call("run_lua", {code = code, lua = true}, timeout)
     return result.values as {string}
 end
 
@@ -147,6 +148,14 @@ describe("mcp compliance: boot and introspection", function()
         local values = runLua(app, "return 1 + 1, 'two'")
         luassert.are.equal("2", values[1])
         luassert.are.equal("two", values[2])
+    end)
+
+    it("run_lua returns JSON values by default", function()
+        local result = app.client:call("run_lua", {code = "return {count = 3, tag = 'ok'}"})
+        local values = result.values as {any}
+        local first = values[1] as {string: any}
+        luassert.are.equal(3, first.count as number)
+        luassert.are.equal("ok", first.tag as string)
     end)
 
     it("tool results carry structuredContent matching the text envelope", function()

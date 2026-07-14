@@ -82,9 +82,11 @@ function fixture.stop(app: fixture.App)
     end
 end
 
---- Run Lua in the app and return the stringified return values.
+--- Run Lua in the app and return the stringified return values. (The run_lua
+--- tool returns JSON by default; the fixture requests the Lua form so specs keep
+--- getting plain strings. Call the tool directly with lua=false for JSON.)
 function fixture.runLua(app: fixture.App, code: string, timeout?: number): {string}
-    local result = app.client:call("run_lua", {code = code}, timeout)
+    local result = app.client:call("run_lua", {code = code, lua = true}, timeout)
     return result.values as {string}
 end
 

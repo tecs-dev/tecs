@@ -135,13 +135,18 @@ tools.list = {
         annotations = {readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false},
         description = "Run Lua code in the game. " ..
             "Code is wrapped in function(world) ... end automatically. " ..
+            "Return values are serialized as JSON by default -- return a table (e.g. " ..
+            "{count = ..., score = ...}) for a structured, cheap read; pass lua=true for the raw " ..
+            "Lua tostring form instead. " ..
             "Use 'world' directly to access the ECS world. Prefer the structured cmd_* " ..
             "command tools (cmd_fetch, cmd_set, cmd_spawn, ...) when one covers the operation." ..
             JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {
-                code = {type = "string", description = "Lua code to execute with 'world' in scope"}
+                code = {type = "string", description = "Lua code to execute with 'world' in scope"},
+                lua = {type = "boolean",
+                    description = "Return values as Lua tostring strings instead of JSON (default false)"}
             },
             required = {"code"},
             additionalProperties = false
