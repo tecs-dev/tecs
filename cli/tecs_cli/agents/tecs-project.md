@@ -14,7 +14,7 @@ LuaRocks, or compiler toolchain is required; the CLI downloads its LÖVE runtime
 
 Run these from the project root (the directory containing `tlconfig.lua`):
 
-- `tecs check`: type-check every Teal source under `src/`. Add `--json` for machine-readable diagnostics: `{"ok": boolean, "diagnostics": [{"file", "line", "column", "severity", "kind", "message"}]}`.
+- `tecs check`: type-check every Teal source under `src/`. Add `--json` for machine-readable diagnostics: `{"ok": boolean, "diagnostics": [{"file", "line", "column", "severity", "kind", "message"}]}`. A diagnostic may carry a remediation `hint` — for unknown fields and signature mismatches it names the exact `tecs api` lookup; follow it instead of guessing.
 - `tecs build`: compile Teal to `build/`, copy assets, and stage the runtime vendor tree. Incremental; safe to rerun.
 - `tecs run`: build, then launch the game with the cached LÖVE 12 runtime.
 - `tecs integ`: compile `spec/**/*.tl` and run it with the bundled busted runner.
@@ -29,6 +29,12 @@ Run these from the project root (the directory containing `tlconfig.lua`):
   for the page you need — e.g. `tecs docs tecs2d/rendering/shapes`. `tecs docs --full` prints
   every page. Prefer this over reading vendored sources under `src/vendor/`; the CLI/testing
   workflow and conventions live in the bundled Claude Code skills.
+- `tecs api <symbol>`: look up exact API signatures — the framework surface plus your own
+  components/systems (type-checked on demand from `src/`). `tecs api` lists modules,
+  `tecs api <module>` its symbols, `tecs api <module>.<Type>` a Teal `record` block,
+  `tecs api <Type>:<method>` one method; a bare name resolves in your project. Pass several
+  symbols to fan out; `--json` for structured records, `--fields <keys>` to return only the
+  keys you need. Prefer this over grepping `src/vendor/` for a signature.
 - `tecs info --json`: CLI, LÖVE, and LuaJIT versions plus project status as JSON.
 - Dependencies: vendor pure-Lua rocks with LuaRocks into the project tree
   (`luarocks install --tree src/vendor --lua-version=5.1 <rock>`, plus the matching
@@ -56,7 +62,9 @@ While the game is running, rerun `tecs build` after editing sources. A successfu
 
 The default project wires the Tecs2D MCP plugin into the game world (`world:addPlugin(mcp.new())` in `src/main.tl`). While the game runs it serves MCP over local HTTP at `http://127.0.0.1:19999/mcp` (Streamable HTTP) with tools to screenshot the game, sample pixels, send input events, run Lua inside the game, read logs, and invoke `cmd_*` debug commands. Prefer observing the live game through MCP over guessing at runtime behavior: `tecs build`, launch with `tecs run`, then connect.
 
-Generated projects ship ready-made client configuration: `.mcp.json` for Claude Code and `.codex/config.toml` for Codex, both running `tecs mcp` — a stdio bridge that works even before the game exists. It serves the toolchain as tools (`check`, `build`, `integ`, `dist`), manages the game process (`start_game`, `stop_game`, `restart_game`, `game_status`, `game_logs` — the log tool works after a crash), and proxies every tool of the running game. Prefer these MCP tools over shell commands when connected: call `start_game` before any game tool, and prefer `build` over `restart_game` for code changes since the running game hot-reloads. To attach to an already-running game directly (for example a dist build with `enableInDist`), use its HTTP endpoint `http://127.0.0.1:19999/mcp` instead.
+Generated projects ship ready-made client configuration: `.mcp.json` for Claude Code and `.codex/config.toml` for Codex, both running `tecs mcp` — a stdio bridge that works even before the game exists. It serves the toolchain as tools (`check`, `build`, `api`, `integ`, `dist`), manages the game process (`start_game`, `stop_game`, `restart_game`, `game_status`, `game_logs` — the log tool works after a crash), and proxies every tool of the running game. Prefer these MCP tools over shell commands when connected: call `start_game` before any game tool, and prefer `build` over `restart_game` for code changes since the running game hot-reloads. To attach to an already-running game directly (for example a dist build with `enableInDist`), use its HTTP endpoint `http://127.0.0.1:19999/mcp` instead.
+
+`tecs docs` and `tecs api` (CLI) — and the `api` MCP tool — are available anytime, before the game is built and before `start_game`. Only in-game tools (`run_lua`, `screenshot`, `cmd_*`) require `start_game`.
 
 The MCP server and debugger disable themselves in `tecs dist` builds: `tecs build` writes a `build/tecs_buildinfo.lua` manifest (name, timestamp, tool versions, `dev` flag) that `tecs dist` packages with `dev = false`. Pass `{enableInDist = true}` to `mcp.new()` or `debug.new()` to keep them in distributed builds; read the manifest at runtime via `require("tecs2d.buildinfo")`.
 

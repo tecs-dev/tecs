@@ -77,6 +77,7 @@ tecs build
 tecs check
 tecs clean
 tecs docs
+tecs api gfx.Rectangle
 tecs agent list
 tecs completions zsh
 ```
@@ -104,6 +105,21 @@ page by its index path (e.g. `tecs docs tecs2d/rendering/shapes`);
 `tecs docs --full` prints every page; and `tecs docs --json` prints the index as
 machine-readable `{id, title, description}`. Generated projects reference
 `tecs docs` from `AGENTS.md` rather than committing copies, so it never drifts.
+
+`tecs api` looks up exact API signatures — the framework surface (generated from
+the vendored framework sources and cached per CLI version, so it is always
+available) plus your project's own components and systems, which it type-checks
+on demand from `src/` (no build or running game needed). `tecs api`
+lists modules; `tecs api <module>` lists a module's symbols; `tecs api
+<module>.<Type>` renders a type as a Teal `record` block; `tecs api <Type>:<method>`
+prints a single method. A bare name (`tecs api Health`) prefers your project's
+own symbols — a framework symbol with the same name is listed as `also matches`.
+Pass several symbols to look them all up at once
+(`tecs api gfx.Rectangle world:getMut`); a miss on one still returns the others
+with module-qualified `did you mean` suggestions. `--json` emits the structured records, and
+`--fields <keys>` (e.g. `signature,doc,methods`) returns only those keys to save
+tokens. The framework tier stays fixed with the installed CLI; the project overlay
+refreshes automatically when your sources change.
 Procedural guidance (the CLI workflow, integration testing, conventions) ships
 as Claude Code skills under `.claude/skills/`.
 

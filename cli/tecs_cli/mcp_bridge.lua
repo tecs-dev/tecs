@@ -159,7 +159,10 @@ function Server:cliTools()
     return {
         {
             name = "check",
-            description = "Type-check every Teal source under src/. Returns {ok, diagnostics}.",
+            description = "Type-check every Teal source under src/. Returns {ok, diagnostics}; "
+                .. "a diagnostic may carry a remediation `hint` (e.g. the exact `tecs api` "
+                .. "lookup for an unknown field or a signature mismatch) -- follow it before "
+                .. "guessing at a fix.",
             inputSchema = OBJECT_SCHEMA,
             handler = function()
                 local ok, diagnostics = ctx.check()
@@ -187,6 +190,41 @@ function Server:cliTools()
                     result.docs = "tecs docs tecs/save-games"
                 end
                 return result
+            end,
+        },
+        {
+            name = "api",
+            description = "Look up API symbols from the framework (always available) and the "
+                .. "project's own src/ (type-checked on demand). No build or running game "
+                .. "needed. Pass `query` for one lookup or `queries` for several at once "
+                .. "(module, module.Type, Type:method, or a bare symbol). Returns rendered Teal "
+                .. "by default, structured records when `json` is true; `fields` selects which "
+                .. "record keys come back to save tokens. An empty query lists modules.",
+            inputSchema = {
+                type = "object",
+                properties = {
+                    query = {type = "string",
+                        description = "A single symbol address; omit to list modules."},
+                    queries = {type = "array", items = {type = "string"},
+                        description = "Several symbol addresses; each resolved independently."},
+                    json = {type = "boolean",
+                        description = "Return structured records instead of rendered Teal."},
+                    fields = {type = "array", items = {type = "string"},
+                        description = "Record keys to return, e.g. signature, doc, methods."},
+                },
+            },
+            handler = function(args)
+                args = args or {}
+                local res = ctx.api({
+                    query = args.query,
+                    queries = args.queries,
+                    json = args.json,
+                    fields = args.fields,
+                })
+                if args.json then
+                    return res.json
+                end
+                return {ok = res.ok, text = res.text}
             end,
         },
         {

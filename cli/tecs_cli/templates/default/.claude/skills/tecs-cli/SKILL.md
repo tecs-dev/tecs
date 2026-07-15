@@ -10,7 +10,8 @@ Run everything from the project root (the directory with `tlconfig.lua`).
 ## Core loop
 
 - `tecs check`: type-check `src/`. Run after every source edit; it must pass before finishing a
-  task. Add `--json` for machine-readable diagnostics.
+  task. Add `--json` for machine-readable diagnostics; unknown-field and signature-mismatch
+  diagnostics carry a `hint` naming the exact `tecs api` lookup — follow it instead of guessing.
 - `tecs build`: compile to `build/`. A running game hot-reloads a successful build automatically,
   so prefer building over restarting the game.
 - `tecs run`: build, then launch the game with the cached LÖVE runtime.
@@ -21,19 +22,26 @@ Run everything from the project root (the directory with `tlconfig.lua`).
 - `tecs docs`: the offline mirror of the framework documentation. `tecs docs` lists the doc tree;
   `tecs docs <page>` prints a page (e.g. `tecs docs tecs2d/rendering/shapes`). Look the API up
   here instead of reading vendored sources under `src/vendor/`.
+- `tecs api <symbol>`: exact API signatures — the framework surface plus your own project symbols
+  (type-checked on demand from `src/`). `tecs api` lists modules; `tecs api <module>` its symbols;
+  `tecs api <module>.<Type>` a Teal `record` block; `tecs api <Type>:<method>` one method; a bare
+  name resolves in your project. Fan out with several symbols; `--json` for structured records,
+  `--fields <keys>` to return only what you need. Prefer this over grepping `src/vendor/`.
 
 ## MCP bridge
 
 `.mcp.json` (Claude Code) and `.codex/config.toml` (Codex) run `tecs mcp`, a stdio bridge that
 works even before the game exists. Prefer these MCP tools over shell commands when connected:
 
-- Toolchain as tools: `check`, `build`, `integ`, `dist`.
+- Toolchain as tools: `check`, `build`, `api`, `integ`, `dist`.
 - Game lifecycle: `start_game`, `stop_game`, `restart_game`, `game_status`, `game_logs`
   (the log tool still works after a crash).
 - It proxies the running game's own tools.
 
-The game's own tools (`screenshot`, `run_lua`, `cmd_*`) become callable only **after** `start_game`.
-Prefer `build` over `restart_game` for code changes, since the running game hot-reloads.
+`tecs docs` and `tecs api` (CLI) — and the `api` MCP tool — are available anytime, before
+the game is built and before `start_game`. Only in-game tools (`run_lua`, `screenshot`, `cmd_*`)
+require `start_game`. Prefer `build` over `restart_game` for code changes, since the running game
+hot-reloads.
 
 Using the game tools:
 

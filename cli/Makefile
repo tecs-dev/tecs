@@ -15,7 +15,7 @@ package: build
 	./scripts/package_dist.sh
 
 lint:
-	luacheck tecs_cli/cli.lua loveapp spec
+	luacheck tecs_cli/cli.lua tecs_cli/apidocs.lua loveapp spec
 
 # Build the offline docs bundle the CLI serves via `tecs docs`, from the Tecs
 # docs source (needs Node). Reuses an existing docs build; run with

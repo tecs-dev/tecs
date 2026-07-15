@@ -88,6 +88,15 @@ local function withCwd(path, fn)
     if not ok then error(err, 0) end
 end
 
+-- A persistent user-data dir shared by the source-mode `api` specs, so the
+-- runtime framework index is type-checked once and then served from its cache
+-- across the rest of the suite (and never writes to the real user home).
+local apiCacheDir
+local function sharedApiDataDir()
+    if not apiCacheDir then apiCacheDir = tempDir("api-fw-cache") end
+    return apiCacheDir
+end
+
 describe("tecs CLI", function()
     local temps = {}
 
@@ -364,6 +373,57 @@ describe("tecs CLI", function()
             assert.is_true(diags[1].hint == nil)
             assert.is_true(diags[1].docs == nil)
         end)
+
+        it("points unknown-field errors at the exact tecs api lookup", function()
+            local diags = {
+                {file = "x.tl", line = 1, column = 1, kind = "type",
+                 message = "invalid key 'linewidth' in record 'r' of type Rectangle"},
+                {file = "x.tl", line = 2, column = 1, kind = "type",
+                 message = "invalid key 'getMutt' in 'world' of interface type tecs.World"},
+                {file = "x.tl", line = 3, column = 1, kind = "type",
+                 message = "cannot index key 'currrent' in variable 'h' of type Health"},
+                -- Structural and primitive types never resolve to an API symbol.
+                {file = "x.tl", line = 4, column = 1, kind = "type",
+                 message = "invalid key 'foo' in record 'm' of type {string:number}"},
+                {file = "x.tl", line = 5, column = 1, kind = "type",
+                 message = "cannot index key 'bar' in variable 's' of type string"},
+            }
+            cli._internal.attachRemediation(diags)
+            assert.matches("`tecs api Rectangle`", diags[1].hint)
+            assert.matches("`tecs api World`", diags[2].hint)
+            assert.matches("`tecs api Health`", diags[3].hint)
+            assert.is_true(diags[4].hint == nil)
+            assert.is_true(diags[5].hint == nil)
+        end)
+
+        it("points arity and argument-type errors at the offending call", function()
+            local root = makeTemp("remediation-call")
+            local file = join(root, "m.tl")
+            writeFile(file, table.concat({
+                "local r = gfx.Rectangle(10)",
+                "world:spawn(\"nope\")",
+                "world.getMut(1, Health)",
+                "local h = Health(1)",
+                "local ok = helper(1, 2, 3)",
+                "print(r, h, ok)",
+            }, "\n") .. "\n")
+            local arity = "wrong number of arguments (given 1, expects 2)"
+            local argt = "argument 1: got string \"nope\", expected number"
+            local diags = {
+                {file = file, line = 1, column = 11, kind = "type", message = arity},
+                {file = file, line = 2, column = 13, kind = "type", message = argt},
+                {file = file, line = 3, column = 14, kind = "type", message = argt},
+                {file = file, line = 4, column = 11, kind = "type", message = arity},
+                -- A local helper is not an API symbol: no hint.
+                {file = file, line = 5, column = 12, kind = "type", message = arity},
+            }
+            cli._internal.attachRemediation(diags)
+            assert.matches("`tecs api gfx%.Rectangle`", diags[1].hint)
+            assert.matches("`tecs api world:spawn`", diags[2].hint)
+            assert.matches("`tecs api world:getMut`", diags[3].hint)
+            assert.matches("`tecs api Health`", diags[4].hint)
+            assert.is_true(diags[5].hint == nil)
+        end)
     end)
 
     describe("docs command", function()
@@ -581,6 +641,470 @@ describe("tecs CLI", function()
         end)
     end)
 
+    describe("api", function()
+        local frameworkDir = os.getenv("TECS_DIR")
+        -- The framework tier is generated at runtime from the framework sources
+        -- by the CLI's own apidocs extractor -- no committed/bundled index.
+        local hasFramework = frameworkDir and frameworkDir ~= ""
+            and exists(join(frameworkDir, "src", "tecs", "init.tl"))
+
+        local function capturePrint(argv)
+            cli._internal.setDataDir(sharedApiDataDir())
+            local printed = {}
+            local realPrint = print
+            _G.print = function(...)
+                printed[#printed + 1] = table.concat({...}, "\t")
+            end
+            local ok, err = cli.run(argv)
+            _G.print = realPrint
+            cli._internal.setDataDir(nil)
+            return ok, err, table.concat(printed, "\n")
+        end
+
+        local function captureWrite(argv)
+            cli._internal.setDataDir(sharedApiDataDir())
+            local chunks = {}
+            local realWrite = io.write
+            io.write = function(...)
+                chunks[#chunks + 1] = table.concat({...})
+                return true
+            end
+            local ok, err = cli.run(argv)
+            io.write = realWrite
+            cli._internal.setDataDir(nil)
+            return ok, err, table.concat(chunks)
+        end
+
+        if hasFramework then
+            it("lists framework modules (full public surface) with no arguments", function()
+                local ok, _, out = captureWrite({"api"})
+                assert.is_true(ok)
+                assert.matches("Framework modules:", out)
+                assert.matches("tecs2d%.gfx", out)
+                assert.matches("tecs%.types", out)
+                -- The bare `tecs` module appears as its own indented line.
+                assert.matches("  tecs\n", out .. "\n")
+            end)
+
+            it("lists tecs.types with more than just World", function()
+                local ok, _, out = captureWrite({"api", "tecs.types"})
+                assert.is_true(ok)
+                assert.matches("World", out)
+                assert.matches("Query", out)
+                assert.matches("Pipeline", out)
+            end)
+
+            it("lists a module's symbols", function()
+                local ok, _, out = captureWrite({"api", "gfx"})
+                assert.is_true(ok)
+                assert.matches("Rectangle", out)
+                assert.matches("newPipeline", out)
+            end)
+
+            it("renders a framework type as a Teal record block", function()
+                local ok, _, out = captureWrite({"api", "gfx.Rectangle"})
+                assert.is_true(ok)
+                assert.matches("^%-%- tecs2d%.gfx%.Rectangle\n", out)
+                assert.matches("record Rectangle", out)
+                assert.matches("width: number", out)
+                assert.matches("metamethod __call", out)
+            end)
+
+            it("prints one method signature", function()
+                local ok, _, out = captureWrite({"api", "world:getMut"})
+                assert.is_true(ok)
+                assert.matches("^%-%- tecs%.types%.World:getMut\n", out)
+                assert.matches("world:getMut", out)
+                assert.matches("integer", out)
+            end)
+
+            it("emits structured records with --json", function()
+                local ok, _, out = capturePrint({"api", "gfx.Rectangle", "--json"})
+                assert.is_true(ok)
+                assert.matches('"kind":"component"', out)
+                assert.matches('"symbol":"Rectangle"', out)
+            end)
+
+            it("projects only requested keys with --fields", function()
+                local ok, _, out = capturePrint({"api", "gfx.Rectangle", "--fields", "signature", "--json"})
+                assert.is_true(ok)
+                assert.matches('"signature":', out)
+                assert.equals(nil, out:match('"methods":'))
+                assert.equals(nil, out:match('"fields":%['))
+            end)
+
+            it("projects the RENDERED output with --fields signature", function()
+                local ok, _, out = captureWrite({"api", "gfx.Rectangle", "--fields", "signature"})
+                assert.is_true(ok)
+                assert.matches("record Rectangle", out)
+                -- Only the signature line, not the whole record block.
+                assert.equals(nil, out:match("width: number"))
+                assert.equals(nil, out:match("metamethod __call"))
+            end)
+
+            it("projects the RENDERED output with --fields methods", function()
+                local ok, _, out = captureWrite({"api", "gfx.Pipeline", "--fields", "methods"})
+                assert.is_true(ok)
+                assert.matches("render: function", out)
+                -- No record wrapper and no data fields when only methods are asked for.
+                assert.equals(nil, out:match("\nrecord Pipeline"))
+                assert.equals(nil, out:match("drawCamX"))
+            end)
+
+            it("suggests module-qualified near matches on an unknown symbol and exits non-zero", function()
+                local ok, _, out = captureWrite({"api", "gfx.Recktangle"})
+                assert.is_false(ok)
+                assert.matches("did you mean", out)
+                -- Suggestions are fully addressable, usable verbatim as the next query.
+                assert.matches("tecs2d%.gfx%.Rectangle", out)
+            end)
+
+            it("batches multiple lookups, never short-circuiting on a miss", function()
+                local ok, _, out = captureWrite({"api", "gfx.Rectangle", "gfx.Nope"})
+                assert.is_false(ok)
+                -- The hit still renders...
+                assert.matches("record Rectangle", out)
+                -- ...and the miss reports its suggestions.
+                assert.matches("gfx%.Nope", out)
+                assert.matches("did you mean", out)
+            end)
+
+            it("looks up a dynamic project component from the overlay", function()
+                local root = makeTemp("api-overlay")
+                local project = join(root, "game")
+                assert.is_true(cli.run({"--quiet", "new", project}))
+
+                mkdirP(join(project, "src", "components"))
+                writeFile(join(project, "src", "components", "health.tl"), table.concat({
+                    "local tecs <const> = require(\"tecs\")",
+                    "",
+                    "local record Health is tecs.Component",
+                    "   --- Current hit points remaining.",
+                    "   current: number",
+                    "   --- Maximum hit points.",
+                    "   max: number",
+                    "",
+                    "   metamethod __call: function(self, current: number, max: number): Health",
+                    "end",
+                    "",
+                    "return Health",
+                    "",
+                }, "\n"))
+
+                local ok, out
+                withCwd(project, function()
+                    local res, _, text = captureWrite({"api", "Health"})
+                    ok, out = res, text
+                end)
+                assert.is_true(ok)
+                assert.matches("record Health", out)
+                assert.matches("current: number", out)
+                assert.matches("max: number", out)
+            end)
+
+            it("does not report a same-type re-export as an alternate match", function()
+                -- TouchPressed is indexed under both tecs2d (re-export) and
+                -- tecs2d.events; the same underlying record is not a collision,
+                -- and the defining module is reported as the canonical address.
+                local ok, _, out = captureWrite({"api", "TouchPressed"})
+                assert.is_true(ok)
+                assert.matches("^%-%- tecs2d%.events%.TouchPressed\n", out)
+                assert.matches("record TouchPressed", out)
+                assert.equals(nil, out:match("also matches"))
+            end)
+
+            it("prefers a project symbol over a framework symbol with the same bare name", function()
+                local root = makeTemp("api-shadow")
+                local project = join(root, "game")
+                assert.is_true(cli.run({"--quiet", "new", project}))
+
+                mkdirP(join(project, "src", "components"))
+                writeFile(join(project, "src", "components", "rectangle.tl"), table.concat({
+                    "local tecs <const> = require(\"tecs\")",
+                    "",
+                    "local record Rectangle is tecs.Component",
+                    "   w: number",
+                    "   h: number",
+                    "",
+                    "   metamethod __call: function(self, w: number, h: number): Rectangle",
+                    "end",
+                    "",
+                    "return Rectangle",
+                    "",
+                }, "\n"))
+
+                local ok, out
+                withCwd(project, function()
+                    local res, _, text = captureWrite({"api", "Rectangle"})
+                    ok, out = res, text
+                end)
+                assert.is_true(ok)
+                -- The project's own component wins the bare name...
+                assert.matches("w: number", out)
+                assert.equals(nil, out:match("lineWidth"))
+                -- ...and the shadowed framework match is reported.
+                assert.matches("also matches: tecs2d%.gfx%.Rectangle", out)
+            end)
+
+            it("keeps reporting a degraded overlay on cache hits", function()
+                local root = makeTemp("api-degraded")
+                local project = join(root, "game")
+                assert.is_true(cli.run({"--quiet", "new", project}))
+
+                mkdirP(join(project, "src", "components"))
+                writeFile(join(project, "src", "components", "broken.tl"),
+                    "local record Broken\n   x: number\nthis is not teal ((\n")
+
+                withCwd(project, function()
+                    -- The second lookup is served from build/api-index.json; the
+                    -- degraded note must survive the cache hit.
+                    for _ = 1, 2 do
+                        local ok, _, out = captureWrite({"api", "gfx.Rectangle"})
+                        assert.is_true(ok)
+                        assert.matches("note: some project modules could not be analyzed", out)
+                        assert.matches("record Rectangle", out)
+                    end
+                end)
+            end)
+
+            it("returns a dynamic project component's fields as JSON", function()
+                local root = makeTemp("api-overlay-json")
+                local project = join(root, "game")
+                assert.is_true(cli.run({"--quiet", "new", project}))
+
+                mkdirP(join(project, "src", "components"))
+                writeFile(join(project, "src", "components", "velocity.tl"), table.concat({
+                    "local tecs <const> = require(\"tecs\")",
+                    "",
+                    "local record Velocity is tecs.Component",
+                    "   dx: number",
+                    "   dy: number",
+                    "",
+                    "   metamethod __call: function(self, dx: number, dy: number): Velocity",
+                    "end",
+                    "",
+                    "return Velocity",
+                    "",
+                }, "\n"))
+
+                local ok, out
+                withCwd(project, function()
+                    local res, _, text = capturePrint({"api", "Velocity", "--json"})
+                    ok, out = res, text
+                end)
+                assert.is_true(ok)
+                assert.matches('"symbol":"Velocity"', out)
+                assert.matches('"dx"', out)
+                assert.matches('"dy"', out)
+            end)
+        else
+            it("skips api specs without a Tecs checkout (set TECS_DIR)", function()
+                assert.is_true(true)
+            end)
+        end
+    end)
+
+    -- Packaged-mode coverage: source-mode specs cannot catch bugs that only
+    -- appear inside the .love (e.g. the extractor's plain-table fallback, which
+    -- source mode masked because it ran the same code but the earlier fixtures
+    -- used a typed `local record` module). This builds the real payload and
+    -- drives the packaged CLI. Gated on a LÖVE binary and Node being available.
+    describe("packaged .love", function()
+        local frameworkDir = os.getenv("TECS_DIR")
+
+        local function shellOk(cmd)
+            local a, _, c = os.execute(cmd)
+            return a == true or a == 0 or c == 0
+        end
+
+        local function findLove()
+            local candidate = os.getenv("TECS_LOVE_BIN") or os.getenv("LOVE")
+            if candidate and candidate ~= "" and exists(candidate) then return candidate end
+            if frameworkDir and frameworkDir ~= "" then
+                local p = join(frameworkDir, "bin", "love2d", "love.app", "Contents", "MacOS", "love")
+                if exists(p) then return p end
+            end
+            return nil
+        end
+
+        local loveBin = findLove()
+        local canPackage = frameworkDir and frameworkDir ~= "" and loveBin
+            and exists(join(frameworkDir, "src", "tecs", "init.tl"))
+            and shellOk("command -v node >/dev/null 2>&1")
+
+        if canPackage then
+            local function sq(s) return "'" .. tostring(s):gsub("'", "'\\''") .. "'" end
+            local app = join(assert(lfs.currentdir()), "dist", "tecs-cli.love")
+
+            -- Build the real payload once, then reuse it across the block.
+            local built = false
+            local function ensureBuilt()
+                if built then return end
+                assert.is_true(shellOk("TECS_DIR=" .. sq(frameworkDir)
+                    .. " ./scripts/build_love.sh >/dev/null 2>&1"),
+                    "scripts/build_love.sh failed")
+                assert.is_true(exists(app), "packaged .love not produced")
+                built = true
+            end
+
+            -- Run the packaged CLI for `project`, with a controlled user-data dir
+            -- (XDG_DATA_HOME) so the framework-index cache is inspectable and the
+            -- real user home is never touched. Captures stdout.
+            local function runPackaged(project, dataDir, argv)
+                local parts = {
+                    "SDL_VIDEODRIVER=dummy", "SDL_AUDIODRIVER=dummy",
+                    "XDG_DATA_HOME=" .. sq(dataDir),
+                    "TECS_LOVE_BIN=" .. sq(loveBin), sq(loveBin), sq(app),
+                    "--tecs-project", sq(project),
+                }
+                for _, a in ipairs(argv) do parts[#parts + 1] = sq(a) end
+                local pipe = assert(io.popen(table.concat(parts, " ") .. " 2>/dev/null"))
+                local out = pipe:read("*a") or ""
+                pipe:close()
+                return out
+            end
+
+            local function frameworkCacheFile(dataDir)
+                local dir = join(dataDir, "tecs")
+                if not isDir(dir) then return nil end
+                for entry in lfs.dir(dir) do
+                    if entry:match("^api%-framework%-index%-.+%.json$") then
+                        return join(dir, entry)
+                    end
+                end
+                return nil
+            end
+
+            it("generates the framework tier at runtime (no bundled index) and caches it", function()
+                ensureBuilt()
+
+                -- The payload ships the extractor, NOT a prebuilt index.
+                local pipe = assert(io.popen("unzip -l " .. sq(app) .. " 2>/dev/null"))
+                local listing = pipe:read("*a") or ""
+                pipe:close()
+                assert.equals(nil, listing:match("api%-index%.json"))
+                assert.matches("apidocs%.lua", listing)
+
+                local dataDir = makeTemp("pkg-udata")
+                local proj = makeTemp("pkg-fw") -- no project: framework tier only
+
+                -- Runtime generation answers a framework lookup with no build/game.
+                local rect = runPackaged(proj, dataDir, {"api", "gfx.Rectangle"})
+                assert.matches("record Rectangle", rect)
+
+                -- Outside a project the framework is staged under the user data
+                -- dir -- never as src/vendor in the cwd.
+                assert.is_false(isDir(join(proj, "src")))
+
+                -- Full public surface: tecs.types is more than just World.
+                local types = runPackaged(proj, dataDir, {"api", "tecs.types"})
+                assert.matches("World", types)
+                assert.matches("Query", types)
+
+                -- The user-level cache was written, keyed by version.
+                local cacheFile = frameworkCacheFile(dataDir)
+                assert.is_true(cacheFile ~= nil, "framework index cache not created")
+
+                -- Second call is served FROM the cache: inject a sentinel module
+                -- and confirm it comes back (a fresh regenerate would drop it).
+                local json = cli._internal.jsonModule()
+                local parsed = json.parse(readFile(cacheFile))
+                parsed.modules["sentinel.module"] = {"SentinelSym"}
+                writeFile(cacheFile, json.serialize(parsed))
+                local relisted = runPackaged(proj, dataDir, {"api"})
+                assert.matches("sentinel%.module", relisted)
+            end)
+
+            it("projects rendered output with --fields through the packaged CLI", function()
+                ensureBuilt()
+                local dataDir = makeTemp("pkg-fields-udata")
+                local proj = makeTemp("pkg-fields")
+                local out = runPackaged(proj, dataDir, {"api", "gfx.Rectangle", "--fields", "signature"})
+                assert.matches("record Rectangle", out)
+                assert.equals(nil, out:match("width: number"))
+            end)
+
+            it("resolves a plain-table-idiom project component through the packaged CLI", function()
+                ensureBuilt()
+                local dataDir = makeTemp("pkg-plain-udata")
+                local root = makeTemp("pkg-plain")
+                local project = join(root, "game")
+                runPackaged(root, dataDir, {"--quiet", "new", "game"})
+                assert.is_true(exists(join(project, "tlconfig.lua")), "tecs new (packaged) failed")
+
+                -- The common project idiom: a record assigned onto a plain table
+                -- (Teal infers the module type as `map`, no field_order).
+                mkdirP(join(project, "src", "components"))
+                writeFile(join(project, "src", "components", "health.tl"), table.concat({
+                    "local tecs <const> = require(\"tecs\")",
+                    "",
+                    "local M = {}",
+                    "",
+                    "local record Health is tecs.Component",
+                    "   --- Current hit points remaining.",
+                    "   current: number",
+                    "   --- Maximum hit points.",
+                    "   max: number",
+                    "",
+                    "   metamethod __call: function(self, current: number, max: number): Health",
+                    "end",
+                    "",
+                    "M.Health = Health",
+                    "",
+                    "return M",
+                    "",
+                }, "\n"))
+
+                local out = runPackaged(project, dataDir, {"api", "Health"})
+                assert.matches("record Health", out)
+                assert.matches("current: number", out)
+                assert.matches("max: number", out)
+            end)
+
+            -- Guards the remediation matchers against drift in the Teal
+            -- compiler's exact error strings: this exercises the real payload
+            -- compiler end to end, not synthetic messages.
+            it("attaches tecs api hints to real check --json diagnostics", function()
+                ensureBuilt()
+                local dataDir = makeTemp("pkg-hints-udata")
+                local root = makeTemp("pkg-hints")
+                local project = join(root, "game")
+                runPackaged(root, dataDir, {"--quiet", "new", "game"})
+                assert.is_true(exists(join(project, "tlconfig.lua")), "tecs new (packaged) failed")
+
+                writeFile(join(project, "src", "broken.tl"), table.concat({
+                    "local gfx <const> = require(\"tecs2d.gfx\")",
+                    "",
+                    "local function setup()",
+                    "   local r = gfx.Rectangle(10)",
+                    "   print(r.linewidth)",
+                    "end",
+                    "",
+                    "return { setup = setup }",
+                    "",
+                }, "\n"))
+
+                local out = runPackaged(project, dataDir, {"check", "--json"})
+                local parsed = cli._internal.jsonModule().parse(out)
+                assert.is_false(parsed.ok)
+                local hints = {}
+                for _, d in ipairs(parsed.diagnostics) do
+                    if d.hint then hints[#hints + 1] = d.hint end
+                end
+                local joined = table.concat(hints, "\n")
+                -- The arity error points at the call target...
+                assert.matches("`tecs api gfx%.Rectangle`", joined)
+                -- ...and the unknown field at its record type.
+                assert.matches("`tecs api Rectangle`", joined)
+                assert.matches("'linewidth' does not exist on Rectangle", joined)
+            end)
+        else
+            it("skips packaged specs without LÖVE, Node, and a Tecs checkout", function()
+                assert.is_true(true)
+            end)
+        end
+    end)
+
     describe("mcp bridge", function()
         local frameworkDir = os.getenv("TECS_DIR")
         local hasFramework = frameworkDir and frameworkDir ~= ""
@@ -597,6 +1121,10 @@ describe("tecs CLI", function()
                 },
                 check = function() return true, {} end,
                 build = function() end,
+                api = function(params)
+                    cli._internal.setDataDir(sharedApiDataDir())
+                    return cli._internal.apiInvoke(params)
+                end,
                 reexec = function() return true, "ran" end,
                 setEnv = function() end,
                 unsetEnv = function() end,
@@ -664,6 +1192,37 @@ describe("tecs CLI", function()
                     '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"screenshot","arguments":{}}}')
                 assert.matches("start_game", out[1])
                 assert.matches('"isError":true', out[1])
+            end)
+
+            it("advertises the api tool at tools/list", function()
+                local out = newServer():handleLine('{"jsonrpc":"2.0","id":2,"method":"tools/list"}')
+                assert.matches('"api"', out[1])
+            end)
+
+            it("answers api with a framework signature and no game running", function()
+                local server = newServer()
+                assert.is_false(server:gameRunning())
+                local out = server:handleLine(
+                    '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"api",'
+                    .. '"arguments":{"query":"gfx.Rectangle"}}}')
+                assert.matches("record Rectangle", out[1])
+                assert.equals(nil, out[1]:match("isError"))
+            end)
+
+            it("returns structured api records when json is set", function()
+                local out = newServer():handleLine(
+                    '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"api",'
+                    .. '"arguments":{"query":"gfx.Rectangle","json":true}}}')
+                assert.matches('\\"kind\\":\\"component\\"', out[1])
+            end)
+
+            it("batches api queries without short-circuiting on a miss", function()
+                local out = newServer():handleLine(
+                    '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"api",'
+                    .. '"arguments":{"queries":["gfx.Rectangle","gfx.Nope"],"json":true}}}')
+                -- The hit still resolves and the miss reports suggestions.
+                assert.matches("Rectangle", out[1])
+                assert.matches("suggestions", out[1])
             end)
 
             it("rejects unknown methods and malformed lines", function()

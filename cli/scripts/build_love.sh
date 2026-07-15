@@ -35,6 +35,11 @@ if [ ! -f "$tecs_dir/docs/tecs2d/mcp/default-tools.json" ]; then
     exit 1
 fi
 cp "$tecs_dir/docs/tecs2d/mcp/default-tools.json" "$stage/tecs_cli/mcp-default-tools.json"
+# The apidocs extractor the CLI runs to generate both tiers of `tecs api` at
+# runtime: the framework tier (over the vendored framework sources, cached at the
+# user level by CLI version) and the project overlay (over the project's src/).
+# No prebuilt index is bundled.
+cp "$root/tecs_cli/apidocs.lua" "$stage/tecs_cli/apidocs.lua"
 cp -R "$root/tecs_cli/vendor" "$stage/tecs_cli/vendor"
 cp -R "$root/tecs_cli/runtime/teal/"* "$stage/"
 cp -R "$root/tecs_cli/runtime/busted/"* "$stage/"

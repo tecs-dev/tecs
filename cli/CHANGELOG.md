@@ -8,6 +8,46 @@ payload, launchers, and installers as GitHub release assets.
 
 ## [Unreleased]
 
+## [0.10.7] - 2026-07-15
+
+### Added
+
+- `tecs api <symbol>` looks up exact API signatures over a type index, as both a
+  CLI command and an MCP bridge tool sharing one lookup core. Two tiers merge at
+  query time, both generated at runtime by the CLI's bundled type extractor
+  (`tecs_cli/apidocs.lua`, driving the vendored Teal compiler's type API) with no
+  build or running game: the framework surface (extracted from the vendored
+  framework sources and cached at the user level, keyed by CLI version, so a
+  repeat call is instant) and a dynamic overlay of the project's own `src/`
+  symbols, type-checked on demand and cached under `build/api-index.json`.
+  Addressing mirrors Teal: `tecs api`
+  lists modules, `tecs api <module>` lists its symbols, `tecs api <module>.<Type>`
+  renders a `record` block, `tecs api <Type>:<method>` prints one method, and a
+  bare symbol prefers the project's own symbols — a framework symbol with the
+  same name is listed as `also matches` instead of silently winning. Every hit
+  opens with its canonical module-qualified address. `--json`
+  returns the structured records; `--fields <keys>` projects only the requested
+  keys to save tokens; multiple symbol arguments (or the MCP tool's `queries`
+  array) fan out and never short-circuit — a miss reports module-qualified
+  `did you mean` suggestions usable verbatim as the next query. Like `check`,
+  this is toolchain-class: it works the instant a project is generated, before
+  `build` or `start_game`, and outside a project the framework tier still
+  answers (staged under the user data dir, never into the cwd). Type errors in
+  a project module do not block its symbols; a module that fails to parse is
+  skipped with a note, and if the whole overlay build fails the framework tier
+  still resolves.
+- Check diagnostics now carry a `tecs api` remediation hint for unknown-field
+  (`invalid key` / `cannot index key`), wrong-arity, and argument-type errors:
+  the hint names the exact lookup for the offending record or call target (e.g.
+  ``tecs api world:getMut`` for a bad `world:getMutt` call), so the fix is one
+  cheap command away at the moment the error is read. Attached wherever the
+  structured diagnostics flow: `tecs check --json` and the MCP `check` tool.
+
+### Removed
+
+- The generated `tecs2d/api/*` doc pages (0.10.5): `tecs api` supersedes them.
+  The type extractor behind it now lives in this repo (`tecs_cli/apidocs.lua`).
+
 ## [0.10.6] - 2026-07-14
 
 ### Changed
