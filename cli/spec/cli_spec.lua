@@ -1008,6 +1008,10 @@ describe("tecs CLI", function()
                 pipe:close()
                 assert.equals(nil, listing:match("api%-index%.json"))
                 assert.matches("apidocs%.lua", listing)
+                assert.matches("cliApi%.lua", listing)
+                assert.matches("cliDocs%.lua", listing)
+                assert.matches("cliFileSystem%.lua", listing)
+                assert.matches("cliParser%.lua", listing)
 
                 local dataDir = makeTemp("pkg-udata")
                 local proj = makeTemp("pkg-fw") -- no project: framework tier only
