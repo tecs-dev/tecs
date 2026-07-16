@@ -7,27 +7,27 @@ describe("Context", function()
         local ctx = tecs.newContext()
         luassert.is_not_nil(ctx, "newContext() should return a non-nil value")
 
-        local key: tecs.Key<integer> = tecs.newKey()
+        local key: tecs.Key<integer> = tecs.newKey("spec.context.create")
         luassert.is_not_nil(key, "newKey() should return a non-nil value")
     end)
 
     it("stores and retrieves values using keys", function()
         local ctx = tecs.newContext()
-        local STRING_KEY: tecs.Key<string> = tecs.newKey()
-        local NUMBER_KEY: tecs.Key<number> = tecs.newKey()
+        local STRING_KEY: tecs.Key<string> = tecs.newKey("spec.context.string")
+        local NUMBER_KEY: tecs.Key<number> = tecs.newKey("spec.context.number")
 
         ctx[STRING_KEY] = "test"
         ctx[NUMBER_KEY] = 42
 
         luassert.is_equal("test", ctx[STRING_KEY], "String value should be retrievable with its key")
         luassert.is_equal(42, ctx[NUMBER_KEY], "Number value should be retrievable with its key")
-        luassert.is_equal(nil, ctx[tecs.newKey()], "Unset key should return nil")
+        luassert.is_equal(nil, ctx[tecs.newKey("spec.context.unset")], "Unset key should return nil")
     end)
 
     it("maintains key separation", function()
         local ctx1 = tecs.newContext()
         local ctx2 = tecs.newContext()
-        local SHARED_KEY: tecs.Key<string> = tecs.newKey()
+        local SHARED_KEY: tecs.Key<string> = tecs.newKey("spec.context.shared")
 
         ctx1[SHARED_KEY] = "context1"
         ctx2[SHARED_KEY] = "context2"
@@ -38,7 +38,7 @@ describe("Context", function()
 
     it("updates and removes values", function()
         local ctx = tecs.newContext()
-        local KEY: tecs.Key<string> = tecs.newKey()
+        local KEY: tecs.Key<string> = tecs.newKey("spec.context.updates")
 
         ctx[KEY] = "original"
         luassert.is_equal("original", ctx[KEY], "Initial value should be set")
@@ -48,5 +48,42 @@ describe("Context", function()
 
         ctx[KEY] = nil
         luassert.is_equal(nil, ctx[KEY], "Value should be nil after removal")
+    end)
+
+    it("still creates distinct keys without a name", function()
+        local a: tecs.Key<string> = tecs.newKey()
+        local b: tecs.Key<string> = tecs.newKey()
+        luassert.is_not_nil(a)
+        luassert.is_not_nil(b)
+        luassert.is_not_equal(a, b, "Unnamed keys are fresh identities")
+    end)
+
+    it("finds named keys and returns the same identity on re-creation", function()
+        local KEY: tecs.Key<string> = tecs.newKey("spec.context.findable")
+        luassert.is_equal(KEY, tecs.findKey("spec.context.findable"),
+            "findKey should return the key created under that name")
+        luassert.is_equal(KEY, tecs.newKey("spec.context.findable"),
+            "newKey with a known name is idempotent (hot-reload safe)")
+        luassert.is_equal(nil, tecs.findKey("spec.context.no-such-key"),
+            "findKey on an unknown name returns nil")
+
+        -- The stored value is reachable through the re-created key.
+        local ctx = tecs.newContext()
+        ctx[KEY] = "kept"
+        local again: tecs.Key<string> = tecs.newKey("spec.context.findable")
+        luassert.is_equal("kept", ctx[again],
+            "values survive module re-execution because the identity is stable")
+    end)
+
+    it("lists named keys with their ids", function()
+        local KEY = tecs.newKey("spec.context.listed") as integer
+        local listed = tecs.listKeys()
+        luassert.is_equal(KEY, listed["spec.context.listed"],
+            "listKeys maps the name to the key id")
+
+        -- The returned table is a copy: mutating it does not affect the registry.
+        listed["spec.context.listed"] = nil
+        luassert.is_not_nil(tecs.findKey("spec.context.listed"),
+            "mutating the listKeys result must not unregister the key")
     end)
 end)

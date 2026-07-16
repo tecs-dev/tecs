@@ -92,9 +92,9 @@ local record text
     plugin: function(world: tecs.World)
 end
 
-text.SLAB_ALLOCATOR = tecs.newKey()
-text.BLOCK_ALLOCATOR = tecs.newKey()
-text.TEXT_META = tecs.newKey()
+text.SLAB_ALLOCATOR = tecs.newKey("tecs2d.gfx.text.slabAllocator")
+text.BLOCK_ALLOCATOR = tecs.newKey("tecs2d.gfx.text.blockAllocator")
+text.TEXT_META = tecs.newKey("tecs2d.gfx.text.meta")
 
 local Text <const> = text.Text
 

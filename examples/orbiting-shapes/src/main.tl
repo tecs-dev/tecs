@@ -28,7 +28,7 @@ local record DemoState
     satelliteCountText: integer
 end
 
-local STATE_KEY <const> = tecs.newKey() as tecs.Key<DemoState>
+local STATE_KEY <const> = tecs.newKey("state") as tecs.Key<DemoState>
 
 -- Calculate position for a satellite based on entity ID
 local function calculateSatellitePosition(entityId: integer): number, number

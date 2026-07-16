@@ -69,7 +69,7 @@ local record ShowcaseState
     colorCycleTime: number
 end
 
-local STATE_KEY <const> = tecs.newKey() as tecs.Key<ShowcaseState>
+local STATE_KEY <const> = tecs.newKey("state") as tecs.Key<ShowcaseState>
 
 if REQUESTED_TARGET ~= INITIAL_TARGET then
     print(string.format(

@@ -9,6 +9,6 @@ local record pipeline_key
     PIPELINE: tecs.Key<types.Pipeline>
 end
 
-pipeline_key.PIPELINE = tecs.newKey()
+pipeline_key.PIPELINE = tecs.newKey("tecs2d.gfx.pipeline")
 
 return pipeline_key

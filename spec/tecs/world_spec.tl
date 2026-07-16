@@ -641,7 +641,7 @@ describe("WorldImpl", function()
     describe("resources", function()
         it("puts resources", function()
             local w2 = tecs.newWorld()
-            local k: tecs.Key<string> = tecs.newKey()
+            local k: tecs.Key<string> = tecs.newKey("spec.world.res")
             local v = "test"
             w2.resources[k] = v
 

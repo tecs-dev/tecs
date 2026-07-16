@@ -54,7 +54,7 @@ local record AppState
     positionText: integer
 end
 
-local STATE_KEY <const> = tecs.newKey() as tecs.Key<AppState>
+local STATE_KEY <const> = tecs.newKey("state") as tecs.Key<AppState>
 local Transform <const> = tecs.builtins.Transform
 local ParticleEmitter <const> = gfx.ParticleEmitter
 

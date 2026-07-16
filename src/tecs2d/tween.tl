@@ -198,7 +198,7 @@ local record TimelineBuilder
     pingPong: function(self: TimelineBuilder, count?: integer): Timeline
 end
 
-local REGISTRY <const>: tecs.Key<Registry> = tecs.newKey()
+local REGISTRY <const>: tecs.Key<Registry> = tecs.newKey("tecs2d.tween.registry")
 local SNAPSHOT_DATA_KEY <const> = "tecs2d.tween.registry"
 
 local record tween

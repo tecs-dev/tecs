@@ -97,7 +97,7 @@ local record DemoState
     worldMaxY: number
 end
 
-local STATE_KEY <const> = tecs.newKey() as tecs.Key<DemoState>
+local STATE_KEY <const> = tecs.newKey("state") as tecs.Key<DemoState>
 
 -------------------------------------------------------------------------------
 -- Game

@@ -40,7 +40,7 @@ local record BenchState
     ballsText: integer
 end
 
-local STATE_KEY <const> = tecs.newKey() as tecs.Key<BenchState>
+local STATE_KEY <const> = tecs.newKey("state") as tecs.Key<BenchState>
 
 -------------------------------------------------------------------------------
 -- Plugin

@@ -255,7 +255,7 @@ _Resources_ in Tecs are the built-in way to share variables globally across your
 To add resources to a world, you first need to create a strongly typed key.
 
 ```teal
-local FONT: tecs.Key<love.graphics.Font> = tecs.newKey()
+local FONT: tecs.Key<love.graphics.Font> = tecs.newKey("app.font")
 ```
 
 This tells the Teal type system that `FONT` contains a `love.graphics.Font`.
@@ -280,6 +280,6 @@ local record MyModule
     FONT: tecs.Key<love.graphics.Font>
 end
 
-MyModule.FONT = tecs.newKey()
+MyModule.FONT = tecs.newKey("app.font")
 ```
 :::

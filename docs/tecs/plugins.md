@@ -204,7 +204,7 @@ local function inputPlugin(world: tecs.World)
     })
 
     -- Export for other systems to query
-    local INPUT_ENTITY: tecs.Key<integer> = tecs.newKey()
+    local INPUT_ENTITY: tecs.Key<integer> = tecs.newKey("input.entity")
     world.resources[INPUT_ENTITY] = inputEntity
 end
 ```

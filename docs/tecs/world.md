@@ -741,7 +741,7 @@ function World:addPlugin(plugin: function(world: World))
 **Example:**
 
 ```teal
-local PHYSICS: tecs.Key<PhysicsConfig> = tecs.newKey()
+local PHYSICS: tecs.Key<PhysicsConfig> = tecs.newKey("physics.config")
 
 -- Define a plugin
 local function physicsPlugin(world: tecs.World)
@@ -780,7 +780,7 @@ local gameSettings: GameSettings = {
 }
 
 -- Define key for the resource.
-local GAME_SETTINGS: tecs.Key<GameSettings> = tecs.newKey()
+local GAME_SETTINGS: tecs.Key<GameSettings> = tecs.newKey("game.settings")
 
 -- Add a resource to the world
 world.resources[GAME_SETTINGS] = gameSettings
@@ -793,9 +793,17 @@ print("Difficulty:", settings.difficulty)
 You can define resource keys for numbers, strings, and any other type too.
 
 ```teal
-local GAME_UUID: tecs.Key<string> = tecs.newKey()
+local GAME_UUID: tecs.Key<string> = tecs.newKey("game.uuid")
 world.resources[GAME_UUID] = "abc"
 ```
+
+Always name your keys. A named key is discoverable at runtime — `tecs.findKey(name)`
+returns it, `tecs.listKeys()` enumerates every named key, and tooling such as the
+MCP `inspect` tool and `tecs info --keys` uses those to read resources by name. A
+named key is also a stable identity: calling `newKey` again with the same name
+returns the same key, so resources keyed by it survive hot reload. Creating a key
+without a name logs a warning and leaves the resource invisible to name-based
+tools.
 
 ## Phase Management
 

@@ -19,6 +19,6 @@ local record mcpinfo
     KEY: tecs.Key<Info>
 end
 
-mcpinfo.KEY = tecs.newKey()
+mcpinfo.KEY = tecs.newKey("tecs2d.mcp.info")
 
 return mcpinfo

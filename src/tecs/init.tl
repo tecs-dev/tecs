@@ -102,9 +102,25 @@ local record tecs
 
     --- Create a new typed configuration key for storing resources in a Context.
     ---
+    --- Always pass a name: named keys are discoverable at runtime through
+    --- `findKey`/`listKeys` and the tooling built on them (the MCP `inspect`
+    --- tool, `tecs info --keys`), and a named key is a stable identity --
+    --- calling `newKey` again with the same name returns the same key, so
+    --- values keyed by it survive hot reload. An unnamed key works but logs a
+    --- warning and stays invisible to name-based lookups.
+    ---
+    --- @param name A stable, unique name for the key, e.g. "game.state".
     --- @param forType Optional type parameter for type inference.
     --- @return A new key that can be used to store values of type T.
-    newKey: function<T>(forType?: T): Key<T>
+    newKey: function<T>(name?: string, forType?: T): Key<T>
+
+    --- Find a named key created by `newKey`. Returns nil when unknown.
+    ---
+    --- @param name The name the key was created with.
+    findKey: function<T>(name: string): Key<T>
+
+    --- All named keys, as a fresh name -> numeric key id table.
+    listKeys: function(): {string: integer}
 
     --- Create a new Context instance.
     newContext: function(): Context
@@ -158,6 +174,8 @@ end
 
 tecs.newWorld = WorldImpl.new
 tecs.newKey = Context.newKey
+tecs.findKey = Context.findKey
+tecs.listKeys = Context.listKeys
 tecs.newContext = Context.new
 tecs.newEvent = events.newEvent
 tecs.newFFIEvent = events.newFFIEvent

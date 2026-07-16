@@ -65,7 +65,7 @@ local record LightingState
     cookieRotation: number
 end
 
-local STATE_KEY <const> = tecs.newKey() as tecs.Key<LightingState>
+local STATE_KEY <const> = tecs.newKey("state") as tecs.Key<LightingState>
 
 -- Color palette for lights
 local LIGHT_COLORS <const>: {{number, number, number}} = {

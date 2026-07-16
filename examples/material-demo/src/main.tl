@@ -46,7 +46,7 @@ local record DemoState
     dissolveDirection: number
 end
 
-local STATE_KEY <const> = tecs.newKey() as tecs.Key<DemoState>
+local STATE_KEY <const> = tecs.newKey("state") as tecs.Key<DemoState>
 
 local function demoPlugin(world: tecs.World)
     local pipeline = world.resources[gfx.PIPELINE] as gfx.Pipeline
