@@ -10,6 +10,10 @@ payload, launchers, and installers as GitHub release assets.
 
 ### Added
 
+- `ping` reads the build manifest fresh from disk, so `build.built` tracks
+  hot reloads instead of reporting boot-time metadata forever.
+- `cmd_fetch count_only=true`: population checks return just the count.
+
 - `send_love_event` routes unfrozen tapeable events through the input tape
   (next gameplay frame, args defaulted), so the Update-phase edge reliably
   consumes them; frozen and gamepad/joystick sends keep the raw push.

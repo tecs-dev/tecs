@@ -15,9 +15,12 @@ Run everything from the project root (the directory with `tlconfig.lua`).
    terminal/reset state. Implement that vertical slice before any polish.
 3. **Design for verification before writing code.** Authoritative game state lives in a
    named-key resource (`tecs.newKey("game.state")`) or queryable components — never only in
-   file-local closures (unreachable from tooling). Give the game an explicit reset path. Make
-   randomness seedable where determinism matters. You should be able to verify every mechanic
-   from data without interpreting pixels.
+   file-local closures (unreachable from tooling). **Export the components and queries you'll
+   verify with** (module exports reachable via `modules("...")` from `run_lua`): a file-local
+   component tag leaves you no handle to count or query your own entities — though
+   `cmd_fetch '{"expr":"Brick","count_only":true}'` answers population checks by name either
+   way. Give the game an explicit reset path. Make randomness seedable where determinism
+   matters. You should be able to verify every mechanic from data without interpreting pixels.
 4. Batch-query unfamiliar constructors (`tecs api <Comp> --fields constructor`), write the
    slice in one pass, then `tecs check` → `tecs build`.
 5. Verify state transitions deterministically (the canonical session below), then one bounded
@@ -87,7 +90,10 @@ keep it, and make every observation deterministic:
 
 1. **Boot already frozen.** `start_game '{"frozen":true}'` holds the game at frame zero. Then
    `ping` and check `build.built` against your latest build — a stale process (a zombie holding
-   the port) silently validates old code. From here the world advances only when you say so.
+   the port) silently validates old code. `build.built` reads the on-disk manifest, so it
+   tracks hot reloads; if a change *still* seems missing after a reload, that's the
+   snapshot-restore trap (Startup-only effects are overwritten) — `restart_game`. From here
+   the world advances only when you say so.
 2. **Analyze.** Read the frozen world until you understand what reaching the goal requires:
    `cmd_resources '{"name":"game.state"}'`, `cmd_fetch '{"expr":"<Component>"}'`, or a
    `run_lua` read. Stash the state handle once — it persists across calls:
