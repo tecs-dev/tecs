@@ -131,12 +131,12 @@ keep it, and make every observation deterministic:
    the path; the goal across the board, reached entirely through taped inputs). Each rung
    verifies exactly one new thing, so a failure indicts one mechanism — one long organic run
    "verifies" everything at once and diagnoses nothing when it fails.
-6. **Then look at it.** After mechanics are proven from state: ONE bounded visual check
-   (`sample_pixels` or a clipped `cmd_screenshot` — full frames cost 1–2k tokens and persist
-   in context forever), and one short live-play pass (`cmd_freeze '{"on":false}'`, play
-   briefly through taped or real input) for readability, control feel, pacing, and layout —
-   state checks can't judge those. Keep cosmetic iteration proportional to the request; don't
-   enter a build→screenshot→tweak loop over colors.
+6. **Then look at it.** After mechanics are proven from state: one visual check —
+   `cmd_screenshot` captures at the game's VIRTUAL resolution by default (cheap; `full=true`
+   for native window pixels, `sample_pixels` for point checks) — and one short live-play pass
+   (`cmd_freeze '{"on":false}'`, play briefly through taped or real input) for readability,
+   control feel, pacing, and layout — state checks can't judge those. Keep cosmetic iteration
+   proportional to the request; don't enter a build→screenshot→tweak loop over colors.
 
 ## Using the game tools
 

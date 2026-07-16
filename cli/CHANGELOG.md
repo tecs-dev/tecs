@@ -8,6 +8,13 @@ payload, launchers, and installers as GitHub release assets.
 
 ## [Unreleased]
 
+### Added
+
+- `cmd_screenshot` captures at the game's virtual resolution by default
+  (`full=true` for native window pixels), and `cmd_record` defaults its
+  output scale to the virtual resolution — captures carry the game's actual
+  pixels, not the window blowup.
+
 ## [0.10.8] - 2026-07-17
 
 ### Fixed
