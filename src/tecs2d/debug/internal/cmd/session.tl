@@ -337,8 +337,10 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     -- quiet=true: the caller wants the answer, not the
                     -- schedule -- drop the will_fire/held/step_dt echo so
                     -- every verification round-trip stops re-paying for it.
+                    -- The marked sentinel keeps a bare `{}` serializing as a
+                    -- JSON object, never degrading to [].
                     if v.quiet == true then
-                        data = {}
+                        data = tecs.json.EMPTY_OBJECT as {string: any}
                     end
 
                     local hookErr: string = nil
