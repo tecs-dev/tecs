@@ -1617,7 +1617,7 @@
           "type": "string"
         },
         "scale": {
-          "description": "output size multiplier, e.g. 0.5 (default: 1)",
+          "description": "output size multiplier, e.g. 0.5; defaults to the virtual-resolution scale in pixel mode, else 1",
           "type": "number"
         },
         "seconds": {
@@ -1841,13 +1841,17 @@
     "name": "cmd_rewind_stop"
   },
   {
-    "description": "Capture the screen (or the marked drag area) to a PNG at the end of the next rendered frame. The result's data.full is the absolute host path where the file appears -- read it from there; data.path is the save-directory-relative name. For cheap visual checks prefer sample_pixels or an area-restricted shot over a full-frame capture. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "description": "Capture the screen (or the marked drag area) to a PNG at the end of the next rendered frame. In pixel mode the capture is downscaled to the game's VIRTUAL resolution by default (the window is just an integer blowup, so this loses nothing and costs a fraction of the tokens to read); pass full=true for the native window pixels. The result's data.full is the absolute host path where the file appears -- read it from there; data.path is the save-directory-relative name. For point checks sample_pixels is still cheaper. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
         "delay": {
           "description": "seconds to wait before capturing",
           "type": "number"
+        },
+        "full": {
+          "description": "capture at native window resolution instead of virtual scale",
+          "type": "boolean"
         },
         "name": {
           "description": "output filename",

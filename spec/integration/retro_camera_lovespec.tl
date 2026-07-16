@@ -46,6 +46,30 @@ describe("retro camera: toScreen matches rendered positions", function()
         luassert.is_true(ok == true, "marker not at the expected integer-scaled screen position")
     end)
 
+    it("cmd_screenshot captures at virtual scale by default", function()
+        -- The window (320x250) is a scale-up of the 80x60 virtual space;
+        -- captures default to virtual scale so readers pay for the game's
+        -- actual pixels, not the blowup. full=true keeps the native size.
+        local png_util = require("tecs2d.testing.png_util")
+        local function shotHeight(args: {string: any}): integer
+            local res = app.client:call("cmd_screenshot", args)
+            local fullPath = res.full as string
+            local h = fixture.eventually(fixture.callTimeout, function(): integer
+                local fh = io.open(fullPath, "rb")
+                if not fh then return nil end
+                local bytes = fh:read("*a")
+                fh:close()
+                local hdr = png_util.parseHeader(bytes)
+                if hdr then return hdr.height end
+                return nil
+            end)
+            luassert.is_not_nil(h, "screenshot never appeared at " .. tostring(fullPath))
+            return h
+        end
+        luassert.are.equal(60, shotHeight({name = "virt-default.png"}))
+        luassert.are.equal(250, shotHeight({name = "virt-native.png", full = true}))
+    end)
+
     it("toScreen agrees with the rendered position", function()
         local values = fixture.runLua(app, [[
             local gfx = require("tecs2d.gfx")

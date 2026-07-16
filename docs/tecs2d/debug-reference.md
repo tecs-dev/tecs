@@ -2379,11 +2379,11 @@ MCP tool: `cmd_diff_get` (read-only, idempotent)
 | `pointer` | string | RFC 6901 pointer, e.g. /summary/byComponent (required) |
 | `ref` | string | diff artifact index or latest; omit for the last diff |
 
-### `screenshot [name] [delay=N] [panel]` {#cmd-screenshot}
+### `screenshot [name] [delay=N] [full] [panel]` {#cmd-screenshot}
 
 Capture the screen (or drag area) to a PNG.
 
-Capture the screen (or the marked drag area) to a PNG at the end of the next rendered frame. The result's data.full is the absolute host path where the file appears -- read it from there; data.path is the save-directory-relative name. For cheap visual checks prefer sample_pixels or an area-restricted shot over a full-frame capture.
+Capture the screen (or the marked drag area) to a PNG at the end of the next rendered frame. In pixel mode the capture is downscaled to the game's VIRTUAL resolution by default (the window is just an integer blowup, so this loses nothing and costs a fraction of the tokens to read); pass full=true for the native window pixels. The result's data.full is the absolute host path where the file appears -- read it from there; data.path is the save-directory-relative name. For point checks sample_pixels is still cheaper.
 
 MCP tool: `cmd_screenshot`
 
@@ -2391,6 +2391,7 @@ MCP tool: `cmd_screenshot`
 | --- | --- | --- |
 | `name` | string | output filename |
 | `delay` | number | seconds to wait before capturing |
+| `full` | boolean | capture at native window resolution instead of virtual scale |
 | `panel` | boolean | keep the debug panel visible in the shot |
 
 ```
@@ -2466,7 +2467,7 @@ MCP tool: `cmd_record_start`
 | `countdown` | number | seconds before recording starts (plugin default if omitted) |
 | `debug` | boolean | keep the debugger visible and the game running (default: false) |
 | `fps` | number | capture frame rate (default: 30) |
-| `scale` | number | output size multiplier, e.g. 0.5 (default: 1) |
+| `scale` | number | output size multiplier, e.g. 0.5; defaults to the virtual-resolution scale in pixel mode, else 1 |
 | `stopOnDebugOpen` | boolean | stop when the debugger opens (default: true only for untimed, non-debug recordings) |
 
 #### `record stop` {#cmd-record-stop}

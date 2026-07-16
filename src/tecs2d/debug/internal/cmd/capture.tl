@@ -29,6 +29,26 @@ local getTime <const> = love.timer.getTime
 
 local Transform <const> = tecs.builtins.Transform
 
+-- Nearest-neighbor ImageData downscale (pure love.image, safe inside the
+-- captureScreenshot callback). Screenshots default to the pipeline's virtual
+-- resolution: in pixel mode the window is an integer blowup of scaledWidth x
+-- scaledHeight, so sampling back down recovers the game's actual pixels while
+-- costing readers a fraction of the tokens.
+local function downscaleImageData(src: love.image.ImageData, tw: integer, th: integer): love.image.ImageData
+    local sw, sh = src:getWidth(), src:getHeight()
+    if tw >= sw or th >= sh or tw < 1 or th < 1 then return src end
+    local out = love.image.newImageData(tw, th)
+    for y = 0, th - 1 do
+        local sy = math.floor((y + 0.5) * sh / th)
+        for x = 0, tw - 1 do
+            local sx = math.floor((x + 0.5) * sw / tw)
+            local r, g, b, a = src:getPixel(sx, sy)
+            out:setPixel(x, y, r, g, b, a)
+        end
+    end
+    return out
+end
+
 local record capture
     --- The Capture-section commands, in display order.
     commands: function(d: cmdtypes.Deps): {cmdtypes.Command}
@@ -39,7 +59,8 @@ local recordSchema <const>: cmdargs.Schema = {
         seconds = {default = 0, help = "auto-stop after N seconds; 0 records until stopped"},
         name = {help = "output filename"},
         fps = {default = 30, help = "capture frame rate"},
-        scale = {default = 1, help = "output size multiplier, e.g. 0.5"},
+        scale = {kind = "number", help = "output size multiplier, e.g. 0.5; "
+            .. "defaults to the virtual-resolution scale in pixel mode, else 1"},
         debug = {default = false, help = "keep the debugger visible and the game running"},
         countdown = {kind = "number", help = "seconds before recording starts (plugin default if omitted)"},
         stopOnDebugOpen = {kind = "boolean",
@@ -1463,15 +1484,20 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             section = "Capture",
             shortHelp = "capture the screen (or drag area) to a PNG",
             mcpHelp = "Capture the screen (or the marked drag area) to a PNG at the end "
-                .. "of the next rendered frame. The result's data.full is the absolute "
-                .. "host path where the file appears -- read it from there; data.path is "
-                .. "the save-directory-relative name. For cheap visual checks prefer "
-                .. "sample_pixels or an area-restricted shot over a full-frame capture.",
+                .. "of the next rendered frame. In pixel mode the capture is downscaled "
+                .. "to the game's VIRTUAL resolution by default (the window is just an "
+                .. "integer blowup, so this loses nothing and costs a fraction of the "
+                .. "tokens to read); pass full=true for the native window pixels. The "
+                .. "result's data.full is the absolute host path where the file appears "
+                .. "-- read it from there; data.path is the save-directory-relative "
+                .. "name. For point checks sample_pixels is still cheaper.",
             schema = {
                 args = {
                     name = {help = "output filename"},
                     panel = {kind = "boolean", help = "keep the debug panel visible in the shot"},
                     delay = {kind = "number", help = "seconds to wait before capturing"},
+                    full = {kind = "boolean",
+                        help = "capture at native window resolution instead of virtual scale"},
                 },
                 positional = {"name"},
             },
@@ -1527,6 +1553,20 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 end
                 local keepPanel = v.panel == true
                 local delay = (v.delay as number) or 0
+                -- Virtual-scale target, resolved at schedule time. nil means
+                -- keep the native capture (full=true, or the pipeline defines
+                -- no smaller virtual resolution). The virtual resolution is
+                -- the game's logical pixel space whether it scales smoothly
+                -- (virtualHeight) or in integer pixel mode.
+                local virtH: integer = nil
+                if v.full ~= true and p then
+                    local pAny = p as {string: any}
+                    local vh = pAny.pixelMode and pAny.scaledHeight as number
+                        or pAny.virtualHeight as number
+                    if vh and vh >= 1 then
+                        virtH = math.floor(vh) as integer
+                    end
+                end
                 local function fire()
                     -- Hide the overlay chrome for this one frame so the shot is
                     -- the game only (unless panel=true); the capture runs at
@@ -1538,9 +1578,11 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         local captureErr: string = nil
                         local ok = xpcall(function()
                             local finalData = imageData
+                            local fullW = imageData:getWidth()
+                            local fullH = imageData:getHeight()
                             if hasArea then
-                                local pw = imageData:getWidth()
-                                local ph = imageData:getHeight()
+                                local pw = fullW
+                                local ph = fullH
                                 local scaleX = pw / love.graphics.getWidth()
                                 local scaleY = ph / love.graphics.getHeight()
                                 local cx = math.max(0, math.min(math.floor(math.min(ax1, ax2) * scaleX) as integer, pw - 1))
@@ -1550,6 +1592,15 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                                 local cropped = love.image.newImageData(cw, ch)
                                 cropped:paste(imageData, 0, 0, cx, cy, cw, ch)
                                 finalData = cropped
+                            end
+                            if virtH and fullH > virtH then
+                                -- Same shrink ratio for full frames and area
+                                -- crops, so a crop's pixels line up with the
+                                -- equivalent region of a full virtual shot.
+                                local ratio = virtH / fullH
+                                local tw = math.max(1, math.floor(finalData:getWidth() * ratio + 0.5)) as integer
+                                local th = math.max(1, math.floor(finalData:getHeight() * ratio + 0.5)) as integer
+                                finalData = downscaleImageData(finalData, tw, th)
                             end
                             finalData:encode("png", name)
                             local info = love.filesystem.getInfo(name)
@@ -1606,11 +1657,28 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         if stopOnOpen == nil then
                             stopOnOpen = secs <= 0 and not showDebug
                         end
+                        -- Default the output to the game's virtual resolution:
+                        -- the window is just a scale-up of the logical pixel
+                        -- space, so encoding it wastes pixels (and reader
+                        -- tokens) on blowup.
+                        local scaleArg = v.scale as number
+                        if scaleArg == nil then
+                            local p = pipeline()
+                            local pAny = p as {string: any}
+                            if p then
+                                local ph = love.graphics.getPixelHeight()
+                                local sh = pAny.pixelMode and pAny.scaledHeight as number
+                                    or pAny.virtualHeight as number
+                                if ph > 0 and sh and sh > 0 and sh < ph then
+                                    scaleArg = sh / ph
+                                end
+                            end
+                        end
                         local out = env.recorder:start({
                             seconds = secs,
                             name = v.name as string,
                             fps = math.floor(v.fps as number) as integer,
-                            scale = v.scale as number,
+                            scale = scaleArg,
                             countdown = v.countdown as number,
                             stopOnDebugOpen = stopOnOpen,
                             hideDebugger = not showDebug,
