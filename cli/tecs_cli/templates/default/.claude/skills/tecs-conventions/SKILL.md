@@ -18,7 +18,7 @@ first time. For the full API, run `tecs docs <page>` (offline mirror of the docs
   site.
 - **Tags** are added by passing the container (`world:spawn(t, Dead)`); other components must be
   constructed (`gfx.Color(1,0,0,1)`).
-- **Never build a query inside `run`** — create it once in the plugin and reuse it.
+- **Never build a query — or register an observer — inside `run`.** Create queries once in the plugin and reuse them; `world:observe` inside a per-frame system adds a NEW handler every tick (your callback fires N times per event and leaks). Register observers in plugin/Startup code.
 - Optional record fields can't be marked `?` (only params can); document optionality and handle
   `nil` at each use site.
 
@@ -39,6 +39,9 @@ first time. For the full API, run `tecs docs <page>` (offline mirror of the docs
   use `batchDespawn`/`batchSet`/`batchRemove` over per-entity loops.
 - **Plugins/state:** plugins are the unit of composition; share globals via `world.resources[...]`
   keyed by a typed key (no Lua globals); use `world:observe` for lifecycle instead of polling.
+  Always name keys — `tecs.newKey("game.state")`, not `tecs.newKey()` — so the resource is
+  readable by name (`cmd_resources`, `tecs.findKey`) and keeps its identity across hot reloads;
+  unnamed keys log a warning.
 - **Errors:** `error(msg, 0)` for user-actionable failures; validate options at construction, not
   on the first frame; log through `tecs.utils.logging`, not `print`.
 
@@ -47,11 +50,22 @@ first time. For the full API, run `tecs docs <page>` (offline mirror of the docs
 These cost iterations because the fix lives in a page you read *before* you hit the problem. Run
 `tecs docs <page>` for detail.
 
+- **Input edge reads are phase-aware — read them in the phase that consumes them.**
+  `input.isKeyPressed` in Update reliably reports this frame's press; in FixedUpdate it reports
+  a latched edge that only the FIRST fixed tick of a frame sees (latches clear per tick).
+  Don't shuttle edge state between phases by hand: read the edge where the consuming logic
+  runs, or use a `KeyPressed` observer for one-shot reactions. If input "silently doesn't
+  work", verify the read actually fires — `cmd_input_tape` a press, `cmd_step`, assert — before
+  rearchitecting. (`tecs docs tecs2d/input`, "Latch-based input")
 - **Transform args:** `Transform(x, y, z, layer, rotation?, scaleX?, scaleY?)` — the 4th arg is the
   **layer**, not scale. (`tecs docs tecs/builtins`)
-- **Draw order:** within one layer, order follows that layer's `sortMode` (e.g. `topdown` y-sort),
-  **not spawn order** — a full-bleed background on a gameplay layer can draw over things above it.
-  Put backgrounds on their own lower layer, or order within a layer with `Transform.z`.
+- **Draw order:** the rule is *one overlapping visual per layer*. Higher layer = strictly on
+  top; **within** a layer, order follows its `sortMode` (e.g. `topdown` y-sort), **not spawn
+  order** — so ANY two overlapping full-area visuals on the same layer can occlude each other
+  (backdrop + board, board + panel, ...), even on a "background" layer. Give each stacked
+  visual its own layer, or order within a layer with `Transform.z`. And one entry per index:
+  a duplicate key in the `layers` table (`[2] = {...}, [2] = {...}`) silently drops the
+  earlier layer — Lua table literals last-win without warning.
   (`tecs docs tecs2d/rendering/layers`, `tecs docs tecs2d/rendering/styling`)
 - **Text/shapes are centered by default:** `gfx.Text`, `gfx.Rectangle`, etc. default to
   `Pivot(0.5, 0.5)`, so the `Transform` position is their **center**, not their top-left. Add
@@ -60,6 +74,11 @@ These cost iterations because the fix lives in a page you read *before* you hit 
 - **Observing events needs the VALUE, not the type:** `local events = require("tecs2d.events");
   world:observe(0, events.MousePressed, ...)`. `tecs2d.MousePressed` resolves to a *type* and won't
   type-check. (`tecs docs tecs2d/events`)
+- **Gameplay belongs on world-space layers, viewed by the camera.** Layers without
+  `space = "virtual"` are world space by default — keep game entities there so camera
+  follow/zoom/shake work and coordinates aren't welded to the window. Reserve
+  `space = "virtual"` for screen-fixed chrome (backdrop, HUD). A game whose every layer is
+  virtual has opted out of the camera entirely — treat that as a design smell.
 - **Pointer → game coordinates:** put gameplay on a **world-space** layer and convert with
   `camera:toWorld(x, y)`; use `tecs2d.ui.Anchor` for HUD (it resolves the layer's coordinate space).
   Don't hand-roll screen→virtual math. (`tecs docs tecs2d/input`, `tecs docs tecs2d/rendering/camera`)

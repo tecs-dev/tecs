@@ -34,7 +34,10 @@ Run these from the project root (the directory containing `tlconfig.lua`):
   `tecs api <module>` its symbols, `tecs api <module>.<Type>` a Teal `record` block,
   `tecs api <Type>:<method>` one method; a bare name resolves in your project. Pass several
   symbols to fan out; `--json` for structured records, `--fields <keys>` to return only the
-  keys you need. Prefer this over grepping `src/vendor/` for a signature.
+  keys you need. **Reach for `tecs api` first for any signature, field, or constructor
+  question** — it answers in tens of tokens what a full `tecs docs` page answers in thousands;
+  open docs pages for concepts and how-tos, not symbol lookups. Prefer both over grepping
+  `src/vendor/`.
 - `tecs info --json`: CLI, LÖVE, and LuaJIT versions plus project status as JSON.
 - Dependencies: vendor pure-Lua rocks with LuaRocks into the project tree
   (`luarocks install --tree src/vendor --lua-version=5.1 <rock>`, plus the matching
@@ -65,6 +68,16 @@ The default project wires the Tecs2D MCP plugin into the game world (`world:addP
 Generated projects ship ready-made client configuration: `.mcp.json` for Claude Code and `.codex/config.toml` for Codex, both running `tecs mcp` — a stdio bridge that works even before the game exists. It serves the toolchain as tools (`check`, `build`, `api`, `integ`, `dist`), manages the game process (`start_game`, `stop_game`, `restart_game`, `game_status`, `game_logs` — the log tool works after a crash), and proxies every tool of the running game. Prefer these MCP tools over shell commands when connected: call `start_game` before any game tool, and prefer `build` over `restart_game` for code changes since the running game hot-reloads. To attach to an already-running game directly (for example a dist build with `enableInDist`), use its HTTP endpoint `http://127.0.0.1:19999/mcp` instead.
 
 `tecs docs` and `tecs api` (CLI) — and the `api` MCP tool — are available anytime, before the game is built and before `start_game`. Only in-game tools (`run_lua`, `screenshot`, `cmd_*`) require `start_game`.
+
+**Check for deferred tools before assuming the bridge is absent.** Clients often defer large MCP toolsets: the `mcp__tecs__*` tools may not be in your immediate tool list but still be loadable via your tool-search mechanism — search for `mcp__tecs__` first, and prefer those tools when present (no process spawn per call, parallel calls work). **Only if they are genuinely unavailable** (common when this project was created in the current session — MCP clients read `.mcp.json` only at startup), do not write your own JSON-RPC client. Use the CLI as the client: `tecs call --list` names every tool of the running game, and `tecs call <tool> '<json-args>'` invokes one (e.g. `tecs call cmd_fetch '{"expr":"Transform"}'`, `tecs call run_lua '{"code":"return world:count()"}'`). The handshake is handled for you; start the game with `tecs run` first. Never kill the game process by hand — `restart_game` (bridge), `tecs call cmd_restart`, or hot reload via `build` keep the prepared state; a raw kill forces a slow re-prep on the next launch, and a broad `pkill love` also kills the stdio bridge (it is a love process too), disconnecting your MCP tools.
+
+**Assert build identity first.** `ping` (game) and `game_status` (bridge) report the running build's metadata; compare its `built` timestamp against your latest `tecs build` before trusting any observation — a stale process (a zombie holding port 19999) silently validates old code, and the game logs an ERROR when it cannot bind because another process is serving the port.
+
+**Start `cmd_rewind_start` right after the game boots** — the snapshot ring plus the input/dt recorder it installs are what make time travel possible: `cmd_rewind_load` teleports back to a ring entry; `cmd_rewind_replay` (freeze first) re-runs the recorded inputs from one, deterministically, then lets you `cmd_step` frame-by-frame into the bug. Neither helps if the session started after the interesting moment.
+
+**Load the `tecs-cli` skill before driving or verifying the running game** — it holds the verification playbook (freeze-first loop, input taping, screenshot budget, event watching). Two rules from it that must never be rediscovered live: (1) **to prove input reaches gameplay, don't poll-and-guess** — freeze, `cmd_input_tape '{"events":[{"at":1,"event":"keypressed","args":["up"]}]}'`, `cmd_step`, assert; it dispatches through the real input path on an exact frame. (2) **`cmd_step` is async** — it returns when frames are *scheduled*; read state in a follow-up call, never in the same breath.
+
+**Verify game state by name, not by pixels.** `cmd_fetch '{"expr":"Enemy -Dead"}'` returns matching entities *with their component data*; `cmd_resources` lists named resources and `cmd_resources '{"name":"game.state"}'` reads one; `cmd_lua_modules`/`cmd_lua_exports` inspect the game's loaded modules; inside `run_lua`, `modules("components.food")` gives you your own component records to query with, and `require("tecs").findKey("game.state")` resolves named resource keys. For deterministic checks, `cmd_freeze` + `cmd_step` advance the game frame by frame instead of racing wall-clock time. For this to work, always create context keys with a name: `tecs.newKey("game.state")` (unnamed keys log a warning and are invisible to tooling).
 
 The MCP server and debugger disable themselves in `tecs dist` builds: `tecs build` writes a `build/tecs_buildinfo.lua` manifest (name, timestamp, tool versions, `dev` flag) that `tecs dist` packages with `dev = false`. Pass `{enableInDist = true}` to `mcp.new()` or `debug.new()` to keep them in distributed builds; read the manifest at runtime via `require("tecs2d.buildinfo")`.
 
