@@ -51,6 +51,10 @@ payload, launchers, and installers as GitHub release assets.
   the lua values in the step result — tape→step→read in one round-trip.
 - Trimmed the generated AGENTS.md's MCP section to a pointer at the tecs-cli
   skill (the playbook was duplicated in both and paid for twice per session).
+- `check` hints the fix when `local KEY: tecs.Key<T> <const>` trips Teal's
+  bare "syntax error" (use `local KEY <const> = ... as tecs.Key<T>`); the
+  conventions skill documents the typed-key pattern. Diagnostics collection
+  and remediation moved to `tecs_cli/diagnostics.lua`.
 - `start_game '{"frozen":true}'` boots the game with the freeze already held
   (inspectable at frame zero; `cmd_freeze on=false` releases it).
 - `tecs new` stamps the LÖVE identity/title with the project name, so games no

@@ -56,7 +56,10 @@ first time. For the full API, run `tecs docs <page>` (offline mirror of the docs
   keyed by a typed key (no Lua globals); use `world:observe` for lifecycle instead of polling.
   Always name keys — `tecs.newKey("game.state")`, not `tecs.newKey()` — so the resource is
   readable by name (`cmd_resources`, `tecs.findKey`) and keeps its identity across hot reloads;
-  unnamed keys log a warning.
+  unnamed keys log a warning. Declare a typed key as
+  `local STATE_KEY <const> = tecs.newKey("game.state") as tecs.Key<GameState>` —
+  `local STATE_KEY: tecs.Key<GameState> <const> = …` is a **syntax error** (Teal cannot parse
+  `<const>` after a generic annotation, and the bare "syntax error" message won't tell you why).
 - **Errors:** `error(msg, 0)` for user-actionable failures; validate options at construction, not
   on the first frame; log through `tecs.utils.logging`, not `print`.
 

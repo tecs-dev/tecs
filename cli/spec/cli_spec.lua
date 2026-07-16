@@ -369,6 +369,35 @@ describe("tecs CLI", function()
             assert.equals("tecs2d/events", diags[1].docs)
         end)
 
+        it("hints the generic-annotation-plus-const syntax error", function()
+            -- `local KEY: tecs.Key<T> <const> = ...` doesn't parse and Teal
+            -- reports only a bare "syntax error", pointing agents at the
+            -- wrong construct (an agent edited the line below it, twice).
+            local root = makeTemp("remediation-const")
+            local file = join(root, "m.tl")
+            writeFile(file, "local tecs = require(\"tecs\")\n"
+                .. "local STATE_KEY: tecs.Key<GameState> <const> = tecs.newKey(\"game.state\")\n")
+            local diags = {{
+                file = file, line = 2, column = 39, kind = "syntax",
+                message = "syntax error",
+            }}
+            cli._internal.attachRemediation(diags)
+            assert.matches("cannot parse `<const>` after a generic", diags[1].hint)
+            assert.matches("as tecs%.Key<T>", diags[1].hint)
+        end)
+
+        it("leaves unrelated syntax errors bare", function()
+            local root = makeTemp("remediation-syntax-neg")
+            local file = join(root, "m.tl")
+            writeFile(file, "local x = {\n")
+            local diags = {{
+                file = file, line = 1, column = 11, kind = "syntax",
+                message = "syntax error",
+            }}
+            cli._internal.attachRemediation(diags)
+            assert.is_true(diags[1].hint == nil)
+        end)
+
         it("does not hint an unrelated type-as-value error", function()
             local root = makeTemp("remediation-neg")
             local file = join(root, "m.tl")
