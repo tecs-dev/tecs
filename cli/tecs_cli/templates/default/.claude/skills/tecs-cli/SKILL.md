@@ -106,7 +106,10 @@ Using the game tools:
   raw Lua `tostring` form. The result is an envelope `{returned, values}`: `values` is an array of
   your return values in order, so `return snake.length` reads back as `values[0]` (not the bare
   value). The code is **sandboxed**: love2d APIs, the ECS world, and `require("tecs2d.…")` work, but
-  the filesystem (`io`, `os.execute`) and module loading (`require("io")`, `load`) are blocked.
+  the filesystem (`io`, `os.execute`) and module loading (`require("io")`, `load`) are blocked;
+  `love.filesystem` save-dir writes work for data files but refuse `.lua`/`.tl` paths.
+  **State persists across calls**: stash a handle once (`_G.mgr = world.resources[...]`) and reuse
+  it in later calls — no need to re-derive it every time.
   `modules("game")` reaches a loaded module's **exports** — but file-local functions are
   unreachable, so anything verification needs to call (a reset, a step function) must be
   exported from the module, stored in a named resource, or registered as a `cmd_*` debug
