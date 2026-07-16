@@ -78,7 +78,7 @@ function Server:refreshGameTools()
     return false
 end
 
-function Server:startGame()
+function Server:startGame(frozen)
     if self:gameRunning() then
         return {already_running = true, port = self.game.port}
     end
@@ -99,6 +99,9 @@ function Server:startGame()
         env = {
             TECS_MCP_PORT = tostring(port),
             SDL_MAC_BACKGROUND_APP = "1",
+            -- Boot with the freeze already held so the game is inspectable
+            -- at frame zero (released with cmd_freeze on=false).
+            TECS_BOOT_FROZEN = frozen and "1" or nil,
         },
     })
     self.ctx.setEnv("SDL_VIDEODRIVER", "dummy")
@@ -259,10 +262,20 @@ function Server:cliTools()
         {
             name = "start_game",
             description = "Build and launch the game with its MCP server on a free port. "
-                .. "The game's own tools (screenshot, run_lua, cmd_*, ...) become callable.",
-            inputSchema = OBJECT_SCHEMA,
-            handler = function()
-                return self:startGame()
+                .. "The game's own tools (screenshot, run_lua, cmd_*, ...) become callable. "
+                .. "Pass frozen=true to boot with the freeze already held: the game sits "
+                .. "inspectable at frame zero -- stage state, queue input_tape rows, and "
+                .. "cmd_step from there; cmd_freeze on=false releases it. Use it for any "
+                .. "game that starts acting immediately.",
+            inputSchema = {
+                type = "object",
+                properties = {
+                    frozen = {type = "boolean",
+                        description = "Start with gameplay frozen at frame zero."},
+                },
+            },
+            handler = function(args)
+                return self:startGame(args and args.frozen == true)
             end,
             notifiesToolsChanged = true,
         },
