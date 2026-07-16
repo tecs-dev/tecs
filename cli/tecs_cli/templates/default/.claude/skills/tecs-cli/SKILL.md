@@ -139,7 +139,10 @@ Using the game tools:
   game wastes a capture per attempt and still proves nothing deterministically. **`cmd_step` is
   asynchronous**: it returns when the frames are *scheduled*; they tick over the next loop
   iterations — so read state in a follow-up call (or `fixture.eventually` in integ specs),
-  never in the same breath as the step. Recipe for
+  never in the same breath as the step. **Stepped frames carry a deterministic dt of 1/fps**
+  (echoed as `step_dt`), so `n` frames advance exactly `n/fps` gameplay seconds — to cross a
+  0.12s timer at 60fps, step 8; or pass `dt` to cover it in fewer frames
+  (`'{"n":1,"dt":0.12}'`). Recipe for
   "does eating grow the snake": freeze → place food one cell ahead of the head → step across
   one tick → assert the new length via `cmd_resources '{"name":"game.state"}'` or `cmd_fetch`.
 - **Verify the real input path with `cmd_input_tape`, not by poking state.** It queues literal

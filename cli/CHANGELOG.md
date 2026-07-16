@@ -39,6 +39,9 @@ payload, launchers, and installers as GitHub release assets.
   `tecs api tecs.phases.Startup` answers directly.
 - `tecs check` prints an explicit `OK: 0 type errors` line on a clean pass
   instead of exiting silently.
+- `cmd_step` frames carry a deterministic dt of 1/fps (echoed as `step_dt`,
+  overridable with `dt=`) instead of the display-refresh-dependent measured
+  dt, so `step n` advances the same gameplay time on every machine.
 - `start_game '{"frozen":true}'` boots the game with the freeze already held
   (inspectable at frame zero; `cmd_freeze on=false` releases it).
 - `tecs new` stamps the LÖVE identity/title with the project name, so games no
