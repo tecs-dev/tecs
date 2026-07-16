@@ -4,6 +4,7 @@ package.cpath = package.cpath .. ";./vendor/lib/lua/5.1/?.so;./vendor/lib/lua/5.
 local tecs <const> = require("tecs")
 local tecs2d <const> = require("tecs2d")
 local gfx <const> = require("tecs2d.gfx")
+local tween <const> = require("tecs2d.tween")
 local mcp <const> = require("tecs2d.mcp")
 local debugPlugin <const> = require("tecs2d.debug")
 
@@ -38,13 +39,28 @@ local function gamePlugin(world: tecs.World)
                 gfx.Pivot(0.5, 0.5)
             )
 
-            -- Greeting text on layer 2 (content), above the background.
-            world:spawn(
-                Transform(VIRTUAL_WIDTH / 2, VIRTUAL_HEIGHT / 2, 0, 2),
+            -- Greeting text on layer 2 (content) -- a WORLD-space layer, viewed
+            -- by the camera. The camera is center-based and starts at world
+            -- (0, 0), so world coordinates are centered on the origin (not
+            -- top-left like virtual space). Pan/zoom in the debugger, camera
+            -- follow, and camera:toWorld(pointer) all work on this layer.
+            --
+            -- Spawned half the bob amplitude below center so the pingPong
+            -- oscillates symmetrically around the origin.
+            local BOB <const> = 12 -- half the rendered text height
+            local hello = world:spawn(
+                Transform(0, BOB, 0, 2),
                 gfx.Text(FONT, "HELLO TECS2D!", 4),
                 gfx.Color(0.9, 0.96, 1.0, 1),
                 gfx.Pivot(0.5, 0.5)
             )
+
+            -- Idle bob: ease up by one text height and back, forever. Tweens
+            -- are ECS data (snapshot-safe); see `tecs docs tecs2d/tween`.
+            tween.timeline()
+                :to(0.9, tween.sineInOut, tween.translateY, -BOB)
+                :pingPong()
+                :apply(world, hello)
         end,
     })
 end
@@ -58,8 +74,12 @@ love.run = tecs2d.run({
         virtualHeight = VIRTUAL_HEIGHT,
         lightingMode = "none",
         layers = {
+            -- Layers default to WORLD space, rendered through the camera --
+            -- keep gameplay there so camera follow/zoom/shake and
+            -- camera:toWorld(pointer) work. Reserve space = "virtual" for
+            -- screen-fixed chrome only (full-bleed backdrops, HUD overlays).
             [1] = {name = "background", space = "virtual"},
-            [2] = {name = "content", space = "virtual"},
+            [2] = {name = "content"},
         },
     },
 })
