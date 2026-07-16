@@ -195,7 +195,62 @@ leftover="$(lsof -nP -iTCP:19999 -sTCP:LISTEN -t 2>/dev/null || true)"
 if [ -n "$leftover" ]; then
     echo "== killing leftover game process $leftover"
     kill "$leftover" 2>/dev/null || true
+    sleep 1
 fi
+
+# --- autograde: objective liveness, independent of what the agent claimed ----------
+# Boots the game the agent left behind and probes ground truth: build passes,
+# MCP answers, entities exist, named state is present, and the game survives
+# three seconds of live play without crashing. Catches "the debrief says
+# verified but the game barely runs".
+echo "== autograde"
+grade="build=FAIL"
+if (cd "$project" && tecs build >/dev/null 2>&1); then
+    grade="build=ok"
+    (cd "$project" && tecs run >/dev/null 2>&1 &)
+    booted=""
+    for _ in $(seq 1 30); do
+        if (cd "$project" && tecs call ping '{}' >/dev/null 2>&1); then booted=1; break; fi
+        sleep 1
+    done
+    if [ -z "$booted" ]; then
+        grade="$grade boot=FAIL"
+    else
+        grade="$grade boot=ok $(cd "$project" && python3 - <<'EOF'
+import json, subprocess, time
+
+def call(tool, args="{}"):
+    try:
+        out = subprocess.run(["tecs", "call", tool, args],
+                             capture_output=True, text=True, timeout=20).stdout
+        return (json.loads(out) or {}).get("result") or {}
+    except Exception:
+        return {}
+
+count_code = ("local t = require(\"tecs\") "
+              "return world:query({include = {t.builtins.Transform}}):count()")
+
+def entities():
+    vals = call("run_lua", json.dumps({"code": count_code})).get("values") or [0]
+    return vals[0]
+
+n = entities()
+# Game-authored named state only: skip framework keys and anonymous tables.
+res = call("cmd_resources").get("resources") or []
+named = sum(1 for e in res
+            if not str(e.get("key", "")).startswith(("table: ", "tecs2d.", "tecs.")))
+time.sleep(3)
+ping = call("ping")
+alive = ping.get("running") is True and not ping.get("crashed")
+print(f"entities={n} named_state={named} "
+      f"alive3s={'ok' if alive else 'CRASHED'} entities_after={entities()}")
+EOF
+)"
+    fi
+    squat="$(lsof -nP -iTCP:19999 -sTCP:LISTEN -t 2>/dev/null || true)"
+    [ -n "$squat" ] && kill "$squat" 2>/dev/null || true
+fi
+echo "== autograde: $grade" | tee "$results/autograde.txt"
 
 echo "== done. artifacts in $results/"
 ls "$results"

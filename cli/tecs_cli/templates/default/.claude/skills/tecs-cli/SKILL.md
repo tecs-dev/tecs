@@ -175,6 +175,11 @@ keep it, and make every observation deterministic:
   `clear=true` drops pending rows and releases anything held.
 - **Iterate entities** with `world:query({include = {Comp}}):iter()` (there is no `world:each`);
   `query:count()` totals matches.
+- **If the game crashes, the tools tell you.** A gameplay error does not kill the MCP server:
+  every world tool answers `game_crashed` with the traceback, `ping` reports
+  `crashed: true`, and `get_logs` (plus the bridge's `game_logs`) holds the full stack. Read
+  the traceback, fix the code, and `restart_game` (or `build` + `start_game`) — do not retry
+  tools against a crashed world or kill the process by hand.
 - Advanced tools — rewind/replay (time travel), watching world events through the log ring,
   attaching to the game's HTTP MCP directly — are in `references.md` next to this skill. Read
   it when a bug needs re-running history or push-based event observation.
