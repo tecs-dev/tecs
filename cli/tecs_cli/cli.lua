@@ -1287,6 +1287,25 @@ function tasks.new(args)
         end
     end
 
+    -- Stamp the LÖVE identity and window title with the project name. A
+    -- static identity would make every generated game share one save
+    -- directory, so debugger artifacts (cmd_screenshot files, snapshots)
+    -- from one project bleed into the next -- an agent reading a stale
+    -- screenshot from a different game chases ghosts.
+    local projectName = basename(target):gsub("[^%w%-_%. ]", "")
+        :gsub("^%s+", ""):gsub("%s+$", "")
+    if projectName == "" then projectName = "game" end
+    local confPath = pathJoin(target, "src/conf.tl")
+    local conf = io.open(normalize(confPath), "rb")
+    if conf then
+        local text = conf:read("*a"); conf:close()
+        text = text:gsub('t%.window%.title = "Tecs Game"',
+            't.window.title = ' .. string.format("%q", projectName))
+        text = text:gsub('t%.identity = "tecs%-game"',
+            't.identity = ' .. string.format("%q", "tecs-" .. projectName))
+        writeFile(confPath, text)
+    end
+
     status("Project created. Next: cd " .. target .. " && tecs check")
 end
 

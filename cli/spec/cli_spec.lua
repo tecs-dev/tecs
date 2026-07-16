@@ -142,7 +142,11 @@ describe("tecs CLI", function()
             assert.matches("tecs2d%.testing%.fixture",
                 readFile(join(project, "spec", "game_lovespec.tl")))
             assert.is_false(exists(join(project, "game-dev-1.rockspec")))
-            assert.is_true(exists(join(project, "src", "conf.tl")))
+            -- conf.tl is stamped with the project name so every game gets
+            -- its own LÖVE save dir (no cross-project artifact bleed).
+            local conf = readFile(join(project, "src", "conf.tl"))
+            assert.matches('t%.window%.title = "sample%-game"', conf)
+            assert.matches('t%.identity = "tecs%-sample%-game"', conf)
             assert.is_true(exists(join(project, "src", "main.tl")))
             assert.is_true(isDir(join(project, "assets")))
             assert.is_false(exists(join(project, "types")))
