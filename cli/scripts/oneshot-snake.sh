@@ -15,6 +15,11 @@
 
 set -euo pipefail
 
+# The whole script runs inside main() so bash parses the entire file before
+# executing anything: editing this file while a run is in flight can no longer
+# corrupt the running copy (bash otherwise reads scripts lazily by byte offset).
+main() {
+
 root="$(cd "$(dirname "$0")/.." && pwd)"
 export PATH="$root/dist:$PATH"
 
@@ -139,3 +144,7 @@ fi
 
 echo "== done. artifacts in $results/"
 ls "$results"
+
+}
+
+main "$@"
