@@ -31,6 +31,27 @@ function serializer.setEmptyObjectSentinel(sentinel: any)
     EMPTY_OBJECT_SENTINEL = sentinel
 end
 
+-- Marker metatable the parser stamps on empty JSON objects, so a
+-- parse -> serialize round trip keeps {} as {} (an unmarked empty table
+-- serializes as []). Set from the main module.
+local OBJECT_MARKER: any = nil
+
+--- Set the marker metatable identifying parsed empty objects.
+function serializer.setObjectMarker(marker: any)
+    OBJECT_MARKER = marker
+end
+
+-- True for an empty table that must serialize as {}: the EMPTY_OBJECT
+-- sentinel, or a parser-marked object that is still empty (a marked table
+-- that gained keys serializes through the normal object path).
+local function isEmptyObject(tbl: {any}): boolean
+    if tbl == EMPTY_OBJECT_SENTINEL then return true end
+    if OBJECT_MARKER == nil or (getmetatable(tbl) as any) ~= OBJECT_MARKER then
+        return false
+    end
+    return next(tbl as {any:any}) == nil
+end
+
 -- Character constants
 local CHAR_QUOTE <const> = 34
 local CHAR_BACKSLASH <const> = 92
@@ -235,8 +256,8 @@ local function serializeTableCompact(tbl: {any}, sortKeys: boolean)
     end
     SEEN[tbl] = true
 
-    -- EMPTY_OBJECT is the one empty table that must serialize as an object.
-    if tbl == EMPTY_OBJECT_SENTINEL then
+    -- EMPTY_OBJECT and parser-marked empty objects serialize as objects.
+    if isEmptyObject(tbl) then
         put(BUF, S_EMPTY_OBJECT)
     elseif rawget(tbl, 1) ~= nil or next(tbl as {any:any}) == nil then
         serializeArrayCompact(tbl, sortKeys)
@@ -383,8 +404,8 @@ local function serializeTablePretty(
     end
     SEEN[tbl] = true
 
-    -- EMPTY_OBJECT is the one empty table that must serialize as an object.
-    if tbl == EMPTY_OBJECT_SENTINEL then
+    -- EMPTY_OBJECT and parser-marked empty objects serialize as objects.
+    if isEmptyObject(tbl) then
         put(BUF, S_EMPTY_OBJECT)
     elseif rawget(tbl, 1) ~= nil or next(tbl as {any:any}) == nil then
         serializeArrayPretty(tbl, currentIndent, indentStr, sortKeys)

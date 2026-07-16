@@ -80,6 +80,14 @@ parser.setNullSentinel(json.NULL)
 serializer.setNullSentinel(json.NULL)
 serializer.setEmptyObjectSentinel(json.EMPTY_OBJECT)
 
+-- Empty objects returned by parse carry this marker metatable, so
+-- serialize keeps them as {} -- without it, a parse -> serialize round trip
+-- turned every empty object into [] (which strict JSON-schema consumers,
+-- like MCP clients validating tools/list, reject).
+local OBJECT_MARKER <const>: metatable<{string: any}> = {}
+parser.setObjectMarker(OBJECT_MARKER)
+serializer.setObjectMarker(OBJECT_MARKER)
+
 json.parse = parser.parse
 json.parseCData = parser.parseCData
 json.serialize = serializer.serialize

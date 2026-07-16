@@ -129,6 +129,28 @@ describe("tecs.json serializer", function()
     end)
 
     describe("round-trip serialization", function()
+        it("round-trips empty objects as {} (never [])", function()
+            -- Strict JSON-schema consumers (MCP clients validating tools/list)
+            -- reject "properties": []; a parse -> serialize round trip must
+            -- keep empty-object identity.
+            local src = "{\"a\":{},\"b\":[],\"c\":{\"properties\":{},\"items\":[]}}"
+            local out = json.serialize(json.parse(src), true)
+            luassert.is_truthy(out:find("\"a\":{}", 1, true), out)
+            luassert.is_truthy(out:find("\"b\":[]", 1, true), out)
+            luassert.is_truthy(out:find("\"properties\":{}", 1, true), out)
+            luassert.is_truthy(out:find("\"items\":[]", 1, true), out)
+
+            -- Pretty output keeps the distinction too.
+            local pretty = json.serializePretty(json.parse(src))
+            luassert.is_nil(pretty:find("\"a\": []", 1, true))
+
+            -- A parsed empty object that later gains keys serializes normally.
+            local mutated = json.parse("{\"m\":{}}") as {string: any}
+            local m = mutated.m as {string: any}
+            m.added = 1
+            luassert.is_truthy(json.serialize(mutated, true):find("\"added\":1", 1, true))
+        end)
+
         it("should round-trip simple values", function()
             local original = {
                 nil_val = nil,

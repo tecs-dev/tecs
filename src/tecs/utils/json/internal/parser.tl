@@ -15,6 +15,15 @@ C.cdef[[
 local type Ptr = {integer}
 local parser = {}
 
+-- Marker metatable stamped on empty JSON objects so the serializer can
+-- round-trip them as {} instead of []. Set from the main module.
+local OBJECT_MARKER: metatable<{string: any}> = nil
+
+--- Set the marker metatable stamped on parsed empty objects.
+function parser.setObjectMarker(marker: metatable<{string: any}>)
+    OBJECT_MARKER = marker
+end
+
 -- NULL sentinel (will be set from main module)
 local NULL_SENTINEL: any = nil
 
@@ -466,8 +475,11 @@ local function parseObject(ptr: Ptr, len: integer, pos: integer, depth: integer)
         error(ERR_UNEXPECTED_END_OBJECT)
     end
 
-    -- Empty object?
+    -- Empty object? Stamp the marker so serialize round-trips it as {}.
     if ptr[pos] == CHAR_RBRACE then
+        if OBJECT_MARKER then
+            return setmetatable({} as {string: any}, OBJECT_MARKER), pos + 1
+        end
         return {}, pos + 1
     end
 
