@@ -245,6 +245,25 @@ function QueryImpl:group(groupId: integer): (Query.GroupIterFn, Query, any)
     return groupNext, self, nil
 end
 
+function QueryImpl:count(): integer
+    local total = 0
+    if self._archetypeGroups then
+        local groupList = self._activeGroupList
+        for gi = 1, #groupList do
+            local items = self._activeGroupItems[groupList[gi]]
+            for ai = 1, #items do
+                total = total + (items[ai].entities[0] as integer)
+            end
+        end
+    else
+        local items = self._activeItems
+        for i = 1, #items do
+            total = total + (items[i].entities[0] as integer)
+        end
+    end
+    return total
+end
+
 function QueryImpl:getGroupCount(groupId: integer): integer
     local items = self._activeGroupItems[groupId]
     if not items then

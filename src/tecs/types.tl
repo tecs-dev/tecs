@@ -461,6 +461,10 @@ local record types
         --- Only available when groupBy is specified.
         --- Returns 0 if group doesn't exist or has no entities.
         getGroupCount: function(self, groupId: integer): integer
+
+        --- Total number of entities currently matched by this query.
+        --- One pass over matching archetypes, not entities.
+        count: function(self): integer
     end
 
     --- A phase in the game loop pipeline.

@@ -190,6 +190,35 @@ describe("Queries module tests", function()
             luassert.is_equal(2, count, "Query should match 2 entities")
         end)
 
+        it("counts matched entities across archetypes and updates live", function()
+            local query = world:query({ include = {Position} })
+            luassert.is_equal(0, query:count())
+
+            world:spawn(Position(1, 1))
+            world:spawn(Position(2, 2))
+            local mixed = world:spawn(Position(3, 3), Velocity(1, 0))
+            world:update(0)
+            luassert.is_equal(3, query:count())
+
+            world:despawn(mixed)
+            world:update(0)
+            luassert.is_equal(2, query:count())
+        end)
+
+        it("counts grouped queries", function()
+            world:spawn(Position(1, 1))
+            world:spawn(Position(2, 2), Velocity(1, 0))
+            world:update(0)
+
+            local query = world:query({
+                include = {Position},
+                groupBy = function(archetype: tecs.Archetype): integer
+                    return archetype.id
+                end,
+            })
+            luassert.is_equal(2, query:count())
+        end)
+
         it("catchup fires onEntitiesAdded for existing entities", function()
             local totalSeen = 0
             local callbackInvocations = 0
