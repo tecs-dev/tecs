@@ -1299,29 +1299,11 @@ local function buildMcpContext()
         loveProcess = require("tecs2d.testing.love_process"),
         mcpClient = require("tecs2d.testing.mcp_client"),
         loveBin = loveBin,
-        check = function()
-            ensureVendor()
-            return collectCheckDiagnostics(listTealSources())
-        end,
+        -- start_game builds before launching; the toolchain itself (check,
+        -- api, docs, integ, dist) is CLI-only by design -- the shell is the
+        -- canonical interface for it, the bridge owns the live game.
         build = function()
             tasks.build()
-        end,
-        -- Symbol lookup: framework tier plus the on-demand project overlay.
-        -- Toolchain-class like check/build -- no running game required.
-        api = function(params)
-            return apiInvoke(params)
-        end,
-        -- Run another CLI task in a child process: integ and dist mutate too
-        -- much global state (busted's runner, os.exit traps) to share the
-        -- bridge's process.
-        reexec = function(task, extra)
-            local command = q(loveBin()) .. " " .. q(loveApi.filesystem.getSource())
-                .. " --tecs-project " .. q(cwd()) .. " " .. task
-            if extra then command = command .. " " .. q(extra) end
-            local pipe = io.popen(command .. " 2>&1")
-            local output = pipe:read("*a") or ""
-            local ok = pipe:close()
-            return ok == true or ok == 0, output:sub(-8192)
         end,
         setEnv = function(name, value) ffi.C.setenv(name, value, 1) end,
         unsetEnv = function(name) ffi.C.unsetenv(name) end,
@@ -1402,6 +1384,52 @@ function tasks.docs(args)
         fail("--json is only valid for the page index (drop the page and --full)")
     end
 
+    -- Content search: match a Lua pattern (case-insensitive; falls back to a
+    -- plain-text match when the pattern is invalid) against every page's id
+    -- and body, printing page ids plus their first matching lines. Retrieval
+    -- beats browsing: agents were dumping the whole index to find one page.
+    if args.search and args.search ~= "" then
+        if args.page or args.full then
+            fail("pass either --search or a page/--full, not both")
+        end
+        local pat = args.search:lower()
+        local okPat = pcall(string.find, "", pat)
+        local function matches(text)
+            local hay = text:lower()
+            if okPat then return hay:find(pat) ~= nil end
+            return hay:find(pat, 1, true) ~= nil
+        end
+        local pages = docPagesByUrl(readDocBundle("llms-full.txt"))
+        local ids = {}
+        for u in pairs(pages) do ids[#ids + 1] = u end
+        table.sort(ids)
+        local shown = 0
+        for _, u in ipairs(ids) do
+            if shown >= 10 then
+                io.write("... (more pages matched; narrow the pattern)\n")
+                break
+            end
+            local id = u:gsub("^/", ""):gsub("%.md$", "")
+            local body = pages[u]
+            local hitLines = {}
+            for lineText in body:gmatch("[^\n]+") do
+                if #hitLines < 3 and matches(lineText) then
+                    hitLines[#hitLines + 1] = "  " .. lineText:gsub("^%s+", ""):sub(1, 120)
+                end
+            end
+            if #hitLines > 0 or matches(id) then
+                shown = shown + 1
+                io.write(id .. "\n")
+                for _, h in ipairs(hitLines) do io.write(h .. "\n") end
+            end
+        end
+        if shown == 0 then
+            fail("no docs match '" .. args.search .. "'. Try a shorter pattern, "
+                .. "or `tecs docs` for the page index")
+        end
+        return
+    end
+
     -- Whole corpus.
     if args.full then
         io.write(readDocBundle("llms-full.txt"))
@@ -1460,6 +1488,7 @@ function tasks.docs(args)
     if not index:match("\n$") then
         io.write("\n")
     end
+    io.write("\nSearch page contents instead of browsing: tecs docs --search <pattern>\n")
 end
 
 function tasks.api(args)
@@ -1799,6 +1828,9 @@ local commands = {
         action = tasks.docs,
         setup = function(subcommand)
             subcommand:argument("page", "Page path to print, e.g. tecs/world; omit for the index."):args("?")
+            subcommand:option("--search",
+                "Search every page's content with a Lua pattern (case-insensitive); "
+                .. "prints matching page ids and lines.")
             subcommand:flag("--full", "Print every page concatenated.")
             subcommand:flag("--json", "Print the page index as JSON on stdout.")
         end,

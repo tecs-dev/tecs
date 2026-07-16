@@ -528,6 +528,20 @@ describe("tecs CLI", function()
             assert.matches("unknown page 'nope/does%-not%-exist'", err)
         end)
 
+        it("searches page contents with a pattern", function()
+            local ok, _, out = captureWrite({"docs", "--search", "latch"})
+            assert.is_true(ok)
+            assert.matches("tecs2d/input", out)
+            -- Matching lines print under the page id, trimmed.
+            assert.matches("[Ll]atch", out)
+        end)
+
+        it("fails a search with no matches", function()
+            local ok, err = cli.run({"docs", "--search", "zzzznothing"})
+            assert.is_true(not ok)
+            assert.matches("no docs match", err)
+        end)
+
         it("suggests near-miss pages on an unknown page", function()
             -- A plausible-but-wrong id must redirect in one call, not dead-end.
             local ok, err = cli.run({"docs", "tecs2d/shapes"})
@@ -1262,13 +1276,7 @@ describe("tecs CLI", function()
                 kernelTools = {
                     {name = "screenshot", description = "d", inputSchema = {type = "object"}},
                 },
-                check = function() return true, {} end,
                 build = function() end,
-                api = function(params)
-                    cli._internal.setDataDir(sharedApiDataDir())
-                    return cli._internal.apiInvoke(params)
-                end,
-                reexec = function() return true, "ran" end,
                 setEnv = function() end,
                 unsetEnv = function() end,
                 readBuildinfo = function() return nil end,
@@ -1298,9 +1306,7 @@ describe("tecs CLI", function()
                 local server = bridge.new({
                     version = "9.9.9", projectName = "spec-game", json = json,
                     kernelTools = parsedTools,
-                    check = function() return true, {} end,
                     build = function() end,
-                    reexec = function() return true, "ran" end,
                     setEnv = function() end, unsetEnv = function() end,
                     readBuildinfo = function() return nil end,
                     log = function() end,
@@ -1310,11 +1316,16 @@ describe("tecs CLI", function()
                 assert.equals(nil, out[1]:find('"properties":[]', 1, true))
             end)
 
-            it("lists CLI tools alongside the game's kernel tools", function()
+            it("lists lifecycle tools alongside the game's kernel tools", function()
                 local out = newServer():handleLine('{"jsonrpc":"2.0","id":2,"method":"tools/list"}')
-                assert.matches('"check"', out[1])
                 assert.matches('"start_game"', out[1])
+                assert.matches('"game_logs"', out[1])
                 assert.matches('"screenshot"', out[1])
+                -- The toolchain is CLI-only by design: no check/build/api/docs
+                -- mirrors bloating the bridge manifest.
+                assert.equals(nil, out[1]:find('"name":"check"', 1, true))
+                assert.equals(nil, out[1]:find('"name":"api"', 1, true))
+                assert.equals(nil, out[1]:find('"name":"integ"', 1, true))
             end)
 
             it("front-loads the bundled tool manifest when the cache is empty", function()
@@ -1334,9 +1345,7 @@ describe("tecs CLI", function()
                         return {{name = "cmd_from_manifest", description = "d",
                             inputSchema = {type = "object"}}}
                     end,
-                    check = function() return true, {} end,
                     build = function() end,
-                    reexec = function() return true, "ran" end,
                     setEnv = function() end,
                     unsetEnv = function() end,
                     readBuildinfo = function() return nil end,
@@ -1347,10 +1356,10 @@ describe("tecs CLI", function()
                 assert.matches('"start_game"', out[1])
             end)
 
-            it("runs CLI tools and wraps structured results", function()
+            it("runs lifecycle tools and wraps structured results", function()
                 local out = newServer():handleLine(
-                    '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"check","arguments":{}}}')
-                assert.matches('\\"ok\\":true', out[1])
+                    '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"game_status","arguments":{}}}')
+                assert.matches('\\"running\\":false', out[1])
                 assert.equals(nil, out[1]:match("isError"))
             end)
 
@@ -1359,37 +1368,6 @@ describe("tecs CLI", function()
                     '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"screenshot","arguments":{}}}')
                 assert.matches("start_game", out[1])
                 assert.matches('"isError":true', out[1])
-            end)
-
-            it("advertises the api tool at tools/list", function()
-                local out = newServer():handleLine('{"jsonrpc":"2.0","id":2,"method":"tools/list"}')
-                assert.matches('"api"', out[1])
-            end)
-
-            it("answers api with a framework signature and no game running", function()
-                local server = newServer()
-                assert.is_false(server:gameRunning())
-                local out = server:handleLine(
-                    '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"api",'
-                    .. '"arguments":{"query":"gfx.Rectangle"}}}')
-                assert.matches("record Rectangle", out[1])
-                assert.equals(nil, out[1]:match("isError"))
-            end)
-
-            it("returns structured api records when json is set", function()
-                local out = newServer():handleLine(
-                    '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"api",'
-                    .. '"arguments":{"query":"gfx.Rectangle","json":true}}}')
-                assert.matches('\\"kind\\":\\"component\\"', out[1])
-            end)
-
-            it("batches api queries without short-circuiting on a miss", function()
-                local out = newServer():handleLine(
-                    '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"api",'
-                    .. '"arguments":{"queries":["gfx.Rectangle","gfx.Nope"],"json":true}}}')
-                -- The hit still resolves and the miss reports suggestions.
-                assert.matches("Rectangle", out[1])
-                assert.matches("suggestions", out[1])
             end)
 
             it("rejects unknown methods and malformed lines", function()

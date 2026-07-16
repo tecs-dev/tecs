@@ -46,26 +46,28 @@ couple dozen calls — per-call latency adds up fast.
 ## MCP bridge
 
 `.mcp.json` (Claude Code) and `.codex/config.toml` (Codex) run `tecs mcp`, a stdio bridge that
-works even before the game exists. Prefer these MCP tools over shell commands when connected:
+works even before the game exists. **The channel split is by design:**
 
-- Toolchain as tools: `check`, `build`, `api`, `integ`, `dist`.
-- Game lifecycle: `start_game`, `stop_game`, `restart_game`, `game_status`, `game_logs`
-  (the log tool still works after a crash).
-- It proxies the running game's own tools.
+- **Toolchain (`check`, `build`, `api`, `docs`, `integ`, `dist`) → Bash `tecs ...`, always.**
+  The CLI is the canonical toolchain interface — it answers in ~50–250ms warm and pipes into
+  `head`/`grep`. These have NO MCP mirrors.
+- **The running game → MCP tools.** Lifecycle (`start_game`, `stop_game`, `restart_game`,
+  `game_status`, `game_logs` — the log tool survives crashes) plus every in-game tool
+  (`ping`, `cmd_*`, `run_lua`, screenshots). No cheap CLI equal exists (`tecs call` spawns a
+  process per call), and only the bridge supports the deferred one-call `cmd_step` flow.
 
-`tecs docs` and `tecs api` (CLI) — and the `api` MCP tool — are available anytime, before
-the game is built and before `start_game`. Only in-game tools (`run_lua`, `screenshot`, `cmd_*`)
-require `start_game`. Prefer `build` over `restart_game` for code changes, since the running game
-hot-reloads.
-
-**The `mcp__tecs__*` tools may be deferred, not absent** — clients defer large MCP toolsets
-behind tool search. Search for `mcp__tecs__` before falling back, and prefer those tools when
-present. If they are genuinely unavailable (common when the project was created in this
-session — clients read `.mcp.json` only at startup), do not hand-roll a JSON-RPC client: use
+**The `mcp__tecs__*` tools are usually deferred, not absent** — clients defer large MCP
+toolsets behind tool search; that saves far more context than it costs. Load the standard
+verification set in ONE search before driving:
+`select:mcp__tecs__start_game,mcp__tecs__ping,mcp__tecs__cmd_freeze,mcp__tecs__cmd_step,mcp__tecs__run_lua,mcp__tecs__cmd_resources,mcp__tecs__cmd_fetch,mcp__tecs__cmd_screenshot,mcp__tecs__sample_pixels`
+If they are genuinely unavailable (common when the project was created in this session —
+clients read `.mcp.json` only at startup), do not hand-roll a JSON-RPC client: use
 `tecs call` as the client. `tecs call --list` names the running game's tools;
 `tecs call <tool> '<json-args>'` invokes one (e.g. `tecs call cmd_fetch '{"expr":"Transform"}'`).
 Start the game with `tecs run` first. Never kill the game process by hand — `restart_game`,
 `tecs call cmd_restart`, or hot reload via `build` avoid the slow re-prep a raw kill causes.
+`game_logs` (bridge) still works after a crash; prefer `build` over `restart_game` for code
+changes, since the running game hot-reloads.
 
 ## The canonical verification session
 
@@ -96,9 +98,16 @@ and make every observation deterministic:
    ```
    One round-trip = press left, run 10 frames, read state. Compare against what you predicted,
    then issue the next one-call step. Small increments beat one big leap: each step is a
-   checkpoint where a wrong prediction is caught within frames of its cause. (Bare `cmd_step`
-   without `lua`/`wait` still returns at *schedule* time — then you must read in a follow-up
-   call; prefer the one-call form.)
+   checkpoint where a wrong prediction is caught within frames of its cause. When the frame
+   count is unknown ("run until the snake dies"), don't guess N — **step until**: `per_frame`
+   runs after every stepped frame and a truthy return stops early, making `n` the cap:
+   ```
+   cmd_step '{"n":300, "per_frame":"return gs.over", "lua":"return {score=gs.score}"}'
+   ```
+   The result reports `frames_run`/`stopped_early`. Side effects in `per_frame` are allowed
+   (same sandbox) — e.g. accumulate a per-frame trace to return from `lua`. (Bare `cmd_step`
+   without `lua`/`per_frame`/`wait` still returns at *schedule* time — then you must read in a
+   follow-up call; prefer the one-call form.)
 5. **Repeat 2–4 until the goal state is proven**, then one bounded screenshot if visuals matter,
    and `cmd_freeze '{"on":false}'` only when you're done.
 

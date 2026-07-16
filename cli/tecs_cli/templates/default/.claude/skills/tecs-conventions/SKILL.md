@@ -52,6 +52,12 @@ first time. For the full API, run `tecs docs <page>` (offline mirror of the docs
   Don't add `love.update`/`love.draw` — `tecs2d.run` owns the loop.
 - **Queries:** iterate archetype-wise, binding columns once; prefer numeric `for row = 1, len`;
   use `batchDespawn`/`batchSet`/`batchRemove` over per-entity loops.
+- **Model with builtins first.** For a small entity game, builtin `Transform` + gfx shapes + a
+  named-key state resource is often the whole model — no custom components needed. Custom
+  components buy two specific things: **querying by trait** (`world:query{include={Enemy}}`)
+  and **serialization** — component state rides snapshots/rewind/replay for free, while
+  resource state survives time travel only if you register a `World.SnapshotHandler`. Choose
+  by which of those you need, not by ceremony.
 - **Plugins/state:** plugins are the unit of composition; share globals via `world.resources[...]`
   keyed by a typed key (no Lua globals); use `world:observe` for lifecycle instead of polling.
   Always name keys — `tecs.newKey("game.state")`, not `tecs.newKey()` — so the resource is
@@ -68,12 +74,15 @@ first time. For the full API, run `tecs docs <page>` (offline mirror of the docs
 These cost iterations because the fix lives in a page you read *before* you hit the problem. Run
 `tecs docs <page>` for detail.
 
-- **Input edge reads are phase-aware — read them in the phase that consumes them.**
-  `input.isKeyPressed` in Update reliably reports this frame's press; in FixedUpdate it reports
-  a latched edge that only the FIRST fixed tick of a frame sees (latches clear per tick).
-  Don't shuttle edge state between phases by hand: read the edge where the consuming logic
-  runs, or use a `KeyPressed` observer for one-shot reactions. If input "silently doesn't
-  work", verify the read actually fires — `cmd_input_tape` a press, `cmd_step`, assert — before
+- **Gameplay input is a poll, not an event subscription.** `tecs2d.input` already latches and
+  phase-schedules every edge — poll `input.isKeyPressed` in the system that consumes it instead
+  of wiring a `KeyPressed` observer plus your own pressed-keys bookkeeping (that rebuilds what
+  the input module does, worse). Observers are for discrete one-shots outside the gameplay loop
+  (pause toggle, menu confirm). **Edge reads are phase-aware — read them in the consuming
+  phase**: `input.isKeyPressed` in Update reliably reports this frame's press; in FixedUpdate
+  it reports a latched edge that only the FIRST fixed tick of a frame sees (latches clear per
+  tick). Don't shuttle edge state between phases by hand. If input "silently doesn't work",
+  verify the read actually fires — tape a press via `cmd_step` events, assert — before
   rearchitecting. (`tecs docs tecs2d/input`, "Latch-based input")
 - **Transform args:** `Transform(x, y, z, layer, rotation?, scaleX?, scaleY?)` — the 4th arg is the
   **layer**, not scale. (`tecs docs tecs/builtins`)

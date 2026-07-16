@@ -49,6 +49,14 @@ payload, launchers, and installers as GitHub release assets.
 - `cmd_step` one-call form: `events=` queues input-tape rows onto the stepped
   frames, `lua=`/`wait=` defer the response until the frames have run, with
   the lua values in the step result — tape→step→read in one round-trip.
+- `cmd_step per_frame=`: Lua evaluated after each stepped frame; truthy stops
+  early ("step until dead or n frames"), reported as `frames_run`/
+  `stopped_early`. `cmd_input_tape` is repositioned as status/clear/live-queue.
+- `tecs docs --search <pattern>`: content search over every doc page (Lua
+  pattern, case-insensitive) instead of dumping the ~3.6k-token index.
+- The MCP bridge no longer mirrors the toolchain (`check`, `build`, `api`,
+  `integ`, `dist` tools removed): the CLI is the canonical toolchain
+  interface; the bridge owns game lifecycle and live runtime tools.
 - Trimmed the generated AGENTS.md's MCP section to a pointer at the tecs-cli
   skill (the playbook was duplicated in both and paid for twice per session).
 - `check` hints the fix when `local KEY: tecs.Key<T> <const>` trips Teal's
