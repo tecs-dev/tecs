@@ -74,12 +74,16 @@ start_epoch="$(date +%s)"
 
 (
     cd "$project"
-    # stream-json keeps a live progress log (tail -f "$results/stream.jsonl");
-    # the final summary object is extracted into result.json afterwards.
+    # The raw stream-json is captured verbatim to stream.jsonl via tee while a
+    # side formatter pretty-prints live progress (tool calls, agent text, tool
+    # errors) to the terminal, so the run can be watched while it executes.
+    # The final summary object is extracted into result.json afterwards.
     claude -p "$prompt" \
         --output-format stream-json --verbose \
         --dangerously-skip-permissions \
-        > "$results/stream.jsonl" 2> "$results/stderr.log"
+        2> "$results/stderr.log" \
+        | tee "$results/stream.jsonl" \
+        | python3 -u "$root/scripts/oneshot-stream-fmt.py"
 ) || echo "WARNING: claude exited non-zero (see $results/stderr.log)" >&2
 
 wall=$(( $(date +%s) - start_epoch ))
