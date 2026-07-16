@@ -60,6 +60,11 @@ payload, launchers, and installers as GitHub release assets.
 - `tecs new` stages the framework vendor at scaffold time, so the first
   `check`/`api` inside a new project answers immediately instead of pausing
   on "Preparing embedded Tecs dependencies...".
+- Restructured the tecs-cli skill: domain-neutral examples (no more
+  snake-flavored recipes), a greenfield build workflow with a
+  design-for-verification step and a definition of done, self-contained
+  run_lua examples, a bounded live-play/visual pass in the policy, and
+  rewind/event-watching moved to a references.md loaded on demand.
 - Trimmed the generated AGENTS.md's MCP section to a pointer at the tecs-cli
   skill (the playbook was duplicated in both and paid for twice per session).
 - `check` hints the fix when `local KEY: tecs.Key<T> <const>` trips Teal's
