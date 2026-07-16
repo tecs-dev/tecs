@@ -1057,6 +1057,15 @@ function tasks.new(args)
     if exists(target) and not isEmptyDir(target) then
         fail("target already exists and is not empty: " .. target)
     end
+    -- Refuse to nest a project inside an existing one: the nested project is
+    -- detached from the outer project's MCP bridge and toolchain, so agents
+    -- that "create a game" this way end up driving the outer template. An
+    -- agent inside a generated project should implement in src/ instead.
+    if not (args and args.force) and exists("tlconfig.lua") and isDir("src") then
+        fail("this directory is already a Tecs project - implement your game "
+            .. "in src/ (start from src/main.tl) instead of nesting a new "
+            .. "project. Pass --force to nest one deliberately")
+    end
 
     status("Creating project " .. target .. "...")
     mkdir(target)
@@ -1749,6 +1758,9 @@ local commands = {
         action = tasks.new,
         setup = function(subcommand)
             subcommand:argument("project", "Directory to create for the new project.")
+            subcommand:flag("--force",
+                "Create even inside an existing Tecs project (nested projects "
+                .. "detach from this project's MCP bridge).")
         end,
     },
     {

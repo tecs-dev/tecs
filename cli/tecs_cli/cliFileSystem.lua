@@ -39,12 +39,28 @@ function M.q(path)
     return '"' .. path:gsub('"', '\\"') .. '"'
 end
 
-function M.sourcePath()
+-- Resolved once at load time: callers may chdir later (project staging,
+-- specs), and a LUA_PATH-relative source path would then resolve nowhere.
+-- Absolutizing lazily is not enough -- by first call the cwd may already
+-- have moved -- so capture it here, but only when lfs is actually loadable
+-- (the packaged CLI resolves through the LÖVE loader and has no lfs need).
+local moduleSource = (function()
     local source = debug.getinfo(1, "S").source
-    if source:sub(1, 1) == "@" then
-        return source:sub(2)
+    if source:sub(1, 1) ~= "@" then return nil end
+    local path = source:sub(2)
+    if path:sub(1, 1) == "/" or path:match("^%a:[/\\]") then
+        return path
     end
-    return nil
+    local okLfs, lfsMod = pcall(require, "lfs")
+    if okLfs and lfsMod and lfsMod.currentdir then
+        local pwd = lfsMod.currentdir()
+        if pwd then return pwd .. "/" .. path end
+    end
+    return path
+end)()
+
+function M.sourcePath()
+    return moduleSource
 end
 
 function M.normalize(path)

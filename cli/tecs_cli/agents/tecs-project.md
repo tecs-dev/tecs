@@ -2,6 +2,11 @@
 
 Working guide for AI coding agents contributing to a Tecs2D game project created by `tecs new`.
 
+**This directory already IS a complete, runnable game project.** "Create a game" means
+implement it in `src/` (start from `src/main.tl`) — never run `tecs new` here: a nested
+project detaches you from this project's MCP bridge and toolchain, and `start_game` would
+launch this outer template instead of your game.
+
 ## If the CLI is missing
 
 Install it with Homebrew on macOS/Linux (`brew install tecs-dev/tap/tecs-cli`) or Scoop on

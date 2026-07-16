@@ -114,6 +114,25 @@ describe("tecs CLI", function()
     end
 
     describe("commands", function()
+        it("refuses to nest a project inside an existing one", function()
+            -- A nested project detaches from the outer project's MCP bridge:
+            -- an agent that runs `tecs new` inside a generated project ends
+            -- up driving the outer template instead of its own game.
+            local root = makeTemp("new-nested")
+            local outer = join(root, "outer")
+            assert.is_true(cli.run({"--quiet", "new", outer}))
+            withCwd(outer, function()
+                local ok, err = cli.run({"new", "inner"})
+                assert.is_true(not ok)
+                assert.matches("already a Tecs project", err)
+                assert.is_false(exists(join(outer, "inner")))
+                -- Deliberate nesting stays possible.
+                local ok2, err2 = cli.run({"--quiet", "new", "inner", "--force"})
+                if not ok2 then error("forced nest failed: " .. tostring(err2)) end
+                assert.is_true(exists(join(outer, "inner", "tlconfig.lua")))
+            end)
+        end)
+
         it("creates a new fixed-layout project from checked-in template source", function()
             local root = makeTemp("new")
             local project = join(root, "sample-game")
