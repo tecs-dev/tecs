@@ -18,6 +18,12 @@ first time. For the full API, run `tecs docs <page>` (offline mirror of the docs
   site.
 - **Tags** are added by passing the container (`world:spawn(t, Dead)`); other components must be
   constructed (`gfx.Color(1,0,0,1)`).
+- **Mutations inside a system are STAGED until the frame commits.** An entity spawned in this
+  frame's system is not query-visible and not `getMut`-able until the commit drain — so never
+  reconcile a variable-length render set by "query how many exist, spawn/despawn the
+  difference" inside a system: the query undercounts every frame and you over-spawn unboundedly.
+  Instead keep the authoritative id list in a named resource, spawn additions pre-positioned
+  (constructor args, not post-spawn `getMut`), and reposition only committed entities.
 - **Never build a query — or register an observer — inside `run`.** Create queries once in the plugin and reuse them; `world:observe` inside a per-frame system adds a NEW handler every tick (your callback fires N times per event and leaks). Register observers in plugin/Startup code.
 - Optional record fields can't be marked `?` (only params can); document optionality and handle
   `nil` at each use site.

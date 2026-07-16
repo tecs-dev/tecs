@@ -68,9 +68,10 @@ Start the game with `tecs run` first. Never kill the game process by hand — `r
 The game should almost never free-run while you verify it. Take control of time once, keep it,
 and make every observation deterministic:
 
-1. **Boot and claim the clock.** `start_game` → `ping` (check `build.built` — you're talking to
-   the code you just built?) → `cmd_rewind_start` (insurance) → `cmd_freeze '{"on":true}'`
-   **before the game has meaningfully run**. From here, the world advances only when you say so.
+1. **Boot already frozen.** `start_game '{"frozen":true}'` holds the game at frame zero — no
+   race against a fast game. Then `ping` (check `build.built` — you're talking to the code you
+   just built?) and `cmd_rewind_start` (insurance). From here, the world advances only when you
+   say so; `cmd_freeze '{"on":false}'` releases it when you're done.
 2. **Analyze.** Read the frozen world until you understand what reaching the goal requires:
    `cmd_resources '{"name":"game.state"}'`, `cmd_fetch '{"expr":"<components>"}'`, `run_lua`
    returning a table. No screenshots yet.

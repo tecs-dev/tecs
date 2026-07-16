@@ -59,6 +59,7 @@ instead of restarting per test. `fixture.start("build")` assigns a free MCP port
 - Assertions use luassert's flat API: `luassert.equal`, `luassert.same`, `luassert.is_true`. There
   is no `luassert.are.*` in the type declarations.
 - Specs are Teal and type-checked: `socket.sleep(3)` compiles, `socket.sleep(3.0)` does not.
-- Prefer polling (`fixture.eventually`) over sleeps.
+- Prefer polling (`fixture.eventually`) over sleeps. It returns on the first **truthy**
+  poll result — return `nil` or `false` while waiting, a value when the condition holds.
 - For deterministic assertions, seed randomness at startup and expose queryable state (a dedicated
   tag or a world resource) rather than guessing from pixels.
