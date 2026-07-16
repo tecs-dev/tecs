@@ -129,7 +129,7 @@ if [ -n "$session_id" ]; then
 
     # Copy the full transcript for forensics. Project paths are munged with
     # '-' in Claude Code's storage layout.
-    munged="$(cd "$project" && pwd | tr '/' '-')"
+    munged="$(cd "$project" && pwd -P | tr '/' '-')"
     transcript="$HOME/.claude/projects/$munged/$session_id.jsonl"
     [ -f "$transcript" ] && cp "$transcript" "$results/transcript.jsonl" \
         || echo "NOTE: transcript not found at $transcript" >&2

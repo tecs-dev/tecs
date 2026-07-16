@@ -38,6 +38,11 @@ first time. For the full API, run `tecs docs <page>` (offline mirror of the docs
 - **Components:** `newFFIComponent` for measured hot numeric data; `newComponent` (table) when a
   field holds a Lua table/string/object or is cold; tags for stable, queried flags. Give each a
   `name` matching its record. Keep components as data — behavior lives in systems.
+- **System `run` is `function(dt, world)` — dt FIRST.** A swapped `(world, dt)` still
+  typechecks (callback params are bivariant), so this is a silent runtime bug; get it right
+  at write time.
+- **Resources are index access:** `world.resources[KEY]` to read and assign — there is no
+  `getResource`/`setResource` method.
 - **Systems:** every persistent system gets a `name`; pick the right `phase` (game logic in
   `Update`/`FixedUpdate`, never render work there); gate with `runIf`; use `dt`, never wall clocks.
   Don't add `love.update`/`love.draw` — `tecs2d.run` owns the loop.
