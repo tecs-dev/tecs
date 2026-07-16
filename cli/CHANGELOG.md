@@ -10,6 +10,9 @@ payload, launchers, and installers as GitHub release assets.
 
 ### Added
 
+- `send_love_event` routes unfrozen tapeable events through the input tape
+  (next gameplay frame, args defaulted), so the Update-phase edge reliably
+  consumes them; frozen and gamepad/joystick sends keep the raw push.
 - `cmd_screenshot` captures at the game's virtual resolution by default
   (`full=true` for native window pixels), and `cmd_record` defaults its
   output scale to the virtual resolution — captures carry the game's actual

@@ -44,7 +44,9 @@ first time. For the full API, run `tecs docs <page>` (offline mirror of the docs
   `name` matching its record. Keep components as data — behavior lives in systems.
 - **System `run` is `function(dt, world)` — dt FIRST.** A swapped `(world, dt)` still
   typechecks (callback params are bivariant), so this is a silent runtime bug; get it right
-  at write time.
+  at write time. Inside a plugin whose param is `world`, name the run param `w` (or take only
+  `dt` and use the plugin's `world` upvalue) — re-naming it `world` shadows the upvalue and
+  earns a warning per system.
 - **Resources are index access:** `world.resources[KEY]` to read and assign — there is no
   `getResource`/`setResource` method.
 - **Systems:** every persistent system gets a `name`; pick the right `phase` (game logic in

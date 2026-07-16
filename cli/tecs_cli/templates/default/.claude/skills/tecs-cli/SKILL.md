@@ -133,10 +133,13 @@ keep it, and make every observation deterministic:
    "verifies" everything at once and diagnoses nothing when it fails.
 6. **Then look at it.** After mechanics are proven from state: one visual check —
    `cmd_screenshot` captures at the game's VIRTUAL resolution by default (cheap; `full=true`
-   for native window pixels, `sample_pixels` for point checks) — and one short live-play pass
-   (`cmd_freeze '{"on":false}'`, play briefly through taped or real input) for readability,
-   control feel, pacing, and layout — state checks can't judge those. Keep cosmetic iteration
-   proportional to the request; don't enter a build→screenshot→tweak loop over colors.
+   for native window pixels, `sample_pixels` for point checks) — and one short live-play
+   pass for readability, control feel, pacing, and layout, which state checks can't judge.
+   The blessed live-pass recipe: **stage the interesting situation while frozen** (heading
+   set, a target nearby), unfreeze (`cmd_freeze '{"on":false}'`), observe briefly, re-freeze.
+   To inject input while unfrozen, `send_love_event` queues onto the next gameplay frame
+   through the real input path. Keep cosmetic iteration proportional to the request; don't
+   enter a build→screenshot→tweak loop over colors.
 
 ## Using the game tools
 
