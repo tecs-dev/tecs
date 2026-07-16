@@ -27,6 +27,11 @@ local record TestState
     -- Same probe from a FixedUpdate-phase system: the latched edge must be
     -- visible to the first fixed tick of the frame.
     upFixedFrames: integer
+    -- Update-phase dt accumulator and FixedUpdate tick counter: the
+    -- deterministic-step probes (stepped frames must carry 1/fps, or the
+    -- cmd_step dt= override, on every machine).
+    dtSum: number
+    fixedTicks: integer
 end
 
 local function gamePlugin(world: tecs.World)
@@ -43,15 +48,17 @@ local function gamePlugin(world: tecs.World)
         gfx.Color(1, 0, 0, 1) as tecs.Component
     )
 
-    local state: TestState = {frames = 0, lastKey = nil, upFrames = 0, upFixedFrames = 0}
+    local state: TestState = {frames = 0, lastKey = nil, upFrames = 0,
+        upFixedFrames = 0, dtSum = 0, fixedTicks = 0}
     local globals = _G as {string: any}
     globals.tecsTest = state
 
     world:addSystem({
         name = "test.FrameCounter",
         phase = tecs.phases.Update,
-        run = function()
+        run = function(dt: number)
             state.frames = state.frames + 1
+            state.dtSum = state.dtSum + dt
             if input.isKeyPressed("up") then
                 state.upFrames = state.upFrames + 1
             end
@@ -62,6 +69,7 @@ local function gamePlugin(world: tecs.World)
         name = "test.FixedInputProbe",
         phase = tecs.phases.FixedUpdate,
         run = function()
+            state.fixedTicks = state.fixedTicks + 1
             if input.isKeyPressed("up") then
                 state.upFixedFrames = state.upFixedFrames + 1
             end

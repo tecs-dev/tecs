@@ -7,6 +7,7 @@
 
 local tecs <const> = require("tecs")
 local mcpinfo <const> = require("tecs2d.internal.mcpinfo")
+local frameclock <const> = require("tecs2d.internal.frameclock")
 local inputtape <const> = require("tecs2d.debug.internal.inputtape")
 local contextreport <const> = require("tecs2d.debug.internal.contextreport")
 local cmdargs <const> = require("tecs2d.debug.internal.cmdargs")
@@ -20,7 +21,11 @@ local record session
 end
 
 local stepSchema <const>: cmdargs.Schema = {
-    args = { n = {default = 1, help = "number of frames to tick"} },
+    args = {
+        n = {default = 1, help = "number of frames to tick"},
+        dt = {kind = "number",
+            help = "seconds each stepped frame carries (default 1/fps)"},
+    },
     positional = {"n"},
 }
 cmdargs.validate(stepSchema)
@@ -226,12 +231,14 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             name = "step",
             section = "Session",
             shortHelp = "tick the game forward N frames while otherwise frozen",
-            mcpHelp = "Advance gameplay by n frames while the freeze controller is held, then freeze again. ASYNC: this returns when the frames are scheduled -- they tick over the next loop iterations, so read state with a follow-up call, never in the same response you scheduled the step in. Fails when nothing holds the freeze; acquire it with cmd_freeze on=true first.",
+            mcpHelp = "Advance gameplay by n frames while the freeze controller is held, then freeze again. Each stepped frame carries a DETERMINISTIC dt of 1/fps (the run config's fps, echoed as step_dt) regardless of display refresh rate, so `n` frames advance exactly n/fps gameplay seconds; pass dt= to override per call. ASYNC: this returns when the frames are scheduled -- they tick over the next loop iterations, so read state with a follow-up call, never in the same response you scheduled the step in. Fails when nothing holds the freeze; acquire it with cmd_freeze on=true first.",
             schema = stepSchema,
             outputSchema = {
                 type = "object",
                 properties = {
                     frames = {type = "integer", description = "frames scheduled to tick"},
+                    step_dt = {type = "number",
+                        description = "seconds each stepped frame will carry"},
                     will_fire = {type = "array", items = {type = "object", properties = {
                         ["in"] = {type = "integer", description = "gameplay frames from now"},
                         event = {type = "string"},
@@ -243,11 +250,17 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             },
             run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
                 local n = math.max(1, math.floor(v.n as number)) as integer
+                local dtArg = v.dt as number
+                if dtArg ~= nil and dtArg <= 0 then
+                    return {ok = false, code = "bad_dt", message = "step: dt must be > 0"}
+                end
+                env.freeze.stepDt = dtArg
                 local ok, err = env.freeze:step(n)
                 if not ok then
                     return {ok = false, code = "not_frozen", message = "step: " .. err}
                 end
-                local data: {string: any} = {frames = n}
+                local data: {string: any} = {frames = n,
+                    step_dt = dtArg or frameclock.nominal}
                 -- Echo the input_tape window so "did my rows land in this
                 -- step?" needs no follow-up call. Frames tick asynchronously,
                 -- so this is the schedule; input_tape status reports actuals.

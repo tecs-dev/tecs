@@ -433,6 +433,7 @@ end
 
 local function runLoop(config: tecs2d.RunConfig): (function(): number | string)
     local timestep <const> = 1 / config.fps
+    frameclock.nominal = timestep
     local benchmarkMode <const> = os.getenv("TECS_BENCHMARK") ~= nil
     local hotReload <const> = makeHotReloadState(config)
     if (love.load) then

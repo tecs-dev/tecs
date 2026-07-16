@@ -2656,17 +2656,18 @@ freeze on
 freeze off
 ```
 
-### `step [n]` {#cmd-step}
+### `step [n] [dt=N]` {#cmd-step}
 
 Tick the game forward N frames while otherwise frozen.
 
-Advance gameplay by n frames while the freeze controller is held, then freeze again. ASYNC: this returns when the frames are scheduled -- they tick over the next loop iterations, so read state with a follow-up call, never in the same response you scheduled the step in. Fails when nothing holds the freeze; acquire it with cmd_freeze on=true first.
+Advance gameplay by n frames while the freeze controller is held, then freeze again. Each stepped frame carries a DETERMINISTIC dt of 1/fps (the run config's fps, echoed as step_dt) regardless of display refresh rate, so `n` frames advance exactly n/fps gameplay seconds; pass dt= to override per call. ASYNC: this returns when the frames are scheduled -- they tick over the next loop iterations, so read state with a follow-up call, never in the same response you scheduled the step in. Fails when nothing holds the freeze; acquire it with cmd_freeze on=true first.
 
 MCP tool: `cmd_step`
 
 | Argument | Type | Description |
 | --- | --- | --- |
 | `n` | number | number of frames to tick (default: 1) |
+| `dt` | number | seconds each stepped frame carries (default 1/fps) |
 
 ::: details Result data schema
 ```json
@@ -2682,6 +2683,10 @@ MCP tool: `cmd_step`
         "type": "string"
       },
       "type": "array"
+    },
+    "step_dt": {
+      "description": "seconds each stepped frame will carry",
+      "type": "number"
     },
     "will_fire": {
       "description": "queued input_tape rows due within this step",

@@ -11,6 +11,7 @@
 
 local tecs <const> = require("tecs")
 local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
+local frameclock <const> = require("tecs2d.internal.frameclock")
 
 local record freeze
     record Controller
@@ -20,6 +21,15 @@ local record freeze
         savedTimeScale: number
         stepsRemaining: integer
         stepping: boolean
+
+        --- dt each stepped frame carries; nil means frameclock.nominal
+        --- (1 / config.fps). Stepping is deterministic: `step n` advances
+        --- exactly n * stepDt gameplay seconds on every machine.
+        stepDt: number
+
+        --- The provider this controller installed on frameclock (nil when
+        --- not stepping, or when a replay owned the provider first).
+        ownProvider: function(number): number
 
         --- Freeze on behalf of `who`. Returns false if already held by them.
         acquire: function(self: Controller, who: string): boolean
@@ -37,6 +47,9 @@ local record freeze
 
         --- Per-frame step state machine; driven by the debug.FreezeStep system.
         tick: function(self: Controller)
+
+        installStepClock: function(self: Controller)
+        removeStepClock: function(self: Controller)
     end
 
     KEY: tecs.Key<Controller>
@@ -107,6 +120,7 @@ function freeze.Controller:release(who: string): boolean
         setRenderTimeScale(self.world, self.savedTimeScale)
         self.stepsRemaining = 0
         self.stepping = false
+        self:removeStepClock()
     end
     return true
 end
@@ -128,12 +142,34 @@ function freeze.Controller:step(frames: integer): boolean, string
     return true, nil
 end
 
+-- Install a deterministic-dt provider for the duration of a step, unless a
+-- replay already owns the frameclock (its recorded dts must win).
+function freeze.Controller:installStepClock()
+    if frameclock.provider ~= nil then return end
+    local ctl = self
+    self.ownProvider = function(_realDt: number): number
+        return ctl.stepDt or frameclock.nominal
+    end
+    frameclock.provider = self.ownProvider
+end
+
+function freeze.Controller:removeStepClock()
+    if self.ownProvider ~= nil and frameclock.provider == self.ownProvider then
+        frameclock.provider = nil
+    end
+    self.ownProvider = nil
+end
+
 -- Step: run the frozen gameplay phases for N frames, then re-freeze. Enabling
 -- here takes effect on the next update (RenderFirst is after the gameplay
 -- phases), so each tick past the enable counts exactly one gameplay frame.
+-- Stepped frames carry a deterministic dt (stepDt or frameclock.nominal)
+-- instead of the display-rate-dependent measured dt, so `step n` advances the
+-- same amount of gameplay time on a 60Hz and a 120Hz machine.
 function freeze.Controller:tick()
     if self.holderCount == 0 or self.stepsRemaining <= 0 then return end
     if not self.stepping then
+        self:installStepClock()
         enableGameplay(self.world)
         setRenderTimeScale(self.world, self.savedTimeScale)
         self.stepping = true
@@ -144,6 +180,7 @@ function freeze.Controller:tick()
         disableGameplay(self.world)
         setRenderTimeScale(self.world, 0.0)
         self.stepping = false
+        self:removeStepClock()
     end
 end
 

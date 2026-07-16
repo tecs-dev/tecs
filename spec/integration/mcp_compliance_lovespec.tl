@@ -332,6 +332,41 @@ describe("mcp compliance: freeze, step, resume", function()
         luassert.are.equal(before + 3, readFrames(app))
     end)
 
+    it("stepped frames carry a deterministic 1/fps dt", function()
+        -- Stepped frames must NOT carry the measured display-rate dt (1/120 on
+        -- a ProMotion Mac), or `step n` means different gameplay time on
+        -- different machines. Contract: dt = 1/fps, overridable per call.
+        runLua(app, "tecsTest.dtSum = 0 tecsTest.fixedTicks = 0 return true")
+        local res = app.client:call("cmd_step", {n = 6})
+        luassert.is_true(math.abs((res.step_dt as number) - 1 / 60) < 1e-9,
+            "step must echo the effective per-frame dt")
+        local ticks = eventually(CALL_TIMEOUT, function(): integer
+            local n = tonumber(runLua(app, "return tecsTest.fixedTicks")[1]) as integer
+            if n >= 6 then return n end
+            return nil
+        end)
+        luassert.are.equal(6, ticks,
+            "6 stepped frames at 1/60 dt must produce exactly 6 fixed ticks")
+        local sum = tonumber(runLua(app, "return tecsTest.dtSum")[1])
+        luassert.is_true(math.abs(sum - 6 / 60) < 1e-9,
+            "6 stepped frames must advance exactly 0.1 gameplay seconds, got " .. tostring(sum))
+
+        -- dt= overrides the per-frame dt for this step only.
+        runLua(app, "tecsTest.dtSum = 0 tecsTest.fixedTicks = 0 return true")
+        local res2 = app.client:call("cmd_step", {n = 2, dt = 0.05})
+        luassert.is_true(math.abs((res2.step_dt as number) - 0.05) < 1e-9)
+        local ticks2 = eventually(CALL_TIMEOUT, function(): integer
+            local n = tonumber(runLua(app, "return tecsTest.fixedTicks")[1]) as integer
+            if n >= 6 then return n end
+            return nil
+        end)
+        luassert.are.equal(6, ticks2,
+            "2 frames of 0.05s are 6 fixed ticks at the 1/60 timestep")
+        local sum2 = tonumber(runLua(app, "return tecsTest.dtSum")[1])
+        luassert.is_true(math.abs(sum2 - 0.1) < 1e-9,
+            "override dt must be carried verbatim, got " .. tostring(sum2))
+    end)
+
     it("input_tape fires inside the stepped frame's input snapshot", function()
         -- Queue a literal keypressed/keyreleased pair on the gameplay-frame
         -- clock, then step across it. The fixture's Update probe counts frames
