@@ -185,6 +185,40 @@ describe("tecs2d.debug.internal.cmd.engine", function()
             luassert.equals("SpecResourceThing", found.type)
         end)
 
+        it("resources resolves registry-named keys and reads a value by name", function()
+            local reg, w = makeRegistry()
+            local KEY: tecs.Key<{string: any}> = tecs.newKey("spec.engine.gamestate")
+            w.resources[KEY] = {score = 12, over = false, tick = function() end}
+            local UNSET: tecs.Key<string> = tecs.newKey("spec.engine.unset")
+            luassert.is_not_nil(UNSET)
+
+            local listed = reg:execute("resources")
+            luassert.is_true(listed.ok, tostring(listed.message))
+            local names: {string: boolean} = {}
+            for _, row in ipairs(listed.data.resources as {any}) do
+                names[(row as {string: any}).key as string] = true
+            end
+            luassert.is_true(names["spec.engine.gamestate"],
+                "registry-named key should resolve to its name")
+            local unsetFound = false
+            for _, n in ipairs(listed.data.unset as {string}) do
+                if n == "spec.engine.unset" then unsetFound = true end
+            end
+            luassert.is_true(unsetFound, "registered-but-unset key names should be listed")
+
+            local got = reg:execute("resources spec.engine.gamestate")
+            luassert.is_true(got.ok, tostring(got.message))
+            luassert.is_true(got.data.set as boolean)
+            local value = got.data.value as {string: any}
+            luassert.equals(12, value.score)
+            luassert.equals(false, value.over)
+            luassert.equals("string", type(value.tick),
+                "live objects must sanitize to inert tostring text")
+
+            local missing = reg:execute("resources spec.engine.nope")
+            luassert.is_false(missing.ok)
+        end)
+
         it("bundles lists requirements and spawns with overrides", function()
             local reg, w = makeRegistry()
             w:newBundle("specbundle", {required = {SpecPos}, with = {[SpecTag] = true}})

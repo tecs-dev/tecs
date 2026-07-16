@@ -28,6 +28,7 @@ local cmdtypes <const> = require("tecs2d.debug.internal.cmdtypes")
 local capturecmds <const> = require("tecs2d.debug.internal.cmd.capture")
 local editcmds <const> = require("tecs2d.debug.internal.cmd.edit")
 local enginecmds <const> = require("tecs2d.debug.internal.cmd.engine")
+local luacmds <const> = require("tecs2d.debug.internal.cmd.lua")
 local rendercmds <const> = require("tecs2d.debug.internal.cmd.render")
 local selectcmds <const> = require("tecs2d.debug.internal.cmd.select")
 local sessioncmds <const> = require("tecs2d.debug.internal.cmd.session")
@@ -192,7 +193,7 @@ local record commands
 end
 
 commands.HRULE = cmdtypes.HRULE
-commands.KEY = tecs.newKey()
+commands.KEY = tecs.newKey("tecs2d.debug.commands")
 
 --- Sentinel prefix marking a section separator in a completion list; the
 --- overlay renders it as " | Name | " and skips it while cycling.
@@ -868,7 +869,18 @@ function commands.build(env: commands.Env): commands.Registry
                         for _, sub in ipairs(c.subcommands) do
                             verbs[#verbs + 1] = sub.name
                         end
-                        withSubs[#withSubs + 1] = "  " .. c.name .. "\t" .. table.concat(verbs, ", ")
+                        -- Wrap long verb lists to the popup's 70-column budget.
+                        local prefix = "  " .. c.name .. "\t"
+                        local line = prefix
+                        for vi = 1, #verbs do
+                            local piece = verbs[vi] .. ((vi < #verbs) and ", " or "")
+                            if #line + #piece > 70 and line ~= prefix then
+                                withSubs[#withSubs + 1] = line
+                                line = "  \t"
+                            end
+                            line = line .. piece
+                        end
+                        withSubs[#withSubs + 1] = line
                     end
                 end
                 if #withSubs > 0 then
@@ -944,6 +956,7 @@ function commands.build(env: commands.Env): commands.Registry
         },
         grouped("freeze"),
         grouped("step"),
+        grouped("input_tape"),
         grouped("stats"),
         grouped("context"),
         grouped("restart"),
@@ -952,7 +965,7 @@ function commands.build(env: commands.Env): commands.Registry
     }
 
     for _, group in ipairs({rendercmds.commands(d), enginecmds.commands(d),
-            capturecmds.commands(d)}) do
+            luacmds.commands(d), capturecmds.commands(d)}) do
         for _, c in ipairs(group) do
             cmds[#cmds + 1] = c
         end

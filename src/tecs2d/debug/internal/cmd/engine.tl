@@ -10,6 +10,7 @@ local tecs <const> = require("tecs")
 local json <const> = require("tecs.utils.json")
 local gfxtypes <const> = require("tecs2d.gfx.types")
 local componentregistry <const> = require("tecs.internal.components")
+local sanitize <const> = require("tecs2d.debug.internal.sanitize")
 local entityinfo <const> = require("tecs2d.internal.entityinfo")
 local systemcontrol <const> = require("tecs2d.internal.systemcontrol")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
@@ -52,6 +53,14 @@ local bundleSpawnSchema <const>: cmdargs.Schema = {
     positional = {"name", "components"},
 }
 cmdargs.validate(bundleSpawnSchema)
+
+local resourcesSchema <const>: cmdargs.Schema = {
+    args = {
+        name = {help = "named key (from tecs.newKey(\"name\")): return that resource's value"},
+    },
+    positional = {"name"},
+}
+cmdargs.validate(resourcesSchema)
 
 -- Evaluate a Lua table expression from the command line. Same trust level
 -- as the run_lua MCP tool: the debugger is a developer surface.
@@ -1204,10 +1213,15 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
         {
             name = "resources",
             section = "Engine",
-            shortHelp = "list world resources with their key and type names",
-            mcpHelp = "Every world resource as {key, type}: keys resolve to their registered name when available, values to their metatable type name. Read-only; use it to discover installed subsystems and custom game resources.",
-            examples = {"resources"},
+            shortHelp = "list world resources; pass a name to read one value",
+            mcpHelp = "Without arguments: every world resource as {key, type} -- keys created with "
+                .. "tecs.newKey(\"name\") resolve to that name -- plus `unset`, the registered key "
+                .. "names holding no value yet. With name=<key name>: that resource's current value, "
+                .. "deep-copied to JSON-safe data (live objects render as their tostring). This is "
+                .. "the way to read named game state (e.g. a GameState resource) without writing Lua.",
+            examples = {"resources", "resources game.state"},
             annotations = {readOnlyHint = true, idempotentHint = true},
+            schema = resourcesSchema,
             outputSchema = {
                 type = "object",
                 properties = {
@@ -1216,16 +1230,46 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         key = {type = "string", description = "resource key name"},
                         type = {type = "string", description = "value type name"},
                     }}},
+                    unset = {type = "array", items = {type = "string"},
+                        description = "registered key names with no value (list form)"},
+                    key = {type = "string", description = "the requested key (value form)"},
+                    set = {type = "boolean", description = "whether the resource holds a value (value form)"},
+                    value = {description = "the resource value, JSON-safe (value form)"},
                 },
-                required = {"count", "resources"},
             },
-            run = function(_v: {string: any}, _parts: {string}): cmdtypes.Result
+            run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
+                local named = tecs.listKeys()
+
+                -- Value form: read one named resource.
+                if v.name ~= nil then
+                    local nm = v.name as string
+                    local id = named[nm]
+                    if not id then
+                        local known: {string} = {}
+                        for n in pairs(named) do known[#known + 1] = n end
+                        table.sort(known)
+                        return {ok = false, code = "unknown_key",
+                            message = "resources: no key named '" .. nm .. "'; named keys: "
+                                .. table.concat(known, ", ")}
+                    end
+                    local value = (w.resources as {any: any})[id]
+                    return {ok = true,
+                        popup = {"resource " .. nm .. " (" .. type(value) .. ")"},
+                        data = {key = nm, set = value ~= nil,
+                            value = sanitize.value(value)}}
+                end
+
+                local reverse: {integer: string} = {}
+                for n, id in pairs(named) do reverse[id] = n end
+
                 local resources = w.resources as {any: any}
                 local rows: {{string: any}} = {}
                 for key, value in pairs(resources) do
                     local keyStr: string
                     if type(key) == "table" and (key as {string: any}).name then
                         keyStr = (key as {string: any}).name as string
+                    elseif type(key) == "number" and reverse[key as integer] then
+                        keyStr = reverse[key as integer]
                     else
                         keyStr = tostring(key)
                     end
@@ -1248,12 +1292,22 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 table.sort(rows, function(a: {string: any}, b: {string: any}): boolean
                     return (a.key as string) < (b.key as string)
                 end)
+
+                -- Named keys with no value: still worth surfacing, so an agent
+                -- learns the name exists before the game first sets it.
+                local unset: {string} = {}
+                for n, id in pairs(named) do
+                    if resources[id] == nil then unset[#unset + 1] = n end
+                end
+                table.sort(unset)
+
                 local popup: {string} = {"resources  (" .. tostring(#rows) .. "):"}
                 for i = 1, #rows do
                     popup[#popup + 1] = "  " .. tostring(rows[i].key) .. "\t" ..
                         tostring(rows[i].type)
                 end
-                return {ok = true, popup = popup, data = {count = #rows, resources = rows}}
+                return {ok = true, popup = popup,
+                    data = {count = #rows, resources = rows, unset = unset}}
             end,
         },
         {
