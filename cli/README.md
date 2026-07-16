@@ -78,6 +78,7 @@ tecs check
 tecs clean
 tecs docs
 tecs api gfx.Rectangle
+tecs call cmd_fetch '{"expr":"Transform"}'
 tecs agent list
 tecs completions zsh
 ```
@@ -120,6 +121,13 @@ with module-qualified `did you mean` suggestions. `--json` emits the structured 
 `--fields <keys>` (e.g. `signature,doc,methods`) returns only those keys to save
 tokens. The framework tier stays fixed with the installed CLI; the project overlay
 refreshes automatically when your sources change.
+
+`tecs call` is a built-in MCP client for the running game: `tecs call --list`
+names every tool the game serves and `tecs call <tool> '<json-args>'` invokes
+one, printing the JSON result. It talks to the game's local HTTP endpoint
+directly (handshake included), so it works even in sessions where the stdio
+bridge was never connected. `tecs info --keys` lists the running game's named
+context keys.
 Procedural guidance (the CLI workflow, integration testing, conventions) ships
 as Claude Code skills under `.claude/skills/`.
 

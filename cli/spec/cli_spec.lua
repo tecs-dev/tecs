@@ -223,7 +223,11 @@ describe("tecs CLI", function()
 
             assert.is_true(ok)
             assert.equals(1, #printed)
-            assert.matches("^%d+%.%d+%.%d+$", printed[1])
+            -- Semver with an optional prerelease tag: release builds print
+            -- "0.10.8", working-tree builds "0.10.8-dev".
+            local v = printed[1]
+            assert.is_true((v:match("^%d+%.%d+%.%d+$")
+                or v:match("^%d+%.%d+%.%d+%-%w+$")) ~= nil)
         end)
 
         it("prints runtime versions and a next step with info", function()
@@ -582,7 +586,7 @@ describe("tecs CLI", function()
                 local ok, _, printed = capturePrint({"info", "--json"})
                 assert.is_true(ok)
                 assert.equals(1, #printed)
-                assert.matches('"version":"%d+%.%d+%.%d+"', printed[1])
+                assert.matches('"version":"%d+%.%d+%.%d+', printed[1])
                 assert.matches('"love":null', printed[1])
                 assert.matches('"project":null', printed[1])
             end)
@@ -684,6 +688,18 @@ describe("tecs CLI", function()
                 assert.matches("tecs%.types", out)
                 -- The bare `tecs` module appears as its own indented line.
                 assert.matches("  tecs\n", out .. "\n")
+            end)
+
+            it("resolves builtins by bare name and module path", function()
+                -- Transform is the first component every agent looks up.
+                local ok, _, out = captureWrite({"api", "Transform"})
+                assert.is_true(ok)
+                assert.matches("^%-%- tecs%.builtins%.Transform\n", out)
+                assert.matches("layer: integer", out)
+
+                local ok2, _, out2 = captureWrite({"api", "tecs.builtins.Transform"})
+                assert.is_true(ok2)
+                assert.matches("record Transform", out2)
             end)
 
             it("lists tecs.types with more than just World", function()
@@ -904,6 +920,14 @@ describe("tecs CLI", function()
         end
     end)
 
+    describe("call command", function()
+        it("requires the packaged runtime in source mode", function()
+            local ok, err = cli.run({"call", "ping"})
+            assert.is_false(ok)
+            assert.matches("launcher", tostring(err))
+        end)
+    end)
+
     -- Packaged-mode coverage: source-mode specs cannot catch bugs that only
     -- appear inside the .love (e.g. the extractor's plain-table fallback, which
     -- source mode masked because it ran the same code but the earlier fixtures
@@ -1061,6 +1085,26 @@ describe("tecs CLI", function()
                 assert.matches("max: number", out)
             end)
 
+            it("tecs call fails helpfully when no game is running", function()
+                ensureBuilt()
+                local dataDir = makeTemp("pkg-call-udata")
+                local proj = makeTemp("pkg-call")
+                -- runPackaged drops stderr; this needs it (fail() writes there).
+                local parts = {
+                    "SDL_VIDEODRIVER=dummy", "SDL_AUDIODRIVER=dummy",
+                    "XDG_DATA_HOME=" .. sq(dataDir),
+                    "TECS_LOVE_BIN=" .. sq(loveBin), sq(loveBin), sq(app),
+                    "--tecs-project", sq(proj),
+                    -- Port 1 is never listening: connection refused, no timeout.
+                    "call", "ping", "--port", "1", "--timeout", "2",
+                }
+                local pipe = assert(io.popen(table.concat(parts, " ") .. " 2>&1"))
+                local out = pipe:read("*a") or ""
+                pipe:close()
+                assert.matches("No game answering", out)
+                assert.matches("tecs run", out)
+            end)
+
             -- Guards the remediation matchers against drift in the Teal
             -- compiler's exact error strings: this exercises the real payload
             -- compiler end to end, not synthetic messages.
@@ -1141,6 +1185,30 @@ describe("tecs CLI", function()
                 assert.matches('"name":"tecs"', out[1])
                 assert.matches('"version":"9%.9%.9"', out[1])
                 assert.matches('"listChanged":true', out[1])
+            end)
+
+            it("round-trips parsed empty tool schemas as {} in tools/list", function()
+                -- Regression: kernel tools come from a PARSED JSON manifest; an
+                -- empty properties object must not degrade to [] (strict MCP
+                -- clients reject the whole tools list -- "tools fetch failed").
+                local bridge = require("tecs_cli.mcp_bridge")
+                local json = cli._internal.jsonModule()
+                local parsedTools = json.parse('[{"name":"ping","description":"d",'
+                    .. '"inputSchema":{"type":"object","properties":{},'
+                    .. '"additionalProperties":false}}]')
+                local server = bridge.new({
+                    version = "9.9.9", projectName = "spec-game", json = json,
+                    kernelTools = parsedTools,
+                    check = function() return true, {} end,
+                    build = function() end,
+                    reexec = function() return true, "ran" end,
+                    setEnv = function() end, unsetEnv = function() end,
+                    readBuildinfo = function() return nil end,
+                    log = function() end,
+                })
+                local out = server:handleLine('{"jsonrpc":"2.0","id":2,"method":"tools/list"}')
+                assert.matches('"properties":{}', out[1], 1, true)
+                assert.equals(nil, out[1]:find('"properties":[]', 1, true))
             end)
 
             it("lists CLI tools alongside the game's kernel tools", function()
@@ -1262,7 +1330,7 @@ describe("tecs CLI", function()
             withCwd(root, function()
                 local dev = internal.buildinfoLua(true)
                 assert.matches("dev = true", dev)
-                assert.matches('cli = "%d+%.%d+%.%d+"', dev)
+                assert.matches('cli = "%d+%.%d+%.%d+', dev)
                 assert.matches('built = "%d%d%d%d%-%d%d%-%d%dT', dev)
                 assert.matches("tecs%-cli%-spec%-buildinfo", dev)
                 assert.matches("dev = false", internal.buildinfoLua(false))

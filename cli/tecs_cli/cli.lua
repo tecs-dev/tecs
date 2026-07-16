@@ -5,7 +5,7 @@ local argparse = require("tecs_cli.vendor.argparse")
 local ansicolors = require("tecs_cli.vendor.ansicolors")
 local haveLfs, lfs = pcall(require, "lfs")
 
-local VERSION = "0.10.7"
+local VERSION = "0.10.8-dev"
 local isLoveCli = rawget(_G, "TECS_LOVE_CLI") == true
 local loveApi = rawget(_G, "love")
 
@@ -894,6 +894,15 @@ local function attachRemediation(diagnostics)
             end
         end
 
+        -- Indexing with a non-integer number: the fix is always the same on
+        -- the LuaJIT/5.1 target (no // operator), so say it outright.
+        if not d.hint and d.kind == "type"
+            and (d.message:match("^cannot index object of type .* with number$")
+                or d.message:match("^wrong index type: got number, expected integer$")) then
+            d.hint = "Lua array indexes must be integers and this target has no `//`: "
+                .. "wrap the index expression in math.floor(...)."
+        end
+
         -- Wrong arity or argument type: the message does not name the callee,
         -- so read it off the offending source line and point `tecs api` at it.
         if not d.hint and d.kind == "type"
@@ -1505,6 +1514,10 @@ end
 local FRAMEWORK_API_MODULES = {
     { module = "tecs",          file = "src/tecs/init.tl",      prefix = "tecs." },
     { module = "tecs.types",    file = "src/tecs/types.tl" },
+    -- The public require path is tecs.builtins (re-exported from init.tl);
+    -- the extractor needs the defining file. Transform is the first component
+    -- every agent looks up, so this module must resolve.
+    { module = "tecs.builtins", file = "src/tecs/internal/builtins.tl" },
     { module = "tecs2d",        file = "src/tecs2d/init.tl",    prefix = "tecs2d." },
     { module = "tecs2d.gfx",    file = "src/tecs2d/gfx/init.tl", prefix = "gfx." },
     { module = "tecs2d.input",  file = "src/tecs2d/input.tl",   prefix = "input." },
@@ -2720,7 +2733,14 @@ local function buildMcpContext()
     -- MCP clients mis-reconcile. (The CLI cannot enumerate cmd_* itself: it
     -- loads the framework from .tl on the fly, and observe()'s slotOf macroexp
     -- is not inlined on that path.)
-    local defaultToolsPath = pathJoin(userDataDir(), "mcp-default-tools.json")
+    -- Last-seen full game tool list, keyed by CLI version: this cache takes
+    -- precedence over the bundled manifest, so a file written by an older
+    -- serializer (which froze empty {} schemas as [], making strict MCP
+    -- clients reject the whole tools list) must never survive an upgrade.
+    local defaultToolsPath = pathJoin(userDataDir(),
+        "mcp-default-tools-" .. VERSION .. ".json")
+    -- Drop the legacy unversioned cache; it may carry that corruption.
+    pcall(os.remove, pathJoin(userDataDir(), "mcp-default-tools.json"))
 
     return {
         version = VERSION,
@@ -3024,16 +3044,115 @@ local function printInfo(args)
     end
 end
 
-tasks.info = printInfo
+--------------------------------------------------------------------------------
+-- `tecs call`: a first-class MCP client for the running game's HTTP endpoint.
+--
+-- MCP clients read project MCP config (.mcp.json) only at session startup, so
+-- the very session that scaffolds a project never has the stdio bridge tools.
+-- This command gives that session the same capabilities -- tools/list plus any
+-- tool call, handshake handled -- with no hand-rolled JSON-RPC client.
+--------------------------------------------------------------------------------
+
+local GAME_MCP_PORT = 19999
+
+local function gameClient(port, timeout)
+    if not isLoveCli then
+        error("this command requires LÖVE; run tecs through its installed launcher", 0)
+    end
+    installFrameworkLoader()
+    local mcpClient = require("tecs2d.testing.mcp_client")
+    return mcpClient.new({port = port or GAME_MCP_PORT, timeout = timeout or 30})
+end
+
+local function noGameHint(port, err)
+    return tostring(err) .. "\nNo game answering on port " .. tostring(port or GAME_MCP_PORT)
+        .. ". Start it with `tecs run` (or the bridge's start_game tool) and retry."
+end
+
+function tasks.call(args)
+    local json = jsonModule()
+    local client = gameClient(args.port, args.timeout)
+
+    if args.list then
+        local response, err = client:rpc("tools/list", nil, args.timeout or 10)
+        if not response then fail(noGameHint(args.port, err)) end
+        local result = response.result or {}
+        local tools = result.tools or {}
+        if args.json then
+            print(json.serialize(tools, true))
+            return
+        end
+        local names = {}
+        for _, t in ipairs(tools) do names[#names + 1] = t.name end
+        table.sort(names)
+        for _, n in ipairs(names) do print(n) end
+        return
+    end
+
+    if not args.tool or args.tool == "" then
+        fail("usage: tecs call <tool> ['<json-args>'] | tecs call --list")
+    end
+    local callArgs
+    if args.args and args.args ~= "" then
+        local ok, parsed = pcall(json.parse, args.args)
+        if not ok or type(parsed) ~= "table" then
+            fail("tool arguments must be a JSON object, e.g. "
+                .. "tecs call run_lua '{\"code\":\"return 1\"}'")
+        end
+        callArgs = parsed
+    end
+
+    local envelope, err = client:tryCall(args.tool, callArgs, args.timeout or 30)
+    if not envelope then fail(noGameHint(args.port, err)) end
+    print(json.serialize(envelope, true))
+    if envelope.ok == false then
+        fail("tool '" .. args.tool .. "' returned an error")
+    end
+end
+
+-- `tecs info --keys`: the running game's named context keys (resources by
+-- name), served by cmd_resources over the same client.
+local function printInfoKeys(args)
+    local json = jsonModule()
+    local client = gameClient(args.port, nil)
+    local envelope, err = client:tryCall("cmd_resources", nil, 10)
+    if not envelope then fail(noGameHint(args.port, err)) end
+    if envelope.ok == false then
+        fail("cmd_resources returned an error: " .. json.serialize(envelope))
+    end
+    local data = envelope.result or envelope
+    if args.json then
+        print(json.serialize({resources = data.resources, unset = data.unset}, true))
+        return
+    end
+    print("Named resources (read one with `tecs call cmd_resources '{\"name\":\"<key>\"}'`):")
+    for _, row in ipairs(data.resources or {}) do
+        print("  " .. tostring(row.key) .. "  (" .. tostring(row.type) .. ")")
+    end
+    for _, name in ipairs(data.unset or {}) do
+        print("  " .. name .. "  (registered, no value)")
+    end
+end
+
+tasks.info = function(args)
+    if args and args.keys then
+        printInfoKeys(args)
+        return
+    end
+    printInfo(args)
+end
 
 local commands = {
     {
         name = "info",
         summary = "Show runtime and project information",
-        description = "Show CLI, Love2D, and LuaJIT versions plus current project status and a next step.",
-        action = printInfo,
+        description = "Show CLI, Love2D, and LuaJIT versions plus current project status and a next step. "
+            .. "With --keys: the running game's named context keys (resources by name).",
+        action = function(args) tasks.info(args) end,
         setup = function(subcommand)
             subcommand:flag("--json", "Print runtime and project information as JSON on stdout.")
+            subcommand:flag("--keys", "List the running game's named context keys (needs a running game).")
+            subcommand:option("--port", "Game MCP port for --keys (default 19999)."):convert(tonumber)
         end,
     },
     {
@@ -3155,6 +3274,28 @@ local commands = {
             subcommand:flag("--json", "Emit structured records as JSON on stdout.")
             subcommand:option("--fields",
                 "Comma-separated record keys to return, e.g. signature,doc,methods.")
+        end,
+    },
+    {
+        name = "call",
+        summary = "Call an MCP tool on the running game",
+        description = "Call one of the running game's MCP tools over its local HTTP endpoint "
+            .. "(no bridge or client config needed; the handshake is handled for you). "
+            .. "`tecs call --list` names every available tool; then e.g. "
+            .. "`tecs call cmd_fetch '{\"expr\":\"Transform\"}'` or "
+            .. "`tecs call run_lua '{\"code\":\"return world:count()\"}'`. Prints the JSON "
+            .. "result envelope. The game must be running (`tecs run`).",
+        action = tasks.call,
+        setup = function(subcommand)
+            subcommand:argument("tool", "Tool name (see --list).")
+                :args("?")
+            subcommand:argument("args", "Tool arguments as one JSON object.")
+                :args("?")
+            subcommand:flag("--list", "List the running game's tools.")
+            subcommand:flag("--json", "With --list, print full tool records as JSON.")
+            subcommand:option("--port", "Game MCP port (default 19999)."):convert(tonumber)
+            subcommand:option("--timeout", "Seconds to wait for the response (default 30).")
+                :convert(tonumber)
         end,
     },
     {
