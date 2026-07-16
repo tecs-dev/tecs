@@ -29,6 +29,8 @@ local stepSchema <const>: cmdargs.Schema = {
             help = "input_tape rows to queue before stepping ({at, event, args})"},
         lua = {help = "Lua to evaluate (run_lua sandbox) after the last frame; "
             .. "defers the response until the step completes"},
+        per_frame = {help = "Lua evaluated after EACH stepped frame; return "
+            .. "true to stop early (n is the cap). Side effects allowed."},
         wait = {kind = "boolean",
             help = "defer the response until the stepped frames have run"},
         force = {kind = "boolean",
@@ -239,7 +241,7 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             name = "step",
             section = "Session",
             shortHelp = "tick the game forward N frames while otherwise frozen",
-            mcpHelp = "Advance gameplay by n frames while the freeze controller is held, then freeze again. Each stepped frame carries a DETERMINISTIC dt of 1/fps (the run config's fps, echoed as step_dt) regardless of display refresh rate, so `n` frames advance exactly n/fps gameplay seconds; pass dt= to override per call. ONE-CALL VERIFICATION: pass events= (input_tape rows, at=1 is the first stepped frame) to queue inputs, and lua= (run_lua sandbox) to read state after the last frame -- the response then arrives when the step COMPLETES, carrying the lua values, so tape->step->read is a single call: cmd_step '{\"events\":[{\"at\":1,\"event\":\"keypressed\",\"args\":[\"left\"]}],\"n\":10,\"lua\":\"return {x=head.x}\"}'. wait=true defers the response without a read. Without lua/wait the call is ASYNC: it returns when the frames are scheduled, so read state in a follow-up call. Fails when nothing holds the freeze; acquire it with cmd_freeze on=true first.",
+            mcpHelp = "Advance gameplay by n frames while the freeze controller is held, then freeze again. Each stepped frame carries a DETERMINISTIC dt of 1/fps (the run config's fps, echoed as step_dt) regardless of display refresh rate, so `n` frames advance exactly n/fps gameplay seconds; pass dt= to override per call. ONE-CALL VERIFICATION: pass events= (input_tape rows, at=1 is the first stepped frame) to queue inputs, and lua= (run_lua sandbox) to read state after the last frame -- the response then arrives when the step COMPLETES, carrying the lua values, so tape->step->read is a single call: cmd_step '{\"events\":[{\"at\":1,\"event\":\"keypressed\",\"args\":[\"left\"]}],\"n\":10,\"lua\":\"return {x=head.x}\"}'. STEP-UNTIL: per_frame= evaluates after EACH stepped frame; return true to stop early, making n the cap -- cmd_step '{\"n\":300,\"per_frame\":\"return gs.over\",\"lua\":\"return {score=gs.score}\"}' runs until game-over or 300 frames and reports frames_run/stopped_early. Side effects in per_frame are allowed (same sandbox). wait=true defers the response without a read. Without lua/per_frame/wait the call is ASYNC: it returns when the frames are scheduled, so read state in a follow-up call. Fails when nothing holds the freeze; acquire it with cmd_freeze on=true first.",
             schema = stepSchema,
             outputSchema = {
                 type = "object",
@@ -257,6 +259,11 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         description = "inputs the tape currently holds down"},
                     waited = {type = "boolean",
                         description = "response was deferred until the step completed"},
+                    frames_run = {type = "integer",
+                        description = "frames actually run (deferred form; less than "
+                            .. "frames when per_frame stopped early)"},
+                    stopped_early = {type = "boolean",
+                        description = "per_frame returned true before the cap"},
                     returned = {type = "integer",
                         description = "lua= return-value count (deferred form)"},
                     values = {type = "array",
@@ -309,33 +316,62 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 -- One-call form: defer the response until the last stepped
                 -- frame has run, then optionally evaluate lua= in the run_lua
                 -- sandbox and carry its values back in this same response.
+                -- per_frame= installs a hook run after every stepped frame:
+                -- truthy return (or an error) stops the step early, so `n`
+                -- acts as a cap ("step until dead or n frames"). Both run in
+                -- the same run_lua sandbox; no new capability is exposed.
                 local code = v.lua as string
-                if code ~= nil or v.wait == true then
-                    data.waited = true
+                local perFrameCode = v.per_frame as string
+                if code ~= nil or perFrameCode ~= nil or v.wait == true then
                     local fz = env.freeze
+                    local evalFn = w.resources[mcpinfo.LUA_EVAL]
+                    if (code ~= nil or perFrameCode ~= nil) and evalFn == nil then
+                        return {ok = false, code = "lua_unavailable",
+                            message = "step lua=/per_frame= needs the MCP plugin's "
+                                .. "sandbox (mcp.new())"}
+                    end
+                    data.waited = true
+
+                    local hookErr: string = nil
+                    if perFrameCode ~= nil then
+                        fz.perFrame = function(): boolean
+                            local okH, res = evalFn(perFrameCode, w)
+                            if not okH then
+                                hookErr = tostring(res)
+                                return true
+                            end
+                            local vals = (res as {string: any}).values as {any}
+                            return #vals > 0 and (vals[1] ~= false and vals[1] ~= nil)
+                        end
+                    end
+
                     return {ok = true,
                         message = "stepping " .. tostring(n) .. " frame(s), deferred",
                         data = data,
                         deferred = function(respond: function({string: any}),
                                 failWith: function(string, string))
                             fz:onStepComplete(function()
-                                if code == nil then
-                                    respond(nil)
+                                if hookErr ~= nil then
+                                    failWith("per_frame_failed",
+                                        "step per_frame: " .. hookErr)
                                     return
                                 end
-                                local evalFn = w.resources[mcpinfo.LUA_EVAL]
-                                if evalFn == nil then
-                                    failWith("lua_unavailable",
-                                        "step lua= needs the MCP plugin's sandbox (mcp.new())")
-                                    return
+                                local final: {string: any} = {
+                                    frames_run = fz.stepFramesRun,
+                                    stopped_early = fz.stoppedEarly or false,
+                                }
+                                if code ~= nil then
+                                    local okE, res = evalFn(code, w)
+                                    if not okE then
+                                        failWith("lua_execution_failed",
+                                            "step lua: " .. tostring(res))
+                                        return
+                                    end
+                                    for k, val in pairs(res as {string: any}) do
+                                        final[k] = val
+                                    end
                                 end
-                                local okE, res = evalFn(code, w)
-                                if not okE then
-                                    failWith("lua_execution_failed",
-                                        "step lua: " .. tostring(res))
-                                    return
-                                end
-                                respond(res as {string: any})
+                                respond(final)
                             end)
                         end}
                 end
@@ -348,16 +384,17 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             name = "input_tape",
             section = "Session",
             shortHelp = "queue frame-scheduled love events; no args = status",
-            mcpHelp = "Queue literal LÖVE events against the gameplay-frame clock: each row "
+            mcpHelp = "The input tape behind cmd_step's events=. For frozen verification prefer "
+                .. "cmd_step's one-call form; use this standalone tool for what it alone does: "
+                .. "the no-argument STATUS form (frame, pending rows, recently FIRED events -- "
+                .. "actuals, vs cmd_step's will_fire schedule -- and held inputs), clear=true "
+                .. "recovery (drops pending rows and synthesizes releases for anything held), "
+                .. "and queueing rows while UNFROZEN (they consume on live frames). Each row "
                 .. "{at, event, args} dispatches through the real input path (the tecs2d.input "
                 .. "snapshot, Tecs events, and love.* callbacks) on gameplay frame `at`, counted "
-                .. "from now (1 = the next gameplay frame). Built for deterministic verification: "
-                .. "cmd_freeze on -> queue -> cmd_step n -> read state; unfrozen it consumes on "
-                .. "live frames. Args are forgiving like send_love_event (keypressed needs just "
-                .. "the key). Model releases as their own rows (keyreleased, mousereleased, ...); "
-                .. "the status form and cmd_step report anything still held. With no arguments: "
-                .. "status (frame, pending rows, recent fired events, held inputs). clear=true "
-                .. "drops pending rows and synthesizes releases. Gamepad/joystick events are not "
+                .. "from now (1 = the next gameplay frame). Args are forgiving like "
+                .. "send_love_event (keypressed needs just the key). Model releases as their own "
+                .. "rows (keyreleased, mousereleased, ...). Gamepad/joystick events are not "
                 .. "tapeable yet (they need device objects). Raw love.* polls do not see taped "
                 .. "input; read tecs2d.input.",
             schema = inputTapeSchema,

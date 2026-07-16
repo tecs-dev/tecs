@@ -400,6 +400,46 @@ describe("mcp compliance: freeze, step, resume", function()
         luassert.are.equal(before + 4, readFrames(app))
     end)
 
+    it("cmd_step per_frame stops early when the condition hits", function()
+        -- "Step until": n is a cap, the hook decides. The condition fires
+        -- when the frame counter crosses a line well inside the cap.
+        local target = tonumber(runLua(app, "return tecsTest.frames")[1]) as integer + 5
+        local res = app.client:call("cmd_step", {
+            n = 200,
+            per_frame = "return tecsTest.frames >= " .. tostring(target),
+            lua = "return {frames = tecsTest.frames}",
+        })
+        luassert.is_true(res.stopped_early as boolean)
+        luassert.are.equal(5, res.frames_run as integer)
+        local first = (res.values as {any})[1] as {string: any}
+        luassert.are.equal(target, tonumber(first.frames))
+    end)
+
+    it("cmd_step per_frame side effects run once per stepped frame", function()
+        runLua(app, "_G.perFrameCount = 0 return true")
+        local res = app.client:call("cmd_step", {
+            n = 6,
+            per_frame = "_G.perFrameCount = _G.perFrameCount + 1 return false",
+            lua = "return {count = _G.perFrameCount}",
+        })
+        luassert.is_false(res.stopped_early as boolean)
+        luassert.are.equal(6, res.frames_run as integer)
+        local first = (res.values as {any})[1] as {string: any}
+        luassert.are.equal(6, tonumber(first.count))
+        runLua(app, "_G.perFrameCount = nil return true")
+    end)
+
+    it("cmd_step per_frame errors stop the step and surface", function()
+        local before = readFrames(app)
+        local ok, err = pcall(function()
+            app.client:call("cmd_step", {n = 50, per_frame = "error('hook boom')"})
+        end)
+        luassert.is_false(ok)
+        luassert.matches("per_frame_failed", tostring(err))
+        -- The broken hook stopped the step on frame one, not at the cap.
+        luassert.are.equal(before + 1, readFrames(app))
+    end)
+
     it("cmd_step lua errors surface as tool errors", function()
         local ok, err = pcall(function()
             app.client:call("cmd_step", {n = 1, lua = "error('boom')"})

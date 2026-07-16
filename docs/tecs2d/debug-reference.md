@@ -2656,11 +2656,11 @@ freeze on
 freeze off
 ```
 
-### `step [n] [dt=N] [events={}] [force] [lua=...] [wait]` {#cmd-step}
+### `step [n] [dt=N] [events={}] [force] [lua=...] [per_frame=...] [wait]` {#cmd-step}
 
 Tick the game forward N frames while otherwise frozen.
 
-Advance gameplay by n frames while the freeze controller is held, then freeze again. Each stepped frame carries a DETERMINISTIC dt of 1/fps (the run config's fps, echoed as step_dt) regardless of display refresh rate, so `n` frames advance exactly n/fps gameplay seconds; pass dt= to override per call. ONE-CALL VERIFICATION: pass events= (input_tape rows, at=1 is the first stepped frame) to queue inputs, and lua= (run_lua sandbox) to read state after the last frame -- the response then arrives when the step COMPLETES, carrying the lua values, so tape->step->read is a single call: cmd_step '{"events":[{"at":1,"event":"keypressed","args":["left"]}],"n":10,"lua":"return {x=head.x}"}'. wait=true defers the response without a read. Without lua/wait the call is ASYNC: it returns when the frames are scheduled, so read state in a follow-up call. Fails when nothing holds the freeze; acquire it with cmd_freeze on=true first.
+Advance gameplay by n frames while the freeze controller is held, then freeze again. Each stepped frame carries a DETERMINISTIC dt of 1/fps (the run config's fps, echoed as step_dt) regardless of display refresh rate, so `n` frames advance exactly n/fps gameplay seconds; pass dt= to override per call. ONE-CALL VERIFICATION: pass events= (input_tape rows, at=1 is the first stepped frame) to queue inputs, and lua= (run_lua sandbox) to read state after the last frame -- the response then arrives when the step COMPLETES, carrying the lua values, so tape->step->read is a single call: cmd_step '{"events":[{"at":1,"event":"keypressed","args":["left"]}],"n":10,"lua":"return {x=head.x}"}'. STEP-UNTIL: per_frame= evaluates after EACH stepped frame; return true to stop early, making n the cap -- cmd_step '{"n":300,"per_frame":"return gs.over","lua":"return {score=gs.score}"}' runs until game-over or 300 frames and reports frames_run/stopped_early. Side effects in per_frame are allowed (same sandbox). wait=true defers the response without a read. Without lua/per_frame/wait the call is ASYNC: it returns when the frames are scheduled, so read state in a follow-up call. Fails when nothing holds the freeze; acquire it with cmd_freeze on=true first.
 
 MCP tool: `cmd_step`
 
@@ -2671,6 +2671,7 @@ MCP tool: `cmd_step`
 | `events` | table | input_tape rows to queue before stepping ({at, event, args}) |
 | `force` | boolean | queue events even when a press is already held (tape force) |
 | `lua` | string | Lua to evaluate (run_lua sandbox) after the last frame; defers the response until the step completes |
+| `per_frame` | string | Lua evaluated after EACH stepped frame; return true to stop early (n is the cap). Side effects allowed. |
 | `wait` | boolean | defer the response until the stepped frames have run |
 
 ::: details Result data schema
@@ -2679,6 +2680,10 @@ MCP tool: `cmd_step`
   "properties": {
     "frames": {
       "description": "frames scheduled to tick",
+      "type": "integer"
+    },
+    "frames_run": {
+      "description": "frames actually run (deferred form; less than frames when per_frame stopped early)",
       "type": "integer"
     },
     "held": {
@@ -2699,6 +2704,10 @@ MCP tool: `cmd_step`
     "step_dt": {
       "description": "seconds each stepped frame will carry",
       "type": "number"
+    },
+    "stopped_early": {
+      "description": "per_frame returned true before the cap",
+      "type": "boolean"
     },
     "values": {
       "description": "lua= return values in order (deferred form)",
@@ -2737,7 +2746,7 @@ MCP tool: `cmd_step`
 
 Queue frame-scheduled love events; no args = status.
 
-Queue literal LÖVE events against the gameplay-frame clock: each row {at, event, args} dispatches through the real input path (the tecs2d.input snapshot, Tecs events, and love.* callbacks) on gameplay frame `at`, counted from now (1 = the next gameplay frame). Built for deterministic verification: cmd_freeze on -> queue -> cmd_step n -> read state; unfrozen it consumes on live frames. Args are forgiving like send_love_event (keypressed needs just the key). Model releases as their own rows (keyreleased, mousereleased, ...); the status form and cmd_step report anything still held. With no arguments: status (frame, pending rows, recent fired events, held inputs). clear=true drops pending rows and synthesizes releases. Gamepad/joystick events are not tapeable yet (they need device objects). Raw love.* polls do not see taped input; read tecs2d.input.
+The input tape behind cmd_step's events=. For frozen verification prefer cmd_step's one-call form; use this standalone tool for what it alone does: the no-argument STATUS form (frame, pending rows, recently FIRED events -- actuals, vs cmd_step's will_fire schedule -- and held inputs), clear=true recovery (drops pending rows and synthesizes releases for anything held), and queueing rows while UNFROZEN (they consume on live frames). Each row {at, event, args} dispatches through the real input path (the tecs2d.input snapshot, Tecs events, and love.* callbacks) on gameplay frame `at`, counted from now (1 = the next gameplay frame). Args are forgiving like send_love_event (keypressed needs just the key). Model releases as their own rows (keyreleased, mousereleased, ...). Gamepad/joystick events are not tapeable yet (they need device objects). Raw love.* polls do not see taped input; read tecs2d.input.
 
 MCP tool: `cmd_input_tape`
 

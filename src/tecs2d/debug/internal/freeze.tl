@@ -38,6 +38,19 @@ local record freeze
         --- run (or the freeze is released mid-step, so no waiter strands).
         stepWaiters: {function()}
 
+        --- Optional per-frame hook, evaluated after each stepped frame's
+        --- gameplay has run; returning true ends the step early. Cleared
+        --- when the step completes or the freeze is released.
+        perFrame: function(): boolean
+
+        --- Frames actually run by the current/most recent step (a per-frame
+        --- hook can stop before the requested count).
+        stepFramesRun: integer
+
+        --- True when the most recent step was ended early by its per-frame
+        --- hook.
+        stoppedEarly: boolean
+
         --- Register a one-shot step-completion callback. Fires immediately
         --- when no step is pending.
         onStepComplete: function(self: Controller, fn: function())
@@ -133,6 +146,7 @@ function freeze.Controller:release(who: string): boolean
         setRenderTimeScale(self.world, self.savedTimeScale)
         self.stepsRemaining = 0
         self.stepping = false
+        self.perFrame = nil
         self:removeStepClock()
         -- A release mid-step resolves waiters rather than stranding their
         -- deferred responses; the game is running, the step is moot.
@@ -155,6 +169,8 @@ function freeze.Controller:step(frames: integer): boolean, string
     end
     if frames < 1 then frames = 1 end
     self.stepsRemaining = frames
+    self.stepFramesRun = 0
+    self.stoppedEarly = false
     return true, nil
 end
 
@@ -215,10 +231,30 @@ function freeze.Controller:tick()
         return
     end
     self.stepsRemaining = self.stepsRemaining - 1
+    self.stepFramesRun = (self.stepFramesRun or 0) + 1
+
+    -- Per-frame hook: this frame's gameplay has run (RenderFirst is after the
+    -- gameplay phases), so the hook observes its result; returning true stops
+    -- the step here. It runs on the natural last frame too (side effects stay
+    -- per-frame-consistent), where its verdict is moot.
+    if self.perFrame then
+        local okH, stop = pcall(self.perFrame) as (boolean, any)
+        if okH and stop and self.stepsRemaining > 0 then
+            self.stepsRemaining = 0
+            self.stoppedEarly = true
+        elseif not okH then
+            -- A broken hook must not run the world unattended for the rest
+            -- of the step; stop and let the waiter surface the error.
+            self.stepsRemaining = 0
+            self.stoppedEarly = true
+        end
+    end
+
     if self.stepsRemaining <= 0 then
         disableGameplay(self.world)
         setRenderTimeScale(self.world, 0.0)
         self.stepping = false
+        self.perFrame = nil
         self:removeStepClock()
         -- The last stepped frame's gameplay phases have run (RenderFirst is
         -- after them), so waiters observe post-step state.
