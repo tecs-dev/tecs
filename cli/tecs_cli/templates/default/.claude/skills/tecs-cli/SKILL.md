@@ -134,12 +134,21 @@ keep it, and make every observation deterministic:
 6. **Then look at it.** After mechanics are proven from state: one visual check —
    `cmd_screenshot` captures at the game's VIRTUAL resolution by default (cheap; `full=true`
    for native window pixels, `sample_pixels` for point checks) — and one short live-play
-   pass for readability, control feel, pacing, and layout, which state checks can't judge.
-   The blessed live-pass recipe: **stage the interesting situation while frozen** (heading
-   set, a target nearby), unfreeze (`cmd_freeze '{"on":false}'`), observe briefly, re-freeze.
-   To inject input while unfrozen, `send_love_event` queues onto the next gameplay frame
-   through the real input path. Keep cosmetic iteration proportional to the request; don't
-   enter a build→screenshot→tweak loop over colors.
+   pass for readability, motion, pacing, and layout, which state checks can't judge.
+   The blessed live-pass recipe: **stage the interesting situation while frozen**, then run
+   it as one bounded step — stepped frames render at display rate, so it plays on screen in
+   real time, auto-stops at the terminal state, and ends still frozen:
+   ```
+   cmd_step '{"n":180, "per_frame":"return _G.state.mode ~= \"playing\"",
+              "quiet":true, "lua":"return {mode=_G.state.mode}"}'
+   ```
+   Avoid unfreeze-and-`sleep` observation: your sleep is wall-clock while the game keeps its
+   own tick rate, so an over-long sleep watches the game die off-screen (from center, a
+   moving actor reaches the wall in `distance / speed` seconds — do that arithmetic or let
+   `per_frame` do it for you). True unfrozen play is only for a human at the keyboard;
+   `send_love_event` queues onto the next gameplay frame if you do need live injection.
+   Keep cosmetic iteration proportional to the request; don't enter a
+   build→screenshot→tweak loop over colors.
 
 ## Using the game tools
 
