@@ -28,6 +28,7 @@ local logging <const> = require("tecs.utils.logging")
 local mcpTools <const> = require("tecs2d.mcp.tools")
 local debugapi <const> = require("tecs2d.debug.context")
 local mcpinfo <const> = require("tecs2d.internal.mcpinfo")
+local crash <const> = require("tecs2d.internal.crash")
 local state <const> = require("tecs2d.mcp.internal.state")
 local logtap <const> = require("tecs2d.mcp.internal.logtap")
 local transport <const> = require("tecs2d.mcp.internal.transport")
@@ -113,6 +114,20 @@ function mcp.new(config?: mcp.Config): function(world: tecs.World)
         -- The run_lua sandbox, callable by debugger commands (cmd_step's
         -- `lua` post-step read) without a dependency on this module.
         w.resources[mcpinfo.LUA_EVAL] = handlers.evalInSandbox
+
+        -- Crash integration: mark the session crashed (tools/call answers
+        -- game_crashed; ping and get_logs keep working) and keep serving
+        -- the transport from inside the error-screen loop so an agent's
+        -- next call gets an answer, never a hang against a bound-but-dead
+        -- socket. A pending deferred response can't be honored by a broken
+        -- world, so the flag is cleared and the connection closes.
+        crash.onCrash(function(err: string)
+            ctx.crashed = err
+            ctx.pendingWorldOpResponse = false
+        end)
+        crash.addPump(function()
+            transport.processCommands(rpc.processMessage)
+        end)
 
         -- The MCP frame systems run in RenderFirst, not a gameplay phase:
         -- a freeze disables the gameplay phases (First..Last), and the server

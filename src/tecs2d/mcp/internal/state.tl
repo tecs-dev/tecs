@@ -18,6 +18,10 @@ local record state
         --- True while a queued world op (run_lua) still owes the client a
         --- deferred response; keeps the socket open like a screenshot.
         pendingWorldOpResponse: boolean
+        --- Traceback of a gameplay crash. When set, tools/call answers
+        --- game_crashed (ping and get_logs still work) while the error
+        --- screen keeps pumping the transport.
+        crashed: string
         --- When set, the next client close aborts the connection with
         --- linger 0 (RST) instead of a FIN close. The MCP plugin's
         --- prepareRestart hook sets this: a normal close leaves the

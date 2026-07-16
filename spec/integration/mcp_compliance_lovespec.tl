@@ -733,6 +733,46 @@ describe("mcp compliance: love events", function()
     end)
 end)
 
+describe("mcp compliance: crash handling", function()
+    it("keeps answering with game_crashed after a gameplay error", function()
+        local app = startApp()
+        -- Trip the app's deliberate-crash system on the next Update frame.
+        runLua(app, "tecsTest.crash = true return true")
+
+        -- The error handler keeps pumping the transport: ping still answers,
+        -- now carrying the crash marker and traceback.
+        local crashed = eventually(CALL_TIMEOUT, function(): boolean
+            local ok, p = pcall(function(): {string: any}
+                return app.client:call("ping")
+            end)
+            if ok and (p as {string: any}).crashed == true then return true end
+            return nil
+        end)
+        luassert.is_true(crashed == true, "ping never reported the crash")
+        local p = app.client:call("ping")
+        luassert.matches("deliberate test crash", p.error as string)
+
+        -- World tools answer game_crashed immediately instead of hanging.
+        local okCall, err = pcall(function()
+            app.client:call("run_lua", {code = "return 1"})
+        end)
+        luassert.is_false(okCall)
+        luassert.matches("game_crashed", tostring(err))
+        luassert.matches("deliberate test crash", tostring(err))
+
+        -- The traceback landed in the log ring, still served by get_logs.
+        local logs = app.client:call("get_logs", {contains = "deliberate test crash"})
+        luassert.is_true((logs.returned as integer) >= 1,
+            "crash traceback not found in the log ring")
+
+        -- And the process still exits cleanly on quit.
+        app.client:tryCall("send_love_event", {event = "quit"}, 2)
+        local exited = app.proc:waitExit(SHUTDOWN_TIMEOUT)
+        if not exited then app.proc:stop() end
+        luassert.is_true(exited, "crashed app did not exit on quit")
+    end)
+end)
+
 describe("mcp compliance: shutdown", function()
     it("quit exits the process cleanly", function()
         local app = startApp()

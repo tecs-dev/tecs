@@ -45,6 +45,10 @@ byName["ping"] = function(_: {string:any}, id: number)
         port = (transport.getBoundPort() or 0) as integer,
         time = lt.getTime(),
     }
+    if ctx.crashed then
+        payload.crashed = true
+        payload.error = ctx.crashed
+    end
     -- Build identity, so a caller can detect a stale process: if `build.built`
     -- predates the latest `tecs build`, the answers come from old code.
     local info = buildinfo.get()
@@ -181,8 +185,11 @@ byName["send_love_event"] = function(args: {string:any}, id: number)
     -- frame instead -- same real dispatch path, frame-aligned, args
     -- defaulted. Frozen, keep the raw push: the debugger overlay's typed
     -- console consumes love callbacks while gameplay phases are disabled.
+    -- Crashed mode raw-pushes always: gameplay frames never run, so a taped
+    -- row would sit forever; the error loop polls love events directly
+    -- (quit/escape), which is exactly what a crashed game still needs.
     local w = ctx.world
-    if w and inputtape.tapeable(eventName) then
+    if w and not ctx.crashed and inputtape.tapeable(eventName) then
         local fz = w.resources[freezekey.KEY]
         local frozen = fz ~= nil and fz:isFrozen()
         if not frozen then

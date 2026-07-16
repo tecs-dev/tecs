@@ -2,6 +2,8 @@ local events <const> = require("tecs2d.events")
 local input <const> = require("tecs2d.input")
 local handlers <const> = require("tecs2d.internal.handlers")
 local frameclock <const> = require("tecs2d.internal.frameclock")
+local crash <const> = require("tecs2d.internal.crash")
+local logging <const> = require("tecs.utils.logging")
 local tecs <const> = require("tecs")
 local tecs_assets <const> = require("tecs2d.assets")
 local tecs_audio <const> = require("tecs2d.audio")
@@ -550,10 +552,63 @@ local function runLoop(config: tecs2d.RunConfig): (function(): number | string)
     end
 end
 
+-- Replacement for LÖVE's default error handler. The default blue screen
+-- stops the world's systems dead: the MCP socket stays bound but nothing
+-- serves it, so an agent's next tool call hangs. This handler logs the
+-- traceback to the log ring and stderr (the bridge's game_logs captures
+-- both), notifies crash observers (the MCP plugin flips into crashed mode),
+-- and keeps pumping registered transports from inside the error screen so
+-- tools answer "game_crashed: <traceback>" instead of timing out.
+local function errorHandler(msg: string): function(): number
+    local trace = debug.traceback("Error: " .. tostring(msg), 3)
+    trace = trace:gsub("\n[^\n]+$", "")
+    pcall(function()
+        logging.getLogger("tecs2d.crash"):error("%s", trace)
+    end)
+    io.stderr:write(trace .. "\n")
+    io.stderr:flush()
+    crash.notify(trace)
+
+    pcall(function()
+        love.graphics.reset()
+        love.graphics.origin()
+        if love.mouse then
+            love.mouse.setVisible(true)
+            love.mouse.setGrabbed(false)
+            love.mouse.setRelativeMode(false)
+        end
+        if love.window and love.window.requestAttention then
+            love.window.requestAttention()
+        end
+    end)
+
+    local shown = "The game crashed (the MCP server is still answering).\n\n" .. trace
+    return function(): number
+        love.event.pump()
+        for name, a in love.event.poll() do
+            if name == "quit" then
+                return (tonumber(a) or 1) as number
+            elseif name == "keypressed" and a == "escape" then
+                return 1
+            end
+        end
+        crash.pump()
+        pcall(function()
+            love.graphics.clear(0.16, 0.09, 0.09)
+            love.graphics.setColor(1, 1, 1, 1)
+            love.graphics.printf(shown, 24, 24, love.graphics.getWidth() - 48)
+            love.graphics.present()
+        end)
+        if love.timer then love.timer.sleep(0.05) end
+        return nil
+    end
+end
+
 function tecs2d.run(config: tecs2d.RunConfig): (function(): function(): number | string)
     assert(config.game, "config.game is required")
     config.fps = config.fps or 60
     assert(config.fps > 0, "config.fps must be a positive number")
+    love.errorhandler = errorHandler
     return function(): function(): number | string
         return runLoop(config)
     end

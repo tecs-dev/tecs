@@ -214,6 +214,17 @@ local function handleToolsCall(id: number, params: {string:any})
         return
     end
     local args = (params.arguments as {string:any}) or {}
+    -- Crashed mode: the world is broken, so every world-touching tool gets a
+    -- clear answer instead of running against wreckage. ping still reports
+    -- (with the crash marker) and get_logs still serves the ring, which
+    -- holds the full traceback.
+    if ctx and ctx.crashed and toolName ~= "ping" and toolName ~= "get_logs"
+        and toolName ~= "send_love_event" then
+        rpc.sendToolError(id, "game_crashed",
+            "the game crashed and needs a restart (restart_game, or fix + "
+            .. "start_game). Traceback:\n" .. ctx.crashed)
+        return
+    end
     local handler = rpc.handlers[toolName as string]
     if not handler then
         local ok, ret = pcall(callCommandTool, toolName as string, args, id) as (boolean, any)

@@ -32,6 +32,9 @@ local record TestState
     -- cmd_step dt= override, on every machine).
     dtSum: number
     fixedTicks: integer
+    -- Crash-handling probe: when set (via run_lua mutating this table),
+    -- the next Update frame raises a deliberate error.
+    crash: boolean
 end
 
 local function gamePlugin(world: tecs.World)
@@ -57,6 +60,9 @@ local function gamePlugin(world: tecs.World)
         name = "test.FrameCounter",
         phase = tecs.phases.Update,
         run = function(dt: number)
+            if state.crash then
+                error("deliberate test crash")
+            end
             state.frames = state.frames + 1
             state.dtSum = state.dtSum + dt
             if input.isKeyPressed("up") then
