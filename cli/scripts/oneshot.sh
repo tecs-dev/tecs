@@ -242,8 +242,12 @@ named = sum(1 for e in res
 time.sleep(3)
 ping = call("ping")
 alive = ping.get("running") is True and not ping.get("crashed")
+n2 = entities()
+# Unbounded growth over 3 idle seconds is a spawn leak (usually a system
+# spawning per frame -- entities treated as draw calls).
+leak = "LEAK" if n2 > max(n * 2, n + 50) else "ok"
 print(f"entities={n} named_state={named} "
-      f"alive3s={'ok' if alive else 'CRASHED'} entities_after={entities()}")
+      f"alive3s={'ok' if alive else 'CRASHED'} entities_after={n2} growth={leak}")
 EOF
 )"
     fi
