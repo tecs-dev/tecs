@@ -706,6 +706,16 @@ describe("tecs CLI", function()
                 assert.matches("record Transform", out2)
             end)
 
+            it("resolves type aliases to their terminal type", function()
+                -- `type System = types.System = function(dt, world)` used to
+                -- dead-end at "type alias to types.System", pushing agents to
+                -- grep vendored source. The terminal type must show inline.
+                local ok, _, out = captureWrite({"api", "tecs.System"})
+                assert.is_true(ok)
+                assert.matches("function%(number, World%)", out)
+                assert.matches("type alias to types%.System", out)
+            end)
+
             it("lists tecs.types with more than just World", function()
                 local ok, _, out = captureWrite({"api", "tecs.types"})
                 assert.is_true(ok)

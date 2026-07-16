@@ -29,7 +29,10 @@ payload, launchers, and installers as GitHub release assets.
   `love.math` random state.
 - Stale-process detection: `ping` reports the running build, and a game that
   cannot bind an already-served MCP port logs an ERROR naming the conflict.
-- `tecs api` resolves `tecs.builtins` (Transform et al); `check` hints
+- `tecs api` resolves type aliases to their terminal type (`tecs api
+  tecs.System` shows the `function(dt, world)` signature, not a dead-end
+  "type alias to ..."), and resolves `tecs.builtins` (Transform et al);
+  `check` hints
   `math.floor` on integer-index errors.
 - `start_game '{"frozen":true}'` boots the game with the freeze already held
   (inspectable at frame zero; `cmd_freeze on=false` releases it).

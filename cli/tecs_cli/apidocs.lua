@@ -69,20 +69,20 @@ local function module_type(env, cache, path)
     return mt
 end
 
--- Resolve a field type to its underlying record / interface definition,
--- following typedecl re-exports and unresolved nominals. Returns the
--- structural def (record or interface) or nil for anything else.
+-- Resolve a field type to its terminal structural type -- record, interface,
+-- function, map, whatever the alias chain ends at -- following typedecl
+-- re-exports and unresolved nominals. `type System = types.System =
+-- function(dt, world)` resolves through to the function type instead of
+-- dead-ending at the alias.
 --   aliasMap : local-var name -> require path (from the module's own AST)
 --   moddef   : the module record, so same-module type refs resolve too
-local function resolve_struct(field, aliasMap, moddef, env, cache)
+local function resolve_type(field, aliasMap, moddef, env, cache)
     local t = field
     local guard = 0
     while t and guard < 32 do
         guard = guard + 1
         local tn = t.typename
-        if tn == "record" or tn == "interface" then
-            return t
-        elseif tn == "typedecl" then
+        if tn == "typedecl" then
             t = t.def
         elseif tn == "generic" then
             t = t.t
@@ -111,8 +111,17 @@ local function resolve_struct(field, aliasMap, moddef, env, cache)
                 t = cur
             end
         else
-            return nil
+            return t
         end
+    end
+    return nil
+end
+
+-- resolve_type narrowed to record/interface terminals (the expandable kinds).
+local function resolve_struct(field, aliasMap, moddef, env, cache)
+    local t = resolve_type(field, aliasMap, moddef, env, cache)
+    if t and (t.typename == "record" or t.typename == "interface") then
+        return t
     end
     return nil
 end
@@ -501,10 +510,24 @@ function M.extract(entry)
                     see = sees,
                 })
             else
+                -- Aliases used to dead-end here ("type alias to types.System"),
+                -- pushing readers to grep vendored source. Resolve the chain
+                -- and show the terminal type inline, keeping the alias as a
+                -- breadcrumb.
+                local shown = show_type(ft)
+                local sig = prefix .. name .. ": " .. shown
+                local resolved = resolve_type(ft, aliasMap, moddef, env, cache)
+                if resolved then
+                    local shownResolved = show_type(resolved)
+                    if shownResolved ~= shown then
+                        sig = prefix .. name .. ": " .. shownResolved
+                            .. "   (" .. shown .. ")"
+                    end
+                end
                 push({
                     symbol = name,
                     kind = "type",
-                    signature = prefix .. name .. ": " .. show_type(ft),
+                    signature = sig,
                     params = {},
                     returns = {},
                     fields = {},
