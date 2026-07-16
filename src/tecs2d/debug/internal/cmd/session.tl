@@ -33,6 +33,9 @@ local stepSchema <const>: cmdargs.Schema = {
             .. "true to stop early (n is the cap). Side effects allowed."},
         wait = {kind = "boolean",
             help = "defer the response until the stepped frames have run"},
+        quiet = {kind = "boolean",
+            help = "deferred form only: return just the lua values plus "
+                .. "frames_run/stopped_early, no schedule echo"},
         force = {kind = "boolean",
             help = "queue events even when a press is already held (tape force)"},
     },
@@ -241,7 +244,7 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             name = "step",
             section = "Session",
             shortHelp = "tick the game forward N frames while otherwise frozen",
-            mcpHelp = "Advance gameplay by n frames while the freeze controller is held, then freeze again. Each stepped frame carries a DETERMINISTIC dt of 1/fps (the run config's fps, echoed as step_dt) regardless of display refresh rate, so `n` frames advance exactly n/fps gameplay seconds; pass dt= to override per call. ONE-CALL VERIFICATION: pass events= (input_tape rows, at=1 is the first stepped frame) to queue inputs, and lua= (run_lua sandbox) to read state after the last frame -- the response then arrives when the step COMPLETES, carrying the lua values, so tape->step->read is a single call: cmd_step '{\"events\":[{\"at\":1,\"event\":\"keypressed\",\"args\":[\"left\"]}],\"n\":10,\"lua\":\"return {x=head.x}\"}'. STEP-UNTIL: per_frame= evaluates after EACH stepped frame; return true to stop early, making n the cap -- cmd_step '{\"n\":300,\"per_frame\":\"return gs.over\",\"lua\":\"return {score=gs.score}\"}' runs until game-over or 300 frames and reports frames_run/stopped_early. Side effects in per_frame are allowed (same sandbox). wait=true defers the response without a read. Without lua/per_frame/wait the call is ASYNC: it returns when the frames are scheduled, so read state in a follow-up call. Fails when nothing holds the freeze; acquire it with cmd_freeze on=true first.",
+            mcpHelp = "Advance gameplay by n frames while the freeze controller is held, then freeze again. Each stepped frame carries a DETERMINISTIC dt of 1/fps (the run config's fps, echoed as step_dt) regardless of display refresh rate, so `n` frames advance exactly n/fps gameplay seconds; pass dt= to override per call. ONE-CALL VERIFICATION: pass events= (input_tape rows, at=1 is the first stepped frame) to queue inputs, and lua= (run_lua sandbox) to read state after the last frame -- the response then arrives when the step COMPLETES, carrying the lua values, so tape->step->read is a single call: cmd_step '{\"events\":[{\"at\":1,\"event\":\"keypressed\",\"args\":[\"left\"]}],\"n\":10,\"lua\":\"return {x=head.x}\"}'. STEP-UNTIL: per_frame= evaluates after EACH stepped frame; return true to stop early, making n the cap -- cmd_step '{\"n\":300,\"per_frame\":\"return gs.over\",\"lua\":\"return {score=gs.score}\"}' runs until game-over or 300 frames and reports frames_run/stopped_early. Side effects in per_frame are allowed (same sandbox). wait=true defers the response without a read; quiet=true trims the deferred response to just the lua values plus frames_run/stopped_early (no schedule echo). Without lua/per_frame/wait the call is ASYNC: it returns when the frames are scheduled, so read state in a follow-up call. Fails when nothing holds the freeze; acquire it with cmd_freeze on=true first.",
             schema = stepSchema,
             outputSchema = {
                 type = "object",
@@ -331,6 +334,12 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                                 .. "sandbox (mcp.new())"}
                     end
                     data.waited = true
+                    -- quiet=true: the caller wants the answer, not the
+                    -- schedule -- drop the will_fire/held/step_dt echo so
+                    -- every verification round-trip stops re-paying for it.
+                    if v.quiet == true then
+                        data = {}
+                    end
 
                     local hookErr: string = nil
                     if perFrameCode ~= nil then
@@ -346,7 +355,8 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     end
 
                     return {ok = true,
-                        message = "stepping " .. tostring(n) .. " frame(s), deferred",
+                        message = v.quiet ~= true
+                            and ("stepping " .. tostring(n) .. " frame(s), deferred") or nil,
                         data = data,
                         deferred = function(respond: function({string: any}),
                                 failWith: function(string, string))

@@ -400,6 +400,20 @@ describe("mcp compliance: freeze, step, resume", function()
         luassert.are.equal(before + 4, readFrames(app))
     end)
 
+    it("cmd_step quiet=true trims the deferred response to the answer", function()
+        local res = app.client:call("cmd_step", {
+            n = 2, quiet = true,
+            lua = "return {frames = tecsTest.frames}",
+        })
+        luassert.are.equal(1, res.returned as integer)
+        luassert.are.equal(2, res.frames_run as integer)
+        -- No schedule echo: the noisy fields are absent, not just empty.
+        luassert.is_nil(res.step_dt)
+        luassert.is_nil(res.waited)
+        luassert.is_nil(res.will_fire)
+        luassert.is_nil(res.message)
+    end)
+
     it("cmd_step per_frame stops early when the condition hits", function()
         -- "Step until": n is a cap, the hook decides. The condition fires
         -- when the frame counter crosses a line well inside the cap.

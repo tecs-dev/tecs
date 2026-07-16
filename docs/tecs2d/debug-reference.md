@@ -2656,11 +2656,11 @@ freeze on
 freeze off
 ```
 
-### `step [n] [dt=N] [events={}] [force] [lua=...] [per_frame=...] [wait]` {#cmd-step}
+### `step [n] [dt=N] [events={}] [force] [lua=...] [per_frame=...] [quiet] [wait]` {#cmd-step}
 
 Tick the game forward N frames while otherwise frozen.
 
-Advance gameplay by n frames while the freeze controller is held, then freeze again. Each stepped frame carries a DETERMINISTIC dt of 1/fps (the run config's fps, echoed as step_dt) regardless of display refresh rate, so `n` frames advance exactly n/fps gameplay seconds; pass dt= to override per call. ONE-CALL VERIFICATION: pass events= (input_tape rows, at=1 is the first stepped frame) to queue inputs, and lua= (run_lua sandbox) to read state after the last frame -- the response then arrives when the step COMPLETES, carrying the lua values, so tape->step->read is a single call: cmd_step '{"events":[{"at":1,"event":"keypressed","args":["left"]}],"n":10,"lua":"return {x=head.x}"}'. STEP-UNTIL: per_frame= evaluates after EACH stepped frame; return true to stop early, making n the cap -- cmd_step '{"n":300,"per_frame":"return gs.over","lua":"return {score=gs.score}"}' runs until game-over or 300 frames and reports frames_run/stopped_early. Side effects in per_frame are allowed (same sandbox). wait=true defers the response without a read. Without lua/per_frame/wait the call is ASYNC: it returns when the frames are scheduled, so read state in a follow-up call. Fails when nothing holds the freeze; acquire it with cmd_freeze on=true first.
+Advance gameplay by n frames while the freeze controller is held, then freeze again. Each stepped frame carries a DETERMINISTIC dt of 1/fps (the run config's fps, echoed as step_dt) regardless of display refresh rate, so `n` frames advance exactly n/fps gameplay seconds; pass dt= to override per call. ONE-CALL VERIFICATION: pass events= (input_tape rows, at=1 is the first stepped frame) to queue inputs, and lua= (run_lua sandbox) to read state after the last frame -- the response then arrives when the step COMPLETES, carrying the lua values, so tape->step->read is a single call: cmd_step '{"events":[{"at":1,"event":"keypressed","args":["left"]}],"n":10,"lua":"return {x=head.x}"}'. STEP-UNTIL: per_frame= evaluates after EACH stepped frame; return true to stop early, making n the cap -- cmd_step '{"n":300,"per_frame":"return gs.over","lua":"return {score=gs.score}"}' runs until game-over or 300 frames and reports frames_run/stopped_early. Side effects in per_frame are allowed (same sandbox). wait=true defers the response without a read; quiet=true trims the deferred response to just the lua values plus frames_run/stopped_early (no schedule echo). Without lua/per_frame/wait the call is ASYNC: it returns when the frames are scheduled, so read state in a follow-up call. Fails when nothing holds the freeze; acquire it with cmd_freeze on=true first.
 
 MCP tool: `cmd_step`
 
@@ -2672,6 +2672,7 @@ MCP tool: `cmd_step`
 | `force` | boolean | queue events even when a press is already held (tape force) |
 | `lua` | string | Lua to evaluate (run_lua sandbox) after the last frame; defers the response until the step completes |
 | `per_frame` | string | Lua evaluated after EACH stepped frame; return true to stop early (n is the cap). Side effects allowed. |
+| `quiet` | boolean | deferred form only: return just the lua values plus frames_run/stopped_early, no schedule echo |
 | `wait` | boolean | defer the response until the stepped frames have run |
 
 ::: details Result data schema
