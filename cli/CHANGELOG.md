@@ -46,6 +46,11 @@ payload, launchers, and installers as GitHub release assets.
 - `tecs api` renders a component's constructor above its field list and
   rejects unknown `--fields` keys with the valid-key list instead of
   silently dropping them.
+- `cmd_step` one-call form: `events=` queues input-tape rows onto the stepped
+  frames, `lua=`/`wait=` defer the response until the frames have run, with
+  the lua values in the step result — tape→step→read in one round-trip.
+- Trimmed the generated AGENTS.md's MCP section to a pointer at the tecs-cli
+  skill (the playbook was duplicated in both and paid for twice per session).
 - `start_game '{"frozen":true}'` boots the game with the freeze already held
   (inspectable at frame zero; `cmd_freeze on=false` releases it).
 - `tecs new` stamps the LÖVE identity/title with the project name, so games no

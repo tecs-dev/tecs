@@ -86,10 +86,19 @@ and make every observation deterministic:
    be arranged; the mechanism itself must run for real. Testing "eating grows the snake"? Move
    the food one cell ahead — but the eat must happen via a real stepped frame, and if steering
    is under test, the turn must come from `cmd_input_tape`, not a direction-field write.
-4. **Advance deliberately and re-read.** `cmd_step '{"n":<small>}'`, then read state in a
-   follow-up call (step is async) and compare against what you predicted. Adjust the plan —
-   queue the next inputs, step again. Small increments beat one big leap: each step is a
-   checkpoint where a wrong prediction is caught within frames of its cause.
+4. **Advance and read in ONE call.** `cmd_step` takes the whole interaction: `events` (tape
+   rows, `at:1` = first stepped frame), `n`, and `lua` — the response arrives after the frames
+   ran, carrying the lua values:
+   ```
+   cmd_step '{"events":[{"at":1,"event":"keypressed","args":["left"]},
+                        {"at":2,"event":"keyreleased","args":["left"]}],
+              "n":10, "lua":"return {x=head.x, y=head.y, over=gs.over}"}'
+   ```
+   One round-trip = press left, run 10 frames, read state. Compare against what you predicted,
+   then issue the next one-call step. Small increments beat one big leap: each step is a
+   checkpoint where a wrong prediction is caught within frames of its cause. (Bare `cmd_step`
+   without `lua`/`wait` still returns at *schedule* time — then you must read in a follow-up
+   call; prefer the one-call form.)
 5. **Repeat 2–4 until the goal state is proven**, then one bounded screenshot if visuals matter,
    and `cmd_freeze '{"on":false}'` only when you're done.
 
@@ -137,26 +146,25 @@ Using the game tools:
 - **The default gameplay-verification loop is freeze → stage → step → assert.** Not a debugging
   fallback — start here for anything time-sensitive (auto-death timers, movement ticks,
   spawns): `cmd_freeze` → stage the exact scenario (`cmd_set`/`cmd_spawn` or `run_lua`) →
-  `cmd_step '{"n":N}'` → assert via a `run_lua` state read (e.g. return `{score, len, over}`)
+  one-call `cmd_step` (events + n + lua, see the canonical session above) → compare, re-stage
   → `cmd_freeze '{"on":false}'`. Remove time from the equation FIRST; screenshot-racing a live
-  game wastes a capture per attempt and still proves nothing deterministically. **`cmd_step` is
-  asynchronous**: it returns when the frames are *scheduled*; they tick over the next loop
-  iterations — so read state in a follow-up call (or `fixture.eventually` in integ specs),
-  never in the same breath as the step. **Stepped frames carry a deterministic dt of 1/fps**
-  (echoed as `step_dt`), so `n` frames advance exactly `n/fps` gameplay seconds — to cross a
-  0.12s timer at 60fps, step 8; or pass `dt` to cover it in fewer frames
-  (`'{"n":1,"dt":0.12}'`). Recipe for
-  "does eating grow the snake": freeze → place food one cell ahead of the head → step across
-  one tick → assert the new length via `cmd_resources '{"name":"game.state"}'` or `cmd_fetch`.
-- **Verify the real input path with `cmd_input_tape`, not by poking state.** It queues literal
-  LÖVE events against the gameplay-frame clock — `cmd_input_tape '{"events":[{"at":1,"event":
-  "keypressed","args":["up"]},{"at":2,"event":"keyreleased","args":["up"]}]}'` then
-  `cmd_step '{"n":3}'` — and each row dispatches through the actual input pipeline
-  (`tecs2d.input`, Tecs events, `love.*` callbacks) on its scheduled frame, so
-  `isKeyPressed`-driven logic is exercised for real, deterministically, while frozen. Model
-  releases as their own rows; the step result echoes `will_fire`/`held`, and bare
-  `cmd_input_tape` reports what actually fired and anything still held (`clear=true` releases
-  it). Args are forgiving like `send_love_event`. It also works from the debugger console:
+  game wastes a capture per attempt and still proves nothing deterministically. **With `lua`
+  or `wait:true` the response arrives after the frames ran** (carrying `values`); without
+  them `cmd_step` returns at *schedule* time and you must read in a follow-up call (or
+  `fixture.eventually` in integ specs) — prefer the one-call form. **Stepped frames carry a
+  deterministic dt of 1/fps** (echoed as `step_dt`), so `n` frames advance exactly `n/fps`
+  gameplay seconds — to cross a 0.12s timer at 60fps, step 8; or pass `dt` to cover it in
+  fewer frames (`'{"n":1,"dt":0.12}'`). Recipe for "does eating grow the snake": freeze →
+  place food one cell ahead → `cmd_step '{"n":9,"lua":"return {len = gs.len}"}'` → the
+  response IS the assertion read.
+- **Verify the real input path by taping events, not by poking state.** `cmd_step`'s `events`
+  rows (and standalone `cmd_input_tape`) queue literal LÖVE events against the gameplay-frame
+  clock, and each row dispatches through the actual input pipeline (`tecs2d.input`, Tecs
+  events, `love.*` callbacks) on its scheduled frame — so `isKeyPressed`-driven logic is
+  exercised for real, deterministically, while frozen. Model releases as their own rows; the
+  step result echoes `queued`/`will_fire`/`held`, and bare `cmd_input_tape` reports what
+  actually fired and anything still held (`clear=true` releases it). Args are forgiving like
+  `send_love_event`. It also works from the debugger console:
   `input_tape {{at=1, event="keypressed", args={"up"}}}`.
 - **Watch world events instead of polling for them.** Wire an observer to a logger once via
   `run_lua`, then read it incrementally through `get_logs` — the game pushes into the buffer,
