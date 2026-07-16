@@ -7,6 +7,7 @@
 
 local tecs <const> = require("tecs")
 local mcpinfo <const> = require("tecs2d.internal.mcpinfo")
+local inputtape <const> = require("tecs2d.debug.internal.inputtape")
 local contextreport <const> = require("tecs2d.debug.internal.contextreport")
 local cmdargs <const> = require("tecs2d.debug.internal.cmdargs")
 local cmdtypes <const> = require("tecs2d.debug.internal.cmdtypes")
@@ -23,6 +24,18 @@ local stepSchema <const>: cmdargs.Schema = {
     positional = {"n"},
 }
 cmdargs.validate(stepSchema)
+
+local inputTapeSchema <const>: cmdargs.Schema = {
+    args = {
+        events = {kind = "table",
+            help = "array of {at = <gameplay frames from now>, event = <love event>, args = {...}}"},
+        clear = {kind = "boolean",
+            help = "drop pending rows and release anything the tape holds down"},
+        force = {kind = "boolean", help = "allow taping 'escape'"},
+    },
+    positional = {"events"},
+}
+cmdargs.validate(inputTapeSchema)
 
 function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
     -- The shared context, aliased once so command bodies stay terse.
@@ -213,12 +226,18 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             name = "step",
             section = "Session",
             shortHelp = "tick the game forward N frames while otherwise frozen",
-            mcpHelp = "Advance gameplay by n frames while the freeze controller is held, then freeze again. Fails when nothing holds the freeze; acquire it with cmd_freeze on=true first.",
+            mcpHelp = "Advance gameplay by n frames while the freeze controller is held, then freeze again. ASYNC: this returns when the frames are scheduled -- they tick over the next loop iterations, so read state with a follow-up call, never in the same response you scheduled the step in. Fails when nothing holds the freeze; acquire it with cmd_freeze on=true first.",
             schema = stepSchema,
             outputSchema = {
                 type = "object",
                 properties = {
                     frames = {type = "integer", description = "frames scheduled to tick"},
+                    will_fire = {type = "array", items = {type = "object", properties = {
+                        ["in"] = {type = "integer", description = "gameplay frames from now"},
+                        event = {type = "string"},
+                    }}, description = "queued input_tape rows due within this step"},
+                    held = {type = "array", items = {type = "string"},
+                        description = "inputs the tape currently holds down"},
                 },
                 required = {"frames"},
             },
@@ -228,8 +247,101 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 if not ok then
                     return {ok = false, code = "not_frozen", message = "step: " .. err}
                 end
+                local data: {string: any} = {frames = n}
+                -- Echo the input_tape window so "did my rows land in this
+                -- step?" needs no follow-up call. Frames tick asynchronously,
+                -- so this is the schedule; input_tape status reports actuals.
+                local tape = w.resources[inputtape.KEY]
+                if tape then
+                    local will <const> = tape:upcoming(n)
+                    if #will > 0 then data.will_fire = will end
+                    local heldNow <const> = tape:heldIds()
+                    if #heldNow > 0 then data.held = heldNow end
+                end
                 return {ok = true, message = "stepping " .. tostring(n) .. " frame(s)",
-                    data = {frames = n}}
+                    data = data}
+            end,
+        },
+        {
+            name = "input_tape",
+            section = "Session",
+            shortHelp = "queue frame-scheduled love events; no args = status",
+            mcpHelp = "Queue literal LÖVE events against the gameplay-frame clock: each row "
+                .. "{at, event, args} dispatches through the real input path (the tecs2d.input "
+                .. "snapshot, Tecs events, and love.* callbacks) on gameplay frame `at`, counted "
+                .. "from now (1 = the next gameplay frame). Built for deterministic verification: "
+                .. "cmd_freeze on -> queue -> cmd_step n -> read state; unfrozen it consumes on "
+                .. "live frames. Args are forgiving like send_love_event (keypressed needs just "
+                .. "the key). Model releases as their own rows (keyreleased, mousereleased, ...); "
+                .. "the status form and cmd_step report anything still held. With no arguments: "
+                .. "status (frame, pending rows, recent fired events, held inputs). clear=true "
+                .. "drops pending rows and synthesizes releases. Gamepad/joystick events are not "
+                .. "tapeable yet (they need device objects). Raw love.* polls do not see taped "
+                .. "input; read tecs2d.input.",
+            schema = inputTapeSchema,
+            examples = {
+                'input_tape {{at=1, event="keypressed", args={"up"}}, {at=2, event="keyreleased", args={"up"}}}',
+                "input_tape",
+                "input_tape clear=true",
+            },
+            outputSchema = {
+                type = "object",
+                properties = {
+                    queued = {type = "integer", description = "rows accepted (queue form)"},
+                    pending = {type = "integer", description = "rows waiting to fire"},
+                    frame = {type = "integer", description = "gameplay frames the tape has seen"},
+                    upcoming = {type = "array", items = {type = "object", properties = {
+                        ["in"] = {type = "integer"},
+                        event = {type = "string"},
+                    }}, description = "pending rows, relative frames (status form)"},
+                    fired = {type = "array", items = {type = "object", properties = {
+                        frame = {type = "integer"},
+                        event = {type = "string"},
+                    }}, description = "recently dispatched rows, newest last (status form)"},
+                    held = {type = "array", items = {type = "string"},
+                        description = "press-type inputs without a release yet"},
+                    dropped = {type = "integer", description = "rows dropped (clear form)"},
+                    released = {type = "integer", description = "releases synthesized (clear form)"},
+                },
+            },
+            run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
+                local tape = inputtape.ensure(w)
+
+                if v.clear == true then
+                    local dropped <const>, released <const> = tape:clear()
+                    return {ok = true,
+                        message = "input_tape: dropped " .. tostring(dropped)
+                            .. " row(s), released " .. tostring(released) .. " held input(s)",
+                        data = {dropped = dropped, released = released}}
+                end
+
+                if v.events == nil then
+                    local firedOut: {{string: any}} = {}
+                    local firstFired = math.max(1, #tape.fired - 15)
+                    for i = firstFired, #tape.fired do
+                        local f <const> = tape.fired[i]
+                        firedOut[#firedOut + 1] = {frame = f.frame, event = f.event}
+                    end
+                    local popup: {string} = {"input_tape  (frame " .. tostring(tape.frame)
+                        .. ", " .. tostring(#tape.rows) .. " pending):"}
+                    local up <const> = tape:upcoming(2147483647)
+                    for i = 1, math.min(#up, 12) do
+                        popup[#popup + 1] = "  +" .. tostring(up[i]["in"]) .. "\t"
+                            .. tostring(up[i].event)
+                    end
+                    return {ok = true, popup = popup,
+                        data = {frame = tape.frame, pending = #tape.rows,
+                            upcoming = up, fired = firedOut, held = tape:heldIds()}}
+                end
+
+                local queued <const>, qerr <const> =
+                    tape:queue(v.events as {{string: any}}, v.force == true)
+                if not queued then
+                    return {ok = false, code = "invalid_tape", message = "input_tape: " .. qerr}
+                end
+                return {ok = true,
+                    message = "input_tape: queued " .. tostring(queued) .. " row(s)",
+                    data = {queued = queued, pending = #tape.rows}}
             end,
         },
         {

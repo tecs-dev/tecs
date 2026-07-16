@@ -50,8 +50,11 @@ tools.list = {
     {
         name = "ping",
         annotations = {readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false},
-        description = "Check if the game is running. Call cmd_capabilities next to discover what the " ..
-            "session's cmd_* command tools support." .. JSON_TEXT_RESPONSE,
+        description = "Check if the game is running and WHICH build is answering: the result's " ..
+            "`build` ({name, built, dev}) identifies the running code, so compare `build.built` " ..
+            "against your latest `tecs build` to detect a stale process before trusting any " ..
+            "other call. Call cmd_capabilities next to discover what the session's cmd_* " ..
+            "command tools support." .. JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
@@ -83,7 +86,8 @@ tools.list = {
             properties = {
                 points = {
                     type = "array",
-                    description = "Points to sample, each an object with x and y. " ..
+                    description = "Points to sample, each an object with x and y -- " ..
+                        "e.g. [{\"x\": 160, \"y\": 120}, {\"x\": 8, \"y\": 8}] (NOT [[x, y]] pairs). " ..
                         "Pixel coordinates by default; out-of-range points are clamped.",
                     items = {
                         type = "object",
@@ -143,8 +147,12 @@ tools.list = {
             "The code is sandboxed: love2d APIs and the ECS world are available, but the " ..
             "filesystem (io, os.execute) and module loading (require, load, dofile) are not, " ..
             "and love escape hatches are removed (love.thread, love.filesystem.load/mount/write). " ..
-            "Use 'world' directly to access the ECS world. Prefer the structured cmd_* " ..
-            "command tools (cmd_fetch, cmd_set, cmd_spawn, ...) when one covers the operation." ..
+            "Use 'world' directly to access the ECS world, and modules(\"components.food\") to " ..
+            "reach the game's own loaded modules -- their component records and constructors " ..
+            "work directly (e.g. local Food = modules(\"components.food\"); world:query(Food)). " ..
+            "Named resources read via findKey: world.resources[require(\"tecs\").findKey(\"game.state\")]. " ..
+            "Prefer the structured cmd_* command tools (cmd_fetch, cmd_set, cmd_spawn, " ..
+            "cmd_resources, ...) when one covers the operation." ..
             JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",

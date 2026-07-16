@@ -20,6 +20,17 @@ local record inputHandlers
     quitRequested: integer | boolean
 
     pollEvents: function(world: tecs.World): tecs.System
+
+    --- Dispatch one LÖVE event through the same path pollEvents uses for
+    --- real events: the Tecs input handler first (so the input snapshot is
+    --- updated), then any user-defined love.* callback. Used by the debug
+    --- input tape to inject scheduled events indistinguishably from real
+    --- ones. `quit` is not dispatchable here.
+    dispatch: function(w: tecs.World, name: string, ...: any)
+
+    --- Optional single listener invoked for every dispatched event, real or
+    --- taped (the debugger's replay recorder). nil when nothing records.
+    onDispatch: function(name: string, ...: any)
 end
 
 -------------------------------------------------------------------------------
@@ -231,7 +242,6 @@ inputHandlers.restartRequested = false
 inputHandlers.quitRequested = false
 
 function inputHandlers.pollEvents(w: tecs.World): tecs.System
-    local handlers <const> = inputHandlers.handlers
     local quit_func <const> = love.quit
 
     return function()
@@ -262,22 +272,30 @@ function inputHandlers.pollEvents(w: tecs.World): tecs.System
                     inputHandlers.quitRequested = exitCode
                 end
             else
-                -- Run the Tecs input handler BEFORE user-defined love.*
-                -- callbacks so that anything reading tecs2d.input (keysPressed,
-                -- mouseButtons, etc.) from inside a love.keypressed /
-                -- love.mousepressed override sees the current event already
-                -- applied to the input snapshot.
-                local inputHandler <const> = rawget(handlers, name)
-                if inputHandler then
-                    inputHandler(w, a, b, c, d, e, f, g, h)
-                end
-
-                local loveHandler <const> = rawget(love_handlers, name)
-                if loveHandler then
-                    loveHandler(a, b, c, d, e, f, g, h)
-                end
+                inputHandlers.dispatch(w, name, a, b, c, d, e, f, g, h)
             end
         end
+    end
+end
+
+-- Run the Tecs input handler BEFORE user-defined love.* callbacks so that
+-- anything reading tecs2d.input (keysPressed, mouseButtons, etc.) from inside
+-- a love.keypressed / love.mousepressed override sees the current event
+-- already applied to the input snapshot.
+function inputHandlers.dispatch(w: tecs.World, name: string, ...: any)
+    local listener <const> = inputHandlers.onDispatch
+    if listener then
+        listener(name, ...)
+    end
+
+    local inputHandler <const> = rawget(inputHandlers.handlers, name)
+    if inputHandler then
+        inputHandler(w, ...)
+    end
+
+    local loveHandler <const> = rawget(love_handlers, name)
+    if loveHandler then
+        loveHandler(...)
     end
 end
 
