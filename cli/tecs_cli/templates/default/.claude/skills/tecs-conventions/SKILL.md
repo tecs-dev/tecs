@@ -18,6 +18,20 @@ first time. For the full API, run `tecs docs <page>` (offline mirror of the docs
   site.
 - **Tags** are added by passing the container (`world:spawn(t, Dead)`); other components must be
   constructed (`gfx.Color(1,0,0,1)`).
+- **Entities are RETAINED objects, not draw calls — never spawn per frame to draw.** Spawn an
+  entity once (Startup, or the moment gameplay creates the thing) and MUTATE its components
+  to move/restyle it; the renderer redraws retained entities every frame by itself. This
+  shape is always a leak (hundreds of orphaned entities per second, even while frozen):
+  ```lua
+  -- WRONG: a per-frame system re-spawning its visuals
+  run = function()
+      for i, seg in ipairs(state.body) do
+          world:spawn(Transform(seg.x, seg.y, 0, 2), gfx.Rectangle(14, 14))  -- leaks!
+      end
+  end
+  -- RIGHT: spawn segments when the body grows; each frame only reposition:
+  --   local t = world:getMut(state.segmentIds[i], Transform); t.x, t.y = ...
+  ```
 - **Mutations inside a system are STAGED until the frame commits.** An entity spawned in this
   frame's system is not query-visible and not `getMut`-able until the commit drain — so never
   reconcile a variable-length render set by "query how many exist, spawn/despawn the
