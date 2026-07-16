@@ -8,6 +8,33 @@ payload, launchers, and installers as GitHub release assets.
 
 ## [Unreleased]
 
+### Fixed
+
+- The MCP bridge's `tools/list` no longer corrupts empty `{}` schemas into `[]`
+  (strict clients like Claude Code rejected the whole list, so no tecs tools
+  ever appeared); the user-level tool cache is now version-keyed so upgrades
+  drop poisoned copies.
+
+### Added
+
+- `tecs call <tool> ['<json>']` / `tecs call --list`: built-in MCP client for
+  the running game. `tecs info --keys` lists its named context keys.
+- Named context keys (`tecs.newKey("game.state")`, `tecs.findKey`/`listKeys`),
+  `cmd_resources` value reads, `cmd_lua_modules`/`cmd_lua_exports`, and a
+  `modules()` helper in the `run_lua` sandbox.
+- `cmd_input_tape`: schedule literal LÖVE events on exact gameplay frames for
+  deterministic input verification; `cmd_step` echoes the scheduled window.
+- `cmd_rewind_replay`: rewind records inputs + per-frame dt while running and
+  replays deterministically from any ring entry; snapshots now carry
+  `love.math` random state.
+- Stale-process detection: `ping` reports the running build, and a game that
+  cannot bind an already-served MCP port logs an ERROR naming the conflict.
+- `tecs api` resolves `tecs.builtins` (Transform et al); `check` hints
+  `math.floor` on integer-index errors.
+- Reworked agent guidance: canonical freeze/tape/step verification loop,
+  staging + goal ladder, time-travel workflow, and a world-space template
+  gameplay layer with an idle tween.
+
 ## [0.10.7] - 2026-07-15
 
 ### Added
