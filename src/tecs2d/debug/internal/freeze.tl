@@ -46,7 +46,7 @@ local record freeze
     ensure: function(w: tecs.World): Controller
 end
 
-freeze.KEY = tecs.newKey()
+freeze.KEY = tecs.newKey("tecs2d.debug.freeze")
 
 -- Every gameplay phase. The debugger overlay draws in PostRender, MCP runs in
 -- RenderFirst, and the event poller runs outside the phase system, so

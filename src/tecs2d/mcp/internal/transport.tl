@@ -226,8 +226,25 @@ function transport.startServer(port: number)
 
     pendingBindPort = port
     nextBindAttempt = lt.getTime() + 1.0
-    log:warn("MCP HTTP server could not bind port %d yet (%s); retrying in the background",
-        port as integer, tostring(lastErr))
+
+    -- Distinguish a live squatter from a draining TIME_WAIT: if a connect
+    -- succeeds, another process is SERVING this port right now, and anything
+    -- a client sends to it reaches that process, not this one. Say so loudly
+    -- -- silently validating against a stale game is the worst failure mode.
+    local probe = socket.tcp()
+    probe:settimeout(0.2)
+    local connected = probe:connect("127.0.0.1", port as integer)
+    pcall(function() probe:close() end)
+    if connected then
+        log:error("MCP port %d is already served by ANOTHER process (a stale game?). "
+            .. "Requests to this port reach that process, not this one. Stop it "
+            .. "(restart_game / cmd_quit / kill the old pid), or this instance keeps "
+            .. "retrying in the background without MCP.",
+            port as integer)
+    else
+        log:warn("MCP HTTP server could not bind port %d yet (%s); retrying in the background",
+            port as integer, tostring(lastErr))
+    end
 end
 
 function transport.cleanup()

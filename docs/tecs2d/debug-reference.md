@@ -1262,8 +1262,9 @@ Engine introspection: systems, archetypes, components, states, physics, controll
 | [`assets`](#cmd-assets) | List cached assets, show one, or reload one from disk. |
 | [`audio`](#cmd-audio) | Audio info; stop everything or mute the master group. |
 | [`fetch`](#cmd-fetch) | Fetch entities matching a component query, without selecting them. |
-| [`resources`](#cmd-resources) | List world resources with their key and type names. |
+| [`resources`](#cmd-resources) | List world resources; pass a name to read one value. |
 | [`bundles`](#cmd-bundles) | List registered bundles or spawn an entity from one. |
+| [`lua`](#cmd-lua) | Inspect the Lua side: loaded modules and their exports. |
 
 ### `systems` {#cmd-systems}
 
@@ -1667,13 +1668,17 @@ fetch Enemy limit=10
 fetch Transform x=0 y=0 w=640 h=360
 ```
 
-### `resources` {#cmd-resources}
+### `resources [name]` {#cmd-resources}
 
-List world resources with their key and type names.
+List world resources; pass a name to read one value.
 
-Every world resource as {key, type}: keys resolve to their registered name when available, values to their metatable type name. Read-only; use it to discover installed subsystems and custom game resources.
+Without arguments: every world resource as {key, type} -- keys created with tecs.newKey("name") resolve to that name -- plus `unset`, the registered key names holding no value yet. With name=&lt;key name>: that resource's current value, deep-copied to JSON-safe data (live objects render as their tostring). This is the way to read named game state (e.g. a GameState resource) without writing Lua.
 
 MCP tool: `cmd_resources` (read-only, idempotent)
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `name` | string | named key (from tecs.newKey("name")): return that resource's value |
 
 ::: details Result data schema
 ```json
@@ -1681,6 +1686,10 @@ MCP tool: `cmd_resources` (read-only, idempotent)
   "properties": {
     "count": {
       "type": "integer"
+    },
+    "key": {
+      "description": "the requested key (value form)",
+      "type": "string"
     },
     "resources": {
       "items": {
@@ -1697,12 +1706,22 @@ MCP tool: `cmd_resources` (read-only, idempotent)
         "type": "object"
       },
       "type": "array"
+    },
+    "set": {
+      "description": "whether the resource holds a value (value form)",
+      "type": "boolean"
+    },
+    "unset": {
+      "description": "registered key names with no value (list form)",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "value": {
+      "description": "the resource value, JSON-safe (value form)"
     }
   },
-  "required": [
-    "count",
-    "resources"
-  ],
   "type": "object"
 }
 ```
@@ -1710,6 +1729,7 @@ MCP tool: `cmd_resources` (read-only, idempotent)
 
 ```
 resources
+resources game.state
 ```
 
 ### `bundles` {#cmd-bundles}
@@ -1800,6 +1820,87 @@ MCP tool: `cmd_bundles_spawn`
 bundles spawn enemy
 bundles spawn enemy {Transform = {x = 10, y = 5}}
 ```
+
+### `lua` {#cmd-lua}
+
+Inspect the Lua side: loaded modules and their exports.
+
+```
+lua modules
+lua modules snake
+lua exports components.food
+```
+
+#### `lua modules [contains]` {#cmd-lua-modules}
+
+List loaded module names.
+
+Every module name currently loaded (package.loaded), sorted; pass contains=&lt;text> to filter. The game's own modules appear under the names they are required with (e.g. components.food). Follow with cmd_lua_exports to read one module's exports.
+
+MCP tool: `cmd_lua_modules` (read-only, idempotent)
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `contains` | string | only names containing this substring |
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "count": {
+      "type": "integer"
+    },
+    "modules": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "count",
+    "modules"
+  ],
+  "type": "object"
+}
+```
+:::
+
+#### `lua exports <module>` {#cmd-lua-exports}
+
+Dump a loaded module's exports as data.
+
+A loaded module's exported table, deep-copied to JSON-safe data: scalars and tables come through as values, functions and other live objects as their tostring form (inert -- nothing returned here is callable). Use it to read a game module's constants, keys, and structure without writing Lua.
+
+MCP tool: `cmd_lua_exports` (read-only, idempotent)
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `module` | string | loaded module name (see `lua modules`) (required) |
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "exports": {
+      "description": "the module value, JSON-safe"
+    },
+    "module": {
+      "type": "string"
+    },
+    "type": {
+      "description": "Lua type of the module's return value",
+      "type": "string"
+    }
+  },
+  "required": [
+    "module",
+    "type"
+  ],
+  "type": "object"
+}
+```
+:::
 
 ## Capture
 
@@ -2141,6 +2242,52 @@ MCP tool: `cmd_rewind_load` (destructive)
 | `ref` | string | entry index (newest first), latest, or Ns for seconds back |
 | `ago` | number | seconds back; picks the closest at or before |
 
+#### `rewind replay [ref] [frames] [ago=N]` {#cmd-rewind-replay}
+
+Re-run recorded input and dt forward from a ring entry.
+
+Deterministically re-run the game from a ring entry: restores that snapshot (RNG state included), re-presses inputs that were held at the anchor, queues every recorded input event onto the input tape at its original gameplay frame, feeds the recorded per-frame dt, and steps. Requires the freeze to be held (cmd_freeze on=true) and a rewind session (the recorder rides the ring). frames defaults to the full recording since that entry. Live input is not muted: touching the controls during a replay simply makes a new timeline.
+
+MCP tool: `cmd_rewind_replay`
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `ref` | string | entry index (newest first), latest, or Ns for seconds back |
+| `frames` | number | gameplay frames to replay (default: to the end of the recording) |
+| `ago` | number | seconds back; picks the closest at or before |
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "events": {
+      "description": "recorded event rows queued",
+      "type": "integer"
+    },
+    "frames": {
+      "description": "gameplay frames being replayed",
+      "type": "integer"
+    },
+    "held": {
+      "description": "held inputs re-pressed at the anchor",
+      "type": "integer"
+    },
+    "index": {
+      "description": "the ring entry replayed from",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "index",
+    "frames",
+    "events",
+    "held"
+  ],
+  "type": "object"
+}
+```
+:::
+
 #### `rewind keep [ref] [name] [ago=N]` {#cmd-rewind-keep}
 
 Promote a ring entry into the snapshot history.
@@ -2387,6 +2534,7 @@ The debugger session itself.
 | [`describe`](#cmd-describe) | One command's full contract as structured data. |
 | [`freeze`](#cmd-freeze) | Freeze or unfreeze gameplay under the operator's hold. |
 | [`step`](#cmd-step) | Tick the game forward N frames while otherwise frozen. |
+| [`input_tape`](#cmd-input_tape) | Queue frame-scheduled love events; no args = status. |
 | [`stats`](#cmd-stats) | World stats: entities, archetypes, memory, fps, window. |
 | [`context`](#cmd-context) | The live debugger context: selection, camera, artifacts. |
 | [`restart`](#cmd-restart) | Restart the game process. |
@@ -2510,7 +2658,7 @@ freeze off
 
 Tick the game forward N frames while otherwise frozen.
 
-Advance gameplay by n frames while the freeze controller is held, then freeze again. Fails when nothing holds the freeze; acquire it with cmd_freeze on=true first.
+Advance gameplay by n frames while the freeze controller is held, then freeze again. ASYNC: this returns when the frames are scheduled -- they tick over the next loop iterations, so read state with a follow-up call, never in the same response you scheduled the step in. Fails when nothing holds the freeze; acquire it with cmd_freeze on=true first.
 
 MCP tool: `cmd_step`
 
@@ -2525,6 +2673,29 @@ MCP tool: `cmd_step`
     "frames": {
       "description": "frames scheduled to tick",
       "type": "integer"
+    },
+    "held": {
+      "description": "inputs the tape currently holds down",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "will_fire": {
+      "description": "queued input_tape rows due within this step",
+      "items": {
+        "properties": {
+          "event": {
+            "type": "string"
+          },
+          "in": {
+            "description": "gameplay frames from now",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "type": "array"
     }
   },
   "required": [
@@ -2534,6 +2705,93 @@ MCP tool: `cmd_step`
 }
 ```
 :::
+
+### `input_tape [events] [clear] [force]` {#cmd-input_tape}
+
+Queue frame-scheduled love events; no args = status.
+
+Queue literal LÖVE events against the gameplay-frame clock: each row {at, event, args} dispatches through the real input path (the tecs2d.input snapshot, Tecs events, and love.* callbacks) on gameplay frame `at`, counted from now (1 = the next gameplay frame). Built for deterministic verification: cmd_freeze on -> queue -> cmd_step n -> read state; unfrozen it consumes on live frames. Args are forgiving like send_love_event (keypressed needs just the key). Model releases as their own rows (keyreleased, mousereleased, ...); the status form and cmd_step report anything still held. With no arguments: status (frame, pending rows, recent fired events, held inputs). clear=true drops pending rows and synthesizes releases. Gamepad/joystick events are not tapeable yet (they need device objects). Raw love.* polls do not see taped input; read tecs2d.input.
+
+MCP tool: `cmd_input_tape`
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `events` | table | array of {at = &lt;gameplay frames from now>, event = &lt;love event>, args = {...}} |
+| `clear` | boolean | drop pending rows and release anything the tape holds down |
+| `force` | boolean | allow taping 'escape' |
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "dropped": {
+      "description": "rows dropped (clear form)",
+      "type": "integer"
+    },
+    "fired": {
+      "description": "recently dispatched rows, newest last (status form)",
+      "items": {
+        "properties": {
+          "event": {
+            "type": "string"
+          },
+          "frame": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "frame": {
+      "description": "gameplay frames the tape has seen",
+      "type": "integer"
+    },
+    "held": {
+      "description": "press-type inputs without a release yet",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "pending": {
+      "description": "rows waiting to fire",
+      "type": "integer"
+    },
+    "queued": {
+      "description": "rows accepted (queue form)",
+      "type": "integer"
+    },
+    "released": {
+      "description": "releases synthesized (clear form)",
+      "type": "integer"
+    },
+    "upcoming": {
+      "description": "pending rows, relative frames (status form)",
+      "items": {
+        "properties": {
+          "event": {
+            "type": "string"
+          },
+          "in": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "type": "object"
+}
+```
+:::
+
+```
+input_tape {{at=1, event="keypressed", args={"up"}}, {at=2, event="keyreleased", args={"up"}}}
+input_tape
+input_tape clear=true
+```
 
 ### `stats` {#cmd-stats}
 

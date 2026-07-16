@@ -130,6 +130,16 @@ function mcp.new(config?: mcp.Config): function(world: tecs.World)
             debugapi.ensureCore(w)
         end
 
+        -- Boot frozen when asked (TECS_BOOT_FROZEN=1, set by the bridge's
+        -- start_game {frozen:true}): the freeze is acquired before the first
+        -- frame, so the game is inspectable at frame zero instead of racing
+        -- the operator's cmd_freeze. Startup phases still run (the freeze
+        -- only disables the gameplay group). Held as "operator" -- the same
+        -- hold cmd_freeze manages -- so cmd_freeze on=false releases it.
+        if os.getenv("TECS_BOOT_FROZEN") == "1" then
+            debugapi.ensureFreeze(w):acquire("operator")
+        end
+
         w:addSystem({
             name = "mcp.ProcessCommands",
             -- Process MCP HTTP requests and enqueue world ops for same-frame

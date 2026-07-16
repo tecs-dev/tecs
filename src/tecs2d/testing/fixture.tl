@@ -27,6 +27,9 @@ local record fixture
     stop: function(app: App)
     runLua: function(app: App, code: string, timeout?: number): {string}
     probePixels: function(app: App, points: {{number, number}}): {{number}}
+    --- Poll `fn` until it returns a truthy value or the deadline passes;
+    --- returns the last value either way. Return nil or false from the poll
+    --- while waiting.
     eventually: function<T>(seconds: number, fn: function(): T): T
 end
 
@@ -119,7 +122,10 @@ function fixture.eventually<T>(seconds: number, fn: function(): T): T
     local last: T
     while socket.gettime() < deadline do
         last = fn()
-        if last ~= nil then return last end
+        -- Truthy, not just non-nil: a poll written as `return cond` yields
+        -- false while waiting, and returning that on the first poll (as the
+        -- old non-nil check did) failed the test before the game advanced.
+        if last then return last end
         sleep(0.05)
     end
     return last

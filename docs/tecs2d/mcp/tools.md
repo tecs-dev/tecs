@@ -65,7 +65,7 @@ Kernel tools are defined by the MCP server itself and available in every session
 
 ### `ping` {#ping}
 
-Check if the game is running. Call cmd_capabilities next to discover what the session's cmd_* command tools support. Returns compact JSON text envelope.
+Check if the game is running and WHICH build is answering: the result's `build` ({name, built, dev}) identifies the running code, so compare `build.built` against your latest `tecs build` to detect a stale process before trusting any other call. Call cmd_capabilities next to discover what the session's cmd_* command tools support. Returns compact JSON text envelope.
 
 Annotations: read-only, idempotent.
 
@@ -92,7 +92,7 @@ Annotations: read-only, idempotent.
 
 | Argument | Type | Required | Description |
 | --- | --- | --- | --- |
-| `points` | object[] | yes | Points to sample, each an object with x and y. Pixel coordinates by default; out-of-range points are clamped. |
+| `points` | object[] | yes | Points to sample, each an object with x and y -- e.g. [{"x": 160, "y": 120}, {"x": 8, "y": 8}] (NOT [[x, y]] pairs). Pixel coordinates by default; out-of-range points are clamped. |
 | `points[].x` | number | yes | X coordinate |
 | `points[].y` | number | yes | Y coordinate |
 | `normalized` | boolean | no | When true, x and y are 0..1 fractions of the framebuffer size instead of pixel coordinates (resolution-independent). |
@@ -110,7 +110,7 @@ Annotations: none.
 
 ### `run_lua` {#run_lua}
 
-Run Lua code in the game. Code is wrapped in function(world) ... end automatically. The result is an envelope {returned: &lt;count>, values: [...]}: values holds your return values in order, so `return snake.length` reads back as values[0]. Return values are serialized as JSON by default -- return a table (e.g. {count = ..., score = ...}) for a structured, cheap read; pass lua=true for the raw Lua tostring form instead. The code is sandboxed: love2d APIs and the ECS world are available, but the filesystem (io, os.execute) and module loading (require, load, dofile) are not, and love escape hatches are removed (love.thread, love.filesystem.load/mount/write). Use 'world' directly to access the ECS world. Prefer the structured cmd_* command tools (cmd_fetch, cmd_set, cmd_spawn, ...) when one covers the operation. Returns compact JSON text envelope.
+Run Lua code in the game. Code is wrapped in function(world) ... end automatically. The result is an envelope {returned: &lt;count>, values: [...]}: values holds your return values in order, so `return snake.length` reads back as values[0]. Return values are serialized as JSON by default -- return a table (e.g. {count = ..., score = ...}) for a structured, cheap read; pass lua=true for the raw Lua tostring form instead. The code is sandboxed: love2d APIs and the ECS world are available, but the filesystem (io, os.execute) and module loading (require, load, dofile) are not, and love escape hatches are removed (love.thread, love.filesystem.load/mount/write). Use 'world' directly to access the ECS world, and modules("components.food") to reach the game's own loaded modules -- their component records and constructors work directly (e.g. local Food = modules("components.food"); world:query(Food)). Named resources read via findKey: world.resources[require("tecs").findKey("game.state")]. Prefer the structured cmd_* command tools (cmd_fetch, cmd_set, cmd_spawn, cmd_resources, ...) when one covers the operation. Returns compact JSON text envelope.
 
 Annotations: destructive.
 
@@ -177,6 +177,7 @@ same contract as structured data at runtime.
 | [`cmd_describe`](../debug-reference#cmd-describe) | One command's full contract as structured data. |
 | [`cmd_freeze`](../debug-reference#cmd-freeze) | Freeze or unfreeze gameplay under the operator's hold. |
 | [`cmd_step`](../debug-reference#cmd-step) | Tick the game forward N frames while otherwise frozen. |
+| [`cmd_input_tape`](../debug-reference#cmd-input_tape) | Queue frame-scheduled love events; no args = status. |
 | [`cmd_stats`](../debug-reference#cmd-stats) | World stats: entities, archetypes, memory, fps, window. |
 | [`cmd_context`](../debug-reference#cmd-context) | The live debugger context: selection, camera, artifacts. |
 | [`cmd_restart`](../debug-reference#cmd-restart) | Restart the game process. |
@@ -232,9 +233,11 @@ same contract as structured data at runtime.
 | [`cmd_audio_stop`](../debug-reference#cmd-audio-stop) | Stop every active source. |
 | [`cmd_audio_mute`](../debug-reference#cmd-audio-mute) | Silence the master group; `audio mute off` restores. |
 | [`cmd_fetch`](../debug-reference#cmd-fetch) | Fetch entities matching a component query, without selecting them. |
-| [`cmd_resources`](../debug-reference#cmd-resources) | List world resources with their key and type names. |
+| [`cmd_resources`](../debug-reference#cmd-resources) | List world resources; pass a name to read one value. |
 | [`cmd_bundles_list`](../debug-reference#cmd-bundles-list) | List bundles with their required and defaulted components. |
 | [`cmd_bundles_spawn`](../debug-reference#cmd-bundles-spawn) | Spawn an entity from a bundle with optional component overrides. |
+| [`cmd_lua_modules`](../debug-reference#cmd-lua-modules) | List loaded module names. |
+| [`cmd_lua_exports`](../debug-reference#cmd-lua-exports) | Dump a loaded module's exports as data. |
 | [`cmd_profile`](../debug-reference#cmd-profile) | Sample the running game with the LuaJIT profiler. |
 | [`cmd_profile_list`](../debug-reference#cmd-profile-list) | List profiles with size and timestamp. |
 | [`cmd_profile_clear`](../debug-reference#cmd-profile-clear) | Delete all profiles this session. |
@@ -255,6 +258,7 @@ same contract as structured data at runtime.
 | [`cmd_rewind_list`](../debug-reference#cmd-rewind-list) | List ring entries, newest first. |
 | [`cmd_rewind_info`](../debug-reference#cmd-rewind-info) | Show the session state: interval, cap, window, cost. |
 | [`cmd_rewind_load`](../debug-reference#cmd-rewind-load) | Restore a ring entry; capture pauses until resumed. |
+| [`cmd_rewind_replay`](../debug-reference#cmd-rewind-replay) | Re-run recorded input and dt forward from a ring entry. |
 | [`cmd_rewind_keep`](../debug-reference#cmd-rewind-keep) | Promote a ring entry into the snapshot history. |
 | [`cmd_rewind_clear`](../debug-reference#cmd-rewind-clear) | Delete the ring files and reset to idle. |
 | [`cmd_diff`](../debug-reference#cmd-diff) | Structural diff between snapshots, rewind entries, and the live world. |

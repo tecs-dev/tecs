@@ -963,6 +963,28 @@
     "name": "cmd_info"
   },
   {
+    "description": "Queue literal LÖVE events against the gameplay-frame clock: each row {at, event, args} dispatches through the real input path (the tecs2d.input snapshot, Tecs events, and love.* callbacks) on gameplay frame `at`, counted from now (1 = the next gameplay frame). Built for deterministic verification: cmd_freeze on -> queue -> cmd_step n -> read state; unfrozen it consumes on live frames. Args are forgiving like send_love_event (keypressed needs just the key). Model releases as their own rows (keyreleased, mousereleased, ...); the status form and cmd_step report anything still held. With no arguments: status (frame, pending rows, recent fired events, held inputs). clear=true drops pending rows and synthesizes releases. Gamepad/joystick events are not tapeable yet (they need device objects). Raw love.* polls do not see taped input; read tecs2d.input. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "clear": {
+          "description": "drop pending rows and release anything the tape holds down",
+          "type": "boolean"
+        },
+        "events": {
+          "description": "array of {at = <gameplay frames from now>, event = <love event>, args = {...}}",
+          "type": "object"
+        },
+        "force": {
+          "description": "allow taping 'escape'",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_input_tape"
+  },
+  {
     "description": "layers all: show every layer (undo toggles and solo). In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
     "inputSchema": {
       "additionalProperties": false,
@@ -1129,6 +1151,37 @@
       "type": "object"
     },
     "name": "cmd_light_toggle"
+  },
+  {
+    "description": "A loaded module's exported table, deep-copied to JSON-safe data: scalars and tables come through as values, functions and other live objects as their tostring form (inert -- nothing returned here is callable). Use it to read a game module's constants, keys, and structure without writing Lua. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "module": {
+          "description": "loaded module name (see `lua modules`)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "module"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_lua_exports"
+  },
+  {
+    "description": "Every module name currently loaded (package.loaded), sorted; pass contains=<text> to filter. The game's own modules appear under the names they are required with (e.g. components.food). Follow with cmd_lua_exports to read one module's exports. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "contains": {
+          "description": "only names containing this substring",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_lua_modules"
   },
   {
     "description": "tilemap info; `info x y` shows the tile at a world point. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
@@ -1631,10 +1684,15 @@
     "name": "cmd_remove"
   },
   {
-    "description": "Every world resource as {key, type}: keys resolve to their registered name when available, values to their metatable type name. Read-only; use it to discover installed subsystems and custom game resources. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "description": "Without arguments: every world resource as {key, type} -- keys created with tecs.newKey(\"name\") resolve to that name -- plus `unset`, the registered key names holding no value yet. With name=<key name>: that resource's current value, deep-copied to JSON-safe data (live objects render as their tostring). This is the way to read named game state (e.g. a GameState resource) without writing Lua. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
     "inputSchema": {
       "additionalProperties": false,
-      "properties": {},
+      "properties": {
+        "name": {
+          "description": "named key (from tecs.newKey(\"name\")): return that resource's value",
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "name": "cmd_resources"
@@ -1723,6 +1781,28 @@
       "type": "object"
     },
     "name": "cmd_rewind_pause"
+  },
+  {
+    "description": "Deterministically re-run the game from a ring entry: restores that snapshot (RNG state included), re-presses inputs that were held at the anchor, queues every recorded input event onto the input tape at its original gameplay frame, feeds the recorded per-frame dt, and steps. Requires the freeze to be held (cmd_freeze on=true) and a rewind session (the recorder rides the ring). frames defaults to the full recording since that entry. Live input is not muted: touching the controls during a replay simply makes a new timeline. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "ago": {
+          "description": "seconds back; picks the closest at or before",
+          "type": "number"
+        },
+        "frames": {
+          "description": "gameplay frames to replay (default: to the end of the recording)",
+          "type": "number"
+        },
+        "ref": {
+          "description": "entry index (newest first), latest, or Ns for seconds back",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "cmd_rewind_replay"
   },
   {
     "description": "rewind resume: resume after a pause (including after a load). In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
@@ -2094,7 +2174,7 @@
     "name": "cmd_stats"
   },
   {
-    "description": "Advance gameplay by n frames while the freeze controller is held, then freeze again. Fails when nothing holds the freeze; acquire it with cmd_freeze on=true first. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "description": "Advance gameplay by n frames while the freeze controller is held, then freeze again. ASYNC: this returns when the frames are scheduled -- they tick over the next loop iterations, so read state with a follow-up call, never in the same response you scheduled the step in. Fails when nothing holds the freeze; acquire it with cmd_freeze on=true first. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -2215,7 +2295,7 @@
     "name": "get_logs"
   },
   {
-    "description": "Check if the game is running. Call cmd_capabilities next to discover what the session's cmd_* command tools support. Returns compact JSON text envelope.",
+    "description": "Check if the game is running and WHICH build is answering: the result's `build` ({name, built, dev}) identifies the running code, so compare `build.built` against your latest `tecs build` to detect a stale process before trusting any other call. Call cmd_capabilities next to discover what the session's cmd_* command tools support. Returns compact JSON text envelope.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {},
@@ -2224,7 +2304,7 @@
     "name": "ping"
   },
   {
-    "description": "Run Lua code in the game. Code is wrapped in function(world) ... end automatically. The result is an envelope {returned: <count>, values: [...]}: values holds your return values in order, so `return snake.length` reads back as values[0]. Return values are serialized as JSON by default -- return a table (e.g. {count = ..., score = ...}) for a structured, cheap read; pass lua=true for the raw Lua tostring form instead. The code is sandboxed: love2d APIs and the ECS world are available, but the filesystem (io, os.execute) and module loading (require, load, dofile) are not, and love escape hatches are removed (love.thread, love.filesystem.load/mount/write). Use 'world' directly to access the ECS world. Prefer the structured cmd_* command tools (cmd_fetch, cmd_set, cmd_spawn, ...) when one covers the operation. Returns compact JSON text envelope.",
+    "description": "Run Lua code in the game. Code is wrapped in function(world) ... end automatically. The result is an envelope {returned: <count>, values: [...]}: values holds your return values in order, so `return snake.length` reads back as values[0]. Return values are serialized as JSON by default -- return a table (e.g. {count = ..., score = ...}) for a structured, cheap read; pass lua=true for the raw Lua tostring form instead. The code is sandboxed: love2d APIs and the ECS world are available, but the filesystem (io, os.execute) and module loading (require, load, dofile) are not, and love escape hatches are removed (love.thread, love.filesystem.load/mount/write). Use 'world' directly to access the ECS world, and modules(\"components.food\") to reach the game's own loaded modules -- their component records and constructors work directly (e.g. local Food = modules(\"components.food\"); world:query(Food)). Named resources read via findKey: world.resources[require(\"tecs\").findKey(\"game.state\")]. Prefer the structured cmd_* command tools (cmd_fetch, cmd_set, cmd_spawn, cmd_resources, ...) when one covers the operation. Returns compact JSON text envelope.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -2254,7 +2334,7 @@
           "type": "boolean"
         },
         "points": {
-          "description": "Points to sample, each an object with x and y. Pixel coordinates by default; out-of-range points are clamped.",
+          "description": "Points to sample, each an object with x and y -- e.g. [{\"x\": 160, \"y\": 120}, {\"x\": 8, \"y\": 8}] (NOT [[x, y]] pairs). Pixel coordinates by default; out-of-range points are clamped.",
           "items": {
             "additionalProperties": false,
             "properties": {

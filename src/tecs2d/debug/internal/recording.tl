@@ -91,7 +91,7 @@ local record recording
     new: function(ctx: debugcontext.Context, opts?: Options): Controller
 end
 
-recording.KEY = tecs.newKey()
+recording.KEY = tecs.newKey("tecs2d.debug.recording")
 
 local shellQuote <const> = osopen.shellQuote
 

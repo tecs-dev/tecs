@@ -95,7 +95,7 @@ local record annotations
     install: function(w: tecs.World, ctx: debugcontext.Context): Store
 end
 
-annotations.KEY = tecs.newKey()
+annotations.KEY = tecs.newKey("tecs2d.debug.annotations")
 
 function annotations.Store:add(a: annotations.Annotation): integer
     a.id = self.nextId

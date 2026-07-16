@@ -4,6 +4,7 @@
 --- run_lua executes inside the frame through the shared queued-op drain.
 
 local tecs <const> = require("tecs")
+local buildinfo <const> = require("tecs2d.buildinfo")
 local logging <const> = require("tecs.utils.logging")
 local rpc <const> = require("tecs2d.mcp.internal.rpc")
 local state <const> = require("tecs2d.mcp.internal.state")
@@ -30,11 +31,18 @@ local requireArg <const> = rpc.requireArg
 local byName: {string: rpc.Handler} = {}
 
 byName["ping"] = function(_: {string:any}, id: number)
-    sendToolOK(id, {
+    local payload: {string: any} = {
         running = true,
         port = (transport.getBoundPort() or 0) as integer,
-        time = lt.getTime()
-    })
+        time = lt.getTime(),
+    }
+    -- Build identity, so a caller can detect a stale process: if `build.built`
+    -- predates the latest `tecs build`, the answers come from old code.
+    local info = buildinfo.get()
+    if info then
+        payload.build = {name = info.name, built = info.built, dev = info.dev}
+    end
+    sendToolOK(id, payload)
 end
 
 byName["screenshot"] = function(args: {string:any}, id: number)
@@ -231,6 +239,40 @@ local function sandboxRequire(name: string): any
     return (require as function(string): any)(name)
 end
 
+-- Module access for run_lua: modules("components.food") returns the already-
+-- loaded module so scripts can reference the game's own types and keys
+-- (component records, constructors, exported constants). Read access only in
+-- spirit -- the table is live, like the rest of the world -- but roots that
+-- would reopen the sandbox's sealed capabilities are denied, and only modules
+-- the game already loaded resolve (nothing is loaded on demand).
+local DENIED_MODULE_ROOT <const>: {string: boolean} = {
+    io = true, os = true, ffi = true, package = true, debug = true,
+    socket = true, mime = true, ltn12 = true, lfs = true, love = true,
+    jit = true, string = true, table = true, math = true, coroutine = true,
+    bit = true, _G = true,
+}
+
+local function sandboxModules(name: string): any
+    if type(name) ~= "string" then
+        error("modules expects a module name", 2)
+    end
+    local root = name:match("^([^.]+)") or name
+    if DENIED_MODULE_ROOT[root]
+        or name:match("^tecs2d%.testing") ~= nil
+        or name:match("^tecs2d%.mcp") ~= nil
+        or name:match("^tecs2d%.debug") ~= nil then
+        error("modules('" .. name .. "') is blocked in run_lua", 2)
+    end
+    local pkg = G["package"] as {string: any}
+    local loaded = pkg.loaded as {string: any}
+    local mod = loaded[name]
+    if mod == nil then
+        error("modules('" .. name .. "'): not loaded. Game modules load at boot; "
+            .. "check the exact require name (cmd_lua_modules lists them).", 2)
+    end
+    return mod
+end
+
 -- love2d is exposed for rendering and world introspection, but a few love APIs
 -- are escape hatches: love.thread spawns threads with a full stdlib
 -- (io/os/ffi/luasocket), love.filesystem.load runs Lua under the real globals,
@@ -287,6 +329,7 @@ local function makeSandboxEnv(): {string: any}
     local mt: {string: any} = {}
     mt["__index"] = function(_: any, k: string): any
         if k == "require" then return sandboxRequire end
+        if k == "modules" then return sandboxModules end
         if k == "os" then return safeOs end
         if k == "love" then return sandboxLove() end
         if DENIED_GLOBAL[k] then return nil end

@@ -186,6 +186,46 @@ describe("mcp compliance: boot and introspection", function()
         luassert.are.equal("function", runLua(app, "return type(love.graphics.getWidth)")[1])
     end)
 
+    it("run_lua modules() reaches loaded game modules but not sealed roots", function()
+        -- A loaded framework module resolves live (usable, not a copy).
+        luassert.are.equal("table", runLua(app, "return type(modules('tecs.utils.json'))")[1])
+        luassert.are.equal("true",
+            runLua(app, "return tostring(modules('tecs.utils.json') == require('tecs.utils.json'))")[1])
+        -- Sealed roots and the tooling subtrees are refused.
+        luassert.are.equal("false", runLua(app, "return tostring((pcall(modules, 'io')))")[1])
+        luassert.are.equal("false", runLua(app, "return tostring((pcall(modules, 'package')))")[1])
+        luassert.are.equal("false", runLua(app, "return tostring((pcall(modules, 'socket')))")[1])
+        luassert.are.equal("false",
+            runLua(app, "return tostring((pcall(modules, 'tecs2d.debug.commands')))")[1])
+        -- Never-loaded modules do not load on demand.
+        luassert.are.equal("false",
+            runLua(app, "return tostring((pcall(modules, 'spec.never.loaded')))")[1])
+    end)
+
+    it("snapshots capture and restore love.math random state", function()
+        -- Draw after a snapshot, restore, draw again: identical values mean
+        -- the RNG state travelled with the snapshot (the replay prerequisite).
+        local same = runLua(app, [[
+            love.math.setRandomSeed(9942)
+            local snap = world:saveSnapshot()
+            local a = love.math.random()
+            world:loadSnapshot(snap.data or snap)
+            local b = love.math.random()
+            return tostring(a == b)
+        ]], 10)
+        luassert.are.equal("true", same[1])
+    end)
+
+    it("cmd_resources reads a named resource end to end", function()
+        -- Create a named key and set a resource from inside the game...
+        runLua(app, "world.resources[require('tecs').newKey('compliance.state')] = {hp = 7}")
+        -- ...then read it back by name through the command tool.
+        local result = app.client:call("cmd_resources", {name = "compliance.state"})
+        luassert.is_true(result.set as boolean, "cmd_resources value read failed")
+        luassert.are.equal(7, (result.value as {string: any}).hp as number)
+        luassert.are.equal("compliance.state", result.key as string)
+    end)
+
     it("tool results carry structuredContent matching the text envelope", function()
         local response = app.client:rpc("tools/call", {name = "ping", arguments = {}})
         local result = response.result as {string: any}
@@ -253,6 +293,54 @@ describe("mcp compliance: freeze, step, resume", function()
         luassert.are.equal(before + 3, readFrames(app))
     end)
 
+    it("input_tape fires inside the stepped frame's input snapshot", function()
+        -- Queue a literal keypressed/keyreleased pair on the gameplay-frame
+        -- clock, then step across it. The fixture's Update probe counts frames
+        -- where input.isKeyPressed("up") was true: it must be exactly one, and
+        -- the Tecs KeyPressed event must have fired (lastKey).
+        local upBefore = tonumber(runLua(app, "return tecsTest.upFrames")[1]) as integer
+        local queued = app.client:call("cmd_input_tape", {events = {
+            {at = 1, event = "keypressed", args = {"up"}},
+            {at = 2, event = "keyreleased", args = {"up"}},
+        }})
+        luassert.are.equal(2, queued.queued as integer)
+
+        local stepResult = app.client:call("cmd_step", {n = 3})
+        local will = stepResult.will_fire as {{string: any}}
+        luassert.is_not_nil(will, "step should echo the scheduled tape window")
+        luassert.are.equal(2, #will)
+
+        local sawUp = eventually(CALL_TIMEOUT, function(): integer
+            local n = tonumber(runLua(app, "return tecsTest.upFrames")[1]) as integer
+            if n > upBefore then return n end
+            return nil
+        end)
+        luassert.are.equal(upBefore + 1, sawUp,
+            "isKeyPressed must be true for exactly the one stepped frame")
+        luassert.are.equal("up", runLua(app, "return tecsTest.lastKey")[1])
+        -- The FixedUpdate-phase poll sees the latched edge too: both polling
+        -- styles work, in their consuming phase.
+        luassert.is_true(tonumber(runLua(app, "return tecsTest.upFixedFrames")[1]) >= 1,
+            "FixedUpdate-phase isKeyPressed must see the latched press")
+
+        -- The release row ran too: nothing held, nothing pending.
+        local status = app.client:call("cmd_input_tape")
+        luassert.are.equal(0, #(status.held as {string}))
+        luassert.are.equal(0, status.pending as integer)
+    end)
+
+    it("input_tape refuses untapeable and dangerous rows", function()
+        local pad = app.client:tryCall("cmd_input_tape", {events = {
+            {at = 1, event = "gamepadpressed", args = {1, "a"}},
+        }})
+        luassert.is_false(pad.ok as boolean, "gamepad rows need a device object")
+
+        local esc = app.client:tryCall("cmd_input_tape", {events = {
+            {at = 1, event = "keypressed", args = {"escape"}},
+        }})
+        luassert.is_false(esc.ok as boolean, "escape must be refused without force")
+    end)
+
     it("releasing the freeze restores gameplay", function()
         local before = readFrames(app)
         app.client:call("cmd_freeze", {on = false})
@@ -262,6 +350,101 @@ describe("mcp compliance: freeze, step, resume", function()
             return nil
         end)
         luassert.is_true(advanced ~= nil and advanced > before)
+    end)
+end)
+
+describe("mcp compliance: boot frozen", function()
+    it("TECS_BOOT_FROZEN holds the game at frame zero until released", function()
+        local port = freePort()
+        local proc = love_process.start({
+            loveBin = loveBin,
+            appDir = APP_DIR,
+            logPath = LOG_DIR .. "/compliance-frozen-" .. tostring(port) .. ".log",
+            env = {
+                TECS_MCP_PORT = tostring(port),
+                TECS_BOOT_FROZEN = "1",
+                SDL_MAC_BACKGROUND_APP = "1",
+            },
+        })
+        local client = mcp_client.new({port = port, timeout = CALL_TIMEOUT})
+        local app: App = {proc = proc, client = client}
+        local ready = client:waitReady(STARTUP_TIMEOUT)
+        luassert.is_true(ready, "frozen app never served MCP")
+
+        -- Startup ran (entities exist) but no gameplay frame has ticked.
+        sleep(0.3)
+        luassert.are.equal(0, readFrames(app), "boot-frozen game must sit at frame zero")
+
+        -- Stepping works from frame zero...
+        app.client:call("cmd_step", {n = 2})
+        local stepped = eventually(CALL_TIMEOUT, function(): integer
+            local n = readFrames(app)
+            if n >= 2 then return n end
+            return nil
+        end)
+        luassert.are.equal(2, stepped)
+
+        -- ...and releasing the freeze lets it run.
+        app.client:call("cmd_freeze", {on = false})
+        local advanced = eventually(CALL_TIMEOUT, function(): integer
+            local n = readFrames(app)
+            if n > 2 then return n end
+            return nil
+        end)
+        luassert.is_true(advanced ~= nil and advanced > 2)
+        stopApp(app)
+    end)
+end)
+
+describe("mcp compliance: rewind replay", function()
+    local app: App
+
+    setup(function()
+        app = startApp()
+    end)
+
+    teardown(function()
+        stopApp(app)
+    end)
+
+    it("replays recorded input deterministically from a ring entry", function()
+        -- A huge interval means the immediate first capture is the only
+        -- entry, so the recorded press lands strictly after the anchor.
+        app.client:call("cmd_rewind_start", {interval = 60, cap = 5})
+        local captured = eventually(CALL_TIMEOUT, function(): integer
+            local listed = app.client:call("cmd_rewind_list")
+            local entries = listed.entries as {any}
+            if entries and #entries >= 1 then return #entries end
+            return nil
+        end)
+        luassert.are.equal(1, captured)
+
+        -- A real keypress after the anchor: consumed live, and recorded.
+        app.client:call("send_love_event", {event = "keypressed", args = {"up", "up", false}})
+        app.client:call("send_love_event", {event = "keyreleased", args = {"up", "up"}})
+        local up1 = eventually(CALL_TIMEOUT, function(): integer
+            local n = tonumber(runLua(app, "return tecsTest.upFrames")[1]) as integer
+            if n >= 1 then return n end
+            return nil
+        end)
+        luassert.are.equal(1, up1)
+
+        -- Freeze and replay the recorded window: the press must fire once
+        -- more, through the real input path, on its original frame.
+        app.client:call("cmd_freeze", {on = true})
+        local result = app.client:call("cmd_rewind_replay", {ref = "latest"})
+        luassert.is_true((result.events as integer) >= 2,
+            "recorded press+release rows expected in the replay window")
+
+        local up2 = eventually(CALL_TIMEOUT, function(): integer
+            local n = tonumber(runLua(app, "return tecsTest.upFrames")[1]) as integer
+            if n > up1 then return n end
+            return nil
+        end)
+        luassert.are.equal(up1 + 1, up2,
+            "replay must re-fire the recorded press exactly once")
+
+        app.client:call("cmd_freeze", {on = false})
     end)
 end)
 

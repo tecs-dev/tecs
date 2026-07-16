@@ -10,6 +10,7 @@ local tecs <const> = require("tecs")
 local tecs2d <const> = require("tecs2d")
 local mcp <const> = require("tecs2d.mcp")
 local gfx <const> = require("tecs2d.gfx")
+local input <const> = require("tecs2d.input")
 
 local Transform <const> = tecs.builtins.Transform
 
@@ -19,6 +20,13 @@ local HEIGHT <const> = 240
 local record TestState
     frames: integer
     lastKey: string
+    -- Update-phase frames where input.isKeyPressed("up") was true: the
+    -- input_tape acceptance probe (taped press must be visible inside the
+    -- stepped frame's Update, not before or after).
+    upFrames: integer
+    -- Same probe from a FixedUpdate-phase system: the latched edge must be
+    -- visible to the first fixed tick of the frame.
+    upFixedFrames: integer
 end
 
 local function gamePlugin(world: tecs.World)
@@ -35,7 +43,7 @@ local function gamePlugin(world: tecs.World)
         gfx.Color(1, 0, 0, 1) as tecs.Component
     )
 
-    local state: TestState = {frames = 0, lastKey = nil}
+    local state: TestState = {frames = 0, lastKey = nil, upFrames = 0, upFixedFrames = 0}
     local globals = _G as {string: any}
     globals.tecsTest = state
 
@@ -44,6 +52,19 @@ local function gamePlugin(world: tecs.World)
         phase = tecs.phases.Update,
         run = function()
             state.frames = state.frames + 1
+            if input.isKeyPressed("up") then
+                state.upFrames = state.upFrames + 1
+            end
+        end,
+    })
+
+    world:addSystem({
+        name = "test.FixedInputProbe",
+        phase = tecs.phases.FixedUpdate,
+        run = function()
+            if input.isKeyPressed("up") then
+                state.upFixedFrames = state.upFixedFrames + 1
+            end
         end,
     })
 
