@@ -36,7 +36,9 @@ couple dozen calls — per-call latency adds up fast.
   (type-checked on demand from `src/`). `tecs api` lists modules; `tecs api <module>` its symbols;
   `tecs api <module>.<Type>` a Teal `record` block; `tecs api <Type>:<method>` one method; a bare
   name resolves in your project. Fan out with several symbols; `--json` for structured records,
-  `--fields <keys>` to return only what you need. **For any signature, field, or constructor
+  `--fields <keys>` to return only what you need — for a component the constructor is the
+  usual question, and `tecs api Text Rectangle --fields constructor` answers it in one line
+  each instead of a page of renderer-internal fields. **For any signature, field, or constructor
   question, `tecs api` first** — tens of tokens vs. thousands for a full docs page; save
   `tecs docs` pages for concepts. Don't re-verify what `tecs check` already proves: write the
   code, check it, and let the diagnostics (with their `tecs api` hints) catch a wrong signature.

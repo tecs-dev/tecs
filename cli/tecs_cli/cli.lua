@@ -1705,8 +1705,8 @@ function tasks.api(args)
         if res.text == "" or not res.text:match("\n$") then io.write("\n") end
     end
     if not res.ok then
-        fail(#queries > 1 and "one or more lookups did not resolve"
-            or ("no match for '" .. (queries[1] or "") .. "'"))
+        fail(res.message or (#queries > 1 and "one or more lookups did not resolve"
+            or ("no match for '" .. (queries[1] or "") .. "'")))
     end
 end
 
@@ -2034,7 +2034,8 @@ local commands = {
                 :args("*")
             subcommand:flag("--json", "Emit structured records as JSON on stdout.")
             subcommand:option("--fields",
-                "Comma-separated record keys to return, e.g. signature,doc,methods.")
+                "Comma-separated record keys to return, e.g. signature,doc,methods. "
+                .. "`--fields constructor` prints just a component's constructor signature.")
         end,
     },
     {

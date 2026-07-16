@@ -768,6 +768,12 @@ function M.new(options)
 
         local out = {}
         out[#out + 1] = "record " .. sym.symbol
+        -- Constructor first: for a component, "how do I make one" is the 90%
+        -- question, and it must not sit below a page of renderer internals.
+        if sym.constructor then
+            out[#out + 1] = "  metamethod __call: "
+                .. apiRenderFnType(sym.constructor.params, sym.constructor.returns)
+        end
         for _, t in ipairs(sym.types or {}) do
             local line = "  type " .. t.name .. ": " .. t.type
             if t.doc then line = line .. "  -- " .. t.doc end
@@ -777,10 +783,6 @@ function M.new(options)
             local line = "  " .. f.name .. ": " .. f.type
             if f.doc then line = line .. "  -- " .. f.doc end
             out[#out + 1] = line
-        end
-        if sym.constructor then
-            out[#out + 1] = "  metamethod __call: "
-                .. apiRenderFnType(sym.constructor.params, sym.constructor.returns)
         end
         for _, m in ipairs(sym.methods or {}) do
             out[#out + 1] = "  " .. m.name .. ": " .. apiRenderFnType(m.params, m.returns)
@@ -994,11 +996,33 @@ function M.new(options)
     --   {ok=bool, text=string, json=<lua value>}
     -- text is rendered Teal; json is the structured payload (both honor `fields`).
     -- Never raises for a miss; a miss sets ok=false and reports suggestions.
+    -- Every key --fields can project, across all symbol kinds. Keys valid for
+    -- one kind are silently inapplicable to another (multi-symbol lookups mix
+    -- kinds), but a key valid nowhere is a typo and must fail loudly -- the
+    -- silent-drop alternative reads as "this symbol has none of those".
+    local VALID_FIELD_KEYS = {
+        signature = true, fields = true, types = true, constructor = true,
+        methods = true, doc = true, see = true, params = true, returns = true,
+    }
+
     local function apiInvoke(params)
         params = params or {}
         local index, note, frameworkMods, projectMods = mergedApiIndex()
         local fields = params.fields
         if fields and #fields == 0 then fields = nil end
+        if fields then
+            for _, f in ipairs(fields) do
+                if not VALID_FIELD_KEYS[f] then
+                    local valid = {}
+                    for k in pairs(VALID_FIELD_KEYS) do valid[#valid + 1] = k end
+                    table.sort(valid)
+                    local msg = "unknown --fields key '" .. tostring(f)
+                        .. "'. Valid keys: " .. table.concat(valid, ", ")
+                    return { ok = false, text = msg, message = msg,
+                        json = { error = "unknown fields key", key = f, valid = valid } }
+                end
+            end
+        end
 
         local queries = params.queries
         local single = false

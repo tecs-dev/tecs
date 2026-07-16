@@ -43,6 +43,9 @@ payload, launchers, and installers as GitHub release assets.
   overridable with `dt=`) instead of the display-refresh-dependent measured
   dt, so `step n` advances the same gameplay time on every machine.
 - `tecs docs <page>` suggests near-miss page ids on an unknown page.
+- `tecs api` renders a component's constructor above its field list and
+  rejects unknown `--fields` keys with the valid-key list instead of
+  silently dropping them.
 - `start_game '{"frozen":true}'` boots the game with the freeze already held
   (inspectable at frame zero; `cmd_freeze on=false` releases it).
 - `tecs new` stamps the LÖVE identity/title with the project name, so games no

@@ -749,6 +749,25 @@ describe("tecs CLI", function()
                 assert.matches("tecs%.types%.World%.Config", out2)
             end)
 
+            it("rejects unknown --fields keys loudly", function()
+                -- Silently dropping a bad key reads as "the symbol has none of
+                -- those" (an agent grepped empty output and concluded World
+                -- had no methods).
+                local ok, err = cli.run({"api", "tecs.World", "--fields", "name,signature"})
+                assert.is_true(not ok)
+                assert.matches("unknown %-%-fields key 'name'", err)
+                assert.matches("constructor", err)
+            end)
+
+            it("renders a component's constructor before its fields", function()
+                local ok, _, out = captureWrite({"api", "tecs2d.gfx.Text"})
+                assert.is_true(ok)
+                local ctorAt = out:find("metamethod __call", 1, true)
+                local fieldAt = out:find("slabOffset", 1, true)
+                assert.is_true(ctorAt ~= nil and fieldAt ~= nil and ctorAt < fieldAt,
+                    "constructor must render above the field list")
+            end)
+
             it("lists tecs.types with more than just World", function()
                 local ok, _, out = captureWrite({"api", "tecs.types"})
                 assert.is_true(ok)
