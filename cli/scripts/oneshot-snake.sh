@@ -26,7 +26,7 @@ if [ -z "$n" ]; then
 else
     shift || true
 fi
-prompt="${*:-oneshot create a nibbles game with tecs and tecs2d}"
+prompt="${*:-oneshot create a nibbles game with tecs and tecs2d. Done means: core mechanics (steer, eat, grow, die, restart) implemented and verified working in the live game. Stop there -- no integration specs, README prose, or extra polish.}"
 
 project="/tmp/oneshot$n"
 results="/tmp/oneshot$n-results"
@@ -69,13 +69,25 @@ start_epoch="$(date +%s)"
 
 (
     cd "$project"
+    # stream-json keeps a live progress log (tail -f "$results/stream.jsonl");
+    # the final summary object is extracted into result.json afterwards.
     claude -p "$prompt" \
-        --output-format json \
+        --output-format stream-json --verbose \
         --dangerously-skip-permissions \
-        > "$results/result.json" 2> "$results/stderr.log"
+        > "$results/stream.jsonl" 2> "$results/stderr.log"
 ) || echo "WARNING: claude exited non-zero (see $results/stderr.log)" >&2
 
 wall=$(( $(date +%s) - start_epoch ))
+# The last stream event is the result summary; that's what result.json held before.
+python3 -c "
+import json, sys
+last = None
+for ln in open('$results/stream.jsonl'):
+    try: e = json.loads(ln)
+    except Exception: continue
+    if e.get('type') == 'result': last = e
+json.dump(last or {}, open('$results/result.json', 'w'))
+"
 
 # --- stats ----------------------------------------------------------------------
 python3 - "$results/result.json" "$wall" <<'EOF'
