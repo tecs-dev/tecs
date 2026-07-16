@@ -367,6 +367,47 @@ describe("mcp compliance: freeze, step, resume", function()
             "override dt must be carried verbatim, got " .. tostring(sum2))
     end)
 
+    it("cmd_step one-call form runs tape, frames, and a lua read in one request", function()
+        -- The whole tape->step->read loop as a single round-trip: the
+        -- response is deferred until the frames ran and carries the lua
+        -- values, so no follow-up call (and no eventually polling) is needed.
+        local upBefore = tonumber(runLua(app, "return tecsTest.upFrames")[1]) as integer
+        local res = app.client:call("cmd_step", {
+            n = 3,
+            events = {
+                {at = 1, event = "keypressed", args = {"up"}},
+                {at = 2, event = "keyreleased", args = {"up"}},
+            },
+            lua = "return {up = tecsTest.upFrames, frames = tecsTest.frames}",
+        })
+        luassert.are.equal(2, res.queued as integer)
+        luassert.is_true(res.waited as boolean)
+        luassert.are.equal(1, res.returned as integer)
+        local first = (res.values as {any})[1] as {string: any}
+        luassert.are.equal(upBefore + 1, tonumber(first.up),
+            "the taped press must be visible in the post-step lua read")
+        -- The tape is drained: press released, nothing pending.
+        local status = app.client:call("cmd_input_tape")
+        luassert.are.equal(0, #(status.held as {string}))
+        luassert.are.equal(0, status.pending as integer)
+    end)
+
+    it("cmd_step wait=true defers the response until frames have run", function()
+        local before = readFrames(app)
+        local res = app.client:call("cmd_step", {n = 4, wait = true})
+        luassert.is_true(res.waited as boolean)
+        -- No eventually loop: by response time the frames are done.
+        luassert.are.equal(before + 4, readFrames(app))
+    end)
+
+    it("cmd_step lua errors surface as tool errors", function()
+        local ok, err = pcall(function()
+            app.client:call("cmd_step", {n = 1, lua = "error('boom')"})
+        end)
+        luassert.is_false(ok)
+        luassert.matches("lua_execution_failed", tostring(err))
+    end)
+
     it("input_tape fires inside the stepped frame's input snapshot", function()
         -- Queue a literal keypressed/keyreleased pair on the gameplay-frame
         -- clock, then step across it. The fixture's Update probe counts frames

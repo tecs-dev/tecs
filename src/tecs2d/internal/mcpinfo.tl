@@ -17,8 +17,15 @@ local record mcpinfo
     end
 
     KEY: tecs.Key<Info>
+
+    --- Installed by the MCP plugin: evaluates code in the run_lua sandbox and
+    --- returns (true, {returned=n, values={...}}) or (false, error message).
+    --- Published as a resource so debugger commands (cmd_step's `lua` read)
+    --- share the one hardened sandbox without depending on the mcp module.
+    LUA_EVAL: tecs.Key<function(string, tecs.World): boolean, any>
 end
 
 mcpinfo.KEY = tecs.newKey("tecs2d.mcp.info")
+mcpinfo.LUA_EVAL = tecs.newKey("tecs2d.mcp.luaeval")
 
 return mcpinfo

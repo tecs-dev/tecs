@@ -2656,11 +2656,11 @@ freeze on
 freeze off
 ```
 
-### `step [n] [dt=N]` {#cmd-step}
+### `step [n] [dt=N] [events={}] [force] [lua=...] [wait]` {#cmd-step}
 
 Tick the game forward N frames while otherwise frozen.
 
-Advance gameplay by n frames while the freeze controller is held, then freeze again. Each stepped frame carries a DETERMINISTIC dt of 1/fps (the run config's fps, echoed as step_dt) regardless of display refresh rate, so `n` frames advance exactly n/fps gameplay seconds; pass dt= to override per call. ASYNC: this returns when the frames are scheduled -- they tick over the next loop iterations, so read state with a follow-up call, never in the same response you scheduled the step in. Fails when nothing holds the freeze; acquire it with cmd_freeze on=true first.
+Advance gameplay by n frames while the freeze controller is held, then freeze again. Each stepped frame carries a DETERMINISTIC dt of 1/fps (the run config's fps, echoed as step_dt) regardless of display refresh rate, so `n` frames advance exactly n/fps gameplay seconds; pass dt= to override per call. ONE-CALL VERIFICATION: pass events= (input_tape rows, at=1 is the first stepped frame) to queue inputs, and lua= (run_lua sandbox) to read state after the last frame -- the response then arrives when the step COMPLETES, carrying the lua values, so tape->step->read is a single call: cmd_step '{"events":[{"at":1,"event":"keypressed","args":["left"]}],"n":10,"lua":"return {x=head.x}"}'. wait=true defers the response without a read. Without lua/wait the call is ASYNC: it returns when the frames are scheduled, so read state in a follow-up call. Fails when nothing holds the freeze; acquire it with cmd_freeze on=true first.
 
 MCP tool: `cmd_step`
 
@@ -2668,6 +2668,10 @@ MCP tool: `cmd_step`
 | --- | --- | --- |
 | `n` | number | number of frames to tick (default: 1) |
 | `dt` | number | seconds each stepped frame carries (default 1/fps) |
+| `events` | table | input_tape rows to queue before stepping ({at, event, args}) |
+| `force` | boolean | queue events even when a press is already held (tape force) |
+| `lua` | string | Lua to evaluate (run_lua sandbox) after the last frame; defers the response until the step completes |
+| `wait` | boolean | defer the response until the stepped frames have run |
 
 ::: details Result data schema
 ```json
@@ -2684,9 +2688,25 @@ MCP tool: `cmd_step`
       },
       "type": "array"
     },
+    "queued": {
+      "description": "events= rows accepted onto the tape",
+      "type": "integer"
+    },
+    "returned": {
+      "description": "lua= return-value count (deferred form)",
+      "type": "integer"
+    },
     "step_dt": {
       "description": "seconds each stepped frame will carry",
       "type": "number"
+    },
+    "values": {
+      "description": "lua= return values in order (deferred form)",
+      "type": "array"
+    },
+    "waited": {
+      "description": "response was deferred until the step completed",
+      "type": "boolean"
     },
     "will_fire": {
       "description": "queued input_tape rows due within this step",

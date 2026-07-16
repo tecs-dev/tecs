@@ -18,6 +18,13 @@ local log <const> = logging.getLogger("tecs-mcp")
 
 local record handlers
     install: function(ctx: state.Context)
+
+    --- Evaluate `code` (wrapped as function(world)) in the run_lua sandbox,
+    --- synchronously; the caller must already be in a world-safe context.
+    --- Returns (true, {returned=n, values={...}}) with JSON-safe values, or
+    --- (false, error message). Published to debugger commands through
+    --- mcpinfo.LUA_EVAL so cmd_step's `lua` read shares this one sandbox.
+    evalInSandbox: function(code: string, w: tecs.World): boolean, any
 end
 
 local ctx: state.Context = nil
@@ -461,6 +468,40 @@ byName["run_lua"] = function(args: {string:any}, id: number)
         })
         ctx.pendingWorldOpResponse = false
     end)
+end
+
+function handlers.evalInSandbox(code: string, w: tecs.World): boolean, any
+    if type(code) ~= "string" or code == "" then
+        return false, "code must be a non-empty string"
+    end
+    local wrapped <const> = "return function(world) " .. code .. "\nend"
+    local chunk, loadErr = load(wrapped, "mcp_lua", "t")
+    if not chunk then
+        return false, "Failed to load code: " .. tostring(loadErr)
+    end
+    sandboxSetfenv(chunk, makeSandboxEnv())
+    local okc, fnAny = pcall(chunk) as (boolean, any)
+    if not okc then return false, tostring(fnAny) end
+    if type(fnAny) ~= "function" then
+        return false, "Code must return a function, got " .. type(fnAny)
+    end
+    local pcallAny = pcall as function(any, ...: any): boolean, any
+    local results = {pcallAny(fnAny, w)} as {any}
+    if not results[1] then return false, tostring(results[2]) end
+    local values: {any} = {}
+    local n = #results
+    for i = 2, n do
+        local v = results[i]
+        local vt = type(v)
+        if vt == "number" or vt == "string" or vt == "boolean" then
+            values[i - 1] = v
+        elseif vt == "table" and pcall(tecs.json.serialize, v) then
+            values[i - 1] = v
+        else
+            values[i - 1] = tostring(v)
+        end
+    end
+    return true, {returned = n - 1, values = values}
 end
 
 function handlers.install(c: state.Context)

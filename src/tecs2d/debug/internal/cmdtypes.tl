@@ -60,6 +60,15 @@ local record cmdtypes
         data: {string: any}
         popup: {string}
         popupImagePath: string
+
+        --- When set (with ok=true), the transport must NOT respond
+        --- immediately: it calls deferred(respond, failWith) and the command
+        --- finishes the exchange later — respond(payload) sends a success
+        --- payload, failWith(code, message) an error. Used by cmd_step's
+        --- wait/lua form, where the answer exists only after the stepped
+        --- frames have run. The typed console ignores deferral (it shows
+        --- result.message as usual).
+        deferred: function(respond: function({string: any}), failWith: function(string, string))
     end
 
     --- Surface-directed side effects an action may raise instead of poking

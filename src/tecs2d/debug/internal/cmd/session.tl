@@ -25,6 +25,14 @@ local stepSchema <const>: cmdargs.Schema = {
         n = {default = 1, help = "number of frames to tick"},
         dt = {kind = "number",
             help = "seconds each stepped frame carries (default 1/fps)"},
+        events = {kind = "table",
+            help = "input_tape rows to queue before stepping ({at, event, args})"},
+        lua = {help = "Lua to evaluate (run_lua sandbox) after the last frame; "
+            .. "defers the response until the step completes"},
+        wait = {kind = "boolean",
+            help = "defer the response until the stepped frames have run"},
+        force = {kind = "boolean",
+            help = "queue events even when a press is already held (tape force)"},
     },
     positional = {"n"},
 }
@@ -231,7 +239,7 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             name = "step",
             section = "Session",
             shortHelp = "tick the game forward N frames while otherwise frozen",
-            mcpHelp = "Advance gameplay by n frames while the freeze controller is held, then freeze again. Each stepped frame carries a DETERMINISTIC dt of 1/fps (the run config's fps, echoed as step_dt) regardless of display refresh rate, so `n` frames advance exactly n/fps gameplay seconds; pass dt= to override per call. ASYNC: this returns when the frames are scheduled -- they tick over the next loop iterations, so read state with a follow-up call, never in the same response you scheduled the step in. Fails when nothing holds the freeze; acquire it with cmd_freeze on=true first.",
+            mcpHelp = "Advance gameplay by n frames while the freeze controller is held, then freeze again. Each stepped frame carries a DETERMINISTIC dt of 1/fps (the run config's fps, echoed as step_dt) regardless of display refresh rate, so `n` frames advance exactly n/fps gameplay seconds; pass dt= to override per call. ONE-CALL VERIFICATION: pass events= (input_tape rows, at=1 is the first stepped frame) to queue inputs, and lua= (run_lua sandbox) to read state after the last frame -- the response then arrives when the step COMPLETES, carrying the lua values, so tape->step->read is a single call: cmd_step '{\"events\":[{\"at\":1,\"event\":\"keypressed\",\"args\":[\"left\"]}],\"n\":10,\"lua\":\"return {x=head.x}\"}'. wait=true defers the response without a read. Without lua/wait the call is ASYNC: it returns when the frames are scheduled, so read state in a follow-up call. Fails when nothing holds the freeze; acquire it with cmd_freeze on=true first.",
             schema = stepSchema,
             outputSchema = {
                 type = "object",
@@ -239,12 +247,20 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     frames = {type = "integer", description = "frames scheduled to tick"},
                     step_dt = {type = "number",
                         description = "seconds each stepped frame will carry"},
+                    queued = {type = "integer",
+                        description = "events= rows accepted onto the tape"},
                     will_fire = {type = "array", items = {type = "object", properties = {
                         ["in"] = {type = "integer", description = "gameplay frames from now"},
                         event = {type = "string"},
                     }}, description = "queued input_tape rows due within this step"},
                     held = {type = "array", items = {type = "string"},
                         description = "inputs the tape currently holds down"},
+                    waited = {type = "boolean",
+                        description = "response was deferred until the step completed"},
+                    returned = {type = "integer",
+                        description = "lua= return-value count (deferred form)"},
+                    values = {type = "array",
+                        description = "lua= return values in order (deferred form)"},
                 },
                 required = {"frames"},
             },
@@ -254,13 +270,31 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 if dtArg ~= nil and dtArg <= 0 then
                     return {ok = false, code = "bad_dt", message = "step: dt must be > 0"}
                 end
+                if not env.freeze:isFrozen() then
+                    return {ok = false, code = "not_frozen", message = "step: not frozen"}
+                end
+
+                local data: {string: any} = {frames = n,
+                    step_dt = dtArg or frameclock.nominal}
+
+                -- Queue events= before scheduling, so the rows land on the
+                -- stepped frames and show up in the will_fire echo. Queueing
+                -- is atomic: a bad batch fails the whole call, nothing steps.
+                if v.events ~= nil then
+                    local tape = inputtape.ensure(w)
+                    local queued <const>, qerr <const> =
+                        tape:queue(v.events as {{string: any}}, v.force == true)
+                    if not queued then
+                        return {ok = false, code = "invalid_tape", message = "step: " .. qerr}
+                    end
+                    data.queued = queued
+                end
+
                 env.freeze.stepDt = dtArg
                 local ok, err = env.freeze:step(n)
                 if not ok then
                     return {ok = false, code = "not_frozen", message = "step: " .. err}
                 end
-                local data: {string: any} = {frames = n,
-                    step_dt = dtArg or frameclock.nominal}
                 -- Echo the input_tape window so "did my rows land in this
                 -- step?" needs no follow-up call. Frames tick asynchronously,
                 -- so this is the schedule; input_tape status reports actuals.
@@ -271,6 +305,41 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     local heldNow <const> = tape:heldIds()
                     if #heldNow > 0 then data.held = heldNow end
                 end
+
+                -- One-call form: defer the response until the last stepped
+                -- frame has run, then optionally evaluate lua= in the run_lua
+                -- sandbox and carry its values back in this same response.
+                local code = v.lua as string
+                if code ~= nil or v.wait == true then
+                    data.waited = true
+                    local fz = env.freeze
+                    return {ok = true,
+                        message = "stepping " .. tostring(n) .. " frame(s), deferred",
+                        data = data,
+                        deferred = function(respond: function({string: any}),
+                                failWith: function(string, string))
+                            fz:onStepComplete(function()
+                                if code == nil then
+                                    respond(nil)
+                                    return
+                                end
+                                local evalFn = w.resources[mcpinfo.LUA_EVAL]
+                                if evalFn == nil then
+                                    failWith("lua_unavailable",
+                                        "step lua= needs the MCP plugin's sandbox (mcp.new())")
+                                    return
+                                end
+                                local okE, res = evalFn(code, w)
+                                if not okE then
+                                    failWith("lua_execution_failed",
+                                        "step lua: " .. tostring(res))
+                                    return
+                                end
+                                respond(res as {string: any})
+                            end)
+                        end}
+                end
+
                 return {ok = true, message = "stepping " .. tostring(n) .. " frame(s)",
                     data = data}
             end,

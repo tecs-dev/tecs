@@ -40,6 +40,12 @@ rpc.handlers = {}
 
 local ctx: state.Context = nil
 
+-- Toggle the keep-socket-open flag for a deferred command response (the same
+-- mechanism run_lua's queued op uses).
+local function ctxPendingWorldOp(v: boolean)
+    if ctx then ctx.pendingWorldOpResponse = v end
+end
+
 function rpc.install(c: state.Context)
     ctx = c
 end
@@ -164,6 +170,34 @@ local function callCommandTool(toolName: string, args: {string:any}, id: number)
     -- data provides (cmd_context carries the overlay status line there).
     if result.message ~= nil then
         payload.message = result.message
+    end
+    -- A deferred command answers later (cmd_step's wait/lua form): keep the
+    -- client socket open (same flag run_lua's queued op uses) and hand the
+    -- command respond/fail closures bound to this request id. The immediate
+    -- payload rides along as the base of the eventual response.
+    if result.deferred then
+        ctxPendingWorldOp(true)
+        local answered = false
+        local respond = function(extra: {string: any})
+            if answered then return end
+            answered = true
+            if extra then
+                for k, v in pairs(extra) do payload[k] = v end
+            end
+            rpc.sendToolOK(id, payload)
+            ctxPendingWorldOp(false)
+        end
+        local failWith = function(code: string, message: string)
+            if answered then return end
+            answered = true
+            rpc.sendToolError(id, code or "command_failed", message or "command failed")
+            ctxPendingWorldOp(false)
+        end
+        local okd, derr = pcall(result.deferred, respond, failWith) as (boolean, any)
+        if not okd and not answered then
+            failWith("deferred_failed", tostring(derr))
+        end
+        return true
     end
     rpc.sendToolOK(id, payload)
     return true

@@ -12,6 +12,9 @@
 local tecs <const> = require("tecs")
 local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
 local frameclock <const> = require("tecs2d.internal.frameclock")
+local logging <const> = require("tecs.utils.logging")
+
+local LOGGER <const> = logging.getLogger("tecs2d.debug.freeze")
 
 local record freeze
     record Controller
@@ -30,6 +33,16 @@ local record freeze
         --- The provider this controller installed on frameclock (nil when
         --- not stepping, or when a replay owned the provider first).
         ownProvider: function(number): number
+
+        --- One-shot callbacks fired when the pending step's last frame has
+        --- run (or the freeze is released mid-step, so no waiter strands).
+        stepWaiters: {function()}
+
+        --- Register a one-shot step-completion callback. Fires immediately
+        --- when no step is pending.
+        onStepComplete: function(self: Controller, fn: function())
+
+        flushStepWaiters: function(self: Controller)
 
         --- Freeze on behalf of `who`. Returns false if already held by them.
         acquire: function(self: Controller, who: string): boolean
@@ -121,6 +134,9 @@ function freeze.Controller:release(who: string): boolean
         self.stepsRemaining = 0
         self.stepping = false
         self:removeStepClock()
+        -- A release mid-step resolves waiters rather than stranding their
+        -- deferred responses; the game is running, the step is moot.
+        self:flushStepWaiters()
     end
     return true
 end
@@ -140,6 +156,29 @@ function freeze.Controller:step(frames: integer): boolean, string
     if frames < 1 then frames = 1 end
     self.stepsRemaining = frames
     return true, nil
+end
+
+-- Fire and clear every registered step waiter. Each callback runs isolated
+-- so one bad waiter cannot strand the others (or kill the tick system).
+function freeze.Controller:flushStepWaiters()
+    local waiters = self.stepWaiters
+    if not waiters or #waiters == 0 then return end
+    self.stepWaiters = {}
+    for i = 1, #waiters do
+        local ok, err = pcall(waiters[i]) as (boolean, any)
+        if not ok then
+            LOGGER:error("step waiter failed: %s", tostring(err))
+        end
+    end
+end
+
+function freeze.Controller:onStepComplete(fn: function())
+    if self.stepsRemaining <= 0 and not self.stepping then
+        pcall(fn)
+        return
+    end
+    self.stepWaiters = self.stepWaiters or {}
+    self.stepWaiters[#self.stepWaiters + 1] = fn
 end
 
 -- Install a deterministic-dt provider for the duration of a step, unless a
@@ -181,6 +220,9 @@ function freeze.Controller:tick()
         setRenderTimeScale(self.world, 0.0)
         self.stepping = false
         self:removeStepClock()
+        -- The last stepped frame's gameplay phases have run (RenderFirst is
+        -- after them), so waiters observe post-step state.
+        self:flushStepWaiters()
     end
 end
 

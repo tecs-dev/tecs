@@ -110,6 +110,10 @@ function mcp.new(config?: mcp.Config): function(world: tecs.World)
             end,
         }
 
+        -- The run_lua sandbox, callable by debugger commands (cmd_step's
+        -- `lua` post-step read) without a dependency on this module.
+        w.resources[mcpinfo.LUA_EVAL] = handlers.evalInSandbox
+
         -- The MCP frame systems run in RenderFirst, not a gameplay phase:
         -- a freeze disables the gameplay phases (First..Last), and the server
         -- must keep answering cmd_freeze/cmd_step/run_lua while frozen.
