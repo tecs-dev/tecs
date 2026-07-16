@@ -1225,6 +1225,9 @@ function tasks.check(args)
     local tlArgs = {"check"}
     for _, source in ipairs(sources) do tlArgs[#tlArgs + 1] = source end
     runTl(tlArgs)
+    -- runTl errors out on any diagnostic, so reaching here means a clean pass.
+    -- Say so explicitly: the exit code alone reads as ambiguous silence.
+    status("OK: 0 type errors in " .. tostring(#sources) .. " files")
 end
 
 function tasks.build()

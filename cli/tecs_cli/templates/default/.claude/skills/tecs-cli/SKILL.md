@@ -11,9 +11,11 @@ Run everything from the project root (the directory with `tlconfig.lua`).
 session — input, rendering/layers, freeze/step, snapshots — read its pitfalls first: the
 tecs-conventions skill's relevant bullets and, for input specifically, `tecs docs tecs2d/input`
 ("Latch-based input"). One minute of reading beats twenty of live debugging a silent no-op.
-And when verifying *behavior*, prefer writing one `tecs integ` spec (batched, deterministic,
-`fixture.eventually` built in) over long interactive MCP drive sessions — per-call latency
-adds up fast.
+And when verifying *behavior*, pick the channel by scope: one interactive freeze→tape→step→assert
+pass through the MCP tools is the right tool for verifying a handful of mechanics once (a one-shot
+"does it work" check); write a `tecs integ` spec (batched, deterministic, `fixture.eventually`
+built in) when the same behaviors will be checked repeatedly or the drive session grows past a
+couple dozen calls — per-call latency adds up fast.
 
 ## Core loop
 
