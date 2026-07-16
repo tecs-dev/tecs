@@ -1152,6 +1152,21 @@ describe("tecs CLI", function()
                 assert.matches("sentinel%.module", relisted)
             end)
 
+            it("tecs new stages the vendor so first use never prepares", function()
+                ensureBuilt()
+                local dataDir = makeTemp("pkg-new-udata")
+                local parent = makeTemp("pkg-new")
+                runPackaged(parent, dataDir, {"new", "staged"})
+                -- The scaffolded project is complete: the exact files
+                -- embeddedDependenciesComplete() checks are already there,
+                -- so the first check/api inside it stages nothing.
+                local v = join(parent, "staged", "src", "vendor", "share", "lua", "5.1")
+                assert.is_true(exists(join(v, "tecs2d", "init.tl")), "framework not staged")
+                assert.is_true(exists(join(v, "love2d.d.tl")), "types not staged")
+                assert.is_true(exists(join(v, "tecs2d", "assets", "fonts", "tiny-font.png")),
+                    "assets not staged")
+            end)
+
             it("projects rendered output with --fields through the packaged CLI", function()
                 ensureBuilt()
                 local dataDir = makeTemp("pkg-fields-udata")

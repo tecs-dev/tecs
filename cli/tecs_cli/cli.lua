@@ -1095,6 +1095,17 @@ function tasks.new(args)
         writeFile(confPath, text)
     end
 
+    -- Stage the framework vendor now, so the project is complete at scaffold
+    -- time: the first `tecs check`/`api` inside it must answer immediately,
+    -- not pause on "Preparing embedded Tecs dependencies...".
+    if isLoveCli then
+        local savedVendor = vendorLua
+        vendorLua = pathJoin(target, "src/vendor/share/lua/5.1")
+        local ok, err = pcall(ensureVendor)
+        vendorLua = savedVendor
+        if not ok then fail(err) end
+    end
+
     status("Project created. Next: cd " .. target .. " && tecs check")
 end
 

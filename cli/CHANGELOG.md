@@ -57,6 +57,9 @@ payload, launchers, and installers as GitHub release assets.
 - The MCP bridge no longer mirrors the toolchain (`check`, `build`, `api`,
   `integ`, `dist` tools removed): the CLI is the canonical toolchain
   interface; the bridge owns game lifecycle and live runtime tools.
+- `tecs new` stages the framework vendor at scaffold time, so the first
+  `check`/`api` inside a new project answers immediately instead of pausing
+  on "Preparing embedded Tecs dependencies...".
 - Trimmed the generated AGENTS.md's MCP section to a pointer at the tecs-cli
   skill (the playbook was duplicated in both and paid for twice per session).
 - `check` hints the fix when `local KEY: tecs.Key<T> <const>` trips Teal's

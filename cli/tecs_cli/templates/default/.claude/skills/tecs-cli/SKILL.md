@@ -40,8 +40,12 @@ couple dozen calls — per-call latency adds up fast.
   usual question, and `tecs api Text Rectangle --fields constructor` answers it in one line
   each instead of a page of renderer-internal fields. **For any signature, field, or constructor
   question, `tecs api` first** — tens of tokens vs. thousands for a full docs page; save
-  `tecs docs` pages for concepts. Don't re-verify what `tecs check` already proves: write the
-  code, check it, and let the diagnostics (with their `tecs api` hints) catch a wrong signature.
+  `tecs docs` pages for concepts (`tecs docs --search <pattern>` finds the page). Don't
+  re-verify what `tecs check` already proves: write the code, check it, and let the
+  diagnostics (with their `tecs api` hints) catch a wrong signature. The conventions skill
+  already states the core ECS shapes (spawn variadics, getMut-at-write-site, resources
+  indexing, run(dt, world), phases) — trust it and skip confirmatory lookups; spend `tecs api`
+  on what it can't know, like component constructors (`--fields constructor`).
 
 ## MCP bridge
 
@@ -87,7 +91,10 @@ and make every observation deterministic:
    that is staging, not cheating. The rule: everything **except** the mechanism under test may
    be arranged; the mechanism itself must run for real. Testing "eating grows the snake"? Move
    the food one cell ahead — but the eat must happen via a real stepped frame, and if steering
-   is under test, the turn must come from `cmd_input_tape`, not a direction-field write.
+   is under test, the turn must come from taped events, not a direction-field write. And when
+   a guard forces you to stage *around* it (e.g. writing `dir` directly because the reversal
+   guard blocks a 180° tape), spend one rung proving the guard itself — a mechanism you leaned
+   on but never exercised is an unverified mechanic.
 4. **Advance and read in ONE call.** `cmd_step` takes the whole interaction: `events` (tape
    rows, `at:1` = first stepped frame), `n`, and `lua` — the response arrives after the frames
    ran, carrying the lua values:
