@@ -2383,6 +2383,8 @@ MCP tool: `cmd_diff_get` (read-only, idempotent)
 
 Capture the screen (or drag area) to a PNG.
 
+Capture the screen (or the marked drag area) to a PNG at the end of the next rendered frame. The result's data.full is the absolute host path where the file appears -- read it from there; data.path is the save-directory-relative name. For cheap visual checks prefer sample_pixels or an area-restricted shot over a full-frame capture.
+
 MCP tool: `cmd_screenshot`
 
 | Argument | Type | Description |

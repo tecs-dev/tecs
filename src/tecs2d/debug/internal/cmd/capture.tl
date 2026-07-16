@@ -1462,6 +1462,11 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             name = "screenshot",
             section = "Capture",
             shortHelp = "capture the screen (or drag area) to a PNG",
+            mcpHelp = "Capture the screen (or the marked drag area) to a PNG at the end "
+                .. "of the next rendered frame. The result's data.full is the absolute "
+                .. "host path where the file appears -- read it from there; data.path is "
+                .. "the save-directory-relative name. For cheap visual checks prefer "
+                .. "sample_pixels or an area-restricted shot over a full-frame capture.",
             schema = {
                 args = {
                     name = {help = "output filename"},
@@ -1564,17 +1569,22 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         end
                     end)
                 end
+                -- `full` is the resolved host path the file will appear at once
+                -- the end-of-frame capture callback runs -- returned up front so
+                -- clients never have to hunt for the save directory.
+                local full = debugcontext.savePath(name)
                 if delay > 0 then
                     reg.pendingShots[#reg.pendingShots + 1] = {dueIn = delay, fire = fire}
                     return {ok = true,
                         message = format("capturing %s in %.1fs%s%s", name, delay,
                             hasArea and " (area)" or "", keepPanel and " (panel)" or ""),
-                        data = {path = name, area = hasArea, panel = keepPanel, delay = delay}}
+                        data = {path = name, full = full, area = hasArea,
+                            panel = keepPanel, delay = delay}}
                 end
                 fire()
                 return {ok = true, message = "capturing " .. name .. (hasArea and " (area)" or "") ..
                         (keepPanel and " (panel)" or ""),
-                    data = {path = name, area = hasArea, panel = keepPanel}}
+                    data = {path = name, full = full, area = hasArea, panel = keepPanel}}
             end,
         },
         {
