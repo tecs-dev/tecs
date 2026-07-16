@@ -31,6 +31,12 @@ payload, launchers, and installers as GitHub release assets.
   cannot bind an already-served MCP port logs an ERROR naming the conflict.
 - `tecs api` resolves `tecs.builtins` (Transform et al); `check` hints
   `math.floor` on integer-index errors.
+- `start_game '{"frozen":true}'` boots the game with the freeze already held
+  (inspectable at frame zero; `cmd_freeze on=false` releases it).
+- `tecs new` stamps the LÖVE identity/title with the project name, so games no
+  longer share a save dir (stale debugger artifacts bled between projects).
+- `fixture.eventually` now polls until truthy, not merely non-nil — a
+  `return cond` poll no longer fails on its first `false`.
 - Reworked agent guidance: canonical freeze/tape/step verification loop,
   staging + goal ladder, time-travel workflow, and a world-space template
   gameplay layer with an idle tween.
