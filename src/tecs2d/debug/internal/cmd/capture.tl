@@ -15,6 +15,9 @@ local StringBuffer <const> = require("string.buffer")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
 local rewind <const> = require("tecs2d.debug.internal.rewind")
 local snapdiff <const> = require("tecs2d.debug.internal.diff")
+local replaytape <const> = require("tecs2d.debug.internal.replaytape")
+local inputtape <const> = require("tecs2d.debug.internal.inputtape")
+local freeze <const> = require("tecs2d.debug.internal.freeze")
 local osopen <const> = require("tecs2d.debug.internal.osopen")
 local cmdargs <const> = require("tecs2d.debug.internal.cmdargs")
 local cmdtypes <const> = require("tecs2d.debug.internal.cmdtypes")
@@ -986,6 +989,10 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         if not ok then
                             return {ok = false, code = "start_failed", message = "rewind start: " .. err}
                         end
+                        -- The replay recorder rides the rewind session: input
+                        -- events and per-frame dt are recorded while a ring
+                        -- exists, so every entry doubles as a replay anchor.
+                        replaytape.ensure(w)
                         invalidateDiffCache()
                         debugcontext.pushEvent(ctx, "rewind", {started = true, interval = interval, cap = cap})
                         return {ok = true,
@@ -1132,6 +1139,110 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                             message = format("rewound %ds (entry %d); capture paused, `rewind resume` to continue",
                                 age, idx),
                             data = {index = idx, age = age, path = e.path, entities = e.entities}}
+                    end,
+                },
+                {
+                    name = "replay",
+                    shortHelp = "re-run recorded input and dt forward from a ring entry",
+                    mcpHelp = "Deterministically re-run the game from a ring entry: restores that snapshot (RNG state included), re-presses inputs that were held at the anchor, queues every recorded input event onto the input tape at its original gameplay frame, feeds the recorded per-frame dt, and steps. Requires the freeze to be held (cmd_freeze on=true) and a rewind session (the recorder rides the ring). frames defaults to the full recording since that entry. Live input is not muted: touching the controls during a replay simply makes a new timeline.",
+                    schema = { args = {
+                        ref = {help = "entry index (newest first), latest, or Ns for seconds back"},
+                        ago = {kind = "number", help = "seconds back; picks the closest at or before"},
+                        frames = {kind = "number", help = "gameplay frames to replay (default: to the end of the recording)"},
+                    }, positional = {"ref", "frames"} },
+                    outputSchema = {
+                        type = "object",
+                        properties = {
+                            index = {type = "integer", description = "the ring entry replayed from"},
+                            frames = {type = "integer", description = "gameplay frames being replayed"},
+                            events = {type = "integer", description = "recorded event rows queued"},
+                            held = {type = "integer", description = "held inputs re-pressed at the anchor"},
+                        },
+                        required = {"index", "frames", "events", "held"},
+                    },
+                    run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
+                        local ctl = freeze.ensure(w)
+                        if not ctl:isFrozen() then
+                            return {ok = false, code = "not_frozen",
+                                message = "rewind replay: freeze first (cmd_freeze on=true); replay drives frames through step"}
+                        end
+                        local recorder = w.resources[replaytape.KEY]
+                        if not recorder then
+                            return {ok = false, code = "no_recording",
+                                message = "rewind replay: no recording; start a rewind session first"}
+                        end
+                        local e, idx, err = rewind.findEntry(ctx, v.ref as string, v.ago as number)
+                        if not e then
+                            return {ok = false, code = "no_match", message = "rewind replay: " .. err}
+                        end
+                        if e.frame == nil then
+                            return {ok = false, code = "no_anchor",
+                                message = "rewind replay: that entry predates the recorder"}
+                        end
+                        local frames = math.floor((v.frames as number) or (recorder.frame - e.frame)) as integer
+                        if frames < 1 then
+                            return {ok = false, code = "empty_window",
+                                message = "rewind replay: nothing recorded after that entry yet"}
+                        end
+                        local rows, dts, serr = recorder:slice(e.frame, frames)
+                        if not rows then
+                            return {ok = false, code = "window_gone", message = "rewind replay: " .. serr}
+                        end
+
+                        -- Restore the anchor world (mirrors rewind load).
+                        local heldCd, heldErr = loadCooldown("rewind replay")
+                        if heldCd then
+                            return {ok = false, code = "busy", message = heldErr}
+                        end
+                        local bytes = love.filesystem.read(e.path)
+                        if not bytes then
+                            return {ok = false, code = "read_failed",
+                                message = "rewind replay: cannot read " .. e.path}
+                        end
+                        local lok, lerr = pcall(w.loadSnapshot, w, bytes)
+                        if not lok then
+                            return {ok = false, code = "load_failed",
+                                message = "rewind replay failed: " .. tostring(lerr)}
+                        end
+                        reg.lastWorldLoadAt = getTime()
+                        ctx.selected = {}
+                        ctx.marks = {}
+                        ctx.notes = {}
+                        if ctx.rewind.status == "running" then
+                            ctx.rewind.status = "paused"
+                            ctx.rewind.pauseReason = "loaded"
+                        end
+
+                        -- Feed the tape: anchor-held presses first (frame 1,
+                        -- lower seq), then the recorded rows.
+                        local tape = inputtape.ensure(w)
+                        tape:clear()
+                        local queuedHeld = 0
+                        if e.held and #e.held > 0 then
+                            local heldRows: {{string: any}} = {}
+                            for i = 1, #e.held do
+                                heldRows[i] = {at = 1, event = e.held[i].event, args = e.held[i].args}
+                            end
+                            local q, qerr = tape:queue(heldRows, true)
+                            if not q then
+                                return {ok = false, code = "tape_failed", message = "rewind replay: " .. qerr}
+                            end
+                            queuedHeld = q
+                        end
+                        if #rows > 0 then
+                            local q2, qerr2 = tape:queue(rows, true)
+                            if not q2 then
+                                return {ok = false, code = "tape_failed", message = "rewind replay: " .. qerr2}
+                            end
+                        end
+
+                        recorder:feedDts(dts, function(): boolean return ctl.stepping end)
+                        ctl:step(frames)
+                        debugcontext.pushEvent(ctx, "rewind", {replayed = idx, frames = frames})
+                        return {ok = true,
+                            message = format("replaying %d frame(s) from entry %d (%d event(s), %d held)",
+                                frames, idx, #rows, queuedHeld),
+                            data = {index = idx, frames = frames, events = #rows, held = queuedHeld}}
                     end,
                 },
                 {

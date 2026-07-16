@@ -92,6 +92,11 @@ local record debugcontext
             -- os.time() at capture; ages are computed against os.time().
             time: integer
             entities: integer
+            -- Replay anchor: the recorder's gameplay frame at capture, and
+            -- synthesized press rows for inputs held at that moment. Absent
+            -- on entries captured before the recorder existed.
+            frame: integer
+            held: {{string: any}}
         end
 
         --- Time-travel snapshot ring (the `rewind` command). Captures are
@@ -196,7 +201,7 @@ local record debugcontext
     end
 end
 
-debugcontext.KEY = tecs.newKey()
+debugcontext.KEY = tecs.newKey("tecs2d.debug.context")
 
 function debugcontext.new(): debugcontext.Context
     return {

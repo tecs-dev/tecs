@@ -1,6 +1,7 @@
 local events <const> = require("tecs2d.events")
 local input <const> = require("tecs2d.input")
 local handlers <const> = require("tecs2d.internal.handlers")
+local frameclock <const> = require("tecs2d.internal.frameclock")
 local tecs <const> = require("tecs")
 local tecs_assets <const> = require("tecs2d.assets")
 local tecs_audio <const> = require("tecs2d.audio")
@@ -453,6 +454,29 @@ local function runLoop(config: tecs2d.RunConfig): (function(): number | string)
     renderConfig.world = world
     local pipelineInstance = gfx.newPipeline(renderConfig)
 
+    -- Random state travels with snapshots: love.math's default generator is
+    -- the framework's sanctioned RNG (the conventions steer games to
+    -- love.math.random), so capturing it makes hot reload, rewind, and input
+    -- replay deterministic for games that use randomness. Lua's raw
+    -- math.random has no readable state and stays outside this guarantee.
+    world:addSnapshotHandler({
+        name = "tecs2d.randomState",
+        save = function(_w: tecs.World): any
+            -- Guarded: test harnesses mock love without love.math.
+            local lm = love.math as {string: any}
+            if not (lm and lm.getRandomState) then return nil end
+            return {state = (lm.getRandomState as function(): string)()}
+        end,
+        load = function(_w: tecs.World, value: any)
+            local data = value as {string: any}
+            local state = data and data.state as string
+            local lm = love.math as {string: any}
+            if state and lm and lm.setRandomState then
+                (lm.setRandomState as function(string))(state)
+            end
+        end,
+    })
+
     -- Auto-install tiled plugin
     world:addPlugin(tecs_tiled.plugin)
 
@@ -499,9 +523,10 @@ local function runLoop(config: tecs2d.RunConfig): (function(): number | string)
             dt = 0.25
         end
 
-        -- Apply time scale from render pipeline
+        -- Apply time scale from render pipeline; a replay provider may then
+        -- substitute the recorded per-frame dt (tecs2d.internal.frameclock).
         local timeScale = pipelineInstance:getTimeScale()
-        local scaledDt = dt * timeScale
+        local scaledDt = frameclock.apply(dt * timeScale)
 
         -- Update game time for GPU animations
         local pipelineAny <const> = pipelineInstance as {string: any}

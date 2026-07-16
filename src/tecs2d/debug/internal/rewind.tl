@@ -10,6 +10,7 @@
 
 local tecs <const> = require("tecs")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
+local replaytape <const> = require("tecs2d.debug.internal.replaytape")
 
 local record rewind
     DIR: string
@@ -163,11 +164,14 @@ function rewind.capture(ctx: debugcontext.Context, w: tecs.World, now: number): 
     end
     local info = love.filesystem.getInfo(path)
     local size = ((info and info.size) or 0) as integer
+    local recorder = w.resources[replaytape.KEY]
     st.entries[#st.entries + 1] = {
         path = path,
         size = size,
         time = os.time() as integer,
         entities = w:getStats().entities,
+        frame = recorder and recorder.frame or nil,
+        held = recorder and recorder:heldRows() or nil,
     }
     st.bytes = st.bytes + size
     while #st.entries > st.cap do
