@@ -826,7 +826,7 @@ function commands.build(env: commands.Env): commands.Registry
                     "  escape = clear the command / popup, or close when empty",
                     "  tab / shift+tab = cycle completions (hold to repeat)",
                     "  bare tab starts the cycle at the last used command",
-                    "  f1 = toggle full help for the current command (or debugger help when empty)",
+                    "  f1 = toggle command help (general help when empty)",
                     "  up / down = walk the command history",
                     "  left / right = page this popup",
                     "  enter = run the command",

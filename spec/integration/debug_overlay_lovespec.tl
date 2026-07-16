@@ -154,20 +154,15 @@ describe("in-game debugger overlay", function()
         app.client:call("send_love_event", {event = "keyreleased", args = {"return"}})
     end)
 
-    it("shows the tab hint on open and clears it on tab", function()
+    it("opens with a clean message line (command bar is always visible)", function()
+        -- The old "Hit [TAB]" hint is gone: the completion bar is permanently
+        -- mounted, so opening shows the commands themselves, not a pointer.
         openDebugger()
-        local shown = fixture.eventually(fixture.callTimeout, function(): boolean
-            if (context().message as string) == "Hit [TAB] to see commands" then return true end
-            return nil
-        end)
-        luassert.is_true(shown == true, "open hint not shown")
-        app.client:call("send_love_event", {event = "keypressed", args = {"tab"}})
-        app.client:call("send_love_event", {event = "keyreleased", args = {"tab"}})
-        local cleared = fixture.eventually(fixture.callTimeout, function(): boolean
+        local clean = fixture.eventually(fixture.callTimeout, function(): boolean
             if (context().message as string) == "" then return true end
             return nil
         end)
-        luassert.is_true(cleared == true, "tab hint did not clear on tab")
+        luassert.is_true(clean == true, "message line not clean on open")
     end)
 
     it("bare tab starts the cycle at the last used command", function()
@@ -270,25 +265,50 @@ describe("in-game debugger overlay", function()
         luassert.is_true(ok == true, "bloom command did not configure bloom")
     end)
 
-    it("toggles selection: click adds, clicking again removes", function()
+    it("click replaces the selection; shift-click adds; empty click clears", function()
         openDebugger()
-        local wx, wy = moveCursor(200, 150)
-        local eid = spawnAt(wx, wy)
+        local ax, ay = moveCursor(200, 150)
+        local a = spawnAt(ax, ay)
         app.client:call("send_love_event", {event = "mousepressed", args = {200, 150, 1}})
         app.client:call("send_love_event", {event = "mousereleased", args = {200, 150, 1}})
         local added = fixture.eventually(fixture.callTimeout, function(): boolean
-            if selectedHas(eid) then return true end
+            if selectedHas(a) then return true end
             return nil
         end)
-        luassert.is_true(added == true, "click did not add to selection")
+        luassert.is_true(added == true, "click did not select")
 
+        -- A plain click on another entity REPLACES the selection.
+        local bx, by = moveCursor(240, 150)
+        local b = spawnAt(bx, by)
+        app.client:call("send_love_event", {event = "mousepressed", args = {240, 150, 1}})
+        app.client:call("send_love_event", {event = "mousereleased", args = {240, 150, 1}})
+        local replaced = fixture.eventually(fixture.callTimeout, function(): boolean
+            if selectedHas(b) and not selectedHas(a) then return true end
+            return nil
+        end)
+        luassert.is_true(replaced == true, "plain click did not replace the selection")
+
+        -- Shift-click ADDS (shift state is captured at press time).
+        moveCursor(200, 150)
+        app.client:call("send_love_event", {event = "keypressed", args = {"lshift"}})
         app.client:call("send_love_event", {event = "mousepressed", args = {200, 150, 1}})
         app.client:call("send_love_event", {event = "mousereleased", args = {200, 150, 1}})
-        local removed = fixture.eventually(fixture.callTimeout, function(): boolean
-            if not selectedHas(eid) then return true end
+        app.client:call("send_love_event", {event = "keyreleased", args = {"lshift"}})
+        local both = fixture.eventually(fixture.callTimeout, function(): boolean
+            if selectedHas(a) and selectedHas(b) then return true end
             return nil
         end)
-        luassert.is_true(removed == true, "second click did not remove from selection")
+        luassert.is_true(both == true, "shift-click did not add to the selection")
+
+        -- A plain click on empty space clears everything.
+        moveCursor(60, 200)
+        app.client:call("send_love_event", {event = "mousepressed", args = {60, 200, 1}})
+        app.client:call("send_love_event", {event = "mousereleased", args = {60, 200, 1}})
+        local cleared = fixture.eventually(fixture.callTimeout, function(): boolean
+            if not selectedHas(a) and not selectedHas(b) then return true end
+            return nil
+        end)
+        luassert.is_true(cleared == true, "empty-space click did not clear the selection")
     end)
 
     it("drag selects entities inside the box", function()
@@ -314,21 +334,21 @@ describe("in-game debugger overlay", function()
         ]], eid))[1])
     end
 
-    it("shift-drag moves the selected entities", function()
+    it("ctrl-drag moves the selected entities", function()
         openDebugger()
         local wx, wy = moveCursor(160, 150)
         local eid = spawnAt(wx, wy)
         app.client:call("cmd_select", {id = eid, replace = true})
-        app.client:call("send_love_event", {event = "keypressed", args = {"lshift"}})
+        app.client:call("send_love_event", {event = "keypressed", args = {"lctrl"}})
         app.client:call("send_love_event", {event = "mousepressed", args = {160, 150, 1}})
         app.client:call("send_love_event", {event = "mousemoved", args = {210, 150, 50, 0}})
         app.client:call("send_love_event", {event = "mousereleased", args = {210, 150, 1}})
-        app.client:call("send_love_event", {event = "keyreleased", args = {"lshift"}})
+        app.client:call("send_love_event", {event = "keyreleased", args = {"lctrl"}})
         local moved = fixture.eventually(fixture.callTimeout, function(): boolean
             if entityX(eid) > wx + 1 then return true end
             return nil
         end)
-        luassert.is_true(moved == true, "shift-drag did not move the entity")
+        luassert.is_true(moved == true, "ctrl-drag did not move the entity")
     end)
 
     it("right-click cancels a shift-drag and restores positions", function()
@@ -336,12 +356,12 @@ describe("in-game debugger overlay", function()
         local wx, wy = moveCursor(160, 150)
         local eid = spawnAt(wx, wy)
         app.client:call("cmd_select", {id = eid, replace = true})
-        app.client:call("send_love_event", {event = "keypressed", args = {"lshift"}})
+        app.client:call("send_love_event", {event = "keypressed", args = {"lctrl"}})
         app.client:call("send_love_event", {event = "mousepressed", args = {160, 150, 1}})
         app.client:call("send_love_event", {event = "mousemoved", args = {220, 150, 60, 0}})
         app.client:call("send_love_event", {event = "mousepressed", args = {220, 150, 2}})
         app.client:call("send_love_event", {event = "mousereleased", args = {220, 150, 1}})
-        app.client:call("send_love_event", {event = "keyreleased", args = {"lshift"}})
+        app.client:call("send_love_event", {event = "keyreleased", args = {"lctrl"}})
         local restored = fixture.eventually(fixture.callTimeout, function(): boolean
             if math.abs(entityX(eid) - wx) < 0.5 then return true end
             return nil
@@ -985,7 +1005,7 @@ describe("in-game debugger overlay", function()
             "down did not walk forward; command=" .. tostring(context().command))
     end)
 
-    it("shift-drag moves every selected entity together", function()
+    it("ctrl-drag moves every selected entity together", function()
         openDebugger()
         local wx, wy = moveCursor(160, 150)
         local a = spawnAt(wx, wy)
@@ -994,16 +1014,16 @@ describe("in-game debugger overlay", function()
         app.client:call("cmd_select", {id = b})
         local ax0 = entityX(a)
         local bx0 = entityX(b)
-        app.client:call("send_love_event", {event = "keypressed", args = {"lshift"}})
+        app.client:call("send_love_event", {event = "keypressed", args = {"lctrl"}})
         app.client:call("send_love_event", {event = "mousepressed", args = {160, 150, 1}})
         app.client:call("send_love_event", {event = "mousemoved", args = {210, 150, 50, 0}})
         app.client:call("send_love_event", {event = "mousereleased", args = {210, 150, 1}})
-        app.client:call("send_love_event", {event = "keyreleased", args = {"lshift"}})
+        app.client:call("send_love_event", {event = "keyreleased", args = {"lctrl"}})
         local moved = fixture.eventually(fixture.callTimeout, function(): boolean
             if entityX(a) > ax0 + 1 and entityX(b) > bx0 + 1 then return true end
             return nil
         end)
-        luassert.is_true(moved == true, "shift-drag did not move both selected entities")
+        luassert.is_true(moved == true, "ctrl-drag did not move both selected entities")
     end)
 
     it("screenshot of a drag area crops to the box", function()

@@ -43,21 +43,21 @@ Ctrl+/ again, pressing Escape on an empty prompt, or running `exit` closes it
 and resumes the game.
 
 The overlay draws two rows across the top of the screen. The upper row is an
-always-visible command toolbar: the active colored group stays at the left,
-its commands fill the middle, and the other group tabs stay at the right. The
-lower row is a command line with a short summary of the current command. A
-compact mouse/world/camera readout sits at the bottom-right.
+always-visible command toolbar: every colored-text section header and every
+command appears in one horizontally scrollable strip. The lower row is a
+command line with a short summary of the current command. A compact
+mouse/world/camera readout sits at the bottom-right.
 
 ![The debugger just opened over a running game](./assets/debug/open.png)
 
 ### A first session
 
 1. Press **Ctrl+/**. The game freezes and the command line opens.
-2. Click a command or press **Tab** to browse. The toolbar shows one colored
-   group at a time; click another group tab to switch. Keep tabbing, click a
-   command, or type to narrow; Enter runs the line. The command line shows a
-   short summary without covering the game. Press **F1** when you want the
-   current command's full usage.
+2. Click a command or press **Tab** to browse. Every section and its commands
+   stays expanded in the toolbar; section headers jump to that section's first
+   command. Keep tabbing, click a command, or type to narrow; Enter runs the
+   line. The command line shows a short summary without covering the game.
+   Press **F1** when you want the current command's full usage.
 
    ![Tab cycling the grouped command toolbar](./assets/debug/completions.png)
 
@@ -137,7 +137,9 @@ As you type or select a command, its short summary appears beside the prompt
 without opening a panel. Press F1 to toggle its full generated usage;
 `help <command>` opens the same details explicitly, and F1 on an empty prompt
 opens the general debugger help. Tab completes command names, verbs, and
-per-argument sources such as component names, marks, systems, and cameras; on
+per-argument sources such as component names, marks, systems, and cameras.
+Subcommand and argument candidates temporarily take over the top toolbar and
+remain clickable; the grouped command toolbar returns when completion ends. On
 an empty line the cycle starts at the last used command, so Tab-Enter repeats
 recent work. History persists across sessions in the save directory (Up/Down
 browses it, `history` lists it, `history clear` forgets it).

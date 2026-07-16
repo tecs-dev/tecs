@@ -73,9 +73,9 @@ local record PopupState
     cmdRowsText: string
     cmdRowsSw: number
     cmdRows: {string}
-    -- Tab-cycle bar layout, rebuilt when completions are assigned. Only the
-    -- active group's command pills are expanded; its group pill is sticky at
-    -- the left and the collapsed group pills follow the commands.
+    -- Tab-cycle bar layout, rebuilt when completions are assigned. Every
+    -- section header and command shares one flat, scrollable strip.
+    barCompletions: {string}
     barLabels: {string}
     barWidths: {number}
     barGroups: {CompletionGroup}
@@ -126,6 +126,9 @@ local record GestureState
     -- True while the current left-button gesture began inside the world view;
     -- presses on the toolbar rows (or swallowed by the menu) must not drag.
     pressInView: boolean
+    -- Shift state captured when the left gesture begins; releasing Shift
+    -- before the mouse button must not change replace vs add semantics.
+    selectionAdditive: boolean
     moving: boolean
     moveStartWX: number
     moveStartWY: number
@@ -388,6 +391,7 @@ local function buildCompletionBar(popup: PopupState, completions: {string},
             labels[i] = " " .. section .. " "
             currentGroup = currentGroup + 1
             groups[currentGroup] = {name = section, first = i + 1, last = i}
+            groupOf[i] = currentGroup
         else
             labels[i] = entry
             if currentGroup == 0 then
@@ -401,6 +405,7 @@ local function buildCompletionBar(popup: PopupState, completions: {string},
         widths[i] = font:getWidth(labels[i])
     end
     popup.barLabels = labels
+    popup.barCompletions = completions
     popup.barWidths = widths
     popup.barGroups = groups
     popup.barGroupOf = groupOf
@@ -427,120 +432,85 @@ local function addCompletionHit(popup: PopupState, kind: integer, value: integer
     popup.barHitW[n] = right - left
 end
 
--- Draw the active command group as pills. Its colored group pill is fixed at
--- the left while command pills and the other collapsed groups scroll behind
--- it. The hit cache uses completion indices, matching Tab selection.
+-- Draw every section and command in one continuous strip. Section entries are
+-- inline headers, never collapse controls. Hit indices still match Tab.
 local function drawCompletionBar(popup: PopupState, completions: {string},
         font: love.graphics.Font, completionIndex: integer, sw: number, rowH: number)
-    if not popup.barLabels then buildCompletionBar(popup, completions, font) end
+    if not popup.barLabels or popup.barCompletions ~= completions then
+        buildCompletionBar(popup, completions, font)
+    end
     local labels = popup.barLabels
     local widths = popup.barWidths
-    local groups = popup.barGroups
     local selectedGroup = popup.barGroupOf[completionIndex]
     if selectedGroup then popup.barActiveGroup = selectedGroup end
-    local active = groups[popup.barActiveGroup]
-    if not active then return end
 
     popup.barHitCount = 0
     local gap = 0
     local pillPad = 12
-    local contentX: number = 0
-
-    -- The active group label is sticky; a prefix-filtered completion list has
-    -- no section label and uses the full row for its command pills.
-    if active.name ~= "" then
-        local label = " " .. active.name .. " "
-        local pillW = font:getWidth(label) + pillPad
-        local accent = commands.SECTION_COLORS_BAR[active.name] or DEFAULT_PILL
-        lg.setColor(accent[1], accent[2], accent[3], 1)
-        lg.rectangle("fill", 0, 0, pillW, rowH)
-        lg.setColor(1, 1, 1, 1)
-        lg.print(label, 6, PAD_Y)
-        addCompletionHit(popup, 2, popup.barActiveGroup, 0, pillW, sw)
-        contentX = pillW
-    end
-
-    -- Logical positions for the expanded commands followed by every other
-    -- group pill. The collapsed groups stay pinned to the right so they are
-    -- always clickable; the active group's commands scroll in the space
-    -- between the two sticky regions.
-    local tailW: number = 0
-    for gi = 1, #groups do
-        if gi ~= popup.barActiveGroup and groups[gi].name ~= "" then
-            local label = " " .. groups[gi].name .. " "
-            tailW = tailW + font:getWidth(label) + pillPad + gap
-        end
-    end
-    local tailX = math.max(contentX, sw - tailW)
-    local commandRight = math.max(contentX, tailX - gap)
-    local selectedX: number = contentX
+    local selectedX: number = 0
     local selectedW: number = 0
-    local x: number = contentX
-    for i = active.first, active.last do
+    local totalW: number = 0
+    for i = 1, #completions do
+        local isSection = completions[i]:sub(1, 1) == SECTION_MARK
+        local itemW = widths[i] + (isSection and pillPad or pillPad * 2)
         if i == completionIndex then
-            selectedX = x
-            selectedW = widths[i] + pillPad * 2
+            selectedX = totalW
+            selectedW = itemW
         end
-        x = x + widths[i] + pillPad * 2 + gap
+        totalW = totalW + itemW + gap
     end
-    local commandW = math.max(0, commandRight - contentX)
-    local maxScroll = math.max(0, x - contentX - commandW)
+    local maxScroll = math.max(0, totalW - sw)
     if popup.barScrollForIndex ~= completionIndex then
-        local selectedLeft = selectedX - contentX
-        local selectedRight = selectedLeft + selectedW
-        if selectedLeft < popup.barScroll then
-            popup.barScroll = selectedLeft
-        elseif selectedRight > popup.barScroll + commandW then
-            popup.barScroll = selectedRight - commandW
+        local selectedRight = selectedX + selectedW
+        if selectedX < popup.barScroll then
+            popup.barScroll = selectedX
+        elseif selectedRight > popup.barScroll + sw then
+            popup.barScroll = selectedRight - sw
         end
         popup.barScrollForIndex = completionIndex
     end
     popup.barScroll = math.max(0, math.min(popup.barScroll, maxScroll))
     local scrollX = popup.barScroll
-    local clipX = contentX
-    lg.setScissor(clipX, 0, commandW, rowH)
-    x = contentX - scrollX
-    for i = active.first, active.last do
-        local pillW = widths[i] + pillPad * 2
-        if i == completionIndex then
-            lg.setColor(0.09, 0.11, 0.14, 1)
+    lg.setScissor(0, 0, sw, rowH)
+    local x: number = -scrollX
+    for i = 1, #completions do
+        local isSection = completions[i]:sub(1, 1) == SECTION_MARK
+        local pillW = widths[i] + (isSection and pillPad or pillPad * 2)
+        if isSection then
+            lg.setColor(0.6549, 0.7529, 0.5020, 1)
+            lg.rectangle("fill", x, 0, pillW, rowH)
+            lg.setColor(0.1804, 0.2157, 0.2353, 1)
+            lg.setLineWidth(1)
+            lg.line(x, 0, x, rowH)
+            lg.line(x + pillW, 0, x + pillW, rowH)
+            local section = completions[i]:sub(2)
+            local accent = commands.SECTION_COLORS_BAR[section] or DEFAULT_PILL
+            lg.setColor(accent[1] * 0.7, accent[2] * 0.7, accent[3] * 0.7, 1)
+            lg.print(labels[i], x + pillPad / 2, PAD_Y)
         else
-            lg.setColor(0.25, 0.30, 0.33, 1)
-        end
-        lg.rectangle("fill", x, 0, pillW, rowH)
-        if i == completionIndex then
-            local accent = commands.SECTION_COLORS[active.name]
-            if accent then
-                lg.setColor(accent[1], accent[2], accent[3], 1)
-                lg.setLineWidth(2)
-                lg.rectangle("line", x, 0, pillW, rowH)
+            if i == completionIndex then
+                lg.setColor(0.1804, 0.2157, 0.2353, 1)
+            else
+                lg.setColor(0.6549, 0.7529, 0.5020, 1)
             end
+            lg.rectangle("fill", x, 0, pillW, rowH)
+            if i == completionIndex then
+                lg.setColor(0.8275, 0.7765, 0.6667, 1)
+            else
+                lg.setColor(0.1804, 0.2157, 0.2353, 1)
+            end
+            lg.print(labels[i], x + pillPad, PAD_Y)
         end
-        lg.setColor(0.8275, 0.7765, 0.6667, 1)
-        lg.print(labels[i], x + pillPad, PAD_Y)
-        local hitLeft = math.max(x, clipX)
-        local hitRight = math.min(x + pillW, commandRight)
+        local hitLeft = math.max(x, 0)
+        local hitRight = math.min(x + pillW, sw)
         if hitRight > hitLeft then
-            addCompletionHit(popup, 1, i, hitLeft, hitRight - hitLeft, sw)
+            local kind = isSection and 2 or 1
+            local value = isSection and popup.barGroupOf[i] or i
+            addCompletionHit(popup, kind, value, hitLeft, hitRight - hitLeft, sw)
         end
         x = x + pillW + gap
     end
     lg.setScissor()
-    x = tailX
-    for gi = 1, #groups do
-        if gi ~= popup.barActiveGroup and groups[gi].name ~= "" then
-            local group = groups[gi]
-            local label = " " .. group.name .. " "
-            local pillW = font:getWidth(label) + pillPad
-            local accent = commands.SECTION_COLORS_BAR[group.name] or DEFAULT_PILL
-            lg.setColor(accent[1], accent[2], accent[3], 1)
-            lg.rectangle("fill", x, 0, pillW, rowH)
-            lg.setColor(1, 1, 1, 1)
-            lg.print(label, x + pillPad / 2, PAD_Y)
-            addCompletionHit(popup, 2, gi, x, pillW, sw)
-            x = x + pillW + gap
-        end
-    end
 end
 
 -- Entities already labeled this frame (a mark and a note can hit the same
@@ -604,6 +574,7 @@ local function handleMouseGestures(gesture: GestureState, menu: MenuState, popup
 
     if view.isMousePressed(1) then
         gesture.pressInView = not swallowing and inView
+        gesture.selectionAdditive = shiftHeld
     end
     if not swallowing and view.isMousePressed(1) and inView then
         -- Interacting with the world replaces reading the popup.
@@ -661,9 +632,9 @@ local function handleMouseGestures(gesture: GestureState, menu: MenuState, popup
             -- ctx.hasArea stays set: the released box keeps
             -- drawing and is the crop region for `screenshot`
             -- until the next left press clears it.
-            cb.selectArea(shiftHeld)
+            cb.selectArea(gesture.selectionAdditive)
         elseif gesture.pressInView and inView then
-            cb.clickSelect(shiftHeld)
+            cb.clickSelect(gesture.selectionAdditive)
         end
         gesture.dragging = false
         gesture.pressInView = false
@@ -795,6 +766,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
     local completionBase = ""
     local completionIndex = 0
     local barSelectionIndex = 0
+    local rootActiveGroup = 1
     local cycling = false
     local cyclingRoot = false
     -- Tab and Backspace repeat after the same deliberate initial pause.
@@ -809,6 +781,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
         dragStartY = 0.0,
         dragging = false,
         pressInView = false,
+        selectionAdditive = false,
         moving = false,
         moveStartWX = 0.0,
         moveStartWY = 0.0,
@@ -1133,6 +1106,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
         completionBase, rootCompletions = registry:complete("")
         buildCompletionBar(popup, rootCompletions, overlayFont)
         barSelectionIndex = 0
+        rootActiveGroup = 1
         dismissPopup(popup)
         ctx.message = ""
         if captureToken == 0 then
@@ -1390,6 +1364,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                                 barSelectionIndex = bi
                                 popup.barActiveGroup = popup.barGroupOf[bi]
                                     or popup.barActiveGroup
+                                rootActiveGroup = popup.barActiveGroup
                                 break
                             end
                         end
@@ -1475,30 +1450,41 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             local infoY = lg.getHeight() - infoH
             local inInfo = input.mouseX >= infoX and input.mouseY >= infoY
             local inView = ctx.mouseScreenY > barsHeight and not inInfo
+            local completionTakeover = cycling and not cyclingRoot and #completions > 0
+            local visibleCompletions = completionTakeover and completions or rootCompletions
+            local visibleIndex = completionTakeover and completionIndex or barSelectionIndex
 
             -- Wheel over the completion row scrolls its active command group
             -- horizontally. Wheel over either debugger row is consumed and
             -- never reaches the camera zoom path.
             local _, barWheelY = reader().getMouseWheelMovement()
-            if not menu.open and #rootCompletions > 0 and input.mouseY >= 0
+            if not menu.open and #visibleCompletions > 0 and input.mouseY >= 0
                 and input.mouseY <= completionBarH and barWheelY ~= 0 then
                 popup.barScroll = popup.barScroll - barWheelY * 120
-                popup.barScrollForIndex = barSelectionIndex
+                popup.barScrollForIndex = visibleIndex
             end
 
-            if not menu.open and #rootCompletions > 0 and reader().isMousePressed(1)
+            if not menu.open and #visibleCompletions > 0 and reader().isMousePressed(1)
                 and input.mouseY >= 0 and input.mouseY <= completionBarH then
                 for hi = 1, popup.barHitCount do
                     local hx = popup.barHitX[hi]
                     if input.mouseX >= hx and input.mouseX <= hx + popup.barHitW[hi] then
-                        if popup.barHitKind[hi] == 1 then
+                        if completionTakeover then
+                            completionIndex = popup.barHitValue[hi]
+                            if completions[completionIndex] then
+                                ctx.command = completionBase .. completions[completionIndex]
+                                ctx.message = ""
+                                dismissPopup(popup)
+                            end
+                        elseif popup.barHitKind[hi] == 1 then
                             barSelectionIndex = popup.barHitValue[hi]
                         else
                             popup.barActiveGroup = popup.barHitValue[hi]
+                            rootActiveGroup = popup.barActiveGroup
                             local group = popup.barGroups[popup.barActiveGroup]
                             barSelectionIndex = group and group.first or barSelectionIndex
                         end
-                        if rootCompletions[barSelectionIndex]
+                        if not completionTakeover and rootCompletions[barSelectionIndex]
                             and rootCompletions[barSelectionIndex]:sub(1, 1) ~= SECTION_MARK then
                             ctx.command = rootCompletions[barSelectionIndex]
                             ctx.message = ""
@@ -1682,14 +1668,21 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 end
             end
 
-            -- Permanently mounted top menu. Completion mode expands one
-            -- command group at a time inside it.
+            -- Permanently mounted top menu. Non-root completion candidates
+            -- temporarily take it over, matching keyboard Tab completion.
             local completionBarH = rowH
-            lg.setColor(0.25, 0.30, 0.33, 1)
+            lg.setColor(0.6549, 0.7529, 0.5020, 1)
             lg.rectangle("fill", 0, 0, sw, rowH)
-            if #rootCompletions > 0 then
-                drawCompletionBar(popup, rootCompletions, overlayFont,
-                    barSelectionIndex, sw, rowH)
+            local completionTakeover = cycling and not cyclingRoot and #completions > 0
+            local visibleCompletions = completionTakeover and completions or rootCompletions
+            local visibleIndex = completionTakeover and completionIndex or barSelectionIndex
+            if #visibleCompletions > 0 then
+                if popup.barCompletions ~= visibleCompletions then
+                    buildCompletionBar(popup, visibleCompletions, overlayFont)
+                    if not completionTakeover then popup.barActiveGroup = rootActiveGroup end
+                end
+                drawCompletionBar(popup, visibleCompletions, overlayFont,
+                    visibleIndex, sw, rowH)
             end
 
             -- Command line (below completions, flush): bg #2e373c, text #d3c6aa.
