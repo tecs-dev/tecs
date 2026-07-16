@@ -926,6 +926,10 @@ local record types
         --- reference. `get` + cdata write silently bypasses dirty
         --- tracking and leaves stale state downstream.
         ---
+        --- STAGING: an entity spawned earlier in the SAME frame is staged
+        --- until the commit drain, so getMut on it returns nil. Spawn with
+        --- final values via constructor args instead of spawn-then-mutate.
+        ---
         --- @param entity Entity ID.
         --- @param component Component type to get-and-mark-dirty.
         --- @return The component instance or nil if not found.
