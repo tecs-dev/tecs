@@ -121,6 +121,7 @@ keep it, and make every observation deterministic:
               "lua":"return {mode=_G.state.mode, score=_G.state.score}"}'
    ```
    The result reports `frames_run`/`stopped_early`. Side effects in `per_frame` are allowed.
+   Add `"quiet":true` to trim the deferred response to just the values (no schedule echo).
    (Bare `cmd_step` without `lua`/`per_frame`/`wait` returns at *schedule* time — then you
    must read in a follow-up call; prefer the one-call form.) Stepped frames carry a
    **deterministic dt of 1/fps** (echoed as `step_dt`), so `n` frames advance exactly `n/fps`

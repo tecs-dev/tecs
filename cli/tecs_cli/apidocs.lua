@@ -177,6 +177,32 @@ end
 -- Render a function type's signature envelope, using show_type for each
 -- element type. `method` drops the leading self argument.
 --   name    : callable name (already includes any prefix/receiver)
+-- Parameter names are not stored on Teal function TYPES, but every arg type
+-- carries its source position (f, y, x) and the declared name sits on that
+-- line immediately before the annotation ("width: number"). Read it back from
+-- source so signatures render as `Rectangle(width, height, lineWidth?)`
+-- instead of three anonymous numbers -- positional ambiguity in multi-number
+-- constructors is a real bug source (an agent read a lineWidth as a corner
+-- radius).
+local argNameSrcCache = {}
+local function arg_name(argType)
+    local f, y, x = argType.f, argType.y, argType.x
+    if not (f and y and x) then return nil end
+    local lines = argNameSrcCache[f]
+    if lines == nil then
+        lines = {}
+        local fh = io.open(f, "rb")
+        if fh then
+            for lineText in fh:lines() do lines[#lines + 1] = lineText end
+            fh:close()
+        end
+        argNameSrcCache[f] = lines
+    end
+    local lineText = lines[y]
+    if not lineText then return nil end
+    return lineText:sub(1, x - 1):match("([%a_][%w_]*)%s*%??%s*:%s*$")
+end
+
 local function render_function(name, ftype, method)
     local typeargs
     local fn = ftype
@@ -208,7 +234,13 @@ local function render_function(name, ftype, method)
             parts[#parts + 1] = "...: " .. show_type(a)
         else
             local opt = fn.min_arity and i > fn.min_arity
-            parts[#parts + 1] = (opt and "? " or "") .. show_type(a)
+            local pname = arg_name(a)
+            local shown = show_type(a)
+            if pname then
+                parts[#parts + 1] = pname .. (opt and "?" or "") .. ": " .. shown
+            else
+                parts[#parts + 1] = (opt and "? " or "") .. shown
+            end
         end
     end
 
@@ -316,10 +348,12 @@ local function fn_params_returns(ftype, method)
     for i = start, n do
         local a = args[i]
         if fn.args.is_va and i == n then
-            params[#params + 1] = { type = show_type(a), optional = false, vararg = true }
+            params[#params + 1] = { type = show_type(a), optional = false, vararg = true,
+                name = arg_name(a) }
         else
             local opt = fn.min_arity and i > fn.min_arity
-            params[#params + 1] = { type = show_type(a), optional = opt and true or false }
+            params[#params + 1] = { type = show_type(a), optional = opt and true or false,
+                name = arg_name(a) }
         end
     end
 

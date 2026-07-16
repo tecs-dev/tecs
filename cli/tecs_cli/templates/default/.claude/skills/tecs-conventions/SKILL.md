@@ -52,6 +52,10 @@ first time. For the full API, run `tecs docs <page>` (offline mirror of the docs
   Don't add `love.update`/`love.draw` — `tecs2d.run` owns the loop.
 - **Queries:** iterate archetype-wise, binding columns once; prefer numeric `for row = 1, len`;
   use `batchDespawn`/`batchSet`/`batchRemove` over per-entity loops.
+- **Render with gfx components first.** `gfx.Rectangle`/`Text`/`Circle` entities get layering,
+  lighting, and batching for free. The immediate-mode escape hatch
+  (`pipeline:worldShader():at(layer):attach()` around raw `love.graphics` calls, detach after)
+  is for effects components can't express — not the default way to draw a board.
 - **Model with builtins first.** For a small entity game, builtin `Transform` + gfx shapes + a
   named-key state resource is often the whole model — no custom components needed. Custom
   components buy two specific things: **querying by trait** (`world:query{include={Enemy}}`)

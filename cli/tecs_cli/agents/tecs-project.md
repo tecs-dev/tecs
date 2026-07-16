@@ -61,6 +61,8 @@ Always run `tecs check` after editing Teal sources, and make sure it passes befo
 
 While the game is running, rerun `tecs build` after editing sources. A successful build refreshes `build/.tecs-reload-stamp`, and the running game snapshots, restarts, and restores its state automatically. You do not need to relaunch the game to see changes.
 
+**But the restore can mask your change:** hot reload restores the world from a snapshot, so Startup-only effects (spawns, pivots, layer/render topology, component data set at boot) are overwritten by the old state — if a change "didn't take effect", use `restart_game` to see it fresh. State in `world.resources[...]` or closures needs a snapshot handler to survive the restore, and a frozen-looking frame after reload is often a leftover debugger freeze.
+
 ## MCP server
 
 The default project wires the Tecs2D MCP plugin into the game world (`world:addPlugin(mcp.new())` in `src/main.tl`). While the game runs it serves MCP over local HTTP at `http://127.0.0.1:19999/mcp` (Streamable HTTP) with tools to screenshot the game, sample pixels, send input events, run Lua inside the game, read logs, and invoke `cmd_*` debug commands. Prefer observing the live game through MCP over guessing at runtime behavior: `tecs build`, launch with `tecs run`, then connect.

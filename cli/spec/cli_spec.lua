@@ -802,6 +802,21 @@ describe("tecs CLI", function()
                 assert.matches("constructor", err)
             end)
 
+            it("renders parameter names in signatures", function()
+                -- Three anonymous numbers invite positional guesses (an agent
+                -- read Rectangle's lineWidth as a corner radius); names are
+                -- read back from the declaration site.
+                local ok, _, out = captureWrite(
+                    {"api", "gfx.Rectangle", "--fields", "constructor"})
+                assert.is_true(ok)
+                assert.matches("width: number", out)
+                assert.matches("lineWidth%?: number", out)
+
+                local ok2, _, out2 = captureWrite({"api", "World:getMut"})
+                assert.is_true(ok2)
+                assert.matches("entity: integer", out2)
+            end)
+
             it("renders a component's constructor before its fields", function()
                 local ok, _, out = captureWrite({"api", "tecs2d.gfx.Text"})
                 assert.is_true(ok)

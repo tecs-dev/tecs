@@ -701,6 +701,10 @@ function M.new(options)
         for _, p in ipairs(params or {}) do
             if p.vararg then
                 ps[#ps + 1] = "...: " .. p.type
+            elseif p.name then
+                -- Named parameters kill positional ambiguity: `lineWidth?:
+                -- number` reads as what it is, three anonymous numbers don't.
+                ps[#ps + 1] = p.name .. (p.optional and "?" or "") .. ": " .. p.type
             else
                 ps[#ps + 1] = p.type .. (p.optional and "?" or "")
             end
