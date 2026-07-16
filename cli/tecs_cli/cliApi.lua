@@ -620,6 +620,42 @@ function M.new(options)
             end
         end
 
+        -- Dotted address reaching INTO a record: module.Record.Member
+        -- (tecs.phases.Startup). Resolve everything before the last dot as a
+        -- symbol address, then answer from that record's nested types/fields.
+        if modPart then
+            local parent
+            local pmod, psym = modPart:match("^(.+)%.([^.]+)$")
+            if pmod then
+                local mod = apiResolveModule(index, pmod)
+                if mod then parent = apiFindSymbol(index, mod, psym) end
+            end
+            if not parent then
+                local matches = apiFindByName(index, modPart)
+                parent = matches[1]
+                for i = 2, #matches do
+                    if parent and apiSameSymbol(parent, matches[i])
+                        and #matches[i].module > #parent.module then
+                        parent = matches[i]
+                    end
+                end
+            end
+            if parent then
+                for _, t in ipairs(parent.types or {}) do
+                    if t.name == symPart then
+                        return { kind = "member", symrec = parent, memberrec = t,
+                            memberkind = "type" }
+                    end
+                end
+                for _, f in ipairs(parent.fields or {}) do
+                    if f.name == symPart then
+                        return { kind = "member", symrec = parent, memberrec = f,
+                            memberkind = "field" }
+                    end
+                end
+            end
+        end
+
         -- Bare symbol. Project symbols order first in the merged index, so a name
         -- the framework also uses resolves to the project's own symbol; genuinely
         -- different alternatives (not same-type re-exports) are reported alongside
@@ -699,6 +735,13 @@ function M.new(options)
                 out[#out + 1] = line
             end
         end
+        if apiHasField(fields, "types") then
+            for _, t in ipairs(sym.types or {}) do
+                local line = "type " .. t.name .. ": " .. t.type
+                if t.doc then line = line .. "  -- " .. t.doc end
+                out[#out + 1] = line
+            end
+        end
         if apiHasField(fields, "constructor") and sym.constructor then
             out[#out + 1] = "metamethod __call: "
                 .. apiRenderFnType(sym.constructor.params, sym.constructor.returns)
@@ -725,6 +768,11 @@ function M.new(options)
 
         local out = {}
         out[#out + 1] = "record " .. sym.symbol
+        for _, t in ipairs(sym.types or {}) do
+            local line = "  type " .. t.name .. ": " .. t.type
+            if t.doc then line = line .. "  -- " .. t.doc end
+            out[#out + 1] = line
+        end
         for _, f in ipairs(sym.fields or {}) do
             local line = "  " .. f.name .. ": " .. f.type
             if f.doc then line = line .. "  -- " .. f.doc end
@@ -892,6 +940,16 @@ function M.new(options)
                 see = m.see,
             }
             return apiProjectKeys(rec, fields)
+        elseif res.kind == "member" then
+            local m = res.memberrec
+            return apiProjectKeys({
+                module = res.symrec.module,
+                parent = res.symrec.symbol,
+                name = m.name,
+                type = m.type,
+                doc = m.doc,
+                memberkind = res.memberkind,
+            }, fields)
         end
         return apiProjectKeys(res.symrec, fields)
     end
@@ -902,6 +960,8 @@ function M.new(options)
         local addr = res.symrec.module .. "." .. res.symrec.symbol
         if res.kind == "method" then
             return addr .. ":" .. res.methodrec.name
+        elseif res.kind == "member" then
+            return addr .. "." .. res.memberrec.name
         end
         return addr
     end
@@ -917,6 +977,13 @@ function M.new(options)
             body = apiRenderMethod(res.methodrec, fields)
         elseif res.kind == "type" then
             body = apiRenderTypeBlock(res.symrec, fields)
+        elseif res.kind == "member" then
+            local m = res.memberrec
+            local line = (res.memberkind == "type" and "type " or "")
+                .. m.name .. ": " .. m.type
+            if m.doc then line = line .. "  -- " .. m.doc end
+            body = line .. "\nnested in: tecs api "
+                .. res.symrec.module .. "." .. res.symrec.symbol
         else
             body = apiRenderCallable(res.symrec, fields)
         end

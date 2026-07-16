@@ -248,20 +248,56 @@ local function record_members(rec)
         return true
     end
 
-    local methods, datafields = {}, {}
+    local methods, datafields, nested = {}, {}, {}
     for _, fn in ipairs(rec.field_order or {}) do
         local ft = rec.fields[fn]
-        if ft.typename ~= "typedecl" and is_own(ft) then
+        if is_own(ft) then
             local doc = field_doc(rec, fn)
-            local inner = unwrap(ft)
-            if inner and inner.typename == "function" then
-                methods[#methods + 1] = { name = fn, ftype = ft, doc = doc }
+            if ft.typename == "typedecl" then
+                nested[#nested + 1] = { name = fn, ftype = ft, doc = doc }
             else
-                datafields[#datafields + 1] = { name = fn, ftype = ft, doc = doc }
+                local inner = unwrap(ft)
+                if inner and inner.typename == "function" then
+                    methods[#methods + 1] = { name = fn, ftype = ft, doc = doc }
+                else
+                    datafields[#datafields + 1] = { name = fn, ftype = ft, doc = doc }
+                end
             end
         end
     end
-    return methods, datafields
+    return methods, datafields, nested
+end
+
+-- A record that declares nested types -- a namespace like tecs.phases (29
+-- phase tag records plus an `index` list). Worth expanding even when it is
+-- re-exported as a plain value field, since "what names live in here" is the
+-- whole point of looking it up.
+local function is_type_namespace(rec)
+    if not rec or (rec.typename ~= "record" and rec.typename ~= "interface") then
+        return false
+    end
+    for _, fn in ipairs(rec.field_order or {}) do
+        if rec.fields[fn].typename == "typedecl" then return true end
+    end
+    return false
+end
+
+-- One-line essence of a nested type declaration: the interface it implements
+-- when it is a tag record (`record Startup is Phase end` -> "Phase"), else its
+-- structural kind.
+local function nested_type_shown(ft)
+    local def = unwrap(ft)
+    if not def then return show_type(ft) end
+    if def.typename == "record" or def.typename == "interface" then
+        local ifaces = {}
+        for _, it in ipairs(def.interface_list or {}) do
+            ifaces[#ifaces + 1] = show_type(it)
+        end
+        if #ifaces > 0 then return table.concat(ifaces, ", ") end
+        return def.typename
+    end
+    if def.typename == "enum" then return "enum" end
+    return show_type(def)
 end
 
 -- Extract a function type's parameters and return types as structured data
@@ -344,7 +380,16 @@ end
 
 -- Build the structured record for an expandable record/interface symbol.
 local function record_symbol(name, struct, receiver)
-    local methods, datafields = record_members(struct)
+    local methods, datafields, nestedTypes = record_members(struct)
+
+    local typesOut = {}
+    for _, t in ipairs(nestedTypes) do
+        typesOut[#typesOut + 1] = {
+            name = t.name,
+            type = nested_type_shown(t.ftype),
+            doc = inline_prose(t.doc),
+        }
+    end
 
     local fieldsOut = {}
     for _, f in ipairs(datafields) do
@@ -384,6 +429,7 @@ local function record_symbol(name, struct, receiver)
         signature = "record " .. name,
         fields = fieldsOut,
         methods = methodsOut,
+        types = typesOut,
         constructor = ctor,
     }
 end
@@ -483,7 +529,8 @@ function M.extract(entry)
             local struct = resolve_struct(ft, aliasMap, moddef, env, cache)
             local expandable = struct
                 and (struct.typename == "record" or struct.typename == "interface")
-                and (ft.typename == "typedecl" or has_ctor(struct))
+                and (ft.typename == "typedecl" or has_ctor(struct)
+                    or is_type_namespace(struct))
 
             local inner = unwrap(ft)
             local is_func = inner and inner.typename == "function"

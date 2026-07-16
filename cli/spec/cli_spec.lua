@@ -716,6 +716,31 @@ describe("tecs CLI", function()
                 assert.matches("type alias to types%.System", out)
             end)
 
+            it("expands type-namespace records like tecs.phases", function()
+                -- phases is re-exported as a value field, and its members are
+                -- nested tag records. Both used to be invisible: `tecs api
+                -- tecs.phases` printed a one-line header with no phase names.
+                local ok, _, out = captureWrite({"api", "tecs.phases"})
+                assert.is_true(ok)
+                assert.matches("record phases", out)
+                assert.matches("type Update: Phase", out)
+                assert.matches("type FixedUpdate: Phase", out)
+                assert.matches("type Startup: Phase", out)
+            end)
+
+            it("answers nested-member addresses like tecs.phases.Startup", function()
+                local ok, _, out = captureWrite({"api", "tecs.phases.Startup"})
+                assert.is_true(ok)
+                assert.matches("type Startup: Phase", out)
+                assert.matches("nested in: tecs api tecs%.phases", out)
+
+                -- Bare parent name works too, and canonicalizes to the
+                -- defining module.
+                local ok2, _, out2 = captureWrite({"api", "World.Config"})
+                assert.is_true(ok2)
+                assert.matches("tecs%.types%.World%.Config", out2)
+            end)
+
             it("lists tecs.types with more than just World", function()
                 local ok, _, out = captureWrite({"api", "tecs.types"})
                 assert.is_true(ok)

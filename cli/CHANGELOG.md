@@ -34,6 +34,9 @@ payload, launchers, and installers as GitHub release assets.
   "type alias to ..."), and resolves `tecs.builtins` (Transform et al);
   `check` hints
   `math.floor` on integer-index errors.
+- `tecs api` expands type-namespace records and nested member addresses:
+  `tecs api tecs.phases` lists every phase with its doc, and
+  `tecs api tecs.phases.Startup` answers directly.
 - `start_game '{"frozen":true}'` boots the game with the freeze already held
   (inspectable at frame zero; `cmd_freeze on=false` releases it).
 - `tecs new` stamps the LÖVE identity/title with the project name, so games no
