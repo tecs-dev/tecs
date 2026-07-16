@@ -1069,7 +1069,7 @@ describe("in-game debugger overlay", function()
 
     it("a game-registered custom command works typed and over MCP", function()
         fixture.runLua(app, [[
-            local commands = require("tecs2d.debug.commands")
+            local commands = tecsTestHooks.commands
             commands.register(world, {
                 name = "hello",
                 shortHelp = "greet a target",
@@ -1126,7 +1126,7 @@ describe("in-game debugger overlay", function()
         app.client:call("cmd_draw_circle", {entity = eid, radius = 12, tag = "pin"})
         local function pinned(): number
             return tonumber(fixture.runLua(app, [[
-                local ann = require("tecs2d.debug.internal.annotations")
+                local ann = tecsTestHooks.annotations
                 local n = 0
                 for _, a in ipairs(world.resources[ann.KEY].list) do
                     if a.tag == "pin" then n = n + 1 end

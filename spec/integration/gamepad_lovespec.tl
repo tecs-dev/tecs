@@ -20,7 +20,7 @@ local APP_DIR <const> = "build/test_deps/spec/integration/apps/shapes"
 -- buttons/axes 1:1 onto SDL_GamepadButton/SDL_GamepadAxis indices and
 -- provides the gamepad mapping automatically.
 local SHIM <const> = [[
-    local ffi = require("ffi")
+    local ffi = tecsTestHooks.ffi
     ffi.cdef([=[
         typedef struct SDL_VirtualJoystickDesc {
             uint32_t version;

@@ -36,6 +36,15 @@ globals.tecsGlowMaterial = gfx.newMaterial("testglow", {
     ]],
 })
 
+-- Capabilities the lovespecs need beyond the run_lua sandbox (ffi for the
+-- virtual SDL gamepad, collectgarbage for leak measurement). The sandbox
+-- reads through to game globals by design, so the app hands these out
+-- deliberately; agent-facing games never define them.
+globals.tecsTestHooks = {
+    ffi = require("ffi"),
+    gc = collectgarbage,
+}
+
 local function gamePlugin(world: tecs.World)
     world:addPlugin(mcp.new({
         port = tonumber(os.getenv("TECS_MCP_PORT")) or mcp.DEFAULT_PORT,

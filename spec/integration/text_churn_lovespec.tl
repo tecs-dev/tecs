@@ -128,7 +128,7 @@ describe("text churn: edits and respawns reuse glyph storage", function()
                 for i = 1, 40 do
                     world:despawn(spawned[i])
                 end
-                return collectgarbage("count")
+                return tecsTestHooks.gc("count")
             ]], round))
         end
 

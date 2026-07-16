@@ -11,6 +11,16 @@ local physics <const> = require("tecs2d.physics")
 local WIDTH <const> = 320
 local HEIGHT <const> = 240
 
+-- Capabilities the lovespecs need beyond the run_lua sandbox (the debug
+-- subtree is require-blocked there). The sandbox reads through to game
+-- globals by design, so the app hands these out deliberately; agent-facing
+-- games never define them.
+local globals <const> = _G as {string: any}
+globals.tecsTestHooks = {
+    commands = require("tecs2d.debug.commands"),
+    annotations = require("tecs2d.debug.internal.annotations"),
+}
+
 local function gamePlugin(world: tecs.World)
     world:addPlugin(mcp.new({
         port = tonumber(os.getenv("TECS_MCP_PORT")) or mcp.DEFAULT_PORT,

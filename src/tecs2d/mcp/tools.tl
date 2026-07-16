@@ -144,9 +144,12 @@ tools.list = {
             "Return values are serialized as JSON by default -- return a table (e.g. " ..
             "{count = ..., score = ...}) for a structured, cheap read; pass lua=true for the raw " ..
             "Lua tostring form instead. " ..
-            "The code is sandboxed: love2d APIs and the ECS world are available, but the " ..
-            "filesystem (io, os.execute) and module loading (require, load, dofile) are not, " ..
-            "and love escape hatches are removed (love.thread, love.filesystem.load/mount/write). " ..
+            "The code is sandboxed: love2d APIs and the ECS world are available, but io, " ..
+            "os.execute, load/dofile, and love escape hatches (love.thread, " ..
+            "love.filesystem.load/mount) are not; love.filesystem save-dir writes work for " ..
+            "data files but refuse .lua/.tl paths. " ..
+            "State persists across calls: stash handles for later calls with " ..
+            "`_G.name = ...` (or a bare global) and read them back in the next call. " ..
             "Use 'world' directly to access the ECS world, and modules(\"components.food\") to " ..
             "reach the game's own loaded modules -- their component records and constructors " ..
             "work directly (e.g. local Food = modules(\"components.food\"); world:query(Food)). " ..

@@ -213,13 +213,16 @@ local sandboxRawset <const> = rawset as function(any, any, any)
 
 -- Globals removed from the sandbox: filesystem (io), native/process escape
 -- (ffi, package, os process bits, load/loadstring/dofile/loadfile), and the
--- introspection hooks that could rebuild them (debug, getfenv/setfenv, _G).
+-- introspection hooks that could rebuild them (debug, getfenv/setfenv).
+-- `_G` is NOT denied: it resolves to the sandbox environment itself (see
+-- makeSandboxEnv), so `_G.handle = x` is a deliberate cross-call stash that
+-- never touches the real global table.
 local SAFE_OS <const>: {string} = {"time", "clock", "date", "difftime"}
 local DENIED_GLOBAL <const>: {string: boolean} = {
     io = true, ffi = true, package = true,
     load = true, loadstring = true, dofile = true, loadfile = true,
     debug = true, collectgarbage = true, newproxy = true,
-    getfenv = true, setfenv = true, _G = true, _ENV = true,
+    getfenv = true, setfenv = true, _ENV = true,
 }
 
 local function sandboxRequire(name: string): any
@@ -276,15 +279,39 @@ end
 -- love2d is exposed for rendering and world introspection, but a few love APIs
 -- are escape hatches: love.thread spawns threads with a full stdlib
 -- (io/os/ffi/luasocket), love.filesystem.load runs Lua under the real globals,
--- and mount/mountFullPath reach arbitrary host paths. The sandbox gets a shallow
--- copy of love with those removed. The game's own systems keep the real love
--- (they run outside this environment), so their save/thread features still work.
+-- mount/mountFullPath reach arbitrary host paths, and setRequirePath could
+-- point require at attacker-written files. The sandbox gets a shallow copy of
+-- love with those removed. Save-directory writes (write/append/newFile) ARE
+-- allowed -- PhysFS confines them to the save dir -- but refuse .lua/.tl
+-- paths: the save dir shadows the source on the require path, so a written
+-- code file would execute under the real globals on the next require. The
+-- game's own systems keep the real love (they run outside this environment),
+-- so their save/thread features still work.
 local DENIED_LOVE_TOP <const>: {string: boolean} = {thread = true}
 local DENIED_LOVE_FS <const>: {string: boolean} = {
     load = true, mount = true, mountFullPath = true, unmount = true,
-    write = true, append = true, remove = true, createDirectory = true,
-    newFile = true, setIdentity = true, setSource = true,
+    setIdentity = true, setSource = true,
+    setRequirePath = true, setCRequirePath = true,
 }
+local WRITE_GUARDED_LOVE_FS <const>: {string: boolean} = {
+    write = true, append = true, newFile = true,
+}
+
+local function guardedFsWrite(name: string, fn: function): any
+    return function(path: any, ...: any): any
+        if path is string then
+            local p = path:lower()
+            if p:match("%.lua$") or p:match("%.tl$") then
+                error("love.filesystem." .. name .. "('" .. path .. "') is "
+                    .. "blocked in run_lua: the save directory shadows the "
+                    .. "source on the require path, so writing code files "
+                    .. "there could execute outside the sandbox. Data files "
+                    .. "(.png, .json, ...) are fine.", 2)
+            end
+        end
+        return (fn as function(any, ...: any): any)(path, ...)
+    end
+end
 local DENIED_LOVE_SYSTEM <const>: {string: boolean} = {openURL = true}
 local DENIED_LOVE_EVENT <const>: {string: boolean} = {quit = true}
 
@@ -303,7 +330,13 @@ local function sandboxLove(): any
     if not L then return nil end
     local out = filteredCopy(L, DENIED_LOVE_TOP)
     if type(L["filesystem"]) == "table" then
-        out["filesystem"] = filteredCopy(L["filesystem"] as {string: any}, DENIED_LOVE_FS)
+        local fs = filteredCopy(L["filesystem"] as {string: any}, DENIED_LOVE_FS)
+        for name in pairs(WRITE_GUARDED_LOVE_FS) do
+            if type(fs[name]) == "function" then
+                fs[name] = guardedFsWrite(name, fs[name] as function)
+            end
+        end
+        out["filesystem"] = fs
     end
     if type(L["system"]) == "table" then
         out["system"] = filteredCopy(L["system"] as {string: any}, DENIED_LOVE_SYSTEM)
@@ -320,14 +353,23 @@ end
 -- keys, hands out a filtered love, replaces os with a clock-only subset, and
 -- swaps in the gated require. Assignments stay local to this table instead of
 -- leaking into real globals.
+--
+-- ONE environment per process, shared by every run_lua call: assignments
+-- (`count = 0`, `_G.handle = am`) persist across calls, which is what makes
+-- multi-step debugging sessions possible. `_G` resolves to this same table,
+-- so the _G idiom works without ever exposing the real global table; the
+-- metatable is sealed (__metatable = false), so it cannot be peeled off.
+local sandboxEnvCache: {string: any} = nil
 local function makeSandboxEnv(): {string: any}
+    if sandboxEnvCache then return sandboxEnvCache end
     local realOs = G["os"] as {string: any}
     local safeOs: {string: any} = {}
     if realOs then
         for _, k in ipairs(SAFE_OS) do safeOs[k] = realOs[k] end
     end
     local mt: {string: any} = {}
-    mt["__index"] = function(_: any, k: string): any
+    mt["__index"] = function(t: any, k: string): any
+        if k == "_G" then return t end
         if k == "require" then return sandboxRequire end
         if k == "modules" then return sandboxModules end
         if k == "os" then return safeOs end
@@ -339,7 +381,8 @@ local function makeSandboxEnv(): {string: any}
         sandboxRawset(t, k, v)
     end
     mt["__metatable"] = false
-    return sandboxSetmt({}, mt) as {string: any}
+    sandboxEnvCache = sandboxSetmt({}, mt) as {string: any}
+    return sandboxEnvCache
 end
 
 byName["run_lua"] = function(args: {string:any}, id: number)

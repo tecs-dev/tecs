@@ -179,11 +179,50 @@ describe("mcp compliance: boot and introspection", function()
         luassert.are.equal("nil", runLua(app, "return type(love.thread)")[1])
         luassert.are.equal("nil", runLua(app, "return type(love.filesystem.load)")[1])
         luassert.are.equal("nil", runLua(app, "return type(love.filesystem.mount)")[1])
-        luassert.are.equal("nil", runLua(app, "return type(love.filesystem.write)")[1])
+        luassert.are.equal("nil", runLua(app, "return type(love.filesystem.setRequirePath)")[1])
         luassert.are.equal("nil", runLua(app, "return type(love.system.openURL)")[1])
         luassert.are.equal("nil", runLua(app, "return type(love.event.quit)")[1])
         luassert.are.equal("function", runLua(app, "return type(love.filesystem.read)")[1])
         luassert.are.equal("function", runLua(app, "return type(love.graphics.getWidth)")[1])
+    end)
+
+    it("run_lua allows save-dir data writes but refuses code files", function()
+        -- Save-directory writes are confined by PhysFS and legitimately useful
+        -- (test fixtures, generated assets)...
+        luassert.are.equal("true", runLua(app,
+            "return tostring(love.filesystem.write('sandbox_probe.bin', 'ok'))")[1])
+        luassert.are.equal("ok", runLua(app,
+            "return love.filesystem.read('sandbox_probe.bin')")[1])
+        luassert.are.equal("true", runLua(app,
+            "return tostring(love.filesystem.remove('sandbox_probe.bin'))")[1])
+        -- ...but the save dir shadows the source on the require path, so a
+        -- written .lua/.tl would execute under the real globals on the next
+        -- require. Those paths are refused.
+        luassert.are.equal("false", runLua(app,
+            "return tostring((pcall(love.filesystem.write, 'evil.lua', 'x')))")[1])
+        luassert.are.equal("false", runLua(app,
+            "return tostring((pcall(love.filesystem.write, 'sub/EVIL.LUA', 'x')))")[1])
+        luassert.are.equal("false", runLua(app,
+            "return tostring((pcall(love.filesystem.append, 'evil.tl', 'x')))")[1])
+        luassert.are.equal("false", runLua(app,
+            "return tostring((pcall(love.filesystem.newFile, 'evil.lua', 'w')))")[1])
+    end)
+
+    it("run_lua state persists across calls and _G is the sandbox env", function()
+        -- One sandbox environment per process: bare and _G assignments are a
+        -- deliberate cross-call stash for multi-step debugging sessions.
+        runLua(app, "_G.sandboxStash = 41 bareStash = 1 return true")
+        luassert.are.equal("42", runLua(app,
+            "return _G.sandboxStash + bareStash")[1])
+        luassert.are.equal("42", runLua(app,
+            "return sandboxStash + _G.bareStash")[1])
+        runLua(app, "_G.sandboxStash = nil bareStash = nil return true")
+        -- _G is the sandbox env, not the real global table: denied globals
+        -- stay nil through it, and the real _G gained nothing.
+        luassert.are.equal("nil", runLua(app, "return type(_G.io)")[1])
+        luassert.are.equal("nil", runLua(app, "return type(_G.package)")[1])
+        luassert.are.equal("false", runLua(app,
+            "return tostring(getmetatable(_G))")[1])
     end)
 
     it("run_lua modules() reaches loaded game modules but not sealed roots", function()
