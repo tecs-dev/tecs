@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 # Orchestrate one unattended "one-shot" eval: scaffold a fresh game project
 # with the working-tree CLI (dist/tecs), launch a headless Claude session in
-# it with the standard prompt, time it, capture token usage, ask the agent
-# for a debrief, and collect the transcript — everything lands in
-# /tmp/oneshot<N>-results/ for review.
+# it with a game prompt, time it, capture token usage, ask the agent for a
+# debrief, and collect the transcript — everything lands in
+# /tmp/oneshot<N>-results/ for review, with meta.json recording game, model,
+# and CLI version so cross-run comparisons stay honest.
 #
 # Usage:
-#   scripts/oneshot.sh [N] [prompt...]
-#     N       run number (default: next free /tmp/oneshot<N>)
-#     prompt  override the default prompt (rarely needed)
+#   scripts/oneshot.sh [-g game] [-m model] [N] [prompt...]
+#     -g game   named preset: snake (default), breakout, match3, asteroids,
+#               platformer
+#     -m model  forwarded to `claude --model` (opus, sonnet, haiku, fable,
+#               or a full model id); omit for the session default
+#     N         run number (default: next free /tmp/oneshot<N>)
+#     prompt    explicit prompt override (wins over -g)
 #
 # The nested Claude runs with --dangerously-skip-permissions so the run is
 # fully unattended; only launch this against scratch projects.
@@ -23,6 +28,39 @@ main() {
 root="$(cd "$(dirname "$0")/.." && pwd)"
 export PATH="$root/dist:$PATH"
 
+# --- options ------------------------------------------------------------------
+game="snake"
+model=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -g) game="$2"; shift 2 ;;
+        -m) model="$2"; shift 2 ;;
+        --) shift; break ;;
+        -*) echo "ERROR: unknown option $1" >&2; exit 1 ;;
+        *)  break ;;
+    esac
+done
+
+# Every preset ends with the same stop-there clause so runs stay comparable;
+# each game stresses a different subsystem (grid ticks, continuous collision,
+# staged-mutation churn + mouse, trait queries, fixed timestep + held input).
+stop_there="Stop there -- no integration specs, README prose, or extra polish."
+case "$game" in
+    snake)
+        game_prompt="oneshot create a nibbles game with tecs and tecs2d. Done means: core mechanics (steer, eat, grow, die, restart) implemented and verified working in the live game. $stop_there" ;;
+    breakout)
+        game_prompt="oneshot create a breakout game with tecs and tecs2d. Done means: paddle control, ball bouncing off walls/paddle/bricks with sane angles, brick destruction, lives, and restart implemented and verified working in the live game. $stop_there" ;;
+    match3)
+        game_prompt="oneshot create a match-3 puzzle game with tecs and tecs2d. Done means: click-to-swap adjacent gems, match detection, cascading refills, score, and a no-more-moves reshuffle implemented and verified working in the live game. $stop_there" ;;
+    asteroids)
+        game_prompt="oneshot create an asteroids game with tecs and tecs2d. Done means: ship rotation and thrust, screen wrapping, shooting, asteroids that split when hit, lives, and restart implemented and verified working in the live game. $stop_there" ;;
+    platformer)
+        game_prompt="oneshot create a single-screen platformer with tecs and tecs2d. Done means: run and jump with gravity, landing on platforms, a collectible, a hazard that resets you, and camera following the player, all verified working in the live game. $stop_there" ;;
+    *)
+        echo "ERROR: unknown game '$game' (snake, breakout, match3, asteroids, platformer)" >&2
+        exit 1 ;;
+esac
+
 # --- resolve run number and paths -------------------------------------------
 n="${1:-}"
 if [ -z "$n" ]; then
@@ -31,7 +69,12 @@ if [ -z "$n" ]; then
 else
     shift || true
 fi
-prompt="${*:-oneshot create a nibbles game with tecs and tecs2d. Done means: core mechanics (steer, eat, grow, die, restart) implemented and verified working in the live game. Stop there -- no integration specs, README prose, or extra polish.}"
+prompt="${*:-$game_prompt}"
+
+model_args=()
+if [ -n "$model" ]; then
+    model_args=(--model "$model")
+fi
 
 project="/tmp/oneshot$n"
 results="/tmp/oneshot$n-results"
@@ -40,7 +83,7 @@ debrief_prompt='Debrief this session honestly: (1) Did the tecs MCP bridge tools
 
 # --- pre-flight ---------------------------------------------------------------
 ver="$(tecs --version)"
-echo "== oneshot $n: tecs $ver"
+echo "== oneshot $n: tecs $ver   game=$game${model:+   model=$model}"
 case "$ver" in
     *-dev) ;;
     *) echo "WARNING: not a -dev build; you are testing the installed CLI, not the working tree" >&2 ;;
@@ -66,6 +109,13 @@ grep -q "canonical verification" "$project/.claude/skills/tecs-cli/SKILL.md" \
 
 mkdir -p "$results"
 cp -R "$project/.claude" "$results/scaffold-claude-dir"   # what guidance the agent saw
+python3 - "$results/meta.json" "$n" "$game" "$model" "$ver" "$prompt" <<'EOF'
+import json, sys, datetime
+path, n, game, model, ver, prompt = sys.argv[1:7]
+json.dump({"n": int(n), "game": game, "model": model or None, "tecs": ver,
+           "prompt": prompt, "started": datetime.datetime.now().isoformat()},
+          open(path, "w"), indent=2)
+EOF
 
 # --- the run -------------------------------------------------------------------
 echo "== launching claude in $project"
@@ -79,6 +129,7 @@ start_epoch="$(date +%s)"
     # errors) to the terminal, so the run can be watched while it executes.
     # The final summary object is extracted into result.json afterwards.
     claude -p "$prompt" \
+        ${model_args[@]+"${model_args[@]}"} \
         --output-format stream-json --verbose \
         --dangerously-skip-permissions \
         2> "$results/stderr.log" \
@@ -126,7 +177,7 @@ if [ -n "$session_id" ]; then
     echo "== requesting debrief"
     (
         cd "$project"
-        claude -p --resume "$session_id" "$debrief_prompt" \
+        claude -p --resume "$session_id" ${model_args[@]+"${model_args[@]}"} "$debrief_prompt" \
             --dangerously-skip-permissions \
             > "$results/debrief.txt" 2>> "$results/stderr.log"
     ) || echo "WARNING: debrief failed" >&2
