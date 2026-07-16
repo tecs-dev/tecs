@@ -28,5 +28,33 @@ describe("FFIStorage", function()
             s:createComponent(a)
             s:createComponent(a)
         end)
+
+        it("updates metatype metadata after the storage module reloads", function()
+            local structName = "ReloadedStorageStruct" .. math.random(1, 1000000)
+            local bindingName = "ReloadedStorageComponent" .. math.random(1, 1000000)
+            local s1 = FFIStorage.new({
+                name = structName,
+                bindingName = bindingName,
+                fields = {{"x", "float"}},
+            })
+            local a = {componentName = bindingName} as any
+            s1:createComponent(a)
+
+            local moduleName <const> = "tecs.internal.ffi.FFIStorage"
+            package.loaded[moduleName] = nil
+            local ReloadedFFIStorage = require(moduleName) as any
+            package.loaded[moduleName] = FFIStorage
+
+            local s2 = ReloadedFFIStorage.new({
+                name = structName,
+                bindingName = bindingName,
+                fields = {{"x", "float"}},
+            }) as any
+            local b = {componentName = bindingName} as any
+            local allocate = s2:createComponent(b) as function(): any
+            local instance = allocate()
+
+            luassert.is_equal(b, instance.componentType)
+        end)
     end)
 end)

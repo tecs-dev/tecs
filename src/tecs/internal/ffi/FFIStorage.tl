@@ -37,6 +37,8 @@ local record FFIStorage
         metatable: {any:any}
         --- If true, each instance is its own component type (for dense relationships)
         perEntityComponent: boolean
+        --- Stable ECS component name used to recognize an insulated module reload.
+        bindingName: string
     end
 
     new: function(def: StructDefinition): Storage
@@ -56,12 +58,6 @@ end
 -- element at index 0 because archetype rows are 1-based.
 local INITIAL_CAPACITY <const> = 64
 
--- Counter for auto-generated struct names
-local structCounter = 0
-
--- Cache for FFI array ctypes (actual ctype objects, not strings)
-local arrayTypeCache: {string: any} = {}
-
 local record FieldInfo
     name: string
     isArray: boolean
@@ -75,7 +71,30 @@ local record StructRegistryEntry
     metatypeInstalled: boolean
 end
 
-local structRegistry: {string: StructRegistryEntry} = {}
+-- LuaJIT owns cdefs and metatypes for the lifetime of the VM, which is longer
+-- than a Lua module under loaders that isolate `package.loaded` (notably
+-- Busted's default per-spec-file insulation). Keep the registry beside the FFI
+-- runtime as well: a reloaded FFIStorage module must update the metadata table
+-- captured by the already-installed metatype, not a new unreachable table.
+local record RuntimeRegistry
+    structCounter: integer
+    structRegistry: {string: StructRegistryEntry}
+    arrayTypeCache: {string: any}
+end
+
+local CAny <const> = C as {string: any}
+local RUNTIME_REGISTRY_KEY <const> = "__tecsFFIStorageRegistry"
+local runtimeRegistry = CAny[RUNTIME_REGISTRY_KEY] as RuntimeRegistry
+if not runtimeRegistry then
+    runtimeRegistry = {
+        structCounter = 0,
+        structRegistry = {},
+        arrayTypeCache = {},
+    }
+    CAny[RUNTIME_REGISTRY_KEY] = runtimeRegistry
+end
+local structRegistry <const> = runtimeRegistry.structRegistry
+local arrayTypeCache <const> = runtimeRegistry.arrayTypeCache
 
 local record StorageMeta
     capacity: integer
@@ -191,8 +210,8 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
 
     local structName = def.name
     if not structName then
-        structCounter = structCounter + 1
-        structName = "FFIComponent" .. structCounter
+        runtimeRegistry.structCounter = runtimeRegistry.structCounter + 1
+        structName = "FFIComponent" .. runtimeRegistry.structCounter
     end
 
     local cdef, fieldNames = generateStructDef(structName, def.fields as {{string, string}})
@@ -521,8 +540,16 @@ function FFIStorage.new(def: FFIStorage.StructDefinition): Storage
                 -- instances (world:set routes by instance.componentType).
                 local bound = metadataFields.componentType as types.components.Component
                 if bound ~= nil and bound ~= container then
-                    error("FFI struct '" .. structName .. "' is already bound to component '" ..
-                        tostring(bound.componentName) .. "'; use a distinct struct name", 0)
+                    -- An insulated module reload reconstructs the same named
+                    -- component with a new Lua-table identity. Rebind it so
+                    -- the VM-global metatype resolves current-generation
+                    -- metadata. A differently named component is still a
+                    -- real struct-name collision and must not steal it.
+                    local nextName = def.bindingName or container.componentName
+                    if bound.componentName ~= nextName then
+                        error("FFI struct '" .. structName .. "' is already bound to component '" ..
+                            tostring(bound.componentName) .. "'; use a distinct struct name", 0)
+                    end
                 end
                 metadataFields.componentType = container
                 metadataFields.componentName = structName

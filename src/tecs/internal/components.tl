@@ -797,6 +797,7 @@ function components.newFFIRelationship<R is Relationship>(config: FFIRelationshi
 
     local ffiStorage = storage.newFFIStorage({
         name = name .. "_FFIRelationship",
+        bindingName = name,
         fields = allFields,
         metatable = cfg.metatable,
         perEntityComponent = not isSparse,  -- sparse relationships don't need per-instance IDs
@@ -911,6 +912,7 @@ function components.newFFIComponent<C is Component>(options: FFIComponentOptions
 
     local componentStorage = storage.newFFIStorage({
         name = opts.name,
+        bindingName = opts.name,
         fields = opts.fields,
         metatable = opts.metatable
     })
