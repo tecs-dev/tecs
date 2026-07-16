@@ -72,8 +72,9 @@ and make every observation deterministic:
 
 1. **Boot already frozen.** `start_game '{"frozen":true}'` holds the game at frame zero — no
    race against a fast game. Then `ping` (check `build.built` — you're talking to the code you
-   just built?) and `cmd_rewind_start` (insurance). From here, the world advances only when you
-   say so; `cmd_freeze '{"on":false}'` releases it when you're done.
+   just built?). Add `cmd_rewind_start` only if you'll let the game run live at some point;
+   a fully frozen stage→step→assert session has nothing for the ring to protect. From here,
+   the world advances only when you say so; `cmd_freeze '{"on":false}'` releases it when done.
 2. **Analyze.** Read the frozen world until you understand what reaching the goal requires:
    `cmd_resources '{"name":"game.state"}'`, `cmd_fetch '{"expr":"<components>"}'`, `run_lua`
    returning a table. No screenshots yet.
@@ -172,9 +173,11 @@ Using the game tools:
   Then poll `get_logs '{"contains":"agent.events","after":<last seq>}'` (the result's `latest`
   is your next cursor). `world:observe(entityId, ...)` scopes to one entity and is auto-cleaned
   when it despawns. Keep messages terse — the log ring holds 500 lines.
-- **Start a rewind session right after `start_game`:** `cmd_rewind_start '{"interval":2,"cap":30}'`.
-  It costs little and is pure insurance — the snapshot ring AND the input/dt recorder only
-  cover moments that happen *while it runs*, so a session started after the bug is useless.
+- **Start a rewind session before letting the game run live/unfrozen:**
+  `cmd_rewind_start '{"interval":2,"cap":30}'`. The snapshot ring AND the input/dt recorder only
+  cover moments that happen *while it runs*, so a session started after the bug is useless. If
+  every verification happens frozen via stage→step→assert (typical for a greenfield build), you
+  can skip it — there is no live play to protect.
 - **Time travel comes in two verbs — teleport vs re-run:**
   - `cmd_rewind_load '{"ref":"latest"}'` (or `'{"ago":10}'`) restores that entry's world state,
     nothing else. From there the game runs forward *live* — new inputs, new timeline.

@@ -499,6 +499,14 @@ describe("tecs CLI", function()
             assert.matches("unknown page 'nope/does%-not%-exist'", err)
         end)
 
+        it("suggests near-miss pages on an unknown page", function()
+            -- A plausible-but-wrong id must redirect in one call, not dead-end.
+            local ok, err = cli.run({"docs", "tecs2d/shapes"})
+            assert.is_true(not ok)
+            assert.matches("did you mean:", err)
+            assert.matches("tecs2d/rendering/shapes", err)
+        end)
+
         it("rejects --json combined with a page", function()
             local ok, err = cli.run({"docs", "tecs/world", "--json"})
             assert.is_true(not ok)

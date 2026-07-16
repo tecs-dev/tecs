@@ -1626,9 +1626,27 @@ function tasks.docs(args)
     -- /tecs2d/rendering/shapes.md).
     if args.page and args.page ~= "" then
         local url = "/" .. (args.page:gsub("^/", ""):gsub("%.md$", "")) .. ".md"
-        local page = docPagesByUrl(readDocBundle("llms-full.txt"))[url]
+        local pages = docPagesByUrl(readDocBundle("llms-full.txt"))
+        local page = pages[url]
         if not page then
-            fail("unknown page '" .. tostring(args.page) .. "'. Run `tecs docs` to list pages")
+            -- Fuzzy-match the request against known page ids so a plausible
+            -- guess redirects in one call instead of inviting another guess.
+            local want = args.page:gsub("^/", ""):gsub("%.md$", ""):lower()
+            local near = {}
+            for u in pairs(pages) do
+                local id = u:gsub("^/", ""):gsub("%.md$", "")
+                local leaf = id:match("([^/]+)$") or id
+                if id:lower():find(want, 1, true) or want:find(leaf:lower(), 1, true)
+                    or leaf:lower():find(want:match("([^/]+)$") or want, 1, true) then
+                    near[#near + 1] = id
+                end
+            end
+            table.sort(near)
+            local hint = "Run `tecs docs` to list pages"
+            if #near > 0 then
+                hint = "did you mean: " .. table.concat(near, ", ", 1, math.min(#near, 4)) .. "?"
+            end
+            fail("unknown page '" .. tostring(args.page) .. "'. " .. hint)
         end
         io.write(page)
         if not page:match("\n$") then

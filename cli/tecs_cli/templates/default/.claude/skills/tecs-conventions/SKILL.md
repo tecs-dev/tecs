@@ -27,6 +27,10 @@ first time. For the full API, run `tecs docs <page>` (offline mirror of the docs
 - **Never build a query — or register an observer — inside `run`.** Create queries once in the plugin and reuse them; `world:observe` inside a per-frame system adds a NEW handler every tick (your callback fires N times per event and leaks). Register observers in plugin/Startup code.
 - Optional record fields can't be marked `?` (only params can); document optionality and handle
   `nil` at each use site.
+- **No anonymous record types in annotations.** `function f(c: {r: number, g: number})` is a
+  syntax error (Teal reports only a bare `expected '}'`). Declare a named record
+  (`local record RGBA r: number g: number end`) and annotate with it; `{K: V}` map and
+  `{T}` array/tuple annotations are fine.
 
 ## Conventions
 
