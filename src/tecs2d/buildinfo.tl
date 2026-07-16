@@ -23,6 +23,12 @@ local record buildinfo
     --- The build metadata, or nil when no tecs_buildinfo module exists.
     get: function(): Info
 
+    --- Re-read the manifest from disk, bypassing the module cache. Hot
+    --- reload swaps the manifest file under the running process, so the
+    --- cached copy reports BOOT-time metadata; staleness checks (the MCP
+    --- ping's `build`) must see what is on disk now.
+    fresh: function(): Info
+
     --- True unless the metadata marks a distributed build.
     isDev: function(): boolean
 end
@@ -41,6 +47,18 @@ function buildinfo.get(): buildinfo.Info
         if ok and info is table then
             cached = info as buildinfo.Info
         end
+    end
+    return cached
+end
+
+function buildinfo.fresh(): buildinfo.Info
+    local pkg = (_G as {string: any}).package as {string: any}
+    local loadedModules = pkg and pkg.loaded as {string: any}
+    if loadedModules then loadedModules[manifestModule] = nil end
+    local ok, info = pcall(require, manifestModule) as (boolean, any)
+    if ok and info is table then
+        cached = info as buildinfo.Info
+        loaded = true
     end
     return cached
 end

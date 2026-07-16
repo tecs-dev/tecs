@@ -1581,17 +1581,18 @@ MCP tool: `cmd_audio_mute`
 | --- | --- | --- |
 | `on` | boolean | enable or disable; omit to toggle |
 
-### `fetch <expr...> [h=N] [limit=N] [w=N] [x=N] [y=N]` {#cmd-fetch}
+### `fetch <expr...> [count_only] [h=N] [limit=N] [w=N] [x=N] [y=N]` {#cmd-fetch}
 
 Fetch entities matching a component query, without selecting them.
 
-Fetch entities matching a component expression ('Enemy -Dead' means has Enemy, lacks Dead) with their serialized component data, without touching the operator's selection. Give x, y, w, h to restrict to a world-space box (spatial filter via Position when registered, else Transform; the spatial component is always included). Returns up to limit entities plus a truncated flag. Use cmd_query when you want to select the matches instead.
+Fetch entities matching a component expression ('Enemy -Dead' means has Enemy, lacks Dead) with their serialized component data, without touching the operator's selection. count_only=true answers "how many match" with just the count -- the cheapest population check; prefer it whenever you don't need the component data. Give x, y, w, h to restrict to a world-space box (spatial filter via Position when registered, else Transform; the spatial component is always included). Returns up to limit entities plus a truncated flag. Use cmd_query when you want to select the matches instead.
 
 MCP tool: `cmd_fetch` (read-only, idempotent)
 
 | Argument | Type | Description |
 | --- | --- | --- |
 | `expr` | string | component names separated by spaces; -Foo excludes (required) |
+| `count_only` | boolean | return only the match count, no entity payloads |
 | `h` | number | bounds height in world units |
 | `limit` | number (min 0) | max entities returned (default: 100) |
 | `w` | number | bounds width in world units |

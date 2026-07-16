@@ -421,6 +421,16 @@ describe("mcp compliance: freeze, step, resume", function()
         app.client:call("cmd_freeze", {on = true})
     end)
 
+    it("cmd_fetch count_only answers population checks without payloads", function()
+        local res = app.client:call("cmd_fetch", {expr = "Transform", count_only = true})
+        luassert.is_true((res.count as integer) >= 1)
+        luassert.are.equal(0, #(res.entities as {any}))
+        luassert.is_false(res.truncated as boolean)
+        -- The count matches what the full form reports.
+        local full = app.client:call("cmd_fetch", {expr = "Transform"})
+        luassert.are.equal(full.count, res.count)
+    end)
+
     it("cmd_step quiet=true trims the deferred response to the answer", function()
         local res = app.client:call("cmd_step", {
             n = 2, quiet = true,

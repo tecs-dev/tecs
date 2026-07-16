@@ -817,10 +817,14 @@
     "name": "cmd_draw_text"
   },
   {
-    "description": "Fetch entities matching a component expression ('Enemy -Dead' means has Enemy, lacks Dead) with their serialized component data, without touching the operator's selection. Give x, y, w, h to restrict to a world-space box (spatial filter via Position when registered, else Transform; the spatial component is always included). Returns up to limit entities plus a truncated flag. Use cmd_query when you want to select the matches instead. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "description": "Fetch entities matching a component expression ('Enemy -Dead' means has Enemy, lacks Dead) with their serialized component data, without touching the operator's selection. count_only=true answers \"how many match\" with just the count -- the cheapest population check; prefer it whenever you don't need the component data. Give x, y, w, h to restrict to a world-space box (spatial filter via Position when registered, else Transform; the spatial component is always included). Returns up to limit entities plus a truncated flag. Use cmd_query when you want to select the matches instead. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
+        "count_only": {
+          "description": "return only the match count, no entity payloads",
+          "type": "boolean"
+        },
         "expr": {
           "description": "component names separated by spaces; -Foo excludes",
           "type": "string"

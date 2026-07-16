@@ -35,6 +35,8 @@ local fetchSchema <const>: cmdargs.Schema = {
         expr = {rest = true, required = true,
             help = "component names separated by spaces; -Foo excludes"},
         limit = {default = 100, min = 0, help = "max entities returned"},
+        count_only = {kind = "boolean",
+            help = "return only the match count, no entity payloads"},
         x = {kind = "number", help = "bounds left world x (give all of x, y, w, h or none)"},
         y = {kind = "number", help = "bounds top world y"},
         w = {kind = "number", help = "bounds width in world units"},
@@ -1061,7 +1063,7 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             section = "Engine",
             complete = {[0] = "components"},
             shortHelp = "fetch entities matching a component query, without selecting them",
-            mcpHelp = "Fetch entities matching a component expression ('Enemy -Dead' means has Enemy, lacks Dead) with their serialized component data, without touching the operator's selection. Give x, y, w, h to restrict to a world-space box (spatial filter via Position when registered, else Transform; the spatial component is always included). Returns up to limit entities plus a truncated flag. Use cmd_query when you want to select the matches instead.",
+            mcpHelp = "Fetch entities matching a component expression ('Enemy -Dead' means has Enemy, lacks Dead) with their serialized component data, without touching the operator's selection. count_only=true answers \"how many match\" with just the count -- the cheapest population check; prefer it whenever you don't need the component data. Give x, y, w, h to restrict to a world-space box (spatial filter via Position when registered, else Transform; the spatial component is always included). Returns up to limit entities plus a truncated flag. Use cmd_query when you want to select the matches instead.",
             schema = fetchSchema,
             examples = {"fetch Transform -Disabled", "fetch Enemy limit=10",
                 "fetch Transform x=0 y=0 w=640 h=360"},
@@ -1134,6 +1136,13 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     -- query for every call; the loop runs to exhaustion because
                     -- breaking out of query:iter() leaks the query scope.
                     local query = w:query({temp = true, include = include, exclude = exclude})
+                    if v.count_only == true then
+                        -- "How many match" is the most common verification
+                        -- read; answer it without serializing anything.
+                        local total = query:count()
+                        return {ok = true, message = "fetch matched " .. tostring(total),
+                            data = {count = total, entities = {}, truncated = false}}
+                    end
                     local results: {{string: any}} = {}
                     local count = 0
                     for archetype, len, entityList in query:iter() do
@@ -1184,29 +1193,33 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 local bx2, by2 = bx + bw, by + bh
                 local query = w:query({temp = true, include = includeComponents, exclude = exclude})
                 local results: {{string: any}} = {}
+                local countOnly = v.count_only == true
                 local count = 0
                 for archetype, len, entityList in query:iter() do
-                    local posColumn = (count < limit) and archetype:get(spatial) or nil
+                    local posColumn = (countOnly or count < limit) and archetype:get(spatial) or nil
                     if posColumn then
                         for row = 1, len do
-                            if count >= limit then break end
+                            if not countOnly and count >= limit then break end
                             local pos = posColumn[row] as {string: number}
                             local px, py = pos.x, pos.y
                             if px >= bx and px <= bx2 and py >= by and py <= by2 then
-                                results[#results + 1] = {
-                                    id = entityList[row],
-                                    components = entityinfo.serializeRow(
-                                        archetype, includeComponents, row),
-                                }
+                                if not countOnly then
+                                    results[#results + 1] = {
+                                        id = entityList[row],
+                                        components = entityinfo.serializeRow(
+                                            archetype, includeComponents, row),
+                                    }
+                                end
                                 count = count + 1
                             end
                         end
                     end
                 end
+                local truncated = not countOnly and count >= limit
                 return {ok = true,
                     message = "fetch matched " .. tostring(count) .. " in bounds" ..
-                        ((count >= limit) and " (truncated)" or ""),
-                    data = {count = count, entities = results, truncated = count >= limit,
+                        (truncated and " (truncated)" or ""),
+                    data = {count = count, entities = results, truncated = truncated,
                         bounds = {x = bx, y = by, width = bw, height = bh}}}
             end,
         },

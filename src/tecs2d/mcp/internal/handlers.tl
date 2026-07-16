@@ -50,8 +50,11 @@ byName["ping"] = function(_: {string:any}, id: number)
         payload.error = ctx.crashed
     end
     -- Build identity, so a caller can detect a stale process: if `build.built`
-    -- predates the latest `tecs build`, the answers come from old code.
-    local info = buildinfo.get()
+    -- predates the latest `tecs build`, the answers come from old code. Read
+    -- fresh from disk -- hot reload swaps the manifest under the process, and
+    -- the cached copy would report boot-time metadata ("my change didn't
+    -- load") forever after.
+    local info = buildinfo.fresh()
     if info then
         payload.build = {name = info.name, built = info.built, dev = info.dev}
     end
