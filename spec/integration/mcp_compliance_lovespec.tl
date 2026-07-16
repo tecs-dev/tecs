@@ -400,6 +400,27 @@ describe("mcp compliance: freeze, step, resume", function()
         luassert.are.equal(before + 4, readFrames(app))
     end)
 
+    it("send_love_event reaches the Update edge while unfrozen", function()
+        -- The old raw love.event.push landed mid-frame with un-defaulted args
+        -- (nil scancode), so the latch never set and the edge silently missed.
+        -- Routed through the tape it must be consumed on the next live frame,
+        -- even in the short-args form.
+        local upBefore = tonumber(runLua(app, "return tecsTest.upFrames")[1]) as integer
+        app.client:call("cmd_freeze", {on = false})
+        local res = app.client:call("send_love_event",
+            {event = "keypressed", args = {"up"}})
+        luassert.matches("input tape", res.dispatch as string)
+        local seen = eventually(CALL_TIMEOUT, function(): integer
+            local n = tonumber(runLua(app, "return tecsTest.upFrames")[1]) as integer
+            if n > upBefore then return n end
+            return nil
+        end)
+        luassert.is_true(seen ~= nil and seen > upBefore,
+            "unfrozen send_love_event edge never consumed")
+        app.client:call("send_love_event", {event = "keyreleased", args = {"up"}})
+        app.client:call("cmd_freeze", {on = true})
+    end)
+
     it("cmd_step quiet=true trims the deferred response to the answer", function()
         local res = app.client:call("cmd_step", {
             n = 2, quiet = true,

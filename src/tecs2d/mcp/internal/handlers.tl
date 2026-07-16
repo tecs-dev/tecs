@@ -8,6 +8,8 @@ local buildinfo <const> = require("tecs2d.buildinfo")
 local logging <const> = require("tecs.utils.logging")
 local rpc <const> = require("tecs2d.mcp.internal.rpc")
 local state <const> = require("tecs2d.mcp.internal.state")
+local inputtape <const> = require("tecs2d.debug.internal.inputtape")
+local freezekey <const> = require("tecs2d.debug.internal.freeze")
 local logtap <const> = require("tecs2d.mcp.internal.logtap")
 local transport <const> = require("tecs2d.mcp.internal.transport")
 
@@ -171,6 +173,31 @@ byName["send_love_event"] = function(args: {string:any}, id: number)
     -- like resize, mousepressed, wheelmoved, focus, and touch events expect
     -- non-string arguments.
     local eventArgs = args.args as {any}
+
+    -- Unfrozen, a raw love.event.push lands mid-frame relative to the input
+    -- latch (and un-defaulted args can leave the latch keyed on a nil
+    -- scancode): the event "sends" but the Update-phase edge never sees it.
+    -- Route tapeable events through the input tape at the next gameplay
+    -- frame instead -- same real dispatch path, frame-aligned, args
+    -- defaulted. Frozen, keep the raw push: the debugger overlay's typed
+    -- console consumes love callbacks while gameplay phases are disabled.
+    local w = ctx.world
+    if w and inputtape.tapeable(eventName) then
+        local fz = w.resources[freezekey.KEY]
+        local frozen = fz ~= nil and fz:isFrozen()
+        if not frozen then
+            local tape = inputtape.ensure(w)
+            local queued, qerr = tape:queue(
+                {{at = 1, event = eventName, args = eventArgs or {}}}, true)
+            if not queued then
+                sendToolError(id, "invalid_event", "send_love_event: " .. qerr)
+                return
+            end
+            sendToolOK(id, {event = eventName, args = eventArgs or {},
+                dispatch = "next gameplay frame (input tape)"})
+            return
+        end
+    end
     if eventArgs and #eventArgs > 0 then
         le.push(eventName, table.unpack(eventArgs))
     else

@@ -104,7 +104,7 @@ local record commands
         lastDiff: {string: any}
 
         --- The last executed result's popup (or message) for the overlay's
-        --- leader+Y yank. Stored at execute time so the live usage previews
+        --- leader+Y yank. Stored at execute time so contextual command help
         --- can never clobber it.
         lastOutput: {string}
 
@@ -184,7 +184,7 @@ local record commands
     subSignature: function(c: Command, sub: Subcommand): string
 
     --- Popup lines describing a command: signature, help, arguments,
-    --- subcommands, and examples. Used by `help <name>` and the live preview.
+    --- subcommands, and examples. Used by `help <name>` and overlay F1 help.
     usagePopup: function(c: Command): {string}
 
     SECTIONS: {string}
@@ -810,9 +810,11 @@ function commands.build(env: commands.Env): commands.Registry
                 local lines: {string} = {
                     "help  (type `help <command>` for details)",
                     "Mouse:",
-                    "  click = toggle the entity under the cursor in the selection",
-                    "  drag = box-select the entities inside the rectangle",
-                    "  shift+drag = move the selection; right-click cancels and restores",
+                    "  click = replace the selection with the entity under the cursor",
+                    "  shift+click = add the entity under the cursor to the selection",
+                    "  drag = replace the selection with entities inside the rectangle",
+                    "  shift+drag = add entities inside the rectangle to the selection",
+                    "  ctrl+drag = move the selection; right-click cancels and restores",
                     "  right-click = context menu for the entity or world position",
                     "  middle-drag = pan the camera",
                     "  wheel = zoom toward the cursor",
@@ -824,6 +826,7 @@ function commands.build(env: commands.Env): commands.Registry
                     "  escape = clear the command / popup, or close when empty",
                     "  tab / shift+tab = cycle completions (hold to repeat)",
                     "  bare tab starts the cycle at the last used command",
+                    "  f1 = toggle full help for the current command (or debugger help when empty)",
                     "  up / down = walk the command history",
                     "  left / right = page this popup",
                     "  enter = run the command",

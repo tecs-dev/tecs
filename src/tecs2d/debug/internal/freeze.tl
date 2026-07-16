@@ -87,7 +87,7 @@ end
 
 freeze.KEY = tecs.newKey("tecs2d.debug.freeze")
 
--- Every gameplay phase. The debugger overlay draws in PostRender, MCP runs in
+-- Every gameplay phase. The debugger overlay draws in RenderLast, MCP runs in
 -- RenderFirst, and the event poller runs outside the phase system, so
 -- disabling these stops the game while input, tools, and drawing keep working.
 local GAMEPLAY_PHASES <const>: {tecs.Phase} = {

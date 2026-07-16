@@ -112,7 +112,13 @@ tools.list = {
     {
         name = "send_love_event",
         annotations = {readOnlyHint = false, destructiveHint = false, idempotentHint = false, openWorldHint = false},
-        description = "Send a Love2D event to the game." .. JSON_TEXT_RESPONSE,
+        description = "Send one Love2D event to the game. Unfrozen, tapeable events queue " ..
+            "onto the input tape for the NEXT gameplay frame (frame-aligned, args " ..
+            "defaulted, real input path -- the Update-phase edge reliably sees it); " ..
+            "frozen, or for gamepad/joystick/filedropped events, it pushes the raw love " ..
+            "event immediately (the debugger overlay consumes those while gameplay is " ..
+            "paused). For deterministic gameplay verification prefer cmd_step's events= " ..
+            "form." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {

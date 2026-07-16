@@ -1,8 +1,8 @@
 --- In-game debugger overlay (micro-editor style command mode). Installed by the
 --- debug plugin; toggled with Ctrl+/. Freezes gameplay and draws a status line
 --- plus a command line. Type a command and Enter to run it; Tab cycles
---- completions. Click toggles the entity under the cursor in the selection;
---- drag box-selects; Shift+drag moves the selection.
+--- completions. Click or box-drag replaces the selection; Shift adds, and
+--- Ctrl-drag moves the current selection.
 ---
 --- The commands themselves live in the shared registry (tecs2d.debug.commands);
 --- this module is the human surface: input, mouse gestures, completion,
@@ -45,7 +45,7 @@ end
 
 -- Popup panel state (lines, visibility, paging, optional thumbnail), one
 -- table so the overlay closures stay under LuaJIT's 60-upvalue limit. Also
--- carries the overlay's per-frame draw caches (popup layout, auto-preview,
+-- carries the overlay's per-frame draw caches (popup layout, contextual help,
 -- wrapped prompt rows, Tab-cycle bar) so the render path allocates nothing
 -- while its inputs are unchanged.
 local record PopupState
@@ -62,8 +62,8 @@ local record PopupState
     measuredPerPage: integer
     blocks: {PopupBlock}
     pageGroups: {{integer}}
-    -- Auto-preview: the last seen command line, the command it names, and
-    -- the usage popup built for that command.
+    -- Contextual help: the command named by the current line and its cached
+    -- usage popup. Short help stays inline; F1 toggles the full panel.
     lastCommandLine: string
     previewCmd: commands.Command
     previewFor: commands.Command
@@ -117,7 +117,7 @@ local record MenuState
     swallow: boolean
 end
 
--- Mouse-gesture state (drag select, shift-move, middle-pan), one table so the
+-- Mouse-gesture state (drag select, Ctrl-move, middle-pan), one table so the
 -- input closure stays under LuaJIT's 60-upvalue limit.
 local record GestureState
     dragStartX: number
@@ -139,8 +139,8 @@ end
 -- overlay; they carry the pick-query and menu wiring that stays inside
 -- install(). Built once per install, never per frame.
 local record GestureCallbacks
-    selectArea: function()
-    clickSelect: function()
+    selectArea: function(boolean)
+    clickSelect: function(boolean)
     openMenuUnderMouse: function()
 end
 
@@ -442,9 +442,9 @@ local function drawCompletionBar(popup: PopupState, completions: {string},
     if not active then return end
 
     popup.barHitCount = 0
-    local gap = font:getWidth("  ")
+    local gap = 0
     local pillPad = 12
-    local contentX: number = PAD_X
+    local contentX: number = 0
 
     -- The active group label is sticky; a prefix-filtered completion list has
     -- no section label and uses the full row for its command pills.
@@ -453,11 +453,11 @@ local function drawCompletionBar(popup: PopupState, completions: {string},
         local pillW = font:getWidth(label) + pillPad
         local accent = commands.SECTION_COLORS_BAR[active.name] or DEFAULT_PILL
         lg.setColor(accent[1], accent[2], accent[3], 1)
-        lg.rectangle("fill", PAD_X - 6, 3, pillW, rowH - 6)
+        lg.rectangle("fill", 0, 0, pillW, rowH)
         lg.setColor(1, 1, 1, 1)
-        lg.print(label, PAD_X, PAD_Y)
-        addCompletionHit(popup, 2, popup.barActiveGroup, PAD_X - 6, pillW, sw)
-        contentX = PAD_X - 6 + pillW + gap
+        lg.print(label, 6, PAD_Y)
+        addCompletionHit(popup, 2, popup.barActiveGroup, 0, pillW, sw)
+        contentX = pillW
     end
 
     -- Logical positions for the expanded commands followed by every other
@@ -471,7 +471,7 @@ local function drawCompletionBar(popup: PopupState, completions: {string},
             tailW = tailW + font:getWidth(label) + pillPad + gap
         end
     end
-    local tailX = math.max(contentX, sw - PAD_X - tailW)
+    local tailX = math.max(contentX, sw - tailW)
     local commandRight = math.max(contentX, tailX - gap)
     local selectedX: number = contentX
     local selectedW: number = 0
@@ -507,13 +507,13 @@ local function drawCompletionBar(popup: PopupState, completions: {string},
         else
             lg.setColor(0.25, 0.30, 0.33, 1)
         end
-        lg.rectangle("fill", x, 3, pillW, rowH - 6)
+        lg.rectangle("fill", x, 0, pillW, rowH)
         if i == completionIndex then
             local accent = commands.SECTION_COLORS[active.name]
             if accent then
                 lg.setColor(accent[1], accent[2], accent[3], 1)
                 lg.setLineWidth(2)
-                lg.rectangle("line", x, 3, pillW, rowH - 6)
+                lg.rectangle("line", x, 0, pillW, rowH)
             end
         end
         lg.setColor(0.8275, 0.7765, 0.6667, 1)
@@ -534,7 +534,7 @@ local function drawCompletionBar(popup: PopupState, completions: {string},
             local pillW = font:getWidth(label) + pillPad
             local accent = commands.SECTION_COLORS_BAR[group.name] or DEFAULT_PILL
             lg.setColor(accent[1], accent[2], accent[3], 1)
-            lg.rectangle("fill", x, 3, pillW, rowH - 6)
+            lg.rectangle("fill", x, 0, pillW, rowH)
             lg.setColor(1, 1, 1, 1)
             lg.print(label, x + pillPad / 2, PAD_Y)
             addCompletionHit(popup, 2, gi, x, pillW, sw)
@@ -585,7 +585,7 @@ local function headerComponent(name: string): tecs.Component
 end
 
 -- Mouse gestures while no context menu owns the mouse: a left press in the
--- world view starts a box-select drag (or a shift-move of the selection),
+-- world view starts a box-select drag (or a Ctrl-move of the selection),
 -- release commits it, right-click opens the menu (or cancels a move),
 -- middle-drag pans, and the wheel zooms toward the cursor. `view` is the
 -- debugger's input layer; a press swallowed by the menu or on the toolbar
@@ -594,6 +594,7 @@ local function handleMouseGestures(gesture: GestureState, menu: MenuState, popup
         ctx: debugcontext.Context, w: tecs.World, view: input.View,
         pipeline: gfxtypes.Pipeline, inView: boolean, cb: GestureCallbacks)
     local shiftHeld = view.isKeyDown("lshift") or view.isKeyDown("rshift")
+    local ctrlHeld = view.isKeyDown("lctrl") or view.isKeyDown("rctrl")
 
     -- A press that closed the menu stays swallowed until release.
     local swallowing = menu.swallow
@@ -607,7 +608,7 @@ local function handleMouseGestures(gesture: GestureState, menu: MenuState, popup
     if not swallowing and view.isMousePressed(1) and inView then
         -- Interacting with the world replaces reading the popup.
         dismissPopup(popup)
-        if shiftHeld and #ctx.selected > 0 then
+        if ctrlHeld and #ctx.selected > 0 then
             -- Begin moving the selection; record originals so a
             -- right-click can put them back.
             gesture.moving = true
@@ -660,9 +661,9 @@ local function handleMouseGestures(gesture: GestureState, menu: MenuState, popup
             -- ctx.hasArea stays set: the released box keeps
             -- drawing and is the crop region for `screenshot`
             -- until the next left press clears it.
-            cb.selectArea()
+            cb.selectArea(shiftHeld)
         elseif gesture.pressInView and inView then
-            cb.clickSelect()
+            cb.clickSelect(shiftHeld)
         end
         gesture.dragging = false
         gesture.pressInView = false
@@ -790,9 +791,12 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
 
     -- UI-only state (not part of the shared context).
     local completions: {string} = {}
+    local rootCompletions: {string} = {}
     local completionBase = ""
     local completionIndex = 0
+    local barSelectionIndex = 0
     local cycling = false
+    local cyclingRoot = false
     -- Tab and Backspace repeat after the same deliberate initial pause.
     local KEY_REPEAT_DELAY <const> = 0.35
     local KEY_REPEAT_INTERVAL <const> = 0.07
@@ -890,25 +894,27 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
         return ids
     end
 
-    -- Left click toggles the nearest entity under the cursor in/out of the set.
-    local function clickSelect()
+    -- Plain click replaces the selection; Shift-click adds the nearest entity.
+    local function clickSelect(additive: boolean)
         local list = underMouse()
-        if #list == 0 then return end
-        local id = list[1]
-        if debugcontext.isSelected(ctx, id) then
-            debugcontext.removeSelected(ctx, id)
-        else
-            debugcontext.addSelected(ctx, id)
+        if not additive then ctx.selected = {} end
+        if #list == 0 then
+            debugcontext.pushEvent(ctx, "selection", {selected = #ctx.selected, clicked = 0})
+            return
         end
-        debugcontext.pushEvent(ctx, "selection", {selected = #ctx.selected, clicked = id})
+        local id = list[1]
+        debugcontext.addSelected(ctx, id)
+        debugcontext.pushEvent(ctx, "selection", {
+            selected = #ctx.selected, clicked = id, additive = additive})
     end
 
-    -- Drag release: add every entity inside the world-space box to the set.
-    local function selectArea()
+    -- Drag release: plain drag replaces; Shift-drag adds box hits to the set.
+    local function selectArea(additive: boolean)
         local minX = math.min(ctx.areaX1, ctx.areaX2)
         local maxX = math.max(ctx.areaX1, ctx.areaX2)
         local minY = math.min(ctx.areaY1, ctx.areaY2)
         local maxY = math.max(ctx.areaY1, ctx.areaY2)
+        if not additive then ctx.selected = {} end
         local seen: {integer: boolean} = {}
         for i = 1, #ctx.selected do seen[ctx.selected[i]] = true end
         for archetype, len, entities in pickQuery:iter() do
@@ -924,21 +930,16 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 end
             end
         end
-        debugcontext.pushEvent(ctx, "selection", {selected = #ctx.selected, boxed = true})
+        debugcontext.pushEvent(ctx, "selection", {
+            selected = #ctx.selected, boxed = true, additive = additive})
     end
 
     local function resetCompletions()
         cycling = false
+        cyclingRoot = false
         completionIndex = 0
         completions = {}
         completionBase = ""
-        popup.barLabels = nil
-        popup.barGroups = nil
-        popup.barGroupOf = nil
-        popup.barActiveGroup = 0
-        popup.barScroll = 0
-        popup.barScrollForIndex = 0
-        popup.barHitCount = 0
     end
 
     -- Wrapped command-line rows at the current window width, so long commands
@@ -1129,8 +1130,11 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
         ctx.command = ""
         historyPos = 0
         resetCompletions()
+        completionBase, rootCompletions = registry:complete("")
+        buildCompletionBar(popup, rootCompletions, overlayFont)
+        barSelectionIndex = 0
         dismissPopup(popup)
-        ctx.message = "Hit [TAB] to see commands"
+        ctx.message = ""
         if captureToken == 0 then
             captureToken = input.pushStack()
         end
@@ -1347,8 +1351,8 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 dismissPopup(popup)
                 local backward = reader().isKeyDown("lshift") or reader().isKeyDown("rshift")
                 if not cycling then
+                    cyclingRoot = ctx.command == ""
                     completionBase, completions = registry:complete(ctx.command)
-                    buildCompletionBar(popup, completions, overlayFont)
                     completionIndex = 0
                     -- On an empty line, start the cycle at the last used
                     -- command (whichever direction) so Tab-Enter repeats
@@ -1380,8 +1384,16 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                         end
                     until completions[completionIndex]:sub(1, 1) ~= SECTION_MARK
                     ctx.command = completionBase .. completions[completionIndex]
-                    popup.barActiveGroup = popup.barGroupOf[completionIndex]
-                        or popup.barActiveGroup
+                    if cyclingRoot then
+                        for bi = 1, #rootCompletions do
+                            if rootCompletions[bi] == completions[completionIndex] then
+                                barSelectionIndex = bi
+                                popup.barActiveGroup = popup.barGroupOf[bi]
+                                    or popup.barActiveGroup
+                                break
+                            end
+                        end
+                    end
                 end
             end
             -- Up/Down browse the command history (persisted by the registry).
@@ -1417,26 +1429,30 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 resetCompletions()
             end
 
-            -- Auto-preview: once the command line names a command, show that
-            -- command's generated popup (how to use it), including as arguments
-            -- are typed and while Tab-cycling. Running the command (Enter) may
-            -- replace it: `help`, for example, swaps in the full command listing.
-            -- The named command and its usage lines are cached; the preview
-            -- reasserts whenever the popup shows anything else.
+            -- Resolve the command named by the prompt for inline short help.
+            -- Full usage is opt-in with F1 instead of obscuring the world on
+            -- every command selection or keystroke.
             if ctx.command ~= popup.lastCommandLine then
                 popup.lastCommandLine = ctx.command
                 local previewWord = ctx.command:match("^(%S+)")
                 popup.previewCmd = previewWord and registry.byName[previewWord]
             end
-            local previewCmd = popup.previewCmd
-            if previewCmd then
-                if popup.previewFor ~= previewCmd then
-                    popup.previewFor = previewCmd
-                    popup.previewLines = commands.usagePopup(previewCmd)
-                end
-                if popup.lines ~= popup.previewLines or not popup.shown then
-                    popup.lines = popup.previewLines
-                    popup.shown = true
+            if not menuTookInput and reader().isKeyPressed("f1") then
+                local helpCmd = popup.previewCmd
+                if helpCmd then
+                    if popup.previewFor ~= helpCmd then
+                        popup.previewFor = helpCmd
+                        popup.previewLines = commands.usagePopup(helpCmd)
+                    end
+                    if popup.shown and popup.lines == popup.previewLines then
+                        dismissPopup(popup)
+                    else
+                        showPopup(popup, popup.previewLines)
+                    end
+                elseif popup.shown then
+                    dismissPopup(popup)
+                else
+                    executeCommand("help")
                 end
             end
 
@@ -1464,29 +1480,30 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             -- horizontally. Wheel over either debugger row is consumed and
             -- never reaches the camera zoom path.
             local _, barWheelY = reader().getMouseWheelMovement()
-            if not menu.open and cycling and #completions > 0 and input.mouseY >= 0
+            if not menu.open and #rootCompletions > 0 and input.mouseY >= 0
                 and input.mouseY <= completionBarH and barWheelY ~= 0 then
                 popup.barScroll = popup.barScroll - barWheelY * 120
-                popup.barScrollForIndex = completionIndex
+                popup.barScrollForIndex = barSelectionIndex
             end
 
-            if not menu.open and cycling and #completions > 0 and reader().isMousePressed(1)
+            if not menu.open and #rootCompletions > 0 and reader().isMousePressed(1)
                 and input.mouseY >= 0 and input.mouseY <= completionBarH then
                 for hi = 1, popup.barHitCount do
                     local hx = popup.barHitX[hi]
                     if input.mouseX >= hx and input.mouseX <= hx + popup.barHitW[hi] then
                         if popup.barHitKind[hi] == 1 then
-                            completionIndex = popup.barHitValue[hi]
+                            barSelectionIndex = popup.barHitValue[hi]
                         else
                             popup.barActiveGroup = popup.barHitValue[hi]
                             local group = popup.barGroups[popup.barActiveGroup]
-                            completionIndex = group and group.first or completionIndex
+                            barSelectionIndex = group and group.first or barSelectionIndex
                         end
-                        if completions[completionIndex]
-                            and completions[completionIndex]:sub(1, 1) ~= SECTION_MARK then
-                            ctx.command = completionBase .. completions[completionIndex]
+                        if rootCompletions[barSelectionIndex]
+                            and rootCompletions[barSelectionIndex]:sub(1, 1) ~= SECTION_MARK then
+                            ctx.command = rootCompletions[barSelectionIndex]
                             ctx.message = ""
                             dismissPopup(popup)
+                            resetCompletions()
                         end
                         break
                     end
@@ -1524,7 +1541,8 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
     -- system so capturedThisFrame is current.
     w:addSystem({
         name = "debug.RecordingIndicator",
-        phase = tecs.phases.PostRender,
+        phase = tecs.phases.RenderLast,
+        before = {"love.Present"},
         run = function()
             if ctx.recording.status ~= "recording" then return end
             if recorder.capturedThisFrame then return end
@@ -1561,7 +1579,10 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
     -- Overlay draw.
     w:addSystem({
         name = "debug.Overlay",
-        phase = tecs.phases.PostRender,
+        -- RenderLast puts debugger chrome above user Render/PostRender systems;
+        -- the explicit edge keeps it immediately before the frame is presented.
+        phase = tecs.phases.RenderLast,
+        before = {"love.Present"},
         run = function()
             if not ctx.open then
                 return
@@ -1664,11 +1685,11 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             -- Permanently mounted top menu. Completion mode expands one
             -- command group at a time inside it.
             local completionBarH = rowH
-            lg.setColor(0.6549, 0.7529, 0.5020, 1)
+            lg.setColor(0.25, 0.30, 0.33, 1)
             lg.rectangle("fill", 0, 0, sw, rowH)
-            if cycling and #completions > 0 then
-                drawCompletionBar(popup, completions, overlayFont,
-                    completionIndex, sw, rowH)
+            if #rootCompletions > 0 then
+                drawCompletionBar(popup, rootCompletions, overlayFont,
+                    barSelectionIndex, sw, rowH)
             end
 
             -- Command line (below completions, flush): bg #2e373c, text #d3c6aa.
@@ -1686,10 +1707,16 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             local cursorY = completionBarH + PAD_Y + (#cmdLines - 1) * fh
             local blockW = overlayFont:getWidth("0")
             lg.rectangle("fill", cursorX + 1, cursorY, blockW, fh)
-            -- Status line: reserved for the initial hint and notifications; the
-            -- per-command usage lives in the popup, not here. Hidden once the
-            -- prompt wraps (no room to its right).
+            -- Status line: outcomes take priority; otherwise show compact
+            -- contextual help. F1 opens the full generated usage on demand.
             local hint = ctx.message
+            if hint == "" then
+                if popup.previewCmd then
+                    hint = popup.previewCmd.shortHelp .. "  [F1 details]"
+                else
+                    hint = "[F1 help]"
+                end
+            end
             if hint ~= "" and #cmdLines == 1 then
                 lg.setColor(0.522, 0.573, 0.537, 1)
                 lg.print(hint, cursorX + blockW + PAD_X * 2, cursorY)

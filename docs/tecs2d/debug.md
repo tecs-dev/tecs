@@ -42,24 +42,28 @@ animation and simulation stop while input and the overlay keep running. Pressing
 Ctrl+/ again, pressing Escape on an empty prompt, or running `exit` closes it
 and resumes the game.
 
-The overlay draws two rows across the top of the screen. The upper row is a
-status line showing the cursor position (screen and world), the camera, the
-frame rate, the entity count, and the selection size. The lower row is a
-command line.
+The overlay draws two rows across the top of the screen. The upper row is an
+always-visible command toolbar: the active colored group stays at the left,
+its commands fill the middle, and the other group tabs stay at the right. The
+lower row is a command line with a short summary of the current command. A
+compact mouse/world/camera readout sits at the bottom-right.
 
 ![The debugger just opened over a running game](./assets/debug/open.png)
 
 ### A first session
 
 1. Press **Ctrl+/**. The game freezes and the command line opens.
-2. Press **Tab** to browse. The strip cycles every command, grouped into
-   colored sections, and the popup previews the highlighted command's usage
-   live. Keep tabbing, or type to narrow; Enter runs the line.
+2. Click a command or press **Tab** to browse. The toolbar shows one colored
+   group at a time; click another group tab to switch. Keep tabbing, click a
+   command, or type to narrow; Enter runs the line. The command line shows a
+   short summary without covering the game. Press **F1** when you want the
+   current command's full usage.
 
-   ![Tab cycling the command strip with a live usage preview](./assets/debug/completions.png)
+   ![Tab cycling the grouped command toolbar](./assets/debug/completions.png)
 
-3. Click an entity, or drag a box around several, to select them. The status
-   bar shows `sel: N` and the selection is highlighted in the world.
+3. Click an entity to select only it, or drag a box to replace the selection
+   with everything inside. Hold Shift while clicking or dragging to add. The
+   selection is highlighted in the world.
 4. Type `info` and press Enter: the selected entity's components appear as a
    paged popup (Left/Right page long output).
 
@@ -82,16 +86,19 @@ The leader key is **Ctrl** by default. `leaderKey`, `debugToggleKey`, and
 | Escape | Close the context menu; otherwise clear prompt state, or close the debugger when the prompt is empty |
 | Enter / keypad Enter | Execute a non-empty command; activate the highlighted context-menu item |
 | Tab / Shift+Tab | Cycle completions forward or backward; hold to repeat |
+| F1 | Toggle full help for the current command; show debugger help when the prompt is empty |
 | Up / Down | Browse command history; move through an open context menu |
 | Left / Right | Page through a multi-page popup |
-| Backspace | Delete the last command-line character |
+| Backspace | Delete the last command-line character; hold to repeat after a short pause |
 | Delete | Despawn every selected entity |
 
 | Pointer | Action |
 | --- | --- |
-| Left-click | Toggle the entity under the cursor in or out of the selection |
-| Left-drag and release | Add every entity inside the box to the selection |
-| Shift+left-drag | Move the selection with the cursor; right-click cancels and restores the original positions |
+| Left-click | Replace the selection with the entity under the cursor; empty space clears it |
+| Shift+left-click | Add the entity under the cursor to the selection |
+| Left-drag and release | Replace the selection with every entity inside the box |
+| Shift+left-drag | Add every entity inside the box to the selection |
+| Ctrl+left-drag | Move the current selection; right-click cancels and restores the original positions |
 | Right-click | Open the context menu for the entity or empty world position under the cursor |
 | Context-menu hover/click | Highlight and activate an item; clicking outside or right-clicking closes the menu |
 | Middle-drag | Pan the camera |
@@ -101,8 +108,8 @@ The entity context menu includes info, selection, marks, notes, copy ID, set,
 remove, and despawn actions. The empty-space menu includes copy position, spawn,
 draw marker, physics query, and tile inspection actions.
 
-Selected entities are highlighted in the world. The selection is a set: Left
-Clicks and drags add to it, and Left Clicking a selected entity removes it.
+Selected entities are highlighted in the world. Plain clicks and box drags
+replace the set; hold Shift to add without clearing the existing selection.
 
 ### Command syntax {#command-syntax}
 
@@ -126,12 +133,14 @@ note flickers when lit           free-text tails need no quotes
 - Commands with a free-text tail (`note`, `query`, `set`) consume the rest of
   the line; declared flags still parse after the text.
 
-As you type a command name, its full usage pops up automatically, and
-`help <command>` shows the same thing on demand. Tab completes command names,
-verbs, and per-argument sources such as component names, marks, systems, and
-cameras; on an empty line the cycle starts at the last used command, so
-Tab-Enter repeats recent work. History persists across sessions in the save
-directory (Up/Down browses it, `history` lists it, `history clear` forgets it).
+As you type or select a command, its short summary appears beside the prompt
+without opening a panel. Press F1 to toggle its full generated usage;
+`help <command>` opens the same details explicitly, and F1 on an empty prompt
+opens the general debugger help. Tab completes command names, verbs, and
+per-argument sources such as component names, marks, systems, and cameras; on
+an empty line the cycle starts at the last used command, so Tab-Enter repeats
+recent work. History persists across sessions in the save directory (Up/Down
+browses it, `history` lists it, `history clear` forgets it).
 
 ### Commands
 

@@ -68,6 +68,8 @@ local record inputtape
 
     --- Get or create the world's tape (installs its consumer system once).
     ensure: function(w: tecs.World): Tape
+
+    tapeable: function(event: string): boolean
 end
 
 inputtape.KEY = tecs.newKey("tecs2d.debug.inputTape")
@@ -80,6 +82,12 @@ local UNTAPEABLE <const>: {string: boolean} = {
     joystickadded = true, joystickremoved = true, joystickpressed = true,
     joystickreleased = true, joystickhat = true, filedropped = true,
 }
+
+--- Whether the tape can carry this event (send_love_event routes tapeable
+--- events through the tape so they land frame-aligned with defaulted args).
+function inputtape.tapeable(event: string): boolean
+    return not UNTAPEABLE[event]
+end
 
 -- Fill what MUST be filled so a row can use the natural short form
 -- (e.g. keypressed with just the key), mirroring how send_love_event
