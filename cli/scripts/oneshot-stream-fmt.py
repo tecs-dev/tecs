@@ -25,12 +25,44 @@ def compact(value, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+def emit_codex_item(item) -> None:
+    itype = item.get("type")
+    if itype == "agent_message":
+        emit(f"{stamp()} ✎ {compact(item.get('text', ''), 400)}")
+    elif itype == "reasoning":
+        pass
+    elif itype == "command_execution":
+        emit(f"{stamp()} → $ {compact(item.get('command', ''), 120)}")
+    elif itype == "mcp_tool_call":
+        name = item.get("tool") or item.get("name") or "?"
+        emit(f"{stamp()} → {name} {compact(item.get('arguments', {}), 120)}")
+    elif itype == "error":
+        emit(f"{stamp()} ✗ {compact(item, 200)}")
+    else:
+        emit(f"{stamp()} → {itype} {compact(item, 120)}")
+
+
 for raw in sys.stdin:
     try:
         event = json.loads(raw)
     except Exception:
         continue
     kind = event.get("type")
+    # Codex `exec --json` events (thread.started / item.completed /
+    # turn.completed); Claude Code stream-json events handled below.
+    if kind == "item.completed":
+        emit_codex_item(event.get("item", {}))
+        continue
+    if kind == "turn.completed":
+        u = event.get("usage", {})
+        emit(f"{stamp()} ■ turn done (in={u.get('input_tokens')} out={u.get('output_tokens')})")
+        continue
+    if kind == "thread.started":
+        emit(f"{stamp()} thread {event.get('thread_id')}")
+        continue
+    if kind == "error":
+        emit(f"{stamp()} ✗ {compact(event, 200)}")
+        continue
     if kind == "assistant":
         for block in event.get("message", {}).get("content", []):
             btype = block.get("type")

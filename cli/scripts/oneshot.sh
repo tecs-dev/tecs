@@ -7,11 +7,13 @@
 # and CLI version so cross-run comparisons stay honest.
 #
 # Usage:
-#   scripts/oneshot.sh [-g game] [-m model] [N] [prompt...]
+#   scripts/oneshot.sh [-g game] [-m model] [-a agent] [N] [prompt...]
 #     -g game   named preset: snake (default), breakout, match3, asteroids,
 #               platformer
-#     -m model  forwarded to `claude --model` (opus, sonnet, haiku, fable,
-#               or a full model id); omit for the session default
+#     -m model  forwarded to the agent's --model / -m flag; omit for the
+#               agent's default
+#     -a agent  claude (default) or codex — codex runs `codex exec --json`
+#               with sandbox bypassed and resumes the thread for the debrief
 #     N         run number (default: next free /tmp/oneshot<N>)
 #     prompt    explicit prompt override (wins over -g)
 #
@@ -31,15 +33,21 @@ export PATH="$root/dist:$PATH"
 # --- options ------------------------------------------------------------------
 game="snake"
 model=""
+agent="claude"
 while [ $# -gt 0 ]; do
     case "$1" in
         -g) game="$2"; shift 2 ;;
         -m) model="$2"; shift 2 ;;
+        -a) agent="$2"; shift 2 ;;
         --) shift; break ;;
         -*) echo "ERROR: unknown option $1" >&2; exit 1 ;;
         *)  break ;;
     esac
 done
+case "$agent" in
+    claude|codex) ;;
+    *) echo "ERROR: unknown agent '$agent' (claude, codex)" >&2; exit 1 ;;
+esac
 
 # Every preset ends with the same stop-there clause so runs stay comparable;
 # each game stresses a different subsystem (grid ticks, continuous collision,
@@ -83,7 +91,7 @@ debrief_prompt='Debrief this session honestly: (1) Did the tecs MCP bridge tools
 
 # --- pre-flight ---------------------------------------------------------------
 ver="$(tecs --version)"
-echo "== oneshot $n: tecs $ver   game=$game${model:+   model=$model}"
+echo "== oneshot $n: tecs $ver   game=$game   agent=$agent${model:+   model=$model}"
 case "$ver" in
     *-dev) ;;
     *) echo "WARNING: not a -dev build; you are testing the installed CLI, not the working tree" >&2 ;;
@@ -109,45 +117,80 @@ grep -q "canonical verification" "$project/.claude/skills/tecs-cli/SKILL.md" \
 
 mkdir -p "$results"
 cp -R "$project/.claude" "$results/scaffold-claude-dir"   # what guidance the agent saw
-python3 - "$results/meta.json" "$n" "$game" "$model" "$ver" "$prompt" <<'EOF'
+python3 - "$results/meta.json" "$n" "$game" "$model" "$ver" "$prompt" "$agent" <<'EOF'
 import json, sys, datetime
-path, n, game, model, ver, prompt = sys.argv[1:7]
-json.dump({"n": int(n), "game": game, "model": model or None, "tecs": ver,
-           "prompt": prompt, "started": datetime.datetime.now().isoformat()},
+path, n, game, model, ver, prompt, agent = sys.argv[1:8]
+json.dump({"n": int(n), "game": game, "model": model or None, "agent": agent,
+           "tecs": ver, "prompt": prompt,
+           "started": datetime.datetime.now().isoformat()},
           open(path, "w"), indent=2)
 EOF
 
 # --- the run -------------------------------------------------------------------
-echo "== launching claude in $project"
+echo "== launching $agent in $project"
 echo "   prompt: $prompt"
 start_epoch="$(date +%s)"
 
 (
     cd "$project"
-    # The raw stream-json is captured verbatim to stream.jsonl via tee while a
-    # side formatter pretty-prints live progress (tool calls, agent text, tool
-    # errors) to the terminal, so the run can be watched while it executes.
-    # The final summary object is extracted into result.json afterwards.
-    claude -p "$prompt" \
-        ${model_args[@]+"${model_args[@]}"} \
-        --output-format stream-json --verbose \
-        --dangerously-skip-permissions \
-        2> "$results/stderr.log" \
-        | tee "$results/stream.jsonl" \
-        | python3 -u "$root/scripts/oneshot-stream-fmt.py"
-) || echo "WARNING: claude exited non-zero (see $results/stderr.log)" >&2
+    # The raw event stream is captured verbatim to stream.jsonl via tee while
+    # a side formatter pretty-prints live progress (tool calls, agent text,
+    # tool errors) to the terminal, so the run can be watched while it
+    # executes. The final summary is extracted into result.json afterwards.
+    if [ "$agent" = "codex" ]; then
+        codex exec "$prompt" \
+            ${model_args[@]+"${model_args[@]}"} \
+            --json \
+            --dangerously-bypass-approvals-and-sandbox \
+            --skip-git-repo-check \
+            2> "$results/stderr.log" \
+            | tee "$results/stream.jsonl" \
+            | python3 -u "$root/scripts/oneshot-stream-fmt.py"
+    else
+        claude -p "$prompt" \
+            ${model_args[@]+"${model_args[@]}"} \
+            --output-format stream-json --verbose \
+            --dangerously-skip-permissions \
+            2> "$results/stderr.log" \
+            | tee "$results/stream.jsonl" \
+            | python3 -u "$root/scripts/oneshot-stream-fmt.py"
+    fi
+) || echo "WARNING: $agent exited non-zero (see $results/stderr.log)" >&2
 
 wall=$(( $(date +%s) - start_epoch ))
-# The last stream event is the result summary; that's what result.json held before.
-python3 -c "
+# Normalize the run summary into result.json regardless of agent: claude's
+# final `result` event carries everything; codex spreads it across
+# thread.started (session) and per-turn turn.completed usage events.
+python3 - "$results/stream.jsonl" "$results/result.json" "$agent" <<'EOF'
 import json, sys
-last = None
-for ln in open('$results/stream.jsonl'):
-    try: e = json.loads(ln)
-    except Exception: continue
-    if e.get('type') == 'result': last = e
-json.dump(last or {}, open('$results/result.json', 'w'))
-"
+stream, out, agent = sys.argv[1:4]
+result = {}
+if agent == "codex":
+    usage = {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0,
+             "cache_creation_input_tokens": 0}
+    turns = 0
+    for ln in open(stream):
+        try: e = json.loads(ln)
+        except Exception: continue
+        t = e.get("type")
+        if t == "thread.started":
+            result["session_id"] = e.get("thread_id")
+        elif t == "turn.completed":
+            turns += 1
+            u = e.get("usage") or {}
+            usage["input_tokens"] += u.get("input_tokens", 0)
+            usage["output_tokens"] += u.get("output_tokens", 0)
+            usage["cache_read_input_tokens"] += u.get("cached_input_tokens", 0)
+    result["usage"] = usage
+    result["num_turns"] = turns
+else:
+    for ln in open(stream):
+        try: e = json.loads(ln)
+        except Exception: continue
+        if e.get("type") == "result":
+            result = e
+json.dump(result, open(out, "w"))
+EOF
 
 # --- stats ----------------------------------------------------------------------
 python3 - "$results/result.json" "$wall" <<'EOF'
@@ -165,9 +208,11 @@ print(f"== duration: {r.get('duration_ms', 0)/1000:.0f}s reported / {wall}s wall
 print(f"== tokens:   in={u.get('input_tokens')} out={u.get('output_tokens')} "
       f"cache_read={u.get('cache_read_input_tokens')} cache_write={u.get('cache_creation_input_tokens')} "
       f"total={total}")
-print(f"== turns:    {r.get('num_turns')}   cost: ${r.get('total_cost_usd', 0):.2f}")
+cost = r.get("total_cost_usd")
+print(f"== turns:    {r.get('num_turns')}"
+      + (f"   cost: ${cost:.2f}" if cost is not None else "   cost: n/a"))
 print(f"== session:  {r.get('session_id')}")
-open(path.replace("result.json", "session_id"), "w").write(r.get("session_id", ""))
+open(path.replace("result.json", "session_id"), "w").write(r.get("session_id") or "")
 EOF
 
 session_id="$(cat "$results/session_id" 2>/dev/null || true)"
@@ -175,19 +220,34 @@ session_id="$(cat "$results/session_id" 2>/dev/null || true)"
 # --- debrief ----------------------------------------------------------------------
 if [ -n "$session_id" ]; then
     echo "== requesting debrief"
-    (
-        cd "$project"
-        claude -p --resume "$session_id" ${model_args[@]+"${model_args[@]}"} "$debrief_prompt" \
-            --dangerously-skip-permissions \
-            > "$results/debrief.txt" 2>> "$results/stderr.log"
-    ) || echo "WARNING: debrief failed" >&2
+    if [ "$agent" = "codex" ]; then
+        (
+            cd "$project"
+            codex exec resume "$session_id" "$debrief_prompt" \
+                --dangerously-bypass-approvals-and-sandbox \
+                --skip-git-repo-check \
+                > "$results/debrief.txt" 2>> "$results/stderr.log"
+        ) || echo "WARNING: debrief failed" >&2
 
-    # Copy the full transcript for forensics. Project paths are munged with
-    # '-' in Claude Code's storage layout.
-    munged="$(cd "$project" && pwd -P | tr '/' '-')"
-    transcript="$HOME/.claude/projects/$munged/$session_id.jsonl"
-    [ -f "$transcript" ] && cp "$transcript" "$results/transcript.jsonl" \
-        || echo "NOTE: transcript not found at $transcript" >&2
+        # Codex records rollouts under dated dirs, filename carries the id.
+        transcript="$(find "$HOME/.codex/sessions" -name "*${session_id}*.jsonl" 2>/dev/null | head -1)"
+        [ -n "$transcript" ] && cp "$transcript" "$results/transcript.jsonl" \
+            || echo "NOTE: codex rollout not found for $session_id" >&2
+    else
+        (
+            cd "$project"
+            claude -p --resume "$session_id" ${model_args[@]+"${model_args[@]}"} "$debrief_prompt" \
+                --dangerously-skip-permissions \
+                > "$results/debrief.txt" 2>> "$results/stderr.log"
+        ) || echo "WARNING: debrief failed" >&2
+
+        # Copy the full transcript for forensics. Project paths are munged with
+        # '-' in Claude Code's storage layout.
+        munged="$(cd "$project" && pwd -P | tr '/' '-')"
+        transcript="$HOME/.claude/projects/$munged/$session_id.jsonl"
+        [ -f "$transcript" ] && cp "$transcript" "$results/transcript.jsonl" \
+            || echo "NOTE: transcript not found at $transcript" >&2
+    fi
 fi
 
 # --- cleanup: leftover game processes from this run --------------------------------

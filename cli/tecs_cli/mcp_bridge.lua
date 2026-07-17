@@ -130,10 +130,31 @@ function Server:startGame(frozen)
         }
     end
 
-    local log = tailFile(logPath)
+    -- Surface the CRASH, not just the tail: on macOS the log's last lines are
+    -- often IMKClient/window-server noise while the Lua traceback that
+    -- explains the boot failure sits further up. Extract the last traceback
+    -- block when one exists, and fall back to the raw tail.
+    local log = tailFile(logPath, 32768)
     proc:stop()
     self.game = nil
-    error("the game never became ready; log tail:\n" .. log, 0)
+    local traceStart
+    local searchFrom = 1
+    while true do
+        local s = log:find("\n[^\n]*Error[: ][^\n]*\nstack traceback:", searchFrom)
+        if not s then break end
+        traceStart = s + 1
+        searchFrom = s + 1
+    end
+    if not traceStart then
+        traceStart = log:find("stack traceback:")
+    end
+    local detail
+    if traceStart then
+        detail = "crash:\n" .. log:sub(traceStart, traceStart + 2000)
+    else
+        detail = "log tail:\n" .. log:sub(-LOG_TAIL_BYTES)
+    end
+    error("the game never became ready; " .. detail, 0)
 end
 
 function Server:stopGame()
