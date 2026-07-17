@@ -92,8 +92,10 @@ keep it, and make every observation deterministic:
    `ping` and check `build.built` against your latest build — a stale process (a zombie holding
    the port) silently validates old code. `build.built` reads the on-disk manifest, so it
    tracks hot reloads; if a change *still* seems missing after a reload, that's the
-   snapshot-restore trap (Startup-only effects are overwritten) — `restart_game`. From here
-   the world advances only when you say so.
+   snapshot-restore trap (Startup-only effects are overwritten) — `restart_game`. Frozen means
+   **Startup has run but the first Update has not**: state the game fills per-frame (HUD text,
+   computed fields) reads as zero/blank until you `cmd_step` 1. From here the world advances
+   only when you say so.
 2. **Analyze.** Read the frozen world until you understand what reaching the goal requires:
    `cmd_resources '{"name":"game.state"}'`, `cmd_fetch '{"expr":"<Component>"}'`, or a
    `run_lua` read. Stash the state handle once — it persists across calls:

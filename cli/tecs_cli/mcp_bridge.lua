@@ -188,7 +188,9 @@ function Server:cliTools()
                 .. "Pass frozen=true to boot with the freeze already held: the game sits "
                 .. "inspectable at frame zero -- stage state, queue input_tape rows, and "
                 .. "cmd_step from there; cmd_freeze on=false releases it. Use it for any "
-                .. "game that starts acting immediately.",
+                .. "game that starts acting immediately. NOTE: frozen means Startup has run "
+                .. "but the first Update has NOT -- state a game initializes per-frame "
+                .. "(HUD text, computed fields) reads as zero/blank until you cmd_step 1.",
             inputSchema = {
                 type = "object",
                 properties = {

@@ -904,7 +904,9 @@ describe("tecs CLI", function()
             it("projects the RENDERED output with --fields methods", function()
                 local ok, _, out = captureWrite({"api", "gfx.Pipeline", "--fields", "methods"})
                 assert.is_true(ok)
-                assert.matches("render: function", out)
+                -- Receiver form: colon-call methods must be visually distinct
+                -- from plain function fields.
+                assert.matches("Pipeline:render%(", out)
                 -- No record wrapper and no data fields when only methods are asked for.
                 assert.equals(nil, out:match("\nrecord Pipeline"))
                 assert.equals(nil, out:match("drawCamX"))

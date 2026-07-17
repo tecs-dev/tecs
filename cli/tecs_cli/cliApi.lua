@@ -752,7 +752,11 @@ function M.new(options)
         end
         if apiHasField(fields, "methods") then
             for _, m in ipairs(sym.methods or {}) do
-                out[#out + 1] = m.name .. ": " .. apiRenderFnType(m.params, m.returns)
+                -- Receiver form, so colon-call methods are visually distinct
+                -- from plain function fields (Text:setText vs a callback
+                -- field) -- calling a method with `.` is a silent bug.
+                out[#out + 1] = m.signature
+                    or (m.name .. ": " .. apiRenderFnType(m.params, m.returns))
             end
         end
         if apiHasField(fields, "doc") and sym.doc then
@@ -789,7 +793,10 @@ function M.new(options)
             out[#out + 1] = line
         end
         for _, m in ipairs(sym.methods or {}) do
-            out[#out + 1] = "  " .. m.name .. ": " .. apiRenderFnType(m.params, m.returns)
+            -- Receiver form (Text:setText(...)) so colon-call methods are
+            -- visually distinct from plain function fields.
+            out[#out + 1] = "  " .. (m.signature
+                or (m.name .. ": " .. apiRenderFnType(m.params, m.returns)))
         end
         out[#out + 1] = "end"
 
