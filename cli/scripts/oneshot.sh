@@ -73,7 +73,10 @@ esac
 n="${1:-}"
 if [ -z "$n" ]; then
     n=1
-    while [ -e "/tmp/oneshot$n" ]; do n=$((n + 1)); done
+    # A slot is taken if EITHER the project or its results dir exists --
+    # deleting a scratch project must never let a new run clobber archived
+    # results.
+    while [ -e "/tmp/oneshot$n" ] || [ -e "/tmp/oneshot$n-results" ]; do n=$((n + 1)); done
 else
     shift || true
 fi
