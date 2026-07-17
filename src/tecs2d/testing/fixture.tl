@@ -116,7 +116,6 @@ function fixture.probePixels(app: fixture.App, points: {{number, number}}): {{nu
     return triples
 end
 
---- Poll `fn` until it returns a non-nil value or the deadline passes.
 function fixture.eventually<T>(seconds: number, fn: function(): T): T
     local deadline = socket.gettime() + seconds
     local last: T

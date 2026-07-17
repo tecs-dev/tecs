@@ -25,20 +25,28 @@ local record diff
         limit: integer
     end
 
-    --- Flatten a snapshot table into {entityId: {componentName: value}} plus
-    --- a meta table (nextEntityId, stateStack). Tag components and serialize
-    --- holes normalize to `true` so presence still diffs.
+    --- Flatten a snapshot table's archetype frames into
+    --- {entityId: {componentName: value}} plus a meta table (nextEntityId,
+    --- stateStack). Column indices resolve through the snapshot's component
+    --- table, so snapshots with different archetype layouts normalize
+    --- identically. Tag components and serialize holes normalize to `true`
+    --- so presence still diffs.
     normalize: function(snap: {string: any}): {integer: {string: any}}, {string: any}
 
-    --- Compare two normalized sides. Returns the result table (summary,
-    --- changes, totalChanges, truncated) ready for JSON.
+    --- Compare two normalized sides across metadata, entity presence, and
+    --- component fields. Component fields produce recursive RFC 6902-style
+    --- operations. Changes sort by scope, entity, component, and path; the
+    --- summary always covers the complete diff even when `limit` truncates
+    --- the detailed list. Returns summary, changes, totalChanges, and
+    --- truncated fields ready for JSON.
     compare: function(fromEntities: {integer: {string: any}}, fromMeta: {string: any},
         toEntities: {integer: {string: any}}, toMeta: {string: any},
         opts: Options): {string: any}
 
     --- Resolve an RFC 6901 JSON Pointer against a Lua document. Integer
     --- segments try the 0-based array position first (matching emitted
-    --- pointers), then the literal key. Returns nil + the deepest path that
+    --- pointers), then the literal key. An empty pointer or bare `/` names
+    --- the whole document. On a miss, returns nil and the deepest path that
     --- did resolve.
     resolvePointer: function(doc: any, pointer: string): any, string
 end
@@ -57,10 +65,6 @@ local function keySegment(k: any): string
     return escapeSegment(tostring(k))
 end
 
---- Flatten a snapshot table's archetype frames into one map keyed by entity
---- id and component name. Column indices resolve through the snapshot's
---- component table, so two snapshots with different archetype layouts
---- normalize identically.
 function diff.normalize(snap: {string: any}): {integer: {string: any}}, {string: any}
     local names: {integer: string} = {}
     local compTable = snap.componentTable as {any}
@@ -131,12 +135,6 @@ local function sortedKeys(a: {any: any}, b: {any: any}): {any}
     return keys
 end
 
---- Compare two normalized sides in three scopes: meta (nextEntityId and the
---- state stack, skipped under entity/component filters), entity presence
---- (adds/removes carry the filtered component payload), and per-component
---- fields (recursive, RFC 6902-style operations). Changes sort by scope,
---- entity, component, and path; the summary always covers the whole diff
---- even when `limit` truncates the detailed list.
 function diff.compare(fromEntities: {integer: {string: any}}, fromMeta: {string: any},
         toEntities: {integer: {string: any}}, toMeta: {string: any},
         opts: diff.Options): {string: any}
@@ -336,11 +334,6 @@ function diff.compare(fromEntities: {integer: {string: any}}, fromMeta: {string:
     }
 end
 
---- Walk an RFC 6901 pointer segment by segment. Integer segments try the
---- 0-based array position first (matching the pointers this module emits),
---- then the literal key. An empty pointer (or a bare "/", accepted leniently)
---- names the whole document. On a miss, the second return names the deepest
---- path that did resolve, which the caller reports as a hint.
 function diff.resolvePointer(doc: any, pointer: string): any, string
     if (pointer == "" or pointer == "/") and doc ~= nil then
         return doc, ""

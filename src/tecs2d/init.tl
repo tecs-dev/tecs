@@ -614,13 +614,11 @@ function tecs2d.run(config: tecs2d.RunConfig): (function(): function(): number |
     end
 end
 
---- Triggers a quit event to exit the application cleanly.
 function tecs2d.quit(exitCode: number)
     exitCode = exitCode or 0
     love.event.push("quit", exitCode)
 end
 
---- Triggers a restart event to reload the application.
 function tecs2d.restart()
     love.event.quit("restart")
 end

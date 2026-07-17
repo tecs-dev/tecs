@@ -165,15 +165,11 @@ function storage.newBitsetStorage(container: Component): Storage
     }
 end
 
---- FFI storage factory.
 function storage.newFFIStorage(def: {string:any}): Storage
     local ffi = require("tecs.internal.ffi" as string) as {string:any}
     return (ffi.newFFIStorage as function({string:any}): Storage)(def)
 end
 
---- Install relationship metadata and behavior hooks on FFI storage. Table-backed
---- relationship instances carry these fields directly; cdata instances read
---- them through the storage metatype.
 function storage.syncMetadataToFFI(s: Storage, container: Component)
     local storageAny = s as {string:any}
     if not storageAny.setMetadata then

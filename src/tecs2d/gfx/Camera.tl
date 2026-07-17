@@ -253,8 +253,10 @@ local record Camera
     --- Called after any change to position, zoom, rotation, or screen size.
     updateBounds: function(self)
 
-    --- Set the pixel-mode screen mapping (pipeline-internal); 0 zoomScale
-    --- falls back to the fractional screen/virtual mapping.
+    --- Set the pixel-mode screen mapping (pipeline-internal). zoomScale is
+    --- the factor the render path multiplies camera zoom by to reach screen
+    --- pixels; offsets are the sub-pixel blit offset in screen pixels. Pass
+    --- 0 to fall back to the fractional screen/virtual mapping.
     _setScreenMapping: function(self, zoomScale: number, offsetX: number, offsetY: number)
 
     --- Set the screen dimensions. Called by the pipeline on init and resize.
@@ -718,11 +720,6 @@ function Camera:updateBounds()
     )
 end
 
---- Set the pixel-mode screen mapping (pipeline-internal). zoomScale is
---- the factor the render path multiplies camera zoom by to reach screen
---- pixels (e.g. the integer upscale); offsets are the sub-pixel blit
---- offset in screen pixels. Pass 0 to fall back to the fractional
---- screen/virtual mapping.
 function Camera:_setScreenMapping(zoomScale: number, offsetX: number, offsetY: number)
     if self._screenZoomScale == zoomScale
         and self._screenOffsetX == offsetX

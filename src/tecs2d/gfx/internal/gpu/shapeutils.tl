@@ -61,13 +61,12 @@ local record shape_utils
         hasAlphaBlendFilter: boolean
     end
 
-    --- Create a RenderPlugin from a SimpleShapeConfig.
+    --- Create a RenderPlugin from a SimpleShapeConfig. All phase closures
+    --- are generated from the config; nil optional fields produce nil hooks
+    --- that the renderer skips.
     simpleShapePlugin: function(config: SimpleShapeConfig): types.RenderPlugin
 end
 
---- Create a RenderPlugin from a SimpleShapeConfig.
---- All phase closures are generated from the config. Nil optional fields
---- produce nil hooks (skipped by the renderer).
 function shape_utils.simpleShapePlugin(config: shape_utils.SimpleShapeConfig): types.RenderPlugin
     local prefix <const> = config.prefix
     local plural <const> = config.plural

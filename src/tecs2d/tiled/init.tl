@@ -98,6 +98,9 @@ local record tiled is tecs_assets.AssetHandler<TilemapData>
 
     --- Create a TileSource component from a global tile ID.
     --- Useful for manually adding TileSource to entities spawned from Tiled objects.
+    --- @param map The loaded tilemap data.
+    --- @param gid The global tile ID from ObjectData.gid or a tile layer.
+    --- @return The TileSource component, or nil if gid is invalid.
     tileSourceFromGid: function(map: TilemapData, gid: integer): types.TileSource
 end
 
@@ -206,11 +209,6 @@ tecs.newComponent({
 -- TileSource is registered in types.tl (must be registered before chunk.tl uses it)
 tiled.TileSource = types.TileSource
 
---- Create a TileSource component from a global tile ID.
---- Useful for manually adding TileSource to entities spawned from Tiled objects.
----@param map TilemapData The loaded tilemap data
----@param gid integer The global tile ID (from ObjectData.gid or tile layer data)
----@return TileSource The TileSource component, or nil if gid is invalid
 function tiled.tileSourceFromGid(map: types.TilemapData, gid: integer): types.TileSource
     if gid == 0 then return nil end
 
