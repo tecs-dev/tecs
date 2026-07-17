@@ -6,10 +6,22 @@ When cutting a release, bump `VERSION` in `tecs_cli/cli.lua`, update this file,
 and push the matching `v*` tag. CI publishes the self-contained `.love`
 payload, launchers, and installers as GitHub release assets.
 
-## [Unreleased]
+## [0.10.9] - 2026-07-17
+
+### Fixed
+
+- `tecs api` renders record methods in receiver form (`Type:method(...)`),
+  distinguishing colon-call methods from plain function fields.
+- MCP bridge startup failures surface the game's Lua crash traceback instead
+  of letting later macOS window-server noise hide the useful error.
+- Source-tree commands keep locating bundled templates, docs, and types after
+  changing directories by resolving the CLI module path before the change.
 
 ### Added
 
+- `tecs new` refuses to create a nested project from inside an existing Tecs
+  project unless `--force` is passed, preventing games from detaching from the
+  outer project's toolchain and MCP bridge.
 - `ping` reads the build manifest fresh from disk, so `build.built` tracks
   hot reloads instead of reporting boot-time metadata forever.
 - `cmd_fetch count_only=true`: population checks return just the count.
