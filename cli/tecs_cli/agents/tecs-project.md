@@ -76,7 +76,8 @@ Generated projects ship ready-made client configuration: `.mcp.json` for Claude 
 
 `tecs docs` and `tecs api` (CLI) — and the `api` MCP tool — are available anytime, before the game is built and before `start_game`. Only in-game tools (`run_lua`, `screenshot`, `cmd_*`) require `start_game`.
 
-**Load the `tecs-cli` skill before driving or verifying the running game.** It is the canonical playbook, and none of it should be rediscovered live: deferred-tool discovery and the `tecs call` fallback, build-identity checks, the freeze→stage→step→assert loop, `cmd_step`'s one-call events/lua form, input taping, rewind/replay, verify-by-name reads, and the screenshot budget all live there.
+**Load the `tecs-cli` skill before driving or verifying the running game.** It is the canonical playbook, and none of it should be rediscovered live: deferred-tool discovery and the `tecs call` fallback, build-identity checks, the freeze→stage→step→assert loop, `cmd_step`'s one-call events/lua form, input taping, rewind/replay, verify-by-name reads, and the screenshot budget all live there. Not running Claude Code (no skill catalog)? The skills are plain files — read
+`.claude/skills/tecs-cli/SKILL.md` and `.claude/skills/tecs-conventions/SKILL.md` directly.
 
 Two process rules apply even before the skill is loaded: **never kill the game process by hand** — `restart_game` (bridge), `tecs call cmd_restart`, or hot reload via `build` keep the prepared state, and a broad `pkill love` also kills the stdio bridge — and **check for deferred `mcp__tecs__*` tools via your tool-search mechanism** before assuming the bridge is absent.
 
