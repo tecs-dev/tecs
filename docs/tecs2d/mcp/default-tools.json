@@ -977,7 +977,10 @@
         },
         "events": {
           "description": "array of {at = <gameplay frames from now>, event = <love event>, args = {...}}",
-          "type": "object"
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
         },
         "force": {
           "description": "allow taping 'escape'",
@@ -2192,7 +2195,10 @@
         },
         "events": {
           "description": "input_tape rows to queue before stepping ({at, event, args})",
-          "type": "object"
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
         },
         "force": {
           "description": "queue events even when a press is already held (tape force)",

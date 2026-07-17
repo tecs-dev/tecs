@@ -25,7 +25,7 @@ local stepSchema <const>: cmdargs.Schema = {
         n = {default = 1, help = "number of frames to tick"},
         dt = {kind = "number",
             help = "seconds each stepped frame carries (default 1/fps)"},
-        events = {kind = "table",
+        events = {kind = "rows",
             help = "input_tape rows to queue before stepping ({at, event, args})"},
         lua = {help = "Lua to evaluate (run_lua sandbox) after the last frame; "
             .. "defers the response until the step completes"},
@@ -45,7 +45,7 @@ cmdargs.validate(stepSchema)
 
 local inputTapeSchema <const>: cmdargs.Schema = {
     args = {
-        events = {kind = "table",
+        events = {kind = "rows",
             help = "array of {at = <gameplay frames from now>, event = <love event>, args = {...}}"},
         clear = {kind = "boolean",
             help = "drop pending rows and release anything the tape holds down"},

@@ -28,12 +28,14 @@ local record cmdargs
         forward: string
         synthetic: {string}
         -- Explicit value type ("number" / "boolean" / "string" / "list" /
-        -- "table"). When omitted it is inferred from `default`. Set it for an
-        -- optional typed arg that has no default, e.g. a number that defaults
-        -- to nil (leave unchanged). A "list" is a comma-separated string on
-        -- the command line and a JSON string array over MCP; a "table" is a
-        -- brace-balanced Lua expression on the command line and a JSON object
-        -- over MCP (actions receive a string or a table and handle both).
+        -- "table" / "rows"). When omitted it is inferred from `default`. Set
+        -- it for an optional typed arg that has no default, e.g. a number
+        -- that defaults to nil (leave unchanged). A "list" is a
+        -- comma-separated string on the command line and a JSON string array
+        -- over MCP; a "table" is a brace-balanced Lua expression on the
+        -- command line and a JSON object over MCP; "rows" is the same on the
+        -- console but a JSON ARRAY of objects over MCP (actions receive a
+        -- string or a table and handle both).
         kind: string
         -- Allowed values for a string arg; projected as a JSON Schema enum.
         enum: {string}
@@ -146,7 +148,8 @@ function cmdargs.validate(schema: cmdargs.Schema)
     local args = schema.args
     for name, spec in pairs(args) do
         if spec.rest then
-            if argType(spec) ~= "string" and argType(spec) ~= "table" then
+            local at = argType(spec)
+            if at ~= "string" and at ~= "table" and at ~= "rows" then
                 error("cmdargs: rest arg '" .. name .. "' must be string-typed")
             end
             if isSynthetic(spec) or spec.forward then
@@ -396,12 +399,14 @@ function cmdargs.parseValues(schema: cmdargs.Schema, given: {string: any}): {str
         end
         local want = argType(spec)
         local got = type(v)
-        if want == "list" or want == "table" then
+        if want == "list" or want == "table" or want == "rows" then
             -- JSON arrays/objects arrive as tables; strings stay accepted
-            -- (the comma form for lists, a Lua expression for tables).
+            -- (the comma form for lists, a Lua expression for tables/rows).
             if got ~= "table" and got ~= "string" then
                 return nil, name .. " must be a JSON " ..
-                    ((want == "list") and "array" or "object") .. ", got " .. got
+                    ((want == "list") and "array"
+                        or (want == "rows") and "array of objects"
+                        or "object") .. ", got " .. got
             end
             if want == "list" then
                 if got == "string" then
@@ -477,6 +482,8 @@ function cmdargs.toolSchema(schema: cmdargs.Schema): {string: any}
                 prop = {type = "array", items = {type = "string"}, description = desc}
             elseif t == "table" then
                 prop = {type = "object", description = desc}
+            elseif t == "rows" then
+                prop = {type = "array", items = {type = "object"}, description = desc}
             else
                 prop = {type = t, description = desc}
             end
@@ -546,6 +553,8 @@ function cmdargs.signature(schema: cmdargs.Schema): string
                 hint = "a,b"
             elseif kind == "table" then
                 hint = "{}"
+            elseif kind == "rows" then
+                hint = "[{..}]"
             else
                 hint = "..."
             end

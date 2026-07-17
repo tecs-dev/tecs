@@ -2658,7 +2658,7 @@ freeze on
 freeze off
 ```
 
-### `step [n] [dt=N] [events={}] [force] [lua=...] [per_frame=...] [quiet] [wait]` {#cmd-step}
+### `step [n] [dt=N] [events=[{..}]] [force] [lua=...] [per_frame=...] [quiet] [wait]` {#cmd-step}
 
 Tick the game forward N frames while otherwise frozen.
 
@@ -2670,7 +2670,7 @@ MCP tool: `cmd_step`
 | --- | --- | --- |
 | `n` | number | number of frames to tick (default: 1) |
 | `dt` | number | seconds each stepped frame carries (default 1/fps) |
-| `events` | table | input_tape rows to queue before stepping ({at, event, args}) |
+| `events` | rows | input_tape rows to queue before stepping ({at, event, args}) |
 | `force` | boolean | queue events even when a press is already held (tape force) |
 | `lua` | string | Lua to evaluate (run_lua sandbox) after the last frame; defers the response until the step completes |
 | `per_frame` | string | Lua evaluated after EACH stepped frame; return true to stop early (n is the cap). Side effects allowed. |
@@ -2755,7 +2755,7 @@ MCP tool: `cmd_input_tape`
 
 | Argument | Type | Description |
 | --- | --- | --- |
-| `events` | table | array of {at = &lt;gameplay frames from now>, event = &lt;love event>, args = {...}} |
+| `events` | rows | array of {at = &lt;gameplay frames from now>, event = &lt;love event>, args = {...}} |
 | `clear` | boolean | drop pending rows and release anything the tape holds down |
 | `force` | boolean | allow taping 'escape' |
 

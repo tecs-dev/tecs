@@ -1543,6 +1543,11 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
                 reg.shotCounter = reg.shotCounter + 1
                 local name = (v.name as string) or ("debug-shot-" .. tostring(reg.shotCounter) .. ".png")
+                -- The file is encoded as PNG regardless; a bare name would
+                -- write an extensionless file that viewers then hunt for.
+                if not name:lower():match("%.png$") then
+                    name = name .. ".png"
+                end
                 local p = pipeline()
                 local hasArea = ctx.hasArea and p ~= nil
                 local ax1, ay1, ax2, ay2 = 0.0, 0.0, 0.0, 0.0
