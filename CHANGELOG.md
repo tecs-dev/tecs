@@ -4,7 +4,7 @@ All notable changes to the combined Tecs framework, Tecs2D runtime, and CLI
 are documented here beginning with the monorepo release line. Standalone CLI
 history through 0.10.9 remains in `cli/CHANGELOG.md`.
 
-## [Unreleased]
+## [0.10.10] - 2026-07-19
 
 ### Changed
 
