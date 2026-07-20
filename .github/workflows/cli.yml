@@ -302,7 +302,11 @@ jobs:
             if curl -fsSI "https://luarocks.org/${package}-${version}-1.rockspec" > /dev/null; then
               echo "${package} ${version}-1 is already published"
             else
-              luarocks upload --api-key="$LUAROCKS_API_KEY" "$rockspec"
+              if ! luarocks upload --api-key="$LUAROCKS_API_KEY" "$rockspec"; then
+                # LuaRocks can report an API failure after accepting the rock.
+                # Trust the immutable public rockspec when it is now present.
+                curl -fsSI "https://luarocks.org/${package}-${version}-1.rockspec" > /dev/null
+              fi
             fi
           }
           publish_rock tecs "tecs-${version}-1.rockspec"
