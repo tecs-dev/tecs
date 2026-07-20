@@ -73,10 +73,11 @@ jobs:
           TECS_CLI_LOVE: ${{ github.workspace }}/cli/dist/tecs-cli.love
         run: |
           project="$RUNNER_TEMP/hello-tecs"
+          launcher="$GITHUB_WORKSPACE/cli/launcher/tecs"
           rm -rf "$project" "$TECS_CACHE_DIR"
-          cli/launcher/tecs --version
-          cli/launcher/tecs info
-          cli/launcher/tecs new "$project"
+          (cd "$RUNNER_TEMP" && "$launcher" --version)
+          (cd "$RUNNER_TEMP" && "$launcher" info)
+          (cd "$RUNNER_TEMP" && "$launcher" new "$project")
           test -f "$project/.github/workflows/ci.yml"
           # The project pre-approves its own MCP server so `tecs mcp` connects
           # with no interactive approval once the folder is trusted.
@@ -204,10 +205,13 @@ jobs:
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           $project = Join-Path $env:RUNNER_TEMP "hello-tecs"
+          $launcher = "$env:GITHUB_WORKSPACE\cli\launcher\tecs.ps1"
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $project, $env:TECS_CACHE_DIR
-          & cli/launcher/tecs.ps1 --version
-          & cli/launcher/tecs.ps1 info
-          & cli/launcher/tecs.ps1 new $project
+          Push-Location $env:RUNNER_TEMP
+          & $launcher --version
+          & $launcher info
+          & $launcher new $project
+          Pop-Location
           Push-Location $project
           $env:TECS_DIR = $env:GITHUB_WORKSPACE
           & "$env:GITHUB_WORKSPACE\cli\launcher\tecs.ps1" dev
