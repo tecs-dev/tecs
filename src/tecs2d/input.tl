@@ -176,11 +176,19 @@ local record input
         getJoystick: function(joystick: love.joystick.Joystick): JoystickInput
     end
 
+    --- Configuration for a named input layer.
+    record LayerOptions
+        --- Whether this layer participates in world snapshots. Defaults to
+        --- true. Runtime tooling such as the debugger sets this to false.
+        snapshot: boolean
+    end
+
     --- One stable target in the intrusive input stack. Physical events reach
     --- only the top target. An observer explicitly forwards an unconsumed event
     --- with `layer.parent:emit(event)`.
     record Layer
         name: string
+        snapshot: boolean
         view: View
         parent: Layer
         _child: Layer
@@ -205,10 +213,11 @@ local record input
     --- observers run before the routed top target and cannot be intercepted.
     raw: Layer
 
-    --- Create an inactive reusable input layer.
-    newLayer: function(name: string): Layer
+    --- Create and register an inactive reusable input layer. Names are
+    --- required, non-empty, and unique within the current world.
+    newLayer: function(name: string, options?: LayerOptions): Layer
 
-    --- Push a layer above the current top target.
+    --- Push a layer into its configured game or runtime lane.
     pushLayer: function(layer: Layer)
 
     --- Pop a specific active layer, including one below the current top.
@@ -377,17 +386,30 @@ local emptyView: input.View = {
 
 local LAYER_MT <const>: metatable<input.Layer> = { __index = input.Layer }
 local boundWorld: tecs.World = nil
+local gameTop: input.Layer
+local runtimeTop: input.Layer = nil
+local runtimeBottom: input.Layer = nil
 local top: input.Layer
-local pushedCount = 0
+local gameCount = 0
+local runtimeCount = 0
+local layersByName: {string: input.Layer} = {}
+local layerMutationDepth = 0
+local restoringLayers = false
+local loadedSnapshotNames: {string} = nil
+local sawSnapshotLayers = false
+local pendingSnapshotNames: {string} = nil
+local pendingSnapshotFromRestore = false
+local flushPendingSnapshot: function()
 local nextDispatchId = 0
 local dispatchDepth = 0
 local dispatchEvents: {tecs.Event} = {}
 local dispatchWorlds: {tecs.World} = {}
 local dispatchIds: {integer} = {}
 
-local function makeLayer(name: string, kind: string, view: input.View): input.Layer
+local function makeLayer(name: string, kind: string, snapshot: boolean, view: input.View): input.Layer
     return setmetatable({
         name = name,
+        snapshot = snapshot,
         view = view,
         parent = nil,
         _child = nil,
@@ -398,8 +420,9 @@ local function makeLayer(name: string, kind: string, view: input.View): input.La
     }, LAYER_MT)
 end
 
-input.base = makeLayer("base", "base", realView)
-input.raw = makeLayer("raw", "raw", realView)
+input.base = makeLayer("base", "base", false, realView)
+input.raw = makeLayer("raw", "raw", false, realView)
+gameTop = input.base
 top = input.base
 
 -- Drop pending edge (pressed/released) and latched state at a capture boundary,
@@ -485,9 +508,22 @@ function input.Layer:isTop(): boolean
     return self == top
 end
 
-function input.newLayer(name: string): input.Layer
-    if name == "" then error("input.newLayer requires a non-empty name", 2) end
-    return makeLayer(name, "layer", emptyView)
+function input.newLayer(name: string, options?: input.LayerOptions): input.Layer
+    if type(name) ~= "string" or name == "" then
+        error("input.newLayer requires a non-empty name", 2)
+    end
+    if name == "base" or name == "raw" then
+        error("input.newLayer name is reserved: " .. name, 2)
+    end
+    if layersByName[name] then
+        error("input.newLayer name is already registered: " .. name, 2)
+    end
+
+    local snapshot = true
+    if options and options.snapshot == false then snapshot = false end
+    local layer <const> = makeLayer(name, "layer", snapshot, emptyView)
+    layersByName[name] = layer
+    return layer
 end
 
 local function emitCapture(target: input.Layer, eventType: tecs.Event, from: string, to: string)
@@ -499,26 +535,52 @@ local function emitCapture(target: input.Layer, eventType: tecs.Event, from: str
     end
 end
 
-function input.pushLayer(layer: input.Layer)
+local function pushLayerNow(layer: input.Layer)
+    if restoringLayers then error("input layers cannot be pushed during snapshot restoration", 2) end
     if layer._kind ~= "layer" then error("input.pushLayer expects a user input layer", 2) end
     if layer._active then error("input.pushLayer: layer is already active: " .. layer.name, 2) end
+    if layersByName[layer.name] ~= layer then
+        error("input.pushLayer expects a layer registered in the current world: " .. layer.name, 2)
+    end
 
     local outgoing <const> = top
-    emitCapture(outgoing, events.InputCaptureLost, outgoing.name, layer.name)
-    outgoing.view = emptyView
+    local changesTop <const> = not layer.snapshot or runtimeTop == nil
+    if changesTop then
+        emitCapture(outgoing, events.InputCaptureLost, outgoing.name, layer.name)
+        outgoing.view = emptyView
+    end
 
-    layer.parent = outgoing
-    layer._child = nil
-    outgoing._child = layer
+    if layer.snapshot then
+        local parent <const> = gameTop
+        local child <const> = runtimeBottom
+        layer.parent = parent
+        layer._child = child
+        parent._child = layer
+        if child then child.parent = layer end
+        gameTop = layer
+        gameCount = gameCount + 1
+    else
+        layer.parent = top
+        layer._child = nil
+        top._child = layer
+        if not runtimeBottom then runtimeBottom = layer end
+        runtimeTop = layer
+        runtimeCount = runtimeCount + 1
+    end
+
     layer._active = true
-    layer.view = realView
-    top = layer
-    pushedCount = pushedCount + 1
-    clearEdges()
-    emitCapture(layer, events.InputCaptureGained, outgoing.name, layer.name)
+    layer.view = emptyView
+
+    if changesTop then
+        top = layer
+        layer.view = realView
+        clearEdges()
+        emitCapture(layer, events.InputCaptureGained, outgoing.name, layer.name)
+    end
 end
 
-function input.popLayer(layer: input.Layer): boolean
+local function popLayerNow(layer: input.Layer): boolean
+    if restoringLayers then error("input layers cannot be popped during snapshot restoration", 2) end
     if layer._kind ~= "layer" or not layer._active then return false end
 
     local wasTop <const> = layer == top
@@ -530,18 +592,64 @@ function input.popLayer(layer: input.Layer): boolean
 
     parent._child = child
     if child then child.parent = parent end
+
+    if layer.snapshot then
+        if layer == gameTop then gameTop = parent end
+        gameCount = gameCount - 1
+    else
+        if layer == runtimeBottom then
+            if child and child._kind == "layer" and not child.snapshot then
+                runtimeBottom = child
+            else
+                runtimeBottom = nil
+            end
+        end
+        if layer == runtimeTop then
+            if parent._kind == "layer" and not parent.snapshot then
+                runtimeTop = parent
+            else
+                runtimeTop = nil
+            end
+        end
+        runtimeCount = runtimeCount - 1
+    end
+
     layer._child = nil
     layer._active = false
     layer.view = emptyView
-    pushedCount = pushedCount - 1
 
     if wasTop then
-        top = parent
-        parent.view = realView
+        top = runtimeTop or gameTop
+        top.view = realView
         clearEdges()
-        emitCapture(parent, events.InputCaptureGained, layer.name, parent.name)
+        emitCapture(top, events.InputCaptureGained, layer.name, top.name)
     end
     return true
+end
+
+local function finishLayerMutation(result: {any})
+    layerMutationDepth = layerMutationDepth - 1
+
+    local flushResult: {any} = nil
+    if layerMutationDepth == 0 and dispatchDepth == 0 and pendingSnapshotNames then
+        flushResult = {pcall(flushPendingSnapshot)}
+    end
+
+    if not result[1] then error(result[2], 0) end
+    if flushResult and not flushResult[1] then error(flushResult[2], 0) end
+end
+
+function input.pushLayer(layer: input.Layer)
+    layerMutationDepth = layerMutationDepth + 1
+    local result: {any} = {pcall(pushLayerNow, layer)}
+    finishLayerMutation(result)
+end
+
+function input.popLayer(layer: input.Layer): boolean
+    layerMutationDepth = layerMutationDepth + 1
+    local result: {any} = {pcall(popLayerNow, layer)}
+    finishLayerMutation(result)
+    return result[2] as boolean
 end
 
 function input.topLayer(): input.Layer
@@ -549,11 +657,209 @@ function input.topLayer(): input.Layer
 end
 
 function input.layerCount(): integer
-    return pushedCount
+    return gameCount + runtimeCount
+end
+
+local function activeGameLayerNames(): {string}
+    local reverse: {string} = {}
+    local layer = gameTop
+    while layer ~= input.base do
+        reverse[#reverse + 1] = layer.name
+        layer = layer.parent
+    end
+
+    local names: {string} = {}
+    for i = #reverse, 1, -1 do
+        names[#names + 1] = reverse[i]
+    end
+    return names
+end
+
+local function validateSnapshotNames(value: any): {string}
+    if type(value) ~= "table" then
+        error("tecs2d.input snapshot data must be a table", 2)
+    end
+    local data = value as {string: any}
+    if data.version ~= 1 then
+        error("unsupported tecs2d.input snapshot version: " .. tostring(data.version), 2)
+    end
+    if type(data.active) ~= "table" then
+        error("tecs2d.input snapshot is missing its active layer list", 2)
+    end
+
+    local active = data.active as {any}
+    local names: {string} = {}
+    local seen: {string: boolean} = {}
+    for i = 1, #active do
+        local name = active[i]
+        if type(name) ~= "string" or name == "" then
+            error("tecs2d.input snapshot layer names must be non-empty strings", 2)
+        end
+        local layerName <const> = name as string
+        if seen[layerName] then
+            error("tecs2d.input snapshot contains duplicate layer: " .. layerName, 2)
+        end
+        local layer <const> = layersByName[layerName]
+        if not layer then
+            error("tecs2d.input snapshot references an unregistered layer: " .. layerName, 2)
+        end
+        if not layer.snapshot then
+            error("tecs2d.input snapshot references a runtime-only layer: " .. layerName, 2)
+        end
+        seen[layerName] = true
+        names[#names + 1] = layerName
+    end
+    return names
+end
+
+local function restoreGameLayers(names: {string})
+    local restored: {input.Layer} = {}
+    for i = 1, #names do restored[i] = layersByName[names[i]] end
+
+    local outgoing <const> = top
+    local runtimeOwnsInput <const> = runtimeTop ~= nil
+    local incoming <const> = runtimeTop or restored[#restored] or input.base
+
+    restoringLayers = true
+    if not runtimeOwnsInput then
+        local result: {any} = {pcall(emitCapture, outgoing, events.InputCaptureLost, outgoing.name, incoming.name)}
+        if not result[1] then
+            restoringLayers = false
+            error(result[2], 0)
+        end
+        outgoing.view = emptyView
+    end
+
+    local layer = gameTop
+    while layer ~= input.base do
+        local parent <const> = layer.parent
+        layer._child = nil
+        layer._active = false
+        layer.view = emptyView
+        layer = parent
+    end
+
+    gameTop = input.base
+    gameCount = 0
+    input.base._child = runtimeBottom
+    if runtimeBottom then runtimeBottom.parent = input.base end
+
+    for i = 1, #restored do
+        local restoredLayer <const> = restored[i]
+        restoredLayer.parent = gameTop
+        restoredLayer._child = runtimeBottom
+        gameTop._child = restoredLayer
+        if runtimeBottom then runtimeBottom.parent = restoredLayer end
+        restoredLayer._active = true
+        restoredLayer.view = emptyView
+        gameTop = restoredLayer
+        gameCount = gameCount + 1
+    end
+
+    top = runtimeTop or gameTop
+    clearEdges()
+    if not runtimeOwnsInput then
+        top.view = realView
+        local result: {any} = {pcall(emitCapture, top, events.InputCaptureGained, outgoing.name, top.name)}
+        restoringLayers = false
+        if not result[1] then error(result[2], 0) end
+    else
+        restoringLayers = false
+    end
+end
+
+local function sameGameLayers(names: {string}): boolean
+    local active <const> = activeGameLayerNames()
+    if #active ~= #names then return false end
+    for i = 1, #active do
+        if active[i] ~= names[i] then return false end
+    end
+    return true
+end
+
+local function applySnapshotRestore(names: {string})
+    layerMutationDepth = layerMutationDepth + 1
+    local result: {any} = {pcall(restoreGameLayers, names)}
+    finishLayerMutation(result)
+end
+
+local function requestSnapshotRestore(names: {string})
+    if dispatchDepth > 0 or layerMutationDepth > 0 then
+        pendingSnapshotNames = names
+        pendingSnapshotFromRestore = restoringLayers
+    else
+        applySnapshotRestore(names)
+    end
+end
+
+flushPendingSnapshot = function()
+    if dispatchDepth > 0 or layerMutationDepth > 0 or not pendingSnapshotNames then return end
+
+    local names <const> = pendingSnapshotNames
+    local fromRestore <const> = pendingSnapshotFromRestore
+    pendingSnapshotNames = nil
+    pendingSnapshotFromRestore = false
+
+    -- Loading the same snapshot from the capture-gained callback of its own
+    -- restoration has already established the requested topology. Avoid an
+    -- infinite restore/capture loop while retaining the cleared input edges.
+    if fromRestore and sameGameLayers(names) then return end
+    applySnapshotRestore(names)
+end
+
+local function resetLayersForNewWorld()
+    for _, layer in pairs(layersByName) do
+        layer._active = false
+        layer.view = emptyView
+        layer._child = nil
+        layer.parent = nil
+    end
+    layersByName = {}
+    input.base._child = nil
+    input.base.view = realView
+    input.raw._bus = tecs.newMessageBus()
+    gameTop = input.base
+    runtimeTop = nil
+    runtimeBottom = nil
+    top = input.base
+    gameCount = 0
+    runtimeCount = 0
+    loadedSnapshotNames = nil
+    sawSnapshotLayers = false
+    pendingSnapshotNames = nil
+    pendingSnapshotFromRestore = false
+    layerMutationDepth = 0
+    restoringLayers = false
+    clearEdges()
 end
 
 function input.bindWorld(world: tecs.World)
+    if boundWorld == world then return end
+    if boundWorld then resetLayersForNewWorld() end
     boundWorld = world
+
+    world:observe(0, tecs.builtins.StartSnapshotLoad, function()
+        loadedSnapshotNames = nil
+        sawSnapshotLayers = false
+    end, "tecs2d.input.snapshot-start")
+
+    world:addSnapshotHandler({
+        name = "tecs2d.input",
+        save = function(): any
+            return {version = 1, active = activeGameLayerNames()}
+        end,
+        load = function(_world: tecs.World, value: any)
+            loadedSnapshotNames = validateSnapshotNames(value)
+            sawSnapshotLayers = true
+        end,
+        finish = function()
+            if sawSnapshotLayers then
+                requestSnapshotRestore(loadedSnapshotNames)
+            end
+            loadedSnapshotNames = nil
+            sawSnapshotLayers = false
+        end,
+    })
 end
 
 function input.route<E is tecs.Event>(world: tecs.World, eventType: E, ...: any)
@@ -566,7 +872,11 @@ function input.route<E is tecs.Event>(world: tecs.World, eventType: E, ...: any)
     -- common case: gameplay is top and no always-on raw observer needs the
     -- same instance. This adds no event allocation beyond the pre-layer API.
     if top == input.base and not rawListening then
+        dispatchDepth = dispatchDepth + 1
+        local depth <const> = dispatchDepth
         world:emit(0, eventType, ...)
+        dispatchDepth = depth - 1
+        if dispatchDepth == 0 then flushPendingSnapshot() end
         return
     end
 
@@ -586,6 +896,8 @@ function input.route<E is tecs.Event>(world: tecs.World, eventType: E, ...: any)
     dispatchWorlds[depth] = nil
     dispatchIds[depth] = nil
     dispatchDepth = depth - 1
+
+    if dispatchDepth == 0 then flushPendingSnapshot() end
 end
 
 function input.isKeyDown(key: string): boolean

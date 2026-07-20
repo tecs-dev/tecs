@@ -46,6 +46,10 @@ The debugger also pushes a stable `"debugger"` [input layer](/tecs2d/input/#inpu
 pointer, wheel, text, touch, and controller interaction belongs to the overlay; gameplay and any lower menu layer are
 suppressed. Closing the debugger pops that exact layer and restores whichever owner is now beneath it.
 
+The debugger layer is runtime-only (`snapshot = false`). Snapshot loads can replace the game-owned input layers under
+an open debugger, but never close or restore the debugger itself. Closing it after a load reveals the input owner from
+the loaded game.
+
 Input capture and freezing are separate mechanisms. The debugger does not push a game state, tag or despawn entities,
 or assume that the game uses the [state stack](/tecs/states). Its Ctrl+/ shortcut uses `input.raw`, so it can always
 open above a game-owned modal and always close itself. The overlay's ordinary controls use its routed layer.

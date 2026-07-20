@@ -1017,6 +1017,42 @@ describe("in-game debugger overlay", function()
         luassert.is_true(waitOpen(false) == true, "debugger did not close after parent pop")
     end)
 
+    it("restores snapshotted game input beneath the open debugger", function()
+        fixture.runLua(app, [[
+            local input = require("tecs2d.input")
+            _G.snapshotInputLayer = input.newLayer("snapshot-pause-menu")
+            input.pushLayer(_G.snapshotInputLayer)
+            _G.snapshotWithInput = world:saveSnapshot({format = "table"}).snapshot
+            input.popLayer(_G.snapshotInputLayer)
+            return true
+        ]])
+
+        tap()
+        luassert.is_true(waitOpen(true) == true, "debugger did not open before snapshot load")
+
+        local loaded = fixture.runLua(app, [[
+            local input = require("tecs2d.input")
+            world:loadSnapshot(_G.snapshotWithInput)
+            return input.topLayer().name, input.topLayer().parent.name,
+                tostring(_G.snapshotInputLayer:isActive())
+        ]])
+        luassert.equals("debugger", loaded[1])
+        luassert.equals("snapshot-pause-menu", loaded[2])
+        luassert.equals("true", loaded[3])
+
+        tap()
+        luassert.is_true(waitOpen(false) == true, "debugger did not close after snapshot load")
+        local revealed = fixture.runLua(app, [[
+            local input = require("tecs2d.input")
+            local name = input.topLayer().name
+            input.popLayer(_G.snapshotInputLayer)
+            _G.snapshotInputLayer = nil
+            _G.snapshotWithInput = nil
+            return name
+        ]])
+        luassert.equals("snapshot-pause-menu", revealed[1])
+    end)
+
     it("down walks the command history forward", function()
         openDebugger()
         typeCommand("clear")

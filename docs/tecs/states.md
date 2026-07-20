@@ -207,11 +207,13 @@ local gameEntities = world:query({include = {GameState}})
 ## Save/load and hot reload
 
 Snapshots preserve the state stack and the state tags on entities. Loading a snapshot restores which state is on top,
-which paused/disabled tags were present, and which entities belong to each state.
+which paused/disabled tags were present, and which entities belong to each state. Tecs2D also saves and restores the
+active snapshot-managed input-layer names and order. The two stacks still restore independently: a state push does not
+implicitly push input, and an input-layer push does not create a state.
 
-The independent Tecs2D input stack is runtime-only and is not part of a world snapshot. If a restored state should own
-an input layer, reconcile that stable layer after load rather than expecting the state-stack restore to push it
-automatically. See [Input layers and game states](/tecs2d/input/#input-layers-and-game-states).
+Create stable named input layers and register their observers during plugin setup, before a snapshot can load. Runtime
+tool layers created with `{snapshot = false}` are not restored and remain above the loaded game layers. See [Input
+layers and game states](/tecs2d/input/#input-layers-and-game-states).
 
 Runtime handles still need the same treatment as the rest of the snapshot system:
 

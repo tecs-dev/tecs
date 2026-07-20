@@ -806,7 +806,9 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
 
     -- The debugger is runtime tooling, not a game state. Its stable input
     -- layer can be pushed above any game/menu layer and popped independently.
-    local captureLayer <const> = input.newLayer("debugger")
+    -- The debugger belongs to the runtime lane: loading a game snapshot must
+    -- restore game-owned input beneath the still-open tool overlay.
+    local captureLayer <const> = input.newLayer("debugger", {snapshot = false})
     local function reader(): input.View
         if ctx.open and captureLayer:isActive() then
             return captureLayer.view

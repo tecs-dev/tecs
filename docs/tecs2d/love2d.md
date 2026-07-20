@@ -228,8 +228,8 @@ Use startup phases with that order in mind:
   entity handles from [`Key`](/tecs/builtins#key-component) or saved components.
 
 Snapshots do not capture `world.resources`, so persist your own resource state with a [snapshot
-handler](/tecs/save-games#world-resources). The built-in plugins already handle theirs (audio, cameras, sprites, text,
-physics, tweens, and tiled maps); see [Handled by built-in
+handler](/tecs/save-games#world-resources). The built-in plugins already handle theirs (audio, cameras, input layers,
+sprites, text, physics, tweens, and tiled maps); see [Handled by built-in
 plugins](/tecs/save-games#handled-by-built-in-plugins) for exactly what round-trips.
 
 For example, refresh keyed handles in `PostStartup`:

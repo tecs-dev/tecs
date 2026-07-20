@@ -123,6 +123,9 @@ The Tecs2D plugins take care of their own runtime state, so these survive a snap
 - **[Sprites](/tecs2d/rendering/sprites/) and [text](/tecs2d/rendering/text)**: on-screen content and animation state.
 - **[Physics](/tecs2d/physics/)**: [colliders and rigid bodies](/tecs2d/physics/components), including their current
   velocity.
+- **[Input layers](/tecs2d/input/#input-layers-and-game-states)**: the names and order of active game-owned input
+  layers. Layer names are required and unique; create the same layers during plugin setup before loading. Runtime-only
+  overlays, `input.raw`, callbacks, and physical device state are intentionally not serialized.
 - **[Tweens](/tecs2d/tween#snapshots)**: in-progress tween playback.
 - **[Tiled maps](/tecs2d/tiled/)**: the [tilemap](/tecs2d/tiled/tilemap) and its rendered tiles.
 

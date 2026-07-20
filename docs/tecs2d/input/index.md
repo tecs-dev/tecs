@@ -203,7 +203,8 @@ state becomes visible to whichever target owns input after a capture change.
 | Target | Purpose | Polling | Routed events |
 | --- | --- | --- | --- |
 | `input.base` | Implicit bottom target for ordinary gameplay | Live only when it is top | Delegates to world observers at address `0` |
-| `input.newLayer(name)` | Stable, reusable target for a menu, modal, console, or tool | Live only while it is top | Uses observers registered directly on the layer |
+| `input.newLayer(name)` | Stable, snapshot-managed target for a game menu or modal | Live only while it is top | Uses observers registered directly on the layer |
+| `input.newLayer(name, {snapshot = false})` | Runtime-only target for a debugger or development tool | Live only while it is top | Uses observers registered directly on the layer |
 | `input.raw` | Always-on target for framework shortcuts, recording, and diagnostics | Always live | Runs before the routed top target and cannot be intercepted |
 
 `input.base` and `input.raw` are permanent targets; do not push or pop them.
@@ -233,26 +234,36 @@ The module-level keyboard, mouse, wheel, text, and joystick functions have the s
 
 #### `input.newLayer`
 
-Creates an inactive, reusable layer. Names identify owners in capture lifecycle events and must not be empty.
+Creates and registers an inactive, reusable layer. Its name is required, non-empty, and unique within the current
+world because snapshots use it as the layer's stable identity.
 
 ```teal
-function input.newLayer(name: string): input.Layer
+function input.newLayer(name: string, options?: input.LayerOptions): input.Layer
 ```
 
 Creating a layer does not activate it or change input ownership. Register observers once and reuse the same handle
 across repeated opens and closes. Popping a layer does not remove its observers; use `stopObserving` when the
 subscription itself should end.
 
+Layers participate in snapshots by default. Runtime tools that must remain open independently of the loaded game
+state opt out explicitly:
+
+```teal
+local debuggerInput = input.newLayer("debugger", {snapshot = false})
+```
+
 #### `input.pushLayer`
 
-Pushes an inactive user layer above the current top target.
+Pushes an inactive user layer into its configured lane.
 
 ```teal
 function input.pushLayer(layer: input.Layer)
 ```
 
-Pushing an already-active layer, `input.base`, or `input.raw` is an error. On success, the old top loses capture, the
-new layer becomes live, pending edge state is cleared, and the new top gains capture.
+Pushing an already-active layer, `input.base`, or `input.raw` is an error. A normal snapshot-managed layer is pushed
+above other game layers. A runtime-only layer is pushed above both lanes. If no runtime layer is open, the old top
+loses capture, pending edge state is cleared, and the new game layer gains capture. Pushing a game layer while a
+runtime overlay is open changes the saved game topology beneath it without disturbing the current input owner.
 
 #### `input.popLayer`
 
@@ -281,7 +292,8 @@ ownership. Prefer keeping the stable layer handle over searching by its diagnost
 
 | Member | Description |
 | --- | --- |
-| `layer.name` | Diagnostic name supplied to `newLayer`. |
+| `layer.name` | Required unique name supplied to `newLayer`; also the layer's snapshot identity. |
+| `layer.snapshot` | `true` for a snapshot-managed game layer; `false` for a runtime-only overlay. |
 | `layer.view` | Polling view for this owner; live only while the layer is top. |
 | `layer.parent` | Next lower routed target while the layer is active. Use it for explicit forwarding. |
 | `layer:observe(Event, callback, id?)` | Subscribe without changing the `function(event)` observer signature. The optional ID supports named removal. |
@@ -383,10 +395,25 @@ local function closePause()
 end
 ```
 
-Input layers and their observer callbacks are runtime handles, not world snapshot data. Loading a snapshot does not
-rewind or reconstruct the input stack. If restored game state implies that a modal should own input, recreate or
-reconcile its layer from a snapshot handler, `FinishSnapshotLoad`, or Tecs2D `PostStartup`, just as you would rebind
-other runtime handles. See [Runtime handles after load](/tecs/save-games#runtime-handles-after-load).
+The stacks are independent in operation, but both have built-in snapshot behavior. Tecs2D saves the names and
+bottom-to-top order of active snapshot-managed input layers. On load it restores that topology automatically. Layer
+handles, observers, and callbacks are runtime objects and are not serialized; create each named layer and register its
+observers during normal plugin setup, before a snapshot can load.
+
+Runtime-only layers remain above the restored game topology and are never opened or closed by a load. This is what
+allows an open debugger to load a paused-game snapshot without losing debugger input:
+
+```text
+runtime-only layers (snapshot = false)  debugger, development tools
+snapshot-managed layers (default)      pause menu, inventory, game modal
+input.base                              ordinary gameplay
+```
+
+Loading establishes a fresh capture boundary: pending press/release edges, text, wheel motion, and fixed-step latches
+are cleared. Physical held state stays live. If a load is requested from inside a routed input or capture-lifecycle
+observer, the topology change is deferred until the current event or push/pop transition finishes. A snapshot that
+names a layer not registered in the new world fails clearly instead of silently restoring the wrong owner. `input.raw`
+remains a separate always-on stream and is not snapshot data.
 
 ### Raw input
 
