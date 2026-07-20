@@ -1,0 +1,4 @@
+build/
+src/vendor/
+dist/
+.DS_Store

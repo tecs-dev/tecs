@@ -1,0 +1,140 @@
+name: Release smoke
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to verify
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+  RELEASE_BASE: https://github.com/${{ github.repository }}/releases/download/${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  unix:
+    name: ${{ matrix.os }} published release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Download and verify published assets
+        run: |
+          mkdir release
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir release
+          if [ "$(uname -s)" = Darwin ]; then
+            (cd release && shasum -a 256 -c SHA256SUMS)
+          else
+            (cd release && sha256sum -c SHA256SUMS)
+          fi
+
+      - name: Install exact release
+        env:
+          TECS_RELEASE_BASE: ${{ env.RELEASE_BASE }}
+          TECS_BIN_DIR: ${{ runner.temp }}/tecs-bin
+        run: bash release/install.sh
+
+      - name: Prove published CLI
+        env:
+          TECS_CACHE_DIR: ${{ runner.temp }}/tecs-cache
+        run: |
+          tecs="$RUNNER_TEMP/tecs-bin/tecs"
+          project="$RUNNER_TEMP/published-tecs-game"
+          "$tecs" --version | grep -Fx "${RELEASE_TAG#v}"
+          "$tecs" info
+          "$tecs" new "$project"
+          (cd "$project" && "$tecs" check)
+          (cd "$project" && "$tecs" build)
+          test -f "$project/build/main.lua"
+          test -f "$project/build/tecs2d/init.lua"
+          test -f "$project/build/tecs2d/assets/fonts/tiny-font.fnt"
+          test -f "$project/build/tecs2d/assets/fonts/tiny-font.png"
+          (cd "$project" && "$tecs" check --json | grep -F '"ok":true')
+          (cd "$project" && "$tecs" info --json | grep -F '"built":true')
+          "$tecs" agent list | grep -F tecs-project
+          test -f "$("$tecs" agent path tecs-project)"
+          "$tecs" completions bash | grep -F '_tecs()'
+
+      - name: Prove package-manager tarball through a symlinked launcher
+        env:
+          TECS_CACHE_DIR: ${{ runner.temp }}/tecs-cache
+        run: |
+          version="${RELEASE_TAG#v}"
+          stage="$RUNNER_TEMP/tecs-tarball"
+          mkdir -p "$stage/pkg" "$stage/bin"
+          tar -xzf "release/tecs-cli-$version.tar.gz" -C "$stage/pkg"
+          ln -s "$stage/pkg/tecs" "$stage/bin/tecs"
+          "$stage/bin/tecs" --version | grep -Fx "$version"
+
+  windows:
+    name: windows-latest published release
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Download published assets
+        shell: pwsh
+        run: gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --dir release
+
+      - name: Install exact release
+        shell: pwsh
+        env:
+          TECS_RELEASE_BASE: ${{ env.RELEASE_BASE }}
+          TECS_BIN_DIR: ${{ runner.temp }}\tecs-bin
+        run: '& release\install.ps1'
+
+      - name: Prove published CLI
+        shell: pwsh
+        env:
+          TECS_CACHE_DIR: ${{ runner.temp }}\tecs-cache
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $tecs = Join-Path $env:RUNNER_TEMP "tecs-bin\tecs.ps1"
+          $project = Join-Path $env:RUNNER_TEMP "published-tecs-game"
+          $expected = $env:RELEASE_TAG.TrimStart("v")
+          $actual = & $tecs --version
+          if ($actual -ne $expected) { throw "expected CLI $expected, got $actual" }
+          & $tecs info
+          & $tecs new $project
+          Push-Location $project
+          & $tecs check
+          & $tecs build
+          $checkJson = (& $tecs check --json | Out-String)
+          if ($checkJson -notmatch '"ok":true') { throw "check --json did not report ok" }
+          $infoJson = (& $tecs info --json | Out-String)
+          if ($infoJson -notmatch '"built":true') { throw "info --json did not report a built project" }
+          Pop-Location
+          $agents = (& $tecs agent list | Out-String)
+          if ($agents -notmatch 'tecs-project') { throw "agent list is missing tecs-project" }
+          $agentPath = (& $tecs agent path tecs-project | Out-String).Trim()
+          if (-not (Test-Path $agentPath)) { throw "agent path did not write $agentPath" }
+          $completions = (& $tecs completions bash | Out-String)
+          if ($completions -notmatch '_tecs') { throw "completions bash did not print a script" }
+          if (-not (Test-Path "$project\build\main.lua")) { throw "main.lua was not built" }
+          if (-not (Test-Path "$project\build\tecs2d\init.lua")) { throw "tecs2d was not built" }
+          if (-not (Test-Path "$project\build\tecs2d\assets\fonts\tiny-font.fnt")) { throw "BMFont descriptor was not built" }
+          if (-not (Test-Path "$project\build\tecs2d\assets\fonts\tiny-font.png")) { throw "BMFont texture was not built" }
+
+      - name: Prove package-manager zip
+        shell: pwsh
+        env:
+          TECS_CACHE_DIR: ${{ runner.temp }}\tecs-cache
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $version = $env:RELEASE_TAG.TrimStart("v")
+          $stage = Join-Path $env:RUNNER_TEMP "tecs-zip"
+          Expand-Archive "release\tecs-cli-$version-windows.zip" $stage
+          $actual = & (Join-Path $stage "tecs.cmd") --version
+          if ($actual -ne $version) { throw "expected CLI $version from zip, got $actual" }
