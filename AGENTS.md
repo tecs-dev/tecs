@@ -31,6 +31,8 @@ make rebuild         # Clean and rebuild from scratch
 make clean           # Remove build artifacts
 make dev             # Install LuaRocks dev deps, docs deps, then run an initial build
 make docs-dev        # Run the VitePress docs dev server
+make cli-check       # Lint, test, and build the bundled tecs command
+make cli-package     # Build the CLI and package-manager archives
 make check-examples  # Type-check the example projects
 make build-examples  # Build the example projects
 make help            # List all targets, including every example
@@ -66,6 +68,7 @@ tecs/
 │       ├── tween.tl
 │       └── ui/
 ├── docs/                  # VitePress docs site
+├── cli/                   # Self-contained tecs command, launchers, templates, and release payload
 │   ├── tecs/
 │   └── tecs2d/
 ├── examples/              # Runnable example projects

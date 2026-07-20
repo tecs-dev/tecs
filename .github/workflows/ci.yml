@@ -321,34 +321,25 @@ jobs:
         repository: tecs-dev/tecs-space-example
         path: tecs-space-example
 
-    - name: Check out CLI
-      if: steps.changes.outputs.run == 'true'
-      uses: actions/checkout@v4
-      with:
-        repository: tecs-dev/tecs-cli
-        path: tecs-cli
-
     - name: Build CLI with this Tecs commit
       if: steps.changes.outputs.run == 'true'
-      env:
-        TECS_DIR: ${{ github.workspace }}/tecs
-      run: tecs-cli/scripts/build_love.sh
+      run: tecs/cli/scripts/build_love.sh
 
     - name: Type-check the space example against this Tecs commit
       if: steps.changes.outputs.run == 'true'
       working-directory: tecs-space-example
       env:
         TECS_CACHE_DIR: ${{ runner.temp }}/tecs-cache
-        TECS_CLI_LOVE: ${{ github.workspace }}/tecs-cli/dist/tecs-cli.love
-      run: ../tecs-cli/launcher/tecs check
+        TECS_CLI_LOVE: ${{ github.workspace }}/tecs/cli/dist/tecs-cli.love
+      run: ../tecs/cli/launcher/tecs check
 
     - name: Build the space example against this Tecs commit
       if: steps.changes.outputs.run == 'true'
       working-directory: tecs-space-example
       env:
         TECS_CACHE_DIR: ${{ runner.temp }}/tecs-cache
-        TECS_CLI_LOVE: ${{ github.workspace }}/tecs-cli/dist/tecs-cli.love
-      run: ../tecs-cli/launcher/tecs build
+        TECS_CLI_LOVE: ${{ github.workspace }}/tecs/cli/dist/tecs-cli.love
+      run: ../tecs/cli/launcher/tecs build
 
   lint:
     runs-on: ubuntu-latest

@@ -1,7 +1,7 @@
 # Install the released Windows launchers and CLI payload into the user profile.
 $ErrorActionPreference = "Stop"
 
-$base = if ($env:TECS_RELEASE_BASE) { $env:TECS_RELEASE_BASE } else { "https://github.com/tecs-dev/tecs-cli/releases/latest/download" }
+$base = if ($env:TECS_RELEASE_BASE) { $env:TECS_RELEASE_BASE } else { "https://github.com/tecs-dev/tecs/releases/latest/download" }
 $binDir = if ($env:TECS_BIN_DIR) { $env:TECS_BIN_DIR } else { Join-Path $env:LOCALAPPDATA "tecs\bin" }
 
 $temp = Join-Path ([System.IO.Path]::GetTempPath()) ("tecs-install-" + [guid]::NewGuid())

@@ -10,7 +10,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-tecs_dir="${TECS_DIR:-$root/../tecs}"
+tecs_dir="${TECS_DIR:-$root/..}"
 dist="$tecs_dir/docs/.vitepress/dist"
 
 if [ ! -f "$tecs_dir/docs/package.json" ]; then

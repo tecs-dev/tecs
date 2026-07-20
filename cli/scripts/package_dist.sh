@@ -5,10 +5,10 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 dist="$root/dist"
-version="$(sed -n 's/^local VERSION = "\([^"]*\)"/\1/p' "$root/tecs_cli/cli.lua")"
+version="$(sed -n 's/^return "\([^"]*\)"/\1/p' "$root/tecs_cli/version.lua")"
 
 if [ -z "$version" ]; then
-    echo "package_dist: could not read VERSION from tecs_cli/cli.lua" >&2
+    echo "package_dist: could not read VERSION from tecs_cli/version.lua" >&2
     exit 1
 fi
 for file in tecs tecs.cmd tecs.ps1 tecs-cli.love LICENSE; do

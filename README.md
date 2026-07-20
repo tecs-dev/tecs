@@ -48,11 +48,11 @@ Standalone installers are also available if you prefer not to use a package
 manager:
 
 ```bash
-curl -fsSL https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/tecs-dev/tecs/releases/latest/download/install.sh | sh
 ```
 
 ```powershell
-irm https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.ps1 | iex
+irm https://github.com/tecs-dev/tecs/releases/latest/download/install.ps1 | iex
 ```
 
 The CLI supplies Teal, Tecs/Tecs2D, type definitions, project setup, builds,

@@ -2,11 +2,14 @@
 
 ## Overview
 
-This repository builds the cross-platform `tecs` command for creating,
+This directory builds the cross-platform `tecs` command for creating,
 checking, building, and running Tecs2D projects. The distributed CLI is a
 headless LÖVE 12 application, not a LuaRocks package. Its launcher downloads a
 LÖVE 12 nightly into the user cache and executes `tecs-cli.love` with the
 same LuaJIT used by games.
+
+The CLI lives inside the Tecs monorepo. Framework sources, docs, built-in
+assets, and the CLI are released atomically from the repository root.
 
 ## Key Commands
 
@@ -59,4 +62,5 @@ make clean              # Remove build/ and dist/
   concise top-level comment describing its role.
 - Keep vendored dependency licenses under `tecs_cli/runtime/licenses/`.
 - Update `README.md` and this guide when commands or distribution behavior change.
-- Keep `CHANGELOG.md` versioned and verify a release tag matches `VERSION`.
+- Keep the repository-root `CHANGELOG.md` versioned and verify a release tag
+  matches `tecs_cli/version.lua`.

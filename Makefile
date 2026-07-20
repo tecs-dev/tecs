@@ -9,11 +9,12 @@
 	example-save-game \
 	newrock test-rockspec typecheck rebuild help rockspecs docs docs-dev docs-debug \
 	docs-descriptions \
-	json-bench ecs-bench snapshot-bench bitset-bench download-love12 check-love12
+	json-bench ecs-bench snapshot-bench bitset-bench download-love12 check-love12 \
+	cli-build cli-test cli-check cli-package
 
 .SILENT: clean test test-no-ffi find-busted
 
-VERSION=0.2.0
+VERSION := $(shell sed -n 's/^return "\([^\"]*\)"/\1/p' cli/tecs_cli/version.lua 2>/dev/null)
 LUA_CMD ?= luajit
 
 # Love2D 12 (nightly) for GPU rendering features
@@ -68,6 +69,18 @@ TECS2D_FONT_ASSETS := examples/shared/assets/tiny-font.fnt examples/shared/asset
 TEST_BUILD_DIR=$(LUA_DIR)/test_deps
 
 all: build test
+
+cli-build:
+	$(MAKE) -C cli build
+
+cli-test:
+	$(MAKE) -C cli test
+
+cli-check:
+	$(MAKE) -C cli check
+
+cli-package:
+	$(MAKE) -C cli package
 
 build: compile
 
@@ -595,6 +608,10 @@ help:
 	@echo "  check-examples - Type check all examples"
 	@echo "  build-examples - Build all examples"
 	@echo "  docs-debug     - Regenerate docs/tecs2d/debug-reference.md and docs/tecs2d/mcp/tools.md"
+	@echo "  cli-build      - Assemble the self-contained CLI payload"
+	@echo "  cli-test       - Run CLI unit tests"
+	@echo "  cli-check      - Lint, test, and build the CLI"
+	@echo "  cli-package    - Build package-manager CLI archives"
 	@echo "  clean          - Remove build directory"
 	@echo ""
 	@echo "Love2D 12 (GPU features):"

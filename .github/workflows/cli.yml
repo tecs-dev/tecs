@@ -1,4 +1,4 @@
-name: CI
+name: CLI
 
 on:
   push:
@@ -7,6 +7,37 @@ on:
   pull_request:
 
 jobs:
+  framework:
+    name: framework release gate
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up isolated Lua 5.4 for LuaRocks
+        run: |
+          curl -fsSL https://www.lua.org/ftp/lua-5.4.8.tar.gz | tar xz -C "$RUNNER_TEMP"
+          make -C "$RUNNER_TEMP/lua-5.4.8/src" posix
+          echo "TECS_LUA54=$RUNNER_TEMP/lua-5.4.8/src/lua" >> "$GITHUB_ENV"
+      - uses: leafo/gh-actions-lua@v11
+        with:
+          luaVersion: "luajit"
+      - uses: leafo/gh-actions-luarocks@v4
+        with:
+          luarocksVersion: "3.12.2"
+      - name: Set up framework dependencies
+        run: |
+          lr() { "$TECS_LUA54" "$(command -v luarocks)" --lua-version=5.1 "$@"; }
+          lr install busted
+          lr install luacov
+          lr --dev install tl
+          make install-type-deps
+      - name: Verify framework
+        run: |
+          eval "$(luarocks path)"
+          make clean
+          make compile
+          make test
+
   unix:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -16,19 +47,13 @@ jobs:
         os: [ubuntu-latest, macos-latest]
 
     steps:
-      - name: Check out CLI
-        uses: actions/checkout@v7
-
       - name: Check out Tecs
         uses: actions/checkout@v7
-        with:
-          repository: tecs-dev/tecs
-          path: tecs
 
       - name: Validate release metadata
         if: startsWith(github.ref, 'refs/tags/v') && matrix.os == 'ubuntu-latest'
         run: |
-          version=$(sed -n 's/^local VERSION = "\([^"]*\)"/\1/p' tecs_cli/cli.lua)
+          version=$(sed -n 's/^return "\([^"]*\)"/\1/p' cli/tecs_cli/version.lua)
           test "$GITHUB_REF_NAME" = "v$version"
           grep -F "## [$version] -" CHANGELOG.md
 
@@ -37,37 +62,35 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: tecs/docs/package-lock.json
+          cache-dependency-path: docs/package-lock.json
 
       - name: Build tecs-cli.love
-        env:
-          TECS_DIR: ${{ github.workspace }}/tecs
-        run: scripts/build_love.sh
+        run: cli/scripts/build_love.sh
 
       - name: Prove option 1 from a cold cache
         env:
           TECS_CACHE_DIR: ${{ runner.temp }}/tecs-cache
-          TECS_CLI_LOVE: ${{ github.workspace }}/dist/tecs-cli.love
+          TECS_CLI_LOVE: ${{ github.workspace }}/cli/dist/tecs-cli.love
         run: |
           project="$RUNNER_TEMP/hello-tecs"
           rm -rf "$project" "$TECS_CACHE_DIR"
-          launcher/tecs --version
-          launcher/tecs info
-          launcher/tecs new "$project"
+          cli/launcher/tecs --version
+          cli/launcher/tecs info
+          cli/launcher/tecs new "$project"
           test -f "$project/.github/workflows/ci.yml"
           # The project pre-approves its own MCP server so `tecs mcp` connects
           # with no interactive approval once the folder is trusted.
           grep -Fq '"enabledMcpjsonServers"' "$project/.claude/settings.json"
           grep -Fq '"tecs"' "$project/.claude/settings.json"
-          (cd "$project" && TECS_DIR="$GITHUB_WORKSPACE/tecs" "$GITHUB_WORKSPACE/launcher/tecs" dev)
-          (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" check)
-          (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" build)
+          (cd "$project" && TECS_DIR="$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/cli/launcher/tecs" dev)
+          (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/cli/launcher/tecs" check)
+          (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/cli/launcher/tecs" build)
           test -f "$project/build/main.lua"
           test -f "$project/build/tecs2d/init.lua"
           test -f "$project/build/tecs2d/assets/fonts/tiny-font.fnt"
           test -f "$project/build/tecs2d/assets/fonts/tiny-font.png"
           if [ "$(uname -s)" = Darwin ]; then
-            (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" integ)
+            (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/cli/launcher/tecs" integ)
             printf '%s\n' \
               '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \
               '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
@@ -77,7 +100,7 @@ jobs:
               '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"run_lua","arguments":{"code":"return 1 + 1"}}}' \
               '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"stop_game","arguments":{}}}' \
               > "$RUNNER_TEMP/mcp-session.jsonl"
-            (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" mcp \
+            (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/cli/launcher/tecs" mcp \
               < "$RUNNER_TEMP/mcp-session.jsonl" > "$RUNNER_TEMP/mcp-out.jsonl")
             grep -q '"name":"tecs"' "$RUNNER_TEMP/mcp-out.jsonl"
             grep -q '"start_game"' "$RUNNER_TEMP/mcp-out.jsonl"
@@ -92,7 +115,7 @@ jobs:
             fi
             grep -q '"values":\[2\]' "$RUNNER_TEMP/mcp-out.jsonl"
             grep -F '\"stopped\":true' "$RUNNER_TEMP/mcp-out.jsonl" > /dev/null
-            (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" dist)
+            (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/cli/launcher/tecs" dist)
             test -f "$project/dist/hello-tecs.love"
             test -f "$project/dist/macos/hello-tecs.app/Contents/Resources/hello-tecs.love"
             grep -q "org.tecs2d.hello-tecs" "$project/dist/macos/hello-tecs.app/Contents/Info.plist"
@@ -112,26 +135,26 @@ jobs:
             grep -q "MCP server disabled" "$RUNNER_TEMP/dist-app.log"
             kill "$APP_PID"
           else
-            (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" dist windows)
+            (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/cli/launcher/tecs" dist windows)
           fi
           test -f "$project/dist/windows/hello-tecs/hello-tecs.exe"
           test -f "$project/dist/hello-tecs-windows.zip"
-          (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" check --json | grep -F '"ok":true')
-          (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/launcher/tecs" info --json | grep -F '"built":true')
-          launcher/tecs agent list | grep -F tecs-project
-          test -f "$(launcher/tecs agent path tecs-project)"
-          launcher/tecs completions bash | grep -F '_tecs()'
-          launcher/tecs completions zsh > /dev/null
-          launcher/tecs completions fish > /dev/null
-          launcher/tecs --version
+          (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/cli/launcher/tecs" check --json | grep -F '"ok":true')
+          (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/cli/launcher/tecs" info --json | grep -F '"built":true')
+          cli/launcher/tecs agent list | grep -F tecs-project
+          test -f "$(cli/launcher/tecs agent path tecs-project)"
+          cli/launcher/tecs completions bash | grep -F '_tecs()'
+          cli/launcher/tecs completions zsh > /dev/null
+          cli/launcher/tecs completions fish > /dev/null
+          cli/launcher/tecs --version
 
       - name: Package versioned archives
         if: matrix.os == 'ubuntu-latest'
-        run: scripts/package_dist.sh
+        run: cli/scripts/package_dist.sh
 
       - name: Create release checksums
         if: matrix.os == 'ubuntu-latest'
-        working-directory: dist
+        working-directory: cli/dist
         run: |
           sha256sum tecs tecs.cmd tecs.ps1 tecs-cli.love install.sh install.ps1 \
             LICENSE CHANGELOG.md tecs-cli-*.tar.gz tecs-cli-*-windows.zip > SHA256SUMS
@@ -142,68 +165,60 @@ jobs:
         with:
           name: tecs-cli-option1
           path: |
-            dist/tecs
-            dist/tecs.cmd
-            dist/tecs.ps1
-            dist/tecs-cli.love
-            dist/install.sh
-            dist/install.ps1
-            dist/LICENSE
-            dist/CHANGELOG.md
-            dist/SHA256SUMS
-            dist/tecs-cli-*.tar.gz
-            dist/tecs-cli-*-windows.zip
+            cli/dist/tecs
+            cli/dist/tecs.cmd
+            cli/dist/tecs.ps1
+            cli/dist/tecs-cli.love
+            cli/dist/install.sh
+            cli/dist/install.ps1
+            cli/dist/LICENSE
+            cli/dist/CHANGELOG.md
+            cli/dist/SHA256SUMS
+            cli/dist/tecs-cli-*.tar.gz
+            cli/dist/tecs-cli-*-windows.zip
 
   windows:
     name: windows-latest
     runs-on: windows-latest
 
     steps:
-      - name: Check out CLI
-        uses: actions/checkout@v7
-
       - name: Check out Tecs
         uses: actions/checkout@v7
-        with:
-          repository: tecs-dev/tecs
-          path: tecs
 
       - name: Set up Node (docs bundle)
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: tecs/docs/package-lock.json
+          cache-dependency-path: docs/package-lock.json
 
       - name: Build tecs-cli.love
         shell: bash
-        env:
-          TECS_DIR: ${{ github.workspace }}/tecs
-        run: scripts/build_love.sh
+        run: cli/scripts/build_love.sh
 
       - name: Prove option 1 from a cold cache
         shell: pwsh
         env:
           TECS_CACHE_DIR: ${{ runner.temp }}\tecs-cache
-          TECS_CLI_LOVE: ${{ github.workspace }}\dist\tecs-cli.love
+          TECS_CLI_LOVE: ${{ github.workspace }}\cli\dist\tecs-cli.love
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           $project = Join-Path $env:RUNNER_TEMP "hello-tecs"
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $project, $env:TECS_CACHE_DIR
-          & launcher/tecs.ps1 --version
-          & launcher/tecs.ps1 info
-          & launcher/tecs.ps1 new $project
+          & cli/launcher/tecs.ps1 --version
+          & cli/launcher/tecs.ps1 info
+          & cli/launcher/tecs.ps1 new $project
           Push-Location $project
-          $env:TECS_DIR = Join-Path $env:GITHUB_WORKSPACE "tecs"
-          & "$env:GITHUB_WORKSPACE\launcher\tecs.ps1" dev
+          $env:TECS_DIR = $env:GITHUB_WORKSPACE
+          & "$env:GITHUB_WORKSPACE\cli\launcher\tecs.ps1" dev
           Remove-Item Env:TECS_DIR -ErrorAction SilentlyContinue
-          & "$env:GITHUB_WORKSPACE\launcher\tecs.ps1" check
-          & "$env:GITHUB_WORKSPACE\launcher\tecs.ps1" build
-          $checkJson = (& "$env:GITHUB_WORKSPACE\launcher\tecs.ps1" check --json | Out-String)
+          & "$env:GITHUB_WORKSPACE\cli\launcher\tecs.ps1" check
+          & "$env:GITHUB_WORKSPACE\cli\launcher\tecs.ps1" build
+          $checkJson = (& "$env:GITHUB_WORKSPACE\cli\launcher\tecs.ps1" check --json | Out-String)
           if ($checkJson -notmatch '"ok":true') { throw "check --json did not report ok" }
-          $infoJson = (& "$env:GITHUB_WORKSPACE\launcher\tecs.ps1" info --json | Out-String)
+          $infoJson = (& "$env:GITHUB_WORKSPACE\cli\launcher\tecs.ps1" info --json | Out-String)
           if ($infoJson -notmatch '"built":true') { throw "info --json did not report a built project" }
-          & "$env:GITHUB_WORKSPACE\launcher\tecs.ps1" dist windows
+          & "$env:GITHUB_WORKSPACE\cli\launcher\tecs.ps1" dist windows
           if (-not (Test-Path "dist\windows\hello-tecs\hello-tecs.exe")) { throw "dist did not fuse the exe" }
           if (-not (Test-Path "dist\hello-tecs-windows.zip")) { throw "dist did not zip the Windows build" }
           Pop-Location
@@ -211,22 +226,25 @@ jobs:
           if (-not (Test-Path "$project\build\tecs2d\init.lua")) { throw "tecs2d was not built" }
           if (-not (Test-Path "$project\build\tecs2d\assets\fonts\tiny-font.fnt")) { throw "BMFont descriptor was not built" }
           if (-not (Test-Path "$project\build\tecs2d\assets\fonts\tiny-font.png")) { throw "BMFont texture was not built" }
-          $agents = (& launcher/tecs.ps1 agent list | Out-String)
+          $agents = (& cli/launcher/tecs.ps1 agent list | Out-String)
           if ($agents -notmatch 'tecs-project') { throw "agent list is missing tecs-project" }
-          $agentPath = (& launcher/tecs.ps1 agent path tecs-project | Out-String).Trim()
+          $agentPath = (& cli/launcher/tecs.ps1 agent path tecs-project | Out-String).Trim()
           if (-not (Test-Path $agentPath)) { throw "agent path did not write $agentPath" }
-          $completions = (& launcher/tecs.ps1 completions bash | Out-String)
+          $completions = (& cli/launcher/tecs.ps1 completions bash | Out-String)
           if ($completions -notmatch '_tecs') { throw "completions bash did not print a script" }
-          & launcher/tecs.ps1 --version
+          & cli/launcher/tecs.ps1 --version
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [unix, windows]
+    needs: [framework, unix, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
       actions: write
     steps:
+      - name: Check out Tecs
+        uses: actions/checkout@v7
+
       - name: Download option 1 package
         uses: actions/download-artifact@v8
         with:
@@ -250,6 +268,32 @@ jobs:
             dist/SHA256SUMS
             dist/tecs-cli-*.tar.gz
             dist/tecs-cli-*-windows.zip
+
+      - name: Set up LuaJIT for LuaRocks publication
+        uses: leafo/gh-actions-lua@v11
+        with:
+          luaVersion: "luajit"
+
+      - name: Set up LuaRocks
+        uses: leafo/gh-actions-luarocks@v4
+        with:
+          luarocksVersion: "3.12.2"
+
+      - name: Publish versioned Tecs rocks
+        env:
+          LUAROCKS_API_KEY: ${{ secrets.LUAROCKS_API_KEY }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          version="${tag#v}"
+          sed -e "s/^version = .*/version = \"${version}-1\"/" \
+              -e "s|branch = \"main\"|tag = \"${tag}\"|" \
+              tecs-dev-1.rockspec > "tecs-${version}-1.rockspec"
+          sed -e "s/^version = .*/version = \"${version}-1\"/" \
+              -e "s|branch = \"main\"|tag = \"${tag}\"|" \
+              -e "s/\"tecs == dev-1\"/\"tecs == ${version}\"/" \
+              tecs2d-dev-1.rockspec > "tecs2d-${version}-1.rockspec"
+          luarocks upload --api-key="$LUAROCKS_API_KEY" "tecs-${version}-1.rockspec"
+          luarocks upload --api-key="$LUAROCKS_API_KEY" "tecs2d-${version}-1.rockspec"
 
       # Releases published with GITHUB_TOKEN do not fire `release` triggers,
       # so start the post-publication smoke run explicitly.

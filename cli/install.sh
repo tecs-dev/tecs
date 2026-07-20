@@ -2,7 +2,7 @@
 # Install the released launcher and CLI payload into user-owned directories.
 set -euo pipefail
 
-base="${TECS_RELEASE_BASE:-https://github.com/tecs-dev/tecs-cli/releases/latest/download}"
+base="${TECS_RELEASE_BASE:-https://github.com/tecs-dev/tecs/releases/latest/download}"
 bin_dir="${TECS_BIN_DIR:-$HOME/.local/bin}"
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/tecs-install.XXXXXX")"

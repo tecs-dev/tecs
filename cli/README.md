@@ -21,13 +21,13 @@ scoop install tecs
 Or use the standalone installers. macOS and Linux:
 
 ```sh
-curl -fsSL https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/tecs-dev/tecs/releases/latest/download/install.sh | sh
 ```
 
 Windows PowerShell:
 
 ```powershell
-irm https://github.com/tecs-dev/tecs-cli/releases/latest/download/install.ps1 | iex
+irm https://github.com/tecs-dev/tecs/releases/latest/download/install.ps1 | iex
 ```
 
 The first `tecs` command downloads the current LÖVE 12 nightly into the user
@@ -37,7 +37,7 @@ required.
 For local checkout development, build the same payload used by releases:
 
 ```sh
-TECS_DIR=../tecs make build
+make build
 TECS_CLI_LOVE="$PWD/dist/tecs-cli.love" launcher/tecs --version
 ```
 
@@ -230,7 +230,7 @@ somewhere repeatable and reinstall after a fresh clone.
 This command copies framework sources from a local Tecs checkout:
 
 ```sh
-TECS_DIR=../tecs tecs dev
+TECS_DIR=/path/to/tecs tecs dev
 ```
 
 Run it again after changing the local framework, then run `tecs check` or

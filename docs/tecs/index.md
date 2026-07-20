@@ -36,7 +36,7 @@ brew install tecs-dev/tap/tecs-cli
 :::
 
 Prefer a standalone installer? Use the scripts from
-[tecs-cli releases](https://github.com/tecs-dev/tecs-cli/releases/latest):
+[tecs-cli releases](https://github.com/tecs-dev/tecs/releases/latest):
 `install.sh` (macOS/Linux) or `install.ps1` (Windows).
 
 Create a project, then run it:

@@ -31,7 +31,7 @@ brew install tecs-dev/tap/tecs-cli
 :::
 
 Standalone installer scripts (`install.sh`, `install.ps1`) are published with
-each [tecs-cli release](https://github.com/tecs-dev/tecs-cli/releases/latest).
+each [tecs-cli release](https://github.com/tecs-dev/tecs/releases/latest).
 
 ## Commands
 

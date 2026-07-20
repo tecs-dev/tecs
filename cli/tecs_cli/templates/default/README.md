@@ -4,7 +4,7 @@ Created with `tecs new`.
 
 ## Tecs CLI
 
-Every workflow runs through the [Tecs CLI](https://github.com/tecs-dev/tecs-cli).
+Every workflow runs through the [Tecs CLI](https://github.com/tecs-dev/tecs).
 If it is not installed:
 
 ```sh
@@ -19,7 +19,7 @@ scoop install tecs
 ```
 
 Standalone installers are on the
-[tecs-cli releases page](https://github.com/tecs-dev/tecs-cli/releases/latest).
+[tecs-cli releases page](https://github.com/tecs-dev/tecs/releases/latest).
 
 ## Commands
 

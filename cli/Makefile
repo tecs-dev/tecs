@@ -15,7 +15,7 @@ package: build
 	./scripts/package_dist.sh
 
 lint:
-	luacheck tecs_cli/cli.lua tecs_cli/cliApi.lua tecs_cli/cliDocs.lua \
+	luacheck tecs_cli/cli.lua tecs_cli/version.lua tecs_cli/cliApi.lua tecs_cli/cliDocs.lua \
 		tecs_cli/cliFileSystem.lua tecs_cli/cliParser.lua \
 		tecs_cli/diagnostics.lua tecs_cli/apidocs.lua loveapp spec
 
@@ -26,9 +26,9 @@ docs-bundle:
 	./scripts/gen-docs-bundle.sh
 
 # Specs that exercise --json and `tecs docs` need framework sources and the docs
-# bundle; default to a sibling Tecs checkout like scripts/build_love.sh does.
+# bundle; default to the parent monorepo checkout like scripts/build_love.sh.
 test: docs-bundle
-	TECS_DIR="$${TECS_DIR:-$(abspath ..)/tecs}" luajit spec/run.lua
+	TECS_DIR="$${TECS_DIR:-$(abspath ..)}" luajit spec/run.lua
 
 check: lint test build
 

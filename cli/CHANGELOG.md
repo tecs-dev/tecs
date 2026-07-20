@@ -2,9 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-When cutting a release, bump `VERSION` in `tecs_cli/cli.lua`, update this file,
-and push the matching `v*` tag. CI publishes the self-contained `.love`
-payload, launchers, and installers as GitHub release assets.
+For releases before the monorepo consolidation, `VERSION` lived in
+`tecs_cli/cli.lua`. Current combined releases use `tecs_cli/version.lua` and
+the repository-root changelog. This file preserves the standalone CLI history.
+
+Historically, cutting a release meant updating this file and pushing the
+matching `v*` tag. CI published the self-contained `.love` payload, launchers,
+and installers as GitHub release assets.
 
 ## [Unreleased]
 
