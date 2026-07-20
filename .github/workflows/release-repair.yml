@@ -1,0 +1,73 @@
+name: Release repair
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v* release tag to repair
+        required: true
+        type: string
+
+jobs:
+  rocks-and-smoke:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Validate release tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          case "$TAG" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "invalid release tag: $TAG" >&2; exit 1 ;;
+          esac
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null
+
+      - name: Check out tagged source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Set up LuaJIT
+        uses: leafo/gh-actions-lua@v11
+        with:
+          luaVersion: "luajit"
+
+      - name: Set up LuaRocks
+        uses: leafo/gh-actions-luarocks@v4
+        with:
+          luarocksVersion: "3.12.2"
+
+      - name: Publish missing versioned Tecs rocks
+        env:
+          LUAROCKS_API_KEY: ${{ secrets.LUAROCKS_API_KEY }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          version="${TAG#v}"
+          sed -e "s/^version = .*/version = \"${version}-1\"/" \
+              -e "s|branch = \"main\"|tag = \"${TAG}\"|" \
+              tecs-dev-1.rockspec > "tecs-${version}-1.rockspec"
+          sed -e "s/^version = .*/version = \"${version}-1\"/" \
+              -e "s|branch = \"main\"|tag = \"${TAG}\"|" \
+              -e "s/\"tecs == dev-1\"/\"tecs == ${version}\"/" \
+              tecs2d-dev-1.rockspec > "tecs2d-${version}-1.rockspec"
+          publish_rock() {
+            package=$1
+            rockspec=$2
+            if curl -fsSI "https://luarocks.org/${package}-${version}-1.rockspec" > /dev/null; then
+              echo "${package} ${version}-1 is already published"
+            else
+              luarocks upload --api-key="$LUAROCKS_API_KEY" "$rockspec"
+            fi
+          }
+          publish_rock tecs "tecs-${version}-1.rockspec"
+          publish_rock tecs2d "tecs2d-${version}-1.rockspec"
+
+      - name: Dispatch release smoke
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: gh workflow run "Release smoke" --repo "$GITHUB_REPOSITORY" -f tag="$TAG"

@@ -296,8 +296,17 @@ jobs:
               -e "s|branch = \"main\"|tag = \"${tag}\"|" \
               -e "s/\"tecs == dev-1\"/\"tecs == ${version}\"/" \
               tecs2d-dev-1.rockspec > "tecs2d-${version}-1.rockspec"
-          luarocks upload --api-key="$LUAROCKS_API_KEY" "tecs-${version}-1.rockspec"
-          luarocks upload --api-key="$LUAROCKS_API_KEY" "tecs2d-${version}-1.rockspec"
+          publish_rock() {
+            package=$1
+            rockspec=$2
+            if curl -fsSI "https://luarocks.org/${package}-${version}-1.rockspec" > /dev/null; then
+              echo "${package} ${version}-1 is already published"
+            else
+              luarocks upload --api-key="$LUAROCKS_API_KEY" "$rockspec"
+            fi
+          }
+          publish_rock tecs "tecs-${version}-1.rockspec"
+          publish_rock tecs2d "tecs2d-${version}-1.rockspec"
 
       # Releases published with GITHUB_TOKEN do not fire `release` triggers,
       # so start the post-publication smoke run explicitly.
