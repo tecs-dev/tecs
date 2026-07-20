@@ -113,10 +113,19 @@ local record tecs2d
     type Quit = events.Quit
     type KeyPressed = events.KeyPressed
     type KeyReleased = events.KeyReleased
+    type TextInput = events.TextInput
     type MousePressed = events.MousePressed
     type MouseReleased = events.MouseReleased
+    type MouseMoved = events.MouseMoved
+    type WheelMoved = events.WheelMoved
     type JoystickAdded = events.JoystickAdded
     type JoystickRemoved = events.JoystickRemoved
+    type GamepadAxis = events.GamepadAxis
+    type GamepadPressed = events.GamepadPressed
+    type GamepadReleased = events.GamepadReleased
+    type JoystickPressed = events.JoystickPressed
+    type JoystickReleased = events.JoystickReleased
+    type JoystickHat = events.JoystickHat
     type DirectoryDropped = events.DirectoryDropped
     type FileDropped = events.FileDropped
     type Focus = events.Focus
@@ -136,6 +145,8 @@ local record tecs2d
     type TouchPressed = events.TouchPressed
     type TouchMoved = events.TouchMoved
     type TouchReleased = events.TouchReleased
+    type InputCaptureLost = events.InputCaptureLost
+    type InputCaptureGained = events.InputCaptureGained
 end
 
 -- Re-export events at runtime
@@ -143,10 +154,19 @@ local tecs2dExports <const> = tecs2d as {string: any}
 tecs2dExports.Quit = events.Quit
 tecs2dExports.KeyPressed = events.KeyPressed
 tecs2dExports.KeyReleased = events.KeyReleased
+tecs2dExports.TextInput = events.TextInput
 tecs2dExports.MousePressed = events.MousePressed
 tecs2dExports.MouseReleased = events.MouseReleased
+tecs2dExports.MouseMoved = events.MouseMoved
+tecs2dExports.WheelMoved = events.WheelMoved
 tecs2dExports.JoystickAdded = events.JoystickAdded
 tecs2dExports.JoystickRemoved = events.JoystickRemoved
+tecs2dExports.GamepadAxis = events.GamepadAxis
+tecs2dExports.GamepadPressed = events.GamepadPressed
+tecs2dExports.GamepadReleased = events.GamepadReleased
+tecs2dExports.JoystickPressed = events.JoystickPressed
+tecs2dExports.JoystickReleased = events.JoystickReleased
+tecs2dExports.JoystickHat = events.JoystickHat
 tecs2dExports.DirectoryDropped = events.DirectoryDropped
 tecs2dExports.FileDropped = events.FileDropped
 tecs2dExports.Focus = events.Focus
@@ -166,6 +186,8 @@ tecs2dExports.JoystickSensorUpdated = events.JoystickSensorUpdated
 tecs2dExports.TouchPressed = events.TouchPressed
 tecs2dExports.TouchMoved = events.TouchMoved
 tecs2dExports.TouchReleased = events.TouchReleased
+tecs2dExports.InputCaptureLost = events.InputCaptureLost
+tecs2dExports.InputCaptureGained = events.InputCaptureGained
 
 -------------------------------------------------------------------------------
 -- game plugin
@@ -485,6 +507,10 @@ local function runLoop(config: tecs2d.RunConfig): (function(): number | string)
 
     -- Auto-install UI plugin (anchors, layout boxes, fit content)
     world:addPlugin(tecs_ui.plugin)
+
+    -- Bind the implicit base input target before user plugin setup so games
+    -- may subscribe through either input.base or the existing world address 0.
+    input.bindWorld(world)
 
     -- Add user's game plugin last (pipeline + tiled + ui already available)
     world:addPlugin(config.game)

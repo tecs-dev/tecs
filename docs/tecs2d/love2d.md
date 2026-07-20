@@ -125,10 +125,11 @@ if input.isKeyDown("w") then
 end
 
 -- Check mouse position
-local mouseX, mouseY = input.mouseX, input.mouseY
+local mouseX, mouseY = input.getMousePosition()
 
 -- Check gamepad (iterate through connected joysticks)
-for joystick, joystickInput in pairs(input.joysticks) do
+for joystick in pairs(input.joysticks) do
+    local joystickInput = input.getJoystick(joystick)
     if joystickInput:isGamepadButtonDown("a") then
         -- Jump
     end
@@ -138,8 +139,12 @@ end
 ::: tip Why use this?
 You can still use `love.keyboard.isDown()` and the like, but the input module efficiently buffers keyboard events and
 tracks when keys are released or pressed in a way that _just works_ across fixed and non-fixed update phases. See
-[input documentation](/tecs2d/input/#input-philosophy-in-tecs) for more information.
+[input documentation](/tecs2d/input/#latch-based-input) for more information.
 :::
+
+The module-level queries read the implicit [`input.base` target](/tecs2d/input/#targets). A pushed menu, modal, or
+debugger layer suppresses those gameplay queries until the base regains ownership. Layer-owned code reads its own
+`layer.view`; framework shortcuts that must ignore all layers use `input.raw`.
 
 ### Event observation
 
@@ -147,16 +152,20 @@ Love2D events are translated into Tecs events and can be observed like any other
 See [Love2D Events](/tecs2d/events) for all available event types.
 
 ```teal
-local tecs2d = require("tecs2d")
+local events = require("tecs2d.events")
 
-world:observe(0, tecs2d.MousePressed, function(e: tecs2d.MousePressed)
+world:observe(0, events.MousePressed, function(e: events.MousePressed)
     print("Mouse clicked at", e.x, e.y, "button", e.button)
 end)
 
-world:observe(0, tecs2d.Resize, function(e: tecs2d.Resize)
+world:observe(0, events.Resize, function(e: events.Resize)
     print("Window resized to", e.width, "x", e.height)
 end)
 ```
+
+Interaction events observed at address `0` are the base input target. They fire only when no higher layer intercepts
+the event, or when every higher owner explicitly forwards it. Window, lifecycle, and device-connection events remain
+global and always reach address `0`.
 
 Standard Love2D callbacks continue to work alongside Tecs:
 
@@ -177,6 +186,11 @@ world:addSystem({
     end
 })
 ```
+
+Traditional `love.*` callbacks run after Tecs updates its polling snapshot and routes the corresponding Tecs event.
+They are outside the input-layer stack and therefore cannot be intercepted by it. Prefer Tecs events for gameplay and
+modal UI that must respect input ownership; reserve direct callbacks for integration code that intentionally remains
+global.
 
 ::: tip Why use Tecs events?
 You can still use `love.*` events as usual, but using Tecs events allows for building decoupled and composable

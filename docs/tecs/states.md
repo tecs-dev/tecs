@@ -9,6 +9,13 @@ The state stack manages game states (play, pause, menus) with automatic entity l
 pop to leave. Entities spawned during a state are automatically tagged with that state's component and cleaned up
 when the state is popped.
 
+::: tip State and input stacks are independent
+State transitions do not automatically capture or release physical input. A state that owns a menu normally keeps a
+stable [`input.Layer`](/tecs2d/input/#input-layers), pushes it alongside `world:pushState`, and pops that exact handle
+alongside `world:popState`. Conversely, input-only overlays such as the runtime debugger do not need to create a game
+state. Keeping the stacks independent lets tooling and transient modals work with any game-state model.
+:::
+
 ## World methods
 
 These methods are available on every `World`.
@@ -201,6 +208,10 @@ local gameEntities = world:query({include = {GameState}})
 
 Snapshots preserve the state stack and the state tags on entities. Loading a snapshot restores which state is on top,
 which paused/disabled tags were present, and which entities belong to each state.
+
+The independent Tecs2D input stack is runtime-only and is not part of a world snapshot. If a restored state should own
+an input layer, reconcile that stable layer after load rather than expecting the state-stack restore to push it
+automatically. See [Input layers and game states](/tecs2d/input/#input-layers-and-game-states).
 
 Runtime handles still need the same treatment as the rest of the snapshot system:
 

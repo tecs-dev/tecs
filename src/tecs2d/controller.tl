@@ -638,7 +638,9 @@ function ControlManager:addController(
 end
 
 function ControlManager:_hasJoystickActivity(joystick: love.joystick.Joystick): boolean
-    local js = input.getJoystick(joystick)
+    -- Device assignment is infrastructure, so it inspects physical activity
+    -- even while a modal input layer owns routed gameplay controls.
+    local js = input.getRawJoystick(joystick)
 
     -- Check for any button activity (we don't care about press vs release)
     if next(js.gamepadButtons) then

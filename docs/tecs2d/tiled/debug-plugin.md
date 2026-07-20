@@ -48,15 +48,18 @@ The debug plugin observes `DebugToggle` events emitted to address 0 (world-level
 This makes it easy to bind to a key press:
 
 ```teal
-local input = require("tecs2d.input")
+local events = require("tecs2d.events")
 local tiled = require("tecs2d.tiled")
 
-world:observe(0, input.KeyPressed, function(e)
+world:observe(0, events.KeyPressed, function(e: events.KeyPressed)
     if e.key == "f3" then
         world:emit(0, tiled.DebugToggle)
     end
 end)
 ```
+
+Because this observes routed input at address `0`, a menu or debugger input layer suppresses the F3 shortcut. Register
+an [`input.raw` observer](/tecs2d/input/#raw-input) only if this diagnostic must remain available through every modal.
 
 ### Supported Shapes
 

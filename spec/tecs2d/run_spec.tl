@@ -28,6 +28,7 @@ local function installTecs2dStubs()
             return key == "escape" and escapePressed
         end,
         update = function() end,
+        bindWorld = function(_world: tecs.World) end,
         enterFixedPhase = function() end,
         exitFixedPhase = function() end,
     }

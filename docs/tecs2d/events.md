@@ -1,5 +1,5 @@
 ---
-description: "Type-safe Tecs event wrappers for Love2D callbacks (MousePressed, KeyPressed, Resize, JoystickAdded) observed at address 0"
+description: "Type-safe LÖVE event wrappers, routed interaction ownership, input capture events, and global lifecycle delivery"
 outline: deep
 ---
 
@@ -10,21 +10,26 @@ system events through the [event system](../tecs/events.md). Love2D events are a
 by Tecs when you use the framework. You can observe these events on the [world](../tecs/world.md) or use
 traditional Love2D callbacks.
 
-::: tip World-level events use address `0`
-Love2D events are world-level events, so use address `0` when observing them.
-See [Events](../tecs/events.md#address-types) for more on address types.
-:::
-
-::: tip Pass the event value, not the type
-`require("tecs2d.events")` and pass the value (e.g. `events.MousePressed`) to
-`observe`/`emit`. Passing `tecs2d.MousePressed` fails to type-check — that name
-is the type, not the value.
+::: tip Address `0` is the base input target
+Address-0 observers receive routed interaction events only when delivery reaches `input.base`. Window, lifecycle, and
+device-connection events remain globally delivered at address `0`. See [Input layers](/tecs2d/input/#input-layers)
+and [Events](../tecs/events.md#address-types).
 :::
 
 ## Event flow
 
-When an event is emitted from Love2D, Tecs emits the event to the Tecs event system and then emits the event to any
-registered `love.*` function. This means you can use both approaches:
+When an interaction arrives from Love2D, Tecs updates polling state, notifies `input.raw`, and emits the event to the
+current top input target. A layer may handle it or explicitly continue with `layer.parent:emit(event)`. With no pushed
+layer, the base target emits to address-0 world observers. Tecs then invokes any registered `love.*` callback.
+
+```text
+physical interaction
+├─ input.raw (always notified when it observes this type)
+└─ current top target
+   └─ parent only after parent:emit(event)
+      └─ ...
+         └─ input.base → world address 0
+```
 
 ```teal
 local events = require("tecs2d.events")
@@ -39,6 +44,26 @@ function love.mousepressed(x, y, button, istouch, presses)
     handleClick(x, y, button)
 end
 ```
+
+Window and device-topology events such as `Resize`, `Focus`, `JoystickAdded`, and `JoystickRemoved` do not participate
+in the input stack. They always reach address-0 observers. `input.raw` is the explicit always-on stream for routed
+interaction events.
+
+Direct `love.*` callbacks are invoked after this flow but remain outside it: an input layer cannot suppress them. Use
+routed Tecs observers for gameplay and modal UI, and direct callbacks only when intentionally global behavior is
+appropriate.
+
+### Routed event families
+
+The routed stream covers:
+
+- `KeyPressed`, `KeyReleased`, and `TextInput`.
+- `MousePressed`, `MouseReleased`, `MouseMoved`, and `WheelMoved`.
+- `TouchPressed`, `TouchMoved`, and `TouchReleased`.
+- `GamepadAxis`, `GamepadPressed`, and `GamepadReleased`.
+- `JoystickPressed`, `JoystickReleased`, and `JoystickHat`.
+- `SensorUpdated`, `JoystickSensorUpdated`, directory/file drops, and drop gestures.
+- `InputCaptureLost` and `InputCaptureGained`, delivered directly to affected targets rather than forwarded.
 
 ## Available events
 
@@ -161,6 +186,21 @@ world:observe(0, events.KeyReleased, function(e: events.KeyReleased)
 end)
 ```
 
+#### TextInput
+
+Triggered when LÖVE produces text according to the active keyboard layout. Use this for text fields rather than
+converting `KeyPressed` values yourself. This is a routed interaction event.
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `text` | `string` | Text entered by the user. |
+
+```teal
+world:observe(0, events.TextInput, function(e: events.TextInput)
+    nameField = nameField .. e.text
+end)
+```
+
 ### Mouse events
 
 #### MousePressed
@@ -203,6 +243,40 @@ world:observe(0, events.MouseReleased, function(e: events.MouseReleased)
 end)
 ```
 
+#### MouseMoved
+
+Triggered when the pointer moves. This is a routed interaction event.
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `x` | `number` | Current mouse x position in pixels. |
+| `y` | `number` | Current mouse y position in pixels. |
+| `dx` | `number` | Horizontal movement since the previous mouse event. |
+| `dy` | `number` | Vertical movement since the previous mouse event. |
+| `istouch` | `boolean` | Whether the motion originated from a touchscreen. |
+
+```teal
+world:observe(0, events.MouseMoved, function(e: events.MouseMoved)
+    updatePointer(e.x, e.y)
+end)
+```
+
+#### WheelMoved
+
+Triggered when the mouse wheel moves. This is a routed interaction event.
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `x` | `number` | Horizontal wheel movement. |
+| `y` | `number` | Vertical wheel movement. |
+| `direction` | `love.mouse.WheelDirection` | LÖVE 12 wheel direction, such as `"standard"` or `"flick"`. |
+
+```teal
+world:observe(0, events.WheelMoved, function(e: events.WheelMoved)
+    zoomBy(e.y)
+end)
+```
+
 ### Joystick events
 
 #### JoystickAdded
@@ -235,6 +309,79 @@ world:observe(0, events.JoystickRemoved, function(e: events.JoystickRemoved)
     if love.joystick.getJoystickCount() == 0 then
         switchToKeyboardControls()
     end
+end)
+```
+
+`JoystickAdded` and `JoystickRemoved` describe device topology and always reach address-0 observers. The interaction
+events below are routed through the active input target.
+
+#### GamepadAxis
+
+Triggered when a standardized gamepad axis changes.
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `joystick` | `love.joystick.Joystick` | Device that produced the input. |
+| `axis` | `love.joystick.GamepadAxis` | Standardized axis name. |
+| `value` | `number` | Current axis value. |
+
+```teal
+world:observe(0, events.GamepadAxis, function(e: events.GamepadAxis)
+    if e.axis == "leftx" then
+        aimX = e.value
+    end
+end)
+```
+
+#### GamepadPressed
+
+Triggered when a standardized gamepad button is pressed.
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `joystick` | `love.joystick.Joystick` | Device that produced the input. |
+| `button` | `love.joystick.GamepadButton` | Standardized button name. |
+
+#### GamepadReleased
+
+Triggered when a standardized gamepad button is released. It has the same `joystick` and `button` properties as
+`GamepadPressed`.
+
+```teal
+world:observe(0, events.GamepadPressed, function(e: events.GamepadPressed)
+    if e.button == "a" then
+        jump()
+    end
+end)
+```
+
+#### JoystickPressed
+
+Triggered when a raw joystick button is pressed.
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `joystick` | `love.joystick.Joystick` | Device that produced the input. |
+| `button` | `number` | Device-specific button index. |
+
+#### JoystickReleased
+
+Triggered when a raw joystick button is released. It has the same `joystick` and numeric `button` properties as
+`JoystickPressed`.
+
+#### JoystickHat
+
+Triggered when a raw joystick hat changes direction.
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `joystick` | `love.joystick.Joystick` | Device that produced the input. |
+| `hat` | `number` | Device-specific hat index. |
+| `direction` | `love.joystick.JoystickHat` | Current direction, such as `"u"`, `"ld"`, or centered `"c"`. |
+
+```teal
+world:observe(0, events.JoystickHat, function(e: events.JoystickHat)
+    updateHat(e.hat, e.direction)
 end)
 ```
 
@@ -277,6 +424,56 @@ world:observe(0, events.FileDropped, function(e: events.FileDropped)
     end
 end)
 ```
+
+### Input ownership events
+
+Input ownership can change in the middle of an interaction. For example, gameplay may receive a mouse press that
+starts a drag, then lose input to a pause menu or debugger before the matching release arrives. Because the new top
+layer intercepts that release, gameplay cannot finish the drag normally and may remain stuck in a transient state.
+
+Capture events give each owner a reliable boundary for that cleanup and restoration:
+
+- On `InputCaptureLost`, cancel partial gestures, drag state, key repeat, text-editing state, hover effects, or pointer
+  capture that should not survive behind a modal.
+- On `InputCaptureGained`, recompute hover and focus, refresh cursor behavior, or restore other UI state that depends on
+  being the active input owner.
+
+Tecs automatically clears pending press/release edges, text, wheel movement, and fixed-step latches when the top owner
+changes. Capture events exist for higher-level state that only the game or UI feature understands.
+
+They are generated by [`input.pushLayer` and `input.popLayer`](/tecs2d/input/#capture-lifecycle), not by a LÖVE
+callback. Each event is sent directly to the target losing or gaining ownership and is never forwarded through the
+stack.
+
+#### InputCaptureLost
+
+Sent to the outgoing top target before capture changes. Use it to abandon interactions that will no longer receive
+their normal completion event.
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `from` | `string` | Name of the target losing capture. |
+| `to` | `string` | Name of the target gaining capture. |
+
+#### InputCaptureGained
+
+Sent to the incoming top target after capture changes. It has the same `from` and `to` properties. Use it to initialize
+or refresh state that should reflect the newly active owner.
+
+```teal
+local input = require("tecs2d.input")
+local pause = input.newLayer("pause")
+
+world:observe(0, events.InputCaptureLost, function(_event: events.InputCaptureLost)
+    dragging = false -- gameplay will not receive the release while covered
+end)
+
+pause:observe(events.InputCaptureGained, function(_event: events.InputCaptureGained)
+    refreshHoveredControl()
+end)
+```
+
+Popping a middle layer emits neither capture event because the top owner remains unchanged.
 
 ### Application events
 

@@ -47,6 +47,10 @@ local controller4 = controlManager:addController(bindings, {
 
 Controller provides automatic gamepad assignment to simplify setup:
 
+Auto-assignment watches raw device activity so connecting or identifying a controller still works while a menu or
+debugger owns routed input. Logical controller bindings remain attached to `input.base` and stay suppressed until
+gameplay regains [input ownership](/tecs2d/input/controller/#input-ownership).
+
 ### When auto=false (default)
 
 - No automatic gamepad assignment

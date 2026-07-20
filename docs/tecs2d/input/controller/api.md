@@ -4,6 +4,11 @@ description: "Controller API reference: ControlManager, Controller methods (isPr
 
 # API Reference
 
+::: tip Routed gameplay input
+All `Controller` query methods read [`input.base`](/tecs2d/input/#targets). While another input layer owns capture,
+digital queries return false and analog queries return zero. See [Input ownership](/tecs2d/input/controller/#input-ownership).
+:::
+
 ## JoystickConfig
 
 The `JoystickConfig` type defines joystick assignment options:

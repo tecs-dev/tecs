@@ -4,13 +4,26 @@ description: "The tecs2d.controller layer for rebindable logical controls, mappi
 
 # Tecs Controller
 
-Tecs Controller provides rebindable controls for Tecs games. It builds on top of Tecs's event-based
+Tecs Controller provides rebindable controls for Tecs games. It builds on Tecs's routed polling
 [input handling system](/tecs2d/input/) to add a layer of configurable controller mappings.
 
 ::: tip Controller == logical input
 Tecs Input handles the *physical* inputs efficiently, while Controller manages the *logical* mapping of those inputs
 to game actions like "jump" and "attack".
 :::
+
+## Input ownership
+
+Controller bindings read the implicit `input.base` target. When a menu, modal, or debugger
+[pushes an input layer](/tecs2d/input/#input-layers), controller queries are suppressed along with direct gameplay
+polling: buttons report up, press/release edges report false, and axes/pairs report zero. They resume when the base
+regains capture, without leaking pending edges from the previous owner.
+
+This means a modal does not need to disable every player-input system individually. Code owned by the modal should use
+its `layer.view` or observe routed events on the layer itself; Controller intentionally remains gameplay-facing.
+
+Gamepad discovery and automatic device assignment still observe raw device activity so controllers can be assigned
+while another layer owns gameplay input. That internal activity does not make logical controls fire through the modal.
 
 ## Quick Start
 

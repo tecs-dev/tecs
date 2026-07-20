@@ -1,4 +1,6 @@
 local table_clear <const> = require("table.clear")
+local tecs <const> = require("tecs")
+local events <const> = require("tecs2d.events")
 
 --- Global input state module for Love2D.
 --- Captures input events from Love2D in an easy to use format.
@@ -165,33 +167,58 @@ local record input
         isKeyDown: function(key: string): boolean
         isKeyPressed: function(key: string): boolean
         isKeyReleased: function(key: string): boolean
+        getTextInput: function(): string
+        getMousePosition: function(): number, number
         isMouseDown: function(button: integer): boolean
         isMousePressed: function(button: integer): boolean
         isMouseReleased: function(button: integer): boolean
         getMouseWheelMovement: function(): number, number, love.mouse.WheelDirection
+        getJoystick: function(joystick: love.joystick.Joystick): JoystickInput
     end
 
-    --- The game's own input view. The module-level input.isKey*/isMouse*
-    --- delegate to this; it reports nothing while any UI layer is pushed on top.
-    base: View
+    --- One stable target in the intrusive input stack. Physical events reach
+    --- only the top target. An observer explicitly forwards an unconsumed event
+    --- with `layer.parent:emit(event)`.
+    record Layer
+        name: string
+        view: View
+        parent: Layer
+        _child: Layer
+        _bus: tecs.MessageBus
+        _active: boolean
+        _kind: string
+        _lastDispatchId: integer
 
-    --- The stack of pushed UI layers: a dense, 1-based array (never a hash). A
-    --- modal UI reads its own input through stack[token], and while it is on top
-    --- the game (base) and lower layers report nothing, so their hotkeys do not
-    --- fire. Forwarding to lower layers is intentionally not supported yet.
-    stack: {View}
+        observe: function<E is tecs.Event>(self, event: E, callback: function(E), id?: string)
+        stopObserving: function<E is tecs.Event>(self, event: E, callback: function(E) | string)
+        hasObservers: function<E is tecs.Event>(self, event: E): boolean
+        emit: function<E is tecs.Event>(self, event: E)
+        isActive: function(self): boolean
+        isTop: function(self): boolean
+    end
 
-    --- Push an input layer, suppressing every layer below it. Returns the token
-    --- to read through (input.stack[token]) and to pass to popStack.
-    pushStack: function(): integer
+    --- The game's implicit bottom target. Existing world observers at address
+    --- zero receive routed input when delivery reaches this target.
+    base: Layer
 
-    --- Pop the top input layer. Only the top may be popped; token must be the
-    --- value returned by the matching pushStack.
-    popStack: function(token: integer)
+    --- An always-live target for tooling, recording, and diagnostics. Raw
+    --- observers run before the routed top target and cannot be intercepted.
+    raw: Layer
 
-    --- Number of layers currently pushed (0 = only the game). The top layer's
-    --- token equals this value.
-    stackDepth: function(): integer
+    --- Create an inactive reusable input layer.
+    newLayer: function(name: string): Layer
+
+    --- Push a layer above the current top target.
+    pushLayer: function(layer: Layer)
+
+    --- Pop a specific active layer, including one below the current top.
+    popLayer: function(layer: Layer): boolean
+
+    --- Return the current routed target (base when no layer is pushed).
+    topLayer: function(): Layer
+
+    --- Number of pushed layers, excluding the implicit base target.
+    layerCount: function(): integer
 
     --- Check if a mouse button is down.
     ---
@@ -220,6 +247,12 @@ local record input
     --- @return direction The wheel direction ("flick" or "standard").
     getMouseWheelMovement: function(): number, number, love.mouse.WheelDirection
 
+    --- Text entered this frame through the base input target.
+    getTextInput: function(): string
+
+    --- Mouse position through the base input target.
+    getMousePosition: function(): number, number
+
     --- Update input states between frames (clears frame events).
     update: function()
 
@@ -236,6 +269,15 @@ local record input
     --- @param joystick The joystick to get the input state for.
     --- @return The input state for the joystick.
     getJoystick: function(joystick: love.joystick.Joystick): JoystickInput
+
+    --- Internal raw joystick state used by LÖVE handlers and device management.
+    getRawJoystick: function(joystick: love.joystick.Joystick): JoystickInput
+
+    --- Bind the world used by the base event target.
+    bindWorld: function(world: tecs.World)
+
+    --- Route one LÖVE interaction to raw observers and the current top target.
+    route: function<E is tecs.Event>(world: tecs.World, event: E, ...: any)
 
     --- Mark latched events as dirty so they'll be cleared after the next fixed update.
     markLatchedDirty: function()
@@ -271,6 +313,8 @@ local inFixedPhase = false
 -- Module functions
 -------------------------------------------------------------------------------
 
+local emptyJoystickInput: input.JoystickInput
+
 -- The real input, read by whichever layer is on top of the stack.
 local realView: input.View = {
     isKeyDown = function(key: string): boolean
@@ -283,6 +327,12 @@ local realView: input.View = {
     isKeyReleased = function(key: string): boolean
         if inFixedPhase then return input.keysLatchedReleased[key] == true end
         return input.keysReleased[key] == true
+    end,
+    getTextInput = function(): string
+        return input.textInput
+    end,
+    getMousePosition = function(): number, number
+        return input.mouseX, input.mouseY
     end,
     isMouseDown = function(button: integer): boolean
         return input.mouseButtons[button] == true
@@ -301,6 +351,9 @@ local realView: input.View = {
         end
         return input.mouseWheelMoved[1], input.mouseWheelMoved[2], input.mouseWheelDirection
     end,
+    getJoystick = function(joystick: love.joystick.Joystick): input.JoystickInput
+        return input.getRawJoystick(joystick)
+    end,
 }
 
 -- The suppressed view: any layer that is not on top (and the game while a modal
@@ -309,20 +362,45 @@ local emptyView: input.View = {
     isKeyDown = function(_key: string): boolean return false end,
     isKeyPressed = function(_key: string): boolean return false end,
     isKeyReleased = function(_key: string): boolean return false end,
+    getTextInput = function(): string return "" end,
+    getMousePosition = function(): number, number return 0, 0 end,
     isMouseDown = function(_button: integer): boolean return false end,
     isMousePressed = function(_button: integer): boolean return false end,
     isMouseReleased = function(_button: integer): boolean return false end,
     getMouseWheelMovement = function(): number, number, love.mouse.WheelDirection
         return 0, 0, "standard"
     end,
+    getJoystick = function(_joystick: love.joystick.Joystick): input.JoystickInput
+        return emptyJoystickInput
+    end,
 }
 
--- Exactly one view points at realView: the top layer, or the game base when the
--- stack is empty. Everything else points at emptyView. push/pop just repoint,
--- no allocation. stack stays a dense 1-based array (top-only pop never holes it).
-input.base = realView
-input.stack = {}
-local stackTop = 0
+local LAYER_MT <const>: metatable<input.Layer> = { __index = input.Layer }
+local boundWorld: tecs.World = nil
+local top: input.Layer
+local pushedCount = 0
+local nextDispatchId = 0
+local dispatchDepth = 0
+local dispatchEvents: {tecs.Event} = {}
+local dispatchWorlds: {tecs.World} = {}
+local dispatchIds: {integer} = {}
+
+local function makeLayer(name: string, kind: string, view: input.View): input.Layer
+    return setmetatable({
+        name = name,
+        view = view,
+        parent = nil,
+        _child = nil,
+        _bus = tecs.newMessageBus(),
+        _active = kind ~= "layer",
+        _kind = kind,
+        _lastDispatchId = 0,
+    }, LAYER_MT)
+end
+
+input.base = makeLayer("base", "base", realView)
+input.raw = makeLayer("raw", "raw", realView)
+top = input.base
 
 -- Drop pending edge (pressed/released) and latched state at a capture boundary,
 -- so key/button/wheel/text that happened for one layer never leaks to the layer
@@ -357,63 +435,193 @@ local function clearEdges()
     latchedDirty = false
 end
 
-function input.pushStack(): integer
-    if stackTop == 0 then
-        input.base = emptyView
+function input.Layer:observe<E is tecs.Event>(eventType: E, callback: function(E), id?: string)
+    if self._kind == "base" then
+        if not boundWorld then error("input.base is not bound to a world yet", 2) end
+        boundWorld:observe(0, eventType, callback, id)
     else
-        input.stack[stackTop] = emptyView
+        self._bus:observe(0, eventType, callback, id)
     end
-    stackTop = stackTop + 1
-    input.stack[stackTop] = realView
-    clearEdges()
-    return stackTop
 end
 
-function input.popStack(token: integer)
-    if token ~= stackTop then
-        error("input.popStack: only the top layer may be popped (top=" ..
-            tostring(stackTop) .. ", got=" .. tostring(token) .. ")")
-    end
-    input.stack[stackTop] = nil
-    stackTop = stackTop - 1
-    if stackTop == 0 then
-        input.base = realView
+function input.Layer:stopObserving<E is tecs.Event>(eventType: E, callback: function(E) | string)
+    if self._kind == "base" then
+        if not boundWorld then error("input.base is not bound to a world yet", 2) end
+        boundWorld:stopObserving(0, eventType, callback)
     else
-        input.stack[stackTop] = realView
+        self._bus:stopObserving(0, eventType, callback)
     end
-    clearEdges()
 end
 
-function input.stackDepth(): integer
-    return stackTop
+function input.Layer:hasObservers<E is tecs.Event>(eventType: E): boolean
+    if self._kind == "base" then
+        return boundWorld ~= nil and boundWorld:hasObservers(0, eventType)
+    end
+    return self._bus:hasObservers(0, eventType)
+end
+
+function input.Layer:emit<E is tecs.Event>(event: E)
+    local depth <const> = dispatchDepth
+    if depth == 0 or dispatchEvents[depth] ~= event then
+        error("input layer targets may only emit the input event currently being routed", 2)
+    end
+
+    local dispatchId <const> = dispatchIds[depth]
+    if self._lastDispatchId == dispatchId then return end
+    self._lastDispatchId = dispatchId
+
+    if self._kind == "base" then
+        dispatchWorlds[depth]:emit(0, event)
+    elseif self._bus:hasObservers(0, event) then
+        self._bus:emit(0, event)
+    end
+end
+
+function input.Layer:isActive(): boolean
+    return self._active
+end
+
+function input.Layer:isTop(): boolean
+    return self == top
+end
+
+function input.newLayer(name: string): input.Layer
+    if name == "" then error("input.newLayer requires a non-empty name", 2) end
+    return makeLayer(name, "layer", emptyView)
+end
+
+local function emitCapture(target: input.Layer, eventType: tecs.Event, from: string, to: string)
+    if target._kind == "base" then
+        if boundWorld then boundWorld:emit(0, eventType, from, to) end
+    elseif target._bus:hasObservers(0, eventType) then
+        local constructor = eventType as any as function(...: any): tecs.Event
+        target._bus:emit(0, constructor(from, to))
+    end
+end
+
+function input.pushLayer(layer: input.Layer)
+    if layer._kind ~= "layer" then error("input.pushLayer expects a user input layer", 2) end
+    if layer._active then error("input.pushLayer: layer is already active: " .. layer.name, 2) end
+
+    local outgoing <const> = top
+    emitCapture(outgoing, events.InputCaptureLost, outgoing.name, layer.name)
+    outgoing.view = emptyView
+
+    layer.parent = outgoing
+    layer._child = nil
+    outgoing._child = layer
+    layer._active = true
+    layer.view = realView
+    top = layer
+    pushedCount = pushedCount + 1
+    clearEdges()
+    emitCapture(layer, events.InputCaptureGained, outgoing.name, layer.name)
+end
+
+function input.popLayer(layer: input.Layer): boolean
+    if layer._kind ~= "layer" or not layer._active then return false end
+
+    local wasTop <const> = layer == top
+    local parent <const> = layer.parent
+    local child <const> = layer._child
+    if wasTop then
+        emitCapture(layer, events.InputCaptureLost, layer.name, parent.name)
+    end
+
+    parent._child = child
+    if child then child.parent = parent end
+    layer._child = nil
+    layer._active = false
+    layer.view = emptyView
+    pushedCount = pushedCount - 1
+
+    if wasTop then
+        top = parent
+        parent.view = realView
+        clearEdges()
+        emitCapture(parent, events.InputCaptureGained, layer.name, parent.name)
+    end
+    return true
+end
+
+function input.topLayer(): input.Layer
+    return top
+end
+
+function input.layerCount(): integer
+    return pushedCount
+end
+
+function input.bindWorld(world: tecs.World)
+    boundWorld = world
+end
+
+function input.route<E is tecs.Event>(world: tecs.World, eventType: E, ...: any)
+    boundWorld = world
+    local rawListening <const> = input.raw._bus:hasObservers(0, eventType)
+    local routedListening <const> = top:hasObservers(eventType)
+    if not rawListening and not routedListening then return end
+
+    -- Preserve World's lazy pooled constructor path for the overwhelmingly
+    -- common case: gameplay is top and no always-on raw observer needs the
+    -- same instance. This adds no event allocation beyond the pre-layer API.
+    if top == input.base and not rawListening then
+        world:emit(0, eventType, ...)
+        return
+    end
+
+    local constructor = eventType as any as function(...: any): E
+    local event <const> = constructor(...) as E
+    nextDispatchId = nextDispatchId + 1
+    dispatchDepth = dispatchDepth + 1
+    local depth <const> = dispatchDepth
+    dispatchEvents[depth] = event
+    dispatchWorlds[depth] = world
+    dispatchIds[depth] = nextDispatchId
+
+    if rawListening then input.raw:emit(event) end
+    if routedListening then top:emit(event) end
+
+    dispatchEvents[depth] = nil
+    dispatchWorlds[depth] = nil
+    dispatchIds[depth] = nil
+    dispatchDepth = depth - 1
 end
 
 function input.isKeyDown(key: string): boolean
-    return input.base.isKeyDown(key)
+    return input.base.view.isKeyDown(key)
 end
 
 function input.isKeyPressed(key: string): boolean
-    return input.base.isKeyPressed(key)
+    return input.base.view.isKeyPressed(key)
 end
 
 function input.isKeyReleased(key: string): boolean
-    return input.base.isKeyReleased(key)
+    return input.base.view.isKeyReleased(key)
 end
 
 function input.isMouseDown(button: integer): boolean
-    return input.base.isMouseDown(button)
+    return input.base.view.isMouseDown(button)
 end
 
 function input.isMousePressed(button: integer): boolean
-    return input.base.isMousePressed(button)
+    return input.base.view.isMousePressed(button)
 end
 
 function input.isMouseReleased(button: integer): boolean
-    return input.base.isMouseReleased(button)
+    return input.base.view.isMouseReleased(button)
 end
 
 function input.getMouseWheelMovement(): number, number, love.mouse.WheelDirection
-    return input.base.getMouseWheelMovement()
+    return input.base.view.getMouseWheelMovement()
+end
+
+function input.getTextInput(): string
+    return input.base.view.getTextInput()
+end
+
+function input.getMousePosition(): number, number
+    return input.base.view.getMousePosition()
 end
 
 function input.update()
@@ -466,6 +674,21 @@ end
 
 local JOYSTICK_INPUT_MT <const>: metatable<input.JoystickInput> = { __index = input.JoystickInput }
 
+emptyJoystickInput = setmetatable({
+    gamepadAxis = {},
+    joystickHat = {},
+    gamepadButtons = {},
+    gamepadPressed = {},
+    gamepadReleased = {},
+    gamepadLatchedPressed = {},
+    gamepadLatchedReleased = {},
+    joystickButtons = {},
+    joystickPressed = {},
+    joystickReleased = {},
+    joystickLatchedPressed = {},
+    joystickLatchedReleased = {},
+}, JOYSTICK_INPUT_MT)
+
 function input.JoystickInput:isGamepadButtonDown(button: love.joystick.GamepadButton): boolean
     return self.gamepadButtons[button] == true
 end
@@ -506,7 +729,7 @@ function input.JoystickInput:isJoystickButtonReleased(button: number): boolean
     end
 end
 
-function input.getJoystick(joystick: love.joystick.Joystick): input.JoystickInput
+function input.getRawJoystick(joystick: love.joystick.Joystick): input.JoystickInput
     local result = input.joysticks[joystick]
     if not result then
         result = {
@@ -527,6 +750,10 @@ function input.getJoystick(joystick: love.joystick.Joystick): input.JoystickInpu
         input.joysticks[joystick] = result
     end
     return result
+end
+
+function input.getJoystick(joystick: love.joystick.Joystick): input.JoystickInput
+    return input.base.view.getJoystick(joystick)
 end
 
 function input.markLatchedDirty()

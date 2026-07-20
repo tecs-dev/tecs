@@ -971,15 +971,50 @@ describe("in-game debugger overlay", function()
         luassert.is_true(waitStats(false) == true, "Ctrl+. did not hide the stats HUD")
     end)
 
-    it("the toggle works while a game modal holds the input stack", function()
-        fixture.runLua(app, "_G.tok = require('tecs2d.input').pushStack() return true")
+    it("the toggle works while a game modal owns an input layer", function()
+        fixture.runLua(app, [[
+            local input = require("tecs2d.input")
+            _G.testInputLayer = input.newLayer("test-modal")
+            input.pushLayer(_G.testInputLayer)
+            return true
+        ]])
         tap()
         luassert.is_true(waitOpen(true) == true,
             "Ctrl+/ did not open the debugger over a game input layer")
         tap()
         luassert.is_true(waitOpen(false) == true,
             "Ctrl+/ did not close the debugger over a game input layer")
-        fixture.runLua(app, "require('tecs2d.input').popStack(_G.tok) return true")
+        fixture.runLua(app, [[
+            require("tecs2d.input").popLayer(_G.testInputLayer)
+            _G.testInputLayer = nil
+            return true
+        ]])
+    end)
+
+    it("stays top when a game layer beneath it is popped externally", function()
+        fixture.runLua(app, [[
+            local input = require("tecs2d.input")
+            _G.testInputLayer = input.newLayer("pause-menu")
+            input.pushLayer(_G.testInputLayer)
+            return true
+        ]])
+        tap()
+        luassert.is_true(waitOpen(true) == true, "debugger did not open over pause-menu")
+
+        local values = fixture.runLua(app, [[
+            local input = require("tecs2d.input")
+            local popped = input.popLayer(_G.testInputLayer)
+            _G.testInputLayer = nil
+            return popped, input.topLayer().name, input.topLayer().parent.name,
+                input.layerCount()
+        ]])
+        luassert.equals("true", values[1])
+        luassert.equals("debugger", values[2])
+        luassert.equals("base", values[3])
+        luassert.equals("1", values[4])
+
+        tap()
+        luassert.is_true(waitOpen(false) == true, "debugger did not close after parent pop")
     end)
 
     it("down walks the command history forward", function()

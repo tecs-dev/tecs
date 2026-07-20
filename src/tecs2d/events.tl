@@ -51,6 +51,12 @@ local record events
         ): KeyReleased
     end
 
+    --- Text entered through the active input target.
+    record TextInput is tecs.Event
+        text: string
+        metamethod __call: function(self, text: string): TextInput
+    end
+
     ---------------------------------------------------------------------------
     -- Mouse events
     ---------------------------------------------------------------------------
@@ -105,6 +111,28 @@ local record events
         ): MouseReleased
     end
 
+    --- Mouse motion routed through the active input target.
+    record MouseMoved is tecs.Event
+        x: number
+        y: number
+        dx: number
+        dy: number
+        istouch: boolean
+        metamethod __call: function(
+            self, x: number, y: number, dx: number, dy: number, istouch: boolean
+        ): MouseMoved
+    end
+
+    --- Mouse wheel motion routed through the active input target.
+    record WheelMoved is tecs.Event
+        x: number
+        y: number
+        direction: love.mouse.WheelDirection
+        metamethod __call: function(
+            self, x: number, y: number, direction: love.mouse.WheelDirection
+        ): WheelMoved
+    end
+
     ---------------------------------------------------------------------------
     -- Joystick events
     ---------------------------------------------------------------------------
@@ -125,6 +153,58 @@ local record events
         joystick: love.joystick.Joystick
 
         metamethod __call: function(self, joystick: love.joystick.Joystick): JoystickRemoved
+    end
+
+    --- Gamepad axis motion routed through the active input target.
+    record GamepadAxis is tecs.Event
+        joystick: love.joystick.Joystick
+        axis: love.joystick.GamepadAxis
+        value: number
+        metamethod __call: function(
+            self, joystick: love.joystick.Joystick, axis: love.joystick.GamepadAxis, value: number
+        ): GamepadAxis
+    end
+
+    --- Gamepad button press routed through the active input target.
+    record GamepadPressed is tecs.Event
+        joystick: love.joystick.Joystick
+        button: love.joystick.GamepadButton
+        metamethod __call: function(
+            self, joystick: love.joystick.Joystick, button: love.joystick.GamepadButton
+        ): GamepadPressed
+    end
+
+    --- Gamepad button release routed through the active input target.
+    record GamepadReleased is tecs.Event
+        joystick: love.joystick.Joystick
+        button: love.joystick.GamepadButton
+        metamethod __call: function(
+            self, joystick: love.joystick.Joystick, button: love.joystick.GamepadButton
+        ): GamepadReleased
+    end
+
+    --- Raw joystick button press routed through the active input target.
+    record JoystickPressed is tecs.Event
+        joystick: love.joystick.Joystick
+        button: number
+        metamethod __call: function(self, joystick: love.joystick.Joystick, button: number): JoystickPressed
+    end
+
+    --- Raw joystick button release routed through the active input target.
+    record JoystickReleased is tecs.Event
+        joystick: love.joystick.Joystick
+        button: number
+        metamethod __call: function(self, joystick: love.joystick.Joystick, button: number): JoystickReleased
+    end
+
+    --- Joystick hat motion routed through the active input target.
+    record JoystickHat is tecs.Event
+        joystick: love.joystick.Joystick
+        hat: number
+        direction: love.joystick.JoystickHat
+        metamethod __call: function(
+            self, joystick: love.joystick.Joystick, hat: number, direction: love.joystick.JoystickHat
+        ): JoystickHat
     end
 
     ---------------------------------------------------------------------------
@@ -211,6 +291,20 @@ local record events
     ---------------------------------------------------------------------------
     -- System events
     ---------------------------------------------------------------------------
+
+    --- Sent directly to the target that is losing routed input ownership.
+    record InputCaptureLost is tecs.Event
+        from: string
+        to: string
+        metamethod __call: function(self, from: string, to: string): InputCaptureLost
+    end
+
+    --- Sent directly to the target that is gaining routed input ownership.
+    record InputCaptureGained is tecs.Event
+        from: string
+        to: string
+        metamethod __call: function(self, from: string, to: string): InputCaptureGained
+    end
 
     --- Event triggered when the system locale changes.
     --- @see https://love2d.org/wiki/love.localechanged
@@ -434,6 +528,11 @@ events.KeyReleased.init = function(e: events.KeyReleased, key: love.keyboard.Key
 end
 tecs.newEvent(events.KeyReleased)
 
+events.TextInput.init = function(e: events.TextInput, text: string)
+    e.text = text
+end
+tecs.newEvent(events.TextInput)
+
 tecs.newFFIEvent(events.MousePressed, {
     {"x", "float"},
     {"y", "float"},
@@ -449,6 +548,21 @@ tecs.newFFIEvent(events.MouseReleased, {
     {"istouch", "bool"},
     {"presses", "int32_t"}
 }, "Love2D_MouseReleased")
+
+tecs.newFFIEvent(events.MouseMoved, {
+    {"x", "float"},
+    {"y", "float"},
+    {"dx", "float"},
+    {"dy", "float"},
+    {"istouch", "bool"}
+}, "Love2D_MouseMoved")
+
+events.WheelMoved.init = function(
+    e: events.WheelMoved, x: number, y: number, direction: love.mouse.WheelDirection
+)
+    e.x, e.y, e.direction = x, y, direction
+end
+tecs.newEvent(events.WheelMoved)
 
 tecs.newFFIEvent(events.Focus, {
     {"visible", "bool"}
@@ -476,6 +590,54 @@ events.JoystickRemoved.init = function(e: events.JoystickRemoved, joystick: love
     e.joystick = joystick
 end
 tecs.newEvent(events.JoystickRemoved)
+
+events.GamepadAxis.init = function(
+    e: events.GamepadAxis,
+    joystick: love.joystick.Joystick,
+    axis: love.joystick.GamepadAxis,
+    value: number
+)
+    e.joystick, e.axis, e.value = joystick, axis, value
+end
+tecs.newEvent(events.GamepadAxis)
+
+events.GamepadPressed.init = function(
+    e: events.GamepadPressed, joystick: love.joystick.Joystick, button: love.joystick.GamepadButton
+)
+    e.joystick, e.button = joystick, button
+end
+tecs.newEvent(events.GamepadPressed)
+
+events.GamepadReleased.init = function(
+    e: events.GamepadReleased, joystick: love.joystick.Joystick, button: love.joystick.GamepadButton
+)
+    e.joystick, e.button = joystick, button
+end
+tecs.newEvent(events.GamepadReleased)
+
+events.JoystickPressed.init = function(
+    e: events.JoystickPressed, joystick: love.joystick.Joystick, button: number
+)
+    e.joystick, e.button = joystick, button
+end
+tecs.newEvent(events.JoystickPressed)
+
+events.JoystickReleased.init = function(
+    e: events.JoystickReleased, joystick: love.joystick.Joystick, button: number
+)
+    e.joystick, e.button = joystick, button
+end
+tecs.newEvent(events.JoystickReleased)
+
+events.JoystickHat.init = function(
+    e: events.JoystickHat,
+    joystick: love.joystick.Joystick,
+    hat: number,
+    direction: love.joystick.JoystickHat
+)
+    e.joystick, e.hat, e.direction = joystick, hat, direction
+end
+tecs.newEvent(events.JoystickHat)
 
 events.DirectoryDropped.init = function(e: events.DirectoryDropped, path: string, x: number, y: number)
     e.path, e.x, e.y = path, x, y
@@ -514,6 +676,16 @@ tecs.newFFIEvent(events.DropCompleted, {
 }, "Love2D_DropCompleted")
 
 tecs.newFFIEvent(events.AudioDisconnected, {}, "Love2D_AudioDisconnected")
+
+events.InputCaptureLost.init = function(e: events.InputCaptureLost, from: string, to: string)
+    e.from, e.to = from, to
+end
+tecs.newEvent(events.InputCaptureLost)
+
+events.InputCaptureGained.init = function(e: events.InputCaptureGained, from: string, to: string)
+    e.from, e.to = from, to
+end
+tecs.newEvent(events.InputCaptureGained)
 
 events.SensorUpdated.init = function(
     e: events.SensorUpdated, sensorType: love.sensor.SensorType, x: number, y: number, z: number

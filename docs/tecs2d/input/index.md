@@ -1,5 +1,5 @@
 ---
-description: "Low-level tecs2d.input queries for keyboard, mouse, and gamepad state plus the latch-based input model"
+description: "Polling, routed events, input layers, capture ownership, and latch-based keyboard, mouse, and gamepad input"
 outline: deep
 ---
 
@@ -59,7 +59,7 @@ end
 
 ### Text input
 
-For text entry (chat boxes, name fields, etc.), use the `textInput` field which captures actual typed characters with
+For text entry (chat boxes, name fields, etc.), use `getTextInput`, which captures actual typed characters with
 proper keyboard layout handling:
 
 ```teal
@@ -67,7 +67,7 @@ local tecs2d = require("tecs2d")
 local input = require("tecs2d.input")
 
 -- Get text typed this frame
-local text = input.textInput
+local text = input.getTextInput()
 if text ~= "" then
     chatBox:appendText(text)
 end
@@ -78,7 +78,7 @@ world:addSystem({
     run = function()
         if activeTextField then
             -- Append typed text
-            activeTextField.text = activeTextField.text .. input.textInput
+            activeTextField.text = activeTextField.text .. input.getTextInput()
 
             -- Handle backspace
             if input.isKeyPressed("backspace") then
@@ -99,7 +99,7 @@ You can get the current mouse X and Y position using `input`:
 local tecs2d = require("tecs2d")
 local input = require("tecs2d.input")
 
-local x, y = input.mouseX, input.mouseY
+local x, y = input.getMousePosition()
 ```
 
 You can check if the mouse wheel was moved using `getMouseWheelMovement()`:
@@ -109,13 +109,6 @@ local dx, dy = input.getMouseWheelMovement()
 if dy ~= 0 then
     zoom = zoom + dy * 0.1
 end
-```
-
-Or access the wheel movement array directly:
-
-```teal
-local wheelX = input.mouseWheelMoved[1]
-local wheelY = input.mouseWheelMoved[2]
 ```
 
 You can check mouse button states:
@@ -151,7 +144,8 @@ local tecs2d = require("tecs2d")
 local input = require("tecs2d.input")
 
 -- Iterate through connected joysticks
-for joystick, joystickInput in pairs(input.joysticks) do
+for joystick in pairs(input.joysticks) do
+    local joystickInput = input.getJoystick(joystick)
     -- Check gamepad buttons (using standard names)
     if joystickInput:isGamepadButtonPressed("a") then
         player:jump()
@@ -179,25 +173,261 @@ for joystick, joystickInput in pairs(input.joysticks) do
 end
 ```
 
+## Input layers
+
+Input layers decide who owns physical interaction without changing the world's
+[game-state stack](/tecs/states). The implicit `input.base` target represents normal gameplay. A pushed layer receives
+polling and routed events while the base and lower layers are suppressed:
+
+```teal
+local input = require("tecs2d.input")
+
+local pause = input.newLayer("pause")
+input.pushLayer(pause)
+
+if pause.view.isKeyPressed("escape") then
+    input.popLayer(pause)
+end
+```
+
+The module-level polling functions (`input.isKeyPressed`, `input.getMousePosition`, `input.getJoystick`, and the other
+queries above) read `input.base.view`. Existing gameplay therefore participates in routing without being rewritten.
+Code owned by a pushed layer reads that layer's `view` instead.
+
+Only the current top target has a live view. Suppressed views report no keys or buttons, empty text, zero wheel motion,
+mouse position `(0, 0)`, and an empty joystick state. Physical state is still recorded internally, so the correct held
+state becomes visible to whichever target owns input after a capture change.
+
+### Targets
+
+| Target | Purpose | Polling | Routed events |
+| --- | --- | --- | --- |
+| `input.base` | Implicit bottom target for ordinary gameplay | Live only when it is top | Delegates to world observers at address `0` |
+| `input.newLayer(name)` | Stable, reusable target for a menu, modal, console, or tool | Live only while it is top | Uses observers registered directly on the layer |
+| `input.raw` | Always-on target for framework shortcuts, recording, and diagnostics | Always live | Runs before the routed top target and cannot be intercepted |
+
+`input.base` and `input.raw` are permanent targets; do not push or pop them.
+
+### Polling view API
+
+`input.View` exposes the same routed polling surface for every target:
+
+| Method | Live result |
+| --- | --- |
+| `view.isKeyDown(key)` | Whether the key is physically held. |
+| `view.isKeyPressed(key)` | Whether the key gained its pressed edge this frame or fixed-step latch. |
+| `view.isKeyReleased(key)` | Whether the key gained its released edge this frame or fixed-step latch. |
+| `view.getTextInput()` | Text entered this frame. |
+| `view.getMousePosition()` | Current mouse `x, y`. |
+| `view.isMouseDown(button)` | Whether the mouse button is physically held. |
+| `view.isMousePressed(button)` | Whether the mouse button gained its pressed edge. |
+| `view.isMouseReleased(button)` | Whether the mouse button gained its released edge. |
+| `view.getMouseWheelMovement()` | Wheel `dx, dy, direction` accumulated for this frame or fixed-step latch. |
+| `view.getJoystick(joystick)` | Routed `JoystickInput` for gamepad axes, hats, and button queries. |
+
+The module-level keyboard, mouse, wheel, text, and joystick functions have the same signatures and delegate to
+`input.base.view`. `input.joysticks` is the current device-to-state map; iterate its keys for connected devices and use
+`input.getJoystick(joystick)` to read routed gameplay state.
+
+### Stack API
+
+#### `input.newLayer`
+
+Creates an inactive, reusable layer. Names identify owners in capture lifecycle events and must not be empty.
+
+```teal
+function input.newLayer(name: string): input.Layer
+```
+
+Creating a layer does not activate it or change input ownership. Register observers once and reuse the same handle
+across repeated opens and closes. Popping a layer does not remove its observers; use `stopObserving` when the
+subscription itself should end.
+
+#### `input.pushLayer`
+
+Pushes an inactive user layer above the current top target.
+
+```teal
+function input.pushLayer(layer: input.Layer)
+```
+
+Pushing an already-active layer, `input.base`, or `input.raw` is an error. On success, the old top loses capture, the
+new layer becomes live, pending edge state is cleared, and the new top gains capture.
+
+#### `input.popLayer`
+
+Pops a specific layer by handle, including a layer below the current top.
+
+```teal
+function input.popLayer(layer: input.Layer): boolean
+```
+
+It returns `true` when an active user layer was popped and `false` for an inactive layer, `input.base`, or `input.raw`.
+Popping the top transfers capture to its parent. Popping a middle layer rewires its child directly to its parent without
+disturbing the current owner or emitting capture events. This lets an external command close a pause menu safely while
+the debugger remains above it.
+
+#### Inspecting the stack
+
+```teal
+local owner = input.topLayer()   -- input.base when no user layer is active
+local count = input.layerCount() -- excludes input.base and input.raw
+```
+
+Use `layer:isActive()` when cleanup may run more than once, and `layer:isTop()` when behavior depends on current
+ownership. Prefer keeping the stable layer handle over searching by its diagnostic `name`.
+
+### Layer API
+
+| Member | Description |
+| --- | --- |
+| `layer.name` | Diagnostic name supplied to `newLayer`. |
+| `layer.view` | Polling view for this owner; live only while the layer is top. |
+| `layer.parent` | Next lower routed target while the layer is active. Use it for explicit forwarding. |
+| `layer:observe(Event, callback, id?)` | Subscribe without changing the `function(event)` observer signature. The optional ID supports named removal. |
+| `layer:stopObserving(Event, callbackOrId)` | Unsubscribe the callback or named observer. |
+| `layer:hasObservers(Event)` | Report whether this target listens for the event type. |
+| `layer:emit(event)` | Forward the event currently being routed to this target. It cannot emit an unrelated or newly constructed event. |
+| `layer:isActive()` | Whether the user layer is currently in the stack. `input.base` and `input.raw` are always active. |
+| `layer:isTop()` | Whether this target currently owns routed and polled input. |
+
+The router checks only `input.raw` and the current top target before constructing an event. With no relevant observers,
+it returns without allocating an event or walking lower layers. Parents are reached only when an observer explicitly
+forwards.
+
+### Event interception and forwarding
+
+Physical input is emitted only to the top target. An observer consumes an event by handling it and doing nothing else.
+To pass the same event down, explicitly emit it to the layer's current parent:
+
+```teal
+local events = require("tecs2d.events")
+local hud = input.newLayer("hud")
+
+hud:observe(events.MousePressed, function(event: events.MousePressed)
+    if hitHud(event.x, event.y) then
+        activateHud(event.x, event.y)
+        return -- consumed
+    end
+
+    hud.parent:emit(event) -- offer the same event to the next target
+end)
+
+input.pushLayer(hud)
+```
+
+Forwarding is explicit: there is no automatic bubbling and observer signatures remain `function(event)`. A routing
+observer should forward at most once and should forward complete press/move/release sequences when a parent owns a
+gesture. Each target is protected against receiving the same physical event twice.
+
+An observer may also close its own layer and continue the same event. Capture the parent first because the layer is no
+longer active after `popLayer`:
+
+```teal
+hud:observe(events.KeyPressed, function(event: events.KeyPressed)
+    if event.key == "escape" then
+        local parent = hud.parent
+        input.popLayer(hud)
+        parent:emit(event)
+    end
+end)
+```
+
+`emit` is synchronous and accepts only the exact event currently being routed. A target receives a physical event at
+most once even if more than one observer tries to forward it.
+
+### Capture lifecycle
+
+`InputCaptureLost` and `InputCaptureGained` are sent directly to the affected targets rather than routed through the
+stack:
+
+```teal
+pause:observe(events.InputCaptureLost, function(event: events.InputCaptureLost)
+    cancelPendingGesture(event.to)
+end)
+```
+
+Both events contain `from` and `to` layer names. A top push sends `Lost` to the outgoing target before `Gained` to the
+incoming target. A top pop does the same in reverse. A middle pop emits neither event because the top owner did not
+change.
+
+Pending press/release edges, text, wheel movement, and their fixed-step latches are cleared at a top-owner boundary so
+input intended for one owner does not leak into the next. Physically held keyboard, mouse, and joystick state remains
+current.
+
+### Input layers and game states
+
+The two stacks are deliberately independent:
+
+- `world:pushState` and `world:popState` manage ECS ownership and entity lifecycle; they do not change input capture.
+- `input.pushLayer` and `input.popLayer` manage physical input ownership; they do not pause systems, tag entities, or
+  create a game state.
+- A pause screen normally uses both stacks, while a transient confirmation dialog may need only an input layer.
+- The runtime debugger pushes its own input layer and separately holds the freeze controller. It does not push a game
+  state, so it can open above any game's state model.
+
+When a feature uses both, retain and pop its exact input-layer handle during the same lifecycle that pushes and pops
+the game state:
+
+```teal
+local pauseInput = input.newLayer("pause")
+
+local function openPause()
+    world:pushState("pause")
+    input.pushLayer(pauseInput)
+end
+
+local function closePause()
+    input.popLayer(pauseInput)
+    world:popState()
+end
+```
+
+Input layers and their observer callbacks are runtime handles, not world snapshot data. Loading a snapshot does not
+rewind or reconstruct the input stack. If restored game state implies that a modal should own input, recreate or
+reconcile its layer from a snapshot handler, `FinishSnapshotLoad`, or Tecs2D `PostStartup`, just as you would rebind
+other runtime handles. See [Runtime handles after load](/tecs/save-games#runtime-handles-after-load).
+
+### Raw input
+
+Framework tooling and diagnostics that must ignore the stack use `input.raw`:
+
+```teal
+if input.raw.view.isKeyPressed("f12") then
+    toggleDeveloperOverlay()
+end
+
+input.raw:observe(events.KeyPressed, function(event: events.KeyPressed)
+    recordPhysicalKey(event.key)
+end)
+```
+
+Raw observers run before the routed top target and cannot be intercepted. Ordinary game code should use module-level
+polling or address-0 world observers so menus and the debugger can suppress it.
+
+Do not use `input.raw` merely to make a shortcut convenient: it is appropriate only when the action must remain live
+through every game modal and tool overlay. Raw observers cannot prevent the top target from receiving the same event.
+
 *See [love.gamepadpressed](https://love2d.org/wiki/love.gamepadpressed) for gamepad buttons and
 [love.joystickpressed](https://love2d.org/wiki/love.joystickpressed) for joystick buttons*
 
-### Reacting to joystick events
+## Joystick connection events
 
 You can also react to joystick connection/disconnection events:
 
 ```teal
-local tecs2d = require("tecs2d")
+local tecs = require("tecs")
+local events = require("tecs2d.events")
 
 world:addSystem({
     phase = tecs.phases.Startup,
     run = function()
-        world:observe(0, tecs2d.JoystickAdded, function(e: tecs2d.JoystickAdded)
+        world:observe(0, events.JoystickAdded, function(e: events.JoystickAdded)
             local name = e.joystick:getName()
             print("Controller connected: " .. name)
         end)
 
-        world:observe(0, tecs2d.JoystickRemoved, function(e: tecs2d.JoystickRemoved)
+        world:observe(0, events.JoystickRemoved, function(e: events.JoystickRemoved)
             print("Controller disconnected")
         end)
     end
@@ -238,13 +468,13 @@ states will return fresh values you'd expect.
 
 While `isKeyPressed` and `isKeyReleased` use a latching model to ensure inputs are never dropped, they do not preserve
 the exact sequence or timing of multiple inputs within a single render frame. If your game requires frame-perfect
-combos or input sequences (e.g., a fighting game), you should implement a custom input buffer by consuming the raw
-event stream provided by the [Tecs event system](/tecs2d/events).
+combos or input sequences (e.g., a fighting game), implement a custom input buffer from the routed
+[Tecs event stream](/tecs2d/events), or use `input.raw` when the buffer must operate regardless of input ownership.
 
 ```teal
-local tecs2d = require("tecs2d")
+local events = require("tecs2d.events")
 
-world:observe(0, tecs2d.KeyPressed, function(e: tecs2d.KeyPressed)
+world:observe(0, events.KeyPressed, function(e: events.KeyPressed)
     addToComboBuffer(e.key, love.timer.getTime())
 end)
 ```

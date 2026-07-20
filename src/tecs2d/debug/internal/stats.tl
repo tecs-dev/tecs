@@ -62,7 +62,8 @@ function stats.install(w: tecs.World, opts: stats.Options)
     -- Leader + statsToggleKey toggles the HUD. Read at the game layer (stack 0),
     -- so an open debugger command line suppresses the toggle.
     local function toggledOn(): boolean
-        return leader.isDown(input.base, leaderKey) and input.isKeyPressed(statsToggleKey)
+        return leader.isDown(input.base.view, leaderKey)
+            and input.isKeyPressed(statsToggleKey)
     end
 
     w:addSystem({

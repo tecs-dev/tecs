@@ -47,19 +47,20 @@ inputHandlers.handlers = {
             input.keysLatchedPressed[key] = true
             input.markLatchedDirty()
         end
-        w:emit(0, events.KeyPressed, key, scancode, isrepeat)
+        input.route(w, events.KeyPressed, key, scancode, isrepeat)
     end,
     keyreleased = function(w: tecs.World, key: love.keyboard.KeyConstant, scancode: love.keyboard.Scancode)
         input.keys[key] = nil
         input.keysReleased[key] = true
         input.keysLatchedReleased[key] = true
         input.markLatchedDirty()
-        w:emit(0, events.KeyReleased, key, scancode)
+        input.route(w, events.KeyReleased, key, scancode)
     end,
-    textinput = function(_world: tecs.World, text: string)
+    textinput = function(w: tecs.World, text: string)
         input.textInput = text
+        input.route(w, events.TextInput, text)
     end,
-    wheelmoved = function(_world: tecs.World, x: number, y: number, direction: love.mouse.WheelDirection)
+    wheelmoved = function(w: tecs.World, x: number, y: number, direction: love.mouse.WheelDirection)
         local moved = input.mouseWheelMoved
         moved[1], moved[2] = moved[1] + x, moved[2] + y
         input.mouseWheelDirection = direction
@@ -67,30 +68,32 @@ inputHandlers.handlers = {
         latchedMoved[1], latchedMoved[2] = latchedMoved[1] + x, latchedMoved[2] + y
         input.mouseWheelLatchedDirection = direction
         input.markLatchedDirty()
+        input.route(w, events.WheelMoved, x, y, direction)
     end,
-    mousemoved = function(_world: tecs.World, x: number, y: number, _dx: number, _dy: number, _istouch: boolean)
+    mousemoved = function(w: tecs.World, x: number, y: number, dx: number, dy: number, istouch: boolean)
         input.mouseX, input.mouseY = x, y
+        input.route(w, events.MouseMoved, x, y, dx, dy, istouch)
     end,
     mousepressed = function(w: tecs.World, x: number, y: number, button: integer, istouch: boolean, presses: number)
         input.mouseButtons[button] = true
         input.mousePressed[button] = true
         input.mouseLatchedPressed[button] = true
         input.markLatchedDirty()
-        w:emit(0, events.MousePressed, x, y, button, istouch, presses)
+        input.route(w, events.MousePressed, x, y, button, istouch, presses)
     end,
     mousereleased = function(w: tecs.World, x: number, y: number, button: integer, istouch: boolean, presses: number)
         input.mouseButtons[button] = nil
         input.mouseReleased[button] = true
         input.mouseLatchedReleased[button] = true
         input.markLatchedDirty()
-        w:emit(0, events.MouseReleased, x, y, button, istouch, presses)
+        input.route(w, events.MouseReleased, x, y, button, istouch, presses)
     end,
     mousefocus = function(w: tecs.World, focus: boolean)
         w:emit(0, events.MouseFocus, focus)
     end,
     joystickadded = function(w: tecs.World, joystick: love.joystick.Joystick)
         LOGGER:debug("Joystick added: %s", joystick)
-        input.getJoystick(joystick) -- triggers the creation and registration of a new JoystickInput.
+        input.getRawJoystick(joystick) -- triggers the creation and registration of a new JoystickInput.
         w:emit(0, events.JoystickAdded, joystick)
     end,
     joystickremoved = function(w: tecs.World, joystick: love.joystick.Joystick)
@@ -101,50 +104,56 @@ inputHandlers.handlers = {
     gamepadaxis = function(
         _world: tecs.World, joystick: love.joystick.Joystick, axis: love.joystick.GamepadAxis, value: number
     )
-        input.getJoystick(joystick).gamepadAxis[axis] = value
+        input.getRawJoystick(joystick).gamepadAxis[axis] = value
+        input.route(_world, events.GamepadAxis, joystick, axis, value)
     end,
     gamepadpressed = function(_world: tecs.World, joystick: love.joystick.Joystick, button: love.joystick.GamepadButton)
-        local js = input.getJoystick(joystick)
+        local js = input.getRawJoystick(joystick)
         js.gamepadButtons[button] = true
         js.gamepadPressed[button] = true
         js.gamepadLatchedPressed[button] = true
         input.markLatchedDirty()
+        input.route(_world, events.GamepadPressed, joystick, button)
     end,
     gamepadreleased = function(
         _world: tecs.World, joystick: love.joystick.Joystick, button: love.joystick.GamepadButton
     )
-        local js = input.getJoystick(joystick)
+        local js = input.getRawJoystick(joystick)
         js.gamepadButtons[button] = nil
         js.gamepadReleased[button] = true
         js.gamepadLatchedReleased[button] = true
         input.markLatchedDirty()
+        input.route(_world, events.GamepadReleased, joystick, button)
     end,
     joystickpressed = function(_world: tecs.World, joystick: love.joystick.Joystick, button: number)
-        local js = input.getJoystick(joystick)
+        local js = input.getRawJoystick(joystick)
         js.joystickButtons[button] = true
         js.joystickPressed[button] = true
         js.joystickLatchedPressed[button] = true
         input.markLatchedDirty()
+        input.route(_world, events.JoystickPressed, joystick, button)
     end,
     joystickreleased = function(_world: tecs.World, joystick: love.joystick.Joystick, button: number)
-        local js = input.getJoystick(joystick)
+        local js = input.getRawJoystick(joystick)
         js.joystickButtons[button] = nil
         js.joystickReleased[button] = true
         js.joystickLatchedReleased[button] = true
         input.markLatchedDirty()
+        input.route(_world, events.JoystickReleased, joystick, button)
     end,
     joystickhat = function(
         _world: tecs.World, joystick: love.joystick.Joystick, hat: number, direction: love.joystick.JoystickHat
     )
-        input.getJoystick(joystick).joystickHat[hat] = direction
+        input.getRawJoystick(joystick).joystickHat[hat] = direction
+        input.route(_world, events.JoystickHat, joystick, hat, direction)
     end,
     directorydropped = function(w: tecs.World, path: string, x: number, y: number)
         LOGGER:info("Directory dropped: %s at (%d, %d)", path, x, y)
-        w:emit(0, events.DirectoryDropped, path, x, y)
+        input.route(w, events.DirectoryDropped, path, x, y)
     end,
     filedropped = function(w: tecs.World, file: love.filesystem.DroppedFile, x: number, y: number)
         LOGGER:debug("File dropped: %s at (%d, %d)", file, x, y)
-        w:emit(0, events.FileDropped, file, x, y)
+        input.route(w, events.FileDropped, file, x, y)
     end,
     focus = function(w: tecs.World, visible: boolean)
         w:emit(0, events.Focus, visible)
@@ -171,20 +180,20 @@ inputHandlers.handlers = {
         w:emit(0, events.ThemeChanged, theme)
     end,
     dropbegan = function(w: tecs.World, x: number, y: number)
-        w:emit(0, events.DropBegan, x, y)
+        input.route(w, events.DropBegan, x, y)
     end,
     dropmoved = function(w: tecs.World, x: number, y: number)
-        w:emit(0, events.DropMoved, x, y)
+        input.route(w, events.DropMoved, x, y)
     end,
     dropcompleted = function(w: tecs.World, x: number, y: number)
-        w:emit(0, events.DropCompleted, x, y)
+        input.route(w, events.DropCompleted, x, y)
     end,
     audiodisconnected = function(w: tecs.World)
         LOGGER:debug("Audio device disconnected")
         w:emit(0, events.AudioDisconnected)
     end,
     sensorupdated = function(w: tecs.World, sensorType: love.sensor.SensorType, x: number, y: number, z: number)
-        w:emit(0, events.SensorUpdated, sensorType, x, y, z)
+        input.route(w, events.SensorUpdated, sensorType, x, y, z)
     end,
     joysticksensorupdated = function(
         w: tecs.World,
@@ -194,7 +203,7 @@ inputHandlers.handlers = {
         y: number,
         z: number
     )
-        w:emit(0, events.JoystickSensorUpdated, joystick, sensorType, x, y, z)
+        input.route(w, events.JoystickSensorUpdated, joystick, sensorType, x, y, z)
     end,
     touchpressed = function(
         w: tecs.World,
@@ -207,7 +216,7 @@ inputHandlers.handlers = {
         deviceType: love.touch.TouchDeviceType,
         isMouse: boolean
     )
-        w:emit(0, events.TouchPressed, id, x, y, pressure, deviceType, isMouse)
+        input.route(w, events.TouchPressed, id, x, y, pressure, deviceType, isMouse)
     end,
     touchmoved = function(
         w: tecs.World,
@@ -220,7 +229,7 @@ inputHandlers.handlers = {
         deviceType: love.touch.TouchDeviceType,
         isMouse: boolean
     )
-        w:emit(0, events.TouchMoved, id, x, y, dx, dy, pressure, deviceType, isMouse)
+        input.route(w, events.TouchMoved, id, x, y, dx, dy, pressure, deviceType, isMouse)
     end,
     touchreleased = function(
         w: tecs.World,
@@ -233,7 +242,7 @@ inputHandlers.handlers = {
         deviceType: love.touch.TouchDeviceType,
         isMouse: boolean
     )
-        w:emit(0, events.TouchReleased, id, x, y, pressure, deviceType, isMouse)
+        input.route(w, events.TouchReleased, id, x, y, pressure, deviceType, isMouse)
     end,
 }
 
@@ -243,6 +252,7 @@ inputHandlers.quitRequested = false
 
 function inputHandlers.pollEvents(w: tecs.World): tecs.System
     local quit_func <const> = love.quit
+    input.bindWorld(w)
 
     return function()
         input.update()

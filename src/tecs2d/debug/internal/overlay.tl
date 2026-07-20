@@ -804,22 +804,16 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
     local hideOverlayFrame = false
     local recorderLastAt = getTime()
 
-    -- Input-stack token held while the debugger command line is open, so the
-    -- game (a lower layer) stops seeing keyboard/mouse and its hotkeys do not
-    -- fire while you type. 0 means the debugger holds no layer.
-    local captureToken = 0
+    -- The debugger is runtime tooling, not a game state. Its stable input
+    -- layer can be pushed above any game/menu layer and popped independently.
+    local captureLayer <const> = input.newLayer("debugger")
     local function reader(): input.View
-        if ctx.open and captureToken ~= 0 then
-            return input.stack[captureToken]
+        if ctx.open and captureLayer:isActive() then
+            return captureLayer.view
         end
-        -- Closed, the only read is the toggle. The debugger is a god layer:
-        -- read through whatever layer is on top so Ctrl+/ still opens while a
-        -- game modal holds the input stack.
-        local depth = input.stackDepth()
-        if depth > 0 then
-            return input.stack[depth]
-        end
-        return input.base
+        -- Closed, only framework-global controls are read. Raw input keeps the
+        -- debugger toggle available over any game-owned input layer.
+        return input.raw.view
     end
 
     local function leaderDown(): boolean
@@ -1109,8 +1103,8 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
         rootActiveGroup = 1
         dismissPopup(popup)
         ctx.message = ""
-        if captureToken == 0 then
-            captureToken = input.pushStack()
+        if not captureLayer:isActive() then
+            input.pushLayer(captureLayer)
         end
         if not debugRecordingActive() then
             fz:acquire("debugger")
@@ -1124,9 +1118,8 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
         ctx.open = false
         releasePopupImage(popup)
         love.keyboard.setTextInput(wasTextInput)
-        if captureToken ~= 0 then
-            input.popStack(captureToken)
-            captureToken = 0
+        if captureLayer:isActive() then
+            input.popLayer(captureLayer)
         end
         fz:release("debugger")
         ctx.frozen = false
@@ -1272,8 +1265,9 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             -- Command line editing. The input stack clears pending text on
             -- push/pop, so nothing typed to toggle the panel leaks in here and
             -- the toggle character itself stays typeable (e.g. "/" in a path).
-            if not menuTookInput and not leaderDown() and input.textInput ~= "" then
-                ctx.command = ctx.command .. input.textInput
+            local textInput <const> = reader().getTextInput()
+            if not menuTookInput and not leaderDown() and textInput ~= "" then
+                ctx.command = ctx.command .. textInput
                 ctx.message = ""
                 dismissPopup(popup)
                 resetCompletions()

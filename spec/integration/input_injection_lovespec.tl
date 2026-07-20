@@ -83,4 +83,78 @@ describe("input injection: love events reach world observers", function()
             "_G.tecsKeyUp and _G.tecsKeyUp.key", "KeyReleased observer")
         luassert.equals("space", values[1], "wrong key constant on release")
     end)
+
+    it("intercepts at the top target while raw observers still receive the event", function()
+        fixture.runLua(app, [[
+            local input = require("tecs2d.input")
+            local events = require("tecs2d.events")
+            _G.tecsKey = nil
+            _G.routeCounts = {top = 0, raw = 0}
+            _G.routeLayer = input.newLayer("integration-modal")
+            _G.routeLayer:observe(events.KeyPressed, function()
+                _G.routeCounts.top = _G.routeCounts.top + 1
+                -- Deliberately omit parent:emit: this layer consumes the key.
+            end)
+            input.raw:observe(events.KeyPressed, function()
+                _G.routeCounts.raw = _G.routeCounts.raw + 1
+            end, "integration-raw")
+            input.pushLayer(_G.routeLayer)
+            return true
+        ]])
+
+        app.client:call("send_love_event", {
+            event = "keypressed",
+            args = {"r", "r", false},
+        })
+        local values = waitGlobal(app,
+            "_G.routeCounts.top == 1 and _G.routeCounts.top or nil, _G.routeCounts.raw, tostring(_G.tecsKey == nil)",
+            "routed input counts")
+        luassert.equals("1", values[1])
+        luassert.equals("1", values[2])
+        luassert.equals("true", values[3], "base observer received an intercepted key")
+
+        fixture.runLua(app, [[
+            local input = require("tecs2d.input")
+            input.popLayer(_G.routeLayer)
+            input.raw:stopObserving(require("tecs2d.events").KeyPressed, "integration-raw")
+            _G.routeLayer = nil
+            return true
+        ]])
+    end)
+
+    it("rewires a popped parent and forwards the same event to the base", function()
+        fixture.runLua(app, [[
+            local input = require("tecs2d.input")
+            local events = require("tecs2d.events")
+            _G.tecsMouse = nil
+            local lower = input.newLayer("lower")
+            local upper = input.newLayer("upper")
+            upper:observe(events.MousePressed, function(event)
+                upper.parent:emit(event)
+            end)
+            input.pushLayer(lower)
+            input.pushLayer(upper)
+            input.popLayer(lower)
+            _G.routeLayer = upper
+            _G.rewiredToBase = upper.parent == input.base
+            return true
+        ]])
+
+        app.client:call("send_love_event", {
+            event = "mousepressed",
+            args = {87, 65, 1, false, 1},
+        })
+        local values = waitGlobal(app,
+            "_G.tecsMouse and _G.tecsMouse.x, _G.tecsMouse and _G.tecsMouse.y, tostring(_G.rewiredToBase)",
+            "forwarded MousePressed")
+        luassert.equals(87, tonumber(values[1]))
+        luassert.equals(65, tonumber(values[2]))
+        luassert.equals("true", values[3])
+
+        fixture.runLua(app, [[
+            require("tecs2d.input").popLayer(_G.routeLayer)
+            _G.routeLayer = nil
+            return true
+        ]])
+    end)
 end)

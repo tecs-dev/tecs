@@ -83,8 +83,9 @@ The harness API:
 ## Driving the game
 
 Input goes through the `send_love_event` MCP tool, which feeds the same event
-pipeline as real input, so `tecs2d.input` and controller bindings respond to
-it:
+pipeline as real input. The current [input-layer owner](/tecs2d/input/#input-layers) receives it: gameplay polling and
+Controller bindings respond when `input.base` is top, while an open menu or debugger receives and may intercept it
+instead. This makes injected input suitable for testing modal isolation as well as ordinary controls:
 
 ```teal
 local function pressKey(key: string)

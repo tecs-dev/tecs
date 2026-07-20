@@ -32,7 +32,7 @@ love.run = tecs2d.run({ fps = 60, game = gamePlugin })
 With the plugin installed:
 
 - **Ctrl+/** opens the modal debugger and freezes the game.
-- **Ctrl+.** toggles the stats HUD.
+- **Ctrl+.** toggles the stats HUD while normal gameplay owns input.
 
 ## Modal debugger
 
@@ -41,6 +41,14 @@ gameplay phase is disabled and the render time scale is set to zero, so
 animation and simulation stop while input and the overlay keep running. Pressing
 Ctrl+/ again, pressing Escape on an empty prompt, or running `exit` closes it
 and resumes the game.
+
+The debugger also pushes a stable `"debugger"` [input layer](/tecs2d/input/#input-layers). While it is open, keyboard,
+pointer, wheel, text, touch, and controller interaction belongs to the overlay; gameplay and any lower menu layer are
+suppressed. Closing the debugger pops that exact layer and restores whichever owner is now beneath it.
+
+Input capture and freezing are separate mechanisms. The debugger does not push a game state, tag or despawn entities,
+or assume that the game uses the [state stack](/tecs/states). Its Ctrl+/ shortcut uses `input.raw`, so it can always
+open above a game-owned modal and always close itself. The overlay's ordinary controls use its routed layer.
 
 The overlay draws two rows across the top of the screen. The upper row is an
 always-visible command toolbar: every colored-text section header and every
@@ -80,7 +88,7 @@ The leader key is **Ctrl** by default. `leaderKey`, `debugToggleKey`, and
 | Keyboard | Action |
 | --- | --- |
 | Ctrl+/ | Open or close the debugger; opening freezes the game |
-| Ctrl+. | Toggle the stats HUD, whether the debugger is open or closed |
+| Ctrl+. | Toggle the stats HUD while normal gameplay owns input |
 | Ctrl+C | Clear the command, completion cycle, and popup without closing the debugger |
 | Ctrl+Y | Yank the last executed command's popup or message to the clipboard |
 | Escape | Close the context menu; otherwise clear prompt state, or close the debugger when the prompt is empty |
@@ -399,7 +407,11 @@ lower the capture rate (`fps=15`) or switch to a faster image format
 
 ## Stats HUD
 
-Press **Ctrl+.** to toggle the stats HUD. It samples once per second and shows:
+The **Ctrl+.** stats shortcut uses the normal base input target. A modal input layer—including the open
+debugger—suppresses it, so typing in a menu or debugger cannot accidentally toggle the HUD. The debugger's Ctrl+/
+shortcut is the intentional always-on exception.
+
+When visible, the HUD samples once per second and shows:
 
 - **FPS**: current frames per second
 - **Lua**: Lua heap memory in MB
