@@ -128,7 +128,7 @@ export default defineConfig({
           { text: 'Love2D Events', link: '/tecs2d/events' },
           {
             text: 'Runtime Introspection',
-            collapsed: false,
+            collapsed: true,
             items: [
               { text: 'Overview', link: '/tecs2d/introspection' },
               { text: 'Debugger', link: '/tecs2d/debug' },
