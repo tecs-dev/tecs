@@ -58,16 +58,10 @@ brew install tecs-dev/tap/tecs-cli
 
 :::
 
-Prefer a standalone installer? Use the scripts from
-[tecs-cli releases](https://github.com/tecs-dev/tecs/releases/latest):
-`install.sh` (macOS/Linux) or `install.ps1` (Windows).
-
 Create and run a game:
 
 ```bash
-tecs new my-game
-cd my-game
-tecs run
+tecs new my-game && cd my-game && tecs run
 ```
 
 ## Example code
