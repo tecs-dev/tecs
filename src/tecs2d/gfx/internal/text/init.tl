@@ -7,6 +7,7 @@ local bmfont <const> = require("tecs2d.gfx.bmfont")
 local types <const> = require("tecs2d.gfx.types")
 local glyphslab <const> = require("tecs2d.gfx.internal.text.glyphslab")
 local glyphblock <const> = require("tecs2d.gfx.internal.text.glyphblock")
+local worldregistry <const> = require("tecs2d.gfx.internal.worldregistry")
 
 local record text
     --- FFI Text component (40 bytes)
@@ -106,17 +107,20 @@ local record PendingSpawn
     textStr: string
     sx: number
     sy: number
-    entry: glyphslab.SlabEntry
 end
 local pendingSpawns: {integer: PendingSpawn} = {}
 
--- Global slab reference (set by plugin)
-local globalSlab: glyphslab.SlabAllocator = nil
-
--- Auto-incrementing text ID and context lookup
+-- Construction IDs exist only until the value enters a world. Lifecycle
+-- replaces them with the same compact world+entity owner token used by Sprite.
 local NEXT_TEXT_ID: integer = 1
-local type TextContext = {tecs.World, integer}
-local textIdToContext: {integer: TextContext} = {}
+
+local function ownerOf(self: text.Text): tecs.World, integer
+    local world, entityId = worldregistry.resolveOwner(self.textId)
+    if not world or not world:has(entityId, Text as tecs.Component) then
+        error("Text component is no longer attached to a live render world entity", 2)
+    end
+    return world, entityId
+end
 
 --- Shared tail of setText/setScale: swap the slab entry for the new
 --- (text, scale) combination, resize the glyph block, refresh the FFI
@@ -174,13 +178,7 @@ local methods = {
     end,
 
     setText = function(self: text.Text, newText: string)
-        local ctx = textIdToContext[self.textId]
-        if not ctx then
-            error("Text:setText called on component not attached to an entity")
-        end
-
-        local world = ctx[1]
-        local entityId = ctx[2]
+        local world, entityId = ownerOf(self)
         local meta = world.resources[text.TEXT_META]
         if meta.texts[entityId] == newText then return end
 
@@ -190,24 +188,13 @@ local methods = {
     end,
 
     getText = function(self: text.Text): string
-        local ctx = textIdToContext[self.textId]
-        if not ctx then
-            return ""
-        end
-        local world = ctx[1]
-        local entityId = ctx[2]
+        local world, entityId = ownerOf(self)
         local meta = world.resources[text.TEXT_META]
         return meta.texts[entityId] or ""
     end,
 
     setScale = function(self: text.Text, sx: number, sy?: number)
-        local ctx = textIdToContext[self.textId]
-        if not ctx then
-            error("Text:setScale called on component not attached to an entity")
-        end
-
-        local world = ctx[1]
-        local entityId = ctx[2]
+        local world, entityId = ownerOf(self)
         local newSy = sy or sx
         local meta = world.resources[text.TEXT_META]
         if meta.scaleX[entityId] == sx and meta.scaleY[entityId] == newSy then return end
@@ -260,19 +247,8 @@ tecs.newFFIComponent({
         local sxVal = sx or 1
         local syVal = sy or sxVal
 
-        -- Acquire slab entry (plugin must be initialized first)
-        if not globalSlab then
-            error("text.plugin() must be called before creating Text components")
-        end
-
-        local entry = globalSlab:acquire(font, textStr, sxVal, syVal)
-        local slabOffset = entry.offset
-        local charCount = entry.count
-        local fontId = entry.fontId
-        local width = entry.width
-        local height = entry.height
-
-        -- Assign unique text ID
+        -- Assign a temporary construction ID. World-owned slab allocation and
+        -- final owner identity are established by the lifecycle observer.
         local textId = NEXT_TEXT_ID
         NEXT_TEXT_ID = NEXT_TEXT_ID + 1
 
@@ -280,17 +256,17 @@ tecs.newFFIComponent({
         -- and fontLayer are written by the sync system once the glyph
         -- block is allocated and the font atlas layer is resolved; zero
         -- is a safe pre-sync placeholder.
-        instance.slabOffset = slabOffset
-        instance.charCount = charCount
-        instance.fontId = fontId
+        instance.slabOffset = 0
+        instance.charCount = 0
+        instance.fontId = 0
         instance.textId = textId
         instance.glyphBlockId = 0
         instance.gpuStartIdx = 0
         instance.fontLayer = 0
-        instance.pivotOffsetX = 0.5 * width
-        instance.pivotOffsetY = 0.5 * height
-        instance.width = width
-        instance.height = height
+        instance.pivotOffsetX = 0
+        instance.pivotOffsetY = 0
+        instance.width = 0
+        instance.height = 0
 
         -- Store pending spawn data keyed by textId for the Text lifecycle query to pick up
         pendingSpawns[textId] = {
@@ -299,7 +275,6 @@ tecs.newFFIComponent({
             textStr = textStr,
             sx = sxVal,
             sy = syVal,
-            entry = entry,
         }
     end,
 
@@ -312,10 +287,8 @@ tecs.newFFIComponent({
     -- path so a restored Text gets fresh textId / glyphBlockId / slab
     -- state.
     serialize = function(inst: text.Text): {string: any}
-        local ctx = textIdToContext[inst.textId]
-        if not ctx then return nil end
-        local world = ctx[1]
-        local entityId = ctx[2]
+        local world, entityId = worldregistry.resolveOwner(inst.textId)
+        if not world then return nil end
         local meta = world.resources[text.TEXT_META]
         return {
             font = meta.fontPaths[entityId],
@@ -339,7 +312,6 @@ function text.plugin(world: tecs.World)
     -- Initialize slab allocator resource
     local slab = glyphslab.new()
     world.resources[text.SLAB_ALLOCATOR] = slab
-    globalSlab = slab  -- Make available to initializer
 
     -- Initialize block allocator resource (for stable GPU slots)
     world.resources[text.BLOCK_ALLOCATOR] = glyphblock.new()
@@ -377,10 +349,18 @@ function text.plugin(world: tecs.World)
                 local entityId = entities[row]
                 local pending = assert(pendingSpawns[self.textId], "Missing pending spawn data for Text")
                 pendingSpawns[self.textId] = nil
+                local entry = slab:acquire(pending.font, pending.textStr,
+                    pending.sx, pending.sy)
+                self.textId = worldregistry.ownerToken(world, entityId)
+                self.slabOffset = entry.offset
+                self.charCount = entry.count
+                self.fontId = entry.fontId
+                self.pivotOffsetX = 0.5 * entry.width
+                self.pivotOffsetY = 0.5 * entry.height
+                self.width = entry.width
+                self.height = entry.height
 
-                textIdToContext[self.textId] = {world, entityId}
-
-                local blockId, _ = blockAlloc:alloc(pending.entry.count)
+                local blockId, _ = blockAlloc:alloc(entry.count)
                 self.glyphBlockId = blockId
 
                 meta.fonts[entityId] = pending.font
@@ -390,7 +370,7 @@ function text.plugin(world: tecs.World)
                 meta.scaleY[entityId] = pending.sy
                 meta.originX[entityId] = 0
                 meta.originY[entityId] = 0
-                meta.slabEntries[entityId] = pending.entry
+                meta.slabEntries[entityId] = entry
                 meta.glyphBlockIds[entityId] = blockId
                 ::continue::
             end
@@ -402,8 +382,6 @@ function text.plugin(world: tecs.World)
                 local self = texts[row]
                 if not self then goto continue end
                 local entityId = entities[row]
-                textIdToContext[self.textId] = nil
-
                 local entry = meta.slabEntries[entityId]
                 if entry then
                     slab:release(entry)

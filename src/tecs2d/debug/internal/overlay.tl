@@ -23,7 +23,7 @@ local SECTION_MARK <const> = commands.SECTION_MARK
 
 local Transform <const> = tecs.builtins.Transform
 
-local lg <const> = love.graphics
+local lg <const> = require("tecs2d.debug.internal.debugdraw")
 
 -- One vertical slice of a popup body laid out in columns: its lines, the
 -- tab-split cells, per-tab x offsets, and total pixel width.
@@ -516,11 +516,10 @@ end
 -- Entities already labeled this frame (a mark and a note can hit the same
 -- entity); cleared at the start of each label pass so drawing allocates
 -- nothing per frame.
-local labelSeen: {integer: boolean} = {}
-
 -- Mark name / note star above one annotated entity.
 local function drawEntityLabel(w: tecs.World, ctx: debugcontext.Context,
-        cam: gfxtypes.Camera, font: love.graphics.Font, fh: number, eid: integer)
+        cam: gfxtypes.Camera, font: love.graphics.Font, fh: number, eid: integer,
+        labelSeen: {integer: boolean})
     if labelSeen[eid] then return end
     labelSeen[eid] = true
     if not w:isAlive(eid) then return end
@@ -741,6 +740,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
     local statsToggleKey = opts.statsToggleKey
     local overlayFont = lg.newFont(20)
     local coordinateFont = lg.newFont(14)
+    local labelSeen: {integer: boolean} = {}
     local wasTextInput = false
     local registry = core.ensure(w, {
         ffmpegPath = opts.recordingFfmpegPath,
@@ -1657,10 +1657,10 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 local cam = pipeline:getCamera()
                 for k in pairs(labelSeen) do labelSeen[k] = nil end
                 for eid in pairs(ctx.marks) do
-                    drawEntityLabel(w, ctx, cam, overlayFont, fh, eid)
+                    drawEntityLabel(w, ctx, cam, overlayFont, fh, eid, labelSeen)
                 end
                 for eid in pairs(ctx.notes) do
-                    drawEntityLabel(w, ctx, cam, overlayFont, fh, eid)
+                    drawEntityLabel(w, ctx, cam, overlayFont, fh, eid, labelSeen)
                 end
             end
 

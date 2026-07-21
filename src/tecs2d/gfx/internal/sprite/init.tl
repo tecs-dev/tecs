@@ -7,6 +7,7 @@ local tecs <const> = require("tecs")
 local types <const> = require("tecs2d.gfx.types")
 local ColorComponent = require("tecs2d.gfx.internal.Color")
 local timingbuffer <const> = require("tecs2d.gfx.internal.gpu.timingbuffer")
+local worldregistry <const> = require("tecs2d.gfx.internal.worldregistry")
 local sprite_sheet <const> = require("tecs2d.gfx.internal.sprite.sheet")
 local sheet <const> = require("tecs2d.gfx.sheet")
 local sprite_events <const> = require("tecs2d.gfx.internal.sprite.events")
@@ -53,36 +54,6 @@ local timingCache: {integer: {integer: {number: {integer, number, integer, integ
 
 local type SpriteInstance = sprite_instance.SpriteInstance
 local getInstance <const> = sprite_instance.get
-
--- Get the current game time from the render pipeline, falling back to wall clock.
--- This ensures CPU-rendered sprites (custom shaders) respect time scale and pause.
-local function getGameTime(): number
-    local world = sprite_instance.getWorld() as tecs.World
-    if world then
-        local rp = world.resources[pipelinekey.PIPELINE] as {string: any}
-        if rp and rp.gameTime ~= nil then
-            return rp.gameTime as number
-        end
-    end
-    return love.timer.getTime()
-end
-
-local playOnceCallbacks: {integer: function(any)} = {}
-local playOncePendingCount = 0
-
-local function clearPlayOnceCallback(entityId: integer)
-    if playOnceCallbacks[entityId] ~= nil then
-        playOnceCallbacks[entityId] = nil
-        playOncePendingCount = playOncePendingCount - 1
-    end
-end
-
-local function queuePlayOnceCallback(entityId: integer, callback: function(any))
-    if playOnceCallbacks[entityId] == nil then
-        playOncePendingCount = playOncePendingCount + 1
-    end
-    playOnceCallbacks[entityId] = callback
-end
 
 local record sprite
     --- Re-export SpriteSheet
@@ -297,6 +268,50 @@ sprite.SpriteCollision = sprite_collision.SpriteCollision
 sprite.ChangeTag = sprite_events.ChangeTag
 
 local Sprite <const> = sprite.Sprite
+
+local record SpriteRuntime
+    callbacks: {integer: function(any)}
+    pendingCount: integer
+end
+
+local SPRITE_RUNTIME <const>: tecs.Key<SpriteRuntime> =
+    tecs.newKey("tecs2d.gfx.sprite.runtime")
+
+local function runtimeOf(world: tecs.World): SpriteRuntime
+    return world.resources[SPRITE_RUNTIME] as SpriteRuntime
+end
+
+local function resolveOwner(self: sprite.Sprite): tecs.World, integer, SpriteRuntime
+    local world, entityId = worldregistry.resolveOwner(self._entity)
+    if not world or not world:has(entityId, Sprite as tecs.Component) then
+        error("Sprite component is no longer attached to a live render world entity", 2)
+    end
+    return world, entityId, runtimeOf(world)
+end
+
+local function getGameTime(self: sprite.Sprite): number
+    local world = worldregistry.resolveOwner(self._entity)
+    if world then
+        local rp = world.resources[pipelinekey.PIPELINE] as {string: any}
+        if rp and rp.gameTime ~= nil then return rp.gameTime as number end
+    end
+    return love.timer.getTime()
+end
+
+local function clearPlayOnceCallback(runtime: SpriteRuntime, entityId: integer)
+    if runtime.callbacks[entityId] ~= nil then
+        runtime.callbacks[entityId] = nil
+        runtime.pendingCount = runtime.pendingCount - 1
+    end
+end
+
+local function queuePlayOnceCallback(runtime: SpriteRuntime, entityId: integer,
+        callback: function(any))
+    if runtime.callbacks[entityId] == nil then
+        runtime.pendingCount = runtime.pendingCount + 1
+    end
+    runtime.callbacks[entityId] = callback
+end
 
 local ChangeTag <const> = sprite_events.ChangeTag
 
@@ -528,6 +543,7 @@ function Sprite:getInstance(): SpriteInstance
 end
 
 function Sprite:setTag(tag: string)
+    local world, entityId, runtime = resolveOwner(self)
     local inst <const> = getInstance(self.spriteId)
     local sheetVal = sprite_sheet.SpriteSheet.getById(inst.sheetId)
     if not sheetVal then
@@ -539,7 +555,7 @@ function Sprite:setTag(tag: string)
         return
     end
 
-    clearPlayOnceCallback(self._entity)
+    clearPlayOnceCallback(runtime, entityId)
 
     local oldTag <const> = sheetVal:getTagName(inst.tagId)
 
@@ -556,7 +572,6 @@ function Sprite:setTag(tag: string)
     self.spriteId = newSpriteId
 
     -- Reset per-entity animation state
-    local world = sprite_instance.getWorld() as tecs.World
     local renderPipeline = world.resources[pipelinekey.PIPELINE] as {string: any}
     local currentTime = renderPipeline and renderPipeline.gameTime as number or 0
     self.animStartTime = currentTime
@@ -565,16 +580,16 @@ function Sprite:setTag(tag: string)
     self.pauseDepth = 0
 
     -- Emit change tag event
-    world:emit(self._entity, ChangeTag, self._entity, oldTag, tag, self)
-    world:markComponentDirty(self._entity, Sprite as tecs.Component)
+    world:emit(entityId, ChangeTag, entityId, oldTag, tag, self)
+    world:markComponentDirty(entityId, Sprite as tecs.Component)
 end
 
 function Sprite:playOnce(tag: string, onComplete?: function(any))
-    local world = sprite_instance.getWorld() as tecs.World
+    local world, entityId, runtime = resolveOwner(self)
     local inst <const> = getInstance(self.spriteId)
     local sameTag = inst and tag == self:getTag()
 
-    clearPlayOnceCallback(self._entity)
+    clearPlayOnceCallback(runtime, entityId)
 
     if sameTag then
         local renderPipeline = world.resources[pipelinekey.PIPELINE] as {string: any}
@@ -583,13 +598,13 @@ function Sprite:playOnce(tag: string, onComplete?: function(any))
         self.pausedFrame = -1
         self._pauseAtFrame = -1
         self.pauseDepth = 0
-        world:markComponentDirty(self._entity, Sprite as tecs.Component)
+        world:markComponentDirty(entityId, Sprite as tecs.Component)
     else
         self:setTag(tag)
     end
 
     if onComplete then
-        queuePlayOnceCallback(self._entity, onComplete)
+        queuePlayOnceCallback(runtime, entityId, onComplete)
     end
     self:pauseAtEnd()
 end
@@ -603,7 +618,7 @@ function Sprite:pause(time?: number)
     if not inst then
         return  -- Zero-initialized sprite (batchSpawn skips FFI defaults)
     end
-    local currentTime = time or getGameTime()
+    local currentTime = time or getGameTime(self)
     local localTime = (currentTime - self.animStartTime) % inst.animTotalDuration
     local frame = timingbuffer.global:getFrameAtTime(
         inst.animTimingOffset,
@@ -611,8 +626,8 @@ function Sprite:pause(time?: number)
         localTime
     )
     self.pausedFrame = frame
-    local world = sprite_instance.getWorld() as tecs.World
-    world:markComponentDirty(self._entity, Sprite as tecs.Component)
+    local world, entityId = resolveOwner(self)
+    world:markComponentDirty(entityId, Sprite as tecs.Component)
 end
 
 function Sprite:resume()
@@ -635,10 +650,10 @@ function Sprite:resume()
         inst.animTimingOffset,
         self.pausedFrame
     )
-    self.animStartTime = getGameTime() - frameTime
+    self.animStartTime = getGameTime(self) - frameTime
     self.pausedFrame = -1
-    local world = sprite_instance.getWorld() as tecs.World
-    world:markComponentDirty(self._entity, Sprite as tecs.Component)
+    local world, entityId = resolveOwner(self)
+    world:markComponentDirty(entityId, Sprite as tecs.Component)
 end
 
 function Sprite:pauseAtEnd()
@@ -655,8 +670,8 @@ function Sprite:pauseAtEnd()
         -- Sprite:getFrame lazily converts it into a hard pause on the CPU.
         self._pauseAtFrame = lastFrame
     end
-    local world = sprite_instance.getWorld() as tecs.World
-    world:markComponentDirty(self._entity, Sprite as tecs.Component)
+    local world, entityId = resolveOwner(self)
+    world:markComponentDirty(entityId, Sprite as tecs.Component)
 end
 
 function Sprite:pauseAtStart()
@@ -678,10 +693,10 @@ function Sprite:gotoFrame(frame: integer)
     if self.pausedFrame >= 0 then
         self.pausedFrame = frame
     else
-        self.animStartTime = getGameTime() - frameTime
+        self.animStartTime = getGameTime(self) - frameTime
     end
-    local world = sprite_instance.getWorld() as tecs.World
-    world:markComponentDirty(self._entity, Sprite as tecs.Component)
+    local world, entityId = resolveOwner(self)
+    world:markComponentDirty(entityId, Sprite as tecs.Component)
     inst.cachedFrame = -1
 end
 
@@ -690,7 +705,7 @@ function Sprite:getFrame(): integer
         return self.pausedFrame
     end
     local inst <const> = getInstance(self.spriteId)
-    local elapsed = getGameTime() - self.animStartTime
+    local elapsed = getGameTime(self) - self.animStartTime
     local localTime: number
     if self._pauseAtFrame >= 0 then
         -- Don't loop past the target frame; clamp to one cycle
@@ -708,11 +723,11 @@ function Sprite:getFrame(): integer
     if self._pauseAtFrame >= 0 and frame >= self._pauseAtFrame then
         self.pausedFrame = self._pauseAtFrame
         self._pauseAtFrame = -1
-        local world = sprite_instance.getWorld() as tecs.World
-        world:markComponentDirty(self._entity, Sprite as tecs.Component)
-        local onComplete = playOnceCallbacks[self._entity]
+        local world, entityId, runtime = resolveOwner(self)
+        world:markComponentDirty(entityId, Sprite as tecs.Component)
+        local onComplete = runtime.callbacks[entityId]
         if onComplete then
-            clearPlayOnceCallback(self._entity)
+            clearPlayOnceCallback(runtime, entityId)
             onComplete(self)
         end
         return self.pausedFrame
@@ -801,8 +816,8 @@ function Sprite:getPivot(): number, number
 end
 
 function Sprite:markDirty()
-    local world = sprite_instance.getWorld() as tecs.World
-    world:markComponentDirty(self._entity, Sprite as tecs.Component)
+    local world, entityId = resolveOwner(self)
+    world:markComponentDirty(entityId, Sprite as tecs.Component)
 end
 
 -------------------------------------------------------------------------------
@@ -851,7 +866,7 @@ tecs.newFFIComponent({
     metatable = SpriteMT,
     fields = {
         {"spriteId", "int32_t"},
-        {"_entity", "int32_t"},
+        {"_entity", "uint32_t"},
         {"animStartTime", "float"},
         {"pausedFrame", "int32_t"},
         {"_pauseAtFrame", "int32_t"},
@@ -958,7 +973,7 @@ tecs.newFFIComponent({
 -- Assigns the bucket/TextureArray tag for the sprite's spriteSheet; the
 -- subsequent `bucket_sync` observer allocates a GPU slot.
 local function onSpriteAdded(world: tecs.World, entityId: integer, self: sprite.Sprite)
-    self._entity = entityId
+    self._entity = worldregistry.ownerToken(world, entityId)
 
     local inst = getInstance(self.spriteId)
     if not inst then return end
@@ -1180,8 +1195,8 @@ end
 
 function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(world: tecs.World)
     return function(world: tecs.World)
-        -- Store world reference for Sprite methods
-        sprite_instance.setWorld(world)
+        local runtime: SpriteRuntime = {callbacks = {}, pendingCount = 0}
+        world.resources[SPRITE_RUNTIME] = runtime
 
         local renderer = renderPipeline:getRenderer()
 
@@ -1200,7 +1215,7 @@ function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(worl
         -- assignment for the new spriteSheet.
         sync.onSpriteReplaced = function(entityId: integer, spr: any, oldSpriteId: integer)
             if oldSpriteId ~= 0 then
-                clearPlayOnceCallback(entityId)
+                clearPlayOnceCallback(runtime, entityId)
                 releaseInstance(oldSpriteId)
             end
             onSpriteAdded(world, entityId, spr as sprite.Sprite)
@@ -1389,10 +1404,11 @@ function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(worl
                 -- Skip refcount release when moving between Sprite-bearing archetypes.
                 if destArchetype and destArchetype:get(Sprite) then return end
                 local sprites = archetype:get(Sprite) as {sprite.Sprite}
+                local entities = archetype.entities
                 for row = firstRow, lastRow do
                     local self = sprites[row]
                     if self and self.spriteId ~= 0 then
-                        clearPlayOnceCallback(self._entity)
+                        clearPlayOnceCallback(runtime, entities[row])
                         releaseInstance(self.spriteId)
                     end
                 end
@@ -1434,7 +1450,7 @@ function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(worl
             name = "sprite.PlayOnce",
             phase = tecs.phases.Update,
             run = function(_dt: number)
-                if playOncePendingCount == 0 then
+                if runtime.pendingCount == 0 then
                     return
                 end
 
@@ -1443,7 +1459,7 @@ function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(worl
                     local entities = archetype.entities
                     for row = 1, len do
                         local entityId = entities[row] as integer
-                        if playOnceCallbacks[entityId] ~= nil then
+                        if runtime.callbacks[entityId] ~= nil then
                             sprites[row]:getFrame()
                         end
                     end

@@ -18,6 +18,7 @@ local buildinfo <const> = require("tecs2d.buildinfo")
 local leader <const> = require("tecs2d.debug.internal.leader")
 local overlay <const> = require("tecs2d.debug.internal.overlay")
 local stats <const> = require("tecs2d.debug.internal.stats")
+local toolworld <const> = require("tecs2d.debug.internal.toolworld")
 
 local record debugplugin
     --- Debug plugin configuration.
@@ -84,6 +85,7 @@ function debugplugin.new(config?: debugplugin.Config): tecs.Plugin
     end
     local statsToggleKey = cfg.statsToggleKey or "."
     return function(w: tecs.World)
+        toolworld.install(w)
         overlay.install(w, {
             leaderKey = leaderKey,
             debugToggleKey = cfg.debugToggleKey or "/",

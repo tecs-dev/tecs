@@ -111,6 +111,9 @@ local record types
     --- GPU components (Sprite, Circle, etc.) sync to GPU buffers automatically.
     --- CPU draw methods queue love.graphics calls for rendering after GPU passes.
     interface Pipeline
+        --- Stable identity of the world that owns this pipeline.
+        getWorldId: function(self): integer
+
         --- Set the screen size of the pipeline.
         setScreenSize: function(self, w: number, h: number)
 

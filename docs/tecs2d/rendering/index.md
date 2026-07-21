@@ -97,6 +97,12 @@ love.run = tecs2d.run({
 | [Custom Drawing](./custom-drawing)       | CPU drawing with depth sorting                                                   |
 | [Materials](./materials)                 | GPU-batched fragment shader injection                                            |
 
+### Advanced rendering
+
+Most games need only one world. When a simulation or tool needs isolated
+entities, systems, clocks, and rendering state, see [Multiple render worlds and
+compositing](./multi-world).
+
 ## RenderConfig
 
 The render pipeline is configured via the `render` table in [`tecs2d.run`](/tecs2d/love2d#run). All fields are optional
@@ -137,3 +143,8 @@ love.run = tecs2d.run({
 | `sizeHints`          | `{string: integer}`          | none            | Initial GPU buffer capacities keyed by name (sprites, circles, lights, etc.). Grows automatically           |
 | `dropShadowScale`    | `number`                     | `0.5`           | Drop shadow AO canvas resolution scale (0.5 = half res, 1.0 = full res)                                     |
 | `bloom`              | `BloomConfig`                | none            | Bloom post-processing config: `enabled`, `intensity`, `radius`, `threshold`                                 |
+| `sharedWith`         | `gfx.Pipeline`               | none            | **Advanced.** Secondary pipeline source; shares device resources and composites on explicit `render()`      |
+
+`world` is required when calling `gfx.newPipeline` directly. A world owns one
+immutable pipeline association. Use `pipeline:getWorldId()` for its stable
+generational render-world identity. See [Multiple render worlds and compositing](./multi-world).

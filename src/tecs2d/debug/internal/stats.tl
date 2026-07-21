@@ -6,7 +6,7 @@ local input <const> = require("tecs2d.input")
 local leader <const> = require("tecs2d.debug.internal.leader")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
 
-local lg <const> = love.graphics
+local lg <const> = require("tecs2d.debug.internal.debugdraw")
 local format <const> = string.format
 local collectgarbage <const> = collectgarbage
 local getStats <const> = love.graphics.getStats
@@ -115,7 +115,7 @@ function stats.install(w: tecs.World, opts: stats.Options)
 
     w:addSystem({
         name = "debug.StatsRender",
-        phase = tecs.phases.PostRender,
+        phase = tecs.phases.RenderLast,
         run = function(_dt: number)
             if not shown or lastMemoryProfile == "" then return end
 

@@ -195,6 +195,9 @@ describe("std430 translations", function()
         assert.equals(32, std430.sizes.LayoutBox)
         assert.equals(8,  std430.sizes.Circle)
         assert.equals(8,  std430.sizes.Occluder)
+        -- world ownership reuses the existing uint32 entity lane; keeping the
+        -- canonical Sprite at 24 bytes protects the 4M-entity hot path.
+        assert.equals(24, std430.sizes.Sprite)
         -- TextEffects is 17 scalar floats. All three layers (FFI struct,
         -- BufferFormat, GLSL struct) must stay all-scalar at the natural
         -- 68-byte stride; a vec4-grouped layout rounds the std430 array

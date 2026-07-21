@@ -90,8 +90,6 @@ local record instance
     findCached: function(sheetId: integer, tagId: integer, speed: number, centered: boolean, sliceId: integer): integer
     cache: function(sheetId: integer, tagId: integer, speed: number, centered: boolean, sliceId: integer, spriteId: integer)
     uncache: function(sheetId: integer, tagId: integer, speed: number, centered: boolean, sliceId: integer)
-    setWorld: function(world: any)
-    getWorld: function(): any
 end
 
 -- Chunked FFI storage
@@ -227,17 +225,6 @@ end
 
 function instance.getSheet(inst: instance.SpriteInstance): sprite_sheet.SpriteSheet
     return sprite_sheet.SpriteSheet.getById(inst.sheetId)
-end
-
--- Module-level world reference for Sprite methods
-local currentWorld: any = nil
-
-function instance.setWorld(world: any)
-    currentWorld = world
-end
-
-function instance.getWorld(): any
-    return currentWorld
 end
 
 return instance

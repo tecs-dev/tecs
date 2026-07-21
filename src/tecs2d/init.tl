@@ -557,10 +557,6 @@ local function runLoop(config: tecs2d.RunConfig): (function(): number | string)
         local timeScale = pipelineInstance:getTimeScale()
         local scaledDt = frameclock.apply(dt * timeScale)
 
-        -- Update game time for GPU animations
-        local pipelineAny <const> = pipelineInstance as {string: any}
-        pipelineAny.gameTime = pipelineInstance:getTime() + scaledDt
-
         world:update(scaledDt)
 
         if hotReload.enabled and updateHotReloadWatcher(hotReload, dt) then

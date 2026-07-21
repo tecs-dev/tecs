@@ -196,6 +196,13 @@ export default defineConfig({
                 ]
               },
               { text: 'Custom Drawing', link: '/tecs2d/rendering/custom-drawing' },
+              {
+                text: 'Advanced',
+                collapsed: true,
+                items: [
+                  { text: 'Multiple Worlds & Compositing', link: '/tecs2d/rendering/multi-world' },
+                ]
+              },
             ]
           },
           {

@@ -863,7 +863,6 @@ function input.bindWorld(world: tecs.World)
 end
 
 function input.route<E is tecs.Event>(world: tecs.World, eventType: E, ...: any)
-    boundWorld = world
     local rawListening <const> = input.raw._bus:hasObservers(0, eventType)
     local routedListening <const> = top:hasObservers(eventType)
     if not rawListening and not routedListening then return end

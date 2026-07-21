@@ -26,12 +26,22 @@ local record systemcontrol
     --- system does not exist.
     setEnabled: function(w: tecs.World, name: string, enabled: boolean): boolean, string
 
-    isEnabled: function(name: string): boolean
+    isEnabled: function(w: tecs.World, name: string): boolean
 end
 
--- Names currently gated off. Keyed by name only: the MCP server already
--- enforces one world per process, and system names are unique per pipeline.
-local disabledSystems: {string: boolean} = {}
+local record State
+    disabledSystems: {string: boolean}
+end
+
+local STATE <const>: tecs.Key<State> = tecs.newKey("tecs2d.systemcontrol")
+
+local function stateFor(w: tecs.World): State
+    local state = w.resources[STATE]
+    if state then return state end
+    state = {disabledSystems = {}}
+    w.resources[STATE] = state
+    return state
+end
 
 local function pipelineOf(w: tecs.World): {string: any}
     return (w as {string: any}).pipeline as {string: any}
@@ -52,7 +62,8 @@ local function findConfig(w: tecs.World, name: string): tecs.SystemConfig, integ
     return nil, 0
 end
 
-local function infoFor(config: tecs.SystemConfig, position: integer): systemcontrol.Info
+local function infoFor(config: tecs.SystemConfig, position: integer,
+        disabledSystems: {string: boolean}): systemcontrol.Info
     local name = config.name or "(anonymous)"
     local configAny = config as {string: any}
     local hasOwnRunIf: boolean
@@ -71,13 +82,14 @@ local function infoFor(config: tecs.SystemConfig, position: integer): systemcont
 end
 
 function systemcontrol.list(w: tecs.World): {systemcontrol.Info}
+    local disabledSystems = stateFor(w).disabledSystems
     local pipeline = pipelineOf(w)
     local systems = pipeline.systems as {{tecs.SystemConfig}}
     local out: {systemcontrol.Info} = {}
     for i = 1, #systems do
         local phaseSystems = systems[i]
         for j = 1, #phaseSystems do
-            out[#out + 1] = infoFor(phaseSystems[j], j)
+            out[#out + 1] = infoFor(phaseSystems[j], j, disabledSystems)
         end
     end
     return out
@@ -86,14 +98,15 @@ end
 function systemcontrol.info(w: tecs.World, name: string): systemcontrol.Info
     local config, position = findConfig(w, name)
     if not config then return nil end
-    return infoFor(config, position)
+    return infoFor(config, position, stateFor(w).disabledSystems)
 end
 
-function systemcontrol.isEnabled(name: string): boolean
-    return not disabledSystems[name]
+function systemcontrol.isEnabled(w: tecs.World, name: string): boolean
+    return not stateFor(w).disabledSystems[name]
 end
 
 function systemcontrol.setEnabled(w: tecs.World, name: string, enabled: boolean): boolean, string
+    local disabledSystems = stateFor(w).disabledSystems
     local config = findConfig(w, name)
     if not config then
         return false, "system not found: " .. name

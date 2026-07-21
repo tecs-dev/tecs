@@ -22,7 +22,7 @@
 
 struct Std430Sprite {
     int   spriteId;
-    int   entityId;
+    uint  entityId;
     float animStartTime;
     int   pausedFrame;
     int   pauseAtFrame;

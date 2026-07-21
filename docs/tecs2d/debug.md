@@ -10,6 +10,13 @@ modal debugger overlay for inspecting and manipulating the world, and a stats
 HUD for performance metrics. When the [MCP plugin](./mcp/) is also present, an
 AI agent reads and drives the same debugger through MCP tools.
 
+The overlay dogfoods Tecs2D rendering: it owns a small independent ECS world
+with the UI plugin and a secondary GPU pipeline. Rectangles, lines, circles,
+BMFont text, and image-preview Sprites render to a transparent canvas and are
+composited in `RenderLast`. Its clock, entities, camera, and mutable GPU buffers
+are isolated from the game world. See the advanced [multiple render worlds and
+compositing guide](./rendering/multi-world) for the underlying architecture.
+
 ## Getting started
 
 Add the plugin to your world. Debug mode is enabled automatically; there is no

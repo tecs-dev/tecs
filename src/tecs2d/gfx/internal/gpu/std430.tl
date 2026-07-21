@@ -147,7 +147,7 @@ C.cdef[[
     // _pauseAtFrame, pauseDepth). Identity memcpy.
     typedef struct {
         int32_t  spriteId;
-        int32_t  entityId;          // canonical: `_entity`
+        uint32_t entityId;          // canonical: `_entity` owner token
         float    animStartTime;
         int32_t  pausedFrame;
         int32_t  pauseAtFrame;      // canonical: `_pauseAtFrame`
@@ -351,7 +351,7 @@ C.cdef[[
     // Canonical Sprite: 24 bytes. Field-identical to Std430Sprite.
     typedef struct {
         int32_t  spriteId;
-        int32_t  entityId;
+        uint32_t entityId;
         float    animStartTime;
         int32_t  pausedFrame;
         int32_t  pauseAtFrame;
@@ -753,7 +753,7 @@ local TEXT_FORMAT: love.graphics.BufferFormat = {
 -- float. The cull shader reinterprets via the Std430Sprite struct.
 local SPRITE_FORMAT: love.graphics.BufferFormat = {
     {format = "int32"},   -- spriteId
-    {format = "int32"},   -- entityId
+    {format = "uint32"},  -- entityId owner token
     {format = "float"},   -- animStartTime
     {format = "int32"},   -- pausedFrame
     {format = "int32"},   -- pauseAtFrame

@@ -15,6 +15,7 @@ local phases <const> = tecs.phases
 local layereffects <const> = require("tecs2d.gfx.internal.layereffects")
 local Camera <const> = require("tecs2d.gfx.Camera")
 local sprite_sheet <const> = require("tecs2d.gfx.internal.sprite.sheet")
+local worldregistry <const> = require("tecs2d.gfx.internal.worldregistry")
 local Occluder <const> = require("tecs2d.gfx.internal.Occluder")
 local bit <const> = require("bit")
 
@@ -95,6 +96,10 @@ local record pipeline
     record RenderConfig
         --- The world to attach the pipeline to.
         world: tecs.World
+
+        --- Reuse another pipeline's GPU device resources and composite this
+        --- pipeline's transparent result when render() is called. Immutable.
+        sharedWith: types.Pipeline
 
         --- Virtual resolution height. In retro mode, determines the integer scale factor
         --- (intScale = floor(screenH / virtualH)) and vertical field of view. In non-retro
@@ -177,6 +182,10 @@ local type Pipeline = types.Pipeline
 local record PipelineImpl is Pipeline, gpuTypes.PipelineInternal
     world: tecs.World
     renderer: gpuTypes.Renderer
+    worldId: integer
+    _composited: boolean
+    _compositeCanvas: love.graphics.Canvas
+    _shutdown: boolean
 
     -- Multi-camera
     _cameras: {Camera}                -- Ordered list (registration order = render order)
@@ -365,6 +374,18 @@ local WS_MT <const>: metatable<types.WorldShaderState> = {
 
 function pipeline.newPipeline(config: pipeline.RenderConfig): Pipeline
     local w = assert(config.world, "Missing required 'world' for render pipeline")
+    if w.resources[pipelinekey.PIPELINE] then
+        error("gfx.newPipeline: world already owns a render pipeline", 2)
+    end
+
+    local sharedRenderer: gpuTypes.Renderer = nil
+    if config.sharedWith then
+        local shared = config.sharedWith as PipelineImpl
+        if shared._shutdown then
+            error("gfx.newPipeline: sharedWith pipeline is shut down", 2)
+        end
+        sharedRenderer = shared.renderer
+    end
 
     -- Compute virtual dimensions
     local screenWidth = lg.getWidth() as integer
@@ -382,7 +403,7 @@ function pipeline.newPipeline(config: pipeline.RenderConfig): Pipeline
         maxY = 100000,
         virtualRes = {virtualWidth, virtualHeight},
         dropShadowScale = config.dropShadowScale,
-    })
+    }, sharedRenderer)
     renderer._roughGeometry = config.roughGeometry == true
 
     -- Create primary camera
@@ -403,9 +424,14 @@ function pipeline.newPipeline(config: pipeline.RenderConfig): Pipeline
         cam:updateBounds()
     end
 
+    local worldId = worldregistry.register(w)
     local self: PipelineImpl = {
         world = w,
         renderer = renderer,
+        worldId = worldId,
+        _composited = config.sharedWith ~= nil,
+        _compositeCanvas = nil,
+        _shutdown = false,
 
         -- Multi-camera
         _cameras = { cam },
@@ -598,13 +624,37 @@ function pipeline.newPipeline(config: pipeline.RenderConfig): Pipeline
         end
     })
 
-    -- Render system (Render phase so UI overlays can draw in PostRender/RenderLast)
+    -- Primary pipelines render as part of their world's normal render group.
+    -- Composited worlds are updated independently and rendered explicitly by
+    -- their owner at the desired composition point.
+    if not pImpl._composited then
+        w:addSystem({
+            name = "GPURender",
+            phase = tecs.phases.Render,
+            run = function(_dt: number)
+                pipelineInstance:render()
+            end
+        })
+    end
+
+    -- A pipeline's time belongs to its world. The caller chooses the clock by
+    -- choosing the dt passed to that world's update.
     w:addSystem({
-        name = "GPURender",
-        phase = tecs.phases.Render,
-        run = function(_dt: number)
-            pipelineInstance:render()
-        end
+        name = "tecs2d.RenderClock",
+        phase = tecs.phases.First,
+        run = function(dt: number)
+            pImpl.gameTime = pImpl.gameTime + dt
+        end,
+    })
+
+    w:addSystem({
+        name = "tecs2d.RenderPipelineShutdown",
+        phase = tecs.phases.PostShutdown,
+        run = function()
+            if pImpl._shutdown then return end
+            pImpl._shutdown = true
+            worldregistry.release(pImpl.worldId)
+        end,
     })
 
     -- Resize handler. setScreenSize resizes the primary camera to
@@ -1080,11 +1130,46 @@ function PipelineImpl:setScreenSize(w: number, h: number)
     self:_updateCameraRenderDims()
 end
 
+function PipelineImpl:getWorldId(): integer
+    return self.worldId
+end
+
+local function bindOutput(self: PipelineImpl)
+    if self._composited then
+        lg.setCanvas(self._compositeCanvas)
+    else
+        lg.setCanvas()
+    end
+end
+
+local function ensureCompositeCanvas(self: PipelineImpl)
+    if not self._composited then return end
+    local canvas = self._compositeCanvas
+    if canvas and canvas:getWidth() == self.screenWidth
+            and canvas:getHeight() == self.screenHeight then
+        return
+    end
+    self._compositeCanvas = lg.newCanvas(self.screenWidth, self.screenHeight,
+        {format = "rgba8"})
+end
+
 -------------------------------------------------------------------------------
 -- Main render function
 -------------------------------------------------------------------------------
 
 function PipelineImpl:render()
+    if self._shutdown then
+        error("render pipeline is shut down", 2)
+    end
+
+    if self._composited then
+        ensureCompositeCanvas(self)
+        lg.push("all")
+        lg.setCanvas(self._compositeCanvas)
+        lg.clear(0, 0, 0, 0)
+        lg.setCanvas()
+    end
+
     zone("upload")
     self.renderer:upload()
     zone()
@@ -1101,6 +1186,20 @@ function PipelineImpl:render()
         end
 
         ::continue::
+    end
+
+    if self._composited then
+        -- Restore the caller's target first. This permits composing a world
+        -- into either the window or another explicitly bound canvas.
+        lg.pop()
+        lg.push("all")
+        lg.origin()
+        lg.setShader()
+        lg.setScissor()
+        lg.setColor(1, 1, 1, 1)
+        lg.setBlendMode("alpha", "premultiplied")
+        lg.draw(self._compositeCanvas, 0, 0)
+        lg.pop()
     end
 end
 
@@ -1205,7 +1304,10 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
 
         if self.lightingMode == "deferred" then
             zone("lighting")
-            self.renderer:renderLighting(useLowRes, self.shadowsEnabled, self.ambientLight, camX, camY, renderZoom, nil, rot, renderSubPixelX, renderSubPixelY)
+            self.renderer:renderLighting(useLowRes, self.shadowsEnabled,
+                self.ambientLight, camX, camY, renderZoom,
+                self._composited and self.renderer.worldLitCanvas or nil,
+                rot, renderSubPixelX, renderSubPixelY)
             zone()
 
             zone("bloom")
@@ -1216,7 +1318,11 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
             lg.setColor(1, 1, 1, 1)
             local albedo = useLowRes and self.renderer.pixelAlbedo or self.renderer.gBufferAlbedo
             lg.setCanvas(self.renderer.worldLitCanvas)
-            lg.clear(0, 0, 0, 1)
+            if self._composited then
+                lg.clear(0, 0, 0, 0)
+            else
+                lg.clear(0, 0, 0, 1)
+            end
             lg.draw(albedo, 0, 0)
             lg.setCanvas()
         end
@@ -1235,6 +1341,7 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
     local worldLit = self.renderer.worldLitCanvas
     local worldLitW = worldLit:getWidth()
     local worldLitH = worldLit:getHeight()
+    bindOutput(self)
     lg.setColor(1, 1, 1, 1)
     if self._integerScaling then
         -- Integer scaling: pixel-perfect upscale with letterboxing.
@@ -1249,7 +1356,9 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
         local vpY <const> = self._intOffsetY
         local vpW <const> = self.scaledWidth * intScale
         local vpH <const> = self.scaledHeight * intScale
-        lg.clear(0, 0, 0, 1)
+        if not self._composited then
+            lg.clear(0, 0, 0, 1)
+        end
         lg.setScissor(vpX, vpY, vpW, vpH)
         worldLit:setFilter("nearest", "nearest")
         lg.draw(worldLit, vpX + blitOffsetX, vpY + blitOffsetY, 0, intScale, intScale)
@@ -1320,6 +1429,7 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
         lg.setCanvas()
 
         -- Composite screen layers on top of world with alpha blending
+        bindOutput(self)
         lg.setBlendMode("alpha", "premultiplied")
         lg.setColor(1, 1, 1, 1)
         lg.draw(screenLit, 0, 0)
@@ -1450,19 +1560,23 @@ function PipelineImpl:_renderSecondary(cam: Camera, globalTime: number)
 
         -- Blit to screen only for viewport cameras (not textureSize)
         if hasViewport and not hasTexture then
+            bindOutput(self)
             lg.setColor(1, 1, 1, 1)
             lg.draw(cam._canvas, vpX, vpY)
         end
     else
         -- No canvas: secondary camera renders directly to screen (full-screen overlay)
+        bindOutput(self)
         if self.lightingMode == "deferred" then
             self.renderer:renderLighting(useLowRes, self.shadowsEnabled, self.ambientLight, camX, camY, effectiveZoom, nil, rot)
-            self.renderer:renderBloom(useLowRes)
+            self.renderer:renderBloom(useLowRes,
+                self._composited and self._compositeCanvas or nil)
         else
             local albedo = self.renderer.gBufferAlbedo
             lg.setColor(1, 1, 1, 1)
             lg.draw(albedo, 0, 0)
         end
+        bindOutput(self)
         self.renderer:renderForwardBlend(camX, camY, effectiveZoom, useLowRes, 0.0, 0.0)
     end
 

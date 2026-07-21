@@ -20,6 +20,20 @@ local setOrthographic <const> = require("tecs2d.gfx.internal.ortho").setOrthogra
 local EMPTY_NUMBERS <const>: {number} = {}
 local EMPTY_INTEGERS <const>: {integer} = {}
 
+-- Screen-sized targets are transient: pipelines sharing the LÖVE device render
+-- sequentially, so identical target sets can be reused across worlds.
+local scratchByKey: {string: {string: any}} = {}
+local SCRATCH_FIELDS <const>: {string} = {
+    "gBufferAlbedo", "gBufferNormal", "gBufferORM", "gBufferEmission",
+    "dropShadowAO", "shadowMask", "shadowMaskTemp",
+    "pixelAlbedo", "pixelNormal", "pixelORM", "pixelEmission",
+    "pixelDropShadowAO", "pixelCanvas",
+    "tileGridWidth", "tileGridHeight", "tileLightCountBuffer",
+    "tileLightIndexBuffer", "tileCountResetData",
+    "bloomMips", "bloomMipWidths", "bloomMipHeights",
+    "pixelBloomMips", "pixelBloomMipWidths", "pixelBloomMipHeights",
+}
+
 local record MaskPack
     u: integer
     f: number
@@ -62,13 +76,13 @@ local record gpu
     type Renderer = types.Renderer
 
     --- Create a new GPU renderer
-    new: function(config: Config): Renderer
+    new: function(config: Config, sharedRenderer?: Renderer): Renderer
 end
 
 gpu.types = types
 gpu.shaders = shaderCode
 
-function gpu.new(config: gpu.Config): gpu.Renderer
+function gpu.new(config: gpu.Config, sharedRenderer?: gpu.Renderer): gpu.Renderer
     config = config or {}
 
     -- Apply defaults for config fields that shape modules read
@@ -94,11 +108,11 @@ function gpu.new(config: gpu.Config): gpu.Renderer
     renderer._roughGeometry = false
 
     -- Compile shared shaders (per-shape shaders are compiled by each shape module)
-    renderer.lightingShader = lg.newShader(shaderCode.LIGHTING)
-    renderer.shadowBlurShader = lg.newShader(shaderCode.SHADOW_BLUR)
-    renderer.screenUnlitShader = lg.newShader(shaderCode.SCREEN_UNLIT)
-    renderer.bloomDownsampleShader = lg.newShader(shaderCode.BLOOM_DOWNSAMPLE)
-    renderer.bloomUpsampleShader = lg.newShader(shaderCode.BLOOM_UPSAMPLE)
+    renderer.lightingShader = sharedRenderer and sharedRenderer.lightingShader or lg.newShader(shaderCode.LIGHTING)
+    renderer.shadowBlurShader = sharedRenderer and sharedRenderer.shadowBlurShader or lg.newShader(shaderCode.SHADOW_BLUR)
+    renderer.screenUnlitShader = sharedRenderer and sharedRenderer.screenUnlitShader or lg.newShader(shaderCode.SCREEN_UNLIT)
+    renderer.bloomDownsampleShader = sharedRenderer and sharedRenderer.bloomDownsampleShader or lg.newShader(shaderCode.BLOOM_DOWNSAMPLE)
+    renderer.bloomUpsampleShader = sharedRenderer and sharedRenderer.bloomUpsampleShader or lg.newShader(shaderCode.BLOOM_UPSAMPLE)
 
     -- Initialize bloom config (disabled by default)
     renderer.bloom = {
@@ -109,7 +123,8 @@ function gpu.new(config: gpu.Config): gpu.Renderer
     }
 
     -- Dummy material params buffer (1 element, all zeros) for shapes with no materials
-    renderer.dummyMaterialParamsBuffer = lg.newBuffer(types.MATERIAL_PARAMS_FORMAT, 1, {usage = "dynamic", shaderstorage = true})
+    renderer.dummyMaterialParamsBuffer = sharedRenderer and sharedRenderer.dummyMaterialParamsBuffer
+        or lg.newBuffer(types.MATERIAL_PARAMS_FORMAT, 1, {usage = "dynamic", shaderstorage = true})
 
     -- Create camera params SSBO buffers
     renderer.cullParamsByteData = love.data.newByteData(C.sizeof("GPUCullParams"))
@@ -130,25 +145,25 @@ function gpu.new(config: gpu.Config): gpu.Renderer
     imageData:mapPixel(function(_x: number, _y: number, _r: number, _g: number, _b: number, _a: number): (number, number, number, number)
         return 1, 1, 1, 1
     end)
-    renderer.defaultTexture = lg.newImage(imageData)
+    renderer.defaultTexture = sharedRenderer and sharedRenderer.defaultTexture or lg.newImage(imageData)
     renderer.defaultTexture:setFilter("nearest", "nearest")
 
     -- 1x1 flat normal texture (neutral normal, alpha=0 means "no normal data")
     local flatNormalData = love.image.newImageData(1, 1)
     flatNormalData:setPixel(0, 0, 0.5, 0.5, 1.0, 0.0)
-    renderer.flatNormalTexture = lg.newImage(flatNormalData)
+    renderer.flatNormalTexture = sharedRenderer and sharedRenderer.flatNormalTexture or lg.newImage(flatNormalData)
     renderer.flatNormalTexture:setFilter("nearest", "nearest")
 
     -- 1x1 black emission texture (no glow)
     local blackEmissionData = love.image.newImageData(1, 1)
     blackEmissionData:setPixel(0, 0, 0, 0, 0, 1)
-    renderer.blackEmissionTexture = lg.newImage(blackEmissionData)
+    renderer.blackEmissionTexture = sharedRenderer and sharedRenderer.blackEmissionTexture or lg.newImage(blackEmissionData)
     renderer.blackEmissionTexture:setFilter("nearest", "nearest")
 
     -- 1x1 default ORM texture (full AO, mid roughness, non-metallic)
     local defaultORMData = love.image.newImageData(1, 1)
     defaultORMData:setPixel(0, 0, 1.0, 0.5, 0.0, 0.0)
-    renderer.defaultORMTexture = lg.newImage(defaultORMData)
+    renderer.defaultORMTexture = sharedRenderer and sharedRenderer.defaultORMTexture or lg.newImage(defaultORMData)
     renderer.defaultORMTexture:setFilter("nearest", "nearest")
 
     -- Initialize screen size and canvases
@@ -190,6 +205,17 @@ function RendererMethods:resize(width: integer, height: integer)
     local vw, vh = self.config.virtualRes[1], self.config.virtualRes[2]
     local dsScale = self.config.dropShadowScale
     local scale = self.config.shadowMaskScale
+    local scratchKey = table.concat({width, height, vw, vh, dsScale, scale}, ":")
+    local cached = scratchByKey[scratchKey]
+    if cached then
+        for i = 1, #SCRATCH_FIELDS do
+            local field = SCRATCH_FIELDS[i]
+            (self as {string: any})[field] = cached[field]
+        end
+        self.screenDropShadowAO = nil
+        self.screenShadowMask = nil
+        return
+    end
 
     -- Full-res G-Buffer at native screen resolution (used for non-retro world
     -- rendering and for screen-phase rendering of screen-space layers)
@@ -283,6 +309,13 @@ function RendererMethods:resize(width: integer, height: integer)
         self.pixelBloomMipWidths[i] = pmipW
         self.pixelBloomMipHeights[i] = pmipH
     end
+
+    local scratch: {string: any} = {}
+    for i = 1, #SCRATCH_FIELDS do
+        local field = SCRATCH_FIELDS[i]
+        scratch[field] = (self as {string: any})[field]
+    end
+    scratchByKey[scratchKey] = scratch
 end
 
 function RendererMethods:upload()
