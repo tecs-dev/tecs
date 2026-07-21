@@ -6,6 +6,10 @@ history through 0.10.9 remains in `cli/CHANGELOG.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- Tween timelines now use typed node constructors with play-time options.
+
 ### Fixed
 
 - Release automation now resumes safely after a partially successful LuaRocks

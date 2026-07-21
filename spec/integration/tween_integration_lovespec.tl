@@ -1,7 +1,6 @@
 --- Love2D integration suite: tween plugin under the real frame loop.
---- Covers absolute :to() targets, relative :adjust() moves, loop counts,
---- completion events, and playback cleanup; the tween plugin is
---- auto-installed by tecs2d.run but was previously only unit-tested.
+--- Covers absolute targets, relative adjustments, loop counts, completion
+--- events, and playback cleanup under the real frame loop.
 ---
 --- Run via `make test-love FILE_MATCH='tween_integration'`.
 
@@ -40,20 +39,20 @@ describe("tween: timelines drive transforms in the live loop", function()
         fixture.stop(app)
     end)
 
-    it(":to() reaches its absolute target and cleans up playback", function()
+    it("to reaches its absolute target and cleans up playback", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
             local gfx = require("tecs2d.gfx")
             local tween = require("tecs2d.tween")
             local Transform = tecs.builtins.Transform
             _G.tecsTweenA = world:spawn(Transform(60, 60, 0, 1), gfx.Rectangle(8, 8), gfx.Color(1, 0, 0, 1))
-            tween.timeline()
-                :to(0.4, tween.linear, tween.translateX, 200)
-                :once()
-                :apply(world, _G.tecsTweenA)
+            tween.timeline({
+                tween.to(0.4, tween.linear, tween.translateX, 200),
+            })
+                :play(world, _G.tecsTweenA)
             return true
         ]])
-        waitX(app, "tecsTweenA", 200, "absolute :to() target")
+        waitX(app, "tecsTweenA", 200, "absolute target")
 
         -- Playback removes itself once the timeline finishes.
         local cleaned = fixture.eventually(fixture.callTimeout, function(): boolean
@@ -67,38 +66,35 @@ describe("tween: timelines drive transforms in the live loop", function()
         luassert.is_true(cleaned == true, "TweenPlayback lingered after completion")
     end)
 
-    it(":adjust() moves relative to the start value", function()
+    it("adjust moves relative to the start value", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
             local gfx = require("tecs2d.gfx")
             local tween = require("tecs2d.tween")
             local Transform = tecs.builtins.Transform
             _G.tecsTweenB = world:spawn(Transform(50, 90, 0, 1), gfx.Rectangle(8, 8), gfx.Color(0, 1, 0, 1))
-            tween.timeline()
-                :adjust(0.3, tween.linear, tween.translateX, 40)
-                :once()
-                :apply(world, _G.tecsTweenB)
+            tween.timeline({
+                tween.adjust(0.3, tween.linear, tween.translateX, 40),
+            })
+                :play(world, _G.tecsTweenB)
             return true
         ]])
-        waitX(app, "tecsTweenB", 90, "relative :adjust() by +40 from 50")
+        waitX(app, "tecsTweenB", 90, "relative adjustment by +40 from 50")
     end)
 
-    it(":loop(n) repeats the timeline n times after the initial play", function()
+    it("loop count is the total number of passes", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
             local gfx = require("tecs2d.gfx")
             local tween = require("tecs2d.tween")
             local Transform = tecs.builtins.Transform
             _G.tecsTweenC = world:spawn(Transform(30, 150, 0, 1), gfx.Rectangle(8, 8), gfx.Color(0, 0, 1, 1))
-            tween.timeline()
-                :adjust(0.2, tween.linear, tween.translateX, 25)
-                :loop(3)
-                :apply(world, _G.tecsTweenC)
+            tween.timeline({
+                tween.adjust(0.2, tween.linear, tween.translateX, 25),
+            }):play(world, _G.tecsTweenC, {mode = "loop", count = 3})
             return true
         ]])
-        -- loop(n) = n repeats on top of the initial play (once() is
-        -- repeats=0), so +25 runs four times.
-        waitX(app, "tecsTweenC", 30 + 25 * 4, "initial play plus three repeats of +25")
+        waitX(app, "tecsTweenC", 30 + 25 * 3, "three passes of +25")
     end)
 
     it("emits TweenComplete when a timeline finishes", function()
@@ -116,10 +112,10 @@ describe("tween: timelines drive transforms in the live loop", function()
                     _G.tecsTweenDone = true
                 end
             end)
-            tween.timeline()
-                :to(0.2, tween.linear, tween.translateX, 120)
-                :once()
-                :apply(world, _G.tecsTweenD)
+            tween.timeline({
+                tween.to(0.2, tween.linear, tween.translateX, 120),
+            })
+                :play(world, _G.tecsTweenD)
             return true
         ]])
         local done = fixture.eventually(fixture.callTimeout, function(): boolean

@@ -57,10 +57,9 @@ local function gamePlugin(world: tecs.World)
 
             -- Idle bob: ease up by one text height and back, forever. Tweens
             -- are ECS data (snapshot-safe); see `tecs docs tecs2d/tween`.
-            tween.timeline()
-                :to(0.9, tween.sineInOut, tween.translateY, -BOB)
-                :pingPong()
-                :apply(world, hello)
+            tween.timeline({
+                tween.to(0.9, tween.sineInOut, tween.translateY, -BOB),
+            }):play(world, hello, {mode = "pingPong"})
         end,
     })
 end

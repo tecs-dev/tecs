@@ -105,9 +105,9 @@ local function tweenDemoPlugin(world: tecs.World)
 
     local lastAction: function() = nil
 
-    local function applyTween(def: tween.Timeline)
+    local function playTween(def: tween.Timeline, options?: tween.PlaybackOptions)
         tween.cancel(world, target, "demo")
-        def:apply(world, target)
+        def:play(world, target, options)
     end
 
     local function updateLabel()
@@ -154,54 +154,54 @@ local function tweenDemoPlugin(world: tecs.World)
 
             local function doMove()
                 resetTarget()
-                applyTween(tween.timeline()
-                    :channel("demo")
-                    :to(0.7, getEasing(), tween.translateX, 250)
-                    :step()
-                    :to(1.0, getEasing(), tween.translateX, -250)
-                    :step()
-                    :to(0.7, getEasing(), tween.translateX, 0)
-                    :once())
+                playTween(tween.timeline({
+                    channel = "demo",
+                    tween.to(0.7, getEasing(), tween.translateX, 250),
+                    tween.to(1.0, getEasing(), tween.translateX, -250),
+                    tween.to(0.7, getEasing(), tween.translateX, 0),
+                }))
             end
 
             local function doRotate()
                 resetTarget()
-                applyTween(tween.timeline()
-                    :channel("demo")
-                    :to(1.5, getEasing(), tween.rotation, math.pi * 2)
-                    :once())
+                playTween(tween.timeline({
+                    channel = "demo",
+                    tween.to(1.5, getEasing(), tween.rotation, math.pi * 2),
+                }))
             end
 
             local function doColor()
                 resetTarget()
                 local Color <const> = gfx.Color
-                applyTween(tween.timeline()
-                    :channel("demo")
-                    :to(0.6, getEasing(), tween.field(Color, "r"), 1.0)
-                    :to(0.6, getEasing(), tween.field(Color, "g"), 0.2)
-                    :to(0.6, getEasing(), tween.field(Color, "b"), 0.3)
-                    :step()
-                    :to(0.6, getEasing(), tween.field(Color, "r"), 0.2)
-                    :to(0.6, getEasing(), tween.field(Color, "g"), 1.0)
-                    :to(0.6, getEasing(), tween.field(Color, "b"), 0.4)
-                    :step()
-                    :to(0.6, getEasing(), tween.field(Color, "r"), 1.0)
-                    :to(0.6, getEasing(), tween.field(Color, "g"), 0.9)
-                    :to(0.6, getEasing(), tween.field(Color, "b"), 0.2)
-                    :step()
-                    :to(0.6, getEasing(), tween.field(Color, "r"), 0.3)
-                    :to(0.6, getEasing(), tween.field(Color, "g"), 0.6)
-                    :to(0.6, getEasing(), tween.field(Color, "b"), 1.0)
-                    :once())
+                playTween(tween.timeline({
+                    channel = "demo",
+                    tween.parallel(
+                        tween.to(0.6, getEasing(), tween.field(Color, "r"), 1.0),
+                        tween.to(0.6, getEasing(), tween.field(Color, "g"), 0.2),
+                        tween.to(0.6, getEasing(), tween.field(Color, "b"), 0.3)),
+                    tween.parallel(
+                        tween.to(0.6, getEasing(), tween.field(Color, "r"), 0.2),
+                        tween.to(0.6, getEasing(), tween.field(Color, "g"), 1.0),
+                        tween.to(0.6, getEasing(), tween.field(Color, "b"), 0.4)),
+                    tween.parallel(
+                        tween.to(0.6, getEasing(), tween.field(Color, "r"), 1.0),
+                        tween.to(0.6, getEasing(), tween.field(Color, "g"), 0.9),
+                        tween.to(0.6, getEasing(), tween.field(Color, "b"), 0.2)),
+                    tween.parallel(
+                        tween.to(0.6, getEasing(), tween.field(Color, "r"), 0.3),
+                        tween.to(0.6, getEasing(), tween.field(Color, "g"), 0.6),
+                        tween.to(0.6, getEasing(), tween.field(Color, "b"), 1.0)),
+                }))
             end
 
             local function doPulse()
                 resetTarget()
-                applyTween(tween.timeline()
-                    :channel("demo")
-                    :to(0.6, getEasing(), tween.scaleX, 3)
-                    :to(0.6, getEasing(), tween.scaleY, 3)
-                    :pingPong())
+                playTween(tween.timeline({
+                    channel = "demo",
+                    tween.parallel(
+                        tween.to(0.6, getEasing(), tween.scaleX, 3),
+                        tween.to(0.6, getEasing(), tween.scaleY, 3)),
+                }), {mode = "pingPong"})
             end
 
             if input.isKeyPressed("m") then lastAction = doMove; doMove() end
@@ -211,12 +211,13 @@ local function tweenDemoPlugin(world: tecs.World)
 
             -- (B)ounce: spawn 500 squares that fall from above using shared def + speed
             if input.isKeyPressed("b") then
-                local fallDef <const> = tween.timeline()
-                    :to(2.0, getEasing(), tween.translateY, 0)
-                    :step(0.5)
-                    :to(0.8, tween.sineIn, tween.scaleX, 0)
-                    :to(0.8, tween.sineIn, tween.scaleY, 0)
-                    :once()
+                local fallDef <const> = tween.timeline({
+                    tween.to(2.0, getEasing(), tween.translateY, 0),
+                    tween.wait(0.5),
+                    tween.parallel(
+                        tween.to(0.8, tween.sineIn, tween.scaleX, 0),
+                        tween.to(0.8, tween.sineIn, tween.scaleY, 0)),
+                })
 
                 for _ = 1, 150 do
                     local size <const> = 4 + math.random() * 20
@@ -232,37 +233,38 @@ local function tweenDemoPlugin(world: tecs.World)
                         gfx.Color(r, g, b, 1),
                         tecs.builtins.TTL(10)
                     )
-                    fallDef:apply(world, e, rate, math.random() * 0.25)
+                    fallDef:play(world, e, {speed = rate, delay = math.random() * 0.25})
                 end
             end
 
             -- (1) orbit: move in a square while spinning and scaling
             local function doOrbit()
                 resetTarget()
-                applyTween(tween.timeline()
-                    :channel("demo")
-                    :to(0.4, getEasing(), tween.translateX, 150)
-                    :to(0.4, getEasing(), tween.translateY, -150)
-                    :to(0.4, getEasing(), tween.rotation, math.pi / 2)
-                    :to(0.4, getEasing(), tween.scaleX, 1.5)
-                    :to(0.4, getEasing(), tween.scaleY, 1.5)
-                    :step()
-                    :to(0.4, getEasing(), tween.translateX, 150)
-                    :to(0.4, getEasing(), tween.translateY, 80)
-                    :to(0.4, getEasing(), tween.rotation, math.pi)
-                    :step()
-                    :to(0.4, getEasing(), tween.translateX, -150)
-                    :to(0.4, getEasing(), tween.translateY, 80)
-                    :to(0.4, getEasing(), tween.rotation, math.pi * 1.5)
-                    :to(0.4, getEasing(), tween.scaleX, 0.5)
-                    :to(0.4, getEasing(), tween.scaleY, 0.5)
-                    :step()
-                    :to(0.4, getEasing(), tween.translateX, 0)
-                    :to(0.4, getEasing(), tween.translateY, -40)
-                    :to(0.4, getEasing(), tween.rotation, math.pi * 2)
-                    :to(0.4, getEasing(), tween.scaleX, 1)
-                    :to(0.4, getEasing(), tween.scaleY, 1)
-                    :once())
+                playTween(tween.timeline({
+                    channel = "demo",
+                    tween.parallel(
+                        tween.to(0.4, getEasing(), tween.translateX, 150),
+                        tween.to(0.4, getEasing(), tween.translateY, -150),
+                        tween.to(0.4, getEasing(), tween.rotation, math.pi / 2),
+                        tween.to(0.4, getEasing(), tween.scaleX, 1.5),
+                        tween.to(0.4, getEasing(), tween.scaleY, 1.5)),
+                    tween.parallel(
+                        tween.to(0.4, getEasing(), tween.translateX, 150),
+                        tween.to(0.4, getEasing(), tween.translateY, 80),
+                        tween.to(0.4, getEasing(), tween.rotation, math.pi)),
+                    tween.parallel(
+                        tween.to(0.4, getEasing(), tween.translateX, -150),
+                        tween.to(0.4, getEasing(), tween.translateY, 80),
+                        tween.to(0.4, getEasing(), tween.rotation, math.pi * 1.5),
+                        tween.to(0.4, getEasing(), tween.scaleX, 0.5),
+                        tween.to(0.4, getEasing(), tween.scaleY, 0.5)),
+                    tween.parallel(
+                        tween.to(0.4, getEasing(), tween.translateX, 0),
+                        tween.to(0.4, getEasing(), tween.translateY, -40),
+                        tween.to(0.4, getEasing(), tween.rotation, math.pi * 2),
+                        tween.to(0.4, getEasing(), tween.scaleX, 1),
+                        tween.to(0.4, getEasing(), tween.scaleY, 1)),
+                }))
             end
             if input.isKeyPressed("1") then lastAction = doOrbit; doOrbit() end
 

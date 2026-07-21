@@ -311,19 +311,17 @@ velocity.x = moveX * speed
 local tween = require("tecs2d.tween")
 
 -- Simple move
-tween.timeline()
-    :to(0.5, tween.quadOut, tween.translateX, 200)
-    :once()
-    :apply(world, entity)
+tween.timeline({
+    tween.to(0.5, "quadOut", "transform.x", 200),
+}):play(world, entity)
 
 -- Sequence with a serializable named event
-tween.timeline()
-    :channel("movement")
-    :to(0.5, tween.quadOut, tween.translateXY, 200, 100)
-    :emit("whoosh")
-    :to(0.3, tween.linear, tween.color, 1, 0, 0, 1)
-    :once()
-    :apply(world, entity)
+tween.timeline({
+    channel = "movement",
+    tween.to(0.5, "quadOut", "transform.xy", 200, 100),
+    tween.emit("whoosh"),
+    tween.to(0.3, "linear", "color.rgba", 1, 0, 0, 1),
+}):play(world, entity)
 
 world:observe(0, tween.TweenEvent, function(ev)
     if ev.name == "whoosh" then
@@ -332,12 +330,15 @@ world:observe(0, tween.TweenEvent, function(ev)
 end)
 
 -- Reusable timeline with stagger
-local pulse = tween.timeline()
-    :to(0.8, tween.sineInOut, tween.scaleXY, 1.5, 1.5)
-    :pingPong()
+local pulse = tween.timeline({
+    tween.to(0.8, "sineInOut", "transform.scaleXY", 1.5, 1.5),
+})
 
 for i = 0, 4 do
-    pulse:apply(world, buttons[i + 1], 1, i * 0.1)
+    pulse:play(world, buttons[i + 1], {
+        mode = "pingPong",
+        delay = i * 0.1,
+    })
 end
 ```
 

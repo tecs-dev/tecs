@@ -39,10 +39,10 @@ describe("pause and time scale: motion control from MCP", function()
             _G.tecsMover = world:spawn(
                 Transform(20, 120, 0, 1), gfx.Rectangle(10, 10), gfx.Color(1, 0, 0, 1))
             -- Long, slow, linear drift so every phase of the suite has motion.
-            tween.timeline()
-                :to(120, tween.linear, tween.translateX, 20000)
-                :once()
-                :apply(world, _G.tecsMover)
+            tween.timeline({
+                tween.to(120, tween.linear, tween.translateX, 20000),
+            })
+                :play(world, _G.tecsMover)
             return true
         ]])
         local moving = fixture.eventually(fixture.callTimeout, function(): boolean

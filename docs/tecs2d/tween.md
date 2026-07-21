@@ -1,278 +1,148 @@
 ---
-description: "The tecs2d.tween animation system: typed targets, timeline builder, easing, channels, events, presets, and snapshot-safe playback"
+description: "The tecs2d.tween animation system: data timelines, easing, targets, playback modes, channels, events, presets, and snapshot-safe cursors"
 outline: deep
 ---
 
 # Tween
 
-`tecs2d.tween` is an animation system for Tecs. It provides typed tween targets,
-timeline composition, easing functions, channels, events, and snapshot-safe
-playback for entity animations. The tween plugin is registered automatically by
-`tecs2d`.
-
-Active tween state is ordinary ECS data. When a timeline is applied, the live
-cursor is stored on the target entity as `tween.TweenPlayback`. Snapshot save/load
-serializes that cursor and writes shared timeline templates once in snapshot
-metadata, so hot reload can resume tweens in flight instead of restarting them.
+`tecs2d.tween` animates numeric ECS component fields from declarative data timelines.
+The plugin is installed automatically by `tecs2d`.
 
 ```teal
 local tween = require("tecs2d.tween")
 
--- Move an entity to x=200 over 0.5 seconds.
-tween.timeline()
-    :to(0.5, tween.quadOut, tween.translateX, 200)
-    :once()
-    :apply(world, entity)
+local slide = tween.timeline({
+    tween.to(0.5, "quadOut", "transform.x", 200),
+})
+
+slide:play(world, entity)
 ```
 
-## Mental Model
+A timeline is a reusable finite clip. Playing it creates a cursor in the
+entity's `tween.TweenPlayback` component. The cursor records elapsed time,
+playback mode, delay, speed, direction, and the values captured when operations
+start.
 
-A tween has two parts:
+## Timeline Data
 
-- A `Timeline` is the immutable animation template: targets, durations, easing,
-  nesting, emits, repeat mode, and optional channel.
-- A `TweenPlayback` component stores live per-entity cursor state: elapsed time,
-  delay, speed, pause state, child cursors, and captured start/delta values.
-
-That split is what makes tweens serializable without duplicating template data
-for every entity. You can define one timeline and apply it to many entities; the
-snapshot stores the template once and each entity stores only its playback cursor.
-
-## Targets
-
-Targets describe which component fields a timeline slot writes to. The target
-value is passed separately to `:to()` or `:adjust()`, so the same target can be
-reused with different values.
-
-### Built-In Targets
-
-Pre-built target descriptors cover common `Transform` and `Color` fields. These
-are created once at module load time and shared everywhere.
-
-| Target                   | Equivalent / behavior                           |
-| ------------------------ | ----------------------------------------------- |
-| `tween.translateX`       | `tween.field(Transform, "x")`                   |
-| `tween.translateY`       | `tween.field(Transform, "y")`                   |
-| `tween.translateXY`      | `tween.field2(Transform, "x", "y")`             |
-| `tween.rotation`         | `tween.field(Transform, "rotation")`            |
-| `tween.rotationShortest` | `tween.angle(Transform, "rotation")`            |
-| `tween.scaleX`           | `tween.field(Transform, "scaleX")`              |
-| `tween.scaleY`           | `tween.field(Transform, "scaleY")`              |
-| `tween.scaleXY`          | `tween.field2(Transform, "scaleX", "scaleY")`   |
-| `tween.alpha`            | `tween.field(Color, "a")`                       |
-| `tween.color`            | Tweens `Color.r`, `g`, `b`, and `a` together    |
-
-Tween X and Y position together:
+Operation constructors provide typed arguments and return positional data
+tables. `tween.timeline` compiles the supplied root and operation tables in
+place, returning the root as a `tween.Timeline`. Nothing is copied. Do not
+mutate or compile those tables again afterward.
 
 ```teal
-tween.timeline()
-    :to(0.5, tween.quadOut, tween.translateXY, 200, 100)
-    :once()
-    :apply(world, entity)
+function tween.timeline(spec: tween.TimelineSpec): tween.Timeline
 ```
 
-Tween several fields in parallel:
+Positional entries in the root run sequentially:
 
 ```teal
--- Move and scale simultaneously.
-tween.timeline()
-    :to(0.5, tween.quadOut, tween.translateXY, 200, 100)
-    :to(0.5, tween.quadOut, tween.scaleXY, 2, 2)
-    :once()
-    :apply(world, entity)
+local entrance = tween.timeline({
+    tween.to(0.4, "backOut", "transform.x", 200),
+    tween.wait(0.2),
+    tween.to(0.3, "linear", "color.a", 1),
+})
 ```
 
-Tween color:
+Use `tween.parallel` when operations should start together. The next entry
+begins after the longest parallel branch finishes.
 
 ```teal
-tween.timeline()
-    :to(0.5, tween.linear, tween.color, 1, 0, 0, 1)
-    :once()
-    :apply(world, entity)
+local entrance = tween.timeline({
+    tween.parallel(
+        tween.to(0.4, "backOut", "transform.xy", 200, 100),
+        tween.to(0.3, "linear", "color.a", 1)
+    ),
+    tween.emit("entered"),
+})
 ```
 
-### `tween.field(component, fieldName)`
+The root is already an implicit sequence. There is no `sequence` constructor or
+named `sequence` field; only parallel execution needs an explicit constructor.
 
-Creates a reusable target for one numeric field.
+Named timeline configuration shares the root table with positional entries:
 
 ```teal
-function tween.field(component: Component, fieldName: string): tween.Target
+local move = tween.timeline({
+    channel = "movement",
+    tween.to(0.5, "quadOut", "transform.x", 200),
+})
 ```
 
-```teal
-local tweenHealth = tween.field(HealthBar, "fill")
+## Operations
 
-tween.timeline()
-    :to(0.3, tween.quadOut, tweenHealth, 1.0)
-    :step()
-    :to(0.3, tween.quadOut, tweenHealth, 0.5)
-    :once()
-    :apply(world, entity)
-```
+### `to`
 
-### `tween.field2(component, fieldA, fieldB)`
-
-Creates a reusable target for two numeric fields on the same component.
+Interpolates from the field value captured when the operation starts to an
+absolute destination.
 
 ```teal
-function tween.field2(
-    component: Component,
-    fieldA: string,
-    fieldB: string
-): tween.Target
-```
-
-```teal
-local tweenSize = tween.field2(MyWidget, "width", "height")
-
-tween.timeline()
-    :to(0.5, tween.quadOut, tweenSize, 200, 100)
-    :once()
-    :apply(world, entity)
-```
-
-### `tween.angle(component, fieldName)`
-
-Creates a target that interpolates an angle over the shortest path. Use this for
-rotation-like fields where wrapping from `359` degrees to `1` degree should move
-through the two-degree path instead of spinning backward.
-
-```teal
-function tween.angle(component: Component, fieldName: string): tween.Target
-```
-
-### `tween.target(component, field)`
-
-Creates a target for one numeric field or two numeric fields. This is the compact
-form for custom component fields.
-
-```teal
-function tween.target(
-    component: Component,
-    field: string | {string}
-): tween.Target
-```
-
-```teal
-local fill = tween.target(HealthBar, "fill")
-local size = tween.target(WidgetBox, {"width", "height"})
-
-tween.timeline()
-    :to(0.3, tween.quadOut, fill, 1.0)
-    :step()
-    :to(0.3, tween.quadOut, size, 200, 100)
-    :once()
-    :apply(world, widget)
-```
-
-::: info Serializable target model
-Targets are data descriptors. Built-in targets and targets made with `field`,
-`field2`, `angle`, or `target` can be serialized because they identify a
-component and field names.
-:::
-
-## Timeline Builder
-
-Timelines are created with `tween.timeline()` and built using a fluent API.
-Finalizing the builder returns an immutable `Timeline` that can be applied to
-any number of entities.
-
-### `TimelineBuilder:to`
-
-Adds an interpolation to the current parallel group. Multiple `:to()` calls
-without a `:step()` between them run simultaneously.
-
-```teal
-function TimelineBuilder:to(
-    self,
+function tween.to(
     duration: number,
-    easingFn: tween.EasingFunction,
-    target: tween.Target,
-    t1?: number,
-    t2?: number,
-    t3?: number,
-    t4?: number
-): TimelineBuilder
+    easing: tween.EasingName | tween.EasingFunction,
+    target: tween.TargetName | tween.Target,
+    value1: number,
+    value2?: number,
+    value3?: number,
+    value4?: number
+): tween.TimelineNode
 ```
 
 ```teal
--- These two run in parallel.
-tween.timeline()
-    :to(0.5, tween.quadOut, tween.translateX, 200)
-    :to(0.5, tween.linear, tween.alpha, 0)
-    :once()
+local resize = tween.timeline({
+    tween.to(0.5, "quadOut", "transform.scaleXY", 2, 2),
+})
 ```
 
-### `TimelineBuilder:adjust`
+### `adjust`
 
-Like `:to()`, but relative: the values are added to the current values captured
-when the slot starts.
+Adds relative deltas to the values captured at the start of the operation.
 
 ```teal
-function TimelineBuilder:adjust(
-    self,
+function tween.adjust(
     duration: number,
-    easingFn: tween.EasingFunction,
-    target: tween.Target,
-    t1: number,
-    t2?: number,
-    t3?: number,
-    t4?: number
-): TimelineBuilder
+    easing: tween.EasingName | tween.EasingFunction,
+    target: tween.TargetName | tween.Target,
+    delta1: number,
+    delta2?: number,
+    delta3?: number,
+    delta4?: number
+): tween.TimelineNode
 ```
 
 ```teal
--- Move 100 units right from wherever the entity currently is.
-tween.timeline()
-    :adjust(0.5, tween.quadOut, tween.translateX, 100)
-    :once()
-    :apply(world, entity)
-
--- Chain relative adjustments: right 100, then down 50.
-tween.timeline()
-    :adjust(0.5, tween.quadOut, tween.translateX, 100)
-    :step()
-    :adjust(0.5, tween.quadOut, tween.translateY, 50)
-    :once()
-    :apply(world, entity)
+local nudge = tween.timeline({
+    tween.adjust(0.2, "quadOut", "transform.x", 20),
+    tween.adjust(0.2, "quadIn", "transform.y", -10),
+})
 ```
 
-### `TimelineBuilder:track`
+### `track`
 
-Tracks target values from ECS data each frame and writes them through an output
-target.
+Reads a destination from ECS state every frame and writes it through a target.
 
 ```teal
-function TimelineBuilder:track(
-    self,
+function tween.track(
     duration: number,
-    easingFn: tween.EasingFunction,
-    target: tween.Target,
+    easing: tween.EasingName | tween.EasingFunction,
+    target: tween.TargetName | tween.Target,
     source: tween.TrackSource
-): TimelineBuilder
+): tween.TimelineNode
 ```
 
-Example: a missile follows the entity whose key is stored in
-`tween.TrackingTarget`.
-
 ```teal
+-- Follow the entity registered as "player", reading its position each frame.
 world:set(missile, tween.TrackingTarget(0, "player"))
 
-tween.timeline()
-    :track(
-        0.25,
-        tween.linear,
-        tween.translateXY,
-        tween.sourceTrackingTarget(tecs.builtins.Transform, {"x", "y"})
-    )
-    :loop()
-    :apply(world, missile)
+local follow = tween.timeline({
+    tween.track(0.25, "linear", "transform.xy",
+        tween.sourceTrackingTarget(tecs.builtins.Transform, {"x", "y"})),
+})
+
+follow:play(world, missile, {mode = "loop"})
 ```
 
-### Tracking Sources
-
-Tracking sources resolve numbers from ECS state. They are serializable because
-they name a source kind, component, and field list.
+Tracking sources are serializable ECS descriptors:
 
 ```teal
 function tween.sourceSelf(
@@ -298,487 +168,206 @@ function tween.sourceRelationship(
 ): tween.TrackSource
 ```
 
-`sourceSelf` reads from the tweened entity:
+`sourceSelf` reads the animated entity. `sourceKey` resolves a durable ECS key.
+`sourceTrackingTarget` reads the entity or key in `TweenTrackingTarget`.
+`sourceRelationship` follows an ECS relationship and reads its target entity.
+
+### `wait`
+
+Advances the timeline clock without writing components.
 
 ```teal
-tween.timeline()
-    :track(0.2, tween.quadOut, tween.scaleXY, tween.sourceSelf(SizeGoal, {"x", "y"}))
-    :loop()
+function tween.wait(duration: number): tween.TimelineNode
 ```
 
-`sourceKey` follows a keyed entity:
+### `emit`
+
+Emits `tween.TweenEvent` at the current timeline position.
 
 ```teal
-tween.timeline()
-    :track(0.2, tween.linear, tween.translateXY, tween.sourceKey(
-        "player",
-        tecs.builtins.Transform,
-        {"x", "y"}
-    ))
-    :loop()
-```
-
-`sourceTrackingTarget` reads `tween.TrackingTarget` from the tweened entity. The
-component can point to an entity ID or a durable `Key`.
-
-```teal
-world:set(missile, tween.TrackingTarget(playerEntity, ""))
-world:set(missile, tween.TrackingTarget(0, "player"))
-```
-
-`sourceRelationship` follows an entity reached through a relationship component.
-Use it when the target is already modeled as ECS relationship data.
-
-::: warning
-Tracking sources are ECS descriptors. If a tween needs to follow runtime-only
-state, put the durable source of truth in a component or reconstruct the
-runtime-only state after load.
-:::
-
-### `TimelineBuilder:step`
-
-A step is a barrier that waits for the current parallel group to finish, then
-starts the next group. Without `:step()`, multiple slots run simultaneously. With
-it, they run sequentially.
-
-```teal
-function TimelineBuilder:step(self, delay?: number): TimelineBuilder
-```
-
-Step with no delay:
-
-```teal
--- Move right, then move down.
-tween.timeline()
-    :to(0.5, tween.quadOut, tween.translateX, 200)
-    :step()
-    :to(0.5, tween.quadOut, tween.translateY, 100)
-    :once()
-```
-
-Step with delay:
-
-```teal
--- Move right, wait 0.2s, then fade out.
-tween.timeline()
-    :to(0.5, tween.quadOut, tween.translateX, 200)
-    :step(0.2)
-    :to(0.5, tween.linear, tween.alpha, 0)
-    :once()
-```
-
-### `TimelineBuilder:emit`
-
-Schedules a named event at the current timeline boundary.
-
-```teal
-function TimelineBuilder:emit(self, name: string): TimelineBuilder
+function tween.emit(name: string): tween.TimelineNode
 ```
 
 ```teal
-tween.timeline()
-    :to(0.5, tween.quadOut, tween.translateX, 200)
-    :emit("whoosh")
-    :step()
-    :to(0.5, tween.quadOut, tween.translateY, 100)
-    :once()
-    :apply(world, entity)
-
-world:observe(0, tween.TweenEvent, function(ev: tween.TweenEvent)
-    if ev.name == "whoosh" then
-        audioManager:play(whoosh)
-    end
-end)
+local flash = tween.timeline({
+    tween.to(0.2, "quadOut", "transform.scaleXY", 1.2, 1.2),
+    tween.emit("flash"),
+    tween.to(0.2, "quadIn", "transform.scaleXY", 1, 1),
+})
 ```
 
-### `TimelineBuilder:run`
+### `run`
 
-Inlines another timeline at the current time offset. The sub-timeline's full
-behavior is preserved: slots, emits, loops, and ping-pong playback all run as
-defined. Sub-timelines can themselves contain `:run()` calls.
+Runs another compiled timeline as a sequential entry.
 
 ```teal
-function TimelineBuilder:run(
-    self,
+function tween.run(
     timeline: tween.Timeline,
-    count?: integer
-): TimelineBuilder
+    options?: tween.RunOptions
+): tween.TimelineNode
 ```
 
 ```teal
-local moveRight = tween.timeline()
-    :to(0.5, tween.quadOut, tween.translateX, 200)
-    :once()
+local pulse = tween.timeline({
+    tween.to(0.8, "sineInOut", "transform.scaleXY", 1.5, 1.5),
+})
 
-local moveRightThenDown = tween.timeline()
-    :run(moveRight)
-    :step()
-    :to(0.5, tween.linear, tween.translateY, 100)
-    :once()
-
-moveRightThenDown:apply(world, entity)
+local entrance = tween.timeline({
+    tween.to(0.5, "quadOut", "transform.x", 200),
+    tween.run(pulse, {mode = "pingPong", count = 4}),
+    tween.to(0.3, "linear", "color.a", 0),
+})
 ```
 
-The optional `count` parameter overrides how many cycles the sub-timeline plays.
-It is required for infinite sub-timelines because their duration is unbounded.
+Run options contain `mode` and `count`. A run defaults to one pass. Repeating
+runs require a positive finite `count` so the containing timeline has a finite
+duration.
+
+### `parallel`
+
+`parallel` starts all branches at the same time and advances by the longest
+branch.
 
 ```teal
-local pulse = tween.timeline()
-    :to(0.8, tween.sineInOut, tween.scaleXY, 1.5, 1.5)
-    :pingPong()
-
-tween.timeline()
-    :to(0.5, tween.quadOut, tween.translateX, 200)
-    :step()
-    :run(pulse, 3)
-    :step()
-    :to(0.5, tween.linear, tween.alpha, 0)
-    :once()
-    :apply(world, entity)
+function tween.parallel(...: tween.TimelineNode): tween.TimelineNode
 ```
 
-Nested timelines are serialized as shared templates. A parent timeline references
-the child template by ID in the snapshot rather than embedding a full copy for
-every active cursor.
-
-### `TimelineBuilder:channel`
-
-Timelines may declare a channel. Applying a timeline with a channel cancels any
-currently active tween on the same entity and channel, then starts the new
-playback. Timelines without a channel never automatically cancel other tweens.
+Put an untagged nested array inside it when one branch contains several
+sequential entries:
 
 ```teal
-function TimelineBuilder:channel(self, name: string): TimelineBuilder
+local split = tween.timeline({
+    tween.parallel(
+        {
+            tween.to(0.2, "quadOut", "transform.x", 200),
+            tween.to(0.3, "quadIn", "transform.y", 100),
+        },
+        {
+            tween.wait(0.1),
+            tween.to(0.4, "linear", "color.a", 0),
+        }
+    ),
+})
 ```
+
+Both branches start together. The first moves on X and then Y, while the second
+waits before fading out. Each branch lasts 0.5 seconds, so the parallel node
+also lasts 0.5 seconds.
+
+## Easing and Targets
+
+Tween operations accept string names or the corresponding exported objects:
 
 ```teal
-local moveRight = tween.timeline()
-    :channel("movement")
-    :to(0.5, tween.quadOut, tween.translateX, 200)
-    :once()
-
-local moveDown = tween.timeline()
-    :channel("movement")
-    :to(0.5, tween.quadOut, tween.translateY, 100)
-    :once()
-
-moveRight:apply(world, entity)
-moveDown:apply(world, entity) -- cancels moveRight on "movement"
+tween.to(0.5, "quadOut", "transform.x", 200)
+tween.to(0.5, tween.quadOut, tween.translateX, 200)
 ```
 
-::: info
-Channels are coarse-grained coordination, not per-field conflict detection.
-:::
+### Built-in Targets
 
-## Completion And Events
+Built-in target names:
 
-Timeline side effects are expressed through events observed by normal ECS
-systems.
+| Name | Export | Fields |
+| --- | --- | --- |
+| `transform.x` | `tween.translateX` | `Transform.x` |
+| `transform.y` | `tween.translateY` | `Transform.y` |
+| `transform.xy` | `tween.translateXY` | `Transform.x`, `y` |
+| `transform.rotation` | `tween.rotation` | `Transform.rotation` |
+| `transform.rotationShortest` | `tween.rotationShortest` | shortest angular path |
+| `transform.scaleX` | `tween.scaleX` | `Transform.scaleX` |
+| `transform.scaleY` | `tween.scaleY` | `Transform.scaleY` |
+| `transform.scaleXY` | `tween.scaleXY` | `Transform.scaleX`, `scaleY` |
+| `color.a` | `tween.alpha` | `Color.a` |
+| `color.rgba` | `tween.color` | `Color.r`, `g`, `b`, `a` |
 
-### `tween.TweenEvent`
+### `tween.field`
 
-`TweenEvent` is emitted when playback reaches a named `:emit(name)` point.
+Creates a target for one numeric component field.
 
 ```teal
-local flash = tween.timeline()
-    :to(0.2, tween.quadOut, tween.scaleXY, 1.2, 1.2)
-    :emit("flash")
-    :step()
-    :to(0.2, tween.quadOut, tween.scaleXY, 1.0, 1.0)
-    :once()
-
-world:observe(0, tween.TweenEvent, function(ev: tween.TweenEvent)
-    if ev.name == "flash" then
-        world:set(ev.entity, HitFlash({timer = 0.1}))
-    end
-end)
-
-flash:apply(world, enemy)
+function tween.field(component: Component, fieldName: string): tween.Target
 ```
 
-`TweenEvent` fields:
-
-| Field        | Description                                    |
-| ------------ | ---------------------------------------------- |
-| `entity`     | Entity playing the tween                       |
-| `name`       | Name passed to `:emit(name)`                   |
-| `channel`    | Timeline channel, or `nil`                     |
-| `timelineId` | World-local template ID for this timeline      |
-
-### `tween.TweenComplete`
-
-`TweenComplete` is emitted when a finite top-level cursor finishes all repeats.
-It is not emitted for infinite loops unless they are cancelled by another
-timeline and therefore do not naturally complete.
+The following example tweens `HealthBar.fill` to `1`:
 
 ```teal
-world:observe(0, tween.TweenComplete, function(ev: tween.TweenComplete)
-    if ev.channel == "fade-out" then
-        world:despawn(ev.entity)
-    end
-end)
+local fill <const> = tween.field(HealthBar, "fill")
+
+local fillBar = tween.timeline({
+    tween.to(0.3, "quadOut", fill, 1),
+})
 ```
 
-`TweenComplete` fields:
+### `tween.field2`
 
-| Field        | Description                                    |
-| ------------ | ---------------------------------------------- |
-| `entity`     | Entity whose tween completed                   |
-| `channel`    | Timeline channel, or `nil`                     |
-| `timelineId` | World-local template ID for this timeline      |
-
-## Timeline Finalizers
-
-Finalizers freeze the builder and return a reusable `Timeline`. Further builder
-mutation after finalization errors.
-
-### `TimelineBuilder:once`
-
-Play through once.
+Creates a target for two numeric fields on the same component.
 
 ```teal
-function TimelineBuilder:once(self): tween.Timeline
+function tween.field2(
+    component: Component,
+    fieldA: string,
+    fieldB: string
+): tween.Target
 ```
 
-### `TimelineBuilder:loop`
-
-Loop the timeline. `loop(count)` treats `count` as the number of additional
-plays, so `loop(2)` plays three times total. `loop()` with no argument loops
-infinitely.
+The following example tweens `WidgetBox.width` and `height` to `200` and `100`:
 
 ```teal
-function TimelineBuilder:loop(self, count?: integer): tween.Timeline
+local size <const> = tween.field2(WidgetBox, "width", "height")
+
+local resize = tween.timeline({
+    tween.to(0.5, "quadOut", size, 200, 100),
+})
 ```
 
-### `TimelineBuilder:pingPong`
+### `tween.angle`
 
-Like `loop()`, but reverses direction each cycle. `pingPong()` with no argument
-loops infinitely.
+Creates a target that interpolates a numeric angle over the shortest path.
 
 ```teal
-function TimelineBuilder:pingPong(self, count?: integer): tween.Timeline
+function tween.angle(component: Component, fieldName: string): tween.Target
 ```
 
-## Applying Timelines
-
-After a timeline is finalized using `:once`, `:loop`, or `:pingPong`, apply it
-to an entity with `:apply` or `:play`. The same template can be applied to
-multiple entities independently.
-
-### `Timeline:apply`
-
-Starts playback on an entity.
+The following example tweens `Direction.radians` to `math.pi` over the shortest
+angular path:
 
 ```teal
-function Timeline:apply(
-    self,
-    world: World,
-    entity: integer,
-    speed?: number,
-    delay?: number
-)
+local heading <const> = tween.angle(Direction, "radians")
+
+local turn = tween.timeline({
+    tween.to(0.4, "sineInOut", heading, math.pi),
+})
 ```
 
-The optional `speed` parameter sets the playback rate multiplier. Default is
-`1`. Use `2` for double speed, `0.5` for half speed.
+### `tween.target`
 
-The optional `delay` parameter postpones the start of playback by the given
-number of seconds. This is useful for staggering animations across multiple
-entities while sharing the same timeline template.
+Creates a target for either one field or a pair of fields. Use it when the
+component fields to write are selected from data, so the same code can build a
+target for one or two values at runtime.
+
+`tween.target` chooses where values are written; it does not resolve a changing
+destination. To follow a value from live ECS state, pass the target to
+`tween.track` with a tracking source.
 
 ```teal
-local fadeOut = tween.timeline()
-    :to(0.5, tween.linear, tween.alpha, 0)
-    :once()
-
-fadeOut:apply(world, entityA)
-fadeOut:apply(world, entityB)
-
-local fall = tween.timeline()
-    :to(2.0, tween.bounceOut, tween.translateY, 0)
-    :once()
-
-fall:apply(world, entityA, 0.5) -- slow
-fall:apply(world, entityB, 2.0) -- fast
-
-local slideIn = tween.timeline()
-    :to(0.3, tween.quadOut, tween.translateX, 0)
-    :once()
-
-for i = 0, 4 do
-    slideIn:apply(world, buttons[i + 1], 1, i * 0.1)
-end
+function tween.target(
+    component: Component,
+    field: string | {string}
+): tween.Target
 ```
 
-### `Timeline:play`
-
-Alias for `Timeline:apply`.
+The following example builds a target from a data-selected field list, then
+tweens `Position.x` and `y` to `200` and `100`:
 
 ```teal
-function Timeline:play(
-    self,
-    world: World,
-    entity: integer,
-    speed?: number,
-    delay?: number
-)
+local offset <const> = tween.target(Position, {"x", "y"})
+
+local move = tween.timeline({
+    tween.to(0.5, "quadOut", offset, 200, 100),
+})
 ```
 
-### `tween.play`
-
-Module-level helper for playing a timeline value, or a named preset that has
-already been interned in the current world.
-
-```teal
-function tween.play(
-    world: World,
-    entity: integer,
-    timelineOrName: tween.Timeline | string,
-    speed?: number,
-    delay?: number
-)
-```
-
-The most explicit pattern is to keep the returned preset timeline and apply it:
-
-```teal
-local fadeOut = tween.registerPreset("ui.fadeOut", tween.timeline()
-    :channel("visibility")
-    :to(0.2, tween.linear, tween.alpha, 0)
-    :once())
-
-fadeOut:apply(world, panel)
-```
-
-## ECS Playback Control
-
-The module helpers operate on the entity's `TweenPlayback` component and are
-safe to call after snapshot load. They affect active cursors selected by entity
-plus an optional selector.
-
-```teal
-function tween.cancel(world: World, entity: integer, selector?: string | tween.Timeline)
-function tween.pause(world: World, entity: integer, selector?: string | tween.Timeline)
-function tween.resume(world: World, entity: integer, selector?: string | tween.Timeline)
-```
-
-Without the optional selector, they affect every active cursor on the entity.
-
-A string selector matches timeline channel first, then preset name. Channels are
-the preferred durable control namespace because they are explicit on the timeline
-and survive snapshot load as template data.
-
-```teal
-local slide = tween.timeline()
-    :channel("visibility")
-    :to(0.2, tween.quadOut, tween.alpha, 1)
-    :once()
-
-slide:apply(world, panel)
-
-tween.pause(world, panel, "visibility")
-tween.resume(world, panel, "visibility")
-tween.cancel(world, panel, "ui.fadeOut")
-```
-
-A timeline selector matches active cursors created from that exact template in
-the current world. This is useful for immediate same-process control, but string
-selectors are the better choice for hot-reload-stable control.
-
-```teal
-local pulse = tween.timeline()
-    :to(0.8, tween.sineInOut, tween.scaleXY, 1.5, 1.5)
-    :pingPong()
-
-pulse:apply(world, button)
-tween.cancel(world, button, pulse)
-```
-
-## Presets
-
-Presets give stable names to reusable timelines. A preset is pinned in the
-world-local template registry while it is present, which makes it appropriate for
-common UI and gameplay motion patterns.
-
-```teal
-local bounceIn = tween.registerPreset("ui.bounceIn", tween.timeline()
-    :channel("overlay")
-    :to(0.7, tween.elasticOut, tween.scaleXY, 1.0, 1.0)
-    :once())
-
-bounceIn:apply(world, titleText)
-```
-
-Use presets for animation shapes that are part of your app vocabulary: menu
-transitions, damage flashes, standard fade-outs, alert pulses, and similar
-reusable behavior.
-
-Inline timelines are also serializable. You do not need to register every
-one-off tween:
-
-```teal
-tween.timeline()
-    :to(0.15, tween.quadOut, tween.scaleXY, 1.1, 1.1)
-    :step()
-    :to(0.15, tween.quadIn, tween.scaleXY, 1.0, 1.0)
-    :once()
-    :apply(world, button)
-```
-
-Anonymous templates are retained only while live cursors reference them. Named
-presets are pinned.
-
-## Snapshots
-
-Tween snapshots are designed around shared immutable templates plus small
-per-entity cursors.
-
-On save:
-
-- `TweenPlayback` serializes active cursors on each entity.
-- Captured start/delta slot state is flattened from FFI into Lua data.
-- The world-local registry writes timeline templates referenced by active
-  cursors.
-- One template applied to many entities is written once.
-
-On load:
-
-- Timeline IDs from the snapshot are restored as-is so cursors still point at the
-  correct templates.
-- The next runtime ID resumes above the highest loaded ID.
-- Refcounts are rebuilt from restored live cursors.
-- Captured start/delta slot state is rebuilt into FFI arrays.
-- Playback control remains available through entity selectors: all, channel,
-  preset name, or same-process timeline reference.
-
-This preserves mid-flight continuity. If an entity is halfway through a
-`rotationShortest` or relative `:adjust()` tween when the snapshot is saved, the
-captured start/delta values are restored rather than recomputed from the post-load
-world.
-
-### What Is Serializable
-
-Serializable:
-
-- Built-in easing values such as `tween.quadOut` and `tween.elasticOut`
-- Built-in targets such as `tween.translateXY` and `tween.color`
-- Targets built with `field`, `field2`, `angle`, or one-/two-field `target`
-- `:to`, `:adjust`, `:track`, `:step(delay)`, `:emit`, `:run`
-- `:once`, `:loop`, `:pingPong`
-- Channels, presets, cursor pause state, speed, delay, and elapsed time
-
-## Cleanup
-
-Timelines are automatically removed when:
-
-- A finite timeline finishes
-- A cursor is cancelled
-- The target entity is no longer alive
-
-When the last cursor for an anonymous template is removed, the world-local
-registry can release that template. Pinned presets remain available.
-
-## Easing Functions
+### Easing Functions
 
 All easing functions live directly on `tween` and have the signature
 `function(t: number): number`, where `f(0) = 0` and `f(1) = 1`.
@@ -790,14 +379,191 @@ All easing functions live directly on `tween` and have the signature
 - **InOut**: Accelerates in the first half, decelerates in the second
 - **OutIn**: Decelerates in the first half, accelerates in the second
 
-| Family  | In          | Out          | InOut          | OutIn          |
-| ------- | ----------- | ------------ | -------------- | -------------- |
-| Quad    | `quadIn`    | `quadOut`    | `quadInOut`    | `quadOutIn`    |
-| Cubic   | `cubicIn`   | `cubicOut`   | `cubicInOut`   | `cubicOutIn`   |
-| Quart   | `quartIn`   | `quartOut`   | `quartInOut`   | `quartOutIn`   |
-| Quint   | `quintIn`   | `quintOut`   | `quintInOut`   | `quintOutIn`   |
-| Sine    | `sineIn`    | `sineOut`    | `sineInOut`    | `sineOutIn`    |
-| Expo    | `expoIn`    | `expoOut`    | `expoInOut`    | `expoOutIn`    |
-| Back    | `backIn`    | `backOut`    | `backInOut`    | `backOutIn`    |
+| Family | In | Out | InOut | OutIn |
+| --- | --- | --- | --- | --- |
+| Quad | `quadIn` | `quadOut` | `quadInOut` | `quadOutIn` |
+| Cubic | `cubicIn` | `cubicOut` | `cubicInOut` | `cubicOutIn` |
+| Quart | `quartIn` | `quartOut` | `quartInOut` | `quartOutIn` |
+| Quint | `quintIn` | `quintOut` | `quintInOut` | `quintOutIn` |
+| Sine | `sineIn` | `sineOut` | `sineInOut` | `sineOutIn` |
+| Expo | `expoIn` | `expoOut` | `expoInOut` | `expoOutIn` |
+| Back | `backIn` | `backOut` | `backInOut` | `backOutIn` |
 | Elastic | `elasticIn` | `elasticOut` | `elasticInOut` | `elasticOutIn` |
-| Bounce  | `bounceIn`  | `bounceOut`  | `bounceInOut`  | `bounceOutIn`  |
+| Bounce | `bounceIn` | `bounceOut` | `bounceInOut` | `bounceOutIn` |
+
+The exported easing and target string types are enums, so Teal rejects unknown
+names at type-check time.
+
+## Playback
+
+Playing a timeline once requires no options:
+
+```teal
+timeline:play(world, entity, options?)
+```
+
+Playback options are named:
+
+```teal
+timeline:play(world, entity, {
+    mode = "pingPong",
+    count = 4,
+    speed = 2,
+    delay = 0.1,
+})
+```
+
+Available playback options:
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `mode` | `once` | `once`, `loop`, or `pingPong` |
+| `count` | — | Total number of passes for repeating modes |
+| `speed` | `1` | Timeline-time multiplier |
+| `delay` | `0` | Seconds before playback starts |
+
+Omitting `count` from `loop` or `pingPong` plays indefinitely. Ping-pong
+alternates direction every pass. A count of three runs forward, reverse, then
+forward.
+
+The module helper accepts a timeline or registered preset name:
+
+```teal
+function tween.play(
+    world: World,
+    entity: integer,
+    timelineOrName: tween.Timeline | string,
+    options?: tween.PlaybackOptions
+)
+```
+
+## Channels and Control
+
+A channel replaces another active timeline on the same entity and channel:
+
+```teal
+local moveRight = tween.timeline({
+    channel = "movement",
+    tween.to(0.5, "quadOut", "transform.x", 200),
+})
+
+local moveDown = tween.timeline({
+    channel = "movement",
+    tween.to(0.5, "quadOut", "transform.y", 100),
+})
+
+moveRight:play(world, entity)
+moveDown:play(world, entity)
+```
+
+Control helpers select all cursors, a channel or preset name, or an exact
+timeline reference:
+
+```teal
+function tween.cancel(world: World, entity: integer, selector?: string | tween.Timeline)
+function tween.pause(world: World, entity: integer, selector?: string | tween.Timeline)
+function tween.resume(world: World, entity: integer, selector?: string | tween.Timeline)
+```
+
+The following example pauses and resumes the entity's `movement` channel, then
+cancels playback started from the exact `moveRight` timeline:
+
+```teal
+tween.pause(world, entity, "movement")
+tween.resume(world, entity, "movement")
+tween.cancel(world, entity, moveRight)
+```
+
+## Events
+
+`TweenEvent` is emitted by an `emit` operation.
+
+The following observer handles the `flash` event emitted by a timeline:
+
+```teal
+world:observe(0, tween.TweenEvent, function(ev: tween.TweenEvent)
+    if ev.name == "flash" then
+        world:set(ev.entity, HitFlash({timer = 0.1}))
+    end
+end)
+```
+
+`TweenComplete` is emitted when a finite top-level playback finishes all its
+passes. Infinite playback does not complete naturally.
+
+Both events contain `entity`, optional `channel`, and `timelineId`; `TweenEvent`
+also contains `name`. `channel` is `nil` for an unchanneled timeline.
+
+```teal
+local record TweenEvent is tecs.Event
+    entity: integer
+    name: string
+    channel: string | nil
+    timelineId: integer
+
+    init: function(
+        self: TweenEvent,
+        entity: integer,
+        name: string,
+        channel: string | nil,
+        timelineId: integer
+    )
+end
+```
+
+## Presets
+
+Presets are useful when an animation is part of the application's shared
+vocabulary rather than a one-off effect. A preset's stable name lets systems
+play it without sharing the original timeline reference, and keeps its template
+available in the world registry even when no entity is currently playing it.
+
+```teal
+function tween.registerPreset(
+    world: World,
+    name: string,
+    timeline: tween.Timeline
+): tween.Timeline
+```
+
+The following example registers a reusable UI entrance preset, then plays it
+both through its timeline and by name:
+
+```teal
+local bounceIn = tween.registerPreset(world, "ui.bounceIn", tween.timeline({
+    channel = "overlay",
+    tween.to(0.7, "elasticOut", "transform.scaleXY", 1, 1),
+}))
+
+bounceIn:play(world, titleText)
+tween.play(world, titleText, "ui.bounceIn", {delay = 0.1})
+```
+
+Anonymous templates remain registered only while live cursors reference them.
+Use them for one-off animations that do not need a durable name.
+
+## Snapshots
+
+Tweens can be snapshotted in the middle of playback and restored at the same
+point in the animation. Elapsed time, direction, remaining passes, speed,
+delay, and captured values are preserved, so playback continues after load
+instead of restarting or jumping.
+
+Snapshot support includes:
+
+- `TweenPlayback` serializes each cursor's elapsed time, mode, remaining passes,
+  direction, speed, delay, pause state, and captured slot values.
+- Shared timeline templates and nested run templates are serialized once in
+  snapshot metadata.
+- Built-in names and custom target/source descriptors are restored through
+  component names and fields.
+- Registry reference counts are rebuilt after load, so selectors and cleanup
+  continue to work.
+
+Relative adjustments, shortest-angle interpolation, tracking, finite repeats,
+and ping-pong playback resume from their captured state rather than restarting.
+
+## Cleanup
+
+Playback cursors are removed when they complete, are cancelled, or lose their
+target entity. `TweenPlayback` is removed when its last cursor is gone.

@@ -1,16 +1,103 @@
 local tecs <const> = require("tecs")
 local ffi <const> = require("ffi")
 local components <const> = require("tecs.internal.components")
+local tecsInternal <const> = require("tecs.internal.types")
 
 local mathPi, mathSin, mathCos, mathPow <const> = math.pi, math.sin, math.cos, math.pow
 
 local type World = tecs.World
+local type WorldImpl = tecsInternal.WorldImpl
 local type Component = tecs.Component
 local type ControlSelector = string | Timeline
+
+local enum PlaybackMode
+    "once"
+    "loop"
+    "pingPong"
+end
+
+local enum OperationKind
+    "to"
+    "adjust"
+    "track"
+    "wait"
+    "emit"
+    "run"
+    "parallel"
+end
+
+local enum TargetMode
+    "field"
+    "field2"
+    "angle"
+    "color"
+end
+
+local enum TrackSourceKind
+    "self"
+    "key"
+    "trackingTarget"
+    "relationship"
+end
+
+local enum EasingName
+    "linear"
+    "quadIn"
+    "quadOut"
+    "quadInOut"
+    "quadOutIn"
+    "cubicIn"
+    "cubicOut"
+    "cubicInOut"
+    "cubicOutIn"
+    "quartIn"
+    "quartOut"
+    "quartInOut"
+    "quartOutIn"
+    "quintIn"
+    "quintOut"
+    "quintInOut"
+    "quintOutIn"
+    "sineIn"
+    "sineOut"
+    "sineInOut"
+    "sineOutIn"
+    "expoIn"
+    "expoOut"
+    "expoInOut"
+    "expoOutIn"
+    "backIn"
+    "backOut"
+    "backInOut"
+    "backOutIn"
+    "elasticIn"
+    "elasticOut"
+    "elasticInOut"
+    "elasticOutIn"
+    "bounceIn"
+    "bounceOut"
+    "bounceInOut"
+    "bounceOutIn"
+end
+
+local enum TargetName
+    "transform.x"
+    "transform.y"
+    "transform.xy"
+    "transform.rotation"
+    "transform.rotationShortest"
+    "transform.scaleX"
+    "transform.scaleY"
+    "transform.scaleXY"
+    "color.a"
+    "color.rgba"
+end
 
 ffi.cdef[[
     typedef struct {
         double init;
+        double applied;
+        double lastT;
         double s1;
         double s2;
         double s3;
@@ -24,6 +111,8 @@ ffi.cdef[[
 
 local record TweenSlotState
     init: number
+    applied: number
+    lastT: number
     s1: number
     s2: number
     s3: number
@@ -36,12 +125,24 @@ end
 
 local type EasingFunction = function(t: number): number
 
+local record PlaybackOptions
+    mode: PlaybackMode
+    count: integer
+    speed: number
+    delay: number
+end
+
+local record RunOptions
+    mode: PlaybackMode
+    count: integer
+end
+
 local record Target
     id: string
     component: Component
     componentName: string
     fields: {string}
-    mode: string
+    mode: TargetMode
 
     init: function(
         world: World, entity: integer, relative: boolean,
@@ -56,7 +157,7 @@ local record Target
 end
 
 local record TrackSource
-    kind: string
+    kind: TrackSourceKind
     key: string
     relationship: Component
     relationshipName: string
@@ -65,11 +166,13 @@ local record TrackSource
     fields: {string}
 end
 
+local type TimelineNode = {any}
+
 local record Slot
-    kind: string
+    kind: OperationKind
     target: Target
     source: TrackSource
-    easingName: string
+    easingName: EasingName
     easing: EasingFunction
     t1: number
     t2: number
@@ -85,6 +188,7 @@ end
 local record EmitSlot
     time: number
     name: string
+    order: integer
 end
 
 local record RunSlot
@@ -92,8 +196,12 @@ local record RunSlot
     timelineId: integer
     startTime: number
     effectiveDuration: number
-    repeatCount: integer
-    pingPong: boolean
+    mode: PlaybackMode
+    passCount: integer
+end
+
+local record TimelineSpec is {TimelineNode}
+    channel: string
 end
 
 local record Timeline
@@ -101,16 +209,12 @@ local record Timeline
     runs: {RunSlot}
     emits: {EmitSlot}
     totalDuration: number
-    effectiveDuration: number
     stateSize: integer
-    repeatCount: integer
-    pingPong: boolean
     channel: string
     presetName: string
     pinned: boolean
 
-    apply: function(self: Timeline, world: World, entity: integer, speed?: number, delay?: number)
-    play: function(self: Timeline, world: World, entity: integer, speed?: number, delay?: number)
+    play: function(self: Timeline, world: World, entity: integer, options?: PlaybackOptions)
 end
 
 local record Cursor
@@ -120,7 +224,8 @@ local record Cursor
     children: {Cursor}
     elapsed: number
     direction: integer
-    repeatCount: integer
+    mode: PlaybackMode
+    remainingPasses: integer
     nextEmit: integer
     rate: number
     paused: boolean
@@ -142,28 +247,28 @@ end
 local record TweenEvent is tecs.Event
     entity: integer
     name: string
-    channel: string
+    channel: string | nil
     timelineId: integer
 
-    init: function(self: TweenEvent, entity: integer, name: string, channel: string, timelineId: integer)
+    init: function(self: TweenEvent, entity: integer, name: string, channel: string | nil, timelineId: integer)
 end
 
 local record TweenComplete is tecs.Event
     entity: integer
-    channel: string
+    channel: string | nil
     timelineId: integer
 
-    init: function(self: TweenComplete, entity: integer, channel: string, timelineId: integer)
+    init: function(self: TweenComplete, entity: integer, channel: string | nil, timelineId: integer)
 end
 
-function TweenEvent.init(e: TweenEvent, entity: integer, name: string, channel: string, timelineId: integer)
+function TweenEvent.init(e: TweenEvent, entity: integer, name: string, channel: string | nil, timelineId: integer)
     e.entity = entity
     e.name = name
     e.channel = channel
     e.timelineId = timelineId
 end
 
-function TweenComplete.init(e: TweenComplete, entity: integer, channel: string, timelineId: integer)
+function TweenComplete.init(e: TweenComplete, entity: integer, channel: string | nil, timelineId: integer)
     e.entity = entity
     e.channel = channel
     e.timelineId = timelineId
@@ -177,35 +282,21 @@ local record Registry
     named: {string: integer}
 end
 
-local record TimelineBuilder
-    _slots: {Slot}
-    _runs: {RunSlot}
-    _emits: {EmitSlot}
-    _currentOffset: number
-    _currentGroupMaxEnd: number
-    _frozen: boolean
-    _channel: string
-
-    channel: function(self: TimelineBuilder, name: string): TimelineBuilder
-    to: function(self: TimelineBuilder, duration: number, easingFn: EasingFunction, target: Target, t1?: number, t2?: number, t3?: number, t4?: number): TimelineBuilder
-    adjust: function(self: TimelineBuilder, duration: number, easingFn: EasingFunction, target: Target, t1: number, t2?: number, t3?: number, t4?: number): TimelineBuilder
-    track: function(self: TimelineBuilder, duration: number, easingFn: EasingFunction, target: Target, source: TrackSource): TimelineBuilder
-    step: function(self: TimelineBuilder, pause?: number): TimelineBuilder
-    emit: function(self: TimelineBuilder, name: string): TimelineBuilder
-    run: function(self: TimelineBuilder, timeline: Timeline, count?: integer): TimelineBuilder
-    once: function(self: TimelineBuilder): Timeline
-    loop: function(self: TimelineBuilder, count?: integer): Timeline
-    pingPong: function(self: TimelineBuilder, count?: integer): Timeline
-end
-
 local REGISTRY <const>: tecs.Key<Registry> = tecs.newKey("tecs2d.tween.registry")
 local SNAPSHOT_DATA_KEY <const> = "tecs2d.tween.registry"
 
 local record tween
+    type PlaybackMode = PlaybackMode
+    type EasingName = EasingName
+    type EasingFunction = EasingFunction
+    type TargetName = TargetName
     type Target = Target
     type TrackSource = TrackSource
     type Timeline = Timeline
-    type TimelineBuilder = TimelineBuilder
+    type TimelineNode = TimelineNode
+    type TimelineSpec = TimelineSpec
+    type PlaybackOptions = PlaybackOptions
+    type RunOptions = RunOptions
     TweenPlayback: TweenPlayback
     TrackingTarget: TrackingTarget
     TweenEvent: TweenEvent
@@ -269,9 +360,25 @@ local record tween
     alpha: Target
     color: Target
 
-    timeline: function(): TimelineBuilder
-    registerPreset: function(name: string, timeline: Timeline): Timeline
-    play: function(world: World, entity: integer, timelineOrName: Timeline | string, speed?: number, delay?: number)
+    to: function(
+        duration: number, easing: EasingName | EasingFunction, target: TargetName | Target,
+        t1: number, t2?: number, t3?: number, t4?: number
+    ): TimelineNode
+    adjust: function(
+        duration: number, easing: EasingName | EasingFunction, target: TargetName | Target,
+        t1: number, t2?: number, t3?: number, t4?: number
+    ): TimelineNode
+    track: function(
+        duration: number, easing: EasingName | EasingFunction, target: TargetName | Target,
+        source: TrackSource
+    ): TimelineNode
+    wait: function(duration: number): TimelineNode
+    emit: function(name: string): TimelineNode
+    run: function(timeline: Timeline, options?: RunOptions): TimelineNode
+    parallel: function(...: TimelineNode): TimelineNode
+    timeline: function(spec: TimelineSpec): Timeline
+    registerPreset: function(world: World, name: string, timeline: Timeline): Timeline
+    play: function(world: World, entity: integer, timelineOrName: Timeline | string, options?: PlaybackOptions)
     cancel: function(world: World, entity: integer, selector?: ControlSelector)
     pause: function(world: World, entity: integer, selector?: ControlSelector)
     resume: function(world: World, entity: integer, selector?: ControlSelector)
@@ -284,10 +391,10 @@ end
 
 function tween.linear(t: number): number return t end
 
-local EASING_NAMES: {EasingFunction: string} = {}
-local EASINGS: {string: EasingFunction} = {}
+local EASING_NAMES: {EasingFunction: EasingName} = {}
+local EASINGS: {EasingName: EasingFunction} = {}
 
-local function registerEasing(name: string, fn: EasingFunction)
+local function registerEasing(name: EasingName, fn: EasingFunction)
     EASING_NAMES[fn] = name
     EASINGS[name] = fn
 end
@@ -347,7 +454,7 @@ do
 end
 
 do
-    local names <const> = {
+    local names <const>: {EasingName} = {
         "linear",
         "quadIn", "quadOut", "quadInOut", "quadOutIn",
         "cubicIn", "cubicOut", "cubicInOut", "cubicOutIn",
@@ -373,7 +480,7 @@ local function serializeState(state: {TweenSlotState}, count: integer): {{number
     local out: {{number}} = {}
     for i = 0, count - 1 do
         local s <const> = state[i]
-        out[i + 1] = {s.init, s.s1, s.s2, s.s3, s.s4, s.d1, s.d2, s.d3, s.d4}
+        out[i + 1] = {s.init, s.applied, s.lastT, s.s1, s.s2, s.s3, s.s4, s.d1, s.d2, s.d3, s.d4}
     end
     return out
 end
@@ -385,14 +492,16 @@ local function deserializeState(rows: {{number}}): {TweenSlotState}
         local row <const> = rows[i]
         local s <const> = state[i - 1]
         s.init = row[1] or 0
-        s.s1 = row[2] or 0
-        s.s2 = row[3] or 0
-        s.s3 = row[4] or 0
-        s.s4 = row[5] or 0
-        s.d1 = row[6] or 0
-        s.d2 = row[7] or 0
-        s.d3 = row[8] or 0
-        s.d4 = row[9] or 0
+        s.applied = row[2] or 0
+        s.lastT = row[3] or 0
+        s.s1 = row[4] or 0
+        s.s2 = row[5] or 0
+        s.s3 = row[6] or 0
+        s.s4 = row[7] or 0
+        s.d1 = row[8] or 0
+        s.d2 = row[9] or 0
+        s.d3 = row[10] or 0
+        s.d4 = row[11] or 0
     end
     return state
 end
@@ -409,7 +518,8 @@ local function serializeCursor(c: Cursor): {string:any}
         timelineId = c.timelineId,
         elapsed = c.elapsed,
         direction = c.direction,
-        repeatCount = c.repeatCount,
+        mode = c.mode,
+        remainingPasses = c.remainingPasses,
         nextEmit = c.nextEmit,
         rate = c.rate,
         paused = c.paused,
@@ -440,7 +550,9 @@ local function deserializeCursor(data: {string:any}): Cursor
         children = children,
         elapsed = (data.elapsed as number) or 0,
         direction = (data.direction as integer) or 1,
-        repeatCount = (data.repeatCount as integer) or 0,
+        mode = assert(data.mode as PlaybackMode, "Tween snapshot cursor mode is required"),
+        remainingPasses = assert(data.remainingPasses as integer,
+            "Tween snapshot cursor remainingPasses is required"),
         nextEmit = (data.nextEmit as integer) or 1,
         rate = (data.rate as number) or 1,
         paused = data.paused == true,
@@ -517,7 +629,7 @@ local function resolveTarget(t: Target): Target
     return t
 end
 
-local function newTarget(component: Component, fields: {string}, mode?: string, id?: string): Target
+local function newTarget(component: Component, fields: {string}, mode?: TargetMode, id?: string): Target
     local parts = component.componentName
     for i = 1, #fields do
         parts = parts .. "." .. fields[i]
@@ -535,7 +647,11 @@ local function newTarget(component: Component, fields: {string}, mode?: string, 
     ): (number, number, number, number, number, number, number, number)
         return targetInit(t, world, entity, relative, t1, t2, t3, t4)
     end
-    t.apply = function(world: World, entity: integer, tv: number, s1: number, s2: number, s3: number, s4: number, d1: number, d2: number, d3: number, d4: number)
+    t.apply = function(
+        world: World, entity: integer, tv: number,
+        s1: number, s2: number, s3: number, s4: number,
+        d1: number, d2: number, d3: number, d4: number
+    )
         targetApply(t, world, entity, tv, s1, s2, s3, s4, d1, d2, d3, d4)
     end
     return t
@@ -618,7 +734,10 @@ function tween.target(component: Component, field: string | {string}): Target
     return newTarget(component, fields)
 end
 
-local function source(kind: string, component: Component, field: string | {string}, key?: string, relationship?: Component): TrackSource
+local function source(
+    kind: TrackSourceKind, component: Component, field: string | {string},
+    key?: string, relationship?: Component
+): TrackSource
     return {
         kind = kind,
         key = key,
@@ -670,7 +789,7 @@ do
     tween.color = newTarget(colorComponent, {"r", "g", "b", "a"}, "color", "color.rgba")
 end
 
-local BUILTIN_TARGETS: {string: Target} = {
+local BUILTIN_TARGETS: {TargetName: Target} = {
     ["transform.x"] = tween.translateX,
     ["transform.y"] = tween.translateY,
     ["transform.xy"] = tween.translateXY,
@@ -698,12 +817,12 @@ end
 
 local function deserializeTarget(data: {string:any}): Target
     local id = data.id as string
-    local builtin = id and BUILTIN_TARGETS[id]
+    local builtin = id and BUILTIN_TARGETS[id as TargetName]
     if builtin then return builtin end
     return newTarget(
         componentByName(data.component as string),
         data.fields as {string},
-        (data.mode as string) or "field",
+        (data.mode as TargetMode) or "field",
         id
     )
 end
@@ -723,7 +842,7 @@ local function deserializeSource(data: {string:any}): TrackSource
     if not data then return nil end
     local relName = data.relationship as string
     return {
-        kind = data.kind as string,
+        kind = data.kind as TrackSourceKind,
         key = data.key as string,
         relationshipName = relName,
         relationship = relName and componentByName(relName) or nil,
@@ -760,8 +879,8 @@ local function serializeTimeline(tl: Timeline): {string:any}
                 timeline = r.timeline and serializeTimeline(r.timeline) or nil,
                 startTime = r.startTime,
                 effectiveDuration = r.effectiveDuration,
-                repeatCount = r.repeatCount,
-                pingPong = r.pingPong,
+                mode = r.mode,
+                passCount = r.passCount,
             }
         end
     end
@@ -770,10 +889,7 @@ local function serializeTimeline(tl: Timeline): {string:any}
         runs = runs,
         emits = tl.emits,
         totalDuration = tl.totalDuration,
-        effectiveDuration = tl.effectiveDuration,
         stateSize = tl.stateSize,
-        repeatCount = tl.repeatCount,
-        pingPong = tl.pingPong,
         channel = tl.channel,
         presetName = tl.presetName,
         pinned = tl.pinned,
@@ -787,9 +903,9 @@ local function deserializeTimeline(data: {string:any}): Timeline
     local savedSlots = data.slots as {{string:any}}
     for i = 1, #(savedSlots or {}) do
         local s <const> = savedSlots[i]
-        local easingName <const> = s.easing as string
+        local easingName <const> = s.easing as EasingName
         slots[i] = {
-            kind = (s.kind as string) or "to",
+            kind = (s.kind as OperationKind) or "to",
             target = deserializeTarget(s.target as {string:any}),
             source = deserializeSource(s.source as {string:any}),
             easingName = easingName,
@@ -816,8 +932,8 @@ local function deserializeTimeline(data: {string:any}): Timeline
                 timelineId = (r.timelineId as integer) or 0,
                 startTime = (r.startTime as number) or 0,
                 effectiveDuration = (r.effectiveDuration as number) or 0,
-                repeatCount = (r.repeatCount as integer) or 0,
-                pingPong = r.pingPong == true,
+                mode = assert(r.mode as PlaybackMode, "Tween snapshot run mode is required"),
+                passCount = assert(r.passCount as integer, "Tween snapshot run passCount is required"),
             }
         end
     end
@@ -826,10 +942,7 @@ local function deserializeTimeline(data: {string:any}): Timeline
         runs = runs,
         emits = data.emits as {EmitSlot},
         totalDuration = (data.totalDuration as number) or 0,
-        effectiveDuration = (data.effectiveDuration as number) or 0,
         stateSize = (data.stateSize as integer) or #slots,
-        repeatCount = (data.repeatCount as integer) or 0,
-        pingPong = data.pingPong == true,
         channel = data.channel as string,
         presetName = data.presetName as string,
         pinned = data.pinned == true,
@@ -946,15 +1059,39 @@ end
 -- Cursor methods and playback creation
 -------------------------------------------------------------------------------
 
-local function createCursor(world: World, tl: Timeline, target: integer, rate: number, delay: number): Cursor
+local function playbackMode(mode?: PlaybackMode, count?: integer, finite?: boolean): PlaybackMode, integer
+    local resolved <const> = mode or "once"
+    assert(resolved == "once" or resolved == "loop" or resolved == "pingPong",
+        "Tween mode must be once, loop, or pingPong")
+    if resolved == "once" then
+        assert(count == nil, "Tween count is only valid with loop or pingPong mode")
+        return resolved, 1
+    end
+    if count ~= nil then
+        assert(count > 0, "Tween count must be greater than 0")
+        return resolved, count
+    end
+    assert(not finite, "Nested loop and pingPong runs require a finite count")
+    return resolved, -1
+end
+
+local function createCursor(
+    world: World,
+    tl: Timeline,
+    target: integer,
+    mode: PlaybackMode,
+    passCount: integer,
+    rate: number,
+    delay: number
+): Cursor
     local id <const> = internTimeline(world, tl)
     local state = ffi.new("TweenSlotState[?]", tl.stateSize) as {TweenSlotState}
     local children: {Cursor} = nil
     if tl.runs then
         children = {}
         for i = 1, #tl.runs do
-            children[i] = createCursor(world, tl.runs[i].timeline, target, 1, 0)
-            children[i].repeatCount = tl.runs[i].repeatCount
+            local run <const> = tl.runs[i]
+            children[i] = createCursor(world, run.timeline, target, run.mode, run.passCount, 1, 0)
         end
     end
     incRef(registry(world), id)
@@ -965,7 +1102,8 @@ local function createCursor(world: World, tl: Timeline, target: integer, rate: n
         children = children,
         elapsed = 0,
         direction = 1,
-        repeatCount = tl.repeatCount,
+        mode = mode,
+        remainingPasses = passCount,
         nextEmit = 1,
         rate = rate,
         delay = delay or 0,
@@ -976,9 +1114,10 @@ end
 local function playbackFor(world: World, entity: integer): TweenPlayback
     local pb = world:getMut(entity, TweenPlayback)
     if pb then return pb end
-    -- Inside a deferred scope (query iteration, observers) the set is queued,
-    -- so a re-fetch would return nil; return the instance handed to set. It is
-    -- a Lua-table component, so mutations before commit land in the same table.
+    -- A prior play in this defer scope may already have staged the component.
+    -- Read through the ECS transaction before creating another staged value.
+    pb = (world as WorldImpl):oldValueOf(entity, TweenPlayback) as TweenPlayback
+    if pb then return pb end
     local created <const> = TweenPlayback.new({})
     world:set(entity, created)
     return created
@@ -988,7 +1127,7 @@ local function cursorTimeline(world: World, c: Cursor): Timeline
     return registry(world).byId[c.timelineId]
 end
 
-local function addCursor(world: World, entity: integer, tl: Timeline, speed?: number, delay?: number): Cursor
+local function addCursor(world: World, entity: integer, tl: Timeline, options?: PlaybackOptions): Cursor
     local pb <const> = playbackFor(world, entity)
     if tl.channel then
         for i = 1, #(pb.cursors or {}) do
@@ -999,27 +1138,32 @@ local function addCursor(world: World, entity: integer, tl: Timeline, speed?: nu
             end
         end
     end
-    local c <const> = createCursor(world, tl, entity, speed or 1, delay or 0)
+    local mode, passCount = playbackMode(options and options.mode, options and options.count)
+    local speed <const> = options and options.speed or 1
+    local delay <const> = options and options.delay or 0
+    assert(speed > 0, "Tween speed must be greater than 0")
+    assert(delay >= 0, "Tween delay must be at least 0")
+    assert(passCount == 1 or tl.totalDuration > 0, "Repeating tween timelines must have a duration")
+    local c <const> = createCursor(
+        world, tl, entity, mode, passCount,
+        speed, delay
+    )
     pb.cursors[#pb.cursors + 1] = c
     return c
 end
 
-function Timeline:play(world: World, entity: integer, speed?: number, delay?: number)
-    addCursor(world, entity, self, speed, delay)
+function Timeline:play(world: World, entity: integer, options?: PlaybackOptions)
+    addCursor(world, entity, self, options)
 end
 
-function Timeline:apply(world: World, entity: integer, speed?: number, delay?: number)
-    self:play(world, entity, speed, delay)
-end
-
-function tween.play(world: World, entity: integer, timelineOrName: Timeline | string, speed?: number, delay?: number)
+function tween.play(world: World, entity: integer, timelineOrName: Timeline | string, options?: PlaybackOptions)
     if timelineOrName is string then
         local id = registry(world).named[timelineOrName]
         if not id then error("Unknown tween preset " .. timelineOrName) end
-        addCursor(world, entity, registry(world).byId[id], speed, delay)
+        addCursor(world, entity, registry(world).byId[id], options)
         return
     end
-    (timelineOrName as Timeline):play(world, entity, speed, delay)
+    (timelineOrName as Timeline):play(world, entity, options)
 end
 
 local function selectorTimelineId(world: World, selector: Timeline): integer
@@ -1072,159 +1216,193 @@ function tween.resume(world: World, entity: integer, selector?: ControlSelector)
 end
 
 -------------------------------------------------------------------------------
--- Builder
+-- Timeline compilation
 -------------------------------------------------------------------------------
 
-local BUILDER_MT <const>: metatable<TimelineBuilder> = { __index = TimelineBuilder }
-
-function tween.timeline(): TimelineBuilder
-    return setmetatable({
-        _slots = {},
-        _runs = {},
-        _emits = {},
-        _currentOffset = 0,
-        _currentGroupMaxEnd = 0,
-        _frozen = false,
-    }, BUILDER_MT)
-end
-
-local function addSlot(builder: TimelineBuilder, kind: string, duration: number, easingFn: EasingFunction, target: Target, trackSource: TrackSource, relative: boolean, t1?: number, t2?: number, t3?: number, t4?: number): TimelineBuilder
-    assert(not builder._frozen, "Cannot add entries to a finalized timeline")
-    assert(duration > 0, "Tween duration must be greater than 0")
-    local easingName <const> = assert(EASING_NAMES[easingFn], "Tween easing must be one of tecs2d.tween's built-in easing values")
-    local startTime <const> = builder._currentOffset
-    local endTime <const> = startTime + duration
-    builder._slots[#builder._slots + 1] = {
-        kind = kind,
-        target = target,
-        source = trackSource,
-        easingName = easingName,
-        easing = easingFn,
-        t1 = t1 or 0, t2 = t2 or 0, t3 = t3 or 0, t4 = t4 or 0,
-        relative = relative,
-        startTime = startTime,
-        endTime = endTime,
-        duration = duration,
-        stateIndex = 0,
-    }
-    if endTime > builder._currentGroupMaxEnd then
-        builder._currentGroupMaxEnd = endTime
+local function resolveEasing(value: any): EasingName, EasingFunction
+    if value is string then
+        local name <const> = value as EasingName
+        return name, assert(EASINGS[name], "Unknown tween easing " .. value)
     end
-    return builder
+    local easingFn <const> = value as EasingFunction
+    return assert(EASING_NAMES[easingFn],
+        "Tween easing must be a built-in easing name or value"), easingFn
 end
 
-function TimelineBuilder:to(duration: number, easingFn: EasingFunction, target: Target, t1?: number, t2?: number, t3?: number, t4?: number): TimelineBuilder
-    return addSlot(self, "to", duration, easingFn, target, nil, false, t1, t2, t3, t4)
+local function resolveTargetValue(value: any): Target
+    if value is string then
+        return assert(BUILTIN_TARGETS[value as TargetName], "Unknown tween target " .. value)
+    end
+    return value as Target
 end
 
-function TimelineBuilder:adjust(duration: number, easingFn: EasingFunction, target: Target, t1: number, t2?: number, t3?: number, t4?: number): TimelineBuilder
-    return addSlot(self, "to", duration, easingFn, target, nil, true, t1, t2, t3, t4)
+local function numericValue(value: any, position: integer): number
+    if value == nil then return 0 end
+    assert(value is number, "Tween value at position " .. tostring(position) .. " must be a number")
+    return value as number
 end
 
-function TimelineBuilder:track(duration: number, easingFn: EasingFunction, target: Target, trackSource: TrackSource): TimelineBuilder
-    return addSlot(self, "track", duration, easingFn, target, trackSource, false, 0, 0, 0, 0)
+function tween.to(
+    duration: number, easing: EasingName | EasingFunction, target: TargetName | Target,
+    t1: number, t2?: number, t3?: number, t4?: number
+): TimelineNode
+    return {"to", duration, easing, target, t1, t2, t3, t4}
 end
 
-function TimelineBuilder:step(pause?: number): TimelineBuilder
-    assert(not self._frozen, "Cannot add entries to a finalized timeline")
-    self._currentOffset = self._currentGroupMaxEnd + (pause or 0)
-    self._currentGroupMaxEnd = self._currentOffset
-    return self
+function tween.adjust(
+    duration: number, easing: EasingName | EasingFunction, target: TargetName | Target,
+    t1: number, t2?: number, t3?: number, t4?: number
+): TimelineNode
+    return {"adjust", duration, easing, target, t1, t2, t3, t4}
 end
 
-function TimelineBuilder:emit(name: string): TimelineBuilder
-    assert(not self._frozen, "Cannot add entries to a finalized timeline")
-    self._emits[#self._emits + 1] = { time = self._currentGroupMaxEnd, name = name }
-    return self
+function tween.track(
+    duration: number, easing: EasingName | EasingFunction,
+    target: TargetName | Target, trackingSource: TrackSource
+): TimelineNode
+    return {"track", duration, easing, target, trackingSource}
 end
 
-function TimelineBuilder:run(timeline: Timeline, count?: integer): TimelineBuilder
-    assert(not self._frozen, "Cannot add entries to a finalized timeline")
-    local effectiveDuration: number
-    if timeline.effectiveDuration == -1 then
-        assert(count, "run() with infinite timeline requires a count parameter")
-        effectiveDuration = timeline.totalDuration * count
-    elseif count then
-        effectiveDuration = timeline.totalDuration * count
+function tween.wait(duration: number): TimelineNode
+    return {"wait", duration}
+end
+
+function tween.emit(name: string): TimelineNode
+    return {"emit", name}
+end
+
+function tween.run(timeline: Timeline, options?: RunOptions): TimelineNode
+    return {"run", timeline, options}
+end
+
+function tween.parallel(...: TimelineNode): TimelineNode
+    local node: {any} = {"parallel"}
+    for i = 1, select("#", ...) do
+        node[i + 1] = select(i, ...)
+    end
+    return node
+end
+
+local compileNode: function(TimelineNode, number, Timeline): number
+
+local function compileBlock(block: {TimelineNode}, startTime: number, tl: Timeline): number
+    local time = startTime
+    for i = 1, #block do
+        time = compileNode(block[i], time, tl)
+    end
+    return time
+end
+
+local function compileSlot(node: TimelineNode, startTime: number, tl: Timeline): number
+    local compiled <const> = (node as any) as {any:any}
+    local authoredKind <const> = compiled[1] as OperationKind
+    local duration <const> = compiled[2] as number
+    assert(duration and duration > 0, "Tween duration must be greater than 0")
+    local easingName, easingFn = resolveEasing(compiled[3])
+    local target <const> = resolveTargetValue(compiled[4])
+    assert(target, "Tween target is required")
+
+    compiled.kind = authoredKind == "track" and "track" or "to"
+    compiled.target = target
+    compiled.source = authoredKind == "track" and (compiled[5] as TrackSource) or nil
+    compiled.easingName = easingName
+    compiled.easing = easingFn
+    compiled.t1 = authoredKind == "track" and 0 or numericValue(compiled[5], 5)
+    compiled.t2 = authoredKind == "track" and 0 or numericValue(compiled[6], 6)
+    compiled.t3 = authoredKind == "track" and 0 or numericValue(compiled[7], 7)
+    compiled.t4 = authoredKind == "track" and 0 or numericValue(compiled[8], 8)
+    compiled.relative = authoredKind == "adjust"
+    compiled.startTime = startTime
+    compiled.endTime = startTime + duration
+    compiled.duration = duration
+    compiled.stateIndex = #tl.slots
+
+    tl.slots[#tl.slots + 1] = node as Slot
+    return compiled.endTime as number
+end
+
+compileNode = function(node: TimelineNode, startTime: number, tl: Timeline): number
+    local data <const> = (node as any) as {any:any}
+    assert(data, "Tween timeline entry is required")
+    local kind <const> = data[1]
+    if kind is table then
+        return compileBlock(data as {TimelineNode}, startTime, tl)
+    end
+    assert(kind is string, "Tween operation name must be a string")
+
+    if kind == "to" or kind == "adjust" or kind == "track" then
+        return compileSlot(node, startTime, tl)
+    elseif kind == "wait" then
+        local duration <const> = data[2] as number
+        assert(duration and duration >= 0, "Tween wait duration must be at least 0")
+        return startTime + duration
+    elseif kind == "emit" then
+        local name <const> = data[2] as string
+        assert(name, "Tween emit name is required")
+        data.time = startTime
+        data.name = name
+        data.order = #tl.emits + 1
+        tl.emits[#tl.emits + 1] = node as EmitSlot
+        return startTime
+    elseif kind == "run" then
+        local child <const> = data[2] as Timeline
+        assert(child and child.totalDuration, "Tween run requires a compiled timeline")
+        local options <const> = data[3] as RunOptions
+        local mode, passCount = playbackMode(options and options.mode, options and options.count, true)
+        local duration <const> = child.totalDuration * passCount
+        data.timeline = child
+        data.startTime = startTime
+        data.effectiveDuration = duration
+        data.mode = mode
+        data.passCount = passCount
+        tl.runs[#tl.runs + 1] = node as RunSlot
+        return startTime + duration
+    elseif kind == "parallel" then
+        local endTime = startTime
+        local children <const> = data as {any}
+        for i = 2, #children do
+            local childEnd <const> = compileNode(children[i] as TimelineNode, startTime, tl)
+            if childEnd > endTime then endTime = childEnd end
+        end
+        return endTime
+    end
+    error("Unknown tween operation " .. kind)
+end
+
+function tween.timeline(spec: TimelineSpec): Timeline
+    local authored <const> = spec as {any:any}
+    assert(authored.sequence == nil, "Tween timelines use an implicit sequence")
+    local tl <const> = spec as Timeline
+    tl.slots = {}
+    tl.runs = {}
+    tl.emits = {}
+    tl.totalDuration = compileBlock(spec, 0, tl)
+    tl.stateSize = #tl.slots
+    if #tl.runs == 0 then tl.runs = nil end
+    if #tl.emits == 0 then
+        tl.emits = nil
     else
-        effectiveDuration = timeline.effectiveDuration
+        table.sort(tl.emits, function(a: EmitSlot, b: EmitSlot): boolean
+            return a.time < b.time or (a.time == b.time and a.order < b.order)
+        end)
     end
-    local runRepeatCount: integer
-    if count then
-        runRepeatCount = count - 1
-    elseif timeline.repeatCount == -1 then
-        error("run() with infinite timeline requires a count parameter")
-    else
-        runRepeatCount = timeline.repeatCount
+    return setmetatable(tl, TIMELINE_MT)
+end
+
+function tween.registerPreset(world: World, name: string, timeline: Timeline): Timeline
+    assert(name ~= "", "Tween preset name must not be empty")
+    local reg <const> = registry(world)
+    local existingId <const> = reg.named[name]
+    if existingId then
+        assert(reg.byId[existingId] == timeline, "Tween preset " .. name .. " is already registered")
+        return timeline
     end
-    local startTime <const> = self._currentOffset
-    local endTime <const> = startTime + effectiveDuration
-    self._runs[#self._runs + 1] = {
-        timeline = timeline,
-        startTime = startTime,
-        effectiveDuration = effectiveDuration,
-        repeatCount = runRepeatCount,
-        pingPong = timeline.pingPong,
-    }
-    if endTime > self._currentGroupMaxEnd then
-        self._currentGroupMaxEnd = endTime
-    end
-    return self
-end
-
-function TimelineBuilder:channel(name: string): TimelineBuilder
-    assert(not self._frozen, "Cannot modify a finalized timeline")
-    self._channel = name
-    return self
-end
-
-local function finalize(builder: TimelineBuilder, repeatCount: integer, isPingPong: boolean): Timeline
-    assert(not builder._frozen, "Timeline already finalized")
-    builder._frozen = true
-    for i = 1, #builder._slots do
-        builder._slots[i].stateIndex = i - 1
-    end
-    local runs: {RunSlot} = nil
-    if #builder._runs > 0 then runs = builder._runs end
-    local emits: {EmitSlot} = nil
-    if #builder._emits > 0 then emits = builder._emits end
-    local totalDuration <const> = builder._currentGroupMaxEnd
-    local effectiveDuration: number
-    if repeatCount == -1 then
-        effectiveDuration = -1
-    else
-        effectiveDuration = totalDuration * (repeatCount + 1)
-    end
-    return setmetatable({
-        slots = builder._slots,
-        runs = runs,
-        emits = emits,
-        totalDuration = totalDuration,
-        effectiveDuration = effectiveDuration,
-        stateSize = #builder._slots,
-        repeatCount = repeatCount,
-        pingPong = isPingPong,
-        channel = builder._channel,
-    }, TIMELINE_MT)
-end
-
-function TimelineBuilder:once(): Timeline
-    return finalize(self, 0, false)
-end
-
-function TimelineBuilder:loop(count?: integer): Timeline
-    if count then return finalize(self, count, false) end
-    return finalize(self, -1, false)
-end
-
-function TimelineBuilder:pingPong(count?: integer): Timeline
-    if count then return finalize(self, count, true) end
-    return finalize(self, -1, true)
-end
-
-function tween.registerPreset(name: string, timeline: Timeline): Timeline
+    assert(not timeline.presetName or timeline.presetName == name,
+        "Tween timeline is already registered as " .. tostring(timeline.presetName))
     timeline.presetName = name
     timeline.pinned = true
+    local id <const> = internTimeline(world, timeline)
+    reg.named[name] = id
     return timeline
 end
 
@@ -1269,7 +1447,22 @@ local function evaluateSlots(slots: {Slot}, state: {TweenSlotState}, world: Worl
     for i = 1, #(slots or {}) do
         local slot <const> = slots[i]
         local ss <const> = state[slot.stateIndex]
+        local shouldEvaluate = false
+        local active = false
+        local localT: number = 0
         if elapsed >= slot.startTime and elapsed <= slot.endTime then
+            shouldEvaluate = true
+            active = true
+            localT = (elapsed - slot.startTime) / slot.duration
+        elseif elapsed > slot.endTime then
+            shouldEvaluate = true
+            localT = 1
+        elseif ss.init ~= 0 then
+            shouldEvaluate = true
+            localT = 0
+        end
+
+        if shouldEvaluate then
             if ss.init == 0 then
                 local t1, t2, t3, t4 = slot.t1, slot.t2, slot.t3, slot.t4
                 if slot.kind == "track" then
@@ -1279,37 +1472,24 @@ local function evaluateSlots(slots: {Slot}, state: {TweenSlotState}, world: Worl
                     slot.target.init(world, target, slot.relative, t1, t2, t3, t4)
                 ss.init = 1
             end
-            local localT = (elapsed - slot.startTime) / slot.duration
             if localT < 0 then localT = 0 end
             if localT > 1 then localT = 1 end
-            if slot.kind == "track" then
+            if slot.kind == "track" and active then
                 local t1, t2, t3, t4 = targetValuesFromSource(world, target, slot.source)
                 ss.d1 = t1 - ss.s1
                 ss.d2 = t2 - ss.s2
                 ss.d3 = t3 - ss.s3
                 ss.d4 = t4 - ss.s4
             end
-            slot.target.apply(world, target, slot.easing(localT), ss.s1, ss.s2, ss.s3, ss.s4, ss.d1, ss.d2, ss.d3, ss.d4)
-        elseif elapsed > slot.endTime then
-            if ss.init == 0 then
-                local t1, t2, t3, t4 = slot.t1, slot.t2, slot.t3, slot.t4
-                if slot.kind == "track" then
-                    t1, t2, t3, t4 = targetValuesFromSource(world, target, slot.source)
-                end
-                ss.s1, ss.s2, ss.s3, ss.s4, ss.d1, ss.d2, ss.d3, ss.d4 =
-                    slot.target.init(world, target, slot.relative, t1, t2, t3, t4)
-                ss.init = 1
+            if ss.applied == 0 or ss.lastT ~= localT or (slot.kind == "track" and active) then
+                slot.target.apply(
+                    world, target, slot.easing(localT),
+                    ss.s1, ss.s2, ss.s3, ss.s4,
+                    ss.d1, ss.d2, ss.d3, ss.d4
+                )
+                ss.applied = 1
+                ss.lastT = localT
             end
-            if slot.kind == "track" then
-                local t1, t2, t3, t4 = targetValuesFromSource(world, target, slot.source)
-                ss.d1 = t1 - ss.s1
-                ss.d2 = t2 - ss.s2
-                ss.d3 = t3 - ss.s3
-                ss.d4 = t4 - ss.s4
-            end
-            slot.target.apply(world, target, slot.easing(1), ss.s1, ss.s2, ss.s3, ss.s4, ss.d1, ss.d2, ss.d3, ss.d4)
-        elseif elapsed < slot.startTime and ss.init ~= 0 then
-            slot.target.apply(world, target, slot.easing(0), ss.s1, ss.s2, ss.s3, ss.s4, ss.d1, ss.d2, ss.d3, ss.d4)
         end
     end
 end
@@ -1329,6 +1509,52 @@ local function fireEmits(c: Cursor, tl: Timeline, world: World, target: integer,
 end
 
 local evaluateCursor: function(Cursor, World, integer)
+local resetCursorCycle: function(Cursor, World)
+
+local function beginRunCycle(child: Cursor, childTl: Timeline, runSlot: RunSlot, cycleIndex: integer, world: World)
+    if runSlot.mode == "loop" or cycleIndex % 2 == 0 then
+        resetCursorCycle(child, world)
+    end
+    child.direction = runSlot.mode == "pingPong" and cycleIndex % 2 == 1 and -1 or 1
+    if child.direction == -1 then
+        child.nextEmit = (childTl.emits and #childTl.emits or 0) + 1
+    else
+        child.nextEmit = 1
+    end
+    child._lastCycleIndex = cycleIndex
+    child.remainingPasses = runSlot.passCount - cycleIndex
+end
+
+local function evaluateRun(
+    child: Cursor, childTl: Timeline, runSlot: RunSlot,
+    localElapsed: number, world: World, target: integer
+)
+    local cycleDuration <const> = childTl.totalDuration
+    if cycleDuration <= 0 then return end
+
+    local atEnd <const> = localElapsed >= runSlot.effectiveDuration
+    local cycleIndex = atEnd and (runSlot.passCount - 1) or math.floor(localElapsed / cycleDuration)
+    local cyclePos = atEnd and cycleDuration or (localElapsed % cycleDuration)
+
+    if cycleIndex > child._lastCycleIndex then
+        for completedCycle = child._lastCycleIndex, cycleIndex - 1 do
+            child.elapsed = runSlot.mode == "pingPong" and completedCycle % 2 == 1 and 0 or cycleDuration
+            evaluateCursor(child, world, target)
+            beginRunCycle(child, childTl, runSlot, completedCycle + 1, world)
+        end
+    elseif cycleIndex < child._lastCycleIndex then
+        child._lastCycleIndex = cycleIndex
+        child.direction = runSlot.mode == "pingPong" and cycleIndex % 2 == 1 and -1 or 1
+    end
+
+    if runSlot.mode == "pingPong" and cycleIndex % 2 == 1 then
+        cyclePos = cycleDuration - cyclePos
+    end
+    child.elapsed = cyclePos
+    child.remainingPasses = runSlot.passCount - cycleIndex
+    evaluateCursor(child, world, target)
+    child.completed = atEnd
+end
 
 evaluateCursor = function(c: Cursor, world: World, target: integer)
     local tl <const> = cursorTimeline(world, c)
@@ -1343,36 +1569,26 @@ evaluateCursor = function(c: Cursor, world: World, target: integer)
             local runEnd <const> = runStart + runSlot.effectiveDuration
             local childTl <const> = cursorTimeline(world, child)
             if childTl and c.elapsed >= runStart and c.elapsed <= runEnd then
-                local localElapsed = c.elapsed - runStart
-                local cycleDuration <const> = childTl.totalDuration
-                if cycleDuration > 0 then
-                    local cyclePos = localElapsed % cycleDuration
-                    local cycleIndex = math.floor(localElapsed / cycleDuration)
-                    if child._lastCycleIndex ~= cycleIndex then
-                        ffi.fill(child.state as ffi.CData, ffi.sizeof("TweenSlotState") * childTl.stateSize, 0)
-                        if runSlot.pingPong and cycleIndex % 2 == 1 then
-                            -- Reverse pass: elapsed runs high-to-low, so
-                            -- every emit time reads as already passed;
-                            -- suppress instead of firing them all at once.
-                            child.nextEmit = (childTl.emits and #childTl.emits or 0) + 1
-                        else
-                            child.nextEmit = 1
-                        end
-                        child._lastCycleIndex = cycleIndex
-                    end
-                    if cycleIndex > child.repeatCount and child.repeatCount >= 0 then
-                        cyclePos = cycleDuration
-                    elseif runSlot.pingPong and cycleIndex % 2 == 1 then
-                        cyclePos = cycleDuration - cyclePos
-                    end
-                    child.elapsed = cyclePos
-                    evaluateCursor(child, world, target)
-                end
+                evaluateRun(child, childTl, runSlot, c.elapsed - runStart, world, target)
             elseif childTl and c.elapsed > runEnd and not child.completed then
-                child.elapsed = childTl.totalDuration
-                evaluateCursor(child, world, target)
-                child.completed = true
+                evaluateRun(child, childTl, runSlot, runSlot.effectiveDuration, world, target)
             end
+        end
+    end
+end
+
+resetCursorCycle = function(c: Cursor, world: World)
+    local tl <const> = cursorTimeline(world, c)
+    if not tl then return end
+    ffi.fill(c.state as ffi.CData, ffi.sizeof("TweenSlotState") * tl.stateSize, 0)
+    c.elapsed = 0
+    c.direction = 1
+    c.nextEmit = 1
+    c.completed = false
+    c._lastCycleIndex = 0
+    if c.children then
+        for i = 1, #c.children do
+            resetCursorCycle(c.children[i], world)
         end
     end
 end
@@ -1387,34 +1603,47 @@ local function advanceCursor(c: Cursor, dt: number, world: World, target: intege
         dt = -c.delay
         c.delay = 0
     end
-    c.elapsed = c.elapsed + dt * c.direction * c.rate
-    evaluateCursor(c, world, target)
     local totalDuration <const> = tl.totalDuration
-    local cycleComplete = (c.direction == 1 and c.elapsed >= totalDuration) or (c.direction == -1 and c.elapsed <= 0)
-    if cycleComplete then
-        if c.repeatCount == -1 or c.repeatCount > 0 then
-            if c.repeatCount > 0 then c.repeatCount = c.repeatCount - 1 end
-            if tl.pingPong then
+    if totalDuration <= 0 then
+        evaluateCursor(c, world, target)
+        world:emit(0, TweenComplete, target, tl.channel, c.timelineId)
+        return true
+    end
+
+    local remainingTime = dt * c.rate
+    if remainingTime <= 0 then
+        evaluateCursor(c, world, target)
+        return false
+    end
+
+    while remainingTime > 0 do
+        local distance <const> = c.direction == 1 and (totalDuration - c.elapsed) or c.elapsed
+        if remainingTime < distance then
+            c.elapsed = c.elapsed + remainingTime * c.direction
+            evaluateCursor(c, world, target)
+            return false
+        end
+
+        c.elapsed = c.direction == 1 and totalDuration or 0
+        evaluateCursor(c, world, target)
+        remainingTime = remainingTime - distance
+
+        if c.remainingPasses == -1 or c.remainingPasses > 1 then
+            if c.remainingPasses > 1 then c.remainingPasses = c.remainingPasses - 1 end
+            if c.mode == "pingPong" then
                 c.direction = -c.direction
                 if c.direction == 1 then
-                    ffi.fill(c.state as ffi.CData, ffi.sizeof("TweenSlotState") * tl.stateSize, 0)
-                    c.nextEmit = 1
-                    c.elapsed = -c.elapsed
-                else
-                    c.elapsed = totalDuration - (c.elapsed - totalDuration)
+                    resetCursorCycle(c, world)
                 end
             else
-                ffi.fill(c.state as ffi.CData, ffi.sizeof("TweenSlotState") * tl.stateSize, 0)
-                c.nextEmit = 1
-                c.elapsed = c.elapsed - totalDuration
+                resetCursorCycle(c, world)
             end
         else
-            c.elapsed = c.direction == 1 and totalDuration or 0
-            evaluateCursor(c, world, target)
             world:emit(0, TweenComplete, target, tl.channel, c.timelineId)
             return true
         end
     end
+
     return false
 end
 
@@ -1433,13 +1662,25 @@ end
 
 local function collectLiveTemplateIds(world: World, playbackQuery: tecs.Query): {integer:boolean}
     local live: {integer:boolean} = {}
+    local reg = registry(world)
+    local function markTemplate(id: integer)
+        if live[id] then return end
+        local tl <const> = reg.byId[id]
+        if not tl then return end
+        live[id] = true
+        if tl.runs then
+            for i = 1, #tl.runs do
+                markTemplate(tl.runs[i].timelineId)
+            end
+        end
+    end
     for archetype, len in playbackQuery:iter() do
         local playbacks = archetype:get(TweenPlayback)
         for i = 1, len do
             local pb = playbacks[i]
             for j = 1, #(pb.cursors or {}) do
                 local function mark(c: Cursor)
-                    live[c.timelineId] = true
+                    markTemplate(c.timelineId)
                     if c.children then
                         for k = 1, #c.children do mark(c.children[k]) end
                     end
@@ -1448,11 +1689,8 @@ local function collectLiveTemplateIds(world: World, playbackQuery: tecs.Query): 
             end
         end
     end
-    local reg = registry(world)
     for id, tl in pairs(reg.byId) do
-        if tl.pinned and (reg.refcounts[id] or 0) > 0 then
-            live[id] = true
-        end
+        if tl.pinned then markTemplate(id) end
     end
     return live
 end
