@@ -9,7 +9,9 @@ output="$root/dist/tecs-cli.love"
 
 if [ ! -f "$tecs_dir/src/tecs/init.tl" ] || [ ! -f "$tecs_dir/src/tecs2d/init.tl" ] \
     || [ ! -f "$tecs_dir/examples/shared/assets/tiny-font.fnt" ] \
-    || [ ! -f "$tecs_dir/examples/shared/assets/tiny-font.png" ]; then
+    || [ ! -f "$tecs_dir/examples/shared/assets/tiny-font.png" ] \
+    || [ ! -f "$tecs_dir/examples/shared/assets/jetbrainsmono-extrabold-msdf.json" ] \
+    || [ ! -f "$tecs_dir/examples/shared/assets/jetbrainsmono-extrabold-msdf.png" ]; then
     echo "Complete Tecs checkout not found: $tecs_dir" >&2
     exit 1
 fi
@@ -58,6 +60,8 @@ cp -R "$tecs_dir/src/tecs2d" "$stage/payload/framework/tecs2d"
 mkdir -p "$stage/payload/framework/tecs2d/assets/fonts"
 cp "$tecs_dir/examples/shared/assets/tiny-font.fnt" \
     "$tecs_dir/examples/shared/assets/tiny-font.png" \
+    "$tecs_dir/examples/shared/assets/jetbrainsmono-extrabold-msdf.json" \
+    "$tecs_dir/examples/shared/assets/jetbrainsmono-extrabold-msdf.png" \
     "$stage/payload/framework/tecs2d/assets/fonts/"
 cp "$tecs_dir/LICENSE-MIT" "$stage/payload/licenses/tecs-LICENSE-MIT"
 

@@ -19,6 +19,8 @@ local globals <const> = _G as {string: any}
 globals.tecsTestHooks = {
     commands = require("tecs2d.debug.commands"),
     annotations = require("tecs2d.debug.internal.annotations"),
+    debugdraw = require("tecs2d.debug.internal.debugdraw"),
+    toolworld = require("tecs2d.debug.internal.toolworld"),
 }
 
 local function gamePlugin(world: tecs.World)

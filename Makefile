@@ -61,7 +61,8 @@ SOURCE_TL := $(shell find $(TL_SRC_DIR) -name "*.tl" 2>/dev/null || true)
 TECS_SOURCE_TL := $(shell find $(TL_SRC_DIR)/tecs -name "*.tl" 2>/dev/null || true)
 TECS2D_SOURCE_TL := $(shell find $(TL_SRC_DIR)/tecs2d -name "*.tl" 2>/dev/null || true)
 SOURCE_GLSL := $(shell find $(TL_SRC_DIR) -name "*.glsl" 2>/dev/null || true)
-TECS2D_FONT_ASSETS := examples/shared/assets/tiny-font.fnt examples/shared/assets/tiny-font.png
+TECS2D_FONT_ASSETS := examples/shared/assets/tiny-font.fnt examples/shared/assets/tiny-font.png \
+	examples/shared/assets/jetbrainsmono-extrabold-msdf.json examples/shared/assets/jetbrainsmono-extrabold-msdf.png
 
 # Test deps live under build/test_deps and are compiled by the post-build
 # script scripts/compile_specs.tl in a single Lua process (much faster than

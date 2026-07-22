@@ -1323,6 +1323,9 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
             else
                 lg.clear(0, 0, 0, 1)
             end
+            -- G-buffer rendering leaves replace blending active. Blend its
+            -- straight-alpha coverage once so worldLit is premultiplied.
+            lg.setBlendMode("alpha", "alphamultiply")
             lg.draw(albedo, 0, 0)
             lg.setCanvas()
         end
@@ -1343,6 +1346,9 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
     local worldLitH = worldLit:getHeight()
     bindOutput(self)
     lg.setColor(1, 1, 1, 1)
+    -- Lighting and the direct albedo copy both produce a premultiplied
+    -- worldLit canvas. Do not multiply fractional edge RGB a second time.
+    lg.setBlendMode("alpha", "premultiplied")
     if self._integerScaling then
         -- Integer scaling: pixel-perfect upscale with letterboxing.
         -- Sub-pixel camera remainder is applied as a screen-pixel blit offset
@@ -1368,6 +1374,7 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
         worldLit:setFilter("linear", "linear")
         lg.draw(worldLit, 0, 0, 0, sw / worldLitW, sh / worldLitH)
     end
+    lg.setBlendMode("alpha", "alphamultiply")
 
     ---------------------------------------------------------------------------
     -- Phase 2: Screen layers (only if _firstScreenLayer > 0)
@@ -1405,13 +1412,16 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
         -- Composite the screen G-buffer unlit. Screen layers are always
         -- unlit, so the deferred lighting shader would take its unlit
         -- early-exit on every pixel; the dedicated composite shader
-        -- reproduces that exit (albedo + emission, alpha 1, uncovered
-        -- pixels discarded) without binding the lighting pipeline.
+        -- reproduces that exit (albedo + emission with preserved coverage,
+        -- uncovered pixels discarded) without binding the lighting pipeline.
         local screenLit = self._screenLitCanvas
         local albedo = self.renderer.gBufferAlbedo
         lg.setCanvas(screenLit)
         lg.clear(0, 0, 0, 0)
         lg.setColor(1, 1, 1, 1)
+        -- Store the straight-alpha shader/copy result as premultiplied RGB;
+        -- screenLit is subsequently composed with premultiplied blending.
+        lg.setBlendMode("alpha", "alphamultiply")
         if self.lightingMode == "deferred" then
             local unlitShader = self.renderer.screenUnlitShader
             lg.setShader(unlitShader)

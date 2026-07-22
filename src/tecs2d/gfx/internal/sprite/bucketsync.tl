@@ -337,7 +337,7 @@ function bucket_sync.new(
         -- Get array index from TextureArray component (1-based, or 0 if not found)
         local arrayIdx = TextureArray.getArrayIndex(archetype)
 
-        -- Get blend mode (0 = default alpha, 1-14 = blend modes)
+        -- Get blend mode (0 = deferred alpha, 1-15 = forward blend modes)
         local blendId = blend.groupBy(archetype)
 
         return (detectedTierIdx * TIER_SHIFT) + (arrayIdx * ARRAY_SHIFT) + blendId

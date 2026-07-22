@@ -484,6 +484,8 @@ local function embeddedDependenciesComplete()
         and exists(pathJoin(vendorLua, "socket.d.tl"))
         and exists(pathJoin(vendorLua, "tecs2d/assets/fonts/tiny-font.fnt"))
         and exists(pathJoin(vendorLua, "tecs2d/assets/fonts/tiny-font.png"))
+        and exists(pathJoin(vendorLua, "tecs2d/assets/fonts/jetbrainsmono-extrabold-msdf.json"))
+        and exists(pathJoin(vendorLua, "tecs2d/assets/fonts/jetbrainsmono-extrabold-msdf.png"))
 end
 
 local function copyLocalFramework()
@@ -494,7 +496,9 @@ local function copyLocalFramework()
     if not exists(pathJoin(tecsSource, "init.tl"))
         or not exists(pathJoin(tecs2dSource, "init.tl"))
         or not exists(pathJoin(fonts, "tiny-font.fnt"))
-        or not exists(pathJoin(fonts, "tiny-font.png")) then
+        or not exists(pathJoin(fonts, "tiny-font.png"))
+        or not exists(pathJoin(fonts, "jetbrainsmono-extrabold-msdf.json"))
+        or not exists(pathJoin(fonts, "jetbrainsmono-extrabold-msdf.png")) then
         error("TECS_DIR is not a complete Tecs checkout: " .. tecsDir, 0)
     end
 
@@ -504,6 +508,10 @@ local function copyLocalFramework()
         pathJoin(vendorLua, "tecs2d/assets/fonts/tiny-font.fnt"))
     copyFile(pathJoin(fonts, "tiny-font.png"),
         pathJoin(vendorLua, "tecs2d/assets/fonts/tiny-font.png"))
+    copyFile(pathJoin(fonts, "jetbrainsmono-extrabold-msdf.json"),
+        pathJoin(vendorLua, "tecs2d/assets/fonts/jetbrainsmono-extrabold-msdf.json"))
+    copyFile(pathJoin(fonts, "jetbrainsmono-extrabold-msdf.png"),
+        pathJoin(vendorLua, "tecs2d/assets/fonts/jetbrainsmono-extrabold-msdf.png"))
     return true
 end
 

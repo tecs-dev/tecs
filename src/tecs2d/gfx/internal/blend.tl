@@ -1,7 +1,7 @@
 --[[
 Blend mode tag components for GPU rendering.
 
-14 tag components representing 7 blend modes × 2 alpha modes.
+15 tag components: 7 blend modes × 2 alpha modes, plus forward alpha.
 These are mutually exclusive: adding one removes any other blend tag from the entity.
 
 Usage:
@@ -34,6 +34,7 @@ local record DarkenBlend is tecs.Component end
 local record DarkenBlendPremul is tecs.Component end
 local record ReplaceBlend is tecs.Component end
 local record ReplaceBlendPremul is tecs.Component end
+local record ForwardAlphaBlend is tecs.Component end
 
 local record blend
     -- Additive blending (glow, fire, light beams)
@@ -63,6 +64,11 @@ local record blend
     -- Replace blending (no blending, overwrites destination)
     ReplaceBlend: ReplaceBlend
     ReplaceBlendPremul: ReplaceBlendPremul
+
+    -- Ordinary alpha blending in the forward composite pass. Use for
+    -- translucent content that must blend over another rendered entity,
+    -- such as antialiased text over a UI panel.
+    ForwardAlphaBlend: ForwardAlphaBlend
 
     -- Array of all blend components (for iteration with numeric for loops)
     ALL: {tecs.Component}
@@ -101,6 +107,7 @@ blend.ID = {
     DARKEN_PREMUL = 12,
     REPLACE = 13,
     REPLACE_PREMUL = 14,
+    FORWARD_ALPHA = 15,
 }
 
 -- Array for iteration (populated as components are created)
@@ -146,7 +153,7 @@ local function createBlendComponent(
     return comp
 end
 
--- Create all 14 blend components
+-- Create all blend components.
 blend.AdditiveBlend = createBlendComponent(
     "AdditiveBlend", "add", "alphamultiply") as AdditiveBlend
 blend.AdditiveBlendPremul = createBlendComponent(
@@ -185,6 +192,8 @@ blend.ReplaceBlend = createBlendComponent(
     "ReplaceBlend", "replace", "alphamultiply") as ReplaceBlend
 blend.ReplaceBlendPremul = createBlendComponent(
     "ReplaceBlendPremul", "replace", "premultiplied") as ReplaceBlendPremul
+blend.ForwardAlphaBlend = createBlendComponent(
+    "ForwardAlphaBlend", "alpha", "alphamultiply") as ForwardAlphaBlend
 
 -- Populate INFO_BY_ID for blend ID → blend info lookup
 blend.INFO_BY_ID[blend.ID.ADD] = blend.INFO[blend.AdditiveBlend]
@@ -201,8 +210,10 @@ blend.INFO_BY_ID[blend.ID.DARKEN] = blend.INFO[blend.DarkenBlend]
 blend.INFO_BY_ID[blend.ID.DARKEN_PREMUL] = blend.INFO[blend.DarkenBlendPremul]
 blend.INFO_BY_ID[blend.ID.REPLACE] = blend.INFO[blend.ReplaceBlend]
 blend.INFO_BY_ID[blend.ID.REPLACE_PREMUL] = blend.INFO[blend.ReplaceBlendPremul]
+blend.INFO_BY_ID[blend.ID.FORWARD_ALPHA] = blend.INFO[blend.ForwardAlphaBlend]
 
--- groupBy function for queries - returns blend ID for an archetype (0 = alpha, 1-14 = blend modes)
+-- groupBy function for queries - returns blend ID for an archetype
+-- (0 = deferred alpha, 1-15 = forward blend modes).
 local blendAll = blend.ALL
 local blendIdMap = blend.ID
 function blend.groupBy(archetype: tecs.Archetype): integer
@@ -220,6 +231,7 @@ function blend.groupBy(archetype: tecs.Archetype): integer
     if archetype:get(blendAll[12]) then return blendIdMap.DARKEN_PREMUL end
     if archetype:get(blendAll[13]) then return blendIdMap.REPLACE end
     if archetype:get(blendAll[14]) then return blendIdMap.REPLACE_PREMUL end
+    if archetype:get(blendAll[15]) then return blendIdMap.FORWARD_ALPHA end
     return 0  -- Default alpha blend
 end
 

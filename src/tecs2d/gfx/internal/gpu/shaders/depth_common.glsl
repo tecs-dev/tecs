@@ -69,7 +69,11 @@ float computeDepth(float layer, float zIndex, float x, float bottomY, uint slotI
         withinBand = (1.0 - (zIndex / MaxZ * 0.7 + normalizedY * 0.3)) * layerBandSize * 0.99;
     }
 
-    // Slot-based tie-breaker for all modes
-    float tieBreaker = float(slotIdx % 10000u) * layerBandSize * 1e-6;
+    // Slot-based tie-breaker for exact depth ties. Keep the entire range
+    // below one tenth of a single z unit so entity identity can never
+    // override an explicit z ordering (notably for layered UI).
+    const float TIE_SLOTS = 1024.0;
+    float tieStep = layerBandSize * 0.099 / (MaxZ * TIE_SLOTS);
+    float tieBreaker = float(slotIdx % 1024u) * tieStep;
     return clamp(layerBase + withinBand + tieBreaker, 0.001, 0.999);
 }

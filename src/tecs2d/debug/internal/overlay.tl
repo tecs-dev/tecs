@@ -112,6 +112,8 @@ local record MenuState
     w: number
     rowH: number
     index: integer
+    mouseX: number
+    mouseY: number
     -- The click that activated or dismissed the menu is swallowed until the
     -- button releases, so it cannot become a phantom drag/box selection.
     swallow: boolean
@@ -156,10 +158,17 @@ local format <const> = string.format
 local getTime <const> = love.timer.getTime
 
 local UNDER_MOUSE_PX <const> = 24         -- pick radius in screen pixels
-local PAD_X <const> = 18                  -- horizontal padding inside the bars
-local PAD_Y <const> = 8                   -- vertical padding inside the bars
-local INFO_PAD_X <const> = 10
-local INFO_PAD_Y <const> = 5
+local PAD_X <const> = 12                  -- horizontal padding inside the bars
+local PAD_Y <const> = 2                   -- vertical padding inside the bars
+local INFO_PAD_X <const> = 6
+local INFO_PAD_Y <const> = 2
+
+local COMMAND_BAR <const>: {number} = {0.1804, 0.2157, 0.2353, 1}
+local BAR_GREEN <const>: {number} = {0.6549, 0.7529, 0.5020, 1}
+local TECS_PURPLE <const>: {number} = {0.4196, 0.2471, 0.6902, 1}
+local ENTITY_LABEL_BG <const>: {number} = {0.11, 0.13, 0.16, 0.85}
+local RECORDING_BG <const>: {number} = {0, 0, 0, 0.6}
+local COORDINATE_BG <const>: {number} = {0.1804, 0.2157, 0.2353, 0.96}
 
 local function coordinateLabel(ctx: debugcontext.Context): string
     return format("m %.0f,%.0f>%.0f,%.0f  c %.0f,%.0f z%.2f",
@@ -191,8 +200,8 @@ local function showPopup(popup: PopupState, lines: {string})
 end
 
 -- Measure one popup column block: split lines on tabs and align the tab
--- columns within the block (proportional overlay font).
-local function measurePopupBlock(font: love.graphics.Font, gap: number, lines: {string}): PopupBlock
+-- columns within the block.
+local function measurePopupBlock(font: lg.Font, gap: number, lines: {string}): PopupBlock
     local rows: {{string}} = {}
     local colW: {number} = {}
     for i = 1, #lines do
@@ -239,7 +248,7 @@ local EMPTY_GROUP <const>: {integer} = {}
 -- columns as the screen width permits, and popup.page (clamped here) picks
 -- which column group is visible. py is the panel's top edge; sw/sh are the
 -- screen dimensions.
-local function drawPopup(popup: PopupState, font: love.graphics.Font,
+local function drawPopup(popup: PopupState, font: lg.Font,
         sw: number, sh: number, py: number)
     local fh = font:getHeight()
     local lineH = fh + 6
@@ -378,7 +387,7 @@ end
 -- names), per-label widths, and x offsets. Built when completions are
 -- assigned, so the per-frame draw only does scroll/highlight math.
 local function buildCompletionBar(popup: PopupState, completions: {string},
-        font: love.graphics.Font)
+        font: lg.Font)
     local labels: {string} = {}
     local widths: {number} = {}
     local groups: {CompletionGroup} = {}
@@ -388,7 +397,7 @@ local function buildCompletionBar(popup: PopupState, completions: {string},
         local entry = completions[i]
         if entry:sub(1, 1) == SECTION_MARK then
             local section = entry:sub(2)
-            labels[i] = " " .. section .. " "
+            labels[i] = section
             currentGroup = currentGroup + 1
             groups[currentGroup] = {name = section, first = i + 1, last = i}
             groupOf[i] = currentGroup
@@ -435,7 +444,7 @@ end
 -- Draw every section and command in one continuous strip. Section entries are
 -- inline headers, never collapse controls. Hit indices still match Tab.
 local function drawCompletionBar(popup: PopupState, completions: {string},
-        font: love.graphics.Font, completionIndex: integer, sw: number, rowH: number)
+        font: lg.Font, completionIndex: integer, sw: number, rowH: number)
     if not popup.barLabels or popup.barCompletions ~= completions then
         buildCompletionBar(popup, completions, font)
     end
@@ -477,29 +486,24 @@ local function drawCompletionBar(popup: PopupState, completions: {string},
         local isSection = completions[i]:sub(1, 1) == SECTION_MARK
         local pillW = widths[i] + (isSection and pillPad or pillPad * 2)
         if isSection then
-            lg.setColor(0.6549, 0.7529, 0.5020, 1)
-            lg.rectangle("fill", x, 0, pillW, rowH)
-            lg.setColor(0.1804, 0.2157, 0.2353, 1)
-            lg.setLineWidth(1)
-            lg.line(x, 0, x, rowH)
-            lg.line(x + pillW, 0, x + pillW, rowH)
             local section = completions[i]:sub(2)
-            local accent = commands.SECTION_COLORS_BAR[section] or DEFAULT_PILL
-            lg.setColor(accent[1] * 0.7, accent[2] * 0.7, accent[3] * 0.7, 1)
+            local accent = commands.SECTION_COLORS[section] or DEFAULT_PILL
+            lg.setColor(accent[1], accent[2], accent[3], 1)
             lg.print(labels[i], x + pillPad / 2, PAD_Y)
         else
             if i == completionIndex then
-                lg.setColor(0.1804, 0.2157, 0.2353, 1)
-            else
-                lg.setColor(0.6549, 0.7529, 0.5020, 1)
-            end
-            lg.rectangle("fill", x, 0, pillW, rowH)
-            if i == completionIndex then
+                lg.setColor(COMMAND_BAR[1], COMMAND_BAR[2],
+                    COMMAND_BAR[3], COMMAND_BAR[4])
+                lg.rectangle("fill", x, 0, pillW, rowH)
                 lg.setColor(0.8275, 0.7765, 0.6667, 1)
+                -- Forward alpha is required here: the MSDF edge must blend
+                -- over the green panel, not replace it in the G-buffer.
+                lg.print(labels[i], x + pillPad, PAD_Y)
             else
-                lg.setColor(0.1804, 0.2157, 0.2353, 1)
+                lg.setColor(BAR_GREEN[1], BAR_GREEN[2],
+                    BAR_GREEN[3], BAR_GREEN[4])
+                lg.print(labels[i], x + pillPad, PAD_Y)
             end
-            lg.print(labels[i], x + pillPad, PAD_Y)
         end
         local hitLeft = math.max(x, 0)
         local hitRight = math.min(x + pillW, sw)
@@ -518,7 +522,7 @@ end
 -- nothing per frame.
 -- Mark name / note star above one annotated entity.
 local function drawEntityLabel(w: tecs.World, ctx: debugcontext.Context,
-        cam: gfxtypes.Camera, font: love.graphics.Font, fh: number, eid: integer,
+        cam: gfxtypes.Camera, font: lg.Font, eid: integer,
         labelSeen: {integer: boolean})
     if labelSeen[eid] then return end
     labelSeen[eid] = true
@@ -532,10 +536,8 @@ local function drawEntityLabel(w: tecs.World, ctx: debugcontext.Context,
     if label == "" then return end
     local sx, sy = cam:toScreen(t.x, t.y)
     local tw = font:getWidth(label)
-    lg.setColor(0.11, 0.13, 0.16, 0.85)
-    lg.rectangle("fill", sx - tw / 2 - 5, sy - 40, tw + 10, fh + 4, 3, 3)
     lg.setColor(0.8275, 0.7765, 0.6667, 1)
-    lg.print(label, sx - tw / 2, sy - 38)
+    lg.fitText(label, sx - tw / 2 - 5, sy - 40, 5, 2, ENTITY_LABEL_BG, 3)
 end
 
 -- Name-bearing components for the context-menu header, resolved by name so
@@ -738,8 +740,11 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
     local leaderKey = opts.leaderKey
     local debugToggleKey = opts.debugToggleKey
     local statsToggleKey = opts.statsToggleKey
-    local overlayFont = lg.newFont(20)
-    local coordinateFont = lg.newFont(14)
+    -- The bundled atlas is authored at 64px. A 21px face size is its smallest
+    -- reliably crisp UI scale; keep the chrome dense with padding, not by
+    -- shrinking the glyph field below the atlas's useful reconstruction range.
+    local overlayFont = lg.newFont(21)
+    local coordinateFont = lg.newFont(17)
     local labelSeen: {integer: boolean} = {}
     local wasTextInput = false
     local registry = core.ensure(w, {
@@ -799,7 +804,8 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
     -- Right-click context menu state.
     local menu: MenuState = {
         open = false, rows = {}, header = "",
-        x = 0, y = 0, w = 0, rowH = 0, index = 1, swallow = false,
+        x = 0, y = 0, w = 0, rowH = 0, index = 1,
+        mouseX = 0, mouseY = 0, swallow = false,
     }
     local hideOverlayFrame = false
     local recorderLastAt = getTime()
@@ -1048,6 +1054,8 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
         if menu.x < 0 then menu.x = 0 end
         if menu.y < 0 then menu.y = 0 end
         menu.index = 1
+        menu.mouseX = input.mouseX
+        menu.mouseY = input.mouseY
         menu.open = true
         ctx.menuOpen = true
         ctx.menuTarget = eid or 0
@@ -1497,7 +1505,10 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             local menuAteMouse = menu.open
             if menuAteMouse then
                 local hover = menuRowAt(input.mouseX, input.mouseY)
-                if hover then menu.index = hover end
+                local mouseMoved = input.mouseX ~= menu.mouseX or input.mouseY ~= menu.mouseY
+                menu.mouseX = input.mouseX
+                menu.mouseY = input.mouseY
+                if mouseMoved and hover then menu.index = hover end
                 if reader().isMousePressed(1) then
                     menu.swallow = true
                     if hover then
@@ -1540,20 +1551,16 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             lg.push("all")
             lg.origin()
             lg.setFont(overlayFont)
-            local pad = 8
-            local dotW = 18
-            local tw = overlayFont:getWidth(text)
-            local th = overlayFont:getHeight()
-            local boxW = dotW + tw + pad * 2
-            local boxH = th + pad
+            local pad = 6
+            local label = "   " .. text
+            local boxW = overlayFont:getWidth(label) + pad * 2
+            local boxH = overlayFont:getHeight() + pad
             local bx = lg.getWidth() - boxW - pad
             local by = pad
-            lg.setColor(0, 0, 0, 0.6)
-            lg.rectangle("fill", bx, by, boxW, boxH, 6, 6)
+            lg.setColor(1, 1, 1, 1)
+            lg.fitText(label, bx, by, pad, pad / 2, RECORDING_BG, 6)
             lg.setColor(1, 0.2, 0.15, 1)
             lg.circle("fill", bx + pad + 4, by + boxH / 2, 5)
-            lg.setColor(1, 1, 1, 1)
-            lg.print(text, bx + pad + dotW, by + pad / 2)
             lg.pop()
         end,
     })
@@ -1657,17 +1664,18 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 local cam = pipeline:getCamera()
                 for k in pairs(labelSeen) do labelSeen[k] = nil end
                 for eid in pairs(ctx.marks) do
-                    drawEntityLabel(w, ctx, cam, overlayFont, fh, eid, labelSeen)
+                    drawEntityLabel(w, ctx, cam, overlayFont, eid, labelSeen)
                 end
                 for eid in pairs(ctx.notes) do
-                    drawEntityLabel(w, ctx, cam, overlayFont, fh, eid, labelSeen)
+                    drawEntityLabel(w, ctx, cam, overlayFont, eid, labelSeen)
                 end
             end
 
             -- Permanently mounted top menu. Non-root completion candidates
             -- temporarily take it over, matching keyboard Tab completion.
             local completionBarH = rowH
-            lg.setColor(0.6549, 0.7529, 0.5020, 1)
+            lg.setColor(TECS_PURPLE[1], TECS_PURPLE[2],
+                TECS_PURPLE[3], TECS_PURPLE[4])
             lg.rectangle("fill", 0, 0, sw, rowH)
             local completionTakeover = cycling and not cyclingRoot and #completions > 0
             local visibleCompletions = completionTakeover and completions or rootCompletions
@@ -1722,15 +1730,10 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             -- colored panel at the bottom-right. FPS and entity count are no
             -- longer part of the debugger chrome.
             local coords = coordinateLabel(ctx)
-            local coordsH = coordinateFont:getHeight() + INFO_PAD_Y * 2
-            local coordsW = coordinateFont:getWidth(coords) + INFO_PAD_X * 2
-            local coordsX = math.max(0, sw - coordsW)
-            local coordsY = lg.getHeight() - coordsH
-            lg.setColor(0.1804, 0.2157, 0.2353, 0.96)
-            lg.rectangle("fill", coordsX, coordsY, coordsW, coordsH)
             lg.setColor(0.8275, 0.7765, 0.6667, 1)
             lg.setFont(coordinateFont)
-            lg.print(coords, coordsX + INFO_PAD_X, coordsY + INFO_PAD_Y)
+            lg.fitText(coords, sw, lg.getHeight(), INFO_PAD_X, INFO_PAD_Y,
+                COORDINATE_BG, nil, 1, 1)
 
             -- Context menu: dark panel, header row, hover/keyboard highlight.
             if menu.open then

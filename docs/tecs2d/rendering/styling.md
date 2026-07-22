@@ -119,8 +119,9 @@ local blend = gfx.blend
 | `DarkenBlendPremul`      | Darken blend for pre-multiplied alpha textures.                                   |
 | `ReplaceBlend`           | Overwrites the destination completely. Use when you need exact color output.      |
 | `ReplaceBlendPremul`     | Replace blend for pre-multiplied alpha textures.                                  |
+| `ForwardAlphaBlend`      | Alpha-blends after the deferred pass. Use for translucent content layered over another entity. |
 
-::: details Why 14 blend mode components?
+::: details Why separate blend mode components?
 Blend modes are tag components rather than a single component with a "mode" field. This allows the ECS to
 group entities by blend mode into separate archetypes. Since all entities in an archetype share the same
 blend mode, the renderer can batch them into a single draw call without state changes.

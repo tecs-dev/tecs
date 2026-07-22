@@ -1,6 +1,7 @@
 --- Owns the debugger's isolated ECS world and composited render pipeline.
 
 local tecs <const> = require("tecs")
+local events <const> = require("tecs2d.events")
 local gfx <const> = require("tecs2d.gfx")
 local ui <const> = require("tecs2d.ui")
 local debugdraw <const> = require("tecs2d.debug.internal.debugdraw")
@@ -29,7 +30,7 @@ function toolworld.install(world: tecs.World)
         sharedWith = primary,
         lightingMode = "none",
         lerpingEnabled = false,
-        layers = {[1] = {name = "debug", space = "screen", unlit = true}},
+        layers = {[1] = {name = "debug", space = "screen", unlit = true, sortMode = "z"}},
         sizeHints = {sprites = 8, circles = 32, lines = 128, rects = 256, textEntities = 256, textGlyphs = 8192},
     })
     tools:addPlugin(ui.plugin)
@@ -40,6 +41,12 @@ function toolworld.install(world: tecs.World)
         lastTime = love.timer.getTime(),
     }
     world.resources[KEY] = state
+
+    -- Resize events belong to the game world. Forward them to the isolated
+    -- tools pipeline so its composite canvas continues to cover the window.
+    world:observe(0, events.Resize, function(e: events.Resize)
+        state.pipeline:setScreenSize(e.width, e.height)
+    end)
 
     world:addSystem({
         name = "debug.DrawBegin",

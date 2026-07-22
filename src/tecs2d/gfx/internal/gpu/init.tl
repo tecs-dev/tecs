@@ -490,6 +490,10 @@ function RendererMethods:renderGBuffer(cameraX: number, cameraY: number, cameraZ
     lg.setCanvas({albedo, normal, orm, emission, depthstencil = true} as love.graphics.CanvasSetup)
     lg.clear({0, 0, 0, 0}, {0, 0, 0, 0}, {1, 0.5, 0, 1}, {0, 0, 0, 0}, true, true)
     lg.setColor(1, 1, 1, 1)  -- Ensure full brightness for instanced draws
+    -- Keep straight shader outputs in the G-buffer. This must be set before
+    -- both the Draw callback and GPU shapes so fractional coverage is not
+    -- premultiplied before the lighting/composite pass.
+    lg.setBlendMode("replace", "premultiplied")
     zone()
 
     -- Render G-buffer draws (tilemaps, etc.) before GPU shapes
@@ -503,9 +507,10 @@ function RendererMethods:renderGBuffer(cameraX: number, cameraY: number, cameraZ
 
     -- Enable depth mode for GPU shapes
     lg.setDepthMode("lequal", true)
-    -- Use replace blend mode for G-buffer to ensure accurate values (no alpha blending)
-    -- This is critical for the unlit flag in normal.a to work correctly
-    lg.setBlendMode("replace")
+    -- The Draw callback may change blend state, so restore G-buffer mode for
+    -- GPU shapes. LÖVE's alphamultiply alpha mode would premultiply RGB even
+    -- with "replace", losing the original albedo at fractional edges.
+    lg.setBlendMode("replace", "premultiplied")
 
     -- Render G-buffer shapes via plugins
     zone("shapes")

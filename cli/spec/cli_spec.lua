@@ -1201,6 +1201,10 @@ describe("tecs CLI", function()
                 assert.is_true(exists(join(v, "love2d.d.tl")), "types not staged")
                 assert.is_true(exists(join(v, "tecs2d", "assets", "fonts", "tiny-font.png")),
                     "assets not staged")
+                assert.is_true(exists(join(v, "tecs2d", "assets", "fonts", "jetbrainsmono-extrabold-msdf.png")),
+                    "debug font not staged")
+                assert.is_true(exists(join(v, "tecs2d", "assets", "fonts", "jetbrainsmono-extrabold-msdf.json")),
+                    "debug font metrics not staged")
             end)
 
             it("projects rendered output with --fields through the packaged CLI", function()

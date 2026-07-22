@@ -81,8 +81,8 @@ describe("blend tag components", function()
     end)
 
     describe("blend.ALL array", function()
-        it("contains exactly 14 components", function()
-            luassert.equals(14, #blend.ALL)
+        it("contains exactly 15 components", function()
+            luassert.equals(15, #blend.ALL)
         end)
 
         it("contains all defined blend components", function()
@@ -94,6 +94,7 @@ describe("blend tag components", function()
                 blend.LightenBlend, blend.LightenBlendPremul,
                 blend.DarkenBlend, blend.DarkenBlendPremul,
                 blend.ReplaceBlend, blend.ReplaceBlendPremul,
+                blend.ForwardAlphaBlend,
             }
 
             for i = 1, #expected do
@@ -126,6 +127,10 @@ describe("blend tag components", function()
             info = blend.INFO[blend.ReplaceBlendPremul]
             luassert.equals("replace", info.mode)
             luassert.equals("premultiplied", info.alphaMode)
+
+            info = blend.INFO[blend.ForwardAlphaBlend]
+            luassert.equals("alpha", info.mode)
+            luassert.equals("alphamultiply", info.alphaMode)
         end)
 
         it("registers multiply, lighten, and darken as premultiplied", function()
@@ -149,9 +154,9 @@ describe("blend tag components", function()
             end
         end)
 
-        it("IDs are in range 1-14", function()
+        it("IDs are in range 1-15", function()
             for _, id in pairs(blend.ID) do
-                luassert.is_truthy(id >= 1 and id <= 14, "ID out of range: " .. id)
+                luassert.is_truthy(id >= 1 and id <= 15, "ID out of range: " .. id)
             end
         end)
     end)

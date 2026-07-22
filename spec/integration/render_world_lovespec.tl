@@ -43,6 +43,9 @@ describe("immutable composited render worlds", function()
             local font = "tecs2d/assets/fonts/tiny-font.fnt"
             local primaryTextId = world:spawn(Transform(-100, -100), gfx.Text(font, "primary"))
             local overlayTextId = overlayWorld:spawn(Transform(-100, -100), gfx.Text(font, "overlay"))
+            -- Spawn after the deliberate cross-world ID collisions above.
+            overlayWorld:spawn(Transform(40, 40, 0, 1),
+                gfx.Rectangle(20, 20), gfx.Color(1, 1, 1, 0.5))
             overlayWorld:startup()
 
             world:addSystem({
@@ -84,13 +87,18 @@ describe("immutable composited render worlds", function()
                 {160 / W, 120 / H},
                 {190 / W, 120 / H},
                 {20 / W, 20 / H},
+                {40 / W, 40 / H},
             })
-            last = string.format("center=%.2f,%.2f edge=%.2f,%.2f bg=%.2f,%.2f",
+            last = string.format(
+                "center=%.2f,%.2f edge=%.2f,%.2f bg=%.2f,%.2f alpha=%.2f",
                 pixels[1][1], pixels[1][2], pixels[2][1], pixels[2][2],
-                pixels[3][1], pixels[3][2])
-            return pixels[1][2] > 0.8 and pixels[1][1] < 0.2
+                pixels[3][1], pixels[3][2], pixels[4][1])
+            local correct = pixels[1][2] > 0.8 and pixels[1][1] < 0.2
                 and pixels[2][1] > 0.8 and pixels[2][2] < 0.2
                 and pixels[3][1] < 0.1 and pixels[3][2] < 0.1
+                and pixels[4][1] > 0.4 and pixels[4][1] < 0.6
+            if correct then return true end
+            return nil
         end)
         luassert.is_true(ok == true, "composited pixels did not settle: " .. last)
     end)

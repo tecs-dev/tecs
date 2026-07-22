@@ -55,7 +55,7 @@ function stats.install(w: tecs.World, opts: stats.Options)
     -- period, so the widest line and line count are remeasured only when the
     -- text (or the active font) changes.
     local measuredProfile = ""
-    local measuredFont: love.graphics.Font = nil
+    local measuredFont: lg.Font = nil
     local measuredWidth: number = 0
     local measuredLines = 0
 

@@ -140,7 +140,9 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 screenCoord) {
     if (normalSample.a < 0.5) {
         vec4 emissionSample = Texel(gEmission, uv);
         vec3 unlitColor = albedo.rgb + emissionSample.rgb * emissionSample.a;
-        return vec4(unlitColor, 1.0);
+        // G-buffer rendering uses replace blending, so albedo.a still
+        // contains the shape's straight-alpha edge coverage.
+        return vec4(unlitColor, albedo.a);
     }
 
     vec3 normal = normalSample.rgb * 2.0 - 1.0;
@@ -276,5 +278,5 @@ vec4 effect(vec4 color, Image tex, vec2 uv, vec2 screenCoord) {
     vec4 emissionSample = Texel(gEmission, uv);
     litColor += emissionSample.rgb * emissionSample.a;
 
-    return vec4(litColor, 1.0);
+    return vec4(litColor, albedo.a);
 }

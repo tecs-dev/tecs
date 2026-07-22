@@ -221,38 +221,16 @@ float median(float r, float g, float b) {
     return max(min(r, g), min(max(r, g), b));
 }
 
-// Sample MSDF with manual bilinear interpolation of the median.
-// Standard hardware bilinear filtering interpolates R, G, B independently,
-// then median() is taken on the mixed values. This produces artifacts at
-// diagonal sampling angles where channel ordering flips between texels.
-// Instead, compute median at each texel corner, then interpolate the result.
-// uvBounds (minU, minV, maxU, maxV) clamps texelFetch to the glyph's atlas
-// cell, preventing bleed from adjacent packed glyphs.
+// Sample the linearly filtered multi-channel field, then reconstruct its
+// signed distance. Taking the median before interpolation collapses MSDF to
+// a scalar SDF and loses the corner information encoded across RGB channels.
+// Clamp to texel centers inside the glyph cell to prevent atlas bleed.
 float sampleMSDFMedian(ArrayImage atlas, vec3 texCoord, vec2 atlasSize, vec4 uvBounds) {
-    vec2 pos = texCoord.xy * atlasSize - 0.5;
-    ivec2 ipos = ivec2(floor(pos));
-    vec2 f = fract(pos);
-    int layer = int(texCoord.z);
-
-    // Clamp texel coordinates to stay within this glyph's atlas cell
-    ivec2 cellMin = ivec2(floor(uvBounds.xy * atlasSize));
-    ivec2 cellMax = ivec2(ceil(uvBounds.zw * atlasSize)) - 1;
-    ivec2 p00 = clamp(ipos,              cellMin, cellMax);
-    ivec2 p10 = clamp(ipos + ivec2(1,0), cellMin, cellMax);
-    ivec2 p01 = clamp(ipos + ivec2(0,1), cellMin, cellMax);
-    ivec2 p11 = clamp(ipos + ivec2(1,1), cellMin, cellMax);
-
-    vec3 s00 = texelFetch(atlas, ivec3(p00, layer), 0).rgb;
-    vec3 s10 = texelFetch(atlas, ivec3(p10, layer), 0).rgb;
-    vec3 s01 = texelFetch(atlas, ivec3(p01, layer), 0).rgb;
-    vec3 s11 = texelFetch(atlas, ivec3(p11, layer), 0).rgb;
-
-    float d00 = median(s00.r, s00.g, s00.b);
-    float d10 = median(s10.r, s10.g, s10.b);
-    float d01 = median(s01.r, s01.g, s01.b);
-    float d11 = median(s11.r, s11.g, s11.b);
-
-    return mix(mix(d00, d10, f.x), mix(d01, d11, f.x), f.y);
+    vec2 halfTexel = 0.5 / atlasSize;
+    vec2 uv = clamp(texCoord.xy, uvBounds.xy + halfTexel,
+        uvBounds.zw - halfTexel);
+    vec3 msd = Texel(atlas, vec3(uv, texCoord.z)).rgb;
+    return median(msd.r, msd.g, msd.b);
 }
 
 
@@ -271,8 +249,9 @@ void effect() {
         // layer's own distance range.
         float pxRange = SDFFontParams[clamp(int(vTexCoord.z + 0.5), 0, MAX_FONT_LAYERS - 1)].z;
         vec2 atlasSize = vec2(textureSize(SDFAtlas, 0).xy);
-        float texelsPerPx = length(fwidth(vTexCoord.xy) * atlasSize);
-        float screenPxRange = max(pxRange / texelsPerPx, 1.0);
+        vec2 unitRange = vec2(pxRange) / atlasSize;
+        vec2 screenTexSize = 1.0 / fwidth(vTexCoord.xy);
+        float screenPxRange = max(0.5 * dot(unitRange, screenTexSize), 1.0);
 
         // Sample SDF within the glyph's atlas region (includes PxRange/2 padding)
         float sd = sampleMSDFMedian(SDFAtlas, vec3(vTexCoord.xy, vTexCoord.z), atlasSize, vUVBounds);

@@ -123,6 +123,130 @@ describe("in-game debugger overlay", function()
         luassert.is_true(waitOpen(false) == true, "debugger did not close")
     end)
 
+    it("sizes overlay panels with the rendered font metrics", function()
+        local values = fixture.runLua(app, [[
+            local font = _G.tecsTestHooks.debugdraw.newFont(20)
+            return font:getWidth("000000"), font:getHeight(),
+                font.drawOffsetX, font.drawOffsetY
+        ]])
+        local width = tonumber(values[1])
+        local height = tonumber(values[2])
+        -- JetBrains Mono ExtraBold is authored at 64px with a 38px advance, an 84px
+        -- line, and a -5px minimum glyph offset. The facade must expose the
+        -- same scaled metrics used by gfx.Text.
+        luassert.near(20 * 84 / 64, height, 0.001)
+        luassert.near(6 * 38 * 20 / 64, width, 0.001)
+        luassert.near(5 * 20 / 64, tonumber(values[3]), 0.001)
+        luassert.near(0, tonumber(values[4]), 0.001)
+    end)
+
+    it("uses FitContent for text-backed debugger panels", function()
+        openDebugger()
+        local fitted = fixture.eventually(fixture.callTimeout, function(): boolean
+            local values = fixture.runLua(app, [[
+                local tecs = require("tecs")
+                local tools = world.resources[_G.tecsTestHooks.toolworld.KEY]
+                local FitContent = tecs.componentByName("FitContent")
+                local query = tools.world:query({include = {FitContent}})
+                local count = 0
+                for _, len in query:iter() do count = count + len end
+                return count
+            ]])
+            if tonumber(values[1]) > 0 then return true end
+            return nil
+        end)
+        luassert.is_true(fitted == true,
+            "debugger text panels were not sized by FitContent")
+    end)
+
+    it("forward-blends all debugger MSDF text over its panels", function()
+        openDebugger()
+        local routed = fixture.eventually(fixture.callTimeout, function(): boolean
+            local values = fixture.runLua(app, [[
+                local tecs = require("tecs")
+                local tools = world.resources[_G.tecsTestHooks.toolworld.KEY]
+                local Text = tecs.componentByName("Text")
+                local ForwardAlphaBlend = tecs.componentByName("ForwardAlphaBlend")
+                local all = tools.world:query({include = {Text}})
+                local deferred = tools.world:query({
+                    include = {Text}, exclude = {ForwardAlphaBlend},
+                })
+                local total, missing = 0, 0
+                for _, len in all:iter() do total = total + len end
+                for _, len in deferred:iter() do missing = missing + len end
+                return total, missing
+            ]])
+            if tonumber(values[1]) > 0 and tonumber(values[2]) == 0 then return true end
+            return nil
+        end)
+        luassert.is_true(routed == true,
+            "debugger text was not routed over its G-buffer panels")
+    end)
+
+    it("renders debugger chrome at screen edges with text above its panels", function()
+        openDebugger()
+        local rendered = fixture.eventually(fixture.callTimeout, function(): boolean
+            local points: {{string: number}} = {
+                {x = 318, y = 238}, -- lower-right coordinate panel
+            }
+            -- Probe the first toolbar labels. At least one sampled glyph
+            -- pixel must be the green/aqua foreground rather than the Tecs
+            -- purple bar fill.
+            for y = 4, 18, 3 do
+                for x = 4, 120, 3 do
+                    points[#points + 1] = {x = x, y = y}
+                end
+            end
+            local result = app.client:call("sample_pixels", {points = points}, 10)
+            local pixels = result.pixels as {{string: number}}
+            local corner = pixels[1]
+            if not corner or corner.r < 0.1 or corner.g < 0.1 or corner.b < 0.1 then
+                return nil
+            end
+            for i = 2, #pixels do
+                local pixel = pixels[i]
+                if pixel.g > 0.55 and pixel.g > pixel.r and pixel.g > pixel.b then
+                    return true
+                end
+            end
+            return nil
+        end)
+        luassert.is_true(rendered == true,
+            "overlay panels were offset from the screen edge or covered their text")
+    end)
+
+    it("resizes the isolated overlay pipeline with the game window", function()
+        openDebugger()
+        fixture.runLua(app, [[
+            love.window.setMode(640, 480)
+            love.event.push("resize", 640, 480)
+            return true
+        ]])
+        local resized = fixture.eventually(fixture.callTimeout, function(): boolean
+            local values = fixture.runLua(app, [[
+                local tools = world.resources[_G.tecsTestHooks.toolworld.KEY]
+                return tools.pipeline.screenWidth, tools.pipeline.screenHeight
+            ]])
+            if tonumber(values[1]) == 640 and tonumber(values[2]) == 480 then return true end
+            return nil
+        end)
+
+        fixture.runLua(app, [[
+            love.window.setMode(320, 240)
+            love.event.push("resize", 320, 240)
+            return true
+        ]])
+        fixture.eventually(fixture.callTimeout, function(): boolean
+            local values = fixture.runLua(app, [[
+                local tools = world.resources[_G.tecsTestHooks.toolworld.KEY]
+                return tools.pipeline.screenWidth, tools.pipeline.screenHeight
+            ]])
+            if tonumber(values[1]) == 320 and tonumber(values[2]) == 240 then return true end
+            return nil
+        end)
+        luassert.is_true(resized == true, "debugger pipeline did not follow the window resize")
+    end)
+
     it("adds to the selection with a typed select command", function()
         local eid = spawnAt(80, 80)
         openDebugger()
