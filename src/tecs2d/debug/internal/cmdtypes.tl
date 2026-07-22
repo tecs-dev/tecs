@@ -59,6 +59,18 @@ local record cmdtypes
         message: string
         data: {string: any}
         popup: {string}
+        --- Optional heading rendered in a dedicated popup title band. When
+        --- omitted, existing popups continue to use their first line.
+        popupTitle: string
+        --- Optional lightweight syntax mode for popup body lines.
+        popupLanguage: string
+        --- Optional semantic body blocks. The overlay packs these into as
+        --- many vertical columns as fit; `popup` remains the copy/yank form.
+        popupBlocks: {{string}}
+        --- Presentation controls consumed only by debugger UI surfaces.
+        popupModal: boolean
+        popupClosable: boolean
+        popupMaxColumns: integer
         popupImagePath: string
 
         --- When set (with ok=true), the transport must NOT respond

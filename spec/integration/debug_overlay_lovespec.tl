@@ -140,7 +140,10 @@ describe("in-game debugger overlay", function()
         luassert.near(0, tonumber(values[4]), 0.001)
     end)
 
-    it("uses FitContent for text-backed debugger panels", function()
+    it("uses FitContent for text-backed floating debugger panels", function()
+        local eid = spawnAt(160, 120)
+        app.client:call("cmd_select", {id = eid, replace = true})
+        app.client:call("cmd_mark", {name = "fit-panel"})
         openDebugger()
         local fitted = fixture.eventually(fixture.callTimeout, function(): boolean
             local values = fixture.runLua(app, [[
@@ -157,6 +160,44 @@ describe("in-game debugger overlay", function()
         end)
         luassert.is_true(fitted == true,
             "debugger text panels were not sized by FitContent")
+    end)
+
+    it("batches large selections without exhausting the tool world", function()
+        fixture.runLua(app, [[
+            local tecs = require("tecs")
+            local Transform = tecs.builtins.Transform
+            world:batchSpawn(5000, {Transform},
+                function(arch, first, last)
+                    local transforms = arch:getMut(Transform)
+                    for i = first, last do
+                        transforms[i] = Transform(160, 120, 0, 1)
+                    end
+                end)
+            world:commit()
+            return true
+        ]])
+        app.client:call("cmd_query", {expr = "Transform"}, 10)
+        openDebugger()
+
+        local batched = fixture.eventually(fixture.callTimeout, function(): boolean
+            local values = fixture.runLua(app, [[
+                local tools = world.resources[_G.tecsTestHooks.toolworld.KEY]
+                return tools.view.markers.count, #tools.view.entities
+            ]])
+            local markers = tonumber(values[1])
+            local transient = tonumber(values[2])
+            if markers == 0 or markers > 2048 or transient >= 512 then return nil end
+            local result = app.client:call("sample_pixels", {
+                points = {{x = 160, y = 106}},
+            }, 10)
+            local pixel = (result.pixels as {{string: number}})[1]
+            if pixel.r > 0.7 and pixel.g > 0.5 and pixel.b < 0.45 then return true end
+            return nil
+        end)
+        luassert.is_true(batched == true,
+            "large selection did not stay inside the batched marker budget")
+        luassert.is_true(#selectedList() >= 5000,
+            "visual marker cap must not truncate selection membership")
     end)
 
     it("forward-blends all debugger MSDF text over its panels", function()
@@ -183,36 +224,92 @@ describe("in-game debugger overlay", function()
             "debugger text was not routed over its G-buffer panels")
     end)
 
-    it("renders debugger chrome at screen edges with text above its panels", function()
+    it("anchors the context and command bars to the bottom edge", function()
         openDebugger()
         local rendered = fixture.eventually(fixture.callTimeout, function(): boolean
             local points: {{string: number}} = {
-                {x = 318, y = 238}, -- lower-right coordinate panel
+                {x = 2, y = 2},     -- game view; no permanent top toolbar
+                {x = 2, y = 238},   -- bottom command bar
+                {x = 318, y = 200}, -- right side of the context bar
+                {x = 2, y = 200},   -- purple DEBUG mode block
             }
-            -- Probe the first toolbar labels. At least one sampled glyph
-            -- pixel must be the green/aqua foreground rather than the Tecs
-            -- purple bar fill.
-            for y = 4, 18, 3 do
-                for x = 4, 120, 3 do
-                    points[#points + 1] = {x = x, y = y}
-                end
-            end
             local result = app.client:call("sample_pixels", {points = points}, 10)
             local pixels = result.pixels as {{string: number}}
-            local corner = pixels[1]
-            if not corner or corner.r < 0.1 or corner.g < 0.1 or corner.b < 0.1 then
-                return nil
+            local game = pixels[1]
+            local command = pixels[2]
+            local contextBar = pixels[3]
+            local debugBlock = pixels[4]
+            if game.r > 0.05 or game.g > 0.05 or game.b > 0.05 then return nil end
+            if command.r < 0.1 or command.g < 0.1 or command.b < 0.1 then return nil end
+            if contextBar.r < 0.08 or contextBar.b < 0.1 then return nil end
+            if debugBlock.r < 0.3 or debugBlock.b < 0.5
+                or debugBlock.b <= debugBlock.g + 0.1 then return nil end
+            return true
+        end)
+        luassert.is_true(rendered == true,
+            "debugger chrome was not confined to the bottom edge")
+    end)
+
+    it("highlights a completion in the first grid row", function()
+        openDebugger()
+        app.client:call("send_love_event", {event = "textinput", args = {"se"}})
+        fixture.eventually(fixture.callTimeout, function(): boolean
+            if (context().command as string) == "se" then return true end
+            return nil
+        end)
+        app.client:call("send_love_event", {event = "keypressed", args = {"tab"}})
+        app.client:call("send_love_event", {event = "keyreleased", args = {"tab"}})
+        local highlighted = fixture.eventually(fixture.callTimeout, function(): boolean
+            if (context().command as string) ~= "select" then return nil end
+            local points: {{string: number}} = {}
+            for y = 164, 192, 4 do
+                for x = 8, 72, 8 do points[#points + 1] = {x = x, y = y} end
             end
-            for i = 2, #pixels do
-                local pixel = pixels[i]
-                if pixel.g > 0.55 and pixel.g > pixel.r and pixel.g > pixel.b then
+            local result = app.client:call("sample_pixels", {points = points}, 10)
+            for _, pixel in ipairs(result.pixels as {{string: number}}) do
+                if pixel.r > 0.3 and pixel.b > 0.5 and pixel.b > pixel.g + 0.15 then
                     return true
                 end
             end
             return nil
         end)
+        luassert.is_true(highlighted == true,
+            "first-row completion did not render its purple selection cell")
+    end)
+
+    it("shows Tab completions in columns over the context row", function()
+        openDebugger()
+        app.client:call("send_love_event", {event = "keypressed", args = {"tab"}})
+        app.client:call("send_love_event", {event = "keyreleased", args = {"tab"}})
+        local rendered = fixture.eventually(fixture.callTimeout, function(): boolean
+            if (context().command as string) == "" then return nil end
+            local points: {{string: number}} = {}
+            for y = 38, 158, 8 do
+                for x = 5, 305, 20 do
+                    points[#points + 1] = {x = x, y = y}
+                end
+            end
+            local result = app.client:call("sample_pixels", {points = points}, 10)
+            local pixels = result.pixels as {{string: number}}
+            local left, right = false, false
+            local columns = 16
+            for i = 1, #pixels do
+                local pixel = pixels[i]
+                if math.max(pixel.r, pixel.g, pixel.b) > 0.55 then
+                    local column = (i - 1) % columns + 1
+                    if column <= columns / 2 then left = true else right = true end
+                end
+            end
+            local statusResult = app.client:call("sample_pixels", {
+                points = {{x = 318, y = 200}},
+            }, 10)
+            local covered = (statusResult.pixels as {{string: number}})[1]
+            if left and right and covered.r < 0.13 and covered.g < 0.10
+                and covered.b < 0.16 then return true end
+            return nil
+        end)
         luassert.is_true(rendered == true,
-            "overlay panels were offset from the screen edge or covered their text")
+            "completion grid did not fill columns over the context row")
     end)
 
     it("resizes the isolated overlay pipeline with the game window", function()
@@ -278,9 +375,7 @@ describe("in-game debugger overlay", function()
         app.client:call("send_love_event", {event = "keyreleased", args = {"return"}})
     end)
 
-    it("opens with a clean message line (command bar is always visible)", function()
-        -- The old "Hit [TAB]" hint is gone: the completion bar is permanently
-        -- mounted, so opening shows the commands themselves, not a pointer.
+    it("opens with a clean message line and no completion panel", function()
         openDebugger()
         local clean = fixture.eventually(fixture.callTimeout, function(): boolean
             if (context().message as string) == "" then return true end
@@ -289,35 +384,165 @@ describe("in-game debugger overlay", function()
         luassert.is_true(clean == true, "message line not clean on open")
     end)
 
-    it("bare tab starts the cycle at the last used command", function()
+    it("bare tab uses canonical completion order", function()
         openDebugger()
         typeCommand("clear")
-        -- Backward: the first shift+tab lands on the command just executed.
-        app.client:call("send_love_event", {event = "keypressed", args = {"lshift"}})
         app.client:call("send_love_event", {event = "keypressed", args = {"tab"}})
         app.client:call("send_love_event", {event = "keyreleased", args = {"tab"}})
-        app.client:call("send_love_event", {event = "keyreleased", args = {"lshift"}})
-        local ok = fixture.eventually(fixture.callTimeout, function(): boolean
-            if (context().command as string) == "clear" then return true end
+        local forward = fixture.eventually(fixture.callTimeout, function(): boolean
+            if (context().command as string) == "select" then return true end
             return nil
         end)
-        luassert.is_true(ok == true,
-            "shift+tab did not start at the last used command; command=" .. tostring(context().command))
-        -- Forward after a reset lands on the same starting point.
+        luassert.is_true(forward == true,
+            "tab did not start at the first command; command=" .. tostring(context().command))
         app.client:call("send_love_event", {event = "keypressed", args = {"escape"}})
         app.client:call("send_love_event", {event = "keyreleased", args = {"escape"}})
         fixture.eventually(fixture.callTimeout, function(): boolean
             if (context().command as string) == "" then return true end
             return nil
         end)
+        app.client:call("send_love_event", {event = "keypressed", args = {"lshift"}})
         app.client:call("send_love_event", {event = "keypressed", args = {"tab"}})
         app.client:call("send_love_event", {event = "keyreleased", args = {"tab"}})
-        local fwd = fixture.eventually(fixture.callTimeout, function(): boolean
+        app.client:call("send_love_event", {event = "keyreleased", args = {"lshift"}})
+        local backward = fixture.eventually(fixture.callTimeout, function(): boolean
+            if (context().command as string) == "quit" then return true end
+            return nil
+        end)
+        luassert.is_true(backward == true,
+            "shift+tab did not start at the last command; command=" .. tostring(context().command))
+    end)
+
+    it("keeps the completion cycle active while F1 help is inspected", function()
+        openDebugger()
+        local function press(key: string)
+            app.client:call("send_love_event", {event = "keypressed", args = {key}})
+            app.client:call("send_love_event", {event = "keyreleased", args = {key}})
+        end
+        press("tab")
+        local first = fixture.eventually(fixture.callTimeout, function(): boolean
+            if (context().command as string) == "select" then return true end
+            return nil
+        end)
+        luassert.is_true(first == true, "tab did not select the first completion")
+
+        press("f1")
+        press("f1")
+        press("tab")
+        local second = fixture.eventually(fixture.callTimeout, function(): boolean
             if (context().command as string) == "clear" then return true end
             return nil
         end)
-        luassert.is_true(fwd == true,
-            "tab did not start at the last used command; command=" .. tostring(context().command))
+        luassert.is_true(second == true,
+            "F1 committed the completion instead of preserving its cycle")
+
+        press("f1")
+        press("f1")
+        press("tab")
+        local third = fixture.eventually(fixture.callTimeout, function(): boolean
+            if (context().command as string) == "mark" then return true end
+            return nil
+        end)
+        luassert.is_true(third == true,
+            "repeated F1 inspection did not preserve completion traversal")
+    end)
+
+    it("keeps F1 help open and follows Tab completion", function()
+        openDebugger()
+        local function press(key: string)
+            app.client:call("send_love_event", {event = "keypressed", args = {key}})
+            app.client:call("send_love_event", {event = "keyreleased", args = {key}})
+        end
+        local function closeControlVisible(): boolean
+            local points: {{string: number}} = {}
+            for y = 18, 48, 6 do
+                for x = 16, 312, 8 do points[#points + 1] = {x = x, y = y} end
+            end
+            local result = app.client:call("sample_pixels", {points = points}, 10)
+            for _, pixel in ipairs(result.pixels as {{string: number}}) do
+                if pixel.r > 0.65 and pixel.g < 0.4 and pixel.b < 0.45 then
+                    return true
+                end
+            end
+            return false
+        end
+
+        press("tab")
+        local first = fixture.eventually(fixture.callTimeout, function(): boolean
+            if (context().command as string) == "select" then return true end
+            return nil
+        end)
+        luassert.is_true(first == true, "Tab did not select the first completion")
+        press("f1")
+        luassert.is_true(fixture.eventually(fixture.callTimeout, function(): boolean
+            return closeControlVisible() and true or nil
+        end) == true, "F1 help did not open")
+
+        press("tab")
+        local nextHelp = fixture.eventually(fixture.callTimeout, function(): boolean
+            if (context().command as string) == "clear" and closeControlVisible() then
+                return true
+            end
+            return nil
+        end)
+        luassert.is_true(nextHelp == true,
+            "Tab did not advance the completion while keeping F1 help visible")
+
+        app.client:call("send_love_event", {event = "keypressed", args = {"lshift"}})
+        press("tab")
+        app.client:call("send_love_event", {event = "keyreleased", args = {"lshift"}})
+        local previousHelp = fixture.eventually(fixture.callTimeout, function(): boolean
+            if (context().command as string) == "select" and closeControlVisible() then
+                return true
+            end
+            return nil
+        end)
+        luassert.is_true(previousHelp == true,
+            "Shift+Tab did not move backward while keeping F1 help visible")
+    end)
+
+    it("shows titled F1 help with a clickable close control", function()
+        openDebugger()
+        app.client:call("send_love_event", {event = "textinput", args = {"select"}})
+        app.client:call("send_love_event", {event = "keypressed", args = {"f1"}})
+        app.client:call("send_love_event", {event = "keyreleased", args = {"f1"}})
+
+        local closeX, closeY = 0, 0
+        local found = fixture.eventually(fixture.callTimeout, function(): boolean
+            local points: {{string: number}} = {}
+            for y = 20, 56, 4 do
+                for x = 248, 312, 4 do points[#points + 1] = {x = x, y = y} end
+            end
+            local result = app.client:call("sample_pixels", {points = points}, 10)
+            for i, pixel in ipairs(result.pixels as {{string: number}}) do
+                if pixel.r > 0.65 and pixel.g < 0.4 and pixel.b < 0.45 then
+                    local index = i - 1
+                    closeX = 248 + (index % 17) * 4
+                    closeY = 20 + math.floor(index / 17) * 4
+                    return true
+                end
+            end
+            return nil
+        end)
+        luassert.is_true(found == true, "F1 popup close control was not rendered")
+
+        app.client:call("send_love_event", {event = "mousemoved",
+            args = {closeX, closeY, 0, 0}})
+        app.client:call("send_love_event", {event = "mousepressed",
+            args = {closeX, closeY, 1}})
+        app.client:call("send_love_event", {event = "mousereleased",
+            args = {closeX, closeY, 1}})
+        local closed = fixture.eventually(fixture.callTimeout, function(): boolean
+            local result = app.client:call("sample_pixels", {
+                points = {{x = closeX, y = closeY}},
+            }, 10)
+            local pixel = (result.pixels as {{string: number}})[1]
+            if not (pixel.r > 0.65 and pixel.g < 0.4 and pixel.b < 0.45) then
+                return true
+            end
+            return nil
+        end)
+        luassert.is_true(closed == true, "F1 popup close control did not dismiss it")
     end)
 
     it("query selects entities by component", function()
@@ -425,9 +650,9 @@ describe("in-game debugger overlay", function()
         luassert.is_true(both == true, "shift-click did not add to the selection")
 
         -- A plain click on empty space clears everything.
-        moveCursor(60, 200)
-        app.client:call("send_love_event", {event = "mousepressed", args = {60, 200, 1}})
-        app.client:call("send_love_event", {event = "mousereleased", args = {60, 200, 1}})
+        moveCursor(60, 100)
+        app.client:call("send_love_event", {event = "mousepressed", args = {60, 100, 1}})
+        app.client:call("send_love_event", {event = "mousereleased", args = {60, 100, 1}})
         local cleared = fixture.eventually(fixture.callTimeout, function(): boolean
             if not selectedHas(a) and not selectedHas(b) then return true end
             return nil
@@ -943,6 +1168,43 @@ describe("in-game debugger overlay", function()
             return nil
         end)
         luassert.is_true(ok == true, "help left a message: " .. tostring(context().message))
+    end)
+
+    it("routes popup scrolling through the debugger input layer", function()
+        openDebugger()
+        typeCommand("help")
+
+        -- The executed command is now in history. Up/Down must scroll the
+        -- visible help document rather than recalling it into the prompt.
+        for _, key in ipairs({"down", "down", "up", "pagedown",
+                "pageup", "end", "home"}) do
+            app.client:call("send_love_event", {event = "keypressed", args = {key}})
+            app.client:call("send_love_event", {event = "keyreleased", args = {key}})
+        end
+        -- Holding an arrow uses the overlay's deterministic repeat, rather
+        -- than depending on platform keyboard-repeat events.
+        app.client:call("send_love_event", {event = "keypressed", args = {"down"}})
+        fixture.eventually(0.55, function(): boolean return nil end)
+        app.client:call("send_love_event", {event = "keyreleased", args = {"down"}})
+        local stayedEmpty = fixture.eventually(fixture.callTimeout, function(): boolean
+            if (context().command as string) == "" then return true end
+            return nil
+        end)
+        luassert.is_true(stayedEmpty == true,
+            "popup arrows escaped into command history")
+
+        local before = tonumber(fixture.runLua(app, [[
+            local key = require("tecs2d.gfx.internal.pipelinekey")
+            return world.resources[key.PIPELINE]:getCamera():getZoom()
+        ]])[1])
+        moveCursor(160, 100)
+        app.client:call("send_love_event", {event = "wheelmoved", args = {0, -2}})
+        local after = tonumber(fixture.runLua(app, [[
+            local key = require("tecs2d.gfx.internal.pipelinekey")
+            return world.resources[key.PIPELINE]:getCamera():getZoom()
+        ]])[1])
+        luassert.near(before, after, 0.0001,
+            "popup wheel event reached camera zoom")
     end)
 
     it("help <command> shows usage and reports unknown", function()
@@ -1781,12 +2043,12 @@ describe("in-game debugger overlay", function()
     it("right-click opens the context menu for entities and the world", function()
         -- A spot no earlier test spawned at: underMouse picks the nearest
         -- entity, so neighbors from other tests would steal the menu target.
-        local eid = spawnAt(60, 200)
+        local eid = spawnAt(60, 140)
         openDebugger()
         local out = fixture.runLua(app, [[
             local pipelinekey = require("tecs2d.gfx.internal.pipelinekey")
             local cam = world.resources[pipelinekey.PIPELINE]:getCamera()
-            local sx, sy = cam:toScreen(60, 200)
+            local sx, sy = cam:toScreen(60, 140)
             return tostring(sx) .. "," .. tostring(sy)
         ]])[1]
         local sxs, sys = out:match("^(-?[%d%.]+),(-?[%d%.]+)$")

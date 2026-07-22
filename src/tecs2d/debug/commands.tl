@@ -310,6 +310,19 @@ function commands.usagePopup(c: commands.Command): {string}
     return popup
 end
 
+local function titledUsage(c: commands.Command): commands.Result
+    local lines = commands.usagePopup(c)
+    local body: {string} = {}
+    for i = 2, #lines do body[#body + 1] = lines[i] end
+    return {
+        ok = true,
+        popup = body,
+        popupTitle = lines[1],
+        popupModal = true,
+        popupClosable = true,
+    }
+end
+
 -------------------------------------------------------------------------------
 -- Registry
 -------------------------------------------------------------------------------
@@ -367,7 +380,13 @@ function commands.Registry:execute(text: string): commands.Result
     local result = runFn(values, parts)
     if result then
         if result.popup then
-            self.lastOutput = result.popup
+            if result.popupTitle then
+                local output: {string} = {result.popupTitle}
+                for i = 1, #result.popup do output[#output + 1] = result.popup[i] end
+                self.lastOutput = output
+            else
+                self.lastOutput = result.popup
+            end
         elseif result.message and result.message ~= "" then
             self.lastOutput = {result.message}
         end
@@ -804,7 +823,7 @@ function commands.build(env: commands.Env): commands.Registry
                         return {ok = false, code = "unknown_command",
                             message = "help: no such command '" .. q .. "'"}
                     end
-                    return {ok = true, popup = commands.usagePopup(c)}
+                    return titledUsage(c)
                 end
                 local keys = env.keys
                 local lines: {string} = {
@@ -825,7 +844,6 @@ function commands.build(env: commands.Env): commands.Registry
                     "  " .. keys.leader .. "+y = yank the last command's output to the clipboard",
                     "  escape = clear the command / popup, or close when empty",
                     "  tab / shift+tab = cycle completions (hold to repeat)",
-                    "  bare tab starts the cycle at the last used command",
                     "  f1 = toggle command help (general help when empty)",
                     "  up / down = walk the command history",
                     "  left / right = page this popup",
@@ -890,7 +908,14 @@ function commands.build(env: commands.Env): commands.Registry
                     lines[#lines + 1] = "Subcommands:"
                     for i = 1, #withSubs do lines[#lines + 1] = withSubs[i] end
                 end
-                return {ok = true, popup = lines}
+                lines[1] = "type `help <command>` for command details"
+                return {
+                    ok = true,
+                    popup = lines,
+                    popupTitle = "debugger help",
+                    popupModal = true,
+                    popupClosable = true,
+                }
             end,
         },
         grouped("select"),
@@ -941,7 +966,8 @@ function commands.build(env: commands.Env): commands.Registry
                     }
                 end
                 local tool = projectTool(c, nil)
-                return {ok = true, popup = commands.usagePopup(c), data = {
+                local result = titledUsage(c)
+                result.data = {
                     name = c.name,
                     signature = commands.commandSignature(c),
                     section = c.section or "Custom",
@@ -954,7 +980,8 @@ function commands.build(env: commands.Env): commands.Registry
                     subcommands = subs,
                     examples = c.examples,
                     metadata = c.metadata,
-                }}
+                }
+                return result
             end,
         },
         grouped("freeze"),

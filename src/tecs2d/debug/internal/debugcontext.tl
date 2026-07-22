@@ -164,7 +164,7 @@ local record debugcontext
     --- Create a DebugContext with default values.
     new: function(): Context
 
-    --- Set the status line shown in the command bar. Subsystems call this to
+    --- Set the status line shown in the context bar. Subsystems call this to
     --- report an outcome, e.g. "screenshot saved at /full/path", which stays
     --- until the next command or message replaces it.
     setStatus: function(ctx: Context, text: string)

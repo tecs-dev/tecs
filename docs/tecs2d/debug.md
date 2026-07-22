@@ -61,30 +61,34 @@ Input capture and freezing are separate mechanisms. The debugger does not push a
 or assume that the game uses the [state stack](/tecs/states). Its Ctrl+/ shortcut uses `input.raw`, so it can always
 open above a game-owned modal and always close itself. The overlay's ordinary controls use its routed layer.
 
-The overlay draws two rows across the top of the screen. The upper row is an
-always-visible command toolbar: every colored-text section header and every
-command appears in one horizontally scrollable strip. The lower row is a
-command line with a short summary of the current command. A compact
-mouse/world/camera readout sits at the bottom-right.
+The overlay draws two rows across the bottom of the screen. The upper context
+row shows debugger state, selection count, command feedback, and the compact
+mouse/world/camera readout. The lower row is a `:` command line. Completions do
+not occupy the game view until requested.
 
 ![The debugger just opened over a running game](./assets/debug/open.png)
 
 ### A first session
 
 1. Press **Ctrl+/**. The game freezes and the command line opens.
-2. Click a command or press **Tab** to browse. Every section and its commands
-   stays expanded in the toolbar; section headers jump to that section's first
-   command. Keep tabbing, click a command, or type to narrow; Enter runs the
-   line. The command line shows a short summary without covering the game.
-   Press **F1** when you want the current command's full usage.
+2. Press **Tab** to browse. A completion panel replaces the context row, grows
+   upward from the command line, and packs one continuous command stream into
+   short columns. Section headings flow with the commands instead of claiming
+   their own columns. Tab moves
+   down a column and then to the column on its right; Shift+Tab moves in
+   reverse. Keep tabbing, click a candidate, or type to narrow; Enter runs the
+   line. The panel header shows the candidate's short summary. Press **F1**
+   when you want the current command's full usage.
 
-   ![Tab cycling the grouped command toolbar](./assets/debug/completions.png)
+   ![Tab cycling the flowing command grid](./assets/debug/completions.png)
 
 3. Click an entity to select only it, or drag a box to replace the selection
    with everything inside. Hold Shift while clicking or dragging to add. The
    selection is highlighted in the world.
-4. Type `info` and press Enter: the selected entity's components appear as a
-   paged popup (Left/Right page long output).
+4. Type `info` and press Enter: the selected entity's components appear as
+   syntax-highlighted Lua under a titled header. Components fill as many
+   balanced columns as the window can hold; the combined document scrolls
+   with the mouse wheel or popup navigation keys.
 
    ![info showing the selected entity's components](./assets/debug/info.png)
 
@@ -106,8 +110,9 @@ The leader key is **Ctrl** by default. `leaderKey`, `debugToggleKey`, and
 | Enter / keypad Enter | Execute a non-empty command; activate the highlighted context-menu item |
 | Tab / Shift+Tab | Cycle completions forward or backward; hold to repeat |
 | F1 | Toggle full help for the current command; show debugger help when the prompt is empty |
-| Up / Down | Browse command history; move through an open context menu |
-| Left / Right | Page through a multi-page popup |
+| Up / Down | Move through a context menu, scroll a popup (hold to repeat), or browse command history |
+| Page Up / Page Down | Scroll a visible popup by one viewport |
+| Home / End | Jump to the beginning or end of a visible popup |
 | Backspace | Delete the last command-line character; hold to repeat after a short pause |
 | Delete | Despawn every selected entity |
 
@@ -152,23 +157,35 @@ note flickers when lit           free-text tails need no quotes
 - Commands with a free-text tail (`note`, `query`, `set`) consume the rest of
   the line; declared flags still parse after the text.
 
-As you type or select a command, its short summary appears beside the prompt
-without opening a panel. Press F1 to toggle its full generated usage;
-`help <command>` opens the same details explicitly, and F1 on an empty prompt
-opens the general debugger help. Tab completes command names, verbs, and
-per-argument sources such as component names, marks, systems, and cameras.
-Subcommand and argument candidates temporarily take over the top toolbar and
-remain clickable; the grouped command toolbar returns when completion ends. On
-an empty line the cycle starts at the last used command, so Tab-Enter repeats
-recent work. History persists across sessions in the save directory (Up/Down
-browses it, `history` lists it, `history clear` forgets it).
+While cycling completions, the panel header shows the selected command's short
+summary. Press F1 to toggle its full generated usage; `help <command>` opens
+the same details explicitly, and F1 on an empty prompt opens the general
+debugger help. F1 only inspects the active completion: closing help restores
+the grid at the same candidate, and the next Tab continues the cycle. Tab
+completes command names, verbs, and per-argument sources such as component
+names, marks, systems, and cameras.
+Root command section headings, commands, subcommands, and argument candidates
+use the same bottom-up column-major flow and remain clickable.
+F1 and `help <command>` place the generated contract above all other debugger
+content. The command signature is rendered in a distinct title band, with a
+red close control; clicking it dismisses help without disturbing the active
+completion cycle. Every argument and subcommand uses a definition-list layout: its
+highlighted syntax is on one line and its description begins on the next,
+indented line. Wrapped syntax retains its highlighting.
+Larger example sets use two columns when the window is wide enough. Long help
+is one continuous document with a visible scrollbar; use the mouse wheel or
+Up/Down to scroll it.
+The panel disappears when completion ends. On an empty line Tab starts at the
+first command and Shift+Tab starts at the last. History persists across
+sessions in the save directory (Up/Down browses it, `history` lists it,
+`history clear` forgets it).
 
 ### Commands
 
 Commands are grouped into colored sections: **Select**, **Edit**, **Render**,
 **Engine**, **Capture**, and **Session** (plus **Custom** for commands the
 game registers). The same grouping structures `help`, the Tab-completion
-strip, and the generated [Command Reference](./debug-reference), which
+grid, and the generated [Command Reference](./debug-reference), which
 documents every command's signature, arguments, examples, result schema, and
 MCP projection. The sections below walk the main workflows instead of
 repeating that reference.

@@ -157,43 +157,89 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             data = {matched = count, selected = #ctx.selected}}
     end
 
-    -- Build display lines for an entity: a header plus one line per component
-    -- with its serialized field values.
-    local function inspectEntity(eid: integer): {string}
+    local function luaScalar(value: any): string
+        local kind = type(value)
+        if kind == "string" then return string.format("%q", value as string) end
+        if kind == "number" then
+            return string.format("%.6g", value as number)
+        end
+        if kind == "boolean" or kind == "nil" then
+            return tostring(value)
+        end
+        return string.format("%q", tostring(value))
+    end
+
+    local function luaKey(key: any): string
+        if type(key) == "string" and (key as string):match("^[%a_][%w_]*$") then
+            return key as string
+        end
+        return "[" .. luaScalar(key) .. "]"
+    end
+
+    local function appendLuaAssignment(lines: {string}, indent: string,
+            name: string, value: any, suffix: string, seen: {any: boolean})
+        if type(value) ~= "table" then
+            lines[#lines + 1] = indent .. name .. " = " .. luaScalar(value) .. suffix
+            return
+        end
+        if seen[value] then
+            lines[#lines + 1] = indent .. name .. " = \"<cycle>\"" .. suffix
+            return
+        end
+        seen[value] = true
+        lines[#lines + 1] = indent .. name .. " = {"
+        local keys: {any} = {}
+        for key in pairs(value as {any: any}) do keys[#keys + 1] = key end
+        table.sort(keys, function(a: any, b: any): boolean
+            if type(a) == type(b) then return tostring(a) < tostring(b) end
+            return type(a) < type(b)
+        end)
+        for i = 1, #keys do
+            local key = keys[i]
+            appendLuaAssignment(lines, indent .. "    ", luaKey(key),
+                (value as {any: any})[key], ",", seen)
+        end
+        lines[#lines + 1] = indent .. "}" .. suffix
+        seen[value] = nil
+    end
+
+    -- Build a Lua-like copy form plus one semantic block per component. The
+    -- overlay chooses the number of columns from its actual viewport.
+    local function inspectEntity(eid: integer): {string}, {{string}}
         local archetype, row, why = entityinfo.locate(w, eid)
         if not archetype then
-            return {"#" .. tostring(eid) ..
-                (why == "not_alive" and " is not alive" or " is not committed")}
+            return {"-- #" .. tostring(eid) ..
+                (why == "not_alive" and " is not alive" or " is not committed")}, {}
         end
-        local lines: {string} = {"entity #" .. tostring(eid)}
-        local compList = archetype.componentList
+        local lines: {string} = {}
+        local blocks: {{string}} = {}
+        local compList: {tecs.Component} = {}
+        for i = 1, #archetype.componentList do
+            local comp = archetype.componentList[i]
+            if comp.componentName then compList[#compList + 1] = comp end
+        end
+        table.sort(compList, function(a: tecs.Component, b: tecs.Component): boolean
+            return (a.componentName or "") < (b.componentName or "")
+        end)
+        local serializedRow = entityinfo.serializeRow(archetype, compList, row)
         for i = 1, #compList do
             local comp = compList[i]
             local cname = comp.componentName
             if cname then
-                local rendered = false
-                if comp.serialize then
-                    local column = archetype:get(comp) as {any}
-                    local instance = column and column[row]
-                    if instance ~= nil then
-                        local serfn = comp.serialize as function(any): {string: any}
-                        local ok, serialized = pcall(serfn, instance)
-                        if ok and serialized then
-                            lines[#lines + 1] = cname .. ":"
-                            local pretty = json.serializePretty(serialized, true)
-                            for jline in (pretty .. "\n"):gmatch("(.-)\n") do
-                                lines[#lines + 1] = "  " .. jline
-                            end
-                            rendered = true
-                        end
-                    end
+                local value: any = serializedRow[cname]
+                if value == nil then value = true end
+                if (comp as {string: any}).storageType == "scalar"
+                    and type(value) == "table" then
+                    value = (value as {string: any}).value
                 end
-                if not rendered then
-                    lines[#lines + 1] = cname
-                end
+                local block: {string} = {}
+                appendLuaAssignment(block, "", cname, value, "", {})
+                blocks[#blocks + 1] = block
+                for j = 1, #block do lines[#lines + 1] = block[j] end
+                if i < #compList then lines[#lines + 1] = "" end
             end
         end
-        return lines
+        return lines, blocks
     end
 
     -- Marks grouped for display and data: name -> {count, first id}.
@@ -482,7 +528,9 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     if nm then names[#names + 1] = nm end
                 end
                 table.sort(names)
-                return {ok = true, popup = inspectEntity(target), data = {
+                local popup, popupBlocks = inspectEntity(target)
+                return {ok = true, popupTitle = "entity #" .. tostring(target),
+                    popup = popup, popupBlocks = popupBlocks, popupLanguage = "lua", data = {
                     id = target,
                     archetypeId = archetype.id,
                     archetypeComponents = table.concat(names, ", "),

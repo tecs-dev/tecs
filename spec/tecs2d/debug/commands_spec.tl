@@ -360,6 +360,24 @@ describe("tecs2d.debug.commands registry", function()
     end)
 
     describe("entity edit commands", function()
+        it("formats entity info as titled Lua component blocks", function()
+            local reg, w = makeRegistry()
+            local eid = w:spawn(SpecPos(1, 2), SpecTag())
+            w:commit()
+
+            local r = reg:execute("info " .. tostring(eid))
+            luassert.is_true(r.ok, tostring(r.message))
+            luassert.equals("entity #" .. tostring(eid), r.popupTitle)
+            luassert.equals("lua", r.popupLanguage)
+            luassert.equals(2, #r.popupBlocks)
+            local rendered = table.concat(r.popup, "\n")
+            luassert.matches("DbgCmdPos = {", rendered, 1, true)
+            luassert.matches("x = 1", rendered, 1, true)
+            luassert.matches("DbgCmdTag = true", rendered, 1, true)
+            luassert.is_true((r.data.components as {string: any}).DbgCmdTag as boolean)
+            luassert.equals(r.popupTitle, reg.lastOutput[1])
+        end)
+
         it("set writes one component with a Lua table value", function()
             local reg, w = makeRegistry()
             local eid = w:spawn(SpecPos(1, 2))
@@ -518,10 +536,23 @@ describe("tecs2d.debug.commands registry", function()
         it("help wraps the command list over multiple popup lines", function()
             local reg = makeRegistry()
             local r = reg:execute("help")
+            luassert.equals("debugger help", r.popupTitle)
+            luassert.is_true(r.popupModal)
+            luassert.is_true(r.popupClosable)
             for _, line in ipairs(r.popup) do
                 luassert.is_true(#line <= 70,
                     "help popup line too long: " .. line)
             end
+        end)
+
+        it("command help uses the signature as its popup title", function()
+            local reg = makeRegistry()
+            local r = reg:execute("help select")
+            luassert.matches("select", r.popupTitle)
+            luassert.is_true(r.popupModal)
+            luassert.is_true(r.popupClosable)
+            luassert.is_false(r.popup[1] == r.popupTitle,
+                "title must not be duplicated in the popup body")
         end)
 
         it("help lists every command's subcommand verbs", function()

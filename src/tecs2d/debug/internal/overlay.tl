@@ -1,8 +1,8 @@
---- In-game debugger overlay (micro-editor style command mode). Installed by the
+--- In-game debugger overlay (Helix-style command mode). Installed by the
 --- debug plugin; toggled with Ctrl+/. Freezes gameplay and draws a status line
 --- plus a command line. Type a command and Enter to run it; Tab cycles
---- completions. Click or box-drag replaces the selection; Shift adds, and
---- Ctrl-drag moves the current selection.
+--- completions through a multi-column panel. Click or box-drag replaces the
+--- selection; Shift adds, and Ctrl-drag moves the current selection.
 ---
 --- The commands themselves live in the shared registry (tecs2d.debug.commands);
 --- this module is the human surface: input, mouse gestures, completion,
@@ -17,6 +17,7 @@ local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
 local core <const> = require("tecs2d.debug.internal.core")
 local leader <const> = require("tecs2d.debug.internal.leader")
 local commands <const> = require("tecs2d.debug.commands")
+local Popup <const> = require("tecs2d.debug.internal.Popup")
 
 local HRULE <const> = commands.HRULE
 local SECTION_MARK <const> = commands.SECTION_MARK
@@ -25,72 +26,8 @@ local Transform <const> = tecs.builtins.Transform
 
 local lg <const> = require("tecs2d.debug.internal.debugdraw")
 
--- One vertical slice of a popup body laid out in columns: its lines, the
--- tab-split cells, per-tab x offsets, and total pixel width.
-local record PopupBlock
-    lines: {string}
-    rows: {{string}}
-    colX: {number}
-    width: number
-end
-
--- One collapsible section in the command completion bar. Completion indices
--- still point into Registry:complete()'s flat list so keyboard and mouse
--- selection share exactly the same state.
-local record CompletionGroup
-    name: string
-    first: integer
-    last: integer
-end
-
--- Popup panel state (lines, visibility, paging, optional thumbnail), one
--- table so the overlay closures stay under LuaJIT's 60-upvalue limit. Also
--- carries the overlay's per-frame draw caches (popup layout, contextual help,
--- wrapped prompt rows, Tab-cycle bar) so the render path allocates nothing
--- while its inputs are unchanged.
-local record PopupState
-    lines: {string}
-    shown: boolean
-    page: integer
-    -- Thumbnail drawn under the popup (screenshot info); lives exactly as
-    -- long as the popup does and is released on dismissal.
-    image: love.graphics.Image
-    -- Measured popup layout, valid while the lines table reference, screen
-    -- width, and per-page row count are unchanged; paging reuses it.
-    measuredLines: {string}
-    measuredSw: number
-    measuredPerPage: integer
-    blocks: {PopupBlock}
-    pageGroups: {{integer}}
-    -- Contextual help: the command named by the current line and its cached
-    -- usage popup. Short help stays inline; F1 toggles the full panel.
-    lastCommandLine: string
-    previewCmd: commands.Command
-    previewFor: commands.Command
-    previewLines: {string}
-    -- Wrapped command-line rows keyed on prompt text and screen width; the
-    -- input pass (bar height) and the draw pass share one getWrap call.
-    cmdRowsText: string
-    cmdRowsSw: number
-    cmdRows: {string}
-    -- Tab-cycle bar layout, rebuilt when completions are assigned. Every
-    -- section header and command shares one flat, scrollable strip.
-    barCompletions: {string}
-    barLabels: {string}
-    barWidths: {number}
-    barGroups: {CompletionGroup}
-    barGroupOf: {integer: integer}
-    barActiveGroup: integer
-    barScroll: number
-    barScrollForIndex: integer
-    -- Hit rectangles are refreshed by the draw pass and consumed by the next
-    -- input pass. Kind 1 selects a command; kind 2 selects a group.
-    barHitKind: {integer}
-    barHitValue: {integer}
-    barHitX: {number}
-    barHitW: {number}
-    barHitCount: integer
-end
+local type PopupState = Popup
+local type PopupBlock = Popup.Block
 
 -- One row of the right-click context menu: a label plus what activating it
 -- does (run a registry command, fill the prompt, and/or copy to clipboard).
@@ -126,7 +63,7 @@ local record GestureState
     dragStartY: number
     dragging: boolean
     -- True while the current left-button gesture began inside the world view;
-    -- presses on the toolbar rows (or swallowed by the menu) must not drag.
+    -- presses on the debugger chrome (or swallowed by the menu) must not drag.
     pressInView: boolean
     -- Shift state captured when the left gesture begins; releasing Shift
     -- before the mouse button must not change replace vs add semantics.
@@ -151,9 +88,6 @@ end
 
 local MENU_HINT <const> = "menu: arrows + enter run a row, esc closes"
 
--- Pill shade for completion sections without an accent color.
-local DEFAULT_PILL <const>: {number} = {0.22, 0.27, 0.30}
-
 local format <const> = string.format
 local getTime <const> = love.timer.getTime
 
@@ -162,13 +96,24 @@ local PAD_X <const> = 12                  -- horizontal padding inside the bars
 local PAD_Y <const> = 2                   -- vertical padding inside the bars
 local INFO_PAD_X <const> = 6
 local INFO_PAD_Y <const> = 2
+local COMPLETION_ROWS <const> = 8
+local COMPLETION_PAD <const> = 6
+local POPUP_RIGHT_PAD <const> = 16
+local POPUP_SCROLLBAR_W <const> = 6
+local POPUP_SCROLL_ROWS <const> = 3
+local POPUP_CONTENT_PAD_TOP <const> = 10
+local POPUP_CONTENT_PAD_BOTTOM <const> = 10
 
 local COMMAND_BAR <const>: {number} = {0.1804, 0.2157, 0.2353, 1}
-local BAR_GREEN <const>: {number} = {0.6549, 0.7529, 0.5020, 1}
 local TECS_PURPLE <const>: {number} = {0.4196, 0.2471, 0.6902, 1}
+local POPUP_ACCENT <const>: {number} = {0.66, 0.51, 0.90, 1}
+local DEBUG_BG <const>: {number} = {0.58, 0.42, 0.82, 1}
+local DEBUG_TEXT <const>: {number} = {0.94, 0.92, 0.98, 1}
+local COMPLETION_BG <const>: {number} = {0.1059, 0.0745, 0.1373, 0.98}
+local POPUP_BG <const>: {number} = {0.1059, 0.0745, 0.1373, 1}
+local CONTEXT_BG <const>: {number} = {0.1451, 0.1098, 0.1804, 1}
 local ENTITY_LABEL_BG <const>: {number} = {0.11, 0.13, 0.16, 0.85}
 local RECORDING_BG <const>: {number} = {0, 0, 0, 0.6}
-local COORDINATE_BG <const>: {number} = {0.1804, 0.2157, 0.2353, 0.96}
 
 local function coordinateLabel(ctx: debugcontext.Context): string
     return format("m %.0f,%.0f>%.0f,%.0f  c %.0f,%.0f z%.2f",
@@ -176,27 +121,133 @@ local function coordinateLabel(ctx: debugcontext.Context): string
         ctx.cameraX, ctx.cameraY, ctx.cameraZoom)
 end
 
-local function releasePopupImage(popup: PopupState)
-    if popup.image then
-        -- Free the GPU texture now rather than at the next GC cycle.
-        local obj = popup.image as love.Object
-        obj:release()
-        popup.image = nil
+local function dismissPopup(popup: PopupState)
+    popup:dismiss()
+end
+
+local function showPopup(popup: PopupState, lines: {string}, modal: boolean,
+        title?: string, language?: string, semanticBlocks?: {{string}},
+        closable?: boolean, imagePath?: string, maxColumns?: integer)
+    if not lines then return end
+    popup:show({
+        lines = lines,
+        title = title,
+        language = language,
+        blocks = semanticBlocks,
+        modal = modal,
+        closable = closable,
+        imagePath = imagePath,
+        maxColumns = maxColumns,
+    })
+end
+
+local function appendWrappedPopupLine(out: {string}, font: lg.Font,
+        line: string, maxWidth: number)
+    if font:getWidth(line) <= maxWidth then
+        out[#out + 1] = line
+        return
+    end
+    local indent = line:match("^(%s*)") or ""
+    local content = line:sub(#indent + 1)
+    local width = math.max(font:getWidth("word"),
+        maxWidth - font:getWidth(indent))
+    local _, wrapped = font:getWrap(content, width)
+    for i = 1, #wrapped do out[#out + 1] = indent .. wrapped[i] end
+end
+
+-- Wrap a syntax/name cell without losing the trailing tab that identifies it
+-- to the renderer. Every continuation therefore retains name-column color.
+local function appendWrappedPopupName(out: {string}, font: lg.Font,
+        name: string, maxWidth: number)
+    if font:getWidth(name) <= maxWidth then
+        out[#out + 1] = name .. "\t"
+        return
+    end
+    local indent = name:match("^(%s*)") or ""
+    local content = name:sub(#indent + 1)
+    local width = math.max(font:getWidth("word"),
+        maxWidth - font:getWidth(indent))
+    local _, wrapped = font:getWrap(content, width)
+    for i = 1, #wrapped do
+        out[#out + 1] = indent .. wrapped[i] .. "\t"
     end
 end
 
-local function dismissPopup(popup: PopupState)
-    popup.shown = false
-    popup.measuredLines = nil
-    releasePopupImage(popup)
-end
+-- Reflow popup text for the current screen. Every tabular definition uses a
+-- term line followed by an indented description; width never changes that
+-- presentation. Larger example sets share two columns when both halves fit.
+local function layoutPopupLines(font: lg.Font, sw: number,
+        lines: {string}, firstLine: integer): {string}
+    local out: {string} = {}
+    local maxWidth = math.max(font:getWidth("word"), sw - PAD_X * 6)
 
-local function showPopup(popup: PopupState, lines: {string})
-    if not lines then return end
-    popup.lines = lines
-    popup.shown = true
-    popup.page = 0
-    popup.measuredLines = nil
+    local i = firstLine
+    while i <= #lines do
+        local line = lines[i]
+        if line == "Examples:" then
+            out[#out + 1] = line
+            local examples: {string} = {}
+            local j = i + 1
+            while j <= #lines and lines[j]:match("^%s") and lines[j] ~= HRULE do
+                examples[#examples + 1] = lines[j]
+                j = j + 1
+            end
+            local paired = false
+            if #examples >= 4 and sw >= 720 then
+                local half = math.ceil(#examples / 2) as integer
+                local leftWidth: number = 0
+                local rightWidth: number = 0
+                for ei = 1, half do
+                    leftWidth = math.max(leftWidth, font:getWidth(examples[ei]))
+                    if examples[ei + half] then
+                        rightWidth = math.max(rightWidth,
+                            font:getWidth(examples[ei + half]))
+                    end
+                end
+                local columnGap = font:getWidth("      ")
+                if leftWidth + columnGap + rightWidth <= maxWidth then
+                    local spaceWidth = math.max(1, font:getWidth(" "))
+                    for ei = 1, half do
+                        local left = examples[ei]
+                        local right = examples[ei + half]
+                        if right then
+                            local spaces = math.max(1, math.ceil(
+                                (leftWidth - font:getWidth(left) + columnGap)
+                                / spaceWidth))
+                            out[#out + 1] = left .. string.rep(" ", spaces) .. right
+                        else
+                            out[#out + 1] = left
+                        end
+                    end
+                    paired = true
+                end
+            end
+            if not paired then
+                for ei = 1, #examples do
+                    appendWrappedPopupLine(out, font, examples[ei], maxWidth)
+                end
+            end
+            i = j
+        else
+            local name, description = line:match("^(.-)\t(.*)$")
+            if name then
+                -- Whitespace-only terms are continuations emitted by a few
+                -- compact command summaries; keep them in the preceding
+                -- definition instead of drawing an empty highlighted term.
+                if name:match("%S") then
+                    appendWrappedPopupName(out, font, name, maxWidth)
+                end
+                if description ~= "" then
+                    appendWrappedPopupLine(out, font,
+                        "    " .. description, maxWidth)
+                end
+            else
+                appendWrappedPopupLine(out, font, line, maxWidth)
+            end
+            i = i + 1
+        end
+    end
+    return out
 end
 
 -- Measure one popup column block: split lines on tabs and align the tab
@@ -241,87 +292,197 @@ local function measurePopupBlock(font: lg.Font, gap: number, lines: {string}): P
     return {lines = lines, rows = rows, colX = colX, width = width}
 end
 
-local EMPTY_GROUP <const>: {integer} = {}
+-- Lightweight Lua coloring for inspector output. It is intentionally lexical:
+-- identifiers, literals, comments, and punctuation are enough to make a data
+-- dump scannable without pulling a parser into the overlay.
+local function drawLuaLine(font: lg.Font, line: string, x: number, y: number)
+    local i = 1
+    while i <= #line do
+        local start = i
+        local c = line:sub(i, i)
+        local kind = "punctuation"
+        if c:match("%s") then
+            kind = "space"
+            repeat i = i + 1 until i > #line or not line:sub(i, i):match("%s")
+        elseif c == "-" and line:sub(i, i + 1) == "--" then
+            kind = "comment"
+            i = #line + 1
+        elseif c == '"' or c == "'" then
+            kind = "string"
+            local quote = c
+            i = i + 1
+            while i <= #line do
+                local ch = line:sub(i, i)
+                i = i + 1
+                if ch == "\\" then
+                    i = math.min(#line + 1, i + 1)
+                elseif ch == quote then
+                    break
+                end
+            end
+        elseif c:match("[%a_]") then
+            kind = "identifier"
+            i = i + 1
+            while i <= #line and line:sub(i, i):match("[%w_]") do i = i + 1 end
+        elseif c:match("%d") or (c == "-" and line:sub(i + 1, i + 1):match("%d")) then
+            kind = "number"
+            i = i + 1
+            while i <= #line and line:sub(i, i):match("[%w%.%+%-]") do i = i + 1 end
+        else
+            i = i + 1
+        end
+        local token = line:sub(start, i - 1)
+        if kind == "identifier" and (token == "true" or token == "false"
+            or token == "nil") then
+            kind = "keyword"
+        end
+        if kind == "identifier" then
+            lg.setColor(0.45, 0.70, 1.0, 1)
+        elseif kind == "keyword" then
+            lg.setColor(POPUP_ACCENT[1], POPUP_ACCENT[2], POPUP_ACCENT[3], 1)
+        elseif kind == "string" then
+            lg.setColor(0.80, 0.66, 0.94, 1)
+        elseif kind == "number" then
+            lg.setColor(0.94, 0.69, 0.48, 1)
+        elseif kind == "comment" then
+            lg.setColor(0.54, 0.49, 0.62, 1)
+        else
+            lg.setColor(0.8275, 0.7765, 0.6667, 1)
+        end
+        if kind ~= "space" then lg.print(token, x, y) end
+        x = x + font:getWidth(token)
+    end
+end
 
--- Draw the popup panel below the command line (goto targets, info, ...).
--- popup.lines[1] is a green header; the body flows into as many perPage-tall
--- columns as the screen width permits, and popup.page (clamped here) picks
--- which column group is visible. py is the panel's top edge; sw/sh are the
--- screen dimensions.
+-- Draw a command output/help popup in the game view (goto targets, info, ...).
+-- Explicit titles get a dedicated header band; semantic blocks may fill
+-- multiple columns. The resulting body remains one vertically scrollable
+-- document. py is the panel's top edge; sw/sh are the available dimensions.
 local function drawPopup(popup: PopupState, font: lg.Font,
         sw: number, sh: number, py: number)
     local fh = font:getHeight()
     local lineH = fh + 6
-    local perPage = math.max(1, math.floor((sh - py - 24) / lineH) - 1)
+    local fixedHeight = 8 + lineH + POPUP_CONTENT_PAD_TOP
+        + POPUP_CONTENT_PAD_BOTTOM
+    local rowCapacity = math.max(1,
+        math.floor((sh - py - fixedHeight) / lineH))
     local gap = font:getWidth("  ")
-    local gutter = font:getWidth("        ")
-    local popupLines = popup.lines
+    local sourceLines = popup.lines
 
-    -- Layout cache: measuring is skipped while the lines table reference,
-    -- screen width, and per-page row count are unchanged (paging reuses it).
-    if popup.measuredLines ~= popupLines or popup.measuredSw ~= sw
-        or popup.measuredPerPage ~= perPage then
-        popup.measuredLines = popupLines
+    -- Layout cache: semantic blocks are packed into the number of columns the
+    -- current viewport can hold. Ordinary popups remain one flowing column.
+    if popup.measuredLines ~= sourceLines or popup.measuredSw ~= sw
+        or popup.measuredBlocks ~= popup.semanticBlocks then
+        popup.measuredLines = sourceLines
+        popup.measuredBlocks = popup.semanticBlocks
         popup.measuredSw = sw
-        popup.measuredPerPage = perPage
-        -- Slice the body into perPage-tall blocks, then group blocks into
-        -- pages by available width. Short popups are one block.
-        local blocks: {PopupBlock} = {}
-        local slice: {string} = {}
-        for i = 2, #popupLines do
-            slice[#slice + 1] = popupLines[i]
-            if #slice == perPage or i == #popupLines then
-                blocks[#blocks + 1] = measurePopupBlock(font, gap, slice)
-                slice = {}
+        local gutter = font:getWidth("    ")
+        if popup.semanticBlocks and #popup.semanticBlocks > 0 then
+            local naturalW: number = 0
+            for bi = 1, #popup.semanticBlocks do
+                local semantic = popup.semanticBlocks[bi]
+                for li = 1, #semantic do
+                    naturalW = math.max(naturalW, font:getWidth(semantic[li]))
+                end
             end
-        end
-        local maxContentW = sw - PAD_X * 4
-        local pageGroups: {{integer}} = {}
-        local cur: {integer} = {}
-        local curW: number = 0
-        for k = 1, #blocks do
-            local bw = blocks[k].width
-            local addW = (#cur == 0) and bw or (curW + gutter + bw)
-            if #cur > 0 and addW > maxContentW then
-                pageGroups[#pageGroups + 1] = cur
-                cur = {k}
-                curW = bw
-            else
-                cur[#cur + 1] = k
-                curW = addW
+            local minW = font:getWidth(string.rep(" ", 24))
+            local maxW = font:getWidth(string.rep(" ", 44))
+            local columnW = math.max(minW, math.min(maxW, naturalW))
+            local availableW = math.max(columnW,
+                sw - PAD_X * 4 - POPUP_RIGHT_PAD - POPUP_SCROLLBAR_W - 8)
+            local columnCount = math.max(1,
+                math.floor((availableW + gutter) / (columnW + gutter))) as integer
+            columnCount = math.min(columnCount, #popup.semanticBlocks)
+            if popup.maxColumns > 0 then
+                columnCount = math.min(columnCount, popup.maxColumns)
             end
+            local rawColumns: {{string}} = {}
+            local heights: {integer} = {}
+            for ci = 1, columnCount do rawColumns[ci], heights[ci] = {}, 0 end
+            for bi = 1, #popup.semanticBlocks do
+                local shortest = 1
+                for ci = 2, columnCount do
+                    if heights[ci] < heights[shortest] then shortest = ci end
+                end
+                local out = rawColumns[shortest]
+                if #out > 0 then out[#out + 1] = "" end
+                local semantic = popup.semanticBlocks[bi]
+                for li = 1, #semantic do
+                    appendWrappedPopupLine(out, font, semantic[li], columnW)
+                end
+                heights[shortest] = #out
+            end
+            local columns: {PopupBlock} = {}
+            for ci = 1, columnCount do
+                columns[ci] = measurePopupBlock(font, gap, rawColumns[ci])
+            end
+            popup.columns = columns
+            popup.columnWidth = columnW
+            popup.columnGap = gutter
+            popup.block = columns[1]
+        else
+            local firstLine = popup.title and 1 or 2
+            local body = layoutPopupLines(font, sw, sourceLines, firstLine)
+            popup.block = measurePopupBlock(font, gap, body)
+            popup.columns = {popup.block}
+            popup.columnWidth = popup.block.width
+            popup.columnGap = 0
         end
-        if #cur > 0 then pageGroups[#pageGroups + 1] = cur end
-        popup.blocks = blocks
-        popup.pageGroups = pageGroups
     end
-    local blocks = popup.blocks
-    local pageGroups = popup.pageGroups
-    local pages = math.max(1, #pageGroups)
-    if popup.page < 0 then popup.page = 0 end
-    if popup.page >= pages then popup.page = pages - 1 end
-    local group = pageGroups[popup.page + 1] or EMPTY_GROUP
-
-    local header = popupLines[1]
-    if pages > 1 then
-        header = header .. format("   (page %d/%d  <- ->)", popup.page + 1, pages)
+    local columns = popup.columns
+    local header = popup.title or sourceLines[1]
+    local totalRows = 0
+    for ci = 1, #columns do totalRows = math.max(totalRows, #columns[ci].lines) end
+    local visibleRows = math.min(totalRows, rowCapacity)
+    local scrollable = totalRows > visibleRows
+    popup.scrollMax = math.max(0, totalRows - visibleRows)
+    popup.visibleRows = visibleRows
+    popup.scroll = math.max(0, math.min(popup.scroll, popup.scrollMax))
+    local firstRow = math.floor(popup.scroll) + 1
+    local lastRow = math.min(totalRows, firstRow + visibleRows - 1)
+    local scrollbarSpace = scrollable and (POPUP_SCROLLBAR_W + 8) or 0
+    local columnsW = #columns * popup.columnWidth
+        + math.max(0, #columns - 1) * popup.columnGap
+    local contentW = math.max(font:getWidth(header), columnsW)
+    local panelW = math.min(sw - PAD_X * 2,
+        contentW + PAD_X + POPUP_RIGHT_PAD + scrollbarSpace)
+    local panelH = lineH * (visibleRows + 1) + 8
+        + POPUP_CONTENT_PAD_TOP + POPUP_CONTENT_PAD_BOTTOM
+    popup.panelX, popup.panelY = PAD_X, py
+    popup.panelW, popup.panelH = panelW, panelH
+    if popup.modal then
+        lg.setColor(0.035, 0.018, 0.055, 0.76)
+        -- Dim the game view without partially covering the debugger's own
+        -- forward-rendered status text and command line.
+        lg.setScissor(0, 0, sw, math.max(0, sh - 1))
+        lg.rectangle("fill", 0, 0, sw, sh)
+        lg.setScissor()
     end
-
-    local contentW: number = font:getWidth(header)
-    local maxRows = 0
-    for gi = 1, #group do
-        local blk = blocks[group[gi]]
-        local groupW: number = 0
-        for gj = 1, gi do
-            groupW = groupW + blocks[group[gj]].width + ((gj > 1) and gutter or 0)
-        end
-        if groupW > contentW then contentW = groupW end
-        if #blk.lines > maxRows then maxRows = #blk.lines end
-    end
-    local panelW = contentW + PAD_X + 8
-    local panelH = lineH * (maxRows + 1) + 12
-    lg.setColor(0.09, 0.11, 0.14, 0.96)
+    lg.setColor(0.025, 0.012, 0.04, 0.75)
+    lg.rectangle("fill", PAD_X + 4, py + 5, panelW, panelH, 4, 4)
+    lg.setColor(POPUP_BG[1], POPUP_BG[2], POPUP_BG[3], POPUP_BG[4])
     lg.rectangle("fill", PAD_X, py, panelW, panelH, 4, 4)
+    lg.setColor(POPUP_ACCENT[1], POPUP_ACCENT[2], POPUP_ACCENT[3], 0.95)
+    lg.setLineWidth(1)
+    lg.rectangle("line", PAD_X, py, panelW, panelH, 4, 4)
+    if popup.title then
+        lg.setColor(0.17, 0.11, 0.23, 1)
+        lg.rectangle("fill", PAD_X + 1, py + 1, panelW - 2, lineH + 7, 4, 4)
+        lg.setColor(POPUP_ACCENT[1], POPUP_ACCENT[2], POPUP_ACCENT[3], 0.8)
+        lg.setLineWidth(2)
+        lg.line(PAD_X + 1, py + lineH + 8,
+            PAD_X + panelW - 1, py + lineH + 8)
+        if popup.closable then
+            local radius = 5
+            popup.closeX = PAD_X + panelW - POPUP_RIGHT_PAD
+            popup.closeY = py + 4 + lineH * 0.5
+            popup.closeRadius = radius + 3
+            lg.setColor(0.88, 0.24, 0.30, 1)
+            lg.circle("fill", popup.closeX, popup.closeY, radius)
+        else
+            popup.closeRadius = 0
+        end
+    end
     -- Thumbnail (screenshot info): scaled to fit under the panel.
     if popup.image then
         local iw = popup.image:getWidth()
@@ -331,188 +492,236 @@ local function drawPopup(popup: PopupState, font: lg.Font,
         if iw > 0 and ih > 0 and maxH > 24 then
             local scale = math.min(maxW / iw, maxH / ih, 1)
             local ty = py + panelH + 8
-            lg.setColor(0.09, 0.11, 0.14, 0.96)
+            lg.setColor(POPUP_BG[1], POPUP_BG[2], POPUP_BG[3], 0.98)
             lg.rectangle("fill", PAD_X, ty, iw * scale + 8, ih * scale + 8, 4, 4)
             lg.setColor(1, 1, 1, 1)
             lg.draw(popup.image, PAD_X + 4, ty + 4, 0, scale, scale)
-            lg.setColor(0.4, 0.8, 1.0, 0.9)
+            lg.setColor(POPUP_ACCENT[1], POPUP_ACCENT[2], POPUP_ACCENT[3], 0.9)
             lg.setLineWidth(1)
             lg.rectangle("line", PAD_X + 4, ty + 4, iw * scale, ih * scale)
         end
     end
-    lg.setColor(0.6549, 0.7529, 0.5020, 1)                 -- header (green)
+    if popup.title then
+        lg.setColor(DEBUG_TEXT[1], DEBUG_TEXT[2], DEBUG_TEXT[3], 1)
+    else
+        lg.setColor(POPUP_ACCENT[1], POPUP_ACCENT[2], POPUP_ACCENT[3], 1)
+    end
     lg.print(header, PAD_X * 2, py + 8)
 
-    local bx: number = PAD_X * 2
-    for gi = 1, #group do
-        local blk = blocks[group[gi]]
-        for i = 1, #blk.lines do
-            local yy = py + 8 + lineH * i
-            local line = blk.lines[i]
+    local bodyY = py + 8 + lineH + POPUP_CONTENT_PAD_TOP
+    local bodyH = visibleRows * lineH
+    lg.setScissor(PAD_X, bodyY, panelW, bodyH)
+    for ci = 1, #columns do
+        local col = columns[ci]
+        local bx = PAD_X * 2 + (ci - 1) * (popup.columnWidth + popup.columnGap)
+        local colLast = math.min(#col.lines, lastRow)
+        for i = firstRow, colLast do
+            local yy = bodyY + lineH * (i - firstRow)
+            local line = col.lines[i]
             if line == HRULE then
                 lg.setColor(0.35, 0.40, 0.46, 0.8)
                 lg.setLineWidth(1)
-                lg.line(bx, yy + lineH * 0.5, bx + blk.width, yy + lineH * 0.5)
+                lg.line(bx, yy + lineH * 0.5,
+                    bx + popup.columnWidth, yy + lineH * 0.5)
+            elseif popup.language == "lua" then
+                drawLuaLine(font, line, bx, yy)
             else
-                local br, bg, bb = 0.8275, 0.7765, 0.6667  -- content (tan)
+                local br, bg, bb = 0.8275, 0.7765, 0.6667
                 if line:sub(1, 1) ~= " " then
-                    br, bg, bb = 0.498, 0.733, 0.702       -- heading (aqua)
-                    -- Command-section headings ("Edit:") take the section's
-                    -- accent color, matching the strip.
-                    local accent = commands.SECTION_COLORS[line:match("^(%w+):")]
-                    if accent then
-                        br, bg, bb = accent[1], accent[2], accent[3]
-                    end
+                    br, bg, bb = POPUP_ACCENT[1], POPUP_ACCENT[2],
+                        POPUP_ACCENT[3]
                 end
-                local cols = blk.rows[i]
-                -- Blue the first (name) column of an indented
-                -- "name<tab>desc" line: parameter names, subcommand names,
-                -- mark names.
+                local cols = col.rows[i]
                 local nameCol = line:sub(1, 1) == " " and #cols > 1
                 for j = 1, #cols do
                     if nameCol and j == 1 then
-                        lg.setColor(0.45, 0.70, 1.0, 1)    -- name (blue)
+                        lg.setColor(0.45, 0.70, 1.0, 1)
                     else
                         lg.setColor(br, bg, bb, 1)
                     end
-                    lg.print(cols[j], bx + blk.colX[j], yy)
+                    lg.print(cols[j], bx + col.colX[j], yy)
                 end
             end
         end
-        bx = bx + blk.width + gutter
+    end
+    lg.setScissor()
+
+    if scrollable then
+        local trackX = PAD_X + panelW - POPUP_SCROLLBAR_W - 7
+        local trackY = bodyY + 2
+        local trackH = math.max(1, bodyH - 4)
+        local thumbH = math.max(18, trackH * visibleRows / totalRows)
+        local thumbTravel = math.max(0, trackH - thumbH)
+        local thumbY = trackY
+        if popup.scrollMax > 0 then
+            thumbY = trackY + thumbTravel * popup.scroll / popup.scrollMax
+        end
+        lg.setColor(0.20, 0.14, 0.27, 1)
+        lg.rectangle("fill", trackX, trackY, POPUP_SCROLLBAR_W, trackH, 3, 3)
+        lg.setColor(POPUP_ACCENT[1], POPUP_ACCENT[2], POPUP_ACCENT[3], 0.95)
+        lg.rectangle("fill", trackX, thumbY, POPUP_SCROLLBAR_W, thumbH, 3, 3)
     end
 end
 
--- Tab-cycle bar layout: display labels (section entries become padded pill
--- names), per-label widths, and x offsets. Built when completions are
--- assigned, so the per-frame draw only does scroll/highlight math.
-local function buildCompletionBar(popup: PopupState, completions: {string},
+-- Cache labels and widths for the completion grid. The flat
+-- completion indices remain authoritative for keyboard and mouse selection.
+local function buildCompletionGrid(popup: PopupState, completions: {string},
         font: lg.Font)
     local labels: {string} = {}
     local widths: {number} = {}
-    local groups: {CompletionGroup} = {}
-    local groupOf: {integer: integer} = {}
-    local currentGroup = 0
     for i = 1, #completions do
         local entry = completions[i]
         if entry:sub(1, 1) == SECTION_MARK then
-            local section = entry:sub(2)
-            labels[i] = section
-            currentGroup = currentGroup + 1
-            groups[currentGroup] = {name = section, first = i + 1, last = i}
-            groupOf[i] = currentGroup
+            labels[i] = entry:sub(2)
         else
             labels[i] = entry
-            if currentGroup == 0 then
-                currentGroup = 1
-                groups[1] = {name = "", first = i, last = i}
-            else
-                groups[currentGroup].last = i
-            end
-            groupOf[i] = currentGroup
         end
         widths[i] = font:getWidth(labels[i])
     end
     popup.barLabels = labels
     popup.barCompletions = completions
     popup.barWidths = widths
-    popup.barGroups = groups
-    popup.barGroupOf = groupOf
-    popup.barActiveGroup = (#groups > 0) and 1 or 0
     popup.barScroll = 0
     popup.barScrollForIndex = 0
-    popup.barHitKind = popup.barHitKind or {}
     popup.barHitValue = popup.barHitValue or {}
     popup.barHitX = popup.barHitX or {}
+    popup.barHitY = popup.barHitY or {}
     popup.barHitW = popup.barHitW or {}
+    popup.barHitH = popup.barHitH or {}
     popup.barHitCount = 0
 end
 
-local function addCompletionHit(popup: PopupState, kind: integer, value: integer,
-        x: number, width: number, sw: number)
+local function addCompletionHit(popup: PopupState, value: integer,
+        x: number, y: number, width: number, height: number,
+        sw: number, top: number, bottom: number)
     local left = math.max(0, x)
     local right = math.min(sw, x + width)
-    if right <= left then return end
+    local clippedTop = math.max(top, y)
+    local clippedBottom = math.min(bottom, y + height)
+    if right <= left or clippedBottom <= clippedTop then return end
     local n = popup.barHitCount + 1
     popup.barHitCount = n
-    popup.barHitKind[n] = kind
     popup.barHitValue[n] = value
     popup.barHitX[n] = left
+    popup.barHitY[n] = clippedTop
     popup.barHitW[n] = right - left
+    popup.barHitH[n] = clippedBottom - clippedTop
 end
 
--- Draw every section and command in one continuous strip. Section entries are
--- inline headers, never collapse controls. Hit indices still match Tab.
-local function drawCompletionBar(popup: PopupState, completions: {string},
-        font: lg.Font, completionIndex: integer, sw: number, rowH: number)
+-- Draw completions bottom-up over the status row. Section headings participate
+-- in the same continuous stream as their commands, so the stream wraps to the
+-- next column without reserving a column per section.
+local function drawCompletionGrid(popup: PopupState, completions: {string},
+        font: lg.Font, completionIndex: integer, sw: number,
+        panelBottom: number, hint: string)
     if not popup.barLabels or popup.barCompletions ~= completions then
-        buildCompletionBar(popup, completions, font)
+        buildCompletionGrid(popup, completions, font)
     end
     local labels = popup.barLabels
     local widths = popup.barWidths
-    local selectedGroup = popup.barGroupOf[completionIndex]
-    if selectedGroup then popup.barActiveGroup = selectedGroup end
-
-    popup.barHitCount = 0
-    local gap = 0
-    local pillPad = 12
+    local lineH = font:getHeight() + 4
+    local helpH = lineH + 2
+    local usable = math.max(lineH,
+        panelBottom - COMPLETION_PAD * 2 - helpH - 4)
+    local rows = math.max(1, math.min(COMPLETION_ROWS,
+        math.floor(usable / lineH)))
+    local gutter = font:getWidth("   ")
+    local itemPad = font:getWidth(" ")
     local selectedX: number = 0
     local selectedW: number = 0
-    local totalW: number = 0
-    for i = 1, #completions do
-        local isSection = completions[i]:sub(1, 1) == SECTION_MARK
-        local itemW = widths[i] + (isSection and pillPad or pillPad * 2)
-        if i == completionIndex then
-            selectedX = totalW
-            selectedW = itemW
+    local totalW: number = COMPLETION_PAD
+    local usedRows = 0
+
+    -- Measure columns and locate the selected item for scroll following.
+    local first = 1
+    while first <= #completions do
+        local last = math.min(#completions, first + rows - 1)
+        local columnW: number = 0
+        for i = first, last do
+            if widths[i] > columnW then columnW = widths[i] end
         end
-        totalW = totalW + itemW + gap
+        columnW = columnW + itemPad * 2
+        if completionIndex >= first and completionIndex <= last then
+            selectedX = totalW
+            selectedW = columnW
+        end
+        local count = last - first + 1
+        if count > usedRows then usedRows = count end
+        totalW = totalW + columnW + gutter
+        first = last + 1
     end
+    totalW = math.max(sw, totalW - gutter + COMPLETION_PAD)
     local maxScroll = math.max(0, totalW - sw)
     if popup.barScrollForIndex ~= completionIndex then
         local selectedRight = selectedX + selectedW
-        if selectedX < popup.barScroll then
-            popup.barScroll = selectedX
-        elseif selectedRight > popup.barScroll + sw then
-            popup.barScroll = selectedRight - sw
+        if selectedX < popup.barScroll + COMPLETION_PAD then
+            popup.barScroll = selectedX - COMPLETION_PAD
+        elseif selectedRight > popup.barScroll + sw - COMPLETION_PAD then
+            popup.barScroll = selectedRight - sw + COMPLETION_PAD
         end
         popup.barScrollForIndex = completionIndex
     end
     popup.barScroll = math.max(0, math.min(popup.barScroll, maxScroll))
-    local scrollX = popup.barScroll
-    lg.setScissor(0, 0, sw, rowH)
-    local x: number = -scrollX
-    for i = 1, #completions do
-        local isSection = completions[i]:sub(1, 1) == SECTION_MARK
-        local pillW = widths[i] + (isSection and pillPad or pillPad * 2)
-        if isSection then
-            local section = completions[i]:sub(2)
-            local accent = commands.SECTION_COLORS[section] or DEFAULT_PILL
-            lg.setColor(accent[1], accent[2], accent[3], 1)
-            lg.print(labels[i], x + pillPad / 2, PAD_Y)
-        else
-            if i == completionIndex then
-                lg.setColor(COMMAND_BAR[1], COMMAND_BAR[2],
-                    COMMAND_BAR[3], COMMAND_BAR[4])
-                lg.rectangle("fill", x, 0, pillW, rowH)
-                lg.setColor(0.8275, 0.7765, 0.6667, 1)
-                -- Forward alpha is required here: the MSDF edge must blend
-                -- over the green panel, not replace it in the G-buffer.
-                lg.print(labels[i], x + pillPad, PAD_Y)
+
+    local panelH = helpH + usedRows * lineH + COMPLETION_PAD
+    local panelTop = math.max(0, panelBottom - panelH)
+    popup.barTop = panelTop
+    popup.barBottom = panelBottom
+    popup.barHitCount = 0
+
+    lg.setColor(COMPLETION_BG[1], COMPLETION_BG[2],
+        COMPLETION_BG[3], COMPLETION_BG[4])
+    lg.rectangle("fill", 0, panelTop, sw, panelBottom - panelTop)
+    lg.setColor(TECS_PURPLE[1], TECS_PURPLE[2], TECS_PURPLE[3], 1)
+    lg.rectangle("fill", 0, panelTop, sw, helpH)
+    lg.setColor(0.86, 0.80, 0.95, 1)
+    lg.print(hint, COMPLETION_PAD, panelTop + 2)
+    local controls = "Tab next  Shift+Tab previous"
+    local controlsW = font:getWidth(controls)
+    if controlsW < sw * 0.45 then
+        lg.setColor(0.66, 0.60, 0.74, 1)
+        lg.print(controls, sw - controlsW - COMPLETION_PAD, panelTop + 2)
+    end
+
+    local gridTop = panelTop + helpH
+    local x = COMPLETION_PAD - popup.barScroll
+    -- A shape exactly on the clip's top edge is discarded by the GPU shape
+    -- clip path. Draw selection outside that clip so first-row candidates get
+    -- the same purple cell as every other row.
+    if completionIndex > 0 then
+        local selectedRow = (completionIndex - 1) % rows
+        lg.setColor(0.4784, 0.3412, 0.7608, 1)
+        lg.rectangle("fill", selectedX - popup.barScroll,
+            gridTop + selectedRow * lineH, selectedW, lineH)
+    end
+    lg.setScissor(0, gridTop, sw, panelBottom - gridTop)
+    first = 1
+    while first <= #completions do
+        local last = math.min(#completions, first + rows - 1)
+        local columnW: number = 0
+        for i = first, last do
+            if widths[i] > columnW then columnW = widths[i] end
+        end
+        columnW = columnW + itemPad * 2
+        for i = first, last do
+            local y = gridTop + (i - first) * lineH
+            local isSection = completions[i]:sub(1, 1) == SECTION_MARK
+            if isSection then
+                lg.setColor(POPUP_ACCENT[1], POPUP_ACCENT[2],
+                    POPUP_ACCENT[3], 1)
+            elseif i == completionIndex then
+                lg.setColor(0.96, 0.93, 1.0, 1)
             else
-                lg.setColor(BAR_GREEN[1], BAR_GREEN[2],
-                    BAR_GREEN[3], BAR_GREEN[4])
-                lg.print(labels[i], x + pillPad, PAD_Y)
+                lg.setColor(0.72, 0.66, 0.84, 1)
+            end
+            lg.print(labels[i], x + itemPad, y + 2)
+            if not isSection then
+                addCompletionHit(popup, i, x, y, columnW, lineH,
+                    sw, panelTop, panelBottom)
             end
         end
-        local hitLeft = math.max(x, 0)
-        local hitRight = math.min(x + pillW, sw)
-        if hitRight > hitLeft then
-            local kind = isSection and 2 or 1
-            local value = isSection and popup.barGroupOf[i] or i
-            addCompletionHit(popup, kind, value, hitLeft, hitRight - hitLeft, sw)
-        end
-        x = x + pillW + gap
+        x = x + columnW + gutter
+        first = last + 1
     end
     lg.setScissor()
 end
@@ -559,7 +768,7 @@ end
 -- world view starts a box-select drag (or a Ctrl-move of the selection),
 -- release commits it, right-click opens the menu (or cancels a move),
 -- middle-drag pans, and the wheel zooms toward the cursor. `view` is the
--- debugger's input layer; a press swallowed by the menu or on the toolbar
+-- debugger's input layer; a press swallowed by the menu or on the chrome
 -- rows never starts a drag (gesture.pressInView).
 local function handleMouseGestures(gesture: GestureState, menu: MenuState, popup: PopupState,
         ctx: debugcontext.Context, w: tecs.World, view: input.View,
@@ -744,7 +953,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
     -- reliably crisp UI scale; keep the chrome dense with padding, not by
     -- shrinking the glyph field below the atlas's useful reconstruction range.
     local overlayFont = lg.newFont(21)
-    local coordinateFont = lg.newFont(17)
+    local coordinateFont = lg.newFont(15)
     local labelSeen: {integer: boolean} = {}
     local wasTextInput = false
     local registry = core.ensure(w, {
@@ -767,13 +976,9 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
 
     -- UI-only state (not part of the shared context).
     local completions: {string} = {}
-    local rootCompletions: {string} = {}
     local completionBase = ""
     local completionIndex = 0
-    local barSelectionIndex = 0
-    local rootActiveGroup = 1
     local cycling = false
-    local cyclingRoot = false
     -- Tab and Backspace repeat after the same deliberate initial pause.
     local KEY_REPEAT_DELAY <const> = 0.35
     local KEY_REPEAT_INTERVAL <const> = 0.07
@@ -781,6 +986,9 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
     local tabRepeatIn = 0.0
     local backspaceHeldFor = 0.0
     local backspaceRepeatIn = 0.0
+    local popupArrowHeld = ""
+    local popupArrowHeldFor = 0.0
+    local popupArrowRepeatIn = 0.0
     local gesture: GestureState = {
         dragStartX = 0.0,
         dragStartY = 0.0,
@@ -796,11 +1004,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
         panLastY = 0.0,
     }
     local historyPos = 0
-    local popup: PopupState = {
-        lines = {},
-        shown = false,
-        page = 0,
-    }
+    local popup = Popup.new()
     -- Right-click context menu state.
     local menu: MenuState = {
         open = false, rows = {}, header = "",
@@ -911,10 +1115,11 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
 
     local function resetCompletions()
         cycling = false
-        cyclingRoot = false
         completionIndex = 0
         completions = {}
         completionBase = ""
+        popup.barTop = 0
+        popup.barBottom = 0
     end
 
     -- Wrapped command-line rows at the current window width, so long commands
@@ -925,12 +1130,25 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
         if popup.cmdRows and popup.cmdRowsText == ctx.command and popup.cmdRowsSw == sw then
             return popup.cmdRows
         end
-        local _, wrapped = overlayFont:getWrap("> " .. ctx.command, sw - PAD_X * 3)
-        if #wrapped == 0 then wrapped = {"> "} end
+        local _, wrapped = overlayFont:getWrap(":" .. ctx.command, sw - PAD_X * 3)
+        if #wrapped == 0 then wrapped = {":"} end
         popup.cmdRowsText = ctx.command
         popup.cmdRowsSw = sw
         popup.cmdRows = wrapped
         return wrapped
+    end
+
+    local function showPreviewHelp(helpCmd: commands.Command)
+        if popup.previewFor ~= helpCmd then
+            popup.previewFor = helpCmd
+            popup.previewLines = commands.usagePopup(helpCmd)
+            popup.previewBody = {}
+            for i = 2, #popup.previewLines do
+                popup.previewBody[#popup.previewBody + 1] = popup.previewLines[i]
+            end
+        end
+        showPopup(popup, popup.previewBody, true,
+            popup.previewLines[1], nil, nil, true)
     end
 
     local function executeCommand(text: string)
@@ -940,14 +1158,14 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
         end
         dismissPopup(popup)
         if result.popup then
-            showPopup(popup, result.popup)
+            local firstWord = text:match("^%s*(%S+)")
+            local modal = result.popupModal
+            if modal == nil then modal = firstWord == "help" end
+            showPopup(popup, result.popup, modal,
+                result.popupTitle, result.popupLanguage, result.popupBlocks,
+                result.popupClosable, result.popupImagePath,
+                result.popupMaxColumns)
             ctx.message = ""
-            if result.popupImagePath then
-                local ok, img = pcall(love.graphics.newImage, result.popupImagePath)
-                if ok then
-                    popup.image = img as love.graphics.Image
-                end
-            end
         end
         if result.message ~= nil then
             ctx.message = result.message
@@ -1107,10 +1325,6 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
         ctx.command = ""
         historyPos = 0
         resetCompletions()
-        completionBase, rootCompletions = registry:complete("")
-        buildCompletionBar(popup, rootCompletions, overlayFont)
-        barSelectionIndex = 0
-        rootActiveGroup = 1
         dismissPopup(popup)
         ctx.message = ""
         if not captureLayer:isActive() then
@@ -1126,7 +1340,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
     local function doClose()
         closeMenu()
         ctx.open = false
-        releasePopupImage(popup)
+        popup:dismiss()
         love.keyboard.setTextInput(wasTextInput)
         if captureLayer:isActive() then
             input.popLayer(captureLayer)
@@ -1186,7 +1400,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 else
                     doOpen()
                     if registry.profiler.session then
-                        showPopup(popup, registry:finishProfile())
+                        showPopup(popup, registry:finishProfile(), false)
                     end
                 end
             end
@@ -1197,7 +1411,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 local profPopup = registry.profileResult
                 registry.profileResult = nil
                 if not ctx.open then doOpen() end
-                showPopup(popup, profPopup)
+                showPopup(popup, profPopup, false)
             end
 
             -- Commands invoked over MCP may raise signals while the panel is
@@ -1326,28 +1540,13 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             end
             if tabStep and not menuTookInput then
                 ctx.message = ""
-                dismissPopup(popup)
+                local followHelp = popup.shown
+                    and popup.lines == popup.previewBody
+                if not followHelp then dismissPopup(popup) end
                 local backward = reader().isKeyDown("lshift") or reader().isKeyDown("rshift")
                 if not cycling then
-                    cyclingRoot = ctx.command == ""
                     completionBase, completions = registry:complete(ctx.command)
                     completionIndex = 0
-                    -- On an empty line, start the cycle at the last used
-                    -- command (whichever direction) so Tab-Enter repeats
-                    -- recent work.
-                    if ctx.command == "" then
-                        local hist = registry.history
-                        local last = hist[#hist]
-                        local firstWord = last and last:match("^(%S+)")
-                        if firstWord then
-                            for ci = 1, #completions do
-                                if completions[ci] == firstWord then
-                                    completionIndex = backward and (ci + 1) or (ci - 1)
-                                    break
-                                end
-                            end
-                        end
-                    end
                     cycling = true
                 end
                 if #completions > 0 then
@@ -1362,39 +1561,89 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                         end
                     until completions[completionIndex]:sub(1, 1) ~= SECTION_MARK
                     ctx.command = completionBase .. completions[completionIndex]
-                    if cyclingRoot then
-                        for bi = 1, #rootCompletions do
-                            if rootCompletions[bi] == completions[completionIndex] then
-                                barSelectionIndex = bi
-                                popup.barActiveGroup = popup.barGroupOf[bi]
-                                    or popup.barActiveGroup
-                                rootActiveGroup = popup.barActiveGroup
-                                break
-                            end
+                    if followHelp then
+                        popup.lastCommandLine = ctx.command
+                        local previewWord = ctx.command:match("^(%S+)")
+                        popup.previewCmd = previewWord and registry.byName[previewWord]
+                        if popup.previewCmd then
+                            showPreviewHelp(popup.previewCmd)
+                        else
+                            dismissPopup(popup)
                         end
                     end
                 end
             end
-            -- Up/Down browse the command history (persisted by the registry).
+            -- A visible popup owns navigation through the debugger input
+            -- layer. Up/Down repeat independently of the OS key-repeat rate;
+            -- Page Up/Down move one viewport and Home/End jump absolutely.
             local history = registry.history
-            if not menuTookInput and reader().isKeyPressed("up") and #history > 0 then
-                if historyPos < #history then historyPos = historyPos + 1 end
-                ctx.command = history[#history - historyPos + 1]
-                ctx.message = ""
-                dismissPopup(popup)
-                resetCompletions()
-            end
-            if not menuTookInput and reader().isKeyPressed("down") then
-                if historyPos > 0 then historyPos = historyPos - 1 end
-                ctx.command = (historyPos == 0) and "" or history[#history - historyPos + 1]
-                ctx.message = ""
-                dismissPopup(popup)
-                resetCompletions()
-            end
-            -- Left/Right page a multi-page popup (does not dismiss it).
-            if popup.shown then
-                if reader().isKeyPressed("left") then popup.page = popup.page - 1 end
-                if reader().isKeyPressed("right") then popup.page = popup.page + 1 end
+            if popup.shown and not menuTookInput then
+                local held = ""
+                if reader().isKeyDown("up") then
+                    held = "up"
+                elseif reader().isKeyDown("down") then
+                    held = "down"
+                end
+                local heldChanged = held ~= popupArrowHeld
+                if heldChanged then
+                    popupArrowHeld = held
+                    popupArrowHeldFor = 0
+                    popupArrowRepeatIn = 0
+                end
+                -- The transition supplies the first step; subsequent steps
+                -- come only from this timer, so OS repeat events cannot make
+                -- scrolling run at a platform-dependent double rate.
+                local arrowStep = held ~= "" and heldChanged
+                if held ~= "" then
+                    popupArrowHeldFor = popupArrowHeldFor + frameDt
+                    if not arrowStep and popupArrowHeldFor >= KEY_REPEAT_DELAY then
+                        popupArrowRepeatIn = popupArrowRepeatIn - frameDt
+                        if popupArrowRepeatIn <= 0 then
+                            arrowStep = true
+                            popupArrowRepeatIn = KEY_REPEAT_INTERVAL
+                        end
+                    end
+                else
+                    popupArrowHeldFor = 0
+                    popupArrowRepeatIn = 0
+                end
+
+                local pageRows = math.max(1, popup.visibleRows)
+                if reader().isKeyPressed("home") then
+                    popup.scroll = 0
+                elseif reader().isKeyPressed("end") then
+                    popup.scroll = popup.scrollMax
+                elseif reader().isKeyPressed("pageup") then
+                    popup.scroll = math.max(0, popup.scroll - pageRows)
+                elseif reader().isKeyPressed("pagedown") then
+                    popup.scroll = math.min(popup.scrollMax,
+                        popup.scroll + pageRows)
+                elseif arrowStep then
+                    local direction = (held == "up") and -1 or 1
+                    popup.scroll = math.max(0, math.min(popup.scrollMax,
+                        popup.scroll + direction))
+                end
+            else
+                popupArrowHeld = ""
+                popupArrowHeldFor = 0
+                popupArrowRepeatIn = 0
+                -- Without a popup, Up/Down browse persisted history.
+                if not menuTookInput and reader().isKeyPressed("up")
+                    and #history > 0 then
+                    if historyPos < #history then historyPos = historyPos + 1 end
+                    ctx.command = history[#history - historyPos + 1]
+                    ctx.message = ""
+                    dismissPopup(popup)
+                    resetCompletions()
+                end
+                if not menuTookInput and reader().isKeyPressed("down") then
+                    if historyPos > 0 then historyPos = historyPos - 1 end
+                    ctx.command = (historyPos == 0) and ""
+                        or history[#history - historyPos + 1]
+                    ctx.message = ""
+                    dismissPopup(popup)
+                    resetCompletions()
+                end
             end
             -- Enter runs the line once; an empty line is a no-op so mashing
             -- Enter after a command cannot re-run anything.
@@ -1419,14 +1668,10 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             if not menuTookInput and reader().isKeyPressed("f1") then
                 local helpCmd = popup.previewCmd
                 if helpCmd then
-                    if popup.previewFor ~= helpCmd then
-                        popup.previewFor = helpCmd
-                        popup.previewLines = commands.usagePopup(helpCmd)
-                    end
-                    if popup.shown and popup.lines == popup.previewLines then
+                    if popup.shown and popup.lines == popup.previewBody then
                         dismissPopup(popup)
                     else
-                        showPopup(popup, popup.previewLines)
+                        showPreviewHelp(helpCmd)
                     end
                 elseif popup.shown then
                     dismissPopup(popup)
@@ -1441,59 +1686,70 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 return
             end
 
-            -- Mouse. The top menu is always mounted; its command groups only
-            -- expand while cycling. Command and group tabs are clickable using
-            -- hit rectangles captured by the previous draw pass.
+            -- Mouse. The status and command rows occupy the bottom edge;
+            -- while cycling, the completion grid replaces the status row and
+            -- grows upward from the command row.
+            -- Hit rectangles come from the previous draw pass.
             local ifh = overlayFont:getHeight()
-            local completionBarH = ifh + PAD_Y * 2
-            local barsHeight = completionBarH + (ifh + PAD_Y * 2) +
+            local cmdBarH = ifh + PAD_Y * 2 +
                 (#commandLineRows(lg.getWidth()) - 1) * ifh
-            local infoH = coordinateFont:getHeight() + INFO_PAD_Y * 2
-            local infoW = coordinateFont:getWidth(coordinateLabel(ctx)) + INFO_PAD_X * 2
-            local infoX = math.max(0, lg.getWidth() - infoW)
-            local infoY = lg.getHeight() - infoH
-            local inInfo = input.mouseX >= infoX and input.mouseY >= infoY
-            local inView = ctx.mouseScreenY > barsHeight and not inInfo
-            local completionTakeover = cycling and not cyclingRoot and #completions > 0
-            local visibleCompletions = completionTakeover and completions or rootCompletions
-            local visibleIndex = completionTakeover and completionIndex or barSelectionIndex
+            local contextH = coordinateFont:getHeight() + INFO_PAD_Y * 2
+            local contextY = lg.getHeight() - cmdBarH - contextH
+            local chromeTop = contextY
+            local completionVisible = cycling and #completions > 0
+                and not (popup.shown and popup.modal)
+            if completionVisible and popup.barTop > 0 then
+                chromeTop = popup.barTop
+            end
+            local inView = ctx.mouseScreenY < chromeTop
+                and not (popup.shown and popup.modal)
 
-            -- Wheel over the completion row scrolls its active command group
-            -- horizontally. Wheel over either debugger row is consumed and
-            -- never reaches the camera zoom path.
-            local _, barWheelY = reader().getMouseWheelMovement()
-            if not menu.open and #visibleCompletions > 0 and input.mouseY >= 0
-                and input.mouseY <= completionBarH and barWheelY ~= 0 then
-                popup.barScroll = popup.barScroll - barWheelY * 120
-                popup.barScrollForIndex = visibleIndex
+            -- A closable popup's title control owns its press. Swallow the
+            -- gesture through release so closing cannot begin a world drag.
+            if not menu.open and reader().isMousePressed(1)
+                    and popup:pressClose(input.mouseX, input.mouseY) then
+                menu.swallow = true
+                inView = false
             end
 
-            if not menu.open and #visibleCompletions > 0 and reader().isMousePressed(1)
-                and input.mouseY >= 0 and input.mouseY <= completionBarH then
+            -- A modal popup owns the wheel anywhere; ordinary command-output
+            -- popups own it while hovered. Both consume it before completion
+            -- scrolling or camera zoom beneath the debugger.
+            local _, wheelY = reader().getMouseWheelMovement()
+            local overPopup = popup.shown and (popup.modal
+                or (input.mouseX >= popup.panelX
+                    and input.mouseX <= popup.panelX + popup.panelW
+                    and input.mouseY >= popup.panelY
+                    and input.mouseY <= popup.panelY + popup.panelH))
+            if not menu.open and overPopup and wheelY ~= 0 then
+                popup.scroll = math.max(0, math.min(popup.scrollMax,
+                    popup.scroll - wheelY * POPUP_SCROLL_ROWS))
+                inView = false
+            -- Wheel over the completion grid scrolls its columns horizontally
+            -- and never reaches camera zoom.
+            elseif not menu.open and completionVisible
+                and input.mouseY >= popup.barTop
+                and input.mouseY <= popup.barBottom and wheelY ~= 0 then
+                popup.barScroll = popup.barScroll - wheelY * 120
+                popup.barScrollForIndex = completionIndex
+                inView = false
+            end
+
+            if not menu.open and completionVisible
+                and reader().isMousePressed(1)
+                and input.mouseY >= popup.barTop
+                and input.mouseY <= popup.barBottom then
                 for hi = 1, popup.barHitCount do
                     local hx = popup.barHitX[hi]
-                    if input.mouseX >= hx and input.mouseX <= hx + popup.barHitW[hi] then
-                        if completionTakeover then
-                            completionIndex = popup.barHitValue[hi]
-                            if completions[completionIndex] then
-                                ctx.command = completionBase .. completions[completionIndex]
-                                ctx.message = ""
-                                dismissPopup(popup)
-                            end
-                        elseif popup.barHitKind[hi] == 1 then
-                            barSelectionIndex = popup.barHitValue[hi]
-                        else
-                            popup.barActiveGroup = popup.barHitValue[hi]
-                            rootActiveGroup = popup.barActiveGroup
-                            local group = popup.barGroups[popup.barActiveGroup]
-                            barSelectionIndex = group and group.first or barSelectionIndex
-                        end
-                        if not completionTakeover and rootCompletions[barSelectionIndex]
-                            and rootCompletions[barSelectionIndex]:sub(1, 1) ~= SECTION_MARK then
-                            ctx.command = rootCompletions[barSelectionIndex]
+                    local hy = popup.barHitY[hi]
+                    if input.mouseX >= hx and input.mouseX <= hx + popup.barHitW[hi]
+                        and input.mouseY >= hy
+                        and input.mouseY <= hy + popup.barHitH[hi] then
+                        completionIndex = popup.barHitValue[hi]
+                        if completions[completionIndex] then
+                            ctx.command = completionBase .. completions[completionIndex]
                             ctx.message = ""
                             dismissPopup(popup)
-                            resetCompletions()
                         end
                         break
                     end
@@ -1618,11 +1874,11 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 lg.rectangle("line", rx, ry, math.abs(x2 - x1), math.abs(y2 - y1))
             end
 
-            -- Highlight every selected entity.
+            -- Selection membership is independent of its visualization. Only
+            -- visible markers are submitted, and MarkerBatch draws them in a
+            -- single mesh without consuming one tool-world entity per mark.
             if pipeline and #ctx.selected > 0 then
                 local cam = pipeline:getCamera()
-                lg.setColor(1.0, 0.85, 0.2, 1)
-                lg.setLineWidth(2)
                 for i = 1, #ctx.selected do
                     local sid = ctx.selected[i]
                     if w:isAlive(sid) then
@@ -1630,11 +1886,10 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                         if t then
                             local sx, sy = cam:toScreen(t.x, t.y)
                             local r = 14
-                            lg.rectangle("line", sx - r, sy - r, r * 2, r * 2)
-                            lg.line(sx, sy - r - 6, sx, sy - r)
-                            lg.line(sx, sy + r, sx, sy + r + 6)
-                            lg.line(sx - r - 6, sy, sx - r, sy)
-                            lg.line(sx + r, sy, sx + r + 6, sy)
+                            if sx >= -20 and sx <= sw + 20
+                                    and sy >= -20 and sy <= lg.getHeight() + 20 then
+                                if not lg.selectionMarker(sx, sy, r) then break end
+                            end
                         end
                     end
                 end
@@ -1671,81 +1926,99 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 end
             end
 
-            -- Permanently mounted top menu. Non-root completion candidates
-            -- temporarily take it over, matching keyboard Tab completion.
-            local completionBarH = rowH
-            lg.setColor(TECS_PURPLE[1], TECS_PURPLE[2],
-                TECS_PURPLE[3], TECS_PURPLE[4])
-            lg.rectangle("fill", 0, 0, sw, rowH)
-            local completionTakeover = cycling and not cyclingRoot and #completions > 0
-            local visibleCompletions = completionTakeover and completions or rootCompletions
-            local visibleIndex = completionTakeover and completionIndex or barSelectionIndex
-            if #visibleCompletions > 0 then
-                if popup.barCompletions ~= visibleCompletions then
-                    buildCompletionBar(popup, visibleCompletions, overlayFont)
-                    if not completionTakeover then popup.barActiveGroup = rootActiveGroup end
-                end
-                drawCompletionBar(popup, visibleCompletions, overlayFont,
-                    visibleIndex, sw, rowH)
-            end
-
-            -- Command line (below completions, flush): bg #2e373c, text #d3c6aa.
-            -- Long commands wrap onto extra rows instead of running off screen.
+            -- Helix-style bottom chrome: context above, command line below.
+            -- Completions replace context while cycling and grow upward in
+            -- columns from the command line.
             local cmdLines = commandLineRows(sw)
             local cmdBarH = rowH + (#cmdLines - 1) * fh
-            lg.setColor(0.1804, 0.2157, 0.2353, 1)
-            lg.rectangle("fill", 0, completionBarH, sw, cmdBarH)
+            local contextH = coordinateFont:getHeight() + INFO_PAD_Y * 2
+            local commandY = lg.getHeight() - cmdBarH
+            local contextY = commandY - contextH
+
+            local helpModal = popup.shown and popup.modal
+            if cycling and #completions > 0 and not helpModal then
+                local completionHint = "completion"
+                if popup.previewCmd then
+                    completionHint = popup.previewCmd.shortHelp
+                end
+                lg.setFont(coordinateFont)
+                drawCompletionGrid(popup, completions, coordinateFont,
+                    completionIndex, sw, commandY, completionHint)
+                lg.setFont(overlayFont)
+            end
+
+            -- Context row: mode/selection at left and pointer/camera
+            -- coordinates at right. Completion mode covers this row.
+            if not cycling or #completions == 0 or helpModal then
+                local badge = "DEBUG"
+                local badgeW = coordinateFont:getWidth(badge) + INFO_PAD_X * 2
+                -- The two status surfaces meet at badgeW without overlap.
+                -- Overlapping opaque GPU rectangles could leave the badge
+                -- behind the context row until another popup changed shape
+                -- registration order.
+                lg.setColor(DEBUG_BG[1], DEBUG_BG[2], DEBUG_BG[3], 1)
+                lg.rectangle("fill", 0, contextY, badgeW, contextH)
+                lg.setColor(CONTEXT_BG[1], CONTEXT_BG[2], CONTEXT_BG[3], 1)
+                lg.rectangle("fill", badgeW, contextY, sw - badgeW, contextH)
+                local coords = coordinateLabel(ctx)
+                local coordsW = coordinateFont:getWidth(coords) + INFO_PAD_X * 2
+                lg.setFont(coordinateFont)
+                lg.setScissor(0, contextY, math.max(0, sw - coordsW), contextH)
+                local statusTail = format("  %s  selected %d",
+                    ctx.frozen and "paused" or "live", #ctx.selected)
+                local status = badge .. statusTail
+                local showTail = coordinateFont:getWidth(status)
+                    + INFO_PAD_X * 2 <= sw - coordsW
+                local statusTextY = contextY
+                lg.setColor(DEBUG_TEXT[1], DEBUG_TEXT[2], DEBUG_TEXT[3], 1)
+                lg.print(badge, INFO_PAD_X - 2, statusTextY + 2)
+                if showTail then
+                    lg.setColor(0.72, 0.66, 0.84, 1)
+                    lg.print(statusTail, badgeW, statusTextY)
+                end
+                if ctx.message ~= "" then
+                    local statusW = showTail and
+                        (badgeW + coordinateFont:getWidth(statusTail)) or badgeW
+                    local messageX = INFO_PAD_X + statusW + INFO_PAD_X * 3
+                    if messageX < sw - coordsW then
+                        lg.setColor(0.66, 0.60, 0.74, 1)
+                        lg.print(ctx.message, messageX, statusTextY)
+                    end
+                end
+                lg.setScissor()
+                lg.setColor(0.8275, 0.7765, 0.6667, 1)
+                lg.print(coords, sw - coordinateFont:getWidth(coords)
+                    - INFO_PAD_X, statusTextY)
+            end
+
+            -- Long commands wrap upward within the bottom command row.
+            lg.setFont(overlayFont)
+            lg.setColor(COMMAND_BAR[1], COMMAND_BAR[2],
+                COMMAND_BAR[3], COMMAND_BAR[4])
+            lg.rectangle("fill", 0, commandY, sw, cmdBarH)
             lg.setColor(0.8275, 0.7765, 0.6667, 1)
             for i = 1, #cmdLines do
-                lg.print(cmdLines[i], PAD_X, completionBarH + PAD_Y + (i - 1) * fh)
+                lg.print(cmdLines[i], PAD_X, commandY + PAD_Y + (i - 1) * fh)
             end
             -- Tall block cursor at the end of the last wrapped row.
             local cursorX = PAD_X + overlayFont:getWidth(cmdLines[#cmdLines])
-            local cursorY = completionBarH + PAD_Y + (#cmdLines - 1) * fh
+            local cursorY = commandY + PAD_Y + (#cmdLines - 1) * fh
             local blockW = overlayFont:getWidth("0")
             lg.rectangle("fill", cursorX + 1, cursorY, blockW, fh)
-            -- Status line: outcomes take priority; otherwise show compact
-            -- contextual help. F1 opens the full generated usage on demand.
-            local hint = ctx.message
-            if hint == "" then
-                if popup.previewCmd then
-                    hint = popup.previewCmd.shortHelp .. "  [F1 details]"
-                else
-                    hint = "[F1 help]"
-                end
-            end
-            if hint ~= "" and #cmdLines == 1 then
-                lg.setColor(0.522, 0.573, 0.537, 1)
-                lg.print(hint, cursorX + blockW + PAD_X * 2, cursorY)
-            end
-
-            -- Popup panel below the command line; Left/Right page through
-            -- the column groups.
-            if popup.shown and #popup.lines > 0 then
-                drawPopup(popup, overlayFont, sw, lg.getHeight(),
-                    completionBarH + cmdBarH + 10)
-            end
-
-            -- Pointer and camera coordinates live in a compact command-bar
-            -- colored panel at the bottom-right. FPS and entity count are no
-            -- longer part of the debugger chrome.
-            local coords = coordinateLabel(ctx)
-            lg.setColor(0.8275, 0.7765, 0.6667, 1)
-            lg.setFont(coordinateFont)
-            lg.fitText(coords, sw, lg.getHeight(), INFO_PAD_X, INFO_PAD_Y,
-                COORDINATE_BG, nil, 1, 1)
 
             -- Context menu: dark panel, header row, hover/keyboard highlight.
             if menu.open then
                 local mfh = overlayFont:getHeight()
                 local totalH = menu.rowH * (#menu.rows + 1) + 8
                 lg.setFont(overlayFont)
-                lg.setColor(0.09, 0.11, 0.14, 0.97)
+                lg.setColor(POPUP_BG[1], POPUP_BG[2], POPUP_BG[3], 0.98)
                 lg.rectangle("fill", menu.x, menu.y, menu.w, totalH, 4, 4)
-                lg.setColor(0.35, 0.42, 0.30, 1)
+                lg.setColor(POPUP_ACCENT[1], POPUP_ACCENT[2],
+                    POPUP_ACCENT[3], 0.75)
                 lg.setLineWidth(1)
                 lg.rectangle("line", menu.x, menu.y, menu.w, totalH, 4, 4)
-                lg.setColor(0.6549, 0.7529, 0.5020, 1)
+                lg.setColor(POPUP_ACCENT[1], POPUP_ACCENT[2],
+                    POPUP_ACCENT[3], 1)
                 lg.print(menu.header, menu.x + 12, menu.y + 6)
                 for i = 1, #menu.rows do
                     local ry = menu.y + menu.rowH * i + 4
@@ -1756,6 +2029,12 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                     lg.setColor(0.8275, 0.7765, 0.6667, 1)
                     lg.print(menu.rows[i].label, menu.x + 12, ry + (menu.rowH - mfh) / 2)
                 end
+            end
+
+            -- Command output/help draws last. F1/help popups add a scrim, so
+            -- their contracts remain legible above menus, chrome, and game UI.
+            if popup.shown and (#popup.lines > 0 or popup.title) then
+                drawPopup(popup, overlayFont, sw, contextY, PAD_X)
             end
 
             lg.pop()

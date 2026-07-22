@@ -67,6 +67,7 @@ function toolworld.install(world: tecs.World)
             local dt = now - state.lastTime
             state.lastTime = now
             state.world:update(dt)
+            debugdraw.drawBatches(state.view)
             if #state.view.entities > 0 then
                 state.pipeline:render()
             end

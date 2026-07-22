@@ -8,6 +8,7 @@ local tecs <const> = require("tecs")
 local gfx <const> = require("tecs2d.gfx")
 local bmfont <const> = require("tecs2d.gfx.bmfont")
 local ui <const> = require("tecs2d.ui")
+local MarkerBatch <const> = require("tecs2d.debug.internal.MarkerBatch")
 local bit <const> = require("bit")
 
 local Transform <const> = tecs.builtins.Transform
@@ -44,6 +45,7 @@ local record DebugView
     lineWidth: number
     clip: {number}
     z: number
+    markers: MarkerBatch
 end
 
 local active: DebugView = nil
@@ -68,6 +70,8 @@ local record debugdraw
     rectangle: function(mode: string, x: number, y: number, width: number, height: number, rx?: number, ry?: number)
     line: function(x1: number, y1: number, x2: number, y2: number)
     circle: function(mode: string, x: number, y: number, radius: number)
+    selectionMarker: function(x: number, y: number, radius: number): boolean
+    drawBatches: function(view: DebugView)
     fitText: function(
         value: any,
         x: number,
@@ -232,6 +236,7 @@ function debugdraw.newView(world: tecs.World): DebugView
         lineWidth = 1,
         clip = nil,
         z = 0,
+        markers = MarkerBatch.new(),
     }
 end
 
@@ -248,6 +253,7 @@ function debugdraw.beginFrame(view: DebugView)
     view.clip = nil
     view.z = 0
     view.fitCount = 0
+    view.markers:clear()
 end
 
 function debugdraw.endFrame()
@@ -358,6 +364,14 @@ end
 function debugdraw.circle(mode: string, x: number, y: number, radius: number)
     spawn({Transform(x, y, depth(), 1), gfx.Circle(radius, mode == "line" and view().lineWidth or 0),
         ui.LayoutBox(gfx.Circle, nil, 0.5, 0.5), color()})
+end
+
+function debugdraw.selectionMarker(x: number, y: number, radius: number): boolean
+    return view().markers:add(x, y, radius)
+end
+
+function debugdraw.drawBatches(v: DebugView)
+    v.markers:draw()
 end
 
 --- Draw a text-backed panel whose render rectangle is sized by the UI system.

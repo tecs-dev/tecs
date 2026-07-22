@@ -52,7 +52,10 @@ function entityinfo.serializeRow(archetype: tecs.Archetype, compList: {tecs.Comp
     local components: {string: any} = {}
     for i = 1, #compList do
         local comp = compList[i]
-        if comp.componentName and comp.serialize then
+        local compAny = comp as {string: any}
+        if comp.componentName and compAny.storageType == "tag" then
+            components[comp.componentName] = true
+        elseif comp.componentName and comp.serialize then
             local column = archetype:get(comp) as {any}
             local instance = column and column[row]
             if instance ~= nil then

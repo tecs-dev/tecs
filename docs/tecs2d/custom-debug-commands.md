@@ -187,6 +187,12 @@ Every action returns `commands.Result`:
 | `message` | Both | Short status line; MCP includes it with the structured payload |
 | `data` | MCP and callers | Canonical structured result object |
 | `popup` | Overlay | Multi-line detail shown in the debugger |
+| `popupTitle` | Overlay | Optional title rendered in a distinct header band |
+| `popupLanguage` | Overlay | Optional lightweight syntax mode, currently `lua` |
+| `popupBlocks` | Overlay | Optional semantic blocks packed into fitting columns; `popup` remains the copy/yank form |
+| `popupModal` | Overlay | Dim the game and give the popup exclusive navigation input |
+| `popupClosable` | Overlay | Show a clickable red close control in a titled popup |
+| `popupMaxColumns` | Overlay | Cap the responsive semantic-block column count |
 | `popupImagePath` | Overlay | Save-directory image displayed with the popup |
 
 Return useful facts in `data`, even when the popup already displays them. MCP
@@ -207,8 +213,8 @@ run = function(v: {string: any}, _parts: {string}): commands.Result
     return {
         ok = true,
         message = report.ok and "encounter valid" or "encounter has errors",
+        popupTitle = "encounter " .. tostring(v.name),
         popup = {
-            "encounter " .. tostring(v.name),
             "  enemies\t" .. tostring(report.enemies),
             "  errors\t" .. tostring(#report.errors),
         },
@@ -380,4 +386,3 @@ use the parsed `v` values and must not depend on `parts`.
 
 See [Runtime introspection](./introspection) for the human-agent workflow and
 [MCP tools](./mcp/tools#command-tools) for projected tool behavior.
-
