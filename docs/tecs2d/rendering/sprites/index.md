@@ -12,10 +12,9 @@ performance.
 
 ```teal
 local assets = require("tecs2d.assets")
-local manager = world.resources[assets]
 
 -- Load sprite sheet (async, returns handle, caches asset)
-local handle = manager:loadSpriteSheet("player.png")
+local handle = assets.loadSpriteSheet("player.png")
 
 -- Create sprite from loaded sheet
 world:spawn(
@@ -32,10 +31,9 @@ Use [`loadSpriteSheet`](/tecs2d/assets/api#loadspritesheet) for async loading wi
 
 ```teal
 local assets = require("tecs2d.assets")
-local manager = world.resources[assets]
 
 -- Load sprite sheet (async, returns handle)
-local handle = manager:loadSpriteSheet("player.png")
+local handle = assets.loadSpriteSheet("player.png")
 
 -- Spawn a Sprite and pass in option configuration
 world:spawn(
@@ -135,7 +133,7 @@ Sprites work with [styling components](../styling):
 | Component                               | Description                                            |
 | --------------------------------------- | ------------------------------------------------------ |
 | [`Color`](../styling#color)             | RGBA tint applied to the sprite                        |
-| [`BlendMode`](../styling#blendmode)     | Controls pixel blending (add, multiply, etc.)          |
+| [Blend tags](../styling#blend-modes)    | Controls pixel blending (add, multiply, etc.)          |
 | [`Unlit`](../styling#unlit)             | Skip dynamic lighting (use for UI sprites)             |
 | [`Pivot`](../styling#pivot)             | Custom origin point (overrides `pivotSlice` option)    |
 | [`Material`](../materials)              | Per-entity GPU shader effects (dissolve, glow, etc.)   |

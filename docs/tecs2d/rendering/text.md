@@ -180,9 +180,8 @@ local assets = require("tecs2d.assets")
 world:addSystem({
     phase = tecs.phases.Startup,
     run = function()
-        local manager = world.resources[assets]
-        manager:loadBMFont("fonts/pixel.fnt"):pin()
-        manager:loadBMFont("fonts/title.fnt"):pin()
+        assets.pin(assets.loadBMFont("fonts/pixel.fnt"))
+        assets.pin(assets.loadBMFont("fonts/title.fnt"))
     end,
 })
 ```
@@ -274,7 +273,7 @@ Text works with these [styling components](/tecs2d/rendering/styling):
 - [Color](/tecs2d/rendering/styling#color) - Tint the text
 - [Pivot](/tecs2d/rendering/styling#pivot) - Change the origin point
 - [Unlit](/tecs2d/rendering/styling#unlit) - Skip dynamic lighting for UI text
-- [BlendMode](/tecs2d/rendering/styling#blendmode) - Control blending
+- [Blend tags](/tecs2d/rendering/styling#blend-modes) - Control blending
 - [Material](/tecs2d/rendering/materials) - Per-entity GPU shader effects
 - [TextEffects](#text-effects-msdf-only) - Outline, glow, drop shadow (MSDF only)
 

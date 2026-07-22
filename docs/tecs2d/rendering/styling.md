@@ -128,8 +128,8 @@ blend mode, the renderer can batch them into a single draw call without state ch
 
 ### Using Blend Modes
 
-Blend modes are **mutually exclusive**: adding a blend component automatically removes any existing blend
-component from the entity.
+Blend modes are **mutually exclusive**: adding a blend tag automatically removes any other blend tag
+from the entity.
 
 **Adding a blend mode** when spawning:
 
@@ -142,7 +142,7 @@ world:spawn(
 )
 ```
 
-**Changing a blend mode** on an existing entity (the old blend component is removed automatically):
+**Changing a blend mode** on an existing entity:
 
 ```teal
 world:set(id, blend.MultiplyBlend())
@@ -155,9 +155,9 @@ world:remove(id, blend.MultiplyBlend)
 ```
 
 ::: warning Materials
-Blend mode components are **not compatible with [Materials](./materials)**. Materials render through
+Blend tags are **not compatible with [Materials](./materials)**. Materials render through
 the deferred G-buffer pipeline, while blend modes use a forward pass after lighting. Entities with
-both a Material and a blend mode component will not render.
+both a Material and a blend tag will not render.
 :::
 
 ## Unlit

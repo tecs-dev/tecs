@@ -471,18 +471,6 @@ function tileChunk.plugin(world: tecs.World)
         return layerIndex
     end
 
-    -- Keep registerTileset accessible on the renderer for backwards compatibility
-    gpuRenderer.registerTileset = function(
-        _self: gpuTypes.Renderer,
-        tileset: love.graphics.Texture,
-        normalMap: love.graphics.Texture,
-        emissionMap: love.graphics.Texture,
-        ormMap: love.graphics.Texture,
-        occluderHeights: {integer: number}
-    ): integer
-        return registerTileset(tileset, normalMap, emissionMap, ormMap, occluderHeights)
-    end
-
     -- Register tilechunk render plugin.
     gpuRenderer:registerPlugin(renderplugin.create({
         renderShader = tileChunkRenderShader,

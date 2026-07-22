@@ -249,9 +249,8 @@ local tecs = require("tecs")
 local gfx = require("tecs2d.gfx")
 local assets = require("tecs2d.assets")
 
--- Load Aseprite sprite sheet (.png + .json) via asset manager
-local manager = world.resources[assets]
-local sheetHandle = manager:loadSpriteSheet("player.png")
+-- Load Aseprite sprite sheet (.png + .json) through the process cache
+local sheetHandle = assets.loadSpriteSheet("player.png")
 
 -- Spawn animated entity (.value blocks until loaded)
 local entity = world:spawn(
@@ -369,6 +368,7 @@ end
 - [Controllers](/tecs2d/input/controller/) - rebindable keyboard and gamepad
 - [UI layout](/tecs2d/rendering/ui/) - boxes, nodes, scrolling, auto-sizing
 - [Assets](/tecs2d/assets/) - async loading with thread pool
+- [Worker jobs](/tecs2d/workers) - typed background jobs with composable handles
 
 </div>
 <div class="feature-group">

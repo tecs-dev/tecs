@@ -119,6 +119,37 @@ The secondary world is otherwise a normal Tecs world. It can install plugins,
 define components, run systems, use UI layout, and render all standard Tecs2D
 drawable components.
 
+## Loading screens
+
+A loading world is useful when the alternative is adding loading-state predicates to gameplay systems. Suspend the
+gameplay world instead:
+
+```teal
+local suspension <const> = require("tecs2d.suspension")
+
+suspension.suspend(gameWorld, "assets.loading")
+-- Create and explicitly update a small secondary UI world.
+-- After its LoadBatch completes and its final frame is composited:
+suspension.resume(gameWorld, "assets.loading")
+```
+
+See [World suspension](/tecs2d/suspension) for suspension ownership and phase semantics.
+
+Suspension disables gameplay phases from `First` through `Last`, but leaves render phases active. Each feature owns an
+independent suspension claim, so the loading screen cannot resume a world that the debugger or MCP also suspended.
+`tecs2d.run` updates the process-global worker queue outside world phases, so asset loading continues while the gameplay
+world is suspended.
+
+Do not pass the suspended world's scaled `dt` to the loading world—it is zero. Measure real time for the secondary world,
+clamp large deltas, and update it explicitly in `RenderLast` before calling its pipeline's `render()`. Share the runtime
+services through the global `tecs2d.assets` and `tecs2d.workers` facades. Neither world owns those services, and a
+secondary world must not replace or shut down the runtime manager or queue.
+
+On completion, render the loading world's final frame, shut that world down to release its pipeline, then release the
+loading suspension. On application shutdown, shut down the secondary world before the primary world finishes shutdown.
+The [assets example](https://github.com/tecs-dev/tecs/tree/main/examples/assets) implements this complete pattern with
+normal Tecs UI components and a `LoadBatch`.
+
 ## How compositing works
 
 Each secondary pipeline renders a complete image independently before blending
@@ -233,6 +264,7 @@ and skip `render()` when the output is not visible or has not changed.
 - Queries, relationships, physics, lighting, and depth never cross worlds.
 - Cross-world communication must be explicit through copied data, events, or
   an application-owned bridge.
+- Process services may be shared by reference, but must have exactly one update and shutdown owner.
 - A secondary pipeline must be shut down by shutting down its world.
 - `sharedWith` is fixed at pipeline creation; there is no attach/detach API.
 - `sizeHints` are initial capacities, not enforced GPU-memory budgets.
@@ -255,4 +287,3 @@ The [debug plugin](/tecs2d/debug) uses this design directly:
 This makes the debugger a consumer of the same public rendering and UI
 facilities used by games while keeping all of its mutable state outside the
 game world.
-

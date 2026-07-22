@@ -256,10 +256,10 @@ local record snapshot
         --- from the current registration.
         readColumnValue: function(self: Reader, colIdx: integer, world: World): Component
 
-        --- Row-major mode only (sparse archetypes). Returns one entity row
-        --- as `(id, comp1, comp2, ...)` matching the legacy shape. `nil` id
-        --- signals end of archetype.
-        readEntity: function(self: Reader): integer, Component...
+        --- Row-major mode only (sparse archetypes). The returned row and its
+        --- component array are reused by the reader and remain valid only
+        --- until the next call. Nil signals the end of the archetype.
+        readRow: function(self: Reader): EntityRow
 
         --- Read the next (key, value) pair from the snapshot's data section.
         --- Returns (nil, nil) when the section ends. `loadSnapshot` calls
@@ -271,6 +271,12 @@ local record snapshot
         --- Paired with `Writer.writeEnd`: readers that skipped over trailing
         --- custom content in `nextArchetype` can surface or seek past it here.
         readEnd: function(self: Reader)
+    end
+
+    record EntityRow
+        id: integer
+        components: {Component}
+        count: integer
     end
 
     record ArchetypeEntry
@@ -1103,17 +1109,18 @@ local function loadColumnMajor(
 end
 
 -- Row-major fallback for sparse-bearing archetypes. Per-entity spawnAt
--- so setSparse fires correctly. readEntity consumes buffer bytes
+-- so setSparse fires correctly. readRow consumes buffer bytes
 -- eagerly, so the whole archetype stages under one scope and drains
 -- once instead of paying a full transaction per entity.
 local function loadRowMajor(world: World, reader: snapshot.Reader)
-    local function applyOne(id: integer, ...: Component): boolean
-        if id == nil then return false end
-        world:spawnAt(id, ...)
-        return true
-    end
     world:defer()
-    while applyOne(reader:readEntity()) do end
+    while true do
+        local row = reader:readRow()
+        if not row then break end
+        world:spawnAt(row.id,
+            (table.unpack as function({Component}, integer, integer): Component...)(
+                row.components, 1, row.count))
+    end
     world:commit()
 end
 
@@ -1499,7 +1506,7 @@ local record TableReaderImpl is snapshot.Reader
     _byName: {string: Component}
     _world: World
     _currentTypes: {Component}     -- resolved once per archetype
-    _compsScratch: {Component}     -- reused across readEntity calls
+    _rowScratch: snapshot.EntityRow
 end
 
 local TABLE_READER_MT <const>: metatable<TableReaderImpl> = {__index = TableReaderImpl}
@@ -1566,7 +1573,7 @@ function TableReaderImpl:schemaMatchesForColumn(_colIdx: integer): boolean
     return true
 end
 
-function TableReaderImpl:readEntity(): integer, Component...
+function TableReaderImpl:readRow(): snapshot.EntityRow
     local archs = self._snap.archetypes as {snapshot.ArchetypeEntry}
     local archIdx = self._archCursor
     if archIdx == 0 or archIdx > #archs then return nil end
@@ -1576,11 +1583,9 @@ function TableReaderImpl:readEntity(): integer, Component...
     self._entityCursor = idx
     local entry = entities[idx]
 
-    local comps = self._compsScratch
-    if not comps then
-        comps = {}
-        self._compsScratch = comps
-    end
+    local row = self._rowScratch
+    if not row then row = {components = {}}; self._rowScratch = row end
+    local comps = row.components
     local id, width = expandEntry(entry, self._currentTypes, comps, self._world)
     if not id then return nil end
     local packed = 0
@@ -1594,7 +1599,9 @@ function TableReaderImpl:readEntity(): integer, Component...
     for i = packed + 1, width do
         comps[i] = nil
     end
-    return id, (table.unpack as function({Component}, integer, integer): Component...)(comps, 1, packed)
+    row.id = id
+    row.count = packed
+    return row
 end
 
 function TableReaderImpl:nextData(): string, any
@@ -1809,7 +1816,7 @@ local record BufferReaderImpl is snapshot.Reader
     _currentMode: integer
     _archRemaining: integer              -- entities left to read in row-major mode
     _archetypesRemaining: integer        -- archetype frames still to consume in the buffer
-    _compsScratch: {Component}
+    _rowScratch: snapshot.EntityRow
 end
 
 local BUFFER_READER_MT <const>: metatable<BufferReaderImpl> = {__index = BufferReaderImpl}
@@ -1970,7 +1977,7 @@ function BufferReaderImpl:readColumnValue(colIdx: integer, world: World): Compon
     return self:_decodeOne(colIdx, world)
 end
 
-function BufferReaderImpl:readEntity(): integer, Component...
+function BufferReaderImpl:readRow(): snapshot.EntityRow
     if self._archRemaining <= 0 then return nil end
     self._archRemaining = self._archRemaining - 1
     local buf = self._buf
@@ -1979,8 +1986,9 @@ function BufferReaderImpl:readEntity(): integer, Component...
     local mask = decode(buf) as number
     local compTypes = self._currentTypes
     local width = #compTypes
-    local comps = self._compsScratch
-    if not comps then comps = {}; self._compsScratch = comps end
+    local row = self._rowScratch
+    if not row then row = {components = {}}; self._rowScratch = row end
+    local comps = row.components
     for i = 1, width do
         local p = POW2[i]
         if mask % (p + p) >= p then
@@ -2000,7 +2008,9 @@ function BufferReaderImpl:readEntity(): integer, Component...
     for i = packed + 1, width do
         comps[i] = nil
     end
-    return id, (table.unpack as function({Component}, integer, integer): Component...)(comps, 1, packed)
+    row.id = id
+    row.count = packed
+    return row
 end
 
 function BufferReaderImpl:nextData(): string, any

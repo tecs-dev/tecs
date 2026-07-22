@@ -71,7 +71,7 @@ TileChunks use a mix of ECS components and built-in properties for styling:
 | Specular    | `specularMap` property (RGB=intensity, A=shininess)                         |
 
 ::: details Limited styling support
-TileChunks do not support per-entity `Unlit`, `BlendMode`, or `Material` components.
+TileChunks do not support per-entity `Unlit`, blend tags, or `Material` components.
 These features are configured at the layer level instead, because chunks are batched
 together for efficient rendering.
 :::
@@ -110,4 +110,3 @@ The chunk size is fixed because GPU shader structs require fixed field counts at
 granularity for tilemaps. Making this configurable would require shader variants or storing tile IDs in a separate
 buffer with indirection.
 :::
-

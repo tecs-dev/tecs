@@ -12,6 +12,7 @@ local inputtape <const> = require("tecs2d.debug.internal.inputtape")
 local contextreport <const> = require("tecs2d.debug.internal.contextreport")
 local cmdargs <const> = require("tecs2d.debug.internal.cmdargs")
 local cmdtypes <const> = require("tecs2d.debug.internal.cmdtypes")
+local assets_module <const> = require("tecs2d.assets")
 
 local format <const> = string.format
 
@@ -173,7 +174,7 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     physics = pluginInstalled("tecs2d.physics"),
                     tilemaps = tilemapCount,
                     controllers = pluginInstalled("tecs2d.controller"),
-                    assets = pluginInstalled("tecs2d.assets"),
+                    assets = assets_module.manager ~= nil,
                     audio = pluginInstalled("tecs2d.audio"),
                     recorder = env.recorder ~= nil,
                 }
@@ -220,15 +221,15 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 required = {"frozen"},
             },
             run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                local fz = env.freeze
+                local fz = env.suspension
                 local want = v.on as boolean
                 if want == nil then want = not fz:heldBy("operator") end
                 if want then
-                    fz:acquire("operator")
+                    fz:suspend("operator")
                 else
-                    fz:release("operator")
+                    fz:resume("operator")
                 end
-                local frozen = fz:isFrozen()
+                local frozen = fz:isSuspended()
                 local msg: string
                 if want then
                     msg = "frozen"
@@ -280,7 +281,7 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 if dtArg ~= nil and dtArg <= 0 then
                     return {ok = false, code = "bad_dt", message = "step: dt must be > 0"}
                 end
-                if not env.freeze:isFrozen() then
+                if not env.suspension:isSuspended() then
                     return {ok = false, code = "not_frozen", message = "step: not frozen"}
                 end
 
@@ -300,8 +301,8 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     data.queued = queued
                 end
 
-                env.freeze.stepDt = dtArg
-                local ok, err = env.freeze:step(n)
+                env.suspension.stepDt = dtArg
+                local ok, err = env.suspension:step(n)
                 if not ok then
                     return {ok = false, code = "not_frozen", message = "step: " .. err}
                 end
@@ -326,7 +327,7 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 local code = v.lua as string
                 local perFrameCode = v.per_frame as string
                 if code ~= nil or perFrameCode ~= nil or v.wait == true then
-                    local fz = env.freeze
+                    local fz = env.suspension
                     local evalFn = w.resources[mcpinfo.LUA_EVAL]
                     if (code ~= nil or perFrameCode ~= nil) and evalFn == nil then
                         return {ok = false, code = "lua_unavailable",

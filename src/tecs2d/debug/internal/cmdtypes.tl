@@ -8,7 +8,7 @@ local profile <const> = require("tecs.utils.profile")
 local gfxtypes <const> = require("tecs2d.gfx.types")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
 local recording <const> = require("tecs2d.debug.internal.recording")
-local freeze <const> = require("tecs2d.debug.internal.freeze")
+local suspension <const> = require("tecs2d.internal.suspension")
 local annotations <const> = require("tecs2d.debug.internal.annotations")
 local cmdargs <const> = require("tecs2d.debug.internal.cmdargs")
 
@@ -43,7 +43,7 @@ local record cmdtypes
         world: tecs.World
         ctx: debugcontext.Context
         recorder: recording.Controller
-        freeze: freeze.Controller
+        suspension: suspension.Controller
         annotations: annotations.Store
         keys: Keys
     end

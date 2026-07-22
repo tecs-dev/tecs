@@ -16,6 +16,7 @@ local systemcontrol <const> = require("tecs2d.internal.systemcontrol")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
 local cmdargs <const> = require("tecs2d.debug.internal.cmdargs")
 local cmdtypes <const> = require("tecs2d.debug.internal.cmdtypes")
+local assets_module <const> = require("tecs2d.assets")
 
 local format <const> = string.format
 
@@ -171,7 +172,7 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
     end
 
     local function assetManager(): {string: any}
-        return pluginResource("tecs2d.assets") as {string: any}
+        return assets_module.manager as {string: any}
     end
 
     -- Sorted asset keys, optionally filtered by a plain substring. Reads the
@@ -207,8 +208,8 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
         local logged = logTable and logTable[key] as {string: any}
         local cache = mgr._cache as {string: any}
         local handle = cache and cache[key] as {string: any}
-        local action = logged and logged.action or (handle and handle._action) or "(custom)"
-        local path = logged and logged.path or (handle and handle._path) or key
+        local action = logged and logged.action or "(custom)"
+        local path = logged and logged.path or key
         local status = logged and (logged.status as string) or nil
         if handle and (status == nil or status == "custom") then
             status = "loaded"
@@ -220,25 +221,6 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
         end
         return {key = key, action = action, path = path,
             status = status or "unknown", cached = handle ~= nil}
-    end
-
-    -- Re-queue a cached handle's original worker request under its own id,
-    -- so completion swaps the loaded value in place and re-fires
-    -- HandleComplete. Handles from custom :load() loaders have no worker
-    -- request to replay; those return false.
-    local function reloadAssetHandle(mgrAny: {string: any}, handle: {string: any}): boolean
-        if not handle then return false end
-        local args = handle._args as {any}
-        local id = handle.id as integer
-        local push = mgrAny._pushChannel as love.thread.Channel
-        if not args or not id or not push then return false end
-        local tasks = mgrAny._runningTasks as {integer: any}
-        if tasks[id] then return false end   -- already loading; nothing to do
-        tasks[id] = handle
-        mgrAny._runningCount = ((mgrAny._runningCount as integer) or 0) + 1
-        handle.isComplete = false
-        push:push(args)
-        return true
     end
 
     -- Systems listing and control shared by the `systems` verbs.
@@ -950,13 +932,13 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                                 message = "assets reload: nothing cached matching '" .. wanted .. "'"}
                         end
                         local mgr = assetManager()
-                        local cache = mgr._cache as {string: any}
                         local assetLog = mgr._assetLog as {string: {string: any}}
                         local reloaded: {string} = {}
                         local skipped = 0
                         for i = 1, #keys do
                             local key = keys[i]
-                            if reloadAssetHandle(mgr, cache[key] as {string: any}) then
+                            local reload = mgr._reload as function(any, string): any
+                            if reload and reload(mgr, key) then
                                 reloaded[#reloaded + 1] = key
                                 local logged = assetLog and assetLog[key]
                                 if logged then logged.status = "loading" end
@@ -966,14 +948,13 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         end
                         if #reloaded == 0 then
                             return {ok = false, code = "not_reloadable",
-                                message = "assets reload: no live handle to re-queue (the game" ..
-                                    " dropped its handles, or the loader is custom)"}
+                                message = "assets reload: no built-in request metadata matched"}
                         end
                         debugcontext.pushEvent(ctx, "edit", {assetsReloaded = #reloaded})
                         return {ok = true,
                             message = "reloading " .. tostring(#reloaded) .. " asset(s)" ..
                                 ((skipped > 0) and (", skipped " .. tostring(skipped)) or "") ..
-                                "; handles refresh in place when the load settles",
+                                "; future asset lookups use the refreshed handles",
                             data = {reloaded = reloaded, skipped = skipped}}
                     end,
                 },

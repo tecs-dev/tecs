@@ -1518,11 +1518,11 @@ function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(worl
                             end
 
                             local entityId = entities[i] as integer
-                            if sprite_collision.setupCollision(
+                            if sprite_collision.setupFixtures(
                                 world,
                                 entityId,
                                 sheetVal,
-                                sc as sprite_collision.Config,
+                                sc,
                                 lp
                             ) then
                                 sc._setupComplete = true

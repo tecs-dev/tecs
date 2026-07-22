@@ -17,6 +17,9 @@ local RunTest: RunTestComp = tecs.newComponent({
     },
 })
 
+local assetUpdates = 0
+local assetShutdowns = 0
+
 local function installTecs2dStubs()
     package.loaded["tecs2d"] = nil
     local escapePressed = false
@@ -46,9 +49,16 @@ local function installTecs2dStubs()
         end,
     }
     package.loaded["tecs2d.assets"] = {
-        new = function(_root: string): any
+        new = function(_root: string, _queue: any): any
             return {
-                update = function() end,
+                shutdown = function() assetShutdowns = assetShutdowns + 1 end,
+            }
+        end,
+    }
+    package.loaded["tecs2d.workers"] = {
+        new = function(): any
+            return {
+                update = function() assetUpdates = assetUpdates + 1 end,
                 shutdown = function() end,
             }
         end,
@@ -117,6 +127,8 @@ describe("tecs2d.run hotReload", function()
     local modtimes: {string: number}
 
     before_each(function()
+        assetUpdates = 0
+        assetShutdowns = 0
         files = {}
         modtimes = {}
         makeFilesystem(files, modtimes)
@@ -152,6 +164,7 @@ describe("tecs2d.run hotReload", function()
         package.loaded["tecs2d.internal.handlers"] = nil
         package.loaded["tecs2d.gfx"] = nil
         package.loaded["tecs2d.assets"] = nil
+        package.loaded["tecs2d.workers"] = nil
         package.loaded["tecs2d.audio"] = nil
         package.loaded["tecs2d.controller"] = nil
         package.loaded["tecs2d.tween"] = nil
@@ -253,6 +266,7 @@ describe("tecs2d.run hotReload", function()
         luassert.is_nil(loop())
         luassert.equals("restart", loop())
         luassert.is_true(shutdownCalled)
+        luassert.equals(1, assetShutdowns)
         luassert.is_string(files[".tecs-hot-reload.snapshot"])
     end)
 
@@ -354,5 +368,21 @@ describe("tecs2d.run hotReload", function()
         inputStub.setEscapePressed(false)
         luassert.equals(0, loop())
         luassert.is_true(shutdownCalled)
+        luassert.equals(1, assetShutdowns)
+    end)
+
+    it("polls runtime workers when the world's First phase is disabled", function()
+        local tecs2d = require("tecs2d")
+        local runner = tecs2d.run({
+            fps = 60,
+            game = function(world: tecs.World)
+                world:disablePhase(tecs.phases.First)
+            end,
+            render = {},
+        })
+        local loop = runner()
+
+        luassert.is_nil(loop())
+        luassert.equals(1, assetUpdates)
     end)
 end)

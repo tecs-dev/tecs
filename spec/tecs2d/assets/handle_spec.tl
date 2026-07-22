@@ -5,25 +5,27 @@ local love2d_mock <const> = require("spec.love2d.love2d_mock")
 rawset(_G, "love", love2d_mock)
 
 local assets <const> = require("tecs2d.assets")
+local workers <const> = require("tecs2d.workers")
 local luassert <const> = require("luassert")
 
-describe("tecs2d.assets.Handle", function()
+describe("asset handles", function()
     local manager: assets.AssetManager
-    -- Each AssetManager owns its own result channel (named
-    -- "tecs2d.assets.result.<id>") so multiple managers don't steal each
-    -- other's worker results. Fetch the manager's channel directly instead
-    -- of the old hard-coded "resultchannel" name.
+    local queue: workers.Queue
+    -- Each worker queue owns a uniquely named result channel, so independent
+    -- queues cannot steal each other's results.
     local resultChannel: love.thread.Channel
 
     before_each(function()
-        manager = assets.new("assets")
-        resultChannel = ((manager as {string: any})._pullChannel) as love.thread.Channel
+        queue = workers.new()
+        manager = assets.new("assets", queue)
+        resultChannel = ((queue as {string: any})._pullChannel) as love.thread.Channel
     end)
 
     after_each(function()
         if manager then
             manager:shutdown()
         end
+        if queue then queue:shutdown() end
     end)
 
     describe("handle", function()
@@ -33,7 +35,7 @@ describe("tecs2d.assets.Handle", function()
 
             -- Simulate completion by pushing result to the channel
             resultChannel:push({1, {getDimensions = function() return 64, 64 end}, nil})
-            manager:update()
+            queue:update()
 
             local handledResult: {string: any} = nil
             local handled = imageHandle:handle(function(value: any, err: any): {string: any}
@@ -41,7 +43,7 @@ describe("tecs2d.assets.Handle", function()
             end)
 
             -- The handle callback should have run
-            manager:update()
+            queue:update()
             luassert.is_true(handled.isComplete)
             handledResult = handled.value
             luassert.is_true(handledResult.gotValue)
@@ -53,13 +55,13 @@ describe("tecs2d.assets.Handle", function()
 
             -- Simulate failure
             resultChannel:push({1, nil, "File not found"})
-            manager:update()
+            queue:update()
 
             local handled = imageHandle:handle(function(value: any, err: any): {string: any}
                 return { gotValue = value, gotErr = err }
             end)
 
-            manager:update()
+            queue:update()
             luassert.is_true(handled.isComplete)
             local result = handled.value
             luassert.is_nil(result.gotValue)
@@ -71,7 +73,7 @@ describe("tecs2d.assets.Handle", function()
 
             -- Simulate failure
             resultChannel:push({1, nil, "File not found"})
-            manager:update()
+            queue:update()
 
             local handled = imageHandle:handle(function(_value: any, err: any): string
                 if err then
@@ -80,15 +82,15 @@ describe("tecs2d.assets.Handle", function()
                 return "loaded"
             end)
 
-            manager:update()
+            queue:update()
             luassert.is_true(handled.isComplete)
             luassert.equals("default", handled.value)
         end)
     end)
 
-    describe("handleAll", function()
+    describe("workers.all", function()
         it("transforms empty handles", function()
-            local result = manager:handleAll({}, function(_values: {string}): string
+            local result = queue:all({} as {workers.Handle<string>}):map(function(_values: {string}): string
                 return "empty"
             end)
             luassert.is_true(result.isComplete)
@@ -100,7 +102,7 @@ describe("tecs2d.assets.Handle", function()
             local handle2 = manager:loadFile("b.txt")
             local handle3 = manager:loadFile("c.txt")
 
-            local result = manager:handleAll({handle1, handle2, handle3}, function(values: {string}): integer
+            local result = queue:all({handle1, handle2, handle3}):map(function(values: {string}): integer
                 return #values
             end)
 
@@ -109,17 +111,17 @@ describe("tecs2d.assets.Handle", function()
 
             -- Complete first handle
             resultChannel:push({1, "a", nil})
-            manager:update()
+            queue:update()
             luassert.is_false(result.isComplete)
 
             -- Complete second handle
             resultChannel:push({2, "b", nil})
-            manager:update()
+            queue:update()
             luassert.is_false(result.isComplete)
 
             -- Complete third handle
             resultChannel:push({3, "c", nil})
-            manager:update()
+            queue:update()
 
             -- Now should be complete
             luassert.is_true(result.isComplete)
@@ -130,7 +132,7 @@ describe("tecs2d.assets.Handle", function()
             local handle1 = manager:loadFile("good.txt")
             local handle2 = manager:loadFile("bad.txt")
 
-            local result = manager:handleAll({handle1, handle2}, function(values: {string}): string
+            local result = queue:all({handle1, handle2}):map(function(values: {string}): string
                 return table.concat(values, ",")
             end)
 
@@ -138,8 +140,8 @@ describe("tecs2d.assets.Handle", function()
             resultChannel:push({1, "good", nil})
             -- Second fails
             resultChannel:push({2, nil, "File not found"})
-            manager:update()
-            manager:update()
+            queue:update()
+            queue:update()
 
             luassert.is_true(result.isComplete)
             luassert.equals("File not found", result.err)
@@ -150,17 +152,17 @@ describe("tecs2d.assets.Handle", function()
             local handle2 = manager:loadFile("second.txt")
             local handle3 = manager:loadFile("third.txt")
 
-            local result = manager:handleAll({handle1, handle2, handle3}, function(values: {string}): string
+            local result = queue:all({handle1, handle2, handle3}):map(function(values: {string}): string
                 return values[1] .. "," .. values[2] .. "," .. values[3]
             end)
 
             -- Complete out of order: 3, 1, 2
             resultChannel:push({3, "third", nil})
-            manager:update()
+            queue:update()
             resultChannel:push({1, "first", nil})
-            manager:update()
+            queue:update()
             resultChannel:push({2, "second", nil})
-            manager:update()
+            queue:update()
 
             luassert.is_true(result.isComplete)
             luassert.equals("first,second,third", result.value)
@@ -170,14 +172,14 @@ describe("tecs2d.assets.Handle", function()
             local handle1 = manager:loadFile("a.txt")
             local handle2 = manager:loadFile("b.txt")
 
-            local result = manager:handleAll({handle1, handle2}, function(values: {string}): {string: string}
+            local result = queue:all({handle1, handle2}):map(function(values: {string}): {string: string}
                 return { first = values[1], second = values[2] }
             end)
 
             resultChannel:push({1, "alpha", nil})
             resultChannel:push({2, "beta", nil})
-            manager:update()
-            manager:update()
+            queue:update()
+            queue:update()
 
             luassert.is_true(result.isComplete)
             luassert.equals("alpha", result.value.first)
@@ -197,7 +199,7 @@ describe("tecs2d.assets.Handle", function()
 
             -- Simulate failure
             resultChannel:push({1, nil, "File not found"})
-            manager:update()
+            queue:update()
 
             luassert.is_true(mapped.isComplete)
             luassert.is_false(transformCalled)
@@ -212,7 +214,7 @@ describe("tecs2d.assets.Handle", function()
             end)
 
             resultChannel:push({1, nil, "Some error"})
-            manager:update()
+            queue:update()
 
             luassert.is_true(mapped.isComplete)
             luassert.equals("Some error", mapped.err)

@@ -1,5 +1,5 @@
-local tecs <const> = require("tecs")
 local types <const> = require("tecs2d.assets.types")
+local workers <const> = require("tecs2d.workers")
 local sprite_sheet <const> = require("tecs2d.gfx.internal.sprite.sheet")
 local sheet <const> = require("tecs2d.gfx.sheet")
 local bmfont <const> = require("tecs2d.gfx.bmfont")
@@ -9,1042 +9,586 @@ local tiled_types <const> = require("tecs2d.tiled.types")
 
 local LOGGER <const> = require("tecs.utils.logging").getLogger("tecs2d.assets")
 
+local type Handle = workers.Handle
 
--- Worker code is loaded lazily when AssetManager is first created. Example
--- builds symlink build/tecs2d/assets/internal to build/internal so
--- love.filesystem can read internal/worker.lua at runtime.
-local WORKER_CODE: string = nil
-local WORKER_PATH <const> = "internal/worker.lua"
-
-local function getWorkerCode(): string
-    if WORKER_CODE then
-        return WORKER_CODE
-    end
-
-    WORKER_CODE = love.filesystem.read(WORKER_PATH)
-    if not WORKER_CODE then
-        error("Could not load assets worker from '" .. WORKER_PATH .. "'. " ..
-              "Copy build/tecs2d/assets/internal/worker.lua to your game's internal/ folder.")
-    end
-    return WORKER_CODE
+local record Request
+    path: string
+    sourceType: love.audio.SourceType
+    streamType: string
 end
 
+local JOB_MODULE <const> = "tecs2d.assets.internal.jobs"
+local LOAD_FILE <const> = workers.newJob(JOB_MODULE, "loadFile") as workers.Job<Request, string>
+local LOAD_FILE_DATA <const> = workers.newJob(JOB_MODULE, "loadFileData") as workers.Job<Request, love.filesystem.FileData>
+local LOAD_IMAGE <const> = workers.newJob(JOB_MODULE, "loadImage") as workers.Job<Request, love.image.ImageData>
+local LOAD_IMAGE_FONT <const> = workers.newJob(JOB_MODULE, "loadImageFont") as workers.Job<Request, love.image.ImageData>
+local LOAD_FONT <const> = workers.newJob(JOB_MODULE, "loadFont") as workers.Job<Request, string>
+local LOAD_AUDIO <const> = workers.newJob(JOB_MODULE, "loadAudio") as workers.Job<Request, love.audio.Source>
+local LOAD_SHADER <const> = workers.newJob(JOB_MODULE, "loadShader") as workers.Job<Request, string>
+local LOAD_VIDEO <const> = workers.newJob(JOB_MODULE, "loadVideo") as workers.Job<Request, string>
+local LOAD_COMPRESSED <const> = workers.newJob(JOB_MODULE, "loadCompressedImage") as workers.Job<Request, love.image.CompressedImageData>
+local LOAD_JSON <const> = workers.newJob(JOB_MODULE, "loadJson") as workers.Job<Request, any>
 
---- A module for asynchronously loading assets in threads for Love2D games.
----
---- Assets are loaded in a thread pool based on the number of CPU cores.
---- The thread-pool is capped at 4 threads.
 local record threaded
-
-    --- An asset manager used to asynchronously load assets in threads.
     record AssetLogEntry
         action: string
         path: string
-        -- "loading" | "loaded" | "failed: <err>" | "custom"
         status: string
     end
 
     record AssetManager is types.AssetManager
         _root: string
-        _dispatcher: tecs.MessageBus
-        _nextId: integer
-        _pushChannel: love.thread.Channel
-        _pullChannel: love.thread.Channel
-        _runningTasks: {integer: Handle<any>}
-        _threads: {love.thread.Thread}
+        _queue: workers.Queue
         _cache: {string: Handle<any>}
         _pinnedHandles: {Handle<any>}
+        _pinnedSet: {Handle<any>: boolean}
+        _descriptors: {Handle<any>: types.AssetDescriptor}
+        _requests: {string: types.AssetDescriptor}
+        _loaderRegistry: {types.AssetHandler<any>: function(string): Handle<any>}
+        _assetLog: {string: AssetLogEntry}
         _runningCount: integer
         _completedCount: integer
-        -- Maps handler objects to loader functions
-        _loaderRegistry: {types.AssetHandler<any>: function(string): Handle<any>}
-        _hasEmittedInitialLoad: boolean
-        _hasCalledUpdate: boolean
-        _getNextId: function(self): integer
-        -- Strong, append-only record of every load keyed like _cache, for
-        -- introspection (the debugger's `assets` command). _cache is
-        -- weak-valued, so entries there vanish once nothing holds the
-        -- handle; this log is what "everything this game has loaded" means.
-        _assetLog: {string: AssetLogEntry}
+        _errors: {string}
+        _closed: boolean
+
+        _reload: function(self, cacheKey: string): Handle<any>
     end
 
-    --- Event emitted when the initial load completes.
-    record InitialLoadComplete is tecs.Event
-        metamethod __call: function(self): InitialLoadComplete
-    end
-
-    --- Event emitted when a handle completes loading.
-    record HandleComplete is tecs.Event
-        handle: Handle<any>
-        metamethod __call: function(self, handle: Handle<any>): HandleComplete
-    end
-
-    --- Creates a new asset manager.
-    ---
-    --- @param root The root directory to load assets from.
-    --- @return a new asset manager.
-    new: function(root: string): AssetManager
+    new: function(root: string, queue?: workers.Queue): AssetManager
 end
 
 local type AssetManager = threaded.AssetManager
-local type Handle = types.Handle
+local ASSET_MANAGER_MT <const>: metatable<AssetManager> = {__index = threaded.AssetManager}
 
 --------------------------------------------------------------------------------
--- Handle implementation
+-- Load batches
 --------------------------------------------------------------------------------
 
---- A HandleImpl wraps an asset loading operation.
-local record HandleImpl<T> is Handle<T>
-    id: integer
+local record LoadBatchImpl is types.LoadBatch
+    totalCount: integer
+    completedCount: integer
+    failedCount: integer
+    progress: number
     isComplete: boolean
-    err: string
+    isSuccessful: boolean
+    errors: {string}
+    _sealed: boolean
+    _tracked: {Handle<any>: boolean}
+    _listeners: {function(types.LoadBatch)}
 
-    _value: T
-    _action: string
-    _path: string
-    _args: {any}
-    _assetManager: AssetManager
-    _cacheKey: string
+    track: function<T>(self, handle: Handle<T>): Handle<T>
+    seal: function(self)
+    observe: function(self, listener: function(types.LoadBatch))
+    _settle: function(self, handle: Handle<any>)
+    _completeIfReady: function(self)
 end
 
---- Build a cache key that distinguishes (action, path, extra args). Keying
---- on path alone collapses distinct requests: loadFile("foo.json") would
---- alias loadJson("foo.json"), and loadFont(p, size=12) would alias
---- loadFont(p, size=24).
-local function makeCacheKey(action: string, path: string, extraArgs: {any}, extraStart: integer): string
-    local parts: {string} = {action, path}
-    for i = extraStart, #extraArgs do
-        parts[#parts + 1] = tostring(extraArgs[i])
+local LOAD_BATCH_MT <const>: metatable<LoadBatchImpl> = {__index = LoadBatchImpl}
+
+function LoadBatchImpl:_completeIfReady()
+    if self.isComplete or not self._sealed or self.completedCount < self.totalCount then return end
+    self.progress = 1
+    self.isComplete = true
+    self.isSuccessful = self.failedCount == 0
+    local listeners = self._listeners
+    self._listeners = {}
+    for i = 1, #listeners do
+        local ok, err = pcall(listeners[i], self as types.LoadBatch) as (boolean, any)
+        if not ok then LOGGER:error("Asset batch observer failed: %s", tostring(err)) end
     end
+    self._tracked = {}
+end
+
+function LoadBatchImpl:_settle(handle: Handle<any>)
+    self.completedCount = self.completedCount + 1
+    if handle.err then
+        self.failedCount = self.failedCount + 1
+        self.errors[#self.errors + 1] = handle.err
+    end
+    if self.totalCount > 0 then self.progress = self.completedCount / self.totalCount end
+    self:_completeIfReady()
+end
+
+function LoadBatchImpl:track<T>(handle: Handle<T>): Handle<T>
+    assert(not self._sealed, "cannot track an asset handle after sealing its batch")
+    assert(handle ~= nil, "cannot track a nil asset handle")
+    if self._tracked[handle as Handle<any>] then return handle end
+    self._tracked[handle as Handle<any>] = true
+    self.totalCount = self.totalCount + 1
+    handle:observe(function(settled: Handle<T>) self:_settle(settled as Handle<any>) end)
+    return handle
+end
+
+function LoadBatchImpl:seal()
+    if self._sealed then return end
+    self._sealed = true
+    self:_completeIfReady()
+end
+
+function LoadBatchImpl:observe(listener: function(types.LoadBatch))
+    if self.isComplete then
+        local ok, err = pcall(listener, self as types.LoadBatch) as (boolean, any)
+        if not ok then LOGGER:error("Asset batch observer failed: %s", tostring(err)) end
+    else
+        self._listeners[#self._listeners + 1] = listener
+    end
+end
+
+local function newLoadBatch(): types.LoadBatch
+    return setmetatable({
+        totalCount = 0,
+        completedCount = 0,
+        failedCount = 0,
+        progress = 0,
+        isComplete = false,
+        isSuccessful = false,
+        errors = {},
+        _sealed = false,
+        _tracked = {},
+        _listeners = {},
+    } as LoadBatchImpl, LOAD_BATCH_MT) as types.LoadBatch
+end
+
+--------------------------------------------------------------------------------
+-- Manager and primitive asset jobs
+--------------------------------------------------------------------------------
+
+function threaded.AssetManager.new(root: string, queue?: workers.Queue): AssetManager
+    local resolvedQueue = queue or workers.queue
+    assert(resolvedQueue, "AssetManager requires a worker queue")
+    return setmetatable({
+        _root = root,
+        _queue = resolvedQueue,
+        _cache = setmetatable({}, {__mode = "v"}),
+        _pinnedHandles = {},
+        _pinnedSet = setmetatable({}, {__mode = "k"}),
+        _descriptors = setmetatable({}, {__mode = "k"}),
+        _requests = {},
+        _loaderRegistry = setmetatable({}, {__mode = "k"}),
+        _assetLog = {},
+        _runningCount = 0,
+        _completedCount = 0,
+        _errors = {},
+        _closed = false,
+    } as AssetManager, ASSET_MANAGER_MT) as AssetManager
+end
+
+function threaded.AssetManager:resolvePath(...: string): string
+    local parts = {...}
+    if #parts == 0 then return self._root end
+    local suffix = table.concat(parts, "/")
+    if self._root == "" then return suffix end
+    return self._root .. "/" .. suffix
+end
+
+function threaded.AssetManager:setRoot(root: string) self._root = root end
+function threaded.AssetManager:getRoot(): string return self._root end
+function threaded.AssetManager:newBatch(): types.LoadBatch return newLoadBatch() end
+
+local function makeCacheKey(action: string, path: string, args: {any}): string
+    local parts = {action, path}
+    for i = 1, #args do parts[#parts + 1] = tostring(args[i]) end
     return table.concat(parts, "|")
 end
 
--- Forward declare the metatable
-local HANDLE_MT: metatable<HandleImpl>
+local function registerHandle<T>(
+    self: AssetManager,
+    cacheKey: string,
+    descriptor: types.AssetDescriptor,
+    handle: Handle<T>
+): Handle<T>
+    self._cache[cacheKey] = handle as Handle<any>
+    self._descriptors[handle as Handle<any>] = descriptor
+    self._requests[cacheKey] = descriptor
+    self._assetLog[cacheKey] = {action = descriptor.action, path = descriptor.path, status = "loading"}
+    self._runningCount = self._runningCount + 1
+    handle:observe(function(settled: Handle<T>)
+        self._runningCount = self._runningCount - 1
+        self._completedCount = self._completedCount + 1
+        local log = self._assetLog[cacheKey]
+        if settled.err then
+            self._cache[cacheKey] = nil
+            self._errors[#self._errors + 1] = settled.err
+            if log then log.status = "failed: " .. settled.err end
+        elseif log then
+            log.status = "loaded"
+        end
+    end)
+    return handle
+end
 
-function HandleImpl._new<T>(
+local function createWorkerHandle<T, U>(
+    self: AssetManager,
     action: string,
-    path: string,
+    inputPath: string,
     args: {any},
-    id: integer,
-    assetManager: AssetManager
-): HandleImpl<T>
-    local self: HandleImpl<T> = {
-        id = id,
-        isComplete = false,
-        _action = action,
-        _path = path,
-        _args = args,
-        _assetManager = assetManager,
-    }
-    return setmetatable(self, HANDLE_MT as metatable<HandleImpl<T>>) as HandleImpl<T>
-end
+    job: workers.Job<Request, U>,
+    transform: function(U): T,
+    request: Request
+): Handle<T>
+    assert(not self._closed, "asset manager is shut down")
+    local path = self:resolvePath(inputPath)
+    local cacheKey = makeCacheKey(action, path, args)
+    local cached = self._cache[cacheKey]
+    if cached then return cached as Handle<T> end
 
-function HandleImpl:_setResult<T>(value: T, err: string)
-    self._value = value
-    self.err = err
-    self.isComplete = true
-
-    -- Cache on the outer table to avoid __index
-    rawset(self as table, "value", value)
-    rawset(self as table, "err", err)
-    rawset(self as table, "isComplete", true)
-
-    -- Emit completion event at handle's address
-    self._assetManager._dispatcher:emit(self.id, threaded.HandleComplete(self as Handle<any>))
-end
-
-function HandleImpl:observe<T>(listener: function(Handle<T>))
-    if self.isComplete then
-        listener(self)
+    local input = request or {path = path} as Request
+    input.path = path
+    local raw = self._queue:submit(job, input)
+    local handle: Handle<T>
+    if transform then
+        handle = raw:map(transform)
     else
-        -- Observe at handle's address, unwrap the event to get the handle
-        self._assetManager._dispatcher:observeOnce(self.id, threaded.HandleComplete, function(e: threaded.HandleComplete)
-            listener(e.handle as Handle<T>)
-        end)
+        handle = raw as Handle<T>
     end
+    return registerHandle(self, cacheKey, {
+        action = action,
+        path = path,
+        inputPath = inputPath,
+        args = args,
+    }, handle)
 end
 
-function HandleImpl:pin()
-    -- Add this handle to the pinned list to prevent garbage collection
-    table.insert(self._assetManager._pinnedHandles, self as Handle<any>)
+local function registerDerived<T>(
+    self: AssetManager,
+    action: string,
+    inputPath: string,
+    args: {any},
+    handle: Handle<T>
+): Handle<T>
+    local path = self:resolvePath(inputPath)
+    local key = makeCacheKey(action, path, args)
+    local cached = self._cache[key]
+    if cached then return cached as Handle<T> end
+    return registerHandle(self, key, {
+        action = action,
+        path = path,
+        inputPath = inputPath,
+        args = args,
+    }, handle)
 end
 
---- Build a derived handle (map/flatMap/handle/handleAll) that completes when
---- its source handles settle rather than through the worker channel.
-local function newDerivedHandle<U>(assetManager: AssetManager, action: string, path: string): HandleImpl<U>
-    return setmetatable({
-        id = assetManager:_getNextId(),
-        isComplete = false,
-        err = nil,
-        _value = nil,
-        _action = action,
-        _path = path,
-        _args = {},
-        _assetManager = assetManager
-    }, HANDLE_MT as metatable<HandleImpl<U>>)
-end
-
-function HandleImpl:map<U>(transform: function(T): U): Handle<U>
-    -- Create a new handle that waits for this one to complete, then transforms the result
-    local mappedHandle: HandleImpl<U> = newDerivedHandle(self._assetManager, "map", self._path)
-
-    -- When this handle completes, transform and complete the mapped handle
-    self:observe(function(originalHandle)
-        local handle = originalHandle as Handle<T>
-        if handle.err then
-            mappedHandle:_setResult(nil as U, handle.err)
-        else
-            local success, result = pcall(transform, handle.value)
-            if success then
-                mappedHandle:_setResult(result, nil)
-            else
-                mappedHandle:_setResult(nil as U, "Transform error: " .. tostring(result))
-            end
-        end
-    end)
-
-    return mappedHandle as Handle<U>
-end
-
-function HandleImpl:flatMap<U>(transform: function(T): Handle<U>): Handle<U>
-    -- Create a new handle that waits for this one to complete,
-    -- then waits for the inner handle returned by the transform
-    local flatMappedHandle: HandleImpl<U> = newDerivedHandle(self._assetManager, "flatMap", self._path)
-
-    -- When this handle completes, call transform to get the inner handle
-    self:observe(function(originalHandle)
-        local handle = originalHandle as Handle<T>
-        if handle.err then
-            flatMappedHandle:_setResult(nil as U, handle.err)
-        else
-            local success, innerHandle = pcall(transform, handle.value)
-            if not success then
-                flatMappedHandle:_setResult(nil as U, "Transform error: " .. tostring(innerHandle))
-            else
-                -- When the inner handle completes, complete the flat-mapped handle
-                (innerHandle as Handle<U>):observe(function(inner: Handle<U>)
-                    if inner.err then
-                        flatMappedHandle:_setResult(nil as U, inner.err)
-                    else
-                        flatMappedHandle:_setResult(inner.value, nil)
-                    end
-                end)
-            end
-        end
-    end)
-
-    return flatMappedHandle as Handle<U>
-end
-
-function HandleImpl:handle<U>(fn: function(T, any): U): Handle<U>
-    -- Create a new handle that always calls fn with (value, err)
-    local handledHandle: HandleImpl<U> = newDerivedHandle(self._assetManager, "handle", self._path)
-
-    -- When this handle completes, call fn with both value and error
-    self:observe(function(originalHandle)
-        local h = originalHandle as HandleImpl<T>
-        local success, result = pcall(fn, h._value, h.err)
-        if success then
-            handledHandle:_setResult(result, nil)
-        else
-            handledHandle:_setResult(nil as U, "Handle error: " .. tostring(result))
-        end
-    end)
-
-    return handledHandle as Handle<U>
-end
-
--- Define the metatable with proper typing
-HANDLE_MT = {
-    __index = function(self: HandleImpl<any>, key: string): any
-        if key == "value" then
-            -- First access to value triggers blocking
-            if not self.isComplete then
-                if self._assetManager then
-                    -- Block until complete
-                    while not self.isComplete and self._assetManager:update() do end
-                    self._assetManager = nil
-                    if not self.isComplete then
-                        -- Set error state
-                        self.err = "Unable to complete operation " .. self.id
-                        self.isComplete = true
-                    end
-                end
-
-                -- Cache the results directly on the table to bypass __index next time
-                rawset(self as table, "value", self._value)
-                rawset(self as table, "err", self.err)
-                rawset(self as table, "isComplete", self.isComplete)
-            end
-
-            if self.err then
-                error("Operation failed to '" .. self._action .. "' for `" ..
-                      self._path .. "`: " .. self.err)
-            end
-
-            return self._value
-        elseif key == "err" then
-            -- Return cached value or nil (no recursion - use rawget, not self.err)
-            return rawget(self as table, "err")
-        elseif key == "isComplete" then
-            -- Return cached value or false (no recursion - use rawget, not self.isComplete)
-            local val = rawget(self as table, "isComplete")
-            return val ~= nil and val or false
-        end
-        return (HandleImpl as {string:any})[key]
-    end
-} as metatable<HandleImpl>
-
---------------------------------------------------------------------------------
--- Asset manager implementation
---------------------------------------------------------------------------------
-
-local ASSET_MANAGER_MT <const>: metatable<AssetManager> = {
-    __index = AssetManager
-}
-
--- Monotonic counter so each AssetManager gets its own worker channels.
--- love.thread.getChannel("taskchannel") returns the SAME channel across
--- all callers, so without per-manager names a second AssetManager would
--- consume the first one's results (and its shutdown would kill the first
--- manager's workers via shared sentinel pushes).
-local _nextManagerId: integer = 0
-
-function AssetManager.new(root: string): AssetManager
-    _nextManagerId = _nextManagerId + 1
-    local mgrId = _nextManagerId
-    local taskChannelName = "tecs2d.assets.task." .. mgrId
-    local resultChannelName = "tecs2d.assets.result." .. mgrId
-
-    local self: AssetManager = {
-        _root = root,
-        _dispatcher = tecs.newMessageBus(),
-        _nextId = 0,
-        _pushChannel = love.thread.getChannel(taskChannelName),
-        _pullChannel = love.thread.getChannel(resultChannelName),
-        _runningTasks = {},
-        _cache = setmetatable({}, {__mode = "v"}),
-        _pinnedHandles = {},
-        _runningCount = 0,
-        _completedCount = 0,
-        _loaderRegistry = setmetatable({}, {__mode = "k"}),
-        _hasEmittedInitialLoad = false,
-        _hasCalledUpdate = false,
-        _assetLog = {},
-    }
-
-    -- Start worker threads
-    local threadCount = math.min(4, love.system.getProcessorCount())
-    self._threads = {}
-    for _ = 1, threadCount do
-        local thread = love.thread.newThread(getWorkerCode())
-        thread:start(taskChannelName, resultChannelName)
-        table.insert(self._threads, thread)
-    end
-
-    return setmetatable(self, ASSET_MANAGER_MT) as AssetManager
-end
-
-function AssetManager:resolvePath(...: string): string
-    local parts = {...}
-
-    if #parts == 0 then
-        return self._root
-    end
-
-    -- Love2D handles path security and normalization for us
-    -- Just join with forward slashes (works on all platforms)
-    return self._root .. "/" .. table.concat(parts, "/")
-end
-
-function AssetManager:setRoot(root: string)
-    self._root = root
-end
-
-function AssetManager:getRoot(): string
-    return self._root
-end
-
-function AssetManager:_getNextId(): integer
-    self._nextId = self._nextId + 1
-    return self._nextId
-end
-
-function AssetManager:registerAssetHandler<T>(handler: types.AssetHandler<T>, loader: function(string): Handle<T>)
+function threaded.AssetManager:registerAssetHandler<T>(
+    handler: types.AssetHandler<T>,
+    loader: function(string): Handle<T>
+)
     self._loaderRegistry[handler] = loader as function(string): Handle<any>
 end
 
-function AssetManager:load<T>(handler: types.AssetHandler<T>, path: string): Handle<T>
-    local loader = assert(
-        (self._loaderRegistry[handler] as function(string): Handle<T>),
+function threaded.AssetManager:load<T>(handler: types.AssetHandler<T>, path: string): Handle<T>
+    assert(not self._closed, "asset manager is shut down")
+    local loader = assert((self._loaderRegistry[handler] as function(string): Handle<T>),
         "No loader registered for handler type")
-
-    local resolvedPath = self:resolvePath(path)
-    -- Include the handler's identity so two different custom handlers on the
-    -- same path don't alias (e.g., "load as LevelData" vs "load as CSV").
-    local key = tostring(handler) .. "|" .. resolvedPath
-    local cached = self._cache[key] as Handle<T>
-
-    if not cached then
-        cached = loader(resolvedPath)
-        self._cache[key] = cached as Handle<any>
-        self._assetLog[key] = {action = "(custom)", path = resolvedPath, status = "custom"}
-    end
-
-    return cached
+    local resolved = self:resolvePath(path)
+    local key = tostring(handler) .. "|" .. resolved
+    local cached = self._cache[key]
+    if cached then return cached as Handle<T> end
+    return registerHandle(self, key, {
+        action = "custom",
+        path = resolved,
+        inputPath = path,
+        args = {},
+    }, loader(resolved))
 end
 
-local function createHandle<T>(self: AssetManager, args: {any}): Handle<T>
-    local action = args[1] as string
-    local inputPath = args[2] as string
-    local path = self:resolvePath(inputPath)
-
-    args[2] = path
-
-    -- Cache key includes the action and any loader-specific extra args so
-    -- distinct requests (loadFile vs loadJson, loadFont size 12 vs 24) stay
-    -- separate entries.
-    local cacheKey = makeCacheKey(action, path, args, 3)
-
-    local cache = self._cache[cacheKey]
-    if cache then
-        return cache as Handle<T>
-    else
-        self._runningCount = self._runningCount + 1
-        local id = self:_getNextId()
-        table.insert(args, 1, id)
-        self._pushChannel:push(args)
-        local handleResult = HandleImpl._new(action, path, args, id, self)
-        handleResult._cacheKey = cacheKey
-        self._runningTasks[id] = handleResult as Handle<any>
-        local handle = handleResult as Handle<T>
-        -- Add to the cache (weak table will allow GC when not referenced elsewhere)
-        self._cache[cacheKey] = handle as Handle<any>
-        self._assetLog[cacheKey] = {action = action, path = path, status = "loading"}
-        return handle
-    end
+function threaded.AssetManager:loadFile(path: string): Handle<string>
+    return createWorkerHandle(self, "loadFile", path, {}, LOAD_FILE, nil, nil)
 end
 
-function AssetManager:loadFile(path: string): Handle<string>
-    return createHandle(self, {"loadFile", path})
+function threaded.AssetManager:loadFileData(path: string): Handle<love.filesystem.FileData>
+    return createWorkerHandle(self, "loadFileData", path, {}, LOAD_FILE_DATA, nil, nil)
 end
 
-function AssetManager:loadFileData(path: string): Handle<love.filesystem.FileData>
-    return createHandle(self, {"loadFileData", path})
+function threaded.AssetManager:loadImage(path: string): Handle<love.graphics.Image>
+    return createWorkerHandle(self, "loadImage", path, {}, LOAD_IMAGE,
+        function(data: love.image.ImageData): love.graphics.Image return love.graphics.newImage(data) end, nil)
 end
 
-function AssetManager:loadImage(path: string): Handle<love.graphics.Image>
-    return createHandle(self, {"loadImage", path})
-end
-
-function AssetManager:loadImageFont(path: string, config?: types.ImageFontConfig): Handle<love.graphics.Font>
+function threaded.AssetManager:loadImageFont(path: string, config?: types.ImageFontConfig): Handle<love.graphics.Font>
     local glyphs = config and config.glyphs
-    local extraSpacing = config and config.extraSpacing or 0
-    return createHandle(self, {"loadImageFont", path, glyphs, extraSpacing}) as Handle<love.graphics.Font>
+    local spacing = config and config.extraSpacing or 0
+    return createWorkerHandle(self, "loadImageFont", path, {glyphs, spacing}, LOAD_IMAGE_FONT,
+        function(data: love.image.ImageData): love.graphics.Font
+            return love.graphics.newImageFont(data, glyphs, spacing)
+        end, nil)
 end
 
-function AssetManager:loadFont(path: string, config?: types.FontConfig): Handle<love.graphics.Font>
+function threaded.AssetManager:loadFont(path: string, config?: types.FontConfig): Handle<love.graphics.Font>
     local size = config and config.size
     local hinting = config and config.hinting
     local dpiscale = config and config.dpiscale
-    return createHandle(self, {"loadFont", path, size, hinting, dpiscale}) as Handle<love.graphics.Font>
+    return createWorkerHandle(self, "loadFont", path, {size, hinting, dpiscale}, LOAD_FONT,
+        function(_contents: string): love.graphics.Font
+            local settings: {string: any} = {}
+            if size then settings.size = size end
+            if hinting then settings.hinting = hinting end
+            if dpiscale then settings.dpiscale = dpiscale end
+            if next(settings) then return love.graphics.newFont(self:resolvePath(path), settings) end
+            return love.graphics.newFont(self:resolvePath(path))
+        end, nil)
 end
 
-function AssetManager:getFont(path: string): Handle<love.graphics.Font>
-    local resolvedPath = self:resolvePath(path)
-    -- Cache keys are action-qualified; scan the cache for a TTF or image
-    -- font loaded at this path. Since font cache entries also include
-    -- size/hinting/dpi (or the image font's glyph string), this returns
-    -- the first font loaded for the path regardless of config.
-    local prefixes <const> = {"loadFont|" .. resolvedPath, "loadImageFont|" .. resolvedPath}
-    for k, handle in pairs(self._cache) do
-        if type(k) == "string" then
-            local key = k as string
-            for i = 1, #prefixes do
-                local prefix = prefixes[i]
-                if key == prefix or key:sub(1, #prefix + 1) == prefix .. "|" then
-                    return handle as Handle<love.graphics.Font>
-                end
+function threaded.AssetManager:getFont(path: string): Handle<love.graphics.Font>
+    local resolved = self:resolvePath(path)
+    local prefixes = {"loadFont|" .. resolved, "loadImageFont|" .. resolved}
+    for key, handle in pairs(self._cache) do
+        for i = 1, #prefixes do
+            local prefix = prefixes[i]
+            if key == prefix or key:sub(1, #prefix + 1) == prefix .. "|" then
+                return handle as Handle<love.graphics.Font>
             end
         end
     end
     error("No font was loaded for " .. path)
 end
 
-function AssetManager:loadAudio(path: string, sourceType: love.audio.SourceType, streamType?: string): Handle<love.audio.Source>
-    return createHandle(self, {"loadAudio", path, sourceType, streamType}) as Handle<love.audio.Source>
+function threaded.AssetManager:loadAudio(
+    path: string,
+    sourceType: love.audio.SourceType,
+    streamType?: string
+): Handle<love.audio.Source>
+    return createWorkerHandle(self, "loadAudio", path, {sourceType, streamType}, LOAD_AUDIO, nil,
+        {path = "", sourceType = sourceType, streamType = streamType} as Request)
 end
 
-function AssetManager:loadShader(path: string): Handle<love.graphics.Shader>
-    return createHandle(self, {"loadShader", path})
+function threaded.AssetManager:loadShader(path: string): Handle<love.graphics.Shader>
+    return createWorkerHandle(self, "loadShader", path, {}, LOAD_SHADER,
+        function(source: string): love.graphics.Shader return love.graphics.newShader(source) end, nil)
 end
 
-function AssetManager:loadVideo(path: string): Handle<love.graphics.Video>
-    return createHandle(self, {"loadVideo", path})
+function threaded.AssetManager:loadVideo(path: string): Handle<love.graphics.Video>
+    return createWorkerHandle(self, "loadVideo", path, {}, LOAD_VIDEO,
+        function(_contents: string): love.graphics.Video return love.graphics.newVideo(self:resolvePath(path)) end, nil)
 end
 
-function AssetManager:loadCompressedImage(path: string): Handle<love.image.CompressedImageData>
-    return createHandle(self, {"loadCompressedImage", path})
+function threaded.AssetManager:loadCompressedImage(path: string): Handle<love.image.CompressedImageData>
+    return createWorkerHandle(self, "loadCompressedImage", path, {}, LOAD_COMPRESSED, nil, nil)
 end
 
-function AssetManager:loadJson(path: string): Handle<any>
-    return createHandle(self, {"loadJson", path})
+function threaded.AssetManager:loadJson(path: string): Handle<any>
+    return createWorkerHandle(self, "loadJson", path, {}, LOAD_JSON, nil, nil)
 end
 
-
---- Runs a main-thread LÖVE constructor under pcall and normalizes failures
---- into a (false, message) pair for COMPLETION_FUNCTIONS.
-local function guardedCreate(fn: function(...: any): (any), ...: any): boolean, any
-    local success, value = pcall(fn, ...)
-    if not success then
-        return false, tostring(value)
+function threaded.AssetManager:pin<T>(handle: Handle<T>): Handle<T>
+    assert(self._descriptors[handle as Handle<any>], "cannot pin a handle owned by another asset manager")
+    if not self._pinnedSet[handle as Handle<any>] then
+        self._pinnedSet[handle as Handle<any>] = true
+        self._pinnedHandles[#self._pinnedHandles + 1] = handle as Handle<any>
     end
-    return true, value
+    return handle
 end
 
-local COMPLETION_FUNCTIONS <const>: {string:function(handle: HandleImpl<any>, result: any): boolean, any} = {
-    loadImage = function(_handle: HandleImpl<any>, result: any): boolean, any
-        return guardedCreate(love.graphics.newImage as function(...: any): (any), result as love.image.ImageData)
-    end,
-    loadImageFont = function(handle: HandleImpl<any>, result: any): boolean, any
-        return guardedCreate(
-            love.graphics.newImageFont as function(...: any): (any),
-            result as love.image.ImageData,
-            handle._args[4] as string,
-            handle._args[5] as number
-        )
-    end,
-    loadFont = function(handle: HandleImpl<any>, _result: any): boolean, any
-        -- result is the file contents, but we need the path to create the font
-        local path = handle._path
-        local size = handle._args[4] as number
-        local hinting = handle._args[5] as love.font.HintingMode
-        local dpiscale = handle._args[6] as number
-        local newFont <const> = love.graphics.newFont as function(...: any): (any)
-        if size or hinting or dpiscale then
-            -- Use LÖVE 12 settings table variant
-            local settings: {string: any} = {}
-            if size then settings.size = size end
-            if hinting then settings.hinting = hinting end
-            if dpiscale then settings.dpiscale = dpiscale end
-            return guardedCreate(newFont, path, settings)
-        end
-        return guardedCreate(newFont, path)
-    end,
-    loadShader = function(_handle: HandleImpl<any>, result: any): boolean, any
-        return guardedCreate(love.graphics.newShader as function(...: any): (any), result as string)
-    end,
-    loadVideo = function(handle: HandleImpl<any>, _result: any): boolean, any
-        -- Video creation must happen on the main thread using the file path
-        return guardedCreate(love.graphics.newVideo as function(...: any): (any), handle._path)
-    end,
-    loadCompressedImage = function(_handle: HandleImpl<any>, result: any): boolean, any
-        -- CompressedImageData is returned directly from the worker thread
-        return true, result
-    end
-}
-
---- Deliver a result to a handle under xpcall: _setResult fires user
---- observe/derived-handle callbacks, and one that throws must not wedge
---- isLoading()/wait() forever or kill the frame.
-local function settleHandle(handle: HandleImpl<any>, value: any, err: string, context: string)
-    local cbErr: string = nil
-    local ok = xpcall(function()
-        handle:_setResult(value, err)
-    end, function(e: any): string
-        cbErr = tostring(e)
-        return cbErr
-    end)
-    if not ok then
-        LOGGER:error("Asset handle observer failed%s for '%s': %s",
-            context, tostring(handle._path), cbErr)
-    end
+function threaded.AssetManager:describe<T>(handle: Handle<T>): types.AssetDescriptor
+    return self._descriptors[handle as Handle<any>]
 end
 
-local function processHandle(self: threaded.AssetManager)
-    local variant = self._pullChannel:pop() as {any}
-    if variant == nil then
-        return
-    elseif type(variant) ~= "table" then
-        error("Expected a table from the thread channel, but got: " .. type(variant))
-    end
+function threaded.AssetManager:isLoading(): boolean return self._runningCount > 0 end
 
-    local untypedId = assert(variant[1], "Missing handle ID")
-    if type(untypedId) ~= "number" then
-        error("Expected an integer id from the thread channel, but got: " .. type(untypedId))
-    end
-    local id = untypedId as integer
-
-    local handle = self._runningTasks[id] as HandleImpl<any>
-    if not handle then
-        error("Handle not found for id: " .. id)
-    end
-    self._runningTasks[id] = nil
-
-    local result, err = variant[2] as any, variant[3] as string
-
-    -- Not all operations can be completed on the thread. Finish them here.
-    if err == nil then
-        local fn = COMPLETION_FUNCTIONS[handle._action]
-        if fn then
-            local success, value = fn(handle, result)
-            if not success then
-                result = nil
-                err = value as string
-            else
-                result = value
-            end
-        end
-    end
-
-    LOGGER:debug("Handle completed %d with result: %s, err: %s", id, result, err)
-
-    -- Bookkeeping happens before result dispatch so a throwing observer
-    -- cannot leave the counts out of sync.
-    self._runningCount = self._runningCount - 1
-    self._completedCount = self._completedCount + 1
-
-    -- Failed loads must not stay cached: evict so a later request for the
-    -- same asset retries (e.g. the file appears on disk after a first
-    -- failed attempt). createHandle inserts into the cache at creation.
-    if err and handle._cacheKey then
-        self._cache[handle._cacheKey] = nil
-    end
-    -- The log entry outlives the cache entry either way.
-    local logged = handle._cacheKey and self._assetLog[handle._cacheKey]
-    if logged then
-        logged.status = err and ("failed: " .. tostring(err)) or "loaded"
-    end
-
-    settleHandle(handle, result, err, "")
-end
-
-function AssetManager:update(): boolean
-    -- Check for thread errors (threads that crashed)
-    local threads <const> = self._threads
-    for i = 1, #threads do
-        local err = threads[i]:getError()
-        if err then
-            error("Asset worker thread " .. i .. " crashed: " .. err)
-        end
-    end
-
-    -- Process all completed handles
-    while self._pullChannel:getCount() > 0 do
-        processHandle(self)
-    end
-
-    -- Emit initial load event on first update call when nothing is loading
-    if self._hasCalledUpdate and not self._hasEmittedInitialLoad and self._runningCount == 0 then
-        self._hasEmittedInitialLoad = true
-        self._dispatcher:emit(0, threaded.InitialLoadComplete())
-    end
-
-    -- Mark that update has been called at least once
-    self._hasCalledUpdate = true
-
-    return self._runningCount > 0
-end
-
-function AssetManager:wait(timeout?: number): {string}
+function threaded.AssetManager:wait(timeout?: number): {string}
     local start = love.timer.getTime()
-    local errors: {string} = {}
-
-    while self:update() do
-        if timeout and love.timer.getTime() - start > timeout then
-            -- Timeout occurred, return collected errors so far
-            return errors
-        end
+    while self._runningCount > 0 do
+        self._queue:update()
+        if timeout and love.timer.getTime() - start >= timeout then break end
     end
-
-    -- Collect any errors from completed handles
-    for _, handle in pairs(self._cache) do
-        local h = handle as HandleImpl<any>
-        if h.err then
-            table.insert(errors, h.err)
-        end
-    end
-
-    return errors
+    local result: {string} = {}
+    for i = 1, #self._errors do result[i] = self._errors[i] end
+    return result
 end
 
-function AssetManager:shutdown()
-    -- Remove pending tasks.
-    while self._pushChannel:getCount() > 0 do
-        self._pushChannel:pop()
-    end
-
-    -- Fail every unresolved handle so nothing waits on results that can
-    -- no longer arrive: isLoading() returns false, wait() terminates,
-    -- and a blocking .value raises instead of spinning forever.
-    for id, task in pairs(self._runningTasks) do
-        local handle = task as HandleImpl<any>
-        self._runningTasks[id] = nil
-        if handle._cacheKey then
-            self._cache[handle._cacheKey] = nil
-        end
-        settleHandle(handle, nil, "asset manager shut down before the load completed", " during shutdown")
-    end
-    self._runningCount = 0
-
-    -- Stop each thread by sending an exit message.
-    for _ = 1, #self._threads do
-        self._pushChannel:push(nil)
-    end
-
-    -- Give threads a moment to process the exit signal, then release them.
-    -- Don't block forever waiting - the process is exiting anyway.
-    local maxWaitMs <const> = 200
-    local waitedMs = 0
-    local allStopped = false
-
-    while waitedMs < maxWaitMs and not allStopped do
-        allStopped = true
-        for i = 1, #self._threads do
-            if self._threads[i] and self._threads[i]:isRunning() then
-                allStopped = false
-            end
-        end
-        if not allStopped then
-            love.timer.sleep(0.01)
-            waitedMs = waitedMs + 10
-        end
-    end
-
-    -- Release thread references (threads will be cleaned up when process exits)
-    for i = 1, #self._threads do
-        self._threads[i] = nil
-    end
-end
-
-function AssetManager:getStats(): types.AssetStats
-    -- Count items in the cache (need to iterate since it's a weak table)
-    local cacheCount = 0
-    for _ in pairs(self._cache) do
-        cacheCount = cacheCount + 1
-    end
-
+function threaded.AssetManager:getStats(): types.AssetStats
+    local cached = 0
+    for _ in pairs(self._cache) do cached = cached + 1 end
     return {
         completedCount = self._completedCount,
         runningCount = self._runningCount,
-        currentAssetCount = cacheCount,
-        pinnedAssetCount = #self._pinnedHandles
+        currentAssetCount = cached,
+        pinnedAssetCount = #self._pinnedHandles,
     }
 end
 
-function AssetManager:isLoading(): boolean
-    return self._runningCount > 0
+function threaded.AssetManager:shutdown()
+    if self._closed then return end
+    self._closed = true
+    self._cache = setmetatable({}, {__mode = "v"})
+    self._pinnedHandles = {}
+    self._pinnedSet = setmetatable({}, {__mode = "k"})
 end
 
-function AssetManager:handleAll<T, U>(handles: {Handle<T>}, fn: function({T}): U): Handle<U>
-    local count = #handles
-
-    -- Create a handle that will complete when all inputs complete
-    local handleAllHandle: HandleImpl<U> = newDerivedHandle(self, "handleAll", "handleAll")
-
-    -- Edge case: no handles
-    if count == 0 then
-        local success, result = pcall(fn, {})
-        if success then
-            handleAllHandle:_setResult(result, nil)
-        else
-            handleAllHandle:_setResult(nil as U, "Transform error: " .. tostring(result))
-        end
-        return handleAllHandle as Handle<U>
+function threaded.AssetManager:_reload(cacheKey: string): Handle<any>
+    local request = self._requests[cacheKey]
+    if not request or request.action == "custom" then return nil end
+    self._cache[cacheKey] = nil
+    local path = request.inputPath
+    local args = request.args
+    if request.action == "loadFile" then return self:loadFile(path) as Handle<any> end
+    if request.action == "loadFileData" then return self:loadFileData(path) as Handle<any> end
+    if request.action == "loadImage" then return self:loadImage(path) as Handle<any> end
+    if request.action == "loadImageFont" then
+        return self:loadImageFont(path, {glyphs = args[1] as string, extraSpacing = args[2] as number}) as Handle<any>
     end
-
-    -- Track completion and results
-    local results: {T} = {}
-    local settledCount = 0
-    local failed = false
-
-    -- Observe each handle
-    for i = 1, count do
-        local h = handles[i]
-        h:observe(function(settled: Handle<T>)
-            if failed then return end
-
-            if settled.err then
-                -- First error fails the whole handleAll
-                failed = true
-                handleAllHandle:_setResult(nil as U, settled.err)
-            else
-                results[i] = (settled as HandleImpl<T>)._value
-                settledCount = settledCount + 1
-
-                -- When all have succeeded, apply transform
-                if settledCount == count then
-                    local success, result = pcall(fn, results)
-                    if success then
-                        handleAllHandle:_setResult(result, nil)
-                    else
-                        handleAllHandle:_setResult(nil as U, "Transform error: " .. tostring(result))
-                    end
-                end
-            end
-        end)
+    if request.action == "loadFont" then
+        return self:loadFont(path, {
+            size = args[1] as number,
+            hinting = args[2] as love.font.HintingMode,
+            dpiscale = args[3] as number,
+        }) as Handle<any>
     end
-
-    return handleAllHandle as Handle<U>
+    if request.action == "loadAudio" then
+        return self:loadAudio(path, args[1] as love.audio.SourceType, args[2] as string) as Handle<any>
+    end
+    if request.action == "loadShader" then return self:loadShader(path) as Handle<any> end
+    if request.action == "loadVideo" then return self:loadVideo(path) as Handle<any> end
+    if request.action == "loadCompressedImage" then return self:loadCompressedImage(path) as Handle<any> end
+    if request.action == "loadJson" then return self:loadJson(path) end
+    if request.action == "loadSpriteSheet" then return self:loadSpriteSheet(path) as Handle<any> end
+    if request.action == "loadStaticSheet" then return self:loadStaticSheet(path) as Handle<any> end
+    if request.action == "loadBMFont" then return self:loadBMFont(path) as Handle<any> end
+    if request.action == "loadTiledMap" then return self:loadTiledMap(path) as Handle<any> end
+    return nil
 end
 
 --------------------------------------------------------------------------------
--- Sprite sheet loading
+-- Composite asset loaders
 --------------------------------------------------------------------------------
 
--- Handler for optional image loading (returns nil on error instead of failing)
-local function optionalImageHandler(v: love.graphics.Image, err: any): love.graphics.Image
+local function optionalImage(value: love.graphics.Image, err: any): love.graphics.Image
     if err then return nil end
-    return v
+    return value
 end
 
-function AssetManager:loadSpriteSheet(
+function threaded.AssetManager:loadSpriteSheet(
     path: string,
     _options?: types.SpriteSheetLoadOptions
 ): Handle<sheet.SpriteSheet>
     local resolvedPath = self:resolvePath(path)
-
-    -- Load main image and JSON data concurrently
-    local imageHandle = self:loadImage(path)
-    local jsonPath = path:gsub("%.[^.]+$", "") .. ".json"
-    local dataHandle = self:loadFileData(jsonPath)
-
-    -- Derive material map paths
-    local basePath = path:gsub("%.[^.]+$", "")
-    local normalPath = basePath .. "_n.png"
-    local emissionPath = basePath .. "_e.png"
-    local ormPath = basePath .. "_orm.png"
-
-    -- Load optional material maps (return nil on failure)
-    local normalHandle = self:loadImage(normalPath):handle(optionalImageHandler)
-    local emissionHandle = self:loadImage(emissionPath):handle(optionalImageHandler)
-    local ormHandle = self:loadImage(ormPath):handle(optionalImageHandler)
-
-    -- Combine all handles and create the sprite sheet
-    return self:handleAll(
-        {
-            imageHandle as Handle<any>,
-            dataHandle as Handle<any>,
-            normalHandle as Handle<any>,
-            emissionHandle as Handle<any>,
-            ormHandle as Handle<any>
-        },
-        function(results: {any}): sheet.SpriteSheet
-            local image = results[1] as love.graphics.Image
-            local jsonData = results[2] as love.filesystem.FileData
-            local normal = results[3] as love.graphics.Image
-            local emission = results[4] as love.graphics.Image
-            local ormImg = results[5] as love.graphics.Image
-
-            local b = sprite_sheet.SpriteSheet.builderFromImage(image, jsonData, resolvedPath)
-            if normal then b:normalImage(normal) end
-            if emission then b:emissionImage(emission) end
-            if ormImg then b:ormImage(ormImg) end
-
-            return b:build() as sheet.SpriteSheet
-        end
-    )
+    local base = path:gsub("%.[^.]+$", "")
+    local handles: {Handle<any>} = {
+        self:loadImage(path) as Handle<any>,
+        self:loadFileData(base .. ".json") as Handle<any>,
+        self:loadImage(base .. "_n.png"):handle(optionalImage) as Handle<any>,
+        self:loadImage(base .. "_e.png"):handle(optionalImage) as Handle<any>,
+        self:loadImage(base .. "_orm.png"):handle(optionalImage) as Handle<any>,
+    }
+    local result = self._queue:all(handles):map(function(values: {any}): sheet.SpriteSheet
+        local builder = sprite_sheet.SpriteSheet.builderFromImage(
+            values[1] as love.graphics.Image,
+            values[2] as love.filesystem.FileData,
+            resolvedPath)
+        if values[3] then builder:normalImage(values[3] as love.graphics.Image) end
+        if values[4] then builder:emissionImage(values[4] as love.graphics.Image) end
+        if values[5] then builder:ormImage(values[5] as love.graphics.Image) end
+        return builder:build() as sheet.SpriteSheet
+    end)
+    return registerDerived(self, "loadSpriteSheet", path, {}, result)
 end
 
-function AssetManager:loadStaticSheet(
+function threaded.AssetManager:loadStaticSheet(
     path: string,
     _options?: types.SpriteSheetLoadOptions
 ): Handle<sheet.SpriteSheet>
     local resolvedPath = self:resolvePath(path)
-
-    -- Load main image
-    local imageHandle = self:loadImage(path)
-
-    -- Derive material map paths
-    local basePath = path:gsub("%.[^.]+$", "")
-    local normalPath = basePath .. "_n.png"
-    local emissionPath = basePath .. "_e.png"
-    local ormPath = basePath .. "_orm.png"
-
-    -- Load optional material maps (return nil on failure)
-    local normalHandle = self:loadImage(normalPath):handle(optionalImageHandler)
-    local emissionHandle = self:loadImage(emissionPath):handle(optionalImageHandler)
-    local ormHandle = self:loadImage(ormPath):handle(optionalImageHandler)
-
-    -- Combine all handles and create the sprite sheet
-    return self:handleAll(
-        {
-            imageHandle as Handle<any>,
-            normalHandle as Handle<any>,
-            emissionHandle as Handle<any>,
-            ormHandle as Handle<any>
-        },
-        function(results: {any}): sheet.SpriteSheet
-            local image = results[1] as love.graphics.Image
-            local normal = results[2] as love.graphics.Image
-            local emission = results[3] as love.graphics.Image
-            local ormImg = results[4] as love.graphics.Image
-
-            local width, height = image:getDimensions()
-            local b = sprite_sheet.SpriteSheet.builder(image, resolvedPath)
-                :frame(0, 0, width, height, 1000000)  -- Static image, long duration
-            if normal then b:normalImage(normal) end
-            if emission then b:emissionImage(emission) end
-            if ormImg then b:ormImage(ormImg) end
-
-            return b:build() as sheet.SpriteSheet
-        end
-    )
+    local base = path:gsub("%.[^.]+$", "")
+    local handles: {Handle<any>} = {
+        self:loadImage(path) as Handle<any>,
+        self:loadImage(base .. "_n.png"):handle(optionalImage) as Handle<any>,
+        self:loadImage(base .. "_e.png"):handle(optionalImage) as Handle<any>,
+        self:loadImage(base .. "_orm.png"):handle(optionalImage) as Handle<any>,
+    }
+    local result = self._queue:all(handles):map(function(values: {any}): sheet.SpriteSheet
+        local image = values[1] as love.graphics.Image
+        local width, height = image:getDimensions()
+        local builder = sprite_sheet.SpriteSheet.builder(image, resolvedPath)
+            :frame(0, 0, width, height, 1000000)
+        if values[2] then builder:normalImage(values[2] as love.graphics.Image) end
+        if values[3] then builder:emissionImage(values[3] as love.graphics.Image) end
+        if values[4] then builder:ormImage(values[4] as love.graphics.Image) end
+        return builder:build() as sheet.SpriteSheet
+    end)
+    return registerDerived(self, "loadStaticSheet", path, {}, result)
 end
 
---------------------------------------------------------------------------------
--- BMFont loading
---------------------------------------------------------------------------------
-
-function AssetManager:loadBMFont(path: string): Handle<bmfont.BMFont>
-    -- Load the font definition file
-    local fontHandle = self:loadFile(path)
-
-    return fontHandle:flatMap(function(content: string): Handle<bmfont.BMFont>
-        -- Parse the font definition (without loading atlas)
+function threaded.AssetManager:loadBMFont(path: string): Handle<bmfont.BMFont>
+    local result = self:loadFile(path):flatMap(function(content: string): Handle<bmfont.BMFont>
         local font = bmfont.parse(content, path)
-
-        -- Build atlas path from font's page field
         local dir = path:match("(.*/)") or ""
-        local atlasPath = dir .. font.page
-
-        -- Load the atlas image
-        local atlasHandle = self:loadImage(atlasPath)
-
-        return atlasHandle:map(function(atlasImage: love.graphics.Image): bmfont.BMFont
-            font:setAtlas(atlasImage)
+        return self:loadImage(dir .. font.page):map(function(atlas: love.graphics.Image): bmfont.BMFont
+            font:setAtlas(atlas)
             return font
         end)
     end)
+    return registerDerived(self, "loadBMFont", path, {}, result)
 end
-
---------------------------------------------------------------------------------
--- Tiled map loading
---------------------------------------------------------------------------------
 
 local type TilemapData = tiled_types.TilemapData
 
-function AssetManager:loadTiledMap(path: string): Handle<TilemapData>
-    -- Load the map JSON file
-    local mapHandle = self:loadFile(path)
-
-    return mapHandle:map(function(content: string): TilemapData
-        local parsed = json.parse(content) as {string: any}
-        local map = tiled_parser.parseTiledMap(parsed)
-
-        -- Load tileset images synchronously (blocking)
-        -- Note: We can't easily parallelize this because each tileset might
-        -- reference an external .tsj file that needs to be loaded first
+function threaded.AssetManager:loadTiledMap(path: string): Handle<TilemapData>
+    local result = self:loadFile(path):map(function(content: string): TilemapData
+        local map = tiled_parser.parseTiledMap(json.parse(content) as {string: any})
         local tilesets <const> = map.tilesets
         for ti = 1, #tilesets do
             local ts = tilesets[ti]
             if ts.imagePath then
-                -- .tsx is the XML tileset format; only JSON (.tsj) is supported.
                 if ts.imagePath:match("%.tsx$") then
-                    error("External .tsx (XML) tilesets are not supported; export as .tsj (JSON): " .. ts.imagePath)
+                    error("External .tsx tilesets are not supported; export as .tsj: " .. ts.imagePath)
                 end
-
-                -- Check if this is an external tileset reference
                 if ts.imagePath:match("%.tsj$") then
-                    -- Load external tileset
                     local tsjPath = tiled_parser.resolveRelativePath(path, ts.imagePath)
                     local tsjData = love.filesystem.read(tsjPath)
                     if tsjData then
-                        local tsjParsed = json.parse(tsjData) as {string: any}
-                        local externalTs = tiled_parser.parseTileset(tsjParsed, ts.firstgid)
-                        -- Copy over the parsed tileset data
-                        ts.name = externalTs.name
-                        ts.tilewidth = externalTs.tilewidth
-                        ts.tileheight = externalTs.tileheight
-                        ts.tilecount = externalTs.tilecount
-                        ts.columns = externalTs.columns
-                        ts.spacing = externalTs.spacing
-                        ts.margin = externalTs.margin
-                        ts.imagePath = externalTs.imagePath
-                        ts.imagewidth = externalTs.imagewidth
-                        ts.imageheight = externalTs.imageheight
-                        ts.tiles = externalTs.tiles
-                        ts._animatedTiles = externalTs._animatedTiles
-                        ts._animationStates = externalTs._animationStates
-                        ts._occluderHeights = externalTs._occluderHeights
+                        local external = tiled_parser.parseTileset(json.parse(tsjData) as {string: any}, ts.firstgid)
+                        ts.name = external.name
+                        ts.tilewidth = external.tilewidth
+                        ts.tileheight = external.tileheight
+                        ts.tilecount = external.tilecount
+                        ts.columns = external.columns
+                        ts.spacing = external.spacing
+                        ts.margin = external.margin
+                        ts.imagePath = external.imagePath
+                        ts.imagewidth = external.imagewidth
+                        ts.imageheight = external.imageheight
+                        ts.tiles = external.tiles
+                        ts._animatedTiles = external._animatedTiles
+                        ts._animationStates = external._animationStates
+                        ts._occluderHeights = external._occluderHeights
                     end
                 end
-
-                -- Now load the image and optional material maps
                 if ts.imagePath and not ts.imagePath:match("%.tsj$") then
-                    local imgPath = tiled_parser.resolveRelativePath(path, ts.imagePath)
-                    local imgHandle = self:loadImage(imgPath)
-                    ts.image = imgHandle.value  -- Block until loaded
-                    -- Use nearest-neighbor filtering to avoid tile bleeding
+                    local imagePath = tiled_parser.resolveRelativePath(path, ts.imagePath)
+                    ts.image = self:loadImage(imagePath).value
                     (ts.image as love.graphics.Texture):setFilter("nearest", "nearest")
-
-                    -- Try to load optional material maps (_n.png, _e.png, _orm.png)
-                    local basePath = imgPath:gsub("%.png$", "")
-                    local normalPath = basePath .. "_n.png"
-                    local emissionPath = basePath .. "_e.png"
-                    local ormPath = basePath .. "_orm.png"
-
-                    if love.filesystem.getInfo(normalPath) then
-                        local normalHandle = self:loadImage(normalPath)
-                        ts.normalImage = normalHandle.value
+                    local base = imagePath:gsub("%.png$", "")
+                    if love.filesystem.getInfo(base .. "_n.png") then
+                        ts.normalImage = self:loadImage(base .. "_n.png").value
                         (ts.normalImage as love.graphics.Texture):setFilter("nearest", "nearest")
                     end
-
-                    if love.filesystem.getInfo(emissionPath) then
-                        local emissionHandle = self:loadImage(emissionPath)
-                        ts.emissionImage = emissionHandle.value
+                    if love.filesystem.getInfo(base .. "_e.png") then
+                        ts.emissionImage = self:loadImage(base .. "_e.png").value
                         (ts.emissionImage as love.graphics.Texture):setFilter("nearest", "nearest")
                     end
-
-                    if love.filesystem.getInfo(ormPath) then
-                        local ormHandle = self:loadImage(ormPath)
-                        ts.ormImage = ormHandle.value
+                    if love.filesystem.getInfo(base .. "_orm.png") then
+                        ts.ormImage = self:loadImage(base .. "_orm.png").value
                         (ts.ormImage as love.graphics.Texture):setFilter("nearest", "nearest")
                     end
                 end
             end
         end
-
-        -- Load image layer images
-        local mapLayers <const> = map.layers
-        for li = 1, #mapLayers do
-            local layer = mapLayers[li]
+        local layers <const> = map.layers
+        for i = 1, #layers do
+            local layer = layers[i]
             if layer.type == "imagelayer" and layer.imagePath then
-                local imgPath = tiled_parser.resolveRelativePath(path, layer.imagePath)
-                local imgHandle = self:loadImage(imgPath)
-                layer._image = imgHandle.value
-                if layer.imagewidth == 0 then
-                    layer.imagewidth = (layer._image as love.graphics.Texture):getWidth() as integer
-                end
-                if layer.imageheight == 0 then
-                    layer.imageheight = (layer._image as love.graphics.Texture):getHeight() as integer
-                end
+                local imagePath = tiled_parser.resolveRelativePath(path, layer.imagePath)
+                layer._image = self:loadImage(imagePath).value
+                if layer.imagewidth == 0 then layer.imagewidth = (layer._image as love.graphics.Texture):getWidth() as integer end
+                if layer.imageheight == 0 then layer.imageheight = (layer._image as love.graphics.Texture):getHeight() as integer end
             end
         end
-
         return map
     end)
+    return registerDerived(self, "loadTiledMap", path, {}, result)
 end
 
---------------------------------------------------------------------------------
--- Create a new asset manager
---------------------------------------------------------------------------------
-
-function threaded.new(root: string): AssetManager
-    return AssetManager.new(root)
+function threaded.new(root: string, queue?: workers.Queue): AssetManager
+    return threaded.AssetManager.new(root, queue)
 end
-
--- Create the InitialLoadComplete event
-threaded.InitialLoadComplete.init = function(_e: threaded.InitialLoadComplete)
-    -- No fields to set
-end
-tecs.newEvent(threaded.InitialLoadComplete)
-
--- Create the HandleComplete event
-threaded.HandleComplete.init = function(e: threaded.HandleComplete, handle: Handle<any>)
-    e.handle = handle
-end
-tecs.newEvent(threaded.HandleComplete)
 
 return threaded

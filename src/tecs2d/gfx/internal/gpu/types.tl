@@ -560,20 +560,6 @@ local record types
         --- Register a render plugin (called by shape modules during setup)
         registerPlugin: function(Renderer, plugin: RenderPlugin)
 
-        --- Register a tileset texture and get its layer index in the texture array.
-        --- If already registered, returns the existing index.
-        --- Triggers texture array rebuild if needed.
-        --- Optional normal, emission, and ORM maps are used for lighting.
-        --- Optional occluderHeights maps local tile IDs to shadow-casting heights.
-        registerTileset: function(
-            Renderer,
-            tileset: love.graphics.Texture,
-            normalMap?: love.graphics.Texture,
-            emissionMap?: love.graphics.Texture,
-            ormMap?: love.graphics.Texture,
-            occluderHeights?: {integer: number}
-        ): integer
-
         --- Set the layer range for multi-pass rendering with effects.
         --- Entities outside this range are discarded in the vertex shader.
         setLayerRange: function(Renderer, minLayer: number, maxLayer: number)

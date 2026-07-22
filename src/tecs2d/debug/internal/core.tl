@@ -9,7 +9,7 @@
 local tecs <const> = require("tecs")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
 local recording <const> = require("tecs2d.debug.internal.recording")
-local freeze <const> = require("tecs2d.debug.internal.freeze")
+local suspension <const> = require("tecs2d.internal.suspension")
 local annotations <const> = require("tecs2d.debug.internal.annotations")
 local rewind <const> = require("tecs2d.debug.internal.rewind")
 local commands <const> = require("tecs2d.debug.commands")
@@ -43,7 +43,7 @@ function core.ensure(w: tecs.World, opts?: core.Options): commands.Registry
 
     local ctx = debugcontext.new()
     w.resources[debugcontext.KEY] = ctx
-    local fz = freeze.ensure(w)
+    local controller = suspension.ensure(w)
     local store = annotations.install(w, ctx)
     local recorder = recording.new(ctx, opts)
     w.resources[recording.KEY] = recorder
@@ -51,7 +51,7 @@ function core.ensure(w: tecs.World, opts?: core.Options): commands.Registry
         world = w,
         ctx = ctx,
         recorder = recorder,
-        freeze = fz,
+        suspension = controller,
         annotations = store,
         keys = {leader = "ctrl", debugToggle = "/", statsToggle = "."},
     })
@@ -70,7 +70,7 @@ function core.ensure(w: tecs.World, opts?: core.Options): commands.Registry
 
             -- Time-travel ring capture: wall-clock interval, and never while
             -- the freeze controller is held (whoever holds it).
-            rewind.tick(ctx, w, now, fz:isFrozen())
+            rewind.tick(ctx, w, now, controller:isSuspended())
 
             -- Delayed screenshots count down on wall-clock time and fire even
             -- while the panel is closed or the game is frozen.

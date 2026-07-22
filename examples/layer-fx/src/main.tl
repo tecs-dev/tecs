@@ -304,7 +304,6 @@ local function layerFxPlugin(world: tecs.World)
         Transform(hudX + 90, hudY + 20, 0, 4),
         gfx.Rectangle(200, 80, 0),
         gfx.Color(0, 0, 0, 0.5),
-        gfx.BlendMode("alpha")
     )
 
     for i = 1, 3 do

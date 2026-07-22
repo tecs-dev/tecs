@@ -7,7 +7,7 @@ _G.love = require("spec.love2d.love2d_mock")
 
 local tecs <const> = require("tecs")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
-local freeze <const> = require("tecs2d.debug.internal.freeze")
+local suspension <const> = require("tecs2d.internal.suspension")
 local annotations <const> = require("tecs2d.debug.internal.annotations")
 local commands <const> = require("tecs2d.debug.commands")
 
@@ -36,7 +36,7 @@ function cmdharness.makeRegistry(): commands.Registry, tecs.World, debugcontext.
         world = w,
         ctx = ctx,
         recorder = nil,
-        freeze = freeze.ensure(w),
+        suspension = suspension.ensure(w),
         annotations = annotations.newStore(),
         keys = {leader = "ctrl", debugToggle = "/", statsToggle = "."},
     })

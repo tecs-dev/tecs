@@ -17,7 +17,7 @@ local rewind <const> = require("tecs2d.debug.internal.rewind")
 local snapdiff <const> = require("tecs2d.debug.internal.diff")
 local replaytape <const> = require("tecs2d.debug.internal.replaytape")
 local inputtape <const> = require("tecs2d.debug.internal.inputtape")
-local freeze <const> = require("tecs2d.debug.internal.freeze")
+local suspension <const> = require("tecs2d.internal.suspension")
 local osopen <const> = require("tecs2d.debug.internal.osopen")
 local cmdargs <const> = require("tecs2d.debug.internal.cmdargs")
 local cmdtypes <const> = require("tecs2d.debug.internal.cmdtypes")
@@ -1182,8 +1182,8 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         required = {"index", "frames", "events", "held"},
                     },
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local ctl = freeze.ensure(w)
-                        if not ctl:isFrozen() then
+                        local ctl = suspension.ensure(w)
+                        if not ctl:isSuspended() then
                             return {ok = false, code = "not_frozen",
                                 message = "rewind replay: freeze first (cmd_freeze on=true); replay drives frames through step"}
                         end

@@ -76,29 +76,14 @@ audio.AudioSource = tecs.newComponent({
     serialize = function(src: types.AudioSource): {string: any}
         local handle = src.handle
         if not handle then return nil end
-        local handleAny = handle as {string: any}
-        local path = handleAny._path as string
-        if not path or path == "" then return nil end
-        -- The asset manager's resolvePath prepends _root + "/" to input
-        -- paths. _path stores the resolved form. Strip the prefix so the
-        -- path round-trips through loadAudio without double-prefixing.
-        local assetMgr = handleAny._assetManager
-        if assetMgr then
-            local root = (assetMgr as {string: any})._root as string
-            if root then
-                local prefix = root .. "/"
-                if path:sub(1, #prefix) == prefix then
-                    path = path:sub(#prefix + 1)
-                end
-            end
-        end
-        -- handle._args layout after createHandle's table.insert(args, 1, id):
-        -- {id, "loadAudio", resolvedPath, sourceType, streamType}
-        local args = handleAny._args as {any}
+        local assets_module <const> = require("tecs2d.assets")
+        local descriptor = assets_module.describe(handle)
+        if not descriptor or descriptor.action ~= "loadAudio" then return nil end
+        local args = descriptor.args
         return {
-            path          = path,
-            sourceType    = args and args[4] or "static",
-            streamType    = args and args[5] or nil,
+            path          = descriptor.inputPath,
+            sourceType    = args and args[1] or "static",
+            streamType    = args and args[2] or nil,
             group         = src.group,
             volume        = src.volume,
             pitch         = src.pitch,
@@ -110,16 +95,12 @@ audio.AudioSource = tecs.newComponent({
             maxDistance    = src.maxDistance,
         }
     end,
-    deserialize = function(world: tecs.World, data: {string: any}): types.AudioSource
+    deserialize = function(_world: tecs.World, data: {string: any}): types.AudioSource
         if not data then return nil end
         local assets_module <const> = require("tecs2d.assets")
-        local assetMgr = world.resources[assets_module]
-        if not assetMgr then return nil end
-        local mgr = assetMgr as {string: function}
-        local handle = mgr.loadAudio(
-            assetMgr,
+        local handle = assets_module.loadAudio(
             data.path as string,
-            (data.sourceType as string) or "static",
+            (data.sourceType as love.audio.SourceType) or "static",
             data.streamType as string
         ) as types.Handle<love.audio.Source>
         return types.AudioSource.new({

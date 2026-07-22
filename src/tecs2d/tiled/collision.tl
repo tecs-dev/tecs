@@ -30,9 +30,6 @@ local type PhysicsBody = love.physics.Body
 local record CollisionConfig
     --- Whether collision is enabled (default: false)
     enabled: boolean
-    --- Accepted for compatibility; adjacent tiles always merge into
-    --- traced chain shapes (there is no unmerged mode).
-    mergeShapes: boolean
     --- Optional filter function to include/exclude tiles
     filter: function(tile: TileData, gid: integer, tileX: integer, tileY: integer): boolean
 end

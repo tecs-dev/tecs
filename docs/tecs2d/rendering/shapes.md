@@ -25,7 +25,7 @@ world:spawn(
 Shapes can be combined with styling components:
 
 - `Color` - RGBA tinting
-- `BlendMode` - Blend mode (add, multiply, etc.)
+- `gfx.blend.*` tags - Blend mode selection (add, multiply, etc.)
 - `Unlit` - Skip dynamic lighting
 - `Pivot` - Custom pivot point
 - *See [Styling](./styling) for details on these components.*

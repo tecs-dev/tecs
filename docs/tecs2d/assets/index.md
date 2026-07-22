@@ -1,218 +1,166 @@
 ---
-description: "Non-blocking threaded asset loading with promise-like Handles, weak-reference caching, pinning, and preloading"
+description: "Process-wide asynchronous asset loading built on the Tecs2D worker queue"
 outline: deep
 ---
 
-# Tecs Assets
+# Assets
 
-Tecs Assets is a non-blocking asset loading and management system. It loads game assets like images, sounds,
-fonts, and shaders in background threads without freezing gameplay.
+`tecs2d.assets` is the process-wide asset cache for a Tecs2D application. It loads and decodes files on
+[`tecs2d.workers`](/tecs2d/workers), then performs graphics-only construction on the main thread.
 
-- **Non-blocking threaded loading**: Uses worker threads to load assets without blocking the main thread
-- **Automatic memory management**: Uses weak references for cached assets, allowing automatic garbage collection
-- **Handle-based API**: Returns promise-like handles that can block on first access or be checked for completion
+Assets are runtime services rather than world resources. Every world in one LÖVE process sees the same cache, which is
+particularly useful for loading screens, debug worlds, and composited render worlds.
 
-## Quickstart
+## Loading assets
 
-You can access the asset manager from any system:
+`tecs2d.run` creates the global worker queue and asset manager before installing the game plugin:
 
 ```teal
-local tecs = require("tecs")
 local assets = require("tecs2d.assets")
 
-world:addSystem({
-    phase = tecs.phases.Startup,
-    run = function()
-        -- Get the asset manager instance
-        local manager = world.resources[assets]
-
-        -- Load assets (returns immediately with a handle)
-        local playerImage = manager:loadImage("sprites/player.png")
-        local jumpSound = manager:loadAudio("sounds/jump.wav", "static")
-        local mainFont = manager:loadFont("fonts/main.ttf", { size = 16 })
-
-        -- Check if a handle is complete
-        if playerImage.isComplete then
-            -- Access the value (will error if load failed)
-            love.graphics.draw(playerImage.value, 100, 100)
-        end
-    end,
-})
+local player = assets.loadImage("sprites/player.png")
+local jump = assets.loadAudio("sounds/jump.wav", "static")
+local font = assets.loadFont("fonts/ui.ttf", {size = 16})
 ```
 
-The game plugin automatically creates an asset manager with a root assets folder of "./assets". Use `setRoot` to change
-the asset root directory:
+Paths are relative to `assets/` by default. Change the global root directly:
 
 ```teal
-world.resources[assets]:setRoot("game-assets")
+assets.setRoot("game-assets")
 ```
+
+The global manager is available as `assets.manager`. Assigning that field performs no initialization or shutdown; the
+runtime normally owns it, while tests may assign a directly constructed manager.
 
 ## Handles
 
-All load methods return a `Handle<T>` immediately. Handles are smart references to assets being loaded.
+Every load returns a [`workers.Handle<T>`](/tecs2d/workers#handles):
 
 ```teal
-local handle = manager:loadImage("player.png")
+local handle = assets.loadImage("player.png")
 
--- You can check if the handle has an error
-if handle.err then
-    print("Failed to load:", handle.err)
-end
-
--- You can check if the handle is done
-if handle.isComplete then
-    local image = handle.value
-end
-```
-
-You can access the handle value directly at any time, blocking until it's fully loaded:
-
-```teal
-local image = handle.value -- blocks!
-```
-
-You can react when the handle is done loaded or has an error:
-
-```teal
--- Listen for completion
-handle:observe(function(h: assets.Handle<T>)
-    if h.err then
-        print("Error:", h.err)
+handle:observe(function(done)
+    if done.err then
+        print("load failed:", done.err)
     else
-        print("Loaded successfully")
-        playerSprite = h.value
+        playerImage = done.value
     end
 end)
 ```
 
-You can transform handles into other types using `map()`:
+Reading `value` before completion blocks by pumping the handle's owning queue. It raises if the job failed. Prefer
+`observe`, `map`, and `flatMap` during normal frame execution.
 
 ```teal
--- Transform an image handle into a particle system
-local particles = manager
-    :loadImage("particle.png")
+local particleSystem = assets.loadImage("particle.png")
     :map(function(image: love.graphics.Image): love.graphics.ParticleSystem
         return love.graphics.newParticleSystem(image)
     end)
 ```
 
-### Handle Properties
+## Caching and pinning
 
-| Name         | Type      | Description                                                 |
-|--------------|-----------|-------------------------------------------------------------|
-| `isComplete` | `boolean` | `true` if the operation has completed                       |
-| `value`      | `T`       | The loaded data. Blocks on first access, errors if failed   |
-| `err`        | `string`  | Error message if loading failed, nil otherwise              |
-
-### Blocking Behavior and Errors
-
-When you access `handle.value` for the first time:
-
-1. If the asset is already loaded, it returns immediately
-2. If still loading, it blocks until complete
-3. Once loaded, the value is cached on the handle for instant future access
-4. If loading failed, accessing `value` throws an error
-
-### Memory Management
-
-Handles are cached in storage using a _weak reference_, allowing automatic garbage collection of unused resources.
+The manager caches handles by operation, resolved path, and loader arguments. Cache values are weak, so assets can be
+collected when the game drops every reference.
 
 ```teal
--- Assets are cached automatically
-local handle1 = manager:loadImage("player.png")
-local handle2 = manager:loadImage("player.png")  -- Returns same handle
-
--- When all references are released, the asset can be garbage collected
-handle1 = nil
-handle2 = nil
-collectgarbage()  -- Asset may be collected if no other references exist
-
--- Next load will create a new handle
-local handle3 = manager:loadImage("player.png")  -- New load operation
+local first = assets.loadImage("player.png")
+local second = assets.loadImage("player.png") -- same handle while cached
 ```
 
-Use the `pin()` method of a Handle to preload assets or to ensure it's never garbage collected:
+Pin long-lived preloads through the asset manager:
 
 ```teal
--- This asset won't be garbage collected
-manager:loadImage("player.png"):pin()
+local player = assets.pin(assets.loadImage("player.png"))
+local music = assets.pin(assets.loadAudio("music.ogg", "stream"))
 ```
 
-## Supported Asset Types
+Pinning is asset policy and therefore is not a method on the generic worker handle.
 
-The asset manager provides built-in loaders for common asset types:
+## Load batches
 
-| Method                                                   | Returns               | Description                                                       |
-| -------------------------------------------------------- | --------------------- | ----------------------------------------------------------------- |
-| [`loadImage`](/tecs2d/assets/api#loadimage)                     | `Image`               | PNG, JPG, and other image formats                                 |
-| [`loadSpriteSheet`](/tecs2d/assets/api#loadspritesheet)         | `SpriteSheet`         | [Sprite sheets](/tecs2d/rendering/sprites/sheets) with animations        |
-| [`loadStaticSheet`](/tecs2d/assets/api#loadstaticsheet)         | `SpriteSheet`         | Single images as [sprite sheets](/tecs2d/rendering/sprites/sheets)       |
-| [`loadBMFont`](/tecs2d/assets/api#loadbmfont)                   | `BMFont`              | [Bitmap font](/tecs2d/rendering/text) atlases (.fnt, .json)              |
-| [`loadTiledMap`](/tecs2d/assets/api#loadtiledmap)               | `TilemapData`         | [Tiled](/tecs2d/tiled/) map editor exports                               |
-| [`loadFont`](/tecs2d/assets/api#loadfont)                       | `Font`                | TrueType fonts (.ttf, .otf)                                       |
-| [`loadImageFont`](/tecs2d/assets/api#loadimagefont)             | `Font`                | Image-based fonts                                                 |
-| [`loadAudio`](/tecs2d/assets/api#loadaudio)                     | `Source`              | Audio files (WAV, OGG, MP3)                                       |
-| [`loadShader`](/tecs2d/assets/api#loadshader)                   | `Shader`              | GLSL shader files                                                 |
-| [`loadVideo`](/tecs2d/assets/api#loadvideo)                     | `Video`               | Video files (OGV)                                                 |
-| [`loadJson`](/tecs2d/assets/api#loadjson)                       | `any`                 | JSON data files                                                   |
-| [`loadFile`](/tecs2d/assets/api#loadfile)                       | `string`              | Raw text file contents                                            |
-| [`loadCompressedImage`](/tecs2d/assets/api#loadcompressedimage) | `CompressedImageData` | Compressed image data (DDS, KTX, etc.)                            |
-| [`loadFileData`](/tecs2d/assets/api#loadfiledata)               | `FileData`            | Raw binary file contents                                          |
-
-### Game-Specific Assets
-
-For sprite sheets, BMFonts, and Tiled maps, the loaders automatically load all required files concurrently:
-
-- **[Sprite Sheets](/tecs2d/rendering/sprites/sheets)**: Loads the image, JSON metadata, and optional material maps
-  (`_n.png`, `_e.png`, `_s.png`)
-- **[BMFonts](/tecs2d/rendering/text)**: Loads the font definition and its atlas texture
-- **[Tiled Maps](/tecs2d/tiled/)**: Loads the map, all tileset images, external tilesets, material maps, and image layers
-
-### Custom Asset Types
-
-For game-specific asset types, use [`registerAssetHandler`](/tecs2d/assets/api#registerassethandler) to create custom loaders
-that integrate with the caching and threading system.
-
-## Preloading assets
-
-To preload assets during startup, load and pin them in a `Startup` system:
+A `LoadBatch` tracks progress for one preload or transition. It waits for every unique handle instead of failing fast.
 
 ```teal
-local tecs = require("tecs")
-local assets = require("tecs2d.assets")
+local batch = assets.newBatch()
+local player = batch:track(assets.loadImage("player.png"))
+local music = batch:track(assets.loadAudio("music.ogg", "stream"))
+batch:seal()
 
-world:addSystem({
-    phase = tecs.phases.Startup,
-    run = function()
-        local manager = world.resources[assets]
-        -- Use :pin() to ensure assets stay in memory
-        manager:loadImage("player.png"):pin()
-        manager:loadAudio("music.ogg", "stream"):pin()
-        manager:loadFont("ui.ttf", { size = 16 }):pin()
-    end,
-})
-```
-
-### InitialLoadComplete
-
-The `InitialLoadComplete` event is emitted on the first call to `update()` when there are no pending load
-operations. This means all assets queued during startup will have finished loading before the event fires. The
-event is only emitted once per AssetManager instance and is emitted even if nothing was ever loaded.
-
-```teal
-world:observe(0, assets.InitialLoadComplete, function()
-    print("All startup assets are ready!")
+batch:observe(function(done: assets.LoadBatch)
+    if done.isSuccessful then
+        assets.pin(player)
+        assets.pin(music)
+    else
+        print(table.concat(done.errors, "\n"))
+    end
 end)
 ```
 
-This is useful for implementing [loading screens](#loading-screens) or deferring gameplay until assets
-are available.
+Use `progress`, `completedCount`, `totalCount`, and `failedCount` for the loading UI. Seal only after tracking every
+handle. A sealed empty batch completes successfully.
 
-### Loading Screens
+## Supported loaders
 
-Asynchronous asset loading can be used to implement animated loading screens with progress displays.
+| Method | Result |
+| --- | --- |
+| `loadFile` | `string` |
+| `loadFileData` | `FileData` |
+| `loadJson` | parsed JSON |
+| `loadImage` | `Image` |
+| `loadCompressedImage` | `CompressedImageData` |
+| `loadFont` / `loadImageFont` | `Font` |
+| `loadAudio` | `Source` |
+| `loadShader` | `Shader` |
+| `loadVideo` | `Video` |
+| `loadSpriteSheet` / `loadStaticSheet` | `SpriteSheet` |
+| `loadBMFont` | `BMFont` |
+| `loadTiledMap` | `TilemapData` |
 
-::: info See working example
-See the [Loading Screen Example](https://github.com/tecs-dev/tecs/tree/main/examples/assets) for a complete
-working example on GitHub.
-:::
+See the [API reference](./api) for signatures.
+
+## Custom asset types
+
+Custom asset handlers add cache identity and domain parsing on top of existing handles:
+
+```teal
+local workers = require("tecs2d.workers")
+
+local LEVEL <const> = assets.newAssetHandler<LevelData>()
+
+assets.registerAssetHandler(LEVEL, function(path: string): workers.Handle<LevelData>
+    return assets.loadFile(path):map(parseLevel)
+end)
+
+local level = assets.load(LEVEL, "levels/one.level")
+```
+
+For CPU-heavy parsing, submit a typed worker job instead of running the parser in `map`; handle transformations execute
+on the main thread.
+
+## Loading screens and multiple worlds
+
+Worker and asset updates occur outside world phases. A game can suspend its gameplay world, update a small loading world
+on a separate clock, and composite the loading canvas while the same process-wide asset batch continues settling.
+
+See [Multiple render worlds and compositing](/tecs2d/rendering/multi-world#loading-screens) and the
+[assets example](https://github.com/tecs-dev/tecs/tree/main/examples/assets).
+
+## Independent managers
+
+Tests and advanced tools can construct independent managers over any queue:
+
+```teal
+local workers = require("tecs2d.workers")
+
+local queue = workers.new({threadCount = 1})
+local manager = assets.new("fixtures", queue)
+
+local value = manager:loadFile("sample.txt").value
+
+manager:shutdown()
+queue:shutdown()
+```
+
+An asset manager owns its cache, not its queue. Multiple managers may share one queue. The queue must be updated and
+shut down by its owner; shutting down a manager never shuts down the shared queue.

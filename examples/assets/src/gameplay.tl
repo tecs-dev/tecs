@@ -1,147 +1,83 @@
 local tecs <const> = require("tecs")
 local assets <const> = require("tecs2d.assets")
-local GameState <const> = require("game_state")
+local gfx <const> = require("tecs2d.gfx")
+local input <const> = require("tecs2d.input")
+local ui <const> = require("tecs2d.ui")
+local loading <const> = require("loading")
 
-local lg <const> = love.graphics
+local Transform <const> = tecs.builtins.Transform
+local FONT <const> = "assets/press-start-2p.fnt"
 
-local record GameplayPlugin
-    world: tecs.World
-    manager: assets.AssetManager
-    messages: {string}
-    titleFont: love.graphics.Font
-    messageFont: love.graphics.Font
-
-    init: function(self, world: tecs.World)
-    update: function(self)
-    render: function(self)
+local record gameplay
+    plugin: function(): tecs.Plugin
 end
 
-function GameplayPlugin.new(): GameplayPlugin
-    return setmetatable({
-        messages = {}
-    }, {__index = GameplayPlugin})
-end
-
-function GameplayPlugin:init(world: tecs.World)
-    self.world = world
-    self.manager = world.resources[assets]
-
-    local input = require("tecs2d.input")
-
-    world:addSystem({
-        name = "GameplayUpdate",
-        phase = tecs.phases.Update,
-        runIf = tecs.runif.inState(GameState.PLAYING),
-        run = function()
-            self:update()
-            if input.isKeyReleased("return") then
-                self.messages = {}
-                -- Force garbage collection to free memory
-                collectgarbage("collect")
-                collectgarbage("collect")
-                world:popState()
-                world:pushState(GameState.LOADING)
-            end
-        end
-    })
-
-    world:addSystem({
-        name = "GameplayRender",
-        phase = tecs.phases.Render,
-        runIf = tecs.runif.inState(GameState.PLAYING),
-        run = function()
-            self:render()
-        end
-    })
-end
-
-function GameplayPlugin:update()
-    if #self.messages == 0 then
-        self.titleFont = lg.newFont(32)
-        self.messageFont = lg.newFont(20)
-
-        -- Load the generated message files
-        for i = 1, 5 do
-            local handle = self.manager:loadFile(string.format("message%d.txt", i))
-            local success, value = pcall(function(): string
-                return handle.value as string
-            end)
-            if success and value then
-                table.insert(self.messages, value)
-            end
-        end
-    end
-end
-
-function GameplayPlugin:render()
-    local width, height = lg.getWidth(), lg.getHeight()
-
-    lg.setColor(0.1, 0.1, 0.15, 1)
-    lg.rectangle("fill", 0, 0, width, height)
-
-    lg.setFont(self.titleFont or lg.newFont(32))
-    lg.setColor(0.2, 0.8, 0.2, 1)
-    local title = "Now Playing..."
-    local titleWidth = lg.getFont():getWidth(title)
-    lg.print(title, width / 2 - titleWidth / 2, 50)
-
-    lg.setFont(lg.newFont(16))
-    lg.setColor(0.6, 0.6, 0.6, 1)
-    local instruction = "Press ENTER to reload assets | Press ESC to quit"
-    local instructionWidth = lg.getFont():getWidth(instruction)
-    lg.print(instruction, width / 2 - instructionWidth / 2, 106)
-
-    if #self.messages > 0 then
-        lg.setColor(0.15, 0.15, 0.2, 1)
-        lg.rectangle("fill", 50, 150, width - 100, height - 200, 10, 10)
-
-        lg.setColor(0.2, 0.2, 0.3, 1)
-        lg.setLineWidth(2)
-        lg.rectangle("line", 50, 150, width - 100, height - 200, 10, 10)
-
-        lg.setFont(self.messageFont or lg.newFont(20))
-        lg.setColor(0.9, 0.9, 0.9, 1)
-        lg.print("Loaded Messages:", 80, 180)
-
-        lg.setFont(lg.newFont(16))
-        lg.setColor(0.7, 0.7, 0.8, 1)
-        local y = 240
-        for i, message in ipairs(self.messages) do
-            lg.print(string.format("%d. %s", i, message), 100, y)
-            y = y + 30
-        end
-
-        -- Show asset stats with heading
-        local stats = self.manager:getStats()
-
-        lg.setFont(self.messageFont or lg.newFont(20))
-        lg.setColor(0.9, 0.9, 0.9, 1)
-        lg.print("AssetManager Stats:", 80, height - 180)
-
-        lg.setFont(lg.newFont(16))
-        lg.setColor(0.7, 0.7, 0.8, 1)
-        local statsText = string.format("Completed: %d | Running: %d | Cached: %d | Pinned: %d",
-            stats.completedCount, stats.runningCount, stats.currentAssetCount, stats.pinnedAssetCount)
-        lg.print(statsText, 100, height - 130)
-
-        lg.setColor(0.5, 0.5, 0.5, 1)
-        lg.setFont(lg.newFont(14))
-        local time = string.format("Time: %.2f seconds", love.timer.getTime())
-        lg.print(time, width - 200, height - 35)
-    else
-        lg.setColor(0.5, 0.5, 0.5, 1)
-        lg.setFont(lg.newFont(18))
-        local noContent = "No content loaded yet..."
-        local noContentWidth = lg.getFont():getWidth(noContent)
-        lg.print(noContent, width / 2 - noContentWidth / 2, height / 2)
-    end
-end
-
-function GameplayPlugin.plugin(): tecs.Plugin
+function gameplay.plugin(): tecs.Plugin
     return function(world: tecs.World)
-        local plugin = GameplayPlugin.new()
-        plugin:init(world)
+        local loadingScreen = assert(world.resources[loading.KEY], "loading screen plugin is missing")
+
+        world:spawn(
+            Transform(0, 0, 0),
+            ui.Anchor(0.5, 0.5),
+            gfx.Rectangle(800, 600),
+            gfx.Color(0.07, 0.085, 0.12)
+        )
+        world:spawn(
+            Transform(0, 0, 2), ui.Anchor(0.5, 0, 0, 70),
+            gfx.Text(FONT, "GAMEPLAY WORLD RUNNING", 1.1), ui.LayoutBox(gfx.Text),
+            gfx.Color(0.35, 0.9, 0.55)
+        )
+        world:spawn(
+            Transform(0, 0, 2), ui.Anchor(0.5, 0, 0, 115),
+            gfx.Text(FONT, "ENTER: show cached loading flow   ESC: quit", 0.55), ui.LayoutBox(gfx.Text),
+            gfx.Color(0.58, 0.64, 0.74)
+        )
+
+        local messageIds: {integer} = {}
+        for i = 1, 5 do
+            messageIds[i] = world:spawn(
+                Transform(0, 0, 2), ui.Anchor(0.5, 0, 0, 185 + (i - 1) * 48),
+                gfx.Text(FONT, "", 0.62), ui.LayoutBox(gfx.Text),
+                gfx.Color(0.78, 0.82, 0.9)
+            )
+        end
+        local statsId = world:spawn(
+            Transform(0, 0, 2), ui.Anchor(0.5, 1, 0, -75),
+            gfx.Text(FONT, "", 0.52), ui.LayoutBox(gfx.Text),
+            gfx.Color(0.48, 0.56, 0.68)
+        )
+
+        local populated = false
+        world:addSystem({
+            name = "assets.GameplayUpdate",
+            phase = tecs.phases.Update,
+            run = function()
+                -- No loading predicate: this system simply cannot run while
+                -- the world is suspended.
+                if not populated then
+                    populated = true
+                    for i = 1, 5 do
+                        local text = world:get(messageIds[i], gfx.Text)
+                        if text then
+                            text:setText(string.format("%d. %s", i,
+                                assets.loadFile(string.format("message%d.txt", i)).value))
+                        end
+                    end
+                end
+
+                local stats = assets.getStats()
+                local statsText = world:get(statsId, gfx.Text)
+                if statsText then
+                    statsText:setText(string.format("lifetime %d complete | %d cached | %.1fs",
+                        stats.completedCount, stats.currentAssetCount, love.timer.getTime()))
+                end
+
+                if input.isKeyPressed("return") then
+                    loadingScreen:start()
+                end
+            end,
+        })
     end
 end
 
-return GameplayPlugin
+return gameplay

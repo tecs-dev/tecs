@@ -756,7 +756,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
     registry.env.keys = {leader = leaderKey, debugToggle = debugToggleKey, statsToggle = statsToggleKey}
     local ctx = registry.env.ctx
     local recorder = registry.env.recorder
-    local fz = registry.env.freeze
+    local fz = registry.env.suspension
 
     local pickQuery = w:query({name = "debug.Pick", include = {Transform}})
 
@@ -1109,7 +1109,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             input.pushLayer(captureLayer)
         end
         if not debugRecordingActive() then
-            fz:acquire("debugger")
+            fz:suspend("debugger")
             ctx.frozen = true
         end
         debugcontext.pushEvent(ctx, "open")
@@ -1123,7 +1123,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
         if captureLayer:isActive() then
             input.popLayer(captureLayer)
         end
-        fz:release("debugger")
+        fz:resume("debugger")
         ctx.frozen = false
         debugcontext.pushEvent(ctx, "close")
     end
@@ -1163,11 +1163,11 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 if ctx.open then doClose() end
             elseif debugRecordingActive() then
                 if ctx.frozen then
-                    fz:release("debugger")
+                    fz:resume("debugger")
                     ctx.frozen = false
                 end
             elseif ctx.open and not ctx.frozen then
-                fz:acquire("debugger")
+                fz:suspend("debugger")
                 ctx.frozen = true
             end
 

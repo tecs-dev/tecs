@@ -660,23 +660,23 @@ describe("tecs2d.debug.commands registry", function()
     describe("freeze command", function()
         it("toggles the operator hold and interoperates with other holders", function()
             local reg, w = makeRegistry()
-            local fz = reg.env.freeze
+            local fz = reg.env.suspension
 
             local on = reg:execute("freeze")
             luassert.is_true(on.ok, tostring(on.message))
             luassert.is_true(on.data.frozen as boolean)
             luassert.is_true(fz:heldBy("operator"))
-            luassert.is_true(fz:isFrozen())
+            luassert.is_true(fz:isSuspended())
 
             -- Another holder keeps the world frozen after the operator
             -- releases.
-            fz:acquire("mcp")
+            fz:suspend("mcp")
             local off = reg:execute("freeze off")
             luassert.is_true(off.ok, tostring(off.message))
             luassert.is_false(fz:heldBy("operator"))
             luassert.is_true(off.data.frozen as boolean, "mcp holder must keep the freeze")
-            fz:release("mcp")
-            luassert.is_false(fz:isFrozen())
+            fz:resume("mcp")
+            luassert.is_false(fz:isSuspended())
 
             -- Bare freeze toggles; on/off are idempotent.
             luassert.is_true((reg:execute("freeze")).data.frozen as boolean)

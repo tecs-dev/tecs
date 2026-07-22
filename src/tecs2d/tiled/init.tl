@@ -186,7 +186,6 @@ tecs.newComponent({
         if t.collision then
             result.collision = {
                 enabled = t.collision.enabled,
-                mergeShapes = t.collision.mergeShapes,
             }
         end
         return result
@@ -199,7 +198,6 @@ tecs.newComponent({
             local collisionData = data.collision as {string: any}
             tilemap.collision = {
                 enabled = collisionData.enabled as boolean,
-                mergeShapes = collisionData.mergeShapes as boolean,
             }
         end
         return tilemap
@@ -248,7 +246,7 @@ tiled.parseTiledMap = loader.parseTiledMap
 function tiled.plugin(world: tecs.World)
 
     -- Get dependencies
-    local assetManager = world.resources[tecs_assets]
+    local assetManager = assert(tecs_assets.manager, "tecs2d.tiled requires the global asset manager")
     local pipelineInstance = world.resources[pipelinekey.PIPELINE]
 
     if not pipelineInstance then

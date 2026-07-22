@@ -10,8 +10,8 @@ for _, m in ipairs(sharedModules) do
     os.execute("tl gen -o " .. dst .. " " .. src .. " 2>/dev/null")
 end
 
--- Symlink internal/ for the threaded asset loader worker.
-os.execute("cd build && ln -sf ../../../build/tecs2d/assets/internal internal")
+-- Symlink internal/ for the process-wide worker queue.
+os.execute("cd build && ln -sf ../../../build/tecs2d/workers/internal internal")
 
 -- Symlink assets into build/ if not already present.
 -- os.execute returns a number in LuaJIT (0 = success), not a boolean.

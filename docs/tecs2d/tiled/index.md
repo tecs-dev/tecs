@@ -59,10 +59,10 @@ For non-blocking map loading, use the asset manager's [`loadTiledMap`](/tecs2d/a
 
 ```teal
 local assets = require("tecs2d.assets")
-local manager = world.resources[assets]
+local workers = require("tecs2d.workers")
 
-manager:loadTiledMap("maps/level1.tmj")
-    :observe(function(h: assets.Handle<tiled.TilemapData>)
+assets.loadTiledMap("maps/level1.tmj")
+    :observe(function(h: workers.Handle<tiled.TilemapData>)
         world:spawn(
             tiled.Tilemap.new({ data = h.value }),
             tecs.builtins.Transform.new({ x = 0, y = 0 })

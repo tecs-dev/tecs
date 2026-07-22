@@ -1,5 +1,5 @@
 local tecs <const> = require("tecs")
-local tecs_assets <const> = require("tecs2d.assets")
+local workers <const> = require("tecs2d.workers")
 
 local type Component = tecs.Component
 
@@ -7,7 +7,7 @@ local type Component = tecs.Component
 local record types
 
     --- Handle type alias for audio sources.
-    type Handle = tecs_assets.Handle<love.audio.Source>
+    type Handle<T> = workers.Handle<T>
 
     --- Options for playing a sound via the direct API.
     record PlayOptions
@@ -122,7 +122,7 @@ local record types
         --- @param handle The audio asset handle.
         --- @param options Optional play options.
         --- @return The playing source, or nil if blocked by cooldown/voice limit.
-        play: function(self, handle: tecs_assets.Handle<love.audio.Source>, options?: PlayOptions): love.audio.Source
+        play: function(self, handle: workers.Handle<love.audio.Source>, options?: PlayOptions): love.audio.Source
 
         --- Play a positional (3D) sound.
         --- @param handle The audio asset handle.
@@ -132,7 +132,7 @@ local record types
         --- @param options Optional play options.
         --- @return The playing source, or nil if blocked by cooldown/voice limit.
         playAt: function(
-            self, handle: tecs_assets.Handle<love.audio.Source>, x: number, y: number, z: number,
+            self, handle: workers.Handle<love.audio.Source>, x: number, y: number, z: number,
             options?: PlayOptions
         ): love.audio.Source
 
@@ -243,7 +243,7 @@ local record types
     --- Configuration for the AudioSource component.
     record AudioSourceConfig
         --- Handle to the audio asset.
-        handle: tecs_assets.Handle<love.audio.Source>
+        handle: workers.Handle<love.audio.Source>
 
         --- Sound group name (defaults to "sfx").
         group: string
@@ -276,7 +276,7 @@ local record types
     --- Component for continuous/looping sounds attached to entities.
     record AudioSource is Component
         --- Handle to the audio asset.
-        handle: tecs_assets.Handle<love.audio.Source>
+        handle: workers.Handle<love.audio.Source>
 
         --- Sound group name. Changing it re-routes group/master volume;
         --- group effects applied at registration do not migrate.

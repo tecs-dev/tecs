@@ -201,6 +201,7 @@ export default defineConfig({
                 collapsed: true,
                 items: [
                   { text: 'Multiple Worlds & Compositing', link: '/tecs2d/rendering/multi-world' },
+                  { text: 'World Suspension', link: '/tecs2d/suspension' },
                 ]
               },
             ]
@@ -213,6 +214,7 @@ export default defineConfig({
               { text: 'API Reference', link: '/tecs2d/assets/api' },
             ]
           },
+          { text: 'Worker Jobs', link: '/tecs2d/workers' },
           {
             text: 'Audio',
             collapsed: true,

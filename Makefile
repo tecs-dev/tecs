@@ -194,7 +194,7 @@ test-love: compile $(LOVE12_BIN)
 	@for app in $(LOVE_FIXTURE_DIR)/*/; do \
 		ln -sfn $(CURDIR)/build/tecs "$$app/tecs"; \
 		ln -sfn $(CURDIR)/build/tecs2d "$$app/tecs2d"; \
-		ln -sfn $(CURDIR)/build/tecs2d/assets/internal "$$app/internal"; \
+		ln -sfn $(CURDIR)/build/tecs2d/workers/internal "$$app/internal"; \
 		ln -sfn $(CURDIR)/examples/shared/assets "$$app/assets"; \
 	done
 	LUA_PATH="$(LUA_DIR)/?.lua;$(LUA_DIR)/?/init.lua;$(TEST_BUILD_DIR)/?.lua;$(TEST_BUILD_DIR)/?/init.lua;$(VENDOR_LUA)/?.lua;$(VENDOR_LUA)/?/init.lua;;" \
@@ -215,7 +215,7 @@ BENCH_SCENARIOS := $(basename $(notdir $(wildcard $(BENCH_LOVE_APP)/scenarios/*.
 bench-love: compile $(LOVE12_BIN)
 	@ln -sfn $(CURDIR)/build/tecs $(BENCH_LOVE_APP)/tecs
 	@ln -sfn $(CURDIR)/build/tecs2d $(BENCH_LOVE_APP)/tecs2d
-	@ln -sfn $(CURDIR)/build/tecs2d/assets/internal $(BENCH_LOVE_APP)/internal
+	@ln -sfn $(CURDIR)/build/tecs2d/workers/internal $(BENCH_LOVE_APP)/internal
 	@ln -sfn $(CURDIR)/examples/shared/assets $(BENCH_LOVE_APP)/assets
 	@mkdir -p $(BENCH_LOVE_RESULTS)
 	@for s in $(if $(SCENARIO),$(SCENARIO),$(BENCH_SCENARIOS)); do \
@@ -259,6 +259,7 @@ ifdef LUADIR
 			;; \
 		tecs2d) \
 			mkdir -p $(LUADIR)/tecs2d/internal $(LUADIR)/tecs2d/assets/internal \
+			         $(LUADIR)/tecs2d/workers/internal \
 			         $(LUADIR)/tecs2d/gfx/internal $(LUADIR)/tecs2d/gfx/bmfont \
 			         $(LUADIR)/tecs2d/audio/internal $(LUADIR)/tecs2d/ui/internal \
 			         $(LUADIR)/tecs2d/mcp $(LUADIR)/tecs2d/tiled/internal; \

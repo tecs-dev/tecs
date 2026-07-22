@@ -1,22 +1,22 @@
---- Shared freeze/step controller: the one owner of "gameplay is stopped".
---- Both the in-game debugger (open panel) and the MCP pause tool freeze
+--- Shared suspension/step controller: the one owner of "gameplay is stopped".
+--- Both the in-game debugger (open panel) and the MCP pause tool suspend
 --- through this resource, so the two surfaces cannot fight over phase state
---- or clobber each other's saved time scale. Freezing disables every
+--- or clobber each other's saved time scale. Suspension disables every
 --- gameplay phase and zeroes the render time scale; rendering, input, the
 --- overlay, and the MCP server keep running.
 ---
---- Holders are named ("debugger", "mcp"): the world freezes when the first
---- holder acquires and thaws when the last releases. Stepping ticks the
---- gameplay phases for exactly N frames while frozen, then re-freezes.
+--- Holders are named ("debugger", "mcp"): the world suspends when the first
+--- holder claims it and resumes when the last holder leaves. Stepping ticks
+--- gameplay for exactly N frames while suspended, then suspends it again.
 
 local tecs <const> = require("tecs")
 local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
 local frameclock <const> = require("tecs2d.internal.frameclock")
 local logging <const> = require("tecs.utils.logging")
 
-local LOGGER <const> = logging.getLogger("tecs2d.debug.freeze")
+local LOGGER <const> = logging.getLogger("tecs2d.suspension")
 
-local record freeze
+local record suspension
     record Controller
         world: tecs.World
         holders: {string: boolean}
@@ -35,12 +35,12 @@ local record freeze
         ownProvider: function(number): number
 
         --- One-shot callbacks fired when the pending step's last frame has
-        --- run (or the freeze is released mid-step, so no waiter strands).
+        --- run (or suspension is released mid-step, so no waiter strands).
         stepWaiters: {function()}
 
         --- Optional per-frame hook, evaluated after each stepped frame's
         --- gameplay has run; returning true ends the step early. Cleared
-        --- when the step completes or the freeze is released.
+        --- when the step completes or suspension is released.
         perFrame: function(): boolean
 
         --- Frames actually run by the current/most recent step (a per-frame
@@ -57,21 +57,21 @@ local record freeze
 
         flushStepWaiters: function(self: Controller)
 
-        --- Freeze on behalf of `who`. Returns false if already held by them.
-        acquire: function(self: Controller, who: string): boolean
+        --- Suspend on behalf of `who`. Returns false if already held by them.
+        suspend: function(self: Controller, who: string): boolean
 
-        --- Release `who`'s hold; thaws when no holder remains. Returns false
+        --- Release `who`'s hold; resumes when no holder remains. Returns false
         --- if they held nothing.
-        release: function(self: Controller, who: string): boolean
+        resume: function(self: Controller, who: string): boolean
 
         heldBy: function(self: Controller, who: string): boolean
-        isFrozen: function(self: Controller): boolean
+        isSuspended: function(self: Controller): boolean
 
-        --- Queue N gameplay frames while frozen. Returns false + reason when
-        --- not frozen.
+        --- Queue N gameplay frames while suspended. Returns false + reason
+        --- when not suspended.
         step: function(self: Controller, frames: integer): boolean, string
 
-        --- Per-frame step state machine; driven by the debug.FreezeStep system.
+        --- Per-frame step state machine; driven by the suspension step system.
         tick: function(self: Controller)
 
         installStepClock: function(self: Controller)
@@ -80,12 +80,12 @@ local record freeze
 
     KEY: tecs.Key<Controller>
 
-    --- Get or create the world's freeze controller (installs its tick system
+    --- Get or create the world's suspension controller (installs its tick system
     --- on creation). Safe to call from any plugin, in any order.
     ensure: function(w: tecs.World): Controller
 end
 
-freeze.KEY = tecs.newKey("tecs2d.debug.freeze")
+suspension.KEY = tecs.newKey("tecs2d.suspension")
 
 -- Every gameplay phase. The debugger overlay draws in RenderLast, MCP runs in
 -- RenderFirst, and the event poller runs outside the phase system, so
@@ -123,7 +123,7 @@ local function enableGameplay(w: tecs.World)
     end
 end
 
-function freeze.Controller:acquire(who: string): boolean
+function suspension.Controller:suspend(who: string): boolean
     if self.holders[who] then return false end
     self.holders[who] = true
     self.holderCount = self.holderCount + 1
@@ -137,7 +137,7 @@ function freeze.Controller:acquire(who: string): boolean
     return true
 end
 
-function freeze.Controller:release(who: string): boolean
+function suspension.Controller:resume(who: string): boolean
     if not self.holders[who] then return false end
     self.holders[who] = nil
     self.holderCount = self.holderCount - 1
@@ -155,17 +155,17 @@ function freeze.Controller:release(who: string): boolean
     return true
 end
 
-function freeze.Controller:heldBy(who: string): boolean
+function suspension.Controller:heldBy(who: string): boolean
     return self.holders[who] == true
 end
 
-function freeze.Controller:isFrozen(): boolean
+function suspension.Controller:isSuspended(): boolean
     return self.holderCount > 0
 end
 
-function freeze.Controller:step(frames: integer): boolean, string
+function suspension.Controller:step(frames: integer): boolean, string
     if self.holderCount == 0 then
-        return false, "not frozen"
+        return false, "not suspended"
     end
     if frames < 1 then frames = 1 end
     self.stepsRemaining = frames
@@ -176,7 +176,7 @@ end
 
 -- Fire and clear every registered step waiter. Each callback runs isolated
 -- so one bad waiter cannot strand the others (or kill the tick system).
-function freeze.Controller:flushStepWaiters()
+function suspension.Controller:flushStepWaiters()
     local waiters = self.stepWaiters
     if not waiters or #waiters == 0 then return end
     self.stepWaiters = {}
@@ -188,7 +188,7 @@ function freeze.Controller:flushStepWaiters()
     end
 end
 
-function freeze.Controller:onStepComplete(fn: function())
+function suspension.Controller:onStepComplete(fn: function())
     if self.stepsRemaining <= 0 and not self.stepping then
         pcall(fn)
         return
@@ -199,7 +199,7 @@ end
 
 -- Install a deterministic-dt provider for the duration of a step, unless a
 -- replay already owns the frameclock (its recorded dts must win).
-function freeze.Controller:installStepClock()
+function suspension.Controller:installStepClock()
     if frameclock.provider ~= nil then return end
     local ctl = self
     self.ownProvider = function(_realDt: number): number
@@ -208,20 +208,20 @@ function freeze.Controller:installStepClock()
     frameclock.provider = self.ownProvider
 end
 
-function freeze.Controller:removeStepClock()
+function suspension.Controller:removeStepClock()
     if self.ownProvider ~= nil and frameclock.provider == self.ownProvider then
         frameclock.provider = nil
     end
     self.ownProvider = nil
 end
 
--- Step: run the frozen gameplay phases for N frames, then re-freeze. Enabling
+-- Step: run the suspended gameplay phases for N frames, then suspend again. Enabling
 -- here takes effect on the next update (RenderFirst is after the gameplay
 -- phases), so each tick past the enable counts exactly one gameplay frame.
 -- Stepped frames carry a deterministic dt (stepDt or frameclock.nominal)
 -- instead of the display-rate-dependent measured dt, so `step n` advances the
 -- same amount of gameplay time on a 60Hz and a 120Hz machine.
-function freeze.Controller:tick()
+function suspension.Controller:tick()
     if self.holderCount == 0 or self.stepsRemaining <= 0 then return end
     if not self.stepping then
         self:installStepClock()
@@ -262,27 +262,38 @@ function freeze.Controller:tick()
     end
 end
 
-function freeze.ensure(w: tecs.World): freeze.Controller
-    local existing = w.resources[freeze.KEY]
+function suspension.ensure(w: tecs.World): suspension.Controller
+    local existing = w.resources[suspension.KEY]
     if existing then return existing end
-    local self: freeze.Controller = {
+    local self: suspension.Controller = {
         world = w,
         holders = {},
         holderCount = 0,
         savedTimeScale = 1.0,
         stepsRemaining = 0,
         stepping = false,
-    } as freeze.Controller
-    setmetatable(self as {string: any}, {__index = freeze.Controller})
-    w.resources[freeze.KEY] = self
+    } as suspension.Controller
+    setmetatable(self as {string: any}, {__index = suspension.Controller})
+    w.resources[suspension.KEY] = self
     w:addSystem({
-        name = "debug.FreezeStep",
+        name = "tecs2d.SuspensionStep",
         phase = tecs.phases.RenderFirst,
         run = function()
             self:tick()
         end,
     })
+    w:addSystem({
+        name = "tecs2d.SuspensionShutdown",
+        phase = tecs.phases.PreShutdown,
+        run = function()
+            self.stepsRemaining = 0
+            self.stepping = false
+            self.perFrame = nil
+            self:removeStepClock()
+            self:flushStepWaiters()
+        end,
+    })
     return self
 end
 
-return freeze
+return suspension

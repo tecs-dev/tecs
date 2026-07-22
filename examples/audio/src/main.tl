@@ -79,7 +79,7 @@ local input <const> = require("tecs2d.input")
     iconsByName["Speaker"] = img.speaker
     iconsByName["Keys"]    = img.keyboard
 
-    local assets = world.resources[tecs_assets] as tecs_assets.AssetManager
+    local assetManager = assert(tecs_assets.manager)
     local audioManager = world.resources[audio]
 
     -- Spawn emitters. AudioSource uses real asset handles (file paths) so
@@ -96,7 +96,7 @@ local input <const> = require("tecs2d.input")
             Transform(e[1], e[2], 0, 1),
             SoundEmitter({name = e[4], icon = e[5]}),
             audio.AudioSource.new({
-                handle = assets:loadAudio(e[3], "static"),
+                handle = assetManager:loadAudio(e[3], "static"),
                 group = "sfx",
                 looping = true,
                 playing = true,

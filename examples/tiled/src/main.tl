@@ -6,7 +6,6 @@
 
 local tecs <const> = require("tecs")
 local tecs2d <const> = require("tecs2d")
-local tecs_assets <const> = require("tecs2d.assets")
 local gfx <const> = require("tecs2d.gfx")
 local tecs_tiled <const> = require("tecs2d.tiled")
 local mcp <const> = require("tecs2d.mcp")
@@ -36,8 +35,6 @@ local BALL_RADIUS <const> = 12
 local BALL_SPEED <const> = 300
 
 local function demoPlugin(world: tecs.World)
-    world.resources[tecs_assets] = tecs_assets.new("assets")
-
     -- Initialize physics (required for tilemap collision)
     lp.setMeter(TILE_SIZE * 2)
     world:addPlugin(physics.new({
@@ -68,7 +65,6 @@ local function demoPlugin(world: tecs.World)
                     path = "level.tmj",
                     collision = {
                         enabled = true,
-                        mergeShapes = true,
                     }
                 }),
                 Transform.new({ x = 0, y = 0 })

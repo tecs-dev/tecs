@@ -2,6 +2,7 @@ require("busted")
 
 local luassert <const> = require("luassert")
 local tecs_assets <const> = require("tecs2d.assets")
+local workers <const> = require("tecs2d.workers")
 
 -- Mock love.audio before loading tecs2d.audio
 local record MockSource
@@ -124,20 +125,25 @@ local function createMockSource(): MockSource
     }, MockSource_mt)
 end
 
--- Mock Handle that satisfies tecs_assets.Handle interface
-local function createMockHandle(source: MockSource): tecs_assets.Handle<love.audio.Source>
+-- Mock the worker handle consumed by the audio manager.
+local function createMockHandle(source: MockSource): workers.Handle<love.audio.Source>
     -- We need to cast through a table to satisfy Teal's strict interface checking
     local handle = {
         isComplete = true,
         value = source as love.audio.Source,
         err = nil,
         observe = function() end,
-        pin = function() end,
-        map = function(): tecs_assets.Handle<love.audio.Source>
+        map = function(): workers.Handle<love.audio.Source>
+            return nil
+        end,
+        flatMap = function(): workers.Handle<love.audio.Source>
+            return nil
+        end,
+        handle = function(): workers.Handle<love.audio.Source>
             return nil
         end
     }
-    return handle as tecs_assets.Handle<love.audio.Source>
+    return handle as workers.Handle<love.audio.Source>
 end
 
 -- Set up love mock

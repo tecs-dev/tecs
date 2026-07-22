@@ -256,7 +256,6 @@ describe("tecs2d.debug.internal.cmd.engine", function()
         it("assets reload re-queues cached handles in place", function()
             local reg, w = makeRegistry()
             local assetskey = require("tecs2d.assets")
-            local pushed: {any} = {}
             local handle: {string: any} = {
                 id = 7, isComplete = true,
                 _action = "loadImage", _path = "img/player.png",
@@ -272,13 +271,15 @@ describe("tecs2d.debug.internal.cmd.engine", function()
                     ["loadImage|img/dropped.png"] =
                         {action = "loadImage", path = "img/dropped.png", status = "loaded"},
                 },
-                _runningTasks = {},
                 _runningCount = 0,
-                _pushChannel = {
-                    push = function(_self: any, a: any) pushed[#pushed + 1] = a end,
-                },
+                _reload = function(_self: any, key: string): any
+                    if key:find("dropped", 1, true) or not handle.isComplete then return nil end
+                    handle.isComplete = false
+                    playerLog.status = "loading"
+                    return handle
+                end,
             };
-            (w.resources as {any: any})[assetskey] = fakeManager
+            assetskey.manager = fakeManager as assetskey.AssetManager
 
             local listed = reg:execute("assets list img/")
             luassert.equals(2, listed.data.count, "log-only entries must list too")
@@ -290,16 +291,14 @@ describe("tecs2d.debug.internal.cmd.engine", function()
 
             local r = reg:execute("assets reload player.png")
             luassert.is_true(r.ok, tostring(r.message))
-            luassert.equals(1, #pushed)
             luassert.is_false(handle.isComplete as boolean)
-            luassert.equals(1, fakeManager._runningCount)
             luassert.equals("loading", playerLog.status)
 
             -- A handle that is already loading is not re-queued, and a
             -- dropped handle cannot be.
             luassert.is_false((reg:execute("assets reload player.png")).ok)
             luassert.is_false((reg:execute("assets reload dropped.png")).ok)
-            luassert.equals(1, #pushed)
+            assetskey.manager = nil
         end)
 
     end)

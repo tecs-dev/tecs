@@ -118,6 +118,17 @@ function M.exists(path)
     return requireLfs().attributes(M.normalize(path)) ~= nil
 end
 
+-- Check generated files through the native filesystem. The packaged CLI's
+-- read-only PhysFS mount can retain stale metadata after build output changes
+-- during the same process.
+function M.isFile(path)
+    local file = io.open(M.normalize(path), "rb")
+    if not file then return false end
+    local readable = file:read(0) ~= nil
+    file:close()
+    return readable
+end
+
 function M.fileMtime(path)
     local mtime = requireLfs().attributes(M.normalize(path), "modification")
     return tonumber(mtime) or 0

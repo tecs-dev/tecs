@@ -176,8 +176,8 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
         end
         -- While frozen the live pipeline scale is 0; report the scale that
         -- resumes, in the popup and the structured payload alike.
-        local frozen = env.freeze:isFrozen()
-        local timescale = frozen and env.freeze.savedTimeScale or p:getTimeScale()
+        local frozen = env.suspension:isSuspended()
+        local timescale = frozen and env.suspension.savedTimeScale or p:getTimeScale()
         local popup: {string} = {
             "camera",
             format("  position\t%.1f, %.1f", cx, cy),
@@ -411,8 +411,8 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         local scale = v.scale as number
                         -- While frozen, the controller owns the live time scale
                         -- (it is 0); update what it restores instead.
-                        if env.freeze:isFrozen() then
-                            env.freeze.savedTimeScale = scale
+                        if env.suspension:isSuspended() then
+                            env.suspension.savedTimeScale = scale
                             return {ok = true,
                                 message = format("timescale %.2f (applies when unfrozen)", scale),
                                 data = {scale = scale, deferred = true}}

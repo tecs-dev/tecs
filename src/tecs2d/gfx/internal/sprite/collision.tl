@@ -18,13 +18,6 @@ local record sprite_collision
         friction: number
     end
 
-    --- Per-entity collision configuration (kept for backwards compat with setupCollision)
-    record Config
-        bodyType: string                            -- "dynamic" or "static"
-        fixedRotation: boolean
-        slices: {string: SliceConfig | string}      -- slice name -> config or template name
-    end
-
     --- Component for sprite-based collision
     --- Add this component alongside a Sprite to enable slice-based physics collision.
     --- Automatically adds Collider and RigidBody/StaticBody components on spawn.
@@ -54,11 +47,11 @@ local record sprite_collision
     --- Setup collision fixtures from slice data
     --- Called after physics body is created
     --- Returns true if collision was set up successfully
-    setupCollision: function(
+    setupFixtures: function(
         world: tecs.World,
         entityId: integer,
         sheetVal: sprite_sheet.SpriteSheet,
-        config: Config,
+        config: SpriteCollision,
         lp: any  -- love.physics module
     ): boolean
 
@@ -152,11 +145,11 @@ local function resolveSliceConfig(configOrName: sprite_collision.SliceConfig | s
     return configOrName as sprite_collision.SliceConfig
 end
 
-function sprite_collision.setupCollision(
+function sprite_collision.setupFixtures(
     world: tecs.World,
     entityId: integer,
     sheetVal: sprite_sheet.SpriteSheet,
-    config: sprite_collision.Config,
+    config: sprite_collision.SpriteCollision,
     lp: any
 ): boolean
     -- Get physics components (Collider must have body created by physics system)

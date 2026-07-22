@@ -38,7 +38,6 @@ world:spawn(
         path = "maps/level1.tmj",
         collision = {
             enabled = true,       -- Create physics bodies for tiles with collision data
-            mergeShapes = true,   -- Merge adjacent shapes into chain shapes (default: true)
         }
     }),
     tecs.builtins.Transform(0, 0)
@@ -52,11 +51,12 @@ an error will be thrown.
 
 ## Configuration Options
 
-| Option          | Type                              | Default   | Description                                        |
-| --------------- | --------------------------------- | --------- | -------------------------------------------------- |
-| `enabled`       | `boolean`                         | `false`   | Enable collision body creation                     |
-| `mergeShapes`   | `boolean`                         | `true`    | Merge adjacent shapes into chain shapes            |
-| `filter`        | `function(tile, gid, x, y)`       | `nil`     | Optional filter to include/exclude specific tiles  |
+| Option    | Type                        | Default | Description                                       |
+| --------- | --------------------------- | ------- | ------------------------------------------------- |
+| `enabled` | `boolean`                   | `false` | Enable collision body creation                    |
+| `filter`  | `function(tile, gid, x, y)` | `nil`   | Optional filter to include/exclude specific tiles |
+
+Adjacent tile boundaries are always merged into traced chain shapes.
 
 ### Filter Function
 
@@ -206,7 +206,6 @@ local function gamePlugin(world)
             path = "maps/level.tmj",
             collision = {
                 enabled = true,
-                mergeShapes = true,
             }
         }),
         tecs.builtins.Transform(0, 0)

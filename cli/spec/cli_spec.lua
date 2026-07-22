@@ -1611,6 +1611,32 @@ describe("tecs CLI", function()
     end)
 
     describe("runtime vendor pruning", function()
+        it("checks generated files through the native filesystem", function()
+            local root = makeTemp("native-file-check")
+            writeFile(join(root, "generated.lua"), "return true\n")
+
+            assert.is_true(cli._internal.isFile(join(root, "generated.lua")))
+            assert.is_false(cli._internal.isFile(join(root, "missing.lua")))
+            assert.is_false(cli._internal.isFile(root))
+        end)
+
+        it("stages the process worker entrypoint for game builds", function()
+            local root = makeTemp("worker-runtime")
+            local tecs2d = join(root, "build", "vendor", "share", "lua", "5.1", "tecs2d")
+            mkdirP(join(tecs2d, "workers", "internal"))
+            mkdirP(join(root, "build", "internal"))
+            writeFile(join(tecs2d, "workers", "internal", "worker.lua"), "return true\n")
+            writeFile(join(root, "build", "internal", "stale.lua"), "return false\n")
+
+            withCwd(root, function()
+                assert.is_true(cli._internal.stageWorkerRuntime(
+                    join("build", "vendor", "share", "lua", "5.1", "tecs2d")))
+            end)
+
+            assert.equals("return true\n", readFile(join(root, "build", "internal", "worker.lua")))
+            assert.is_false(exists(join(root, "build", "internal", "stale.lua")))
+        end)
+
         it("keeps runtime modules while removing development-only files", function()
             local root = makeTemp("prune-vendor")
             local luaRoot = join(root, "build", "vendor", "share", "lua", "5.1")

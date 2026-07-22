@@ -57,9 +57,7 @@ documentation.
 ```teal
 local assets = require("tecs2d.assets")
 
-local assetManager = world.resources[assets]
-
-local handle = assetManager:loadSpriteSheet("assets/player.png")
+local handle = assets.loadSpriteSheet("player.png")
 
 world:spawn(
     tecs.builtins.Transform(100, 100),
@@ -75,9 +73,7 @@ If you need to load a texture that doesn't have any animation or an Aseprite JSO
 ```teal
 local assets = require("tecs2d.assets")
 
-local assetManager = world.resources[assets]
-
-local handle = assetManager:loadStaticSheet("assets/sprite.png")
+local handle = assets.loadStaticSheet("sprite.png")
 
 world:spawn(
     tecs.builtins.Transform(100, 100),

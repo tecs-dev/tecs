@@ -15,8 +15,6 @@ local BUF_PUTCDATA <const> = (BUF_PROBE as {string: function}).putcdata as funct
 local BUF_REF <const> = (BUF_PROBE as {string: function}).ref as function(any): any
 local BUF_SKIP <const> = (BUF_PROBE as {string: function}).skip as function(any, integer)
 
-local type Storage = storage.Storage
-
 local max <const> = math.max
 local min <const> = math.min
 local select <const> = select
@@ -28,6 +26,12 @@ local select <const> = select
 local byteDataByColumn <const> = setmetatable({}, {__mode = "k"}) as {any: any}
 
 local record FFIStorage
+    interface Storage is storage.Storage
+        --- Install an allocator whose returned transferable backing owns each
+        --- FFI column. Used by GPU-mirrored component storage.
+        setColumnAllocator: function(self, fn: function(integer, string): (any, any))
+    end
+
     record StructDefinition
         --- Optional struct name (auto-generated if not provided)
         name: string
@@ -53,6 +57,8 @@ local record FFIStorage
     --- renderer to upload a column's backing straight to its SSBO.
     getColumnByteData: function(column: any): any
 end
+
+local type Storage = FFIStorage.Storage
 
 -- Minimum logical capacity for a new FFI column. Columns allocate one extra
 -- element at index 0 because archetype rows are 1-based.

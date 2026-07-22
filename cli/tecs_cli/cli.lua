@@ -104,6 +104,7 @@ local HOT_RELOAD_STAMP = pathJoin("build", ".tecs-reload-stamp")
 local dirname = fileSystem.dirname
 local basename = fileSystem.basename
 local exists = fileSystem.exists
+local isFile = fileSystem.isFile
 
 -- Echo and run a shell command, raising on failure. Handles both the
 -- LuaJIT/Lua 5.1 (numeric) and 5.2+ (boolean) os.execute return conventions.
@@ -617,12 +618,22 @@ local function copyAssets()
 end
 
 -- Stage the runtime Lua tree into build/ and compile framework sources.
+local function stageWorkerRuntime(tecs2d)
+    local internal = pathJoin(tecs2d, "workers/internal")
+    if not exists(internal) then return false end
+    remove("build/internal")
+    copyDir(internal, "build/internal")
+    return true
+end
+
 -- Returns true when anything was staged.
 local function copyVendor()
     local required = pathJoin("build/tecs2d/init.lua")
+    local workerRequired = pathJoin("build/internal/worker.lua")
     local stamp = pathJoin("build/.vendor-copy-stamp")
     local vendorTime = treeMtime("src/vendor")
-    if exists(required) and exists(stamp) and fileMtime(stamp) >= vendorTime then
+    if exists(required) and isFile(workerRequired)
+        and exists(stamp) and fileMtime(stamp) >= vendorTime then
         status("Runtime vendor tree is up to date.")
         return false
     end
@@ -646,11 +657,7 @@ local function copyVendor()
         remove("build/tecs2d")
         copyDir(tecs2d, "build/tecs2d")
     end
-    local internal = pathJoin(tecs2d, "assets/internal")
-    if exists(internal) then
-        remove("build/internal")
-        copyDir(internal, "build/internal")
-    end
+    stageWorkerRuntime(tecs2d)
     pruneRuntimeVendor()
     writeFile(stamp, tostring(os.time()) .. "\n")
     return true
@@ -1985,6 +1992,8 @@ M._internal = {
     shouldExclude = shouldExclude,
     needsUpdate = needsUpdate,
     copyDir = copyDir,
+    isFile = isFile,
+    stageWorkerRuntime = stageWorkerRuntime,
     pruneRuntimeVendor = pruneRuntimeVendor,
     q = q,
     setDataDir = function(path) dataDirOverride = path end,

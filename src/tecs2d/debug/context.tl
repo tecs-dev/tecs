@@ -8,7 +8,7 @@ local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
 local contextreport <const> = require("tecs2d.debug.internal.contextreport")
 local commands <const> = require("tecs2d.debug.commands")
 local core <const> = require("tecs2d.debug.internal.core")
-local freeze <const> = require("tecs2d.debug.internal.freeze")
+local suspension <const> = require("tecs2d.internal.suspension")
 
 local record context
     --- Resource key for the live DebugContext published by the debug plugin
@@ -27,7 +27,7 @@ local record context
 
     --- Get or create the world's freeze/step controller. Works with or
     --- without the debug plugin installed.
-    ensureFreeze: function(w: tecs.World): freeze.Controller
+    ensureSuspension: function(w: tecs.World): suspension.Controller
 
     --- Get or create the headless debugger core: context, registry, freeze,
     --- annotations, recorder, rewind; works without the overlay.
@@ -45,7 +45,7 @@ end
 
 context.KEY = debugcontext.KEY
 context.encodeGroups = debugcontext.encodeGroups
-context.ensureFreeze = freeze.ensure
+context.ensureSuspension = suspension.ensure
 context.ensureCore = core.ensure
 
 function context.report(w: tecs.World): {string: any}

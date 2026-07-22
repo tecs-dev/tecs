@@ -144,7 +144,7 @@ function mcp.new(config?: mcp.Config): function(world: tecs.World)
         -- freeze/step working with or without the debug plugin. debugCore =
         -- false narrows this to the freeze controller alone.
         if config and config.debugCore == false then
-            debugapi.ensureFreeze(w)
+            debugapi.ensureSuspension(w)
         else
             debugapi.ensureCore(w)
         end
@@ -156,7 +156,7 @@ function mcp.new(config?: mcp.Config): function(world: tecs.World)
         -- only disables the gameplay group). Held as "operator" -- the same
         -- hold cmd_freeze manages -- so cmd_freeze on=false releases it.
         if os.getenv("TECS_BOOT_FROZEN") == "1" then
-            debugapi.ensureFreeze(w):acquire("operator")
+            debugapi.ensureSuspension(w):suspend("operator")
         end
 
         w:addSystem({

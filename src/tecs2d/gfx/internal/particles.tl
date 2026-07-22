@@ -202,15 +202,9 @@ local function applyConfig(system: love.graphics.ParticleSystem, config: Particl
     end
 end
 
-function ParticleEmitter.fromConfig(world: tecs.World, config: ParticleEmitterConfig): ParticleEmitter
+function ParticleEmitter.fromConfig(_world: tecs.World, config: ParticleEmitterConfig): ParticleEmitter
     assert(config.texturePath, "ParticleEmitterConfig.texturePath is required")
-    local assets = world.resources[tecs_assets]
-    local texture: love.graphics.Texture
-    if assets then
-        texture = assets:loadImage(config.texturePath).value as love.graphics.Texture
-    else
-        texture = love.graphics.newImage(config.texturePath) as love.graphics.Texture
-    end
+    local texture = tecs_assets.loadImage(config.texturePath).value as love.graphics.Texture
     local bufferSize = config.bufferSize or 1000
     local system = lg_newParticleSystem(texture as love.graphics.Image, bufferSize)
 

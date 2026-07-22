@@ -23,9 +23,7 @@ local assets = require("tecs2d.assets")
 
 -- Audio manager is auto-added by tecs2d
 local audioManager = world.resources[audio]
-local assetManager = world.resources[assets]
-
-local explosionHandle = assetManager:loadAudio("explosion.wav", "static")
+local explosionHandle = assets.loadAudio("explosion.wav", "static")
 
 -- 2D sound
 audioManager:play(explosionHandle, { group = "sfx" })

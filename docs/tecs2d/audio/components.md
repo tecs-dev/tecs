@@ -37,8 +37,7 @@ space (e.g., footsteps, engines, ambient emitters).
 local audio = require("tecs2d.audio")
 local assets = require("tecs2d.assets")
 
-local assetManager = world.resources[assets]
-local engineHandle = assetManager:loadAudio("sounds/engine.wav", "static")
+local engineHandle = assets.loadAudio("sounds/engine.wav", "static")
 
 -- Positional sound (follows entity position)
 world:spawn(

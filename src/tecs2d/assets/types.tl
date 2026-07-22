@@ -1,8 +1,11 @@
 local sheet <const> = require("tecs2d.gfx.sheet")
 local bmfont_module <const> = require("tecs2d.gfx.bmfont")
 local tiled_types <const> = require("tecs2d.tiled.types")
+local workers <const> = require("tecs2d.workers")
 
 local record types
+    type Handle<T> = workers.Handle<T>
+
     --- Re-export SpriteSheet type for convenience
     SpriteSheet: sheet.SpriteSheet
 
@@ -14,6 +17,9 @@ local record types
 
     --- An asset manager used to asynchronously load assets in threads.
     interface AssetManager
+        --- Create a batch that tracks one logical group of asset handles.
+        newBatch: function(self): LoadBatch
+
         --- Load an asset at the given path using the given handler.
         ---
         --- Errors if a handler isn't registered.
@@ -100,13 +106,6 @@ local record types
         --- @return The love.graphics.Font object handle.
         getFont: function(self, path: string): Handle<love.graphics.Font>
 
-        --- Updates the AssetManager each frame to check for loaded assets and update tasks.
-        ---
-        --- When using the plugin, this is called automatically.
-        ---
-        --- @return true if there are still tasks running, false if all tasks are complete.
-        update: function(self): boolean
-
         --- Checks if any operations are currently loading.
         isLoading: function(self): boolean
 
@@ -116,10 +115,15 @@ local record types
         --- @return An array of error messages from failed operations. Empty if all succeeded or timeout occurred.
         wait: function(self, timeout?: number): {string}
 
-        --- Shuts down the asset manager and cleans up resources.
-        ---
-        --- Any tasks that are still running will be cancelled.
+        --- Closes the manager and releases its cache and pins. The owning
+        --- worker queue remains responsible for pending jobs and shutdown.
         shutdown: function(self)
+
+        --- Keep an asset handle strongly reachable from this manager's cache.
+        pin: function<T>(self, handle: Handle<T>): Handle<T>
+
+        --- Return the request metadata recorded for an asset handle.
+        describe: function<T>(self, handle: Handle<T>): AssetDescriptor
 
         --- Get detailed statistics about the asset manager's current state.
         ---
@@ -143,13 +147,6 @@ local record types
         ---
         --- @return The current root directory path.
         getRoot: function(self): string
-
-        --- Wait for multiple handles to complete, then transform their values.
-        --- All handles must be of the same type T. Fails if any handle fails.
-        --- @param handles Array of handles to wait for
-        --- @param fn Transform function that receives array of values and returns U
-        --- @return A handle that completes when all inputs succeed, with the transformed value
-        handleAll: function<T, U>(self, handles: {Handle<T>}, fn: function({T}): U): Handle<U>
 
         --- Load a sprite sheet from an Aseprite export (image + JSON).
         --- Automatically loads material maps (_n.png, _e.png, _orm.png) if they exist.
@@ -178,44 +175,33 @@ local record types
         loadTiledMap: function(self, path: string): Handle<tiled_types.TilemapData>
     end
 
-    --- Handle for an async operation that blocks on value access.
-    interface Handle<T>
-        --- Whether the operation has completed (simple boolean).
+    record AssetDescriptor
+        action: string
+        path: string
+        inputPath: string
+        args: {any}
+    end
+
+    --- Progress and completion for one explicitly defined group of loads.
+    interface LoadBatch
+        totalCount: integer
+        completedCount: integer
+        failedCount: integer
+        progress: number
         isComplete: boolean
+        isSuccessful: boolean
+        errors: {string}
 
-        --- The error message if the operation failed, or nil if successful.
-        err: string
+        --- Track a handle, returning it unchanged for convenient assignment.
+        --- Tracking the same handle more than once is idempotent.
+        track: function<T>(self, handle: Handle<T>): Handle<T>
 
-        --- Access triggers blocking if not complete, then caches result.
-        --- Raises error if operation failed.
-        value: T
+        --- Close the batch to new handles. Completion is possible only after
+        --- sealing and all unique tracked handles have settled.
+        seal: function(self)
 
-        --- Listens once for the operation to complete.
-        --- @param listener The listener to call when the operation is complete.
-        observe: function(self, function(handle: Handle<T>))
-
-        --- Pins this handle to prevent garbage collection.
-        --- Useful for preloading assets that should remain in memory.
-        pin: function(self)
-
-        --- Transform this handle's value when it completes successfully.
-        --- Only called on success; errors are carried forward without calling the transform.
-        --- @param transform Function to transform the successful result
-        --- @return A new handle with the transformed value, or the original error
-        map: function<U>(self, transform: function(T): U): Handle<U>
-
-        --- Transform this handle's value into another handle when it completes successfully, flattening the result.
-        --- Only called on success; errors are carried forward without calling the transform.
-        --- @param transform Function that returns a new handle
-        --- @return A new handle that completes when the inner handle completes
-        flatMap: function<U>(self, transform: function(T): Handle<U>): Handle<U>
-
-        --- Handle both success and error cases when this handle completes.
-        --- Always called with (value, err) where one will be nil.
-        --- Use this to recover from errors or transform results with error awareness.
-        --- @param fn Function receiving (value, err) that returns a new value
-        --- @return A new handle with the returned value
-        handle: function<U>(self, fn: function(T, any): U): Handle<U>
+        --- Observe completion once. Completed batches invoke immediately.
+        observe: function(self, listener: function(LoadBatch))
     end
 
     --- Image font configuration.

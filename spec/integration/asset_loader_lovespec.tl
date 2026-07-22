@@ -1,5 +1,5 @@
 --- Love2D integration suite: threaded asset loader robustness. Drives a
---- real asset manager (worker threads + channels) via run_lua:
+--- real worker queue and asset manager via run_lua:
 ---   - a throwing observe callback must not wedge isLoading() forever
 ---   - failed loads must not be cached (a retry after the file appears
 ---     must succeed)
@@ -21,11 +21,11 @@ end
 
 --- Pump `am` updates until it goes idle or the deadline passes; returns
 --- the final isLoading() value as a string.
-local function pumpUntilIdle(app: fixture.App, managerExpr: string, seconds: number): string
+local function pumpUntilIdle(app: fixture.App, managerExpr: string, queueExpr: string, seconds: number): string
     local final = fixture.eventually(seconds, function(): string
         local values = run(app, string.format(
             "pcall(function() %s:update() end) return tostring(%s:isLoading())",
-            managerExpr, managerExpr))
+            queueExpr, managerExpr))
         if values[1] == "false" then return values[1] end
         return nil
     end)
@@ -42,7 +42,8 @@ describe("asset loader: robustness", function()
             -- runs; remove leftovers so failure cases actually fail.
             love.filesystem.remove("late.png")
             love.filesystem.remove("imgfont.png")
-            _G.am = require("tecs2d.assets").new("")
+            _G.wq = require("tecs2d.workers").new()
+            _G.am = require("tecs2d.assets").new("", _G.wq)
             return true
         ]])
     end)
@@ -57,14 +58,14 @@ describe("asset loader: robustness", function()
             h:observe(function() error("observer boom") end)
             return true
         ]])
-        local idle = pumpUntilIdle(app, "_G.am", 4)
+        local idle = pumpUntilIdle(app, "_G.am", "_G.wq", 4)
         luassert.are.equal("false", idle,
             "isLoading() stuck true after an observer threw")
     end)
 
     it("retries a failed load once the file exists", function()
         run(app, "_G.lateHandle = _G.am:loadImage('late.png') return true")
-        pumpUntilIdle(app, "_G.am", 4)
+        pumpUntilIdle(app, "_G.am", "_G.wq", 4)
         local firstErr = run(app, "return tostring(_G.lateHandle.err ~= nil)")
         luassert.are.equal("true", firstErr[1], "missing file load did not fail")
 
@@ -73,7 +74,7 @@ describe("asset loader: robustness", function()
             _G.retryHandle = _G.am:loadImage("late.png")
             return true
         ]])
-        pumpUntilIdle(app, "_G.am", 4)
+        pumpUntilIdle(app, "_G.am", "_G.wq", 4)
         local values = run(app, [[
             return tostring(_G.retryHandle.err), tostring(_G.retryHandle.isComplete)
         ]])
@@ -99,7 +100,7 @@ describe("asset loader: robustness", function()
             _G.fontHandle = _G.am:loadImageFont("imgfont.png", {glyphs = "AB"})
             return true
         ]])
-        pumpUntilIdle(app, "_G.am", 4)
+        pumpUntilIdle(app, "_G.am", "_G.wq", 4)
         local values = run(app, [[
             local loadErr = tostring(_G.fontHandle.err)
             local ok, result = pcall(function()
@@ -114,12 +115,15 @@ describe("asset loader: robustness", function()
 
     it("shutdown resolves pending handles", function()
         local values = run(app, [[
-            local am2 = require("tecs2d.assets").new("")
+            local wq2 = require("tecs2d.workers").new()
+            local am2 = require("tecs2d.assets").new("", wq2)
             local handles = {}
             for i = 1, 8 do
                 handles[i] = am2:loadImage("pending-" .. i .. ".png")
             end
-            -- No update() ran, so every task is still pending at shutdown.
+            -- The manager does not own its queue. Queue shutdown settles jobs;
+            -- manager shutdown only releases its asset cache and pins.
+            wq2:shutdown()
             am2:shutdown()
             local unresolved = 0
             for i = 1, 8 do

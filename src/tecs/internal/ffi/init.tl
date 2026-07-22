@@ -2,10 +2,7 @@
 
 local C <const> = require("ffi")
 local types <const> = require("tecs.types")
-local storage <const> = require("tecs.internal.storage")
 local FFIStorage <const> = require("tecs.internal.ffi.FFIStorage")
-
-local type Storage = storage.Storage
 
 local max <const> = math.max
 
@@ -28,8 +25,8 @@ local record ffi
 
     --- Create FFI-backed component storage.
     --- @param def FFIStorage.StructDefinition
-    --- @return Storage (FFI-specific storage interface, but typed as Storage for compatibility)
-    newFFIStorage: function(def: FFIStorage.StructDefinition): Storage
+    --- @return FFI-backed storage with its allocator capability exposed.
+    newFFIStorage: function(def: FFIStorage.StructDefinition): FFIStorage.Storage
 
     FFIStorage: FFIStorage
 end
@@ -105,8 +102,8 @@ function ffi.adjustCapacityDouble(array: DoubleArray, usedCount: integer): Doubl
     return array
 end
 
-function ffi.newFFIStorage(def: ffi.FFIStorage.StructDefinition): Storage
-    return FFIStorage.new(def) as Storage
+function ffi.newFFIStorage(def: ffi.FFIStorage.StructDefinition): ffi.FFIStorage.Storage
+    return FFIStorage.new(def)
 end
 
 return ffi

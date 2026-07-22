@@ -17,7 +17,6 @@ local TextEffects <const> = require("tecs2d.gfx.internal.text.effects")
 local bmfont <const> = require("tecs2d.gfx.bmfont")
 local particles <const> = require("tecs2d.gfx.internal.particles")
 local Color <const> = require("tecs2d.gfx.internal.Color")
-local BlendMode <const> = require("tecs2d.gfx.internal.BlendMode")
 local blend <const> = require("tecs2d.gfx.internal.blend")
 local Pivot <const> = require("tecs2d.gfx.internal.Pivot")
 local Unlit <const> = require("tecs2d.gfx.internal.Unlit")
@@ -145,10 +144,6 @@ local record gfx
     --- Sets a love.graphics.color for a draw call.
     Color: Color
 
-    --- Sets a blendmode for a draw call.
-    --- @deprecated Use blend tag components instead (e.g., blend.AdditiveBlend())
-    BlendMode: BlendMode
-
     --- Blend mode tag components for GPU-batched rendering.
     --- Each blend mode is a separate tag component with mutual exclusivity.
     --- Example: gfx.blend.AdditiveBlend(), gfx.blend.MultiplyBlend()
@@ -242,7 +237,6 @@ gfx.BMFont = bmfont
 gfx.ParticleEmitter = particles.ParticleEmitter
 gfx.ParticleEmitterConfig = particles.ParticleEmitterConfig
 gfx.Color = Color
-gfx.BlendMode = BlendMode
 gfx.blend = blend
 gfx.Pivot = Pivot
 gfx.Unlit = Unlit
@@ -277,7 +271,6 @@ function gfx.newPipeline(config: pipeline.RenderConfig): types.Pipeline
     config.world:addPlugin(particles.plugin)
     config.world:addPlugin(cameratarget.plugin(result))
     config.world:addPlugin(Color.plugin)
-    config.world:addPlugin(BlendMode.plugin)
     config.world:addPlugin(lightMod.plugin)
     config.world:addPlugin(tileChunkMod.plugin)
 

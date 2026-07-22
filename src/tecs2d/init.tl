@@ -6,6 +6,7 @@ local crash <const> = require("tecs2d.internal.crash")
 local logging <const> = require("tecs.utils.logging")
 local tecs <const> = require("tecs")
 local tecs_assets <const> = require("tecs2d.assets")
+local workers <const> = require("tecs2d.workers")
 local tecs_audio <const> = require("tecs2d.audio")
 local tecs_controller <const> = require("tecs2d.controller")
 local tecs_tween <const> = require("tecs2d.tween")
@@ -194,10 +195,6 @@ tecs2dExports.InputCaptureGained = events.InputCaptureGained
 -------------------------------------------------------------------------------
 
 local function gamePlugin(world: tecs.World)
-    -- Create and register asset manager with default root "assets"
-    local assetManager = tecs_assets.new("assets")
-    world.resources[tecs_assets] = assetManager
-
     -- Create and register audio manager
     world:addPlugin(tecs_audio.plugin())
 
@@ -206,25 +203,6 @@ local function gamePlugin(world: tecs.World)
 
     -- Create and register controller manager
     world:addPlugin(tecs_controller.plugin())
-
-    -- Update asset manager each frame
-    world:addSystem({
-        name = "love.AssetUpdate",
-        phase = tecs.phases.First,
-        run = function()
-            assetManager:update()
-        end
-    })
-
-    -- Shutdown asset manager when game shuts down
-    world:addSystem({
-        name = "love.AssetShutdown",
-        phase = tecs.phases.Shutdown,
-        run = function()
-            LOGGER:debug("Shutting down asset manager")
-            assetManager:shutdown()
-        end
-    })
 
     world:addSystem({
         name = "love.RenderClear",
@@ -445,11 +423,30 @@ local function updateHotReloadWatcher(state: HotReloadState, dt: number): boolea
     return false
 end
 
-local function requestRestart(world: tecs.World, hotReload: HotReloadState, moduleBaseline: {string: boolean}): boolean
+local function shutdownRuntime(
+    world: tecs.World,
+    assetManager: tecs_assets.AssetManager,
+    workerQueue: workers.Queue
+)
+    world:shutdown()
+    LOGGER:debug("Shutting down runtime asset manager")
+    assetManager:shutdown()
+    workerQueue:shutdown()
+    if tecs_assets.manager == assetManager then tecs_assets.manager = nil end
+    if workers.queue == workerQueue then workers.queue = nil end
+end
+
+local function requestRestart(
+    world: tecs.World,
+    assetManager: tecs_assets.AssetManager,
+    workerQueue: workers.Queue,
+    hotReload: HotReloadState,
+    moduleBaseline: {string: boolean}
+): boolean
     if not saveHotReloadSnapshot(world, hotReload) then
         return false
     else
-        world:shutdown()
+        shutdownRuntime(world, assetManager, workerQueue)
         clearModuleCache(moduleBaseline)
         return true
     end
@@ -468,6 +465,12 @@ local function runLoop(config: tecs2d.RunConfig): (function(): number | string)
         timestep = timestep,
         maxEntities = config.maxEntities,
     })
+    -- Runtime services are not owned by a world phase. In particular, asset
+    -- completion must continue while the gameplay phases are suspended.
+    local workerQueue <const> = workers.new()
+    workers.queue = workerQueue
+    local assetManager <const> = tecs_assets.new("assets", workerQueue)
+    tecs_assets.manager = assetManager
     world:addPlugin(gamePlugin)
 
     if config.quitOnEscape == true then
@@ -532,7 +535,7 @@ local function runLoop(config: tecs2d.RunConfig): (function(): number | string)
         -- Handle restart request from event poller
         if handlers.restartRequested then
             handlers.restartRequested = false
-            if requestRestart(world, hotReload, MODULE_BASELINE) then
+            if requestRestart(world, assetManager, workerQueue, hotReload, MODULE_BASELINE) then
                 return "restart"
             end
         end
@@ -543,7 +546,7 @@ local function runLoop(config: tecs2d.RunConfig): (function(): number | string)
         if handlers.quitRequested ~= false then
             local exitCode = handlers.quitRequested as integer
             handlers.quitRequested = false
-            world:shutdown()
+            shutdownRuntime(world, assetManager, workerQueue)
             return exitCode
         end
 
@@ -551,6 +554,10 @@ local function runLoop(config: tecs2d.RunConfig): (function(): number | string)
         if dt > 0.25 then
             dt = 0.25
         end
+
+        -- Poll process-level services before the world. This is intentionally
+        -- independent of the world's First phase and scaled clock.
+        workerQueue:update()
 
         -- Apply time scale from render pipeline; a replay provider may then
         -- substitute the recorded per-frame dt (tecs2d.internal.frameclock).
@@ -561,7 +568,7 @@ local function runLoop(config: tecs2d.RunConfig): (function(): number | string)
 
         if hotReload.enabled and updateHotReloadWatcher(hotReload, dt) then
             LOGGER:info("Hot reload stamp changed: %s", hotReload.stampPath)
-            if requestRestart(world, hotReload, MODULE_BASELINE) then
+            if requestRestart(world, assetManager, workerQueue, hotReload, MODULE_BASELINE) then
                 return "restart"
             end
         end

@@ -11,7 +11,7 @@ return {
         "*.rockspec",
         "*.tl",
         "tecs/tecs",
-        "tecs2d/assets/internal/internal",
+        "tecs2d/workers/internal/worker",
         "tecs2d/gfx/internal/gpu/shaders",
         "tecs2d/gfx/internal/gpu/shaders/*.glsl",
         "tecs2d/gfx/internal/**/*.glsl",

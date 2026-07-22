@@ -9,7 +9,7 @@ local logging <const> = require("tecs.utils.logging")
 local rpc <const> = require("tecs2d.mcp.internal.rpc")
 local state <const> = require("tecs2d.mcp.internal.state")
 local inputtape <const> = require("tecs2d.debug.internal.inputtape")
-local freezekey <const> = require("tecs2d.debug.internal.freeze")
+local suspension <const> = require("tecs2d.internal.suspension")
 local logtap <const> = require("tecs2d.mcp.internal.logtap")
 local transport <const> = require("tecs2d.mcp.internal.transport")
 
@@ -193,8 +193,8 @@ byName["send_love_event"] = function(args: {string:any}, id: number)
     -- (quit/escape), which is exactly what a crashed game still needs.
     local w = ctx.world
     if w and not ctx.crashed and inputtape.tapeable(eventName) then
-        local fz = w.resources[freezekey.KEY]
-        local frozen = fz ~= nil and fz:isFrozen()
+        local controller = w.resources[suspension.KEY]
+        local frozen = controller ~= nil and controller:isSuspended()
         if not frozen then
             local tape = inputtape.ensure(w)
             local queued, qerr = tape:queue(

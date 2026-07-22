@@ -1,4 +1,4 @@
-local tecs_assets <const> = require("tecs2d.assets")
+local workers <const> = require("tecs2d.workers")
 local types <const> = require("tecs2d.audio.internal.types")
 
 local la_setPosition <const> = love.audio.setPosition
@@ -269,7 +269,7 @@ end
 
 local function playInternal(
     self: AudioManagerImpl,
-    handle: tecs_assets.Handle<love.audio.Source>,
+    handle: workers.Handle<love.audio.Source>,
     options: PlayOptions,
     isPositional: boolean,
     x: number,
@@ -341,12 +341,12 @@ local function playInternal(
     return source
 end
 
-function AudioManagerImpl:play(handle: tecs_assets.Handle<love.audio.Source>, options?: PlayOptions): love.audio.Source
+function AudioManagerImpl:play(handle: workers.Handle<love.audio.Source>, options?: PlayOptions): love.audio.Source
     return playInternal(self, handle, options or {}, false, 0, 0, 0)
 end
 
 function AudioManagerImpl:playAt(
-    handle: tecs_assets.Handle<love.audio.Source>, x: number, y: number, z: number, options?: PlayOptions
+    handle: workers.Handle<love.audio.Source>, x: number, y: number, z: number, options?: PlayOptions
 ): love.audio.Source
     return playInternal(self, handle, options or {}, true, x, y, z)
 end
