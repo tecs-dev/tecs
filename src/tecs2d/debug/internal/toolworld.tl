@@ -33,7 +33,7 @@ function toolworld.install(world: tecs.World)
         layers = {[1] = {name = "debug", space = "screen", unlit = true, sortMode = "z"}},
         sizeHints = {sprites = 8, circles = 32, lines = 128, rects = 256, textEntities = 256, textGlyphs = 8192},
     })
-    tools:addPlugin(ui.plugin)
+    tools:addPlugin(ui.new({origin = "topLeft"}))
     local state: State = {
         world = tools,
         pipeline = pipeline,

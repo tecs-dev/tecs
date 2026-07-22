@@ -39,6 +39,7 @@ local function waitPixel(app: fixture.App, x: number, y: number,
 end
 
 local function isGreen(p: {number}): boolean return p[2] > 0.8 and p[1] < 0.2 end
+local function isRed(p: {number}): boolean return p[1] > 0.8 and p[2] < 0.2 end
 local function notGreen(p: {number}): boolean return p[2] < 0.5 end
 
 describe("ui layout: containers position, scroll, and clip children", function()
@@ -58,7 +59,6 @@ describe("ui layout: containers position, scroll, and clip children", function()
                 Transform(%d, %d),
                 gfx.Rectangle(120, 160),
                 ui.LayoutBox(gfx.Rectangle, nil, 0, 0),
-                gfx.Pivot(0, 0),
                 ui.LayoutNode(0, 0, 120, 400),
                 gfx.Color(0.2, 0.2, 0.3, 1))
             _G.tecsUiContainer = container
@@ -70,7 +70,6 @@ describe("ui layout: containers position, scroll, and clip children", function()
                     RelativeTransform.new({x = 10, y = localY, z = 1}),
                     gfx.Rectangle(100, 24),
                     ui.LayoutBox(gfx.Rectangle, nil, 0, 0),
-                    gfx.Pivot(0, 0),
                     gfx.Color(0, 1, 0, 1))
             end
             _G.tecsUiBar = bar(10)
@@ -87,6 +86,24 @@ describe("ui layout: containers position, scroll, and clip children", function()
         -- Child local (10, 10) -> world (110, 50); bar center ~ (160, 62)
         waitPixel(app, CONTAINER_X + 10 + 50, CONTAINER_Y + 10 + 12, isGreen,
             "child bar should render inside the container")
+    end)
+
+    it("renders a centered LayoutBox around its Transform exactly once", function()
+        fixture.runLua(app, [[
+            local tecs = require("tecs")
+            local gfx = require("tecs2d.gfx")
+            local ui = require("tecs2d.ui")
+            world:spawn(
+                tecs.builtins.Transform(40, 210, 5),
+                gfx.Rectangle(40, 20),
+                ui.LayoutBox(gfx.Rectangle),
+                gfx.Color(1, 0, 0, 1))
+            return true
+        ]])
+        -- Center (40,210), width 40: x=55 is inside. Applying both the
+        -- LayoutBox offset and its synchronized pivot would end at x=40.
+        waitPixel(app, 55, 210, isRed,
+            "centered rectangle should not receive its origin offset twice")
     end)
 
     it("clips children outside the container bounds", function()

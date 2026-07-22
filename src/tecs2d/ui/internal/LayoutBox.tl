@@ -39,22 +39,26 @@ local record LayoutBox is Component
     offsetY: number
 
     --- Origin X as a percentage (0-1). 0 = left edge, 0.5 = center, 1 = right edge.
-    --- Defaults to 0.5 (centered).
+    --- Defaults to the UI world's configured origin (centered normally).
     originX: number
 
     --- Origin Y as a percentage (0-1). 0 = top edge, 0.5 = center, 1 = bottom edge.
-    --- Defaults to 0.5 (centered).
+    --- Defaults to the UI world's configured origin (centered normally).
     originY: number
 
     --- The component ID to query for dimensions (0 = use fixed width/height).
     sourceComponentId: integer
 
+    --- Nonzero when omitted origins inherit the UI world's configured default.
+    --- Set to 0 before assigning originX/originY directly at runtime.
+    inheritsOrigin: integer
+
     --- Creates a new LayoutBox component.
     ---
     --- @param widthOrComponent Fixed width, or a Component to dynamically query for dimensions.
     --- @param height Fixed height (only used if first param is a number).
-    --- @param originX Origin X (0-1), defaults to 0.5.
-    --- @param originY Origin Y (0-1), defaults to 0.5.
+    --- @param originX Origin X (0-1), or the world default when omitted.
+    --- @param originY Origin Y (0-1), or the world default when omitted.
     --- @return the created LayoutBox component.
     metamethod __call: function(
         self,
@@ -65,12 +69,18 @@ local record LayoutBox is Component
     ): LayoutBox
 
     --- Plugin to install LayoutBox systems (ComputeLayoutBox, origin-aware transforms).
-    plugin: function(world: World)
+    record Options
+        defaultOriginX: number
+        defaultOriginY: number
+    end
+
+    plugin: function(world: World, options?: Options)
 end
 
 tecs.newFFIComponent({
     name = "LayoutBox",
     container = LayoutBox,
+    requires = {PivotModule},
     fields = {
         {"width", "float"},
         {"height", "float"},
@@ -78,7 +88,8 @@ tecs.newFFIComponent({
         {"offsetY", "float"},
         {"originX", "float"},
         {"originY", "float"},
-        {"sourceComponentId", "int32_t"}
+        {"sourceComponentId", "int32_t"},
+        {"inheritsOrigin", "int32_t"}
     },
     __call = function(
         instance: LayoutBox,
@@ -87,9 +98,12 @@ tecs.newFFIComponent({
         originX: number,
         originY: number
     )
-        -- Default origin to 0.5 (centered)
+        local inheritsDefault = originX == nil and originY == nil
+        -- The component remains centered until its world's UI defaults are
+        -- resolved, preserving useful values before the first update.
         local ox = originX or 0.5
         local oy = originY or 0.5
+        instance.inheritsOrigin = inheritsDefault and 1 or 0
 
         if type(widthOrComponent) == "number" then
             -- Fixed dimensions: LayoutBox(100, 50) or LayoutBox(100, 50, 0, 0)
@@ -163,7 +177,9 @@ local function composeTransformsWithOrigin(
     outputTransform.scaleY = pScaleY * relativeTransform.scaleY
 end
 
-function LayoutBox.plugin(world: World)
+function LayoutBox.plugin(world: World, options?: LayoutBox.Options)
+    local defaultOriginX = options and options.defaultOriginX or 0.5
+    local defaultOriginY = options and options.defaultOriginY or 0.5
     -- Compute LayoutBox dimensions from referenced components
     local layoutBoxQuery = world:query({
         name = "ComputeLayoutBox",
@@ -187,7 +203,6 @@ function LayoutBox.plugin(world: World)
             for archetype, len in layoutBoxQuery:iter() do
                 local layoutBoxes = archetype:get(LayoutBox)
                 local mutBoxes: {LayoutBox} = nil
-                -- Get Pivot component array from archetype (may be nil)
                 local pivots = archetype:get(PivotModule)
                 local mutPivots: {tecs.Component} = nil
 
@@ -195,6 +210,10 @@ function LayoutBox.plugin(world: World)
 
                 for row = 1, len do
                     local box = layoutBoxes[row]
+                    local originX = box.inheritsOrigin ~= 0 and defaultOriginX or box.originX
+                    local originY = box.inheritsOrigin ~= 0 and defaultOriginY or box.originY
+                    local width = box.width
+                    local height = box.height
 
                     -- Compute dimensions from source component if specified
                     local sourceId = box.sourceComponentId
@@ -209,40 +228,44 @@ function LayoutBox.plugin(world: World)
                         end
                         local sourceData = col and (col as {Rect})[row]
                         if sourceData and sourceData.getRect then
-                            local _offsetX, _offsetY, width, height = sourceData:getRect()
-                            scratchBox.width = width
-                            scratchBox.height = height
-                            scratchBox.offsetX = -width * box.originX
-                            scratchBox.offsetY = -height * box.originY
-                            -- Write back (and mark the column dirty) only
-                            -- when the rounded result actually changed.
-                            if box.width ~= scratchBox.width
-                                or box.height ~= scratchBox.height
-                                or box.offsetX ~= scratchBox.offsetX
-                                or box.offsetY ~= scratchBox.offsetY then
-                                if not mutBoxes then
-                                    mutBoxes = archetype:getMut(LayoutBox)
-                                end
-                                local mut = mutBoxes[row]
-                                mut.width = scratchBox.width
-                                mut.height = scratchBox.height
-                                mut.offsetX = scratchBox.offsetX
-                                mut.offsetY = scratchBox.offsetY
-                            end
+                            local _offsetX: number
+                            local _offsetY: number
+                            _offsetX, _offsetY, width, height = sourceData:getRect()
                         end
                     end
 
-                    -- Sync LayoutBox origin to Pivot component
-                    if pivots then
-                        local pivot = pivots[row] as PivotData
-                        if pivot and (pivot.x ~= box.originX or pivot.y ~= box.originY) then
-                            if not mutPivots then
-                                mutPivots = archetype:getMut(PivotModule)
-                            end
-                            local mutPivot = mutPivots[row] as PivotData
-                            mutPivot.x = box.originX
-                            mutPivot.y = box.originY
+                    scratchBox.width = width
+                    scratchBox.height = height
+                    scratchBox.offsetX = -width * originX
+                    scratchBox.offsetY = -height * originY
+                    if box.width ~= scratchBox.width
+                        or box.height ~= scratchBox.height
+                        or box.offsetX ~= scratchBox.offsetX
+                        or box.offsetY ~= scratchBox.offsetY
+                        or box.originX ~= originX
+                        or box.originY ~= originY then
+                        if not mutBoxes then
+                            mutBoxes = archetype:getMut(LayoutBox)
                         end
+                        local mut = mutBoxes[row]
+                        mut.width = scratchBox.width
+                        mut.height = scratchBox.height
+                        mut.offsetX = scratchBox.offsetX
+                        mut.offsetY = scratchBox.offsetY
+                        mut.originX = originX
+                        mut.originY = originY
+                    end
+
+                    -- LayoutBox requires Pivot, so UI entities enter their
+                    -- final archetype once and this pass only synchronizes it.
+                    local pivot = pivots[row] as PivotData
+                    if pivot and (pivot.x ~= originX or pivot.y ~= originY) then
+                        if not mutPivots then
+                            mutPivots = archetype:getMut(PivotModule)
+                        end
+                        local mutPivot = mutPivots[row] as PivotData
+                        mutPivot.x = originX
+                        mutPivot.y = originY
                     end
                 end
 

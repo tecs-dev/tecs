@@ -40,7 +40,6 @@ function helpers.setup(world: tecs.World, spawn: function(tecs.World, ...: tecs.
         gfx.Rectangle(vContainerW, vContainerH),
         gfx.RoundedCorners(8),
         LayoutBox(gfx.Rectangle, nil, 0, 0),
-        gfx.Pivot(0, 0),
         gfx.Color(0.15, 0.12, 0.20)
     )
     -- Border
@@ -49,7 +48,6 @@ function helpers.setup(world: tecs.World, spawn: function(tecs.World, ...: tecs.
         gfx.Rectangle(vContainerW, vContainerH, 1),
         gfx.RoundedCorners(8),
         LayoutBox(gfx.Rectangle, nil, 0, 0),
-        gfx.Pivot(0, 0),
         gfx.Color(0.4, 0.3, 0.5)
     )
 
@@ -64,7 +62,6 @@ function helpers.setup(world: tecs.World, spawn: function(tecs.World, ...: tecs.
             RelativeTransform.new({x = 10, y = 0, z = 1}),
             gfx.Rectangle(vChildW, vChildH),
             LayoutBox(vChildW, vChildH, 0, 0),  -- Fixed dimensions for stacking
-            gfx.Pivot(0, 0),
             gfx.Color(0.4 + i * 0.08, 0.25, 0.55 + i * 0.05)
         )
         table.insert(vChildren, child)
@@ -88,7 +85,6 @@ function helpers.setup(world: tecs.World, spawn: function(tecs.World, ...: tecs.
         gfx.Rectangle(hContainerW, hContainerH),
         gfx.RoundedCorners(8),
         LayoutBox(gfx.Rectangle, nil, 0, 0),
-        gfx.Pivot(0, 0),
         gfx.Color(0.15, 0.12, 0.20)
     )
     -- Border
@@ -97,7 +93,6 @@ function helpers.setup(world: tecs.World, spawn: function(tecs.World, ...: tecs.
         gfx.Rectangle(hContainerW, hContainerH, 1),
         gfx.RoundedCorners(8),
         LayoutBox(gfx.Rectangle, nil, 0, 0),
-        gfx.Pivot(0, 0),
         gfx.Color(0.4, 0.3, 0.5)
     )
 
@@ -112,7 +107,6 @@ function helpers.setup(world: tecs.World, spawn: function(tecs.World, ...: tecs.
             RelativeTransform.new({x = 0, y = 10, z = 1}),
             gfx.Rectangle(hChildW, hChildH),
             LayoutBox(hChildW, hChildH, 0, 0),  -- Fixed dimensions for stacking
-            gfx.Pivot(0, 0),
             gfx.Color(0.3 + i * 0.08, 0.25, 0.5 + i * 0.08)
         )
         table.insert(hChildren, child)
@@ -136,7 +130,6 @@ function helpers.setup(world: tecs.World, spawn: function(tecs.World, ...: tecs.
         gfx.Rectangle(mContainerW, mContainerH),
         gfx.RoundedCorners(8),
         LayoutBox(gfx.Rectangle, nil, 0, 0),
-        gfx.Pivot(0, 0),
         gfx.Color(0.15, 0.12, 0.20)
     )
     -- Border
@@ -145,7 +138,6 @@ function helpers.setup(world: tecs.World, spawn: function(tecs.World, ...: tecs.
         gfx.Rectangle(mContainerW, mContainerH, 1),
         gfx.RoundedCorners(8),
         LayoutBox(gfx.Rectangle, nil, 0, 0),
-        gfx.Pivot(0, 0),
         gfx.Color(0.4, 0.3, 0.5)
     )
 
@@ -160,7 +152,6 @@ function helpers.setup(world: tecs.World, spawn: function(tecs.World, ...: tecs.
             RelativeTransform.new({x = pos[1], y = pos[2], z = 1}),
             gfx.Rectangle(mChildW, mChildH),
             LayoutBox(mChildW, mChildH, 0, 0),  -- Fixed dimensions for measuring
-            gfx.Pivot(0, 0),
             gfx.Color(0.5 + i * 0.08, 0.25, 0.45 + i * 0.08)
         )
         table.insert(mChildren, child)

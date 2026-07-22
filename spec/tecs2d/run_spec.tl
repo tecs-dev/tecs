@@ -81,6 +81,9 @@ local function installTecs2dStubs()
     }
     package.loaded["tecs2d.ui"] = {
         plugin = function(_world: tecs.World) end,
+        new = function(_config: any): tecs.Plugin
+            return function(_world: tecs.World) end
+        end,
     }
 end
 

@@ -90,9 +90,9 @@ function origin.setup(world: tecs.World, spawn: function(tecs.World, ...: tecs.C
     spawn(world, Transform(col3, row2, 10), gfx.Circle(5), LayoutBox(gfx.Circle), gfx.Color(1, 0, 0))
 
     -- Shapes with top-left origin (0, 0) - no manual offset needed!
-    spawn(world, Transform(col1, row2), gfx.Rectangle(120, 80), LayoutBox(gfx.Rectangle, nil, 0, 0), gfx.Pivot(0, 0), gfx.Color(0.5, 0.3, 0.5))
-    spawn(world, Transform(col2, row2), gfx.Circle(45), LayoutBox(gfx.Circle, nil, 0, 0), gfx.Pivot(0, 0), gfx.Color(0.5, 0.3, 0.5))
-    spawn(world, Transform(col3, row2), Text(common.DEFAULT_FONT, "Hello!", common.TITLE_SCALE), LayoutBox(Text, nil, 0, 0), gfx.Pivot(0, 0), gfx.Color(0.5, 0.3, 0.5))
+    spawn(world, Transform(col1, row2), gfx.Rectangle(120, 80), LayoutBox(gfx.Rectangle, nil, 0, 0), gfx.Color(0.5, 0.3, 0.5))
+    spawn(world, Transform(col2, row2), gfx.Circle(45), LayoutBox(gfx.Circle, nil, 0, 0), gfx.Color(0.5, 0.3, 0.5))
+    spawn(world, Transform(col3, row2), Text(common.DEFAULT_FONT, "Hello!", common.TITLE_SCALE), LayoutBox(Text, nil, 0, 0), gfx.Color(0.5, 0.3, 0.5))
 
     -- Footer
     common.footer(world, spawn, WINDOW_WIDTH, _WINDOW_HEIGHT,

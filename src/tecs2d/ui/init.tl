@@ -11,6 +11,17 @@ local type World = tecs.World
 local RelativeTransform <const> = tecs.builtins.RelativeTransform
 
 local record ui
+    enum Origin
+        "center"
+        "topLeft"
+    end
+
+    record Config
+        --- Origin inherited by LayoutBox values that omit explicit origins.
+        --- Defaults to "center".
+        origin: Origin
+    end
+
     --- Viewport-relative positioning using anchor percentages and pixel offsets.
     Anchor: Anchor
 
@@ -26,6 +37,10 @@ local record ui
     --- Unified layout plugin. Installs LayoutBox, LayoutNode, and FitContent systems.
     --- Call this once after creating the render pipeline.
     plugin: function(world: World)
+
+    --- Create a UI plugin with world-local defaults.
+    --- `ui.new({origin = "topLeft"})` makes omitted LayoutBox origins top-left.
+    new: function(config?: Config): tecs.Plugin
 
     --- Simple helper that sets each child's RelativeTransform.y sequentially (child[i].y = startY + sum of
     --- prior child heights + spacing). This is a placement convenience, not a layout engine: it ignores origin,
@@ -50,11 +65,29 @@ ui.LayoutBox = LayoutBox
 ui.LayoutNode = LayoutNode
 ui.FitContent = FitContent
 
-function ui.plugin(world: World)
+local function install(world: World, config?: ui.Config)
+    local originX, originY = 0.5, 0.5
+    if config and config.origin then
+        if config.origin == "topLeft" then
+            originX, originY = 0, 0
+        elseif config.origin ~= "center" then
+            error("unknown UI origin: " .. tostring(config.origin))
+        end
+    end
     Anchor.plugin(world)
-    LayoutBox.plugin(world)
+    LayoutBox.plugin(world, {defaultOriginX = originX, defaultOriginY = originY})
     LayoutNode.plugin(world)
     FitContent.plugin(world)
+end
+
+function ui.plugin(world: World)
+    install(world)
+end
+
+function ui.new(config?: ui.Config): tecs.Plugin
+    return function(world: World)
+        install(world, config)
+    end
 end
 
 -- Shared body of stackVertical/stackHorizontal: place children sequentially

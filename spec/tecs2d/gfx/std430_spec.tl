@@ -119,6 +119,7 @@ describe("std430 translations", function()
         canonical[1].originX = 0.5
         canonical[1].originY = 0.5
         canonical[1].sourceComponentId = 42
+        canonical[1].inheritsOrigin = 1
 
         cfg.translate(canonical, shadow, 1, 1)
 
@@ -129,7 +130,7 @@ describe("std430 translations", function()
         assert.equals(0.5, shadow[1].originX)
         assert.equals(0.5, shadow[1].originY)
         assert.equals(42, shadow[1].sourceComponentId)
-        assert.equals(0.0, shadow[1]._pad0)
+        assert.equals(1, shadow[1].inheritsOrigin)
     end)
 
     it("translates Circle via identity memcpy", function()

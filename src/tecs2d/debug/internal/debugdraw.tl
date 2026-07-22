@@ -344,8 +344,7 @@ function debugdraw.rectangle(mode: string, x: number, y: number, width: number, 
     local parts: {tecs.Component} = {
         Transform(x, y, depth(), 1),
         gfx.Rectangle(width, height, mode == "line" and view().lineWidth or 0),
-        ui.LayoutBox(gfx.Rectangle, nil, 0, 0),
-        gfx.Pivot(0, 0),
+        ui.LayoutBox(gfx.Rectangle),
         color(),
     }
     if rx and rx > 0 then parts[#parts + 1] = gfx.RoundedCorners(rx, ry) end
@@ -379,7 +378,6 @@ function debugdraw.fitText(value: any, x: number, y: number, paddingX: number,
             Transform(x, y, z, 1),
             gfx.Rectangle(0, 0),
             ui.LayoutBox(gfx.Rectangle, nil, ox, oy),
-            gfx.Pivot(ox, oy),
             ui.FitContent.new({
                 paddingTop = paddingY,
                 paddingRight = paddingX,
@@ -401,7 +399,6 @@ function debugdraw.fitText(value: any, x: number, y: number, paddingX: number,
             }),
             gfx.Text(FONT_PATH, textValue, v.font.scale, v.font.scale),
             ui.LayoutBox(gfx.Text, nil, ox, oy),
-            gfx.Pivot(ox, oy),
             color(),
             gfx.blend.ForwardAlphaBlend(),
             gfx.Unlit()
@@ -424,9 +421,8 @@ function debugdraw.fitText(value: any, x: number, y: number, paddingX: number,
     fit.paddingTop, fit.paddingRight = paddingY, paddingX
     fit.paddingBottom, fit.paddingLeft = paddingY, paddingX
     local parentBox = v.world:getMut(slot.parent, ui.LayoutBox)
+    parentBox.inheritsOrigin = 0
     parentBox.originX, parentBox.originY = ox, oy
-    local parentPivot = v.world:getMut(slot.parent, gfx.Pivot)
-    parentPivot.x, parentPivot.y = ox, oy
 
     local relative = v.world:getMut(slot.child, RelativeTransform)
     relative.x = paddingX * (1 - 2 * ox)
@@ -436,9 +432,8 @@ function debugdraw.fitText(value: any, x: number, y: number, paddingX: number,
     relative.scaleX, relative.scaleY = 1, 1
     setColorValue(v.world:getMut(slot.child, gfx.Color), v.color)
     local childBox = v.world:getMut(slot.child, ui.LayoutBox)
+    childBox.inheritsOrigin = 0
     childBox.originX, childBox.originY = ox, oy
-    local childPivot = v.world:getMut(slot.child, gfx.Pivot)
-    childPivot.x, childPivot.y = ox, oy
     local text = v.world:get(slot.child, gfx.Text)
     text:setText(textValue)
     text:setScale(v.font.scale, v.font.scale)
@@ -453,8 +448,7 @@ function debugdraw.print(value: any, x: number, y: number)
     local parts: {tecs.Component} = {
         Transform(x + v.font.drawOffsetX, y + v.font.drawOffsetY, depth(), 1),
         gfx.Text(FONT_PATH, tostring(value), scale, scale),
-        ui.LayoutBox(gfx.Text, nil, 0, 0),
-        gfx.Pivot(0, 0),
+        ui.LayoutBox(gfx.Text),
         color(),
         gfx.blend.ForwardAlphaBlend(),
     }
@@ -476,8 +470,7 @@ function debugdraw.draw(texture: love.graphics.Image, x: number, y: number, rota
     spawn({
         Transform(x, y, depth(), 1, rotation or 0, sx or 1, sy or sx or 1),
         sprite,
-        ui.LayoutBox(gfx.Sprite, nil, 0, 0),
-        gfx.Pivot(0, 0),
+        ui.LayoutBox(gfx.Sprite),
         color(),
     })
 end

@@ -33,7 +33,6 @@ function scrollable.setup(world: tecs.World, spawn: function(tecs.World, ...: te
         gfx.Rectangle(containerW, containerH),  -- filled
         gfx.RoundedCorners(8),
         LayoutBox(gfx.Rectangle, nil, 0, 0),  -- top-left origin for child positioning
-        gfx.Pivot(0, 0),
         LayoutNode(0, 0, containerW, contentHeight),
         gfx.Color(0.15, 0.12, 0.20)  -- Dark purple background
     )
@@ -43,7 +42,6 @@ function scrollable.setup(world: tecs.World, spawn: function(tecs.World, ...: te
         gfx.Rectangle(containerW, containerH, 1),  -- outline
         gfx.RoundedCorners(8),
         LayoutBox(gfx.Rectangle, nil, 0, 0),  -- top-left origin
-        gfx.Pivot(0, 0),
         gfx.Color(0.4, 0.3, 0.5)  -- Purple border
     )
 
@@ -60,7 +58,6 @@ function scrollable.setup(world: tecs.World, spawn: function(tecs.World, ...: te
             RelativeTransform.new({x = x, y = y, z = 1}),
             gfx.Rectangle(itemW, itemH),
             LayoutBox(gfx.Rectangle, nil, 0, 0),  -- top-left origin
-            gfx.Pivot(0, 0),
             gfx.Color(0.35 + (i % 3) * 0.08, 0.25, 0.45 + (i % 3) * 0.08)  -- Purple tones
         )
 

@@ -95,13 +95,6 @@ float readOccluderHeight(uint row) {
     return 0.0;
 }
 
-vec2 readLayoutBoxOffset(uint row) {
-    if ((ComponentMask & COMP_LAYOUTBOX) != 0u) {
-        return layoutBoxes[row].whOffsetXY.zw;
-    }
-    return vec2(0.0, 0.0);
-}
-
 // Pivot fallback chain:
 //   explicit Pivot component → LayoutBox origin → (0.5, 0.5).
 vec2 readPivot(uint row) {
@@ -151,11 +144,6 @@ void computemain() {
     if (scaledW < 0.0) scaledW = -scaledW;
     if (scaledH < 0.0) scaledH = -scaledH;
 
-    // LayoutBox offset (rebases UI rectangles to a top-left origin).
-    vec2 layoutOffset = readLayoutBoxOffset(row);
-    x += layoutOffset.x;
-    y += layoutOffset.y;
-
     // Build output flags. StaticFlags carries per-archetype tag bits;
     // FLAG_FILLED is set when lineWidth is 0.
     uint baseFlags = StaticFlags;
@@ -180,8 +168,9 @@ void computemain() {
     bool ignoresZoom = isIgnoreZoomLayer(layer);
     bool usesVirtualCoords = isVirtualCoordsLayer(layer);
 
-    // Compute rectangle center accounting for pivot. Transform position
-    // sits at the pivot point; center is offset from it.
+    // Compute rectangle center from the render pivot. LayoutBox.offset is
+    // layout metadata (measurement and child positioning), not an additional
+    // render translation; applying both would shift centered UI twice.
     float centerOffX = scaledW * (0.5 - pivotX);
     float centerOffY = scaledH * (0.5 - pivotY);
     float centerX = x + centerOffX;

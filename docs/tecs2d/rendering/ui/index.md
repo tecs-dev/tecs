@@ -15,6 +15,29 @@ than being a complete UI framework.
 - **Scrollable containers** - LayoutNode provides clipping and scrolling
 - **Helper functions** - Simple utilities for common layout patterns
 
+The built-in plugin keeps centered origins for compatibility. UI-heavy or tool
+worlds can make top-left positioning the world-local default:
+
+```teal
+world:addPlugin(ui.new({origin = "topLeft"}))
+```
+
+For the primary world created by `tecs2d.run`, configure the automatically
+installed UI plugin directly:
+
+```teal
+love.run = tecs2d.run({
+    game = gamePlugin,
+    render = renderConfig,
+    ui = {origin = "topLeft"},
+})
+```
+
+With that plugin, `LayoutBox(gfx.Rectangle)` places the transform and renderer
+pivot at the rectangle's top-left. An explicit origin on a `LayoutBox` still
+wins. `LayoutBox` also supplies and synchronizes `gfx.Pivot`, so UI entities do
+not need a duplicate pivot component.
+
 ## Quick Example
 
 ```teal
@@ -33,7 +56,7 @@ local LayoutNode = ui.LayoutNode
 local panel = world:spawn(
     Transform(50, 50),
     gfx.Rectangle(300, 400),
-    LayoutBox(gfx.Rectangle, nil, 0, 0),  -- top-left origin
+    LayoutBox(gfx.Rectangle, nil, 0, 0),  -- explicit top-left origin
     LayoutNode(0, 0, 300, 800)  -- scrollable content
 )
 

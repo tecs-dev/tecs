@@ -7,6 +7,11 @@ description: "The LayoutBox component defining layout dimensions and origin, inc
 Defines layout dimensions and origin for UI positioning. Supports both fixed dimensions and dynamic dimensions from
 render components.
 
+`LayoutBox` owns the render pivot for UI entities. It requires `gfx.Pivot`, so
+the ECS supplies both components in the same spawn transition, and the UI
+system keeps the pivot synchronized with the box origin. You do not need to
+specify both components.
+
 ## Basic Usage
 
 ```teal
@@ -46,6 +51,7 @@ world:spawn(
 | `originX`           | number  | Origin X (0-1). 0=left, 0.5=center, 1=right |
 | `originY`           | number  | Origin Y (0-1). 0=top, 0.5=center, 1=bottom |
 | `sourceComponentId` | integer | Component to pull dimensions from (0=fixed) |
+| `inheritsOrigin`    | integer | Nonzero when the world-local default applies |
 
 ## Origin System
 
@@ -55,6 +61,26 @@ The origin determines where the entity's reference point is:
 - `(0, 0)` - Top-left (typical for UI elements)
 - `(1, 1)` - Bottom-right
 - `(0, 0.5)` - Left-center
+
+### World-local default
+
+Install a configured UI plugin when a world should use top-left origins unless
+a box says otherwise:
+
+```teal
+world:addPlugin(ui.new({origin = "topLeft"}))
+
+world:spawn(
+    Transform(100, 100),
+    Rectangle(50, 30),
+    LayoutBox(Rectangle) -- inherits top-left; Pivot is supplied automatically
+)
+```
+
+The ordinary `ui.plugin` and Tecs2D's automatically installed game-world UI
+plugin remain centered by default. Pass `ui = {origin = "topLeft"}` to
+`tecs2d.run` to configure its game world. Defaults belong to each world, so a
+game world and a composited loading or debugger world can choose independently.
 
 <p align="center">
 <img src="./origin-comparison.png" alt="Origin Comparison" /><br/>

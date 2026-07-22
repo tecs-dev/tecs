@@ -52,15 +52,14 @@ C.cdef[[
         float _pad0, _pad1, _pad2;  // vec4
     } Std430Material;
 
-    // LayoutBox: 32 bytes. Canonical is 28 bytes (6 float + int32); pad to
-    // vec4 alignment. Only offsetX/offsetY are read by the cull shader for
+    // LayoutBox: 32 bytes. Only offsetX/offsetY are read by the cull shader for
     // circles, but mirror the full record so a future shader pass can read
     // dimensions and origin without re-mirroring.
     typedef struct {
         float width, height, offsetX, offsetY;     // vec4
         float originX, originY;
         uint32_t sourceComponentId;
-        float _pad0;                                // vec4
+        uint32_t inheritsOrigin;                     // vec4
     } Std430LayoutBox;
 
     // Circle: 8 bytes. radius + lineWidth = 8 bytes; std430 array
@@ -227,7 +226,7 @@ local record Std430LayoutBoxR
     originX: number
     originY: number
     sourceComponentId: integer
-    _pad0: number
+    inheritsOrigin: integer
 end
 
 local record Std430PivotR
@@ -279,6 +278,7 @@ C.cdef[[
         float width, height, offsetX, offsetY;
         float originX, originY;
         int32_t sourceComponentId;
+        int32_t inheritsOrigin;
     } CanonicalLayoutBox;
 
     typedef struct {
@@ -419,6 +419,7 @@ local record CanonicalLayoutBoxR
     originX: number
     originY: number
     sourceComponentId: integer
+    inheritsOrigin: integer
 end
 
 local record CanonicalPivotR
@@ -531,7 +532,7 @@ local function translateLayoutBox(canonicalRaw: C.CData, shadowRaw: C.CData, fir
         s.originX = c.originX
         s.originY = c.originY
         s.sourceComponentId = c.sourceComponentId
-        s._pad0 = 0
+        s.inheritsOrigin = c.inheritsOrigin
     end
 end
 
@@ -658,7 +659,7 @@ local MATERIAL_FORMAT: love.graphics.BufferFormat = {
 
 local LAYOUTBOX_FORMAT: love.graphics.BufferFormat = {
     {format = "floatvec4"},  -- width, height, offsetX, offsetY
-    {format = "floatvec4"},  -- originX, originY, sourceComponentId (bits), pad
+    {format = "floatvec4"},  -- originX, originY, sourceComponentId/inheritsOrigin (bits)
 }
 
 local CIRCLE_FORMAT: love.graphics.BufferFormat = {

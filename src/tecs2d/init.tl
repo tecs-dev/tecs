@@ -81,6 +81,10 @@ local record tecs2d
         --- Render pipeline configuration. Passed to gfx.newPipeline.
         render: gfx.RenderConfig
 
+        --- UI defaults. Omit for centered origins; use
+        --- `{origin = "topLeft"}` for conventional UI coordinates.
+        ui: tecs_ui.Config
+
         --- Optional. Maximum number of concurrent entity slots. Must be a
         --- power of 2, at most 2^22. Defaults to 2^20 (~1M). See
         --- `tecs.World.Config.maxEntities`.
@@ -509,7 +513,7 @@ local function runLoop(config: tecs2d.RunConfig): (function(): number | string)
     world:addPlugin(tecs_tiled.plugin)
 
     -- Auto-install UI plugin (anchors, layout boxes, fit content)
-    world:addPlugin(tecs_ui.plugin)
+    world:addPlugin(tecs_ui.new(config.ui))
 
     -- Bind the implicit base input target before user plugin setup so games
     -- may subscribe through either input.base or the existing world address 0.

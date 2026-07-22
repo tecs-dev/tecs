@@ -52,6 +52,7 @@ love.run = tecs2d.run({
 | `fps`    | `number`                                   | `60`                           | Target frames per second                                        |
 | `game`   | `function(tecs.World)`                     | *(required)*                   | A plugin function that receives the world and sets up your game |
 | `render` | [`RenderConfig`](/tecs2d/rendering/#renderconfig) | [defaults](/tecs2d/rendering/#fields) | Render pipeline configuration                                   |
+| `ui`     | `ui.Config`                               | `{origin = "center"}`         | World-local UI defaults; use `{origin = "topLeft"}` for conventional UI coordinates |
 | `quitOnEscape` | `boolean`                           | `false`                        | When true, pressing Escape requests a clean quit with exit code 0 |
 | `hotReload` | `HotReloadConfig`                       | disabled                       | Optional development hot reload using one build stamp file and snapshots |
 
