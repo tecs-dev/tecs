@@ -27,6 +27,8 @@ local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
 local cmdargs <const> = require("tecs2d.debug.internal.cmdargs")
 local cmdtypes <const> = require("tecs2d.debug.internal.cmdtypes")
 local markup <const> = require("tecs2d.debug.internal.markup")
+local breakpoints <const> = require("tecs2d.debug.internal.breakpoints")
+local breakpointcmds <const> = require("tecs2d.debug.internal.cmd.breakpoint")
 local capturecmds <const> = require("tecs2d.debug.internal.cmd.capture")
 local editcmds <const> = require("tecs2d.debug.internal.cmd.edit")
 local enginecmds <const> = require("tecs2d.debug.internal.cmd.engine")
@@ -127,6 +129,9 @@ local record commands
         --- headless. The overlay's input system consumes it: reopen the
         --- debugger if closed, show the popup, clear the field.
         profileResult: {string}
+
+        --- A breakpoint hit waiting for the overlay to reopen and present it.
+        breakpointResult: Result
 
         --- cmd_* tool name to its dispatch entry; built lazily on the
         --- first invokeMcp and appended by add().
@@ -639,6 +644,9 @@ end
 function commands.build(env: commands.Env): commands.Registry
     local w = env.world
     local ctx = env.ctx
+    if not w.resources[breakpoints.KEY] then
+        w.resources[breakpoints.KEY] = breakpoints.new(w, env.suspension)
+    end
 
     local reg: commands.Registry = {
         env = env,
@@ -724,6 +732,16 @@ function commands.build(env: commands.Env): commands.Registry
                 out[#out + 1] = name
             end
             table.sort(out)
+            return out
+        elseif source == "breakpointselectors" then
+            return breakpoints.completionCandidates(w)
+        elseif source == "breakpointids" then
+            local manager = w.resources[breakpoints.KEY]
+            if manager then
+                for i = 1, #manager.entries do
+                    out[#out + 1] = tostring(manager.entries[i].id)
+                end
+            end
             return out
         elseif source == "marks" or source == "targets" or source == "edittargets" then
             if source == "edittargets" then out[#out + 1] = EDIT_SELECTION_TARGET end
@@ -940,7 +958,7 @@ function commands.build(env: commands.Env): commands.Registry
     }
 
     for _, group in ipairs({rendercmds.commands(d), enginecmds.commands(d),
-            capturecmds.commands(d)}) do
+            breakpointcmds.commands(d), capturecmds.commands(d)}) do
         for _, c in ipairs(group) do
             cmds[#cmds + 1] = c
         end
@@ -1198,10 +1216,10 @@ function commands.Registry:complete(text: string): string, {string}
     if named and schema.args[named] and not schema.args[named].synthetic then
         spec = schema.args[named]
         outputPrefix = named .. "="
-    elseif not named then
+    else
         local positional = schema.positional or {}
         local slot = positional[position]
-        if slot then
+        if slot and (not named or schema.args[slot].rest) then
             activeSlot = slot
             spec = schema.args[slot]
         end

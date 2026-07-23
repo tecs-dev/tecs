@@ -1,5 +1,5 @@
 ---
-description: "The tecs2d.debug plugin: in-game modal debugger overlay, stats HUD, selection, snapshots, rewind, diff, screenshots, and recordings"
+description: "The tecs2d.debug plugin: in-game overlay, breakpoints, stats, selection, snapshots, rewind, screenshots, and recordings"
 outline: deep
 ---
 
@@ -197,6 +197,66 @@ grid, and the generated [Command Reference](./debug-reference), which
 documents every command's signature, arguments, examples, result schema, and
 MCP projection. The sections below walk the main workflows instead of
 repeating that reference.
+
+### Transition breakpoints
+
+Breakpoints are an advanced way to stop on structural ECS changes or state
+stack transitions. They are useful when the frame where an entity changes is
+more important than its eventual contents. For example:
+
+```text
+breakpoint add has=Transform lacks=Disabled
+breakpoint add added=Poisoned
+breakpoint add removed=Health || life=despawn
+breakpoint add life=spawn has=Enemy state=Gameplay
+breakpoint add pushed=Pause
+breakpoint add popped=Pause state=Gameplay
+```
+
+Terms separated by spaces are ANDed from left to right. A single `|` gives
+alternatives within one term (`life=spawn|despawn`); `||` starts another
+branch. Values containing spaces use quotes. Parentheses are intentionally not
+part of the language.
+
+| Term | Matches |
+| --- | --- |
+| `has=Foo` | The entity has `Foo` after the transition |
+| `lacks=Foo` | The entity lacks `Foo` after the transition |
+| `added=Foo` | `Foo` was absent before and present after |
+| `removed=Foo` | `Foo` was present before and absent after |
+| `life=spawn\|despawn` | An entity lifecycle transition |
+| `state=Gameplay` | The active state after the transition |
+| `pushed=Pause` | `Pause` was pushed |
+| `popped=Pause` | `Pause` was popped |
+
+A branch containing only `has`, `lacks`, and optional `state` terms fires when
+an entity enters that set, rather than on every later mutation while it remains
+in the set. `pushed` and `popped` describe state transitions and cannot be
+ANDed with entity terms in the same branch; use `||` to combine those domains.
+Component names are resolved when the breakpoint is added, so a misspelling
+fails immediately.
+
+On a hit, Tecs finishes the current pipeline pass, suspends gameplay before the
+next frame, selects the matching entity when there is one, opens the debugger,
+and shows the transition. Despawned entities still report their final ID but
+cannot remain selected. Manage armed definitions with:
+
+```text
+breakpoint list
+breakpoint disable 1
+breakpoint enable 1
+breakpoint continue
+breakpoint remove 1
+breakpoint clear
+```
+
+Closing the debugger continues execution. Headless tooling can use
+`breakpoint continue` to release the same suspension without an overlay.
+
+The world installs its transition observer only while at least one breakpoint
+is enabled. With none armed, ordinary structural mutations only perform a nil
+check; entity scans for bulk mutations happen only while breakpoints are
+active.
 
 ### Log search
 

@@ -425,6 +425,12 @@ function WorldImpl:_drainArchBatchSpawn(archetype: Archetype)
         end
 
         archetype:onRowsAdded(currentCount, placed, nil)
+        local observer = self._transitionObserver
+        if observer then
+            for row = currentCount + 1, currentCount + placed do
+                observer.entity(entitiesArr[row], nil, archetype)
+            end
+        end
 
         i = i + BATCH_SPAWN_SLOTS
     end
@@ -565,6 +571,12 @@ function WorldImpl:_drainArchBatchSpawnAt(archetype: Archetype)
         end
 
         archetype:onRowsAdded(currentCount, placed, nil)
+        local observer = self._transitionObserver
+        if observer then
+            for row = currentCount + 1, currentCount + placed do
+                observer.entity(entitiesArr[row], nil, archetype)
+            end
+        end
 
         i = i + BATCH_SPAWN_AT_SLOTS
     end

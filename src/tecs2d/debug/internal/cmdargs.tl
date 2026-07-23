@@ -311,13 +311,10 @@ function cmdargs.parse(schema: cmdargs.Schema, tokens: {string}): {string: any},
     while i <= n do
         local tok = tokens[i]
         local key, val = tok:match("^(%w+)=(.*)$")
-        if key then
+        local namedSpec = key and args[key]
+        if key and namedSpec and not isSynthetic(namedSpec) then
             sawNamed = true
-            local spec = args[key]
-            if not spec or isSynthetic(spec) then
-                return nil, "unknown argument '" .. key .. "'"
-            end
-            local v, err = coerce(key, spec, val)
+            local v, err = coerce(key, namedSpec, val)
             if err then return nil, err end
             local ferr = forwardValue(key, v)
             if ferr then return nil, ferr end
@@ -334,6 +331,9 @@ function cmdargs.parse(schema: cmdargs.Schema, tokens: {string}): {string: any},
             end
             posIndex = posIndex + 1
             local spec = args[slot]
+            if key and not spec.rest then
+                return nil, "unknown argument '" .. key .. "'"
+            end
             if spec.rest then
                 -- Free-text tail: remaining tokens joined with single spaces.
                 -- Tokens naming a declared arg (key=value, or a bare boolean

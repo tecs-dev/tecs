@@ -1690,6 +1690,17 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 showPopup(popup, profPopup, false)
             end
 
+            if registry.breakpointResult then
+                local result = registry.breakpointResult
+                registry.breakpointResult = nil
+                if not ctx.open then doOpen() end
+                showPopup(popup, result.popup, false,
+                    result.popupTitle, result.popupLanguage,
+                    result.popupBlocks, result.popupClosable,
+                    result.popupImagePath, result.popupMaxColumns,
+                    result.popupDocument, result.popupScrollToEnd)
+            end
+
             -- Commands invoked over MCP may raise signals while the panel is
             -- closed (e.g. a screenshot's chrome hide); honor them every frame.
             consumeSignals()

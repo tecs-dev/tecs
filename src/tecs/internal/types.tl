@@ -30,6 +30,16 @@ local type Bitset = BitsetImpl
 
 local record internal
 
+    --- Optional cold-path observer for committed entity/archetype and state
+    --- transitions. Debug tooling installs this only while a breakpoint is
+    --- armed; normal worlds pay one nil check at structural mutation sites.
+    record TransitionObserver
+        entity: function(id: integer, before: ArchetypeInternal,
+            after: ArchetypeInternal)
+        state: function(kind: string, before: string, after: string,
+            changed: string)
+    end
+
     --- A single resolved entry in a component's `_requiresClosure`.
     --- Built once per (registering) component and walked on every
     --- mutation that adds the owning component, so field reads here
@@ -324,6 +334,7 @@ local record internal
         _stateComponents: {string: Component}
         _statePolicies: {string: StatePolicy}
         _keyIndex: {string: integer}
+        _transitionObserver: TransitionObserver
 
         relationshipStores: {Component: RelationshipStore}
         _targetRefCounts: {integer: integer}

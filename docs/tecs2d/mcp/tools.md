@@ -218,6 +218,13 @@ and safety annotations) in the [Command Reference](../debug-reference).
 | [`cmd_audio_stop`](../debug-reference#cmd-audio-stop) | Stop every active source. |
 | [`cmd_audio_mute`](../debug-reference#cmd-audio-mute) | Silence the master group; `audio mute off` restores. |
 | [`cmd_resources`](../debug-reference#cmd-resources) | List world resources; pass a name to read one value. |
+| [`cmd_breakpoint_add`](../debug-reference#cmd-breakpoint-add) | Compile and enable a transition selector. |
+| [`cmd_breakpoint_list`](../debug-reference#cmd-breakpoint-list) | List breakpoints, hit counts, and enabled state. |
+| [`cmd_breakpoint_enable`](../debug-reference#cmd-breakpoint-enable) | Enable a breakpoint. |
+| [`cmd_breakpoint_disable`](../debug-reference#cmd-breakpoint-disable) | Disable a breakpoint without removing it. |
+| [`cmd_breakpoint_remove`](../debug-reference#cmd-breakpoint-remove) | Delete a breakpoint. |
+| [`cmd_breakpoint_clear`](../debug-reference#cmd-breakpoint-clear) | Delete every breakpoint. |
+| [`cmd_breakpoint_continue`](../debug-reference#cmd-breakpoint-continue) | Leave a breakpoint stop and resume gameplay. |
 | [`cmd_profile`](../debug-reference#cmd-profile) | Sample the running game with the LuaJIT profiler. |
 | [`cmd_profile_list`](../debug-reference#cmd-profile-list) | List profiles with size and timestamp. |
 | [`cmd_profile_clear`](../debug-reference#cmd-profile-clear) | Delete all profiles this session. |

@@ -1396,12 +1396,84 @@ Artifacts and time travel: screenshots, profiles, snapshots, recordings, rewind,
 
 | Command | Description |
 | --- | --- |
+| [`breakpoint`](#cmd-breakpoint) | Stop on entity or state transitions. |
 | [`profile`](#cmd-profile) | Sample the running game with the LuaJIT profiler. |
 | [`snapshot`](#cmd-snapshot) | Save and restore the whole world. |
 | [`rewind`](#cmd-rewind) | Time travel: keep a rolling snapshot ring and load back into it. |
 | [`diff`](#cmd-diff) | Structural diff between snapshots, rewind entries, and the live world. |
 | [`screenshot`](#cmd-screenshot) | Capture the screen (or drag area) to a PNG. |
 | [`record`](#cmd-record) | Record the window to a video. |
+
+### `breakpoint` {#cmd-breakpoint}
+
+Stop on entity or state transitions.
+
+```
+breakpoint add has=Transform lacks=Disabled
+breakpoint add removed=Health || life=despawn
+breakpoint add pushed="Pause" state=Pause
+breakpoint list
+breakpoint disable 1
+breakpoint continue
+```
+
+#### `breakpoint add <selector...>` {#cmd-breakpoint-add}
+
+Compile and enable a transition selector.
+
+MCP tool: `cmd_breakpoint_add`
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `selector` | string | transition selector; terms are ANDed and \|\| separates branches (required) |
+
+#### `breakpoint list` {#cmd-breakpoint-list}
+
+List breakpoints, hit counts, and enabled state.
+
+MCP tool: `cmd_breakpoint_list` (read-only, idempotent)
+
+#### `breakpoint enable <id>` {#cmd-breakpoint-enable}
+
+Enable a breakpoint.
+
+MCP tool: `cmd_breakpoint_enable`
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `id` | number (min 1) | breakpoint number from `breakpoint list` (required) |
+
+#### `breakpoint disable <id>` {#cmd-breakpoint-disable}
+
+Disable a breakpoint without removing it.
+
+MCP tool: `cmd_breakpoint_disable`
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `id` | number (min 1) | breakpoint number from `breakpoint list` (required) |
+
+#### `breakpoint remove <id>` {#cmd-breakpoint-remove}
+
+Delete a breakpoint.
+
+MCP tool: `cmd_breakpoint_remove`
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `id` | number (min 1) | breakpoint number from `breakpoint list` (required) |
+
+#### `breakpoint clear` {#cmd-breakpoint-clear}
+
+Delete every breakpoint.
+
+MCP tool: `cmd_breakpoint_clear`
+
+#### `breakpoint continue` {#cmd-breakpoint-continue}
+
+Leave a breakpoint stop and resume gameplay.
+
+MCP tool: `cmd_breakpoint_continue`
 
 ### `profile [seconds] [intervalMs=N] [zone=...]` {#cmd-profile}
 

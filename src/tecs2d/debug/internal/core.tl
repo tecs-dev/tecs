@@ -8,6 +8,7 @@
 
 local tecs <const> = require("tecs")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
+local breakpoints <const> = require("tecs2d.debug.internal.breakpoints")
 local recording <const> = require("tecs2d.debug.internal.recording")
 local suspension <const> = require("tecs2d.internal.suspension")
 local visuals <const> = require("tecs2d.debug.internal.visuals")
@@ -43,6 +44,8 @@ function core.ensure(w: tecs.World, opts?: core.Options): commands.Registry
     local ctx = debugcontext.new()
     w.resources[debugcontext.KEY] = ctx
     local controller = suspension.ensure(w)
+    local breakpointManager = breakpoints.new(w, controller)
+    w.resources[breakpoints.KEY] = breakpointManager
     visuals.install(w, ctx)
     local recorder = recording.new(ctx, opts)
     w.resources[recording.KEY] = recorder
@@ -88,6 +91,45 @@ function core.ensure(w: tecs.World, opts?: core.Options): commands.Registry
             if prof.session and prof.deadline > 0 and now >= prof.deadline then
                 registry.profileResult = registry:finishProfile()
             end
+
+            local trigger = breakpointManager:consume()
+            if trigger then
+                ctx.frozen = true
+                if trigger.entity and w:isAlive(trigger.entity) then
+                    ctx.selected = {trigger.entity}
+                end
+                debugcontext.pushEvent(ctx, "breakpoint", {
+                    id = trigger.breakpointId,
+                    selector = trigger.selector,
+                    entity = trigger.entity,
+                    transition = trigger.description,
+                })
+                local popup = {
+                    "Selector",
+                    "  " .. trigger.selector,
+                    "",
+                    "Transition",
+                    "  " .. trigger.description,
+                }
+                if trigger.entity then
+                    popup[#popup + 1] = ""
+                    popup[#popup + 1] = "Entity"
+                    popup[#popup + 1] = "  #" .. tostring(trigger.entity)
+                end
+                registry.breakpointResult = {
+                    ok = true,
+                    popupTitle = "Breakpoint #" .. tostring(
+                        trigger.breakpointId),
+                    popup = popup,
+                    popupClosable = true,
+                    data = {
+                        breakpointId = trigger.breakpointId,
+                        selector = trigger.selector,
+                        entity = trigger.entity,
+                        transition = trigger.description,
+                    },
+                }
+            end
         end,
     })
 
@@ -95,6 +137,7 @@ function core.ensure(w: tecs.World, opts?: core.Options): commands.Registry
         name = "debug.RecordingShutdown",
         phase = tecs.phases.PreShutdown,
         run = function()
+            breakpointManager:detach()
             recorder:shutdown()
         end,
     })

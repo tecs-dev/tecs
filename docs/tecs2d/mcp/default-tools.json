@@ -155,6 +155,104 @@
     "name": "cmd_bounds"
   },
   {
+    "description": "breakpoint add: compile and enable a transition selector. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "selector": {
+          "description": "transition selector; terms are ANDed and || separates branches",
+          "type": "string"
+        }
+      },
+      "required": [
+        "selector"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_breakpoint_add"
+  },
+  {
+    "description": "breakpoint clear: delete every breakpoint. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_breakpoint_clear"
+  },
+  {
+    "description": "breakpoint continue: leave a breakpoint stop and resume gameplay. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_breakpoint_continue"
+  },
+  {
+    "description": "breakpoint disable: disable a breakpoint without removing it. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "breakpoint number from `breakpoint list`",
+          "minimum": 1,
+          "type": "number"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_breakpoint_disable"
+  },
+  {
+    "description": "breakpoint enable: enable a breakpoint. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "breakpoint number from `breakpoint list`",
+          "minimum": 1,
+          "type": "number"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_breakpoint_enable"
+  },
+  {
+    "description": "breakpoint list: list breakpoints, hit counts, and enabled state. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_breakpoint_list"
+  },
+  {
+    "description": "breakpoint remove: delete a breakpoint. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "breakpoint number from `breakpoint list`",
+          "minimum": 1,
+          "type": "number"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_breakpoint_remove"
+  },
+  {
     "description": "camera info: show camera position, zoom, time scale, and registered cameras. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
     "inputSchema": {
       "additionalProperties": false,

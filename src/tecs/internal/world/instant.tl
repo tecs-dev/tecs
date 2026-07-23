@@ -140,6 +140,10 @@ end
 local macro instantFinish!()
     return ```
         target:onRowsAdded(newRow, 1, nil)
+        local transitionObserver = self._transitionObserver
+        if transitionObserver then
+            transitionObserver.entity(id, nil, target)
+        end
 
         return true, id
     ```
@@ -277,6 +281,8 @@ function WorldImpl:instantSetRaw(id: integer, componentType: Component, value: a
         local movedSlot = IdAllocator.slotOf(movedEntId)
         slots[movedSlot].row = srcRow
     end
+    local observer = self._transitionObserver
+    if observer then observer.entity(packedId, srcArch, dstArch) end
 end
 
 -- Dispatcher: components with defer handlers either stage under a synthetic
@@ -440,6 +446,8 @@ function WorldImpl:_instantDespawn(id: integer): boolean
         end
     end
 
+    local observer = self._transitionObserver
+    if observer then observer.entity(id, srcArch, nil) end
     local movedEntId = srcArch:removeEntity(s.row, nil)
     if movedEntId ~= 0 then
         local movedSlot = IdAllocator.slotOf(movedEntId)

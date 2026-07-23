@@ -115,6 +115,7 @@ function WorldImpl.new(config?: types.World.Config): World
         _stateComponents = {},
         _statePolicies = {},
         _keyIndex = {},
+        _transitionObserver = nil,
         _archetypeSnapshotPool = pool.newTablePool({ clearOn = "release" }),
         _scopeDepth = 0,
 
@@ -645,6 +646,20 @@ function WorldImpl:batchRemove(query: Query, componentType: Component)
 end
 
 function WorldImpl:clearEntities()
+    local observer = self._transitionObserver
+    if observer then
+        local archetypeIndex = self.archetypeIndex
+        for i = 1, archetypeIndex.maxId do
+            local arch = archetypeIndex[i]
+            if arch then
+                local entities = arch.entities as {integer}
+                for row = 1, entities[0] do
+                    observer.entity(entities[row], arch, nil)
+                end
+            end
+        end
+    end
+
     -- In-place reset: zero the arena slots, reset ring / nextFreshSlot.
     -- Keeps the arena object identity stable for captured references.
     IdAllocator.reset(self.allocator)
@@ -913,6 +928,7 @@ function WorldImpl:pushState(name: string)
     end
 
     local stack = self._stateStack
+    local before = stack[#stack]
 
     -- Fire onBlur for the current top state
     if #stack > 0 then
@@ -934,6 +950,8 @@ function WorldImpl:pushState(name: string)
         executePolicy(self, policy.onEnter, name)
     end
     self:emit(0, builtins.StateEnter(name))
+    local observer = self._transitionObserver
+    if observer then observer.state("push", before, name, name) end
 end
 
 function WorldImpl:popState()
@@ -966,6 +984,8 @@ function WorldImpl:popState()
     else
         self.autoStateComponent = nil
     end
+    local observer = self._transitionObserver
+    if observer then observer.state("pop", poppedName, stack[#stack], poppedName) end
 end
 
 function WorldImpl:peekState(): string

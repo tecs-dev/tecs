@@ -157,6 +157,8 @@ local function moveSingleEntity(
         local movedSlot = IdAllocator.slotOf(movedEntId)
         slots[movedSlot].row = srcRow
     end
+    local observer = self._transitionObserver
+    if observer then observer.entity(packedId, srcArch, dstArch) end
 end
 
 local function bulkMoveEntireArchetype(
@@ -167,6 +169,12 @@ local function bulkMoveEntireArchetype(
     local srcEntities = srcArch.entities as {integer}
     local count = srcEntities[0]
     if count == 0 then return 0, 0 end
+    local observer = self._transitionObserver
+    if observer then
+        for i = 1, count do
+            observer.entity(srcEntities[i], srcArch, dstArch)
+        end
+    end
 
     local plan = srcArch:getMovePlanTo(dstArch) as internal.MovePlan
     local planCount = plan.count

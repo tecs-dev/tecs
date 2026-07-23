@@ -32,6 +32,12 @@ function WorldImpl:_truncateArchetype(arch: Archetype)
     if archCount == 0 then return end
 
     local arena = self.allocator
+    local observer = self._transitionObserver
+    if observer then
+        for r = 1, archCount do
+            observer.entity(entities[r], arch, nil)
+        end
+    end
 
     -- notifyRemoved itself is gated on `hasRemoveObservers` internally
     -- -- no need to repeat the check at the call site.
@@ -98,6 +104,8 @@ function WorldImpl:_drainPendingSpawns(arch: Archetype)
             self.entityStateCount = self.entityStateCount - 1
 
             placed = placed + 1
+            local observer = self._transitionObserver
+            if observer then observer.entity(packedId, nil, arch) end
             ::nextSpawn::
         end
 
@@ -228,6 +236,8 @@ function WorldImpl:_drainPendingMoves(srcArch: Archetype)
             -- onRowsAdded marks dirty unconditionally and gates
             -- notification on observer presence internally.
             dstArch:onRowsAdded(newRow, 1, srcArch)
+            local observer = self._transitionObserver
+            if observer then observer.entity(entId, srcArch, dstArch) end
 
             removeCount = removeCount + 1
             toRemove[removeCount] = r
@@ -295,6 +305,8 @@ function WorldImpl:_drainPendingDespawns(arch: Archetype)
                 for i = 1, removeCount do
                     local slotOfRow = list[i]
                     local row = slots[slotOfRow].row + 1
+                    local observer = self._transitionObserver
+                    if observer then observer.entity(entities[row], arch, nil) end
                     local movedEntId = arch:removeEntity(row - 1, nil)
                     IdAllocator.freeSlot(arena, slotOfRow)
                     if movedEntId ~= 0 then

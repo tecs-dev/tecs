@@ -11,6 +11,11 @@ local recording <const> = require("tecs2d.debug.internal.recording")
 local suspension <const> = require("tecs2d.internal.suspension")
 local commands <const> = require("tecs2d.debug.commands")
 local core <const> = require("tecs2d.debug.internal.core")
+local breakpoints <const> = require("tecs2d.debug.internal.breakpoints")
+
+local BreakpointCoreTag <const> = tecs.newTagComponent({
+    name = "BreakpointCoreSpecTag",
+})
 
 describe("tecs2d.debug.internal.core", function()
     it("returns the same registry on repeated ensure", function()
@@ -28,6 +33,24 @@ describe("tecs2d.debug.internal.core", function()
         luassert.equals(reg.env.ctx, w.resources[debugcontext.KEY])
         luassert.equals(reg.env.recorder, w.resources[recording.KEY])
         luassert.equals(reg.env.suspension, w.resources[suspension.KEY])
+        luassert.is_not_nil(w.resources[breakpoints.KEY])
+    end)
+
+    it("surfaces a breakpoint hit from the frame-boundary core tick", function()
+        local w = tecs.newWorld()
+        local reg = core.ensure(w)
+        local added = reg:execute(
+            "breakpoint add life=spawn has=BreakpointCoreSpecTag")
+        luassert.is_true(added.ok)
+
+        local id = w:spawn(BreakpointCoreTag)
+        w:update(1 / 60)
+
+        luassert.is_not_nil(reg.breakpointResult)
+        luassert.equals("Breakpoint #1", reg.breakpointResult.popupTitle)
+        luassert.equals(id, reg.breakpointResult.data.entity)
+        luassert.equals(id, reg.env.ctx.selected[1])
+        luassert.is_true(reg.env.suspension:heldBy("debugger"))
     end)
 
     it("seeds default key bindings for the help command", function()
