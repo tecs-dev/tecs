@@ -4,6 +4,7 @@
 --- Sprites are assigned to buckets based on their texture size.
 
 local lg <const> = love.graphics
+local devicestate <const> = require("tecs2d.gfx.internal.gpu.devicestate")
 local LOGGER <const> = require("tecs.utils.logging").getLogger("tecs2d.gfx.bucketmanager")
 
 -- Bucket tier enumeration
@@ -129,9 +130,6 @@ bucket_manager.CONFIGS = {
 
 -- Tier order from smallest to largest (for size lookup)
 bucket_manager.TIER_ORDER = {"Tiny", "Small", "Medium", "Large", "XL", "XXL"}
-
--- Global singleton instance
-local globalManager: bucket_manager.Manager = nil
 
 local Manager <const> = bucket_manager.Manager
 local MANAGER_MT <const>: metatable<Manager> = { __index = Manager }
@@ -439,6 +437,8 @@ function Manager:getUVScale(sheetId: integer, textureWidth: integer, textureHeig
 end
 
 function bucket_manager.init(): bucket_manager.Manager
+    local deviceState = devicestate.get()
+    local globalManager = deviceState.spriteBucketManager as bucket_manager.Manager
     if globalManager then
         return globalManager
     end
@@ -465,11 +465,14 @@ function bucket_manager.init(): bucket_manager.Manager
         buckets = buckets,
         allAllocations = {},
     }, MANAGER_MT)
+    deviceState.spriteBucketManager = globalManager
 
     return globalManager
 end
 
 function bucket_manager.get(): bucket_manager.Manager
+    local globalManager = devicestate.get().spriteBucketManager
+        as bucket_manager.Manager
     if not globalManager then
         return bucket_manager.init()
     end

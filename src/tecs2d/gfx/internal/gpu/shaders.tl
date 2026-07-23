@@ -43,6 +43,7 @@ local record shaders
     LIGHT_CULL: string
     BLOOM_DOWNSAMPLE: string
     BLOOM_UPSAMPLE: string
+    LAYER_COMPOSITE: string
 end
 
 -- Default shader base path
@@ -119,5 +120,15 @@ shaders.CPU_WORLD = shaders.loadShader("cpu_world")
 shaders.LIGHT_CULL = shaders.loadShader("light_cull")
 shaders.BLOOM_DOWNSAMPLE = shaders.loadShader("bloom_downsample")
 shaders.BLOOM_UPSAMPLE = shaders.loadShader("bloom_upsample")
+-- In the G-buffer, depth testing makes the winning entity opaque. Reproduce
+-- that result across layer groups by premultiplying its alpha and returning an
+-- opaque pixel before the group is composed over the accumulator.
+shaders.LAYER_COMPOSITE = [[
+vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
+    vec4 pixel = Texel(tex, tc);
+    if (pixel.a < 0.01) discard;
+    return vec4(pixel.rgb * pixel.a, 1.0) * color;
+}
+]]
 
 return shaders

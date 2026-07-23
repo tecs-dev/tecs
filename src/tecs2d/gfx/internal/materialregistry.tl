@@ -3,6 +3,7 @@
 --- and lazily-compiled shader variants per shape type.
 
 local Material <const> = require("tecs2d.gfx.internal.Material")
+local devicestate <const> = require("tecs2d.gfx.internal.gpu.devicestate")
 
 local record material_registry
     --- A registered material definition.
@@ -70,9 +71,22 @@ local record material_registry
     loadTextures: function(def: MaterialDef)
 end
 
-local nextId = 1
-local byId: {integer: material_registry.MaterialDef} = {}
-local byName: {string: material_registry.MaterialDef} = {}
+local record RegistryState
+    nextId: integer
+    byId: {integer: material_registry.MaterialDef}
+    byName: {string: material_registry.MaterialDef}
+end
+
+local deviceState <const> = devicestate.get()
+local registry = deviceState.materialRegistry as RegistryState
+if not registry then
+    registry = {
+        nextId = 1,
+        byId = {},
+        byName = {},
+    }
+    deviceState.materialRegistry = registry
+end
 
 -- Read a GLSL source file, trying io.open first then love.filesystem.
 local function readGlslFile(path: string): string
@@ -120,11 +134,11 @@ function material_registry.register(name: string, opts: material_registry.Materi
     assert(name, "Material name is required")
     assert(opts, "Material options are required")
     assert(opts.fragment or opts.vertex, "Material must have at least a fragment or vertex source")
-    assert(not byName[name], "Material '" .. name .. "' is already registered")
-    assert(nextId <= 255, "Maximum of 255 materials exceeded")
+    assert(not registry.byName[name], "Material '" .. name .. "' is already registered")
+    assert(registry.nextId <= 255, "Maximum of 255 materials exceeded")
 
-    local id = nextId
-    nextId = nextId + 1
+    local id = registry.nextId
+    registry.nextId = registry.nextId + 1
 
     local fragmentSource: string
     local fragmentPath: string
@@ -161,32 +175,32 @@ function material_registry.register(name: string, opts: material_registry.Materi
         variants = {},
     }
 
-    byId[id] = def
-    byName[name] = def
+    registry.byId[id] = def
+    registry.byName[name] = def
 
     return Material(id)
 end
 
 function material_registry.getById(id: integer): material_registry.MaterialDef
-    return byId[id]
+    return registry.byId[id]
 end
 
 function material_registry.getByName(name: string): material_registry.MaterialDef
-    return byName[name]
+    return registry.byName[name]
 end
 
 function material_registry.getAll(): {integer: material_registry.MaterialDef}
-    return byId
+    return registry.byId
 end
 
 function material_registry.getVariant(materialId: integer, shapeType: string): love.graphics.Shader
-    local def = byId[materialId]
+    local def = registry.byId[materialId]
     if not def then return nil end
     return def.variants[shapeType]
 end
 
 function material_registry.setVariant(materialId: integer, shapeType: string, shader: love.graphics.Shader)
-    local def = byId[materialId]
+    local def = registry.byId[materialId]
     if not def then return end
     def.variants[shapeType] = shader
 end

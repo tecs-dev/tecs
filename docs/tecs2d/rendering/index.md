@@ -143,7 +143,7 @@ love.run = tecs2d.run({
 | `sizeHints`          | `{string: integer}`          | none            | Initial GPU buffer capacities keyed by name (sprites, circles, lights, etc.). Grows automatically           |
 | `dropShadowScale`    | `number`                     | `0.5`           | Drop shadow AO canvas resolution scale (0.5 = half res, 1.0 = full res)                                     |
 | `bloom`              | `BloomConfig`                | none            | Bloom post-processing config: `enabled`, `intensity`, `radius`, `threshold`                                 |
-| `sharedWith`         | `gfx.Pipeline`               | none            | **Advanced.** Secondary pipeline source; shares device resources and composites on explicit `render()`      |
+| `composite`          | `boolean`                    | `false`         | **Advanced.** Render to a transparent canvas and composite it on explicit `render()`                         |
 
 `world` is required when calling `gfx.newPipeline` directly. A world owns one
 immutable pipeline association. Use `pipeline:getWorldId()` for its stable

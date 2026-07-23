@@ -11,13 +11,15 @@ HUD for performance metrics. When the [MCP plugin](./mcp/) is also present, an
 AI agent reads and drives the same debugger through MCP tools.
 
 The overlay dogfoods Tecs2D rendering: it owns a small independent ECS world
-with the UI plugin and a secondary GPU pipeline. Rectangles, lines, circles,
-BMFont text, and image-preview Sprites render to a transparent canvas and are
-composited in `RenderLast`. Its immediate drawing facade reuses persistent
-entities by primitive type and mutates them only when their content changes;
-unused slots are hidden instead of spawned and despawned every frame. Its clock,
-entities, camera, and mutable GPU buffers are isolated from the game world. See
-the advanced [multiple render worlds and compositing
+with the UI plugin and a composite pipeline. Every pipeline automatically uses
+the same process-owned GPU device resources, while the debugger keeps its
+mutable renderer state isolated. Rectangles, lines, circles, BMFont text, and
+image-preview Sprites render to a transparent canvas and are composited in
+`RenderLast`. Its immediate drawing facade reuses persistent entities by
+primitive type and mutates them only when their content changes; unused slots
+are hidden instead of spawned and despawned every frame. Its clock, entities,
+camera, and mutable GPU buffers are isolated from the game world. See the
+advanced [multiple render worlds and compositing
 guide](./rendering/multi-world) for the underlying architecture.
 
 ## Getting started

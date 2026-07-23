@@ -9,7 +9,7 @@ local levents <const> = require("tecs2d.events")
 
 local gpuModule <const> = require("tecs2d.gfx.internal.gpu")
 local gpuTypes <const> = require("tecs2d.gfx.internal.gpu.types")
-local gpuShaders <const> = require("tecs2d.gfx.internal.gpu.shaders")
+local gpuDevice <const> = require("tecs2d.gfx.internal.gpu.device")
 local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
 local phases <const> = tecs.phases
 local layereffects <const> = require("tecs2d.gfx.internal.layereffects")
@@ -97,9 +97,10 @@ local record pipeline
         --- The world to attach the pipeline to.
         world: tecs.World
 
-        --- Reuse another pipeline's GPU device resources and composite this
-        --- pipeline's transparent result when render() is called. Immutable.
-        sharedWith: types.Pipeline
+        --- Render into a transparent persistent canvas and blend that result
+        --- over the caller's active target when render() is called. Composite
+        --- pipelines render only when called explicitly. Defaults to false.
+        composite: boolean
 
         --- Virtual resolution height. In retro mode, determines the integer scale factor
         --- (intScale = floor(screenH / virtualH)) and vertical field of view. In non-retro
@@ -183,7 +184,7 @@ local record PipelineImpl is Pipeline, gpuTypes.PipelineInternal
     world: tecs.World
     renderer: gpuTypes.Renderer
     worldId: integer
-    _composited: boolean
+    _compositeEnabled: boolean
     _compositeCanvas: love.graphics.Canvas
     _shutdown: boolean
 
@@ -234,7 +235,6 @@ local record PipelineImpl is Pipeline, gpuTypes.PipelineInternal
     timeScale: number     -- Time scale multiplier (1.0 = normal)
 
     -- CPU world shader for Draw phase (full G-buffer MRT output)
-    cpuWorldShader: love.graphics.Shader
     cpuWorldShaderActive: boolean
 
     -- Draw phase state (set during G-buffer rendering for systems in Draw phase)
@@ -378,15 +378,6 @@ function pipeline.newPipeline(config: pipeline.RenderConfig): Pipeline
         error("gfx.newPipeline: world already owns a render pipeline", 2)
     end
 
-    local sharedRenderer: gpuTypes.Renderer = nil
-    if config.sharedWith then
-        local shared = config.sharedWith as PipelineImpl
-        if shared._shutdown then
-            error("gfx.newPipeline: sharedWith pipeline is shut down", 2)
-        end
-        sharedRenderer = shared.renderer
-    end
-
     -- Compute virtual dimensions
     local screenWidth = lg.getWidth() as integer
     local screenHeight = lg.getHeight() as integer
@@ -403,7 +394,7 @@ function pipeline.newPipeline(config: pipeline.RenderConfig): Pipeline
         maxY = 100000,
         virtualRes = {virtualWidth, virtualHeight},
         dropShadowScale = config.dropShadowScale,
-    }, sharedRenderer)
+    }, gpuDevice.get())
     renderer._roughGeometry = config.roughGeometry == true
 
     -- Create primary camera
@@ -429,7 +420,7 @@ function pipeline.newPipeline(config: pipeline.RenderConfig): Pipeline
         world = w,
         renderer = renderer,
         worldId = worldId,
-        _composited = config.sharedWith ~= nil,
+        _compositeEnabled = config.composite == true,
         _compositeCanvas = nil,
         _shutdown = false,
 
@@ -498,8 +489,6 @@ function pipeline.newPipeline(config: pipeline.RenderConfig): Pipeline
         if b.threshold ~= nil then rb.threshold = b.threshold end
     end
 
-    -- Create CPU world shader for Draw phase (G-buffer MRT output)
-    self.cpuWorldShader = lg.newShader(gpuShaders.CPU_WORLD)
     self.cpuWorldShaderActive = false
 
     -- Pre-allocate world shader state for fluent API
@@ -553,7 +542,12 @@ function pipeline.newPipeline(config: pipeline.RenderConfig): Pipeline
     end
 
     -- Layer effects manager
-    self.layerEffectsManager = layereffects.new(MAX_LAYERS, screenWidth, screenHeight)
+    self.layerEffectsManager = layereffects.new(
+        MAX_LAYERS,
+        screenWidth,
+        screenHeight,
+        renderer.device.layerCompositeShader
+    )
 
     local pipelineInstance = setmetatable(self, PIPELINE_MT) as Pipeline
 
@@ -627,7 +621,7 @@ function pipeline.newPipeline(config: pipeline.RenderConfig): Pipeline
     -- Primary pipelines render as part of their world's normal render group.
     -- Composited worlds are updated independently and rendered explicitly by
     -- their owner at the desired composition point.
-    if not pImpl._composited then
+    if not pImpl._compositeEnabled then
         w:addSystem({
             name = "GPURender",
             phase = tecs.phases.Render,
@@ -1135,7 +1129,7 @@ function PipelineImpl:getWorldId(): integer
 end
 
 local function bindOutput(self: PipelineImpl)
-    if self._composited then
+    if self._compositeEnabled then
         lg.setCanvas(self._compositeCanvas)
     else
         lg.setCanvas()
@@ -1143,7 +1137,7 @@ local function bindOutput(self: PipelineImpl)
 end
 
 local function ensureCompositeCanvas(self: PipelineImpl)
-    if not self._composited then return end
+    if not self._compositeEnabled then return end
     local canvas = self._compositeCanvas
     if canvas and canvas:getWidth() == self.screenWidth
             and canvas:getHeight() == self.screenHeight then
@@ -1162,7 +1156,7 @@ function PipelineImpl:render()
         error("render pipeline is shut down", 2)
     end
 
-    if self._composited then
+    if self._compositeEnabled then
         ensureCompositeCanvas(self)
         lg.push("all")
         lg.setCanvas(self._compositeCanvas)
@@ -1188,7 +1182,7 @@ function PipelineImpl:render()
         ::continue::
     end
 
-    if self._composited then
+    if self._compositeEnabled then
         -- Restore the caller's target first. This permits composing a world
         -- into either the window or another explicitly bound canvas.
         lg.pop()
@@ -1309,7 +1303,7 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
                 zone("lighting")
                 self.renderer:renderLighting(useLowRes, self.shadowsEnabled,
                     self.ambientLight, camX, camY, renderZoom,
-                    self._composited and self.renderer.worldLitCanvas or nil,
+                    self._compositeEnabled and self.renderer.worldLitCanvas or nil,
                     rot, renderSubPixelX, renderSubPixelY)
                 zone()
 
@@ -1321,7 +1315,7 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
                 lg.setColor(1, 1, 1, 1)
                 local albedo = useLowRes and self.renderer.pixelAlbedo or self.renderer.gBufferAlbedo
                 lg.setCanvas(self.renderer.worldLitCanvas)
-                if self._composited then
+                if self._compositeEnabled then
                     lg.clear(0, 0, 0, 0)
                 else
                     lg.clear(0, 0, 0, 1)
@@ -1363,7 +1357,7 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
             local vpY <const> = self._intOffsetY
             local vpW <const> = self.scaledWidth * intScale
             local vpH <const> = self.scaledHeight * intScale
-            if not self._composited then
+            if not self._compositeEnabled then
                 lg.clear(0, 0, 0, 1)
             end
             lg.setScissor(vpX, vpY, vpW, vpH)
@@ -1420,7 +1414,7 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
         -- result underneath it. Render the screen result directly into its
         -- already-cleared composite canvas, avoiding screenLit and one full-
         -- resolution copy. Mixed world/screen pipelines still need screenLit.
-        local directComposite = self._composited and worldMaxLayer == 0
+        local directComposite = self._compositeEnabled and worldMaxLayer == 0
         local screenLit = directComposite and self._compositeCanvas
             or self._screenLitCanvas
         local albedo = self.renderer.gBufferAlbedo
@@ -1431,7 +1425,7 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
         -- screenLit is subsequently composed with premultiplied blending.
         lg.setBlendMode("alpha", "alphamultiply")
         if self.lightingMode == "deferred" then
-            local unlitShader = self.renderer.screenUnlitShader
+            local unlitShader = self.renderer.device.screenUnlitShader
             lg.setShader(unlitShader)
             unlitShader:send("ScreenEmission", self.renderer.gBufferEmission)
             lg.draw(albedo, 0, 0)
@@ -1590,7 +1584,7 @@ function PipelineImpl:_renderSecondary(cam: Camera, globalTime: number)
         if self.lightingMode == "deferred" then
             self.renderer:renderLighting(useLowRes, self.shadowsEnabled, self.ambientLight, camX, camY, effectiveZoom, nil, rot)
             self.renderer:renderBloom(useLowRes,
-                self._composited and self._compositeCanvas or nil)
+                self._compositeEnabled and self._compositeCanvas or nil)
         else
             local albedo = self.renderer.gBufferAlbedo
             lg.setColor(1, 1, 1, 1)
@@ -1911,7 +1905,7 @@ function WorldShaderState:attach()
 
         -- Send normal map (use flat normal as fallback)
         if customShader:hasUniform("tecs_NormalMap") then
-            local flatNormal = p.renderer.flatNormalTexture as love.graphics.Texture
+            local flatNormal = p.renderer.device.flatNormalTexture as love.graphics.Texture
             customShader:send("tecs_NormalMap", self._normalMap or flatNormal)
         end
 
@@ -1929,18 +1923,19 @@ function WorldShaderState:attach()
     else
         -- Standard world shader with lit/unlit support
         if not p.cpuWorldShaderActive then
-            lg.setShader(p.cpuWorldShader)
+            lg.setShader(p.renderer.device.cpuWorldShader)
             p.cpuWorldShaderActive = true
         end
-        p.cpuWorldShader:send("tecs_Depth", depth)
-        p.cpuWorldShader:send("tecs_Lit", self._isUnlit and 0.0 or 1.0)
+        local cpuShader = p.renderer.device.cpuWorldShader
+        cpuShader:send("tecs_Depth", depth)
+        cpuShader:send("tecs_Lit", self._isUnlit and 0.0 or 1.0)
 
-        p.cpuWorldShader:send("tecs_Normal", DEFAULT_NORMAL)
+        cpuShader:send("tecs_Normal", DEFAULT_NORMAL)
         if self._normalMap then
-            p.cpuWorldShader:send("tecs_NormalMap", self._normalMap)
-            p.cpuWorldShader:send("tecs_UseNormalMap", true)
+            cpuShader:send("tecs_NormalMap", self._normalMap)
+            cpuShader:send("tecs_UseNormalMap", true)
         else
-            p.cpuWorldShader:send("tecs_UseNormalMap", false)
+            cpuShader:send("tecs_UseNormalMap", false)
         end
     end
 end
@@ -2124,6 +2119,7 @@ function pipeline.newPlugin(config: pipeline.RenderConfig): tecs.Plugin
     return function(w: tecs.World)
         local configWithWorld: pipeline.RenderConfig = {
             world = w,
+            composite = config.composite,
             virtualHeight = config.virtualHeight,
             virtualWidth = config.virtualWidth,
             pixelMode = config.pixelMode,

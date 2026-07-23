@@ -23,7 +23,7 @@ describe("immutable composited render worlds", function()
             local overlayWorld = tecs.newWorld({maxEntities = 64})
             local overlayPipeline = gfx.newPipeline({
                 world = overlayWorld,
-                sharedWith = primary,
+                composite = true,
                 virtualHeight = 240,
                 lightingMode = "none",
                 lerpingEnabled = false,
@@ -120,6 +120,22 @@ describe("immutable composited render worlds", function()
         luassert.equals("true", values[2])
         luassert.near(0, tonumber(values[3]) as number, 0.0001)
         luassert.near(0.5, tonumber(values[4]) as number, 0.0001)
+    end)
+
+    it("shares device resources while isolating mutable renderer state", function()
+        local values = fixture.runLua(app, [[
+            local gfx = require("tecs2d.gfx")
+            local primary = world.resources[gfx.PIPELINE]:getRenderer()
+            local secondary = _G.tecsOverlayPipeline:getRenderer()
+            return primary ~= secondary,
+                primary.device == secondary.device,
+                primary.device.lightingShader == secondary.device.lightingShader,
+                primary.cullParamsBuffer ~= secondary.cullParamsBuffer
+        ]])
+        luassert.equals("true", values[1])
+        luassert.equals("true", values[2])
+        luassert.equals("true", values[3])
+        luassert.equals("true", values[4])
     end)
 
     it("rejects replacing a world's pipeline", function()

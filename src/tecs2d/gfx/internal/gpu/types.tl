@@ -287,6 +287,7 @@ C.cdef[[
 
 local Camera <const> = require("tecs2d.gfx.Camera")
 local gfxTypes <const> = require("tecs2d.gfx.types")
+local devicestate <const> = require("tecs2d.gfx.internal.gpu.devicestate")
 
 local sheet <const> = require("tecs2d.gfx.internal.sprite.sheet")
 
@@ -377,16 +378,15 @@ local record types
         getRenderer: function(self): Renderer
     end
 
-    --- The GPU renderer instance.
-    --- Shape-specific buffers are owned by each shape plugin (closure-captured locals).
-    --- The Renderer holds only shared resources: G-buffer, lighting, camera params, config.
+    --- Process/device-owned GPU resources shared by all pipelines.
+    type DeviceResources = devicestate.Resources
+
+    --- World/pipeline-owned mutable GPU renderer state.
+    --- Shape-specific buffers are owned by each shape plugin
+    --- (closure-captured locals).
     record Renderer
-        -- Shared shaders (not owned by any shape module)
-        shadowBlurShader: love.graphics.Shader
-        --- Screen-phase unlit composite (albedo + emission passthrough).
-        screenUnlitShader: love.graphics.Shader
+        device: DeviceResources
         shadowMaskTemp: love.graphics.Canvas  -- Temp canvas for blur pass
-        lightingShader: love.graphics.Shader
         -- Cross-cutting light buffers (set by Light plugin, read by renderLighting)
         lightOutputBuffer: love.graphics.Buffer
         lightVisibleCountBuffer: love.graphics.Buffer
@@ -403,9 +403,6 @@ local record types
         tileCountResetData: love.data.ByteData
         tileGridWidth: integer
         tileGridHeight: integer
-
-        -- Dummy material params buffer (1 element, all zeros) for shapes with no materials
-        dummyMaterialParamsBuffer: love.graphics.Buffer
 
         -- Current layer range for variant shader dispatch
         _layerRange: {number}
@@ -436,8 +433,6 @@ local record types
         pixelDropShadowAO: love.graphics.Canvas
 
         -- Bloom post-processing
-        bloomDownsampleShader: love.graphics.Shader
-        bloomUpsampleShader: love.graphics.Shader
         bloomMips: {love.graphics.Canvas}
         bloomMipWidths: {integer}
         bloomMipHeights: {integer}
@@ -506,14 +501,6 @@ local record types
 
         -- Indirect buffer reset data (shared across all plugins)
         indirectResetData: love.data.ByteData
-
-        -- Default texture for sprites (white 16x16 fallback)
-        defaultTexture: love.graphics.Image
-
-        -- Default fallback textures (1x1, created at init)
-        flatNormalTexture: love.graphics.Image
-        blackEmissionTexture: love.graphics.Image
-        defaultORMTexture: love.graphics.Image
 
         --- Upload all dirty buffers to GPU
         upload: function(Renderer)

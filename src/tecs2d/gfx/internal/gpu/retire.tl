@@ -8,6 +8,8 @@
 --- frame from Renderer:upload and releases objects two ticks later,
 --- after in-flight work has drained.
 
+local devicestate <const> = require("tecs2d.gfx.internal.gpu.devicestate")
+
 local record retire
     --- Queue a replaced GPU object (love.graphics.Buffer, Mesh, ...)
     --- for release two frames from now. nil is ignored.
@@ -30,7 +32,7 @@ local record Entry
     frames: integer
 end
 
-local entries: {Entry} = {}
+local entries <const> = devicestate.get().retiredObjects as {Entry}
 
 function retire.push(obj: any)
     if obj == nil then return end

@@ -102,11 +102,12 @@ function LoadingScreenPlugin:createBatch(): assets.LoadBatch
 end
 
 function LoadingScreenPlugin:createWorld()
-    local gamePipeline = assert(self.world.resources[gfx.PIPELINE], "loading screen requires a render pipeline")
+    assert(self.world.resources[gfx.PIPELINE],
+        "loading screen requires a render pipeline")
     local loadingWorld = tecs.newWorld({maxEntities = 64})
     local pipeline = gfx.newPipeline({
         world = loadingWorld,
-        sharedWith = gamePipeline,
+        composite = true,
         lightingMode = "none",
         lerpingEnabled = false,
         layers = {[1] = {name = "loading", space = "screen", unlit = true}},

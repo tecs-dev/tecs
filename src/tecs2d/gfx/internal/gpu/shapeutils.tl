@@ -135,7 +135,7 @@ function shape_utils.simpleShapePlugin(config: shape_utils.SimpleShapeConfig): t
             if syncRef and syncRef.materialParamsBuffer then
                 matIn = syncRef.materialParamsBuffer.handle
             else
-                matIn = renderer.dummyMaterialParamsBuffer
+                matIn = renderer.device.dummyMaterialParamsBuffer
             end
             shader:send("MaterialParamsInput", matIn)
             shader:send("MaterialParamsOutput", growable.materialParamsOutBuffer)

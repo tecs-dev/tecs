@@ -6,21 +6,6 @@
 
 local lg <const> = love.graphics
 
--- Compositing shader for non-effect layer groups.
--- In the G-buffer, depth testing makes all entities "opaque" (winner takes all).
--- The single-pass path draws the albedo to screen with alpha blending against
--- the black screen clear: result = color * alpha + black * (1 - alpha).
--- To replicate this in multi-pass, pre-multiply alpha into the color (matching
--- the darkening from alpha against black) and force alpha=1 so the pixel
--- composites opaquely over the accumulator without blending with layers below.
-local COMPOSITE_SHADER_CODE <const> = [[
-vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
-    vec4 pixel = Texel(tex, tc);
-    if (pixel.a < 0.01) discard;
-    return vec4(pixel.rgb * pixel.a, 1.0) * color;
-}
-]]
-
 local record layer_effects
     --- Options for layer effects
     record EffectOptions
@@ -64,14 +49,16 @@ local record layer_effects
     end
 
     --- Create a new layer effects manager
-    new: function(maxLayers: integer, width: integer, height: integer): Manager
+    new: function(maxLayers: integer, width: integer, height: integer,
+        compositeShader: love.graphics.Shader): Manager
 end
 
 local MANAGER_MT <const>: metatable<layer_effects.Manager> = {
     __index = layer_effects.Manager,
 }
 
-function layer_effects.new(maxLayers: integer, width: integer, height: integer): layer_effects.Manager
+function layer_effects.new(maxLayers: integer, width: integer, height: integer,
+        compositeShader: love.graphics.Shader): layer_effects.Manager
     local manager: layer_effects.Manager = setmetatable({
         effects = {},
         groups = {},
@@ -80,7 +67,7 @@ function layer_effects.new(maxLayers: integer, width: integer, height: integer):
         accumulator = lg.newCanvas(width, height),
         effectTemp = lg.newCanvas(width, height),
         litLayer = lg.newCanvas(width, height),
-        compositeShader = lg.newShader(COMPOSITE_SHADER_CODE),
+        compositeShader = compositeShader,
     }, MANAGER_MT)
 
     return manager

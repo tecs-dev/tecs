@@ -26,11 +26,11 @@ toolworld.KEY = toolworldkey.KEY
 function toolworld.install(world: tecs.World, uiHeight: number)
     assert(uiHeight > 0, "debug uiHeight must be greater than zero")
     debugdraw.setScreenScale(math.max(1, love.graphics.getHeight() / uiHeight))
-    local primary = assert(world.resources[gfx.PIPELINE], "debug plugin requires a render pipeline")
+    assert(world.resources[gfx.PIPELINE], "debug plugin requires a render pipeline")
     local tools = tecs.newWorld({maxEntities = 4096})
     local pipeline = gfx.newPipeline({
         world = tools,
-        sharedWith = primary,
+        composite = true,
         lightingMode = "none",
         lerpingEnabled = false,
         layers = {[1] = {name = "debug", space = "screen", unlit = true, sortMode = "z"}},

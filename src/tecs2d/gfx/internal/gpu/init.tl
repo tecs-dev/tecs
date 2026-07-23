@@ -2,7 +2,6 @@
 --- Provides instanced rendering with compute shader culling and deferred lighting.
 
 local types <const> = require("tecs2d.gfx.internal.gpu.types")
-local shaderCode <const> = require("tecs2d.gfx.internal.gpu.shaders")
 local forwardblend <const> = require("tecs2d.gfx.internal.gpu.forwardblend")
 local retire <const> = require("tecs2d.gfx.internal.gpu.retire")
 local C <const> = require("ffi")
@@ -20,9 +19,6 @@ local setOrthographic <const> = require("tecs2d.gfx.internal.ortho").setOrthogra
 local EMPTY_NUMBERS <const>: {number} = {}
 local EMPTY_INTEGERS <const>: {integer} = {}
 
--- Screen-sized targets are transient: pipelines sharing the LÖVE device render
--- sequentially, so identical target sets can be reused across worlds.
-local scratchByKey: {string: {string: any}} = {}
 local SCRATCH_FIELDS <const>: {string} = {
     "gBufferAlbedo", "gBufferNormal", "gBufferORM", "gBufferEmission",
     "dropShadowAO", "shadowMask", "shadowMaskTemp",
@@ -66,9 +62,6 @@ local record gpu
     --- Re-export types module
     types: types
 
-    --- Re-export shader code
-    shaders: shaderCode
-
     --- Configuration for the GPU renderer (alias to types.Config)
     type Config = types.Config
 
@@ -76,14 +69,15 @@ local record gpu
     type Renderer = types.Renderer
 
     --- Create a new GPU renderer
-    new: function(config: Config, sharedRenderer?: Renderer): Renderer
+    new: function(config: Config, device: types.DeviceResources): Renderer
 end
 
 gpu.types = types
-gpu.shaders = shaderCode
 
-function gpu.new(config: gpu.Config, sharedRenderer?: gpu.Renderer): gpu.Renderer
+function gpu.new(config: gpu.Config,
+        device: types.DeviceResources): gpu.Renderer
     config = config or {}
+    assert(device, "GPU device resources are required")
 
     -- Apply defaults for config fields that shape modules read
     config.maxLayers = config.maxLayers or 16
@@ -97,6 +91,7 @@ function gpu.new(config: gpu.Config, sharedRenderer?: gpu.Renderer): gpu.Rendere
 
     local renderer: gpu.Renderer = {
         config = config,
+        device = device,
     }
 
     -- Default layer range (all layers visible)
@@ -107,13 +102,6 @@ function gpu.new(config: gpu.Config, sharedRenderer?: gpu.Renderer): gpu.Rendere
     -- roughGeometry is set in its config or via setRoughGeometry.
     renderer._roughGeometry = false
 
-    -- Compile shared shaders (per-shape shaders are compiled by each shape module)
-    renderer.lightingShader = sharedRenderer and sharedRenderer.lightingShader or lg.newShader(shaderCode.LIGHTING)
-    renderer.shadowBlurShader = sharedRenderer and sharedRenderer.shadowBlurShader or lg.newShader(shaderCode.SHADOW_BLUR)
-    renderer.screenUnlitShader = sharedRenderer and sharedRenderer.screenUnlitShader or lg.newShader(shaderCode.SCREEN_UNLIT)
-    renderer.bloomDownsampleShader = sharedRenderer and sharedRenderer.bloomDownsampleShader or lg.newShader(shaderCode.BLOOM_DOWNSAMPLE)
-    renderer.bloomUpsampleShader = sharedRenderer and sharedRenderer.bloomUpsampleShader or lg.newShader(shaderCode.BLOOM_UPSAMPLE)
-
     -- Initialize bloom config (disabled by default)
     renderer.bloom = {
         enabled = false,
@@ -121,10 +109,6 @@ function gpu.new(config: gpu.Config, sharedRenderer?: gpu.Renderer): gpu.Rendere
         radius = 1.0,
         threshold = 0.0,
     }
-
-    -- Dummy material params buffer (1 element, all zeros) for shapes with no materials
-    renderer.dummyMaterialParamsBuffer = sharedRenderer and sharedRenderer.dummyMaterialParamsBuffer
-        or lg.newBuffer(types.MATERIAL_PARAMS_FORMAT, 1, {usage = "dynamic", shaderstorage = true})
 
     -- Create camera params SSBO buffers
     renderer.cullParamsByteData = love.data.newByteData(C.sizeof("GPUCullParams"))
@@ -139,32 +123,6 @@ function gpu.new(config: gpu.Config, sharedRenderer?: gpu.Renderer): gpu.Rendere
     ptr[1] = 0   -- instanceCount (set by compute shader)
     ptr[2] = 0   -- firstVertex
     ptr[3] = 0   -- firstInstance
-
-    -- Create default white texture
-    local imageData = love.image.newImageData(16, 16)
-    imageData:mapPixel(function(_x: number, _y: number, _r: number, _g: number, _b: number, _a: number): (number, number, number, number)
-        return 1, 1, 1, 1
-    end)
-    renderer.defaultTexture = sharedRenderer and sharedRenderer.defaultTexture or lg.newImage(imageData)
-    renderer.defaultTexture:setFilter("nearest", "nearest")
-
-    -- 1x1 flat normal texture (neutral normal, alpha=0 means "no normal data")
-    local flatNormalData = love.image.newImageData(1, 1)
-    flatNormalData:setPixel(0, 0, 0.5, 0.5, 1.0, 0.0)
-    renderer.flatNormalTexture = sharedRenderer and sharedRenderer.flatNormalTexture or lg.newImage(flatNormalData)
-    renderer.flatNormalTexture:setFilter("nearest", "nearest")
-
-    -- 1x1 black emission texture (no glow)
-    local blackEmissionData = love.image.newImageData(1, 1)
-    blackEmissionData:setPixel(0, 0, 0, 0, 0, 1)
-    renderer.blackEmissionTexture = sharedRenderer and sharedRenderer.blackEmissionTexture or lg.newImage(blackEmissionData)
-    renderer.blackEmissionTexture:setFilter("nearest", "nearest")
-
-    -- 1x1 default ORM texture (full AO, mid roughness, non-metallic)
-    local defaultORMData = love.image.newImageData(1, 1)
-    defaultORMData:setPixel(0, 0, 1.0, 0.5, 0.0, 0.0)
-    renderer.defaultORMTexture = sharedRenderer and sharedRenderer.defaultORMTexture or lg.newImage(defaultORMData)
-    renderer.defaultORMTexture:setFilter("nearest", "nearest")
 
     -- Initialize screen size and canvases
     renderer.screenWidth = lg.getWidth() as integer
@@ -206,7 +164,7 @@ function RendererMethods:resize(width: integer, height: integer)
     local dsScale = self.config.dropShadowScale
     local scale = self.config.shadowMaskScale
     local scratchKey = table.concat({width, height, vw, vh, dsScale, scale}, ":")
-    local cached = scratchByKey[scratchKey]
+    local cached = self.device.scratchByKey[scratchKey]
     if cached then
         for i = 1, #SCRATCH_FIELDS do
             local field = SCRATCH_FIELDS[i]
@@ -315,7 +273,7 @@ function RendererMethods:resize(width: integer, height: integer)
         local field = SCRATCH_FIELDS[i]
         scratch[field] = (self as {string: any})[field]
     end
-    scratchByKey[scratchKey] = scratch
+    self.device.scratchByKey[scratchKey] = scratch
 end
 
 function RendererMethods:upload()
@@ -590,7 +548,7 @@ function RendererMethods:renderShadowMask(cameraX: number, cameraY: number, came
     -- Blurs height (R), preserves occluder flag (G) from center pixel
     -- Must use "replace" blend to fully overwrite temp canvas
     lg.setBlendMode("replace")
-    local blurShader = self.shadowBlurShader
+    local blurShader = self.device.shadowBlurShader
     local texelSize = {1.0 / maskW, 1.0 / maskH}
     lg.setShader(blurShader)
     blurShader:send("TexelSize", texelSize)
@@ -669,7 +627,7 @@ function RendererMethods:renderLighting(useLowRes: boolean, shadowsEnabled: bool
 
     -- Always use lighting shader to apply ambient (even with 0 lights)
     -- Tile-based light binning: fragment shader reads per-tile light lists
-    local shader = self.lightingShader
+    local shader = self.device.lightingShader
     lg.setShader(shader)
     shader:send("gAlbedo", albedo)
     shader:send("gNormal", normal)
@@ -764,8 +722,8 @@ function RendererMethods:renderBloom(useLowRes: boolean, outputCanvas?: love.gra
         mipHeights = self.bloomMipHeights
     end
 
-    local downShader = self.bloomDownsampleShader
-    local upShader = self.bloomUpsampleShader
+    local downShader = self.device.bloomDownsampleShader
+    local upShader = self.device.bloomUpsampleShader
 
     -- Downsample chain: emission -> mip[1] -> mip[2] -> ... -> mip[N]
     lg.setBlendMode("replace")

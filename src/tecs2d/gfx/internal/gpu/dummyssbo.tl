@@ -6,6 +6,7 @@
 --- layout is shared across all dispatchers.
 
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
+local devicestate <const> = require("tecs2d.gfx.internal.gpu.devicestate")
 
 local lg <const> = love.graphics
 
@@ -14,7 +15,7 @@ local record dummy_ssbo
     dummyFor: function(layout: std430.Descriptor): love.graphics.Buffer
 end
 
-local dummyByFormat: {string: love.graphics.Buffer} = {}
+local dummyByFormat <const> = devicestate.get().dummySSBOs
 
 function dummy_ssbo.dummyFor(layout: std430.Descriptor): love.graphics.Buffer
     local existing = dummyByFormat[layout.shadowCtype]

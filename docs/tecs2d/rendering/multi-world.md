@@ -37,8 +37,12 @@ This invariant provides two useful guarantees:
 
 The pipeline created by `tecs2d.run` is the **primary pipeline**. It renders
 automatically during the world's `Render` phase. A pipeline configured with
-`sharedWith` is a **secondary pipeline**. Its owner updates and renders it
-explicitly at the desired composition point.
+`composite = true` is a **composite pipeline**. Its owner updates and renders
+it explicitly at the desired composition point.
+
+All pipelines automatically use the same process-owned GPU device resources.
+No pipeline is the resource parent of another pipeline. `composite` controls
+presentation only: it does not change world ownership or GPU resource sharing.
 
 Every pipeline exposes a stable generational identity through
 `pipeline:getWorldId()`. Entity IDs remain local to their world: two worlds may
@@ -71,12 +75,11 @@ local gfx <const> = require("tecs2d.gfx")
 local ui <const> = require("tecs2d.ui")
 
 local function game(world: tecs.World)
-    local gamePipeline = world.resources[gfx.PIPELINE]
     local tools = tecs.newWorld({maxEntities = 4096})
 
     local toolsPipeline = gfx.newPipeline({
         world = tools,
-        sharedWith = gamePipeline,
+        composite = true,
         lightingMode = "none",
         lerpingEnabled = false,
         layers = {
@@ -152,7 +155,7 @@ normal Tecs UI components and a `LoadBatch`.
 
 ## How compositing works
 
-Each secondary pipeline renders a complete image independently before blending
+Each composite pipeline renders a complete image independently before blending
 that image over the caller's current render target:
 
 ```text
@@ -161,9 +164,9 @@ game world ────────────── render ──────�
 tool world ─ render to transparent canvas ─┘
 ```
 
-Calling `secondaryPipeline:render()` performs these operations:
+Calling a composite pipeline's `render()` performs these operations:
 
-1. Clear the secondary pipeline's persistent output canvas to transparent.
+1. Clear the composite pipeline's persistent output canvas to transparent.
 2. Upload and render that world's entities using its cameras and effects.
 3. Restore the render target that was active before the call.
 4. Draw the completed canvas with premultiplied-alpha blending.
@@ -178,7 +181,7 @@ one world cannot be inserted between entities in another world by changing its
 
 ### Composition order
 
-Secondary pipelines are blended in call order, back to front:
+Composite pipelines are blended in call order, back to front:
 
 ```teal
 -- The game pipeline has already rendered automatically.
@@ -209,15 +212,24 @@ replay:update(realDt * 2)      -- fast-forward
 preview:update(1 / 60)         -- deterministic fixed step
 ```
 
-A secondary pipeline is never rendered automatically. The owner may render it
+A composite pipeline is never rendered automatically. The owner may render it
 every frame, at a reduced frequency, or only after its contents change. Updating
 and rendering are separate decisions.
 
 ## Resource sharing and isolation
 
-`sharedWith` does not merge the worlds. It reuses device-level resources that
-are safe to share and transient targets that sequential pipelines need at
-different times.
+GPU ownership is split explicitly at the device and pipeline boundary:
+
+- Process/device resources contain compiled shaders, fallback textures,
+  sprite texture arrays, the material registry and compiled variants, shared
+  animation timing data, GPU retirement state, and compatible transient
+  targets that sequential pipelines can reuse.
+- Each pipeline owns the mutable state derived from its world, including
+  archetype shadows, instance and cull-output buffers, cameras, and persistent
+  output canvases.
+
+This split is automatic. A pipeline never needs a reference to another
+pipeline merely to reuse GPU resources.
 
 | State | Owner | Behavior |
 | --- | --- | --- |
@@ -227,13 +239,13 @@ different times.
 | Sprite callbacks and Text slabs/metadata | World | Isolated even when entity IDs collide |
 | Runtime system enable/disable state | World | Same system name can differ by world |
 | Entity GPU buffers and output canvas | Pipeline | Independently mutable |
-| Shaders, default textures, immutable material definitions | Process/device | Shared |
+| Shaders, texture arrays, material registry and variants, timing data | Process/device | Shared |
 | Compatible G-buffers and transient GPU targets | Process/device scratch pool | Reused by sequential renders |
 | Input layer stack and OS input binding | Process | One explicit gameplay owner |
 | MCP transport and command registry | Process/session | One operator session |
 
-Do not render shared pipelines concurrently. They are designed for ordered,
-sequential composition on LÖVE's render thread.
+Do not render pipelines concurrently. Transient targets are designed for
+ordered, sequential composition on LÖVE's render thread.
 
 ## Capacity and performance
 
@@ -265,8 +277,8 @@ and skip `render()` when the output is not visible or has not changed.
 - Cross-world communication must be explicit through copied data, events, or
   an application-owned bridge.
 - Process services may be shared by reference, but must have exactly one update and shutdown owner.
-- A secondary pipeline must be shut down by shutting down its world.
-- `sharedWith` is fixed at pipeline creation; there is no attach/detach API.
+- A composite pipeline must be shut down by shutting down its world.
+- `composite` is fixed at pipeline creation; there is no attach/detach API.
 - `sizeHints` are initial capacities, not enforced GPU-memory budgets.
 - Tecs2D does not currently enforce frame-time or GPU-memory quotas per world.
 
@@ -280,7 +292,7 @@ The [debug plugin](/tecs2d/debug) uses this design directly:
 - a dedicated world capped at 4096 entities;
 - the normal UI plugin and `LayoutBox` positioning;
 - Rectangle, Line, Circle, Text, and Sprite components;
-- an unlit secondary pipeline sharing the game's GPU infrastructure;
+- an unlit composite pipeline using the process GPU device;
 - a raw independent clock;
 - composition in `RenderLast`, immediately before presentation.
 

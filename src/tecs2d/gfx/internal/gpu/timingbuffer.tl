@@ -4,6 +4,7 @@
 --- cumulative frame times. Sprites reference into this buffer via animTimingOffset.
 
 local C <const> = require("ffi")
+local devicestate <const> = require("tecs2d.gfx.internal.gpu.devicestate")
 local retire <const> = require("tecs2d.gfx.internal.gpu.retire")
 
 local record timing_buffer
@@ -220,7 +221,10 @@ function TimingBuffer:clear()
     -- Don't destroy gpuBuffer/byteData, they can be reused
 end
 
--- Create global singleton
-timing_buffer.global = timing_buffer.new()
+local deviceState <const> = devicestate.get()
+if not deviceState.timingBuffer then
+    deviceState.timingBuffer = timing_buffer.new()
+end
+timing_buffer.global = deviceState.timingBuffer as TimingBuffer
 
 return timing_buffer
