@@ -2,8 +2,8 @@
 --- {at, event, args} -- literal love event shapes -- dispatch through the
 --- exact path real events take (tecs2d.internal.handlers.dispatch), on
 --- GAMEPLAY frames: the tape's consumer system runs in phases.First, which
---- the freeze controller disables while frozen and enables during cmd_step,
---- so `freeze -> queue -> step N -> assert state` is fully deterministic.
+--- the suspension controller disables while held and enables during cmd_step,
+--- so queueing input before a step is deterministic.
 --- Unfrozen, the same system consumes the tape on live frames.
 ---
 --- `at` counts gameplay frames from queue time: at=1 fires on the next

@@ -1,7 +1,7 @@
 --- Shared suspension/step controller: the one owner of "gameplay is stopped".
---- Both the in-game debugger (open panel) and the MCP pause tool suspend
---- through this resource, so the two surfaces cannot fight over phase state
---- or clobber each other's saved time scale. Suspension disables every
+--- The in-game debugger and headless tooling suspend through this resource,
+--- so callers cannot fight over phase state or clobber each other's saved
+--- time scale. Suspension disables every
 --- gameplay phase and zeroes the render time scale; rendering, input, the
 --- overlay, and the MCP server keep running.
 ---
@@ -12,9 +12,6 @@
 local tecs <const> = require("tecs")
 local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
 local frameclock <const> = require("tecs2d.internal.frameclock")
-local logging <const> = require("tecs.utils.logging")
-
-local LOGGER <const> = logging.getLogger("tecs2d.suspension")
 
 local record suspension
     record Controller
@@ -33,29 +30,6 @@ local record suspension
         --- The provider this controller installed on frameclock (nil when
         --- not stepping, or when a replay owned the provider first).
         ownProvider: function(number): number
-
-        --- One-shot callbacks fired when the pending step's last frame has
-        --- run (or suspension is released mid-step, so no waiter strands).
-        stepWaiters: {function()}
-
-        --- Optional per-frame hook, evaluated after each stepped frame's
-        --- gameplay has run; returning true ends the step early. Cleared
-        --- when the step completes or suspension is released.
-        perFrame: function(): boolean
-
-        --- Frames actually run by the current/most recent step (a per-frame
-        --- hook can stop before the requested count).
-        stepFramesRun: integer
-
-        --- True when the most recent step was ended early by its per-frame
-        --- hook.
-        stoppedEarly: boolean
-
-        --- Register a one-shot step-completion callback. Fires immediately
-        --- when no step is pending.
-        onStepComplete: function(self: Controller, fn: function())
-
-        flushStepWaiters: function(self: Controller)
 
         --- Suspend on behalf of `who`. Returns false if already held by them.
         suspend: function(self: Controller, who: string): boolean
@@ -146,11 +120,7 @@ function suspension.Controller:resume(who: string): boolean
         setRenderTimeScale(self.world, self.savedTimeScale)
         self.stepsRemaining = 0
         self.stepping = false
-        self.perFrame = nil
         self:removeStepClock()
-        -- A release mid-step resolves waiters rather than stranding their
-        -- deferred responses; the game is running, the step is moot.
-        self:flushStepWaiters()
     end
     return true
 end
@@ -169,32 +139,7 @@ function suspension.Controller:step(frames: integer): boolean, string
     end
     if frames < 1 then frames = 1 end
     self.stepsRemaining = frames
-    self.stepFramesRun = 0
-    self.stoppedEarly = false
     return true, nil
-end
-
--- Fire and clear every registered step waiter. Each callback runs isolated
--- so one bad waiter cannot strand the others (or kill the tick system).
-function suspension.Controller:flushStepWaiters()
-    local waiters = self.stepWaiters
-    if not waiters or #waiters == 0 then return end
-    self.stepWaiters = {}
-    for i = 1, #waiters do
-        local ok, err = pcall(waiters[i]) as (boolean, any)
-        if not ok then
-            LOGGER:error("step waiter failed: %s", tostring(err))
-        end
-    end
-end
-
-function suspension.Controller:onStepComplete(fn: function())
-    if self.stepsRemaining <= 0 and not self.stepping then
-        pcall(fn)
-        return
-    end
-    self.stepWaiters = self.stepWaiters or {}
-    self.stepWaiters[#self.stepWaiters + 1] = fn
 end
 
 -- Install a deterministic-dt provider for the duration of a step, unless a
@@ -231,34 +176,12 @@ function suspension.Controller:tick()
         return
     end
     self.stepsRemaining = self.stepsRemaining - 1
-    self.stepFramesRun = (self.stepFramesRun or 0) + 1
-
-    -- Per-frame hook: this frame's gameplay has run (RenderFirst is after the
-    -- gameplay phases), so the hook observes its result; returning true stops
-    -- the step here. It runs on the natural last frame too (side effects stay
-    -- per-frame-consistent), where its verdict is moot.
-    if self.perFrame then
-        local okH, stop = pcall(self.perFrame) as (boolean, any)
-        if okH and stop and self.stepsRemaining > 0 then
-            self.stepsRemaining = 0
-            self.stoppedEarly = true
-        elseif not okH then
-            -- A broken hook must not run the world unattended for the rest
-            -- of the step; stop and let the waiter surface the error.
-            self.stepsRemaining = 0
-            self.stoppedEarly = true
-        end
-    end
 
     if self.stepsRemaining <= 0 then
         disableGameplay(self.world)
         setRenderTimeScale(self.world, 0.0)
         self.stepping = false
-        self.perFrame = nil
         self:removeStepClock()
-        -- The last stepped frame's gameplay phases have run (RenderFirst is
-        -- after them), so waiters observe post-step state.
-        self:flushStepWaiters()
     end
 end
 
@@ -288,9 +211,7 @@ function suspension.ensure(w: tecs.World): suspension.Controller
         run = function()
             self.stepsRemaining = 0
             self.stepping = false
-            self.perFrame = nil
             self:removeStepClock()
-            self:flushStepWaiters()
         end,
     })
     return self

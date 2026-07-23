@@ -1248,7 +1248,7 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
 
     -- Set camera on renderer for VP access
     self.renderer.camera = cam
-    
+
 
     local rot = cam._renderRotation
     local hasScreenLayers = self._firstScreenLayer > 0
@@ -1260,121 +1260,123 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
     ---------------------------------------------------------------------------
     -- Phase 1: World/virtual layers (at scaled resolution)
     ---------------------------------------------------------------------------
-    self.renderer._renderPhase = "world"
-    self.renderer.shadowsEnabled = self.shadowsEnabled
-
-    -- Run culling compute shaders (uses scaled G-buffer dims for tile viewport).
-    -- Restrict the cull's layer mask to the world layers: screen-layer
-    -- entities are culled and drawn by the screen phase, and world
-    -- entities must not survive into it.
-    local worldLayerMask = bit.band(cam._layerMask, self.visibleLayerMask, bit.lshift(1, worldMaxLayer) - 1)
-    zone("cull")
-    self.renderer:cull(camX, camY, renderZoom, useLowRes, globalTime, self.screenSpaceMask, self.ignoreZoomMask, self.virtualCoordsMask, self.unlitMask, self.parallaxX, self.parallaxY, self.sortModes, rot, worldLayerMask)
-    zone()
-
-    if hasScreenLayers then
-        self.renderer:setLayerRange(1, worldMaxLayer)
-    else
-        self.renderer:resetLayerRange()
-    end
-    -- Narrow the CPU-draw layer filter (attachWorldShader) to the world
-    -- layers; without this, Draw-phase content on screen layers renders
-    -- here in world space and again in the screen phase.
-    self.currentLayerMin = 1
-    self.currentLayerMax = worldMaxLayer
-
-    -- Check if layer effects are active
-    if self.layerEffectsManager:hasEffects() then
-        zone("layerEffects")
-        self:renderWithLayerEffects(camX, camY, renderZoom, useLowRes, globalTime, rot, renderSubPixelX, renderSubPixelY)
-        zone()
-    else
-        -- Standard single-pass rendering (no effects) for world layers
-        zone("gBuffer")
-        self.renderer:renderGBuffer(camX, camY, renderZoom, useLowRes, globalTime, gBufferCb, rot, renderSubPixelX, renderSubPixelY)
-        zone()
-
-        if self.shadowsEnabled and self.lightingMode == "deferred"
-                and not self:_shadowMaskFresh(camX, camY, renderZoom, rot) then
-            zone("shadowMask")
-            self.renderer:renderShadowMask(camX, camY, renderZoom, rot)
-            self:_stampShadowMask(camX, camY, renderZoom, rot)
-            zone()
-        end
-
-        if self.lightingMode == "deferred" then
-            zone("lighting")
-            self.renderer:renderLighting(useLowRes, self.shadowsEnabled,
-                self.ambientLight, camX, camY, renderZoom,
-                self._composited and self.renderer.worldLitCanvas or nil,
-                rot, renderSubPixelX, renderSubPixelY)
-            zone()
-
-            zone("bloom")
-            self.renderer:renderBloom(useLowRes, self.renderer.worldLitCanvas)
-            zone()
-        else
-            -- No lighting: copy albedo to worldLitCanvas
-            lg.setColor(1, 1, 1, 1)
-            local albedo = useLowRes and self.renderer.pixelAlbedo or self.renderer.gBufferAlbedo
-            lg.setCanvas(self.renderer.worldLitCanvas)
-            if self._composited then
-                lg.clear(0, 0, 0, 0)
-            else
-                lg.clear(0, 0, 0, 1)
-            end
-            -- G-buffer rendering leaves replace blending active. Blend its
-            -- straight-alpha coverage once so worldLit is premultiplied.
-            lg.setBlendMode("alpha", "alphamultiply")
-            lg.draw(albedo, 0, 0)
-            lg.setCanvas()
-        end
-
-        -- Forward pass for blend-mode shapes (render to worldLitCanvas)
-        zone("forwardBlend")
-        lg.setCanvas(self.renderer.worldLitCanvas)
-        self.renderer:renderForwardBlend(camX, camY, renderZoom, useLowRes, renderSubPixelX, renderSubPixelY)
-        lg.setCanvas()
-        zone()
-    end
-
-    -- Upscale worldLitCanvas to screen
     local sw <const> = self.screenWidth
     local sh <const> = self.screenHeight
-    local worldLit = self.renderer.worldLitCanvas
-    local worldLitW = worldLit:getWidth()
-    local worldLitH = worldLit:getHeight()
-    bindOutput(self)
-    lg.setColor(1, 1, 1, 1)
-    -- Lighting and the direct albedo copy both produce a premultiplied
-    -- worldLit canvas. Do not multiply fractional edge RGB a second time.
-    lg.setBlendMode("alpha", "premultiplied")
-    if self._integerScaling then
-        -- Integer scaling: pixel-perfect upscale with letterboxing.
-        -- Sub-pixel camera remainder is applied as a screen-pixel blit offset
-        -- (not in the render pass) so every virtual pixel maps to exactly
-        -- intScale x intScale screen pixels, eliminating pixel crawl.
-        -- Scissor clips the content to a fixed viewport so letterbox bars don't shift.
-        local intScale <const> = self._intScale
-        local blitOffsetX = floor(subPixelX * intScale + 0.5) as integer
-        local blitOffsetY = floor(subPixelY * intScale + 0.5) as integer
-        local vpX <const> = self._intOffsetX
-        local vpY <const> = self._intOffsetY
-        local vpW <const> = self.scaledWidth * intScale
-        local vpH <const> = self.scaledHeight * intScale
-        if not self._composited then
-            lg.clear(0, 0, 0, 1)
+    if worldMaxLayer > 0 then
+        self.renderer._renderPhase = "world"
+        self.renderer.shadowsEnabled = self.shadowsEnabled
+
+        -- Run culling compute shaders (uses scaled G-buffer dims for tile viewport).
+        -- Restrict the cull's layer mask to the world layers: screen-layer
+        -- entities are culled and drawn by the screen phase, and world
+        -- entities must not survive into it.
+        local worldLayerMask = bit.band(cam._layerMask, self.visibleLayerMask, bit.lshift(1, worldMaxLayer) - 1)
+        zone("cull")
+        self.renderer:cull(camX, camY, renderZoom, useLowRes, globalTime, self.screenSpaceMask, self.ignoreZoomMask, self.virtualCoordsMask, self.unlitMask, self.parallaxX, self.parallaxY, self.sortModes, rot, worldLayerMask)
+        zone()
+
+        if hasScreenLayers then
+            self.renderer:setLayerRange(1, worldMaxLayer)
+        else
+            self.renderer:resetLayerRange()
         end
-        lg.setScissor(vpX, vpY, vpW, vpH)
-        worldLit:setFilter("nearest", "nearest")
-        lg.draw(worldLit, vpX + blitOffsetX, vpY + blitOffsetY, 0, intScale, intScale)
-        lg.setScissor()
-    else
-        -- Non-pixel or modern: bilinear filtering
-        worldLit:setFilter("linear", "linear")
-        lg.draw(worldLit, 0, 0, 0, sw / worldLitW, sh / worldLitH)
+        -- Narrow the CPU-draw layer filter (attachWorldShader) to the world
+        -- layers; without this, Draw-phase content on screen layers renders
+        -- here in world space and again in the screen phase.
+        self.currentLayerMin = 1
+        self.currentLayerMax = worldMaxLayer
+
+        -- Check if layer effects are active
+        if self.layerEffectsManager:hasEffects() then
+            zone("layerEffects")
+            self:renderWithLayerEffects(camX, camY, renderZoom, useLowRes, globalTime, rot, renderSubPixelX, renderSubPixelY)
+            zone()
+        else
+            -- Standard single-pass rendering (no effects) for world layers
+            zone("gBuffer")
+            self.renderer:renderGBuffer(camX, camY, renderZoom, useLowRes, globalTime, gBufferCb, rot, renderSubPixelX, renderSubPixelY)
+            zone()
+
+            if self.shadowsEnabled and self.lightingMode == "deferred"
+                    and not self:_shadowMaskFresh(camX, camY, renderZoom, rot) then
+                zone("shadowMask")
+                self.renderer:renderShadowMask(camX, camY, renderZoom, rot)
+                self:_stampShadowMask(camX, camY, renderZoom, rot)
+                zone()
+            end
+
+            if self.lightingMode == "deferred" then
+                zone("lighting")
+                self.renderer:renderLighting(useLowRes, self.shadowsEnabled,
+                    self.ambientLight, camX, camY, renderZoom,
+                    self._composited and self.renderer.worldLitCanvas or nil,
+                    rot, renderSubPixelX, renderSubPixelY)
+                zone()
+
+                zone("bloom")
+                self.renderer:renderBloom(useLowRes, self.renderer.worldLitCanvas)
+                zone()
+            else
+                -- No lighting: copy albedo to worldLitCanvas
+                lg.setColor(1, 1, 1, 1)
+                local albedo = useLowRes and self.renderer.pixelAlbedo or self.renderer.gBufferAlbedo
+                lg.setCanvas(self.renderer.worldLitCanvas)
+                if self._composited then
+                    lg.clear(0, 0, 0, 0)
+                else
+                    lg.clear(0, 0, 0, 1)
+                end
+                -- G-buffer rendering leaves replace blending active. Blend its
+                -- straight-alpha coverage once so worldLit is premultiplied.
+                lg.setBlendMode("alpha", "alphamultiply")
+                lg.draw(albedo, 0, 0)
+                lg.setCanvas()
+            end
+
+            -- Forward pass for blend-mode shapes (render to worldLitCanvas)
+            zone("forwardBlend")
+            lg.setCanvas(self.renderer.worldLitCanvas)
+            self.renderer:renderForwardBlend(camX, camY, renderZoom, useLowRes, renderSubPixelX, renderSubPixelY)
+            lg.setCanvas()
+            zone()
+        end
+
+        -- Upscale worldLitCanvas to screen
+        local worldLit = self.renderer.worldLitCanvas
+        local worldLitW = worldLit:getWidth()
+        local worldLitH = worldLit:getHeight()
+        bindOutput(self)
+        lg.setColor(1, 1, 1, 1)
+        -- Lighting and the direct albedo copy both produce a premultiplied
+        -- worldLit canvas. Do not multiply fractional edge RGB a second time.
+        lg.setBlendMode("alpha", "premultiplied")
+        if self._integerScaling then
+            -- Integer scaling: pixel-perfect upscale with letterboxing.
+            -- Sub-pixel camera remainder is applied as a screen-pixel blit offset
+            -- (not in the render pass) so every virtual pixel maps to exactly
+            -- intScale x intScale screen pixels, eliminating pixel crawl.
+            -- Scissor clips the content to a fixed viewport so letterbox bars don't shift.
+            local intScale <const> = self._intScale
+            local blitOffsetX = floor(subPixelX * intScale + 0.5) as integer
+            local blitOffsetY = floor(subPixelY * intScale + 0.5) as integer
+            local vpX <const> = self._intOffsetX
+            local vpY <const> = self._intOffsetY
+            local vpW <const> = self.scaledWidth * intScale
+            local vpH <const> = self.scaledHeight * intScale
+            if not self._composited then
+                lg.clear(0, 0, 0, 1)
+            end
+            lg.setScissor(vpX, vpY, vpW, vpH)
+            worldLit:setFilter("nearest", "nearest")
+            lg.draw(worldLit, vpX + blitOffsetX, vpY + blitOffsetY, 0, intScale, intScale)
+            lg.setScissor()
+        else
+            -- Non-pixel or modern: bilinear filtering
+            worldLit:setFilter("linear", "linear")
+            lg.draw(worldLit, 0, 0, 0, sw / worldLitW, sh / worldLitH)
+        end
+        lg.setBlendMode("alpha", "alphamultiply")
     end
-    lg.setBlendMode("alpha", "alphamultiply")
 
     ---------------------------------------------------------------------------
     -- Phase 2: Screen layers (only if _firstScreenLayer > 0)
@@ -1414,10 +1416,16 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
         -- early-exit on every pixel; the dedicated composite shader
         -- reproduces that exit (albedo + emission with preserved coverage,
         -- uncovered pixels discarded) without binding the lighting pipeline.
-        local screenLit = self._screenLitCanvas
+        -- A composited pipeline containing only screen layers has no world
+        -- result underneath it. Render the screen result directly into its
+        -- already-cleared composite canvas, avoiding screenLit and one full-
+        -- resolution copy. Mixed world/screen pipelines still need screenLit.
+        local directComposite = self._composited and worldMaxLayer == 0
+        local screenLit = directComposite and self._compositeCanvas
+            or self._screenLitCanvas
         local albedo = self.renderer.gBufferAlbedo
         lg.setCanvas(screenLit)
-        lg.clear(0, 0, 0, 0)
+        if not directComposite then lg.clear(0, 0, 0, 0) end
         lg.setColor(1, 1, 1, 1)
         -- Store the straight-alpha shader/copy result as premultiplied RGB;
         -- screenLit is subsequently composed with premultiplied blending.
@@ -1438,12 +1446,14 @@ function PipelineImpl:_renderPrimary(cam: Camera, globalTime: number)
         self.renderer:renderForwardBlend(0, 0, 1.0, false, 0.0, 0.0)
         lg.setCanvas()
 
-        -- Composite screen layers on top of world with alpha blending
-        bindOutput(self)
-        lg.setBlendMode("alpha", "premultiplied")
-        lg.setColor(1, 1, 1, 1)
-        lg.draw(screenLit, 0, 0)
-        lg.setBlendMode("alpha")
+        if not directComposite then
+            -- Composite screen layers on top of the world result.
+            bindOutput(self)
+            lg.setBlendMode("alpha", "premultiplied")
+            lg.setColor(1, 1, 1, 1)
+            lg.draw(screenLit, 0, 0)
+            lg.setBlendMode("alpha")
+        end
 
         -- Restore renderer state
         self.renderer.screenWidth = prevW

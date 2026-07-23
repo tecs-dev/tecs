@@ -118,23 +118,24 @@ tecs/
 - Prefer the structured `cmd_*` tools over `run_lua` for live game edits. In particular, use
   `cmd_set`, `cmd_modify`, and `cmd_remove` to add, update, or remove components on existing
   entities.
-- Useful live-debug tools include `cmd_context`, `cmd_info`, `cmd_stats`, and `cmd_fetch`
-  (component-query fetch, optionally restricted to a world-space box via `x`, `y`, `w`, `h`).
+- Useful live-debug tools include `cmd_context`, `cmd_info`, `cmd_query`, and
+  `cmd_components_info`.
 - The debugger's commands share the operator's selection, marks, and notes (`cmd_select`,
-  `cmd_mark`, `cmd_goto`, `cmd_note`, `cmd_query`, `cmd_spawn`, `cmd_draw_*`, `cmd_systems_*`,
-  `cmd_camera_*`, `cmd_snapshot_save`, `cmd_record_start`, ...), so use them to annotate or
+  `cmd_mark`, `cmd_goto`, `cmd_note`, `cmd_query`, `cmd_spawn`, `cmd_systems_*`,
+  `cmd_camera_*`, `cmd_snapshot_save`, `cmd_record_start`, ...). For durable tool-owned visuals,
+  read `debugWorldId` from `cmd_context`, then use `cmd_spawn`, `cmd_modify`, and `cmd_despawn`
+  with that `worldId`; the entities render in the isolated debugger world. Use commands to
   highlight entities the user can see in-game (`cmd_select` takes `replace = true` to swap the
-  selection instead of adding). Freeze with `cmd_freeze` and advance frame by frame with
-  `cmd_step`.
-- Call `cmd_capabilities` once after connecting to learn which plugins and tool families the
-  session supports, and `cmd_describe {command = "<name>"}` for a command's full contract.
-  Tool results carry the payload as MCP `structuredContent`, and every tool declares safety
-  annotations (read-only, destructive, idempotent).
+  selection instead of adding). Open the debugger to suspend gameplay and advance frame by
+  frame with `cmd_step`.
+- Use the standard MCP `tools/list` request to learn the exact live tool surface and each
+  command's contract. Tool results carry the payload as MCP `structuredContent`, and every
+  tool declares safety annotations (read-only, destructive, idempotent).
 - Time-travel debugging: `cmd_rewind_start` keeps a rolling snapshot ring while the game runs;
   after something goes wrong, `cmd_diff {from = "rewind:10s", ignore = "Transform", limit = 0}`
-  shows a per-component summary of what changed, `cmd_diff_get` dereferences a JSON Pointer
-  into the result, `cmd_rewind_load` restores an entry, and `cmd_step` replays frame by
-  frame. `cmd_map_info` reads tiles at a world point. `cmd_set` and `cmd_modify` take the
+  shows a per-component summary of what changed and writes the full result as an artifact;
+  `cmd_rewind_load` restores an entry, and `cmd_step` replays frame by frame.
+  `cmd_map_info` reads tiles at a world point. `cmd_set` and `cmd_modify` take the
   component value as a JSON object: `cmd_set` replaces the whole component (adds it when missing,
   omitted fields reset to defaults) while `cmd_modify` changes only the named fields and skips
   targets that lack the component, so prefer `cmd_modify` for tweaking live values.

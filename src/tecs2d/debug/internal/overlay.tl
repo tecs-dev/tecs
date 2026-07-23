@@ -11,6 +11,7 @@
 
 local tecs <const> = require("tecs")
 local input <const> = require("tecs2d.input")
+local gfx <const> = require("tecs2d.gfx")
 local gfxtypes <const> = require("tecs2d.gfx.types")
 local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
@@ -18,6 +19,8 @@ local core <const> = require("tecs2d.debug.internal.core")
 local leader <const> = require("tecs2d.debug.internal.leader")
 local commands <const> = require("tecs2d.debug.commands")
 local Popup <const> = require("tecs2d.debug.internal.Popup")
+local markup <const> = require("tecs2d.debug.internal.markup")
+local toolworldkey <const> = require("tecs2d.debug.internal.toolworldkey")
 
 local HRULE <const> = commands.HRULE
 local SECTION_MARK <const> = commands.SECTION_MARK
@@ -103,12 +106,15 @@ local POPUP_SCROLLBAR_W <const> = 6
 local POPUP_SCROLL_ROWS <const> = 3
 local POPUP_CONTENT_PAD_TOP <const> = 10
 local POPUP_CONTENT_PAD_BOTTOM <const> = 10
+local POPUP_SECTION_PAD_TOP <const> = 4
+local POPUP_SECTION_PAD_BOTTOM <const> = 4
 
 local COMMAND_BAR <const>: {number} = {0.1804, 0.2157, 0.2353, 1}
 local TECS_PURPLE <const>: {number} = {0.4196, 0.2471, 0.6902, 1}
 local POPUP_ACCENT <const>: {number} = {0.66, 0.51, 0.90, 1}
 local DEBUG_BG <const>: {number} = {0.58, 0.42, 0.82, 1}
 local DEBUG_TEXT <const>: {number} = {0.94, 0.92, 0.98, 1}
+local COMMAND_HINT <const>: {number} = {0.46, 0.46, 0.46, 1}
 local COMPLETION_BG <const>: {number} = {0.1059, 0.0745, 0.1373, 0.98}
 local POPUP_BG <const>: {number} = {0.1059, 0.0745, 0.1373, 1}
 local CONTEXT_BG <const>: {number} = {0.1451, 0.1098, 0.1804, 1}
@@ -127,10 +133,11 @@ end
 
 local function showPopup(popup: PopupState, lines: {string}, modal: boolean,
         title?: string, language?: string, semanticBlocks?: {{string}},
-        closable?: boolean, imagePath?: string, maxColumns?: integer)
-    if not lines then return end
+        closable?: boolean, imagePath?: string, maxColumns?: integer,
+        document?: markup.Document, scrollToEnd?: boolean)
+    if not lines and not document then return end
     popup:show({
-        lines = lines,
+        lines = lines or {},
         title = title,
         language = language,
         blocks = semanticBlocks,
@@ -138,6 +145,8 @@ local function showPopup(popup: PopupState, lines: {string}, modal: boolean,
         closable = closable,
         imagePath = imagePath,
         maxColumns = maxColumns,
+        document = document,
+        scrollToEnd = scrollToEnd,
     })
 end
 
@@ -153,6 +162,72 @@ local function appendWrappedPopupLine(out: {string}, font: lg.Font,
         maxWidth - font:getWidth(indent))
     local _, wrapped = font:getWrap(content, width)
     for i = 1, #wrapped do out[#out + 1] = indent .. wrapped[i] end
+end
+
+local function slicedDocumentLine(line: markup.Line, first: integer,
+        last: integer): markup.Line
+    local spans: {markup.Span} = {}
+    local offset = 1
+    for _, span in ipairs(line.spans) do
+        local spanLast = offset + #span.text - 1
+        local from = math.max(first, offset)
+        local to = math.min(last, spanLast)
+        if from <= to then
+            spans[#spans + 1] = {
+                text = span.text:sub(from - offset + 1, to - offset + 1),
+                style = span.style,
+            }
+        end
+        offset = spanLast + 1
+    end
+    if #spans == 0 then spans[1] = {text = "", style = "body"} end
+    return {
+        text = line.text:sub(first, last),
+        style = line.style,
+        language = line.language,
+        spans = spans,
+        span = line.span,
+    }
+end
+
+-- Character-range wrapping keeps inline styles attached to their source
+-- ranges, including on continuation lines.
+local function appendWrappedDocumentLine(out: {markup.Line}, font: lg.Font,
+        line: markup.Line, maxWidth: number)
+    if line.style == "rule" or line.text == "" then
+        out[#out + 1] = line
+        return
+    end
+    local indentW = line.style == "definitionBody" and font:getWidth("    ") or 0
+    local width = math.max(font:getWidth("word"), maxWidth - indentW)
+    if font:getWidth(line.text) <= width then
+        out[#out + 1] = line
+        return
+    end
+    local first = 1
+    while first <= #line.text do
+        while first <= #line.text and line.text:sub(first, first):match("%s") do
+            first = first + 1
+        end
+        if first > #line.text then break end
+        local last = first
+        local breakAt: integer = nil
+        while last <= #line.text
+            and font:getWidth(line.text:sub(first, last)) <= width do
+            if line.text:sub(last, last):match("%s") then breakAt = last end
+            last = last + 1
+        end
+        if last <= #line.text and breakAt and breakAt >= first then
+            last = breakAt
+        else
+            last = math.max(first, last - 1)
+        end
+        while last > first and line.text:sub(last, last):match("%s") do
+            last = last - 1
+        end
+        out[#out + 1] = slicedDocumentLine(line, first, last)
+        first = math.max(first + 1, last + 1)
+    end
 end
 
 -- Wrap a syntax/name cell without losing the trailing tab that identifies it
@@ -252,7 +327,8 @@ end
 
 -- Measure one popup column block: split lines on tabs and align the tab
 -- columns within the block.
-local function measurePopupBlock(font: lg.Font, gap: number, lines: {string}): PopupBlock
+local function measurePopupBlock(font: lg.Font, gap: number, lines: {string},
+        documentLines?: {markup.Line}): PopupBlock
     local rows: {{string}} = {}
     local colW: {number} = {}
     for i = 1, #lines do
@@ -289,14 +365,25 @@ local function measurePopupBlock(font: lg.Font, gap: number, lines: {string}): P
             end
         end
     end
-    return {lines = lines, rows = rows, colX = colX, width = width}
+    if documentLines then
+        width = 0
+        for i = 1, #documentLines do
+            local indentW = documentLines[i].style == "definitionBody"
+                and font:getWidth("    ") or 0
+            width = math.max(width, indentW + font:getWidth(documentLines[i].text))
+        end
+    end
+    return {lines = lines, documentLines = documentLines,
+        rows = rows, colX = colX, width = width}
 end
 
 -- Lightweight Lua coloring for inspector output. It is intentionally lexical:
 -- identifiers, literals, comments, and punctuation are enough to make a data
 -- dump scannable without pulling a parser into the overlay.
-local function drawLuaLine(font: lg.Font, line: string, x: number, y: number)
+local function drawLuaLine(font: lg.Font, line: string, x: number, y: number,
+        key: string)
     local i = 1
+    local tokenIndex = 0
     while i <= #line do
         local start = i
         local c = line:sub(i, i)
@@ -349,8 +436,53 @@ local function drawLuaLine(font: lg.Font, line: string, x: number, y: number)
         else
             lg.setColor(0.8275, 0.7765, 0.6667, 1)
         end
-        if kind ~= "space" then lg.print(token, x, y) end
+        if kind ~= "space" then
+            tokenIndex = tokenIndex + 1
+            lg.print(key .. "." .. tostring(tokenIndex), token, x, y)
+        end
         x = x + font:getWidth(token)
+    end
+end
+
+local function setDocumentColor(style: string)
+    if style == "section" or style == "accent" then
+        lg.setColor(POPUP_ACCENT[1], POPUP_ACCENT[2], POPUP_ACCENT[3], 1)
+    elseif style == "definitionTerm" or style == "arg" then
+        lg.setColor(0.45, 0.70, 1.0, 1)
+    elseif style == "key" then
+        lg.setColor(0.92, 0.88, 0.98, 1)
+    elseif style == "code" then
+        lg.setColor(0.94, 0.69, 0.48, 1)
+    elseif style == "muted" then
+        lg.setColor(0.54, 0.49, 0.62, 1)
+    elseif style == "warning" then
+        lg.setColor(0.96, 0.45, 0.48, 1)
+    elseif style == "title" then
+        lg.setColor(DEBUG_TEXT[1], DEBUG_TEXT[2], DEBUG_TEXT[3], 1)
+    else
+        lg.setColor(0.8275, 0.7765, 0.6667, 1)
+    end
+end
+
+local function drawDocumentLine(font: lg.Font, line: markup.Line,
+        x: number, y: number, width: number, key: string)
+    if line.style == "rule" then
+        lg.setColor(0.35, 0.40, 0.46, 0.8)
+        lg.setLineWidth(1)
+        lg.line(key .. ".rule", x, y + (font:getHeight() + 6) * 0.5, x + width,
+            y + (font:getHeight() + 6) * 0.5)
+        return
+    end
+    if line.style == "code" and line.language == "lua" then
+        drawLuaLine(font, line.text, x, y, key .. ".lua")
+        return
+    end
+    if line.style == "definitionBody" then x = x + font:getWidth("    ") end
+    for i, span in ipairs(line.spans) do
+        local style = span.style ~= "body" and span.style or line.style
+        setDocumentColor(style)
+        lg.print(key .. ".span." .. tostring(i), span.text, x, y)
+        x = x + font:getWidth(span.text)
     end
 end
 
@@ -362,22 +494,97 @@ local function drawPopup(popup: PopupState, font: lg.Font,
         sw: number, sh: number, py: number)
     local fh = font:getHeight()
     local lineH = fh + 6
-    local fixedHeight = 8 + lineH + POPUP_CONTENT_PAD_TOP
-        + POPUP_CONTENT_PAD_BOTTOM
-    local rowCapacity = math.max(1,
-        math.floor((sh - py - fixedHeight) / lineH))
-    local gap = font:getWidth("  ")
     local sourceLines = popup.lines
-
+    local document = popup.document
+    local hasExplicitTitle = popup.title ~= nil
+        or (document ~= nil and document.title ~= nil)
+    local header = popup.title
+        or (document and document.title and document.title.text)
+        or (not document and sourceLines[1])
+    local headerRows = header and 1 or 0
+    local fixedHeight = 8 + headerRows * lineH
+        + POPUP_CONTENT_PAD_TOP + POPUP_CONTENT_PAD_BOTTOM
+    local maxBodyH = math.max(lineH, sh - py - fixedHeight)
+    local gap = font:getWidth("  ")
     -- Layout cache: semantic blocks are packed into the number of columns the
     -- current viewport can hold. Ordinary popups remain one flowing column.
     if popup.measuredLines ~= sourceLines or popup.measuredSw ~= sw
-        or popup.measuredBlocks ~= popup.semanticBlocks then
+        or popup.measuredBlocks ~= popup.semanticBlocks
+        or popup.measuredDocument ~= document then
         popup.measuredLines = sourceLines
         popup.measuredBlocks = popup.semanticBlocks
+        popup.measuredDocument = document
         popup.measuredSw = sw
         local gutter = font:getWidth("    ")
-        if popup.semanticBlocks and #popup.semanticBlocks > 0 then
+        if document then
+            local columnCount = 1
+            for _, block in ipairs(document.blocks) do
+                if block.kind == "columns" then
+                    local requested = block.columnMode == "fixed"
+                        and block.columnCount or #block.columns
+                    columnCount = math.max(columnCount, requested, #block.columns)
+                end
+            end
+            if popup.maxColumns > 0 then
+                columnCount = math.min(columnCount, popup.maxColumns)
+            end
+            local minW = font:getWidth(string.rep(" ", 24))
+            local availableW = math.max(minW,
+                sw - PAD_X * 4 - POPUP_RIGHT_PAD - POPUP_SCROLLBAR_W - 8)
+            local fit = math.max(1,
+                math.floor((availableW + gutter) / (minW + gutter))) as integer
+            columnCount = math.min(columnCount, fit)
+            local columnW = math.max(minW,
+                (availableW - gutter * (columnCount - 1)) / columnCount)
+            local raw: {{markup.Line}} = {}
+            for ci = 1, columnCount do raw[ci] = {} end
+            local function padColumns()
+                local height = 0
+                for ci = 1, columnCount do height = math.max(height, #raw[ci]) end
+                for ci = 1, columnCount do
+                    while #raw[ci] < height do
+                        raw[ci][#raw[ci] + 1] = markup.line("", "spacer")
+                    end
+                end
+            end
+            for _, block in ipairs(document.blocks) do
+                padColumns()
+                if block.kind == "flow" then
+                    local before = #raw[1]
+                    for _, line in ipairs(block.lines) do
+                        line.span = true
+                        appendWrappedDocumentLine(raw[1], font, line, availableW)
+                    end
+                    local added = #raw[1] - before
+                    for ci = 2, columnCount do
+                        for _ = 1, added do
+                            raw[ci][#raw[ci] + 1] = markup.line("", "spacer")
+                        end
+                    end
+                else
+                    for sourceColumn, lines in ipairs(block.columns) do
+                        local ci = ((sourceColumn - 1) % columnCount) + 1
+                        if sourceColumn > columnCount and #raw[ci] > 0 then
+                            raw[ci][#raw[ci] + 1] = markup.line("", "spacer")
+                        end
+                        for _, line in ipairs(lines) do
+                            appendWrappedDocumentLine(raw[ci], font, line, columnW)
+                        end
+                    end
+                    padColumns()
+                end
+            end
+            local columns: {PopupBlock} = {}
+            for ci = 1, columnCount do
+                local textLines: {string} = {}
+                for li = 1, #raw[ci] do textLines[li] = raw[ci][li].text end
+                columns[ci] = measurePopupBlock(font, gap, textLines, raw[ci])
+            end
+            popup.columns = columns
+            popup.columnWidth = columnW
+            popup.columnGap = gutter
+            popup.block = columns[1]
+        elseif popup.semanticBlocks and #popup.semanticBlocks > 0 then
             local naturalW: number = 0
             for bi = 1, #popup.semanticBlocks do
                 local semantic = popup.semanticBlocks[bi]
@@ -430,23 +637,73 @@ local function drawPopup(popup: PopupState, font: lg.Font,
         end
     end
     local columns = popup.columns
-    local header = popup.title or sourceLines[1]
     local totalRows = 0
     for ci = 1, #columns do totalRows = math.max(totalRows, #columns[ci].lines) end
-    local visibleRows = math.min(totalRows, rowCapacity)
-    local scrollable = totalRows > visibleRows
-    popup.scrollMax = math.max(0, totalRows - visibleRows)
-    popup.visibleRows = visibleRows
+
+    -- Semantic section headings get real pixel padding rather than blank
+    -- document rows. Scroll positions remain row-based, while layout and the
+    -- scrollbar use the resulting variable row heights.
+    local rowHeights: {number} = {}
+    local rowTopPads: {number} = {}
+    local totalContentH: number = 0
+    for i = 1, totalRows do
+        local section = false
+        if document then
+            for ci = 1, #columns do
+                local lines = columns[ci].documentLines
+                if lines and lines[i] and lines[i].style == "section" then
+                    section = true
+                    break
+                end
+            end
+        end
+        local topPad: number = 0
+        if section then
+            topPad = i == 1 and POPUP_SECTION_PAD_TOP or lineH
+        end
+        local bottomPad = section and POPUP_SECTION_PAD_BOTTOM or 0
+        rowTopPads[i] = topPad
+        rowHeights[i] = lineH + topPad + bottomPad
+        totalContentH = totalContentH + rowHeights[i]
+    end
+
+    local bottomFirst = totalRows + 1
+    local bottomHeight: number = 0
+    for i = totalRows, 1, -1 do
+        if bottomHeight > 0 and bottomHeight + rowHeights[i] > maxBodyH then
+            break
+        end
+        bottomHeight = bottomHeight + rowHeights[i]
+        bottomFirst = i
+    end
+    popup.scrollMax = math.max(0, bottomFirst - 1)
+    if popup.scrollToEndPending then
+        popup.scroll = popup.scrollMax
+        popup.scrollToEndPending = false
+    end
     popup.scroll = math.max(0, math.min(popup.scroll, popup.scrollMax))
     local firstRow = math.floor(popup.scroll) + 1
-    local lastRow = math.min(totalRows, firstRow + visibleRows - 1)
+    local lastRow = firstRow - 1
+    local bodyH: number = 0
+    for i = firstRow, totalRows do
+        if bodyH > 0 and bodyH + rowHeights[i] > maxBodyH then break end
+        bodyH = bodyH + rowHeights[i]
+        lastRow = i
+    end
+    local visibleRows = math.max(0, lastRow - firstRow + 1)
+    -- The viewport height belongs to the document, not the current scroll
+    -- slice. Variable-height section rows can leave less occupied space at
+    -- the bottom; preserve that space instead of making the panel jump.
+    bodyH = math.min(maxBodyH, totalContentH)
+    local scrollable = totalContentH > bodyH
+    popup.visibleRows = visibleRows
     local scrollbarSpace = scrollable and (POPUP_SCROLLBAR_W + 8) or 0
     local columnsW = #columns * popup.columnWidth
         + math.max(0, #columns - 1) * popup.columnGap
-    local contentW = math.max(font:getWidth(header), columnsW)
+    local contentW = math.max(header and font:getWidth(header) or 0, columnsW)
     local panelW = math.min(sw - PAD_X * 2,
         contentW + PAD_X + POPUP_RIGHT_PAD + scrollbarSpace)
-    local panelH = lineH * (visibleRows + 1) + 8
+    local panelH = bodyH + lineH * headerRows + 8
         + POPUP_CONTENT_PAD_TOP + POPUP_CONTENT_PAD_BOTTOM
     popup.panelX, popup.panelY = PAD_X, py
     popup.panelW, popup.panelH = panelW, panelH
@@ -455,22 +712,24 @@ local function drawPopup(popup: PopupState, font: lg.Font,
         -- Dim the game view without partially covering the debugger's own
         -- forward-rendered status text and command line.
         lg.setScissor(0, 0, sw, math.max(0, sh - 1))
-        lg.rectangle("fill", 0, 0, sw, sh)
+        lg.rectangle("popup.scrim", "fill", 0, 0, sw, sh)
         lg.setScissor()
     end
     lg.setColor(0.025, 0.012, 0.04, 0.75)
-    lg.rectangle("fill", PAD_X + 4, py + 5, panelW, panelH, 4, 4)
+    lg.rectangle("popup.shadow", "fill", PAD_X + 4, py + 5,
+        panelW, panelH, 4, 4)
     lg.setColor(POPUP_BG[1], POPUP_BG[2], POPUP_BG[3], POPUP_BG[4])
-    lg.rectangle("fill", PAD_X, py, panelW, panelH, 4, 4)
+    lg.rectangle("popup.panel", "fill", PAD_X, py, panelW, panelH, 4, 4)
     lg.setColor(POPUP_ACCENT[1], POPUP_ACCENT[2], POPUP_ACCENT[3], 0.95)
     lg.setLineWidth(1)
-    lg.rectangle("line", PAD_X, py, panelW, panelH, 4, 4)
-    if popup.title then
+    lg.rectangle("popup.border", "line", PAD_X, py, panelW, panelH, 4, 4)
+    if hasExplicitTitle then
         lg.setColor(0.17, 0.11, 0.23, 1)
-        lg.rectangle("fill", PAD_X + 1, py + 1, panelW - 2, lineH + 7, 4, 4)
+        lg.rectangle("popup.title.background", "fill", PAD_X + 1, py + 1,
+            panelW - 2, lineH + 7, 4, 4)
         lg.setColor(POPUP_ACCENT[1], POPUP_ACCENT[2], POPUP_ACCENT[3], 0.8)
         lg.setLineWidth(2)
-        lg.line(PAD_X + 1, py + lineH + 8,
+        lg.line("popup.title.rule", PAD_X + 1, py + lineH + 8,
             PAD_X + panelW - 1, py + lineH + 8)
         if popup.closable then
             local radius = 5
@@ -478,7 +737,7 @@ local function drawPopup(popup: PopupState, font: lg.Font,
             popup.closeY = py + 4 + lineH * 0.5
             popup.closeRadius = radius + 3
             lg.setColor(0.88, 0.24, 0.30, 1)
-            lg.circle("fill", popup.closeX, popup.closeY, radius)
+            lg.circle("popup.close", "fill", popup.closeX, popup.closeY, radius)
         else
             popup.closeRadius = 0
         end
@@ -493,38 +752,59 @@ local function drawPopup(popup: PopupState, font: lg.Font,
             local scale = math.min(maxW / iw, maxH / ih, 1)
             local ty = py + panelH + 8
             lg.setColor(POPUP_BG[1], POPUP_BG[2], POPUP_BG[3], 0.98)
-            lg.rectangle("fill", PAD_X, ty, iw * scale + 8, ih * scale + 8, 4, 4)
+            lg.rectangle("popup.image.background", "fill", PAD_X, ty,
+                iw * scale + 8, ih * scale + 8, 4, 4)
             lg.setColor(1, 1, 1, 1)
-            lg.draw(popup.image, PAD_X + 4, ty + 4, 0, scale, scale)
+            lg.draw("popup.image", popup.image, PAD_X + 4, ty + 4,
+                0, scale, scale)
             lg.setColor(POPUP_ACCENT[1], POPUP_ACCENT[2], POPUP_ACCENT[3], 0.9)
             lg.setLineWidth(1)
-            lg.rectangle("line", PAD_X + 4, ty + 4, iw * scale, ih * scale)
+            lg.rectangle("popup.image.border", "line", PAD_X + 4, ty + 4,
+                iw * scale, ih * scale)
         end
     end
-    if popup.title then
+    if hasExplicitTitle then
         lg.setColor(DEBUG_TEXT[1], DEBUG_TEXT[2], DEBUG_TEXT[3], 1)
     else
         lg.setColor(POPUP_ACCENT[1], POPUP_ACCENT[2], POPUP_ACCENT[3], 1)
     end
-    lg.print(header, PAD_X * 2, py + 8)
+    if header then
+        if document and document.title and not popup.title then
+            drawDocumentLine(font, document.title, PAD_X * 2, py + 8,
+                popup.columnWidth, "popup.title")
+        else
+            lg.print("popup.title", header, PAD_X * 2, py + 8)
+        end
+    end
 
-    local bodyY = py + 8 + lineH + POPUP_CONTENT_PAD_TOP
-    local bodyH = visibleRows * lineH
+    local bodyY = py + 8 + headerRows * lineH + POPUP_CONTENT_PAD_TOP
     lg.setScissor(PAD_X, bodyY, panelW, bodyH)
+    local rowY: {number} = {}
+    local nextY = bodyY
+    for i = firstRow, lastRow do
+        rowY[i] = nextY + rowTopPads[i]
+        nextY = nextY + rowHeights[i]
+    end
     for ci = 1, #columns do
         local col = columns[ci]
         local bx = PAD_X * 2 + (ci - 1) * (popup.columnWidth + popup.columnGap)
         local colLast = math.min(#col.lines, lastRow)
         for i = firstRow, colLast do
-            local yy = bodyY + lineH * (i - firstRow)
+            local yy = rowY[i]
             local line = col.lines[i]
-            if line == HRULE then
+            if col.documentLines then
+                drawDocumentLine(font, col.documentLines[i], bx, yy,
+                    col.documentLines[i].span and columnsW or popup.columnWidth,
+                    "popup.body." .. tostring(ci) .. "." .. tostring(i))
+            elseif line == HRULE then
                 lg.setColor(0.35, 0.40, 0.46, 0.8)
                 lg.setLineWidth(1)
-                lg.line(bx, yy + lineH * 0.5,
+                lg.line("popup.rule." .. tostring(ci) .. "." .. tostring(i),
+                    bx, yy + lineH * 0.5,
                     bx + popup.columnWidth, yy + lineH * 0.5)
             elseif popup.language == "lua" then
-                drawLuaLine(font, line, bx, yy)
+                drawLuaLine(font, line, bx, yy,
+                    "popup.lua." .. tostring(ci) .. "." .. tostring(i))
             else
                 local br, bg, bb = 0.8275, 0.7765, 0.6667
                 if line:sub(1, 1) ~= " " then
@@ -539,7 +819,9 @@ local function drawPopup(popup: PopupState, font: lg.Font,
                     else
                         lg.setColor(br, bg, bb, 1)
                     end
-                    lg.print(cols[j], bx + col.colX[j], yy)
+                    lg.print("popup.cell." .. tostring(ci) .. "."
+                        .. tostring(i) .. "." .. tostring(j),
+                        cols[j], bx + col.colX[j], yy)
                 end
             end
         end
@@ -550,16 +832,25 @@ local function drawPopup(popup: PopupState, font: lg.Font,
         local trackX = PAD_X + panelW - POPUP_SCROLLBAR_W - 7
         local trackY = bodyY + 2
         local trackH = math.max(1, bodyH - 4)
-        local thumbH = math.max(18, trackH * visibleRows / totalRows)
+        local thumbH = math.max(18,
+            trackH * math.min(1, bodyH / math.max(1, totalContentH)))
         local thumbTravel = math.max(0, trackH - thumbH)
         local thumbY = trackY
         if popup.scrollMax > 0 then
-            thumbY = trackY + thumbTravel * popup.scroll / popup.scrollMax
+            local scrollOffset: number = 0
+            for i = 1, firstRow - 1 do
+                scrollOffset = scrollOffset + rowHeights[i]
+            end
+            local maxOffset = math.max(1, totalContentH - bodyH)
+            thumbY = trackY + thumbTravel
+                * math.min(1, scrollOffset / maxOffset)
         end
         lg.setColor(0.20, 0.14, 0.27, 1)
-        lg.rectangle("fill", trackX, trackY, POPUP_SCROLLBAR_W, trackH, 3, 3)
+        lg.rectangle("popup.scroll.track", "fill", trackX, trackY,
+            POPUP_SCROLLBAR_W, trackH, 3, 3)
         lg.setColor(POPUP_ACCENT[1], POPUP_ACCENT[2], POPUP_ACCENT[3], 0.95)
-        lg.rectangle("fill", trackX, thumbY, POPUP_SCROLLBAR_W, thumbH, 3, 3)
+        lg.rectangle("popup.scroll.thumb", "fill", trackX, thumbY,
+            POPUP_SCROLLBAR_W, thumbH, 3, 3)
     end
 end
 
@@ -619,6 +910,18 @@ local function drawCompletionGrid(popup: PopupState, completions: {string},
     end
     local labels = popup.barLabels
     local widths = popup.barWidths
+    -- Typing opens the grid before Tab has committed a candidate. Present the
+    -- first real candidate as highlighted while keeping completionIndex at
+    -- zero, so the first Tab still accepts the entry the operator already sees.
+    local highlightedIndex = completionIndex
+    if highlightedIndex == 0 then
+        for i = 1, #completions do
+            if completions[i]:sub(1, 1) ~= SECTION_MARK then
+                highlightedIndex = i
+                break
+            end
+        end
+    end
     local lineH = font:getHeight() + 4
     local helpH = lineH + 2
     local usable = math.max(lineH,
@@ -641,7 +944,7 @@ local function drawCompletionGrid(popup: PopupState, completions: {string},
             if widths[i] > columnW then columnW = widths[i] end
         end
         columnW = columnW + itemPad * 2
-        if completionIndex >= first and completionIndex <= last then
+        if highlightedIndex >= first and highlightedIndex <= last then
             selectedX = totalW
             selectedW = columnW
         end
@@ -652,14 +955,14 @@ local function drawCompletionGrid(popup: PopupState, completions: {string},
     end
     totalW = math.max(sw, totalW - gutter + COMPLETION_PAD)
     local maxScroll = math.max(0, totalW - sw)
-    if popup.barScrollForIndex ~= completionIndex then
+    if popup.barScrollForIndex ~= highlightedIndex then
         local selectedRight = selectedX + selectedW
         if selectedX < popup.barScroll + COMPLETION_PAD then
             popup.barScroll = selectedX - COMPLETION_PAD
         elseif selectedRight > popup.barScroll + sw - COMPLETION_PAD then
             popup.barScroll = selectedRight - sw + COMPLETION_PAD
         end
-        popup.barScrollForIndex = completionIndex
+        popup.barScrollForIndex = highlightedIndex
     end
     popup.barScroll = math.max(0, math.min(popup.barScroll, maxScroll))
 
@@ -671,16 +974,18 @@ local function drawCompletionGrid(popup: PopupState, completions: {string},
 
     lg.setColor(COMPLETION_BG[1], COMPLETION_BG[2],
         COMPLETION_BG[3], COMPLETION_BG[4])
-    lg.rectangle("fill", 0, panelTop, sw, panelBottom - panelTop)
+    lg.rectangle("completion.background", "fill", 0, panelTop,
+        sw, panelBottom - panelTop)
     lg.setColor(TECS_PURPLE[1], TECS_PURPLE[2], TECS_PURPLE[3], 1)
-    lg.rectangle("fill", 0, panelTop, sw, helpH)
+    lg.rectangle("completion.header.background", "fill", 0, panelTop, sw, helpH)
     lg.setColor(0.86, 0.80, 0.95, 1)
-    lg.print(hint, COMPLETION_PAD, panelTop + 2)
+    lg.print("completion.header.hint", hint, COMPLETION_PAD, panelTop + 2)
     local controls = "Tab next  Shift+Tab previous"
     local controlsW = font:getWidth(controls)
     if controlsW < sw * 0.45 then
         lg.setColor(0.66, 0.60, 0.74, 1)
-        lg.print(controls, sw - controlsW - COMPLETION_PAD, panelTop + 2)
+        lg.print("completion.header.controls", controls,
+            sw - controlsW - COMPLETION_PAD, panelTop + 2)
     end
 
     local gridTop = panelTop + helpH
@@ -688,10 +993,11 @@ local function drawCompletionGrid(popup: PopupState, completions: {string},
     -- A shape exactly on the clip's top edge is discarded by the GPU shape
     -- clip path. Draw selection outside that clip so first-row candidates get
     -- the same purple cell as every other row.
-    if completionIndex > 0 then
-        local selectedRow = (completionIndex - 1) % rows
+    if highlightedIndex > 0 then
+        local selectedRow = (highlightedIndex - 1) % rows
         lg.setColor(0.4784, 0.3412, 0.7608, 1)
-        lg.rectangle("fill", selectedX - popup.barScroll,
+        lg.alphaRectangle("completion.selection", "fill",
+            selectedX - popup.barScroll,
             gridTop + selectedRow * lineH, selectedW, lineH)
     end
     lg.setScissor(0, gridTop, sw, panelBottom - gridTop)
@@ -709,12 +1015,13 @@ local function drawCompletionGrid(popup: PopupState, completions: {string},
             if isSection then
                 lg.setColor(POPUP_ACCENT[1], POPUP_ACCENT[2],
                     POPUP_ACCENT[3], 1)
-            elseif i == completionIndex then
+            elseif i == highlightedIndex then
                 lg.setColor(0.96, 0.93, 1.0, 1)
             else
                 lg.setColor(0.72, 0.66, 0.84, 1)
             end
-            lg.print(labels[i], x + itemPad, y + 2)
+            lg.print("completion.item." .. tostring(i),
+                labels[i], x + itemPad, y + 2)
             if not isSection then
                 addCompletionHit(popup, i, x, y, columnW, lineH,
                     sw, panelTop, panelBottom)
@@ -745,23 +1052,11 @@ local function drawEntityLabel(w: tecs.World, ctx: debugcontext.Context,
     if label == "" then return end
     local sx, sy = cam:toScreen(t.x, t.y)
     local tw = font:getWidth(label)
+    local scale = lg.getScreenScale()
     lg.setColor(0.8275, 0.7765, 0.6667, 1)
-    lg.fitText(label, sx - tw / 2 - 5, sy - 40, 5, 2, ENTITY_LABEL_BG, 3)
-end
-
--- Name-bearing components for the context-menu header, resolved by name so
--- the overlay never forces those modules to load. Misses retry (games may
--- register them after the first menu opens); successes are memoized.
-local HEADER_COMPONENTS <const>: {string} = {"Name", "Key"}
-local headerComps: {string: tecs.Component} = {}
-local function headerComponent(name: string): tecs.Component
-    local comp = headerComps[name]
-    if comp == nil then
-        local ok, resolved = pcall(tecs.componentByName, name)
-        comp = ok and resolved or nil
-        if comp then headerComps[name] = comp end
-    end
-    return comp
+    lg.fitText("entityLabel." .. tostring(eid), label,
+        sx / scale - tw / 2 - 5, sy / scale - 40, 5, 2,
+        ENTITY_LABEL_BG, 3)
 end
 
 -- Mouse gestures while no context menu owns the mouse: a left press in the
@@ -941,7 +1236,7 @@ local record overlay
     end
 
     --- Ensure the headless debugger core (context, registry, freeze,
-    --- annotations, recorder) and install the overlay systems on top of it.
+    --- recorder, diagnostic visuals) and install the overlay systems on top of it.
     install: function(w: tecs.World, opts: Options): debugcontext.Context
 end
 
@@ -971,6 +1266,8 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
     local ctx = registry.env.ctx
     local recorder = registry.env.recorder
     local fz = registry.env.suspension
+    local tools = assert(w.resources[toolworldkey.KEY],
+        "debug overlay requires its tool world")
 
     local pickQuery = w:query({name = "debug.Pick", include = {Transform}})
 
@@ -1122,6 +1419,13 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
         popup.barBottom = 0
     end
 
+    local function refreshCompletions()
+        resetCompletions()
+        if ctx.command == "" then return end
+        completionBase, completions = registry:complete(ctx.command)
+        cycling = #completions > 0
+    end
+
     -- Wrapped command-line rows at the current window width, so long commands
     -- (set/spawn with Lua tables) wrap instead of running off screen. Used by
     -- both the draw pass and the input pass (click-through guard); cached on
@@ -1141,14 +1445,10 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
     local function showPreviewHelp(helpCmd: commands.Command)
         if popup.previewFor ~= helpCmd then
             popup.previewFor = helpCmd
-            popup.previewLines = commands.usagePopup(helpCmd)
-            popup.previewBody = {}
-            for i = 2, #popup.previewLines do
-                popup.previewBody[#popup.previewBody + 1] = popup.previewLines[i]
-            end
+            popup.previewDocument = commands.usageDocument(helpCmd)
         end
-        showPopup(popup, popup.previewBody, true,
-            popup.previewLines[1], nil, nil, true)
+        showPopup(popup, {}, true, nil, nil, nil, true, nil, nil,
+            popup.previewDocument)
     end
 
     local function executeCommand(text: string)
@@ -1157,14 +1457,23 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             return
         end
         dismissPopup(popup)
-        if result.popup then
+        local document = result.popupDocument
+        if result.popupMarkup then
+            local parsed, err = markup.parse(result.popupMarkup)
+            if not parsed then
+                ctx.message = "popup markup: " .. err
+                return
+            end
+            document = parsed
+        end
+        if result.popup or document then
             local firstWord = text:match("^%s*(%S+)")
             local modal = result.popupModal
             if modal == nil then modal = firstWord == "help" end
             showPopup(popup, result.popup, modal,
                 result.popupTitle, result.popupLanguage, result.popupBlocks,
                 result.popupClosable, result.popupImagePath,
-                result.popupMaxColumns)
+                result.popupMaxColumns, document, result.popupScrollToEnd)
             ctx.message = ""
         end
         if result.message ~= nil then
@@ -1191,47 +1500,13 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
         end
     end
 
-    -- "#42 boss Player": id, then the mark, then a Name/Key component's
-    -- string when the game defines one.
-    local function entityHeader(eid: integer): string
-        local label = "#" .. tostring(eid)
-        local markName = ctx.marks[eid]
-        if markName then label = label .. " " .. markName end
-        for ci = 1, #HEADER_COMPONENTS do
-            local comp = headerComponent(HEADER_COMPONENTS[ci])
-            if comp then
-                local v = w:get(eid, comp) as any
-                local text: string = nil
-                if type(v) == "string" then
-                    text = v as string
-                elseif type(v) == "table" or type(v) == "cdata" then
-                    local okS, fields = pcall(function(): {string: any}
-                        local serialize = (comp as {string: any}).serialize
-                            as function(any): {string: any}
-                        return serialize and serialize(v) or nil
-                    end)
-                    if okS and fields then
-                        local candidate = fields.name or fields.value or fields.key or fields.text
-                        if type(candidate) == "string" then
-                            text = candidate as string
-                        end
-                    end
-                end
-                if text then label = label .. " " .. text end
-            end
-        end
-        return label
-    end
-
     -- Build and place the menu for an entity (or the world when eid is nil).
     local function openMenu(eid: integer)
         if eid then
             local id = tostring(eid)
-            menu.header = entityHeader(eid)
+            menu.header = "#" .. id
             menu.rows = {
                 {label = "Info", run = "info " .. id},
-                {label = "Select", run = "select " .. id},
-                {label = "Select Only", run = "select " .. id .. " replace"},
                 {label = "Mark...", run = "select " .. id .. " replace", fill = "mark "},
                 {label = "Note...", run = "select " .. id .. " replace", fill = "note "},
                 {label = "Copy ID", clip = id},
@@ -1245,8 +1520,6 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             menu.rows = {
                 {label = "Copy Position", clip = format("%.1f, %.1f", wx, wy)},
                 {label = "Spawn...", fill = "spawn "},
-                {label = "Draw Marker",
-                    run = format("draw circle %.1f %.1f 8 seconds=5 tag=marker", wx, wy)},
                 {label = "Physics Query",
                     run = format("physics query %.1f %.1f 32 32", wx - 16, wy - 16)},
             }
@@ -1267,13 +1540,15 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
         end
         menu.w = menu.w + 28
         local totalH = menu.rowH * (#menu.rows + 1) + 8
-        menu.x = math.min(input.mouseX, lg.getWidth() - menu.w)
-        menu.y = math.min(input.mouseY, lg.getHeight() - totalH)
+        local mouseX = input.mouseX / lg.getScreenScale()
+        local mouseY = input.mouseY / lg.getScreenScale()
+        menu.x = math.min(mouseX, lg.getWidth() - menu.w)
+        menu.y = math.min(mouseY, lg.getHeight() - totalH)
         if menu.x < 0 then menu.x = 0 end
         if menu.y < 0 then menu.y = 0 end
         menu.index = 1
-        menu.mouseX = input.mouseX
-        menu.mouseY = input.mouseY
+        menu.mouseX = mouseX
+        menu.mouseY = mouseY
         menu.open = true
         ctx.menuOpen = true
         ctx.menuTarget = eid or 0
@@ -1296,6 +1571,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
         if row.fill then
             ctx.command = row.fill
             ctx.message = ""
+            refreshCompletions()
         end
     end
 
@@ -1494,7 +1770,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 ctx.command = ctx.command .. textInput
                 ctx.message = ""
                 dismissPopup(popup)
-                resetCompletions()
+                refreshCompletions()
             end
             local backspaceStep = reader().isKeyPressed("backspace")
             if reader().isKeyDown("backspace") then
@@ -1514,7 +1790,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 ctx.command = ctx.command:sub(1, -2)
                 ctx.message = ""
                 dismissPopup(popup)
-                resetCompletions()
+                refreshCompletions()
             end
             -- Delete despawns the current selection outright.
             if not menuTookInput and reader().isKeyPressed("delete") then
@@ -1541,7 +1817,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             if tabStep and not menuTookInput then
                 ctx.message = ""
                 local followHelp = popup.shown
-                    and popup.lines == popup.previewBody
+                    and popup.document == popup.previewDocument
                 if not followHelp then dismissPopup(popup) end
                 local backward = reader().isKeyDown("lshift") or reader().isKeyDown("rshift")
                 if not cycling then
@@ -1634,7 +1910,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                     ctx.command = history[#history - historyPos + 1]
                     ctx.message = ""
                     dismissPopup(popup)
-                    resetCompletions()
+                    refreshCompletions()
                 end
                 if not menuTookInput and reader().isKeyPressed("down") then
                     if historyPos > 0 then historyPos = historyPos - 1 end
@@ -1642,7 +1918,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                         or history[#history - historyPos + 1]
                     ctx.message = ""
                     dismissPopup(popup)
-                    resetCompletions()
+                    refreshCompletions()
                 end
             end
             -- Enter runs the line once; an empty line is a no-op so mashing
@@ -1668,7 +1944,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             if not menuTookInput and reader().isKeyPressed("f1") then
                 local helpCmd = popup.previewCmd
                 if helpCmd then
-                    if popup.shown and popup.lines == popup.previewBody then
+                    if popup.shown and popup.document == popup.previewDocument then
                         dismissPopup(popup)
                     else
                         showPreviewHelp(helpCmd)
@@ -1701,13 +1977,15 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             if completionVisible and popup.barTop > 0 then
                 chromeTop = popup.barTop
             end
-            local inView = ctx.mouseScreenY < chromeTop
+            local uiMouseX = input.mouseX / lg.getScreenScale()
+            local uiMouseY = input.mouseY / lg.getScreenScale()
+            local inView = uiMouseY < chromeTop
                 and not (popup.shown and popup.modal)
 
             -- A closable popup's title control owns its press. Swallow the
             -- gesture through release so closing cannot begin a world drag.
             if not menu.open and reader().isMousePressed(1)
-                    and popup:pressClose(input.mouseX, input.mouseY) then
+                    and popup:pressClose(uiMouseX, uiMouseY) then
                 menu.swallow = true
                 inView = false
             end
@@ -1717,10 +1995,10 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             -- scrolling or camera zoom beneath the debugger.
             local _, wheelY = reader().getMouseWheelMovement()
             local overPopup = popup.shown and (popup.modal
-                or (input.mouseX >= popup.panelX
-                    and input.mouseX <= popup.panelX + popup.panelW
-                    and input.mouseY >= popup.panelY
-                    and input.mouseY <= popup.panelY + popup.panelH))
+                or (uiMouseX >= popup.panelX
+                    and uiMouseX <= popup.panelX + popup.panelW
+                    and uiMouseY >= popup.panelY
+                    and uiMouseY <= popup.panelY + popup.panelH))
             if not menu.open and overPopup and wheelY ~= 0 then
                 popup.scroll = math.max(0, math.min(popup.scrollMax,
                     popup.scroll - wheelY * POPUP_SCROLL_ROWS))
@@ -1728,8 +2006,8 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             -- Wheel over the completion grid scrolls its columns horizontally
             -- and never reaches camera zoom.
             elseif not menu.open and completionVisible
-                and input.mouseY >= popup.barTop
-                and input.mouseY <= popup.barBottom and wheelY ~= 0 then
+                and uiMouseY >= popup.barTop
+                and uiMouseY <= popup.barBottom and wheelY ~= 0 then
                 popup.barScroll = popup.barScroll - wheelY * 120
                 popup.barScrollForIndex = completionIndex
                 inView = false
@@ -1737,19 +2015,20 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
 
             if not menu.open and completionVisible
                 and reader().isMousePressed(1)
-                and input.mouseY >= popup.barTop
-                and input.mouseY <= popup.barBottom then
+                and uiMouseY >= popup.barTop
+                and uiMouseY <= popup.barBottom then
                 for hi = 1, popup.barHitCount do
                     local hx = popup.barHitX[hi]
                     local hy = popup.barHitY[hi]
-                    if input.mouseX >= hx and input.mouseX <= hx + popup.barHitW[hi]
-                        and input.mouseY >= hy
-                        and input.mouseY <= hy + popup.barHitH[hi] then
+                    if uiMouseX >= hx and uiMouseX <= hx + popup.barHitW[hi]
+                        and uiMouseY >= hy
+                        and uiMouseY <= hy + popup.barHitH[hi] then
                         completionIndex = popup.barHitValue[hi]
                         if completions[completionIndex] then
                             ctx.command = completionBase .. completions[completionIndex]
                             ctx.message = ""
                             dismissPopup(popup)
+                            refreshCompletions()
                         end
                         break
                     end
@@ -1760,10 +2039,10 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             -- activates or closes, right-click closes.
             local menuAteMouse = menu.open
             if menuAteMouse then
-                local hover = menuRowAt(input.mouseX, input.mouseY)
-                local mouseMoved = input.mouseX ~= menu.mouseX or input.mouseY ~= menu.mouseY
-                menu.mouseX = input.mouseX
-                menu.mouseY = input.mouseY
+                local hover = menuRowAt(uiMouseX, uiMouseY)
+                local mouseMoved = uiMouseX ~= menu.mouseX or uiMouseY ~= menu.mouseY
+                menu.mouseX = uiMouseX
+                menu.mouseY = uiMouseY
                 if mouseMoved and hover then menu.index = hover end
                 if reader().isMousePressed(1) then
                     menu.swallow = true
@@ -1793,8 +2072,10 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
         phase = tecs.phases.RenderLast,
         before = {"love.Present"},
         run = function()
-            if ctx.recording.status ~= "recording" then return end
-            if recorder.capturedThisFrame then return end
+            if ctx.recording.status ~= "recording" or recorder.capturedThisFrame then
+                lg.releaseOwner("recording")
+                return
+            end
             local r = ctx.recording
             local text: string
             if r.duration > 0 then
@@ -1807,6 +2088,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             lg.push("all")
             lg.origin()
             lg.setFont(overlayFont)
+            lg.beginOwner("recording")
             local pad = 6
             local label = "   " .. text
             local boxW = overlayFont:getWidth(label) + pad * 2
@@ -1814,9 +2096,10 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             local bx = lg.getWidth() - boxW - pad
             local by = pad
             lg.setColor(1, 1, 1, 1)
-            lg.fitText(label, bx, by, pad, pad / 2, RECORDING_BG, 6)
+            lg.fitText("panel", label, bx, by, pad, pad / 2, RECORDING_BG, 6)
             lg.setColor(1, 0.2, 0.15, 1)
-            lg.circle("fill", bx + pad + 4, by + boxH / 2, 5)
+            lg.circle("dot", "fill", bx + pad + 4, by + boxH / 2, 5)
+            lg.endOwner()
             lg.pop()
         end,
     })
@@ -1830,6 +2113,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
         before = {"love.Present"},
         run = function()
             if not ctx.open then
+                lg.releaseOwner("overlay")
                 return
             end
             -- Skip drawing the chrome for one frame while a screenshot captures.
@@ -1841,6 +2125,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             lg.push("all")
             lg.origin()
             lg.setFont(overlayFont)
+            lg.beginOwner("overlay")
 
             local fh = overlayFont:getHeight()
             local rowH = fh + PAD_Y * 2
@@ -1850,14 +2135,15 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             if ctx.recording.status == "countdown" then
                 local label = "RECORDING IN " .. tostring(math.ceil(ctx.recording.countdown))
                 lg.setColor(0, 0, 0, 0.72)
-                lg.rectangle("fill", 0, 0, sw, rowH * 2)
+                lg.rectangle("recordingModal.background", "fill", 0, 0, sw, rowH * 2)
                 lg.setColor(1, 0.18, 0.12, 1)
-                lg.printf(label, 0, PAD_Y, sw, "center")
+                lg.printf("recordingModal.text", label, 0, PAD_Y, sw, "center")
             elseif ctx.recording.status == "stopping" then
                 lg.setColor(0, 0, 0, 0.72)
-                lg.rectangle("fill", 0, 0, sw, rowH * 2)
+                lg.rectangle("recordingModal.background", "fill", 0, 0, sw, rowH * 2)
                 lg.setColor(1, 0.85, 0.2, 1)
-                lg.printf("STOPPING RECORDING", 0, PAD_Y, sw, "center")
+                lg.printf("recordingModal.text", "STOPPING RECORDING",
+                    0, PAD_Y, sw, "center")
             end
 
             -- Drag-selected area (world -> screen).
@@ -1868,14 +2154,16 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 local rx = math.min(x1, x2)
                 local ry = math.min(y1, y2)
                 lg.setColor(0.3, 0.7, 1.0, 0.15)
-                lg.rectangle("fill", rx, ry, math.abs(x2 - x1), math.abs(y2 - y1))
+                lg.batchRectangle("fill", rx, ry,
+                    math.abs(x2 - x1), math.abs(y2 - y1))
                 lg.setColor(0.4, 0.8, 1.0, 0.9)
                 lg.setLineWidth(1)
-                lg.rectangle("line", rx, ry, math.abs(x2 - x1), math.abs(y2 - y1))
+                lg.batchRectangle("line", rx, ry,
+                    math.abs(x2 - x1), math.abs(y2 - y1))
             end
 
             -- Selection membership is independent of its visualization. Only
-            -- visible markers are submitted, and MarkerBatch draws them in a
+            -- visible markers are submitted, and PrimitiveBatch draws them in a
             -- single mesh without consuming one tool-world entity per mark.
             if pipeline and #ctx.selected > 0 then
                 local cam = pipeline:getCamera()
@@ -1905,11 +2193,11 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                     local r = 20
                     lg.setColor(0.35, 0.85, 1.0, 1)
                     lg.setLineWidth(2)
-                    lg.rectangle("line", sx - r, sy - r, r * 2, r * 2)
-                    lg.line(sx, sy - r - 8, sx, sy - r + 6)
-                    lg.line(sx, sy + r - 6, sx, sy + r + 8)
-                    lg.line(sx - r - 8, sy, sx - r + 6, sy)
-                    lg.line(sx + r - 6, sy, sx + r + 8, sy)
+                    lg.batchRectangle("line", sx - r, sy - r, r * 2, r * 2)
+                    lg.batchLine(sx, sy - r - 8, sx, sy - r + 6)
+                    lg.batchLine(sx, sy + r - 6, sx, sy + r + 8)
+                    lg.batchLine(sx - r - 8, sy, sx - r + 6, sy)
+                    lg.batchLine(sx + r - 6, sy, sx + r + 8, sy)
                 end
             end
 
@@ -1957,54 +2245,70 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 -- behind the context row until another popup changed shape
                 -- registration order.
                 lg.setColor(DEBUG_BG[1], DEBUG_BG[2], DEBUG_BG[3], 1)
-                lg.rectangle("fill", 0, contextY, badgeW, contextH)
+                lg.rectangle("status.badgeBackground", "fill",
+                    0, contextY, badgeW, contextH)
                 lg.setColor(CONTEXT_BG[1], CONTEXT_BG[2], CONTEXT_BG[3], 1)
-                lg.rectangle("fill", badgeW, contextY, sw - badgeW, contextH)
+                lg.rectangle("status.background", "fill",
+                    badgeW, contextY, sw - badgeW, contextH)
                 local coords = coordinateLabel(ctx)
                 local coordsW = coordinateFont:getWidth(coords) + INFO_PAD_X * 2
                 lg.setFont(coordinateFont)
                 lg.setScissor(0, contextY, math.max(0, sw - coordsW), contextH)
-                local statusTail = format("  %s  selected %d",
-                    ctx.frozen and "paused" or "live", #ctx.selected)
+                local statusTail = format("  %s  selected %d  %d fps",
+                    ctx.frozen and "paused" or "live", #ctx.selected,
+                    math.floor(love.timer.getFPS()) as integer)
                 local status = badge .. statusTail
                 local showTail = coordinateFont:getWidth(status)
                     + INFO_PAD_X * 2 <= sw - coordsW
                 local statusTextY = contextY
                 lg.setColor(DEBUG_TEXT[1], DEBUG_TEXT[2], DEBUG_TEXT[3], 1)
-                lg.print(badge, INFO_PAD_X - 2, statusTextY + 2)
+                lg.print("status.badge", badge, INFO_PAD_X - 2, statusTextY + 2)
                 if showTail then
                     lg.setColor(0.72, 0.66, 0.84, 1)
-                    lg.print(statusTail, badgeW, statusTextY)
+                    lg.print("status.tail", statusTail, badgeW, statusTextY)
                 end
+                local statusW = showTail and
+                    (badgeW + coordinateFont:getWidth(statusTail)) or badgeW
+                local messageX = INFO_PAD_X + statusW + INFO_PAD_X * 3
                 if ctx.message ~= "" then
-                    local statusW = showTail and
-                        (badgeW + coordinateFont:getWidth(statusTail)) or badgeW
-                    local messageX = INFO_PAD_X + statusW + INFO_PAD_X * 3
                     if messageX < sw - coordsW then
                         lg.setColor(0.66, 0.60, 0.74, 1)
-                        lg.print(ctx.message, messageX, statusTextY)
+                        lg.print("status.message", ctx.message, messageX, statusTextY)
                     end
                 end
                 lg.setScissor()
                 lg.setColor(0.8275, 0.7765, 0.6667, 1)
-                lg.print(coords, sw - coordinateFont:getWidth(coords)
-                    - INFO_PAD_X, statusTextY)
+                lg.print("status.coords", coords,
+                    sw - coordinateFont:getWidth(coords) - INFO_PAD_X, statusTextY)
             end
 
             -- Long commands wrap upward within the bottom command row.
             lg.setFont(overlayFont)
             lg.setColor(COMMAND_BAR[1], COMMAND_BAR[2],
                 COMMAND_BAR[3], COMMAND_BAR[4])
-            lg.rectangle("fill", 0, commandY, sw, cmdBarH)
+            lg.rectangle("command.background", "fill", 0, commandY, sw, cmdBarH)
             lg.setColor(0.8275, 0.7765, 0.6667, 1)
             for i = 1, #cmdLines do
-                lg.print(cmdLines[i], PAD_X, commandY + PAD_Y + (i - 1) * fh)
+                lg.print("command.line." .. tostring(i), cmdLines[i],
+                    PAD_X, commandY + PAD_Y + (i - 1) * fh)
             end
             -- Tall block cursor at the end of the last wrapped row.
             local cursorX = PAD_X + overlayFont:getWidth(cmdLines[#cmdLines])
             local cursorY = commandY + PAD_Y + (#cmdLines - 1) * fh
             local blockW = overlayFont:getWidth("0")
-            lg.rectangle("fill", cursorX + 1, cursorY, blockW, fh)
+            local cursorColor = tools.world:get(tools.cursorAlphaEntity, gfx.Color)
+            lg.setColor(0.8275, 0.7765, 0.6667, cursorColor.a)
+            lg.alphaRectangle("command.cursor", "fill",
+                cursorX + 1, cursorY, blockW, fh)
+            if ctx.command == "" then
+                lg.setColor(COMMAND_HINT[1], COMMAND_HINT[2], COMMAND_HINT[3], 1)
+                local enterHint = "Enter command..."
+                local hintX = cursorX + blockW + INFO_PAD_X * 2
+                lg.print("command.commandHint", enterHint, hintX, cursorY)
+                lg.print("command.autocompleteHint", "[TAB] to autocomplete",
+                    hintX + overlayFont:getWidth(enterHint) + INFO_PAD_X * 2,
+                    cursorY)
+            end
 
             -- Context menu: dark panel, header row, hover/keyboard highlight.
             if menu.open then
@@ -2012,31 +2316,36 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 local totalH = menu.rowH * (#menu.rows + 1) + 8
                 lg.setFont(overlayFont)
                 lg.setColor(POPUP_BG[1], POPUP_BG[2], POPUP_BG[3], 0.98)
-                lg.rectangle("fill", menu.x, menu.y, menu.w, totalH, 4, 4)
+                lg.rectangle("menu.background", "fill",
+                    menu.x, menu.y, menu.w, totalH, 4, 4)
                 lg.setColor(POPUP_ACCENT[1], POPUP_ACCENT[2],
                     POPUP_ACCENT[3], 0.75)
                 lg.setLineWidth(1)
-                lg.rectangle("line", menu.x, menu.y, menu.w, totalH, 4, 4)
+                lg.rectangle("menu.border", "line",
+                    menu.x, menu.y, menu.w, totalH, 4, 4)
                 lg.setColor(POPUP_ACCENT[1], POPUP_ACCENT[2],
                     POPUP_ACCENT[3], 1)
-                lg.print(menu.header, menu.x + 12, menu.y + 6)
+                lg.print("menu.header", menu.header, menu.x + 12, menu.y + 6)
                 for i = 1, #menu.rows do
                     local ry = menu.y + menu.rowH * i + 4
                     if i == menu.index then
                         lg.setColor(0.25, 0.32, 0.40, 1)
-                        lg.rectangle("fill", menu.x + 4, ry, menu.w - 8, menu.rowH - 2, 3, 3)
+                        lg.rectangle("menu.selection", "fill", menu.x + 4, ry,
+                            menu.w - 8, menu.rowH - 2, 3, 3)
                     end
                     lg.setColor(0.8275, 0.7765, 0.6667, 1)
-                    lg.print(menu.rows[i].label, menu.x + 12, ry + (menu.rowH - mfh) / 2)
+                    lg.print("menu.row." .. tostring(i), menu.rows[i].label,
+                        menu.x + 12, ry + (menu.rowH - mfh) / 2)
                 end
             end
 
             -- Command output/help draws last. F1/help popups add a scrim, so
             -- their contracts remain legible above menus, chrome, and game UI.
-            if popup.shown and (#popup.lines > 0 or popup.title) then
+            if popup.shown and (#popup.lines > 0 or popup.title or popup.document) then
                 drawPopup(popup, overlayFont, sw, contextY, PAD_X)
             end
 
+            lg.endOwner()
             lg.pop()
         end
     })

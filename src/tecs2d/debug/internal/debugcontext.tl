@@ -186,7 +186,7 @@ local record debugcontext
     pushEvent: function(ctx: Context, kind: string, data?: {string: any})
 
     --- Invert an entity->value map to value->compact id-range string, e.g.
-    --- {5="a", 6="a", 9="b"} -> {a="5-6", b="9"}. Keeps annotations cheap to
+    --- {5="a", 6="a", 9="b"} -> {a="5-6", b="9"}. Keeps marks and notes cheap to
     --- ship to the agent for lists and contiguous ranges of entities.
     encodeGroups: function({integer: string}): {string: string}
 

@@ -8,7 +8,6 @@ _G.love = require("spec.love2d.love2d_mock")
 local tecs <const> = require("tecs")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
 local suspension <const> = require("tecs2d.internal.suspension")
-local annotations <const> = require("tecs2d.debug.internal.annotations")
 local commands <const> = require("tecs2d.debug.commands")
 
 local record cmdharness
@@ -37,7 +36,6 @@ function cmdharness.makeRegistry(): commands.Registry, tecs.World, debugcontext.
         ctx = ctx,
         recorder = nil,
         suspension = suspension.ensure(w),
-        annotations = annotations.newStore(),
         keys = {leader = "ctrl", debugToggle = "/", statsToggle = "."},
     })
     w.resources[commands.KEY] = reg

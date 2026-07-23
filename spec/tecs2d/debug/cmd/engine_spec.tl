@@ -72,6 +72,9 @@ describe("tecs2d.debug.internal.cmd.engine", function()
             local r = reg:execute("components info DbgCmdPos")
             luassert.is_true(r.ok, tostring(r.message))
             luassert.equals("table", r.data.kind)
+            luassert.equals("component DbgCmdPos", r.popupDocument.title.text)
+            luassert.equals("section", r.popupDocument.blocks[1].lines[4].style)
+            luassert.equals("Fields", r.popupDocument.blocks[1].lines[4].text)
             local byId = reg:execute("components info " .. tostring(r.data.id))
             luassert.is_true(byId.ok, tostring(byId.message))
             luassert.equals(r.data.name, byId.data.name)
@@ -79,22 +82,18 @@ describe("tecs2d.debug.internal.cmd.engine", function()
             luassert.is_false((reg:execute("components info Nope")).ok)
         end)
 
-        it("states shows, pushes, and pops the state stack", function()
+        it("states shows the state stack without mutating it", function()
             local reg, w = makeRegistry()
             w:createState("DbgSpecState")
-
-            luassert.is_true((reg:execute("states info")).ok)
-            local pushed = reg:execute("states push DbgSpecState")
-            luassert.is_true(pushed.ok, tostring(pushed.message))
-            luassert.equals("DbgSpecState", w:peekState())
+            w:pushState("DbgSpecState")
 
             local shown = reg:execute("states info")
+            luassert.is_true(shown.ok, tostring(shown.message))
             luassert.equals("DbgSpecState", shown.data.top)
-
-            local popped = reg:execute("states pop")
-            luassert.is_true(popped.ok, tostring(popped.message))
-            luassert.equals("DbgSpecState", popped.data.popped)
-            luassert.is_false((reg:execute("states pop")).ok, "empty stack should refuse")
+            luassert.equals("unknown_subcommand",
+                (reg:execute("states push DbgSpecState")).code)
+            luassert.equals("unknown_subcommand", (reg:execute("states pop")).code)
+            luassert.equals("DbgSpecState", w:peekState())
         end)
 
         it("subsystem commands fail cleanly when their plugin is absent", function()
@@ -118,54 +117,6 @@ describe("tecs2d.debug.internal.cmd.engine", function()
                 luassert.is_false(r.ok, cmdLine)
                 luassert.equals(code, r.code, cmdLine)
             end
-        end)
-
-        it("fetch returns serialized matches without touching the selection", function()
-            local reg, w, ctx = makeRegistry()
-            w:spawn(SpecPos(1, 2), SpecTag())
-            local plain = w:spawn(SpecPos(3, 4))
-            w:commit()
-
-            local r = reg:execute("fetch DbgCmdPos -DbgCmdTag")
-            luassert.is_true(r.ok, tostring(r.message))
-            luassert.equals(1, r.data.count)
-            local row = (r.data.entities as {any})[1] as {string: any}
-            luassert.equals(plain, row.id)
-            luassert.equals(3, ((row.components as {string: any}).DbgCmdPos as {string: number}).x)
-            luassert.matches("DbgCmdPos", row.archetypeComponents as string)
-            luassert.is_false(r.data.truncated as boolean)
-            luassert.equals(0, #ctx.selected, "fetch must not select")
-
-            local limited = reg:execute("fetch DbgCmdPos limit=1")
-            luassert.equals(1, limited.data.count)
-            luassert.is_true(limited.data.truncated as boolean)
-
-            luassert.equals("unknown_component", (reg:execute("fetch Nope")).code)
-            luassert.equals("invalid_arguments", (reg:execute("fetch -DbgCmdTag")).code,
-                "exclude-only expressions must be rejected")
-        end)
-
-        it("fetch bounds need all four values and filter via Transform", function()
-            local reg, w = makeRegistry()
-            local inside = w:spawn(tecs.builtins.Transform(5, 5))
-            w:spawn(tecs.builtins.Transform(50, 50))
-            w:commit()
-
-            luassert.equals("invalid_arguments",
-                (reg:execute("fetch Transform x=0 y=0 w=10")).code)
-
-            local r = reg:execute("fetch Transform x=0 y=0 w=10 h=10")
-            luassert.is_true(r.ok, tostring(r.message))
-            luassert.equals(1, r.data.count)
-            local row = (r.data.entities as {any})[1] as {string: any}
-            luassert.equals(inside, row.id)
-            luassert.is_not_nil((row.components as {string: any}).Transform,
-                "the spatial component must be included")
-            local bounds = r.data.bounds as {string: number}
-            luassert.equals(0, bounds.x)
-            luassert.equals(10, bounds.width)
-            luassert.equals(10, bounds.height)
-            luassert.is_false(r.data.truncated as boolean)
         end)
 
         it("resources lists key and type names", function()
@@ -219,17 +170,11 @@ describe("tecs2d.debug.internal.cmd.engine", function()
             luassert.is_false(missing.ok)
         end)
 
-        it("bundles lists requirements and spawns with overrides", function()
+        it("spawn accepts bundles without a separate bundle command", function()
             local reg, w = makeRegistry()
             w:newBundle("specbundle", {required = {SpecPos}, with = {[SpecTag] = true}})
 
-            local listed = reg:execute("bundles list")
-            luassert.is_true(listed.ok, tostring(listed.message))
-            local b = (listed.data.bundles as {string: any}).specbundle as {string: any}
-            luassert.same({"DbgCmdPos"}, b.required)
-            luassert.same({"DbgCmdTag"}, b.defaulted)
-
-            local spawned = reg:execute("bundles spawn specbundle {DbgCmdPos = {x = 6, y = 7}}")
+            local spawned = reg:execute("spawn specbundle DbgCmdPos {x = 6, y = 7}")
             w:commit()
             luassert.is_true(spawned.ok, tostring(spawned.message))
             local id = spawned.data.id as integer
@@ -237,20 +182,15 @@ describe("tecs2d.debug.internal.cmd.engine", function()
             luassert.equals(6, (w:get(id, SpecPos) as {string: number}).x)
             luassert.is_true(w:has(id, SpecTag))
 
-            -- The same call shape over MCP with a JSON object.
-            local viaMcp = reg:invokeMcp("cmd_bundles_spawn",
-                {name = "specbundle", components = {DbgCmdPos = {x = 1, y = 2}}})
+            local viaMcp = reg:invokeMcp("cmd_spawn",
+                {spec = "specbundle DbgCmdPos {x = 1, y = 2}"})
             w:commit()
             luassert.is_true(viaMcp.ok, tostring(viaMcp.message))
             luassert.is_true(w:isAlive(viaMcp.data.id as integer))
 
-            -- Error parity with the spawn_bundle builtin.
-            luassert.equals("spawn_bundle_failed", (reg:execute("bundles spawn nope")).code)
-            luassert.equals("unknown_component",
-                (reg:execute("bundles spawn specbundle {Nope = {x = 1}}")).code)
-            luassert.equals("spawn_bundle_failed",
-                (reg:execute("bundles spawn specbundle")).code,
-                "a missing required component must fail like the builtin")
+            luassert.equals("unknown_command", (reg:execute("bundles list")).code)
+            luassert.equals("spawn_failed", (reg:execute("spawn specbundle")).code,
+                "a missing required component must fail")
         end)
 
         it("assets reload re-queues cached handles in place", function()

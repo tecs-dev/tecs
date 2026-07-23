@@ -1,9 +1,11 @@
 --- Shared builder for the debugger-context report. One function produces the
---- exact payload served by the `context` debugger command (the cmd_context
---- MCP tool), so the two surfaces cannot drift.
+--- exact payload served by the cmd_context MCP tool and the public report
+--- helper, so the two surfaces cannot drift.
 
 local tecs <const> = require("tecs")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
+local worldregistry <const> = require("tecs2d.gfx.internal.worldregistry")
+local toolworldkey <const> = require("tecs2d.debug.internal.toolworldkey")
 
 local record contextreport
     --- Build the debugger-context payload. Prunes marks and notes on
@@ -27,7 +29,7 @@ local function lastN<T>(list: {T}, n: integer): {T}
 end
 
 function contextreport.build(w: tecs.World, ctx: debugcontext.Context): {string: any}
-    -- Drop annotations on entities the game has since despawned.
+    -- Drop marks and notes on entities the game has since despawned.
     for eid in pairs(ctx.marks) do
         if not w:isAlive(eid) then ctx.marks[eid] = nil end
     end
@@ -36,7 +38,10 @@ function contextreport.build(w: tecs.World, ctx: debugcontext.Context): {string:
     end
     -- selection is an entity id; call cmd_info with it for the components.
     -- marks/notes are keyed by name/message with compact id-range values.
+    local tools = w.resources[toolworldkey.KEY]
     return {
+        worldId = w.resources[worldregistry.WORLD_ID],
+        debugWorldId = tools and tools.pipeline:getWorldId() or nil,
         open = ctx.open,
         frozen = ctx.frozen,
         mode = ctx.mode,

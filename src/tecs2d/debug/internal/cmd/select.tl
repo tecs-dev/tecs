@@ -21,7 +21,7 @@ end
 
 local querySchema <const>: cmdargs.Schema = {
     args = {
-        expr = {rest = true, required = true,
+        expr = {rest = true, required = true, completion = "components",
             help = "component names separated by spaces; -Foo excludes"},
         invert = {default = false,
             help = "de-select the selected entities that match, instead of adding"},
@@ -51,8 +51,8 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
     local reg <const> = d.reg
     local pipeline <const> = d.pipeline
     local resolveTargets <const> = d.resolveTargets
+    local worldFor <const> = d.worldFor
     local targetSchema <const> = d.targetSchema
-    local optionalTargetSchema <const> = d.optionalTargetSchema
 
     -- select's target plus a replace flag (replace the selection instead of adding).
     local selectSchema <const> = d.makeTargetSchema(true, {
@@ -63,6 +63,12 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
     -- and the selection).
     local despawnSchema <const> = d.makeTargetSchema(false, {
         ids = {kind = "list", help = "entity ids to despawn (overrides target and the selection)"},
+        worldId = {kind = "number",
+            help = "render world id; omit for the game world (see context)"},
+    })
+    local infoSchema <const> = d.makeTargetSchema(false, {
+        worldId = {kind = "number",
+            help = "render world id; omit for the game world (see context)"},
     })
 
     -- Archetype signature membership by component identity. Column access
@@ -205,8 +211,9 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
 
     -- Build a Lua-like copy form plus one semantic block per component. The
     -- overlay chooses the number of columns from its actual viewport.
-    local function inspectEntity(eid: integer): {string}, {{string}}
-        local archetype, row, why = entityinfo.locate(w, eid)
+    local function inspectEntity(sourceWorld: tecs.World,
+            eid: integer): {string}, {{string}}
+        local archetype, row, why = entityinfo.locate(sourceWorld, eid)
         if not archetype then
             return {"-- #" .. tostring(eid) ..
                 (why == "not_alive" and " is not alive" or " is not committed")}, {}
@@ -272,7 +279,6 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
         {
             name = "select",
             section = "Select",
-            complete = {[1] = "targets"},
             examples = {"select 5", "select boss", "select 5 replace", "select name=\"big boss\""},
             shortHelp = "select an entity by id, or all entities with a mark name",
             mcpHelp = "Add an entity (by id) or a marked group (by name) to the operator-visible selection; replace=true swaps the selection instead. Selected entities are highlighted in-game. Returns the selection size. Follow with cmd_info for component data or cmd_note to annotate.",
@@ -335,7 +341,7 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             shortHelp = "name the selected entities so select, goto, and despawn can recall them by name",
             mcpHelp = "Name the currently selected entities so later commands (select, goto, despawn, diff entity=) can address the group by that name. Marks survive until cleared. Returns the marked count.",
             schema = { args = { name = {help = "mark name; omit to unmark the selection"} }, positional = {"name"} },
-            examples = {"mark boss", "mark \"big boss\"", "mark  (unmark selection)", "mark ls"},
+            examples = {"mark boss", "mark \"big boss\"", "mark  (unmark selection)", "mark list"},
             outputSchema = {
                 type = "object",
                 properties = {
@@ -347,7 +353,6 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             subcommands = {
                 {
                     name = "list",
-                    aliases = {"ls"},
                     shortHelp = "show every mark with its count and first id",
                     outputSchema = {
                         type = "object",
@@ -374,7 +379,6 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 },
                 {
                     name = "clear",
-                    aliases = {"rm"},
                     shortHelp = "remove all marks",
                     run = function(_v: {string: any}, _parts: {string}): cmdtypes.Result
                         ctx.marks = {}
@@ -409,7 +413,6 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
         {
             name = "goto",
             section = "Select",
-            complete = {[1] = "targets"},
             examples = {"goto 5", "goto boss"},
             shortHelp = "move the camera to an entity by id, or the first with a mark name",
             schema = targetSchema,
@@ -482,10 +485,9 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
         {
             name = "info",
             section = "Select",
-            complete = {[1] = "targets"},
             shortHelp = "show an entity's components; defaults to the first selected",
             mcpHelp = "One entity's serialized component data by id or mark name; with no target, the first selected entity. Returns the entity id, its archetype id and sorted signature, and a map of component name to serialized fields. Read-only.",
-            schema = optionalTargetSchema,
+            schema = infoSchema,
             annotations = {readOnlyHint = true, idempotentHint = true},
             outputSchema = {
                 type = "object",
@@ -496,18 +498,29 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         description = "sorted archetype signature"},
                     components = {type = "object",
                         description = "component name to serialized data (true for tags)"},
+                    worldId = {type = "integer", description = "target render world"},
                 },
-                required = {"archetypeComponents", "archetypeId", "components", "id"},
+                required = {"archetypeComponents", "archetypeId", "components", "id", "worldId"},
             },
             run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
+                local targetWorld, worldId, werr = worldFor(v)
+                if not targetWorld then
+                    return {ok = false, code = "unknown_world", message = "info: " .. werr}
+                end
+                if targetWorld ~= w and v.name ~= nil then
+                    return {ok = false, code = "invalid_arguments",
+                        message = "info: marks belong to the game world; use id= with worldId"}
+                end
                 local target = 0
                 if v.target == nil then
-                    target = ctx.selected[1] or 0
+                    if targetWorld == w then target = ctx.selected[1] or 0 end
                 else
                     local ids = resolveTargets(v)
                     for i = 1, #ids do
                         local eid = ids[i]
-                        if w:isAlive(eid) and (target == 0 or eid < target) then target = eid end
+                        if targetWorld:isAlive(eid) and (target == 0 or eid < target) then
+                            target = eid
+                        end
                     end
                 end
                 if target == 0 then
@@ -515,7 +528,7 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         message = (v.target ~= nil) and ("info: no match for '" .. tostring(v.target) .. "'")
                             or "info: nothing selected"}
                 end
-                local archetype, row, why = entityinfo.locate(w, target)
+                local archetype, row, why = entityinfo.locate(targetWorld, target)
                 if not archetype then
                     return {ok = false,
                         code = (why == "not_alive") and "no_match" or "not_committed",
@@ -528,10 +541,11 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     if nm then names[#names + 1] = nm end
                 end
                 table.sort(names)
-                local popup, popupBlocks = inspectEntity(target)
+                local popup, popupBlocks = inspectEntity(targetWorld, target)
                 return {ok = true, popupTitle = "entity #" .. tostring(target),
                     popup = popup, popupBlocks = popupBlocks, popupLanguage = "lua", data = {
                     id = target,
+                    worldId = worldId,
                     archetypeId = archetype.id,
                     archetypeComponents = table.concat(names, ", "),
                     components = entityinfo.serializeRow(archetype, archetype.componentList, row),
@@ -541,7 +555,6 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
         {
             name = "despawn",
             section = "Select",
-            complete = {[1] = "targets"},
             shortHelp = "despawn an entity by id or mark name, given ids, or the whole selection",
             mcpHelp = "Despawn the target entities (an id, a mark name, an explicit ids list, or the current selection when no target is given). Destructive and immediate. Take cmd_snapshot_save first if the state matters.",
             schema = despawnSchema,
@@ -555,10 +568,19 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         description = "despawned entity ids (absent for selection despawns)"},
                     missing = {type = "array", items = {type = "integer"},
                         description = "requested ids that were not alive (ids= form)"},
+                    worldId = {type = "integer", description = "target render world"},
                 },
-                required = {"despawned"},
+                required = {"despawned", "worldId"},
             },
             run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
+                local targetWorld, worldId, werr = worldFor(v)
+                if not targetWorld then
+                    return {ok = false, code = "unknown_world", message = "despawn: " .. werr}
+                end
+                if targetWorld ~= w and v.name ~= nil then
+                    return {ok = false, code = "invalid_arguments",
+                        message = "despawn: marks belong to the game world; use id= or ids= with worldId"}
+                end
                 if v.ids ~= nil then
                     local wanted: {integer} = {}
                     for _, raw in ipairs(v.ids as {string}) do
@@ -578,11 +600,13 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     local missing: {integer} = {}
                     for i = 1, #wanted do
                         local eid = wanted[i]
-                        if w:isAlive(eid) then
-                            debugcontext.removeSelected(ctx, eid)
-                            w:despawn(eid)
-                            ctx.marks[eid] = nil
-                            ctx.notes[eid] = nil
+                        if targetWorld:isAlive(eid) then
+                            if targetWorld == w then
+                                debugcontext.removeSelected(ctx, eid)
+                                ctx.marks[eid] = nil
+                                ctx.notes[eid] = nil
+                            end
+                            targetWorld:despawn(eid)
                             killed[#killed + 1] = eid
                         else
                             missing[#missing + 1] = eid
@@ -593,22 +617,29 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     return {ok = true,
                         message = "despawned " .. tostring(#killed) ..
                             ((#missing > 0) and (" (" .. tostring(#missing) .. " not alive)") or ""),
-                        data = {despawned = #killed, ids = killed, missing = missing}}
+                        data = {despawned = #killed, ids = killed,
+                            missing = missing, worldId = worldId}}
                 end
                 if v.target == nil then
+                    if targetWorld ~= w then
+                        return {ok = false, code = "invalid_arguments",
+                            message = "despawn: give id= or ids= when worldId targets another world"}
+                    end
                     local n = reg:despawnSelected()
                     return {ok = true, message = "despawned " .. tostring(n) .. " selected",
-                        data = {despawned = n}}
+                        data = {despawned = n, worldId = worldId}}
                 end
                 local ids = resolveTargets(v)
                 local killed: {integer} = {}
                 for i = 1, #ids do
                     local eid = ids[i]
-                    if w:isAlive(eid) then
-                        debugcontext.removeSelected(ctx, eid)
-                        w:despawn(eid)
-                        ctx.marks[eid] = nil
-                        ctx.notes[eid] = nil
+                    if targetWorld:isAlive(eid) then
+                        if targetWorld == w then
+                            debugcontext.removeSelected(ctx, eid)
+                            ctx.marks[eid] = nil
+                            ctx.notes[eid] = nil
+                        end
+                        targetWorld:despawn(eid)
                         killed[#killed + 1] = eid
                     end
                 end
@@ -618,14 +649,12 @@ function selectcmds.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 end
                 debugcontext.pushEvent(ctx, "selection", {selected = #ctx.selected, despawned = #killed})
                 return {ok = true, message = "despawned " .. tostring(#killed),
-                    data = {despawned = #killed, ids = killed}}
+                    data = {despawned = #killed, ids = killed, worldId = worldId}}
             end,
         },
         {
             name = "query",
             section = "Select",
-            aliases = {"q"},
-            complete = {[0] = "components"},
             shortHelp = "select entities matching a component query: Foo has it, -Foo lacks it",
             mcpHelp = "Select every entity matching a component expression ('Enemy -Dead' means has Enemy, lacks Dead); invert=true instead de-selects matching entities from the current selection. Returns the match count. Follow with cmd_info or cmd_set on @selection.",
             schema = querySchema,

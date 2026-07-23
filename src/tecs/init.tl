@@ -165,10 +165,12 @@ tecs.newRelationship = components.newRelationship
     as function<R is types.components.Relationship>(config: types.components.RelationshipOptions<R>): R
 tecs.newFFIRelationship = components.newFFIRelationship
     as function<R is types.components.Relationship>(config: types.components.FFIRelationshipOptions<R>): R
-tecs.getComponentById = function(id: integer): types.components.Component
+
+function tecs.getComponentById(id: integer): types.components.Component
     return components.componentsById[id]
 end
-tecs.componentByName = function(name: string): types.components.Component
+
+function tecs.componentByName(name: string): types.components.Component
     return components.registeredComponents[name]
 end
 

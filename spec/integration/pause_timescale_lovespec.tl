@@ -1,8 +1,8 @@
---- Love2D integration suite: pause, step, and time-scale semantics. A
---- tween drives an entity's Transform.x so motion is observable from
---- outside; cmd_freeze must freeze it exactly, cmd_step must advance it by
---- a bounded amount and freeze again, releasing the freeze must restore
---- motion, and a higher time scale must move it proportionally faster.
+--- Love2D integration suite: suspension, step, and time-scale semantics. A
+--- tween drives an entity's Transform.x so motion is observable from outside;
+--- suspension must stop it exactly, cmd_step must advance it by a bounded
+--- amount and suspend again, releasing suspension must restore motion, and a
+--- higher time scale must move it proportionally faster.
 --- Covers the MCP control surface, the pipeline's gameTime/timeScale
 --- plumbing, and the tween plugin under the real frame loop.
 ---
@@ -24,6 +24,12 @@ local function markerX(app: fixture.App): number
         return t.x
     ]])
     return tonumber(values[1])
+end
+
+local function setSuspended(app: fixture.App, suspended: boolean)
+    local action = suspended and "suspend" or "resume"
+    fixture.runLua(app, "require('tecs2d.internal.suspension').ensure(world):"
+        .. action .. "('spec') return true")
 end
 
 describe("pause and time scale: motion control from MCP", function()
@@ -56,8 +62,8 @@ describe("pause and time scale: motion control from MCP", function()
         fixture.stop(app)
     end)
 
-    it("freeze stops gameplay", function()
-        app.client:call("cmd_freeze", {on = true})
+    it("suspension stops gameplay", function()
+        setSuspended(app, true)
         -- Let any in-flight frame drain, then sample twice.
         sleep(0.2)
         local x1 = markerX(app)
@@ -68,6 +74,7 @@ describe("pause and time scale: motion control from MCP", function()
     end)
 
     it("step advances a bounded number of frames and freezes again", function()
+        setSuspended(app, true)
         local before = markerX(app)
         app.client:call("cmd_step", {n = 10})
         -- Stepping spans ~10 frames of wall time; wait until the marker
@@ -91,9 +98,10 @@ describe("pause and time scale: motion control from MCP", function()
         luassert.equals(settled, markerX(app), "marker kept moving after step completed")
     end)
 
-    it("releasing the freeze restores motion", function()
+    it("releasing suspension restores motion", function()
+        setSuspended(app, true)
         local before = markerX(app)
-        app.client:call("cmd_freeze", {on = false})
+        setSuspended(app, false)
         local moving = fixture.eventually(fixture.callTimeout, function(): boolean
             if markerX(app) > before + 1 then return true end
             return nil

@@ -6,11 +6,14 @@
 --- object, so one declaration drives both the command line and the agent.
 ---
 --- Schema:
----   args: name -> {required, default, help, forward, synthetic, kind, rest}
+---   args: name -> {required, default, help, forward, synthetic, kind,
+---                    enum, completion, rest}
 ---     default   : also declares the value type (number / boolean / string).
 ---     forward   : name of a synthetic arg this arg feeds its value into.
 ---     synthetic : source arg names; presence marks this arg synthetic (hidden).
 ---                 A synthetic's value comes from a positional slot or a forward.
+---     enum       : fixed string values, used by validation and completion.
+---     completion : optional live value domain used by overlay completion.
 ---     rest      : the arg captures the remainder of the line as free text; it
 ---                 must be the last positional slot and string- or table-typed.
 ---   positional: ordered arg names bound by position (may be synthetic).
@@ -21,6 +24,10 @@
 local json <const> = require("tecs.utils.json")
 
 local record cmdargs
+    record HelpDefinition
+        term: string
+        description: string
+    end
     record ArgSpec
         required: boolean
         default: any
@@ -39,6 +46,10 @@ local record cmdargs
         kind: string
         -- Allowed values for a string arg; projected as a JSON Schema enum.
         enum: {string}
+        -- Optional live value source for overlay completion. The command line
+        -- derives positions and named keys from Schema; this only names the
+        -- runtime domain (for example components, systems, or cameras).
+        completion: string
         -- Inclusive bounds for a number arg.
         min: number
         max: number
@@ -79,6 +90,9 @@ local record cmdargs
 
     --- Tab-aligned per-argument help lines (name, help, default).
     argHelp: function(schema: Schema): {string}
+
+    --- Structured user-facing argument definitions for popup documents.
+    argDefinitions: function(schema: Schema): {HelpDefinition}
 end
 
 local function argType(spec: cmdargs.ArgSpec): string
@@ -569,8 +583,7 @@ function cmdargs.signature(schema: cmdargs.Schema): string
     return table.concat(parts, " ")
 end
 
-function cmdargs.argHelp(schema: cmdargs.Schema): {string}
-    -- Show every user-facing (non-synthetic) argument, name-aligned with tabs.
+function cmdargs.argDefinitions(schema: cmdargs.Schema): {cmdargs.HelpDefinition}
     local names: {string} = {}
     for name, spec in pairs(schema.args) do
         if not isSynthetic(spec) then
@@ -578,16 +591,26 @@ function cmdargs.argHelp(schema: cmdargs.Schema): {string}
         end
     end
     table.sort(names)
-    local lines: {string} = {}
+    local definitions: {cmdargs.HelpDefinition} = {}
     for _, name in ipairs(names) do
         local spec = schema.args[name]
-        local line = "  " .. name .. "\t" .. (spec.help or "")
+        local description = spec.help or ""
         if spec.default ~= nil and not spec.forward then
-            line = line .. " (default: " .. tostring(spec.default) .. ")"
+            description = description .. " (default: " .. tostring(spec.default) .. ")"
         elseif spec.required then
-            line = line .. " (required)"
+            description = description .. " (required)"
         end
-        lines[#lines + 1] = line
+        definitions[#definitions + 1] = {term = name, description = description}
+    end
+    return definitions
+end
+
+function cmdargs.argHelp(schema: cmdargs.Schema): {string}
+    -- Legacy plain-text projection used by generated docs and copy surfaces.
+    local lines: {string} = {}
+    for _, definition in ipairs(cmdargs.argDefinitions(schema)) do
+        lines[#lines + 1] = "  " .. definition.term .. "\t"
+            .. definition.description
     end
     return lines
 end

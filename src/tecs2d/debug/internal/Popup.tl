@@ -1,14 +1,17 @@
 --- Reusable popup state for debugger UI surfaces.
 ---
 --- Popup presentation is configured per show() call: title, modality,
---- optional close control, syntax mode, semantic column blocks, and column
---- cap. The overlay owns placement/rendering, while this component owns the
---- document lifecycle, scrolling bounds, hit geometry, and image lifetime.
+--- optional close control, typed or legacy content, syntax mode, semantic
+--- column blocks, and column cap. The overlay owns placement/rendering, while
+--- this component owns the document lifecycle, scrolling bounds, hit geometry,
+--- and image lifetime.
 
 local cmdtypes <const> = require("tecs2d.debug.internal.cmdtypes")
+local markup <const> = require("tecs2d.debug.internal.markup")
 
 local record PopupBlock
     lines: {string}
+    documentLines: {markup.Line}
     rows: {{string}}
     colX: {number}
     width: number
@@ -25,21 +28,26 @@ local record Popup
         blocks: {{string}}
         imagePath: string
         maxColumns: integer
+        scrollToEnd: boolean
+        document: markup.Document
     end
 
     lines: {string}
     title: string
     language: string
     semanticBlocks: {{string}}
+    document: markup.Document
     shown: boolean
     modal: boolean
     closable: boolean
     maxColumns: integer
     scroll: number
     scrollMax: number
+    scrollToEndPending: boolean
     image: love.graphics.Image
     measuredLines: {string}
     measuredBlocks: {{string}}
+    measuredDocument: markup.Document
     measuredSw: number
     block: PopupBlock
     columns: {PopupBlock}
@@ -59,8 +67,7 @@ local record Popup
     lastCommandLine: string
     previewCmd: cmdtypes.Command
     previewFor: cmdtypes.Command
-    previewLines: {string}
-    previewBody: {string}
+    previewDocument: markup.Document
     cmdRowsText: string
     cmdRowsSw: number
     cmdRows: {string}
@@ -96,6 +103,7 @@ function Popup.new(): Popup
         maxColumns = 0,
         scroll = 0,
         scrollMax = 0,
+        scrollToEndPending = false,
         panelX = 0,
         panelY = 0,
         panelW = 0,
@@ -121,14 +129,17 @@ function Popup:show(options: Popup.Options)
     self.title = options.title
     self.language = options.language
     self.semanticBlocks = options.blocks
+    self.document = options.document
     self.shown = true
     self.modal = options.modal or false
     self.closable = options.closable or false
     self.maxColumns = options.maxColumns or 0
     self.scroll = 0
     self.scrollMax = 0
+    self.scrollToEndPending = options.scrollToEnd or false
     self.measuredLines = nil
     self.measuredBlocks = nil
+    self.measuredDocument = nil
     self.closeRadius = 0
     if options.imagePath then
         local ok, image = pcall(love.graphics.newImage, options.imagePath)
@@ -141,6 +152,7 @@ function Popup:dismiss()
     self.modal = false
     self.closable = false
     self.measuredLines = nil
+    self.measuredDocument = nil
     self.closeRadius = 0
     releaseImage(self)
 end

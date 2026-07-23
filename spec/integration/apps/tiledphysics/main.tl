@@ -74,7 +74,7 @@ local function buildMap(): tiled.TilemapData
 end
 
 local function gamePlugin(world: tecs.World)
-    world:addPlugin(require("tecs2d.debug").new())
+    world:addPlugin(require("tecs2d.debug").new({uiHeight = HEIGHT}))
     world:addPlugin(mcp.new({
         port = tonumber(os.getenv("TECS_MCP_PORT")) or mcp.DEFAULT_PORT,
     }))

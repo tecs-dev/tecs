@@ -19,8 +19,8 @@ local record context
     --- {5="a", 6="a", 9="b"} -> {a="5-6", b="9"}.
     encodeGroups: function({integer: string}): {string: string}
 
-    --- The debugger-context payload served by the cmd_context MCP tool
-    --- and the `context` debugger command: selection, marks, notes, camera,
+    --- The debugger-context payload served by the cmd_context MCP tool:
+    --- selection, marks, notes, camera,
     --- and the newest artifact history entries. Returns nil when the debug
     --- plugin is not installed.
     report: function(w: tecs.World): {string: any}
@@ -30,7 +30,7 @@ local record context
     ensureSuspension: function(w: tecs.World): suspension.Controller
 
     --- Get or create the headless debugger core: context, registry, freeze,
-    --- annotations, recorder, rewind; works without the overlay.
+    --- recorder, rewind, and diagnostic visuals; works without the overlay.
     ensureCore: function(w: tecs.World, opts?: core.Options): commands.Registry
 
     --- The command registry projected as MCP tool definitions (cmd_*

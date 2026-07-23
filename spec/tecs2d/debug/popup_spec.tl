@@ -14,6 +14,7 @@ describe("debugger Popup", function()
             language = "lua",
             blocks = blocks,
             maxColumns = 2,
+            scrollToEnd = true,
         })
 
         luassert.is_true(popup.shown)
@@ -23,6 +24,7 @@ describe("debugger Popup", function()
         luassert.equals("lua", popup.language)
         luassert.equals(blocks, popup.semanticBlocks)
         luassert.equals(2, popup.maxColumns)
+        luassert.is_true(popup.scrollToEndPending)
     end)
 
     it("only dismisses through an opted-in close control", function()

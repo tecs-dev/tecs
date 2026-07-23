@@ -234,10 +234,6 @@ end
 local function renderCommand(out: {string}, c: cmdtypes.Command, toolFor: {string: cmdtypes.McpTool})
     out[#out + 1] = "### `" .. commands.commandSignature(c) .. "` {#cmd-" .. c.name .. "}"
     out[#out + 1] = ""
-    if c.aliases and #c.aliases > 0 then
-        out[#out + 1] = "Aliases: `" .. table.concat(c.aliases, "`, `") .. "`"
-        out[#out + 1] = ""
-    end
     out[#out + 1] = sentence(c.shortHelp)
     out[#out + 1] = ""
     if c.mcpHelp then
@@ -444,9 +440,8 @@ function docgen.toolsPage(reg: commands.Registry): string
         "- **Kernel tools** are transport-level and always available: liveness, screenshots, pixel",
         "  sampling, Love2D events, arbitrary Lua, and log capture.",
         "- **Command tools** (`cmd_*`) project the debugger command registry, one tool per command or",
-        "  subcommand verb, including commands the game registers itself. Call `cmd_capabilities` after",
-        "  connecting to discover what the session supports, and `cmd_describe` for one command's full",
-        "  contract.",
+        "  subcommand verb, including commands the game registers itself. The standard `tools/list`",
+        "  request returns the exact live surface and every tool's complete contract.",
         "",
         "The server listens on `http://localhost:19999/mcp` by default; an MCP client connects with",
         '`{"type": "http", "url": "http://localhost:19999/mcp"}`. See the [MCP server guide](./) for',
@@ -510,8 +505,7 @@ function docgen.toolsPage(reg: commands.Registry): string
     out[#out + 1] = "exactly like the builtins."
     out[#out + 1] = ""
     out[#out + 1] = "This index links each tool to its full contract (arguments, result data schema, examples,"
-    out[#out + 1] = "safety annotations) in the [Command Reference](../debug-reference); `cmd_describe` returns the"
-    out[#out + 1] = "same contract as structured data at runtime."
+    out[#out + 1] = "and safety annotations) in the [Command Reference](../debug-reference)."
     out[#out + 1] = ""
     out[#out + 1] = docgen.toolIndex(reg)
     return table.concat(out, "\n")

@@ -88,6 +88,12 @@ local function readFrames(app: App): integer
     return tonumber(values[1]) as integer
 end
 
+local function setSuspended(app: App, suspended: boolean)
+    local action = suspended and "suspend" or "resume"
+    runLua(app, "require('tecs2d.internal.suspension').ensure(world):"
+        .. action .. "('spec') return true")
+end
+
 --- Poll `fn` until it returns a non-nil value or the deadline passes.
 local function eventually<T>(seconds: number, fn: function(): T): T
     local deadline = socket.gettime() + seconds
@@ -138,10 +144,9 @@ describe("mcp compliance: boot and introspection", function()
     end)
 
     it("reports the configured window size", function()
-        local result = app.client:call("cmd_stats")
-        local window = result.window as {string: any}
-        luassert.are.equal(320, window.width as number)
-        luassert.are.equal(240, window.height as number)
+        local size = runLua(app, "return love.graphics.getWidth(), love.graphics.getHeight()")
+        luassert.are.equal(320, tonumber(size[1]))
+        luassert.are.equal(240, tonumber(size[2]))
     end)
 
     it("run_lua round-trips multiple return values", function()
@@ -284,34 +289,38 @@ describe("mcp compliance: boot and introspection", function()
             found[t.name as string] = t.annotations as {string: any}
         end
         luassert.is_true(found.ping.readOnlyHint as boolean)
-        luassert.is_true(found.cmd_stats.readOnlyHint as boolean)
-        luassert.is_false(found.cmd_stats.destructiveHint as boolean)
+        luassert.is_true(found.cmd_context.readOnlyHint as boolean)
+        luassert.is_false(found.cmd_context.destructiveHint as boolean)
         luassert.is_true(found.cmd_despawn.destructiveHint as boolean)
-        luassert.is_false(found.cmd_freeze.destructiveHint as boolean)
-        luassert.is_true(found.cmd_freeze.idempotentHint as boolean)
+        for _, removed in ipairs({"cmd_fetch", "cmd_capabilities", "cmd_describe",
+                "cmd_freeze", "cmd_stats", "cmd_exit",
+                "cmd_camera_world", "cmd_camera_screen", "cmd_diff_get",
+                "cmd_lua_modules", "cmd_lua_exports", "cmd_lua_eval",
+                "cmd_bundles_list", "cmd_bundles_spawn",
+                "cmd_states_push", "cmd_states_pop"}) do
+            luassert.is_nil(found[removed], removed .. " should not be advertised")
+        end
     end)
 
     it("sees the fixture world state", function()
-        local stats = app.client:call("cmd_stats")
-        luassert.is_true((stats.entities as number) >= 1)
         local values = runLua(app, "return world:getStats().entities")
         luassert.is_true(tonumber(values[1]) >= 1)
     end)
 end)
 
-describe("mcp compliance: freeze, step, resume", function()
+describe("mcp compliance: suspended step and input tape", function()
     local app: App
 
     setup(function()
         app = startApp()
+        setSuspended(app, true)
     end)
 
     teardown(function()
         stopApp(app)
     end)
 
-    it("freeze stops gameplay but keeps MCP responsive", function()
-        app.client:call("cmd_freeze", {on = true})
+    it("suspension stops gameplay but keeps MCP responsive", function()
         local before = readFrames(app)
         sleep(0.25)
         local after = readFrames(app)
@@ -367,46 +376,13 @@ describe("mcp compliance: freeze, step, resume", function()
             "override dt must be carried verbatim, got " .. tostring(sum2))
     end)
 
-    it("cmd_step one-call form runs tape, frames, and a lua read in one request", function()
-        -- The whole tape->step->read loop as a single round-trip: the
-        -- response is deferred until the frames ran and carries the lua
-        -- values, so no follow-up call (and no eventually polling) is needed.
-        local upBefore = tonumber(runLua(app, "return tecsTest.upFrames")[1]) as integer
-        local res = app.client:call("cmd_step", {
-            n = 3,
-            events = {
-                {at = 1, event = "keypressed", args = {"up"}},
-                {at = 2, event = "keyreleased", args = {"up"}},
-            },
-            lua = "return {up = tecsTest.upFrames, frames = tecsTest.frames}",
-        })
-        luassert.are.equal(2, res.queued as integer)
-        luassert.is_true(res.waited as boolean)
-        luassert.are.equal(1, res.returned as integer)
-        local first = (res.values as {any})[1] as {string: any}
-        luassert.are.equal(upBefore + 1, tonumber(first.up),
-            "the taped press must be visible in the post-step lua read")
-        -- The tape is drained: press released, nothing pending.
-        local status = app.client:call("cmd_input_tape")
-        luassert.are.equal(0, #(status.held as {string}))
-        luassert.are.equal(0, status.pending as integer)
-    end)
-
-    it("cmd_step wait=true defers the response until frames have run", function()
-        local before = readFrames(app)
-        local res = app.client:call("cmd_step", {n = 4, wait = true})
-        luassert.is_true(res.waited as boolean)
-        -- No eventually loop: by response time the frames are done.
-        luassert.are.equal(before + 4, readFrames(app))
-    end)
-
     it("send_love_event reaches the Update edge while unfrozen", function()
         -- The old raw love.event.push landed mid-frame with un-defaulted args
         -- (nil scancode), so the latch never set and the edge silently missed.
         -- Routed through the tape it must be consumed on the next live frame,
         -- even in the short-args form.
         local upBefore = tonumber(runLua(app, "return tecsTest.upFrames")[1]) as integer
-        app.client:call("cmd_freeze", {on = false})
+        setSuspended(app, false)
         local res = app.client:call("send_love_event",
             {event = "keypressed", args = {"up"}})
         luassert.matches("input tape", res.dispatch as string)
@@ -418,79 +394,7 @@ describe("mcp compliance: freeze, step, resume", function()
         luassert.is_true(seen ~= nil and seen > upBefore,
             "unfrozen send_love_event edge never consumed")
         app.client:call("send_love_event", {event = "keyreleased", args = {"up"}})
-        app.client:call("cmd_freeze", {on = true})
-    end)
-
-    it("cmd_fetch count_only answers population checks without payloads", function()
-        local res = app.client:call("cmd_fetch", {expr = "Transform", count_only = true})
-        luassert.is_true((res.count as integer) >= 1)
-        luassert.are.equal(0, #(res.entities as {any}))
-        luassert.is_false(res.truncated as boolean)
-        -- The count matches what the full form reports.
-        local full = app.client:call("cmd_fetch", {expr = "Transform"})
-        luassert.are.equal(full.count, res.count)
-    end)
-
-    it("cmd_step quiet=true trims the deferred response to the answer", function()
-        local res = app.client:call("cmd_step", {
-            n = 2, quiet = true,
-            lua = "return {frames = tecsTest.frames}",
-        })
-        luassert.are.equal(1, res.returned as integer)
-        luassert.are.equal(2, res.frames_run as integer)
-        -- No schedule echo: the noisy fields are absent, not just empty.
-        luassert.is_nil(res.step_dt)
-        luassert.is_nil(res.waited)
-        luassert.is_nil(res.will_fire)
-        luassert.is_nil(res.message)
-    end)
-
-    it("cmd_step per_frame stops early when the condition hits", function()
-        -- "Step until": n is a cap, the hook decides. The condition fires
-        -- when the frame counter crosses a line well inside the cap.
-        local target = tonumber(runLua(app, "return tecsTest.frames")[1]) as integer + 5
-        local res = app.client:call("cmd_step", {
-            n = 200,
-            per_frame = "return tecsTest.frames >= " .. tostring(target),
-            lua = "return {frames = tecsTest.frames}",
-        })
-        luassert.is_true(res.stopped_early as boolean)
-        luassert.are.equal(5, res.frames_run as integer)
-        local first = (res.values as {any})[1] as {string: any}
-        luassert.are.equal(target, tonumber(first.frames))
-    end)
-
-    it("cmd_step per_frame side effects run once per stepped frame", function()
-        runLua(app, "_G.perFrameCount = 0 return true")
-        local res = app.client:call("cmd_step", {
-            n = 6,
-            per_frame = "_G.perFrameCount = _G.perFrameCount + 1 return false",
-            lua = "return {count = _G.perFrameCount}",
-        })
-        luassert.is_false(res.stopped_early as boolean)
-        luassert.are.equal(6, res.frames_run as integer)
-        local first = (res.values as {any})[1] as {string: any}
-        luassert.are.equal(6, tonumber(first.count))
-        runLua(app, "_G.perFrameCount = nil return true")
-    end)
-
-    it("cmd_step per_frame errors stop the step and surface", function()
-        local before = readFrames(app)
-        local ok, err = pcall(function()
-            app.client:call("cmd_step", {n = 50, per_frame = "error('hook boom')"})
-        end)
-        luassert.is_false(ok)
-        luassert.matches("per_frame_failed", tostring(err))
-        -- The broken hook stopped the step on frame one, not at the cap.
-        luassert.are.equal(before + 1, readFrames(app))
-    end)
-
-    it("cmd_step lua errors surface as tool errors", function()
-        local ok, err = pcall(function()
-            app.client:call("cmd_step", {n = 1, lua = "error('boom')"})
-        end)
-        luassert.is_false(ok)
-        luassert.matches("lua_execution_failed", tostring(err))
+        setSuspended(app, true)
     end)
 
     it("input_tape fires inside the stepped frame's input snapshot", function()
@@ -505,10 +409,7 @@ describe("mcp compliance: freeze, step, resume", function()
         }})
         luassert.are.equal(2, queued.queued as integer)
 
-        local stepResult = app.client:call("cmd_step", {n = 3})
-        local will = stepResult.will_fire as {{string: any}}
-        luassert.is_not_nil(will, "step should echo the scheduled tape window")
-        luassert.are.equal(2, #will)
+        app.client:call("cmd_step", {n = 3})
 
         local sawUp = eventually(CALL_TIMEOUT, function(): integer
             local n = tonumber(runLua(app, "return tecsTest.upFrames")[1]) as integer
@@ -541,9 +442,9 @@ describe("mcp compliance: freeze, step, resume", function()
         luassert.is_false(esc.ok as boolean, "escape must be refused without force")
     end)
 
-    it("releasing the freeze restores gameplay", function()
+    it("releasing suspension restores gameplay", function()
         local before = readFrames(app)
-        app.client:call("cmd_freeze", {on = false})
+        setSuspended(app, false)
         local advanced = eventually(CALL_TIMEOUT, function(): integer
             local frames = readFrames(app)
             if frames > before then return frames end
@@ -554,7 +455,7 @@ describe("mcp compliance: freeze, step, resume", function()
 end)
 
 describe("mcp compliance: boot frozen", function()
-    it("TECS_BOOT_FROZEN holds the game at frame zero until released", function()
+    it("TECS_BOOT_FROZEN holds the game at frame zero and permits stepping", function()
         local port = freePort()
         local proc = love_process.start({
             loveBin = loveBin,
@@ -584,14 +485,6 @@ describe("mcp compliance: boot frozen", function()
         end)
         luassert.are.equal(2, stepped)
 
-        -- ...and releasing the freeze lets it run.
-        app.client:call("cmd_freeze", {on = false})
-        local advanced = eventually(CALL_TIMEOUT, function(): integer
-            local n = readFrames(app)
-            if n > 2 then return n end
-            return nil
-        end)
-        luassert.is_true(advanced ~= nil and advanced > 2)
         stopApp(app)
     end)
 end)
@@ -629,9 +522,9 @@ describe("mcp compliance: rewind replay", function()
         end)
         luassert.are.equal(1, up1)
 
-        -- Freeze and replay the recorded window: the press must fire once
+        -- Suspend and replay the recorded window: the press must fire once
         -- more, through the real input path, on its original frame.
-        app.client:call("cmd_freeze", {on = true})
+        setSuspended(app, true)
         local result = app.client:call("cmd_rewind_replay", {ref = "latest"})
         luassert.is_true((result.events as integer) >= 2,
             "recorded press+release rows expected in the replay window")
@@ -644,7 +537,7 @@ describe("mcp compliance: rewind replay", function()
         luassert.are.equal(up1 + 1, up2,
             "replay must re-fire the recorded press exactly once")
 
-        app.client:call("cmd_freeze", {on = false})
+        setSuspended(app, false)
     end)
 end)
 

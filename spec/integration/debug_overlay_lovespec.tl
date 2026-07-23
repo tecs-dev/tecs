@@ -182,7 +182,14 @@ describe("in-game debugger overlay", function()
         local batched = fixture.eventually(fixture.callTimeout, function(): boolean
             local values = fixture.runLua(app, [[
                 local tools = world.resources[_G.tecsTestHooks.toolworld.KEY]
-                return tools.view.markers.count, #tools.view.entities
+                local view = tools.view
+                local retained = 0
+                for _, owner in pairs(view.owners) do
+                    for _, element in pairs(owner.elements) do
+                        retained = retained + 1 + (element.child and 1 or 0)
+                    end
+                end
+                return view.markers.count, retained
             ]])
             local markers = tonumber(values[1])
             local transient = tonumber(values[2])
@@ -198,6 +205,94 @@ describe("in-game debugger overlay", function()
             "large selection did not stay inside the batched marker budget")
         luassert.is_true(#selectedList() >= 5000,
             "visual marker cap must not truncate selection membership")
+    end)
+
+    it("keeps retained debugger element identities stable across frames", function()
+        openDebugger()
+        local function retainedIdentity(): string
+            local values = fixture.runLua(app, [[
+                local tools = world.resources[_G.tecsTestHooks.toolworld.KEY]
+                local elements = tools.view.owners.overlay
+                    and tools.view.owners.overlay.elements
+                if not elements or not elements["status.badgeBackground"]
+                        or not elements["command.background"] then return "" end
+                return table.concat({
+                    elements["status.badgeBackground"].state.id,
+                    elements["command.background"].state.id,
+                }, ":")
+            ]])
+            return tostring(values[1] or "")
+        end
+
+        local first = ""
+        local ready = fixture.eventually(fixture.callTimeout, function(): boolean
+            first = retainedIdentity()
+            if first ~= "" then return true end
+            return nil
+        end)
+        luassert.is_true(ready == true, "retained debugger elements did not populate")
+
+        fixture.eventually(0.2, function(): boolean return nil end)
+        luassert.equals(first, retainedIdentity(),
+            "retained debugger element identities changed between frames")
+    end)
+
+    it("manages ordinary entities in the debugger world by worldId", function()
+        local before = #(context().selected as {any})
+        local worlds = app.client:call("cmd_context", {})
+        local gameWorldId = tonumber(worlds.worldId)
+        local debugWorldId = tonumber(worlds.debugWorldId)
+        luassert.is_true(debugWorldId > 0, "context did not expose debugWorldId")
+        luassert.is_true(debugWorldId ~= gameWorldId,
+            "debugger and game worlds must have distinct ids")
+
+        local spawned = app.client:call("cmd_spawn", {
+            worldId = debugWorldId,
+            spec = "Transform {x = 20, y = 20, z = 50, layer = 1} " ..
+                "Rectangle {width = 24, height = 16} " ..
+                "Color {r = 1, g = 0, b = 0, a = 1} Unlit",
+        })
+        local eid = tonumber(spawned.id)
+        luassert.equals(debugWorldId, tonumber(spawned.worldId))
+        luassert.equals(before, #(context().selected as {any}),
+            "debug-world entities must not enter the game-world selection")
+
+        local changed = app.client:call("cmd_modify", {
+            worldId = debugWorldId,
+            id = eid,
+            comp = "Color",
+            value = {r = 0, g = 1, b = 0, a = 1},
+        })
+        luassert.equals(1, tonumber(changed.modified))
+        local info = app.client:call("cmd_info", {
+            worldId = debugWorldId,
+            id = eid,
+        })
+        luassert.equals(debugWorldId, tonumber(info.worldId))
+        local color = (info.components as {string: any}).Color as {string: any}
+        luassert.near(1, tonumber(color.g), 0.001)
+
+        local removed = app.client:call("cmd_despawn", {
+            worldId = debugWorldId,
+            id = eid,
+        })
+        luassert.equals(1, tonumber(removed.despawned))
+
+        local timed = app.client:call("cmd_spawn", {
+            worldId = debugWorldId,
+            spec = "Transform {x = 1, y = 1, layer = 1} " ..
+                "Rectangle {width = 1, height = 1} Unlit TTL {remaining = 0.05}",
+        })
+        local timedId = tonumber(timed.id)
+        local expired = fixture.eventually(fixture.callTimeout, function(): boolean
+            local values = fixture.runLua(app, [[
+                local tools = world.resources[_G.tecsTestHooks.toolworld.KEY]
+                return tools.world:isAlive(]] .. tostring(timedId) .. ")")
+            if tostring(values[1]) == "false" then return true end
+            return nil
+        end)
+        luassert.is_true(expired == true,
+            "debugger-world TTL did not advance on its independent clock")
     end)
 
     it("forward-blends all debugger MSDF text over its panels", function()
@@ -257,20 +352,32 @@ describe("in-game debugger overlay", function()
             if (context().command as string) == "se" then return true end
             return nil
         end)
-        app.client:call("send_love_event", {event = "keypressed", args = {"tab"}})
-        app.client:call("send_love_event", {event = "keyreleased", args = {"tab"}})
-        local highlighted = fixture.eventually(fixture.callTimeout, function(): boolean
-            if (context().command as string) ~= "select" then return nil end
+        local function purpleSelection(): boolean
             local points: {{string: number}} = {}
             for y = 164, 192, 4 do
                 for x = 8, 72, 8 do points[#points + 1] = {x = x, y = y} end
             end
             local result = app.client:call("sample_pixels", {points = points}, 10)
             for _, pixel in ipairs(result.pixels as {{string: number}}) do
-                if pixel.r > 0.3 and pixel.b > 0.5 and pixel.b > pixel.g + 0.15 then
+                if pixel.r > 0.3 and pixel.b > 0.5
+                        and pixel.b > pixel.g + 0.15 then
                     return true
                 end
             end
+            return false
+        end
+        local highlightedWhileTyping = fixture.eventually(
+            fixture.callTimeout, function(): boolean
+                if purpleSelection() then return true end
+                return nil
+            end)
+        luassert.is_true(highlightedWhileTyping == true,
+            "typing completions did not highlight the first candidate")
+        app.client:call("send_love_event", {event = "keypressed", args = {"tab"}})
+        app.client:call("send_love_event", {event = "keyreleased", args = {"tab"}})
+        local highlighted = fixture.eventually(fixture.callTimeout, function(): boolean
+            if (context().command as string) ~= "select" then return nil end
+            if purpleSelection() then return true end
             return nil
         end)
         luassert.is_true(highlighted == true,
@@ -322,9 +429,16 @@ describe("in-game debugger overlay", function()
         local resized = fixture.eventually(fixture.callTimeout, function(): boolean
             local values = fixture.runLua(app, [[
                 local tools = world.resources[_G.tecsTestHooks.toolworld.KEY]
-                return tools.pipeline.screenWidth, tools.pipeline.screenHeight
+                local draw = _G.tecsTestHooks.debugdraw
+                return tools.pipeline.screenWidth, tools.pipeline.screenHeight,
+                    draw.getScreenScale(), draw.getWidth(), draw.getHeight()
             ]])
-            if tonumber(values[1]) == 640 and tonumber(values[2]) == 480 then return true end
+            if tonumber(values[1]) == 640 and tonumber(values[2]) == 480
+                    and tonumber(values[3]) == 2
+                    and tonumber(values[4]) == 320
+                    and tonumber(values[5]) == 240 then
+                return true
+            end
             return nil
         end)
 
@@ -342,6 +456,84 @@ describe("in-game debugger overlay", function()
             return nil
         end)
         luassert.is_true(resized == true, "debugger pipeline did not follow the window resize")
+    end)
+
+    it("animates the command cursor through the tool-world tween", function()
+        openDebugger()
+        local first = tonumber(fixture.runLua(app, [[
+            local tools = world.resources[_G.tecsTestHooks.toolworld.KEY]
+            local Color = require("tecs2d.gfx").Color
+            local color = tools.world:get(tools.cursorAlphaEntity, Color)
+            return color.a, color.r, color.g, color.b
+        ]])[1])
+        local rgbStayedWhite = true
+        local changed = fixture.eventually(1.5, function(): boolean
+            local values = fixture.runLua(app, [[
+                local tools = world.resources[_G.tecsTestHooks.toolworld.KEY]
+                local Color = require("tecs2d.gfx").Color
+                local color = tools.world:get(tools.cursorAlphaEntity, Color)
+                return color.a, color.r, color.g, color.b
+            ]])
+            local alpha = tonumber(values[1])
+            rgbStayedWhite = tonumber(values[2]) == 1
+                and tonumber(values[3]) == 1 and tonumber(values[4]) == 1
+            if math.abs(alpha - first) > 0.1 then return true end
+            return nil
+        end)
+        luassert.is_true(changed == true, "command cursor alpha did not animate")
+        luassert.is_true(rgbStayedWhite,
+            "command cursor tween changed an RGB channel")
+        local forwardBlended = fixture.runLua(app, [[
+            local tools = world.resources[_G.tecsTestHooks.toolworld.KEY]
+            local cursor = tools.view.owners.overlay.elements["command.cursor"]
+            local blend = require("tecs2d.gfx").blend.ForwardAlphaBlend
+            return cursor and tools.world:has(cursor.state.id, blend) or false
+        ]])[1]
+        luassert.equals("true", tostring(forwardBlended),
+            "command cursor did not alpha-blend over the command bar")
+    end)
+
+    it("shows FPS above clear-prompt hints placed after the cursor", function()
+        openDebugger()
+        fixture.runLua(app, [[
+            love.window.setMode(1600, 480)
+            love.event.push("resize", 1600, 480)
+            return true
+        ]])
+        local rendered = fixture.eventually(fixture.callTimeout, function(): boolean
+            local values = fixture.runLua(app, [[
+                local tools = world.resources[_G.tecsTestHooks.toolworld.KEY]
+                local elements = tools.view.owners.overlay.elements
+                local tail = elements["status.tail"]
+                local cursor = elements["command.cursor"]
+                local enter = elements["command.commandHint"]
+                local tab = elements["command.autocompleteHint"]
+                return tail and tail.text or "", enter and enter.text or "",
+                    tab and tab.text or "",
+                    cursor and cursor.state.x or -1,
+                    cursor and cursor.width or -1,
+                    enter and enter.state.x or -1,
+                    enter and enter.state.r or -1,
+                    enter and enter.state.g or -1,
+                    enter and enter.state.b or -1
+            ]])
+            if (values[1] as string):match("%d+ fps")
+                    and values[2] == "Enter command..."
+                    and values[3] == "[TAB] to autocomplete"
+                    and tonumber(values[6]) > tonumber(values[4]) + tonumber(values[5])
+                    and tonumber(values[7]) == tonumber(values[8])
+                    and tonumber(values[8]) == tonumber(values[9]) then
+                return true
+            end
+            return nil
+        end)
+        fixture.runLua(app, [[
+            love.window.setMode(320, 240)
+            love.event.push("resize", 320, 240)
+            return true
+        ]])
+        luassert.is_true(rendered == true,
+            "command hints were not gray and positioned after the cursor")
     end)
 
     it("adds to the selection with a typed select command", function()
@@ -373,6 +565,38 @@ describe("in-game debugger overlay", function()
             "Tab did not complete to despawn; command=" .. tostring(context().command))
         app.client:call("send_love_event", {event = "keypressed", args = {"return"}})
         app.client:call("send_love_event", {event = "keyreleased", args = {"return"}})
+    end)
+
+    it("shows and narrows completions while typing", function()
+        openDebugger()
+        app.client:call("send_love_event", {event = "textinput", args = {"s"}})
+        local broad = fixture.eventually(fixture.callTimeout, function(): boolean
+            if (context().command as string) ~= "s" then return nil end
+            local pixel = (app.client:call("sample_pixels", {
+                points = {{x = 310, y = 100}},
+            }, 10).pixels as {{string: number}})[1]
+            if pixel.r > 0.06 and pixel.r < 0.16
+                and pixel.g < 0.13 and pixel.b > 0.08 and pixel.b < 0.20 then
+                return true
+            end
+            return nil
+        end)
+        luassert.is_true(broad == true,
+            "typing did not open the broad completion grid")
+
+        app.client:call("send_love_event", {event = "textinput", args = {"el"}})
+        local narrowed = fixture.eventually(fixture.callTimeout, function(): boolean
+            if (context().command as string) ~= "sel" then return nil end
+            local pixel = (app.client:call("sample_pixels", {
+                points = {{x = 310, y = 100}},
+            }, 10).pixels as {{string: number}})[1]
+            if pixel.r < 0.03 and pixel.g < 0.03 and pixel.b < 0.03 then
+                return true
+            end
+            return nil
+        end)
+        luassert.is_true(narrowed == true,
+            "completion grid did not shrink as the prefix narrowed")
     end)
 
     it("opens with a clean message line and no completion panel", function()
@@ -764,16 +988,6 @@ describe("in-game debugger overlay", function()
             return nil
         end)
         luassert.is_true(zoomed == true, "wheel did not zoom the camera in")
-    end)
-
-    it("exit command closes the debugger and unfreezes", function()
-        openDebugger()
-        typeCommand("exit")
-        local ok = fixture.eventually(fixture.callTimeout, function(): boolean
-            if not (context().open as boolean) and not (context().frozen as boolean) then return true end
-            return nil
-        end)
-        luassert.is_true(ok == true, "exit did not close the debugger")
     end)
 
     it("step command ticks the game a fixed number of frames", function()
@@ -1174,6 +1388,19 @@ describe("in-game debugger overlay", function()
         openDebugger()
         typeCommand("help")
 
+        local panelHeight = -1.0
+        local panelReady = fixture.eventually(fixture.callTimeout, function(): boolean
+            panelHeight = tonumber(fixture.runLua(app, [[
+                local tools = world.resources[_G.tecsTestHooks.toolworld.KEY]
+                local owner = tools.view.owners.overlay
+                local panel = owner and owner.elements["popup.panel"]
+                return panel and panel.height or -1
+            ]])[1])
+            if panelHeight > 0 then return true end
+            return nil
+        end)
+        luassert.is_true(panelReady == true, "help popup was not rendered")
+
         -- The executed command is now in history. Up/Down must scroll the
         -- visible help document rather than recalling it into the prompt.
         for _, key in ipairs({"down", "down", "up", "pagedown",
@@ -1205,6 +1432,13 @@ describe("in-game debugger overlay", function()
         ]])[1])
         luassert.near(before, after, 0.0001,
             "popup wheel event reached camera zoom")
+        local afterScroll = tonumber(fixture.runLua(app, [[
+            local tools = world.resources[_G.tecsTestHooks.toolworld.KEY]
+            local panel = tools.view.owners.overlay.elements["popup.panel"]
+            return panel.height
+        ]])[1])
+        luassert.near(panelHeight, afterScroll, 0.0001,
+            "popup height changed while its document scrolled")
     end)
 
     it("help <command> shows usage and reports unknown", function()
@@ -1288,41 +1522,6 @@ describe("in-game debugger overlay", function()
         local envType = app.client:tryCall("cmd_goto", {id = "five"})
         luassert.is_true(envType ~= nil and (envType.ok as boolean) == false,
             "cmd_goto with a string id should fail validation")
-    end)
-
-    it("an MCP freeze survives a debugger open/close cycle and shares step", function()
-        app.client:call("cmd_freeze", {on = true})
-        local f0 = tonumber(fixture.runLua(app, "return _G.rec.frames")[1])
-        fixture.eventually(0.2, function(): boolean return nil end)
-        local f1 = tonumber(fixture.runLua(app, "return _G.rec.frames")[1])
-        luassert.is_true(f1 == f0, "game ran while MCP-frozen")
-
-        -- Opening and closing the debugger must not clobber the MCP pause.
-        tap()
-        luassert.is_true(waitOpen(true) == true, "debugger did not open while frozen")
-        tap()
-        luassert.is_true(waitOpen(false) == true, "debugger did not close while frozen")
-        local f2 = tonumber(fixture.runLua(app, "return _G.rec.frames")[1])
-        fixture.eventually(0.3, function(): boolean return nil end)
-        local f3 = tonumber(fixture.runLua(app, "return _G.rec.frames")[1])
-        luassert.is_true(f3 == f2, "closing the debugger broke the MCP freeze")
-
-        -- The cmd_step tool and the debugger share one freeze controller.
-        app.client:call("cmd_step", {n = 2})
-        local stepped = fixture.eventually(fixture.callTimeout, function(): boolean
-            local now = tonumber(fixture.runLua(app, "return _G.rec.frames")[1])
-            if now == f3 + 2 then return true end
-            return nil
-        end)
-        luassert.is_true(stepped == true, "step did not advance exactly 2 frames while frozen")
-
-        app.client:call("cmd_freeze", {on = false})
-        local resumed = fixture.eventually(fixture.callTimeout, function(): boolean
-            local now = tonumber(fixture.runLua(app, "return _G.rec.frames")[1])
-            if now > f3 + 2 then return true end
-            return nil
-        end)
-        luassert.is_true(resumed == true, "releasing the freeze did not restart gameplay")
     end)
 
     -- Toggle the stats HUD: Ctrl+. (ctrl held while . is pressed).
@@ -1442,7 +1641,7 @@ describe("in-game debugger overlay", function()
     it("down walks the command history forward", function()
         openDebugger()
         typeCommand("clear")
-        typeCommand("mark ls")
+        typeCommand("mark list")
         app.client:call("send_love_event", {event = "keypressed", args = {"up"}})
         app.client:call("send_love_event", {event = "keyreleased", args = {"up"}})
         app.client:call("send_love_event", {event = "keypressed", args = {"up"}})
@@ -1455,7 +1654,7 @@ describe("in-game debugger overlay", function()
         app.client:call("send_love_event", {event = "keypressed", args = {"down"}})
         app.client:call("send_love_event", {event = "keyreleased", args = {"down"}})
         local fwd = fixture.eventually(fixture.callTimeout, function(): boolean
-            if (context().command as string) == "mark ls" then return true end
+            if (context().command as string) == "mark list" then return true end
             return nil
         end)
         luassert.is_true(fwd == true,
@@ -1555,7 +1754,34 @@ describe("in-game debugger overlay", function()
                     positional = {"who"},
                 },
                 run = function(v)
-                    return {ok = true, message = "hello " .. tostring(v.who), data = {who = v.who}}
+                    return {
+                        ok = true,
+                        message = "hello " .. tostring(v.who),
+                        popupClosable = true,
+                        popupMarkup = [=[
+@title hello [arg]target[/arg]
+@def greeting
+[accent]Hello[/accent] from a custom command.
+@endDef
+@columns auto
+@column
+@code console
+hello world
+@endCode
+@column
+@code lua
+return "hello"
+@endCode
+@endColumns]=],
+                        data = {who = v.who},
+                    }
+                end,
+            })
+            commands.register(world, {
+                name = "bad-markup",
+                shortHelp = "return malformed popup markup",
+                run = function()
+                    return {ok = true, popupMarkup = "@code lua\nreturn true\n@endColumns"}
                 end,
             })
             return true
@@ -1573,51 +1799,15 @@ describe("in-game debugger overlay", function()
         end)
         luassert.is_true(ok == true,
             "typed custom command did not run; message=" .. tostring(context().message))
-    end)
 
-    it("draw annotations render on screen and clear over MCP", function()
-        -- Earlier tests pan and zoom the camera; restore the identity mapping
-        -- (camera at the window center, zoom 1) so world == screen.
-        app.client:call("cmd_camera_move", {x = 160, y = 120, r = 0, z = 1})
-        app.client:call("cmd_draw_line",
-            {x = 20, y = 60, x2 = 120, y2 = 60, r = 1, g = 0, b = 0, a = 1, stroke = 8, tag = "spec"})
-        local seen = fixture.eventually(fixture.callTimeout, function(): boolean
-            local px = fixture.probePixels(app, {{70 / 320, 60 / 240}})[1]
-            if px[1] > 0.5 and px[2] < 0.3 then return true end
+        typeCommand("bad-markup")
+        local rejected = fixture.eventually(fixture.callTimeout, function(): boolean
+            local message = context().message as string
+            if message:match("expected @endCode") then return true end
             return nil
         end)
-        luassert.is_true(seen == true, "annotation line did not render")
-
-        local cleared = app.client:call("cmd_draw_clear", {tag = "spec"})
-        luassert.equals(1, tonumber(cleared.cleared))
-        local gone = fixture.eventually(fixture.callTimeout, function(): boolean
-            local px = fixture.probePixels(app, {{70 / 320, 60 / 240}})[1]
-            if px[1] < 0.5 then return true end
-            return nil
-        end)
-        luassert.is_true(gone == true, "cleared annotation still renders")
-    end)
-
-    it("entity-pinned annotations die with their entity", function()
-        local eid = spawnAt(100, 100)
-        app.client:call("cmd_draw_circle", {entity = eid, radius = 12, tag = "pin"})
-        local function pinned(): number
-            return tonumber(fixture.runLua(app, [[
-                local ann = tecsTestHooks.annotations
-                local n = 0
-                for _, a in ipairs(world.resources[ann.KEY].list) do
-                    if a.tag == "pin" then n = n + 1 end
-                end
-                return n
-            ]])[1])
-        end
-        luassert.equals(1, pinned())
-        app.client:call("cmd_despawn", {id = eid})
-        local swept = fixture.eventually(fixture.callTimeout, function(): boolean
-            if pinned() == 0 then return true end
-            return nil
-        end)
-        luassert.is_true(swept == true, "annotation did not die with its entity")
+        luassert.is_true(rejected == true,
+            "malformed popup markup was not reported")
     end)
 
     it("ids toggles the id-label flag over MCP", function()
@@ -1630,11 +1820,11 @@ describe("in-game debugger overlay", function()
     it("history records typed commands and is readable over MCP", function()
         openDebugger()
         typeCommand("clear")
-        typeCommand("mark ls")
+        typeCommand("mark list")
         local hist = app.client:call("cmd_history", {})
         local entries = hist.history as {string}
         luassert.is_true(#entries >= 2, "history did not record typed commands")
-        luassert.equals("mark ls", entries[#entries])
+        luassert.equals("mark list", entries[#entries])
     end)
 
     it("get_logs captures engine log lines with filters", function()
@@ -1649,6 +1839,52 @@ describe("in-game debugger overlay", function()
         luassert.equals("INFO", last.level as string)
         luassert.equals("spec.logs", last.logger as string)
         luassert.matches("hello%-logs 42", last.message as string)
+    end)
+
+    it("logs searches the shared ring without projecting another MCP tool", function()
+        local values = fixture.runLua(app, [[
+            local logging = require("tecs.utils.logging")
+            local commands = tecsTestHooks.commands
+            logging.getLogger("spec.logs.command"):warn("Searchable Needle %d", 17)
+            local registry = world.resources[commands.KEY]
+            local result = registry:execute(
+                "logs searchable needle level=warn source=SPEC.LOGS limit=10")
+            local entries = result.data.logs
+            local _, candidates = registry:complete("logs source=spec.logs.")
+            local completed = false
+            for i = 1, #candidates do
+                if candidates[i] == "source=spec.logs.command" then completed = true end
+            end
+            local original = logging.level
+            local changed = registry:execute("logs verbosity debug")
+            logging.getLogger("spec.logs.command"):debug("verbosity-probe")
+            local debugResult = registry:execute(
+                "logs verbosity-probe level=debug source=spec.logs.command")
+            local status = registry:execute("logs verbosity")
+            local restored = registry:execute("logs verbosity " .. original:lower())
+            return result.ok, result.data.returned, entries[#entries].message,
+                result.popupDocument.title.text, result.popupModal, completed,
+                result.popupScrollToEnd, changed.data.verbosity,
+                debugResult.data.returned, status.data.verbosity,
+                original, restored.data.verbosity
+        ]])
+        luassert.equals("true", values[1])
+        luassert.equals(1, tonumber(values[2]))
+        luassert.matches("Searchable Needle 17", values[3])
+        luassert.equals("logs", values[4])
+        luassert.equals("true", values[5])
+        luassert.equals("true", values[6])
+        luassert.equals("true", values[7])
+        luassert.equals("DEBUG", values[8])
+        luassert.equals(1, tonumber(values[9]))
+        luassert.equals("DEBUG", values[10])
+        luassert.equals(values[11], values[12])
+
+        local listed = app.client:rpc("tools/list", {})
+        for _, tool in ipairs((listed.result as {string: any}).tools as {any}) do
+            luassert.is_not_equal("cmd_logs", (tool as {string: any}).name)
+            luassert.is_not_equal("cmd_logs_verbosity", (tool as {string: any}).name)
+        end
     end)
 
     it("the operator-action feed flows through get_logs with a cursor", function()
@@ -1799,11 +2035,10 @@ describe("in-game debugger overlay", function()
         luassert.equals("ffi", comp.kind as string)
 
         -- States.
-        fixture.runLua(app, "world:createState('LoveSpecState') return true")
-        app.client:call("cmd_states_push", {name = "LoveSpecState"})
+        fixture.runLua(app,
+            "world:createState('LoveSpecState') world:pushState('LoveSpecState') return true")
         local states = app.client:call("cmd_states_info", {})
         luassert.equals("LoveSpecState", states.top as string)
-        app.client:call("cmd_states_pop", {})
 
         -- Layers: hiding layer 1 removes pixels, not just the flag.
         fixture.runLua(app, [[
@@ -1887,7 +2122,6 @@ describe("in-game debugger overlay", function()
         local tileInfo = app.client:call("cmd_map_info", {x = 33, y = 33})
         luassert.equals(1, tonumber(tileInfo.x), "map info must honor the grid origin on x")
         luassert.equals(2, tonumber(tileInfo.y), "map info must honor the grid origin on y")
-        app.client:call("cmd_draw_clear", {tag = "tile"})
         app.client:call("cmd_grid", {on = false})
         app.client:call("cmd_bounds", {on = false})
 
@@ -1896,8 +2130,6 @@ describe("in-game debugger overlay", function()
         luassert.equals(0, tonumber(phys.bodies))
         local ray = app.client:call("cmd_physics_raycast", {x1 = 0, y1 = 0, x2 = 100, y2 = 100})
         luassert.equals(0, #(ray.hits as {any}))
-        app.client:call("cmd_draw_clear", {tag = "physics"})
-
         -- physics debug installs the drawer plugin on first use.
         app.client:call("cmd_physics_debug", {})
         local drawer = fixture.runLua(app, [[
@@ -1913,18 +2145,10 @@ describe("in-game debugger overlay", function()
         luassert.is_not_nil((app.client:call("cmd_audio_info", {})).active)
         luassert.is_not_nil((app.client:call("cmd_assets_list", {})).count)
 
-        -- Capabilities and describe answer over MCP.
-        local caps = app.client:call("cmd_capabilities", {})
-        luassert.is_true((caps.plugins as {string: any}).pipeline as boolean)
-        luassert.is_true((caps.plugins as {string: any}).physics as boolean)
-        luassert.is_not_nil((caps.mcp as {string: any}).port)
-        local described = app.client:call("cmd_describe", {command = "rewind"})
-        luassert.is_true(#(described.subcommands as {any}) >= 8)
-
         -- Agent session reflects the fixture's own MCP port.
         local agent = app.client:call("cmd_agent_info", {})
         luassert.equals(app.client.port, tonumber(agent.port), "agent session port mismatch")
-        luassert.is_true(tonumber(agent.tools) > 40, "tool count looks wrong")
+        luassert.is_true(tonumber(agent.tools) > 30, "tool count looks wrong")
     end)
 
     it("rewind captures a ring, loads the past, and holds while frozen", function()
@@ -2003,13 +2227,6 @@ describe("in-game debugger overlay", function()
         end
         luassert.is_true(found, "spawned entity missing from the change list")
 
-        -- Pointer drill-down against the last diff, then against the artifact.
-        local got = app.client:call("cmd_diff_get", {pointer = "/summary/entitiesAdded"})
-        luassert.is_true(tonumber(got.value) >= 1)
-        local fromFile = app.client:call("cmd_diff_get",
-            {pointer = "/totalChanges", ref = "latest"})
-        luassert.is_not_nil(fromFile.value)
-
         -- The live world diffs empty against the snapshot just taken of it.
         local same = app.client:call("cmd_diff", {from = "diff-two.snapshot"})
         luassert.equals(0, tonumber(same.totalChanges), "current should equal the fresh snapshot")
@@ -2062,22 +2279,41 @@ describe("in-game debugger overlay", function()
             return nil
         end)
         luassert.is_true(opened == true, "entity context menu did not open")
+        local title = ""
+        local titled = fixture.eventually(fixture.callTimeout, function(): boolean
+            title = tostring(fixture.runLua(app, [[
+                local tools = world.resources[_G.tecsTestHooks.toolworld.KEY]
+                local owner = tools.view.owners.overlay
+                local header = owner and owner.elements["menu.header"]
+                return header and header.text or ""
+            ]])[1])
+            if title == "#" .. tostring(eid) then return true end
+            return nil
+        end)
+        luassert.is_true(titled == true,
+            "entity context menu title was not its entity ID: " .. title)
 
-        -- Keyboard: Info(1) -> Select(2) -> Select Only(3), Enter activates.
-        for _ = 1, 2 do
-            app.client:call("send_love_event", {event = "keypressed", args = {"down"}})
-            app.client:call("send_love_event", {event = "keyreleased", args = {"down"}})
-        end
+        -- Selection actions are deliberately absent. The second row is Mark.
+        app.client:call("send_love_event", {event = "keypressed", args = {"down"}})
+        app.client:call("send_love_event", {event = "keyreleased", args = {"down"}})
         app.client:call("send_love_event", {event = "keypressed", args = {"return"}})
         app.client:call("send_love_event", {event = "keyreleased", args = {"return"}})
-        local selected = fixture.eventually(fixture.callTimeout, function(): boolean
+        local markPrompt = fixture.eventually(fixture.callTimeout, function(): boolean
             local m = context().menu as {string: any}
-            if m ~= nil and m.open == false and selectedHas(eid) and #selectedList() == 1 then
+            if m ~= nil and m.open == false and selectedHas(eid)
+                    and (context().command as string) == "mark " then
                 return true
             end
             return nil
         end)
-        luassert.is_true(selected == true, "Select Only did not run from the menu")
+        luassert.is_true(markPrompt == true,
+            "the entity menu still had a selection row before Mark")
+        app.client:call("send_love_event", {event = "keypressed", args = {"escape"}})
+        app.client:call("send_love_event", {event = "keyreleased", args = {"escape"}})
+        fixture.eventually(fixture.callTimeout, function(): boolean
+            if (context().command as string) == "" then return true end
+            return nil
+        end)
 
         -- Empty space: world menu opens, Escape closes without side effects.
         moveCursor(sx + 60, sy - 60)

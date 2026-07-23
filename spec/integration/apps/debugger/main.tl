@@ -18,7 +18,6 @@ local HEIGHT <const> = 240
 local globals <const> = _G as {string: any}
 globals.tecsTestHooks = {
     commands = require("tecs2d.debug.commands"),
-    annotations = require("tecs2d.debug.internal.annotations"),
     debugdraw = require("tecs2d.debug.internal.debugdraw"),
     toolworld = require("tecs2d.debug.internal.toolworld"),
 }
@@ -27,7 +26,7 @@ local function gamePlugin(world: tecs.World)
     world:addPlugin(mcp.new({
         port = tonumber(os.getenv("TECS_MCP_PORT")) or mcp.DEFAULT_PORT,
     }))
-    world:addPlugin(require("tecs2d.debug").new())
+    world:addPlugin(require("tecs2d.debug").new({uiHeight = HEIGHT}))
     -- Physics (empty world, no gravity) so the debugger's physics verbs have
     -- a live plugin to talk to.
     world:addPlugin(physics.new({world = love.physics.newWorld(0, 0)}))

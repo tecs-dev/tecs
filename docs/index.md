@@ -350,49 +350,64 @@ end
 
 **Core ECS**
 
-- [World](/tecs/world) - central hub for entities, systems, resources
-- [Components](/tecs/components/) - data containers with FFI support
-- [Systems](/tecs/systems) - update logic with phase ordering
-- [Queries](/tecs/queries/) - filter entities by composition
-- [Events](/tecs/events) - type-safe pub/sub messaging
-- [Relationships](/tecs/relationships/) - entity-to-entity links
+- [Static typing](/tecs/) - Teal types for components, queries, systems, events, and resources
+- [Worlds and archetypes](/tecs/archetype) - cache-friendly storage for millions of entities
+- [Components](/tecs/components/) - table, tag, scalar, and LuaJIT FFI data containers
+- [Component dependencies](/tecs/components/#auto-dependencies-with-requires) - automatically add required components
+- [Dirty tracking](/tecs/components/dirty-tracking) - change-gated systems and GPU synchronization
+- [Systems and phases](/tecs/systems) - ordered phase scheduling, before/after dependencies, and composable run conditions
+- [Queries](/tecs/queries/) - reusable filters with archetype iteration, callbacks, and grouping
+- [Events](/tecs/events) - type-safe pub/sub and entity lifecycle events
+- [Relationships](/tecs/relationships/) - entity links, hierarchies, relative transforms, and cascade deletion
 - [Plugins](/tecs/plugins) - modular, shareable game mechanics
-- [Bundles](/tecs/components/bundles) - reusable entity templates
-- [States](/tecs/states) - trackable state machines
+- [Bundles](/tecs/components/bundles) - reusable entity templates and batch spawning
+- [States](/tecs/states) - stack-based game states with transition events
+- [Serialization and save games](/tecs/save-games) - binary or table snapshots, component codecs, migrations, and resource handlers
+- [Built-ins](/tecs/builtins) - names, transforms, hierarchy, TTL, pause, disable, and state events
+- [Utilities](/tecs/utils/json) - high-performance JSON, [structured logging](/tecs/utils/logging), and [profiling](/tecs/utils/profiling)
 
 **Game Systems**
 
-- [Physics](/tecs2d/physics/) - Box2D integration with collision events
-- [Tweens](/tecs2d/tween) - timeline animation with easing, channels, tracking
-- [Audio](/tecs2d/audio/) - spatial sound, groups, voice limiting
-- [Controllers](/tecs2d/input/controller/) - rebindable keyboard and gamepad
-- [UI layout](/tecs2d/rendering/ui/) - boxes, nodes, scrolling, auto-sizing
-- [Assets](/tecs2d/assets/) - async loading with thread pool
-- [Worker jobs](/tecs2d/workers) - typed background jobs with composable handles
+- [LÖVE integration](/tecs2d/love2d) - game loop, fixed updates, frame pacing, clean restarts, and state-preserving hot reload
+- [LÖVE events](/tecs2d/events) - typed, routable keyboard, mouse, touch, gamepad, window, and system events
+- [Input](/tecs2d/input/) - keyboard, mouse, and gamepad polling with layers, latches, and ownership
+- [Controllers](/tecs2d/input/controller/) - rebindable, multi-player controls across input devices
+- [Physics](/tecs2d/physics/) - Box2D bodies, forces, collision events, filtering, and smoothing
+- [Tweens](/tecs2d/tween) - serializable timelines with easing, channels, events, and presets
+- [Audio](/tecs2d/audio/) - spatial sound, groups, fades, effects, cooldowns, and voice limiting
+- [UI layout](/tecs2d/rendering/ui/) - anchors, boxes, clipping, scrolling, and auto-sizing
+- [Assets](/tecs2d/assets/) - cached async loading, batches, pinning, and custom asset types
+- [Worker jobs](/tecs2d/workers) - typed background jobs with composable handles and independent queues
+- [World suspension](/tecs2d/suspension) - pause simulation while independent UI worlds keep running
 
 </div>
 <div class="feature-group">
 
 **Rendering**
 
-- [Render pipeline](/tecs2d/rendering/) - GPU-driven rendering
-- [Camera](/tecs2d/rendering/camera) - pixel-perfect with smooth following
-- [Sprites](/tecs2d/rendering/sprites/) - texture rendering with quads
-- [Shapes](/tecs2d/rendering/shapes) - circles, ellipses, rectangles, arcs, lines
-- [Text](/tecs2d/rendering/text) - bitmap and MSDF fonts with GPU instancing
-- [Particles](/tecs2d/rendering/particles) - Love2D particle systems
-- [Layers](/tecs2d/rendering/layers) - z-ordering and layer decorators
-- [Lighting](/tecs2d/rendering/lighting) - dynamic lights and shadows
-- [Materials](/tecs2d/rendering/materials) - per-entity GPU shader effects
-- [Styling](/tecs2d/rendering/styling) - tinting and blend modes
+- [Render pipeline](/tecs2d/rendering/) - deferred GPU rendering with instancing, compute culling, and indirect drawing
+- [Camera](/tecs2d/rendering/camera) - pixel-perfect scaling, smooth following, bounds, and multiple cameras
+- [Sprites and animation](/tecs2d/rendering/sprites/) - sheets, frame tags, pivots, tiling, and collision slices
+- [Shapes and meshes](/tecs2d/rendering/shapes) - circles, ellipses, rectangles, arcs, lines, and custom geometry
+- [Text](/tecs2d/rendering/text) - GPU-instanced BMFont and MSDF text with effects
+- [Particles](/tecs2d/rendering/particles) - LÖVE particle systems in the render pipeline
+- [Layers](/tecs2d/rendering/layers) - z-ordering, parallax, visibility, lighting, and post-processing
+- [Lighting](/tecs2d/rendering/lighting) - deferred lights, 2.5D shadows, normal maps, emission, and bloom
+- [Materials](/tecs2d/rendering/materials) - per-entity shaders, textures, and vertex displacement
+- [Styling](/tecs2d/rendering/styling) - tinting, blend modes, geometry styles, and pivots
+- [Custom drawing](/tecs2d/rendering/custom-drawing) - world-space, UI, and post-render LÖVE drawing
+- [Multi-world compositing](/tecs2d/rendering/multi-world) - independent render worlds, cameras, clocks, and cadence
 
-**Integrations**
+**Tools and Integrations**
 
-- [LÖVE2D](/tecs2d/) - game loop, input, graphics, physics, audio
-- [Aseprite](/tecs2d/rendering/sprites/) - animation, tags, slices, collision boxes
-- [Tiled](/tecs2d/tiled/) - tilemaps, object spawning, automatic material maps
-- [MCP server](/tecs2d/mcp/) - AI control, queries, screenshots, hot reload
-- [JSON](/tecs/utils/json) - high-performance LuaJIT parser
+- [Runtime introspection](/tecs2d/introspection) - inspect worlds, systems, entities, selections, and performance
+- [Visual debugger](/tecs2d/debug) - freeze, step, rewind, diff, edit, annotate, record, and replay a game
+- [MCP server](/tecs2d/mcp/) - expose debugger queries, commands, screenshots, logs, and live edits to AI agents
+- [Custom debugger commands](/tecs2d/custom-debug-commands) - project-specific typed tools on the shared command surface
+- [Integration testing](/tecs2d/integration-testing) - drive real LÖVE applications and make runtime assertions
+- [Aseprite](/tecs2d/rendering/sprites/sheets) - animations, tags, slices, pivots, collision shapes, and material maps
+- [Tiled](/tecs2d/tiled/) - animated maps, objects, chunks, parallax, tile edits, collisions, shadows, and material maps
+- [Tecs CLI](/cli/) - project creation, type checking, builds, tests, packaging, and agent setup
 </div>
 </div>
 

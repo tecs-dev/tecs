@@ -8,6 +8,7 @@ local tecs <const> = require("tecs")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
 local commands <const> = require("tecs2d.debug.commands")
 local cmdargs <const> = require("tecs2d.debug.internal.cmdargs")
+local markup <const> = require("tecs2d.debug.internal.markup")
 
 local makeRegistry <const> = cmdharness.makeRegistry
 local SpecPos <const> = cmdharness.SpecPos
@@ -80,6 +81,28 @@ describe("tecs2d.debug.commands registry", function()
         luassert.matches("^Compare two moments structurally", byName.cmd_diff.description)
         -- Undeclared tools keep the shortHelp form.
         luassert.matches("^layers list: list named or modified layers", byName.cmd_layers_list.description)
+    end)
+
+    it("omits retired commands and keeps step limited to n and dt", function()
+        local reg = makeRegistry()
+        for _, name in ipairs({"fetch", "capabilities", "describe", "freeze",
+                "stats", "exit", "bundles", "lua"}) do
+            luassert.is_nil(reg.allByName[name], name .. " should not be registered")
+        end
+
+        local tools: {string: commands.McpTool} = {}
+        for _, tool in ipairs(reg:mcpTools()) do tools[tool.name] = tool end
+        for _, name in ipairs({"cmd_camera_world", "cmd_camera_screen", "cmd_diff_get",
+                "cmd_states_push", "cmd_states_pop"}) do
+            luassert.is_nil(tools[name], name .. " should not be projected")
+        end
+
+        local stepProps = tools.cmd_step.inputSchema.properties as {string: any}
+        luassert.is_truthy(stepProps.n)
+        luassert.is_truthy(stepProps.dt)
+        local count = 0
+        for _ in pairs(stepProps) do count = count + 1 end
+        luassert.equals(2, count)
     end)
 
     it("cmd_set accepts a JSON object value over MCP", function()
@@ -176,13 +199,13 @@ describe("tecs2d.debug.commands registry", function()
     it("keeps outputSchema absent for commands that declare none", function()
         local reg = makeRegistry()
         for _, t in ipairs(reg:mcpTools()) do
-            if t.name == "cmd_capabilities" then
+            if t.name == "cmd_history" then
                 luassert.is_nil(t.outputSchema)
             end
         end
     end)
 
-    it("carries metadata and outputSchema through describe", function()
+    it("retains metadata and projects outputSchema", function()
         local reg = makeRegistry()
         reg:add({
             name = "metacmd",
@@ -194,12 +217,13 @@ describe("tecs2d.debug.commands registry", function()
                 return {ok = true, data = {hits = 1}}
             end,
         })
-        local r = reg:invokeMcp("cmd_describe", {command = "metacmd"})
-        luassert.is_true(r.ok, tostring(r.message))
-        local d = r.data as {string: any}
-        local meta = d.metadata as {string: any}
+        local meta = reg.allByName.metacmd.metadata as {string: any}
         luassert.is_truthy((meta.screenshots as {any})[1])
-        local out = d.outputSchema as {string: any}
+        local out: {string: any} = nil
+        for _, tool in ipairs(reg:mcpTools()) do
+            if tool.name == "cmd_metacmd" then out = tool.outputSchema end
+        end
+        luassert.is_truthy(out)
         local oprops = out.properties as {string: any}
         luassert.is_truthy((oprops.result as {string: any}).properties)
     end)
@@ -220,43 +244,6 @@ describe("tecs2d.debug.commands registry", function()
                     return {ok = true}
                 end})
         end)
-    end)
-
-    it("capabilities reports plugins, sections, and capture support", function()
-        local reg = makeRegistry()
-        local r = reg:execute("capabilities")
-        luassert.is_true(r.ok, tostring(r.message))
-        local plugins = r.data.plugins as {string: any}
-        luassert.is_false(plugins.pipeline as boolean, "headless world has no pipeline")
-        luassert.is_false(plugins.physics as boolean)
-        local cmds = r.data.commands as {string: any}
-        luassert.is_true((cmds.count as integer) > 30)
-        luassert.is_not_nil((cmds.sections as {string: integer}).Capture)
-        luassert.is_true((r.data.capture as {string: any}).snapshots as boolean)
-    end)
-
-    it("describe returns one command's full contract", function()
-        local reg = makeRegistry()
-        local r = reg:invokeMcp("cmd_describe", {command = "diff"})
-        luassert.is_true(r.ok, tostring(r.message))
-        luassert.equals("diff", r.data.name)
-        luassert.equals("Capture", r.data.section)
-        luassert.equals("cmd_diff", r.data.tool)
-        luassert.is_not_nil((r.data.inputSchema as {string: any}).properties)
-        local subs = r.data.subcommands as {any}
-        local sawGet = false
-        for _, sub in ipairs(subs) do
-            local sc = sub as {string: any}
-            if sc.name == "get" then
-                sawGet = true
-                luassert.equals("cmd_diff_get", sc.tool)
-                luassert.is_true((sc.annotations as {string: any}).readOnlyHint as boolean)
-            end
-        end
-        luassert.is_true(sawGet, "diff get missing from the description")
-        -- MCP-only: the typed surface uses `help` instead.
-        luassert.equals("unknown_command", (reg:execute("describe diff")).code)
-        luassert.is_false((reg:invokeMcp("cmd_describe", {command = "nope"})).ok)
     end)
 
     it("projects derived and overridden safety annotations", function()
@@ -345,18 +332,20 @@ describe("tecs2d.debug.commands registry", function()
         luassert.has_error(function()
             reg:add({name = "norun", shortHelp = "no action"})
         end)
-        luassert.has_error(function()
-            reg:add({name = "quiet", shortHelp = "alias clash", aliases = {"q"},
-                run = function(_v: {string: any}, _p: {string}): commands.Result
-                    return {ok = true}
-                end})
-        end)   -- q is the builtin query alias
     end)
 
     it("registered commands appear in the help listing names", function()
         local reg = makeRegistry()
         reg:add(helloCommand())
         luassert.equals("hello", reg.names[#reg.names])
+    end)
+
+    it("does not register alternate command spellings", function()
+        local reg = makeRegistry()
+        luassert.is_nil(reg.byName.q)
+        local result = reg:execute("q Transform")
+        luassert.is_false(result.ok)
+        luassert.equals("unknown_command", result.code)
     end)
 
     describe("entity edit commands", function()
@@ -505,6 +494,12 @@ describe("tecs2d.debug.commands registry", function()
             luassert.is_true(w:isAlive(id))
             luassert.equals(42, (w:get(id, SpecPos) as {string: number}).x)
             luassert.is_true(debugcontext.isSelected(ctx, id), "spawned entity should be selected")
+            luassert.equals(0, r.data.worldId)
+
+            local changed = reg:execute("modify " .. tostring(id) ..
+                " DbgCmdPos {x = 7} worldId=0")
+            luassert.is_true(changed.ok, tostring(changed.message))
+            luassert.equals(7, (w:get(id, SpecPos) as {string: number}).x)
         end)
 
         it("spawn rejects unknown components and bad expressions", function()
@@ -533,56 +528,36 @@ describe("tecs2d.debug.commands registry", function()
                 "inverted query must keep non-matching selected entities")
         end)
 
-        it("help wraps the command list over multiple popup lines", function()
+        it("help produces a structured popup document", function()
             local reg = makeRegistry()
             local r = reg:execute("help")
-            luassert.equals("debugger help", r.popupTitle)
+            luassert.equals("debugger help", r.popupDocument.title.text)
             luassert.is_true(r.popupModal)
             luassert.is_true(r.popupClosable)
-            for _, line in ipairs(r.popup) do
-                luassert.is_true(#line <= 70,
-                    "help popup line too long: " .. line)
-            end
+            luassert.equals("section", r.popupDocument.blocks[1].lines[2].style)
         end)
 
         it("command help uses the signature as its popup title", function()
             local reg = makeRegistry()
             local r = reg:execute("help select")
-            luassert.matches("select", r.popupTitle)
+            luassert.matches("select", r.popupDocument.title.text)
             luassert.is_true(r.popupModal)
             luassert.is_true(r.popupClosable)
-            luassert.is_false(r.popup[1] == r.popupTitle,
-                "title must not be duplicated in the popup body")
+            luassert.equals("section", r.popupDocument.blocks[1].lines[3].style)
         end)
 
         it("help lists every command's subcommand verbs", function()
             local reg = makeRegistry()
-            local joined = table.concat((reg:execute("help")).popup, "\n")
-            luassert.matches("Subcommands:", joined)
-            luassert.matches("light\tinfo, color, toggle, shadows, bloom", joined)
-            luassert.matches("snapshot\tsave", joined)
+            local document = (reg:execute("help")).popupDocument
+            local joined = table.concat(markup.plainLines(document), "\n")
+            luassert.matches("Subcommands", joined)
+            luassert.matches("light\ninfo, color, toggle, shadows, bloom", joined)
+            luassert.matches("snapshot\nsave", joined)
         end)
 
     end)
 
-    describe("draw and ids commands", function()
-        it("draw verbs write the annotation store and clear removes", function()
-            local reg = makeRegistry()
-            local store = reg.env.annotations
-            luassert.is_true((reg:execute("draw rect 10 10 5 5 tag=path")).ok)
-            luassert.is_true((reg:execute("draw text 0 0 spawn point here tag=path")).ok)
-            luassert.equals(2, #store.list)
-            luassert.equals("spawn point here", store.list[2].text)
-
-            local viaMcp = reg:invokeMcp("cmd_draw_circle", {x = 1, y = 2, radius = 8, entity = 42})
-            luassert.is_true(viaMcp.ok)
-            luassert.equals(42, store.list[3].entity)
-
-            local cleared = reg:execute("draw clear path")
-            luassert.equals(2, cleared.data.cleared)
-            luassert.equals(1, #store.list)
-        end)
-
+    describe("ids command", function()
         it("ids toggles the context flag", function()
             local reg, _, ctx = makeRegistry()
             luassert.is_true((reg:execute("ids")).data.shown as boolean)
@@ -615,6 +590,18 @@ describe("tecs2d.debug.commands registry", function()
             luassert.same({"spec.Completable"}, names)
         end)
 
+        it("merges default arguments and verbs for mixed commands", function()
+            local reg = makeRegistry()
+            local _, defaultArgs = reg:complete("logs s")
+            luassert.same({"since=", "source="}, defaultArgs)
+
+            local _, verbs = reg:complete("logs v")
+            luassert.same({"verbosity"}, verbs)
+
+            local _, levels = reg:complete("logs verbosity d")
+            luassert.same({"debug"}, levels)
+        end)
+
         it("completes component names, marks, and @selection", function()
             local reg, w, ctx = makeRegistry()
             local eid = w:spawn(SpecPos(0, 0))
@@ -638,6 +625,22 @@ describe("tecs2d.debug.commands registry", function()
 
             local _, third = reg:complete("set 5 DbgCmdP")
             luassert.same({"DbgCmdPos"}, third)
+
+            local _, named = reg:complete("set 5 comp=DbgCmdP")
+            luassert.same({"comp=DbgCmdPos"}, named)
+        end)
+
+        it("derives named keys, enums, and booleans from schemas", function()
+            local reg = makeRegistry()
+
+            local _, keys = reg:complete("snapshot save f")
+            luassert.same({"format="}, keys)
+
+            local _, formats = reg:complete("snapshot save format=j")
+            luassert.same({"format=json"}, formats)
+
+            local _, booleans = reg:complete("bounds o")
+            luassert.same({"on", "off"}, booleans)
         end)
 
         it("returns nothing for unknown commands or broken input", function()
@@ -655,7 +658,7 @@ describe("tecs2d.debug.commands registry", function()
             luassert.is_nil(reg.lastOutput)
 
             luassert.is_true((reg:execute("help")).ok)
-            luassert.matches("Select:", table.concat(reg.lastOutput, "\n"))
+            luassert.matches("\nSelect\n", table.concat(reg.lastOutput, "\n"))
 
             local flat = commands.flattenOutput(reg.lastOutput)
             luassert.is_nil(flat:find("\t", 1, true), "tabs must flatten for the clipboard")
@@ -670,10 +673,11 @@ describe("tecs2d.debug.commands registry", function()
     describe("sections", function()
         it("help groups the command list by section", function()
             local reg = makeRegistry()
-            local joined = table.concat((reg:execute("help")).popup, "\n")
-            luassert.matches("Select:", joined)
-            luassert.matches("Engine:", joined)
-            luassert.matches("Session:", joined)
+            local document = (reg:execute("help")).popupDocument
+            local joined = table.concat(markup.plainLines(document), "\n")
+            luassert.matches("\nSelect\n", joined)
+            luassert.matches("\nEngine\n", joined)
+            luassert.matches("\nSession\n", joined)
         end)
 
         it("bare completion carries section separators, prefixes do not", function()
@@ -688,77 +692,8 @@ describe("tecs2d.debug.commands registry", function()
         end)
     end)
 
-    describe("freeze command", function()
-        it("toggles the operator hold and interoperates with other holders", function()
-            local reg, w = makeRegistry()
-            local fz = reg.env.suspension
-
-            local on = reg:execute("freeze")
-            luassert.is_true(on.ok, tostring(on.message))
-            luassert.is_true(on.data.frozen as boolean)
-            luassert.is_true(fz:heldBy("operator"))
-            luassert.is_true(fz:isSuspended())
-
-            -- Another holder keeps the world frozen after the operator
-            -- releases.
-            fz:suspend("mcp")
-            local off = reg:execute("freeze off")
-            luassert.is_true(off.ok, tostring(off.message))
-            luassert.is_false(fz:heldBy("operator"))
-            luassert.is_true(off.data.frozen as boolean, "mcp holder must keep the freeze")
-            fz:resume("mcp")
-            luassert.is_false(fz:isSuspended())
-
-            -- Bare freeze toggles; on/off are idempotent.
-            luassert.is_true((reg:execute("freeze")).data.frozen as boolean)
-            luassert.is_false((reg:execute("freeze")).data.frozen as boolean)
-            luassert.is_true((reg:execute("freeze on")).data.frozen as boolean)
-            luassert.is_true((reg:execute("freeze on")).data.frozen as boolean)
-            luassert.is_false((reg:execute("freeze off")).data.frozen as boolean)
-
-            -- Frozen gameplay phases actually stop.
-            local ticks = 0
-            w:addSystem({
-                name = "spec.FreezeTickable",
-                phase = tecs.phases.Update,
-                run = function() ticks = ticks + 1 end,
-            })
-            w:update(0.016)
-            luassert.equals(1, ticks)
-            reg:execute("freeze on")
-            w:update(0.016)
-            luassert.equals(1, ticks, "frozen gameplay still ran")
-            reg:execute("freeze off")
-            w:update(0.016)
-            luassert.equals(2, ticks)
-        end)
-    end)
-
-    describe("stats command", function()
-        it("reports world stats, fps, and window size in one payload", function()
-            local reg, w = makeRegistry()
-            w:spawn(SpecPos(0, 0))
-            w:commit()
-
-            local r = reg:execute("stats")
-            luassert.is_true(r.ok, tostring(r.message))
-            local s = w:getStats()
-            luassert.equals(s.entities, r.data.entities)
-            luassert.equals(s.archetypes, r.data.archetypes)
-            luassert.equals(s.components, r.data.components)
-            luassert.equals(s.systems, r.data.systems)
-            luassert.is_true((r.data.memoryKB as number) > 0)
-            luassert.equals((r.data.memoryKB as number) / 1024, r.data.memoryMB)
-            luassert.equals(60, r.data.fps, "mock fps")
-            local window = r.data.window as {string: number}
-            luassert.equals(1920, window.width)
-            luassert.equals(1080, window.height)
-            luassert.matches("entities", table.concat(r.popup, "\n"))
-        end)
-    end)
-
-    describe("context command", function()
-        it("returns the shared context-report payload", function()
+    describe("context tool", function()
+        it("is MCP-only and returns the shared context-report payload", function()
             local contextreport = require("tecs2d.debug.internal.contextreport")
             local reg, w, ctx = makeRegistry()
             local eid = w:spawn(SpecPos(1, 2))
@@ -772,7 +707,10 @@ describe("tecs2d.debug.commands registry", function()
             w:despawn(dead)
             w:commit()
 
-            local r = reg:execute("context")
+            luassert.is_false(reg:execute("context").ok,
+                "context must not be typeable in the overlay")
+            local r, err = reg:invokeMcp("cmd_context", {})
+            luassert.is_nil(err)
             luassert.is_true(r.ok, tostring(r.message))
             luassert.same(contextreport.build(w, ctx), r.data)
             luassert.equals(tostring(eid), (r.data.marks as {string: string}).boss)
@@ -780,7 +718,6 @@ describe("tecs2d.debug.commands registry", function()
                 "marks on despawned entities must prune")
             luassert.equals("select", r.data.mode)
             luassert.same({eid}, r.data.selected)
-            luassert.matches("selected", table.concat(r.popup, "\n"))
         end)
     end)
 

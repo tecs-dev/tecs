@@ -10,8 +10,8 @@
 --- honored so test harnesses can assign a free port per game instance.
 ---
 --- The plugin ensures the headless debugger core (see tecs2d.debug.context),
---- so the registry-derived cmd_* command tools (cmd_context,
---- cmd_capabilities, ...) work in every session; the debug plugin
+--- so the registry-derived cmd_* command tools (cmd_context, cmd_info, ...)
+--- work in every session; the debug plugin
 --- (require("tecs2d.debug").new()) adds the in-game overlay on top of the
 --- same core. Set debugCore = false to ensure only the freeze controller.
 ---
@@ -30,7 +30,7 @@ local debugapi <const> = require("tecs2d.debug.context")
 local mcpinfo <const> = require("tecs2d.internal.mcpinfo")
 local crash <const> = require("tecs2d.internal.crash")
 local state <const> = require("tecs2d.mcp.internal.state")
-local logtap <const> = require("tecs2d.mcp.internal.logtap")
+local logtap <const> = require("tecs2d.internal.logtap")
 local transport <const> = require("tecs2d.mcp.internal.transport")
 local rpc <const> = require("tecs2d.mcp.internal.rpc")
 local handlers <const> = require("tecs2d.mcp.internal.handlers")
@@ -40,7 +40,7 @@ local record mcp
         port: number
 
         --- Ensure the headless debugger core (context, command registry,
-        --- freeze, annotations, recorder) so the cmd_* tools work without
+        --- freeze, recorder, diagnostic visuals) so the cmd_* tools work without
         --- the debug plugin. Default true; false ensures only the freeze
         --- controller.
         debugCore: boolean
@@ -111,10 +111,6 @@ function mcp.new(config?: mcp.Config): function(world: tecs.World)
             end,
         }
 
-        -- The run_lua sandbox, callable by debugger commands (cmd_step's
-        -- `lua` post-step read) without a dependency on this module.
-        w.resources[mcpinfo.LUA_EVAL] = handlers.evalInSandbox
-
         -- Crash integration: mark the session crashed (tools/call answers
         -- game_crashed; ping and get_logs keep working) and keep serving
         -- the transport from inside the error-screen loop so an agent's
@@ -131,7 +127,7 @@ function mcp.new(config?: mcp.Config): function(world: tecs.World)
 
         -- The MCP frame systems run in RenderFirst, not a gameplay phase:
         -- a freeze disables the gameplay phases (First..Last), and the server
-        -- must keep answering cmd_freeze/cmd_step/run_lua while frozen.
+        -- must keep answering cmd_step/run_lua while suspended.
         -- RenderFirst also runs
         -- before the render pipeline's PreRender sync, so world ops drained this
         -- frame render this frame; the component-dirty bits they set would
@@ -139,10 +135,10 @@ function mcp.new(config?: mcp.Config): function(world: tecs.World)
         -- could see them.
         --
         -- The debugger core (shared with the debug plugin) carries the command
-        -- registry, freeze controller, and the always-on rewind/screenshot/
+        -- registry, suspension controller, and the always-on rewind/screenshot/
         -- recording systems; ensuring it here keeps the cmd_* tools and
-        -- freeze/step working with or without the debug plugin. debugCore =
-        -- false narrows this to the freeze controller alone.
+        -- stepping working with or without the debug plugin. debugCore =
+        -- false narrows this to the suspension controller alone.
         if config and config.debugCore == false then
             debugapi.ensureSuspension(w)
         else
@@ -151,10 +147,8 @@ function mcp.new(config?: mcp.Config): function(world: tecs.World)
 
         -- Boot frozen when asked (TECS_BOOT_FROZEN=1, set by the bridge's
         -- start_game {frozen:true}): the freeze is acquired before the first
-        -- frame, so the game is inspectable at frame zero instead of racing
-        -- the operator's cmd_freeze. Startup phases still run (the freeze
-        -- only disables the gameplay group). Held as "operator" -- the same
-        -- hold cmd_freeze manages -- so cmd_freeze on=false releases it.
+        -- frame, so the game is inspectable at frame zero. Startup phases
+        -- still run because suspension only disables the gameplay group.
         if os.getenv("TECS_BOOT_FROZEN") == "1" then
             debugapi.ensureSuspension(w):suspend("operator")
         end

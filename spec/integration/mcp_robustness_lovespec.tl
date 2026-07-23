@@ -54,19 +54,18 @@ describe("mcp robustness: hostile input survives", function()
         -- debugger core: registry-derived debugger tools answer normally, and
         -- a hostile call still gets a tool-level error rather than crashing
         -- or hanging the connection.
-        local drawn = app.client:call("cmd_draw_rect", {x = 10, y = 10, w = 20, h = 20})
-        luassert.is_number(drawn.id as number, "draw without debug plugin: no annotation id")
-        local caps = app.client:call("cmd_capabilities")
-        luassert.is_table(caps.commands, "capabilities without debug plugin: no command info")
+        local spawned = app.client:call("cmd_spawn", {spec = "Transform {x = 10, y = 10}"})
+        luassert.is_number(spawned.id as number, "spawn without debug plugin: no entity id")
+        local context = app.client:call("cmd_context")
+        luassert.is_number(context.entityCount,
+            "context without debug plugin: no world information")
         expectToolError(app, "cmd_select", {id = 999999}, "select of a dead id")
         expectAlive(app, "after headless debugger calls")
     end)
 
     it("unknown cmd_* names still answer cleanly", function()
-        -- A cmd_* name the registry does not project (draw only has
-        -- subcommand verbs) gets a JSON-RPC error naming the unknown tool.
-        local envelope, err = app.client:tryCall("cmd_draw", {type = "rect"})
-        luassert.is_nil(envelope, "unprojected cmd_draw name: expected no envelope")
+        local envelope, err = app.client:tryCall("cmd_not_real", {})
+        luassert.is_nil(envelope, "unknown cmd_* tool: expected no envelope")
         luassert.matches("unknown debugger tool", tostring(err))
         expectAlive(app, "after unknown debug tool")
     end)

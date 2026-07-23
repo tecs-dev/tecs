@@ -1,21 +1,23 @@
 --- Engine-section debugger commands: systems, archetypes, components,
---- states, physics, controllers, assets, audio, fetch, resources, and
---- bundles, plus the subsystem lookups they share (the physics state, the
---- controller/audio/asset managers, and the asset manager's strong load log).
+--- states, physics, controllers, assets, audio, logs, and resources, plus the
+--- subsystem lookups they share (the physics state, the controller/audio/asset
+--- managers, and the asset manager's strong load log).
 ---
 --- Everything shared with the core registry arrives through cmdtypes.Deps;
 --- this module must not require tecs2d.debug.commands (a load cycle).
 
 local tecs <const> = require("tecs")
-local json <const> = require("tecs.utils.json")
+local logging <const> = require("tecs.utils.logging")
 local gfxtypes <const> = require("tecs2d.gfx.types")
 local componentregistry <const> = require("tecs.internal.components")
 local sanitize <const> = require("tecs2d.debug.internal.sanitize")
 local entityinfo <const> = require("tecs2d.internal.entityinfo")
 local systemcontrol <const> = require("tecs2d.internal.systemcontrol")
+local logtap <const> = require("tecs2d.internal.logtap")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
 local cmdargs <const> = require("tecs2d.debug.internal.cmdargs")
 local cmdtypes <const> = require("tecs2d.debug.internal.cmdtypes")
+local markup <const> = require("tecs2d.debug.internal.markup")
 local assets_module <const> = require("tecs2d.assets")
 
 local format <const> = string.format
@@ -27,35 +29,10 @@ local record engine
 end
 
 local systemNameSchema <const>: cmdargs.Schema = {
-    args = { name = {required = true, help = "system name (see `systems`)"} },
+    args = { name = {required = true, completion = "systems",
+        help = "system name (see `systems`)"} },
     positional = {"name"},
 }
-
-local fetchSchema <const>: cmdargs.Schema = {
-    args = {
-        expr = {rest = true, required = true,
-            help = "component names separated by spaces; -Foo excludes"},
-        limit = {default = 100, min = 0, help = "max entities returned"},
-        count_only = {kind = "boolean",
-            help = "return only the match count, no entity payloads"},
-        x = {kind = "number", help = "bounds left world x (give all of x, y, w, h or none)"},
-        y = {kind = "number", help = "bounds top world y"},
-        w = {kind = "number", help = "bounds width in world units"},
-        h = {kind = "number", help = "bounds height in world units"},
-    },
-    positional = {"expr"},
-}
-cmdargs.validate(fetchSchema)
-
-local bundleSpawnSchema <const>: cmdargs.Schema = {
-    args = {
-        name = {required = true, help = "bundle name"},
-        components = {kind = "table",
-            help = "component overrides: {Name = {field = value}, ...} (a JSON object over MCP)"},
-    },
-    positional = {"name", "components"},
-}
-cmdargs.validate(bundleSpawnSchema)
 
 local resourcesSchema <const>: cmdargs.Schema = {
     args = {
@@ -65,52 +42,74 @@ local resourcesSchema <const>: cmdargs.Schema = {
 }
 cmdargs.validate(resourcesSchema)
 
--- Evaluate a Lua table expression from the command line. Same trust level
--- as the run_lua MCP tool: the debugger is a developer surface.
-local function evalTable(expr: string): {string: any}, string
-    local chunk, cerr = load("return " .. expr, "debug-expr", "t")
-    if not chunk then return nil, "bad expression: " .. tostring(cerr) end
-    local ok, result = pcall(chunk)
-    if not ok then return nil, "expression failed: " .. tostring(result) end
-    if type(result) ~= "table" then
-        return nil, "expression must be a table, got " .. type(result)
-    end
-    return result as {string: any}, nil
+local logsSchema <const>: cmdargs.Schema = {
+    args = {
+        query = {rest = true,
+            help = "case-insensitive text in the message, logger, or level"},
+        level = {enum = {"debug", "info", "warn", "error"},
+            help = "minimum severity"},
+        source = {completion = "loggers",
+            help = "case-insensitive logger-name substring"},
+        since = {kind = "number", min = 0,
+            help = "only lines captured within this many seconds"},
+        limit = {default = 100, min = 1, max = 500,
+            help = "maximum matching lines, newest retained"},
+        clear = {kind = "boolean", help = "empty the captured log ring"},
+    },
+    positional = {"query"},
+}
+cmdargs.validate(logsSchema)
+
+local verbositySchema <const>: cmdargs.Schema = {
+    args = {
+        level = {enum = {"debug", "info", "warn", "error", "off"},
+            help = "global logger verbosity; omit to show the current value"},
+    },
+    positional = {"level"},
+}
+cmdargs.validate(verbositySchema)
+
+local LOG_LEVELS <const>: {string: logging.LogLevel} = {
+    debug = "DEBUG",
+    info = "INFO",
+    warn = "WARN",
+    error = "ERROR",
+    off = "OFF",
+}
+
+local function shortLogTime(value: string): string
+    return value:match("(%d%d:%d%d:%d%d)$") or value
 end
 
--- A table-kind argument value: a table passes through (a JSON object over
--- MCP); a nonempty string evaluates as a Lua table expression. Returns nil
--- with no error when the value is absent.
-local function parseTableArg(value: any): {string: any}, string
-    if type(value) == "table" then
-        return value as {string: any}, nil
-    end
-    if type(value) == "string" and (value as string) ~= "" then
-        return evalTable(value as string)
-    end
-    return nil, nil
-end
-
--- Archetype signature (sorted component names) as one display string.
-local function archetypeSignature(arch: tecs.Archetype): string
-    local names: {string} = {}
-    for i = 1, #arch.componentList do
-        local nm = arch.componentList[i].componentName
-        if nm then names[#names + 1] = nm end
-    end
-    table.sort(names)
-    return table.concat(names, ", ")
+local function logLine(entry: {string: any}): markup.Line
+    local time = shortLogTime(entry.time as string)
+    local level = entry.level as string
+    local logger = entry.logger as string
+    local message = entry.message as string
+    local levelStyle = (level == "WARN" or level == "ERROR") and "warning"
+        or ((level == "INFO") and "accent" or "muted")
+    local prefix = time .. "  " .. level .. "  " .. logger .. "  "
+    return {
+        text = prefix .. message,
+        style = "body",
+        spans = {
+            {text = time .. "  ", style = "muted"},
+            {text = level, style = levelStyle},
+            {text = "  ", style = "body"},
+            {text = logger, style = "code"},
+            {text = "  ", style = "body"},
+            {text = message, style = "body"},
+        },
+    }
 end
 
 function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
     -- The shared context, aliased once so command bodies stay terse.
     local w <const> = d.world
     local ctx <const> = d.ctx
-    local env <const> = d.env
     local pipeline <const> = d.pipeline
     local componentFor <const> = d.componentFor
     local resolveTargets <const> = d.resolveTargets
-    local makeAnnotation <const> = d.makeAnnotation
     local onOffSchema <const> = d.onOffSchema
     local optionalTargetSchema <const> = d.optionalTargetSchema
 
@@ -259,7 +258,6 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             subcommands = {
                 {
                     name = "list",
-                    aliases = {"ls"},
                     shortHelp = "list every system with its phase and state",
                     run = function(_v: {string: any}, _parts: {string}): cmdtypes.Result
                         return systemsList()
@@ -267,7 +265,6 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 },
                 {
                     name = "stop",
-                    complete = {[1] = "systems"},
                     shortHelp = "disable a system by name",
                     schema = systemNameSchema,
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
@@ -276,7 +273,6 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 },
                 {
                     name = "start",
-                    complete = {[1] = "systems"},
                     shortHelp = "re-enable a stopped system",
                     schema = systemNameSchema,
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
@@ -285,7 +281,6 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 },
                 {
                     name = "toggle",
-                    complete = {[1] = "systems"},
                     shortHelp = "flip a system between stopped and running",
                     schema = systemNameSchema,
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
@@ -300,7 +295,6 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 },
                 {
                     name = "info",
-                    complete = {[1] = "systems"},
                     shortHelp = "show one system's phase, order, and state",
                     schema = systemNameSchema,
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
@@ -456,9 +450,9 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 },
                 {
                     name = "info",
-                    complete = {[1] = "components"},
                     shortHelp = "show a component's schema by name or id",
-                    schema = { args = { name = {required = true, help = "component name or id"} },
+                    schema = { args = { name = {required = true,
+                        completion = "components", help = "component name or id"} },
                         positional = {"name"} },
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
                         local nm = v.name as string
@@ -477,22 +471,21 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                             return {ok = false, code = "unknown_component", message = "components info: " .. cerr}
                         end
                         local schema = entityinfo.componentSchema(comp)
-                        local popup: {string} = {
-                            "component " .. tostring(schema.name),
-                            "  id\t" .. tostring(schema.id),
-                            "  storage\t" .. schema.kind,
-                            "  serializable\t" .. (schema.serializable and "yes" or "no"),
-                        }
+                        local document = markup.new("component " .. tostring(schema.name))
+                        markup.text(document, "id  " .. tostring(schema.id))
+                        markup.text(document, "storage  " .. schema.kind)
+                        markup.text(document, "serializable  " ..
+                            (schema.serializable and "yes" or "no"))
                         if #schema.fields > 0 then
-                            popup[#popup + 1] = "Fields:"
+                            markup.section(document, "Fields")
                             for i = 1, #schema.fields do
                                 local f = schema.fields[i]
                                 local def = schema.defaults and schema.defaults[f.name]
-                                popup[#popup + 1] = "  " .. f.name .. "\t" .. f.type ..
-                                    ((def ~= nil) and ("\t= " .. tostring(def)) or "")
+                                markup.definition(document, f.name, f.type ..
+                                    ((def ~= nil) and (" = " .. tostring(def)) or ""))
                             end
                         end
-                        return {ok = true, popup = popup,
+                        return {ok = true, popupDocument = document,
                             data = {name = schema.name, id = schema.id, kind = schema.kind,
                                 fields = schema.fields, defaults = schema.defaults,
                                 serializable = schema.serializable}}
@@ -503,8 +496,8 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
         {
             name = "states",
             section = "Engine",
-            shortHelp = "show the state stack; `push <name>` / `pop` change it",
-            examples = {"states info", "states push Paused", "states pop"},
+            shortHelp = "show the state stack",
+            examples = {"states info"},
             subcommands = {
                 {
                     name = "info",
@@ -526,46 +519,6 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                             popup[#popup + 1] = "  (empty)"
                         end
                         return {ok = true, popup = popup, data = {stack = names, top = w:peekState()}}
-                    end,
-                },
-                {
-                    name = "push",
-                    shortHelp = "push a created state onto the stack",
-                    schema = { args = { name = {required = true, help = "state name (created with createState)"} },
-                        positional = {"name"} },
-                    run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local nm = v.name as string
-                        local ok, err = pcall(function(): boolean
-                            w:pushState(nm)
-                            return true
-                        end)
-                        if not ok then
-                            return {ok = false, code = "push_failed",
-                                message = "states push: " .. tostring(err)}
-                        end
-                        debugcontext.pushEvent(ctx, "edit", {state = nm, pushed = true})
-                        return {ok = true, message = "pushed state " .. nm, data = {top = w:peekState()}}
-                    end,
-                },
-                {
-                    name = "pop",
-                    shortHelp = "pop the top state off the stack",
-                    run = function(_v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local top = w:peekState()
-                        if not top then
-                            return {ok = false, code = "empty_stack", message = "states pop: the stack is empty"}
-                        end
-                        local ok, err = pcall(function(): boolean
-                            w:popState()
-                            return true
-                        end)
-                        if not ok then
-                            return {ok = false, code = "pop_failed",
-                                message = "states pop: " .. tostring(err)}
-                        end
-                        debugcontext.pushEvent(ctx, "edit", {state = top, popped = true})
-                        return {ok = true, message = "popped " .. tostring(top),
-                            data = {popped = top, top = w:peekState()}}
                     end,
                 },
             },
@@ -651,7 +604,7 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 },
                 {
                     name = "raycast",
-                    shortHelp = "cast a ray, draw it, and select the hits",
+                    shortHelp = "cast a ray and select the hits",
                     schema = { args = {
                         x1 = {required = true, kind = "number", help = "start world x"},
                         y1 = {required = true, kind = "number", help = "start world y"},
@@ -688,11 +641,7 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         table.sort(hits, function(a: {string: number}, b: {string: number}): boolean
                             return a.fraction < b.fraction
                         end)
-                        env.annotations:add(makeAnnotation({x = x1, y = y1, x2 = x2, y2 = y2,
-                            seconds = 5, tag = "physics", g = 0.4, b = 1}, "line"))
                         for i = 1, #hits do
-                            env.annotations:add(makeAnnotation({x = hits[i].x, y = hits[i].y,
-                                radius = 4, seconds = 5, tag = "physics", g = 0.2, b = 0.2}, "circle"))
                             if hits[i].entity ~= 0 then
                                 debugcontext.addSelected(ctx, hits[i].entity as integer)
                             end
@@ -701,14 +650,13 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                             debugcontext.pushEvent(ctx, "selection", {selected = #ctx.selected})
                         end
                         return {ok = true,
-                            message = "raycast hit " .. tostring(#hits) ..
-                                " shape(s); drawn for 5s (`draw clear physics`)",
+                            message = "raycast hit " .. tostring(#hits) .. " shape(s)",
                             data = {hits = hits}}
                     end,
                 },
                 {
                     name = "query",
-                    shortHelp = "select bodies inside a world-space box and draw it",
+                    shortHelp = "select bodies inside a world-space box",
                     schema = { args = {
                         x = {required = true, kind = "number", help = "left world x"},
                         y = {required = true, kind = "number", help = "top world y"},
@@ -740,14 +688,11 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                                 end
                                 return true
                             end)
-                        env.annotations:add(makeAnnotation({x = qx, y = qy, w = qw, h = qh,
-                            seconds = 5, tag = "physics", g = 0.4, b = 1}, "rect"))
                         if #found > 0 then
                             debugcontext.pushEvent(ctx, "selection", {selected = #ctx.selected})
                         end
                         return {ok = true,
-                            message = "query matched " .. tostring(#found) ..
-                                " bodies; drawn for 5s (`draw clear physics`)",
+                            message = "query matched " .. tostring(#found) .. " bodies",
                             data = {entities = found}}
                     end,
                 },
@@ -1040,168 +985,106 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             },
         },
         {
-            name = "fetch",
+            name = "logs",
             section = "Engine",
-            complete = {[0] = "components"},
-            shortHelp = "fetch entities matching a component query, without selecting them",
-            mcpHelp = "Fetch entities matching a component expression ('Enemy -Dead' means has Enemy, lacks Dead) with their serialized component data, without touching the operator's selection. count_only=true answers \"how many match\" with just the count -- the cheapest population check; prefer it whenever you don't need the component data. Give x, y, w, h to restrict to a world-space box (spatial filter via Position when registered, else Transform; the spatial component is always included). Returns up to limit entities plus a truncated flag. Use cmd_query when you want to select the matches instead.",
-            schema = fetchSchema,
-            examples = {"fetch Transform -Disabled", "fetch Enemy limit=10",
-                "fetch Transform x=0 y=0 w=640 h=360"},
-            annotations = {readOnlyHint = true, idempotentHint = true},
-            outputSchema = {
-                type = "object",
-                properties = {
-                    count = {type = "integer", description = "entities returned"},
-                    entities = {type = "array", items = {type = "object", properties = {
-                        id = {type = "integer"},
-                        archetypeId = {type = "integer",
-                            description = "absent in the bounds form"},
-                        archetypeComponents = {type = "string",
-                            description = "sorted archetype signature; absent in the bounds form"},
-                        components = {type = "object",
-                            description = "serialized data of the included components"},
-                    }}},
-                    truncated = {type = "boolean", description = "true when the limit cut the results"},
-                    bounds = {type = "object", properties = {
-                        x = {type = "number"},
-                        y = {type = "number"},
-                        width = {type = "number"},
-                        height = {type = "number"},
-                    }, description = "the spatial filter, when one was given"},
+            mcp = false,
+            shortHelp = "search recent engine logs or change logger verbosity",
+            schema = logsSchema,
+            examples = {
+                "logs",
+                "logs collision",
+                "logs level=warn",
+                "logs source=tecs2d.debug since=10",
+                "logs verbosity",
+                "logs verbosity debug",
+            },
+            subcommands = {
+                {
+                    name = "verbosity",
+                    mcp = false,
+                    shortHelp = "show or change the global logger verbosity",
+                    schema = verbositySchema,
+                    examples = {
+                        "logs verbosity",
+                        "logs verbosity debug",
+                        "logs verbosity info",
+                        "logs verbosity off",
+                    },
+                    run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
+                        local previous = logging.level
+                        local requested = v.level as string
+                        if requested then
+                            logging.setLevel(LOG_LEVELS[requested])
+                        end
+                        local current = logging.level
+                        local message = requested
+                            and ("log verbosity: " .. previous:lower()
+                                .. " -> " .. current:lower())
+                            or ("log verbosity: " .. current:lower())
+                        return {
+                            ok = true,
+                            message = message,
+                            data = {
+                                verbosity = current,
+                                previous = requested and previous or nil,
+                            },
+                        }
+                    end,
                 },
-                required = {"count", "entities", "truncated"},
             },
             run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                local given = 0
-                if v.x ~= nil then given = given + 1 end
-                if v.y ~= nil then given = given + 1 end
-                if v.w ~= nil then given = given + 1 end
-                if v.h ~= nil then given = given + 1 end
-                if given ~= 0 and given ~= 4 then
-                    return {ok = false, code = "invalid_arguments",
-                        message = "fetch: bounds need all of x, y, w, h (or none)"}
+                if v.clear == true then
+                    local cleared = logtap.clear()
+                    return {
+                        ok = true,
+                        message = "logs: cleared " .. tostring(cleared) .. " line(s)",
+                        data = {cleared = cleared},
+                    }
                 end
 
-                local include: {tecs.Component} = {}
-                local includeNames: {string} = {}
-                local exclude: {tecs.Component} = {}
-                for tok in (v.expr as string):gmatch("%S+") do
-                    local nm = tok
-                    local bucket = "include"
-                    if tok:sub(1, 1) == "-" then
-                        nm = tok:sub(2)
-                        bucket = "exclude"
-                    elseif tok:sub(1, 1) == "+" then
-                        nm = tok:sub(2)
-                    end
-                    local comp, cerr = componentFor(nm)
-                    if not comp then
-                        return {ok = false, code = "unknown_component", message = "fetch: " .. cerr}
-                    end
-                    if bucket == "include" then
-                        include[#include + 1] = comp
-                        includeNames[#includeNames + 1] = nm
-                    else
-                        exclude[#exclude + 1] = comp
-                    end
-                end
-                if #include == 0 then
-                    return {ok = false, code = "invalid_arguments",
-                        message = "fetch: needs at least one component to include"}
-                end
-                local limit = math.max(0, math.floor(v.limit as number))
+                local level = (v.level as string) or "debug"
+                local minRank = logtap.levelRank(level)
+                local entries, matched, captured, dropped, latest = logtap.query(
+                    minRank,
+                    v.query as string,
+                    v.source as string,
+                    0,
+                    (v.since as number) or 0,
+                    v.limit as integer)
 
-                if given == 0 then
-                    -- Component-only form. temp avoids registering a persistent
-                    -- query for every call; the loop runs to exhaustion because
-                    -- breaking out of query:iter() leaks the query scope.
-                    local query = w:query({temp = true, include = include, exclude = exclude})
-                    if v.count_only == true then
-                        -- "How many match" is the most common verification
-                        -- read; answer it without serializing anything.
-                        local total = query:count()
-                        return {ok = true, message = "fetch matched " .. tostring(total),
-                            data = {count = total, entities = {}, truncated = false}}
+                local document = markup.new("logs")
+                local summary = tostring(#entries) .. " shown"
+                    .. "  ·  " .. tostring(matched) .. " matched"
+                    .. "  ·  " .. tostring(captured) .. " captured"
+                    .. "  ·  verbosity " .. logging.level:lower()
+                if dropped > 0 then
+                    summary = summary .. "  ·  " .. tostring(dropped) .. " dropped"
+                end
+                markup.text(document, summary, "muted")
+                if #entries == 0 then
+                    markup.text(document, "No matching log lines.", "muted")
+                else
+                    markup.rule(document)
+                    for i = 1, #entries do
+                        markup.add(document, logLine(entries[i]))
                     end
-                    local results: {{string: any}} = {}
-                    local count = 0
-                    for archetype, len, entityList in query:iter() do
-                        if count < limit then
-                            local sig = archetypeSignature(archetype)
-                            local archetypeId = archetype.id
-                            for row = 1, len do
-                                if count >= limit then break end
-                                results[#results + 1] = {
-                                    id = entityList[row],
-                                    archetypeId = archetypeId,
-                                    archetypeComponents = sig,
-                                    components = entityinfo.serializeRow(archetype, include, row),
-                                }
-                                count = count + 1
-                            end
-                        end
-                    end
-                    return {ok = true,
-                        message = "fetch matched " .. tostring(count) ..
-                            ((count >= limit) and " (truncated)" or ""),
-                        data = {count = count, entities = results, truncated = count >= limit}}
                 end
 
-                -- Bounds form. Prefer a game-registered Position component;
-                -- tecs's Transform is the ubiquitous fallback.
-                local spatial = componentFor("Position")
-                local spatialName = "Position"
-                if not spatial then
-                    spatial = componentFor("Transform")
-                    spatialName = "Transform"
-                end
-                if not spatial then
-                    return {ok = false, code = "spatial_component_not_found",
-                        message = "fetch: neither Position nor Transform is registered;" ..
-                            " bounds need one"}
-                end
-                local includeComponents: {tecs.Component} = {spatial}
-                for i = 1, #include do
-                    if includeNames[i] ~= spatialName then
-                        includeComponents[#includeComponents + 1] = include[i]
-                    end
-                end
-                local bx = v.x as number
-                local by = v.y as number
-                local bw = v.w as number
-                local bh = v.h as number
-                local bx2, by2 = bx + bw, by + bh
-                local query = w:query({temp = true, include = includeComponents, exclude = exclude})
-                local results: {{string: any}} = {}
-                local countOnly = v.count_only == true
-                local count = 0
-                for archetype, len, entityList in query:iter() do
-                    local posColumn = (countOnly or count < limit) and archetype:get(spatial) or nil
-                    if posColumn then
-                        for row = 1, len do
-                            if not countOnly and count >= limit then break end
-                            local pos = posColumn[row] as {string: number}
-                            local px, py = pos.x, pos.y
-                            if px >= bx and px <= bx2 and py >= by and py <= by2 then
-                                if not countOnly then
-                                    results[#results + 1] = {
-                                        id = entityList[row],
-                                        components = entityinfo.serializeRow(
-                                            archetype, includeComponents, row),
-                                    }
-                                end
-                                count = count + 1
-                            end
-                        end
-                    end
-                end
-                local truncated = not countOnly and count >= limit
-                return {ok = true,
-                    message = "fetch matched " .. tostring(count) .. " in bounds" ..
-                        (truncated and " (truncated)" or ""),
-                    data = {count = count, entities = results, truncated = truncated,
-                        bounds = {x = bx, y = by, width = bw, height = bh}}}
+                return {
+                    ok = true,
+                    popupDocument = document,
+                    popupModal = true,
+                    popupClosable = true,
+                    popupScrollToEnd = true,
+                    data = {
+                        logs = entries,
+                        returned = #entries,
+                        matched = matched,
+                        captured = captured,
+                        dropped = dropped,
+                        latest = latest,
+                    },
+                }
             end,
         },
         {
@@ -1303,115 +1186,6 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 return {ok = true, popup = popup,
                     data = {count = #rows, resources = rows, unset = unset}}
             end,
-        },
-        {
-            name = "bundles",
-            section = "Engine",
-            shortHelp = "list registered bundles or spawn an entity from one",
-            examples = {"bundles list", "bundles spawn enemy",
-                "bundles spawn enemy {Transform = {x = 10, y = 5}}"},
-            subcommands = {
-                {
-                    name = "list",
-                    aliases = {"ls"},
-                    shortHelp = "list bundles with their required and defaulted components",
-                    mcpHelp = "Registered bundles as a map of name to component requirements: required components must be provided at spawn, defaulted ones fill in automatically. Pair with cmd_bundles_spawn.",
-                    outputSchema = {
-                        type = "object",
-                        properties = {
-                            bundles = {type = "object",
-                                additionalProperties = {type = "object", properties = {
-                                    required = {type = "array", items = {type = "string"},
-                                        description = "components that must be provided at spawn"},
-                                    defaulted = {type = "array", items = {type = "string"},
-                                        description = "components filled from defaults"},
-                                }},
-                                description = "bundle name to its component requirements"},
-                        },
-                        required = {"bundles"},
-                    },
-                    run = function(_v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local bundles = w:getBundles()
-                        local result: {string: {string: any}} = {}
-                        local names: {string} = {}
-                        for name, bundle in pairs(bundles) do
-                            local bndl = bundle as tecs.Bundle
-                            result[name] = {required = bndl.required, defaulted = bndl.defaulted}
-                            names[#names + 1] = name
-                        end
-                        if #names == 0 then
-                            return {ok = true, message = "no bundles registered",
-                                data = {bundles = json.EMPTY_OBJECT as {string: any}}}
-                        end
-                        table.sort(names)
-                        local popup: {string} = {"bundles  (" .. tostring(#names) .. "):"}
-                        for i = 1, #names do
-                            local b = bundles[names[i]] as tecs.Bundle
-                            local bits: {string} = {}
-                            if #b.required > 0 then
-                                bits[#bits + 1] = "required: " .. table.concat(b.required, ", ")
-                            end
-                            if #b.defaulted > 0 then
-                                bits[#bits + 1] = "defaulted: " .. table.concat(b.defaulted, ", ")
-                            end
-                            popup[#popup + 1] = "  " .. names[i] .. "\t" .. table.concat(bits, "; ")
-                        end
-                        return {ok = true, popup = popup, data = {bundles = result}}
-                    end,
-                },
-                {
-                    name = "spawn",
-                    complete = {[1] = "bundles"},
-                    shortHelp = "spawn an entity from a bundle with optional component overrides",
-                    mcpHelp = "Spawn one entity from a registered bundle. components is a map of component name to field data; the bundle's required components must be provided there. Returns the new entity id. Unlike cmd_spawn this does not select the entity.",
-                    schema = bundleSpawnSchema,
-                    examples = {"bundles spawn enemy",
-                        "bundles spawn enemy {Transform = {x = 10, y = 5}}"},
-                    outputSchema = {
-                        type = "object",
-                        properties = {
-                            id = {type = "integer", description = "the new entity"},
-                        },
-                        required = {"id"},
-                    },
-                    run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local bundleName = v.name as string
-                        local overrides, verr = parseTableArg(v.components)
-                        if verr then
-                            return {ok = false, code = "invalid_arguments",
-                                message = "bundles spawn: " .. verr}
-                        end
-                        local instances: {tecs.Component} = {}
-                        for compName, compData in pairs(overrides or {}) do
-                            local comp, cerr = componentFor(compName)
-                            if not comp then
-                                return {ok = false, code = "unknown_component",
-                                    message = "bundles spawn: " .. cerr}
-                            end
-                            local okD, res = pcall(function(): tecs.Component
-                                return comp.deserialize(w, compData as {string: any})
-                            end)
-                            if not okD then
-                                return {ok = false, code = "component_deserialize_failed",
-                                    message = "bundles spawn: " .. compName .. ": " .. tostring(res)}
-                            end
-                            instances[#instances + 1] = res as tecs.Component
-                        end
-                        local okS, spawnedOrErr = pcall(function(): integer
-                            return w:spawnBundle(bundleName, table.unpack(instances))
-                        end)
-                        if not okS then
-                            return {ok = false, code = "spawn_bundle_failed",
-                                message = "bundles spawn failed: " .. tostring(spawnedOrErr)}
-                        end
-                        local id = spawnedOrErr as integer
-                        debugcontext.pushEvent(ctx, "spawn", {id = id, bundle = bundleName})
-                        return {ok = true,
-                            message = "spawned #" .. tostring(id) .. " from " .. bundleName,
-                            data = {id = id}}
-                    end,
-                },
-            },
         },
     }
 end

@@ -12,9 +12,8 @@ The MCP server exposes two tool layers to agents connected to a running game:
 - **Kernel tools** are transport-level and always available: liveness, screenshots, pixel
   sampling, Love2D events, arbitrary Lua, and log capture.
 - **Command tools** (`cmd_*`) project the debugger command registry, one tool per command or
-  subcommand verb, including commands the game registers itself. Call `cmd_capabilities` after
-  connecting to discover what the session supports, and `cmd_describe` for one command's full
-  contract.
+  subcommand verb, including commands the game registers itself. The standard `tools/list`
+  request returns the exact live surface and every tool's complete contract.
 
 The server listens on `http://localhost:19999/mcp` by default; an MCP client connects with
 `{"type": "http", "url": "http://localhost:19999/mcp"}`. See the [MCP server guide](./) for
@@ -65,7 +64,7 @@ Kernel tools are defined by the MCP server itself and available in every session
 
 ### `ping` {#ping}
 
-Check if the game is running and WHICH build is answering: the result's `build` ({name, built, dev}) identifies the running code, so compare `build.built` against your latest `tecs build` to detect a stale process before trusting any other call. Call cmd_capabilities next to discover what the session's cmd_* command tools support. Returns compact JSON text envelope.
+Check if the game is running and WHICH build is answering: the result's `build` ({name, built, dev}) identifies the running code, so compare `build.built` against your latest `tecs build` to detect a stale process before trusting any other call. Use tools/list to discover the session's cmd_* command tools. Returns compact JSON text envelope.
 
 Annotations: read-only, idempotent.
 
@@ -99,7 +98,7 @@ Annotations: read-only, idempotent.
 
 ### `send_love_event` {#send_love_event}
 
-Send one Love2D event to the game. Unfrozen, tapeable events queue onto the input tape for the NEXT gameplay frame (frame-aligned, args defaulted, real input path -- the Update-phase edge reliably sees it); frozen, or for gamepad/joystick/filedropped events, it pushes the raw love event immediately (the debugger overlay consumes those while gameplay is paused). For deterministic gameplay verification prefer cmd_step's events= form. Returns compact JSON text envelope.
+Send one Love2D event to the game. Unfrozen, tapeable events queue onto the input tape for the NEXT gameplay frame (frame-aligned, args defaulted, real input path -- the Update-phase edge reliably sees it); frozen, or for gamepad/joystick/filedropped events, it pushes the raw love event immediately (the debugger overlay consumes those while gameplay is paused). Returns compact JSON text envelope.
 
 Annotations: none.
 
@@ -110,7 +109,7 @@ Annotations: none.
 
 ### `run_lua` {#run_lua}
 
-Run Lua code in the game. Code is wrapped in function(world) ... end automatically. The result is an envelope {returned: &lt;count>, values: [...]}: values holds your return values in order, so `return snake.length` reads back as values[0]. Return values are serialized as JSON by default -- return a table (e.g. {count = ..., score = ...}) for a structured, cheap read; pass lua=true for the raw Lua tostring form instead. The code is sandboxed: love2d APIs and the ECS world are available, but io, os.execute, load/dofile, and love escape hatches (love.thread, love.filesystem.load/mount) are not; love.filesystem save-dir writes work for data files but refuse .lua/.tl paths. State persists across calls: stash handles for later calls with `_G.name = ...` (or a bare global) and read them back in the next call. Use 'world' directly to access the ECS world, and modules("components.food") to reach the game's own loaded modules -- their component records and constructors work directly (e.g. local Food = modules("components.food"); world:query(Food)). Named resources read via findKey: world.resources[require("tecs").findKey("game.state")]. Prefer the structured cmd_* command tools (cmd_fetch, cmd_set, cmd_spawn, cmd_resources, ...) when one covers the operation. Returns compact JSON text envelope.
+Run Lua code in the game. Code is wrapped in function(world) ... end automatically. The result is an envelope {returned: &lt;count>, values: [...]}: values holds your return values in order, so `return snake.length` reads back as values[0]. Return values are serialized as JSON by default -- return a table (e.g. {count = ..., score = ...}) for a structured, cheap read; pass lua=true for the raw Lua tostring form instead. The code is sandboxed: love2d APIs and the ECS world are available, but io, os.execute, load/dofile, and love escape hatches (love.thread, love.filesystem.load/mount) are not; love.filesystem save-dir writes work for data files but refuse .lua/.tl paths. State persists across calls: stash handles for later calls with `_G.name = ...` (or a bare global) and read them back in the next call. Use 'world' directly to access the ECS world, and modules("components.food") to reach the game's own loaded modules -- their component records and constructors work directly (e.g. local Food = modules("components.food"); world:query(Food)). Named resources read via findKey: world.resources[require("tecs").findKey("game.state")]. Prefer the structured cmd_* command tools (cmd_info, cmd_set, cmd_spawn, cmd_resources, ...) when one covers the operation. Returns compact JSON text envelope.
 
 Annotations: destructive.
 
@@ -144,8 +143,7 @@ the operator's selection, marks, notes, and capture artifacts. Games extend the 
 exactly like the builtins.
 
 This index links each tool to its full contract (arguments, result data schema, examples,
-safety annotations) in the [Command Reference](../debug-reference); `cmd_describe` returns the
-same contract as structured data at runtime.
+and safety annotations) in the [Command Reference](../debug-reference).
 
 | Tool | Description |
 | --- | --- |
@@ -163,22 +161,13 @@ same contract as structured data at runtime.
 | [`cmd_modify`](../debug-reference#cmd-modify) | Change only the given fields of a component the target already has. |
 | [`cmd_spawn`](../debug-reference#cmd-spawn) | Spawn an entity from a bundle and/or components with Lua table values. |
 | [`cmd_query`](../debug-reference#cmd-query) | Select entities matching a component query: Foo has it, -Foo lacks it. |
-| [`cmd_draw_rect`](../debug-reference#cmd-draw-rect) | Outline a rectangle (x y w h in world units). |
-| [`cmd_draw_circle`](../debug-reference#cmd-draw-circle) | Outline a circle (x y radius in world units). |
-| [`cmd_draw_line`](../debug-reference#cmd-draw-line) | Draw a line (x y x2 y2 in world units). |
-| [`cmd_draw_text`](../debug-reference#cmd-draw-text) | Print text at a world position. |
-| [`cmd_draw_clear`](../debug-reference#cmd-draw-clear) | Remove annotations by id or tag; everything when omitted. |
 | [`cmd_ids`](../debug-reference#cmd-ids) | Toggle entity id labels over on-screen entities. |
 | [`cmd_history`](../debug-reference#cmd-history) | Show the command history (persisted across sessions). |
 | [`cmd_history_clear`](../debug-reference#cmd-history-clear) | Forget the history and delete its file. |
 | [`cmd_agent_info`](../debug-reference#cmd-agent-info) | Show the MCP URL, tool count, and save directory. |
 | [`cmd_agent_connect`](../debug-reference#cmd-agent-connect) | Copy the MCP client config JSON to the clipboard. |
-| [`cmd_capabilities`](../debug-reference#cmd-capabilities) | Installed plugins, command families, and host features. |
-| [`cmd_describe`](../debug-reference#cmd-describe) | One command's full contract as structured data. |
-| [`cmd_freeze`](../debug-reference#cmd-freeze) | Freeze or unfreeze gameplay under the operator's hold. |
 | [`cmd_step`](../debug-reference#cmd-step) | Tick the game forward N frames while otherwise frozen. |
 | [`cmd_input_tape`](../debug-reference#cmd-input_tape) | Queue frame-scheduled love events; no args = status. |
-| [`cmd_stats`](../debug-reference#cmd-stats) | World stats: entities, archetypes, memory, fps, window. |
 | [`cmd_context`](../debug-reference#cmd-context) | The live debugger context: selection, camera, artifacts. |
 | [`cmd_restart`](../debug-reference#cmd-restart) | Restart the game process. |
 | [`cmd_quit`](../debug-reference#cmd-quit) | Quit the game. |
@@ -191,8 +180,6 @@ same contract as structured data at runtime.
 | [`cmd_camera_move`](../debug-reference#cmd-camera-move) | Set camera position (and optionally rotation and zoom). |
 | [`cmd_camera_timescale`](../debug-reference#cmd-camera-timescale) | Set the game time scale (0 = frozen, 1 = normal). |
 | [`cmd_camera_toggle`](../debug-reference#cmd-camera-toggle) | Toggle a named camera's active flag. |
-| [`cmd_camera_world`](../debug-reference#cmd-camera-world) | Convert screen coordinates to world through the active camera. |
-| [`cmd_camera_screen`](../debug-reference#cmd-camera-screen) | Convert world coordinates to screen through the active camera. |
 | [`cmd_layers_list`](../debug-reference#cmd-layers-list) | List named or modified layers with their flags. |
 | [`cmd_layers_info`](../debug-reference#cmd-layers-info) | Show one layer's name, flags, and entity count. |
 | [`cmd_layers_all`](../debug-reference#cmd-layers-all) | Show every layer (undo toggles and solo). |
@@ -217,12 +204,10 @@ same contract as structured data at runtime.
 | [`cmd_components_list`](../debug-reference#cmd-components-list) | List registered component types. |
 | [`cmd_components_info`](../debug-reference#cmd-components-info) | Show a component's schema by name or id. |
 | [`cmd_states_info`](../debug-reference#cmd-states-info) | Show the state stack, top last. |
-| [`cmd_states_push`](../debug-reference#cmd-states-push) | Push a created state onto the stack. |
-| [`cmd_states_pop`](../debug-reference#cmd-states-pop) | Pop the top state off the stack. |
 | [`cmd_physics_debug`](../debug-reference#cmd-physics-debug) | Toggle collision-shape debug drawing (installs the drawer if needed). |
 | [`cmd_physics_info`](../debug-reference#cmd-physics-info) | Physics state, or one entity's Box2D body properties. |
-| [`cmd_physics_raycast`](../debug-reference#cmd-physics-raycast) | Cast a ray, draw it, and select the hits. |
-| [`cmd_physics_query`](../debug-reference#cmd-physics-query) | Select bodies inside a world-space box and draw it. |
+| [`cmd_physics_raycast`](../debug-reference#cmd-physics-raycast) | Cast a ray and select the hits. |
+| [`cmd_physics_query`](../debug-reference#cmd-physics-query) | Select bodies inside a world-space box. |
 | [`cmd_controllers_list`](../debug-reference#cmd-controllers-list) | List controllers and their joysticks. |
 | [`cmd_controllers_info`](../debug-reference#cmd-controllers-info) | Show a controller's joystick, deadzone, and bindings. |
 | [`cmd_controllers_rumble`](../debug-reference#cmd-controllers-rumble) | Vibrate a controller's joystick to verify it. |
@@ -232,12 +217,7 @@ same contract as structured data at runtime.
 | [`cmd_audio_info`](../debug-reference#cmd-audio-info) | Show active sources per group and the master volume. |
 | [`cmd_audio_stop`](../debug-reference#cmd-audio-stop) | Stop every active source. |
 | [`cmd_audio_mute`](../debug-reference#cmd-audio-mute) | Silence the master group; `audio mute off` restores. |
-| [`cmd_fetch`](../debug-reference#cmd-fetch) | Fetch entities matching a component query, without selecting them. |
 | [`cmd_resources`](../debug-reference#cmd-resources) | List world resources; pass a name to read one value. |
-| [`cmd_bundles_list`](../debug-reference#cmd-bundles-list) | List bundles with their required and defaulted components. |
-| [`cmd_bundles_spawn`](../debug-reference#cmd-bundles-spawn) | Spawn an entity from a bundle with optional component overrides. |
-| [`cmd_lua_modules`](../debug-reference#cmd-lua-modules) | List loaded module names. |
-| [`cmd_lua_exports`](../debug-reference#cmd-lua-exports) | Dump a loaded module's exports as data. |
 | [`cmd_profile`](../debug-reference#cmd-profile) | Sample the running game with the LuaJIT profiler. |
 | [`cmd_profile_list`](../debug-reference#cmd-profile-list) | List profiles with size and timestamp. |
 | [`cmd_profile_clear`](../debug-reference#cmd-profile-clear) | Delete all profiles this session. |
@@ -266,7 +246,6 @@ same contract as structured data at runtime.
 | [`cmd_diff_clear`](../debug-reference#cmd-diff-clear) | Delete all diffs this session. |
 | [`cmd_diff_open`](../debug-reference#cmd-diff-open) | Open with the OS default handler (latest if omitted). |
 | [`cmd_diff_path`](../debug-reference#cmd-diff-path) | Copy the file's absolute path to the clipboard (latest if omitted). |
-| [`cmd_diff_get`](../debug-reference#cmd-diff-get) | Dereference a JSON Pointer into a diff result. |
 | [`cmd_screenshot`](../debug-reference#cmd-screenshot) | Capture the screen (or drag area) to a PNG. |
 | [`cmd_screenshot_list`](../debug-reference#cmd-screenshot-list) | List screenshots with size and timestamp. |
 | [`cmd_screenshot_clear`](../debug-reference#cmd-screenshot-clear) | Delete all screenshots this session. |

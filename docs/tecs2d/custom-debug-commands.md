@@ -69,8 +69,8 @@ An MCP client discovers the equivalent `cmd_wave` tool:
 {"name":"cmd_wave","arguments":{"count":12,"kind":"elite"}}
 ```
 
-Registration raises immediately if the debug plugin is missing, the name or an
-alias collides, the command has no action, or its schema is invalid.
+Registration raises immediately if the debug plugin is missing, the name
+collides, the command has no action, or its schema is invalid.
 
 ## Argument schemas
 
@@ -190,6 +190,7 @@ Every action returns `commands.Result`:
 | `popupTitle` | Overlay | Optional title rendered in a distinct header band |
 | `popupLanguage` | Overlay | Optional lightweight syntax mode, currently `lua` |
 | `popupBlocks` | Overlay | Optional semantic blocks packed into fitting columns; `popup` remains the copy/yank form |
+| `popupMarkup` | Overlay | Structured popup source with explicit definitions, code, columns, and inline styles |
 | `popupModal` | Overlay | Dim the game and give the popup exclusive navigation input |
 | `popupClosable` | Overlay | Show a clickable red close control in a titled popup |
 | `popupMaxColumns` | Overlay | Cap the responsive semantic-block column count |
@@ -226,6 +227,68 @@ run = function(v: {string: any}, _parts: {string}): commands.Result
     }
 end
 ```
+
+## Popup markup
+
+Use `popupMarkup` when a command needs more structure than a plain `popup`
+array. The overlay parses it into the same typed document model used by built-in
+F1 help, so wrapping preserves syntax styles and columns do not depend on tabs
+or indentation.
+
+```teal
+return {
+    ok = true,
+    popupModal = true,
+    popupClosable = true,
+    popupMarkup = [[
+@title encounter [arg]foundry[/arg]
+@section Summary
+@def enemies
+12 active enemies
+@endDef
+@def status
+[warning]Two spawn points are blocked.[/warning]
+@endDef
+@section Repair
+@code lua
+world:remove(blocker, Disabled)
+@endCode
+@section Examples
+@columns auto
+@column
+@code console
+encounter validate foundry
+@endCode
+@column
+@code console
+encounter repair foundry
+@endCode
+@endColumns
+]],
+    data = report,
+}
+```
+
+Block directives are line-oriented:
+
+| Directive | Meaning |
+| --- | --- |
+| `@title text` | Optional popup title band |
+| `@text text` | Body line; an unprefixed line means the same thing |
+| `@section text` | Section heading |
+| `@rule` | Horizontal rule |
+| `@def term` ... `@endDef` | Definition term followed by indented description lines |
+| `@code language` ... `@endCode` | Code block; `lua` enables Lua highlighting |
+| `@columns auto\|N` ... `@endColumns` | Responsive or fixed-count column group |
+| `@column` | Starts a column inside `@columns` |
+
+Named terminators are required: code ends with `@endCode`, definitions with
+`@endDef`, and columns with `@endColumns`. A mismatched or missing terminator is
+reported in the debugger status line instead of displaying a partial popup.
+
+Inline spans use paired tags: `[key]`, `[code]`, `[arg]`, `[accent]`,
+`[muted]`, and `[warning]`. Keep spans unnested. The renderer retains these
+styles when a line wraps.
 
 Use stable failure codes such as `unknown_checkpoint`, `invalid_phase`, or
 `encounter_locked`; agents can react without parsing prose.
@@ -283,7 +346,6 @@ commands.register(world, {
     subcommands = {
         {
             name = "list",
-            aliases = {"ls"},
             shortHelp = "list available checkpoints",
             run = function(_v: {string: any}, _parts: {string}): commands.Result
                 local names = listCheckpoints()
@@ -327,9 +389,7 @@ Use these presentation fields to make commands discoverable:
 | --- | --- |
 | `shortHelp` | Required one-line description shown in help and MCP discovery |
 | `examples` | Command lines displayed in the detailed debugger help popup |
-| `aliases` | Alternate command-line names |
 | `section` | Help group; omitted custom commands appear under `Custom` |
-| `complete` | Built-in live completion sources by argument position |
 | `outputSchema` | JSON Schema for the `data` payload; projected as the MCP tool's `outputSchema` (wrapped in the `{ok, result}` envelope) and rendered in the generated command reference |
 | `metadata` | Free-form application metadata; the engine only interprets documented keys |
 
@@ -337,24 +397,32 @@ The one documented `metadata` key is `screenshots`: a list of
 `{file = "path", alt = "alt text", docs = true}` entries. Entries with
 `docs = true` render as images in the generated
 [Command Reference](./debug-reference) (`file` is resolved from that page, so
-use paths like `./assets/debug/select.png`). Other entries, and any other
-`metadata` keys, ride along untouched in `cmd_describe` for your own tooling.
+use paths like `./assets/debug/select.png`). Other metadata keys remain
+available to registry consumers but are otherwise uninterpreted.
 
-Completion positions start at `1` after the command or subcommand. Position `0`
-applies to any later argument. Available sources are `components`, `marks`,
-`targets`, `edittargets`, `bundles`, `systems`, `cameras`, and `commands`.
-Comma-separate sources to combine them:
+Completion is derived from the same argument schema used for parsing, help, and
+MCP projection. Named argument keys, enum values, booleans, and subcommand names
+complete automatically. Add `completion` to an argument when its values come
+from live runtime state. Available sources are `components`, `marks`, `targets`,
+`edittargets`, `bundles`, `systems`, `cameras`, and `commands`. Comma-separate
+sources to combine them:
 
 ```teal
-complete = {
-    [1] = "targets",
-    [2] = "components",
-    [0] = "components",
+schema = {
+    args = {
+        target = {required = true, completion = "targets"},
+        component = {required = true, completion = "components"},
+        enabled = {kind = "boolean"},
+        format = {enum = {"json", "luajit"}},
+    },
+    positional = {"target", "component"},
 }
 ```
 
-Subcommand names complete automatically. Completion affects only the in-game
-command line; MCP clients use the generated input schema.
+The in-game command line and MCP clients therefore discover values from one
+contract instead of separate completion declarations. Dynamic completion
+affects only the in-game command line; MCP clients use the generated input
+schema.
 
 ## Choose the exposed surfaces
 

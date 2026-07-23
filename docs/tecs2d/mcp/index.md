@@ -7,7 +7,7 @@ outline: deep
 
 Tecs MCP connects an AI agent to the running game. With the debug plugin
 installed, the agent and developer share the same selection, marks, notes,
-freeze state, annotations, debugger commands, and capture history.
+freeze state, debugger commands, isolated debugger-world ID, and capture history.
 
 Read [Runtime introspection](../introspection) for the complete human-agent
 debugging model. This page covers setup and the MCP workflow.
@@ -48,19 +48,19 @@ Tecs exposes two MCP tool layers:
 
 Prefer a structured `cmd_*` tool when one covers the operation. Use `cmd_set`
 and `cmd_modify` for component edits, `cmd_info` for entity inspection, and
-`cmd_fetch` for component queries; fall back to `run_lua` only when no command
-fits. Call `cmd_capabilities` after connecting to discover what the session
-supports.
+`cmd_query` when selecting entities by component expression; fall back to
+`run_lua` only when no command fits. MCP clients discover the exact live
+surface through the standard `tools/list` request.
 
 ## Investigation workflow
 
 Start by asking for context rather than immediately mutating the game:
 
 1. Use `screenshot` and `cmd_context` to establish visual and operator context.
-2. Inspect selected entities with `cmd_info`, or locate candidates with `cmd_fetch` (optionally restricted to a world-space box).
+2. Locate candidates with `cmd_query`, then inspect the selection with `cmd_info`.
 3. Use `cmd_components_info` before constructing edits.
 4. Read `get_logs` with `contains = "debug.events"` to follow operator actions.
-5. Freeze with `cmd_freeze`, inspect safely, and advance deliberately with `cmd_step`.
+5. Open the debugger to suspend gameplay, then advance deliberately with `cmd_step`.
 6. Use `cmd_rewind_*`, `cmd_diff`, and `cmd_snapshot_*` to investigate a timeline.
 7. Apply the smallest structured change with `cmd_set`, `cmd_modify`, or a game-defined `cmd_*` command.
 8. Replay and verify with a screenshot, recording, profile, or diff artifact.
@@ -115,8 +115,8 @@ argument schemas.
 
 ## Component serialization
 
-For `cmd_spawn`, `cmd_fetch`, and `cmd_bundles_spawn` to work, components need serialization support. Most
-components work automatically:
+For `cmd_spawn` and the entity inspection/edit commands to work, components
+need serialization support. Most components work automatically:
 
 - **Table components**: Serialize all fields by default
 - **FFI components**: Serialize based on field schema

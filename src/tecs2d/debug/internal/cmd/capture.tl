@@ -232,7 +232,6 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             line: function(any): string): cmdtypes.Subcommand
         return {
             name = "list",
-            aliases = {"ls"},
             shortHelp = "list " .. noun .. " with size and timestamp",
             run = function(_v: {string: any}, _parts: {string}): cmdtypes.Result
                 local list = items()
@@ -250,7 +249,6 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             removeFile: function(string), reset: function()): cmdtypes.Subcommand
         return {
             name = "clear",
-            aliases = {"rm"},
             shortHelp = "delete all " .. noun .. " this session",
             run = function(_v: {string: any}, _parts: {string}): cmdtypes.Result
                 local list = items()
@@ -596,7 +594,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             mcpHelp = "Start the LuaJIT sampling profiler for seconds (0.1-60; capped) and write a collapsed-stack capture when it finishes. The capture lands in the process working directory and its summary publishes to cmd_context; fetch details with cmd_profile_info and cmd_profile_path. Filtering (zone=) and intervalMs are fixed at start.",
             schema = profileSchema,
             examples = {"profile", "profile 5", "profile 5 intervalMs=5",
-                "profile zone=afterFixed/Render", "profile ls"},
+                "profile zone=afterFixed/Render", "profile list"},
             subcommands = {
                 artifactList("profiles",
                     function(): {any} return ctx.profiles as {any} end,
@@ -690,7 +688,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             name = "snapshot",
             section = "Capture",
             shortHelp = "save and restore the whole world",
-            examples = {"snapshot save boss-fight", "snapshot load 3", "snapshot ls"},
+            examples = {"snapshot save boss-fight", "snapshot load 3", "snapshot list"},
             subcommands = {
                 {
                     name = "save",
@@ -1059,7 +1057,6 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 },
                 {
                     name = "list",
-                    aliases = {"ls"},
                     shortHelp = "list ring entries, newest first",
                     run = function(_v: {string: any}, _parts: {string}): cmdtypes.Result
                         local st = ctx.rewind
@@ -1165,7 +1162,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "replay",
                     shortHelp = "re-run recorded input and dt forward from a ring entry",
-                    mcpHelp = "Deterministically re-run the game from a ring entry: restores that snapshot (RNG state included), re-presses inputs that were held at the anchor, queues every recorded input event onto the input tape at its original gameplay frame, feeds the recorded per-frame dt, and steps. Requires the freeze to be held (cmd_freeze on=true) and a rewind session (the recorder rides the ring). frames defaults to the full recording since that entry. Live input is not muted: touching the controls during a replay simply makes a new timeline.",
+                    mcpHelp = "Deterministically re-run the game from a ring entry: restores that snapshot (RNG state included), re-presses inputs that were held at the anchor, queues every recorded input event onto the input tape at its original gameplay frame, feeds the recorded per-frame dt, and steps. Requires gameplay to be suspended, such as while the debugger is open, and a rewind session (the recorder rides the ring). frames defaults to the full recording since that entry. Live input is not muted: touching the controls during a replay simply makes a new timeline.",
                     schema = { args = {
                         ref = {help = "entry index (newest first), latest, or Ns for seconds back"},
                         ago = {kind = "number", help = "seconds back; picks the closest at or before"},
@@ -1185,7 +1182,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         local ctl = suspension.ensure(w)
                         if not ctl:isSuspended() then
                             return {ok = false, code = "not_frozen",
-                                message = "rewind replay: freeze first (cmd_freeze on=true); replay drives frames through step"}
+                                message = "rewind replay: open the debugger first; replay drives frames through step"}
                         end
                         local recorder = w.resources[replaytape.KEY]
                         if not recorder then
@@ -1329,7 +1326,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             name = "diff",
             section = "Capture",
             shortHelp = "structural diff between snapshots, rewind entries, and the live world",
-            mcpHelp = "Compare two moments structurally: from/to are a snapshot number, name, or latest; rewind:<idx|latest|Ns|ago=N>; or current (default to). Call with limit=0 first: the per-component summary always covers the whole diff and tells you what to filter (component=, ignore=, entity=). Read-only. Returns summary, changes with JSON Pointer paths, and the path of a JSON artifact holding the full result. Drill in with cmd_diff_get.",
+            mcpHelp = "Compare two moments structurally: from/to are a snapshot number, name, or latest; rewind:<idx|latest|Ns|ago=N>; or current (default to). Call with limit=0 first: the per-component summary always covers the whole diff and tells you what to filter (component=, ignore=, entity=). Read-only. Returns summary, changes with JSON Pointer paths, and the path of a JSON artifact holding the full result.",
             schema = {
                 args = {
                     from = {required = true,
@@ -1344,8 +1341,8 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 },
                 positional = {"from", "to"},
             },
-            examples = {"diff 1", "diff rewind:10s ignore=Transform", "diff 1 2 component=Health",
-                "diff rewind:3 current limit=0", "diff get /changes/0/after"},
+            examples = {"diff 1", "diff rewind:10s ignore=Transform",
+                "diff 1 2 component=Health", "diff rewind:3 current limit=0"},
             subcommands = {
                 artifactList("diffs",
                     function(): {any} return ctx.diffs as {any} end,
@@ -1361,7 +1358,6 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     function()
                         ctx.diffs = {}
                         reg.diffCounter = 0
-                        reg.lastDiff = nil
                     end),
                 artifactOpen("diff", "ref", "diff name or list index",
                     function(ref: string): string
@@ -1374,54 +1370,6 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         return e and e.path as string
                     end,
                     debugcontext.savePath),
-                {
-                    name = "get",
-                    shortHelp = "dereference a JSON Pointer into a diff result",
-                    mcpHelp = "Dereference an RFC 6901 pointer (e.g. /summary/byComponent or /changes/0/after) into the last diff result, or into a saved diff artifact when ref is given. Use after cmd_diff to fetch payloads its truncated change list omitted.",
-                    schema = { args = {
-                        pointer = {required = true, help = "RFC 6901 pointer, e.g. /summary/byComponent"},
-                        ref = {help = "diff artifact index or latest; omit for the last diff"},
-                    }, positional = {"pointer", "ref"} },
-                    run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local doc: any = reg.lastDiff
-                        if v.ref ~= nil then
-                            local e = findArtifact(ctx.diffs as {any}, v.ref as string)
-                            if not e then
-                                return {ok = false, code = "no_match",
-                                    message = "diff get: no diff artifact for '" .. tostring(v.ref) .. "'. Use `diff ls`."}
-                            end
-                            local bytes = love.filesystem.read(e.path as string)
-                            if not bytes then
-                                return {ok = false, code = "read_failed",
-                                    message = "diff get: cannot read " .. tostring(e.path)}
-                            end
-                            local okParse, parsed = pcall(json.parse, bytes)
-                            if not okParse then
-                                return {ok = false, code = "decode_failed",
-                                    message = "diff get: cannot parse " .. tostring(e.path)}
-                            end
-                            doc = parsed
-                        end
-                        if doc == nil then
-                            return {ok = false, code = "no_match",
-                                message = "diff get: no diff this session; run `diff <from>` first"}
-                        end
-                        local node, deepest = snapdiff.resolvePointer(doc, v.pointer as string)
-                        if node == nil then
-                            return {ok = false, code = "no_match",
-                                message = "diff get: nothing at " .. tostring(v.pointer) ..
-                                    ((deepest and deepest ~= "") and (" (deepest match: " .. deepest .. ")")
-                                        or " (" .. tostring(deepest) .. ")")}
-                        end
-                        local popup: {string} = {"diff get " .. tostring(v.pointer)}
-                        local pretty = json.serializePretty(node, true)
-                        for line in (pretty .. "\n"):gmatch("(.-)\n") do
-                            popup[#popup + 1] = "  " .. line
-                        end
-                        return {ok = true, popup = popup,
-                            data = {pointer = v.pointer, value = node}}
-                    end,
-                },
             },
             run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
                 local t0 = getTime()
@@ -1452,8 +1400,6 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 result.from = fromMeta
                 result.to = toMeta
                 result.elapsedMs = (getTime() - t0) * 1000
-                reg.lastDiff = result
-
                 -- Every run is also written as a JSON artifact for external
                 -- tools and agents with file access.
                 reg.diffCounter = reg.diffCounter + 1
@@ -1502,7 +1448,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 positional = {"name"},
             },
             examples = {"screenshot", "screenshot boss.png", "screenshot panel=true delay=2",
-                "screenshot ls"},
+                "screenshot list"},
             subcommands = {
                 artifactList("screenshots",
                     function(): {any} return ctx.screenshots as {any} end,
@@ -1647,7 +1593,7 @@ function capture.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             name = "record",
             section = "Capture",
             shortHelp = "record the window to a video",
-            examples = {"record start 30 clip fps=60", "record start debug", "record stop", "record ls"},
+            examples = {"record start 30 clip fps=60", "record start debug", "record stop", "record list"},
             subcommands = {
                 {
                     name = "start",

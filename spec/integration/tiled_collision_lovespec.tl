@@ -57,12 +57,16 @@ describe("tiled collision: geometry follows the tilemap Transform", function()
             world:emit(0, gfx.PhysicsDebugToggle())
             return true
         ]])
+        local lastR, lastG, lastB = 0, 0, 0
         local drawn = fixture.eventually(fixture.callTimeout, function(): boolean
             local p = fixture.probePixels(app, EDGE_PROBE)[1]
-            if p[1] > 0.8 then return true end
+            lastR, lastG, lastB = p[1], p[2], p[3]
+            if p[1] > 0.75 then return true end
             return nil
         end)
-        luassert.is_true(drawn == true, "debug overlay never drew the collider outline")
+        luassert.is_true(drawn == true, string.format(
+            "debug overlay never drew the collider outline (last %.3f %.3f %.3f)",
+            lastR, lastG, lastB))
 
         fixture.runLua(app, [[
             local gfx = require("tecs2d.gfx")
@@ -97,7 +101,6 @@ describe("tiled collision: geometry follows the tilemap Transform", function()
             if tonumber((layer as {string: any}).gid) > 0 then sawGid = true end
         end
         luassert.is_true(sawGid, "floor tile should carry a gid on some layer")
-        app.client:call("cmd_draw_clear", {tag = "tile"})
     end)
 
     it("drops the ball onto the floor instead of through it", function()

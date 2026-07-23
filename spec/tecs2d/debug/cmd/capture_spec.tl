@@ -405,7 +405,7 @@ describe("tecs2d.debug.internal.cmd.capture", function()
 
             -- The artifact was written and is listed.
             luassert.is_not_nil(files["debug-diff-1.json"], "diff artifact missing")
-            luassert.equals(1, #((reg:execute("diff ls")).data.diffs as {any}))
+            luassert.equals(1, #((reg:execute("diff list")).data.diffs as {any}))
 
             -- to defaults to current; the world equals snapshot 2 right now.
             local toCurrent = reg:execute("diff 1")
@@ -441,18 +441,6 @@ describe("tecs2d.debug.internal.cmd.capture", function()
             luassert.equals("read_failed", (reg:execute("diff nope")).code,
                 "unknown names pass through as filenames")
             luassert.equals("invalid_ref", (reg:execute("diff rewind:nope")).code)
-
-            -- diff get: pointers work on the last diff and on the artifact.
-            reg:execute("diff 1 2")
-            local got = reg:execute("diff get /summary/byComponent")
-            luassert.is_true(got.ok, tostring(got.message))
-            luassert.is_not_nil((got.data.value as {string: any}).DbgCmdPos)
-            local first = reg:execute("diff get /changes/0")
-            luassert.is_true(first.ok, tostring(first.message))
-            luassert.is_false((reg:execute("diff get /nope/deeper")).ok)
-            local fromFile = reg:execute("diff get /totalChanges latest")
-            luassert.is_true(fromFile.ok, tostring(fromFile.message))
-            luassert.equals(r.data.totalChanges, fromFile.data.value)
 
             -- Rewind refs decode too, and a fresh capture diffs empty against
             -- the live world (the round-trip fidelity check).

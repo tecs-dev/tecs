@@ -35,7 +35,7 @@ Something goes wrong in the running game
 → capture a screenshot, recording, profile, or diff as evidence
 ```
 
-Selection, marks, notes, annotations, snapshots, rewind entries, diffs, and
+Selection, marks, notes, snapshots, rewind entries, diffs, and
 artifacts are shared runtime state, so work started on one surface continues
 on the other.
 
@@ -54,7 +54,7 @@ state connects the two:
 | Add a note to an entity | Read the note with its compact entity range |
 | Freeze in the debugger | Inspect safely and advance with `cmd_step` |
 | Start a rewind ring | Compare `rewind:<ref>` with `current`, then load and replay |
-| Draw a probe or toggle bounds | See the same annotation in screenshots and recordings |
+| Spawn a visual in `debugWorldId` or toggle bounds | See it in screenshots and recordings |
 | Save a capture | Read its metadata or open the artifact by path |
 
 ## Time travel and evidence

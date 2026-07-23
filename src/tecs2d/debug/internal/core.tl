@@ -1,5 +1,5 @@
 --- Headless debugger core: the shared DebugContext, freeze controller,
---- annotations store, recorder, and command registry, plus the always-on
+--- recorder, command registry, and private diagnostic visuals, plus the always-on
 --- systems that keep the registry's stateful commands working with no overlay
 --- (rewind ring capture, delayed screenshots, recording frame capture and
 --- shutdown). The overlay layers the human surface (input, drawing, menus)
@@ -10,7 +10,7 @@ local tecs <const> = require("tecs")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
 local recording <const> = require("tecs2d.debug.internal.recording")
 local suspension <const> = require("tecs2d.internal.suspension")
-local annotations <const> = require("tecs2d.debug.internal.annotations")
+local visuals <const> = require("tecs2d.debug.internal.visuals")
 local rewind <const> = require("tecs2d.debug.internal.rewind")
 local commands <const> = require("tecs2d.debug.commands")
 
@@ -22,13 +22,12 @@ local record core
     type Options = recording.Options
 
     --- Get or create the headless debugger core: context, registry, freeze,
-    --- annotations, recorder, rewind; works without the overlay. Idempotent
+    --- recorder, rewind, and diagnostic visuals; works without the overlay. Idempotent
     --- (keyed on the command registry resource). A later call with non-nil
     --- opts reconfigures the existing recorder: exactly the fields present in
     --- opts overwrite its defaults (the debug plugin installing after the MCP
     --- plugin applies its recording config this way). Returns the registry;
-    --- its env carries the context, recorder, freeze controller, and
-    --- annotations store.
+    --- its env carries the context, recorder, and freeze controller.
     ensure: function(w: tecs.World, opts?: Options): commands.Registry
 end
 
@@ -44,7 +43,7 @@ function core.ensure(w: tecs.World, opts?: core.Options): commands.Registry
     local ctx = debugcontext.new()
     w.resources[debugcontext.KEY] = ctx
     local controller = suspension.ensure(w)
-    local store = annotations.install(w, ctx)
+    visuals.install(w, ctx)
     local recorder = recording.new(ctx, opts)
     w.resources[recording.KEY] = recorder
     local registry = commands.build({
@@ -52,7 +51,6 @@ function core.ensure(w: tecs.World, opts?: core.Options): commands.Registry
         ctx = ctx,
         recorder = recorder,
         suspension = controller,
-        annotations = store,
         keys = {leader = "ctrl", debugToggle = "/", statsToggle = "."},
     })
     w.resources[commands.KEY] = registry

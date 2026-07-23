@@ -19,22 +19,22 @@ local tecs <const> = require("tecs")
 local componentregistry <const> = require("tecs.internal.components")
 local json <const> = require("tecs.utils.json")
 local systemcontrol <const> = require("tecs2d.internal.systemcontrol")
+local logtap <const> = require("tecs2d.internal.logtap")
 local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
+local worldregistry <const> = require("tecs2d.gfx.internal.worldregistry")
 local gfxtypes <const> = require("tecs2d.gfx.types")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
-local annotations <const> = require("tecs2d.debug.internal.annotations")
 local cmdargs <const> = require("tecs2d.debug.internal.cmdargs")
 local cmdtypes <const> = require("tecs2d.debug.internal.cmdtypes")
+local markup <const> = require("tecs2d.debug.internal.markup")
 local capturecmds <const> = require("tecs2d.debug.internal.cmd.capture")
 local editcmds <const> = require("tecs2d.debug.internal.cmd.edit")
 local enginecmds <const> = require("tecs2d.debug.internal.cmd.engine")
-local luacmds <const> = require("tecs2d.debug.internal.cmd.lua")
 local rendercmds <const> = require("tecs2d.debug.internal.cmd.render")
 local selectcmds <const> = require("tecs2d.debug.internal.cmd.select")
 local sessioncmds <const> = require("tecs2d.debug.internal.cmd.session")
 
 local format <const> = string.format
-local getTime <const> = love.timer.getTime
 
 local Transform <const> = tecs.builtins.Transform
 
@@ -77,11 +77,11 @@ local record commands
     record Registry
         env: Env
         list: {Command}
-        --- Overlay dispatch by name or alias; excludes MCP-only commands
+        --- Overlay dispatch by name; excludes MCP-only commands
         --- (overlay = false).
         byName: {string: Command}
-        --- Every registered command and alias regardless of surface; backs
-        --- `describe` and the duplicate-registration check.
+        --- Every registered command regardless of surface; backs the
+        --- duplicate-registration check and MCP dispatch.
         allByName: {string: Command}
         names: {string}
         signals: Signals
@@ -98,10 +98,8 @@ local record commands
         --- presses cannot stack full-world loads back to back.
         lastWorldLoadAt: number
 
-        --- Monotonic diff artifact number and the last diff result held in
-        --- memory for `diff get`.
+        --- Monotonic diff artifact number.
         diffCounter: integer
-        lastDiff: {string: any}
 
         --- The last executed result's popup (or message) for the overlay's
         --- leader+Y yank. Stored at execute time so contextual command help
@@ -141,7 +139,7 @@ local record commands
         --- Returns nil + error when the name is unknown.
         invokeMcp: function(self: Registry, name: string, args: {string: any}): Result, string
 
-        --- Add a command to the registry. Raises on a duplicate name/alias or
+        --- Add a command to the registry. Raises on a duplicate name or
         --- an invalid schema, since a bad registration is a programming error.
         add: function(self: Registry, cmd: Command)
 
@@ -149,10 +147,9 @@ local record commands
         --- repeats) and persist the tail to the save directory.
         appendHistory: function(self: Registry, text: string)
 
-        --- Tab completion for a partial command line: returns the text up to
-        --- the word being completed and the candidate replacements for it
-        --- (command names, subcommand verbs, and per-command sources such as
-        --- component and mark names).
+        --- Schema-driven completion for a partial command line: returns the
+        --- text up to the word being completed and candidate replacements for
+        --- command names, verbs, argument keys, and argument values.
         complete: function(self: Registry, text: string): string, {string}
 
         --- Resolve one completion source name to its current candidates.
@@ -187,6 +184,9 @@ local record commands
     --- subcommands, and examples. Used by `help <name>` and overlay F1 help.
     usagePopup: function(c: Command): {string}
 
+    --- Typed popup help consumed by F1 and `help <command>`.
+    usageDocument: function(c: Command): markup.Document
+
     SECTIONS: {string}
     SECTION_COLORS: {string: {number}}
     SECTION_COLORS_BAR: {string: {number}}
@@ -217,8 +217,9 @@ local HISTORY_CAP <const> = 100
 local function makeTargetSchema(required: boolean, extra: {string: cmdargs.ArgSpec}): cmdargs.Schema
     local args: {string: cmdargs.ArgSpec} = {
         id = {kind = "number", forward = "target", help = "entity id"},
-        name = {forward = "target", help = "mark name"},
-        target = {synthetic = {"id", "name"}, required = required, help = "entity id or mark name"},
+        name = {forward = "target", completion = "targets", help = "mark name"},
+        target = {synthetic = {"id", "name"}, required = required,
+            completion = "targets", help = "entity id or mark name"},
     }
     if extra then
         for k, v in pairs(extra) do args[k] = v end
@@ -286,38 +287,53 @@ function commands.subSignature(c: commands.Command, sub: commands.Subcommand): s
     return capSignature(sig)
 end
 
-function commands.usagePopup(c: commands.Command): {string}
-    local popup: {string} = {commands.commandSignature(c), "  " .. c.shortHelp}
-    if c.aliases and #c.aliases > 0 then
-        popup[#popup + 1] = "  aliases: " .. table.concat(c.aliases, ", ")
-    end
+function commands.usageDocument(c: commands.Command): markup.Document
+    local document = markup.new(commands.commandSignature(c))
+    markup.text(document, c.shortHelp)
     if c.schema or c.subcommands then
-        popup[#popup + 1] = commands.HRULE
+        markup.rule(document)
     end
     if c.schema then
-        for _, l in ipairs(cmdargs.argHelp(c.schema)) do popup[#popup + 1] = l end
+        markup.section(document, "Arguments")
+        for _, definition in ipairs(cmdargs.argDefinitions(c.schema)) do
+            markup.definition(document, definition.term, definition.description)
+        end
     end
     if c.subcommands then
-        popup[#popup + 1] = "Subcommands:"
+        markup.section(document, "Subcommands")
         for _, sub in ipairs(c.subcommands) do
-            popup[#popup + 1] = "  " .. commands.subSignature(c, sub) .. "\t" .. sub.shortHelp
+            markup.definition(document, commands.subSignature(c, sub), sub.shortHelp)
         end
     end
     if c.examples and #c.examples > 0 then
-        popup[#popup + 1] = "Examples:"
-        for i = 1, #c.examples do popup[#popup + 1] = "  " .. c.examples[i] end
+        markup.section(document, "Examples")
+        if #c.examples >= 4 then
+            local half = math.ceil(#c.examples / 2) as integer
+            local columns: {{markup.Line}} = {{}, {}}
+            for i = 1, #c.examples do
+                local ci = i <= half and 1 or 2
+                columns[ci][#columns[ci] + 1] = markup.line(c.examples[i],
+                    "code", "console")
+            end
+            markup.columns(document, columns, "auto")
+        else
+            for i = 1, #c.examples do
+                markup.add(document, markup.line(c.examples[i], "code", "console"))
+            end
+        end
     end
-    return popup
+    return document
+end
+
+function commands.usagePopup(c: commands.Command): {string}
+    return markup.plainLines(commands.usageDocument(c))
 end
 
 local function titledUsage(c: commands.Command): commands.Result
-    local lines = commands.usagePopup(c)
-    local body: {string} = {}
-    for i = 2, #lines do body[#body + 1] = lines[i] end
+    local document = commands.usageDocument(c)
     return {
         ok = true,
-        popup = body,
-        popupTitle = lines[1],
+        popupDocument = document,
         popupModal = true,
         popupClosable = true,
     }
@@ -331,11 +347,6 @@ local function findSubcommand(cmd: commands.Command, subName: string): commands.
     if not cmd.subcommands or not subName then return nil end
     for _, sub in ipairs(cmd.subcommands) do
         if sub.name == subName then return sub end
-        if sub.aliases then
-            for _, a in ipairs(sub.aliases) do
-                if a == subName then return sub end
-            end
-        end
     end
     return nil
 end
@@ -379,7 +390,12 @@ function commands.Registry:execute(text: string): commands.Result
     end
     local result = runFn(values, parts)
     if result then
-        if result.popup then
+        if result.popupDocument then
+            self.lastOutput = markup.plainLines(result.popupDocument)
+        elseif result.popupMarkup then
+            local document = markup.parse(result.popupMarkup)
+            if document then self.lastOutput = markup.plainLines(document) end
+        elseif result.popup then
             if result.popupTitle then
                 local output: {string} = {result.popupTitle}
                 for i = 1, #result.popup do output[#output + 1] = result.popup[i] end
@@ -469,7 +485,7 @@ local TOOL_SUFFIX <const> = " In-game debugger command; requires the debug plugi
     " Returns compact JSON text envelope."
 
 -- One command, or one of its subcommand verbs when `sub` is set, projected
--- as an MCP tool definition. Shared by mcpTools and describe.
+-- as an MCP tool definition.
 local function projectTool(cmd: commands.Command, sub: commands.Subcommand): commands.McpTool
     if sub then
         return {
@@ -671,34 +687,20 @@ function commands.build(env: commands.Env): commands.Registry
         return ids
     end
 
-    -- Build an annotation from parsed draw args (default color: yellow).
-    local function makeAnnotation(v: {string: any}, kind: annotations.Kind): annotations.Annotation
-        local expiresAt: number = nil
-        local secs = v.seconds as number
-        if secs then
-            -- 0 means one frame: expire right after the next render.
-            expiresAt = getTime() + ((secs > 0) and secs or 0.001)
+    local function worldFor(v: {string: any}): tecs.World, integer, string
+        local requested = v.worldId as number
+        if requested == nil then
+            return w, w.resources[worldregistry.WORLD_ID] or 0, nil
         end
-        return {
-            kind = kind,
-            x = v.x as number,
-            y = v.y as number,
-            w = (v.w as number) or 0,
-            h = (v.h as number) or 0,
-            radius = (v.radius as number) or 0,
-            x2 = (v.x2 as number) or 0,
-            y2 = (v.y2 as number) or 0,
-            text = (v.msg as string) or "",
-            r = (v.r as number) or 1,
-            g = (v.g as number) or 1,
-            b = (v.b as number) or 0,
-            a = (v.a as number) or 0.8,
-            tag = v.tag as string,
-            expiresAt = expiresAt,
-            lineWidth = (v.stroke as number) or 4,
-            fontSize = (v.fontSize as number) or 14,
-            entity = math.floor((v.entity as number) or 0) as integer,
-        }
+        local worldId = math.floor(requested) as integer
+        if worldId == 0 and not w.resources[worldregistry.WORLD_ID] then
+            return w, 0, nil
+        end
+        local target = worldregistry.resolve(worldId)
+        if not target then
+            return nil, worldId, "unknown or stale render worldId " .. tostring(worldId)
+        end
+        return target, worldId, nil
     end
 
     local function componentFor(nm: string): tecs.Component, string
@@ -709,7 +711,8 @@ function commands.build(env: commands.Env): commands.Registry
     end
 
     -- Live candidates for Tab-completion sources. Sources read current world
-    -- state (marks, bundles, systems, cameras) at completion time.
+    -- or process state (marks, bundles, systems, cameras, loggers) at
+    -- completion time.
     reg.candidatesFor = function(_self: commands.Registry, source: string): {string}
         local out: {string} = {}
         if source == "commands" then
@@ -759,6 +762,8 @@ function commands.build(env: commands.Env): commands.Registry
             end
             table.sort(out)
             return out
+        elseif source == "loggers" then
+            return logtap.loggers()
         end
         return out
     end
@@ -773,7 +778,7 @@ function commands.build(env: commands.Env): commands.Registry
         pipeline = pipeline,
         componentFor = componentFor,
         resolveTargets = resolveTargets,
-        makeAnnotation = makeAnnotation,
+        worldFor = worldFor,
         tileAt = commands.tileAt,
         summarizeProfile = summarizeProfile,
         systemZoneIds = systemZoneIds,
@@ -811,9 +816,9 @@ function commands.build(env: commands.Env): commands.Registry
             name = "help",
             section = "Session",
             mcp = false,
-            complete = {[1] = "commands"},
             shortHelp = "list all commands, or show one command's arguments",
-            schema = { args = { command = {help = "a command to describe"} }, positional = {"command"} },
+            schema = { args = { command = {completion = "commands",
+                help = "command name"} }, positional = {"command"} },
             examples = {"help", "help record", "help select"},
             run = function(v: {string: any}, _parts: {string}): commands.Result
                 local q = v.command as string
@@ -826,38 +831,55 @@ function commands.build(env: commands.Env): commands.Registry
                     return titledUsage(c)
                 end
                 local keys = env.keys
-                local lines: {string} = {
-                    "help  (type `help <command>` for details)",
-                    "Mouse:",
-                    "  click = replace the selection with the entity under the cursor",
-                    "  shift+click = add the entity under the cursor to the selection",
-                    "  drag = replace the selection with entities inside the rectangle",
-                    "  shift+drag = add entities inside the rectangle to the selection",
-                    "  ctrl+drag = move the selection; right-click cancels and restores",
-                    "  right-click = context menu for the entity or world position",
-                    "  middle-drag = pan the camera",
-                    "  wheel = zoom toward the cursor",
-                    "Keys:",
-                    "  " .. keys.leader .. "+" .. keys.debugToggle .. " = open or close the debugger (freezes the game)",
-                    "  " .. keys.leader .. "+" .. keys.statsToggle .. " = toggle the stats HUD",
-                    "  " .. keys.leader .. "+c = clear the command / popup",
-                    "  " .. keys.leader .. "+y = yank the last command's output to the clipboard",
-                    "  escape = clear the command / popup, or close when empty",
-                    "  tab / shift+tab = cycle completions (hold to repeat)",
-                    "  f1 = toggle command help (general help when empty)",
-                    "  up / down = walk the command history",
-                    "  left / right = page this popup",
-                    "  enter = run the command",
-                    "  delete = despawn the selection",
-                    "Arguments (`help <command>` lists each command's):",
-                    "  give them positionally or as name=value, in any order;",
-                    "  positional args come before any named arg",
-                    "  quote values with spaces: mark \"big boss\", record name=\"my clip\"",
-                    "  flags are bare or =bool: debug, debug=true, debug=off",
-                    "Commands (`help <name>` for details):",
-                }
-                -- Group by section, wrapping each section's names (one long
-                -- line overflows the popup).
+                local document = markup.new("debugger help")
+                markup.text(document,
+                    "Type [code]help <command>[/code] for command details.")
+                markup.section(document, "Mouse")
+                markup.definition(document, "click",
+                    "replace the selection with the entity under the cursor")
+                markup.definition(document, "shift+click",
+                    "add the entity under the cursor to the selection")
+                markup.definition(document, "drag",
+                    "replace the selection with entities inside the rectangle")
+                markup.definition(document, "shift+drag",
+                    "add entities inside the rectangle to the selection")
+                markup.definition(document, "ctrl+drag",
+                    "move the selection; right-click cancels and restores")
+                markup.definition(document, "right-click",
+                    "open the context menu for an entity or world position")
+                markup.definition(document, "middle-drag", "pan the camera")
+                markup.definition(document, "wheel", "zoom toward the cursor")
+                markup.section(document, "Keys")
+                markup.definition(document, keys.leader .. "+" .. keys.debugToggle,
+                    "open or close the debugger (freezes the game)")
+                markup.definition(document, keys.leader .. "+" .. keys.statsToggle,
+                    "toggle the stats HUD")
+                markup.definition(document, keys.leader .. "+c",
+                    "clear the command or popup")
+                markup.definition(document, keys.leader .. "+y",
+                    "yank the last command output to the clipboard")
+                markup.definition(document, "escape",
+                    "clear the command or popup, or close when empty")
+                markup.definition(document, "tab / shift+tab",
+                    "cycle completions (hold to repeat)")
+                markup.definition(document, "f1",
+                    "toggle command help (general help when empty)")
+                markup.definition(document, "up / down", "walk command history")
+                markup.definition(document, "page up / page down",
+                    "scroll this popup by a page")
+                markup.definition(document, "home / end",
+                    "jump to the start or end of this popup")
+                markup.definition(document, "enter", "run the command")
+                markup.definition(document, "delete", "despawn the selection")
+                markup.section(document, "Arguments")
+                markup.text(document,
+                    "Give arguments positionally or as [code]name=value[/code], in any order.")
+                markup.text(document, "Positional arguments precede named arguments.")
+                markup.text(document,
+                    "Quote spaces: [code]mark \"big boss\"[/code] or [code]record name=\"my clip\"[/code].")
+                markup.text(document,
+                    "Flags are bare or boolean: [code]debug[/code], [code]debug=true[/code], [code]debug=off[/code].")
+                markup.section(document, "Commands")
                 for _, section in ipairs(cmdtypes.SECTIONS) do
                     local names: {string} = {}
                     for i = 1, #reg.names do
@@ -867,52 +889,29 @@ function commands.build(env: commands.Env): commands.Registry
                         end
                     end
                     if #names > 0 then
-                        lines[#lines + 1] = section .. ":"
-                        local line = "  "
-                        for i = 1, #names do
-                            local piece = names[i] .. ((i < #names) and ", " or "")
-                            if #line + #piece > 64 and line ~= "  " then
-                                lines[#lines + 1] = line
-                                line = "  "
-                            end
-                            line = line .. piece
-                        end
-                        lines[#lines + 1] = line
+                        markup.definition(document, section,
+                            table.concat(names, ", "))
                     end
                 end
-                -- Commands with verbs, so subcommands are discoverable here
-                -- and not only from `help <name>`.
-                local withSubs: {string} = {}
+                local hasSubcommands = false
                 for i = 1, #reg.names do
                     local c = reg.byName[reg.names[i]]
                     if c and c.subcommands then
+                        if not hasSubcommands then
+                            markup.section(document, "Subcommands")
+                            hasSubcommands = true
+                        end
                         local verbs: {string} = {}
                         for _, sub in ipairs(c.subcommands) do
                             verbs[#verbs + 1] = sub.name
                         end
-                        -- Wrap long verb lists to the popup's 70-column budget.
-                        local prefix = "  " .. c.name .. "\t"
-                        local line = prefix
-                        for vi = 1, #verbs do
-                            local piece = verbs[vi] .. ((vi < #verbs) and ", " or "")
-                            if #line + #piece > 70 and line ~= prefix then
-                                withSubs[#withSubs + 1] = line
-                                line = "  \t"
-                            end
-                            line = line .. piece
-                        end
-                        withSubs[#withSubs + 1] = line
+                        markup.definition(document, c.name,
+                            table.concat(verbs, ", "))
                     end
                 end
-                if #withSubs > 0 then
-                    lines[#lines + 1] = "Subcommands:"
-                    for i = 1, #withSubs do lines[#lines + 1] = withSubs[i] end
-                end
-                lines[1] = "type `help <command>` for command details"
                 return {
                     ok = true,
-                    popup = lines,
-                    popupTitle = "debugger help",
+                    popupDocument = document,
                     popupModal = true,
                     popupClosable = true,
                 }
@@ -930,72 +929,18 @@ function commands.build(env: commands.Env): commands.Registry
         grouped("modify"),
         grouped("spawn"),
         grouped("query"),
-        grouped("draw"),
         grouped("ids"),
         grouped("history"),
         grouped("agent"),
-        grouped("capabilities"),
-        {
-            name = "describe",
-            section = "Session",
-            overlay = false,   -- the typed surface has `help <command>`
-            complete = {[1] = "commands"},
-            shortHelp = "one command's full contract as structured data",
-            mcpHelp = "The complete contract of one debugger command: signature, help, argument schema, subcommand verbs with their schemas and safety annotations, and examples. Use it before calling an unfamiliar cmd_* tool, or to discover verbs of a family.",
-            schema = { args = { command = {required = true, help = "command name"} },
-                positional = {"command"} },
-            run = function(v: {string: any}, _parts: {string}): commands.Result
-                local q = v.command as string
-                local c = reg.allByName[q]
-                if not c then
-                    return {ok = false, code = "unknown_command",
-                        message = "describe: no such command '" .. q .. "'"}
-                end
-                local subs: {{string: any}} = {}
-                for _, sub in ipairs(c.subcommands or {}) do
-                    local tool = projectTool(c, sub)
-                    subs[#subs + 1] = {
-                        name = sub.name,
-                        shortHelp = sub.shortHelp,
-                        mcpHelp = sub.mcpHelp,
-                        tool = (sub.mcp ~= false) and tool.name or nil,
-                        inputSchema = tool.inputSchema,
-                        outputSchema = tool.outputSchema,
-                        annotations = tool.annotations,
-                        metadata = sub.metadata,
-                    }
-                end
-                local tool = projectTool(c, nil)
-                local result = titledUsage(c)
-                result.data = {
-                    name = c.name,
-                    signature = commands.commandSignature(c),
-                    section = c.section or "Custom",
-                    shortHelp = c.shortHelp,
-                    mcpHelp = c.mcpHelp,
-                    tool = (c.mcp ~= false and c.run ~= nil) and tool.name or nil,
-                    inputSchema = tool.inputSchema,
-                    outputSchema = tool.outputSchema,
-                    annotations = tool.annotations,
-                    subcommands = subs,
-                    examples = c.examples,
-                    metadata = c.metadata,
-                }
-                return result
-            end,
-        },
-        grouped("freeze"),
         grouped("step"),
         grouped("input_tape"),
-        grouped("stats"),
         grouped("context"),
         grouped("restart"),
-        grouped("exit"),
         grouped("quit"),
     }
 
     for _, group in ipairs({rendercmds.commands(d), enginecmds.commands(d),
-            luacmds.commands(d), capturecmds.commands(d)}) do
+            capturecmds.commands(d)}) do
         for _, c in ipairs(group) do
             cmds[#cmds + 1] = c
         end
@@ -1085,20 +1030,8 @@ function commands.Registry:add(cmd: commands.Command)
             end
         end
     end
-    if cmd.aliases then
-        for _, a in ipairs(cmd.aliases) do
-            if self.allByName[a] then
-                error("commands: alias '" .. a .. "' of '" .. cmd.name .. "' is already registered")
-            end
-        end
-    end
     self.list[#self.list + 1] = cmd
     self.allByName[cmd.name] = cmd
-    if cmd.aliases then
-        for _, a in ipairs(cmd.aliases) do
-            self.allByName[a] = cmd
-        end
-    end
     -- Keep the lazy MCP dispatch index current once it exists.
     if self.byToolName then
         indexTools(self.byToolName, cmd)
@@ -1108,11 +1041,6 @@ function commands.Registry:add(cmd: commands.Command)
     if cmd.overlay ~= false then
         self.byName[cmd.name] = cmd
         self.names[#self.names + 1] = cmd.name
-        if cmd.aliases then
-            for _, a in ipairs(cmd.aliases) do
-                self.byName[a] = cmd
-            end
-        end
     end
 end
 
@@ -1152,6 +1080,55 @@ function commands.Registry:appendHistory(text: string)
     love.filesystem.write(HISTORY_FILE, table.concat(self.history, "\n") .. "\n")
 end
 
+local function completionKind(spec: cmdargs.ArgSpec): string
+    if spec.kind then return spec.kind end
+    if type(spec.default) == "boolean" then return "boolean" end
+    if type(spec.default) == "number" then return "number" end
+    return "string"
+end
+
+local function markCompletionArg(schema: cmdargs.Schema,
+        used: {string: boolean}, name: string)
+    if not name then return end
+    used[name] = true
+    local spec = schema.args[name]
+    if not spec then return end
+    if spec.forward then
+        used[spec.forward] = true
+        local target = schema.args[spec.forward]
+        for _, member in ipairs((target and target.synthetic) or {}) do
+            used[member] = true
+        end
+    end
+    for _, member in ipairs(spec.synthetic or {}) do used[member] = true end
+end
+
+local function completionPosition(schema: cmdargs.Schema, tokens: {string}): integer,
+        {string: boolean}
+    local used: {string: boolean} = {}
+    local position = 1
+    for _, token in ipairs(tokens) do
+        local name = token:match("^([%a_][%w_]*)=")
+        if name and schema.args[name] then
+            markCompletionArg(schema, used, name)
+        else
+            local positional = schema.positional or {}
+            local slot = positional[position]
+            if slot then
+                markCompletionArg(schema, used, slot)
+                local spec = schema.args[slot]
+                if not spec.rest then position = position + 1 end
+            end
+        end
+    end
+    return position, used
+end
+
+local function quotedCompletion(value: string): string
+    if not value:find("[%s\"\\]") then return value end
+    return '"' .. value:gsub("\\", "\\\\"):gsub('"', '\\"') .. '"'
+end
+
 function commands.Registry:complete(text: string): string, {string}
     local out: {string} = {}
     local head, prefix = text:match("^(.*%s)(%S*)$")
@@ -1189,41 +1166,112 @@ function commands.Registry:complete(text: string): string, {string}
     local cmd = self.byName[toks[1]]
     if not cmd then return head, out end
 
-    -- The word being completed sits at argument position #toks relative to
-    -- the command, shifting by one once a subcommand verb is routed.
-    local argIndex = #toks
-    local completeMap = cmd.complete
     local routedSub: commands.Subcommand = nil
     if cmd.subcommands and toks[2] then
         routedSub = findSubcommand(cmd, toks[2])
-        if routedSub then
-            completeMap = routedSub.complete
-            argIndex = #toks - 1
-        end
     end
 
-    local candidates: {string} = {}
-    if argIndex == 1 and cmd.subcommands and not routedSub then
+    if cmd.subcommands and not routedSub then
         for _, sub in ipairs(cmd.subcommands) do
-            candidates[#candidates + 1] = sub.name
-        end
-    end
-    if completeMap then
-        local src = completeMap[argIndex] or completeMap[0]
-        if src then
-            for name in src:gmatch("[^,]+") do
-                local list = self:candidatesFor(name)
-                for i = 1, #list do candidates[#candidates + 1] = list[i] end
+            if sub.name:sub(1, #prefix) == prefix then
+                out[#out + 1] = sub.name
             end
         end
+        -- A command may have both a default action and named subcommands.
+        -- Keep the matching verbs, then also complete the default schema.
+        -- Subcommand-only parents stop here because they have no default
+        -- argument surface to merge.
+        if not cmd.run then return head, out end
+    end
+
+    local schema = routedSub and routedSub.schema or cmd.schema
+    if not schema then return head, out end
+    local firstArg = routedSub and 3 or 2
+    local previous: {string} = {}
+    for i = firstArg, #toks do previous[#previous + 1] = toks[i] end
+    local position, used = completionPosition(schema, previous)
+
+    local named, valuePrefix = prefix:match("^([%a_][%w_]*)=(.*)$")
+    local spec: cmdargs.ArgSpec = nil
+    local activeSlot: string = nil
+    local outputPrefix = ""
+    if named and schema.args[named] and not schema.args[named].synthetic then
+        spec = schema.args[named]
+        outputPrefix = named .. "="
+    elseif not named then
+        local positional = schema.positional or {}
+        local slot = positional[position]
+        if slot then
+            activeSlot = slot
+            spec = schema.args[slot]
+        end
+        valuePrefix = prefix
     end
 
     local seen: {string: boolean} = {}
-    for i = 1, #candidates do
-        local c = candidates[i]
-        if c:sub(1, #prefix) == prefix and not seen[c] then
-            seen[c] = true
-            out[#out + 1] = c
+    local function add(value: string, rawPrefix: string, prefixOut: string)
+        local negative = rawPrefix:sub(1, 1) == "-"
+        local openedQuote = rawPrefix:sub(1, 1) == '"'
+        local matchPrefix = rawPrefix
+        if negative or openedQuote then matchPrefix = rawPrefix:sub(2) end
+        if value:sub(1, #matchPrefix) ~= matchPrefix then return end
+        local rendered = quotedCompletion(value)
+        if negative then rendered = "-" .. rendered end
+        local candidate = prefixOut .. rendered
+        if not seen[candidate] then
+            seen[candidate] = true
+            out[#out + 1] = candidate
+        end
+    end
+
+    local function addSpecValues(valueSpec: cmdargs.ArgSpec)
+        local values: {string} = {}
+        for _, value in ipairs(valueSpec.enum or {}) do values[#values + 1] = value end
+        if completionKind(valueSpec) == "boolean" then
+            values[#values + 1] = "on"
+            values[#values + 1] = "off"
+        end
+        if valueSpec.completion then
+            for source in valueSpec.completion:gmatch("[^,]+") do
+                local live = self:candidatesFor(source)
+                for i = 1, #live do values[#values + 1] = live[i] end
+            end
+        end
+        for _, member in ipairs(valueSpec.synthetic or {}) do
+            local memberSpec = schema.args[member]
+            if memberSpec then
+                for _, value in ipairs(memberSpec.enum or {}) do
+                    values[#values + 1] = value
+                end
+                if completionKind(memberSpec) == "boolean" then
+                    values[#values + 1] = "on"
+                    values[#values + 1] = "off"
+                end
+                if memberSpec.completion then
+                    for source in memberSpec.completion:gmatch("[^,]+") do
+                        local live = self:candidatesFor(source)
+                        for i = 1, #live do values[#values + 1] = live[i] end
+                    end
+                end
+            end
+        end
+        for i = 1, #values do add(values[i], valuePrefix or "", outputPrefix) end
+    end
+    if spec then addSpecValues(spec) end
+
+    if not named then
+        local keys: {string} = {}
+        for name, argSpec in pairs(schema.args) do
+            if not argSpec.synthetic and not used[name] and name ~= activeSlot then
+                keys[#keys + 1] = name .. "="
+            end
+        end
+        table.sort(keys)
+        for i = 1, #keys do
+            if keys[i]:sub(1, #prefix) == prefix and not seen[keys[i]] then
+                seen[keys[i]] = true
+                out[#out + 1] = keys[i]
+            end
         end
     end
     return head, out

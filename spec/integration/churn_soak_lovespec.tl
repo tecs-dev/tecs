@@ -26,8 +26,7 @@ local SENTINEL_PROBE <const> = {{160 / W, 120 / H}}
 local FIELD_PROBE <const> = {{80 / W, 60 / H}}
 
 local function entityCount(app: fixture.App): integer
-    local result = app.client:call("cmd_stats", {})
-    return tonumber(result.entities) as integer
+    return tonumber(fixture.runLua(app, "return world:getStats().entities")[1]) as integer
 end
 
 local function sentinelVisible(app: fixture.App): boolean

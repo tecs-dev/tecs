@@ -21,7 +21,8 @@ describe("restart: the loop reboots into a fresh, working world", function()
 
     setup(function()
         app = fixture.start(APP_DIR)
-        baselineEntities = tonumber(app.client:call("cmd_stats", {}).entities) as integer
+        baselineEntities = tonumber(
+            fixture.runLua(app, "return world:getStats().entities")[1]) as integer
         fixture.runLua(app, [[
             local tecs = require("tecs")
             local gfx = require("tecs2d.gfx")
@@ -55,16 +56,18 @@ describe("restart: the loop reboots into a fresh, working world", function()
         local fresh = fixture.eventually(40, function(): boolean
             -- tryCall returns the raw envelope; use a pcall'd call for
             -- the unwrapped result (it raises while the server is down).
-            local ok, stats = pcall(function(): {string: any}
-                return app.client:call("cmd_stats", {}, 2)
+            local ok, values = pcall(function(): {string}
+                local result = app.client:call("run_lua",
+                    {code = "return world:getStats().entities", lua = true}, 2)
+                return result.values as {string}
             end)
-            if ok and stats then
-                lastSeen = "entities=" .. tostring(stats.entities)
-                if tonumber(stats.entities) == baselineEntities then
+            if ok and values then
+                lastSeen = "entities=" .. tostring(values[1])
+                if tonumber(values[1]) == baselineEntities then
                     return true
                 end
             elseif not ok then
-                lastSeen = tostring(stats)
+                lastSeen = tostring(values)
             end
             return nil
         end)

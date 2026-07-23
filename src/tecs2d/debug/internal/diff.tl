@@ -43,12 +43,6 @@ local record diff
         toEntities: {integer: {string: any}}, toMeta: {string: any},
         opts: Options): {string: any}
 
-    --- Resolve an RFC 6901 JSON Pointer against a Lua document. Integer
-    --- segments try the 0-based array position first (matching emitted
-    --- pointers), then the literal key. An empty pointer or bare `/` names
-    --- the whole document. On a miss, returns nil and the deepest path that
-    --- did resolve.
-    resolvePointer: function(doc: any, pointer: string): any, string
 end
 
 -- RFC 6901 escaping: ~ becomes ~0 and / becomes ~1.
@@ -332,40 +326,6 @@ function diff.compare(fromEntities: {integer: {string: any}}, fromMeta: {string:
         truncated = total > #limited,
         skipped = (#skipped > 0) and skipped or nil,
     }
-end
-
-function diff.resolvePointer(doc: any, pointer: string): any, string
-    if (pointer == "" or pointer == "/") and doc ~= nil then
-        return doc, ""
-    end
-    if pointer:sub(1, 1) ~= "/" then
-        return nil, "a JSON Pointer starts with /"
-    end
-    local node = doc
-    local resolved = ""
-    for seg in pointer:gmatch("/([^/]*)") do
-        local key = seg:gsub("~1", "/"):gsub("~0", "~")
-        if type(node) ~= "table" then
-            return nil, resolved
-        end
-        local t = node as {any: any}
-        local nextNode: any = nil
-        local n = tonumber(key)
-        if n and math.floor(n) == n then
-            -- Emitted pointers are 0-based for arrays; try that first.
-            nextNode = t[n + 1]
-            if nextNode == nil then nextNode = t[n] end
-        end
-        if nextNode == nil then
-            nextNode = t[key]
-        end
-        if nextNode == nil then
-            return nil, resolved
-        end
-        node = nextNode
-        resolved = resolved .. "/" .. seg
-    end
-    return node, resolved
 end
 
 return diff

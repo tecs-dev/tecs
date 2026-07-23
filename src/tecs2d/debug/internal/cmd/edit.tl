@@ -1,13 +1,12 @@
---- Edit-section debugger commands: remove, set, modify, spawn, and draw,
+--- Edit-section debugger commands: remove, set, modify, and spawn,
 --- plus the mutation helpers they share (edit-target resolution, Lua table
---- expression evaluation, field merging, and the draw-verb schemas).
+--- expression evaluation, and field merging).
 ---
 --- Everything shared with the core registry arrives through cmdtypes.Deps;
 --- this module must not require tecs2d.debug.commands (a load cycle).
 
 local tecs <const> = require("tecs")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
-local annotations <const> = require("tecs2d.debug.internal.annotations")
 local cmdargs <const> = require("tecs2d.debug.internal.cmdargs")
 local cmdtypes <const> = require("tecs2d.debug.internal.cmdtypes")
 
@@ -16,69 +15,11 @@ local record edit
     commands: function(d: cmdtypes.Deps): {cmdtypes.Command}
 end
 
--- Shared arguments of every draw verb, plus the verb's own positionals.
-local function makeDrawSchema(extra: {string: cmdargs.ArgSpec}, positional: {string}): cmdargs.Schema
-    local args: {string: cmdargs.ArgSpec} = {
-        x = {default = 0, help = "world x (an offset when entity is set)"},
-        y = {default = 0, help = "world y (an offset when entity is set)"},
-        r = {kind = "number", help = "red 0-1 (default 1)"},
-        g = {kind = "number", help = "green 0-1 (default 1)"},
-        b = {kind = "number", help = "blue 0-1 (default 0)"},
-        a = {kind = "number", help = "alpha 0-1 (default 0.8)"},
-        tag = {help = "tag for grouped clearing"},
-        seconds = {kind = "number", help = "auto-remove after N wall-clock seconds; 0 = one frame"},
-        entity = {kind = "number", help = "pin to this entity: positions become offsets; removed when it dies"},
-        -- Named stroke, not width: rect already has a `w` size argument.
-        stroke = {default = 4, help = "outline width in pixels"},
-    }
-    for k, v in pairs(extra) do args[k] = v end
-    local schema: cmdargs.Schema = {args = args, positional = positional}
-    cmdargs.validate(schema)
-    return schema
-end
-
-local drawRectSchema <const> = makeDrawSchema({
-    w = {required = true, kind = "number", help = "width in world units"},
-    h = {required = true, kind = "number", help = "height in world units"},
-}, {"x", "y", "w", "h"})
-
-local drawCircleSchema <const> = makeDrawSchema({
-    radius = {required = true, kind = "number", help = "radius in world units"},
-}, {"x", "y", "radius"})
-
-local drawLineSchema <const> = makeDrawSchema({
-    x2 = {required = true, kind = "number", help = "end world x (an offset when entity is set)"},
-    y2 = {required = true, kind = "number", help = "end world y (an offset when entity is set)"},
-}, {"x", "y", "x2", "y2"})
-
-local drawTextSchema <const> = makeDrawSchema({
-    msg = {rest = true, required = true, help = "text to display"},
-    fontSize = {default = 14, help = "font size in pixels"},
-}, {"x", "y", "msg"})
-
--- Clear by tag or id, or everything when omitted.
-local drawClearSchema <const>: cmdargs.Schema = {
-    args = {
-        id = {kind = "number", forward = "which", help = "annotation id"},
-        tag = {forward = "which", help = "annotation tag"},
-        which = {synthetic = {"id", "tag"}, help = "an annotation id or tag; omit to clear all"},
-    },
-    positional = {"which"},
-}
-cmdargs.validate(drawClearSchema)
-
-local drawOutputSchema <const>: {string: any} = {
-    type = "object",
-    properties = {
-        id = {type = "integer", description = "annotation id for draw clear"},
-        tag = {type = "string"},
-    },
-    required = {"id"},
-}
-
 local spawnSchema <const>: cmdargs.Schema = {
     args = {
-        spec = {rest = true, required = true,
+        worldId = {kind = "number",
+            help = "render world id; omit for the game world (see context)"},
+        spec = {rest = true, required = true, completion = "bundles,components",
             help = "[bundle] Component {lua table} ..., e.g. enemy Transform {x = 10}"},
     },
     positional = {"spec"},
@@ -129,10 +70,9 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
     -- The shared context, aliased once so command bodies stay terse.
     local w <const> = d.world
     local ctx <const> = d.ctx
-    local env <const> = d.env
     local componentFor <const> = d.componentFor
     local resolveTargets <const> = d.resolveTargets
-    local makeAnnotation <const> = d.makeAnnotation
+    local worldFor <const> = d.worldFor
     local selectionTarget <const> = d.selectionTarget
 
     -- Entity-edit commands take an explicit target: an id, a mark name, or
@@ -141,16 +81,21 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
     local function editTargetArgs(): {string: cmdargs.ArgSpec}
         return {
             id = {kind = "number", forward = "target", help = "entity id"},
-            name = {forward = "target", help = "mark name, or " .. selectionTarget},
+            name = {forward = "target", completion = "edittargets",
+                help = "mark name, or " .. selectionTarget},
             target = {synthetic = {"id", "name"},
+                completion = "edittargets",
                 help = "entity id, mark name, or " .. selectionTarget .. " (or give ids=)"},
             ids = {kind = "list", help = "entity ids to target instead (overrides target)"},
+            worldId = {kind = "number",
+                help = "render world id; omit for the game world (see context)"},
         }
     end
 
     local removeSchema <const>: cmdargs.Schema = (function(): cmdargs.Schema
         local args = editTargetArgs()
-        args.comps = {rest = true, required = true, help = "component names to remove"}
+        args.comps = {rest = true, required = true, completion = "components",
+            help = "component names to remove"}
         local schema: cmdargs.Schema = {args = args, positional = {"target", "comps"}}
         cmdargs.validate(schema)
         return schema
@@ -158,7 +103,7 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
 
     local setSchema <const>: cmdargs.Schema = (function(): cmdargs.Schema
         local args = editTargetArgs()
-        args.comp = {required = true, help = "component name"}
+        args.comp = {required = true, completion = "components", help = "component name"}
         args.value = {rest = true, kind = "table",
             help = "component fields: a Lua table expression, e.g. {x = 10, y = 20}, or a JSON object over MCP; omit for defaults"}
         local schema: cmdargs.Schema = {args = args, positional = {"target", "comp", "value"}}
@@ -168,7 +113,7 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
 
     local modifySchema <const>: cmdargs.Schema = (function(): cmdargs.Schema
         local args = editTargetArgs()
-        args.comp = {required = true, help = "component name"}
+        args.comp = {required = true, completion = "components", help = "component name"}
         args.value = {rest = true, required = true, kind = "table",
             help = "fields to change: a Lua table expression, e.g. {x = 10}, or a JSON object over MCP"}
         local schema: cmdargs.Schema = {args = args, positional = {"target", "comp", "value"}}
@@ -179,7 +124,8 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
     -- Resolve an edit target: an explicit ids= list wins, and the literal
     -- @selection means the current selection. Returns nil plus a reason and
     -- a machine-readable code when nothing matches.
-    local function resolveEditTargets(v: {string: any}): {integer}, string, string
+    local function resolveEditTargets(v: {string: any}, targetWorld: tecs.World):
+            {integer}, string, string
         if v.ids ~= nil then
             local ids: {integer} = {}
             for _, raw in ipairs(v.ids as {string}) do
@@ -197,6 +143,10 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             return nil, "give an entity id, mark name, " .. selectionTarget .. ", or ids=",
                 "invalid_arguments"
         end
+        if targetWorld ~= w and v.name ~= nil then
+            return nil, "marks and @selection belong to the game world; use id= or ids= with worldId",
+                "invalid_arguments"
+        end
         if v.name == selectionTarget then
             if #ctx.selected == 0 then return nil, "nothing selected", "no_match" end
             local ids: {integer} = {}
@@ -210,26 +160,10 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
         return ids, nil, nil
     end
 
-    -- One draw verb: the name doubles as the annotation kind.
-    local function drawVerb(name: string, shortHelp: string, schema: cmdargs.Schema): cmdtypes.Subcommand
-        return {
-            name = name,
-            shortHelp = shortHelp,
-            schema = schema,
-            outputSchema = drawOutputSchema,
-            run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                local id = env.annotations:add(makeAnnotation(v, name as annotations.Kind))
-                return {ok = true, message = "drew " .. name .. " #" .. tostring(id),
-                    data = {id = id, tag = v.tag}}
-            end,
-        }
-    end
-
     return {
         {
             name = "remove",
             section = "Edit",
-            complete = {[1] = "edittargets", [0] = "components"},
             shortHelp = "remove components from an entity, marked group, or " .. selectionTarget,
             mcpHelp = "Strip the named components from the target entities (an id, a mark name, @selection, or an ids list). Destructive to component data; the entities survive. Returns how many entities were changed.",
             schema = removeSchema,
@@ -241,11 +175,16 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     entities = {type = "integer", description = "entities touched"},
                     components = {type = "array", items = {type = "string"}},
                     errors = {type = "integer", description = "failed removals"},
+                    worldId = {type = "integer", description = "target render world"},
                 },
-                required = {"components", "entities", "errors"},
+                required = {"components", "entities", "errors", "worldId"},
             },
             run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                local ids, terr, tcode = resolveEditTargets(v)
+                local targetWorld, worldId, werr = worldFor(v)
+                if not targetWorld then
+                    return {ok = false, code = "unknown_world", message = "remove: " .. werr}
+                end
+                local ids, terr, tcode = resolveEditTargets(v, targetWorld)
                 if not ids then
                     return {ok = false, code = tcode, message = "remove: " .. terr}
                 end
@@ -267,9 +206,9 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 local errors = 0
                 for i = 1, #ids do
                     local eid = ids[i]
-                    if w:isAlive(eid) then
+                    if targetWorld:isAlive(eid) then
                         for j = 1, #comps do
-                            if not pcall(w.remove, w, eid, comps[j]) then
+                            if not pcall(targetWorld.remove, targetWorld, eid, comps[j]) then
                                 errors = errors + 1
                             end
                         end
@@ -282,15 +221,14 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     message = "removed " .. table.concat(names, ", ") .. " from " ..
                         tostring(touched) .. " entities" ..
                         ((errors > 0) and (" (" .. tostring(errors) .. " errors)") or ""),
-                    data = {entities = touched, components = names, errors = errors}}
+                    data = {entities = touched, components = names,
+                        errors = errors, worldId = worldId}}
             end,
         },
         {
             name = "set",
             section = "Edit",
-            complete = {[1] = "edittargets", [2] = "components"},
-            shortHelp = "set one component on an entity, marked group, or " ..
-                selectionTarget .. " (Lua table value)",
+            shortHelp = "set one component on an entity, marked group, or " .. selectionTarget .. " (Lua table value)",
             mcpHelp = "Write one component on the target entities (an id, a mark name, the literal @selection, or an ids list). The value is a JSON object or a Lua table expression, e.g. {x = 10, y = {n = 2}}; omitted fields reset to the component's defaults (use cmd_modify to change fields in place). Adds the component when missing. Mutates the live world immediately. Returns how many entities were written.",
             schema = setSchema,
             examples = {"set 5 Transform {x = 10, y = 20}", "set @selection Color {r = 1, g = 0, b = 0}",
@@ -300,11 +238,16 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 properties = {
                     set = {type = "integer", description = "entities written"},
                     component = {type = "string"},
+                    worldId = {type = "integer", description = "target render world"},
                 },
-                required = {"component", "set"},
+                required = {"component", "set", "worldId"},
             },
             run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                local ids, terr, tcode = resolveEditTargets(v)
+                local targetWorld, worldId, werr = worldFor(v)
+                if not targetWorld then
+                    return {ok = false, code = "unknown_world", message = "set: " .. werr}
+                end
+                local ids, terr, tcode = resolveEditTargets(v, targetWorld)
                 if not ids then
                     return {ok = false, code = tcode, message = "set: " .. terr}
                 end
@@ -322,11 +265,11 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 local firstError: string = nil
                 for i = 1, #ids do
                     local eid = ids[i]
-                    if w:isAlive(eid) then
+                    if targetWorld:isAlive(eid) then
                         -- A fresh instance per entity: FFI cdata must never be
                         -- shared across rows.
                         local ok2, err2 = pcall(function()
-                            w:set(eid, comp.deserialize(w, dataTbl))
+                            targetWorld:set(eid, comp.deserialize(targetWorld, dataTbl))
                         end) as (boolean, any)
                         if ok2 then
                             count = count + 1
@@ -343,13 +286,12 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 return {ok = true,
                     message = "set " .. compName .. " on " .. tostring(count) .. " entities" ..
                         (firstError and (" (some failed: " .. firstError .. ")") or ""),
-                    data = {set = count, component = compName}}
+                    data = {set = count, component = compName, worldId = worldId}}
             end,
         },
         {
             name = "modify",
             section = "Edit",
-            complete = {[1] = "edittargets", [2] = "components"},
             shortHelp = "change only the given fields of a component the target already has",
             mcpHelp = "Update only the provided fields of one component on the target entities (an id, a mark name, @selection, or an ids list). Unlike cmd_set it never adds the component and never resets omitted fields: targets missing the component are skipped and unnamed fields keep their current values. Returns modified and skipped counts.",
             schema = modifySchema,
@@ -361,11 +303,16 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     modified = {type = "integer", description = "entities changed"},
                     skipped = {type = "integer", description = "live targets lacking the component"},
                     component = {type = "string"},
+                    worldId = {type = "integer", description = "target render world"},
                 },
-                required = {"component", "modified", "skipped"},
+                required = {"component", "modified", "skipped", "worldId"},
             },
             run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                local ids, terr, tcode = resolveEditTargets(v)
+                local targetWorld, worldId, werr = worldFor(v)
+                if not targetWorld then
+                    return {ok = false, code = "unknown_world", message = "modify: " .. werr}
+                end
+                local ids, terr, tcode = resolveEditTargets(v, targetWorld)
                 if not ids then
                     return {ok = false, code = tcode, message = "modify: " .. terr}
                 end
@@ -387,14 +334,14 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 local firstError: string = nil
                 for i = 1, #ids do
                     local eid = ids[i]
-                    if w:isAlive(eid) then
-                        if not w:has(eid, comp) then
+                    if targetWorld:isAlive(eid) then
+                        if not targetWorld:has(eid, comp) then
                             skipped = skipped + 1
                         else
                             -- getMut marks the component dirty so GPU syncs
                             -- and other dirty-gated consumers see the write.
                             local ok2, err2 = pcall(function()
-                                applyFields(w:getMut(eid, comp), dataTbl)
+                                applyFields(targetWorld:getMut(eid, comp), dataTbl)
                             end) as (boolean, any)
                             if ok2 then
                                 count = count + 1
@@ -414,15 +361,15 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     message = "modified " .. compName .. " on " .. tostring(count) .. " entities" ..
                         ((skipped > 0) and (" (" .. tostring(skipped) .. " lacked it)") or "") ..
                         (firstError and (" (some failed: " .. firstError .. ")") or ""),
-                    data = {modified = count, skipped = skipped, component = compName}}
+                    data = {modified = count, skipped = skipped,
+                        component = compName, worldId = worldId}}
             end,
         },
         {
             name = "spawn",
             section = "Edit",
-            complete = {[1] = "bundles,components", [0] = "components"},
             shortHelp = "spawn an entity from a bundle and/or components with Lua table values",
-            mcpHelp = "Spawn one entity from a bundle name and/or component list with Lua table values, e.g. 'Transform {x = 10, y = 20}'. The new entity becomes selected. Returns its id.",
+            mcpHelp = "Spawn one entity in the game world or an explicit render worldId from a bundle name and/or component list with Lua table values, e.g. 'Transform {x = 10, y = 20}'. Game-world entities become selected; entities in another world remain independent. Returns its id and worldId.",
             schema = spawnSchema,
             examples = {"spawn Transform {x = 100, y = 50}", "spawn enemy Transform {x = 0, y = 0}",
                 "spawn ball"},
@@ -431,15 +378,20 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 properties = {
                     id = {type = "integer", description = "the new entity, now selected"},
                     bundle = {type = "string", description = "bundle used, when one matched"},
+                    worldId = {type = "integer", description = "target render world"},
                 },
-                required = {"id"},
+                required = {"id", "worldId"},
             },
             run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
+                local targetWorld, worldId, werr = worldFor(v)
+                if not targetWorld then
+                    return {ok = false, code = "unknown_world", message = "spawn: " .. werr}
+                end
                 local toks, terr = cmdargs.tokenize(v.spec as string)
                 if not toks then
                     return {ok = false, code = "parse_error", message = "spawn: " .. terr}
                 end
-                local bundles = w:getBundles()
+                local bundles = targetWorld:getBundles()
                 local idx = 1
                 local bundleName: string = nil
                 if toks[1] and bundles[toks[1]] ~= nil then
@@ -475,7 +427,7 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         dataTbl = parsed
                     end
                     local okD, res = pcall(function(): tecs.Component
-                        return comp.deserialize(w, dataTbl)
+                        return comp.deserialize(targetWorld, dataTbl)
                     end)
                     if not okD then
                         return {ok = false, code = "component_deserialize_failed",
@@ -490,55 +442,23 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 end
                 local okS, spawnedOrErr = pcall(function(): integer
                     if bundleName then
-                        return w:spawnBundle(bundleName, table.unpack(instances))
+                        return targetWorld:spawnBundle(bundleName, table.unpack(instances))
                     end
-                    return w:spawn(table.unpack(instances))
+                    return targetWorld:spawn(table.unpack(instances))
                 end)
                 if not okS then
                     return {ok = false, code = "spawn_failed",
                         message = "spawn failed: " .. tostring(spawnedOrErr)}
                 end
                 local id = spawnedOrErr as integer
-                debugcontext.addSelected(ctx, id)
-                debugcontext.pushEvent(ctx, "spawn", {id = id, bundle = bundleName})
+                if targetWorld == w then debugcontext.addSelected(ctx, id) end
+                debugcontext.pushEvent(ctx, "spawn",
+                    {id = id, worldId = worldId, bundle = bundleName})
                 return {ok = true,
                     message = "spawned #" .. tostring(id) ..
                         (bundleName and (" from " .. bundleName) or ""),
-                    data = {id = id, bundle = bundleName}}
+                    data = {id = id, worldId = worldId, bundle = bundleName}}
             end,
-        },
-        {
-            name = "draw",
-            section = "Edit",
-            shortHelp = "draw a world-space annotation over the game",
-            examples = {"draw rect 10 10 64 48", "draw circle 0 0 20 entity=42 r=0 b=1",
-                "draw text 5 -30 spawn point here", "draw clear paths"},
-            subcommands = {
-                drawVerb("rect", "outline a rectangle (x y w h in world units)", drawRectSchema),
-                drawVerb("circle", "outline a circle (x y radius in world units)", drawCircleSchema),
-                drawVerb("line", "draw a line (x y x2 y2 in world units)", drawLineSchema),
-                drawVerb("text", "print text at a world position", drawTextSchema),
-                {
-                    name = "clear",
-                    aliases = {"rm"},
-                    shortHelp = "remove annotations by id or tag; everything when omitted",
-                    schema = drawClearSchema,
-                    outputSchema = {
-                        type = "object",
-                        properties = {
-                            cleared = {type = "integer", description = "annotations removed"},
-                        },
-                        required = {"cleared"},
-                    },
-                    run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local id: integer = nil
-                        if v.id ~= nil then id = math.floor(v.id as number) as integer end
-                        local n = env.annotations:clear(v.tag as string, id)
-                        return {ok = true, message = "cleared " .. tostring(n) .. " annotation(s)",
-                            data = {cleared = n}}
-                    end,
-                },
-            },
         },
     }
 end

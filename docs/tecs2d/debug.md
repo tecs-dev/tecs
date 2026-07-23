@@ -13,9 +13,12 @@ AI agent reads and drives the same debugger through MCP tools.
 The overlay dogfoods Tecs2D rendering: it owns a small independent ECS world
 with the UI plugin and a secondary GPU pipeline. Rectangles, lines, circles,
 BMFont text, and image-preview Sprites render to a transparent canvas and are
-composited in `RenderLast`. Its clock, entities, camera, and mutable GPU buffers
-are isolated from the game world. See the advanced [multiple render worlds and
-compositing guide](./rendering/multi-world) for the underlying architecture.
+composited in `RenderLast`. Its immediate drawing facade reuses persistent
+entities by primitive type and mutates them only when their content changes;
+unused slots are hidden instead of spawned and despawned every frame. Its clock,
+entities, camera, and mutable GPU buffers are isolated from the game world. See
+the advanced [multiple render worlds and compositing
+guide](./rendering/multi-world) for the underlying architecture.
 
 ## Getting started
 
@@ -46,8 +49,8 @@ With the plugin installed:
 Press **Ctrl+/** to open the debugger. Opening it freezes the game: every
 gameplay phase is disabled and the render time scale is set to zero, so
 animation and simulation stop while input and the overlay keep running. Pressing
-Ctrl+/ again, pressing Escape on an empty prompt, or running `exit` closes it
-and resumes the game.
+Ctrl+/ again or pressing Escape on an empty prompt closes it and resumes the
+game.
 
 The debugger also pushes a stable `"debugger"` [input layer](/tecs2d/input/#input-layers). While it is open, keyboard,
 pointer, wheel, text, touch, and controller interaction belongs to the overlay; gameplay and any lower menu layer are
@@ -62,19 +65,22 @@ or assume that the game uses the [state stack](/tecs/states). Its Ctrl+/ shortcu
 open above a game-owned modal and always close itself. The overlay's ordinary controls use its routed layer.
 
 The overlay draws two rows across the bottom of the screen. The upper context
-row shows debugger state, selection count, command feedback, and the compact
-mouse/world/camera readout. The lower row is a `:` command line. Completions do
-not occupy the game view until requested.
+row shows debugger state, selection count, current FPS, command feedback, and
+the compact mouse/world/camera readout. The lower row is a `:` command line;
+when it is empty, faint hints after the cursor identify command entry and
+Tab-completion controls. Completions do not occupy the game view until the
+prompt has matching candidates.
 
 ![The debugger just opened over a running game](./assets/debug/open.png)
 
 ### A first session
 
 1. Press **Ctrl+/**. The game freezes and the command line opens.
-2. Press **Tab** to browse. A completion panel replaces the context row, grows
-   upward from the command line, and packs one continuous command stream into
-   short columns. Section headings flow with the commands instead of claiming
-   their own columns. Tab moves
+2. Start typing. A completion panel appears immediately, filters after every
+   edit, and shrinks as the prefix becomes more specific. It replaces the
+   context row, grows upward from the command line, and packs one continuous
+   candidate stream into short columns. Section headings flow with the commands
+   instead of claiming their own columns. Tab moves
    down a column and then to the column on its right; Shift+Tab moves in
    reverse. Keep tabbing, click a candidate, or type to narrow; Enter runs the
    line. The panel header shows the candidate's short summary. Press **F1**
@@ -128,9 +134,10 @@ The leader key is **Ctrl** by default. `leaderKey`, `debugToggleKey`, and
 | Middle-drag | Pan the camera |
 | Wheel | Zoom toward the cursor |
 
-The entity context menu includes info, selection, marks, notes, copy ID, set,
-remove, and despawn actions. The empty-space menu includes copy position, spawn,
-draw marker, physics query, and tile inspection actions.
+The entity context menu includes info, marks, notes, copy ID, set, remove, and
+despawn actions. Selection stays on the faster left-click and Shift+left-click
+gestures. The empty-space menu includes copy position, spawn, physics query, and
+tile inspection actions.
 
 Selected entities are highlighted in the world. Plain clicks and box drags
 replace the set; hold Shift to add without clearing the existing selection.
@@ -157,8 +164,9 @@ note flickers when lit           free-text tails need no quotes
 - Commands with a free-text tail (`note`, `query`, `set`) consume the rest of
   the line; declared flags still parse after the text.
 
-While cycling completions, the panel header shows the selected command's short
-summary. Press F1 to toggle its full generated usage; `help <command>` opens
+Completions refresh after every typed character and backspace. While cycling
+them, the panel header shows the selected command's short summary. Press F1 to
+toggle its full generated usage; `help <command>` opens
 the same details explicitly, and F1 on an empty prompt opens the general
 debugger help. F1 only inspects the active completion: closing help restores
 the grid at the same candidate, and the next Tab continues the cycle. Tab
@@ -175,8 +183,8 @@ indented line. Wrapped syntax retains its highlighting.
 Larger example sets use two columns when the window is wide enough. Long help
 is one continuous document with a visible scrollbar; use the mouse wheel or
 Up/Down to scroll it.
-The panel disappears when completion ends. On an empty line Tab starts at the
-first command and Shift+Tab starts at the last. History persists across
+The panel disappears when the prompt is empty or has no candidates. On an empty
+line Tab starts at the first command and Shift+Tab starts at the last. History persists across
 sessions in the save directory (Up/Down browses it, `history` lists it,
 `history clear` forgets it).
 
@@ -189,6 +197,36 @@ grid, and the generated [Command Reference](./debug-reference), which
 documents every command's signature, arguments, examples, result schema, and
 MCP projection. The sections below walk the main workflows instead of
 repeating that reference.
+
+### Log search
+
+`logs` searches the newest 500 lines captured from Tecs loggers and opens the
+results in a scrollable popup. Text and source matching are case-insensitive;
+the level is a minimum severity:
+
+```text
+logs
+logs collision
+logs level=warn
+logs source=tecs2d.debug since=10
+logs "entity ID exhaustion" limit=200
+logs verbosity
+logs verbosity debug
+```
+
+`source=` completes from logger names currently present in the ring. `since=`
+is an age in seconds, and `limit=` controls how many of the newest matches are
+shown. The popup reports how many lines matched, how many remain captured, and
+whether older lines were dropped. Run `logs clear=true` to empty the ring.
+
+`logs verbosity` reports the process-wide Tecs logging level.
+`logs verbosity debug|info|warn|error|off` changes it for the rest of the
+current process; it does not discard lines already in the ring. This is
+separate from `level=`, which only filters the current search.
+
+The debugger installs capture itself; the MCP plugin is not required. When MCP
+is installed, its `get_logs` tool reads the same ring. `logs` remains an
+overlay-only command rather than creating a redundant `cmd_logs` tool.
 
 ### Marks and notes
 
@@ -252,29 +290,33 @@ spawn enemy Transform {x = 0, y = 0}
 
 `spawn` accepts an optional leading bundle name, then component name / value
 pairs (a bare component name uses its defaults); the new entity is added to the
-selection. Agents call the same actions as `cmd_set`, `cmd_remove`, and
+selection when it belongs to the game world. Agents call the same actions as `cmd_set`, `cmd_remove`, and
 `cmd_spawn`, passing the value expression as a string.
 
-### Annotations and id labels
+### Debugger world and id labels
 
-`draw` places world-space shapes and text over the game, drawn every frame
-whether the panel is open or not:
+The overlay owns an isolated, screen-space render world. `cmd_context` reports
+it as `debugWorldId`; pass that value to the ordinary entity commands when a
+tool needs a durable visual without mutating the game world:
 
 ```text
-draw rect 10 10 64 48 tag=zone
-draw circle 0 0 20 entity=42 r=0 b=1
-draw text 5 -30 spawn point here seconds=10
-draw clear zone
+spawn Transform {x = 10, y = 10} Rectangle {width = 64, height = 48} Color {r = 0.7, g = 0.4, b = 1} Unlit worldId=130
+modify 7 Color {a = 0.5} worldId=130
+info 7 worldId=130
+despawn 7 worldId=130
 ```
 
-![Rect, circle, and text annotations drawn over the running game](./assets/debug/annotations.png)
+The numeric IDs above are examples; always read the current `debugWorldId` and
+use the entity ID returned by `spawn`. Entities in this world are normal Tecs
+entities. They keep their identity, can use renderer and UI components, update
+on the debugger world's clock, and can carry `TTL` when automatic cleanup is
+useful. They are composited over the game and are not part of the operator's
+game-world selection. This is an advanced MCP/debugging facility; game UI
+should normally live in a game-owned render world.
 
-Every verb takes color channels (`r= g= b= a=`), a `tag` for grouped clearing,
-`seconds` for a wall-clock expiry (0 = one frame), `stroke` for outline width, and
-`entity` to pin the annotation to an entity: positions become offsets from its
-Transform and the annotation is removed when the entity dies. Durations use
-wall-clock time, so annotations appear and expire even while the game is
-frozen. Agents draw through the `cmd_draw_*` tools.
+Short-lived engine guides such as selection corners, bounds, and the grid are
+private batched geometry rather than entities. There is no separate public
+debug-drawing API.
 
 `ids` toggles small entity-id labels over every on-screen entity (capped at
 200 labels), so ids can be read off the screen and used in commands.
@@ -330,9 +372,9 @@ recordings) shares the same bookkeeping verbs: `list`, `info`, `open`, `path`
 
 `rewind start [interval=5] [cap=10]` keeps a rolling ring of world snapshots
 under `debug-rewind/` in the save directory, captured on wall-clock intervals.
-Capture never runs while the freeze controller is held (the debugger is open,
-an agent paused the game, or a recording countdown froze it), so freezing to
-investigate cannot churn the ring and evict the history you came for.
+Capture never runs while the suspension controller is held (the debugger is
+open or a recording countdown suspended gameplay), so investigating cannot
+churn the ring and evict the history you came for.
 
 When something goes wrong: freeze, `rewind list` to see the ring newest first
 (age, timestamp, size, entity count), then `rewind load 3`, `rewind load
@@ -378,11 +420,8 @@ live game, where positions drift constantly), and `epsilon=0.001` for numeric
 tolerance. Custom snapshot-handler data is skipped symmetrically and noted in
 the result.
 
-Every run writes the full result to `debug-diff-N.json` in the save dir
-(`diff ls`/`open`/`path`/`clear` manage them), and `diff get <pointer> [ref]`
-dereferences an RFC 6901 pointer into the last diff or a saved one:
-`diff get /summary/byComponent`, `diff get /changes/0/after`. Filters select;
-pointers dereference.
+Every run writes the full result to `debug-diff-N.json` in the save dir;
+`diff list`, `diff open`, `diff path`, and `diff clear` manage those artifacts.
 
 
 ### Screenshots
@@ -472,6 +511,10 @@ world:addPlugin(debug.new({
     -- Seconds between Lua heap-size samples (default 8).
     gcFrequency = 8,
 
+    -- Logical height above which the debugger scales up (default 1080). It
+    -- stays at authored size on shorter windows, with native-resolution text.
+    uiHeight = 1080,
+
     -- ffmpeg executable path/name, used to assemble frames (default "ffmpeg").
     recordingFfmpegPath = "ffmpeg",
 
@@ -523,10 +566,9 @@ and drives it:
 A command called over MCP runs the same validation and produces the same
 effects as the typed command, including the on-screen highlights.
 
-Pausing is shared: the debugger's freeze and the `cmd_freeze` tool go through
-one freeze controller, so an agent freeze survives the operator opening and
-closing the debugger, and `cmd_step` works no matter which side froze the
-game.
+Opening the debugger suspends gameplay through the same controller used by
+`cmd_step`, rewind replay, recording countdowns, and loading screens. This
+keeps stepping deterministic without exposing a second remote pause command.
 
 Agents follow what the operator does through the log feed: every action
 (selection changes, marks, notes, edits, spawns, artifact writes, panel

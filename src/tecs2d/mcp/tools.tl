@@ -2,8 +2,8 @@ local json <const> = require("tecs.utils.json")
 
 --- Kernel MCP tool definitions: the transport-level tools the server always
 --- exposes. Everything else is projected from the debugger command registry
---- as cmd_* tools (see tecs2d.debug.commands); cmd_capabilities is the
---- discovery entry point for that surface.
+--- as cmd_* tools (see tecs2d.debug.commands) and discovered through the
+--- standard tools/list request.
 local record tools
     record Schema
         type: string
@@ -53,8 +53,8 @@ tools.list = {
         description = "Check if the game is running and WHICH build is answering: the result's " ..
             "`build` ({name, built, dev}) identifies the running code, so compare `build.built` " ..
             "against your latest `tecs build` to detect a stale process before trusting any " ..
-            "other call. Call cmd_capabilities next to discover what the session's cmd_* " ..
-            "command tools support." .. JSON_TEXT_RESPONSE,
+            "other call. Use tools/list to discover the session's cmd_* command tools." ..
+            JSON_TEXT_RESPONSE,
         inputSchema = EMPTY_SCHEMA
     },
     {
@@ -117,8 +117,7 @@ tools.list = {
             "defaulted, real input path -- the Update-phase edge reliably sees it); " ..
             "frozen, or for gamepad/joystick/filedropped events, it pushes the raw love " ..
             "event immediately (the debugger overlay consumes those while gameplay is " ..
-            "paused). For deterministic gameplay verification prefer cmd_step's events= " ..
-            "form." .. JSON_TEXT_RESPONSE,
+            "paused)." .. JSON_TEXT_RESPONSE,
         inputSchema = {
             type = "object",
             properties = {
@@ -160,7 +159,7 @@ tools.list = {
             "reach the game's own loaded modules -- their component records and constructors " ..
             "work directly (e.g. local Food = modules(\"components.food\"); world:query(Food)). " ..
             "Named resources read via findKey: world.resources[require(\"tecs\").findKey(\"game.state\")]. " ..
-            "Prefer the structured cmd_* command tools (cmd_fetch, cmd_set, cmd_spawn, " ..
+            "Prefer the structured cmd_* command tools (cmd_info, cmd_set, cmd_spawn, " ..
             "cmd_resources, ...) when one covers the operation." ..
             JSON_TEXT_RESPONSE,
         inputSchema = {

@@ -14,6 +14,7 @@
 --- and (unless opted out) a cmd_<name> MCP tool.
 
 local tecs <const> = require("tecs")
+local logtap <const> = require("tecs2d.internal.logtap")
 local buildinfo <const> = require("tecs2d.buildinfo")
 local leader <const> = require("tecs2d.debug.internal.leader")
 local overlay <const> = require("tecs2d.debug.internal.overlay")
@@ -38,6 +39,10 @@ local record debugplugin
 
         --- Seconds between Lua heap-size samples.
         gcFrequency: number
+
+        --- Logical height above which debugger UI scales with the host window.
+        --- It stays at authored size on shorter windows. Defaults to 1080.
+        uiHeight: number
 
         --- ffmpeg executable path/name, used to assemble captured frames into
         --- the output video. Defaults to ffmpeg on PATH.
@@ -85,7 +90,8 @@ function debugplugin.new(config?: debugplugin.Config): tecs.Plugin
     end
     local statsToggleKey = cfg.statsToggleKey or "."
     return function(w: tecs.World)
-        toolworld.install(w)
+        logtap.install()
+        toolworld.install(w, cfg.uiHeight or 1080)
         overlay.install(w, {
             leaderKey = leaderKey,
             debugToggleKey = cfg.debugToggleKey or "/",

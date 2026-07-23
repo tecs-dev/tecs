@@ -9,8 +9,8 @@ local gfxtypes <const> = require("tecs2d.gfx.types")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
 local recording <const> = require("tecs2d.debug.internal.recording")
 local suspension <const> = require("tecs2d.internal.suspension")
-local annotations <const> = require("tecs2d.debug.internal.annotations")
 local cmdargs <const> = require("tecs2d.debug.internal.cmdargs")
+local markup <const> = require("tecs2d.debug.internal.markup")
 
 local record cmdtypes
     --- Sentinel popup line drawn as a horizontal rule rather than text.
@@ -44,12 +44,11 @@ local record cmdtypes
         ctx: debugcontext.Context
         recorder: recording.Controller
         suspension: suspension.Controller
-        annotations: annotations.Store
         keys: Keys
     end
 
     --- What an action asks its surface to do. `data` is the canonical
-    --- structured payload (the MCP tool result); `popup` is overlay-only
+    --- structured payload (the MCP tool result); popup fields are overlay-only
     --- presentation; ok=false marks a failure (code is machine-readable).
     --- popupImagePath names a save-dir image the overlay shows as a thumbnail
     --- for the popup's lifetime (screenshot info); MCP ignores it.
@@ -67,20 +66,16 @@ local record cmdtypes
         --- Optional semantic body blocks. The overlay packs these into as
         --- many vertical columns as fit; `popup` remains the copy/yank form.
         popupBlocks: {{string}}
+        --- Typed popup document, used by built-in help and reusable surfaces.
+        popupDocument: markup.Document
+        --- Authored popup markup parsed into popupDocument by the overlay.
+        popupMarkup: string
         --- Presentation controls consumed only by debugger UI surfaces.
         popupModal: boolean
         popupClosable: boolean
         popupMaxColumns: integer
+        popupScrollToEnd: boolean
         popupImagePath: string
-
-        --- When set (with ok=true), the transport must NOT respond
-        --- immediately: it calls deferred(respond, failWith) and the command
-        --- finishes the exchange later — respond(payload) sends a success
-        --- payload, failWith(code, message) an error. Used by cmd_step's
-        --- wait/lua form, where the answer exists only after the stepped
-        --- frames have run. The typed console ignores deferral (it shows
-        --- result.message as usual).
-        deferred: function(respond: function({string: any}), failWith: function(string, string))
     end
 
     --- Surface-directed side effects an action may raise instead of poking
@@ -94,7 +89,6 @@ local record cmdtypes
     --- One verb under a command (git/docker style), e.g. `snapshot save`.
     record Subcommand
         name: string
-        aliases: {string}
         shortHelp: string
         schema: cmdargs.Schema
         examples: {string}
@@ -107,11 +101,6 @@ local record cmdtypes
         -- what it returns, and what to call next. Falls back to shortHelp,
         -- which is written for the overlay's one-line hint.
         mcpHelp: string
-        -- Optional Tab-completion sources by argument position (1 = the word
-        -- after the verb; 0 = any later position). Comma-separated source
-        -- names: "components", "marks", "targets", "edittargets", "bundles",
-        -- "systems", "cameras", "commands".
-        complete: {integer: string}
         -- JSON Schema for the Result.data payload. Projected over MCP as the
         -- tool's outputSchema (wrapped in the {ok, result} envelope) and
         -- rendered in the generated command reference.
@@ -126,7 +115,6 @@ local record cmdtypes
 
     record Command
         name: string
-        aliases: {string}
         shortHelp: string
         examples: {string}
         schema: cmdargs.Schema
@@ -141,10 +129,6 @@ local record cmdtypes
         annotations: ToolAnnotations
         -- Agent-facing tool description; see Subcommand.mcpHelp.
         mcpHelp: string
-        -- Optional Tab-completion sources by argument position (1 = the word
-        -- after the command name; 0 = any later position). Subcommand names
-        -- complete implicitly at position 1. Same sources as Subcommand.
-        complete: {integer: string}
         -- Help/completion grouping: "Select", "Edit", "Render", "Engine",
         -- "Capture", or "Session". Unset (custom commands) groups as "Custom".
         section: string
@@ -205,7 +189,6 @@ local record cmdtypes
         history: {string}
         lastWorldLoadAt: number
         diffCounter: integer
-        lastDiff: {string: any}
         lastOutput: {string}
         pendingShots: {PendingShot}
         despawnSelected: function(RegSlice): integer
@@ -231,8 +214,8 @@ local record cmdtypes
         --- Resolve a parsed `<id|name>` target to entity ids.
         resolveTargets: function({string: any}): {integer}
 
-        --- Build a validated annotation from draw-style arguments.
-        makeAnnotation: function({string: any}, annotations.Kind): annotations.Annotation
+        --- Resolve an optional worldId argument. Omitted means the game world.
+        worldFor: function({string: any}): tecs.World, integer, string
 
         --- commands.tileAt, passed through so groups avoid the cycle.
         tileAt: function(tecs.World, debugcontext.Context, number, number): integer, integer, number, number, number, number

@@ -26,6 +26,7 @@ end
 ---   warmup     (integer, default 120) frames before measurement
 ---   frames     (integer, default 300) timed frames
 ---   allocFrames(integer, default 60) GC-stopped allocation frames
+---   phase      (tecs.Phase|nil) frame-probe phase (default First)
 ---   tick       (function(world, frame)|nil) per-frame scenario callback
 ---   meta       (table|nil) extra fields merged into the report
 function harness.plugin(opts)
@@ -78,7 +79,7 @@ function harness.plugin(opts)
 
         world:addSystem({
             name = "bench.FrameProbe",
-            phase = tecs.phases.First,
+            phase = opts.phase or tecs.phases.First,
             run = function()
                 if done then return end
                 frame = frame + 1

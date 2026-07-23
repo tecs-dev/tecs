@@ -117,10 +117,14 @@ function stats.install(w: tecs.World, opts: stats.Options)
         name = "debug.StatsRender",
         phase = tecs.phases.RenderLast,
         run = function(_dt: number)
-            if not shown or lastMemoryProfile == "" then return end
+            if not shown or lastMemoryProfile == "" then
+                lg.releaseOwner("stats")
+                return
+            end
 
             lg.push("all")
             lg.origin()
+            lg.beginOwner("stats")
 
             local textFont = lg.getFont()
             local lineHeight = textFont:getHeight()
@@ -138,11 +142,13 @@ function stats.install(w: tecs.World, opts: stats.Options)
                 end
             end
             lg.setColor(0, 0, 0, 0.6)
-            lg.rectangle("fill", 0, 0, measuredWidth + 16, measuredLines * lineHeight + 8)
+            lg.rectangle("background", "fill", 0, 0,
+                measuredWidth + 16, measuredLines * lineHeight + 8)
             lg.setColor(1, 1, 1, 1)
-            lg.print(lastMemoryProfile, 8, 4)
+            lg.print("text", lastMemoryProfile, 8, 4)
 
             getStats(gfxStats)
+            lg.endOwner()
             lg.pop()
         end
     })

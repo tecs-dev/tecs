@@ -69,7 +69,8 @@ local cameraTimescaleSchema <const>: cmdargs.Schema = {
 }
 
 local cameraToggleSchema <const>: cmdargs.Schema = {
-    args = { name = {required = true, help = "camera name (see `camera`)"} },
+    args = { name = {required = true, completion = "cameras",
+        help = "camera name (see `camera`)"} },
     positional = {"name"},
 }
 
@@ -80,7 +81,6 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
     local env <const> = d.env
     local pipeline <const> = d.pipeline
     local componentFor <const> = d.componentFor
-    local makeAnnotation <const> = d.makeAnnotation
     local tileAt <const> = d.tileAt
     local onOffSchema <const> = d.onOffSchema
 
@@ -363,7 +363,7 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             section = "Render",
             shortHelp = "inspect and control the camera and time scale",
             examples = {"camera info", "camera move 100 50", "camera move z=0.3",
-                "camera timescale 0.5", "camera toggle minimap", "camera world 640 360"},
+                "camera timescale 0.5", "camera toggle minimap"},
             subcommands = {
                 {
                     name = "info",
@@ -424,7 +424,6 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 },
                 {
                     name = "toggle",
-                    complete = {[1] = "cameras"},
                     shortHelp = "toggle a named camera's active flag",
                     schema = cameraToggleSchema,
                     run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
@@ -444,68 +443,6 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         return {ok = true,
                             message = "camera " .. nm .. (cam:isActive() and " on" or " off"),
                             data = {name = nm, active = cam:isActive()}}
-                    end,
-                },
-                {
-                    name = "world",
-                    shortHelp = "convert screen coordinates to world through the active camera",
-                    mcpHelp = "Convert window pixel coordinates to world coordinates through the active camera, the same mapping a click at that pixel uses. Returns both the screen input and the world result. The reverse is cmd_camera_screen.",
-                    schema = { args = {
-                        x = {required = true, kind = "number", help = "screen x in pixels"},
-                        y = {required = true, kind = "number", help = "screen y in pixels"},
-                    }, positional = {"x", "y"} },
-                    examples = {"camera world 640 360"},
-                    annotations = {readOnlyHint = true, idempotentHint = true},
-                    outputSchema = {
-                        type = "object",
-                        properties = {
-                            screen = {type = "object", properties = {
-                                x = {type = "number"}, y = {type = "number"}}},
-                            world = {type = "object", properties = {
-                                x = {type = "number"}, y = {type = "number"}}},
-                        },
-                        required = {"screen", "world"},
-                    },
-                    run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local p, perr = needPipeline("camera world")
-                        if not p then return perr end
-                        local sx = v.x as number
-                        local sy = v.y as number
-                        local wx, wy = p:getCamera():toWorld(sx, sy)
-                        return {ok = true,
-                            message = format("screen %g, %g -> world %.2f, %.2f", sx, sy, wx, wy),
-                            data = {screen = {x = sx, y = sy}, world = {x = wx, y = wy}}}
-                    end,
-                },
-                {
-                    name = "screen",
-                    shortHelp = "convert world coordinates to screen through the active camera",
-                    mcpHelp = "Convert world coordinates to window pixel coordinates through the active camera. Returns both the world input and the screen result. The reverse is cmd_camera_world.",
-                    schema = { args = {
-                        x = {required = true, kind = "number", help = "world x"},
-                        y = {required = true, kind = "number", help = "world y"},
-                    }, positional = {"x", "y"} },
-                    examples = {"camera screen 100 -40"},
-                    annotations = {readOnlyHint = true, idempotentHint = true},
-                    outputSchema = {
-                        type = "object",
-                        properties = {
-                            world = {type = "object", properties = {
-                                x = {type = "number"}, y = {type = "number"}}},
-                            screen = {type = "object", properties = {
-                                x = {type = "number"}, y = {type = "number"}}},
-                        },
-                        required = {"screen", "world"},
-                    },
-                    run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                        local p, perr = needPipeline("camera screen")
-                        if not p then return perr end
-                        local wx = v.x as number
-                        local wy = v.y as number
-                        local sx, sy = p:getCamera():toScreen(wx, wy)
-                        return {ok = true,
-                            message = format("world %g, %g -> screen %.2f, %.2f", wx, wy, sx, sy),
-                            data = {world = {x = wx, y = wy}, screen = {x = sx, y = sy}}}
                     end,
                 },
             },
@@ -788,7 +725,7 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 {
                     name = "info",
                     shortHelp = "tile coordinates and per-layer tiles at a world point",
-                    mcpHelp = "The tile at a world point: coordinates against the tilemap origin plus each tile layer's gid and tileset there (map picks a tilemap by entity id, first map by default). Falls back to debug-grid coordinates when no tilemaps are loaded. Read-only; briefly outlines the tile in-game.",
+                    mcpHelp = "The tile at a world point: coordinates against the tilemap origin plus each tile layer's gid and tileset there (map picks a tilemap by entity id, first map by default). Falls back to debug-grid coordinates when no tilemaps are loaded. Read-only.",
                     schema = { args = {
                         x = {required = true, kind = "number", help = "world x"},
                         y = {required = true, kind = "number", help = "world y"},
@@ -809,10 +746,6 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                                 return {ok = false, code = "no_grid",
                                     message = "map info: no tilemaps and no grid enabled (`grid size=16`)"}
                             end
-                            env.annotations:add(makeAnnotation({
-                                x = ox + tx * tw, y = oy + ty * th, w = tw, h = th,
-                                seconds = 3, tag = "tile", r = 0.3, g = 1, b = 0.4,
-                            }, "rect"))
                             return {ok = true,
                                 message = format("tile %d, %d  (grid %gx%g; no tilemaps loaded)",
                                     tx, ty, tw, th),
@@ -840,10 +773,6 @@ function render.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         for i = 1, #layerLines do
                             popup[#popup + 1] = layerLines[i]
                         end
-                        env.annotations:add(makeAnnotation({
-                            x = entry.x + tx * tw, y = entry.y + ty * th,
-                            w = tw, h = th, seconds = 3, tag = "tile", r = 0.3, g = 1, b = 0.4,
-                        }, "rect"))
                         return {ok = true, popup = popup,
                             data = {x = tx, y = ty, map = entry.entity, inside = inside,
                                 w = tw, h = th, layers = layerHits,

@@ -282,7 +282,7 @@ describe("tecs2d.debug.internal.cmdargs", function()
         end)
 
         it("respects quotes inside a brace span", function()
-            local toks = cmdargs.tokenize('draw text 0 0 {msg = "a } b"}')
+            local toks = cmdargs.tokenize('spawn Label {msg = "a } b"}')
             luassert.equals('{msg = "a } b"}', toks[#toks])
         end)
 
@@ -427,4 +427,3 @@ describe("cmdargs rich kinds", function()
         luassert.equals(10, props.count.maximum)
     end)
 end)
-

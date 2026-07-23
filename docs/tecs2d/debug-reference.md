@@ -138,7 +138,7 @@ MCP tool: `cmd_mark`
 mark boss
 mark "big boss"
 mark  (unmark selection)
-mark ls
+mark list
 ```
 
 #### `mark list` {#cmd-mark-list}
@@ -262,7 +262,7 @@ note flickers when hit
 note  (clear notes)
 ```
 
-### `info [id|name]` {#cmd-info}
+### `info [id|name] [worldId=N]` {#cmd-info}
 
 Show an entity's components; defaults to the first selected.
 
@@ -274,6 +274,7 @@ MCP tool: `cmd_info` (read-only, idempotent)
 | --- | --- | --- |
 | `id` | number | entity id |
 | `name` | string | mark name |
+| `worldId` | number | render world id; omit for the game world (see context) |
 
 ::: details Result data schema
 ```json
@@ -293,20 +294,25 @@ MCP tool: `cmd_info` (read-only, idempotent)
     "id": {
       "description": "the inspected entity",
       "type": "integer"
+    },
+    "worldId": {
+      "description": "target render world",
+      "type": "integer"
     }
   },
   "required": [
     "archetypeComponents",
     "archetypeId",
     "components",
-    "id"
+    "id",
+    "worldId"
   ],
   "type": "object"
 }
 ```
 :::
 
-### `despawn [id|name] [ids=a,b]` {#cmd-despawn}
+### `despawn [id|name] [ids=a,b] [worldId=N]` {#cmd-despawn}
 
 Despawn an entity by id or mark name, given ids, or the whole selection.
 
@@ -319,6 +325,7 @@ MCP tool: `cmd_despawn` (destructive)
 | `id` | number | entity id |
 | `name` | string | mark name |
 | `ids` | list | entity ids to despawn (overrides target and the selection) |
+| `worldId` | number | render world id; omit for the game world (see context) |
 
 ::: details Result data schema
 ```json
@@ -340,10 +347,15 @@ MCP tool: `cmd_despawn` (destructive)
         "type": "integer"
       },
       "type": "array"
+    },
+    "worldId": {
+      "description": "target render world",
+      "type": "integer"
     }
   },
   "required": [
-    "despawned"
+    "despawned",
+    "worldId"
   ],
   "type": "object"
 }
@@ -358,8 +370,6 @@ despawn  (the selection)
 ```
 
 ### `query <expr...> [invert]` {#cmd-query}
-
-Aliases: `q`
 
 Select entities matching a component query: Foo has it, -Foo lacks it.
 
@@ -445,9 +455,8 @@ Mutate the live world: components, spawning, world-space drawing.
 | [`set`](#cmd-set) | Set one component on an entity, marked group, or @selection (Lua table value). |
 | [`modify`](#cmd-modify) | Change only the given fields of a component the target already has. |
 | [`spawn`](#cmd-spawn) | Spawn an entity from a bundle and/or components with Lua table values. |
-| [`draw`](#cmd-draw) | Draw a world-space annotation over the game. |
 
-### `remove [id|name] <comps...> [ids=a,b]` {#cmd-remove}
+### `remove [id|name] <comps...> [ids=a,b] [worldId=N]` {#cmd-remove}
 
 Remove components from an entity, marked group, or @selection.
 
@@ -461,6 +470,7 @@ MCP tool: `cmd_remove` (destructive)
 | `name` | string | mark name, or @selection |
 | `comps` | string | component names to remove (required) |
 | `ids` | list | entity ids to target instead (overrides target) |
+| `worldId` | number | render world id; omit for the game world (see context) |
 
 ::: details Result data schema
 ```json
@@ -479,12 +489,17 @@ MCP tool: `cmd_remove` (destructive)
     "errors": {
       "description": "failed removals",
       "type": "integer"
+    },
+    "worldId": {
+      "description": "target render world",
+      "type": "integer"
     }
   },
   "required": [
     "components",
     "entities",
-    "errors"
+    "errors",
+    "worldId"
   ],
   "type": "object"
 }
@@ -498,7 +513,7 @@ remove boss Shield
 remove ids=5,6 comps=Shield
 ```
 
-### `set [id|name] <comp> [value...] [ids=a,b]` {#cmd-set}
+### `set [id|name] <comp> [value...] [ids=a,b] [worldId=N]` {#cmd-set}
 
 Set one component on an entity, marked group, or @selection (Lua table value).
 
@@ -513,6 +528,7 @@ MCP tool: `cmd_set`
 | `comp` | string | component name (required) |
 | `value` | table | component fields: a Lua table expression, e.g. {x = 10, y = 20}, or a JSON object over MCP; omit for defaults |
 | `ids` | list | entity ids to target instead (overrides target) |
+| `worldId` | number | render world id; omit for the game world (see context) |
 
 ::: details Result data schema
 ```json
@@ -524,11 +540,16 @@ MCP tool: `cmd_set`
     "set": {
       "description": "entities written",
       "type": "integer"
+    },
+    "worldId": {
+      "description": "target render world",
+      "type": "integer"
     }
   },
   "required": [
     "component",
-    "set"
+    "set",
+    "worldId"
   ],
   "type": "object"
 }
@@ -542,7 +563,7 @@ set boss Shield
 set ids=5,6 comp=Transform value={x = 0}
 ```
 
-### `modify [id|name] <comp> <value...> [ids=a,b]` {#cmd-modify}
+### `modify [id|name] <comp> <value...> [ids=a,b] [worldId=N]` {#cmd-modify}
 
 Change only the given fields of a component the target already has.
 
@@ -557,6 +578,7 @@ MCP tool: `cmd_modify`
 | `comp` | string | component name (required) |
 | `value` | table | fields to change: a Lua table expression, e.g. {x = 10}, or a JSON object over MCP (required) |
 | `ids` | list | entity ids to target instead (overrides target) |
+| `worldId` | number | render world id; omit for the game world (see context) |
 
 ::: details Result data schema
 ```json
@@ -572,12 +594,17 @@ MCP tool: `cmd_modify`
     "skipped": {
       "description": "live targets lacking the component",
       "type": "integer"
+    },
+    "worldId": {
+      "description": "target render world",
+      "type": "integer"
     }
   },
   "required": [
     "component",
     "modified",
-    "skipped"
+    "skipped",
+    "worldId"
   ],
   "type": "object"
 }
@@ -591,17 +618,18 @@ modify boss Health {hp = 1}
 modify ids=5,6 comp=Health value={hp = 1}
 ```
 
-### `spawn <spec...>` {#cmd-spawn}
+### `spawn <spec...> [worldId=N]` {#cmd-spawn}
 
 Spawn an entity from a bundle and/or components with Lua table values.
 
-Spawn one entity from a bundle name and/or component list with Lua table values, e.g. 'Transform {x = 10, y = 20}'. The new entity becomes selected. Returns its id.
+Spawn one entity in the game world or an explicit render worldId from a bundle name and/or component list with Lua table values, e.g. 'Transform {x = 10, y = 20}'. Game-world entities become selected; entities in another world remain independent. Returns its id and worldId.
 
 MCP tool: `cmd_spawn`
 
 | Argument | Type | Description |
 | --- | --- | --- |
 | `spec` | string | [bundle] Component {lua table} ..., e.g. enemy Transform {x = 10} (required) |
+| `worldId` | number | render world id; omit for the game world (see context) |
 
 ::: details Result data schema
 ```json
@@ -614,10 +642,15 @@ MCP tool: `cmd_spawn`
     "id": {
       "description": "the new entity, now selected",
       "type": "integer"
+    },
+    "worldId": {
+      "description": "target render world",
+      "type": "integer"
     }
   },
   "required": [
-    "id"
+    "id",
+    "worldId"
   ],
   "type": "object"
 }
@@ -629,208 +662,6 @@ spawn Transform {x = 100, y = 50}
 spawn enemy Transform {x = 0, y = 0}
 spawn ball
 ```
-
-### `draw` {#cmd-draw}
-
-Draw a world-space annotation over the game.
-
-```
-draw rect 10 10 64 48
-draw circle 0 0 20 entity=42 r=0 b=1
-draw text 5 -30 spawn point here
-draw clear paths
-```
-
-#### `draw rect [x] [y] <w> <h> [a=N] [b=N] [entity=N] [g=N] [r=N] [seconds=N] [stroke=N] [tag=...]` {#cmd-draw-rect}
-
-Outline a rectangle (x y w h in world units).
-
-MCP tool: `cmd_draw_rect`
-
-| Argument | Type | Description |
-| --- | --- | --- |
-| `x` | number | world x (an offset when entity is set) (default: 0) |
-| `y` | number | world y (an offset when entity is set) (default: 0) |
-| `w` | number | width in world units (required) |
-| `h` | number | height in world units (required) |
-| `a` | number | alpha 0-1 (default 0.8) |
-| `b` | number | blue 0-1 (default 0) |
-| `entity` | number | pin to this entity: positions become offsets; removed when it dies |
-| `g` | number | green 0-1 (default 1) |
-| `r` | number | red 0-1 (default 1) |
-| `seconds` | number | auto-remove after N wall-clock seconds; 0 = one frame |
-| `stroke` | number | outline width in pixels (default: 4) |
-| `tag` | string | tag for grouped clearing |
-
-::: details Result data schema
-```json
-{
-  "properties": {
-    "id": {
-      "description": "annotation id for draw clear",
-      "type": "integer"
-    },
-    "tag": {
-      "type": "string"
-    }
-  },
-  "required": [
-    "id"
-  ],
-  "type": "object"
-}
-```
-:::
-
-#### `draw circle [x] [y] <radius> [a=N] [b=N] [entity=N] [g=N] [r=N] [seconds=N] [stroke=N] [tag=...]` {#cmd-draw-circle}
-
-Outline a circle (x y radius in world units).
-
-MCP tool: `cmd_draw_circle`
-
-| Argument | Type | Description |
-| --- | --- | --- |
-| `x` | number | world x (an offset when entity is set) (default: 0) |
-| `y` | number | world y (an offset when entity is set) (default: 0) |
-| `radius` | number | radius in world units (required) |
-| `a` | number | alpha 0-1 (default 0.8) |
-| `b` | number | blue 0-1 (default 0) |
-| `entity` | number | pin to this entity: positions become offsets; removed when it dies |
-| `g` | number | green 0-1 (default 1) |
-| `r` | number | red 0-1 (default 1) |
-| `seconds` | number | auto-remove after N wall-clock seconds; 0 = one frame |
-| `stroke` | number | outline width in pixels (default: 4) |
-| `tag` | string | tag for grouped clearing |
-
-::: details Result data schema
-```json
-{
-  "properties": {
-    "id": {
-      "description": "annotation id for draw clear",
-      "type": "integer"
-    },
-    "tag": {
-      "type": "string"
-    }
-  },
-  "required": [
-    "id"
-  ],
-  "type": "object"
-}
-```
-:::
-
-#### `draw line [x] [y] <x2> <y2> [a=N] [b=N] [entity=N] [g=N] [r=N] [seconds=N] [stroke=N] [tag=...]` {#cmd-draw-line}
-
-Draw a line (x y x2 y2 in world units).
-
-MCP tool: `cmd_draw_line`
-
-| Argument | Type | Description |
-| --- | --- | --- |
-| `x` | number | world x (an offset when entity is set) (default: 0) |
-| `y` | number | world y (an offset when entity is set) (default: 0) |
-| `x2` | number | end world x (an offset when entity is set) (required) |
-| `y2` | number | end world y (an offset when entity is set) (required) |
-| `a` | number | alpha 0-1 (default 0.8) |
-| `b` | number | blue 0-1 (default 0) |
-| `entity` | number | pin to this entity: positions become offsets; removed when it dies |
-| `g` | number | green 0-1 (default 1) |
-| `r` | number | red 0-1 (default 1) |
-| `seconds` | number | auto-remove after N wall-clock seconds; 0 = one frame |
-| `stroke` | number | outline width in pixels (default: 4) |
-| `tag` | string | tag for grouped clearing |
-
-::: details Result data schema
-```json
-{
-  "properties": {
-    "id": {
-      "description": "annotation id for draw clear",
-      "type": "integer"
-    },
-    "tag": {
-      "type": "string"
-    }
-  },
-  "required": [
-    "id"
-  ],
-  "type": "object"
-}
-```
-:::
-
-#### `draw text [x] [y] <msg...> [a=N] [b=N] [entity=N] [fontSize=N] [g=N] [r=N] [seconds=N] [stroke=N] [tag=...]` {#cmd-draw-text}
-
-Print text at a world position.
-
-MCP tool: `cmd_draw_text`
-
-| Argument | Type | Description |
-| --- | --- | --- |
-| `x` | number | world x (an offset when entity is set) (default: 0) |
-| `y` | number | world y (an offset when entity is set) (default: 0) |
-| `msg` | string | text to display (required) |
-| `a` | number | alpha 0-1 (default 0.8) |
-| `b` | number | blue 0-1 (default 0) |
-| `entity` | number | pin to this entity: positions become offsets; removed when it dies |
-| `fontSize` | number | font size in pixels (default: 14) |
-| `g` | number | green 0-1 (default 1) |
-| `r` | number | red 0-1 (default 1) |
-| `seconds` | number | auto-remove after N wall-clock seconds; 0 = one frame |
-| `stroke` | number | outline width in pixels (default: 4) |
-| `tag` | string | tag for grouped clearing |
-
-::: details Result data schema
-```json
-{
-  "properties": {
-    "id": {
-      "description": "annotation id for draw clear",
-      "type": "integer"
-    },
-    "tag": {
-      "type": "string"
-    }
-  },
-  "required": [
-    "id"
-  ],
-  "type": "object"
-}
-```
-:::
-
-#### `draw clear [id|tag]` {#cmd-draw-clear}
-
-Remove annotations by id or tag; everything when omitted.
-
-MCP tool: `cmd_draw_clear`
-
-| Argument | Type | Description |
-| --- | --- | --- |
-| `id` | number | annotation id |
-| `tag` | string | annotation tag |
-
-::: details Result data schema
-```json
-{
-  "properties": {
-    "cleared": {
-      "description": "annotations removed",
-      "type": "integer"
-    }
-  },
-  "required": [
-    "cleared"
-  ],
-  "type": "object"
-}
-```
-:::
 
 ## Render
 
@@ -933,7 +764,6 @@ camera move 100 50
 camera move z=0.3
 camera timescale 0.5
 camera toggle minimap
-camera world 640 360
 ```
 
 #### `camera info` {#cmd-camera-info}
@@ -975,112 +805,6 @@ MCP tool: `cmd_camera_toggle`
 | Argument | Type | Description |
 | --- | --- | --- |
 | `name` | string | camera name (see `camera`) (required) |
-
-#### `camera world <x> <y>` {#cmd-camera-world}
-
-Convert screen coordinates to world through the active camera.
-
-Convert window pixel coordinates to world coordinates through the active camera, the same mapping a click at that pixel uses. Returns both the screen input and the world result. The reverse is cmd_camera_screen.
-
-MCP tool: `cmd_camera_world` (read-only, idempotent)
-
-| Argument | Type | Description |
-| --- | --- | --- |
-| `x` | number | screen x in pixels (required) |
-| `y` | number | screen y in pixels (required) |
-
-::: details Result data schema
-```json
-{
-  "properties": {
-    "screen": {
-      "properties": {
-        "x": {
-          "type": "number"
-        },
-        "y": {
-          "type": "number"
-        }
-      },
-      "type": "object"
-    },
-    "world": {
-      "properties": {
-        "x": {
-          "type": "number"
-        },
-        "y": {
-          "type": "number"
-        }
-      },
-      "type": "object"
-    }
-  },
-  "required": [
-    "screen",
-    "world"
-  ],
-  "type": "object"
-}
-```
-:::
-
-```
-camera world 640 360
-```
-
-#### `camera screen <x> <y>` {#cmd-camera-screen}
-
-Convert world coordinates to screen through the active camera.
-
-Convert world coordinates to window pixel coordinates through the active camera. Returns both the world input and the screen result. The reverse is cmd_camera_world.
-
-MCP tool: `cmd_camera_screen` (read-only, idempotent)
-
-| Argument | Type | Description |
-| --- | --- | --- |
-| `x` | number | world x (required) |
-| `y` | number | world y (required) |
-
-::: details Result data schema
-```json
-{
-  "properties": {
-    "screen": {
-      "properties": {
-        "x": {
-          "type": "number"
-        },
-        "y": {
-          "type": "number"
-        }
-      },
-      "type": "object"
-    },
-    "world": {
-      "properties": {
-        "x": {
-          "type": "number"
-        },
-        "y": {
-          "type": "number"
-        }
-      },
-      "type": "object"
-    }
-  },
-  "required": [
-    "screen",
-    "world"
-  ],
-  "type": "object"
-}
-```
-:::
-
-```
-camera screen 100 -40
-```
 
 ### `layers` {#cmd-layers}
 
@@ -1202,7 +926,7 @@ map info 320 96 42
 
 Tile coordinates and per-layer tiles at a world point.
 
-The tile at a world point: coordinates against the tilemap origin plus each tile layer's gid and tileset there (map picks a tilemap by entity id, first map by default). Falls back to debug-grid coordinates when no tilemaps are loaded. Read-only; briefly outlines the tile in-game.
+The tile at a world point: coordinates against the tilemap origin plus each tile layer's gid and tileset there (map picks a tilemap by entity id, first map by default). Falls back to debug-grid coordinates when no tilemaps are loaded. Read-only.
 
 MCP tool: `cmd_map_info` (read-only, idempotent)
 
@@ -1256,15 +980,13 @@ Engine introspection: systems, archetypes, components, states, physics, controll
 | [`systems`](#cmd-systems) | List systems and stop, start, or inspect them. |
 | [`archetypes`](#cmd-archetypes) | List archetypes, show one, or select its entities. |
 | [`components`](#cmd-components) | List component types or show one component's schema. |
-| [`states`](#cmd-states) | Show the state stack; `push <name>` / `pop` change it. |
+| [`states`](#cmd-states) | Show the state stack. |
 | [`physics`](#cmd-physics) | Physics info; debug draw, body info, raycast, and area query. |
 | [`controllers`](#cmd-controllers) | List controllers; `info <n>` shows bindings, `rumble` tests one. |
 | [`assets`](#cmd-assets) | List cached assets, show one, or reload one from disk. |
 | [`audio`](#cmd-audio) | Audio info; stop everything or mute the master group. |
-| [`fetch`](#cmd-fetch) | Fetch entities matching a component query, without selecting them. |
+| [`logs`](#cmd-logs) | Search recent engine logs or change logger verbosity. |
 | [`resources`](#cmd-resources) | List world resources; pass a name to read one value. |
-| [`bundles`](#cmd-bundles) | List registered bundles or spawn an entity from one. |
-| [`lua`](#cmd-lua) | Inspect the Lua side: loaded modules and their exports. |
 
 ### `systems` {#cmd-systems}
 
@@ -1386,12 +1108,10 @@ MCP tool: `cmd_components_info` (read-only, idempotent)
 
 ### `states` {#cmd-states}
 
-Show the state stack; `push <name>` / `pop` change it.
+Show the state stack.
 
 ```
 states info
-states push Paused
-states pop
 ```
 
 #### `states info` {#cmd-states-info}
@@ -1399,22 +1119,6 @@ states pop
 Show the state stack, top last.
 
 MCP tool: `cmd_states_info` (read-only, idempotent)
-
-#### `states push <name>` {#cmd-states-push}
-
-Push a created state onto the stack.
-
-MCP tool: `cmd_states_push`
-
-| Argument | Type | Description |
-| --- | --- | --- |
-| `name` | string | state name (created with createState) (required) |
-
-#### `states pop` {#cmd-states-pop}
-
-Pop the top state off the stack.
-
-MCP tool: `cmd_states_pop`
 
 ### `physics` {#cmd-physics}
 
@@ -1447,7 +1151,7 @@ MCP tool: `cmd_physics_info` (read-only, idempotent)
 
 #### `physics raycast <x1> <y1> <x2> <y2>` {#cmd-physics-raycast}
 
-Cast a ray, draw it, and select the hits.
+Cast a ray and select the hits.
 
 MCP tool: `cmd_physics_raycast`
 
@@ -1460,7 +1164,7 @@ MCP tool: `cmd_physics_raycast`
 
 #### `physics query <x> <y> <w> <h>` {#cmd-physics-query}
 
-Select bodies inside a world-space box and draw it.
+Select bodies inside a world-space box.
 
 MCP tool: `cmd_physics_query`
 
@@ -1581,92 +1285,45 @@ MCP tool: `cmd_audio_mute`
 | --- | --- | --- |
 | `on` | boolean | enable or disable; omit to toggle |
 
-### `fetch <expr...> [count_only] [h=N] [limit=N] [w=N] [x=N] [y=N]` {#cmd-fetch}
+### `logs [query...] [clear] [level=debug|info|warn|error] [limit=N] [since=N] [source=...]` {#cmd-logs}
 
-Fetch entities matching a component query, without selecting them.
+Search recent engine logs or change logger verbosity.
 
-Fetch entities matching a component expression ('Enemy -Dead' means has Enemy, lacks Dead) with their serialized component data, without touching the operator's selection. count_only=true answers "how many match" with just the count -- the cheapest population check; prefer it whenever you don't need the component data. Give x, y, w, h to restrict to a world-space box (spatial filter via Position when registered, else Transform; the spatial component is always included). Returns up to limit entities plus a truncated flag. Use cmd_query when you want to select the matches instead.
-
-MCP tool: `cmd_fetch` (read-only, idempotent)
+Overlay only; not projected over MCP.
 
 | Argument | Type | Description |
 | --- | --- | --- |
-| `expr` | string | component names separated by spaces; -Foo excludes (required) |
-| `count_only` | boolean | return only the match count, no entity payloads |
-| `h` | number | bounds height in world units |
-| `limit` | number (min 0) | max entities returned (default: 100) |
-| `w` | number | bounds width in world units |
-| `x` | number | bounds left world x (give all of x, y, w, h or none) |
-| `y` | number | bounds top world y |
-
-::: details Result data schema
-```json
-{
-  "properties": {
-    "bounds": {
-      "description": "the spatial filter, when one was given",
-      "properties": {
-        "height": {
-          "type": "number"
-        },
-        "width": {
-          "type": "number"
-        },
-        "x": {
-          "type": "number"
-        },
-        "y": {
-          "type": "number"
-        }
-      },
-      "type": "object"
-    },
-    "count": {
-      "description": "entities returned",
-      "type": "integer"
-    },
-    "entities": {
-      "items": {
-        "properties": {
-          "archetypeComponents": {
-            "description": "sorted archetype signature; absent in the bounds form",
-            "type": "string"
-          },
-          "archetypeId": {
-            "description": "absent in the bounds form",
-            "type": "integer"
-          },
-          "components": {
-            "description": "serialized data of the included components",
-            "type": "object"
-          },
-          "id": {
-            "type": "integer"
-          }
-        },
-        "type": "object"
-      },
-      "type": "array"
-    },
-    "truncated": {
-      "description": "true when the limit cut the results",
-      "type": "boolean"
-    }
-  },
-  "required": [
-    "count",
-    "entities",
-    "truncated"
-  ],
-  "type": "object"
-}
-```
-:::
+| `query` | string | case-insensitive text in the message, logger, or level |
+| `clear` | boolean | empty the captured log ring |
+| `level` | debug \| info \| warn \| error | minimum severity |
+| `limit` | number (1..500) | maximum matching lines, newest retained (default: 100) |
+| `since` | number (min 0) | only lines captured within this many seconds |
+| `source` | string | case-insensitive logger-name substring |
 
 ```
-fetch Transform -Disabled
-fetch Enemy limit=10
-fetch Transform x=0 y=0 w=640 h=360
+logs
+logs collision
+logs level=warn
+logs source=tecs2d.debug since=10
+logs verbosity
+logs verbosity debug
+```
+
+#### `logs verbosity [level]` {#cmd-logs-verbosity}
+
+Show or change the global logger verbosity.
+
+Overlay only; not projected over MCP.
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `level` | debug \| info \| warn \| error \| off | global logger verbosity; omit to show the current value |
+
+```
+logs verbosity
+logs verbosity debug
+logs verbosity info
+logs verbosity off
 ```
 
 ### `resources [name]` {#cmd-resources}
@@ -1733,176 +1390,6 @@ resources
 resources game.state
 ```
 
-### `bundles` {#cmd-bundles}
-
-List registered bundles or spawn an entity from one.
-
-```
-bundles list
-bundles spawn enemy
-bundles spawn enemy {Transform = {x = 10, y = 5}}
-```
-
-#### `bundles list` {#cmd-bundles-list}
-
-List bundles with their required and defaulted components.
-
-Registered bundles as a map of name to component requirements: required components must be provided at spawn, defaulted ones fill in automatically. Pair with cmd_bundles_spawn.
-
-MCP tool: `cmd_bundles_list` (read-only, idempotent)
-
-::: details Result data schema
-```json
-{
-  "properties": {
-    "bundles": {
-      "additionalProperties": {
-        "properties": {
-          "defaulted": {
-            "description": "components filled from defaults",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "required": {
-            "description": "components that must be provided at spawn",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          }
-        },
-        "type": "object"
-      },
-      "description": "bundle name to its component requirements",
-      "type": "object"
-    }
-  },
-  "required": [
-    "bundles"
-  ],
-  "type": "object"
-}
-```
-:::
-
-#### `bundles spawn <name> [components]` {#cmd-bundles-spawn}
-
-Spawn an entity from a bundle with optional component overrides.
-
-Spawn one entity from a registered bundle. components is a map of component name to field data; the bundle's required components must be provided there. Returns the new entity id. Unlike cmd_spawn this does not select the entity.
-
-MCP tool: `cmd_bundles_spawn`
-
-| Argument | Type | Description |
-| --- | --- | --- |
-| `name` | string | bundle name (required) |
-| `components` | table | component overrides: {Name = {field = value}, ...} (a JSON object over MCP) |
-
-::: details Result data schema
-```json
-{
-  "properties": {
-    "id": {
-      "description": "the new entity",
-      "type": "integer"
-    }
-  },
-  "required": [
-    "id"
-  ],
-  "type": "object"
-}
-```
-:::
-
-```
-bundles spawn enemy
-bundles spawn enemy {Transform = {x = 10, y = 5}}
-```
-
-### `lua` {#cmd-lua}
-
-Inspect the Lua side: loaded modules and their exports.
-
-```
-lua modules
-lua modules snake
-lua exports components.food
-```
-
-#### `lua modules [contains]` {#cmd-lua-modules}
-
-List loaded module names.
-
-Every module name currently loaded (package.loaded), sorted; pass contains=&lt;text> to filter. The game's own modules appear under the names they are required with (e.g. components.food). Follow with cmd_lua_exports to read one module's exports.
-
-MCP tool: `cmd_lua_modules` (read-only, idempotent)
-
-| Argument | Type | Description |
-| --- | --- | --- |
-| `contains` | string | only names containing this substring |
-
-::: details Result data schema
-```json
-{
-  "properties": {
-    "count": {
-      "type": "integer"
-    },
-    "modules": {
-      "items": {
-        "type": "string"
-      },
-      "type": "array"
-    }
-  },
-  "required": [
-    "count",
-    "modules"
-  ],
-  "type": "object"
-}
-```
-:::
-
-#### `lua exports <module>` {#cmd-lua-exports}
-
-Dump a loaded module's exports as data.
-
-A loaded module's exported table, deep-copied to JSON-safe data: scalars and tables come through as values, functions and other live objects as their tostring form (inert -- nothing returned here is callable). Use it to read a game module's constants, keys, and structure without writing Lua.
-
-MCP tool: `cmd_lua_exports` (read-only, idempotent)
-
-| Argument | Type | Description |
-| --- | --- | --- |
-| `module` | string | loaded module name (see `lua modules`) (required) |
-
-::: details Result data schema
-```json
-{
-  "properties": {
-    "exports": {
-      "description": "the module value, JSON-safe"
-    },
-    "module": {
-      "type": "string"
-    },
-    "type": {
-      "description": "Lua type of the module's return value",
-      "type": "string"
-    }
-  },
-  "required": [
-    "module",
-    "type"
-  ],
-  "type": "object"
-}
-```
-:::
-
 ## Capture
 
 Artifacts and time travel: screenshots, profiles, snapshots, recordings, rewind, diff.
@@ -1935,7 +1422,7 @@ profile
 profile 5
 profile 5 intervalMs=5
 profile zone=afterFixed/Render
-profile ls
+profile list
 ```
 
 #### `profile list` {#cmd-profile-list}
@@ -1987,7 +1474,7 @@ Save and restore the whole world.
 ```
 snapshot save boss-fight
 snapshot load 3
-snapshot ls
+snapshot list
 ```
 
 #### `snapshot save [name] [format=json|luajit] [inline] [layers=a,b] [pretty]` {#cmd-snapshot-save}
@@ -2247,7 +1734,7 @@ MCP tool: `cmd_rewind_load` (destructive)
 
 Re-run recorded input and dt forward from a ring entry.
 
-Deterministically re-run the game from a ring entry: restores that snapshot (RNG state included), re-presses inputs that were held at the anchor, queues every recorded input event onto the input tape at its original gameplay frame, feeds the recorded per-frame dt, and steps. Requires the freeze to be held (cmd_freeze on=true) and a rewind session (the recorder rides the ring). frames defaults to the full recording since that entry. Live input is not muted: touching the controls during a replay simply makes a new timeline.
+Deterministically re-run the game from a ring entry: restores that snapshot (RNG state included), re-presses inputs that were held at the anchor, queues every recorded input event onto the input tape at its original gameplay frame, feeds the recorded per-frame dt, and steps. Requires gameplay to be suspended, such as while the debugger is open, and a rewind session (the recorder rides the ring). frames defaults to the full recording since that entry. Live input is not muted: touching the controls during a replay simply makes a new timeline.
 
 MCP tool: `cmd_rewind_replay`
 
@@ -2313,7 +1800,7 @@ MCP tool: `cmd_rewind_clear` (destructive)
 
 Structural diff between snapshots, rewind entries, and the live world.
 
-Compare two moments structurally: from/to are a snapshot number, name, or latest; rewind:&lt;idx|latest|Ns|ago=N>; or current (default to). Call with limit=0 first: the per-component summary always covers the whole diff and tells you what to filter (component=, ignore=, entity=). Read-only. Returns summary, changes with JSON Pointer paths, and the path of a JSON artifact holding the full result. Drill in with cmd_diff_get.
+Compare two moments structurally: from/to are a snapshot number, name, or latest; rewind:&lt;idx|latest|Ns|ago=N>; or current (default to). Call with limit=0 first: the per-component summary always covers the whole diff and tells you what to filter (component=, ignore=, entity=). Read-only. Returns summary, changes with JSON Pointer paths, and the path of a JSON artifact holding the full result.
 
 MCP tool: `cmd_diff`
 
@@ -2332,7 +1819,6 @@ diff 1
 diff rewind:10s ignore=Transform
 diff 1 2 component=Health
 diff rewind:3 current limit=0
-diff get /changes/0/after
 ```
 
 #### `diff list` {#cmd-diff-list}
@@ -2367,19 +1853,6 @@ MCP tool: `cmd_diff_path`
 | --- | --- | --- |
 | `ref` | string | diff name or list index |
 
-#### `diff get <pointer> [ref]` {#cmd-diff-get}
-
-Dereference a JSON Pointer into a diff result.
-
-Dereference an RFC 6901 pointer (e.g. /summary/byComponent or /changes/0/after) into the last diff result, or into a saved diff artifact when ref is given. Use after cmd_diff to fetch payloads its truncated change list omitted.
-
-MCP tool: `cmd_diff_get` (read-only, idempotent)
-
-| Argument | Type | Description |
-| --- | --- | --- |
-| `pointer` | string | RFC 6901 pointer, e.g. /summary/byComponent (required) |
-| `ref` | string | diff artifact index or latest; omit for the last diff |
-
 ### `screenshot [name] [delay=N] [full] [panel]` {#cmd-screenshot}
 
 Capture the screen (or drag area) to a PNG.
@@ -2399,7 +1872,7 @@ MCP tool: `cmd_screenshot`
 screenshot
 screenshot boss.png
 screenshot panel=true delay=2
-screenshot ls
+screenshot list
 ```
 
 #### `screenshot list` {#cmd-screenshot-list}
@@ -2452,7 +1925,7 @@ Record the window to a video.
 record start 30 clip fps=60
 record start debug
 record stop
-record ls
+record list
 ```
 
 #### `record start [seconds] [name] [countdown=N] [debug] [fps=N] [scale=N] [stopOnDebugOpen]` {#cmd-record-start}
@@ -2534,15 +2007,10 @@ The debugger session itself.
 | [`help`](#cmd-help) | List all commands, or show one command's arguments. |
 | [`history`](#cmd-history) | Show the command history (persisted across sessions). |
 | [`agent`](#cmd-agent) | MCP session info and client config. |
-| [`capabilities`](#cmd-capabilities) | Installed plugins, command families, and host features. |
-| [`describe`](#cmd-describe) | One command's full contract as structured data. |
-| [`freeze`](#cmd-freeze) | Freeze or unfreeze gameplay under the operator's hold. |
 | [`step`](#cmd-step) | Tick the game forward N frames while otherwise frozen. |
 | [`input_tape`](#cmd-input_tape) | Queue frame-scheduled love events; no args = status. |
-| [`stats`](#cmd-stats) | World stats: entities, archetypes, memory, fps, window. |
 | [`context`](#cmd-context) | The live debugger context: selection, camera, artifacts. |
 | [`restart`](#cmd-restart) | Restart the game process. |
-| [`exit`](#cmd-exit) | Close the debugger (same as the toggle key). |
 | [`quit`](#cmd-quit) | Quit the game. |
 
 ### `help [command]` {#cmd-help}
@@ -2553,7 +2021,7 @@ Overlay only; not projected over MCP.
 
 | Argument | Type | Description |
 | --- | --- | --- |
-| `command` | string | a command to describe |
+| `command` | string | command name |
 
 ```
 help
@@ -2599,70 +2067,11 @@ Copy the MCP client config JSON to the clipboard.
 
 MCP tool: `cmd_agent_connect`
 
-### `capabilities` {#cmd-capabilities}
-
-Installed plugins, command families, and host features.
-
-What this game session supports: installed plugins (render pipeline, physics, tilemaps, controllers, audio, assets, recorder), command sections with counts, capture facilities, host OS, and the MCP port. Call once after connecting to learn which tool families apply.
-
-MCP tool: `cmd_capabilities`
-
-```
-capabilities
-```
-
-### `describe <command>` {#cmd-describe}
-
-One command's full contract as structured data.
-
-The complete contract of one debugger command: signature, help, argument schema, subcommand verbs with their schemas and safety annotations, and examples. Use it before calling an unfamiliar cmd_* tool, or to discover verbs of a family.
-
-MCP tool: `cmd_describe`. MCP only; not typeable in the overlay.
-
-| Argument | Type | Description |
-| --- | --- | --- |
-| `command` | string | command name (required) |
-
-### `freeze [on]` {#cmd-freeze}
-
-Freeze or unfreeze gameplay under the operator's hold.
-
-Freeze gameplay through the shared freeze controller under the "operator" hold: on=true acquires, on=false releases, omit toggles. Rendering, input, and tools keep running; the world stays frozen while any other holder (the open debugger panel) remains. Returns the resulting frozen state. Use cmd_step to advance frames while frozen.
-
-MCP tool: `cmd_freeze` (idempotent)
-
-| Argument | Type | Description |
-| --- | --- | --- |
-| `on` | boolean | enable or disable; omit to toggle |
-
-::: details Result data schema
-```json
-{
-  "properties": {
-    "frozen": {
-      "description": "whether gameplay is frozen after the call (any holder)",
-      "type": "boolean"
-    }
-  },
-  "required": [
-    "frozen"
-  ],
-  "type": "object"
-}
-```
-:::
-
-```
-freeze
-freeze on
-freeze off
-```
-
-### `step [n] [dt=N] [events=[{..}]] [force] [lua=...] [per_frame=...] [quiet] [wait]` {#cmd-step}
+### `step [n] [dt=N]` {#cmd-step}
 
 Tick the game forward N frames while otherwise frozen.
 
-Advance gameplay by n frames while the freeze controller is held, then freeze again. Each stepped frame carries a DETERMINISTIC dt of 1/fps (the run config's fps, echoed as step_dt) regardless of display refresh rate, so `n` frames advance exactly n/fps gameplay seconds; pass dt= to override per call. ONE-CALL VERIFICATION: pass events= (input_tape rows, at=1 is the first stepped frame) to queue inputs, and lua= (run_lua sandbox) to read state after the last frame -- the response then arrives when the step COMPLETES, carrying the lua values, so tape->step->read is a single call: cmd_step '{"events":[{"at":1,"event":"keypressed","args":["left"]}],"n":10,"lua":"return {x=head.x}"}'. STEP-UNTIL: per_frame= evaluates after EACH stepped frame; return true to stop early, making n the cap -- cmd_step '{"n":300,"per_frame":"return gs.over","lua":"return {score=gs.score}"}' runs until game-over or 300 frames and reports frames_run/stopped_early. Side effects in per_frame are allowed (same sandbox). wait=true defers the response without a read; quiet=true trims the deferred response to just the lua values plus frames_run/stopped_early (no schedule echo). Without lua/per_frame/wait the call is ASYNC: it returns when the frames are scheduled, so read state in a follow-up call. Fails when nothing holds the freeze; acquire it with cmd_freeze on=true first.
+Advance gameplay by n frames while gameplay is suspended, then suspend it again. Each stepped frame carries a deterministic dt of 1/fps regardless of display refresh rate; pass dt to override it for this call.
 
 MCP tool: `cmd_step`
 
@@ -2670,12 +2079,6 @@ MCP tool: `cmd_step`
 | --- | --- | --- |
 | `n` | number | number of frames to tick (default: 1) |
 | `dt` | number | seconds each stepped frame carries (default 1/fps) |
-| `events` | rows | input_tape rows to queue before stepping ({at, event, args}) |
-| `force` | boolean | queue events even when a press is already held (tape force) |
-| `lua` | string | Lua to evaluate (run_lua sandbox) after the last frame; defers the response until the step completes |
-| `per_frame` | string | Lua evaluated after EACH stepped frame; return true to stop early (n is the cap). Side effects allowed. |
-| `quiet` | boolean | deferred form only: return just the lua values plus frames_run/stopped_early, no schedule echo |
-| `wait` | boolean | defer the response until the stepped frames have run |
 
 ::: details Result data schema
 ```json
@@ -2685,56 +2088,9 @@ MCP tool: `cmd_step`
       "description": "frames scheduled to tick",
       "type": "integer"
     },
-    "frames_run": {
-      "description": "frames actually run (deferred form; less than frames when per_frame stopped early)",
-      "type": "integer"
-    },
-    "held": {
-      "description": "inputs the tape currently holds down",
-      "items": {
-        "type": "string"
-      },
-      "type": "array"
-    },
-    "queued": {
-      "description": "events= rows accepted onto the tape",
-      "type": "integer"
-    },
-    "returned": {
-      "description": "lua= return-value count (deferred form)",
-      "type": "integer"
-    },
     "step_dt": {
       "description": "seconds each stepped frame will carry",
       "type": "number"
-    },
-    "stopped_early": {
-      "description": "per_frame returned true before the cap",
-      "type": "boolean"
-    },
-    "values": {
-      "description": "lua= return values in order (deferred form)",
-      "type": "array"
-    },
-    "waited": {
-      "description": "response was deferred until the step completed",
-      "type": "boolean"
-    },
-    "will_fire": {
-      "description": "queued input_tape rows due within this step",
-      "items": {
-        "properties": {
-          "event": {
-            "type": "string"
-          },
-          "in": {
-            "description": "gameplay frames from now",
-            "type": "integer"
-          }
-        },
-        "type": "object"
-      },
-      "type": "array"
     }
   },
   "required": [
@@ -2749,7 +2105,7 @@ MCP tool: `cmd_step`
 
 Queue frame-scheduled love events; no args = status.
 
-The input tape behind cmd_step's events=. For frozen verification prefer cmd_step's one-call form; use this standalone tool for what it alone does: the no-argument STATUS form (frame, pending rows, recently FIRED events -- actuals, vs cmd_step's will_fire schedule -- and held inputs), clear=true recovery (drops pending rows and synthesizes releases for anything held), and queueing rows while UNFROZEN (they consume on live frames). Each row {at, event, args} dispatches through the real input path (the tecs2d.input snapshot, Tecs events, and love.* callbacks) on gameplay frame `at`, counted from now (1 = the next gameplay frame). Args are forgiving like send_love_event (keypressed needs just the key). Model releases as their own rows (keyreleased, mousereleased, ...). Gamepad/joystick events are not tapeable yet (they need device objects). Raw love.* polls do not see taped input; read tecs2d.input.
+Queue frame-scheduled input independently from cmd_step. The no-argument status form returns the frame, pending rows, recently fired events, and held inputs. clear=true drops pending rows and synthesizes releases for anything held. Rows queued while unfrozen consume on live frames. Each row {at, event, args} dispatches through the real input path (the tecs2d.input snapshot, Tecs events, and love.* callbacks) on gameplay frame `at`, counted from now (1 = the next gameplay frame). Args are forgiving like send_love_event (keypressed needs just the key). Model releases as their own rows (keyreleased, mousereleased, ...). Gamepad/joystick events are not tapeable yet (they need device objects). Raw love.* polls do not see taped input; read tecs2d.input.
 
 MCP tool: `cmd_input_tape`
 
@@ -2832,82 +2188,13 @@ input_tape
 input_tape clear=true
 ```
 
-### `stats` {#cmd-stats}
-
-World stats: entities, archetypes, memory, fps, window.
-
-World and host stats in one call: entity, archetype, component, and system counts, Lua memory in KB and MB, the current FPS, and the window size in pixels. Read-only; use it as a quick health check.
-
-MCP tool: `cmd_stats` (read-only, idempotent)
-
-::: details Result data schema
-```json
-{
-  "properties": {
-    "archetypes": {
-      "type": "integer"
-    },
-    "components": {
-      "description": "registered component types",
-      "type": "integer"
-    },
-    "entities": {
-      "description": "live entity count",
-      "type": "integer"
-    },
-    "fps": {
-      "description": "frames per second",
-      "type": "integer"
-    },
-    "memoryKB": {
-      "description": "Lua heap from collectgarbage",
-      "type": "number"
-    },
-    "memoryMB": {
-      "type": "number"
-    },
-    "systems": {
-      "type": "integer"
-    },
-    "window": {
-      "description": "window size in pixels",
-      "properties": {
-        "height": {
-          "type": "integer"
-        },
-        "width": {
-          "type": "integer"
-        }
-      },
-      "type": "object"
-    }
-  },
-  "required": [
-    "archetypes",
-    "components",
-    "entities",
-    "fps",
-    "memoryKB",
-    "memoryMB",
-    "systems",
-    "window"
-  ],
-  "type": "object"
-}
-```
-:::
-
-```
-stats
-```
-
 ### `context` {#cmd-context}
 
 The live debugger context: selection, camera, artifacts.
 
 The full debugger context snapshot: selection, marks, notes, mode, freeze state, camera, mouse, grid, rewind status, and the newest artifact entries (snapshots, diffs, profiles, screenshots, recordings). Read-only; call it to orient before driving the other cmd_* tools.
 
-MCP tool: `cmd_context` (read-only, idempotent)
+MCP tool: `cmd_context` (read-only, idempotent). MCP only; not typeable in the overlay.
 
 ::: details Result data schema
 ```json
@@ -2924,6 +2211,10 @@ MCP tool: `cmd_context` (read-only, idempotent)
     "command": {
       "description": "the typed command line",
       "type": "string"
+    },
+    "debugWorldId": {
+      "description": "isolated debugger UI render world, when the overlay is installed",
+      "type": "integer"
     },
     "diffs": {
       "description": "newest diff artifacts",
@@ -3012,6 +2303,10 @@ MCP tool: `cmd_context` (read-only, idempotent)
     },
     "statsShown": {
       "type": "boolean"
+    },
+    "worldId": {
+      "description": "game render world for worldId-aware entity commands",
+      "type": "integer"
     }
   },
   "required": [
@@ -3030,10 +2325,6 @@ MCP tool: `cmd_context` (read-only, idempotent)
 }
 ```
 :::
-
-```
-context
-```
 
 ### `restart` {#cmd-restart}
 
@@ -3062,12 +2353,6 @@ MCP tool: `cmd_restart` (destructive)
 ```
 restart
 ```
-
-### `exit` {#cmd-exit}
-
-Close the debugger (same as the toggle key).
-
-Overlay only; not projected over MCP.
 
 ### `quit` {#cmd-quit}
 

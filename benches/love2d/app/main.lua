@@ -19,6 +19,7 @@ love.run = tecs2d.run({
             warmup = scenario.warmup,
             frames = scenario.frames,
             allocFrames = scenario.allocFrames,
+            phase = scenario.probePhase,
             tick = scenario.tick,
             meta = scenario.meta,
         })(world)
