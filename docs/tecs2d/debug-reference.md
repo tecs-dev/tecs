@@ -517,7 +517,7 @@ remove ids=5,6 comps=Shield
 
 Set one component on an entity, marked group, or @selection (Lua table value).
 
-Write one component on the target entities (an id, a mark name, the literal @selection, or an ids list). The value is a JSON object or a Lua table expression, e.g. {x = 10, y = {n = 2}}; omitted fields reset to the component's defaults (use cmd_modify to change fields in place). Adds the component when missing. Mutates the live world immediately. Returns how many entities were written.
+Write one component on the target entities (an id, a mark name, the literal @selection, or an ids list). The value is a JSON object; omitted fields reset to the component's defaults (use cmd_modify to change fields in place). Adds the component when missing. Mutates the live world immediately. Returns how many entities were written.
 
 MCP tool: `cmd_set`
 
@@ -622,7 +622,7 @@ modify ids=5,6 comp=Health value={hp = 1}
 
 Spawn an entity from a bundle and/or components with Lua table values.
 
-Spawn one entity in the game world or an explicit render worldId from a bundle name and/or component list with Lua table values, e.g. 'Transform {x = 10, y = 20}'. Game-world entities become selected; entities in another world remain independent. Returns its id and worldId.
+Spawn one entity in the game world or an explicit render worldId from a bundle name and/or component list with data-only Lua table literals, e.g. 'Transform {x = 10, y = 20}'. Game-world entities become selected; entities in another world remain independent. Returns its id and worldId.
 
 MCP tool: `cmd_spawn`
 
@@ -2105,7 +2105,7 @@ help select
 
 Show the command history (persisted across sessions).
 
-MCP tool: `cmd_history`
+MCP tool: `cmd_history` (read-only, idempotent)
 
 ```
 history
@@ -2116,7 +2116,7 @@ history clear
 
 Forget the history and delete its file.
 
-MCP tool: `cmd_history_clear` (destructive)
+MCP tool: `cmd_history_clear` (read-only, destructive, idempotent)
 
 ### `agent` {#cmd-agent}
 
@@ -2131,13 +2131,13 @@ agent connect
 
 Show the MCP URL, tool count, and save directory.
 
-MCP tool: `cmd_agent_info` (read-only, idempotent)
+Overlay only; not projected over MCP.
 
 #### `agent connect` {#cmd-agent-connect}
 
 Copy the MCP client config JSON to the clipboard.
 
-MCP tool: `cmd_agent_connect`
+Overlay only; not projected over MCP.
 
 ### `step [n] [dt=N]` {#cmd-step}
 

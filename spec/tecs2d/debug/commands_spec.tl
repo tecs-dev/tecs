@@ -93,7 +93,8 @@ describe("tecs2d.debug.commands registry", function()
         local tools: {string: commands.McpTool} = {}
         for _, tool in ipairs(reg:mcpTools()) do tools[tool.name] = tool end
         for _, name in ipairs({"cmd_camera_world", "cmd_camera_screen", "cmd_diff_get",
-                "cmd_states_push", "cmd_states_pop"}) do
+                "cmd_states_push", "cmd_states_pop", "cmd_agent_info",
+                "cmd_agent_connect"}) do
             luassert.is_nil(tools[name], name .. " should not be projected")
         end
 
@@ -116,12 +117,10 @@ describe("tecs2d.debug.commands registry", function()
         local pos = w:get(eid, SpecPos) as {string: number}
         luassert.equals(9, pos.x)
         luassert.equals(3, pos.y)
-        -- The legacy Lua-expression string keeps working over MCP too.
-        local legacy = reg:invokeMcp("cmd_set",
+        local textValue = reg:invokeMcp("cmd_set",
             {id = eid, comp = "DbgCmdPos", value = "{x = 4}"})
-        w:commit()
-        luassert.is_true(legacy.ok, tostring(legacy.message))
-        luassert.equals(4, (w:get(eid, SpecPos) as {string: number}).x)
+        luassert.is_false(textValue.ok)
+        luassert.equals("invalid_arguments", textValue.code)
     end)
 
     it("cmd_modify merges a JSON object value over MCP", function()
@@ -259,6 +258,9 @@ describe("tecs2d.debug.commands registry", function()
         luassert.is_true(byName.cmd_archetypes_info.annotations.readOnlyHint)
         luassert.is_true(byName.cmd_archetypes_info.annotations.idempotentHint)
         luassert.is_false(byName.cmd_archetypes_info.annotations.destructiveHint)
+        luassert.is_true(byName.cmd_info.annotations.readOnlyHint)
+        luassert.is_true(byName.cmd_resources.annotations.readOnlyHint)
+        luassert.is_true(byName.cmd_history.annotations.readOnlyHint)
         -- World loads and despawns derive destructive.
         luassert.is_true(byName.cmd_rewind_load.annotations.destructiveHint)
         luassert.is_true(byName.cmd_despawn.annotations.destructiveHint)
@@ -331,6 +333,30 @@ describe("tecs2d.debug.commands registry", function()
         end)
         luassert.has_error(function()
             reg:add({name = "norun", shortHelp = "no action"})
+        end)
+    end)
+
+    it("rejects command paths that project the same MCP tool name", function()
+        local reg = makeRegistry()
+        reg:add({
+            name = "collision",
+            shortHelp = "collision parent",
+            subcommands = {{
+                name = "path",
+                shortHelp = "collision child",
+                run = function(_v: {string: any}, _p: {string}): commands.Result
+                    return {ok = true}
+                end,
+            }},
+        })
+        luassert.has_error(function()
+            reg:add({
+                name = "collision_path",
+                shortHelp = "colliding root",
+                run = function(_v: {string: any}, _p: {string}): commands.Result
+                    return {ok = true}
+                end,
+            })
         end)
     end)
 
@@ -510,6 +536,11 @@ describe("tecs2d.debug.commands registry", function()
             local bad = reg:execute("spawn DbgCmdPos {x = }")
             luassert.is_false(bad.ok)
             luassert.equals("invalid_arguments", bad.code)
+            local global = reg:invokeMcp("cmd_spawn",
+                {spec = "DbgCmdPos {x = os.time()}"})
+            luassert.is_false(global.ok)
+            luassert.equals("invalid_arguments", global.code)
+            luassert.matches("global 'os'", global.message)
         end)
 
         it("query invert de-selects matching entities from the selection", function()

@@ -9,6 +9,7 @@
 require("busted")
 local luassert <const> = require("luassert")
 local fixture <const> = require("tecs2d.testing.fixture")
+local json <const> = require("tecs.utils.json")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/compliance"
 
@@ -70,6 +71,80 @@ describe("mcp robustness: hostile input survives", function()
         expectAlive(app, "after unknown debug tool")
     end)
 
+    it("preserves string JSON-RPC ids", function()
+        local body, requestErr = app.client:request(json.serialize({
+            jsonrpc = "2.0",
+            id = "request-7",
+            method = "tools/list",
+        }))
+        luassert.is_nil(requestErr)
+        local response = json.parse(body) as {string: any}
+        luassert.are.equal("request-7", response.id)
+        luassert.is_table((response.result as {string: any}).tools)
+    end)
+
+    it("rejects malformed JSON-RPC envelopes and tool arguments", function()
+        local bareBody, bareErr = app.client:request("7")
+        luassert.is_nil(bareErr)
+        local bareResponse = json.parse(bareBody) as {string: any}
+        local bareRpcError = bareResponse.error as {string: any}
+        luassert.are.equal(-32600, bareRpcError.code)
+        luassert.are.equal(json.NULL, bareResponse.id)
+
+        local nullIdBody, nullIdErr = app.client:request(json.serialize({
+            jsonrpc = "2.0",
+            id = json.NULL,
+            method = "tools/list",
+        }))
+        luassert.is_nil(nullIdErr)
+        local nullIdResponse = json.parse(nullIdBody) as {string: any}
+        luassert.are.equal(-32600,
+            (nullIdResponse.error as {string: any}).code)
+
+        local argsBody, argsErr = app.client:request(json.serialize({
+            jsonrpc = "2.0",
+            id = "bad-args",
+            method = "tools/call",
+            params = {name = "ping", arguments = "not-an-object"},
+        }))
+        luassert.is_nil(argsErr)
+        local argsResponse = json.parse(argsBody) as {string: any}
+        luassert.are.equal("bad-args", argsResponse.id)
+        luassert.are.equal(-32602,
+            (argsResponse.error as {string: any}).code)
+        expectAlive(app, "after malformed protocol input")
+    end)
+
+    it("negotiates unsupported protocol versions to the server version", function()
+        local response, rpcErr = app.client:rpc("initialize", {
+            protocolVersion = "2099-01-01",
+            capabilities = {},
+            clientInfo = {name = "spec", version = "1"},
+        })
+        luassert.is_nil(rpcErr)
+        luassert.are.equal("2025-11-25",
+            (response.result as {string: any}).protocolVersion)
+    end)
+
+    it("rejects incomplete initialize requests", function()
+        local response, rpcErr = app.client:rpc("initialize", {
+            protocolVersion = "2025-11-25",
+        })
+        luassert.is_nil(rpcErr)
+        luassert.are.equal(-32602,
+            (response.error as {string: any}).code)
+        expectAlive(app, "after incomplete initialize")
+    end)
+
+    it("acknowledges notifications without a JSON-RPC body", function()
+        local body, requestErr = app.client:request(json.serialize({
+            jsonrpc = "2.0",
+            method = "notifications/initialized",
+        }))
+        luassert.is_nil(requestErr)
+        luassert.are.equal("", body)
+    end)
+
     it("rejects invalid screenshot regions and keeps the connection usable", function()
         expectToolError(app, "screenshot",
             {x = 0, y = 0, width = -5, height = 10}, "negative width")
@@ -81,6 +156,20 @@ describe("mcp robustness: hostile input survives", function()
         -- screenshot must still work.
         local base64 = app.client:screenshot({x = 0, y = 0, width = 32, height = 32})
         luassert.is_string(base64, "valid screenshot after rejected region failed")
+    end)
+
+    it("validates every kernel tool against its advertised schema", function()
+        expectToolError(app, "ping", {extra = true},
+            "unknown ping argument")
+        expectToolError(app, "run_lua", {code = 42},
+            "non-string Lua source")
+        expectToolError(app, "send_love_event", {event = 7},
+            "non-string event name")
+        expectToolError(app, "sample_pixels", {
+            points = {{x = 1, y = 1}},
+            normalized = "yes",
+        }, "non-boolean normalized flag")
+        expectAlive(app, "after invalid kernel tool arguments")
     end)
 
     it("rejects cmd_set with non-numeric ids and survives", function()

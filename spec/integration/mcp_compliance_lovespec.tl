@@ -271,7 +271,8 @@ describe("mcp compliance: boot and introspection", function()
     end)
 
     it("tool results carry structuredContent matching the text envelope", function()
-        local response = app.client:rpc("tools/call", {name = "ping", arguments = {}})
+        local response = app.client:rpc("tools/call",
+            {name = "ping", arguments = json.EMPTY_OBJECT})
         local result = response.result as {string: any}
         local sc = result.structuredContent as {string: any}
         luassert.is_not_nil(sc, "structuredContent missing from the tool result")

@@ -16,27 +16,28 @@
 --- heavy machinery does not live here.
 
 local tecs <const> = require("tecs")
-local componentregistry <const> = require("tecs.internal.components")
 local json <const> = require("tecs.utils.json")
-local systemcontrol <const> = require("tecs2d.internal.systemcontrol")
-local logtap <const> = require("tecs2d.internal.logtap")
 local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
 local worldregistry <const> = require("tecs2d.gfx.internal.worldregistry")
 local gfxtypes <const> = require("tecs2d.gfx.types")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
 local cmdargs <const> = require("tecs2d.debug.internal.cmdargs")
 local cmdtypes <const> = require("tecs2d.debug.internal.cmdtypes")
+local completion <const> = require("tecs2d.debug.internal.completion")
+local candidates <const> = require("tecs2d.debug.internal.candidates")
+local profilecapture <const> = require("tecs2d.debug.internal.profilecapture")
 local markup <const> = require("tecs2d.debug.internal.markup")
 local breakpoints <const> = require("tecs2d.debug.internal.breakpoints")
 local breakpointcmds <const> = require("tecs2d.debug.internal.cmd.breakpoint")
 local capturecmds <const> = require("tecs2d.debug.internal.cmd.capture")
+local worldcapturecmds <const> = require("tecs2d.debug.internal.cmd.worldcapture")
 local editcmds <const> = require("tecs2d.debug.internal.cmd.edit")
 local enginecmds <const> = require("tecs2d.debug.internal.cmd.engine")
+local engineecscmds <const> = require("tecs2d.debug.internal.cmd.engineecs")
+local profilecmds <const> = require("tecs2d.debug.internal.cmd.profile")
 local rendercmds <const> = require("tecs2d.debug.internal.cmd.render")
 local selectcmds <const> = require("tecs2d.debug.internal.cmd.select")
 local sessioncmds <const> = require("tecs2d.debug.internal.cmd.session")
-
-local format <const> = string.format
 
 local Transform <const> = tecs.builtins.Transform
 
@@ -85,6 +86,8 @@ local record commands
         --- Every registered command regardless of surface; backs the
         --- duplicate-registration check and MCP dispatch.
         allByName: {string: Command}
+        --- Projected MCP tool names and their owning command paths.
+        toolNames: {string: string}
         names: {string}
         signals: Signals
         profiler: ProfilerState
@@ -417,7 +420,10 @@ end
 
 -- Verbs that only read state: safe, repeatable, world untouched.
 local READ_VERBS <const>: {string: boolean} = {
-    list = true, ls = true, info = true, status = true, get = true,
+    list = true, info = true, status = true,
+}
+local READ_COMMANDS <const>: {string: boolean} = {
+    info = true, resources = true, history = true,
 }
 -- Commands whose action removes data outright.
 local DESTRUCTIVE_CMDS <const>: {string: boolean} = {
@@ -433,7 +439,8 @@ local ARTIFACT_PARENTS <const>: {string: boolean} = {
 -- then overridden key by key with any explicit annotations.
 local function toolAnnotations(cmdName: string, verb: string,
         explicit: cmdtypes.ToolAnnotations): cmdtypes.ToolAnnotations
-    local readOnly = (verb ~= nil and READ_VERBS[verb] == true)
+    local readOnly = READ_COMMANDS[cmdName] == true
+        or (verb ~= nil and READ_VERBS[verb] == true)
     local destructive = DESTRUCTIVE_CMDS[cmdName] == true
         or verb == "load"
         or (verb == "clear" and ARTIFACT_PARENTS[cmdName] == true)
@@ -514,12 +521,16 @@ end
 -- Register one command's MCP-dispatchable actions in the tool-name index.
 local function indexTools(index: {string: ToolEntry}, cmd: commands.Command)
     if cmd.mcp ~= false and cmd.run then
-        index["cmd_" .. cmd.name] = {schema = cmd.schema, run = cmd.run}
+        local name = "cmd_" .. cmd.name
+        if index[name] then error("duplicate debugger MCP tool: " .. name) end
+        index[name] = {schema = cmd.schema, run = cmd.run}
     end
     if cmd.subcommands then
         for _, sub in ipairs(cmd.subcommands) do
             if sub.mcp ~= false then
-                index["cmd_" .. cmd.name .. "_" .. sub.name] = {schema = sub.schema, run = sub.run}
+                local name = "cmd_" .. cmd.name .. "_" .. sub.name
+                if index[name] then error("duplicate debugger MCP tool: " .. name) end
+                index[name] = {schema = sub.schema, run = sub.run}
             end
         end
     end
@@ -572,75 +583,6 @@ end
 -- Build
 -------------------------------------------------------------------------------
 
-local function sortedCounts(m: {string: integer}): {{string, integer}}
-    local out: {{string, integer}} = {}
-    for k, v in pairs(m) do out[#out + 1] = {k, v} end
-    table.sort(out, function(a: {string, integer}, b: {string, integer}): boolean
-        return a[2] > b[2]
-    end)
-    return out
-end
-
--- Summarize collapsed-stack text: the top self-sample hot spots (with the
--- zone each ran in) and the top systems by inclusive samples (every system
--- runs in its own "Phase:SystemName" jit.zone, the second stack segment).
--- Returns the popup body and the compact profileTop lines.
-local function summarizeProfile(text: string, name: string,
-        systemsById: {string: string}): {string}, {string}
-    local byHot: {string: integer} = {}
-    local bySystem: {string: integer} = {}
-    local total = 0
-    for line in (text .. "\n"):gmatch("(.-)\n") do
-        local stack, cnt = line:match("^(.-)%s+(%d+)$")
-        if stack and cnt then
-            local n = tonumber(cnt) as integer
-            total = total + n
-            local leaf = stack:match("([^;]+)$") or stack
-            local zone = stack:match("^([^;]+)") or ""
-            if zone:lower() == "root" then zone = "" end
-            byHot[leaf .. "\1" .. zone] = (byHot[leaf .. "\1" .. zone] or 0) + n
-            local seg2 = stack:match("^[^;]+;([^;]+)")
-            local sysName = seg2 and systemsById[seg2]
-            if sysName then
-                bySystem[sysName] = (bySystem[sysName] or 0) + n
-            end
-        end
-    end
-    local hot = sortedCounts(byHot)
-    local systems = sortedCounts(bySystem)
-
-    local top: {string} = {}
-    local popup: {string} = {"profile  (type to dismiss)", "saved: " .. name,
-        "samples: " .. tostring(total), "Hot spots (self, zone):"}
-    for i = 1, math.min(10, #hot) do
-        local leaf, zone = hot[i][1]:match("^(.-)\1(.*)$")
-        local zoneStr = (zone ~= "") and ("<" .. zone .. ">") or ""
-        local pct = (total > 0) and (hot[i][2] * 100.0 / total) or 0.0
-        popup[#popup + 1] = format("  %d\t%.1f%%\t%s\t%s", hot[i][2], pct, leaf, zoneStr)
-        top[#top + 1] = format("%d %.1f%% %s %s", hot[i][2], pct, leaf, zoneStr)
-    end
-    if #systems > 0 then
-        popup[#popup + 1] = commands.HRULE
-        popup[#popup + 1] = "Systems (inclusive samples):"
-        for i = 1, math.min(10, #systems) do
-            local pct = (total > 0) and (systems[i][2] * 100.0 / total) or 0.0
-            popup[#popup + 1] = format("  %d\t%.1f%%\t%s", systems[i][2], pct, systems[i][1])
-            top[#top + 1] = format("system %d %.1f%% %s", systems[i][2], pct, systems[i][1])
-        end
-    end
-    return popup, top
-end
-
---- The system-id to name map for profile summaries.
-local function systemZoneIds(w: tecs.World): {string: string}
-    local out: {string: string} = {}
-    local infos = systemcontrol.list(w)
-    for i = 1, #infos do
-        out[infos[i].phase .. ":" .. infos[i].name] = infos[i].name
-    end
-    return out
-end
-
 function commands.build(env: commands.Env): commands.Registry
     local w = env.world
     local ctx = env.ctx
@@ -653,6 +595,7 @@ function commands.build(env: commands.Env): commands.Registry
         list = {},
         byName = {},
         allByName = {},
+        toolNames = {},
         names = {},
         signals = {action = "", hideOverlay = false},
         pendingShots = {},
@@ -718,72 +661,11 @@ function commands.build(env: commands.Env): commands.Registry
         return comp, nil
     end
 
-    -- Live candidates for Tab-completion sources. Sources read current world
-    -- or process state (marks, bundles, systems, cameras, loggers) at
-    -- completion time.
-    reg.candidatesFor = function(_self: commands.Registry, source: string): {string}
-        local out: {string} = {}
-        if source == "commands" then
-            return reg.names
-        elseif source == "components" then
-            -- Iterate the name-keyed registry: id-walking breaks at the first
-            -- gap in component ids.
-            for name in pairs(componentregistry.registeredComponents) do
-                out[#out + 1] = name
-            end
-            table.sort(out)
-            return out
-        elseif source == "breakpointselectors" then
-            return breakpoints.completionCandidates(w)
-        elseif source == "breakpointids" then
-            local manager = w.resources[breakpoints.KEY]
-            if manager then
-                for i = 1, #manager.entries do
-                    out[#out + 1] = tostring(manager.entries[i].id)
-                end
-            end
-            return out
-        elseif source == "marks" or source == "targets" or source == "edittargets" then
-            if source == "edittargets" then out[#out + 1] = EDIT_SELECTION_TARGET end
-            local names: {string} = {}
-            for _, mn in pairs(ctx.marks) do
-                names[#names + 1] = mn
-            end
-            table.sort(names)
-            local last: string = nil
-            for i = 1, #names do
-                if names[i] ~= last then
-                    out[#out + 1] = names[i]
-                    last = names[i]
-                end
-            end
-            return out
-        elseif source == "bundles" then
-            for name in pairs(w:getBundles()) do
-                out[#out + 1] = name
-            end
-            table.sort(out)
-            return out
-        elseif source == "systems" then
-            local infos = systemcontrol.list(w)
-            for i = 1, #infos do out[#out + 1] = infos[i].name end
-            table.sort(out)
-            return out
-        elseif source == "cameras" then
-            local p = pipeline()
-            local registered = p and (p as {string: any})._cameras as {gfxtypes.Camera}
-            if registered then
-                for i = 1, #registered do
-                    local nm = registered[i]:getName()
-                    if nm ~= "" then out[#out + 1] = nm end
-                end
-            end
-            table.sort(out)
-            return out
-        elseif source == "loggers" then
-            return logtap.loggers()
-        end
-        return out
+    local resolveCandidates = candidates.build(w, ctx, pipeline,
+        function(): {string} return reg.names end, EDIT_SELECTION_TARGET)
+    reg.candidatesFor = function(_self: commands.Registry,
+            source: string): {string}
+        return resolveCandidates(source)
     end
 
     -- Shared context for the command groups (internal/cmd/*). The registry
@@ -798,8 +680,8 @@ function commands.build(env: commands.Env): commands.Registry
         resolveTargets = resolveTargets,
         worldFor = worldFor,
         tileAt = commands.tileAt,
-        summarizeProfile = summarizeProfile,
-        systemZoneIds = systemZoneIds,
+        summarizeProfile = profilecapture.summarize,
+        systemZoneIds = profilecapture.systemZoneIds,
         onOffSchema = onOffSchema,
         nameSchema = nameSchema,
         refSchema = refSchema,
@@ -809,25 +691,6 @@ function commands.build(env: commands.Env): commands.Registry
         selectionTarget = EDIT_SELECTION_TARGET,
         historyFile = HISTORY_FILE,
     }
-
-    -- The Select, Edit, and Session groups own these builtin definitions;
-    -- the cmds list below owns the registration order, which drives help
-    -- listing, completion cycling, the MCP tool listing, and the generated
-    -- reference.
-    local groupCmds: {string: commands.Command} = {}
-    for _, group in ipairs({selectcmds.commands(d), editcmds.commands(d),
-            sessioncmds.commands(d)}) do
-        for _, c in ipairs(group) do
-            groupCmds[c.name] = c
-        end
-    end
-    local function grouped(nm: string): commands.Command
-        local c = groupCmds[nm]
-        if not c then
-            error("commands: builtin '" .. nm .. "' is missing from its command group")
-        end
-        return c
-    end
 
     local cmds: {commands.Command} = {
         {
@@ -935,30 +798,24 @@ function commands.build(env: commands.Env): commands.Registry
                 }
             end,
         },
-        grouped("select"),
-        grouped("clear"),
-        grouped("mark"),
-        grouped("goto"),
-        grouped("note"),
-        grouped("info"),
-        grouped("despawn"),
-        grouped("remove"),
-        grouped("set"),
-        grouped("modify"),
-        grouped("spawn"),
-        grouped("query"),
-        grouped("ids"),
-        grouped("history"),
-        grouped("agent"),
-        grouped("step"),
-        grouped("input_tape"),
-        grouped("context"),
-        grouped("restart"),
-        grouped("quit"),
     }
 
-    for _, group in ipairs({rendercmds.commands(d), enginecmds.commands(d),
-            breakpointcmds.commands(d), capturecmds.commands(d)}) do
+    -- Command groups own both their definitions and their local order. Adding
+    -- a command to a group therefore registers it automatically; the previous
+    -- name-by-name reconstruction silently dropped new group members unless a
+    -- second list was also updated.
+    for _, group in ipairs({
+            selectcmds.commands(d),
+            editcmds.commands(d),
+            rendercmds.commands(d),
+            engineecscmds.commands(d),
+            enginecmds.commands(d),
+            breakpointcmds.commands(d),
+            profilecmds.commands(d),
+            worldcapturecmds.commands(d),
+            capturecmds.commands(d),
+            sessioncmds.commands(d),
+        }) do
         for _, c in ipairs(group) do
             cmds[#cmds + 1] = c
         end
@@ -1048,8 +905,28 @@ function commands.Registry:add(cmd: commands.Command)
             end
         end
     end
+    local projected: {string: string} = {}
+    if cmd.mcp ~= false and cmd.run then
+        projected["cmd_" .. cmd.name] = cmd.name
+    end
+    if cmd.subcommands then
+        for _, sub in ipairs(cmd.subcommands) do
+            if sub.mcp ~= false then
+                local name = "cmd_" .. cmd.name .. "_" .. sub.name
+                projected[name] = cmd.name .. " " .. sub.name
+            end
+        end
+    end
+    for name, owner in pairs(projected) do
+        local previous = self.toolNames[name]
+        if previous then
+            error("commands: '" .. owner .. "' projects duplicate MCP tool " ..
+                name .. " already owned by '" .. previous .. "'")
+        end
+    end
     self.list[#self.list + 1] = cmd
     self.allByName[cmd.name] = cmd
+    for name, owner in pairs(projected) do self.toolNames[name] = owner end
     -- Keep the lazy MCP dispatch index current once it exists.
     if self.byToolName then
         indexTools(self.byToolName, cmd)
@@ -1098,230 +975,15 @@ function commands.Registry:appendHistory(text: string)
     love.filesystem.write(HISTORY_FILE, table.concat(self.history, "\n") .. "\n")
 end
 
-local function completionKind(spec: cmdargs.ArgSpec): string
-    if spec.kind then return spec.kind end
-    if type(spec.default) == "boolean" then return "boolean" end
-    if type(spec.default) == "number" then return "number" end
-    return "string"
-end
-
-local function markCompletionArg(schema: cmdargs.Schema,
-        used: {string: boolean}, name: string)
-    if not name then return end
-    used[name] = true
-    local spec = schema.args[name]
-    if not spec then return end
-    if spec.forward then
-        used[spec.forward] = true
-        local target = schema.args[spec.forward]
-        for _, member in ipairs((target and target.synthetic) or {}) do
-            used[member] = true
-        end
-    end
-    for _, member in ipairs(spec.synthetic or {}) do used[member] = true end
-end
-
-local function completionPosition(schema: cmdargs.Schema, tokens: {string}): integer,
-        {string: boolean}
-    local used: {string: boolean} = {}
-    local position = 1
-    for _, token in ipairs(tokens) do
-        local name = token:match("^([%a_][%w_]*)=")
-        if name and schema.args[name] then
-            markCompletionArg(schema, used, name)
-        else
-            local positional = schema.positional or {}
-            local slot = positional[position]
-            if slot then
-                markCompletionArg(schema, used, slot)
-                local spec = schema.args[slot]
-                if not spec.rest then position = position + 1 end
-            end
-        end
-    end
-    return position, used
-end
-
-local function quotedCompletion(value: string): string
-    if not value:find("[%s\"\\]") then return value end
-    return '"' .. value:gsub("\\", "\\\\"):gsub('"', '\\"') .. '"'
-end
-
 function commands.Registry:complete(text: string): string, {string}
-    local out: {string} = {}
-    local head, prefix = text:match("^(.*%s)(%S*)$")
-    if not head then
-        -- Completing the command name itself; keep registry order within each
-        -- section so cycling is stable (help first, quit last). The full
-        -- listing (empty prefix) is grouped with section separators; a typed
-        -- prefix returns plain matches.
-        prefix = text
-        if prefix == "" then
-            for _, section in ipairs(cmdtypes.SECTIONS) do
-                local start = #out
-                for i = 1, #self.names do
-                    local c = self.byName[self.names[i]]
-                    if c and (c.section or "Custom") == section then
-                        out[#out + 1] = self.names[i]
-                    end
-                end
-                if #out > start then
-                    table.insert(out, start + 1, commands.SECTION_MARK .. section)
-                end
-            end
-            return "", out
-        end
-        for i = 1, #self.names do
-            if self.names[i]:sub(1, #prefix) == prefix then
-                out[#out + 1] = self.names[i]
-            end
-        end
-        return "", out
-    end
-
-    local toks = cmdargs.tokenize(head)
-    if not toks or #toks == 0 then return head, out end
-    local cmd = self.byName[toks[1]]
-    if not cmd then return head, out end
-
-    local routedSub: commands.Subcommand = nil
-    if cmd.subcommands and toks[2] then
-        routedSub = findSubcommand(cmd, toks[2])
-    end
-
-    if cmd.subcommands and not routedSub then
-        for _, sub in ipairs(cmd.subcommands) do
-            if sub.name:sub(1, #prefix) == prefix then
-                out[#out + 1] = sub.name
-            end
-        end
-        -- A command may have both a default action and named subcommands.
-        -- Keep the matching verbs, then also complete the default schema.
-        -- Subcommand-only parents stop here because they have no default
-        -- argument surface to merge.
-        if not cmd.run then return head, out end
-    end
-
-    local schema = routedSub and routedSub.schema or cmd.schema
-    if not schema then return head, out end
-    local firstArg = routedSub and 3 or 2
-    local previous: {string} = {}
-    for i = firstArg, #toks do previous[#previous + 1] = toks[i] end
-    local position, used = completionPosition(schema, previous)
-
-    local named, valuePrefix = prefix:match("^([%a_][%w_]*)=(.*)$")
-    local spec: cmdargs.ArgSpec = nil
-    local activeSlot: string = nil
-    local outputPrefix = ""
-    if named and schema.args[named] and not schema.args[named].synthetic then
-        spec = schema.args[named]
-        outputPrefix = named .. "="
-    else
-        local positional = schema.positional or {}
-        local slot = positional[position]
-        if slot and (not named or schema.args[slot].rest) then
-            activeSlot = slot
-            spec = schema.args[slot]
-        end
-        valuePrefix = prefix
-    end
-
-    local seen: {string: boolean} = {}
-    local function add(value: string, rawPrefix: string, prefixOut: string)
-        local negative = rawPrefix:sub(1, 1) == "-"
-        local openedQuote = rawPrefix:sub(1, 1) == '"'
-        local matchPrefix = rawPrefix
-        if negative or openedQuote then matchPrefix = rawPrefix:sub(2) end
-        if value:sub(1, #matchPrefix) ~= matchPrefix then return end
-        local rendered = quotedCompletion(value)
-        if negative then rendered = "-" .. rendered end
-        local candidate = prefixOut .. rendered
-        if not seen[candidate] then
-            seen[candidate] = true
-            out[#out + 1] = candidate
-        end
-    end
-
-    local function addSpecValues(valueSpec: cmdargs.ArgSpec)
-        local values: {string} = {}
-        for _, value in ipairs(valueSpec.enum or {}) do values[#values + 1] = value end
-        if completionKind(valueSpec) == "boolean" then
-            values[#values + 1] = "on"
-            values[#values + 1] = "off"
-        end
-        if valueSpec.completion then
-            for source in valueSpec.completion:gmatch("[^,]+") do
-                local live = self:candidatesFor(source)
-                for i = 1, #live do values[#values + 1] = live[i] end
-            end
-        end
-        for _, member in ipairs(valueSpec.synthetic or {}) do
-            local memberSpec = schema.args[member]
-            if memberSpec then
-                for _, value in ipairs(memberSpec.enum or {}) do
-                    values[#values + 1] = value
-                end
-                if completionKind(memberSpec) == "boolean" then
-                    values[#values + 1] = "on"
-                    values[#values + 1] = "off"
-                end
-                if memberSpec.completion then
-                    for source in memberSpec.completion:gmatch("[^,]+") do
-                        local live = self:candidatesFor(source)
-                        for i = 1, #live do values[#values + 1] = live[i] end
-                    end
-                end
-            end
-        end
-        for i = 1, #values do add(values[i], valuePrefix or "", outputPrefix) end
-    end
-    if spec then addSpecValues(spec) end
-
-    if not named then
-        local keys: {string} = {}
-        for name, argSpec in pairs(schema.args) do
-            if not argSpec.synthetic and not used[name] and name ~= activeSlot then
-                keys[#keys + 1] = name .. "="
-            end
-        end
-        table.sort(keys)
-        for i = 1, #keys do
-            if keys[i]:sub(1, #prefix) == prefix and not seen[keys[i]] then
-                seen[keys[i]] = true
-                out[#out + 1] = keys[i]
-            end
-        end
-    end
-    return head, out
+    return completion.complete(self as completion.Source, text)
 end
 
 -- Stop the active sampler, write the collapsed stacks, summarize the top
 -- self-sample frames (and derived zones), and publish the path to the context.
 -- Returns the results popup for the overlay to show, or nil with no session.
 function commands.Registry:finishProfile(): {string}
-    local prof = self.profiler
-    if not prof.session then return nil end
-    local ctx = self.env.ctx
-    local text = prof.session:stop()
-    prof.session = nil
-    prof.deadline = 0.0
-    prof.counter = prof.counter + 1
-    local name = "debug-profile-" .. tostring(prof.counter) .. ".collapsed"
-    local f = io.open(name, "w")
-    if f then
-        f:write(text)
-        f:close()
-    end
-    ctx.profiles[#ctx.profiles + 1] = {path = name, size = #text, time = os.time()}
-
-    local popup, top = summarizeProfile(text, name, systemZoneIds(self.env.world))
-    ctx.profileTop = top
-    -- io.open writes to the process working directory, not the LÖVE save dir.
-    debugcontext.setStatus(ctx, "profile saved at " ..
-        love.filesystem.getWorkingDirectory() .. "/" .. name)
-    debugcontext.pushEvent(ctx, "profile", {path = name})
-    self.env.world:emit(0, debugcontext.OnDebugContext("profile", name, 0))
-    return popup
+    return profilecapture.finish(self.profiler, self.env.world, self.env.ctx)
 end
 
 return commands

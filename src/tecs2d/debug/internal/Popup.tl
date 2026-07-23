@@ -1,7 +1,7 @@
 --- Reusable popup state for debugger UI surfaces.
 ---
 --- Popup presentation is configured per show() call: title, modality,
---- optional close control, typed or legacy content, syntax mode, semantic
+--- optional close control, line or typed-document content, syntax mode, semantic
 --- column blocks, and column cap. The overlay owns placement/rendering, while
 --- this component owns the document lifecycle, scrolling bounds, hit geometry,
 --- and image lifetime.

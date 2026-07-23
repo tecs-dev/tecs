@@ -9,6 +9,8 @@ local tecs <const> = require("tecs")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
 local cmdargs <const> = require("tecs2d.debug.internal.cmdargs")
 local cmdtypes <const> = require("tecs2d.debug.internal.cmdtypes")
+local setfenv <const> = ((_G as any) as {string: any})["setfenv"]
+    as function(any, {string: any})
 
 local record edit
     --- The Edit-section commands, in display order.
@@ -26,11 +28,13 @@ local spawnSchema <const>: cmdargs.Schema = {
 }
 cmdargs.validate(spawnSchema)
 
--- Evaluate a Lua table expression from the command line. Same trust level
--- as the run_lua MCP tool: the debugger is a developer surface.
+-- Evaluate a data-only Lua table expression from the command line. The empty
+-- environment admits literals and arithmetic but no globals, so cmd_spawn
+-- cannot become an unsandboxed process/filesystem escape over MCP.
 local function evalTable(expr: string): {string: any}, string
     local chunk, err = load("return " .. expr, "debug-expr", "t")
     if not chunk then return nil, "bad expression: " .. tostring(err) end
+    setfenv(chunk, {})
     local ok, result = pcall(chunk)
     if not ok then return nil, "expression failed: " .. tostring(result) end
     if type(result) ~= "table" then
@@ -229,7 +233,7 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             name = "set",
             section = "Edit",
             shortHelp = "set one component on an entity, marked group, or " .. selectionTarget .. " (Lua table value)",
-            mcpHelp = "Write one component on the target entities (an id, a mark name, the literal @selection, or an ids list). The value is a JSON object or a Lua table expression, e.g. {x = 10, y = {n = 2}}; omitted fields reset to the component's defaults (use cmd_modify to change fields in place). Adds the component when missing. Mutates the live world immediately. Returns how many entities were written.",
+            mcpHelp = "Write one component on the target entities (an id, a mark name, the literal @selection, or an ids list). The value is a JSON object; omitted fields reset to the component's defaults (use cmd_modify to change fields in place). Adds the component when missing. Mutates the live world immediately. Returns how many entities were written.",
             schema = setSchema,
             examples = {"set 5 Transform {x = 10, y = 20}", "set @selection Color {r = 1, g = 0, b = 0}",
                 "set boss Shield", "set ids=5,6 comp=Transform value={x = 0}"},
@@ -369,7 +373,7 @@ function edit.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             name = "spawn",
             section = "Edit",
             shortHelp = "spawn an entity from a bundle and/or components with Lua table values",
-            mcpHelp = "Spawn one entity in the game world or an explicit render worldId from a bundle name and/or component list with Lua table values, e.g. 'Transform {x = 10, y = 20}'. Game-world entities become selected; entities in another world remain independent. Returns its id and worldId.",
+            mcpHelp = "Spawn one entity in the game world or an explicit render worldId from a bundle name and/or component list with data-only Lua table literals, e.g. 'Transform {x = 10, y = 20}'. Game-world entities become selected; entities in another world remain independent. Returns its id and worldId.",
             schema = spawnSchema,
             examples = {"spawn Transform {x = 100, y = 50}", "spawn enemy Transform {x = 0, y = 0}",
                 "spawn ball"},

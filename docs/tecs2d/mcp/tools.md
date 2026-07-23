@@ -122,7 +122,7 @@ Annotations: destructive.
 
 Read recent engine log lines captured from tecs logging (ring of 500), including the tecs2d.debug.events operator-action feed. Each line carries a monotonic seq; poll incrementally with after=&lt;last seen seq> (result.latest). Filter by minimum level or substring; newest last. Pass clear=true to empty the buffer. Returns compact JSON text envelope.
 
-Annotations: read-only, idempotent.
+Annotations: destructive, idempotent.
 
 | Argument | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -156,21 +156,12 @@ and safety annotations) in the [Command Reference](../debug-reference).
 | [`cmd_note`](../debug-reference#cmd-note) | Annotate the selected entities for the agent; empty message clears. |
 | [`cmd_info`](../debug-reference#cmd-info) | Show an entity's components; defaults to the first selected. |
 | [`cmd_despawn`](../debug-reference#cmd-despawn) | Despawn an entity by id or mark name, given ids, or the whole selection. |
+| [`cmd_query`](../debug-reference#cmd-query) | Select entities matching a component query: Foo has it, -Foo lacks it. |
+| [`cmd_ids`](../debug-reference#cmd-ids) | Toggle entity id labels over on-screen entities. |
 | [`cmd_remove`](../debug-reference#cmd-remove) | Remove components from an entity, marked group, or @selection. |
 | [`cmd_set`](../debug-reference#cmd-set) | Set one component on an entity, marked group, or @selection (Lua table value). |
 | [`cmd_modify`](../debug-reference#cmd-modify) | Change only the given fields of a component the target already has. |
 | [`cmd_spawn`](../debug-reference#cmd-spawn) | Spawn an entity from a bundle and/or components with Lua table values. |
-| [`cmd_query`](../debug-reference#cmd-query) | Select entities matching a component query: Foo has it, -Foo lacks it. |
-| [`cmd_ids`](../debug-reference#cmd-ids) | Toggle entity id labels over on-screen entities. |
-| [`cmd_history`](../debug-reference#cmd-history) | Show the command history (persisted across sessions). |
-| [`cmd_history_clear`](../debug-reference#cmd-history-clear) | Forget the history and delete its file. |
-| [`cmd_agent_info`](../debug-reference#cmd-agent-info) | Show the MCP URL, tool count, and save directory. |
-| [`cmd_agent_connect`](../debug-reference#cmd-agent-connect) | Copy the MCP client config JSON to the clipboard. |
-| [`cmd_step`](../debug-reference#cmd-step) | Tick the game forward N frames while otherwise frozen. |
-| [`cmd_input_tape`](../debug-reference#cmd-input_tape) | Queue frame-scheduled love events; no args = status. |
-| [`cmd_context`](../debug-reference#cmd-context) | The live debugger context: selection, camera, artifacts. |
-| [`cmd_restart`](../debug-reference#cmd-restart) | Restart the game process. |
-| [`cmd_quit`](../debug-reference#cmd-quit) | Quit the game. |
 | [`cmd_light_info`](../debug-reference#cmd-light-info) | Show ambient color, lighting, shadows, and bloom state. |
 | [`cmd_light_color`](../debug-reference#cmd-light-color) | Set or show the ambient light color. |
 | [`cmd_light_toggle`](../debug-reference#cmd-light-toggle) | Enable or disable lighting entirely. |
@@ -267,3 +258,10 @@ and safety annotations) in the [Command Reference](../debug-reference).
 | [`cmd_record_open`](../debug-reference#cmd-record-open) | Open a completed recording (latest if omitted). |
 | [`cmd_record_path`](../debug-reference#cmd-record-path) | Copy the file's absolute path to the clipboard (latest if omitted). |
 | [`cmd_record_info`](../debug-reference#cmd-record-info) | Show one completed recording's details (latest if omitted). |
+| [`cmd_history`](../debug-reference#cmd-history) | Show the command history (persisted across sessions). |
+| [`cmd_history_clear`](../debug-reference#cmd-history-clear) | Forget the history and delete its file. |
+| [`cmd_step`](../debug-reference#cmd-step) | Tick the game forward N frames while otherwise frozen. |
+| [`cmd_input_tape`](../debug-reference#cmd-input_tape) | Queue frame-scheduled love events; no args = status. |
+| [`cmd_context`](../debug-reference#cmd-context) | The live debugger context: selection, camera, artifacts. |
+| [`cmd_restart`](../debug-reference#cmd-restart) | Restart the game process. |
+| [`cmd_quit`](../debug-reference#cmd-quit) | Quit the game. |

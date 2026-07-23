@@ -122,8 +122,6 @@ function stats.install(w: tecs.World, opts: stats.Options)
                 return
             end
 
-            lg.push("all")
-            lg.origin()
             lg.beginOwner("stats")
 
             local textFont = lg.getFont()
@@ -149,7 +147,6 @@ function stats.install(w: tecs.World, opts: stats.Options)
 
             getStats(gfxStats)
             lg.endOwner()
-            lg.pop()
         end
     })
 end

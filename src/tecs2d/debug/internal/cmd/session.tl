@@ -81,11 +81,13 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
         {
             name = "agent",
             section = "Session",
+            mcp = false,
             shortHelp = "MCP session info and client config",
             examples = {"agent info", "agent connect"},
             subcommands = {
                 {
                     name = "info",
+                    mcp = false,
                     shortHelp = "show the MCP URL, tool count, and save directory",
                     run = function(_v: {string: any}, _parts: {string}): cmdtypes.Result
                         local info = w.resources[mcpinfo.KEY]
@@ -106,6 +108,7 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 },
                 {
                     name = "connect",
+                    mcp = false,
                     shortHelp = "copy the MCP client config JSON to the clipboard",
                     run = function(_v: {string: any}, _parts: {string}): cmdtypes.Result
                         local info = w.resources[mcpinfo.KEY]

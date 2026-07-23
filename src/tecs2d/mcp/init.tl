@@ -117,11 +117,11 @@ function mcp.new(config?: mcp.Config): function(world: tecs.World)
         -- next call gets an answer, never a hang against a bound-but-dead
         -- socket. A pending deferred response can't be honored by a broken
         -- world, so the flag is cleared and the connection closes.
-        crash.onCrash(function(err: string)
+        local removeCrashObserver <const> = crash.onCrash(function(err: string)
             ctx.crashed = err
             ctx.pendingWorldOpResponse = false
         end)
-        crash.addPump(function()
+        local removeCrashPump <const> = crash.addPump(function()
             transport.processCommands(rpc.processMessage)
         end)
 
@@ -178,6 +178,10 @@ function mcp.new(config?: mcp.Config): function(world: tecs.World)
             phase = tecs.phases.Shutdown,
             run = function()
                 ctx.queuedWorldOps = {}
+                removeCrashObserver()
+                removeCrashPump()
+                handlers.cleanup()
+                rpc.cleanup()
                 transport.cleanup()
             end
         })

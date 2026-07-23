@@ -153,9 +153,13 @@ end
 --- ({ok = true, result = ...} or {ok = false, error = ...}), or nil and an
 --- error message for transport/protocol failures.
 function ClientImpl.tryCall(self: mcp_client.Client, tool: string, args?: {string: any}, timeout?: number): {string: any}, string
+    local arguments: {string: any} = args
+    if not arguments or next(arguments) == nil then
+        arguments = json.EMPTY_OBJECT as {string: any}
+    end
     local response, rpcErr = self:rpc("tools/call", {
         name = tool,
-        arguments = args or {},
+        arguments = arguments,
     }, timeout)
     if not response then
         return nil, rpcErr

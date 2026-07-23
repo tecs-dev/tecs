@@ -8,6 +8,8 @@ local buildinfo <const> = require("tecs2d.buildinfo")
 local logging <const> = require("tecs.utils.logging")
 local rpc <const> = require("tecs2d.mcp.internal.rpc")
 local state <const> = require("tecs2d.mcp.internal.state")
+local sandbox <const> = require("tecs2d.mcp.internal.sandbox")
+local mcpTools <const> = require("tecs2d.mcp.tools")
 local inputtape <const> = require("tecs2d.debug.internal.inputtape")
 local suspension <const> = require("tecs2d.internal.suspension")
 local logtap <const> = require("tecs2d.internal.logtap")
@@ -20,6 +22,7 @@ local log <const> = logging.getLogger("tecs-mcp")
 
 local record handlers
     install: function(ctx: state.Context)
+    cleanup: function()
 end
 
 local ctx: state.Context = nil
@@ -32,7 +35,7 @@ local requireArg <const> = rpc.requireArg
 
 local byName: {string: rpc.Handler} = {}
 
-byName["ping"] = function(_: {string:any}, id: number)
+byName["ping"] = function(_: {string:any}, id: rpc.Id)
     local payload: {string: any} = {
         running = true,
         port = (transport.getBoundPort() or 0) as integer,
@@ -54,7 +57,7 @@ byName["ping"] = function(_: {string:any}, id: number)
     sendToolOK(id, payload)
 end
 
-byName["screenshot"] = function(args: {string:any}, id: number)
+byName["screenshot"] = function(args: {string:any}, id: rpc.Id)
     -- Validate region params at the boundary: the capture callback runs
     -- during present, outside the tool-handler pcall, so bad values there
     -- crash the frame and wedge the connection.
@@ -110,7 +113,7 @@ byName["screenshot"] = function(args: {string:any}, id: number)
     end)
 end
 
-byName["sample_pixels"] = function(args: {string:any}, id: number)
+byName["sample_pixels"] = function(args: {string:any}, id: rpc.Id)
     local points = args.points as {{string: any}}
     if type(points) ~= "table" or #points == 0 then
         sendToolError(id, "missing_parameter", "Missing or empty 'points' array")
@@ -166,7 +169,7 @@ byName["sample_pixels"] = function(args: {string:any}, id: number)
     end)
 end
 
-byName["send_love_event"] = function(args: {string:any}, id: number)
+byName["send_love_event"] = function(args: {string:any}, id: rpc.Id)
     local eventName = requireArg(args, "event", id) as string
     if not eventName then return end
     -- Accept mixed-type payloads (numbers, booleans, strings). LÖVE events
@@ -209,7 +212,7 @@ byName["send_love_event"] = function(args: {string:any}, id: number)
     sendToolOK(id, {event = eventName, args = eventArgs or {}})
 end
 
-byName["get_logs"] = function(args: {string:any}, id: number)
+byName["get_logs"] = function(args: {string:any}, id: rpc.Id)
     if args.clear == true then
         sendToolOK(id, {cleared = logtap.clear()})
         return
@@ -236,228 +239,19 @@ byName["get_logs"] = function(args: {string:any}, id: number)
         captured = captured, dropped = dropped, latest = latest})
 end
 
--- run_lua sandbox. User code runs with a restricted environment so an MCP
--- client cannot touch the host filesystem, spawn processes, or open sockets.
--- love2d APIs and the ECS world stay available (love.filesystem is itself
--- jailed to the game directory by LÖVE). The escape vectors are simply absent
--- from the environment: io, ffi, debug, package, collectgarbage, the
--- load/loadstring/dofile/loadfile family, and getfenv/setfenv. os is narrowed
--- to its clock functions, and require only resolves framework modules outside
--- the process/network/filesystem-touching subtrees.
-local G <const> = (_G as any) as {string: any}
-local sandboxSetfenv <const> = G["setfenv"] as function(any, {string: any})
-local sandboxSetmt <const> = setmetatable as function(any, any): any
-local sandboxRawset <const> = rawset as function(any, any, any)
-
--- Globals removed from the sandbox: filesystem (io), native/process escape
--- (ffi, package, os process bits, load/loadstring/dofile/loadfile), and the
--- introspection hooks that could rebuild them (debug, getfenv/setfenv).
--- `_G` is NOT denied: it resolves to the sandbox environment itself (see
--- makeSandboxEnv), so `_G.handle = x` is a deliberate cross-call stash that
--- never touches the real global table.
-local SAFE_OS <const>: {string} = {"time", "clock", "date", "difftime"}
-local DENIED_GLOBAL <const>: {string: boolean} = {
-    io = true, ffi = true, package = true,
-    load = true, loadstring = true, dofile = true, loadfile = true,
-    debug = true, collectgarbage = true, newproxy = true,
-    getfenv = true, setfenv = true, _ENV = true,
-}
-
-local function sandboxRequire(name: string): any
-    if type(name) ~= "string" then
-        error("run_lua require expects a module name", 2)
-    end
-    local root = name:match("^([^.]+)") or name
-    local allowed = (root == "tecs" or root == "tecs2d")
-        and name:match("^tecs2d%.testing") == nil
-        and name:match("^tecs2d%.mcp") == nil
-        and name:match("^tecs2d%.debug") == nil
-    if not allowed then
-        error("require('" .. name .. "') is blocked in run_lua: the filesystem, "
-            .. "network, and process modules are unavailable. love2d APIs and the "
-            .. "ECS world are already in scope.", 2)
-    end
-    return (require as function(string): any)(name)
-end
-
--- Module access for run_lua: modules("components.food") returns the already-
--- loaded module so scripts can reference the game's own types and keys
--- (component records, constructors, exported constants). Read access only in
--- spirit -- the table is live, like the rest of the world -- but roots that
--- would reopen the sandbox's sealed capabilities are denied, and only modules
--- the game already loaded resolve (nothing is loaded on demand).
-local DENIED_MODULE_ROOT <const>: {string: boolean} = {
-    io = true, os = true, ffi = true, package = true, debug = true,
-    socket = true, mime = true, ltn12 = true, lfs = true, love = true,
-    jit = true, string = true, table = true, math = true, coroutine = true,
-    bit = true, _G = true,
-}
-
-local function sandboxModules(name: string): any
-    if type(name) ~= "string" then
-        error("modules expects a module name", 2)
-    end
-    local root = name:match("^([^.]+)") or name
-    if DENIED_MODULE_ROOT[root]
-        or name:match("^tecs2d%.testing") ~= nil
-        or name:match("^tecs2d%.mcp") ~= nil
-        or name:match("^tecs2d%.debug") ~= nil then
-        error("modules('" .. name .. "') is blocked in run_lua", 2)
-    end
-    local pkg = G["package"] as {string: any}
-    local loaded = pkg.loaded as {string: any}
-    local mod = loaded[name]
-    if mod == nil then
-        error("modules('" .. name .. "'): not loaded. Game modules load at boot; "
-            .. "check the exact require name.", 2)
-    end
-    return mod
-end
-
--- love2d is exposed for rendering and world introspection, but a few love APIs
--- are escape hatches: love.thread spawns threads with a full stdlib
--- (io/os/ffi/luasocket), love.filesystem.load runs Lua under the real globals,
--- mount/mountFullPath reach arbitrary host paths, and setRequirePath could
--- point require at attacker-written files. The sandbox gets a shallow copy of
--- love with those removed. Save-directory writes (write/append/newFile) ARE
--- allowed -- PhysFS confines them to the save dir -- but refuse .lua/.tl
--- paths: the save dir shadows the source on the require path, so a written
--- code file would execute under the real globals on the next require. The
--- game's own systems keep the real love (they run outside this environment),
--- so their save/thread features still work.
-local DENIED_LOVE_TOP <const>: {string: boolean} = {thread = true}
-local DENIED_LOVE_FS <const>: {string: boolean} = {
-    load = true, mount = true, mountFullPath = true, unmount = true,
-    setIdentity = true, setSource = true,
-    setRequirePath = true, setCRequirePath = true,
-}
-local WRITE_GUARDED_LOVE_FS <const>: {string: boolean} = {
-    write = true, append = true, newFile = true,
-}
-
-local function guardedFsWrite(name: string, fn: function): any
-    return function(path: any, ...: any): any
-        if path is string then
-            local p = path:lower()
-            if p:match("%.lua$") or p:match("%.tl$") then
-                error("love.filesystem." .. name .. "('" .. path .. "') is "
-                    .. "blocked in run_lua: the save directory shadows the "
-                    .. "source on the require path, so writing code files "
-                    .. "there could execute outside the sandbox. Data files "
-                    .. "(.png, .json, ...) are fine.", 2)
-            end
-        end
-        return (fn as function(any, ...: any): any)(path, ...)
-    end
-end
-local DENIED_LOVE_SYSTEM <const>: {string: boolean} = {openURL = true}
-local DENIED_LOVE_EVENT <const>: {string: boolean} = {quit = true}
-
-local function filteredCopy(t: {string: any}, denied: {string: boolean}): {string: any}
-    local out: {string: any} = {}
-    for k, v in pairs(t) do
-        if not denied[k] then out[k] = v end
-    end
-    return out
-end
-
-local sandboxLoveCache: {string: any} = nil
-local function sandboxLove(): any
-    if sandboxLoveCache then return sandboxLoveCache end
-    local L = G["love"] as {string: any}
-    if not L then return nil end
-    local out = filteredCopy(L, DENIED_LOVE_TOP)
-    if type(L["filesystem"]) == "table" then
-        local fs = filteredCopy(L["filesystem"] as {string: any}, DENIED_LOVE_FS)
-        for name in pairs(WRITE_GUARDED_LOVE_FS) do
-            if type(fs[name]) == "function" then
-                fs[name] = guardedFsWrite(name, fs[name] as function)
-            end
-        end
-        out["filesystem"] = fs
-    end
-    if type(L["system"]) == "table" then
-        out["system"] = filteredCopy(L["system"] as {string: any}, DENIED_LOVE_SYSTEM)
-    end
-    if type(L["event"]) == "table" then
-        out["event"] = filteredCopy(L["event"] as {string: any}, DENIED_LOVE_EVENT)
-    end
-    sandboxLoveCache = out
-    return out
-end
-
--- The environment reads through to the real globals (so run_lua can inspect
--- love2d, the ECS world, and the game's own globals) but shadows the dangerous
--- keys, hands out a filtered love, replaces os with a clock-only subset, and
--- swaps in the gated require. Assignments stay local to this table instead of
--- leaking into real globals.
---
--- ONE environment per process, shared by every run_lua call: assignments
--- (`count = 0`, `_G.handle = am`) persist across calls, which is what makes
--- multi-step debugging sessions possible. `_G` resolves to this same table,
--- so the _G idiom works without ever exposing the real global table; the
--- metatable is sealed (__metatable = false), so it cannot be peeled off.
-local sandboxEnvCache: {string: any} = nil
-local function makeSandboxEnv(): {string: any}
-    if sandboxEnvCache then return sandboxEnvCache end
-    local realOs = G["os"] as {string: any}
-    local safeOs: {string: any} = {}
-    if realOs then
-        for _, k in ipairs(SAFE_OS) do safeOs[k] = realOs[k] end
-    end
-    local mt: {string: any} = {}
-    mt["__index"] = function(t: any, k: string): any
-        if k == "_G" then return t end
-        if k == "require" then return sandboxRequire end
-        if k == "modules" then return sandboxModules end
-        if k == "os" then return safeOs end
-        if k == "love" then return sandboxLove() end
-        if DENIED_GLOBAL[k] then return nil end
-        return G[k]
-    end
-    mt["__newindex"] = function(t: any, k: any, v: any)
-        sandboxRawset(t, k, v)
-    end
-    mt["__metatable"] = false
-    sandboxEnvCache = sandboxSetmt({}, mt) as {string: any}
-    return sandboxEnvCache
-end
-
-byName["run_lua"] = function(args: {string:any}, id: number)
+byName["run_lua"] = function(args: {string:any}, id: rpc.Id)
     if not requireWorld(id) then return end
 
     local code = requireArg(args, "code", id) as string
     if not code then return end
 
-    -- Wrap user code in a function(world) body so they don't need boilerplate
-    -- Newline before "end" so code ending in a line comment still parses.
-    local wrapped <const> = "return function(world) " .. code .. "\nend"
-
-    -- Load the code
-    local loadOk, loadResult = pcall(function(): function(tecs.World)
-        local chunk, loadErr = load(wrapped, "mcp_lua", "t")
-        if not chunk then
-            error("Failed to load code: " .. tostring(loadErr))
-        end
-        -- Sandbox: the chunk (and the function it returns) runs with a
-        -- restricted environment. love2d and the ECS world stay reachable;
-        -- filesystem, network, and process access do not.
-        sandboxSetfenv(chunk, makeSandboxEnv())
-        local fn = chunk()
-        if type(fn) ~= "function" then
-            error("Code must return a function, got " .. type(fn))
-        end
-        return fn as function(tecs.World)
-    end)
-
-    if not loadOk then
-        local errMsg = tostring(loadResult)
+    local fn, compileErr = sandbox.compile(code)
+    if not fn then
+        local errMsg = tostring(compileErr)
         log:error("run_lua load failed: %s", errMsg)
         sendToolError(id, "lua_load_failed", "Lua load failed", {error = errMsg})
         return
     end
-
-    local fn = loadResult as function(tecs.World)
 
     -- Run in the queued-op drain and return the chunk's results. Keep the client
     -- socket open until this deferred response is sent (the request handler returns
@@ -503,9 +297,22 @@ end
 
 function handlers.install(c: state.Context)
     ctx = c
+    for name in pairs(mcpTools.byName) do
+        if not byName[name] then
+            error("kernel MCP tool has no handler: " .. name)
+        end
+    end
     for name, fn in pairs(byName) do
+        if not mcpTools.byName[name] then
+            error("kernel MCP handler has no tool declaration: " .. name)
+        end
         rpc.handlers[name] = fn
     end
+end
+
+function handlers.cleanup()
+    ctx = nil
+    sandbox.reset()
 end
 
 return handlers

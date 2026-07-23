@@ -14,7 +14,7 @@ local record state
         queuedWorldOps: {function(tecs.World)}
         --- Tool id of an in-flight screenshot. The capture callback answers
         --- a frame later, so the client socket stays open until it clears.
-        pendingScreenshotId: number
+        pendingScreenshotId: string | number
         --- True while a queued world op (run_lua) still owes the client a
         --- deferred response; keeps the socket open like a screenshot.
         pendingWorldOpResponse: boolean

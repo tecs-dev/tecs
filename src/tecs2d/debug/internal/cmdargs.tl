@@ -414,26 +414,25 @@ function cmdargs.parseValues(schema: cmdargs.Schema, given: {string: any}): {str
         local want = argType(spec)
         local got = type(v)
         if want == "list" or want == "table" or want == "rows" then
-            -- JSON arrays/objects arrive as tables; strings stay accepted
-            -- (the comma form for lists, a Lua expression for tables/rows).
-            if got ~= "table" and got ~= "string" then
+            -- MCP is a typed JSON surface. Text coercion belongs only to the
+            -- overlay parser; accepting comma lists or Lua expressions here
+            -- made the runtime looser than the projected JSON Schema.
+            if got ~= "table" then
                 return nil, name .. " must be a JSON " ..
                     ((want == "list") and "array"
                         or (want == "rows") and "array of objects"
                         or "object") .. ", got " .. got
             end
             if want == "list" then
-                if got == "string" then
-                    local items: {string} = {}
-                    for item in (v as string):gmatch("[^,]+") do
-                        items[#items + 1] = item
+                for _, item in ipairs(v as {any}) do
+                    if type(item) ~= "string" then
+                        return nil, name .. " must be an array of strings"
                     end
-                    v = items
-                else
-                    for _, item in ipairs(v as {any}) do
-                        if type(item) ~= "string" then
-                            return nil, name .. " must be an array of strings"
-                        end
+                end
+            elseif want == "rows" then
+                for _, row in ipairs(v as {any}) do
+                    if type(row) ~= "table" then
+                        return nil, name .. " must be an array of objects"
                     end
                 end
             end

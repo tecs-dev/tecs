@@ -108,9 +108,6 @@ local record debugdraw
     endOwner: function()
     releaseOwner: function(name: string)
     hasRetainedDraws: function(view: DebugView): boolean
-    push: function(mode?: string)
-    pop: function()
-    origin: function()
     setColor: function(r: number, g: number, b: number, a?: number)
     setFont: function(font: DebugFont)
     getFont: function(): DebugFont
@@ -497,10 +494,6 @@ local function updateState(v: DebugView, state: DrawState, x: number, y: number,
     updateColor(v, state, v.color)
     updateClip(v, state)
 end
-
-function debugdraw.push(_mode?: string) end
-function debugdraw.pop() end
-function debugdraw.origin() end
 
 function debugdraw.setColor(r: number, g: number, b: number, a?: number)
     local c = view().color

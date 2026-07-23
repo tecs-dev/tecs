@@ -32,6 +32,7 @@ local record tools
     end
 
     list: {Tool}
+    byName: {string: Tool}
 
     --- Serialize tools list to JSON string (for bridge)
     toJSON: function(): string
@@ -175,7 +176,7 @@ tools.list = {
     },
     {
         name = "get_logs",
-        annotations = {readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false},
+        annotations = {readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false},
         description = "Read recent engine log lines captured from tecs logging (ring of 500), including the " ..
             "tecs2d.debug.events operator-action feed. Each line carries a monotonic seq; poll incrementally " ..
             "with after=<last seen seq> (result.latest). Filter by minimum level or substring; newest last. " ..
@@ -193,6 +194,15 @@ tools.list = {
         }
     }
 }
+
+tools.byName = {}
+for i = 1, #tools.list do
+    local tool = tools.list[i]
+    if tools.byName[tool.name] then
+        error("duplicate kernel MCP tool declaration: " .. tool.name)
+    end
+    tools.byName[tool.name] = tool
+end
 
 function tools.toJSON(): string
     return json.serialize(tools.list)

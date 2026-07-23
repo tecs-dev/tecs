@@ -2145,10 +2145,6 @@ return "hello"
         luassert.is_not_nil((app.client:call("cmd_audio_info", {})).active)
         luassert.is_not_nil((app.client:call("cmd_assets_list", {})).count)
 
-        -- Agent session reflects the fixture's own MCP port.
-        local agent = app.client:call("cmd_agent_info", {})
-        luassert.equals(app.client.port, tonumber(agent.port), "agent session port mismatch")
-        luassert.is_true(tonumber(agent.tools) > 30, "tool count looks wrong")
     end)
 
     it("rewind captures a ring, loads the past, and holds while frozen", function()

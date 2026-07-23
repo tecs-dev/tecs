@@ -1,23 +1,5 @@
 [
   {
-    "description": "agent connect: copy the MCP client config JSON to the clipboard. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
-    "inputSchema": {
-      "additionalProperties": false,
-      "properties": {},
-      "type": "object"
-    },
-    "name": "cmd_agent_connect"
-  },
-  {
-    "description": "agent info: show the MCP URL, tool count, and save directory. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
-    "inputSchema": {
-      "additionalProperties": false,
-      "properties": {},
-      "type": "object"
-    },
-    "name": "cmd_agent_info"
-  },
-  {
     "description": "archetypes info: show one archetype's entity count and components. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
     "inputSchema": {
       "additionalProperties": false,
@@ -1602,7 +1584,7 @@
     "name": "cmd_select"
   },
   {
-    "description": "Write one component on the target entities (an id, a mark name, the literal @selection, or an ids list). The value is a JSON object or a Lua table expression, e.g. {x = 10, y = {n = 2}}; omitted fields reset to the component's defaults (use cmd_modify to change fields in place). Adds the component when missing. Mutates the live world immediately. Returns how many entities were written. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "description": "Write one component on the target entities (an id, a mark name, the literal @selection, or an ids list). The value is a JSON object; omitted fields reset to the component's defaults (use cmd_modify to change fields in place). Adds the component when missing. Mutates the live world immediately. Returns how many entities were written. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -1765,7 +1747,7 @@
     "name": "cmd_snapshot_save"
   },
   {
-    "description": "Spawn one entity in the game world or an explicit render worldId from a bundle name and/or component list with Lua table values, e.g. 'Transform {x = 10, y = 20}'. Game-world entities become selected; entities in another world remain independent. Returns its id and worldId. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "description": "Spawn one entity in the game world or an explicit render worldId from a bundle name and/or component list with data-only Lua table literals, e.g. 'Transform {x = 10, y = 20}'. Game-world entities become selected; entities in another world remain independent. Returns its id and worldId. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {

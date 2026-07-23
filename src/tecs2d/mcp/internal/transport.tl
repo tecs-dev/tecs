@@ -45,18 +45,52 @@ function transport.getBoundPort(): number
     return boundPort
 end
 
+-- LuaSocket may only accept part of a response, especially for base64
+-- screenshots. Continue from the returned byte index instead of silently
+-- truncating the JSON body.
+local function sendAll(sock: socket.TCP, payload: string): boolean, string
+    local send = sock.send as function(socket.TCP, string, integer): integer, string, integer
+    local nextByte = 1
+    local deadline = lt.getTime() + 2.0
+    sock:settimeout(0.05)
+    while nextByte <= #payload do
+        local sentThrough, err, partialThrough = send(sock, payload, nextByte)
+        local last = sentThrough or partialThrough
+        if last and last >= nextByte then
+            nextByte = last + 1
+        elseif err ~= "timeout" then
+            return false, tostring(err or "socket send failed")
+        end
+        if lt.getTime() >= deadline then
+            return false, "socket send timed out"
+        end
+    end
+    return true, nil
+end
+
 function transport.sendHttpResponse(statusCode: integer, statusText: string, body: string)
     if not client then return end
     local header = string.format(
-        "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n",
+        "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\n" ..
+        "Content-Length: %d\r\nConnection: close\r\n\r\n",
         statusCode, statusText, #body
     )
-    client:send(header .. body)
+    local ok, err = sendAll(client, header .. body)
+    if not ok then
+        log:error("MCP HTTP response failed: %s", err)
+        ctx.rstOnClose = true
+    end
 end
 
 function transport.sendHttpAccepted()
     if not client then return end
-    client:send("HTTP/1.1 202 Accepted\r\n\r\n")
+    local ok, err = sendAll(client,
+        "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n" ..
+        "Connection: close\r\n\r\n")
+    if not ok then
+        log:error("MCP HTTP response failed: %s", err)
+        ctx.rstOnClose = true
+    end
 end
 
 -- Read a complete HTTP request from a socket.
@@ -94,7 +128,26 @@ local function readHttpRequest(sock: socket.TCP): (string, string, {string:strin
     local body = ""
     local contentLength = tonumber(headers["content-length"])
     if contentLength and contentLength > 0 then
-        body = sock:receive(contentLength as integer) or ""
+        local chunks: {string} = {}
+        local received = 0
+        local deadline = lt.getTime() + 1.0
+        local receive = sock.receive as function(socket.TCP, integer):
+            string, string, string
+        while received < contentLength and lt.getTime() < deadline do
+            local chunk, err, partial = receive(sock,
+                (contentLength - received) as integer)
+            local bytes = chunk or partial
+            if bytes and #bytes > 0 then
+                chunks[#chunks + 1] = bytes
+                received = received + #bytes
+            elseif err ~= "timeout" then
+                return nil, nil, nil, nil
+            end
+        end
+        if received ~= contentLength then
+            return nil, nil, nil, nil
+        end
+        body = table.concat(chunks)
     end
 
     return httpMethod, path, headers, body
@@ -116,6 +169,14 @@ local function closeClient()
     end
 end
 
+local function originAllowed(origin: string): boolean
+    if not origin or origin == "" then return true end
+    local host = origin:match("^https?://([^/]+)")
+    if not host then return false end
+    host = host:lower():gsub(":%d+$", "")
+    return host == "localhost" or host == "127.0.0.1" or host == "[::1]"
+end
+
 --- One bind attempt. Returns true and installs `server` on success;
 --- returns false and the bind error otherwise.
 local function tryBind(port: number): boolean, string
@@ -132,7 +193,12 @@ local function tryBind(port: number): boolean, string
         return false, tostring(bindErr)
     end
 
-    server:listen(5)
+    local listening, listenErr = server:listen(5)
+    if not listening then
+        server:close()
+        server = nil
+        return false, tostring(listenErr)
+    end
     server:settimeout(0)
     boundPort = port
     pendingBindPort = nil
@@ -172,7 +238,7 @@ function transport.processCommands(onMessage: function(string))
 
     client = newClient
 
-    local httpMethod, path, _, body = readHttpRequest(newClient)
+    local httpMethod, path, headers, body = readHttpRequest(newClient)
     if not httpMethod then
         pcall(function() newClient:close() end)
         client = nil
@@ -182,6 +248,17 @@ function transport.processCommands(onMessage: function(string))
     -- Only accept requests to /mcp
     if path ~= "/mcp" then
         transport.sendHttpResponse(404, "Not Found", '{"error":"Not found"}')
+        pcall(function() newClient:close() end)
+        client = nil
+        return
+    end
+
+    -- The server binds to loopback, but browsers can still reach loopback
+    -- through DNS rebinding. Reject non-local Origin headers while allowing
+    -- ordinary native MCP clients, which omit Origin.
+    if not originAllowed(headers["origin"]) then
+        transport.sendHttpResponse(403, "Forbidden",
+            '{"error":"Origin must be localhost"}')
         pcall(function() newClient:close() end)
         client = nil
         return
@@ -204,6 +281,10 @@ function transport.processCommands(onMessage: function(string))
 end
 
 function transport.startServer(port: number)
+    if type(port) ~= "number" or port % 1 ~= 0
+            or port < 1 or port > 65535 then
+        error("MCP port must be an integer in 1..65535", 2)
+    end
     -- Rebinding the same port right after an engine restart can race
     -- kernel connection state from the previous instance (TIME_WAIT
     -- entries live up to 30 seconds on macOS and SO_REUSEADDR does not
@@ -264,6 +345,15 @@ function transport.cleanup()
         pcall(function() server:close() end)
         server = nil
     end
+    pendingBindPort = nil
+    nextBindAttempt = 0
+    boundPort = nil
+    pcall(function()
+        local title = love.window.getTitle()
+        local cleanTitle = title:gsub("%s*%(MCP:.-%)%s*$", "")
+        love.window.setTitle(cleanTitle)
+    end)
+    ctx = nil
     log:info("MCP server stopped")
 end
 

@@ -9,11 +9,11 @@
 
 local record crash
     --- Register a one-shot crash observer (receives the full traceback).
-    onCrash: function(fn: function(string))
+    onCrash: function(fn: function(string)): function()
 
     --- Register a per-frame pump run while the error screen is up
     --- (the MCP transport's accept/serve tick).
-    addPump: function(fn: function())
+    addPump: function(fn: function()): function()
 
     --- Fired by the error handler. Runs every observer, isolated.
     notify: function(err: string)
@@ -29,12 +29,27 @@ local handlers: {function(string)} = {}
 local pumps: {function()} = {}
 local crashError: string = nil
 
-function crash.onCrash(fn: function(string))
-    handlers[#handlers + 1] = fn
+local function removeCallback(list: {any}, callback: any)
+    for i = #list, 1, -1 do
+        if list[i] == callback then
+            table.remove(list, i)
+            return
+        end
+    end
 end
 
-function crash.addPump(fn: function())
+function crash.onCrash(fn: function(string)): function()
+    handlers[#handlers + 1] = fn
+    return function()
+        removeCallback(handlers as {any}, fn)
+    end
+end
+
+function crash.addPump(fn: function()): function()
     pumps[#pumps + 1] = fn
+    return function()
+        removeCallback(pumps as {any}, fn)
+    end
 end
 
 function crash.notify(err: string)
