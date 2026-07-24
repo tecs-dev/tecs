@@ -60,6 +60,10 @@ jobs:
           test -f "$project/build/tecs2d/init.lua"
           test -f "$project/build/tecs2d/assets/fonts/tiny-font.fnt"
           test -f "$project/build/tecs2d/assets/fonts/tiny-font.png"
+          test -f "$project/build/tecs2d/assets/fonts/jetbrainsmono-extrabold-msdf.json"
+          test -f "$project/build/tecs2d/assets/fonts/jetbrainsmono-extrabold-msdf.png"
+          test -f "$project/build/tecs2d/assets/fonts/JetBrainsMono-OFL.txt"
+          test -f "$project/build/tecs2d/assets/fonts/JetBrainsMono-NOTICE.md"
           (cd "$project" && "$tecs" check --json | grep -F '"ok":true')
           (cd "$project" && "$tecs" info --json | grep -F '"built":true')
           "$tecs" agent list | grep -F tecs-project
@@ -126,6 +130,10 @@ jobs:
           if (-not (Test-Path "$project\build\tecs2d\init.lua")) { throw "tecs2d was not built" }
           if (-not (Test-Path "$project\build\tecs2d\assets\fonts\tiny-font.fnt")) { throw "BMFont descriptor was not built" }
           if (-not (Test-Path "$project\build\tecs2d\assets\fonts\tiny-font.png")) { throw "BMFont texture was not built" }
+          if (-not (Test-Path "$project\build\tecs2d\assets\fonts\jetbrainsmono-extrabold-msdf.json")) { throw "Debug font descriptor was not built" }
+          if (-not (Test-Path "$project\build\tecs2d\assets\fonts\jetbrainsmono-extrabold-msdf.png")) { throw "Debug font texture was not built" }
+          if (-not (Test-Path "$project\build\tecs2d\assets\fonts\JetBrainsMono-OFL.txt")) { throw "Debug font license was not built" }
+          if (-not (Test-Path "$project\build\tecs2d\assets\fonts\JetBrainsMono-NOTICE.md")) { throw "Debug font notice was not built" }
 
       - name: Prove package-manager zip
         shell: pwsh

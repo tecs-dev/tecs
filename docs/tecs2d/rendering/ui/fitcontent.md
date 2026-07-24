@@ -40,6 +40,8 @@ world:spawn(
 | `paddingBottom`     | number  | Bottom padding (overrides uniform)      |
 | `paddingLeft`       | number  | Left padding (overrides uniform)        |
 | `adjustComponentId` | integer | Component to update with new dimensions |
+| `fitWidth`          | boolean | Fit the container and adjusted width    |
+| `fitHeight`         | boolean | Fit the container and adjusted height   |
 
 ## Constructor
 
@@ -50,22 +52,42 @@ FitContent(10)
 -- Uniform padding, adjust Rectangle component
 FitContent(10, Rectangle)
 
--- Config table for per-side padding
-FitContent({
+-- Config table for per-side padding and per-axis fitting
+FitContent.new({
     padding = 10,
     paddingTop = 20,
+    fit = "width",
     adjust = Rectangle
 })
 ```
 
+`fit` accepts `both` (the default), `width`, or `height`. The positional
+constructor fits both axes.
+
 ## How It Works
 
-Each frame, FitContent:
+When relevant layout data changes, FitContent:
 
 1. Measures the bounding box of all children with LayoutBox
 2. Adds padding to calculate final dimensions
-3. Updates the entity's LayoutBox width/height
-4. Optionally updates a render component's width/height
+3. Updates the selected LayoutBox axes
+4. Optionally updates the same axes on a render component
+
+FitContent and [Flow](./flow) resolve together. This lets one axis remain a
+fixed wrapping constraint while the other follows the arranged content:
+
+```teal
+world:spawn(
+    Rectangle(400, 100),
+    LayoutBox(Rectangle, nil, 0, 0),
+    ui.Flow("right", 10),
+    FitContent.new({
+        padding = 10,
+        fit = "height",
+        adjust = Rectangle,
+    })
+)
+```
 
 ## Requirements
 
@@ -91,7 +113,8 @@ world:spawn(
 
 ## Dynamic Resizing
 
-FitContent recalculates every frame, so containers automatically resize when children change:
+FitContent is dirty-gated, so containers resize after children change without
+rescanning settled layouts every frame:
 
 ```teal
 -- Text changes → container resizes automatically

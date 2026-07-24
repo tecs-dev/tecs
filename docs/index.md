@@ -375,7 +375,7 @@ end
 - [Physics](/tecs2d/physics/) - Box2D bodies, forces, collision events, filtering, and smoothing
 - [Tweens](/tecs2d/tween) - serializable timelines with easing, channels, events, and presets
 - [Audio](/tecs2d/audio/) - spatial sound, groups, fades, effects, cooldowns, and voice limiting
-- [UI layout](/tecs2d/rendering/ui/) - anchors, boxes, clipping, scrolling, and auto-sizing
+- [UI layout](/tecs2d/rendering/ui/) - anchors, flow, clipping, scrolling, and auto-sizing
 - [Assets](/tecs2d/assets/) - cached async loading, batches, pinning, and custom asset types
 - [Worker jobs](/tecs2d/workers) - typed background jobs with composable handles and independent queues
 - [World suspension](/tecs2d/suspension) - pause simulation while independent UI worlds keep running

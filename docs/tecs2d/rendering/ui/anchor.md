@@ -108,7 +108,7 @@ world:spawn(
 ```
 PostUpdate:
   ui.ComputeLayoutBox
-  ui.ComputeFitContent
+  ui.ResolveLayout        -- resolves Flow and FitContent
   ui.ComputeAnchor        -- resolves anchor → Transform.x/y
   ui.RelativeTransform     -- composes parent + child transforms
 ```

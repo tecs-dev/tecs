@@ -84,7 +84,7 @@ function Anchor.plugin(world: World)
     world:addSystem({
         name = "ui.ComputeAnchor",
         phase = tecs.phases.PostUpdate,
-        after = {"ui.ComputeLayoutBox", "ui.ComputeFitContent"},
+        after = {"ui.ComputeLayoutBox", "ui.ResolveLayout"},
         before = {"ui.RelativeTransform"},
         run = function()
             -- Lazy-load pipeline resource (not available at registration time)

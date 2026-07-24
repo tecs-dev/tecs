@@ -1,5 +1,5 @@
 ---
-description: "Overview of the Tecs UI building blocks Anchor, LayoutBox, Viewport, FitContent, and helper functions"
+description: "Overview of the Tecs UI building blocks Anchor, LayoutBox, Flow, Viewport, and FitContent"
 ---
 
 # Tecs UI
@@ -12,6 +12,7 @@ than being a complete UI framework.
 - **Viewport-relative anchoring** - Position elements relative to screen/viewport edges
 - **Origin-based positioning** - Components can have configurable origins (top-left, center, etc.)
 - **Dynamic dimensions** - LayoutBox can pull dimensions from render components automatically
+- **Flow layout** - Arrange ordered children in rows or columns with wrapping
 - **Scrollable containers** - Viewport provides clipping and scrolling
 - **Helper functions** - Simple utilities for common layout patterns
 
@@ -50,6 +51,7 @@ local Transform = tecs.builtins.Transform
 local ChildOf = tecs.builtins.ChildOf
 local RelativeTransform = tecs.builtins.RelativeTransform
 local LayoutBox = ui.LayoutBox
+local Flow = ui.Flow
 local Viewport = ui.Viewport
 
 -- Create a scrollable panel with top-left origin
@@ -57,6 +59,12 @@ local panel = world:spawn(
     Transform(50, 50),
     gfx.Rectangle(300, 400),
     LayoutBox(gfx.Rectangle, nil, 0, 0),  -- explicit top-left origin
+    Flow("down", 10),
+    ui.FitContent.new({
+        padding = 10,
+        fit = "width",
+        adjust = gfx.Rectangle,
+    }),
     Viewport(0, 0, 300, 800)  -- scrollable content
 )
 
@@ -64,9 +72,10 @@ local panel = world:spawn(
 for i = 1, 10 do
     world:spawn(
         ChildOf(panel),
-        RelativeTransform.new({x = 10, y = (i - 1) * 50}),
+        RelativeTransform(),
         gfx.Text(font, "Item " .. i),
-        LayoutBox(gfx.Text)
+        LayoutBox(gfx.Text),
+        ui.FlowOrder(i)
     )
 end
 ```
@@ -75,6 +84,7 @@ end
 
 - [Anchor](./anchor) - Viewport-relative positioning
 - [LayoutBox](./layoutbox) - Dimensions and origin for UI positioning
+- [Flow](./flow) - Ordered rows and columns with wrapping
 - [Viewport](./viewport) - Scrollable containers with clipping
 - [FitContent](./fitcontent) - Auto-size containers to fit children
 - [Helpers](./helpers) - Layout helper functions

@@ -132,12 +132,12 @@ function Viewport.plugin(world: tecs.World)
     -- made after PostUpdate, e.g. MCP run_lua, surface via the
     -- dirty carryover sampler). Per-child ancestor walks are only
     -- worth running when something that feeds them moved.
-    dirty.watch(world, {
+    local hierarchyWatch = dirty.watch(world, "hierarchy", {
         Transform, RelativeTransform, ChildOf,
         Viewport as tecs.Component, LayoutBox as tecs.Component,
     })
     local function hierarchyDirty(): boolean
-        return dirty.changed(world)
+        return dirty.changed(world, hierarchyWatch)
     end
 
     -- Apply scroll offset to children of Viewports

@@ -378,9 +378,6 @@ function popupview.draw(popup: PopupState, font: lg.Font,
         or (document and document.title and document.title.text)
         or (not document and sourceLines[1])
     local headerRows = header and 1 or 0
-    local fixedHeight = 8 + headerRows * lineH
-        + POPUP_CONTENT_PAD_TOP + POPUP_CONTENT_PAD_BOTTOM
-    local maxBodyH = math.max(lineH, sh - py - fixedHeight)
     local gap = font:getWidth("  ")
     -- Layout cache: semantic blocks are packed into the number of columns the
     -- current viewport can hold. Ordinary popups remain one flowing column.
@@ -522,6 +519,8 @@ function popupview.draw(popup: PopupState, font: lg.Font,
     local rowHeights: {number} = {}
     local rowTopPads: {number} = {}
     local totalContentH: number = 0
+    local firstRowIsSection = false
+    local sawSection = false
     for i = 1, totalRows do
         local section = false
         if document then
@@ -535,13 +534,27 @@ function popupview.draw(popup: PopupState, font: lg.Font,
         end
         local topPad: number = 0
         if section then
-            topPad = i == 1 and POPUP_SECTION_PAD_TOP or lineH
+            if not sawSection then
+                sawSection = true
+                firstRowIsSection = i == 1
+            else
+                topPad = lineH
+            end
         end
         local bottomPad = section and POPUP_SECTION_PAD_BOTTOM or 0
         rowTopPads[i] = topPad
         rowHeights[i] = lineH + topPad + bottomPad
         totalContentH = totalContentH + rowHeights[i]
     end
+
+    -- A leading section heading already establishes the document structure.
+    -- Keep it close to the title while preserving the larger content inset
+    -- for ordinary first rows and the full-line gap before later sections.
+    local contentPadTop = firstRowIsSection
+        and POPUP_SECTION_PAD_TOP or POPUP_CONTENT_PAD_TOP
+    local fixedHeight = 8 + headerRows * lineH
+        + contentPadTop + POPUP_CONTENT_PAD_BOTTOM
+    local maxBodyH = math.max(lineH, sh - py - fixedHeight)
 
     local bottomFirst = totalRows + 1
     local bottomHeight: number = 0
@@ -580,7 +593,7 @@ function popupview.draw(popup: PopupState, font: lg.Font,
     local panelW = math.min(sw - PAD_X * 2,
         contentW + PAD_X + POPUP_RIGHT_PAD + scrollbarSpace)
     local panelH = bodyH + lineH * headerRows + 8
-        + POPUP_CONTENT_PAD_TOP + POPUP_CONTENT_PAD_BOTTOM
+        + contentPadTop + POPUP_CONTENT_PAD_BOTTOM
     popup.panelX, popup.panelY = PAD_X, py
     popup.panelW, popup.panelH = panelW, panelH
     if popup.modal then
@@ -653,7 +666,7 @@ function popupview.draw(popup: PopupState, font: lg.Font,
         end
     end
 
-    local bodyY = py + 8 + headerRows * lineH + POPUP_CONTENT_PAD_TOP
+    local bodyY = py + 8 + headerRows * lineH + contentPadTop
     local scrollOffset: number = 0
     for i = 1, firstRow - 1 do
         scrollOffset = scrollOffset + rowHeights[i]

@@ -139,6 +139,9 @@ Licensed under either of
 
 at your option.
 
+Third-party assets retain their original licenses. See
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 ### Contribution
 
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, 

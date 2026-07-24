@@ -9,6 +9,9 @@ local common <const> = require("scenes.common")
 local Transform <const> = tecs.builtins.Transform
 local ChildOf <const> = tecs.builtins.ChildOf
 local RelativeTransform <const> = tecs.builtins.RelativeTransform
+local FitContent <const> = ui.FitContent
+local Flow <const> = ui.Flow
+local FlowOrder <const> = ui.FlowOrder
 local LayoutBox <const> = ui.LayoutBox
 local Viewport <const> = ui.Viewport
 local Text <const> = gfx.Text
@@ -18,7 +21,12 @@ end
 
 scrollable.name = "Scrollable Container"
 
-function scrollable.setup(world: tecs.World, spawn: function(tecs.World, ...: tecs.Component): integer, WINDOW_WIDTH: number, WINDOW_HEIGHT: number)
+function scrollable.setup(
+    world: tecs.World,
+    spawn: function(tecs.World, ...: tecs.Component): integer,
+    WINDOW_WIDTH: number,
+    WINDOW_HEIGHT: number
+)
     -- Header
     common.header(world, spawn, WINDOW_WIDTH, "Scrollable Container (Viewport)")
 
@@ -26,13 +34,19 @@ function scrollable.setup(world: tecs.World, spawn: function(tecs.World, ...: te
     local containerW, containerH = 400, 400
     local containerX = (WINDOW_WIDTH - containerW) / 2  -- Visual left edge
     local containerY = 120  -- Visual top edge (below title)
-    local contentHeight = 32 * 40 + 10  -- 32 items * 40px spacing + padding
+    local contentHeight = 32 * 35 + 31 * 5 + 20
 
     local container = spawn(world,
         Transform(containerX, containerY),
         gfx.Rectangle(containerW, containerH),  -- filled
         gfx.RoundedCorners(8),
         LayoutBox(gfx.Rectangle, nil, 0, 0),  -- top-left origin for child positioning
+        Flow("down", 5),
+        FitContent.new({
+            padding = 10,
+            fit = "width",
+            adjust = gfx.Rectangle,
+        }),
         Viewport(0, 0, containerW, contentHeight),
         gfx.Color(0.15, 0.12, 0.20)  -- Dark purple background
     )
@@ -47,17 +61,14 @@ function scrollable.setup(world: tecs.World, spawn: function(tecs.World, ...: te
 
     -- Add items to container (positioned relative to parent's visual top-left)
     local itemW, itemH = containerW - 20, 35
-    local padding = 10
-    local spacing = 40
     for i = 1, 32 do
-        local x = padding  -- From left edge
-        local y = padding + (i - 1) * spacing  -- From top edge
         local itemId = spawn(world,
             Transform(0, 0, 1),  -- z=1 to render above container
             ChildOf(container),
-            RelativeTransform.new({x = x, y = y, z = 1}),
+            RelativeTransform.new({z = 1}),
             gfx.Rectangle(itemW, itemH),
             LayoutBox(gfx.Rectangle, nil, 0, 0),  -- top-left origin
+            FlowOrder(i),
             gfx.Color(0.35 + (i % 3) * 0.08, 0.25, 0.45 + (i % 3) * 0.08)  -- Purple tones
         )
 

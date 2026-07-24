@@ -3,9 +3,13 @@
 
 local tecs <const> = require("tecs")
 local Anchor <const> = require("tecs2d.ui.internal.Anchor")
+local Flow <const> = require("tecs2d.ui.internal.Flow")
+local FlowOrder <const> = require("tecs2d.ui.internal.FlowOrder")
+    as tecs.ScalarComponent<number>
 local LayoutBox <const> = require("tecs2d.ui.internal.LayoutBox")
 local Viewport <const> = require("tecs2d.ui.internal.Viewport")
 local FitContent <const> = require("tecs2d.ui.internal.FitContent")
+local layout <const> = require("tecs2d.ui.internal.layout")
 
 local type World = tecs.World
 local RelativeTransform <const> = tecs.builtins.RelativeTransform
@@ -28,6 +32,12 @@ local record ui
     --- Layout dimensions and origin for UI positioning.
     LayoutBox: LayoutBox
 
+    --- Arranges direct children in rows or columns.
+    Flow: Flow
+
+    --- Optional deterministic child order within a Flow.
+    FlowOrder: tecs.ScalarComponent<number>
+
     --- A viewport that provides clipping and scrolling for its children.
     Viewport: Viewport
 
@@ -35,7 +45,7 @@ local record ui
     FitContent: FitContent
 
     --- Unified layout plugin.
-    --- Installs Anchor, LayoutBox, Viewport, and FitContent systems.
+    --- Installs Anchor, LayoutBox, Flow, Viewport, and FitContent systems.
     --- Call this once after creating the render pipeline.
     plugin: function(world: World)
 
@@ -63,6 +73,8 @@ end
 
 ui.Anchor = Anchor
 ui.LayoutBox = LayoutBox
+ui.Flow = Flow
+ui.FlowOrder = FlowOrder
 ui.Viewport = Viewport
 ui.FitContent = FitContent
 
@@ -77,8 +89,8 @@ local function install(world: World, config?: ui.Config)
     end
     Anchor.plugin(world)
     LayoutBox.plugin(world, {defaultOriginX = originX, defaultOriginY = originY})
+    layout.plugin(world)
     Viewport.plugin(world)
-    FitContent.plugin(world)
 end
 
 function ui.plugin(world: World)
@@ -105,9 +117,13 @@ local function stackChildren(world: World, children: {integer}, spacing: number,
                 step = step + (vertical and layoutBox.height or layoutBox.width)
             end
             if vertical then
-                relTransform.y = current
+                if relTransform.y ~= current then
+                    world:getMut(childId, RelativeTransform).y = current
+                end
             else
-                relTransform.x = current
+                if relTransform.x ~= current then
+                    world:getMut(childId, RelativeTransform).x = current
+                end
             end
             current = current + step
         end

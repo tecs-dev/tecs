@@ -8,10 +8,12 @@ stage="$root/build/loveapp"
 output="$root/dist/tecs-cli.love"
 
 if [ ! -f "$tecs_dir/src/tecs/init.tl" ] || [ ! -f "$tecs_dir/src/tecs2d/init.tl" ] \
-    || [ ! -f "$tecs_dir/examples/shared/assets/tiny-font.fnt" ] \
-    || [ ! -f "$tecs_dir/examples/shared/assets/tiny-font.png" ] \
-    || [ ! -f "$tecs_dir/examples/shared/assets/jetbrainsmono-extrabold-msdf.json" ] \
-    || [ ! -f "$tecs_dir/examples/shared/assets/jetbrainsmono-extrabold-msdf.png" ]; then
+    || [ ! -f "$tecs_dir/src/tecs2d/assets/fonts/tiny-font.fnt" ] \
+    || [ ! -f "$tecs_dir/src/tecs2d/assets/fonts/tiny-font.png" ] \
+    || [ ! -f "$tecs_dir/src/tecs2d/assets/fonts/jetbrainsmono-extrabold-msdf.json" ] \
+    || [ ! -f "$tecs_dir/src/tecs2d/assets/fonts/jetbrainsmono-extrabold-msdf.png" ] \
+    || [ ! -f "$tecs_dir/src/tecs2d/assets/fonts/JetBrainsMono-OFL.txt" ] \
+    || [ ! -f "$tecs_dir/src/tecs2d/assets/fonts/JetBrainsMono-NOTICE.md" ]; then
     echo "Complete Tecs checkout not found: $tecs_dir" >&2
     exit 1
 fi
@@ -57,13 +59,11 @@ cp -R "$root/tecs_cli/runtime/licenses" "$stage/payload/licenses"
 cp "$root/LICENSE" "$stage/payload/licenses/tecs-cli-LICENSE"
 cp -R "$tecs_dir/src/tecs" "$stage/payload/framework/tecs"
 cp -R "$tecs_dir/src/tecs2d" "$stage/payload/framework/tecs2d"
-mkdir -p "$stage/payload/framework/tecs2d/assets/fonts"
-cp "$tecs_dir/examples/shared/assets/tiny-font.fnt" \
-    "$tecs_dir/examples/shared/assets/tiny-font.png" \
-    "$tecs_dir/examples/shared/assets/jetbrainsmono-extrabold-msdf.json" \
-    "$tecs_dir/examples/shared/assets/jetbrainsmono-extrabold-msdf.png" \
-    "$stage/payload/framework/tecs2d/assets/fonts/"
 cp "$tecs_dir/LICENSE-MIT" "$stage/payload/licenses/tecs-LICENSE-MIT"
+cp "$tecs_dir/THIRD_PARTY_NOTICES.md" \
+    "$stage/payload/licenses/tecs-THIRD-PARTY-NOTICES.md"
+cp "$tecs_dir/src/tecs2d/assets/fonts/JetBrainsMono-OFL.txt" \
+    "$stage/payload/licenses/JetBrainsMono-OFL.txt"
 
 rm -f "$output"
 if command -v zip >/dev/null 2>&1; then

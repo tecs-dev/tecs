@@ -2,15 +2,19 @@
 --- Measures child bounds and updates LayoutBox (and optionally a render component).
 
 local tecs <const> = require("tecs")
-local dirty <const> = require("tecs2d.ui.internal.dirty")
 
-local ChildOf <const> = tecs.builtins.ChildOf
 local RelativeTransform <const> = tecs.builtins.RelativeTransform
 
 local type Component = tecs.Component
 local type World = tecs.World
 
 local LayoutBox: Component
+
+local enum FitMode
+    "both"
+    "width"
+    "height"
+end
 
 local record FitContentConfig
     padding: number
@@ -19,6 +23,7 @@ local record FitContentConfig
     paddingBottom: number
     paddingLeft: number
     adjust: Component
+    fit: FitMode
 end
 
 --- Auto-sizes a container to fit its children with optional padding.
@@ -40,8 +45,14 @@ local record FitContent is Component
     paddingLeft: number
 
     --- Component ID to update with new dimensions (0 = none).
-    --- The component must have width/height fields or a setSize method.
+    --- The component must have width/height fields.
     adjustComponentId: integer
+
+    --- Whether LayoutBox width is fitted to the measured content.
+    fitWidth: boolean
+
+    --- Whether LayoutBox height is fitted to the measured content.
+    fitHeight: boolean
 
     --- Creates a new FitContent component from positional args.
     --- For the table form, use `FitContent.new({ padding = 10, adjust = ... })`.
@@ -72,13 +83,6 @@ local record FitContent is Component
     --- or LayoutBox are ignored. Usable directly as a world:targets visitor.
     measureChild: function(childId: integer, ctx: MeasureCtx)
 
-    --- Plugin to install FitContent systems.
-    plugin: function(world: World)
-end
-
-local record Sizable
-    width: number
-    height: number
 end
 
 local function resolveAdjustId(c: Component): integer
@@ -130,15 +134,23 @@ tecs.newComponent({
         "paddingRight",
         "paddingBottom",
         "paddingLeft",
-        "adjustComponentId"
+        "adjustComponentId",
+        "fitWidth",
+        "fitHeight",
     },
-    defaults = {0, 0, 0, 0, 0, 0},
+    defaults = {0, 0, 0, 0, 0, 0, true, true},
     __call = function(instance: FitContent, padding?: number, adjustComponent?: Component)
         instance.padding = padding or 0
         instance.adjustComponentId = resolveAdjustId(adjustComponent)
+        instance.fitWidth = true
+        instance.fitHeight = true
     end,
     new = function(data: {string: any}): FitContent
         local config = data as FitContentConfig
+        local fit = config.fit or "both"
+        if fit ~= "both" and fit ~= "width" and fit ~= "height" then
+            error("FitContent: fit must be both, width, or height")
+        end
         return {
             padding = config.padding or 0,
             paddingTop = config.paddingTop or 0,
@@ -146,114 +158,10 @@ tecs.newComponent({
             paddingBottom = config.paddingBottom or 0,
             paddingLeft = config.paddingLeft or 0,
             adjustComponentId = resolveAdjustId(config.adjust),
+            fitWidth = fit == "both" or fit == "width",
+            fitHeight = fit == "both" or fit == "height",
         }
     end,
 })
-
-function FitContent.plugin(world: World)
-    -- Lazy require to avoid circular dependency
-    LayoutBox = require("tecs2d.ui.internal.LayoutBox")
-
-    local fitContentQuery = world:query({
-        name = "FitContent",
-        include = {FitContent, LayoutBox}
-    })
-
-    -- Reusable measurement context. Hoisted to plugin scope so the
-    -- world:targets visitor doesn't allocate a fresh table per parent.
-    local measureCtx: FitContent.MeasureCtx = {
-        world = world, hasChildren = false,
-        minX = 0.0, minY = 0.0, maxX = 0.0, maxY = 0.0
-    }
-    local measureChild <const> = FitContent.measureChild
-    dirty.watch(world, {
-        FitContent as Component,
-        LayoutBox,
-        RelativeTransform as Component,
-        ChildOf as Component,
-    })
-
-    world:addSystem({
-        name = "ui.ComputeFitContent",
-        phase = tecs.phases.PostUpdate,
-        after = {"ui.ComputeLayoutBox"},
-        run = function()
-            if not dirty.changed(world) then return end
-            for archetype, len, entities in fitContentQuery:iter() do
-                local fitContents = archetype:get(FitContent)
-                local layoutBoxes = archetype:get(LayoutBox)
-                local mutLayoutBoxes: {SizableBox} = nil
-
-                for row = 1, len do
-                    local fitContent = fitContents[row]
-                    local layoutBox = layoutBoxes[row] as SizableBox
-                    local parentId = entities[row]
-
-                    -- 1. Measure children via the reverse-indexed ChildOf
-                    -- relationship: O(own-children) per parent, no allocation.
-                    measureCtx.hasChildren = false
-                    measureCtx.minX = math.huge
-                    measureCtx.minY = math.huge
-                    measureCtx.maxX = -math.huge
-                    measureCtx.maxY = -math.huge
-                    world:targets(parentId, ChildOf, measureChild, measureCtx)
-                    local minX = measureCtx.minX
-                    local minY = measureCtx.minY
-                    local maxX = measureCtx.maxX
-                    local maxY = measureCtx.maxY
-                    local hasChildren = measureCtx.hasChildren
-
-                    if not hasChildren then
-                        minX, minY, maxX, maxY = 0, 0, 0, 0
-                    end
-
-                    -- 2. Calculate dimensions with padding
-                    local padTop = fitContent.paddingTop > 0 and fitContent.paddingTop or fitContent.padding
-                    local padRight = fitContent.paddingRight > 0 and fitContent.paddingRight or fitContent.padding
-                    local padBottom = fitContent.paddingBottom > 0 and fitContent.paddingBottom or fitContent.padding
-                    local padLeft = fitContent.paddingLeft > 0 and fitContent.paddingLeft or fitContent.padding
-
-                    local contentWidth = maxX - minX
-                    local contentHeight = maxY - minY
-                    local newWidth = contentWidth + padLeft + padRight
-                    local newHeight = contentHeight + padTop + padBottom
-
-                    -- 3. Update LayoutBox
-                    local newOffsetX = -newWidth * layoutBox.originX
-                    local newOffsetY = -newHeight * layoutBox.originY
-                    if layoutBox.width ~= newWidth
-                            or layoutBox.height ~= newHeight
-                            or layoutBox.offsetX ~= newOffsetX
-                            or layoutBox.offsetY ~= newOffsetY then
-                        if not mutLayoutBoxes then
-                            mutLayoutBoxes = archetype:getMut(LayoutBox)
-                                as {SizableBox}
-                        end
-                        local mut = mutLayoutBoxes[row]
-                        mut.width, mut.height = newWidth, newHeight
-                        mut.offsetX, mut.offsetY = newOffsetX, newOffsetY
-                    end
-
-                    -- 4. Update render component if specified
-                    if fitContent.adjustComponentId > 0 then
-                        local comp = tecs.getComponentById(fitContent.adjustComponentId)
-                        if comp then
-                            local renderData = world:get(parentId, comp) as Sizable
-                            if renderData and (renderData.width ~= newWidth
-                                or renderData.height ~= newHeight) then
-                                renderData.width = newWidth
-                                renderData.height = newHeight
-                                -- cdata writes through world:get don't
-                                -- signal the dirty model; without this the
-                                -- GPU sync never re-uploads the new size.
-                                world:markComponentDirty(parentId, comp)
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    })
-end
 
 return FitContent

@@ -1,5 +1,5 @@
---- Love2D integration suite: UI layout. A Viewport container with
---- ChildOf + RelativeTransform children verifies parent-relative
+--- Love2D integration suite: UI layout. A Flow + FitContent + Viewport
+--- container with ChildOf + RelativeTransform children verifies parent-relative
 --- positioning, scroll offsets moving children, and clip bounds hiding
 --- content outside the container. Directly guards the layout systems'
 --- dirty gates: scroll and container moves must keep propagating even
@@ -59,21 +59,28 @@ describe("ui layout: containers position, scroll, and clip children", function()
                 Transform(%d, %d),
                 gfx.Rectangle(120, 160),
                 ui.LayoutBox(gfx.Rectangle, nil, 0, 0),
+                ui.Flow("down", 166),
+                ui.FitContent.new({
+                    padding = 10,
+                    fit = "width",
+                    adjust = gfx.Rectangle,
+                }),
                 ui.Viewport(0, 0, 120, 400),
                 gfx.Color(0.2, 0.2, 0.3, 1))
             _G.tecsUiContainer = container
 
-            local function bar(localY)
+            local function bar(order)
                 return world:spawn(
                     Transform(0, 0, 1),
                     ChildOf(container),
-                    RelativeTransform.new({x = 10, y = localY, z = 1}),
+                    RelativeTransform.new({z = 1}),
                     gfx.Rectangle(100, 24),
                     ui.LayoutBox(gfx.Rectangle, nil, 0, 0),
+                    ui.FlowOrder(order),
                     gfx.Color(0, 1, 0, 1))
             end
-            _G.tecsUiBar = bar(10)
-            _G.tecsUiClippedBar = bar(200)
+            _G.tecsUiBar = bar(1)
+            _G.tecsUiClippedBar = bar(2)
             return true
         ]], CONTAINER_X, CONTAINER_Y))
     end)

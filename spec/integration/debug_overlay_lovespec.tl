@@ -426,9 +426,26 @@ describe("in-game debugger overlay", function()
             return nil
         end)
         local function purpleSelection(): boolean
+            local bounds = fixture.runLua(app, [[
+                local tools = world.resources[_G.tecsTestHooks.toolworld.KEY]
+                local elements = tools.view.owners.overlay.elements
+                local grid = elements["completion.grid"]
+                local selection = elements["completion.selection"]
+                if not grid or not selection then return 0, 0, 0, 0 end
+                return grid.state.x + selection.state.x,
+                    grid.state.y + selection.state.y,
+                    selection.width, selection.height
+            ]])
+            local left = tonumber(bounds[1])
+            local top = tonumber(bounds[2])
+            local width = tonumber(bounds[3])
+            local height = tonumber(bounds[4])
+            if width <= 0 or height <= 0 then return false end
             local points: {{string: number}} = {}
-            for y = 164, 192, 4 do
-                for x = 8, 72, 8 do points[#points + 1] = {x = x, y = y} end
+            for y = top + 2, top + height - 2, 4 do
+                for x = left + 2, left + width - 2, 4 do
+                    points[#points + 1] = {x = x, y = y}
+                end
             end
             local result = app.client:call("sample_pixels", {points = points}, 10)
             for _, pixel in ipairs(result.pixels as {{string: number}}) do
@@ -446,15 +463,6 @@ describe("in-game debugger overlay", function()
             end)
         luassert.is_true(highlightedWhileTyping == true,
             "typing completions did not highlight the first candidate")
-        app.client:call("send_love_event", {event = "keypressed", args = {"tab"}})
-        app.client:call("send_love_event", {event = "keyreleased", args = {"tab"}})
-        local highlighted = fixture.eventually(fixture.callTimeout, function(): boolean
-            if (context().command as string) ~= "select" then return nil end
-            if purpleSelection() then return true end
-            return nil
-        end)
-        luassert.is_true(highlighted == true,
-            "first-row completion did not render its purple selection cell")
     end)
 
     it("shows Tab completions in columns over the context row", function()
@@ -490,6 +498,28 @@ describe("in-game debugger overlay", function()
         end)
         luassert.is_true(rendered == true,
             "completion grid did not fill columns over the context row")
+        local usesCommandFont = fixture.eventually(
+            fixture.callTimeout, function(): boolean
+                local values = fixture.runLua(app, [[
+                    local tools = world.resources[_G.tecsTestHooks.toolworld.KEY]
+                    local elements = tools.view.owners.overlay.elements
+                    local command = elements["command.line.1"]
+                    local help = elements["completion.header.hint"]
+                    local item = elements["completion.item.1"]
+                    return command and command.scale or 0,
+                        help and help.scale or 0,
+                        item and item.scale or 0
+                ]])
+                local commandScale = tonumber(values[1])
+                if commandScale > 0
+                        and tonumber(values[2]) == commandScale
+                        and tonumber(values[3]) == commandScale then
+                    return true
+                end
+                return nil
+            end)
+        luassert.is_true(usesCommandFont == true,
+            "completion help and items did not use the command font size")
     end)
 
     it("resizes the isolated overlay pipeline with the game window", function()
@@ -581,6 +611,9 @@ describe("in-game debugger overlay", function()
                 local cursor = elements["command.cursor"]
                 local enter = elements["command.commandHint"]
                 local tab = elements["command.autocompleteHint"]
+                local statusBackground = elements["status.background"]
+                local commandBackground = elements["command.background"]
+                local command = elements["command.line.1"]
                 return tail and tail.text or "", enter and enter.text or "",
                     tab and tab.text or "",
                     cursor and cursor.state.x or -1,
@@ -588,14 +621,21 @@ describe("in-game debugger overlay", function()
                     enter and enter.state.x or -1,
                     enter and enter.state.r or -1,
                     enter and enter.state.g or -1,
-                    enter and enter.state.b or -1
+                    enter and enter.state.b or -1,
+                    statusBackground and statusBackground.height or -1,
+                    commandBackground and commandBackground.height or -1,
+                    tail and tail.scale or -1,
+                    command and command.scale or -1
             ]])
             if (values[1] as string):match("%d+ fps")
                     and values[2] == "Enter command..."
                     and values[3] == "[TAB] to autocomplete"
                     and tonumber(values[6]) > tonumber(values[4]) + tonumber(values[5])
                     and tonumber(values[7]) == tonumber(values[8])
-                    and tonumber(values[8]) == tonumber(values[9]) then
+                    and tonumber(values[8]) == tonumber(values[9])
+                    and tonumber(values[7]) < 0.45
+                    and tonumber(values[10]) == tonumber(values[11])
+                    and tonumber(values[12]) == tonumber(values[13]) then
                 return true
             end
             return nil

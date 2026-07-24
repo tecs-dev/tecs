@@ -97,16 +97,15 @@ local getTime <const> = love.timer.getTime
 
 local UNDER_MOUSE_PX <const> = 24         -- pick radius in screen pixels
 local PAD_X <const> = 12                  -- horizontal padding inside the bars
-local PAD_Y <const> = 2                   -- vertical padding inside the bars
+local PAD_Y <const> = 4                   -- vertical padding inside the bars
 local INFO_PAD_X <const> = 6
-local INFO_PAD_Y <const> = 2
 local POPUP_SCROLL_ROWS <const> = 3
 
 local COMMAND_BAR <const>: {number} = {0.1804, 0.2157, 0.2353, 1}
 local POPUP_ACCENT <const>: {number} = {0.66, 0.51, 0.90, 1}
 local DEBUG_BG <const>: {number} = {0.58, 0.42, 0.82, 1}
 local DEBUG_TEXT <const>: {number} = {0.94, 0.92, 0.98, 1}
-local COMMAND_HINT <const>: {number} = {0.46, 0.46, 0.46, 1}
+local COMMAND_HINT <const>: {number} = {0.40, 0.40, 0.40, 1}
 local POPUP_BG <const>: {number} = {0.1059, 0.0745, 0.1373, 1}
 local CONTEXT_BG <const>: {number} = {0.1451, 0.1098, 0.1804, 1}
 local ENTITY_LABEL_BG <const>: {number} = {0.11, 0.13, 0.16, 0.85}
@@ -115,6 +114,17 @@ local RECORDING_BG <const>: {number} = {0, 0, 0, 0.6}
 local function coordinateLabel(ctx: debugcontext.Context): string
     return format("m %.0f,%.0f>%.0f,%.0f  c %.0f,%.0f z%.2f",
         ctx.mouseScreenX, ctx.mouseScreenY, ctx.mouseWorldX, ctx.mouseWorldY,
+        ctx.cameraX, ctx.cameraY, ctx.cameraZoom)
+end
+
+local function compactCoordinateLabel(ctx: debugcontext.Context): string
+    return format("m %.0f,%.0f  c %.0f,%.0f z%.2f",
+        ctx.mouseWorldX, ctx.mouseWorldY,
+        ctx.cameraX, ctx.cameraY, ctx.cameraZoom)
+end
+
+local function cameraLabel(ctx: debugcontext.Context): string
+    return format("c %.0f,%.0f z%.2f",
         ctx.cameraX, ctx.cameraY, ctx.cameraZoom)
 end
 
@@ -356,7 +366,6 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
     -- reliably crisp UI scale; keep the chrome dense with padding, not by
     -- shrinking the glyph field below the atlas's useful reconstruction range.
     local overlayFont = lg.newFont(21)
-    local coordinateFont = lg.newFont(15)
     local labelSeen: {integer: boolean} = {}
     local wasTextInput = false
     local registry = core.ensure(w, {
@@ -1088,7 +1097,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             local ifh = overlayFont:getHeight()
             local cmdBarH = ifh + PAD_Y * 2 +
                 (#commandLineRows(lg.getWidth()) - 1) * ifh
-            local contextH = coordinateFont:getHeight() + INFO_PAD_Y * 2
+            local contextH = ifh + PAD_Y * 2
             local contextY = lg.getHeight() - cmdBarH - contextH
             local chromeTop = contextY
             local completionVisible = cycling and #completions > 0
@@ -1334,7 +1343,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             -- columns from the command line.
             local cmdLines = commandLineRows(sw)
             local cmdBarH = rowH + (#cmdLines - 1) * fh
-            local contextH = coordinateFont:getHeight() + INFO_PAD_Y * 2
+            local contextH = rowH
             local commandY = lg.getHeight() - cmdBarH
             local contextY = commandY - contextH
 
@@ -1344,10 +1353,9 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 if popup.previewCmd then
                     completionHint = popup.previewCmd.shortHelp
                 end
-                lg.setFont(coordinateFont)
-                completionview.draw(popup, completions, coordinateFont,
-                    completionIndex, sw, commandY, completionHint)
                 lg.setFont(overlayFont)
+                completionview.draw(popup, completions, overlayFont,
+                    completionIndex, sw, commandY, completionHint)
             end
 
             local bottomH = contextH + cmdBarH
@@ -1360,7 +1368,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             -- coordinates at right. Completion mode covers this row.
             if not cycling or #completions == 0 or helpModal then
                 local badge = "DEBUG"
-                local badgeW = coordinateFont:getWidth(badge) + INFO_PAD_X * 2
+                local badgeW = overlayFont:getWidth(badge) + INFO_PAD_X * 2
                 -- The two status surfaces meet at badgeW without overlap.
                 -- Overlapping opaque GPU rectangles could leave the badge
                 -- behind the context row until another popup changed shape
@@ -1372,17 +1380,28 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 lg.rectangle("status.background", "fill",
                     badgeW, contextLocalY, sw - badgeW, contextH)
                 local coords = coordinateLabel(ctx)
-                local coordsW = coordinateFont:getWidth(coords) + INFO_PAD_X * 2
-                lg.setFont(coordinateFont)
+                local maxCoordsW = math.max(0, sw - badgeW - INFO_PAD_X * 2)
+                if overlayFont:getWidth(coords) > maxCoordsW then
+                    coords = compactCoordinateLabel(ctx)
+                end
+                if overlayFont:getWidth(coords) > maxCoordsW then
+                    coords = cameraLabel(ctx)
+                end
+                if overlayFont:getWidth(coords) > maxCoordsW then
+                    coords = ""
+                end
+                local coordsW = coords == "" and 0
+                    or overlayFont:getWidth(coords) + INFO_PAD_X * 2
+                lg.setFont(overlayFont)
                 lg.beginLayout("status.content", 0, contextLocalY,
                     math.max(0, sw - coordsW), contextH)
                 local statusTail = format("  %s  selected %d  %d fps",
                     ctx.frozen and "paused" or "live", #ctx.selected,
                     math.floor(love.timer.getFPS()) as integer)
                 local status = badge .. statusTail
-                local showTail = coordinateFont:getWidth(status)
+                local showTail = overlayFont:getWidth(status)
                     + INFO_PAD_X * 2 <= sw - coordsW
-                local statusTextY = 0
+                local statusTextY = PAD_Y
                 lg.setColor(DEBUG_TEXT[1], DEBUG_TEXT[2], DEBUG_TEXT[3], 1)
                 lg.print("status.badge", badge, INFO_PAD_X - 2, statusTextY + 2)
                 if showTail then
@@ -1390,7 +1409,7 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                     lg.print("status.tail", statusTail, badgeW, statusTextY)
                 end
                 local statusW = showTail and
-                    (badgeW + coordinateFont:getWidth(statusTail)) or badgeW
+                    (badgeW + overlayFont:getWidth(statusTail)) or badgeW
                 local messageX = INFO_PAD_X + statusW + INFO_PAD_X * 3
                 if ctx.message ~= "" then
                     if messageX < sw - coordsW then
@@ -1399,10 +1418,12 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                     end
                 end
                 lg.endLayout()
-                lg.setColor(0.8275, 0.7765, 0.6667, 1)
-                lg.print("status.coords", coords,
-                    sw - coordinateFont:getWidth(coords) - INFO_PAD_X,
-                    contextLocalY)
+                if coords ~= "" then
+                    lg.setColor(0.8275, 0.7765, 0.6667, 1)
+                    lg.print("status.coords", coords,
+                        sw - overlayFont:getWidth(coords) - INFO_PAD_X,
+                        contextLocalY + statusTextY)
+                end
             end
 
             -- Long commands wrap upward within the bottom command row.

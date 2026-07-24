@@ -90,6 +90,10 @@ jobs:
           test -f "$project/build/tecs2d/init.lua"
           test -f "$project/build/tecs2d/assets/fonts/tiny-font.fnt"
           test -f "$project/build/tecs2d/assets/fonts/tiny-font.png"
+          test -f "$project/build/tecs2d/assets/fonts/jetbrainsmono-extrabold-msdf.json"
+          test -f "$project/build/tecs2d/assets/fonts/jetbrainsmono-extrabold-msdf.png"
+          test -f "$project/build/tecs2d/assets/fonts/JetBrainsMono-OFL.txt"
+          test -f "$project/build/tecs2d/assets/fonts/JetBrainsMono-NOTICE.md"
           if [ "$(uname -s)" = Darwin ]; then
             (cd "$project" && env -u TECS_DIR "$GITHUB_WORKSPACE/cli/launcher/tecs" integ)
             printf '%s\n' \
@@ -230,6 +234,10 @@ jobs:
           if (-not (Test-Path "$project\build\tecs2d\init.lua")) { throw "tecs2d was not built" }
           if (-not (Test-Path "$project\build\tecs2d\assets\fonts\tiny-font.fnt")) { throw "BMFont descriptor was not built" }
           if (-not (Test-Path "$project\build\tecs2d\assets\fonts\tiny-font.png")) { throw "BMFont texture was not built" }
+          if (-not (Test-Path "$project\build\tecs2d\assets\fonts\jetbrainsmono-extrabold-msdf.json")) { throw "Debug font descriptor was not built" }
+          if (-not (Test-Path "$project\build\tecs2d\assets\fonts\jetbrainsmono-extrabold-msdf.png")) { throw "Debug font texture was not built" }
+          if (-not (Test-Path "$project\build\tecs2d\assets\fonts\JetBrainsMono-OFL.txt")) { throw "Debug font license was not built" }
+          if (-not (Test-Path "$project\build\tecs2d\assets\fonts\JetBrainsMono-NOTICE.md")) { throw "Debug font notice was not built" }
           $agents = (& cli/launcher/tecs.ps1 agent list | Out-String)
           if ($agents -notmatch 'tecs-project') { throw "agent list is missing tecs-project" }
           $agentPath = (& cli/launcher/tecs.ps1 agent path tecs-project | Out-String).Trim()

@@ -6,9 +6,12 @@ description: "Layout helper functions stackVertical, stackHorizontal, and measur
 
 Utility functions for common layout patterns.
 
+These are one-shot placement helpers. Use [Flow](./flow) when children or their
+dimensions can change at runtime.
+
 <p align="center">
 <img src="./layout-helpers.png" alt="Layout Helpers" /><br/>
-<em>See the <a href="https://github.com/tecs-dev/tecs/tree/main/examples/tecs-ui">tecs-ui example</a>.</em>
+<em>See the <a href="https://github.com/tecs-dev/tecs/tree/main/examples/ui">UI example</a>.</em>
 </p>
 
 ## stackVertical

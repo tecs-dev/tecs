@@ -278,7 +278,9 @@ function LayoutBox.plugin(world: World, options?: LayoutBox.Options)
     })
 
     -- Origin-aware RelativeTransform pass for UI entities.
-    dirty.watch(world, {Transform, RelativeTransform, ChildOf, LayoutBox as tecs.Component})
+    local hierarchyWatch = dirty.watch(world, "hierarchy", {
+        Transform, RelativeTransform, ChildOf, LayoutBox as tecs.Component,
+    })
     local hierarchyQuery = world:query({
         name = "ui.RelativeTransform",
         include = {RelativeTransform, ChildOf, Transform}
@@ -376,7 +378,7 @@ function LayoutBox.plugin(world: World, options?: LayoutBox.Options)
             -- changed this frame or at the end of the previous one (the
             -- dirty sampler carries over post-PostUpdate
             -- mutations such as MCP run_lua writes).
-            if not dirty.changed(world) then return end
+            if not dirty.changed(world, hierarchyWatch) then return end
 
             -- The parent cache holds live column references; it must not
             -- survive frames (rows move between archetypes), but staying

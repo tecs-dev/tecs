@@ -15,18 +15,28 @@ local tecs <const> = require("tecs")
 local tecsInternal <const> = require("tecs.internal.types")
 
 local record layout_dirty
-    --- Merge components into the world's watch set and install the
-    --- frame-end sampler on first use.
-    watch: function(world: tecs.World, components: {tecs.Component})
+    record Watch
+        watched: {tecs.Component: boolean}
+        pending: boolean
+    end
 
-    --- True when a watched column is dirty now, or was dirty at the end
-    --- of the previous frame.
-    changed: function(world: tecs.World): boolean
+    --- Merge components into a named watch and install the frame-end
+    --- sampler on first use. Consumers that intentionally share an
+    --- invalidation domain use the same name.
+    watch: function(
+        world: tecs.World,
+        name: string,
+        components: {tecs.Component}
+    ): Watch
+
+    --- True when one of this watch's columns is dirty now, or was dirty
+    --- at the end of the previous frame.
+    changed: function(world: tecs.World, watch: Watch): boolean
 end
 
 local record WorldState
-    watched: {tecs.Component: boolean}
-    pending: boolean
+    watches: {layout_dirty.Watch}
+    watchByName: {string: layout_dirty.Watch}
     installed: boolean
 end
 
@@ -36,7 +46,7 @@ local states <const>: {tecs.World: WorldState} =
 local function stateFor(world: tecs.World): WorldState
     local state = states[world]
     if not state then
-        state = {watched = {}, pending = false, installed = false}
+        state = {watches = {}, watchByName = {}, installed = false}
         states[world] = state
     end
     return state
@@ -45,9 +55,8 @@ end
 local function scan(world: tecs.World, watched: {tecs.Component: boolean}): boolean
     local worldImpl <const> = world as tecsInternal.WorldImpl
     for arch in worldImpl:dirtyArchetypes() do
-        local cols = arch.columns
         for comp in pairs(watched) do
-            if cols[comp] ~= nil then
+            if arch:isComponentDirty(comp) then
                 return true
             end
         end
@@ -55,28 +64,42 @@ local function scan(world: tecs.World, watched: {tecs.Component: boolean}): bool
     return false
 end
 
-function layout_dirty.watch(world: tecs.World, components: {tecs.Component})
+function layout_dirty.watch(
+    world: tecs.World,
+    name: string,
+    components: {tecs.Component}
+): layout_dirty.Watch
     local state = stateFor(world)
+    local watch = state.watchByName[name]
+    if not watch then
+        watch = {watched = {}, pending = true}
+        state.watchByName[name] = watch
+        state.watches[#state.watches + 1] = watch
+    end
     for i = 1, #components do
-        state.watched[components[i]] = true
+        watch.watched[components[i]] = true
     end
     if not state.installed then
         state.installed = true
-        -- New watchers must run once against existing state.
-        state.pending = true
         world:addSystem({
             name = "ui.LayoutDirtySampler",
             phase = tecs.phases.RenderLast,
             run = function()
-                state.pending = scan(world, state.watched)
+                for i = 1, #state.watches do
+                    local item = state.watches[i]
+                    item.pending = scan(world, item.watched)
+                end
             end,
         })
     end
+    return watch
 end
 
-function layout_dirty.changed(world: tecs.World): boolean
-    local state = stateFor(world)
-    return state.pending or scan(world, state.watched)
+function layout_dirty.changed(
+    world: tecs.World,
+    watch: layout_dirty.Watch
+): boolean
+    return watch.pending or scan(world, watch.watched)
 end
 
 return layout_dirty
