@@ -1,5 +1,5 @@
 ---
-description: "Overview of the Tecs UI building blocks Anchor, LayoutBox, LayoutNode, FitContent, and helper functions"
+description: "Overview of the Tecs UI building blocks Anchor, LayoutBox, Viewport, FitContent, and helper functions"
 ---
 
 # Tecs UI
@@ -12,7 +12,7 @@ than being a complete UI framework.
 - **Viewport-relative anchoring** - Position elements relative to screen/viewport edges
 - **Origin-based positioning** - Components can have configurable origins (top-left, center, etc.)
 - **Dynamic dimensions** - LayoutBox can pull dimensions from render components automatically
-- **Scrollable containers** - LayoutNode provides clipping and scrolling
+- **Scrollable containers** - Viewport provides clipping and scrolling
 - **Helper functions** - Simple utilities for common layout patterns
 
 The built-in plugin keeps centered origins for compatibility. UI-heavy or tool
@@ -50,14 +50,14 @@ local Transform = tecs.builtins.Transform
 local ChildOf = tecs.builtins.ChildOf
 local RelativeTransform = tecs.builtins.RelativeTransform
 local LayoutBox = ui.LayoutBox
-local LayoutNode = ui.LayoutNode
+local Viewport = ui.Viewport
 
 -- Create a scrollable panel with top-left origin
 local panel = world:spawn(
     Transform(50, 50),
     gfx.Rectangle(300, 400),
     LayoutBox(gfx.Rectangle, nil, 0, 0),  -- explicit top-left origin
-    LayoutNode(0, 0, 300, 800)  -- scrollable content
+    Viewport(0, 0, 300, 800)  -- scrollable content
 )
 
 -- Add child elements
@@ -75,6 +75,6 @@ end
 
 - [Anchor](./anchor) - Viewport-relative positioning
 - [LayoutBox](./layoutbox) - Dimensions and origin for UI positioning
-- [LayoutNode](./layoutnode) - Scrollable containers with clipping
+- [Viewport](./viewport) - Scrollable containers with clipping
 - [FitContent](./fitcontent) - Auto-size containers to fit children
 - [Helpers](./helpers) - Layout helper functions

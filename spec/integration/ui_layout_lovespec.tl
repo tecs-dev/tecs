@@ -1,4 +1,4 @@
---- Love2D integration suite: UI layout. A LayoutNode container with
+--- Love2D integration suite: UI layout. A Viewport container with
 --- ChildOf + RelativeTransform children verifies parent-relative
 --- positioning, scroll offsets moving children, and clip bounds hiding
 --- content outside the container. Directly guards the layout systems'
@@ -59,7 +59,7 @@ describe("ui layout: containers position, scroll, and clip children", function()
                 Transform(%d, %d),
                 gfx.Rectangle(120, 160),
                 ui.LayoutBox(gfx.Rectangle, nil, 0, 0),
-                ui.LayoutNode(0, 0, 120, 400),
+                ui.Viewport(0, 0, 120, 400),
                 gfx.Color(0.2, 0.2, 0.3, 1))
             _G.tecsUiContainer = container
 
@@ -116,8 +116,8 @@ describe("ui layout: containers position, scroll, and clip children", function()
     it("scrolling moves children and reveals clipped content", function()
         fixture.runLua(app, [[
             local ui = require("tecs2d.ui")
-            local node = world:getMut(_G.tecsUiContainer, ui.LayoutNode)
-            node.scrollY = 150
+            local viewport = world:getMut(_G.tecsUiContainer, ui.Viewport)
+            viewport.scrollY = 150
             return true
         ]])
         -- First bar scrolled up out of view: old position empties.

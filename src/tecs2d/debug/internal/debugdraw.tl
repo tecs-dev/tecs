@@ -33,6 +33,7 @@ end
 
 local record DrawState
     id: integer
+    parent: integer
     x: number
     y: number
     z: number
@@ -72,6 +73,12 @@ local record Element
     originX: number
     originY: number
     texture: love.graphics.Image
+    scrollX: number
+    scrollY: number
+    contentWidth: number
+    contentHeight: number
+    anchorX: number
+    anchorY: number
 end
 
 local record Owner
@@ -91,6 +98,7 @@ local record DebugView
     clip: {number}
     z: number
     primitives: PrimitiveBatch
+    parents: {integer}
     -- Compatibility name for diagnostics that report selection marker count.
     markers: PrimitiveBatch
 end
@@ -118,6 +126,11 @@ local record debugdraw
     getWidth: function(): number
     getHeight: function(): number
     newFont: function(size: number): DebugFont
+    beginLayout: function(key: string, x: number, y: number,
+        width: number, height: number, scrollX?: number, scrollY?: number,
+        contentWidth?: number, contentHeight?: number,
+        anchorX?: number, anchorY?: number)
+    endLayout: function()
     rectangle: function(key: string, mode: string, x: number, y: number,
         width: number, height: number, rx?: number, ry?: number)
     alphaRectangle: function(key: string, mode: string, x: number, y: number,
@@ -294,11 +307,13 @@ local function clipValues(v: DebugView): number, number, number, number
 end
 
 local function newState(v: DebugView, id: integer, x: number, y: number,
-        z: number, rotation?: number, scaleX?: number, scaleY?: number): DrawState
+        z: number, rotation?: number, scaleX?: number, scaleY?: number,
+        parent?: integer): DrawState
     local c = v.color
     local minX, minY, maxX, maxY = clipValues(v)
     return {
         id = id,
+        parent = parent,
         x = x,
         y = y,
         z = z,
@@ -342,6 +357,7 @@ function debugdraw.newView(world: tecs.World): DebugView
         z = 0,
         primitives = primitives,
         markers = primitives,
+        parents = {},
     }
 end
 
@@ -355,11 +371,13 @@ function debugdraw.beginFrame(view: DebugView)
     view.clip = nil
     view.z = 0
     view.primitives:clear()
+    for i = #view.parents, 1, -1 do view.parents[i] = nil end
 end
 
 function debugdraw.endFrame()
     local v = active
     assert(not v or not v.owner, "debug draw owner left open")
+    assert(not v or #v.parents == 0, "debug layout container left open")
     active = nil
 end
 
@@ -434,6 +452,36 @@ local function depth(): number
     return v.z
 end
 
+local function currentParent(v: DebugView): integer
+    return v.parents[#v.parents]
+end
+
+local function transformParts(v: DebugView, x: number, y: number, z: number,
+        rotation?: number, scaleX?: number, scaleY?: number): {tecs.Component}, integer
+    local parent = currentParent(v)
+    local rot = rotation or 0
+    local sx = scaleX or 1
+    local sy = scaleY or scaleX or 1
+    if parent then
+        return {
+            Transform(0, 0, 0, 1),
+            ChildOf(parent),
+            RelativeTransform(x, y, z, rot, sx, sy),
+        }, parent
+    end
+    return {Transform(x, y, z, 1, rot, sx, sy)}, nil
+end
+
+local function resetForParent(v: DebugView, key: string, slot: Element,
+        parent: integer): Element
+    if slot and slot.state.parent ~= parent then
+        destroyElement(v, slot)
+        assert(v.owner).elements[key] = nil
+        return nil
+    end
+    return slot
+end
+
 local function color(): gfx.Color
     local c = view().color
     return gfx.Color(c[1], c[2], c[3], c[4])
@@ -457,11 +505,18 @@ local function updateTransform(v: DebugView, state: DrawState, x: number, y: num
     local sy = scaleY or scaleX or 1
     if state.x ~= x or state.y ~= y or state.z ~= z or state.rotation ~= rot
             or state.scaleX ~= sx or state.scaleY ~= sy or state.layer ~= 1 then
-        local transform = v.world:getMut(state.id, Transform)
-        transform.x, transform.y, transform.z = x, y, z
-        transform.rotation = rot
-        transform.scaleX, transform.scaleY = sx, sy
-        transform.layer = 1
+        if state.parent then
+            local relative = v.world:getMut(state.id, RelativeTransform)
+            relative.x, relative.y, relative.z = x, y, z
+            relative.rotation = rot
+            relative.scaleX, relative.scaleY = sx, sy
+        else
+            local transform = v.world:getMut(state.id, Transform)
+            transform.x, transform.y, transform.z = x, y, z
+            transform.rotation = rot
+            transform.scaleX, transform.scaleY = sx, sy
+            transform.layer = 1
+        end
         state.x, state.y, state.z = x, y, z
         state.rotation, state.scaleX, state.scaleY = rot, sx, sy
         state.layer = 1
@@ -538,6 +593,98 @@ function debugdraw.newFont(size: number): DebugFont
     return fontAtSize(size)
 end
 
+--- Open a retained UI container. Draw calls made before endLayout use local
+--- coordinates and become children of this entity. Viewport owns descendant
+--- clipping and scroll translation; optional anchors position root containers
+--- relative to the screen viewport.
+function debugdraw.beginLayout(key: string, x: number, y: number,
+        width: number, height: number, scrollX?: number, scrollY?: number,
+        contentWidth?: number, contentHeight?: number,
+        anchorX?: number, anchorY?: number)
+    local v = view()
+    local scale = screenScale
+    x, y = x * scale, y * scale
+    width, height = width * scale, height * scale
+    local sx = (scrollX or 0) * scale
+    local sy = (scrollY or 0) * scale
+    local cw = (contentWidth or width / scale) * scale
+    local ch = (contentHeight or height / scale) * scale
+    local anchored = anchorX ~= nil or anchorY ~= nil
+    assert(not anchored or not currentParent(v),
+        "only root debugger layouts may use viewport anchors")
+    local kind = anchored and "anchoredLayout" or "layout"
+    -- Layout containers do not render. Keeping their authored depth at zero
+    -- prevents hierarchy composition from adding the container's draw order
+    -- to every descendant and lifting early children over later siblings.
+    local z = 0
+    local parent = currentParent(v)
+    local slot = resetForParent(v, key, element(key, kind), parent)
+    if not slot then
+        local parts: {tecs.Component}
+        if anchored then
+            parts = {
+                Transform(0, 0, z, 1),
+                ui.Anchor(anchorX or 0, anchorY or 0, x, y),
+            }
+        else
+            parts, parent = transformParts(v, x, y, z)
+        end
+        parts[#parts + 1] = ui.LayoutBox(width, height)
+        parts[#parts + 1] = ui.Viewport(sx, sy, cw, ch)
+        local id = v.world:spawn(table.unpack(parts))
+        slot = {
+            kind = kind,
+            state = newState(v, id, x, y, z, nil, nil, nil, parent),
+            width = width,
+            height = height,
+            scrollX = sx,
+            scrollY = sy,
+            contentWidth = cw,
+            contentHeight = ch,
+            anchorX = anchorX,
+            anchorY = anchorY,
+        }
+        putElement(key, slot)
+    else
+        if anchored then
+            if slot.anchorX ~= anchorX or slot.anchorY ~= anchorY
+                    or slot.state.x ~= x or slot.state.y ~= y then
+                local anchor = v.world:getMut(slot.state.id, ui.Anchor)
+                anchor.anchorX, anchor.anchorY = anchorX or 0, anchorY or 0
+                anchor.offsetX, anchor.offsetY = x, y
+                slot.anchorX, slot.anchorY = anchorX, anchorY
+                slot.state.x, slot.state.y = x, y
+            end
+            if slot.state.z ~= z then
+                v.world:getMut(slot.state.id, Transform).z = z
+                slot.state.z = z
+            end
+        else
+            updateTransform(v, slot.state, x, y, z)
+        end
+        if slot.width ~= width or slot.height ~= height then
+            local box = v.world:getMut(slot.state.id, ui.LayoutBox)
+            box.width, box.height = width, height
+            slot.width, slot.height = width, height
+        end
+        if slot.scrollX ~= sx or slot.scrollY ~= sy
+                or slot.contentWidth ~= cw or slot.contentHeight ~= ch then
+            local node = v.world:getMut(slot.state.id, ui.Viewport)
+            node.scrollX, node.scrollY = sx, sy
+            node.contentWidth, node.contentHeight = cw, ch
+            slot.scrollX, slot.scrollY = sx, sy
+            slot.contentWidth, slot.contentHeight = cw, ch
+        end
+    end
+    v.parents[#v.parents + 1] = slot.state.id
+end
+
+function debugdraw.endLayout()
+    local parents = view().parents
+    assert(#parents > 0, "no debugger layout container is open")
+    parents[#parents] = nil
+end
+
 local function drawRectangle(key: string, mode: string, x: number, y: number,
         width: number, height: number, rx: number, ry: number,
         alphaBlend: boolean)
@@ -549,25 +696,25 @@ local function drawRectangle(key: string, mode: string, x: number, y: number,
     local radiusX = (rx or 0) * scale
     local radiusY = (ry or rx or 0) * scale
     local kind = alphaBlend and "alphaRectangle" or "rectangle"
-    local slot = element(key, kind)
+    local parent = currentParent(v)
+    local slot = resetForParent(v, key, element(key, kind), parent)
     if not slot then
         local minX, minY, maxX, maxY = clipValues(v)
-        local parts: {tecs.Component} = {
-            Transform(x, y, z, 1),
-            gfx.Rectangle(width, height, lineWidth),
-            ui.LayoutBox(gfx.Rectangle),
-            color(),
-            gfx.RoundedCorners(radiusX, radiusY),
-            gfx.ClipBounds(minX, minY, maxX, maxY),
-            gfx.Unlit(),
-        }
+        local parts: {tecs.Component}
+        parts, parent = transformParts(v, x, y, z)
+        parts[#parts + 1] = gfx.Rectangle(width, height, lineWidth)
+        parts[#parts + 1] = ui.LayoutBox(gfx.Rectangle)
+        parts[#parts + 1] = color()
+        parts[#parts + 1] = gfx.RoundedCorners(radiusX, radiusY)
+        parts[#parts + 1] = gfx.ClipBounds(minX, minY, maxX, maxY)
+        parts[#parts + 1] = gfx.Unlit()
         if alphaBlend then
             parts[#parts + 1] = gfx.blend.ForwardAlphaBlend()
         end
         local id = v.world:spawn(table.unpack(parts))
         slot = {
             kind = kind,
-            state = newState(v, id, x, y, z),
+            state = newState(v, id, x, y, z, nil, nil, nil, parent),
             width = width,
             height = height,
             lineWidth = lineWidth,
@@ -608,16 +755,19 @@ function debugdraw.line(key: string, x1: number, y1: number,
     x1, y1, x2, y2 = x1 * scale, y1 * scale, x2 * scale, y2 * scale
     local z = depth()
     local width = v.lineWidth * scale
-    local slot = element(key, "line")
+    local parent = currentParent(v)
+    local slot = resetForParent(v, key, element(key, "line"), parent)
     if not slot then
         local minX, minY, maxX, maxY = clipValues(v)
-        local id = v.world:spawn(
-            Transform(0, 0, z, 1),
-            gfx.Line(x1, y1, x2, y2, width),
-            color(),
-            gfx.ClipBounds(minX, minY, maxX, maxY),
-            gfx.Unlit())
-        slot = {kind = "line", state = newState(v, id, 0, 0, z),
+        local parts: {tecs.Component}
+        parts, parent = transformParts(v, 0, 0, z)
+        parts[#parts + 1] = gfx.Line(x1, y1, x2, y2, width)
+        parts[#parts + 1] = color()
+        parts[#parts + 1] = gfx.ClipBounds(minX, minY, maxX, maxY)
+        parts[#parts + 1] = gfx.Unlit()
+        local id = v.world:spawn(table.unpack(parts))
+        slot = {kind = "line", state = newState(v, id, 0, 0, z,
+                nil, nil, nil, parent),
             x1 = x1, y1 = y1, x2 = x2, y2 = y2, width = width}
         putElement(key, slot)
         return
@@ -640,17 +790,20 @@ function debugdraw.circle(key: string, mode: string, x: number, y: number,
     x, y, radius = x * scale, y * scale, radius * scale
     local z = depth()
     local lineWidth = mode == "line" and v.lineWidth * scale or 0
-    local slot = element(key, "circle")
+    local parent = currentParent(v)
+    local slot = resetForParent(v, key, element(key, "circle"), parent)
     if not slot then
         local minX, minY, maxX, maxY = clipValues(v)
-        local id = v.world:spawn(
-            Transform(x, y, z, 1),
-            gfx.Circle(radius, lineWidth),
-            ui.LayoutBox(gfx.Circle, nil, 0.5, 0.5),
-            color(),
-            gfx.ClipBounds(minX, minY, maxX, maxY),
-            gfx.Unlit())
-        slot = {kind = "circle", state = newState(v, id, x, y, z),
+        local parts: {tecs.Component}
+        parts, parent = transformParts(v, x, y, z)
+        parts[#parts + 1] = gfx.Circle(radius, lineWidth)
+        parts[#parts + 1] = ui.LayoutBox(gfx.Circle, nil, 0.5, 0.5)
+        parts[#parts + 1] = color()
+        parts[#parts + 1] = gfx.ClipBounds(minX, minY, maxX, maxY)
+        parts[#parts + 1] = gfx.Unlit()
+        local id = v.world:spawn(table.unpack(parts))
+        slot = {kind = "circle", state = newState(v, id, x, y, z,
+                nil, nil, nil, parent),
             radius = radius, lineWidth = lineWidth}
         putElement(key, slot)
         return
@@ -715,24 +868,25 @@ function debugdraw.fitText(key: string, value: any, x: number, y: number, paddin
     local relativeX = paddingX * (1 - 2 * ox)
     local relativeY = paddingY * (1 - 2 * oy)
     local minX, minY, maxX, maxY = clipValues(v)
-    local slot = element(key, "fitText")
+    local layoutParent = currentParent(v)
+    local slot = resetForParent(v, key, element(key, "fitText"), layoutParent)
     if not slot then
-        local parent = v.world:spawn(
-            Transform(x, y, z, 1),
-            gfx.Rectangle(0, 0),
-            ui.LayoutBox(gfx.Rectangle, nil, ox, oy),
-            ui.FitContent.new({
-                paddingTop = paddingY,
-                paddingRight = paddingX,
-                paddingBottom = paddingY,
-                paddingLeft = paddingX,
-                adjust = gfx.Rectangle,
-            }),
-            tableColor(background),
-            gfx.RoundedCorners(cornerRadius),
-            gfx.ClipBounds(minX, minY, maxX, maxY),
-            gfx.Unlit()
-        )
+        local parts: {tecs.Component}
+        parts, layoutParent = transformParts(v, x, y, z)
+        parts[#parts + 1] = gfx.Rectangle(0, 0)
+        parts[#parts + 1] = ui.LayoutBox(gfx.Rectangle, nil, ox, oy)
+        parts[#parts + 1] = ui.FitContent.new({
+            paddingTop = paddingY,
+            paddingRight = paddingX,
+            paddingBottom = paddingY,
+            paddingLeft = paddingX,
+            adjust = gfx.Rectangle,
+        })
+        parts[#parts + 1] = tableColor(background)
+        parts[#parts + 1] = gfx.RoundedCorners(cornerRadius)
+        parts[#parts + 1] = gfx.ClipBounds(minX, minY, maxX, maxY)
+        parts[#parts + 1] = gfx.Unlit()
+        local parent = v.world:spawn(table.unpack(parts))
         local child = v.world:spawn(
             Transform(0, 0, 0, 1),
             ChildOf(parent),
@@ -748,7 +902,8 @@ function debugdraw.fitText(key: string, value: any, x: number, y: number, paddin
             gfx.blend.ForwardAlphaBlend(),
             gfx.Unlit()
         )
-        local parentState = newState(v, parent, x, y, z)
+        local parentState = newState(v, parent, x, y, z,
+            nil, nil, nil, layoutParent)
         parentState.r, parentState.g, parentState.b = background[1], background[2], background[3]
         parentState.a = background[4] or 1
         slot = {
@@ -818,18 +973,21 @@ function debugdraw.print(key: string, value: any, x: number, y: number)
     local drawX = (x + v.font.drawOffsetX) * screen
     local drawY = (y + v.font.drawOffsetY) * screen
     local z = depth()
-    local slot = element(key, "text")
+    local parent = currentParent(v)
+    local slot = resetForParent(v, key, element(key, "text"), parent)
     if not slot then
         local minX, minY, maxX, maxY = clipValues(v)
-        local id = v.world:spawn(
-            Transform(drawX, drawY, z, 1),
-            gfx.Text(FONT_PATH, textValue, scale, scale),
-            ui.LayoutBox(gfx.Text),
-            color(),
-            gfx.ClipBounds(minX, minY, maxX, maxY),
-            gfx.blend.ForwardAlphaBlend(),
-            gfx.Unlit())
-        slot = {kind = "text", state = newState(v, id, drawX, drawY, z),
+        local parts: {tecs.Component}
+        parts, parent = transformParts(v, drawX, drawY, z)
+        parts[#parts + 1] = gfx.Text(FONT_PATH, textValue, scale, scale)
+        parts[#parts + 1] = ui.LayoutBox(gfx.Text)
+        parts[#parts + 1] = color()
+        parts[#parts + 1] = gfx.ClipBounds(minX, minY, maxX, maxY)
+        parts[#parts + 1] = gfx.blend.ForwardAlphaBlend()
+        parts[#parts + 1] = gfx.Unlit()
+        local id = v.world:spawn(table.unpack(parts))
+        slot = {kind = "text", state = newState(v, id, drawX, drawY, z,
+                nil, nil, nil, parent),
             text = textValue, scale = scale}
         putElement(key, slot)
         return
@@ -862,20 +1020,22 @@ function debugdraw.draw(key: string, texture: love.graphics.Image, x: number,
     local z = depth()
     local scaleX = (sx or 1) * screen
     local scaleY = (sy or sx or 1) * screen
-    local slot = element(key, "sprite")
+    local parent = currentParent(v)
+    local slot = resetForParent(v, key, element(key, "sprite"), parent)
     if not slot then
         local minX, minY, maxX, maxY = clipValues(v)
         local sprite = gfx.Sprite.fromTexture(texture as love.graphics.Texture,
             {centered = false})
-        local id = v.world:spawn(
-            Transform(x, y, z, 1, rotation or 0, scaleX, scaleY),
-            sprite,
-            ui.LayoutBox(gfx.Sprite),
-            color(),
-            gfx.ClipBounds(minX, minY, maxX, maxY),
-            gfx.Unlit())
+        local parts: {tecs.Component}
+        parts, parent = transformParts(v, x, y, z, rotation, scaleX, scaleY)
+        parts[#parts + 1] = sprite
+        parts[#parts + 1] = ui.LayoutBox(gfx.Sprite)
+        parts[#parts + 1] = color()
+        parts[#parts + 1] = gfx.ClipBounds(minX, minY, maxX, maxY)
+        parts[#parts + 1] = gfx.Unlit()
+        local id = v.world:spawn(table.unpack(parts))
         slot = {kind = "sprite",
-            state = newState(v, id, x, y, z, rotation, scaleX, scaleY),
+            state = newState(v, id, x, y, z, rotation, scaleX, scaleY, parent),
             texture = texture}
         putElement(key, slot)
         return

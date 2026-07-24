@@ -2,6 +2,7 @@
 --- Measures child bounds and updates LayoutBox (and optionally a render component).
 
 local tecs <const> = require("tecs")
+local dirty <const> = require("tecs2d.ui.internal.dirty")
 
 local ChildOf <const> = tecs.builtins.ChildOf
 local RelativeTransform <const> = tecs.builtins.RelativeTransform
@@ -165,15 +166,23 @@ function FitContent.plugin(world: World)
         minX = 0.0, minY = 0.0, maxX = 0.0, maxY = 0.0
     }
     local measureChild <const> = FitContent.measureChild
+    dirty.watch(world, {
+        FitContent as Component,
+        LayoutBox,
+        RelativeTransform as Component,
+        ChildOf as Component,
+    })
 
     world:addSystem({
         name = "ui.ComputeFitContent",
         phase = tecs.phases.PostUpdate,
         after = {"ui.ComputeLayoutBox"},
         run = function()
+            if not dirty.changed(world) then return end
             for archetype, len, entities in fitContentQuery:iter() do
                 local fitContents = archetype:get(FitContent)
-                local layoutBoxes = archetype:getMut(LayoutBox)
+                local layoutBoxes = archetype:get(LayoutBox)
+                local mutLayoutBoxes: {SizableBox} = nil
 
                 for row = 1, len do
                     local fitContent = fitContents[row]
@@ -210,10 +219,20 @@ function FitContent.plugin(world: World)
                     local newHeight = contentHeight + padTop + padBottom
 
                     -- 3. Update LayoutBox
-                    layoutBox.width = newWidth
-                    layoutBox.height = newHeight
-                    layoutBox.offsetX = -newWidth * layoutBox.originX
-                    layoutBox.offsetY = -newHeight * layoutBox.originY
+                    local newOffsetX = -newWidth * layoutBox.originX
+                    local newOffsetY = -newHeight * layoutBox.originY
+                    if layoutBox.width ~= newWidth
+                            or layoutBox.height ~= newHeight
+                            or layoutBox.offsetX ~= newOffsetX
+                            or layoutBox.offsetY ~= newOffsetY then
+                        if not mutLayoutBoxes then
+                            mutLayoutBoxes = archetype:getMut(LayoutBox)
+                                as {SizableBox}
+                        end
+                        local mut = mutLayoutBoxes[row]
+                        mut.width, mut.height = newWidth, newHeight
+                        mut.offsetX, mut.offsetY = newOffsetX, newOffsetY
+                    end
 
                     -- 4. Update render component if specified
                     if fitContent.adjustComponentId > 0 then

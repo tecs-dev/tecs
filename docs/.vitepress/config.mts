@@ -189,7 +189,7 @@ export default defineConfig({
                   { text: 'Overview', link: '/tecs2d/rendering/ui/' },
                   { text: 'Anchor', link: '/tecs2d/rendering/ui/anchor' },
                   { text: 'LayoutBox', link: '/tecs2d/rendering/ui/layoutbox' },
-                  { text: 'LayoutNode', link: '/tecs2d/rendering/ui/layoutnode' },
+                  { text: 'Viewport', link: '/tecs2d/rendering/ui/viewport' },
                   { text: 'ClipBounds', link: '/tecs2d/rendering/ui/clipbounds' },
                   { text: 'FitContent', link: '/tecs2d/rendering/ui/fitcontent' },
                   { text: 'Helpers', link: '/tecs2d/rendering/ui/helpers' },

@@ -162,6 +162,79 @@ describe("in-game debugger overlay", function()
             "debugger text panels were not sized by FitContent")
     end)
 
+    it("builds debugger chrome from Tecs UI hierarchies", function()
+        openDebugger()
+        local chromeState = ""
+        local chromeReady = fixture.eventually(fixture.callTimeout,
+            function(): boolean
+                local values = fixture.runLua(app, [[
+                    local tecs = require("tecs")
+                    local tools = world.resources[_G.tecsTestHooks.toolworld.KEY]
+                    local elements = tools.view.owners.overlay
+                        and tools.view.owners.overlay.elements
+                    if not elements then return false end
+                    local bottom = elements["bottom.chrome"]
+                    local status = elements["status.content"]
+                    local badge = elements["status.badgeBackground"]
+                    if not bottom or not status or not badge then return false end
+                    local Viewport = tecs.componentByName("Viewport")
+                    local Anchor = tecs.componentByName("Anchor")
+                    return tools.world:has(bottom.state.id, Viewport),
+                        tools.world:has(bottom.state.id, Anchor),
+                        tools.world:has(status.state.id, Viewport),
+                        tools.world:has(badge.state.id,
+                            tecs.builtins.ChildOf)
+                ]])
+                if tostring(values[1]) == "true" and tostring(values[2]) == "true"
+                        and tostring(values[3]) == "true"
+                        and tostring(values[4]) == "true" then
+                    return true
+                end
+                chromeState = table.concat({
+                    tostring(values[1]), tostring(values[2]),
+                    tostring(values[3]), tostring(values[4]),
+                }, ",")
+                return nil
+            end)
+        luassert.is_true(chromeReady == true,
+            "bottom debugger chrome was not a Tecs UI hierarchy: "
+                .. chromeState)
+
+        app.client:call("send_love_event", {event = "keypressed", args = {"tab"}})
+        local completionReady = fixture.eventually(fixture.callTimeout,
+            function(): boolean
+                local values = fixture.runLua(app, [[
+                    local tecs = require("tecs")
+                    local tools = world.resources[_G.tecsTestHooks.toolworld.KEY]
+                    local elements = tools.view.owners.overlay.elements
+                    local grid = elements["completion.grid"]
+                    local Viewport = tecs.componentByName("Viewport")
+                    return grid and tools.world:has(grid.state.id, Viewport)
+                ]])
+                if tostring(values[1]) == "true" then return true end
+                return nil
+            end)
+        luassert.is_true(completionReady == true,
+            "completion grid was not clipped by a Tecs UI Viewport")
+
+        app.client:call("send_love_event", {event = "keypressed", args = {"f1"}})
+        local popupReady = fixture.eventually(fixture.callTimeout,
+            function(): boolean
+                local values = fixture.runLua(app, [[
+                    local tecs = require("tecs")
+                    local tools = world.resources[_G.tecsTestHooks.toolworld.KEY]
+                    local elements = tools.view.owners.overlay.elements
+                    local body = elements["popup.body"]
+                    local Viewport = tecs.componentByName("Viewport")
+                    return body and tools.world:has(body.state.id, Viewport)
+                ]])
+                if tostring(values[1]) == "true" then return true end
+                return nil
+            end)
+        luassert.is_true(popupReady == true,
+            "popup body was not clipped and scrolled by a Tecs UI Viewport")
+    end)
+
     it("batches large selections without exhausting the tool world", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")

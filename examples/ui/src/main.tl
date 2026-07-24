@@ -17,7 +17,7 @@ local helpersScene <const> = require("scenes.helpers")
 
 local lg <const> = love.graphics
 
-local LayoutNode <const> = ui.LayoutNode
+local Viewport <const> = ui.Viewport
 local LayoutBox <const> = ui.LayoutBox
 local Anchor <const> = ui.Anchor
 local Text <const> = gfx.Text
@@ -89,9 +89,9 @@ local function tecsUiExamplePlugin(world: tecs.World)
             -- Scroll handling for scroll scene
             local scrollContainer = world.resources["scrollContainer" as tecs.Key<integer>]
             if scrollContainer and world:isAlive(scrollContainer) then
-                local layoutNode = world:get(scrollContainer, LayoutNode)
+                local viewport = world:get(scrollContainer, Viewport)
                 local layoutBox = world:get(scrollContainer, LayoutBox)
-                if layoutNode and layoutBox then
+                if viewport and layoutBox then
                     local scrollDelta = 0.0
                     local dt = love.timer.getDelta()
                     if input.isKeyDown("down") then
@@ -106,9 +106,11 @@ local function tecsUiExamplePlugin(world: tecs.World)
                     end
 
                     if scrollDelta ~= 0 then
-                        layoutNode.scrollY = layoutNode.scrollY + scrollDelta
-                        local maxScroll = math.max(0, layoutNode.contentHeight - layoutBox.height)
-                        layoutNode.scrollY = math.max(0, math.min(layoutNode.scrollY, maxScroll))
+                        local mutViewport = world:getMut(scrollContainer, Viewport)
+                        mutViewport.scrollY = viewport.scrollY + scrollDelta
+                        local maxScroll = math.max(0, viewport.contentHeight - layoutBox.height)
+                        mutViewport.scrollY = math.max(0,
+                            math.min(mutViewport.scrollY, maxScroll))
                     end
                 end
             end

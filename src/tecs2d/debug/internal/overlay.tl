@@ -1210,12 +1210,13 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
             local label = "   " .. text
             local boxW = overlayFont:getWidth(label) + pad * 2
             local boxH = overlayFont:getHeight() + pad
-            local bx = lg.getWidth() - boxW - pad
-            local by = pad
+            lg.beginLayout("layout", -boxW - pad, pad, boxW, boxH,
+                0, 0, boxW, boxH, 1, 0)
             lg.setColor(1, 1, 1, 1)
-            lg.fitText("panel", label, bx, by, pad, pad / 2, RECORDING_BG, 6)
+            lg.fitText("panel", label, 0, 0, pad, pad / 2, RECORDING_BG, 6)
             lg.setColor(1, 0.2, 0.15, 1)
-            lg.circle("dot", "fill", bx + pad + 4, by + boxH / 2, 5)
+            lg.circle("dot", "fill", pad + 4, boxH / 2, 5)
+            lg.endLayout()
             lg.endOwner()
         end,
     })
@@ -1349,6 +1350,12 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 lg.setFont(overlayFont)
             end
 
+            local bottomH = contextH + cmdBarH
+            lg.beginLayout("bottom.chrome", 0, -bottomH, sw, bottomH,
+                0, 0, sw, bottomH, 0, 1)
+            local contextLocalY = 0
+            local commandLocalY = contextH
+
             -- Context row: mode/selection at left and pointer/camera
             -- coordinates at right. Completion mode covers this row.
             if not cycling or #completions == 0 or helpModal then
@@ -1360,21 +1367,22 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                 -- registration order.
                 lg.setColor(DEBUG_BG[1], DEBUG_BG[2], DEBUG_BG[3], 1)
                 lg.rectangle("status.badgeBackground", "fill",
-                    0, contextY, badgeW, contextH)
+                    0, contextLocalY, badgeW, contextH)
                 lg.setColor(CONTEXT_BG[1], CONTEXT_BG[2], CONTEXT_BG[3], 1)
                 lg.rectangle("status.background", "fill",
-                    badgeW, contextY, sw - badgeW, contextH)
+                    badgeW, contextLocalY, sw - badgeW, contextH)
                 local coords = coordinateLabel(ctx)
                 local coordsW = coordinateFont:getWidth(coords) + INFO_PAD_X * 2
                 lg.setFont(coordinateFont)
-                lg.setScissor(0, contextY, math.max(0, sw - coordsW), contextH)
+                lg.beginLayout("status.content", 0, contextLocalY,
+                    math.max(0, sw - coordsW), contextH)
                 local statusTail = format("  %s  selected %d  %d fps",
                     ctx.frozen and "paused" or "live", #ctx.selected,
                     math.floor(love.timer.getFPS()) as integer)
                 local status = badge .. statusTail
                 local showTail = coordinateFont:getWidth(status)
                     + INFO_PAD_X * 2 <= sw - coordsW
-                local statusTextY = contextY
+                local statusTextY = 0
                 lg.setColor(DEBUG_TEXT[1], DEBUG_TEXT[2], DEBUG_TEXT[3], 1)
                 lg.print("status.badge", badge, INFO_PAD_X - 2, statusTextY + 2)
                 if showTail then
@@ -1390,25 +1398,27 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                         lg.print("status.message", ctx.message, messageX, statusTextY)
                     end
                 end
-                lg.setScissor()
+                lg.endLayout()
                 lg.setColor(0.8275, 0.7765, 0.6667, 1)
                 lg.print("status.coords", coords,
-                    sw - coordinateFont:getWidth(coords) - INFO_PAD_X, statusTextY)
+                    sw - coordinateFont:getWidth(coords) - INFO_PAD_X,
+                    contextLocalY)
             end
 
             -- Long commands wrap upward within the bottom command row.
             lg.setFont(overlayFont)
             lg.setColor(COMMAND_BAR[1], COMMAND_BAR[2],
                 COMMAND_BAR[3], COMMAND_BAR[4])
-            lg.rectangle("command.background", "fill", 0, commandY, sw, cmdBarH)
+            lg.rectangle("command.background", "fill",
+                0, commandLocalY, sw, cmdBarH)
             lg.setColor(0.8275, 0.7765, 0.6667, 1)
             for i = 1, #cmdLines do
                 lg.print("command.line." .. tostring(i), cmdLines[i],
-                    PAD_X, commandY + PAD_Y + (i - 1) * fh)
+                    PAD_X, commandLocalY + PAD_Y + (i - 1) * fh)
             end
             -- Tall block cursor at the end of the last wrapped row.
             local cursorX = PAD_X + overlayFont:getWidth(cmdLines[#cmdLines])
-            local cursorY = commandY + PAD_Y + (#cmdLines - 1) * fh
+            local cursorY = commandLocalY + PAD_Y + (#cmdLines - 1) * fh
             local blockW = overlayFont:getWidth("0")
             local cursorColor = tools.world:get(tools.cursorAlphaEntity, gfx.Color)
             lg.setColor(0.8275, 0.7765, 0.6667, cursorColor.a)
@@ -1423,34 +1433,37 @@ function overlay.install(w: tecs.World, opts: overlay.Options): debugcontext.Con
                     hintX + overlayFont:getWidth(enterHint) + INFO_PAD_X * 2,
                     cursorY)
             end
+            lg.endLayout()
 
             -- Context menu: dark panel, header row, hover/keyboard highlight.
             if menu.open then
                 local mfh = overlayFont:getHeight()
                 local totalH = menu.rowH * (#menu.rows + 1) + 8
                 lg.setFont(overlayFont)
+                lg.beginLayout("menu.layout", menu.x, menu.y, menu.w, totalH)
                 lg.setColor(POPUP_BG[1], POPUP_BG[2], POPUP_BG[3], 0.98)
                 lg.rectangle("menu.background", "fill",
-                    menu.x, menu.y, menu.w, totalH, 4, 4)
+                    0, 0, menu.w, totalH, 4, 4)
                 lg.setColor(POPUP_ACCENT[1], POPUP_ACCENT[2],
                     POPUP_ACCENT[3], 0.75)
                 lg.setLineWidth(1)
                 lg.rectangle("menu.border", "line",
-                    menu.x, menu.y, menu.w, totalH, 4, 4)
+                    0, 0, menu.w, totalH, 4, 4)
                 lg.setColor(POPUP_ACCENT[1], POPUP_ACCENT[2],
                     POPUP_ACCENT[3], 1)
-                lg.print("menu.header", menu.header, menu.x + 12, menu.y + 6)
+                lg.print("menu.header", menu.header, 12, 6)
                 for i = 1, #menu.rows do
-                    local ry = menu.y + menu.rowH * i + 4
+                    local ry = menu.rowH * i + 4
                     if i == menu.index then
                         lg.setColor(0.25, 0.32, 0.40, 1)
-                        lg.rectangle("menu.selection", "fill", menu.x + 4, ry,
+                        lg.rectangle("menu.selection", "fill", 4, ry,
                             menu.w - 8, menu.rowH - 2, 3, 3)
                     end
                     lg.setColor(0.8275, 0.7765, 0.6667, 1)
                     lg.print("menu.row." .. tostring(i), menu.rows[i].label,
-                        menu.x + 12, ry + (menu.rowH - mfh) / 2)
+                        12, ry + (menu.rowH - mfh) / 2)
                 end
+                lg.endLayout()
             end
 
             -- Command output/help draws last. F1/help popups add a scrim, so

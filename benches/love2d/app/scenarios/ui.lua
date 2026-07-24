@@ -1,6 +1,6 @@
 --- UI layout steady state: scrolling containers full of child rects.
 --- The containers scroll continuously (a realistic worst case for
---- LayoutNode: every frame recomputes scroll offsets and clip bounds
+--- Viewport: every frame recomputes scroll offsets and clip bounds
 --- for every child), measuring the per-frame layout systems' cost and
 --- allocation behavior.
 
@@ -35,7 +35,7 @@ return {
                 gfx.Rectangle(containerW, containerH),
                 ui.LayoutBox(gfx.Rectangle, nil, 0, 0),
                 gfx.Pivot(0, 0),
-                ui.LayoutNode(0, 0, containerW, contentHeight),
+                ui.Viewport(0, 0, containerW, contentHeight),
                 gfx.Color(0.15, 0.12, 0.20)
             )
             containers[c] = container
@@ -64,9 +64,9 @@ return {
         end
     end,
     tick = (not os.getenv("TECS_BENCH_UI_STATIC")) and function(world, frame)
-        local LayoutNode = ui.LayoutNode
+        local Viewport = ui.Viewport
         for c = 1, CONTAINERS do
-            local mut = world:getMut(containers[c], LayoutNode)
+            local mut = world:getMut(containers[c], Viewport)
             if mut then
                 mut.scrollY = (frame * 2) % 1000
             end

@@ -102,7 +102,8 @@ function Anchor.plugin(world: World)
 
             for archetype, len in anchorQuery:iter() do
                 local anchors = archetype:get(Anchor)
-                local transforms = archetype:getMut(Transform)
+                local transforms = archetype:get(Transform)
+                local mutTransforms: {tecs.builtins.Transform} = nil
 
                 for row = 1, len do
                     local anchor = anchors[row]
@@ -144,8 +145,15 @@ function Anchor.plugin(world: World)
                         vpHeight = y2 - y1
                     end
 
-                    transform.x = vpLeft + anchor.anchorX * vpWidth + anchor.offsetX
-                    transform.y = vpTop + anchor.anchorY * vpHeight + anchor.offsetY
+                    local x = vpLeft + anchor.anchorX * vpWidth + anchor.offsetX
+                    local y = vpTop + anchor.anchorY * vpHeight + anchor.offsetY
+                    if transform.x ~= x or transform.y ~= y then
+                        if not mutTransforms then
+                            mutTransforms = archetype:getMut(Transform)
+                        end
+                        local mut = mutTransforms[row]
+                        mut.x, mut.y = x, y
+                    end
                 end
             end
         end

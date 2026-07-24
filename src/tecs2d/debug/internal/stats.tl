@@ -51,14 +51,6 @@ function stats.install(w: tecs.World, opts: stats.Options)
     local lastStats = {}
     w:getStats(lastStats)
 
-    -- Backdrop measurement cache: the profile text changes once per sample
-    -- period, so the widest line and line count are remeasured only when the
-    -- text (or the active font) changes.
-    local measuredProfile = ""
-    local measuredFont: lg.Font = nil
-    local measuredWidth: number = 0
-    local measuredLines = 0
-
     -- Leader + statsToggleKey toggles the HUD. Read at the game layer (stack 0),
     -- so an open debugger command line suppresses the toggle.
     local function toggledOn(): boolean
@@ -123,27 +115,9 @@ function stats.install(w: tecs.World, opts: stats.Options)
             end
 
             lg.beginOwner("stats")
-
-            local textFont = lg.getFont()
-            local lineHeight = textFont:getHeight()
-            -- Size the backdrop from the text itself: widest line and the
-            -- actual line count, so adding a stat line never overflows it.
-            if lastMemoryProfile ~= measuredProfile or textFont ~= measuredFont then
-                measuredProfile = lastMemoryProfile
-                measuredFont = textFont
-                measuredWidth = 0
-                measuredLines = 0
-                for line in (lastMemoryProfile .. "\n"):gmatch("(.-)\n") do
-                    measuredLines = measuredLines + 1
-                    local lw = textFont:getWidth(line)
-                    if lw > measuredWidth then measuredWidth = lw end
-                end
-            end
-            lg.setColor(0, 0, 0, 0.6)
-            lg.rectangle("background", "fill", 0, 0,
-                measuredWidth + 16, measuredLines * lineHeight + 8)
             lg.setColor(1, 1, 1, 1)
-            lg.print("text", lastMemoryProfile, 8, 4)
+            lg.fitText("panel", lastMemoryProfile, 0, 0, 8, 4,
+                {0, 0, 0, 0.6})
 
             getStats(gfxStats)
             lg.endOwner()

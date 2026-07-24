@@ -4,7 +4,7 @@
 local tecs <const> = require("tecs")
 local Anchor <const> = require("tecs2d.ui.internal.Anchor")
 local LayoutBox <const> = require("tecs2d.ui.internal.LayoutBox")
-local LayoutNode <const> = require("tecs2d.ui.internal.LayoutNode")
+local Viewport <const> = require("tecs2d.ui.internal.Viewport")
 local FitContent <const> = require("tecs2d.ui.internal.FitContent")
 
 local type World = tecs.World
@@ -28,13 +28,14 @@ local record ui
     --- Layout dimensions and origin for UI positioning.
     LayoutBox: LayoutBox
 
-    --- A layout node that provides clipping and scrolling for its children.
-    LayoutNode: LayoutNode
+    --- A viewport that provides clipping and scrolling for its children.
+    Viewport: Viewport
 
     --- Auto-sizes a container to fit its children with optional padding.
     FitContent: FitContent
 
-    --- Unified layout plugin. Installs LayoutBox, LayoutNode, and FitContent systems.
+    --- Unified layout plugin.
+    --- Installs Anchor, LayoutBox, Viewport, and FitContent systems.
     --- Call this once after creating the render pipeline.
     plugin: function(world: World)
 
@@ -62,7 +63,7 @@ end
 
 ui.Anchor = Anchor
 ui.LayoutBox = LayoutBox
-ui.LayoutNode = LayoutNode
+ui.Viewport = Viewport
 ui.FitContent = FitContent
 
 local function install(world: World, config?: ui.Config)
@@ -76,7 +77,7 @@ local function install(world: World, config?: ui.Config)
     end
     Anchor.plugin(world)
     LayoutBox.plugin(world, {defaultOriginX = originX, defaultOriginY = originY})
-    LayoutNode.plugin(world)
+    Viewport.plugin(world)
     FitContent.plugin(world)
 end
 

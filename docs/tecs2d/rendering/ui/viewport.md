@@ -1,8 +1,8 @@
 ---
-description: "The LayoutNode component providing clipping and scrolling containers for child entities"
+description: "The Viewport component providing clipping and scrolling containers for child entities"
 ---
 
-# LayoutNode
+# Viewport
 
 A container that provides clipping and scrolling for its children. Requires LayoutBox for dimensions.
 
@@ -10,7 +10,7 @@ A container that provides clipping and scrolling for its children. Requires Layo
 
 ```teal
 local ui = require("tecs2d.ui")
-local LayoutNode = ui.LayoutNode
+local Viewport = ui.Viewport
 local LayoutBox = ui.LayoutBox
 
 -- Create a scrollable container
@@ -18,7 +18,7 @@ local container = world:spawn(
     Transform(50, 50),
     Rectangle(200, 300),
     LayoutBox(Rectangle, nil, 0, 0),  -- Top-left origin
-    LayoutNode(0, 0, 200, 600)  -- scrollX, scrollY, contentWidth, contentHeight
+    Viewport(0, 0, 200, 600)  -- scrollX, scrollY, contentWidth, contentHeight
 )
 ```
 
@@ -34,14 +34,15 @@ local container = world:spawn(
 ## Constructor
 
 ```teal
-LayoutNode(scrollX, scrollY, contentWidth, contentHeight)
+Viewport(scrollX, scrollY, contentWidth, contentHeight)
 ```
 
 All parameters are optional and default to 0.
 
 ## Requirements
 
-LayoutNode **requires** a LayoutBox component on the same entity. An error is thrown if LayoutBox is missing:
+Viewport requires a LayoutBox component on the same entity. Without one, the
+entity is not processed as a viewport:
 
 ```teal
 -- This works
@@ -49,32 +50,32 @@ world:spawn(
     Transform(0, 0),
     Rectangle(200, 300),
     LayoutBox(Rectangle),
-    LayoutNode(0, 0, 200, 600)
+    Viewport(0, 0, 200, 600)
 )
 
--- This throws an error
+-- This entity does not clip or scroll its children
 world:spawn(
     Transform(0, 0),
-    LayoutNode(0, 0, 200, 600)  -- Error: LayoutNode requires LayoutBox
+    Viewport(0, 0, 200, 600)
 )
 ```
 
 ## Scrolling
 
-Children of a LayoutNode are clipped to its bounds and offset by the scroll values:
+Children of a Viewport are clipped to its bounds and offset by the scroll values:
 
 <p align="center">
 <img src="./scrollable-container.png" alt="Scrollable Container" /><br/>
-<em>See the <a href="https://github.com/tecs-dev/tecs/tree/main/examples/tecs-ui">tecs-ui example</a>.</em>
+<em>See the <a href="https://github.com/tecs-dev/tecs/tree/main/examples/ui">UI example</a>.</em>
 </p>
 
 ```teal
 -- Update scroll position
-local layoutNode = world:get(containerId, LayoutNode)
-layoutNode.scrollY = layoutNode.scrollY + 10  -- Scroll down 10 pixels
+local viewport = world:getMut(containerId, Viewport)
+viewport.scrollY = viewport.scrollY + 10  -- Scroll down 10 pixels
 
 -- Clamp to valid range
 local layoutBox = world:get(containerId, LayoutBox)
-local maxScroll = math.max(0, layoutNode.contentHeight - layoutBox.height)
-layoutNode.scrollY = math.max(0, math.min(layoutNode.scrollY, maxScroll))
+local maxScroll = math.max(0, viewport.contentHeight - layoutBox.height)
+viewport.scrollY = math.max(0, math.min(viewport.scrollY, maxScroll))
 ```

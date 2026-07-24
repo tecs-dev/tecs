@@ -1,5 +1,5 @@
 --- Scene 3: Scrollable Container
---- Shows LayoutNode for scrolling and clipping
+--- Shows Viewport for scrolling and clipping
 
 local tecs <const> = require("tecs")
 local gfx <const> = require("tecs2d.gfx")
@@ -10,7 +10,7 @@ local Transform <const> = tecs.builtins.Transform
 local ChildOf <const> = tecs.builtins.ChildOf
 local RelativeTransform <const> = tecs.builtins.RelativeTransform
 local LayoutBox <const> = ui.LayoutBox
-local LayoutNode <const> = ui.LayoutNode
+local Viewport <const> = ui.Viewport
 local Text <const> = gfx.Text
 
 local record scrollable is common.Scene
@@ -20,7 +20,7 @@ scrollable.name = "Scrollable Container"
 
 function scrollable.setup(world: tecs.World, spawn: function(tecs.World, ...: tecs.Component): integer, WINDOW_WIDTH: number, WINDOW_HEIGHT: number)
     -- Header
-    common.header(world, spawn, WINDOW_WIDTH, "Scrollable Container (LayoutNode)")
+    common.header(world, spawn, WINDOW_WIDTH, "Scrollable Container (Viewport)")
 
     -- Container background (visually centered in window, using top-left origin)
     local containerW, containerH = 400, 400
@@ -33,7 +33,7 @@ function scrollable.setup(world: tecs.World, spawn: function(tecs.World, ...: te
         gfx.Rectangle(containerW, containerH),  -- filled
         gfx.RoundedCorners(8),
         LayoutBox(gfx.Rectangle, nil, 0, 0),  -- top-left origin for child positioning
-        LayoutNode(0, 0, containerW, contentHeight),
+        Viewport(0, 0, containerW, contentHeight),
         gfx.Color(0.15, 0.12, 0.20)  -- Dark purple background
     )
     -- Border

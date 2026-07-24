@@ -15,7 +15,7 @@ afterFixed;Render:GPURender;cull;[love "boot.lua"]:515;[builtin#21];init.lua:510
 afterFixed;RenderLast:love.Present;[love "boot.lua"]:515;[builtin#21];init.lua:510;world.lua:1246;pipeline.lua:378;pipeline.lua:317;init.lua:231_[C] 2
 [love "boot.lua"]:517_[I] 1
 afterFixed;PostRender:debug.RecordingIndicator;[love "boot.lua"]:515;[builtin#21];init.lua:510;world.lua:1246;pipeline.lua:378;pipeline.lua:317;overlay.lua:674_[N] 1
-afterFixed;PostUpdate:ui.ApplyClipBounds;[love "boot.lua"]:515;[builtin#21];init.lua:510;world.lua:1246;pipeline.lua:378;pipeline.lua:317;LayoutNode.lua:252;world.lua:998_[J] 1
+afterFixed;PostUpdate:ui.ApplyClipBounds;[love "boot.lua"]:515;[builtin#21];init.lua:510;world.lua:1246;pipeline.lua:378;pipeline.lua:317;Viewport.lua:252;world.lua:998_[J] 1
 afterFixed;PostUpdate:ui.ComputeAnchor;[love "boot.lua"]:515;[builtin#21];init.lua:510;world.lua:1246;pipeline.lua:378;pipeline.lua:317;Anchor.lua:103;QueryImpl.lua:182_[N] 1
 afterFixed;PreRender:circle.ShadowRenderState;[love "boot.lua"]:515;[builtin#21];init.lua:510;world.lua:1246;pipeline.lua:378;pipeline.lua:317;shadowplugin.lua:265;shadowrenderstate.lua:50_[J] 1
 afterFixed;PreRender:circle.ShadowUpload;[love "boot.lua"]:515;[builtin#21];init.lua:510;world.lua:1246;pipeline.lua:378;pipeline.lua:317;shadowplugin.lua:278;archetyperegistry.lua:150;shadowstate.lua:78;archetypeshadowset.lua:168;Archetype.lua:661_[N] 1

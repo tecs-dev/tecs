@@ -587,9 +587,9 @@ function popupview.draw(popup: PopupState, font: lg.Font,
         lg.setColor(0.035, 0.018, 0.055, 0.76)
         -- Dim the game view without partially covering the debugger's own
         -- forward-rendered status text and command line.
-        lg.setScissor(0, 0, sw, math.max(0, sh - 1))
+        lg.beginLayout("popup.scrim.layout", 0, 0, sw, math.max(0, sh - 1))
         lg.rectangle("popup.scrim", "fill", 0, 0, sw, sh)
-        lg.setScissor()
+        lg.endLayout()
     end
     lg.setColor(0.025, 0.012, 0.04, 0.75)
     lg.rectangle("popup.shadow", "fill", PAD_X + 4, py + 5,
@@ -654,16 +654,21 @@ function popupview.draw(popup: PopupState, font: lg.Font,
     end
 
     local bodyY = py + 8 + headerRows * lineH + POPUP_CONTENT_PAD_TOP
-    lg.setScissor(PAD_X, bodyY, panelW, bodyH)
+    local scrollOffset: number = 0
+    for i = 1, firstRow - 1 do
+        scrollOffset = scrollOffset + rowHeights[i]
+    end
+    lg.beginLayout("popup.body", PAD_X, bodyY, panelW, bodyH,
+        0, scrollOffset, columnsW + PAD_X * 2, totalContentH)
     local rowY: {number} = {}
-    local nextY = bodyY
+    local nextY = scrollOffset
     for i = firstRow, lastRow do
         rowY[i] = nextY + rowTopPads[i]
         nextY = nextY + rowHeights[i]
     end
     for ci = 1, #columns do
         local col = columns[ci]
-        local bx = PAD_X * 2 + (ci - 1) * (popup.columnWidth + popup.columnGap)
+        local bx = PAD_X + (ci - 1) * (popup.columnWidth + popup.columnGap)
         local colLast = math.min(#col.lines, lastRow)
         for i = firstRow, colLast do
             local yy = rowY[i]
@@ -702,7 +707,7 @@ function popupview.draw(popup: PopupState, font: lg.Font,
             end
         end
     end
-    lg.setScissor()
+    lg.endLayout()
 
     if scrollable then
         local trackX = PAD_X + panelW - POPUP_SCROLLBAR_W - 7
@@ -713,10 +718,6 @@ function popupview.draw(popup: PopupState, font: lg.Font,
         local thumbTravel = math.max(0, trackH - thumbH)
         local thumbY = trackY
         if popup.scrollMax > 0 then
-            local scrollOffset: number = 0
-            for i = 1, firstRow - 1 do
-                scrollOffset = scrollOffset + rowHeights[i]
-            end
             local maxOffset = math.max(1, totalContentH - bodyH)
             thumbY = trackY + thumbTravel
                 * math.min(1, scrollOffset / maxOffset)

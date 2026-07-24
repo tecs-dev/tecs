@@ -146,15 +146,16 @@ function completionview.draw(popup: Popup, completions: {string},
     end
 
     local gridTop = panelTop + helpHeight
-    local x = COMPLETION_PAD - popup.barScroll
+    lg.beginLayout("completion.grid", 0, gridTop, screenWidth,
+        panelBottom - gridTop, popup.barScroll, 0, totalWidth,
+        usedRows * lineHeight)
+    local x: number = COMPLETION_PAD
     if highlightedIndex > 0 then
         local selectedRow = (highlightedIndex - 1) % rows
         lg.setColor(0.4784, 0.3412, 0.7608, 1)
         lg.alphaRectangle("completion.selection", "fill",
-            selectedX - popup.barScroll,
-            gridTop + selectedRow * lineHeight, selectedW, lineHeight)
+            selectedX, selectedRow * lineHeight, selectedW, lineHeight)
     end
-    lg.setScissor(0, gridTop, screenWidth, panelBottom - gridTop)
     first = 1
     while first <= #completions do
         local last = math.min(#completions, first + rows - 1)
@@ -164,7 +165,7 @@ function completionview.draw(popup: Popup, completions: {string},
         end
         columnWidth = columnWidth + itemPad * 2
         for i = first, last do
-            local y = gridTop + (i - first) * lineHeight
+            local y = (i - first) * lineHeight
             local isSection = completions[i]:sub(1, 1) == SECTION_MARK
             if isSection then
                 lg.setColor(POPUP_ACCENT[1], POPUP_ACCENT[2],
@@ -177,14 +178,15 @@ function completionview.draw(popup: Popup, completions: {string},
             lg.print("completion.item." .. tostring(i),
                 labels[i], x + itemPad, y + 2)
             if not isSection then
-                addHit(popup, i, x, y, columnWidth, lineHeight,
+                addHit(popup, i, x - popup.barScroll, gridTop + y,
+                    columnWidth, lineHeight,
                     screenWidth, panelTop, panelBottom)
             end
         end
         x = x + columnWidth + gutter
         first = last + 1
     end
-    lg.setScissor()
+    lg.endLayout()
 end
 
 return completionview

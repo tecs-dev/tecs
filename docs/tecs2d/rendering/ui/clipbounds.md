@@ -8,7 +8,7 @@ Clips (hides) any part of an entity's rendering that falls outside a rectangular
 types: sprites, shapes, text, lines, arcs, circles, ellipses, rectangles, and meshes.
 
 ClipBounds is a standalone component. You can add it directly to any entity; it does not require UI components. The
-[LayoutNode](./layoutnode) system uses ClipBounds internally to implement scroll container clipping, but you can use it
+[Viewport](./viewport) system uses ClipBounds internally to implement scroll container clipping, but you can use it
 independently for any rectangular masking.
 
 ## Basic Usage
@@ -71,8 +71,8 @@ world:set(entityId, ClipBounds(newMinX, newMinY, newMaxX, newMaxY))
 
 See [Dirty Tracking](/tecs/components/dirty-tracking) for more details and efficient bulk approaches.
 
-## Automatic Clipping with LayoutNode
+## Automatic Clipping with Viewport
 
-If you use [LayoutNode](./layoutnode) for scrollable containers, ClipBounds is propagated automatically to all
+If you use [Viewport](./viewport) for scrollable containers, ClipBounds is propagated automatically to all
 descendant entities. You do not need to manage it manually in that case. See the
-[LayoutNode documentation](./layoutnode) for details.
+[Viewport documentation](./viewport) for details.

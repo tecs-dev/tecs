@@ -2,7 +2,7 @@ local tecs <const> = require("tecs")
 
 --- ClipBounds component for GPU-based clipping.
 --- Entities with this component will have their rendering clipped to the specified bounds.
---- Used by LayoutNode for scroll container clipping.
+--- Used by Viewport for scroll container clipping.
 local record ClipBounds is tecs.Component
     --- Minimum X coordinate (world space)
     minX: number

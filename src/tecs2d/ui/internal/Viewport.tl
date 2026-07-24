@@ -7,10 +7,10 @@ local Transform <const> = tecs.builtins.Transform
 local ChildOf <const> = tecs.builtins.ChildOf
 local RelativeTransform <const> = tecs.builtins.RelativeTransform
 
---- A layout node that provides clipping and scrolling for its children.
---- Children use ChildOf + RelativeTransform to position within the node.
+--- A viewport that provides clipping and scrolling for its children.
+--- Children use ChildOf + RelativeTransform to position within the viewport.
 --- Requires LayoutBox component for dimensions.
-local record LayoutNode is tecs.Component
+local record Viewport is tecs.Component
     --- Scroll offset (how much content is shifted)
     scrollX: number
     scrollY: number
@@ -19,22 +19,22 @@ local record LayoutNode is tecs.Component
     contentWidth: number
     contentHeight: number
 
-    --- Create a new LayoutNode component.
+    --- Create a new Viewport component.
     metamethod __call: function(
         self,
         scrollX?: number,
         scrollY?: number,
         contentWidth?: number,
         contentHeight?: number
-    ): LayoutNode
+    ): Viewport
 
-    --- Plugin to install LayoutNode systems.
+    --- Plugin to install Viewport systems.
     plugin: function(world: tecs.World)
 end
 
 tecs.newFFIComponent({
-    name = "LayoutNode",
-    container = LayoutNode,
+    name = "Viewport",
+    container = Viewport,
     fields = {
         {"scrollX", "float"},
         {"scrollY", "float"},
@@ -42,16 +42,16 @@ tecs.newFFIComponent({
         {"contentHeight", "float"}
     },
     defaults = {0, 0, 0, 0},
-    -- LayoutNode requires a user-specified LayoutBox for dimensions
+    -- Viewport requires a user-specified LayoutBox for dimensions
     -- (no meaningful default). Users must add `LayoutBox(w, h)` on
     -- the same entity; the layout query below includes both.
 })
 
-function LayoutNode.plugin(world: tecs.World)
-    -- Query for LayoutNode entities (to compute their clip bounds)
-    local layoutNodeQuery = world:query({
-        name = "ui.LayoutNodeQuery",
-        include = {LayoutNode, LayoutBox, Transform}
+function Viewport.plugin(world: tecs.World)
+    -- Query for Viewport entities (to compute their clip bounds)
+    local viewportQuery = world:query({
+        name = "ui.ViewportQuery",
+        include = {Viewport, LayoutBox, Transform}
     })
 
     -- Query for layout children. RelativeTransform is required: the
@@ -134,13 +134,13 @@ function LayoutNode.plugin(world: tecs.World)
     -- worth running when something that feeds them moved.
     dirty.watch(world, {
         Transform, RelativeTransform, ChildOf,
-        LayoutNode as tecs.Component, LayoutBox as tecs.Component,
+        Viewport as tecs.Component, LayoutBox as tecs.Component,
     })
     local function hierarchyDirty(): boolean
         return dirty.changed(world)
     end
 
-    -- Apply scroll offset to children of LayoutNodes
+    -- Apply scroll offset to children of Viewports
     -- This runs after RelativeTransform computes base positions
     world:addSystem({
         name = "ui.ApplyScrollOffset",
@@ -152,13 +152,13 @@ function LayoutNode.plugin(world: tecs.World)
             -- exactly, or recomposed children lose their scroll offset.
             if not hierarchyDirty() then return end
 
-            -- Build a map of LayoutNode entity ID -> scroll offset
+            -- Build a map of Viewport entity ID -> scroll offset
             local offsetsX = scrollCtx.offsetsX
             local offsetsY = scrollCtx.offsetsY
             local scrollCount = 0
 
-            for archetype, len, entities in layoutNodeQuery:iter() do
-                local layouts = archetype:get(LayoutNode)
+            for archetype, len, entities in viewportQuery:iter() do
+                local layouts = archetype:get(Viewport)
                 for i = 1, len do
                     local layout = layouts[i]
                     if layout.scrollX ~= 0 or layout.scrollY ~= 0 then
@@ -174,7 +174,7 @@ function LayoutNode.plugin(world: tecs.World)
             -- Nothing scrolled: skip the per-child ancestor walks.
             if scrollCount == 0 then return end
 
-            -- Apply scroll offset to all descendants of LayoutNodes.
+            -- Apply scroll offset to all descendants of Viewports.
             -- Sums offsets from the full ancestor chain so nested scrolling containers compose their displacements.
             for archetype, len, entities in childTransformQuery:iter() do
                 local transforms = archetype:getMut(Transform)
@@ -198,7 +198,7 @@ function LayoutNode.plugin(world: tecs.World)
         end
     })
 
-    -- Apply ClipBounds from LayoutNode ancestors to descendants.
+    -- Apply ClipBounds from Viewport ancestors to descendants.
     -- Run in PostUpdate so changes commit before PreRender GPU sync.
     world:addSystem({
         name = "ui.ApplyClipBounds",
@@ -210,14 +210,14 @@ function LayoutNode.plugin(world: tecs.World)
             -- from the previous run are still correct.
             if not hierarchyDirty() then return end
 
-            -- Build a map of LayoutNode entity ID -> clip bounds
+            -- Build a map of Viewport entity ID -> clip bounds
             local minXByNode = boundsCtx.minXByNode
             local minYByNode = boundsCtx.minYByNode
             local maxXByNode = boundsCtx.maxXByNode
             local maxYByNode = boundsCtx.maxYByNode
             local boundsCount = 0
 
-            for archetype, len, entities in layoutNodeQuery:iter() do
+            for archetype, len, entities in viewportQuery:iter() do
                 local boxes = archetype:get(LayoutBox)
                 local transforms = archetype:get(Transform)
 
@@ -240,8 +240,8 @@ function LayoutNode.plugin(world: tecs.World)
                 end
             end
 
-            -- Apply ClipBounds to all entities that have a LayoutNode ancestor, and explicitly remove ClipBounds
-            -- from entities that don't. Intersects bounds from EVERY LayoutNode ancestor so content inside an inner
+            -- Apply ClipBounds to all entities that have a Viewport ancestor, and explicitly remove ClipBounds
+            -- from entities that don't. Intersects bounds from EVERY Viewport ancestor so content inside an inner
             -- container can't escape an outer clipped one. Rows whose bounds are unchanged are left alone so the
             -- ClipBounds column doesn't go dirty (and re-upload) every frame.
             for archetype, len, entities in childTransformQuery:iter() do
@@ -287,4 +287,4 @@ function LayoutNode.plugin(world: tecs.World)
     })
 end
 
-return LayoutNode
+return Viewport
