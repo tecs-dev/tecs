@@ -34,7 +34,18 @@ function toolworld.install(world: tecs.World, uiHeight: number)
         lightingMode = "none",
         lerpingEnabled = false,
         layers = {[1] = {name = "debug", space = "screen", unlit = true, sortMode = "z"}},
-        sizeHints = {sprites = 8, circles = 32, lines = 128, rects = 256, textEntities = 256, textGlyphs = 8192},
+        sizeHints = {
+            sprites = 8,
+            circles = 32,
+            ellipses = 1,
+            arcs = 1,
+            lines = 1,
+            rects = 256,
+            lights = 1,
+            tilechunks = 1,
+            textEntities = 256,
+            textGlyphs = 8192,
+        },
     })
     tools:addPlugin(ui.new({origin = "topLeft"}))
     tools:addPlugin(tween.plugin)
