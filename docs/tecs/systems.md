@@ -114,6 +114,41 @@ Tecs provides built-in scheduling helpers that cover the common cases.
 
 ### Scheduling helpers
 
+These replace the accumulator most systems otherwise grow at the top of `run`:
+
+```teal
+-- Without a helper: every system that ticks on an interval repeats this
+local elapsed = 0
+world:addSystem({
+    phase = tecs.phases.Update,
+    run = function(dt: number)
+        elapsed = elapsed + dt
+        if elapsed < 0.5 then return end
+        elapsed = 0
+        spawnWave(world)
+    end
+})
+
+-- With one: the schedule is declared, not reimplemented
+world:addSystem({
+    phase = tecs.phases.Update,
+    runIf = tecs.runif.every(0.5),
+    run = function() spawnWave(world) end
+})
+```
+
+The gameplay vocabulary maps directly onto the four helpers:
+
+| You want                                              | Use                            |
+| ----------------------------------------------------- | ------------------------------ |
+| Spawn waves, tick AI, poll for a condition periodically | `every(interval, jitter?)`    |
+| An ability, regen, or attack on a cooldown              | `cooldown(duration)`           |
+| A delayed one-shot: a cutscene beat, a grace period     | `after(delay)`                 |
+| Systems that belong to one screen or mode               | `inState(name)`                |
+
+`every` takes jitter so a hundred enemies sharing one interval do not all think on the same frame. `after` removes
+its own system once it fires, so a one-shot leaves nothing behind. Compose them with `both`, `either`, and `negate`.
+
 #### `tecs.runif.after(delay)`
 
 Runs a system once after a delay (in seconds), then automatically removes it from the world.

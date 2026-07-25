@@ -99,11 +99,13 @@ love.run = tecs2d.run({
 | [Custom Drawing](./custom-drawing)       | CPU drawing with depth sorting                                                   |
 | [Materials](./materials)                 | GPU-batched fragment shader injection                                            |
 
-### Advanced rendering
+### Detached interfaces and tools
 
-Most games need only one world. When a simulation or tool needs isolated
-entities, systems, clocks, and rendering state, see [Multiple render worlds and
-compositing](./multi-world).
+Pause menus, loading screens, inventory previews, and editor tooling usually
+want their own entities, clock, and lifecycle rather than gameplay's. Give them
+their own world and composite its output over the game: see [Multiple render
+worlds and compositing](./multi-world). Use another [camera](./camera) when you
+want a second view of the same simulation instead.
 
 ## RenderConfig
 

@@ -1,16 +1,25 @@
 ---
-description: "Advanced guide to isolated render worlds, shared GPU resources, independent clocks, and ordered canvas compositing"
+description: "Building detached interfaces in their own world, with isolated render pipelines, independent clocks, and ordered canvas compositing"
 outline: deep
 ---
 
 # Multiple render worlds and compositing
 
-::: warning Advanced topic
-Most games should use one world and one render pipeline. Use additional
-[cameras](./camera) when you need another view of the same simulation, such as
-a minimap or split screen. Add another world only when the entities, systems,
-clock, or lifecycle must be isolated.
-:::
+A second world with its own composite pipeline is the way to build an interface
+that is genuinely detached from gameplay: a pause menu that keeps animating
+while the simulation is frozen, a loading screen that runs while the game world
+waits on assets, an inventory or character preview with its own lifecycle, a
+level editor or debug tool whose entities must never reach the game.
+
+The debugger is built this way. Its UI, shapes, text, and sprite previews live
+in a small tool world composited over the game, so freezing or mutating that
+world cannot touch game entities. Anything you would otherwise build by
+threading "am I paused?" through every gameplay system is usually better as its
+own world.
+
+Use another [camera](./camera), not another world, when you want a second view
+of the *same* simulation: a minimap, split screen, a security camera. Cameras
+are cheaper and share everything.
 
 A useful rule is:
 

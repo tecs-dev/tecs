@@ -10,6 +10,21 @@ contiguously, so systems can switch state once per group and process a whole bat
 For example, a renderer can draw all alpha-blended sprites, then all additive sprites, without sorting entities
 every frame.
 
+## When to reach for it
+
+Grouping pays off whenever per-entity work is cheap but the *setup around it* is not. Rendering is the obvious case,
+and gameplay has the same shape:
+
+- **Factions and teams.** Group by team tag, then resolve each team's shared target list, threat table, or morale
+  once instead of per unit.
+- **Per-material or per-tileset logic.** Group by the asset an archetype uses so a lookup, atlas bind, or config
+  fetch happens once per group.
+- **AI tiers.** Group by behavior class so the expensive planner runs once for a batch of identical agents.
+- **Spatial buckets.** Group by region or chunk id so a system can skip whole groups that are far from the camera.
+
+The rule of thumb: if your inner loop starts with "look up the thing this entity belongs to," that lookup probably
+belongs at group level.
+
 ## Basic usage
 
 The `groupBy` function receives an archetype and returns an integer. Tecs stores that key with the archetype as it
