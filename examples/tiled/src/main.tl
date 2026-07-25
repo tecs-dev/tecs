@@ -12,6 +12,7 @@ local mcp <const> = require("tecs2d.mcp")
 
 local physics <const> = require("tecs2d.physics")
 local input <const> = require("tecs2d.input")
+local ui <const> = require("tecs2d.ui")
 
 local lp <const> = love.physics
 
@@ -53,6 +54,49 @@ local function demoPlugin(world: tecs.World)
     local initialized = false
     local lightsSpawned = false
     local tilemapQuery = world:query({ include = {tecs_tiled.Tilemap} })
+
+    ---------------------------------------------------------------------------
+    -- Pause menu: a state for the menu's entities, an input layer for its
+    -- input. The two stacks are independent, so they are pushed and popped
+    -- together here.
+    --
+    -- While the layer is on top it owns keyboard and pointer input, and the
+    -- gameplay systems below poll through the base target. Their input.isKeyDown
+    -- calls report false without knowing a menu exists, so nothing needs a
+    -- "unless paused" branch.
+    ---------------------------------------------------------------------------
+    local pauseLayer <const> = input.newLayer("pause")
+    world:createState("paused")   -- default onExit = "despawn" clears the menu
+
+    local function openPause()
+        world:pushState("paused")
+        input.pushLayer(pauseLayer)
+        world:spawn(
+            Transform(0, 0, 0, 10),
+            Text(FONT_PATH, "PAUSED\n\nTAB: Resume", 1.0),
+            Color(0.95, 0.65, 0.25, 1),
+            gfx.Pivot(0.5, 0.5),
+            ui.Anchor(0.5, 0.5, 0, 0)
+        )
+    end
+
+    local function closePause()
+        input.popLayer(pauseLayer)
+        world:popState()
+    end
+
+    world:addSystem({
+        name = "demo.PauseToggle",
+        phase = tecs.phases.Update,
+        run = function()
+            if world:peekState() == "paused" then
+                -- Read through the layer: it owns input while it is on top.
+                if pauseLayer.view.isKeyPressed("tab") then closePause() end
+            elseif input.isKeyPressed("tab") then
+                openPause()
+            end
+        end
+    })
 
     -- Spawn tilemap
     world:addSystem({
@@ -245,7 +289,7 @@ local function demoPlugin(world: tecs.World)
     -- HUD text (static, left-aligned at bottom)
     world:spawn(
         Transform(10, VIRTUAL_HEIGHT - 30, 0, 10),
-        Text(FONT_PATH, "WASD: Move | Click: Remove wall | +/-: Zoom\nP: Physics debug | L: Lighting | ESC: Quit", 0.5),
+        Text(FONT_PATH, "WASD: Move | Click: Remove wall | +/-: Zoom\nP: Physics debug | L: Lighting | TAB: Pause | ESC: Quit", 0.5),
         Color(0.95, 0.65, 0.25, 1),
         gfx.Pivot(0, 0)
     )
