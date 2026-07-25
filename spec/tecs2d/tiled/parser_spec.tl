@@ -28,6 +28,11 @@ local function minimalMap(layerData: any, encoding?: string): {string: any}
 end
 
 describe("tiled parser", function()
+    it("reports the fixed renderer chunk size", function()
+        local map = parser.parseTiledMap(minimalMap({1, 2, 3, 0}))
+        luassert.equals(16, map.chunkSize)
+    end)
+
     it("parses raw array tile data", function()
         local map = parser.parseTiledMap(minimalMap({1, 2, 3, 0}))
         local layer = map.layers[1]

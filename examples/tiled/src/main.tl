@@ -85,13 +85,14 @@ local function demoPlugin(world: tecs.World)
                 for i = 1, len do
                     local data = tilemaps[i].data
                     if data then
+                        local loadedData = data as tecs_tiled.TilemapData
                         initialized = true
 
                         -- Get map dimensions from tilemap
-                        local mapWidth = data.width
-                        local mapHeight = data.height
-                        local tileWidth = data.tilewidth
-                        local tileHeight = data.tileheight
+                        local mapWidth = loadedData.width
+                        local mapHeight = loadedData.height
+                        local tileWidth = loadedData.tilewidth
+                        local tileHeight = loadedData.tileheight
                         local mapPixelWidth = mapWidth * tileWidth
                         local mapPixelHeight = mapHeight * tileHeight
 
@@ -223,10 +224,11 @@ local function demoPlugin(world: tecs.World)
                     for i = 1, len do
                         local tmData = tilemaps[i].data
                         if tmData then
+                            local loadedData = tmData as tecs_tiled.TilemapData
                             local worldX, worldY = cam:toWorld(input.mouseX, input.mouseY)
                             -- Remove wall tiles (tile 2), leave grass (tile 1)
-                            if tmData:getTileAt(1, worldX, worldY) == 2 then
-                                tmData:setTileAt(1, worldX, worldY, 1)  -- Replace wall with grass
+                            if loadedData:getTileAt(1, worldX, worldY) == 2 then
+                                loadedData:setTileAt(1, worldX, worldY, 1)  -- Replace wall with grass
                             end
                         end
                     end

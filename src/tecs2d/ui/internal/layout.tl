@@ -50,8 +50,8 @@ local function gatherChild(childId: integer, ctx: GatherCtx)
     local count = ctx.count + 1
     ctx.count = count
     ctx.ids[count] = childId
-    local order = ctx.world:get(childId, FlowOrder) as any
-    ctx.orders[count] = order and order as number or 0
+    local order = ctx.world:get(childId, FlowOrder) as number
+    ctx.orders[count] = order or 0
 end
 
 local function sortChildren(ids: {integer}, orders: {number}, count: integer)

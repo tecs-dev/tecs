@@ -124,7 +124,7 @@ audio:isGroupPaused("sfx")     -- Check if paused
 
 ## Effects
 
-Apply LÖVE audio effects to groups:
+Apply Love audio effects to groups:
 
 ```teal
 -- Add reverb to all sfx
@@ -138,7 +138,7 @@ audio:removeGroupEffect("sfx", "reverb")
 ```
 
 Effects are automatically applied to all current and future sounds in the group. See
-[LÖVE's effect documentation](https://love2d.org/wiki/EffectType) for available effect types.
+[Love's effect documentation](https://love2d.org/wiki/EffectType) for available effect types.
 
 ## Configuring Audio
 

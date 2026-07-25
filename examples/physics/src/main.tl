@@ -1,5 +1,5 @@
 -- Box2D Physics Example
--- Same demo as physics example, but using LÖVE's Box2D bindings
+-- Same demo as physics example, but using Love's Box2D bindings
 
 local tecs = require("tecs")
 local tecs2d = require("tecs2d")

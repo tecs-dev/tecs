@@ -177,12 +177,15 @@ function Viewport.plugin(world: tecs.World)
             -- Apply scroll offset to all descendants of Viewports.
             -- Sums offsets from the full ancestor chain so nested scrolling containers compose their displacements.
             for archetype, len, entities in childTransformQuery:iter() do
-                local transforms = archetype:getMut(Transform)
+                local mutTransforms: {tecs.builtins.Transform} = nil
                 for i = 1, len do
                     scrollCtx.x, scrollCtx.y = 0.0, 0.0
                     world:walkUp(entities[i], ChildOf, visitScrollAncestor, scrollCtx)
                     if scrollCtx.x ~= 0 or scrollCtx.y ~= 0 then
-                        local transform = transforms[i]
+                        if not mutTransforms then
+                            mutTransforms = archetype:getMut(Transform)
+                        end
+                        local transform = mutTransforms[i]
                         transform.x = transform.x - scrollCtx.x
                         transform.y = transform.y - scrollCtx.y
                     end
@@ -246,6 +249,7 @@ function Viewport.plugin(world: tecs.World)
             -- ClipBounds column doesn't go dirty (and re-upload) every frame.
             for archetype, len, entities in childTransformQuery:iter() do
                 local clipCol = archetype:get(ClipBounds)
+                local mutClipCol: {ClipBounds} = nil
                 for i = 1, len do
                     local entityId = entities[i]
                     boundsCtx.haveBounds = false
@@ -257,8 +261,10 @@ function Viewport.plugin(world: tecs.World)
                                     or existing.minY ~= boundsCtx.minY
                                     or existing.maxX ~= boundsCtx.maxX
                                     or existing.maxY ~= boundsCtx.maxY then
-                                local mutCol = archetype:getMut(ClipBounds)
-                                local mut = mutCol[i]
+                                if not mutClipCol then
+                                    mutClipCol = archetype:getMut(ClipBounds)
+                                end
+                                local mut = mutClipCol[i]
                                 mut.minX = boundsCtx.minX
                                 mut.minY = boundsCtx.minY
                                 mut.maxX = boundsCtx.maxX

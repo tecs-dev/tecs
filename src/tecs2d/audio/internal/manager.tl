@@ -46,8 +46,7 @@ local DEFAULT_GROUPS <const>: {string: number} = {
 --- Constructor
 -------------------------------------------------------------------------------
 
---- Creates a new AudioManager.
---- @return A new AudioManager instance.
+-- Creates the concrete manager behind the documented AudioManager interface.
 function AudioManagerImpl.new(): AudioManagerImpl
     local groups: {string: SoundGroup} = {}
     for name, volume in pairs(DEFAULT_GROUPS) do
@@ -559,9 +558,7 @@ function AudioManagerImpl:setGroupEffect(groupName: string, effectName: string, 
         ge = { effects = {} }
         self._groupEffects[groupName] = ge
     end
-    ge.effects[effectName] = settings
-
-    -- Define the effect globally in LÖVE's audio system
+    -- Define the effect globally in Love's audio system
     -- The effect name is scoped to the group to avoid conflicts
     local globalEffectName = groupName .. "_" .. effectName
     local effectSettings = { type = effectName } as {string:any}
@@ -573,6 +570,10 @@ function AudioManagerImpl:setGroupEffect(groupName: string, effectName: string, 
     if not success then
         return
     end
+
+    -- Record the effect only after Love accepts its definition. Otherwise
+    -- future sources would try to enable an effect slot that does not exist.
+    ge.effects[effectName] = settings
 
     -- Enable effect on all current sources in this group
     setEffectOnGroupSources(self, groupName, globalEffectName, true)
@@ -591,7 +592,7 @@ function AudioManagerImpl:removeGroupEffect(groupName: string, effectName: strin
 
     -- Free the global effect slot. Effect names are scoped per group, so
     -- no other group can be using this one; without this, repeated
-    -- set/remove cycles with distinct names exhaust LÖVE's limited
+    -- set/remove cycles with distinct names exhaust Love's limited
     -- effect slots.
     local clearGlobalEffect = love.audio.setEffect as function(string, boolean): boolean
     clearGlobalEffect(globalEffectName, false)

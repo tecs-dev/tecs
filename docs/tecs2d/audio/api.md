@@ -199,12 +199,12 @@ Check if a group is paused.
 audio:setGroupEffect(groupName, effectType, settings)
 ```
 
-Apply a LÖVE audio effect to all sounds in a group. The effect applies to both currently playing sources and any new
+Apply a Love audio effect to all sounds in a group. The effect applies to both currently playing sources and any new
 sources added to the group.
 
 **Parameters:**
 - `groupName` - The sound group name (e.g., "sfx", "music")
-- `effectType` - LÖVE effect type: "reverb", "chorus", "distortion", "echo", "flanger", "compressor",
+- `effectType` - Love effect type: "reverb", "chorus", "distortion", "echo", "flanger", "compressor",
   "equalizer", "ringmodulator"
 - `settings` - Table of effect-specific parameters
 
@@ -226,7 +226,7 @@ audio:setGroupEffect("music", "chorus", {
 })
 ```
 
-See [LÖVE Audio Effects](https://love2d.org/wiki/EffectType) for available parameters per effect type.
+See [Love Audio Effects](https://love2d.org/wiki/EffectType) for available parameters per effect type.
 
 #### removeGroupEffect
 

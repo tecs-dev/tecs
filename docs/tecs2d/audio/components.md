@@ -127,8 +127,8 @@ The attenuation follows Love2D's default model (inverse distance clamped).
 Modify the component to control playback:
 
 ```teal
--- Get the component
-local source = world:get(entityId, audio.AudioSource)
+-- Get the component mutably so dirty-gated audio systems observe the writes.
+local source = world:getMut(entityId, audio.AudioSource)
 
 -- Stop playback
 source.playing = false
@@ -139,7 +139,7 @@ source.playing = true
 -- Change volume
 source.volume = 0.5
 
--- Change pitch (takes effect on next loop for looping sounds)
+-- Change pitch (takes effect on the next audio-system update)
 source.pitch = 1.2
 ```
 
@@ -155,4 +155,5 @@ audio.AudioSource({
 })
 ```
 
-Pitch variance is applied each time the sound starts or loops (not while playing).
+Pitch variance is rolled when playback is triggered or retriggered and held for that playback. Love looping does not
+re-roll the variance at each loop boundary.

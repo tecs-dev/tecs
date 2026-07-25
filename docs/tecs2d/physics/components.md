@@ -87,6 +87,7 @@ world:spawn(
 
 | Property          | Type        | Default   | Description                                                          |
 | ----------------- | ----------- | --------- | -------------------------------------------------------------------- |
+| `bodyType`        | `BodyType`  | `"dynamic"` | Love body type (`"dynamic"`, `"kinematic"`, or `"static"`)          |
 | `mass`            | `number`    | *nil*     | Explicit body mass in kg (see below)                                 |
 | `density`         | `number`    | `1`       | Shape density in kg/px², used by Box2D to compute mass from area     |
 | `restitution`     | `number`    | `0`       | Bounciness, 0-1 (overrides Collider's value)                         |

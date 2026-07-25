@@ -1,6 +1,6 @@
---- tecs2d.physics: Box2D physics integration for LÖVE2D games.
+--- tecs2d.physics: Box2D physics integration for Love2D games.
 ---
---- Uses LÖVE's built-in love.physics (Box2D) for collision detection and response.
+--- Uses Love's built-in love.physics (Box2D) for collision detection and response.
 ---
 --- Example usage:
 --- ```
@@ -36,40 +36,59 @@ local Transform <const> = tecs.builtins.Transform
 -------------------------------------------------------------------------------
 
 local record physics_components
+    --- Supported primitive collider shapes.
     enum ShapeType
         "circle"
         "rectangle"
     end
 
+    --- One shape in a multi-shape collider.
     record ShapeConfig
+        --- Primitive shape type.
         type: ShapeType
+        --- Circle radius. Defaults to 16.
         radius: number        -- for circle
+        --- Rectangle width. Defaults to 32.
         width: number         -- for rectangle
+        --- Rectangle height. Defaults to 32.
         height: number        -- for rectangle
+        --- Horizontal offset from the body origin. Defaults to 0.
         offsetX: number       -- offset from body center
+        --- Vertical offset from the body origin. Defaults to 0.
         offsetY: number       -- offset from body center
+        --- Whether this shape detects contacts without collision response.
         sensor: boolean
+        --- Optional name copied into contact shape data.
         name: string          -- optional name for the shape
     end
 
+    --- Collider construction options.
     record ColliderConfig
-        -- Single shape (simple case)
+        --- Primitive shape used when shapes is omitted. Defaults to "circle".
         shape: ShapeType
+        --- Circle radius. Defaults to 16.
         radius: number
+        --- Rectangle width. Defaults to 32.
         width: number
+        --- Rectangle height. Defaults to 32.
         height: number
+        --- Whether the single primitive shape is a sensor.
         sensor: boolean
-        -- Filtering
+        --- Box2D collision group index. Defaults to 0.
         groupIndex: integer
+        --- Category bit mask. Defaults to all 16 categories.
         categories: integer
+        --- Collision mask. Defaults to all 16 categories.
         mask: integer
-        -- Physics properties (used for static bodies, or as defaults)
+        --- Static-body restitution. Defaults to 0.
         restitution: number
+        --- Static-body friction. Defaults to 0.3.
         friction: number
-        -- Multi-shape support
+        --- Explicit shapes sharing one body; replaces the primitive fields.
         shapes: {ShapeConfig}
     end
 
+    --- Collision geometry and its runtime Box2D state.
     record Collider is tecs.Component
         -- Primary shape (for simple single-shape case)
         shapeType: ShapeType
@@ -102,25 +121,39 @@ local record physics_components
         runtimeAngularVelocity: number
         hasRuntimeVelocity: boolean
 
+        --- Create a Collider from primitive or multi-shape configuration.
         metamethod __call: function(self, config: ColliderConfig): Collider
     end
 
+    --- Dynamic-body construction options.
     record RigidBodyConfig
-        bodyType: string
+        --- Box2D body type. Defaults to "dynamic".
+        bodyType: love.physics.BodyType
+        --- Optional explicit total mass; density-derived when omitted.
         mass: number
+        --- Shape density. Defaults to 1.
         density: number
+        --- Shape restitution. Defaults to 0.
         restitution: number
+        --- Shape friction. Defaults to 0.3.
         friction: number
+        --- Linear damping. Defaults to 0.
         drag: number
+        --- Angular damping. Defaults to 0.
         angularDrag: number
+        --- Initial horizontal velocity.
         vx: number
+        --- Initial vertical velocity.
         vy: number
+        --- Whether continuous collision detection is enabled.
         bullet: boolean
+        --- Whether rotation is locked.
         fixedRotation: boolean
     end
 
+    --- Configures a Collider as a dynamic Box2D body.
     record RigidBody is tecs.Component
-        bodyType: string
+        bodyType: love.physics.BodyType
         mass: number
         density: number
         restitution: number
@@ -132,9 +165,11 @@ local record physics_components
         bullet: boolean
         fixedRotation: boolean
 
+        --- Create dynamic-body configuration for a Collider.
         metamethod __call: function(self, config: RigidBodyConfig): RigidBody
     end
 
+    --- Marks a Collider as a static Box2D body.
     record StaticBody is tecs.Component
         metamethod __call: function(self): StaticBody
     end
@@ -391,20 +426,33 @@ tecs.newEvent(physics_events.PostSolve)
 -------------------------------------------------------------------------------
 
 local record physics is tecs.Key<physics.PhysicsState>
-    -- Components
+    --- Transform synchronization mode used between fixed physics steps.
+    enum SmoothingMode
+        "interpolate"
+        "extrapolate"
+        "disabled"
+    end
+    --- Collision geometry component.
     Collider: physics_components.Collider
+    --- Dynamic-body configuration component.
     RigidBody: physics_components.RigidBody
+    --- Static-body tag component.
     StaticBody: physics_components.StaticBody
 
-    -- Events
+    --- Event emitted when contact begins.
     BeginContact: physics_events.BeginContact
+    --- Event emitted when contact ends.
     EndContact: physics_events.EndContact
+    --- Event emitted before Box2D resolves a contact.
     PreSolve: physics_events.PreSolve
+    --- Event emitted after Box2D resolves a contact.
     PostSolve: physics_events.PostSolve
 
-    -- Types
+    --- Metadata stored on plugin-owned Box2D shapes.
     type ShapeData = physics_events.ShapeData
+    --- Configuration for one shape in a multi-shape collider.
     type ShapeConfig = physics_components.ShapeConfig
+    --- Contact filter invoked with both shapes and their Tecs metadata.
     type ContactFilterFn = function(
         shapeA: love.physics.Shape,
         shapeB: love.physics.Shape,
@@ -419,22 +467,29 @@ local record physics is tecs.Key<physics.PhysicsState>
         contactFilter: ContactFilterFn
         --- Default for RigidBody.fixedRotation when not specified. Defaults to false.
         defaultFixedRotation: boolean
-        --- Draw collision shape outlines for debugging. Defaults to false.
+        --- Deprecated compatibility flag. The physics plugin does not draw;
+        --- install `gfx.physicsDebug` for collision visualization.
         debug: boolean
         --- Transform smoothing mode: "interpolate" (default), "extrapolate", or "disabled" (direct).
-        smoothing: string
+        smoothing: SmoothingMode
     end
 
     record PhysicsState
+        --- The Box2D world owned by this plugin.
         world: love.physics.World
+        --- Default used for RigidBody values that omit fixedRotation.
         defaultFixedRotation: boolean
+        --- Legacy debug flag. Rendering debug shapes is handled by gfx.physicsDebug.
         debug: boolean
-        smoothing: string
+        --- Active transform smoothing mode.
+        smoothing: SmoothingMode
     end
 
-    new: function(config?: Config): tecs.Plugin
+    --- Create a physics plugin for a Box2D world.
+    new: function(config: Config): tecs.Plugin
 
     --- Helper to create category bitmask from category numbers (1-16).
+    --- Errors when a category is not an integer in that range.
     categories: function(...: integer): integer
 end
 
@@ -451,6 +506,8 @@ function physics.categories(...: integer): integer
     local result = 0
     for i = 1, select("#", ...) do
         local cat = select(i, ...)
+        assert(cat == math.floor(cat) and cat >= 1 and cat <= 16,
+            "physics.categories expects integer category numbers from 1 to 16")
         result = bit.bor(result, bit.lshift(1, cat - 1))
     end
     return result
@@ -651,7 +708,7 @@ function physics.new(config: physics.Config): tecs.Plugin
 
         -----------------------------------------------------------------------
         -- Helper: Configure a shape (already attached to body) with user data.
-        -- In LÖVE 12, shapes are created attached to bodies and carry the
+        -- In Love 12, shapes are created attached to bodies and carry the
         -- fixture methods (friction, restitution, filtering).
         -----------------------------------------------------------------------
         local function configureShape(
@@ -762,12 +819,20 @@ function physics.new(config: physics.Config): tecs.Plugin
             run = function(_dt: number)
                 for archetype, len, entities in dynamicQuery:iter() do
                     local transforms = archetype:get(Transform)
-                    local colliders = archetype:getMut(Collider)
+                    local colliders = archetype:get(Collider)
+                    local mutColliders: {physics_components.Collider} = nil
                     local rigidBodies = archetype:get(RigidBody)
 
                     for i = 1, len do
                         local c = colliders[i]
                         if not c.body then
+                            -- Body creation is a one-time transition. Avoid
+                            -- dirtying every settled Collider column on every
+                            -- fixed step.
+                            if not mutColliders then
+                                mutColliders = archetype:getMut(Collider)
+                            end
+                            c = mutColliders[i]
                             local t = transforms[i]
                             local rb = rigidBodies[i]
                             local entityId = entities[i]
@@ -815,11 +880,16 @@ function physics.new(config: physics.Config): tecs.Plugin
 
                 for archetype, len, entities in staticQuery:iter() do
                     local transforms = archetype:get(Transform)
-                    local colliders = archetype:getMut(Collider)
+                    local colliders = archetype:get(Collider)
+                    local mutColliders: {physics_components.Collider} = nil
 
                     for i = 1, len do
                         local c = colliders[i]
                         if not c.body then
+                            if not mutColliders then
+                                mutColliders = archetype:getMut(Collider)
+                            end
+                            c = mutColliders[i]
                             local t = transforms[i]
                             local entityId = entities[i]
 
@@ -861,15 +931,23 @@ function physics.new(config: physics.Config): tecs.Plugin
             end,
             run = function(_dt: number)
                 for archetype, len in colliderQuery:iter() do
-                    local colliders = archetype:getMut(Collider)
+                    local colliders = archetype:get(Collider)
+                    local mutColliders: {physics_components.Collider} = nil
 
                     for i = 1, len do
                         local c = colliders[i]
                         if c.body then
                             local x, y = c.body:getPosition()
-                            c.prevX = x
-                            c.prevY = y
-                            c.prevRotation = c.body:getAngle()
+                            local rotation = c.body:getAngle()
+                            if c.prevX ~= x or c.prevY ~= y or c.prevRotation ~= rotation then
+                                if not mutColliders then
+                                    mutColliders = archetype:getMut(Collider)
+                                end
+                                local mut = mutColliders[i]
+                                mut.prevX = x
+                                mut.prevY = y
+                                mut.prevRotation = rotation
+                            end
                         end
                     end
                 end
@@ -892,7 +970,8 @@ function physics.new(config: physics.Config): tecs.Plugin
                 local remainingTime = pl.fixedAccumulator
 
                 for archetype, len in colliderQuery:iter() do
-                    local transforms = archetype:getMut(Transform)
+                    local transforms = archetype:get(Transform)
+                    local mutTransforms: {tecs.builtins.Transform} = nil
                     local colliders = archetype:get(Collider)
 
                     for i = 1, len do
@@ -901,22 +980,35 @@ function physics.new(config: physics.Config): tecs.Plugin
                             local t = transforms[i]
                             local bx, by = c.body:getPosition()
                             local brot = c.body:getAngle()
+                            local x, y, rotation = bx, by, brot
 
                             if smoothingMode == "interpolate" then
                                 -- Interpolate: blend previous → current (smooth, 1 frame behind)
-                                t.x = c.prevX + (bx - c.prevX) * alpha
-                                t.y = c.prevY + (by - c.prevY) * alpha
-                                t.rotation = c.prevRotation + (brot - c.prevRotation) * alpha
+                                x = c.prevX + (bx - c.prevX) * alpha
+                                y = c.prevY + (by - c.prevY) * alpha
+                                rotation = c.prevRotation + (brot - c.prevRotation) * alpha
                             elseif smoothingMode == "extrapolate" then
                                 -- Extrapolate: predict beyond current using velocity (responsive, can overshoot)
                                 local vx, vy = c.body:getLinearVelocity()
                                 local vrot = c.body:getAngularVelocity()
-                                t.x = bx + vx * remainingTime
-                                t.y = by + vy * remainingTime
-                                t.rotation = brot + vrot * remainingTime
+                                x = bx + vx * remainingTime
+                                y = by + vy * remainingTime
+                                rotation = brot + vrot * remainingTime
                             elseif smoothingMode == "disabled" then
                                 -- Direct: no smoothing
-                                t.x, t.y, t.rotation = bx, by, brot
+                                x, y, rotation = bx, by, brot
+                            end
+
+                            -- Static and sleeping bodies often produce the
+                            -- same visual transform for thousands of frames.
+                            -- Mark Transform dirty only when physics actually
+                            -- changes one of the synchronized fields.
+                            if t.x ~= x or t.y ~= y or t.rotation ~= rotation then
+                                if not mutTransforms then
+                                    mutTransforms = archetype:getMut(Transform)
+                                end
+                                local mut = mutTransforms[i]
+                                mut.x, mut.y, mut.rotation = x, y, rotation
                             end
                         end
                     end

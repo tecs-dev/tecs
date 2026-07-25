@@ -126,22 +126,34 @@ end
 local type EasingFunction = function(t: number): number
 
 local record PlaybackOptions
+    --- Playback mode. Defaults to "once".
     mode: PlaybackMode
+    --- Pass count for finite loop/ping-pong playback.
     count: integer
+    --- Playback speed multiplier. Defaults to 1.
     speed: number
+    --- Delay before playback begins, in seconds.
     delay: number
 end
 
 local record RunOptions
+    --- Nested timeline playback mode. Defaults to "once".
     mode: PlaybackMode
+    --- Pass count for the nested timeline.
     count: integer
 end
 
+--- A component field target used by timeline operations.
 local record Target
+    --- Stable serialized target identity.
     id: string
+    --- Component whose fields are animated.
     component: Component
+    --- Serialized component name.
     componentName: string
+    --- Fields animated by this target.
     fields: {string}
+    --- Target interpolation behavior.
     mode: TargetMode
 
     init: function(
@@ -156,6 +168,7 @@ local record Target
     )
 end
 
+--- A live component-field source for a tracking operation.
 local record TrackSource
     kind: TrackSourceKind
     key: string
@@ -164,6 +177,13 @@ local record TrackSource
     component: Component
     componentName: string
     fields: {string}
+end
+
+-- Structural value returned for a targeted relationship instance. The
+-- generic public Relationship container type intentionally does not expose
+-- instance storage fields.
+local interface RelationshipValue
+    target: integer
 end
 
 local type TimelineNode = {any}
@@ -200,10 +220,13 @@ local record RunSlot
     passCount: integer
 end
 
+--- Sequential timeline nodes with an optional replacement channel.
 local record TimelineSpec is {TimelineNode}
+    --- Playing another timeline on this channel cancels the current one.
     channel: string
 end
 
+--- An immutable compiled tween timeline.
 local record Timeline
     slots: {Slot}
     runs: {RunSlot}
@@ -214,6 +237,7 @@ local record Timeline
     presetName: string
     pinned: boolean
 
+    --- Play this timeline on an entity.
     play: function(self: Timeline, world: World, entity: integer, options?: PlaybackOptions)
 end
 
@@ -235,27 +259,40 @@ local record Cursor
     _lastCycleIndex: integer
 end
 
+--- Internal playback state attached while an entity has active tweens.
 local record TweenPlayback is tecs.Component
     cursors: {Cursor}
 end
 
+--- Selects another entity as a dynamic tracking source.
 local record TrackingTarget is tecs.Component
+    --- Direct source entity, or zero to use key.
     entity: integer
+    --- Source entity key used when entity is zero.
     key: string
 end
 
+--- Event emitted by an `emit` timeline node.
 local record TweenEvent is tecs.Event
+    --- Entity whose timeline emitted the event.
     entity: integer
+    --- Authored event name.
     name: string
+    --- Timeline channel, when present.
     channel: string | nil
+    --- Runtime timeline template id.
     timelineId: integer
 
     init: function(self: TweenEvent, entity: integer, name: string, channel: string | nil, timelineId: integer)
 end
 
+--- Event emitted after one root timeline playback completes.
 local record TweenComplete is tecs.Event
+    --- Entity whose timeline completed.
     entity: integer
+    --- Timeline channel, when present.
     channel: string | nil
+    --- Runtime timeline template id.
     timelineId: integer
 
     init: function(self: TweenComplete, entity: integer, channel: string | nil, timelineId: integer)
@@ -286,102 +323,186 @@ local REGISTRY <const>: tecs.Key<Registry> = tecs.newKey("tecs2d.tween.registry"
 local SNAPSHOT_DATA_KEY <const> = "tecs2d.tween.registry"
 
 local record tween
+    --- Root playback behavior.
     type PlaybackMode = PlaybackMode
+    --- Name of a built-in easing curve.
     type EasingName = EasingName
+    --- Function mapping normalized progress to eased progress.
     type EasingFunction = EasingFunction
+    --- Name of a built-in component-field target.
     type TargetName = TargetName
+    --- Component-field animation target.
     type Target = Target
+    --- Live component-field tracking source.
     type TrackSource = TrackSource
+    --- Compiled immutable timeline.
     type Timeline = Timeline
+    --- One authored timeline operation.
     type TimelineNode = TimelineNode
+    --- Sequential list of authored timeline operations.
     type TimelineSpec = TimelineSpec
+    --- Root playback options.
     type PlaybackOptions = PlaybackOptions
+    --- Nested timeline playback options.
     type RunOptions = RunOptions
+    --- Component holding active playback cursors.
     TweenPlayback: TweenPlayback
+    --- Component selecting a dynamic tracking source entity.
     TrackingTarget: TrackingTarget
+    --- Event emitted by authored `emit` nodes.
     TweenEvent: TweenEvent
+    --- Event emitted when root playback completes.
     TweenComplete: TweenComplete
 
+    --- Linear easing.
     linear: EasingFunction
+    --- Quadratic ease-in.
     quadIn: EasingFunction
+    --- Quadratic ease-out.
     quadOut: EasingFunction
+    --- Quadratic ease-in-out.
     quadInOut: EasingFunction
+    --- Quadratic ease-out-in.
     quadOutIn: EasingFunction
+    --- Cubic ease-in.
     cubicIn: EasingFunction
+    --- Cubic ease-out.
     cubicOut: EasingFunction
+    --- Cubic ease-in-out.
     cubicInOut: EasingFunction
+    --- Cubic ease-out-in.
     cubicOutIn: EasingFunction
+    --- Quartic ease-in.
     quartIn: EasingFunction
+    --- Quartic ease-out.
     quartOut: EasingFunction
+    --- Quartic ease-in-out.
     quartInOut: EasingFunction
+    --- Quartic ease-out-in.
     quartOutIn: EasingFunction
+    --- Quintic ease-in.
     quintIn: EasingFunction
+    --- Quintic ease-out.
     quintOut: EasingFunction
+    --- Quintic ease-in-out.
     quintInOut: EasingFunction
+    --- Quintic ease-out-in.
     quintOutIn: EasingFunction
+    --- Sinusoidal ease-in.
     sineIn: EasingFunction
+    --- Sinusoidal ease-out.
     sineOut: EasingFunction
+    --- Sinusoidal ease-in-out.
     sineInOut: EasingFunction
+    --- Sinusoidal ease-out-in.
     sineOutIn: EasingFunction
+    --- Exponential ease-in.
     expoIn: EasingFunction
+    --- Exponential ease-out.
     expoOut: EasingFunction
+    --- Exponential ease-in-out.
     expoInOut: EasingFunction
+    --- Exponential ease-out-in.
     expoOutIn: EasingFunction
+    --- Overshooting ease-in.
     backIn: EasingFunction
+    --- Overshooting ease-out.
     backOut: EasingFunction
+    --- Overshooting ease-in-out.
     backInOut: EasingFunction
+    --- Overshooting ease-out-in.
     backOutIn: EasingFunction
+    --- Elastic ease-in.
     elasticIn: EasingFunction
+    --- Elastic ease-out.
     elasticOut: EasingFunction
+    --- Elastic ease-in-out.
     elasticInOut: EasingFunction
+    --- Elastic ease-out-in.
     elasticOutIn: EasingFunction
+    --- Bouncing ease-in.
     bounceIn: EasingFunction
+    --- Bouncing ease-out.
     bounceOut: EasingFunction
+    --- Bouncing ease-in-out.
     bounceInOut: EasingFunction
+    --- Bouncing ease-out-in.
     bounceOutIn: EasingFunction
 
+    --- Target one numeric field.
     field: function(component: Component, fieldName: string): Target
+    --- Target two numeric fields together.
     field2: function(component: Component, fieldA: string, fieldB: string): Target
+    --- Target an angle using the shortest rotation.
     angle: function(component: Component, fieldName: string): Target
+    --- Infer a scalar or pair target from one or two field names.
     target: function(component: Component, field: string | {string}): Target
+    --- Track fields on the tweened entity.
     sourceSelf: function(component: Component, field: string | {string}): TrackSource
+    --- Track fields on the entity registered under a world key.
     sourceKey: function(key: string, component: Component, field: string | {string}): TrackSource
+    --- Track fields selected by the entity's TrackingTarget component.
     sourceTrackingTarget: function(component: Component, field: string | {string}): TrackSource
+    --- Track fields on the target of a relationship component.
     sourceRelationship: function(relationship: Component, component: Component, field: string | {string}): TrackSource
 
+    --- Built-in Transform.x target.
     translateX: Target
+    --- Built-in Transform.y target.
     translateY: Target
+    --- Built-in Transform x/y target.
     translateXY: Target
+    --- Built-in Transform.rotation target.
     rotation: Target
+    --- Built-in shortest-path Transform.rotation target.
     rotationShortest: Target
+    --- Built-in Transform.scaleX target.
     scaleX: Target
+    --- Built-in Transform.scaleY target.
     scaleY: Target
+    --- Built-in Transform scale x/y target.
     scaleXY: Target
+    --- Built-in Color alpha target.
     alpha: Target
+    --- Built-in Color RGBA target.
     color: Target
 
+    --- Animate to absolute target values.
     to: function(
         duration: number, easing: EasingName | EasingFunction, target: TargetName | Target,
         t1: number, t2?: number, t3?: number, t4?: number
     ): TimelineNode
+    --- Animate by relative target deltas.
     adjust: function(
         duration: number, easing: EasingName | EasingFunction, target: TargetName | Target,
         t1: number, t2?: number, t3?: number, t4?: number
     ): TimelineNode
+    --- Animate toward values read continuously from another source.
     track: function(
         duration: number, easing: EasingName | EasingFunction, target: TargetName | Target,
         source: TrackSource
     ): TimelineNode
+    --- Advance the timeline cursor without changing a component.
     wait: function(duration: number): TimelineNode
+    --- Emit a named TweenEvent at the cursor position.
     emit: function(name: string): TimelineNode
+    --- Run a nested timeline.
     run: function(timeline: Timeline, options?: RunOptions): TimelineNode
+    --- Run nodes concurrently.
     parallel: function(...: TimelineNode): TimelineNode
+    --- Compile an authored timeline specification.
     timeline: function(spec: TimelineSpec): Timeline
+    --- Register a snapshot-safe named timeline preset in one world.
     registerPreset: function(world: World, name: string, timeline: Timeline): Timeline
+    --- Play a compiled timeline or named preset on an entity.
     play: function(world: World, entity: integer, timelineOrName: Timeline | string, options?: PlaybackOptions)
+    --- Cancel matching playback; selector may be a channel, preset, or timeline.
     cancel: function(world: World, entity: integer, selector?: ControlSelector)
+    --- Pause matching playback.
     pause: function(world: World, entity: integer, selector?: ControlSelector)
+    --- Resume matching playback.
     resume: function(world: World, entity: integer, selector?: ControlSelector)
+    --- Install tween playback and snapshot integration in a world.
     plugin: function(world: World)
 end
 
@@ -700,7 +821,7 @@ targetApply = function(self: Target,
     d1: number, d2: number, d3: number, d4: number
 )
     resolveTarget(self)
-    local c = world:get(entity, self.component)
+    local c = world:getMut(entity, self.component)
     if not c then return end
     local cany = c as {string:number}
     local f <const> = self.fields
@@ -713,7 +834,6 @@ targetApply = function(self: Target,
         cany[f[3]] = s3 + d3 * t
         cany[f[4]] = s4 + d4 * t
     end
-    world:markComponentDirty(entity, self.component)
 end
 
 function tween.field(component: Component, fieldName: string): Target
@@ -1186,31 +1306,37 @@ local function matchesCursor(world: World, c: Cursor, selector?: ControlSelector
 end
 
 function tween.cancel(world: World, entity: integer, selector?: ControlSelector)
-    local pb = world:getMut(entity, TweenPlayback)
+    local pb = world:get(entity, TweenPlayback)
     if not pb then return end
+    local mutable: TweenPlayback = nil
     for i = 1, #(pb.cursors or {}) do
         if matchesCursor(world, pb.cursors[i], selector) then
-            pb.cursors[i].cancelled = true
+            if not mutable then mutable = world:getMut(entity, TweenPlayback) end
+            mutable.cursors[i].cancelled = true
         end
     end
 end
 
 function tween.pause(world: World, entity: integer, selector?: ControlSelector)
-    local pb = world:getMut(entity, TweenPlayback)
+    local pb = world:get(entity, TweenPlayback)
     if not pb then return end
+    local mutable: TweenPlayback = nil
     for i = 1, #(pb.cursors or {}) do
-        if matchesCursor(world, pb.cursors[i], selector) then
-            pb.cursors[i].paused = true
+        if not pb.cursors[i].paused and matchesCursor(world, pb.cursors[i], selector) then
+            if not mutable then mutable = world:getMut(entity, TweenPlayback) end
+            mutable.cursors[i].paused = true
         end
     end
 end
 
 function tween.resume(world: World, entity: integer, selector?: ControlSelector)
-    local pb = world:getMut(entity, TweenPlayback)
+    local pb = world:get(entity, TweenPlayback)
     if not pb then return end
+    local mutable: TweenPlayback = nil
     for i = 1, #(pb.cursors or {}) do
-        if matchesCursor(world, pb.cursors[i], selector) then
-            pb.cursors[i].paused = false
+        if pb.cursors[i].paused and matchesCursor(world, pb.cursors[i], selector) then
+            if not mutable then mutable = world:getMut(entity, TweenPlayback) end
+            mutable.cursors[i].paused = false
         end
     end
 end
@@ -1434,7 +1560,7 @@ local function targetValuesFromSource(world: World, entity: integer, src: TrackS
         end
         local rel = world:get(entity, src.relationship)
         if not rel then return 0, 0, 0, 0 end
-        sourceEntity = (rel as {string:any}).target as integer
+        sourceEntity = (rel as RelationshipValue).target
     end
     local c = world:get(sourceEntity, src.component)
     if not c then return 0, 0, 0, 0 end
@@ -1742,7 +1868,9 @@ function tween.plugin(world: World)
         local reg <const> = registry(world)
         reg.refcounts = {}
         for archetype, len in playbackQuery:iter() do
-            local playbacks = archetype:getMut(TweenPlayback)
+            -- Rebuilding the registry reads cursor ids but does not mutate
+            -- playback components.
+            local playbacks = archetype:get(TweenPlayback)
             for i = 1, len do
                 local pb = playbacks[i]
                 for j = 1, #(pb.cursors or {}) do

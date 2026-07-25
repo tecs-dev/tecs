@@ -49,7 +49,12 @@ local function getTileAt(self: TilemapData, layerIndex: integer, worldX: number,
 end
 
 -- Get TileData for a tile at given position (returns nil if no tile data)
-local function getTileProperties(self: TilemapData, layerIndex: integer, tileX: integer, tileY: integer): TileData
+local function getTileProperties(
+    self: TilemapData,
+    layerIndex: integer,
+    tileX: integer,
+    tileY: integer
+): TileData | nil
     local gid = getTile(self, layerIndex, tileX, tileY)
     if gid == 0 then
         return nil
@@ -70,7 +75,7 @@ local function getTileProperties(self: TilemapData, layerIndex: integer, tileX: 
 end
 
 -- Get layer properties by index
-local function getLayerProperties(self: TilemapData, layerIndex: integer): {string: any}
+local function getLayerProperties(self: TilemapData, layerIndex: integer): {string: any} | nil
     local layer = self.layers[layerIndex]
     if not layer then
         return nil
@@ -79,7 +84,7 @@ local function getLayerProperties(self: TilemapData, layerIndex: integer): {stri
 end
 
 -- Get layer by name
-local function getLayer(self: TilemapData, name: string): LayerData
+local function getLayer(self: TilemapData, name: string): LayerData | nil
     local layers <const> = self.layers
     for i = 1, #layers do
         if layers[i].name == name then
@@ -865,7 +870,8 @@ function parser.parseTiledMap(data: {string: any}): TilemapData
         tilesets = {},
         properties = parser.parseProperties(data.properties as {{string: any}}),
         _gidToTileset = {},
-        chunkSize = 32
+        -- Render and collision storage use a fixed 16x16 GPU layout.
+        chunkSize = 16
     }
 
     -- Parse tilesets

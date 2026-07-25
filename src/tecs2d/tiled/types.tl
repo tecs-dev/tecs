@@ -6,6 +6,14 @@
 local tecs <const> = require("tecs")
 
 local record types
+    --- Collision generation options retained for runtime tile edits.
+    record CollisionConfig
+        --- Whether collision generation is enabled.
+        enabled: boolean
+        --- Optional filter for including individual tiles.
+        filter: function(tile: TileData, gid: integer, tileX: integer, tileY: integer): boolean
+    end
+
     --- Animation frame within a tile animation.
     record Frame
         tileid: integer      -- Local tile ID for this frame
@@ -170,17 +178,19 @@ local record types
 
         -- Runtime state
         _gidToTileset: {integer: TilesetData}  -- Cache for GID lookups
-        _world: any  -- ECS world reference for TileChunk dirty marking
-        _physicsWorld: any  -- Box2D physics world for collision rebuild
-        _collisionConfig: any  -- Collision config for rebuild
+        _world: tecs.World  -- ECS world reference for TileChunk dirty marking
+        _physicsWorld: love.physics.World  -- Box2D physics world for collision rebuild
+        _collisionConfig: CollisionConfig  -- Collision config for rebuild
         -- Tilemap entity Transform position at load time; collision
         -- bodies are created at this origin so physics geometry lands
         -- where the map renders.
         _collisionOriginX: number
         _collisionOriginY: number
 
-        -- Chunk configuration
-        chunkSize: integer       -- Tiles per chunk side (default 32)
+        -- Fixed render/collision chunk size. Retained as data for callers
+        -- that inspect map metadata; changing it does not reconfigure the
+        -- GPU layout.
+        chunkSize: integer
 
         -- Methods
         worldToTile: function(self, worldX: number, worldY: number): integer, integer
@@ -192,9 +202,9 @@ local record types
         toJSON: function(self, pretty: boolean): string
 
         -- Property access methods
-        getTileProperties: function(self, layerIndex: integer, tileX: integer, tileY: integer): TileData
-        getLayerProperties: function(self, layerIndex: integer): {string: any}
-        getLayer: function(self, name: string): LayerData
+        getTileProperties: function(self, layerIndex: integer, tileX: integer, tileY: integer): TileData | nil
+        getLayerProperties: function(self, layerIndex: integer): {string: any} | nil
+        getLayer: function(self, name: string): LayerData | nil
     end
 
     --- Component that associates a sprite with its source tile data.

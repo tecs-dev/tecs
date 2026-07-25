@@ -807,8 +807,6 @@ function chunk.spawnImageLayerEntities(
             -- Create sprite from texture (cast Image to Texture for type checker)
             local sprite = gfx.Sprite.fromTexture(layer._image as love.graphics.Texture, {
                 centered = false,  -- Top-left origin like original render
-                pivotX = 0,
-                pivotY = 0,
             })
 
             -- Build component list

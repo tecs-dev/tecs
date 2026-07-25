@@ -192,7 +192,7 @@ local record types
         update: function(self, dt: number)
 
         --- Register an AudioSource component's source for group operations.
-        --- @param source The LÖVE audio source.
+        --- @param source The Love audio source.
         --- @param group The sound group name.
         --- @param baseVolume The base volume for the source.
         --- @param audioSrc The owning AudioSource component (used by stopAll()
@@ -202,21 +202,21 @@ local record types
         --- Refresh a registered component source's mutable state (volume,
         --- group, looping, attenuation). Called each frame by the audio
         --- plugin so gameplay mutations on AudioSource take effect.
-        --- @param source The LÖVE audio source.
+        --- @param source The Love audio source.
         --- @param audioSrc The component with current field values.
         refreshComponentSource: function(self, source: love.audio.Source, audioSrc: AudioSource)
 
         --- Unregister an AudioSource component's source.
-        --- @param source The LÖVE audio source.
+        --- @param source The Love audio source.
         unregisterComponentSource: function(self, source: love.audio.Source)
 
         --- Check if a component source should play (not paused by group).
-        --- @param source The LÖVE audio source.
+        --- @param source The Love audio source.
         --- @return True if the source should play.
         shouldComponentSourcePlay: function(self, source: love.audio.Source): boolean
 
         --- Check if a component source is currently fading.
-        --- @param source The LÖVE audio source.
+        --- @param source The Love audio source.
         --- @return True if the source is fading.
         isComponentSourceFading: function(self, source: love.audio.Source): boolean
 

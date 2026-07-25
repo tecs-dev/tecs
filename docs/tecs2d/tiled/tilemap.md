@@ -24,7 +24,8 @@ world:spawn(
 
 Either `path` or `data` should be provided:
 
-- **`path`**: The component loads the map synchronously on first render. Simple but may cause frame drops.
+- **`path`**: The component loads the map synchronously during its first `First` phase update. Simple but may cause
+  frame drops.
 - **`data`**: Use pre-loaded data from [`loadTiledMap`](/tecs2d/assets/api#loadtiledmap). No loading delay.
 
 ## Required Components

@@ -169,7 +169,7 @@ function tween.sourceRelationship(
 ```
 
 `sourceSelf` reads the animated entity. `sourceKey` resolves a durable ECS key.
-`sourceTrackingTarget` reads the entity or key in `TweenTrackingTarget`.
+`sourceTrackingTarget` reads the entity or key in `TrackingTarget`.
 `sourceRelationship` follows an ECS relationship and reads its target entity.
 
 ### `wait`

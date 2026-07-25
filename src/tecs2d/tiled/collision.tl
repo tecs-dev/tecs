@@ -16,22 +16,20 @@ local getCleanGid <const> = tileset_utils.getCleanGid
 local getTilesetForGid <const> = tileset_utils.getTilesetForGid
 
 local type TilemapData = types.TilemapData
-local type TileData = types.TileData
 local type LayerData = types.LayerData
 local type ObjectData = types.ObjectData
 
 local lp <const> = love.physics
 
--- Type aliases for Box2D objects (to work with 'any' physics world)
+-- Local aliases keep collision signatures compact.
 local type PhysicsWorld = love.physics.World
 local type PhysicsBody = love.physics.Body
 
---- Configuration for collision generation.
-local record CollisionConfig
-    --- Whether collision is enabled (default: false)
-    enabled: boolean
-    --- Optional filter function to include/exclude tiles
-    filter: function(tile: TileData, gid: integer, tileX: integer, tileY: integer): boolean
+local type CollisionConfig = types.CollisionConfig
+
+-- Love 12 API missing from the bundled declaration at the time of writing.
+local interface BodyWithShapes
+    getShapes: function(self): {love.physics.Shape}
 end
 
 --- An edge in 2D space with direction.
@@ -517,8 +515,7 @@ function collision.createChunkCollider(
 
     -- Check if body has any shapes; if not, destroy and return nil
     -- Note: getShapes is the Love2D 12 replacement for deprecated getFixtures
-    local getShapes = (body as {string: any}).getShapes as function(any): {any}
-    local shapes = getShapes(body)
+    local shapes = (body as BodyWithShapes):getShapes()
     if #shapes == 0 then
         body:destroy()
         return nil

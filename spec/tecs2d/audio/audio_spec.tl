@@ -1,7 +1,6 @@
 require("busted")
 
 local luassert <const> = require("luassert")
-local tecs_assets <const> = require("tecs2d.assets")
 local workers <const> = require("tecs2d.workers")
 
 -- Mock love.audio before loading tecs2d.audio
@@ -150,9 +149,11 @@ end
 local listenerX: number = 0
 local listenerY: number = 0
 local listenerZ: number = 0
+local acceptEffects = true
 
 local record AudioMock
     setPosition: function(x: number, y: number, z: number)
+    setEffect: function(name: string, settings: {string:any} | boolean): boolean
 end
 
 local record LoveMock
@@ -162,7 +163,10 @@ end
 local mockAudio: AudioMock = {
     setPosition = function(x: number, y: number, z: number)
         listenerX, listenerY, listenerZ = x, y, z
-    end
+    end,
+    setEffect = function(_name: string, _settings: {string:any} | boolean): boolean
+        return acceptEffects
+    end,
 }
 
 local globalEnv = _G as {string: LoveMock}
@@ -390,6 +394,22 @@ describe("tecs2d.audio", function()
 
                 local played = audio:play(handle, { pitch = 1.5 })
                 luassert.equals(1.5, (played as MockSource):getPitch())
+            end)
+
+        end)
+
+        describe("Effects", function()
+
+            it("does not retain an effect definition rejected by Love", function()
+                local audio = manager.new()
+                acceptEffects = false
+                audio:setGroupEffect("sfx", "reverb", {})
+
+                local source = createMockSource()
+                local played = audio:play(createMockHandle(source), { group = "sfx" })
+                acceptEffects = true
+
+                luassert.is_nil((played as MockSource)._effects["sfx_reverb"])
             end)
 
         end)

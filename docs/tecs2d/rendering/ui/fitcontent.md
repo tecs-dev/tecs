@@ -35,10 +35,10 @@ world:spawn(
 | Field               | Type    | Description                             |
 | ------------------- | ------- | --------------------------------------- |
 | `padding`           | number  | Uniform padding on all sides            |
-| `paddingTop`        | number  | Top padding (overrides uniform)         |
-| `paddingRight`      | number  | Right padding (overrides uniform)       |
-| `paddingBottom`     | number  | Bottom padding (overrides uniform)      |
-| `paddingLeft`       | number  | Left padding (overrides uniform)        |
+| `paddingTop`        | number  | Positive top padding (otherwise uses uniform)    |
+| `paddingRight`      | number  | Positive right padding (otherwise uses uniform)  |
+| `paddingBottom`     | number  | Positive bottom padding (otherwise uses uniform) |
+| `paddingLeft`       | number  | Positive left padding (otherwise uses uniform)   |
 | `adjustComponentId` | integer | Component to update with new dimensions |
 | `fitWidth`          | boolean | Fit the container and adjusted width    |
 | `fitHeight`         | boolean | Fit the container and adjusted height   |

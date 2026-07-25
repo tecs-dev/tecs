@@ -1,6 +1,7 @@
 local tecs <const> = require("tecs")
 local manager <const> = require("tecs2d.audio.internal.manager")
 local types <const> = require("tecs2d.audio.internal.types")
+local assetTypes <const> = require("tecs2d.assets.types")
 
 local Transform <const> = tecs.builtins.Transform
 
@@ -78,10 +79,12 @@ audio.AudioSource = tecs.newComponent({
         if not handle then return nil end
         local assets_module <const> = require("tecs2d.assets")
         local descriptor = assets_module.describe(handle)
-        if not descriptor or descriptor.action ~= "loadAudio" then return nil end
-        local args = descriptor.args
+        if not descriptor then return nil end
+        local audioDescriptor = descriptor as assetTypes.AssetDescriptor
+        if audioDescriptor.action ~= "loadAudio" then return nil end
+        local args = audioDescriptor.args
         return {
-            path          = descriptor.inputPath,
+            path          = audioDescriptor.inputPath,
             sourceType    = args and args[1] or "static",
             streamType    = args and args[2] or nil,
             group         = src.group,
@@ -162,7 +165,7 @@ function audio.plugin(): tecs.Plugin
         })
 
         -----------------------------------------------------------------------
-        --- Helper: Teardown a component source (stop, unregister, clear).
+        -- Helper: Teardown a component source (stop, unregister, clear).
         -----------------------------------------------------------------------
         local function teardownSource(audioSrc: types.AudioSource)
             local src = audioSrc._source
@@ -205,7 +208,7 @@ function audio.plugin(): tecs.Plugin
         })
 
         -----------------------------------------------------------------------
-        --- Helper: Initialize a source from an AudioSource component
+        -- Helper: Initialize a source from an AudioSource component
         -----------------------------------------------------------------------
         local function initializeSource(audioSrc: types.AudioSource, isRelative: boolean)
             if not audioSrc.handle or not audioSrc.handle.isComplete then return end
@@ -226,10 +229,10 @@ function audio.plugin(): tecs.Plugin
         end
 
         -----------------------------------------------------------------------
-        --- Helper: If the component's group or relative flag changed since
-        --- last init, tear down and re-initialize. Other mutable fields
-        --- (volume, looping, attenuation) flow through refreshComponentSource
-        --- each frame and don't require a re-init.
+        -- Helper: If the component's group or relative flag changed since
+        -- last init, tear down and re-initialize. Other mutable fields
+        -- (volume, looping, attenuation) flow through refreshComponentSource
+        -- each frame and don't require a re-init.
         -----------------------------------------------------------------------
         local function reinitIfStructuralChange(audioSrc: types.AudioSource, isRelative: boolean)
             if not audioSrc._source then return end
@@ -243,16 +246,16 @@ function audio.plugin(): tecs.Plugin
         end
 
         -----------------------------------------------------------------------
-        --- Helper: Apply pitch with optional variance. The variance offset
-        --- is rolled once per (re)trigger in updatePlayState and held for
-        --- the whole playback.
+        -- Helper: Apply pitch with optional variance. The variance offset
+        -- is rolled once per (re)trigger in updatePlayState and held for
+        -- the whole playback.
         -----------------------------------------------------------------------
         local function applyPitch(audioSrc: types.AudioSource)
             audioSrc._source:setPitch(audioSrc.pitch + (audioSrc._pitchOffset or 0))
         end
 
         -----------------------------------------------------------------------
-        --- Helper: Update play state based on component and manager state
+        -- Helper: Update play state based on component and manager state
         -----------------------------------------------------------------------
         local function updatePlayState(audioSrc: types.AudioSource)
             local src = audioSrc._source
@@ -277,8 +280,31 @@ function audio.plugin(): tecs.Plugin
             end
         end
 
+        -- Return true only when the next sync can mutate AudioSource state.
+        -- Manager/source refreshes touch Love objects and manager bookkeeping,
+        -- not the ECS component.
+        local function needsSourceMutation(audioSrc: types.AudioSource, isRelative: boolean): boolean
+            if audioSrc.handle.isComplete and not audioSrc.handle.err and not audioSrc._source then
+                return true
+            end
+            local src = audioSrc._source
+            if not src then return false end
+            if audioSrc._appliedGroup ~= audioSrc.group
+                    or audioSrc._appliedRelative ~= isRelative then
+                return true
+            end
+            local canPlay = audioManager:shouldComponentSourcePlay(src)
+            local isFading = audioManager:isComponentSourceFading(src)
+            if audioSrc.playing and canPlay and not src:isPlaying() then
+                return true
+            end
+            return not isFading
+                and (not audioSrc.playing or not canPlay)
+                and src:isPlaying()
+        end
+
         -----------------------------------------------------------------------
-        --- System: Update Listener
+        -- System: Update Listener
         -----------------------------------------------------------------------
         world:addSystem({
             name = "audio.UpdateListener",
@@ -302,12 +328,12 @@ function audio.plugin(): tecs.Plugin
         })
 
         -----------------------------------------------------------------------
-        --- System: Update AudioSources (positional)
+        -- System: Update AudioSources (positional)
         -----------------------------------------------------------------------
         -----------------------------------------------------------------------
-        --- Helper: Per-frame sync for a relative (non-positional) source:
-        --- init when the handle completes, re-init on structural change, then
-        --- refresh mutable fields and play state.
+        -- Helper: Per-frame sync for a relative (non-positional) source:
+        -- init when the handle completes, re-init on structural change, then
+        -- refresh mutable fields and play state.
         -----------------------------------------------------------------------
         local function updateRelativeSource(audioSrc: types.AudioSource)
             if audioSrc.handle.isComplete and not audioSrc._source then
@@ -324,22 +350,30 @@ function audio.plugin(): tecs.Plugin
         end
 
         -----------------------------------------------------------------------
-        --- System: Update AudioSources with a Transform. Relative rows take
-        --- the non-positional path in the same iteration, so the query is
-        --- only walked once per frame.
+        -- System: Update AudioSources with a Transform. Relative rows take
+        -- the non-positional path in the same iteration, so the query is
+        -- only walked once per frame.
         -----------------------------------------------------------------------
         world:addSystem({
             name = "audio.UpdateSources",
             phase = tecs.phases.PostUpdate,
             run = function(_dt: number)
                 for archetype, len in sourceQuery:iter() do
-                    local sources = archetype:getMut(audio.AudioSource)
+                    local sources = archetype:get(audio.AudioSource)
+                    local mutSources: {types.AudioSource} = nil
                     local transforms = archetype:get(Transform)
 
                     for i = 1, len do
                         local audioSrc = sources[i]
+                        local isRelative = audioSrc.relative
+                        if needsSourceMutation(audioSrc, isRelative) then
+                            if not mutSources then
+                                mutSources = archetype:getMut(audio.AudioSource)
+                            end
+                            audioSrc = mutSources[i]
+                        end
 
-                        if audioSrc.relative then
+                        if isRelative then
                             updateRelativeSource(audioSrc)
                             goto continue
                         end
@@ -368,24 +402,32 @@ function audio.plugin(): tecs.Plugin
         })
 
         -----------------------------------------------------------------------
-        --- System: Update AudioSources without a Transform (always relative)
+        -- System: Update AudioSources without a Transform (always relative)
         -----------------------------------------------------------------------
         world:addSystem({
             name = "audio.UpdateRelativeSources",
             phase = tecs.phases.PostUpdate,
             run = function(_dt: number)
                 for archetype, len in relativeSourceQuery:iter() do
-                    local sources = archetype:getMut(audio.AudioSource)
+                    local sources = archetype:get(audio.AudioSource)
+                    local mutSources: {types.AudioSource} = nil
 
                     for i = 1, len do
-                        updateRelativeSource(sources[i])
+                        local audioSrc = sources[i]
+                        if needsSourceMutation(audioSrc, true) then
+                            if not mutSources then
+                                mutSources = archetype:getMut(audio.AudioSource)
+                            end
+                            audioSrc = mutSources[i]
+                        end
+                        updateRelativeSource(audioSrc)
                     end
                 end
             end
         })
 
         -----------------------------------------------------------------------
-        --- System: Cleanup
+        -- System: Cleanup
         -----------------------------------------------------------------------
         world:addSystem({
             name = "audio.Cleanup",
@@ -396,7 +438,7 @@ function audio.plugin(): tecs.Plugin
         })
 
         -----------------------------------------------------------------------
-        --- System: Shutdown
+        -- System: Shutdown
         -----------------------------------------------------------------------
         world:addSystem({
             name = "audio.Shutdown",
