@@ -2430,7 +2430,7 @@ restart
 
 Quit the game.
 
-Quit the game process via a LÖVE quit event. Unsaved state is lost and the MCP connection drops. Take cmd_snapshot_save first if the state matters.
+Quit the game process via a Love quit event. Unsaved state is lost and the MCP connection drops. Take cmd_snapshot_save first if the state matters.
 
 MCP tool: `cmd_quit` (destructive)
 

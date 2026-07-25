@@ -22,11 +22,27 @@ local stats <const> = require("tecs2d.debug.internal.stats")
 local toolworld <const> = require("tecs2d.debug.internal.toolworld")
 
 local record debugplugin
+    enum LeaderKey
+        "ctrl"
+        "alt"
+        "shift"
+        "gui"
+        "cmd"
+        "super"
+    end
+
+    enum RecordingFrameFormat
+        "png"
+        "tga"
+        "jpg"
+        "bmp"
+    end
+
     --- Debug plugin configuration.
     record Config
         --- Modifier held with a toggle key: "ctrl" (default), "alt", "shift",
         --- or "gui"/"cmd"/"super".
-        leaderKey: string
+        leaderKey: LeaderKey
 
         --- Key that, with the leader, toggles the modal debugger (default "/").
         debugToggleKey: string
@@ -61,7 +77,7 @@ local record debugplugin
         recordingScale: number
 
         --- Captured image format: "png" (default), "tga", "jpg", or "bmp".
-        recordingFrameFormat: string
+        recordingFrameFormat: RecordingFrameFormat
 
         --- Max frames in flight before dropping (default 8).
         recordingRingSize: integer

@@ -1,4 +1,4 @@
---- Frame-scheduled LÖVE event injection: the input tape. Rows of
+--- Frame-scheduled Love event injection: the input tape. Rows of
 --- {at, event, args} -- literal love event shapes -- dispatch through the
 --- exact path real events take (tecs2d.internal.handlers.dispatch), on
 --- GAMEPLAY frames: the tape's consumer system runs in phases.First, which
@@ -186,7 +186,7 @@ function TapeImpl.queue(self: inputtape.Tape, rows: {{string: any}}, force: bool
         end
         if type(event) ~= "string" or inputHandlers.handlers[event] == nil then
             return nil, "row " .. i .. ": unknown event '" .. tostring(event)
-                .. "' (any LÖVE event name the game handles, e.g. keypressed)"
+                .. "' (any Love event name the game handles, e.g. keypressed)"
         end
         if UNTAPEABLE[event] then
             return nil, "row " .. i .. ": '" .. event .. "' needs a device object "

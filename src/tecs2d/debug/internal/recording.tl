@@ -19,7 +19,7 @@ local record recording
         countdown: number
         fps: integer
         scale: number         -- output scale multiplier, 0 < scale (default 1)
-        frameFormat: string   -- captured image format: "png" (default) | "tga" | "jpg"
+        frameFormat: string   -- captured image format: "png" (default) | "tga" | "jpg" | "bmp"
         ringSize: integer      -- max frames in flight before dropping (default 8)
     end
 

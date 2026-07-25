@@ -328,7 +328,7 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             name = "quit",
             section = "Session",
             shortHelp = "quit the game",
-            mcpHelp = "Quit the game process via a LÖVE quit event. Unsaved state is lost and the MCP connection drops. Take cmd_snapshot_save first if the state matters.",
+            mcpHelp = "Quit the game process via a Love quit event. Unsaved state is lost and the MCP connection drops. Take cmd_snapshot_save first if the state matters.",
             outputSchema = {
                 type = "object",
                 properties = {

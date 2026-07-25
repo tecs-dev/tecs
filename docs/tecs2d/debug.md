@@ -592,7 +592,7 @@ world:addPlugin(debug.new({
     -- Default output scale multiplier (default 1).
     recordingScale = 1,
 
-    -- Captured image format: "png" (default), "tga", or "jpg".
+    -- Captured image format: "png" (default), "tga", "jpg", or "bmp".
     recordingFrameFormat = "png",
 
     -- Max frames in flight before dropping (default 8).

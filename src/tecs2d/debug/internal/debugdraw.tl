@@ -205,7 +205,7 @@ end
 
 local function fontAtSize(size: number): DebugFont
     local parsed = metrics()
-    -- Match LÖVE's newFont(size) convention: size selects the face size,
+    -- Match Love's newFont(size) convention: size selects the face size,
     -- while getHeight() reports the scaled line height. Treating size as the
     -- line height made this font's 28px x-height only 8px tall at size 15.
     local scale = size / parsed.size
@@ -234,15 +234,19 @@ function DebugFont:getWidth(text: string): number
             previous = nil
         elseif codepoint == 9 then
             local space = self.metrics:getChar(32)
-            if space then cursor = cursor + space.xadvance * self.scale * 4 end
+            if space then
+                cursor = cursor
+                    + (space as bmfont.BMFontChar).xadvance * self.scale * 4
+            end
             previous = nil
         elseif codepoint >= 32 then
             local char = self.metrics:getChar(codepoint)
             if char then
+                local glyph = char as bmfont.BMFontChar
                 if previous then
                     cursor = cursor + self.metrics:getKerning(previous, codepoint) * self.scale
                 end
-                cursor = cursor + char.xadvance * self.scale
+                cursor = cursor + glyph.xadvance * self.scale
                 previous = codepoint
             end
         end
