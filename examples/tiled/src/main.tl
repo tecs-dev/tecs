@@ -39,7 +39,6 @@ local function demoPlugin(world: tecs.World)
     lp.setMeter(TILE_SIZE * 2)
     world:addPlugin(physics.new({
         world = lp.newWorld(0, 0, true),  -- No gravity for top-down
-        debug = false,
     }))
 
     local pipeline = world.resources[gfx.PIPELINE] as gfx.Pipeline

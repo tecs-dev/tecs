@@ -165,21 +165,20 @@ render pipeline so they respect camera zoom and position:
 local gfx = require("tecs2d.gfx")
 local physics = require("tecs2d.physics")
 
--- Initialize physics with debug enabled
 world:addPlugin(physics.new({
     world = love.physics.newWorld(0, 300, true),
-    debug = true,  -- Enable debug state
 }))
 
 -- Add physics debug rendering
-world:addPlugin(gfx.physicsDebug.new())
+world:addPlugin(gfx.physicsDebug.new({
+    enabled = true,
+}))
 ```
 
 Toggle debug rendering at runtime:
 
 ```teal
-local state = world.resources[physics]
-state.debug = not state.debug  -- Toggle on/off
+world:emit(0, gfx.PhysicsDebugToggle())
 ```
 
 ## Example
@@ -194,7 +193,6 @@ local function gamePlugin(world)
     -- Initialize physics first
     world:addPlugin(physics.new({
         world = love.physics.newWorld(0, 300, true),
-        debug = false,
     }))
 
     -- Optional: Add physics debug rendering

@@ -97,11 +97,12 @@ Toggle debug drawing at runtime by emitting the `PhysicsDebugToggle` event:
 world:emit(0, gfx.PhysicsDebugToggle)
 ```
 
-Debug shapes are drawn on layer 15 and appear on top of game graphics. The debug plugin accepts optional RGBA color
-configuration:
+Debug shapes are drawn on layer 15 and appear on top of game graphics. The debug plugin accepts an initial enabled
+state and optional RGBA color configuration:
 
 ```teal
 world:addPlugin(gfx.physicsDebug.new({
+    enabled = true,
     r = 1.0,
     g = 0.0,
     b = 0.0,

@@ -83,9 +83,9 @@ local function gamePlugin(world: tecs.World)
         world = love.physics.newWorld(0, 300, true),
     }))
 
-    -- Debug overlay installed but disabled; the collision spec toggles
-    -- it via PhysicsDebugToggle to cover the lazy buffer path.
-    world:addPlugin(gfx.physicsDebug.new())
+    -- Start enabled so the collision spec covers the renderer-owned option
+    -- as well as runtime toggling.
+    world:addPlugin(gfx.physicsDebug.new({enabled = true}))
 
     local pipeline = world.resources[gfx.PIPELINE] as gfx.Pipeline
     pipeline:getCamera():setPosition(160, 120)

@@ -140,10 +140,7 @@ local function box2dExamplePlugin(w: tecs.World)
 
             -- Toggle debug draw
             if input.isKeyPressed("f2") then
-                local physicsState = world.resources[physics]
-                if physicsState then
-                    physicsState.debug = not physicsState.debug
-                end
+                world:emit(0, gfx.PhysicsDebugToggle())
             end
 
             if input.isMouseDown(1) and spawnCooldown <= 0 then

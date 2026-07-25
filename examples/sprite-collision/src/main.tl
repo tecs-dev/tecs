@@ -194,10 +194,7 @@ local function examplePlugin(w: tecs.World)
             end
 
             if input.isKeyPressed("f2") then
-                local physicsState = w.resources[physics]
-                if physicsState then
-                    physicsState.debug = not physicsState.debug
-                end
+                w:emit(0, gfx.PhysicsDebugToggle())
             end
 
         end,

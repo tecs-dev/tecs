@@ -45,18 +45,13 @@ describe("tiled collision: geometry follows the tilemap Transform", function()
         luassert.is_true(ok == true, "floor tiles not rendered at the offset position")
     end)
 
-    it("physics debug overlay draws on toggle and clears on re-toggle", function()
+    it("physics debug overlay honors its initial state and runtime toggles", function()
         -- The floor collider's top edge runs along world y=128. The debug
         -- overlay draws red outlines (default color r=1); the tile under
-        -- it is green. Buffers allocate lazily on the first enabled frame,
-        -- so this exercises that path end to end.
+        -- it is green. The fixture starts debug rendering enabled, so this
+        -- also exercises lazy buffer allocation end to end.
         local EDGE_PROBE = {{248 / 320, 128 / 240}}
 
-        fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
-            world:emit(0, gfx.PhysicsDebugToggle())
-            return true
-        ]])
         local lastR, lastG, lastB = 0, 0, 0
         local drawn = fixture.eventually(fixture.callTimeout, function(): boolean
             local p = fixture.probePixels(app, EDGE_PROBE)[1]
@@ -79,6 +74,18 @@ describe("tiled collision: geometry follows the tilemap Transform", function()
             return nil
         end)
         luassert.is_true(cleared == true, "debug overlay did not clear after toggling off")
+
+        fixture.runLua(app, [[
+            local gfx = require("tecs2d.gfx")
+            world:emit(0, gfx.PhysicsDebugToggle())
+            return true
+        ]])
+        local redrawn = fixture.eventually(fixture.callTimeout, function(): boolean
+            local p = fixture.probePixels(app, EDGE_PROBE)[1]
+            if p[1] > 0.75 then return true end
+            return nil
+        end)
+        luassert.is_true(redrawn == true, "debug overlay did not redraw after toggling on")
     end)
 
     it("debug map reports the tilemap and reads tiles at a point", function()

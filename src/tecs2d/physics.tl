@@ -467,9 +467,6 @@ local record physics is tecs.Key<physics.PhysicsState>
         contactFilter: ContactFilterFn
         --- Default for RigidBody.fixedRotation when not specified. Defaults to false.
         defaultFixedRotation: boolean
-        --- Deprecated compatibility flag. The physics plugin does not draw;
-        --- install `gfx.physicsDebug` for collision visualization.
-        debug: boolean
         --- Transform smoothing mode: "interpolate" (default), "extrapolate", or "disabled" (direct).
         smoothing: SmoothingMode
     end
@@ -479,8 +476,6 @@ local record physics is tecs.Key<physics.PhysicsState>
         world: love.physics.World
         --- Default used for RigidBody values that omit fixedRotation.
         defaultFixedRotation: boolean
-        --- Legacy debug flag. Rendering debug shapes is handled by gfx.physicsDebug.
-        debug: boolean
         --- Active transform smoothing mode.
         smoothing: SmoothingMode
     end
@@ -549,7 +544,6 @@ function physics.new(config: physics.Config): tecs.Plugin
         defaultFixedRotation = config.defaultFixedRotation
     end
     local contactFilterFn = config.contactFilter or defaultContactFilter
-    local debugDraw = config.debug or false
     local smoothing = config.smoothing == nil and "interpolate" or config.smoothing
     if smoothing ~= "interpolate" and smoothing ~= "extrapolate" and smoothing ~= "disabled" then
         error("physics.new: invalid smoothing mode '" .. tostring(smoothing)
@@ -560,7 +554,6 @@ function physics.new(config: physics.Config): tecs.Plugin
         local state: physics.PhysicsState = {
             world = physicsWorld,
             defaultFixedRotation = defaultFixedRotation,
-            debug = debugDraw,
             smoothing = smoothing
         }
         world.resources[physics] = state

@@ -58,9 +58,15 @@ end
 
 local record physicsDebug
     record Options
+        --- Whether debug drawing starts enabled. Defaults to false.
+        enabled: boolean
+        --- Red channel. Defaults to 1.
         r: number
+        --- Green channel. Defaults to 0.
         g: number
+        --- Blue channel. Defaults to 0.
         b: number
+        --- Alpha channel. Defaults to 0.8.
         a: number
     end
 
@@ -81,6 +87,7 @@ function physicsDebug.new(options?: physicsDebug.Options): tecs.Plugin
     local cg = options and options.g or 0.0
     local cb = options and options.b or 0.0
     local ca = options and options.a or 0.8
+    local startsEnabled = options and options.enabled or false
 
     return function(world: tecs.World)
         local physicsState = world.resources[physics]
@@ -94,7 +101,7 @@ function physicsDebug.new(options?: physicsDebug.Options): tecs.Plugin
         end
 
         local physicsWorld = physicsState.world
-        local enabled = physicsState.debug or false
+        local enabled = startsEnabled
 
         -- Mesh buffer state, allocated lazily on the first enabled frame
         -- so installing the plugin costs no VRAM or RAM until the debug
