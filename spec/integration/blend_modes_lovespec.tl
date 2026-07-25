@@ -60,7 +60,7 @@ describe("blend modes: forward-blend composites over the lit scene", function()
             world:spawn(Transform(260, 120, 0.5, 2),
                 gfx.Circle(20), gfx.Color(1, 0, 0, 1))
 
-            -- Second row: lighten and darken (LÖVE requires these run
+            -- Second row: lighten and darken (Love requires these run
             -- premultiplied; the non-premul tags must not crash)
             for _, x in ipairs({60, 160}) do
                 world:spawn(Transform(x, 195, 0, 1),

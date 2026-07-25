@@ -1,4 +1,4 @@
---- MCP compliance fixture: a tiny deterministic LÖVE app driven by the
+--- MCP compliance fixture: a tiny deterministic Love app driven by the
 --- love2d integration suite over the tecs2d MCP HTTP server.
 ---
 --- The scene is one red 80x80 rectangle centered in a 320x240 window with

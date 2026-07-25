@@ -16,11 +16,11 @@ Everything lands in `dist/`:
 
 | Artifact | Contents |
 | -------- | -------- |
-| `<name>.love` | `build/` zipped; runs on an installed LÖVE 12 |
-| `<name>-macos.zip` | A self-contained app bundle: the LÖVE runtime with the game embedded and a rebranded `Info.plist`. Unzip, double-click, play |
-| `<name>-windows.zip` | A folder with `<name>.exe` (LÖVE fused with the game), LÖVE's DLLs, and its license |
+| `<name>.love` | `build/` zipped; runs on an installed Love 12 |
+| `<name>-macos.zip` | A self-contained app bundle: the Love runtime with the game embedded and a rebranded `Info.plist`. Unzip, double-click, play |
+| `<name>-windows.zip` | A folder with `<name>.exe` (Love fused with the game), Love's DLLs, and its license |
 
-The LÖVE runtime comes from the launcher cache when present and is
+The Love runtime comes from the launcher cache when present and is
 downloaded once otherwise. Windows packages build on any host, because
 fusing is byte concatenation. The macOS bundle needs macOS or Linux, since
 the app's framework symlinks require a POSIX filesystem.

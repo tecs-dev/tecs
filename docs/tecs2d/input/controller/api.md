@@ -25,7 +25,7 @@ type JoystickConfig = {
 
 - `joystick`: A specific Love2D joystick/gamepad to assign to the controller
 - `auto`: Enable automatic gamepad assignment (default: false)
-  - When `true`: Auto-assigns available gamepads, prioritizes controllers with activity
+  - When `true`: Auto-assigns available gamepads, prioritizing a joystick with current activity
   - When `false`: Manual assignment only
 - `deadzone`: Minimum axis value to register as input (prevents stick drift)
 

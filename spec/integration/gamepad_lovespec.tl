@@ -1,5 +1,5 @@
 --- Love2D integration suite: gamepad input via an SDL3 virtual device.
---- LÖVE 12 bundles SDL3 (ABI-stable since 3.2), whose virtual joystick
+--- Love 12 bundles SDL3 (ABI-stable since 3.2), whose virtual joystick
 --- API creates a device indistinguishable from real hardware at every
 --- layer above SDL. A LuaJIT FFI shim attaches a virtual gamepad from
 --- inside the fixture app and puppets its buttons and axes, covering

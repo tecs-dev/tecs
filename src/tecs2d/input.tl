@@ -279,13 +279,13 @@ local record input
     --- @return The input state for the joystick.
     getJoystick: function(joystick: love.joystick.Joystick): JoystickInput
 
-    --- Internal raw joystick state used by LÖVE handlers and device management.
+    --- Internal raw joystick state used by Love handlers and device management.
     getRawJoystick: function(joystick: love.joystick.Joystick): JoystickInput
 
     --- Bind the world used by the base event target.
     bindWorld: function(world: tecs.World)
 
-    --- Route one LÖVE interaction to raw observers and the current top target.
+    --- Route one Love interaction to raw observers and the current top target.
     route: function<E is tecs.Event>(world: tecs.World, event: E, ...: any)
 
     --- Mark latched events as dirty so they'll be cleared after the next fixed update.

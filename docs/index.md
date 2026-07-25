@@ -24,7 +24,7 @@ features:
   - title: ECS built for LuaJIT
     details: Tecs is a fast, <a href="/tecs/">archetype-based ECS</a> with easy to create LuaJIT FFI components, handling 4M entities at 200 FPS.<sup>[1]</sup>
     icon: ⚡
-  - title: "LÖVE2D on the GPU"
+  - title: "Love2D on the GPU"
     details: Tecs2D provides GPU-driven culling, cameras, materials, lighting, and <a href="https://www.love2d.org/wiki/12.0">indirect rendering</a> for absurd on-screen scale.
     icon:
       src: /images/love2d-logo.svg
@@ -38,7 +38,7 @@ features:
 ## Install Tecs CLI
 
 The Tecs CLI includes the compiler, engine sources, type definitions, and
-project template. It downloads LÖVE 12 on first use, so you do not need to
+project template. It downloads Love 12 on first use, so you do not need to
 install Lua, LuaRocks, Teal, or a C compiler.
 
 ::: code-group
@@ -181,7 +181,7 @@ end)
 world:emit(0, DamageEvent, enemyId, 25)
 ```
 
-```teal [LÖVE2D]
+```teal [Love2D]
 -- main.tl
 local tecs = require("tecs")
 local tecs2d = require("tecs2d")
@@ -368,8 +368,8 @@ end
 
 **Game Systems**
 
-- [LÖVE integration](/tecs2d/love2d) - game loop, fixed updates, frame pacing, clean restarts, and state-preserving hot reload
-- [LÖVE events](/tecs2d/events) - typed, routable keyboard, mouse, touch, gamepad, window, and system events
+- [Love integration](/tecs2d/love2d) - game loop, fixed updates, frame pacing, clean restarts, and state-preserving hot reload
+- [Love events](/tecs2d/events) - typed, routable keyboard, mouse, touch, gamepad, window, and system events
 - [Input](/tecs2d/input/) - keyboard, mouse, and gamepad polling with layers, latches, and ownership
 - [Controllers](/tecs2d/input/controller/) - rebindable, multi-player controls across input devices
 - [Physics](/tecs2d/physics/) - Box2D bodies, forces, collision events, filtering, and smoothing
@@ -390,12 +390,12 @@ end
 - [Sprites and animation](/tecs2d/rendering/sprites/) - sheets, frame tags, pivots, tiling, and collision slices
 - [Shapes and meshes](/tecs2d/rendering/shapes) - circles, ellipses, rectangles, arcs, lines, and custom geometry
 - [Text](/tecs2d/rendering/text) - GPU-instanced BMFont and MSDF text with effects
-- [Particles](/tecs2d/rendering/particles) - LÖVE particle systems in the render pipeline
+- [Particles](/tecs2d/rendering/particles) - Love particle systems in the render pipeline
 - [Layers](/tecs2d/rendering/layers) - z-ordering, parallax, visibility, lighting, and post-processing
 - [Lighting](/tecs2d/rendering/lighting) - deferred lights, 2.5D shadows, normal maps, emission, and bloom
 - [Materials](/tecs2d/rendering/materials) - per-entity shaders, textures, and vertex displacement
 - [Styling](/tecs2d/rendering/styling) - tinting, blend modes, geometry styles, and pivots
-- [Custom drawing](/tecs2d/rendering/custom-drawing) - world-space, UI, and post-render LÖVE drawing
+- [Custom drawing](/tecs2d/rendering/custom-drawing) - world-space, UI, and post-render Love drawing
 - [Multi-world compositing](/tecs2d/rendering/multi-world) - independent render worlds, cameras, clocks, and cadence
 
 **Tools and Integrations**
@@ -404,7 +404,7 @@ end
 - [Visual debugger](/tecs2d/debug) - freeze, step, rewind, diff, edit, annotate, record, and replay a game
 - [MCP server](/tecs2d/mcp/) - expose debugger queries, commands, screenshots, logs, and live edits to AI agents
 - [Custom debugger commands](/tecs2d/custom-debug-commands) - project-specific typed tools on the shared command surface
-- [Integration testing](/tecs2d/integration-testing) - drive real LÖVE applications and make runtime assertions
+- [Integration testing](/tecs2d/integration-testing) - drive real Love applications and make runtime assertions
 - [Aseprite](/tecs2d/rendering/sprites/sheets) - animations, tags, slices, pivots, collision shapes, and material maps
 - [Tiled](/tecs2d/tiled/) - animated maps, objects, chunks, parallax, tile edits, collisions, shadows, and material maps
 - [Tecs CLI](/cli/) - project creation, type checking, builds, tests, packaging, and agent setup

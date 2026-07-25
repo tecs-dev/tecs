@@ -8,7 +8,7 @@ outline: deep
 The `tecs` command creates, checks, builds, tests, runs, and packages Tecs2D
 projects. It is a self-contained tool: it bundles the Teal compiler, the
 Tecs/Tecs2D sources, type declarations, and a busted test runner, and it
-downloads a cached LÖVE 12 runtime on first use. No Lua, LuaRocks, or
+downloads a cached Love 12 runtime on first use. No Lua, LuaRocks, or
 compiler toolchain is required.
 
 ## Install
@@ -40,7 +40,7 @@ each [tecs-cli release](https://github.com/tecs-dev/tecs/releases/latest).
 | `tecs new <dir>` | Create a project: sources, CI workflow, agent tooling, an example spec |
 | `tecs check` | Type-check `src/` (`--json` for machine-readable diagnostics) |
 | `tecs build` | Compile to `build/`; a running game hot-reloads the result |
-| `tecs run` | Build, then launch the game with the cached LÖVE runtime |
+| `tecs run` | Build, then launch the game with the cached Love runtime |
 | `tecs integ` | Run `spec/` with the bundled busted runner ([Integration Testing](/tecs2d/integration-testing)) |
 | `tecs dist` | Package the game for players ([Packaging](/cli/packaging)) |
 | `tecs mcp` | Serve the project to agent clients over stdio ([MCP Bridge](/cli/mcp)) |
@@ -77,7 +77,7 @@ read it with `require("tecs2d.buildinfo")`.
 | -------- | ------ |
 | `TECS_DIR` | Use framework sources from a local Tecs checkout; `tecs dev` copies them into `src/vendor/` |
 | `TECS_TEAL_DIR` | Load the Teal compiler from a local `teal-language/tl` checkout |
-| `TECS_CACHE_DIR` | Override the LÖVE runtime cache directory |
+| `TECS_CACHE_DIR` | Override the Love runtime cache directory |
 | `TECS_MCP_PORT` | Port for the game's built-in MCP server (assigned automatically by test and agent harnesses) |
 
 ## Updating

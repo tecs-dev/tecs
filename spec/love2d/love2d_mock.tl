@@ -176,7 +176,7 @@ local record love2d_mock
         print: function(...: any)
 
         --- Minimal Buffer stub for shadow_buffer integration tests. The
-        --- real LÖVE 12 returns an SSBO handle; the stub records the
+        --- real Love 12 returns an SSBO handle; the stub records the
         --- shape of the call and exposes `_writes` so tests can assert
         --- what was uploaded. Other GPU tests stay pending because
         --- `newComputeShader` isn't stubbed.

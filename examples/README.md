@@ -42,7 +42,7 @@ Every example follows this structure:
 ```
 examples/my-feature/
 ├── tlconfig.lua     # Teal config (same for all examples)
-├── conf.lua         # LÖVE window config
+├── conf.lua         # Love window config
 ├── build.sh         # Build script
 ├── run.sh           # Run script
 ├── src/

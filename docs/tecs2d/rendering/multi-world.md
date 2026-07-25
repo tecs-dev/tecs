@@ -245,7 +245,7 @@ pipeline merely to reuse GPU resources.
 | MCP transport and command registry | Process/session | One operator session |
 
 Do not render pipelines concurrently. Transient targets are designed for
-ordered, sequential composition on LÖVE's render thread.
+ordered, sequential composition on Love's render thread.
 
 ## Capacity and performance
 

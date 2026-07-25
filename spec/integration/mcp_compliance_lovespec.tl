@@ -1,5 +1,5 @@
 --- Love2D integration suite: boots the compliance fixture app under a real
---- LÖVE binary and drives it over the tecs2d MCP HTTP server.
+--- Love binary and drives it over the tecs2d MCP HTTP server.
 ---
 --- Run via `make test-love`. Uses the *_lovespec suffix so the fast headless
 --- suite (busted pattern `_spec`) never collects this file.

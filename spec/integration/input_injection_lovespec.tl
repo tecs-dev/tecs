@@ -1,4 +1,4 @@
---- Love2D integration suite: input event flow. LÖVE events pushed via
+--- Love2D integration suite: input event flow. Love events pushed via
 --- the send_love_event MCP tool must travel through the event poller
 --- into world observers as tecs2d event records with their payloads
 --- intact (key constants, mouse coordinates and button, wheel delta).

@@ -13,7 +13,7 @@ local record inputHandlers
     restartRequested: boolean
     -- Set to the exit code (0 by default) when a quit event was polled
     -- and not vetoed by `love.quit`. Consumed by the main loop, which
-    -- returns it from love.run so LÖVE exits cleanly. `false` means no
+    -- returns it from love.run so Love exits cleanly. `false` means no
     -- quit is pending. Stored here (not on the bus) so the path from
     -- poll → exit is a direct boolean check rather than an event dispatch
     -- that depends on observer wiring surviving plugin init ordering.
@@ -21,7 +21,7 @@ local record inputHandlers
 
     pollEvents: function(world: tecs.World): tecs.System
 
-    --- Dispatch one LÖVE event through the same path pollEvents uses for
+    --- Dispatch one Love event through the same path pollEvents uses for
     --- real events: the Tecs input handler first (so the input snapshot is
     --- updated), then any user-defined love.* callback. Used by the debug
     --- input tape to inject scheduled events indistinguishably from real
@@ -257,7 +257,7 @@ function inputHandlers.pollEvents(w: tecs.World): tecs.System
     return function()
         input.update()
         love.event.pump()
-        -- Capture up to 8 payload slots: LÖVE 12 touchmoved/pressed/released
+        -- Capture up to 8 payload slots: Love 12 touchmoved/pressed/released
         -- events carry (id, x, y, dx, dy, pressure, deviceType, isMouse).
         -- Stopping at 6 would silently drop deviceType and isMouse and leave
         -- TouchPressed/TouchMoved/TouchReleased event fields as nil.

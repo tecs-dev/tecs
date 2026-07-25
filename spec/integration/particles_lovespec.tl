@@ -1,5 +1,5 @@
 --- Love2D integration suite: particle emitters. A ParticleEmitter
---- wrapping a LÖVE particle system must render particles around the
+--- wrapping a Love particle system must render particles around the
 --- emitter's Transform, follow the entity when it moves, and stop
 --- leaving pixels once despawned. First coverage of the particles
 --- integration.

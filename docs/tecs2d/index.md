@@ -13,8 +13,8 @@ tweens, and dev tooling.
 
 The Tecs CLI is the supported installation path. It includes Teal,
 Tecs/Tecs2D, type definitions, project generation, and build tooling. On first
-use it downloads a cached LÖVE 12 nightly. You do not need to install Lua,
-LuaRocks, Teal, LÖVE, or a C compiler separately.
+use it downloads a cached Love 12 nightly. You do not need to install Lua,
+LuaRocks, Teal, Love, or a C compiler separately.
 
 ::: code-group
 
@@ -55,7 +55,7 @@ MCP server so a developer or coding agent can inspect the running world.
 `tecs new` creates:
 
 - **`src/main.tl`** - A small Tecs2D game with startup spawning, render layers, MCP, and debugging
-- **`src/conf.tl`** - LÖVE application configuration
+- **`src/conf.tl`** - Love application configuration
 - **`tlconfig.lua`** - Teal compiler configuration
 - **`assets/`** - Project-owned game assets
 - **`.github/workflows/ci.yml`** - CI that type-checks and builds the game on Linux, macOS, and Windows

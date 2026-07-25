@@ -1,6 +1,6 @@
 # Tecs
 
-A fast, type-safe ECS framework for LuaJIT and LÖVE2D. Uses a GPU-driven rendering pipeline made available in LÖVE 12
+A fast, type-safe ECS framework for LuaJIT and Love2D. Uses a GPU-driven rendering pipeline made available in Love 12
 to handle millions of draws at 60+ FPS.
 
 Full documentation is available at https://tecs.dev.
@@ -22,7 +22,7 @@ Full documentation is available at https://tecs.dev.
 * **Events**: Decouple systems with type-safe events. React to spawn, despawn, state changes, and custom events.
 * **Build with AI**: A runtime debugger and built-in MCP server let humans and agents inspect, freeze, rewind, diff,
   edit, replay, and verify a running game through one shared command surface.
-* **LÖVE2D integration**: Integrates with LÖVE2D game loop, input handling, physics, audio, and events.
+* **Love2D integration**: Integrates with Love2D game loop, input handling, physics, audio, and events.
 * **Batteries included**: Pixel-perfect camera, rebindable controllers, async asset loading, component bundles,
   and more.
 
@@ -56,7 +56,7 @@ irm https://github.com/tecs-dev/tecs/releases/latest/download/install.ps1 | iex
 ```
 
 The CLI supplies Teal, Tecs/Tecs2D, type definitions, project setup, builds,
-and a cached LÖVE 12 runtime. See the
+and a cached Love 12 runtime. See the
 [Tecs2D Getting Started guide](https://tecs.dev/tecs2d/) for the full workflow.
 
 To hack on Tecs itself, run `make dev` to install LuaRocks and docs dev dependencies.
