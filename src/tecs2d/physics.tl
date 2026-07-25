@@ -965,9 +965,7 @@ function physics.new(config: physics.Config): tecs.Plugin
             phase = tecs.phases.PostUpdate,
             run = function(_dt: number)
                 local smoothingMode = state.smoothing
-                local pl = (world as {string:any}).pipeline as tecs.Pipeline
-                local alpha = pl.fixedAccumulator / pl.fixedTimestep
-                local remainingTime = pl.fixedAccumulator
+                local _, remainingTime, alpha = world:getFixedTiming()
 
                 for archetype, len in colliderQuery:iter() do
                     local transforms = archetype:get(Transform)

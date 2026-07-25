@@ -698,6 +698,19 @@ local record types
         --- @param dt The time since the last update.
         update: function(self, dt: number)
 
+        --- Return fixed-step timing for interpolation consumers.
+        ---
+        --- The return values are the fixed timestep, the residual time not
+        --- consumed by fixed updates, and the residual divided by the
+        --- timestep clamped to `[0, 1]`. This method does not allocate.
+        ---
+        --- The fixed-step clock advances even when fixed phases are disabled.
+        ---
+        --- @return timestep Fixed update interval in seconds.
+        --- @return accumulator Residual time in seconds.
+        --- @return alpha Clamped interpolation fraction.
+        getFixedTiming: function(self): number, number, number
+
         --- Run the startup systems.
         startup: function(self)
 

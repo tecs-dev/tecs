@@ -1250,6 +1250,18 @@ function WorldImpl:update(dt: number)
     table_clear(self._dirtyArchetypes)
 end
 
+function WorldImpl:getFixedTiming(): number, number, number
+    local timestep = self.pipeline.fixedTimestep
+    local accumulator = self.pipeline.fixedAccumulator
+    local alpha = accumulator / timestep
+    if alpha < 0 then
+        alpha = 0
+    elseif alpha > 1 then
+        alpha = 1
+    end
+    return timestep, accumulator, alpha
+end
+
 function WorldImpl:enablePhase(phase: Phase)
     self.pipeline:enablePhase(phase)
 end

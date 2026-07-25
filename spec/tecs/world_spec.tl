@@ -833,6 +833,49 @@ describe("WorldImpl", function()
     end)
 
     describe("update cycle", function()
+        it("returns fixed timing for interpolation", function()
+            local w2: tecs.World = tecs.newWorld({timestep = 0.1})
+
+            local timestep, accumulator, alpha = w2:getFixedTiming()
+            luassert.is_near(0.1, timestep, 1e-9)
+            luassert.is_near(0, accumulator, 1e-9)
+            luassert.is_near(0, alpha, 1e-9)
+
+            w2:update(0.05)
+            timestep, accumulator, alpha = w2:getFixedTiming()
+            luassert.is_near(0.1, timestep, 1e-9)
+            luassert.is_near(0.05, accumulator, 1e-9)
+            luassert.is_near(0.5, alpha, 1e-9)
+
+            w2:update(0.2)
+            timestep, accumulator, alpha = w2:getFixedTiming()
+            luassert.is_near(0.1, timestep, 1e-9)
+            luassert.is_near(0.05, accumulator, 1e-9)
+            luassert.is_near(0.5, alpha, 1e-9)
+        end)
+
+        it("clamps fixed interpolation alpha after catch-up limiting", function()
+            local w2 = tecs.newWorld({timestep = 0.1})
+
+            w2:update(2)
+
+            local timestep, accumulator, alpha = w2:getFixedTiming()
+            luassert.is_near(0.1, timestep, 1e-9)
+            luassert.is_near(0.2, accumulator, 1e-9)
+            luassert.is_near(1, alpha, 1e-9)
+        end)
+
+        it("advances fixed timing while fixed phases are disabled", function()
+            local w2 = tecs.newWorld({timestep = 0.1})
+            w2:disablePhase(phases.FixedUpdateGroup)
+
+            w2:update(0.15)
+
+            local _, accumulator, alpha = w2:getFixedTiming()
+            luassert.is_near(0.05, accumulator, 1e-9)
+            luassert.is_near(0.5, alpha, 1e-9)
+        end)
+
         it("should run fixed timestep updates", function()
             local updateCount = 0
             local totalDt: number = 0

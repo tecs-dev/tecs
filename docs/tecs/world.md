@@ -67,6 +67,24 @@ while running do
 end
 ```
 
+### getFixedTiming
+
+Returns the fixed timestep, the residual time not consumed by fixed updates, and a clamped interpolation fraction.
+The method returns three numbers directly and does not allocate.
+
+```teal
+local timestep, accumulator, alpha = world:getFixedTiming()
+```
+
+```teal
+function World:getFixedTiming(): number, number, number
+```
+
+`alpha` is `accumulator / timestep` clamped to `[0, 1]`. The accessor returns the scheduler's stored accumulator
+unchanged, so extrapolation consumers can use the residual time directly. The scheduler may cap that residual
+during catch-up limiting. Disabling fixed phases does not pause the fixed-step clock; the returned values continue
+to describe scheduler timing.
+
 ### startup
 
 Runs all systems in the Startup phase group. Call this once before the main game loop begins.
