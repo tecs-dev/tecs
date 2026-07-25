@@ -85,7 +85,10 @@ local function cameraTargetPlugin(world: tecs.World)
 
     -- Spawn player
     local runnerSheet = SpriteSheet.fromFile("assets/running.png")
-    local playerId = world:spawn(
+    -- Key addresses the player from any system. Unlike a captured local,
+    -- it stays valid across a hot reload and a snapshot load.
+    world:spawn(
+        tecs.builtins.Key("player"),
         Transform(WORLD_W / 2, WORLD_H / 2, 0, 2, 0, 2, 2),
         gfx.Sprite.fromSheet(runnerSheet, "run", { centered = true }),
         gfx.Color(1, 1, 1, 1),
@@ -111,7 +114,7 @@ local function cameraTargetPlugin(world: tecs.World)
     local function applyMode(m: integer)
         currentMode = m
         local cfg = MODES[m]
-        local ct = world:get(playerId, gfx.CameraTarget)
+        local ct = world:get(world:requireKey("player"), gfx.CameraTarget)
         ct.deadZoneW = cfg.dzW
         ct.deadZoneH = cfg.dzH
         ct.lookAheadX = cfg.laX

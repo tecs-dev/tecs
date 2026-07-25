@@ -16,6 +16,7 @@ local input <const> = require("tecs2d.input")
 local lp <const> = love.physics
 
 local Transform <const> = tecs.builtins.Transform
+local Key <const> = tecs.builtins.Key
 local Circle <const> = gfx.Circle
 local Color <const> = gfx.Color
 local Light <const> = gfx.Light
@@ -49,7 +50,6 @@ local function demoPlugin(world: tecs.World)
     world:addPlugin(require("tecs2d.debug").new())
     world:addPlugin(mcp.new())
 
-    local playerId: integer
     local initialized = false
     local lightsSpawned = false
     local tilemapQuery = world:query({ include = {tecs_tiled.Tilemap} })
@@ -102,7 +102,11 @@ local function demoPlugin(world: tecs.World)
                         local centerX = mapPixelWidth / 2
                         local centerY = mapPixelHeight / 2
                         -- Spawn on layer 1 with z = 100.5 to match torches for proper y-sorting
-                        playerId = world:spawn(
+                        -- Key gives the player a durable address. A Lua
+                        -- local holding the id is stale after a hot reload
+                        -- or a snapshot load; the Key index is rebuilt.
+                        world:spawn(
+                            Key("player"),
                             Transform.new({ x = centerX, y = centerY, z = 100.5, layer = 1 }),
                             Circle(BALL_RADIUS),
                             Color(0.4, 0.8, 1.0, 1),
@@ -161,6 +165,7 @@ local function demoPlugin(world: tecs.World)
         name = "demo.PlayerMovement",
         phase = tecs.phases.FixedUpdate,
         run = function(_dt: number)
+            local playerId = world:byKey("player")
             if not playerId then return end
 
             local collider = world:get(playerId, Collider)
@@ -184,6 +189,7 @@ local function demoPlugin(world: tecs.World)
         name = "demo.CameraAndInput",
         phase = tecs.phases.Update,
         run = function(dt: number)
+            local playerId = world:byKey("player")
             if not playerId then return end
 
             local playerTransform = world:get(playerId, Transform)
