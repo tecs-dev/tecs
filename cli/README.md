@@ -30,7 +30,7 @@ Windows PowerShell:
 irm https://github.com/tecs-dev/tecs/releases/latest/download/install.ps1 | iex
 ```
 
-The first `tecs` command downloads the current LÖVE 12 nightly into the user
+The first `tecs` command downloads the current Love 12 nightly into the user
 cache. Later commands reuse it. Lua, LuaRocks, and a compiler toolchain are not
 required.
 
@@ -83,11 +83,11 @@ tecs agent list
 tecs completions zsh
 ```
 
-`tecs run` builds the project and launches it with the same cached LÖVE runtime
+`tecs run` builds the project and launches it with the same cached Love runtime
 that hosts the CLI. `tecs build` compiles Teal source into a self-contained
 `build/`. `tecs check` runs the embedded Teal compiler in-process. Pass
 `--quiet` (or `-q`) to suppress progress output. `tecs --version` prints only
-the CLI version; `tecs info` reports the LÖVE/LuaJIT runtime and current project.
+the CLI version; `tecs info` reports the Love/LuaJIT runtime and current project.
 
 `tecs check --json` and `tecs info --json` print machine-readable JSON on
 stdout for editors, CI, and coding agents. Check output has the shape
@@ -141,7 +141,7 @@ tecs integ
 [busted](https://lunarmodules.github.io/busted/) runner; no busted or
 LuaRocks installation is required. Specs named `*_lovespec.tl` are integration
 tests: through `tecs2d.testing.fixture` they launch the built game under real
-LÖVE on a free MCP port and drive it live (run Lua inside the game, sample
+Love on a free MCP port and drive it live (run Lua inside the game, sample
 pixels, send input). New projects include a working example in
 `spec/game_lovespec.tl`. Integration runs are not headless; macOS and Linux
 only.
@@ -177,15 +177,15 @@ tecs dist windows    # or one target: love, macos, windows
 ```
 
 `tecs dist` zips the self-contained `build/` into `dist/<name>.love`, fuses a
-Windows executable with LÖVE's DLLs and license into
+Windows executable with Love's DLLs and license into
 `dist/<name>-windows.zip`, and assembles a macOS app bundle with the game's
-name and bundle identifier into `dist/<name>-macos.zip`. The LÖVE runtime
+name and bundle identifier into `dist/<name>-macos.zip`. The Love runtime
 comes from the launcher cache when present and is downloaded once otherwise.
 
 Windows packages build on any host. The macOS bundle needs macOS or Linux
 (the app's symlinks require a POSIX filesystem), and it ships unsigned: sign
 and notarize it before wide distribution. Packaged games use the same pinned
-LÖVE 12 nightly the CLI runs.
+Love 12 nightly the CLI runs.
 
 Every build writes a `tecs_buildinfo.lua` module into `build/` recording the
 project name, build timestamp, tool versions, and a `dev` flag; `tecs dist`
@@ -220,7 +220,7 @@ luarocks install --tree src/vendor --lua-version=5.1 inspect-tl-type
 
 Teal declarations for popular rocks are published as `<rock>-tl-type`
 packages, so `tecs check` keeps type-checking code that requires them. Only
-pure-Lua rocks work: the game runtime is LÖVE's LuaJIT with no C toolchain,
+pure-Lua rocks work: the game runtime is Love's LuaJIT with no C toolchain,
 and `tecs build` prunes LuaRocks bookkeeping from the shipped game.
 `src/vendor/` is regenerated and gitignored, so record installed rocks
 somewhere repeatable and reinstall after a fresh clone.
@@ -251,7 +251,7 @@ TECS_TEAL_DIR=../tl tecs check
 
 - the Teal compiler
 - compatible Tecs and Tecs2D sources
-- project type declarations for LuaJIT, LuaSocket, and LÖVE
+- project type declarations for LuaJIT, LuaSocket, and Love
 - the starter template
 
 The CLI stages the required declarations and framework sources into
@@ -282,7 +282,7 @@ example `make update-teal TEAL_REF=<commit>`.
 - curl
 - unzip on macOS/Linux, or PowerShell `Expand-Archive` on Windows
 
-LÖVE 12 is downloaded once per user on the first command. The cached runtime
+Love 12 is downloaded once per user on the first command. The cached runtime
 provides the same LuaJIT and LuaSocket implementation used by the game.
 
 ## License

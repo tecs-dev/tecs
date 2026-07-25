@@ -4,8 +4,8 @@
 
 This directory builds the cross-platform `tecs` command for creating,
 checking, building, and running Tecs2D projects. The distributed CLI is a
-headless LÖVE 12 application, not a LuaRocks package. Its launcher downloads a
-LÖVE 12 nightly into the user cache and executes `tecs-cli.love` with the
+headless Love 12 application, not a LuaRocks package. Its launcher downloads a
+Love 12 nightly into the user cache and executes `tecs-cli.love` with the
 same LuaJIT used by games.
 
 The CLI lives inside the Tecs monorepo. Framework sources, docs, built-in
@@ -21,7 +21,7 @@ make test               # Run the Lua CLI unit tests
 make check              # Test and build the release payload
 make update-vendor      # Refresh every embedded third-party dependency
 make update-teal        # Refresh Teal and compat53
-make update-types       # Refresh LuaJIT, LuaSocket, and LÖVE type declarations
+make update-types       # Refresh LuaJIT, LuaSocket, and Love type declarations
 make update-lua-vendor  # Refresh argparse and ansicolors
 make clean              # Remove build/ and dist/
 ```
@@ -34,7 +34,7 @@ make clean              # Remove build/ and dist/
 - `tecs_cli/vendor/`: private CLI Lua modules.
 - `tecs_cli/runtime/teal/`: canonical `teal.*`, `tlcli.*`, and `compat53.*` modules.
 - `tecs_cli/runtime/types/`: declarations copied into generated projects.
-- `loveapp/`: headless LÖVE entry point and configuration.
+- `loveapp/`: headless Love entry point and configuration.
 - `launcher/`: macOS/Linux shell and Windows PowerShell/cmd launchers.
 - `scripts/`: payload assembly and dependency refresh scripts.
 - `spec/`: CLI unit tests.
@@ -44,7 +44,7 @@ make clean              # Remove build/ and dist/
 - Do not add a CLI rockspec or runtime dependency on Lua, LuaRocks, or a C
   compiler. The release consists of `tecs-cli.love`, launchers, installers,
   and versioned archives for package managers (Homebrew tarball, Scoop zip).
-- Keep the LÖVE application headless. CLI launchers set dummy SDL video/audio
+- Keep the Love application headless. CLI launchers set dummy SDL video/audio
   drivers; `tecs run` clears them before starting the user's game.
 - Preserve macOS, Linux, and Windows behavior. CI must prove a cold-cache
   `--version`, `info`, `new`, `check`, and `build` flow on all three platforms.

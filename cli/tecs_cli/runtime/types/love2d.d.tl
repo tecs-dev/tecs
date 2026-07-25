@@ -24,8 +24,8 @@
 -- FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 -- OTHER DEALINGS IN THE SOFTWARE.
 
--- Based on the LÖVE 11.4 declarations generated with generate_tl.lua, then
--- extended with the LÖVE 12 APIs used by Tecs2D.
+-- Based on the Love 11.4 declarations generated with generate_tl.lua, then
+-- extended with the Love 12 APIs used by Tecs2D.
 --#pragma arity off
 
 global type love = record
@@ -838,7 +838,7 @@ global type love = record
 			--- Get the number of elements
 			getElementCount: function(self: Buffer): number
 			--- Set buffer data from array (1-indexed). Argument order is
-			--- (data, srcIndex, destIndex, count), matching LÖVE's
+			--- (data, srcIndex, destIndex, count), matching Love's
 			--- wrap_Buffer.cpp (source start before destination start).
 			setArrayData: function(self: Buffer, data: love.data.ByteData, srcIndex: integer, destIndex: integer, count: integer)
 			--- Set buffer data from array (simple form)

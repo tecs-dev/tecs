@@ -1,5 +1,5 @@
--- Minimal LuaFileSystem-compatible adapter for the self-contained LÖVE CLI.
--- LÖVE ships LuaJIT and PhysFS, but not LuaFileSystem. The CLI only needs
+-- Minimal LuaFileSystem-compatible adapter for the self-contained Love CLI.
+-- Love ships LuaJIT and PhysFS, but not LuaFileSystem. The CLI only needs
 -- directory traversal, metadata, and basic directory operations, so keeping
 -- that small surface here avoids requiring LuaRocks or a native compiler.
 local ffi = require("ffi")
@@ -87,7 +87,7 @@ local function starts_with(path, root)
 end
 
 local function remount_external(source)
-    -- LÖVE 12's full-path mounts expose arbitrary host directories through
+    -- Love 12's full-path mounts expose arbitrary host directories through
     -- PhysFS. Only one external mount is needed at a time during a traversal.
     if externalSource == source then return true end
     if externalSource then love.filesystem.unmountFullPath(externalSource) end

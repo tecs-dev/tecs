@@ -8,10 +8,10 @@ source = {
 }
 
 description = {
-    summary = "LÖVE2D game-engine layer for the Tecs ECS framework",
+    summary = "Love2D game-engine layer for the Tecs ECS framework",
     detailed = [[
-Tecs2D is the LÖVE2D-facing game-engine layer built on top of the Tecs ECS core.
-It provides a GPU-driven render pipeline (LÖVE 12) with deferred lighting and
+Tecs2D is the Love2D-facing game-engine layer built on top of the Tecs ECS core.
+It provides a GPU-driven render pipeline (Love 12) with deferred lighting and
 shadows, input, audio, physics, tweens, a controller plugin, tiled-map support,
 a UI plugin, and MCP tooling for introspection and live editing.
 

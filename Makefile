@@ -76,20 +76,20 @@ TEST_BUILD_DIR=$(LUA_DIR)/test_deps
 all: build test
 
 cli-build:
-	$(MAKE) -C cli build
+	$(TEAL_ENV) $(MAKE) -C cli build
 
 cli-test:
-	$(MAKE) -C cli test
+	$(TEAL_ENV) $(MAKE) -C cli test
 
 cli-check:
-	$(MAKE) -C cli check
+	$(TEAL_ENV) $(MAKE) -C cli check
 
 cli-package:
-	$(MAKE) -C cli package
+	$(TEAL_ENV) $(MAKE) -C cli package
 
 build: compile
 
-# The core rock must not require Tecs2D's LÖVE global environment while
+# The core rock must not require Tecs2D's Love global environment while
 # LuaRocks is still resolving the tecs2d dependency tree.
 build-tecs: compile-tecs
 
@@ -180,8 +180,8 @@ test: compile
 	@echo "Running tests..."
 	LUA_PATH="$(LUA_DIR)/?.lua;$(LUA_DIR)/?/init.lua;$(TEST_BUILD_DIR)/?.lua;$(TEST_BUILD_DIR)/?/init.lua;$(VENDOR_LUA)/?.lua;$(VENDOR_LUA)/?/init.lua;;" $(BUSTED_CMD) --no-auto-insulate $(TEST_BUILD_DIR)
 
-# Love2D integration tests: launch real LÖVE fixture apps and drive them over
-# the tecs2d MCP HTTP server. Opt-in (needs LÖVE, a display, and sockets);
+# Love2D integration tests: launch real Love fixture apps and drive them over
+# the tecs2d MCP HTTP server. Opt-in (needs Love, a display, and sockets);
 # integration specs use the *_lovespec.tl suffix so the fast suite's default
 # _spec pattern never picks them up.
 LOVE_FIXTURE_DIR=$(TEST_BUILD_DIR)/spec/integration/apps
@@ -207,7 +207,7 @@ test-love: compile $(LOVE12_BIN)
 	LOVE="$(LOVE)" \
 	$(BUSTED_CMD) --no-auto-insulate --pattern="$(LOVE_FILE_PATTERN)" $(LOVE_TEST_FILTER) $(TEST_BUILD_DIR)/spec/integration
 
-# Love2D performance benches: run scenario apps under real LÖVE and record
+# Love2D performance benches: run scenario apps under real Love and record
 # steady-state frame times + per-frame Lua allocation. Results land in
 # benches/love2d/results/<scenario>.json and print as TECS_BENCH_RESULT
 # lines. Usage:
@@ -237,7 +237,7 @@ clean:
 # Install target for luarocks (called by luarocks make/build)
 # LUADIR is set by luarocks. ROCK selects which rock is being installed:
 #   ROCK=tecs   -> renderer-agnostic ECS core only
-#   ROCK=tecs2d -> LÖVE2D engine layer only (depends on the tecs rock)
+#   ROCK=tecs2d -> Love2D engine layer only (depends on the tecs rock)
 install:
 ifdef LUADIR
 	@# SAFETY: refuse to install if LUADIR/tecs is a symlink. Some downstream
@@ -607,7 +607,7 @@ help:
 	@echo "  rebuild        - Force full rebuild (clean + compile)"
 	@echo "  dev            - Install development dependencies"
 	@echo "  test           - Run tests"
-	@echo "  test-love      - Run Love2D integration tests (real LÖVE + MCP)"
+	@echo "  test-love      - Run Love2D integration tests (real Love + MCP)"
 	@echo "                   Filter with MATCH='<Lua pattern>' or FILE_MATCH='<Lua pattern>'"
 	@echo "  test-no-ffi    - Run tests with FFI disabled"
 	@echo "  typecheck      - Type check source files only"

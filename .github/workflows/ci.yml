@@ -92,10 +92,10 @@ jobs:
         eval "$(luarocks path)"
         make test
 
-  # Love2D integration tests: boots real LÖVE fixture apps and drives them
+  # Love2D integration tests: boots real Love fixture apps and drives them
   # over the tecs2d MCP HTTP server (spec/integration, `make test-love`).
   # Runs on macOS because those runners provide a windowing session with a
-  # paravirtualized Metal GPU; the Makefile auto-downloads the pinned LÖVE
+  # paravirtualized Metal GPU; the Makefile auto-downloads the pinned Love
   # 12 nightly. Blocking: proven stable across the full 163-test suite.
   test-love-macos:
     runs-on: macos-latest

@@ -13,7 +13,7 @@ Install it with Homebrew on macOS/Linux (`brew install tecs-dev/tap/tecs-cli`) o
 Windows (`scoop bucket add tecs https://github.com/tecs-dev/scoop-bucket`, then
 `scoop install tecs`). Standalone installer scripts live on the
 [tecs-cli releases page](https://github.com/tecs-dev/tecs/releases/latest). No Lua,
-LuaRocks, or compiler toolchain is required; the CLI downloads its LÖVE runtime on first use.
+LuaRocks, or compiler toolchain is required; the CLI downloads its Love runtime on first use.
 
 ## Commands
 
@@ -21,10 +21,10 @@ Run these from the project root (the directory containing `tlconfig.lua`):
 
 - `tecs check`: type-check every Teal source under `src/`. Add `--json` for machine-readable diagnostics: `{"ok": boolean, "diagnostics": [{"file", "line", "column", "severity", "kind", "message"}]}`. A diagnostic may carry a remediation `hint` — for unknown fields and signature mismatches it names the exact `tecs api` lookup; follow it instead of guessing.
 - `tecs build`: compile Teal to `build/`, copy assets, and stage the runtime vendor tree. Incremental; safe to rerun.
-- `tecs run`: build, then launch the game with the cached LÖVE 12 runtime.
+- `tecs run`: build, then launch the game with the cached Love 12 runtime.
 - `tecs integ`: compile `spec/**/*.tl` and run it with the bundled busted runner.
   `*_lovespec.tl` specs use `tecs2d.testing.fixture` to launch the built game under real
-  LÖVE and drive it over MCP (`fixture.runLua`, `fixture.probePixels`, `fixture.eventually`).
+  Love and drive it over MCP (`fixture.runLua`, `fixture.probePixels`, `fixture.eventually`).
   Not headless; macOS and Linux only.
 - `tecs dist [love|macos|windows]`: package the built game into `dist/` as a `.love`
   file, a macOS app bundle, and a fused Windows executable. The macOS bundle needs a
@@ -43,7 +43,7 @@ Run these from the project root (the directory containing `tlconfig.lua`):
   question** — it answers in tens of tokens what a full `tecs docs` page answers in thousands;
   open docs pages for concepts and how-tos, not symbol lookups. Prefer both over grepping
   `src/vendor/`.
-- `tecs info --json`: CLI, LÖVE, and LuaJIT versions plus project status as JSON.
+- `tecs info --json`: CLI, Love, and LuaJIT versions plus project status as JSON.
 - Dependencies: vendor pure-Lua rocks with LuaRocks into the project tree
   (`luarocks install --tree src/vendor --lua-version=5.1 <rock>`, plus the matching
   `<rock>-tl-type` rock for Teal declarations). `src/vendor/` is gitignored; record
@@ -89,4 +89,4 @@ The MCP server and debugger disable themselves in `tecs dist` builds: `tecs buil
 
 - `TECS_DIR`: path to a local Tecs framework checkout; `tecs dev` copies its sources into `src/vendor/`.
 - `TECS_TEAL_DIR`: path to a local Teal compiler checkout (`teal-language/tl`) used instead of the embedded compiler.
-- `TECS_CACHE_DIR`: override the LÖVE runtime cache directory.
+- `TECS_CACHE_DIR`: override the Love runtime cache directory.

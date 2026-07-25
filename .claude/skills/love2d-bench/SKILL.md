@@ -5,7 +5,7 @@ description: Add a Love2D performance bench scenario or measure a performance ch
 
 # Benchmark Love2D performance changes
 
-`make bench-love` runs scenario apps under real LÖVE and reports steady-state
+`make bench-love` runs scenario apps under real Love and reports steady-state
 frame time and per-frame Lua allocation. Scenarios are plain Lua files in
 `benches/love2d/app/scenarios/*.lua`; results land in
 `benches/love2d/results/<scenario>.json`.

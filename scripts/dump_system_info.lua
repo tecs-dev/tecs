@@ -1,4 +1,4 @@
--- LÖVE2D system info dump for bug reports
+-- Love2D system info dump for bug reports
 -- Run with: make system-info
 
 local output = {}
@@ -18,13 +18,13 @@ end
 
 
 function love.load()
-    emit("# LÖVE System Info")
+    emit("# Love System Info")
     emit("")
     emit("```")
 
     -- Version
     local major, minor, revision, codename = love.getVersion()
-    emit(string.format("LÖVE %d.%d.%d (%s)", major, minor, revision, codename))
+    emit(string.format("Love %d.%d.%d (%s)", major, minor, revision, codename))
     emit(string.format("OS: %s", love.system.getOS()))
     emit(string.format("Processors: %d cores", love.system.getProcessorCount()))
     emit("```")

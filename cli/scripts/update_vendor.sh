@@ -50,7 +50,7 @@ update_types() {
 
 # Vendor busted and its pure-Lua dependencies for `tecs integ`. The C
 # dependencies are never installed: lfs, system, and term are shimmed over
-# the LÖVE runtime inside the CLI.
+# the Love runtime inside the CLI.
 update_busted() {
     local tree="$tmp/busted-tree"
     local rocks=(

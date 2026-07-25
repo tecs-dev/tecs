@@ -43,7 +43,7 @@ end
 -- specs), and a LUA_PATH-relative source path would then resolve nowhere.
 -- Absolutizing lazily is not enough -- by first call the cwd may already
 -- have moved -- so capture it here, but only when lfs is actually loadable
--- (the packaged CLI resolves through the LÖVE loader and has no lfs need).
+-- (the packaged CLI resolves through the Love loader and has no lfs need).
 local moduleSource = (function()
     local source = debug.getinfo(1, "S").source
     if source:sub(1, 1) ~= "@" then return nil end

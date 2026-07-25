@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# macOS/Linux entry point: cache LÖVE 12 and run the CLI payload headlessly.
+# macOS/Linux entry point: cache Love 12 and run the CLI payload headlessly.
 set -euo pipefail
 
 # Resolve $0 through symlinks so the payload is found beside the real script
@@ -29,7 +29,7 @@ case "$(uname -s)" in
     Darwin)
         love="$cache/love.app/Contents/MacOS/love"
         if [ ! -x "$love" ]; then
-            echo "Downloading LÖVE 12 runtime..." >&2
+            echo "Downloading Love 12 runtime..." >&2
             rm -rf "$cache"
             mkdir -p "$cache"
             curl -fsSL "$base/love-macos.zip" -o "$cache/outer.zip"
@@ -41,7 +41,7 @@ case "$(uname -s)" in
     Linux)
         love="$cache/squashfs-root/AppRun"
         if [ ! -x "$love" ]; then
-            echo "Downloading LÖVE 12 runtime..." >&2
+            echo "Downloading Love 12 runtime..." >&2
             rm -rf "$cache"
             mkdir -p "$cache"
             curl -fsSL "$base/love-linux-X64.AppImage.zip" -o "$cache/outer.zip"
@@ -49,7 +49,7 @@ case "$(uname -s)" in
             rm -f "$cache/outer.zip"
             appimage="$(find "$cache" -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
             if [ -z "$appimage" ]; then
-                echo "tecs: LÖVE archive did not contain an AppImage" >&2
+                echo "tecs: Love archive did not contain an AppImage" >&2
                 exit 1
             fi
             chmod +x "$appimage"

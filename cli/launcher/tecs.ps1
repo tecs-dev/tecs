@@ -1,4 +1,4 @@
-# Windows entry point: cache LÖVE 12 and run the CLI payload through lovec.exe.
+# Windows entry point: cache Love 12 and run the CLI payload through lovec.exe.
 $ErrorActionPreference = "Stop"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -19,7 +19,7 @@ if (-not (Test-Path $payload)) {
 }
 
 if (-not (Test-Path $love)) {
-    Write-Host "Downloading LÖVE 12 runtime..." -ForegroundColor DarkGray
+    Write-Host "Downloading Love 12 runtime..." -ForegroundColor DarkGray
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $cache
     New-Item -ItemType Directory -Force -Path $cache | Out-Null
     $outer = Join-Path $cache "outer.zip"
@@ -29,7 +29,7 @@ if (-not (Test-Path $love)) {
     # Nightly artifacts include the version in the inner archive name.
     $inner = Get-ChildItem $cache -File -Filter "*.zip" | Select-Object -First 1 -ExpandProperty FullName
     if (-not $inner) {
-        throw "tecs: LÖVE download did not contain a Windows runtime archive"
+        throw "tecs: Love download did not contain a Windows runtime archive"
     }
     Expand-Archive -Force $inner $cache
     Remove-Item $inner
@@ -39,7 +39,7 @@ if (-not (Test-Path $love)) {
     $love = Get-ChildItem $cache -Recurse -Filter lovec.exe | Select-Object -First 1 -ExpandProperty FullName
 }
 if (-not $love -or -not (Test-Path $love)) {
-    Write-Error "tecs: LÖVE archive did not contain lovec.exe"
+    Write-Error "tecs: Love archive did not contain lovec.exe"
     exit 1
 }
 Set-Content -Path $marker -Value $love -NoNewline

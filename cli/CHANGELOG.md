@@ -56,7 +56,7 @@ and installers as GitHub release assets.
 - Named context keys (`tecs.newKey("game.state")`, `tecs.findKey`/`listKeys`),
   `cmd_resources` value reads, `cmd_lua_modules`/`cmd_lua_exports`, and a
   `modules()` helper in the `run_lua` sandbox.
-- `cmd_input_tape`: schedule literal LÖVE events on exact gameplay frames for
+- `cmd_input_tape`: schedule literal Love events on exact gameplay frames for
   deterministic input verification; `cmd_step` echoes the scheduled window.
 - `cmd_rewind_replay`: rewind records inputs + per-frame dt while running and
   replays deterministically from any ring entry; snapshots now carry
@@ -113,7 +113,7 @@ and installers as GitHub release assets.
   and remediation moved to `tecs_cli/diagnostics.lua`.
 - `start_game '{"frozen":true}'` boots the game with the freeze already held
   (inspectable at frame zero; `cmd_freeze on=false` releases it).
-- `tecs new` stamps the LÖVE identity/title with the project name, so games no
+- `tecs new` stamps the Love identity/title with the project name, so games no
   longer share a save dir (stale debugger artifacts bled between projects).
 - `fixture.eventually` now polls until truthy, not merely non-nil — a
   `return cond` poll no longer fails on its first `false`.
@@ -255,7 +255,7 @@ and installers as GitHub release assets.
   the set actually changes, so a large post-`start_game` tool-list swap no longer
   makes some clients drop the `tecs` tools.
 - New projects' CI uses the `tecs-dev/setup-tecs` action to install the CLI and
-  cache the LÖVE runtime, instead of inlining per-OS Homebrew/Scoop/installer
+  cache the Love runtime, instead of inlining per-OS Homebrew/Scoop/installer
   steps. Old projects that reference `@v1` track install-channel fixes
   automatically. Requires the `tecs-dev/setup-tecs` repo tagged `v1`.
 
@@ -322,7 +322,7 @@ and installers as GitHub release assets.
 ### Added
 
 - `tecs dist` packages the built game into `dist/`: a `.love` file, a fused
-  Windows executable with LÖVE's DLLs (buildable on any host), and a macOS
+  Windows executable with Love's DLLs (buildable on any host), and a macOS
   app bundle with a patched Info.plist (macOS/Linux hosts). Runtimes come
   from the launcher cache or a one-time download.
 
@@ -340,7 +340,7 @@ and installers as GitHub release assets.
 
 - `tecs integ` compiles `spec/**/*.tl` and runs it with a bundled busted
   runner (no busted or LuaRocks installation). `*_lovespec.tl` specs launch
-  the built game under real LÖVE via `tecs2d.testing.fixture` and drive it
+  the built game under real Love via `tecs2d.testing.fixture` and drive it
   over MCP. New projects include `spec/game_lovespec.tl` and run `tecs integ`
   on macOS in their generated CI.
 
@@ -402,9 +402,9 @@ and installers as GitHub release assets.
 
 ### Added
 
-- Self-contained `tecs-cli.love` application running on the same LÖVE 12 and
+- Self-contained `tecs-cli.love` application running on the same Love 12 and
   LuaJIT runtime used by Tecs2D games.
-- Headless macOS, Linux, and Windows launchers that download and cache LÖVE 12
+- Headless macOS, Linux, and Windows launchers that download and cache Love 12
   without requiring Lua, LuaRocks, or a compiler toolchain.
 - `new`, `check`, `build`, `run`, `clean`, `dev`, and `info` commands.
 - Embedded Teal compiler, Tecs/Tecs2D sources, type declarations, starter

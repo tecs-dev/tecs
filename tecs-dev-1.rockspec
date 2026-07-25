@@ -15,7 +15,7 @@ designed specifically for LuaJIT with FFI. It provides a type-safe, cache-friend
 ECS implementation with immutable spawns, staging archetypes, and frame arena memory
 management for zero allocations after warmup.
 
-This rock ships only the renderer-agnostic core. For the LÖVE2D game-engine layer
+This rock ships only the renderer-agnostic core. For the Love2D game-engine layer
 (rendering, input, audio, tiled maps, tweens, UI, MCP tooling), install the
 companion `tecs2d` rock.
     ]],

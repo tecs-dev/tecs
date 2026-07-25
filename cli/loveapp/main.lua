@@ -1,4 +1,4 @@
--- Headless LÖVE entry point that boots the embedded, dependency-free Tecs CLI.
+-- Headless Love entry point that boots the embedded, dependency-free Tecs CLI.
 _G.TECS_LOVE_CLI = true
 
 package.preload.argparse = function()

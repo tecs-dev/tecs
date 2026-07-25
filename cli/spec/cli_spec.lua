@@ -162,7 +162,7 @@ describe("tecs CLI", function()
                 readFile(join(project, "spec", "game_lovespec.tl")))
             assert.is_false(exists(join(project, "game-dev-1.rockspec")))
             -- conf.tl is stamped with the project name so every game gets
-            -- its own LÖVE save dir (no cross-project artifact bleed).
+            -- its own Love save dir (no cross-project artifact bleed).
             local conf = readFile(join(project, "src", "conf.tl"))
             assert.matches('t%.window%.title = "sample%-game"', conf)
             assert.matches('t%.identity = "tecs%-sample%-game"', conf)
@@ -691,7 +691,7 @@ describe("tecs CLI", function()
             end)
         end
 
-        it("points integ at the installed launcher outside LÖVE", function()
+        it("points integ at the installed launcher outside Love", function()
             local root = makeTemp("integ-nolove")
             mkdirP(join(root, "src"))
             mkdirP(join(root, "spec"))
@@ -705,7 +705,7 @@ describe("tecs CLI", function()
             assert.matches("installed launcher", err)
         end)
 
-        it("points check --json at the installed launcher outside LÖVE", function()
+        it("points check --json at the installed launcher outside Love", function()
             local root = makeTemp("check-json-nolove")
             mkdirP(join(root, "src"))
             writeFile(join(root, "tlconfig.lua"), "return {}\n")
@@ -1077,7 +1077,7 @@ describe("tecs CLI", function()
     -- appear inside the .love (e.g. the extractor's plain-table fallback, which
     -- source mode masked because it ran the same code but the earlier fixtures
     -- used a typed `local record` module). This builds the real payload and
-    -- drives the packaged CLI. Gated on a LÖVE binary and Node being available.
+    -- drives the packaged CLI. Gated on a Love binary and Node being available.
     describe("packaged .love", function()
         local frameworkDir = os.getenv("TECS_DIR")
 
@@ -1315,7 +1315,7 @@ describe("tecs CLI", function()
                 assert.matches("'linewidth' does not exist on Rectangle", joined)
             end)
         else
-            it("skips packaged specs without LÖVE, Node, and a Tecs checkout", function()
+            it("skips packaged specs without Love, Node, and a Tecs checkout", function()
                 assert.is_true(true)
             end)
         end
@@ -1476,13 +1476,13 @@ describe("tecs CLI", function()
             end)
         end)
 
-        it("patches the LÖVE Info.plist for the game", function()
+        it("patches the Love Info.plist for the game", function()
             local plist = table.concat({
                 "<dict>",
                 "    <key>CFBundleIdentifier</key>",
                 "    <string>org.love2d.love</string>",
                 "    <key>CFBundleName</key>",
-                "    <string>LÖVE</string>",
+                "    <string>Love</string>",
                 "    <key>UTExportedTypeDeclarations</key>",
                 "    <array>",
                 "        <dict>",

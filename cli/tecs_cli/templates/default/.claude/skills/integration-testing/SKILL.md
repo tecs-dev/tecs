@@ -6,7 +6,7 @@ description: Write and run integration specs that drive the built game over MCP 
 # Tecs integration testing
 
 `tecs integ` builds the game, compiles `spec/**/*.tl`, and runs it with the bundled busted runner.
-Specs named `*_lovespec.tl` launch the built game under real LÖVE and drive it over MCP; `*_spec.tl`
+Specs named `*_lovespec.tl` launch the built game under real Love and drive it over MCP; `*_spec.tl`
 files are plain busted specs. Love-driven runs are not headless (a game window opens, unfocused on
 macOS) and work on macOS and Linux only. Always finish by running `tecs integ` and making it pass.
 

@@ -39,7 +39,7 @@ no generated files (`build/`, `src/vendor/`) were edited.
   diagnostics carry a `hint` naming the exact `tecs api` lookup — follow it instead of guessing.
 - `tecs build`: compile to `build/`. A running game hot-reloads a successful build automatically,
   so prefer building over restarting the game.
-- `tecs run`: build, then launch the game with the cached LÖVE runtime.
+- `tecs run`: build, then launch the game with the cached Love runtime.
 - `tecs integ`: compile and run `spec/` with the bundled busted runner. See the
   integration-testing skill. Prefer one interactive verification pass for a handful of
   mechanics; write an integ spec when the same behaviors will be checked repeatedly or a drive
@@ -176,7 +176,7 @@ keep it, and make every observation deterministic:
   `run_lua`, `require("tecs").findKey("<name>")` resolves named keys and `modules("<mod>")`
   hands you your own component records to query with. This only works if you named your keys.
 - **Tape events; don't poke input state.** `cmd_step`'s `events` rows (and standalone
-  `cmd_input_tape`) dispatch literal LÖVE events through the real input pipeline
+  `cmd_input_tape`) dispatch literal Love events through the real input pipeline
   (`tecs2d.input`, Tecs events, `love.*` callbacks) on exact gameplay frames — model releases
   as their own rows. `send_love_event` sends ONE immediate event (`{event = "keypressed",
   args = ["space"]}`, args forgiving). Bare `cmd_input_tape` reports fired/held actuals;
@@ -201,7 +201,7 @@ luarocks install --tree src/vendor --lua-version=5.1 <rock>
 ```
 
 Install the matching `<rock>-tl-type` rock too so `tecs check` keeps passing. Only pure-Lua rocks
-work — the runtime is LÖVE's LuaJIT with no C toolchain. `src/vendor/` is regenerated and
+work — the runtime is Love's LuaJIT with no C toolchain. `src/vendor/` is regenerated and
 gitignored, so record installed rocks somewhere repeatable.
 
 ## Facts worth knowing

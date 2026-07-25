@@ -130,7 +130,7 @@ local relativeTo = fileSystem.relativeTo
 local copyDir = fileSystem.copyDir
 
 local function copyLoveDir(src, dst, depth)
-    assert(loveApi, "embedded copy requires LÖVE")
+    assert(loveApi, "embedded copy requires Love")
     depth = (depth or 0) + 1
     if depth > 32 then
         error("embedded directory nests too deep (malformed payload?): " .. src, 0)
@@ -377,7 +377,7 @@ local function runTl(args)
     end
 end
 
--- Teal compiler API, importable from both the LÖVE payload and a source
+-- Teal compiler API, importable from both the Love payload and a source
 -- checkout (specs); a TECS_TEAL_DIR checkout wins through the loader above.
 local tealApi
 local function loadTealApi()
@@ -474,7 +474,7 @@ local collectCheckDiagnostics = diagnosticsModule.collectCheckDiagnostics
 local function loveBin()
     local supplied = os.getenv("TECS_LOVE_BIN")
     if supplied and supplied ~= "" then return normalize(supplied) end
-    error("LÖVE runtime unavailable; run tecs through its installed launcher", 0)
+    error("Love runtime unavailable; run tecs through its installed launcher", 0)
 end
 
 local function embeddedDependenciesComplete()
@@ -687,11 +687,11 @@ end
 -- Mount a zip archive and call fn(mountpoint).
 local function withMountedArchive(archive, fn)
     if not (isLoveCli and loveApi) then
-        error("archive handling requires LÖVE; run tecs through its installed launcher", 0)
+        error("archive handling requires Love; run tecs through its installed launcher", 0)
     end
     local fs = loveApi.filesystem
     if not fs.mountFullPath then
-        error("this LÖVE runtime cannot mount archives; update the cached runtime", 0)
+        error("this Love runtime cannot mount archives; update the cached runtime", 0)
     end
     local mount = "tecs-archive-mount"
     if not fs.mountFullPath(archive, mount) then
@@ -711,7 +711,7 @@ end
 --------------------------------------------------------------------------------
 -- Distribution: package the built game as a .love file, a fused Windows
 -- executable, and a macOS app bundle. Runtimes come from the launcher cache
--- when present, otherwise from the same pinned LÖVE nightly the launchers use.
+-- when present, otherwise from the same pinned Love nightly the launchers use.
 --------------------------------------------------------------------------------
 
 local DIST_RUNTIME_BASE = "https://nightly.link/love2d/love/workflows/main/main"
@@ -751,7 +751,7 @@ local function removePlistArray(plist, key)
     return plist:sub(1, declarationStart - 1) .. plist:sub(position)
 end
 
--- Rebrand LÖVE's Info.plist for the game and drop its claim on .love files.
+-- Rebrand Love's Info.plist for the game and drop its claim on .love files.
 local function patchPlist(plist, name)
     plist = plist:gsub("(<key>CFBundleIdentifier</key>%s*<string>)[^<]*", "%1org.tecs2d." .. name, 1)
     plist = plist:gsub("(<key>CFBundleName</key>%s*<string>)[^<]*", "%1" .. name, 1)
@@ -817,7 +817,7 @@ local function distWindowsRuntime()
         end
     end
 
-    status("Downloading the Windows LÖVE runtime...")
+    status("Downloading the Windows Love runtime...")
     mkdir(dir)
     local outer = pathJoin(cacheRoot(), "dist/love-windows-outer.zip")
     writeFile(outer, fetchUrl(DIST_RUNTIME_BASE .. "/love-windows-x64.zip"))
@@ -832,7 +832,7 @@ local function distWindowsRuntime()
             end
         end
         if not innerName then
-            error("unexpected Windows LÖVE runtime archive layout", 0)
+            error("unexpected Windows Love runtime archive layout", 0)
         end
         writeFile(inner, (fs.read(mount .. "/" .. innerName)))
     end)
@@ -847,7 +847,7 @@ local function distWindowsRuntime()
             return dirname(file)
         end
     end
-    error("Windows LÖVE runtime did not contain love.exe", 0)
+    error("Windows Love runtime did not contain love.exe", 0)
 end
 
 -- Path to love.app, reusing the host launcher's cache on macOS and
@@ -864,14 +864,14 @@ local function distMacosRuntime()
         return app
     end
 
-    status("Downloading the macOS LÖVE runtime...")
+    status("Downloading the macOS Love runtime...")
     remove(baseDir)
     mkdir(baseDir)
     writeFile(pathJoin(baseDir, "outer.zip"), fetchUrl(DIST_RUNTIME_BASE .. "/love-macos.zip"))
     run("cd " .. q(baseDir) .. " && unzip -q outer.zip && unzip -q love-macos.zip"
         .. " && rm -f outer.zip love-macos.zip")
     if not exists(pathJoin(app, "Contents/MacOS/love")) then
-        error("macOS LÖVE runtime did not contain love.app", 0)
+        error("macOS Love runtime did not contain love.app", 0)
     end
     return app
 end
@@ -1096,7 +1096,7 @@ function tasks.new(args)
         end
     end
 
-    -- Stamp the LÖVE identity and window title with the project name. A
+    -- Stamp the Love identity and window title with the project name. A
     -- static identity would make every generated game share one save
     -- directory, so debugger artifacts (cmd_screenshot files, snapshots)
     -- from one project bleed into the next -- an agent reading a stale
@@ -1139,7 +1139,7 @@ function tasks.dev()
 end
 
 -- Run project specs with the vendored busted runner. Files matching
--- *_lovespec.tl launch the built game under real LÖVE and drive it over the
+-- *_lovespec.tl launch the built game under real Love and drive it over the
 -- tecs2d MCP server, so this is intentionally not headless.
 function tasks.integ()
     ensureProject()
@@ -1213,7 +1213,7 @@ end
 function tasks.dist(args)
     ensureProject()
     if not isLoveCli then
-        error("packaging requires LÖVE; run tecs through its installed launcher", 0)
+        error("packaging requires Love; run tecs through its installed launcher", 0)
     end
     if args.target == "macos" and isWindows then
         fail("the macOS bundle cannot be assembled on Windows; its symlinks need a POSIX host")
@@ -1245,7 +1245,7 @@ function tasks.dist(args)
 end
 
 -- Everything host-specific the MCP bridge needs, kept injectable so the
--- dispatcher stays unit-testable outside LÖVE.
+-- dispatcher stays unit-testable outside Love.
 local function buildMcpContext()
     local ffi = require("ffi")
     pcall(ffi.cdef, [[
@@ -1355,7 +1355,7 @@ end
 function tasks.mcp()
     ensureProject()
     if not isLoveCli then
-        error("the MCP bridge requires LÖVE; run tecs through its installed launcher", 0)
+        error("the MCP bridge requires Love; run tecs through its installed launcher", 0)
     end
     if isWindows then
         fail("tecs mcp requires macOS or Linux; the game process harness is POSIX-only")
@@ -1634,7 +1634,7 @@ local function printInfo(args)
 
     print("Tecs CLI " .. info.version)
     if info.love then
-        print("LÖVE " .. info.love)
+        print("Love " .. info.love)
     end
     print(info.lua)
 
@@ -1664,7 +1664,7 @@ local GAME_MCP_PORT = 19999
 
 local function gameClient(port, timeout)
     if not isLoveCli then
-        error("this command requires LÖVE; run tecs through its installed launcher", 0)
+        error("this command requires Love; run tecs through its installed launcher", 0)
     end
     installFrameworkLoader()
     local mcpClient = require("tecs2d.testing.mcp_client")
@@ -1777,7 +1777,7 @@ local commands = {
     {
         name = "run",
         summary = "Build and run the game",
-        description = "Build the project, then launch the game from build/ with the cached LÖVE runtime.",
+        description = "Build the project, then launch the game from build/ with the cached Love runtime.",
         action = tasks.run,
     },
     {
@@ -1800,7 +1800,7 @@ local commands = {
         name = "dist",
         summary = "Package the game for distribution",
         description = "Zip the built game into a .love file, assemble a macOS app bundle, and "
-            .. "fuse a Windows executable, using the cached LÖVE runtimes.",
+            .. "fuse a Windows executable, using the cached Love runtimes.",
         action = tasks.dist,
         setup = function(subcommand)
             subcommand:argument("target", "Optional target: love, macos, or windows; omit for all.")
@@ -1812,7 +1812,7 @@ local commands = {
         name = "integ",
         summary = "Run project specs against the built game",
         description = "Compile spec/ and run it with the bundled busted runner; *_lovespec.tl "
-            .. "specs launch the built game under real LÖVE and drive it over MCP.",
+            .. "specs launch the built game under real Love and drive it over MCP.",
         action = tasks.integ,
     },
     {

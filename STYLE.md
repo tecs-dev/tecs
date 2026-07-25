@@ -144,7 +144,7 @@ metamethods (`__call`, `__index`), and generated bindings.
   columns. It also carries conversion, lifetime, and tooling tradeoffs, so
   choose it for measured hot data, not by default. Use `tecs.newComponent`
   (table storage) when fields hold Lua tables, varying strings, functions,
-  or userdata such as LÖVE objects, or when the component is cold. Do not
+  or userdata such as Love objects, or when the component is cold. Do not
   mix: if one field needs a table, the component is a table component.
 - Tag components (no fields) beat boolean fields when the flag is stable
   and queried often: queries match archetypes directly instead of scanning.
