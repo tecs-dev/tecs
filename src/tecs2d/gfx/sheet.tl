@@ -104,7 +104,8 @@ local record sprite_sheet
         getAnimationFrame: function(self, tag: string, timeElapsed: number): integer, number
 
         --- Get the file path this sheet was loaded from (for serialization).
-        --- @return The image file path, or nil if not loaded from file
+        --- @return The image file path, or an empty string when the sheet has
+        --- no durable source path.
         getPath: function(self): string
 
         --- Get pre-computed UV coordinates for a frame.
@@ -172,7 +173,7 @@ local record sprite_sheet
         --- Create a new sheet from Love2D image and data.
         --- @param image The Love2D image
         --- @param data The file data containing JSON configuration
-        --- @param path Optional file path for serialization
+        --- @param path File path used for serialization
         --- @return A new SpriteSheet instance
         fromImage: function(
             image: love.graphics.Image,
@@ -191,7 +192,7 @@ local record sprite_sheet
         --- Create a new sheet from Love2D image and config table.
         --- @param image The Love2D image
         --- @param config The configuration table (parsed from JSON)
-        --- @param path Optional file path for serialization
+        --- @param path File path used for serialization
         --- @return A new SpriteSheet instance
         fromConfig: function(image: love.graphics.Image, config: table, path: string): SpriteSheet
 

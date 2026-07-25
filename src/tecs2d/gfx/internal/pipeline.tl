@@ -4,6 +4,7 @@
 --- phase callback, depth-interleaved with GPU shapes via the world shader.
 
 local tecs <const> = require("tecs")
+local tecsInternal <const> = require("tecs.internal.types")
 local types <const> = require("tecs2d.gfx.types")
 local levents <const> = require("tecs2d.events")
 
@@ -14,6 +15,7 @@ local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
 local phases <const> = tecs.phases
 local layereffects <const> = require("tecs2d.gfx.internal.layereffects")
 local Camera <const> = require("tecs2d.gfx.Camera")
+local sheet <const> = require("tecs2d.gfx.sheet")
 local sprite_sheet <const> = require("tecs2d.gfx.internal.sprite.sheet")
 local worldregistry <const> = require("tecs2d.gfx.internal.worldregistry")
 local Occluder <const> = require("tecs2d.gfx.internal.Occluder")
@@ -180,6 +182,23 @@ end
 
 local type Pipeline = types.Pipeline
 
+local record WorldShaderStateImpl
+    _pipeline: types.Pipeline
+    _layer: number
+    _z: number
+    _x: number
+    _bottomY: number
+    _isUnlit: boolean
+    _shader: love.graphics.Shader | nil
+    _normalMap: love.graphics.Texture | nil
+
+    at: function(WorldShaderStateImpl, layer: number, z?: number, x?: number, bottomY?: number): types.WorldShaderState
+    unlit: function(WorldShaderStateImpl): types.WorldShaderState
+    shader: function(WorldShaderStateImpl, loveShader: love.graphics.Shader): types.WorldShaderState
+    normalMap: function(WorldShaderStateImpl, texture: love.graphics.Texture): types.WorldShaderState
+    attach: function(WorldShaderStateImpl)
+end
+
 local record PipelineImpl is Pipeline, gpuTypes.PipelineInternal
     world: tecs.World
     renderer: gpuTypes.Renderer
@@ -249,7 +268,7 @@ local record PipelineImpl is Pipeline, gpuTypes.PipelineInternal
     _gBufferCallback: function(number, number, number, number, number, number)
 
     -- Fluent world shader state (pre-allocated, reused)
-    _worldShaderState: types.WorldShaderState
+    _worldShaderState: WorldShaderStateImpl
 
     -- Layer effects manager
     layerEffectsManager: layereffects.Manager
@@ -367,8 +386,8 @@ function PipelineImpl:_validateLayerOrdering()
 end
 
 -- Forward-declare WorldShaderState metatable (methods added later in the file)
-local WorldShaderState <const> = types.WorldShaderState
-local WS_MT <const>: metatable<types.WorldShaderState> = {
+local WorldShaderState <const> = WorldShaderStateImpl
+local WS_MT <const>: metatable<WorldShaderStateImpl> = {
     __index = WorldShaderState
 }
 
@@ -496,7 +515,7 @@ function pipeline.newPipeline(config: pipeline.RenderConfig): Pipeline
         _pipeline = self,
         _layer = 1, _z = 0, _x = 0, _bottomY = 0,
         _isUnlit = false, _shader = nil, _normalMap = nil,
-    } as types.WorldShaderState, WS_MT)
+    } as WorldShaderStateImpl, WS_MT)
 
     -- Create G-buffer callback once (avoid per-frame closure allocation)
     self._gBufferCallback = function(effCamX: number, effCamY: number, zoom: number, rw: number, rh: number, rotation: number)
@@ -817,7 +836,11 @@ end
 local COOKIE_ARRAY_SIZE <const> = 256
 local COOKIE_MAX_LAYERS <const> = 64
 
-function PipelineImpl:registerCookie(name: string, spriteSheet: any, tag?: string): integer
+function PipelineImpl:registerCookie(
+    name: string,
+    spriteSheet: sheet.SpriteSheet,
+    tag?: string
+): integer
     local r = self.renderer
     local ss = spriteSheet as sprite_sheet.SpriteSheet
 
@@ -1092,7 +1115,12 @@ end
 -- Layer Effects
 -------------------------------------------------------------------------------
 
-function PipelineImpl:setLayerEffect(layer: integer | string, shader: any, uniforms?: {string: any}, options?: types.LayerEffectOptions)
+function PipelineImpl:setLayerEffect(
+    layer: integer | string,
+    shader: any,
+    uniforms?: {string: any},
+    options?: types.LayerEffectOptions
+)
     local layerNum = resolveLayer(self, layer)
     self.layerEffectsManager:setEffect(layerNum, shader, uniforms, options as layereffects.EffectOptions)
 end
@@ -1802,13 +1830,7 @@ end
 -- Draw phase support - depth shader methods for CPU draws
 -------------------------------------------------------------------------------
 
---- Compute a depth value for sorting (matches GPU shader formula).
---- Lower depth = further back in scene.
---- @param layer Layer number (1-16)
---- @param z Z-index within layer
---- @param x X coordinate (used for isometric sort mode)
---- @param bottomY Bottom Y coordinate of the entity
---- @return Depth value in range [0, 1]
+-- Public contract documented on types.Pipeline.computeDepth.
 function PipelineImpl:computeDepth(layer: number, z: number, x: number, bottomY: number): number
     local sortMode = self.sortModes[layer as integer] or 0
     return computeDepth(layer, z, x, bottomY, sortMode)
@@ -1821,47 +1843,34 @@ local DEFAULT_NORMAL <const> = {0, 0, 1}
 -- WorldShaderState: fluent API for CPU draws during Draw phase
 -------------------------------------------------------------------------------
 
---- Set depth sorting position. z, x, and bottomY default to 0 if omitted.
---- @param layer Render layer (1-16)
---- @param z Z-index within layer (default 0)
---- @param x X coordinate for isometric sorting (default 0)
---- @param bottomY Bottom Y coordinate for isometric sorting (default 0)
---- @return self for chaining
+-- Public contract documented on types.WorldShaderState.at.
 function WorldShaderState:at(layer: number, z: number, x: number, bottomY: number): types.WorldShaderState
     self._layer = layer
     self._z = z or 0
     self._x = x or 0
     self._bottomY = bottomY or 0
-    return self
+    return self as types.WorldShaderState
 end
 
---- Mark this draw as unlit (full brightness, no lighting).
---- @return self for chaining
+-- Public contract documented on types.WorldShaderState.unlit.
 function WorldShaderState:unlit(): types.WorldShaderState
     self._isUnlit = true
-    return self
+    return self as types.WorldShaderState
 end
 
---- Set a custom Love2D shader. Custom shaders MUST be MRT-aware and output to both:
----   love_Canvases[0] = albedo color
----   love_Canvases[1] = vec4(normal * 0.5 + 0.5, lit ? 1.0 : 0.0)
---- @param loveShader A love.graphics.Shader
---- @return self for chaining
-function WorldShaderState:shader(loveShader: any): types.WorldShaderState
+-- Public contract documented on types.WorldShaderState.shader.
+function WorldShaderState:shader(loveShader: love.graphics.Shader): types.WorldShaderState
     self._shader = loveShader
-    return self
+    return self as types.WorldShaderState
 end
 
---- Set a normal map texture for per-pixel normals.
---- @param texture The normal map texture
---- @return self for chaining
+-- Public contract documented on types.WorldShaderState.normalMap.
 function WorldShaderState:normalMap(texture: love.graphics.Texture): types.WorldShaderState
     self._normalMap = texture
-    return self
+    return self as types.WorldShaderState
 end
 
---- Apply the world shader with the accumulated settings. Draw after this call,
---- then call pipeline:detachWorldShader() when done.
+-- Public contract documented on types.WorldShaderState.attach.
 function WorldShaderState:attach()
     local p = self._pipeline as PipelineImpl
     if not p.drawActive then
@@ -1940,9 +1949,7 @@ function WorldShaderState:attach()
     end
 end
 
---- Get the pre-allocated WorldShaderState for fluent configuration.
---- Resets all fields to defaults. Chain methods and call :attach() to apply.
---- @return WorldShaderState for chaining
+-- Public contract documented on types.Pipeline.worldShader.
 function PipelineImpl:worldShader(): types.WorldShaderState
     local ws = self._worldShaderState
     ws._layer = 1
@@ -1952,11 +1959,10 @@ function PipelineImpl:worldShader(): types.WorldShaderState
     ws._isUnlit = false
     ws._shader = nil
     ws._normalMap = nil
-    return ws
+    return ws as types.WorldShaderState
 end
 
---- Detach the world shader after CPU draws.
---- This resets both the standard cpuWorldShader and any custom shaders.
+-- Public contract documented on types.Pipeline.detachWorldShader.
 function PipelineImpl:detachWorldShader()
     -- Always reset the shader, whether using cpuWorldShader or custom shader
     lg.setShader()
@@ -1966,20 +1972,7 @@ function PipelineImpl:detachWorldShader()
     self.cpuWorldShaderActive = false
 end
 
---- Query the lighting brightness at a world position.
---- Returns 0-1 luminance including shadow occlusion.
---- Lazy: first call activates an intermediate canvas (zero cost until called).
---- The first frame after activation returns 0 (no data yet).
---- Query the lit pixel luminance at a world position.
----
---- NOTE: This is a debug/tooling API. It does a GPU->CPU readback
---- via `lg.readbackTexture`, which is expensive (stalls the GPU pipeline).
---- Do not call per-frame from gameplay code. Intended for editor tools,
---- stealth detection debug overlays, or infrequent checks.
----
---- @param worldX World-space X coordinate.
---- @param worldY World-space Y coordinate.
---- @return Perceptual luminance in [0, 1] (ITU-R BT.709), or 0 if off-screen.
+-- Public contract documented on types.Pipeline.queryLightAt.
 -- Per-archetype "column set contains a Sprite/TileChunk column" caches.
 -- Column sets are fixed per archetype, so one name scan suffices.
 local archHasSprite <const>: {tecs.Archetype: boolean} =
@@ -1990,7 +1983,8 @@ local archHasTileChunk <const>: {tecs.Archetype: boolean} =
 local function scanColumns(arch: tecs.Archetype)
     local hasSprite = false
     local hasTileChunk = false
-    for comp in pairs((arch as {string:any}).columns as {tecs.Component: any}) do
+    local columns = (arch as tecsInternal.ArchetypeInternal).columns
+    for comp in pairs(columns) do
         local name = comp.componentName
         if name == "Sprite" then
             hasSprite = true
@@ -2018,7 +2012,7 @@ function PipelineImpl:_shadowMaskFresh(camX: number, camY: number, zoom: number,
     -- moves are covered. TileChunk edits (DirtyTileChunk resync) change
     -- baked occluder heights without an Occluder column.
     for arch in self.world:dirtyArchetypes() do
-        local cols = (arch as {string:any}).columns as {tecs.Component: any}
+        local cols = (arch as tecsInternal.ArchetypeInternal).columns
         if cols[Occluder as tecs.Component] ~= nil then
             return false
         end
@@ -2104,8 +2098,7 @@ function PipelineImpl:queryLightAt(worldX: number, worldY: number): number
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
 end
 
---- Check if Draw phase is currently active.
---- @return true if within Draw phase render context
+-- Public contract documented on types.Pipeline.isDrawActive.
 function PipelineImpl:isDrawActive(): boolean
     return self.drawActive
 end

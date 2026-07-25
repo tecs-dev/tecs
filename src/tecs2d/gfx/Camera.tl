@@ -308,7 +308,7 @@ local record Camera
     setDisableDrawPhase: function(self, disabled: boolean)
 
     --- Check if the CPU Draw phase is enabled for this camera.
-    --- @return true if Draw phase runs for this camera.
+    --- @return true if Draw-phase systems are disabled for this camera.
     getDisableDrawPhase: function(self): boolean
 
     --- Get the camera name.

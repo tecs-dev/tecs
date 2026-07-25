@@ -159,7 +159,7 @@ blend.AdditiveBlend = createBlendComponent(
 blend.AdditiveBlendPremul = createBlendComponent(
     "AdditiveBlendPremul", "add", "premultiplied") as AdditiveBlendPremul
 
--- LÖVE only permits the multiply, lighten, and darken blend modes with
+-- Love only permits the multiply, lighten, and darken blend modes with
 -- premultiplied alpha (setBlendMode errors otherwise), so their
 -- non-Premul tags register as premultiplied too. For SDF shapes the two
 -- are numerically identical (their shaders output alpha 1).

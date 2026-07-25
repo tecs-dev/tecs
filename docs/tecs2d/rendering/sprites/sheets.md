@@ -336,9 +336,12 @@ flat surface.
 
 ## Performance Notes
 
-- Sheets are cached by path; loading the same file returns the cached sheet
+- The asset manager caches sheet handles by path. The synchronous
+  `SpriteSheet.fromFile` and `fromTextureFile` factories create a new sheet
+  each time, so retain their result when creating multiple sprites.
 - Material maps are optional; omitting them has no performance cost
 - Auto-generating normal maps happens at load time (slight delay)
 - Textures are automatically allocated into size-bucketed texture arrays for efficient GPU batching
 - All sprites within the same size bucket and texture array are rendered in a single draw call
-- Textures larger than 2048×2048 require the `DirectSprite` component and are rendered separately
+- Sprite textures are limited to 2048×2048; split larger images or draw them
+  through a custom `Draw` phase system

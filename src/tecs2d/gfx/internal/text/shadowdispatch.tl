@@ -89,7 +89,7 @@ end
 
 -- Reset-data ByteData built once and reused. setArrayData wants a
 -- ByteData (or buffer-typed source); a Lua table doesn't satisfy the
--- LÖVE 12 binding signature.
+-- Love 12 binding signature.
 local INDIRECT_ARG_COUNT <const> = 8
 local indirectResetData: love.data.ByteData = nil
 

@@ -1,6 +1,6 @@
 -- archetypeshadowset: integration test exercising pointer-drift
 -- detection, dirty-page derivation from _dirtyBits, and flush against
--- multiple component columns. Uses the LÖVE 12 mock for ByteData/Buffer.
+-- multiple component columns. Uses the Love 12 mock for ByteData/Buffer.
 
 require("busted")
 

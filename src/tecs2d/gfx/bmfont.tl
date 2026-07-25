@@ -6,10 +6,6 @@
 local lg <const> = love.graphics
 local json <const> = require("tecs.utils.json")
 
--- Font cache to avoid loading the same font multiple times
--- Each font load creates a GPU texture, so caching is essential for performance
-local fontCache: {string: any} = {}
-
 local record bmfont
     --- Metrics for a single character in the atlas.
     record BMFontChar
@@ -43,9 +39,6 @@ local record bmfont
 
     --- A loaded BMFont with metrics and atlas.
     record BMFont
-        --- Unique id per loaded font instance; identifies the font in
-        --- caches (face/page names are not unique across files).
-        _uid: integer
         --- Font type: "bitmap", "msdf", "sdf", or "psdf"
         type: string
         --- Font face name
@@ -70,13 +63,13 @@ local record bmfont
         --- in a double, and avoids building a string per lookup.
         kernings: {integer: number}
         --- The loaded atlas texture
-        atlas: love.graphics.Image
+        atlas: love.graphics.Image | nil
         --- Distance field info (for MSDF/SDF fonts)
-        distanceField: DistanceField
+        distanceField: DistanceField | nil
 
         --- Get character metrics for a codepoint.
         --- Returns nil if character not found.
-        getChar: function(BMFont, codepoint: integer): BMFontChar
+        getChar: function(BMFont, codepoint: integer): BMFontChar | nil
 
         --- Get kerning amount between two codepoints.
         --- Returns 0 if no kerning defined.
@@ -89,6 +82,7 @@ local record bmfont
         --- Sets appropriate texture filter based on font type (linear for SDF, nearest for bitmap).
         --- @param atlasImage The atlas texture to attach
         setAtlas: function(BMFont, atlasImage: love.graphics.Image)
+
     end
 
     --- Load a BMFont from a .fnt or .json file.
@@ -119,7 +113,11 @@ end
 
 local BMFont <const> = bmfont.BMFont
 
-function BMFont:getChar(codepoint: integer): bmfont.BMFontChar
+-- Each font load creates a GPU texture, so cache the high-level load()
+-- result by its complete caller-supplied path.
+local fontCache: {string: bmfont.BMFont} = {}
+
+function BMFont:getChar(codepoint: integer): bmfont.BMFontChar | nil
     return self.chars[codepoint]
 end
 
@@ -215,12 +213,8 @@ local function getExtension(path: string): string
 end
 
 -- Create font with metatable
-local nextFontUid = 1
 local function createFont(): bmfont.BMFont
-    local uid = nextFontUid
-    nextFontUid = nextFontUid + 1
     local font: bmfont.BMFont = {
-        _uid = uid,
         type = "bitmap",
         face = "",
         size = 0,
@@ -459,7 +453,7 @@ function bmfont.load(fontPath: string): bmfont.BMFont
     -- Check cache first to avoid creating duplicate GPU textures
     local cached = fontCache[fontPath]
     if cached then
-        return cached as bmfont.BMFont
+        return cached
     end
 
     local ext = getExtension(fontPath)

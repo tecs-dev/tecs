@@ -67,12 +67,23 @@ local record sprite
     --- SpriteInstance type (exported for external access)
     Instance: SpriteInstance
 
-    --- DirectSprite marker component - forces direct texture binding (slow path).
-    --- Use for sprites with textures larger than the texture array slice size (2048x2048),
-    --- or when explicit texture binding is needed for other reasons.
-    --- Currently callers must add this component manually; oversized textures
-    --- are only flagged with a warning by the bucket manager, not auto-routed.
-    record DirectSprite is tecs.Component
+    --- Options shared by all Sprite factories.
+    interface SpriteOptions
+        --- Animation speed multiplier. Defaults to 1.
+        speed: number
+        --- Center the sprite on its Transform. Defaults to true.
+        centered: boolean
+        --- Aseprite slice name to use as the pivot.
+        pivotSlice: string
+        --- Animation start time, used to stagger otherwise identical sprites.
+        startTime: number
+    end
+
+    --- Options for `Sprite.fromTexture`.
+    interface TextureSpriteOptions is SpriteOptions
+        --- Durable source path used to reconstruct the sprite during snapshot
+        --- load. The caller must keep this path and the supplied texture in sync.
+        path: string
     end
 
     --- Texture bucket marker components - group sprites by texture array size tier.
@@ -137,7 +148,7 @@ local record sprite
         setTag: function(self, tag: string)
 
         --- Play a tag once, then invoke the callback when the last frame is reached.
-        playOnce: function(self, tag: string, onComplete?: function(any))
+        playOnce: function(self, tag: string, onComplete?: function(Sprite))
 
         --- Pause the animation at current frame.
         --- Optional time parameter for synchronized batch pausing.
@@ -196,7 +207,7 @@ local record sprite
         fromSheet: function(
             spriteSheet: sheet.SpriteSheet,
             tag?: string,
-            options?: {string: any}
+            options?: SpriteOptions
         ): Sprite
 
         --- Create a Sprite from an Aseprite file path
@@ -204,13 +215,13 @@ local record sprite
         --- @param tag Optional animation tag
         --- @param options Optional configuration
         --- @return A new Sprite instance
-        fromAseprite: function(path: string, tag?: string, options?: {string: any}): Sprite
+        fromAseprite: function(path: string, tag?: string, options?: SpriteOptions): Sprite
 
         --- Create a simple Sprite from a texture (single-frame)
         --- @param texture The texture to use
         --- @param options Optional configuration
         --- @return A new Sprite instance
-        fromTexture: function(texture: love.graphics.Texture, options?: {string: any}): Sprite
+        fromTexture: function(texture: love.graphics.Texture, options?: TextureSpriteOptions): Sprite
     end
 
     --- Plugin to add sprite rendering and collision systems to a TECS world.
@@ -270,7 +281,7 @@ sprite.ChangeTag = sprite_events.ChangeTag
 local Sprite <const> = sprite.Sprite
 
 local record SpriteRuntime
-    callbacks: {integer: function(any)}
+    callbacks: {integer: function(sprite.Sprite)}
     pendingCount: integer
 end
 
@@ -306,7 +317,7 @@ local function clearPlayOnceCallback(runtime: SpriteRuntime, entityId: integer)
 end
 
 local function queuePlayOnceCallback(runtime: SpriteRuntime, entityId: integer,
-        callback: function(any))
+        callback: function(sprite.Sprite))
     if runtime.callbacks[entityId] == nil then
         runtime.pendingCount = runtime.pendingCount + 1
     end
@@ -584,7 +595,7 @@ function Sprite:setTag(tag: string)
     world:markComponentDirty(entityId, Sprite as tecs.Component)
 end
 
-function Sprite:playOnce(tag: string, onComplete?: function(any))
+function Sprite:playOnce(tag: string, onComplete?: function(sprite.Sprite))
     local world, entityId, runtime = resolveOwner(self)
     local inst <const> = getInstance(self.spriteId)
     local sameTag = inst and tag == self:getTag()
@@ -952,10 +963,10 @@ tecs.newFFIComponent({
             sheetCacheByPath[path] = spriteSheet
         end
         local inst = Sprite.fromSheet(spriteSheet as sheet.SpriteSheet, data.tag as string, {
-            speed      = data.speed,
-            centered   = data.centered,
-            pivotSlice = data.pivotSlice,
-            startTime  = data.animStartTime,
+            speed      = data.speed as number,
+            centered   = data.centered as boolean,
+            pivotSlice = data.pivotSlice as string,
+            startTime  = data.animStartTime as number,
         })
         inst.pausedFrame   = (data.pausedFrame   as integer) or -1
         inst._pauseAtFrame = (data._pauseAtFrame as integer) or -1
@@ -1044,13 +1055,6 @@ tecs.newFFIComponent({
             (data.height as number) or 0
         )
     end,
-})
-
--- DirectSprite component registration (marker for direct texture binding)
-local DirectSprite <const> = sprite.DirectSprite
-tecs.newComponent({
-    name = "DirectSprite",
-    container = DirectSprite,
 })
 
 -- Texture bucket component registrations (FFI for performance)
@@ -1154,7 +1158,7 @@ local TIER_TO_COMPONENT: {string: tecs.Component} = {
 function Sprite.fromSheet(
     spriteSheet: sheet.SpriteSheet,
     tag?: string,
-    options?: {string: any}
+    options?: sprite.SpriteOptions
 ): sprite.Sprite
     local opts = options or {}
     local tagStr = tag or ""
@@ -1175,18 +1179,24 @@ function Sprite.fromSheet(
     return Sprite(spriteId, startTime)
 end
 
-function Sprite.fromAseprite(path: string, tag?: string, options?: {string: any}): sprite.Sprite
+function Sprite.fromAseprite(path: string, tag?: string, options?: sprite.SpriteOptions): sprite.Sprite
     return Sprite.fromSheet(
         sprite_sheet.SpriteSheet.fromFile(path) as sheet.SpriteSheet, tag, options)
 end
 
-function Sprite.fromTexture(texture: love.graphics.Texture, options?: {string: any}): sprite.Sprite
+function Sprite.fromTexture(
+    texture: love.graphics.Texture,
+    options?: sprite.TextureSpriteOptions
+): sprite.Sprite
     -- `options.path`, when supplied, is threaded through to the underlying
     -- spriteSheet so the sprite round-trips through snapshot save/load. Caller is
     -- responsible for keeping the texture and path in sync.
     local path = options and (options.path as string) or nil
     return Sprite.fromSheet(
-        sprite_sheet.SpriteSheet.fromTexture(texture, path) as sheet.SpriteSheet, "", options)
+        sprite_sheet.SpriteSheet.fromTexture(texture, path) as sheet.SpriteSheet,
+        "",
+        options
+    )
 end
 
 -------------------------------------------------------------------------------
@@ -1205,7 +1215,14 @@ function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(worl
 
         -- Create the bucket-based sync system (handles both normal and blend mode sprites via groupBy)
         local spriteSizeHint = (renderer as gpuTypes.Renderer).config.sizeHints["sprites"]
-        local sync = bucketsync.new(world, Sprite, SpriteData as tecs.Component, TIER_TO_COMPONENT, DirectSprite, RepeatedSprite, spriteSizeHint)
+        local sync = bucketsync.new(
+            world,
+            Sprite,
+            SpriteData as tecs.Component,
+            TIER_TO_COMPONENT,
+            RepeatedSprite,
+            spriteSizeHint
+        )
 
         -- In-place Sprite replacement (world:set over an existing Sprite, or
         -- a batch-spawned zero sprite receiving its first value) causes no
@@ -1455,7 +1472,12 @@ function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(worl
                 end
 
                 for archetype, len in playOnceQuery:iter() do
-                    local sprites = archetype:getMut(Sprite) as {sprite.Sprite}
+                    -- getFrame is read-only until the one target frame is
+                    -- reached; that mutation path marks its own entity dirty.
+                    -- Acquiring the whole column mutably here would force a
+                    -- GPU upload for every Sprite in the archetype whenever
+                    -- any one-shot callback is pending.
+                    local sprites = archetype:get(Sprite) as {sprite.Sprite}
                     local entities = archetype.entities
                     for row = 1, len do
                         local entityId = entities[row] as integer

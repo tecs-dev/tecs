@@ -19,6 +19,7 @@
 
 local C <const> = require("ffi")
 local tecs <const> = require("tecs")
+local tecsInternal <const> = require("tecs.internal.types")
 local shadowbuffer <const> = require("tecs2d.gfx.internal.gpu.shadowbuffer")
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
 local FFIStorage <const> = require("tecs.internal.ffi.FFIStorage") as {string:any}
@@ -78,7 +79,7 @@ local SHADOW_SET_MT <const>: metatable<ShadowSet> = {__index = ShadowSet}
 -- the next reserveCapacity will trigger pointer drift detection and
 -- grow the shadow buffer to whatever the underlying column reports.
 local function initialCapacity(archetype: tecs.Archetype): integer
-    local cap = (archetype as {string:any}).capacity as integer
+    local cap = (archetype as tecsInternal.ArchetypeInternal).capacity
     if cap < 1 then cap = 1 end
     return cap
 end
@@ -88,8 +89,7 @@ function archetype_shadow_set.new(
     specs: {tecs.Component: LayoutDescriptor}
 ): archetype_shadow_set.ShadowSet
     local entries: {archetype_shadow_set.Entry} = {}
-    local archAny = archetype as {string:any}
-    local columns = archAny.columns as {tecs.Component: any}
+    local columns = (archetype as tecsInternal.ArchetypeInternal).columns
     local cap = initialCapacity(archetype)
 
     for comp, layout in pairs(specs) do
@@ -135,16 +135,17 @@ end
 
 function ShadowSet:flush()
     local archetype = self.archetype
-    local archAny = archetype as {string:any}
-    local columns = archAny.columns as {tecs.Component: any}
-    local archCap = archAny.capacity as integer
-    local rowCount = (archAny.entities as {integer})[0] as integer
+    local archInternal = archetype as tecsInternal.ArchetypeInternal
+    local columns = archInternal.columns
+    local archCap = archInternal.capacity
+    local rowCount = archInternal.entities[0]
 
     if rowCount == 0 then return end
 
     for i = 1, #self.entries do
         local e = self.entries[i]
         local canonical = columns[e.component]
+        local canonicalPtr = canonical as C.CData
 
         -- Pointer drift detection: if the archetype's column was
         -- reallocated (reserveCapacity creates a new cdata array), the
@@ -152,13 +153,13 @@ function ShadowSet:flush()
         -- buffer has uninitialized contents, so an unconditional
         -- flushRange follows regardless of the component-dirty bit.
         local drifted = false
-        if canonical ~= e.cachedCanonical or archCap > e.buffer.capacity then
+        if canonicalPtr ~= e.cachedCanonical or archCap > e.buffer.capacity then
             local newCap = archCap
             if newCap < 1 then newCap = 1 end
             if newCap > e.buffer.capacity then
                 e.buffer:grow(newCap)
             end
-            e.cachedCanonical = canonical as C.CData
+            e.cachedCanonical = canonicalPtr
             drifted = true
         end
 
@@ -166,14 +167,14 @@ function ShadowSet:flush()
         -- component's column hasn't changed this frame. Pointer drift
         -- forces an upload to repopulate the new GPU buffer.
         if drifted or archetype:isComponentDirty(e.component) then
-            local holder = (FFIStorage.getColumnByteData as function(any): any)(canonical)
+            local holder = (FFIStorage.getColumnByteData as function(any): any)(canonicalPtr)
             if holder ~= nil and e.layout.identity then
                 -- Direct upload: the column's backing ByteData is already in
                 -- std430 layout (identity), so skip the staging translate and
                 -- push it straight to the SSBO.
                 e.buffer.gpuBuffer:setArrayData(holder as love.data.ByteData, 2, 1, rowCount)
             else
-                e.buffer:flushRange(canonical as C.CData, rowCount)
+                e.buffer:flushRange(canonicalPtr, rowCount)
             end
         end
     end

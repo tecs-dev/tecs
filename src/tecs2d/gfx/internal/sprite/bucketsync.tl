@@ -178,7 +178,6 @@ local record bucket_sync
         spriteComponent: tecs.Component,
         spriteDataComponent: tecs.Component,
         bucketComponents: {string: tecs.Component},
-        directSpriteComponent?: tecs.Component,
         repeatedSpriteComponent?: tecs.Component,
         spriteSizeHint?: integer
     ): SpriteBucketSync
@@ -273,7 +272,6 @@ function bucket_sync.new(
     spriteComponent: tecs.Component,
     spriteDataComponent: tecs.Component,
     bucketComponents: {string: tecs.Component},
-    directSpriteComponent?: tecs.Component,
     repeatedSpriteComponent?: tecs.Component,
     spriteSizeHint?: integer
 ): bucket_sync.SpriteBucketSync
@@ -343,12 +341,6 @@ function bucket_sync.new(
         return (detectedTierIdx * TIER_SHIFT) + (arrayIdx * ARRAY_SHIFT) + blendId
     end
 
-    -- Build exclude list
-    local excludeList: {tecs.Component} = {}
-    if directSpriteComponent then
-        excludeList[#excludeList + 1] = directSpriteComponent
-    end
-
     -- Create single unified query for all tiers
     -- Batched hooks: tier detection and arraySync lookup are per-archetype
     -- invariants, hoisted out of the per-entity loop.
@@ -356,7 +348,6 @@ function bucket_sync.new(
         name = "sprite.BucketSync.unified",
         include = {spriteComponent, Transform},
         includeAny = includeAnyList,
-        exclude = excludeList,
         groupBy = unifiedGroupBy,
         onEntitiesAdded = function(archetype: tecs.Archetype, _firstRow: integer, _lastRow: integer, count: integer)
             local detectedTierIdx = detectTierIdx(archetype)

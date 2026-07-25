@@ -466,7 +466,7 @@ function RendererMethods:renderGBuffer(cameraX: number, cameraY: number, cameraZ
     -- Enable depth mode for GPU shapes
     lg.setDepthMode("lequal", true)
     -- The Draw callback may change blend state, so restore G-buffer mode for
-    -- GPU shapes. LÖVE's alphamultiply alpha mode would premultiply RGB even
+    -- GPU shapes. Love's alphamultiply alpha mode would premultiply RGB even
     -- with "replace", losing the original albedo at fractional edges.
     lg.setBlendMode("replace", "premultiplied")
 

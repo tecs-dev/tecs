@@ -70,8 +70,6 @@ function floor.spawnCheckered(world: tecs.World, options: floor.Options)
     -- reference to the texture and drops the component on load.
     local sprite = Sprite.fromTexture(cachedTexture as love.graphics.Texture, {
         centered = false,
-        pivotX = 0,
-        pivotY = 0,
         path = texturePath,
     })
 

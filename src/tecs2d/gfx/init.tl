@@ -65,6 +65,10 @@ local record gfx
     ---
     --- Requires adding the Transform component to get the default rendering logic.
     Sprite: sprite.Sprite
+    --- Shared configuration accepted by Sprite factories.
+    type SpriteOptions = sprite.SpriteOptions
+    --- Configuration accepted by Sprite.fromTexture, including snapshot source path.
+    type TextureSpriteOptions = sprite.TextureSpriteOptions
 
     --- SpriteSheet record for sprite frame data, textures, and animations.
     --- Factory methods: fromFile, fromImage, fromTexture, fromTextureFile

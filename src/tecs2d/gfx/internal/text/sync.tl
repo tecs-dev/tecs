@@ -352,11 +352,16 @@ function text_sync.plugin(_world: tecs.World, renderer: gpuTypes.Renderer, TextC
         end
 
         local function registerFont(font: bmfontMod.BMFont): integer, boolean
+            local atlas = assert(font.atlas,
+                "BMFont atlas must be attached before rendering")
             if font:isSDF() then
-                local dr = font.distanceField and font.distanceField.distanceRange or 4.0
-                return registerSDFFontAtlas(font.atlas, dr), true
+                local distanceField = font.distanceField
+                local dr = distanceField
+                    and (distanceField as bmfontMod.DistanceField).distanceRange
+                    or 4.0
+                return registerSDFFontAtlas(atlas, dr), true
             end
-            return registerBitmapFontAtlas(font.atlas), false
+            return registerBitmapFontAtlas(atlas), false
         end
 
         local textQuery = w:query({

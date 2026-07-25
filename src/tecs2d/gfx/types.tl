@@ -1,6 +1,7 @@
 --- Shared type definitions for the tecs2d.gfx module.
 
 local Camera <const> = require("tecs2d.gfx.Camera")
+local sheet <const> = require("tecs2d.gfx.sheet")
 
 local record types
     --- Camera type re-export.
@@ -46,17 +47,7 @@ local record types
 
     --- Fluent state for configuring CPU world shader draws.
     --- Obtained via pipeline:worldShader(). Chain methods, then call :attach().
-    record WorldShaderState
-        -- Private implementation fields (set by pipeline.tl)
-        _pipeline: any
-        _layer: number
-        _z: number
-        _x: number
-        _bottomY: number
-        _isUnlit: boolean
-        _shader: any
-        _normalMap: love.graphics.Texture
-
+    interface WorldShaderState
         --- Set depth sorting position. z, x, and bottomY default to 0 if omitted.
         --- @param layer Render layer (1-16)
         --- @param z Z-index within layer (default 0)
@@ -83,7 +74,7 @@ local record types
         --- https://love2d.org/wiki/Shader_Variables
         --- @param loveShader A love.graphics.Shader
         --- @return self for chaining
-        shader: function(WorldShaderState, shaderComp: any): WorldShaderState
+        shader: function(WorldShaderState, loveShader: love.graphics.Shader): WorldShaderState
 
         --- Set a normal map texture for per-pixel normals.
         --- @param texture The normal map texture
@@ -250,7 +241,16 @@ local record types
         --- @param shader A single Shader or list of Shaders (multi-pass, e.g. separable blur).
         --- @param uniforms Optional table of uniform name/value pairs sent to all shaders.
         --- @param options Optional options (singleLayer: if false, effect applies to layer and all below).
-        setLayerEffect: function(self, layer: integer | string, shader: any, uniforms?: {string: any}, options?: LayerEffectOptions)
+        setLayerEffect: function(
+            self,
+            layer: integer | string,
+            -- A single Love Shader or a list for a multi-pass effect. Teal
+            -- cannot discriminate the union because both are table-backed in
+            -- the Love declarations, so this boundary is intentionally dynamic.
+            shader: any,
+            uniforms?: {string: any},
+            options?: LayerEffectOptions
+        )
 
         --- Remove a shader effect from a layer.
         --- @param layer The layer number (1-16) or name.
@@ -269,7 +269,7 @@ local record types
         --- @param sheet SpriteSheet loaded via the sheet module.
         --- @param tag Optional animation tag name.
         --- @return Cookie ID (integer, 1-based).
-        registerCookie: function(self, name: string, sheet: any, tag?: string): integer
+        registerCookie: function(self, name: string, spriteSheet: sheet.SpriteSheet, tag?: string): integer
 
         --- Look up a cookie ID by name.
         --- @param name Cookie name.

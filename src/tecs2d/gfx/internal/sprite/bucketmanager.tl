@@ -286,8 +286,13 @@ function Manager:allocate(
     local w, h = (albedo as love.graphics.Texture):getDimensions()
     local tier = self:getTierForSize(w as integer, h as integer)
     if not tier then
-        -- Oversized texture, cannot allocate
-        LOGGER:warn("Texture %d (%dx%d) exceeds max bucket size (2048), use DirectSprite", sheetId, w, h)
+        LOGGER:warn(
+            "Texture %d (%dx%d) exceeds Sprite's 2048x2048 limit; " ..
+            "split the texture or draw it through the Draw phase",
+            sheetId,
+            w,
+            h
+        )
         return nil
     end
 

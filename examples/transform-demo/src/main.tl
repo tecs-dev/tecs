@@ -258,9 +258,15 @@ local function transformDemoPlugin(world: tecs.World)
         w:spawn(Transform(x, y, 0, 2, 0, 1, 1), gfx.Circle(6), COLOR_PIVOT_MARKER)
     end)
     defineCell(5, 5, "Sprite with top-middle pivot rotation", function(w: tecs.World, x: number, y: number)
-        -- GPU-rendered sprite rotating with top-middle pivot (pivotX=0.5, pivotY=0)
+        -- GPU-rendered sprite rotating around a top-middle Pivot component.
         w:spawn(Transform(x, y, 0, 1, 0, 1, 1), gfx.Circle(6), COLOR_PIVOT_MARKER)
-        w:spawn(Transform(x, y, 0, 2, 0, 0.5, 0.5), gfx.Sprite.fromSheet(runnerSheet, "run", {centered = false, pivotX = 0.5, pivotY = 0}), gfx.Color(1, 1, 1, 1), AnimateTransform(1.2, 0, 1, 1, 0))
+        w:spawn(
+            Transform(x, y, 0, 2, 0, 0.5, 0.5),
+            gfx.Sprite.fromSheet(runnerSheet, "run", {centered = false}),
+            gfx.Pivot(0.5, 0),
+            gfx.Color(1, 1, 1, 1),
+            AnimateTransform(1.2, 0, 1, 1, 0)
+        )
     end)
     defineCell(6, 5, "BLEND: Rotating additive rectangle", function(w: tecs.World, x: number, y: number)
         -- Centered rotation to avoid culling bounds issues

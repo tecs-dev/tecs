@@ -63,4 +63,84 @@ describe("sprite play-once: pauseAtEnd clamps on the GPU", function()
             sleep(0.08)
         end
     end)
+
+    it("does not dirty unrelated Sprite archetypes while a callback is pending", function()
+        fixture.runLua(app, [[
+            local tecs = require("tecs")
+            local gfx = require("tecs2d.gfx")
+            local Transform = tecs.builtins.Transform
+            local ProbeTag = tecs.newComponent({
+                name = "SpritePlayOnceDirtyProbe",
+                container = {},
+            })
+            world:spawn(
+                Transform(32, 32, 0, 1),
+                gfx.Sprite.fromSheet(_G.tecsTestSheet, "play"),
+                ProbeTag
+            )
+
+            local probeQuery = world:query({
+                name = "test.SpritePlayOnceDirtyProbe",
+                include = {gfx.Sprite, ProbeTag},
+            })
+            _G.tecsPlayOnceDirty = {
+                stage = "settling",
+                samples = 0,
+                dirtySamples = 0,
+                complete = false,
+            }
+            world:addSystem({
+                name = "test.SpritePlayOnceDirtyRecorder",
+                phase = tecs.phases.Update,
+                after = {"sprite.PlayOnce"},
+                run = function()
+                    local rec = _G.tecsPlayOnceDirty
+                    local probeDirty = false
+                    for arch, len in probeQuery:iter() do
+                        if len > 0 and arch:isComponentDirty(gfx.Sprite) then
+                            probeDirty = true
+                        end
+                    end
+
+                    if rec.stage == "settling" then
+                        if not probeDirty then
+                            world:get(_G.tecsTestSprite, gfx.Sprite):playOnce(
+                                "play",
+                                function()
+                                    rec.complete = true
+                                end
+                            )
+                            rec.stage = "pending"
+                        end
+                    elseif rec.stage == "pending" and not rec.complete then
+                        rec.samples = rec.samples + 1
+                        if probeDirty then
+                            rec.dirtySamples = rec.dirtySamples + 1
+                        end
+                    end
+                end,
+            })
+            return true
+        ]])
+
+        local samples = 0
+        local dirtySamples = -1
+        local complete = false
+        local ok = fixture.eventually(fixture.callTimeout, function(): boolean
+            local result = fixture.runLua(app, [[
+                local rec = _G.tecsPlayOnceDirty
+                return rec.samples, rec.dirtySamples, rec.complete
+            ]])
+            samples = tonumber(result[1]) or 0
+            dirtySamples = tonumber(result[2]) or -1
+            complete = result[3] == "true"
+            if complete then return true end
+            return nil
+        end)
+
+        luassert.is_true(ok == true, "playOnce callback did not complete")
+        luassert.is_true(samples > 0, "dirty recorder did not observe a pending frame")
+        luassert.are.equal(0, dirtySamples,
+            "pending callback dirtied an unrelated Sprite archetype")
+    end)
 end)

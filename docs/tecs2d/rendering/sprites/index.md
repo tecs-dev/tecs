@@ -96,12 +96,16 @@ gfx.Sprite.fromTexture(texture)
 
 ## Sprite Options
 
-| Option         | Type      | Default   | Description                            |
-| -------------- | --------- | --------- | -------------------------------------- |
-| `speed`        | number    | 1.0       | Animation speed multiplier             |
-| `centered`     | boolean   | true      | Center sprite on transform position    |
-| `pivotSlice`   | string    | nil       | Name of Aseprite slice to use as pivot |
-| `startTime`    | number    | 0         | Animation start time (for staggering)  |
+| Option         | Type      | Default   | Description                                                         |
+| -------------- | --------- | --------- | ------------------------------------------------------------------- |
+| `speed`        | number    | 1.0       | Animation speed multiplier                                          |
+| `centered`     | boolean   | true      | Center sprite on transform position                                 |
+| `pivotSlice`   | string    | nil       | Name of Aseprite slice to use as pivot                              |
+| `startTime`    | number    | 0         | Animation start time (for staggering)                               |
+| `path`         | string    | nil       | `fromTexture` only: durable source used to reconstruct the snapshot |
+
+When supplying `path` to `fromTexture`, the caller is responsible for ensuring that the texture came from that path.
+In-memory textures without a durable path are omitted from snapshot serialization.
 
 ## Sprite Methods
 
@@ -175,19 +179,24 @@ This architecture enables:
 - **Automatic allocation** - Textures are assigned to buckets based on their dimensions
 - **GPU culling** - Visibility culling runs entirely on the GPU via compute shaders
 
-### DirectSprite for Large Textures
+### Large Textures
 
-Textures larger than 2048×2048 cannot use the bucket system. Use the `DirectSprite` component for these:
+`Sprite` textures have a maximum size of 2048×2048 because every sprite is
+stored in a GPU texture-array bucket. Larger textures are not rendered by the
+Sprite pipeline. Split a large background into smaller textures, or draw it
+through a [`Draw` phase system](../custom-drawing):
 
 ```teal
-world:spawn(
-    tecs.builtins.Transform(0, 0),
-    gfx.Sprite.fromTexture(hugeBackgroundTexture),
-    gfx.DirectSprite  -- Bypass bucket system, render directly
-)
+world:addSystem({
+    name = "background.Draw",
+    phase = tecs.phases.Draw,
+    run = function()
+        pipeline:worldShader():at(1):attach()
+        love.graphics.draw(hugeBackgroundTexture)
+        pipeline:detachWorldShader()
+    end,
+})
 ```
-
-`DirectSprite` entities are rendered separately and don't benefit from instanced batching.
 
 ## Documentation
 

@@ -134,7 +134,7 @@ describe("blend tag components", function()
         end)
 
         it("registers multiply, lighten, and darken as premultiplied", function()
-            -- LÖVE's setBlendMode rejects these three modes with
+            -- Love's setBlendMode rejects these three modes with
             -- alphamultiply; registering them premultiplied keeps the
             -- non-Premul tags usable (SDF shapes output alpha 1, so the
             -- result is identical).

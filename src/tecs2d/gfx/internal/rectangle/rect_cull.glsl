@@ -17,7 +17,7 @@
 // ---------- Shape-specific source SSBOs ----------
 
 struct Std430Rectangle {
-    // LÖVE 12 BufferFormat requires struct field count == format member
+    // Love 12 BufferFormat requires struct field count == format member
     // count. The format is three individual floats, so the struct is too.
     float width;
     float height;

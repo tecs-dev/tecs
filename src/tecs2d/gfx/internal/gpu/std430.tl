@@ -630,7 +630,7 @@ end
 -- BufferFormat declarations
 --
 -- Each format mirrors the std430 struct so `lg.newBuffer(format, n, ...)`
--- and the GLSL SSBO declaration agree on layout. LÖVE's BufferFormat is a
+-- and the GLSL SSBO declaration agree on layout. Love's BufferFormat is a
 -- list of `{name, format}` entries; element stride matches the struct.
 -------------------------------------------------------------------------------
 

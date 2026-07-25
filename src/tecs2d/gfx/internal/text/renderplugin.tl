@@ -19,6 +19,7 @@
 ---      glyph buffer; draw via `lg.drawFromShaderIndirect`.
 
 local tecs <const> = require("tecs")
+local tecsInternal <const> = require("tecs.internal.types")
 local buffer <const> = require("tecs2d.gfx.internal.gpu.buffer")
 local types <const> = require("tecs2d.gfx.internal.gpu.types")
 local materialcompiler <const> = require("tecs2d.gfx.internal.materialcompiler")
@@ -81,12 +82,11 @@ local function countLive(
     for arch, _state in registry:archetypes() do
         local state = _state as shadowstate.ArchetypeState
         if state.destroyed then goto continue end
-        local archAny = arch as {string:any}
-        local rowCount = (archAny.entities as {integer})[0] as integer
+        local archInternal = arch as tecsInternal.ArchetypeInternal
+        local rowCount = archInternal.entities[0]
         if rowCount == 0 then goto continue end
         entities = entities + rowCount
-        local cols = archAny.columns as {tecs.Component: any}
-        local textCol = cols[textComponent] as {TextFFIRead}
+        local textCol = archInternal.columns[textComponent] as {TextFFIRead}
         if textCol then
             for r = 1, rowCount do
                 glyphs = glyphs + (textCol[r].charCount or 0)

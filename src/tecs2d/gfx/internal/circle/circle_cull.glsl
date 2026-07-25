@@ -15,7 +15,7 @@
 
 struct Std430Circle {
     // (radius, lineWidth) -- packed to match the BufferFormat's
-    // single floatvec2 member. LÖVE 12 enforces struct field count
+    // single floatvec2 member. Love 12 enforces struct field count
     // == BufferFormat member count.
     vec2 radiusLineWidth;
 };

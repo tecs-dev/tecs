@@ -8,6 +8,21 @@ local bit <const> = require("bit")
 local bmfont <const> = require("tecs2d.gfx.bmfont")
 local freerange <const> = require("tecs2d.gfx.internal.text.freerange")
 
+-- Layout dedup needs object identity, but that renderer detail should not be
+-- part of the public BMFont contract.
+local fontIdentities <const>: {bmfont.BMFont: integer} =
+    setmetatable({}, {__mode = "k"} as metatable<{bmfont.BMFont: integer}>)
+local nextFontIdentity = 1
+
+local function fontIdentity(font: bmfont.BMFont): integer
+    local identity = fontIdentities[font]
+    if identity then return identity end
+    identity = nextFontIdentity
+    nextFontIdentity = identity + 1
+    fontIdentities[font] = identity
+    return identity
+end
+
 -- Define the slab entry struct (32 bytes per glyph, matches GPUGlyphData exactly)
 C.cdef[[
     typedef struct {
@@ -177,7 +192,8 @@ local function computeLayout(
         if codepoint == 9 then  -- '\t'
             local spaceChar = font:getChar(32)  -- space
             if spaceChar then
-                cursorX = cursorX + spaceChar.xadvance * sx * 4
+                local space = spaceChar as bmfont.BMFontChar
+                cursorX = cursorX + space.xadvance * sx * 4
             end
             prevCodepoint = nil
             goto continue
@@ -187,6 +203,7 @@ local function computeLayout(
         if not char then
             goto continue
         end
+        local glyph = char as bmfont.BMFontChar
 
         -- Apply kerning if available
         if prevCodepoint then
@@ -194,22 +211,22 @@ local function computeLayout(
         end
 
         -- Store renderable glyphs (skip spaces)
-        if codepoint ~= 32 and char.width > 0 and char.height > 0 then
+        if codepoint ~= 32 and glyph.width > 0 and glyph.height > 0 then
             local entry = buffer[startOffset + glyphCount]
             -- Store full GPU-ready data (no lookup needed during sync)
-            entry.localX = cursorX + char.xoffset * sx
-            entry.localY = cursorY + char.yoffset * sy
-            entry.uvX = char.x / atlasW
-            entry.uvY = char.y / atlasH
-            entry.uvW = char.width / atlasW
-            entry.uvH = char.height / atlasH
-            entry.glyphW = char.width * sx
-            entry.glyphH = char.height * sy
+            entry.localX = cursorX + glyph.xoffset * sx
+            entry.localY = cursorY + glyph.yoffset * sy
+            entry.uvX = glyph.x / atlasW
+            entry.uvY = glyph.y / atlasH
+            entry.uvW = glyph.width / atlasW
+            entry.uvH = glyph.height / atlasH
+            entry.glyphW = glyph.width * sx
+            entry.glyphH = glyph.height * sy
             glyphCount = glyphCount + 1
         end
 
         -- Advance cursor
-        cursorX = cursorX + char.xadvance * sx
+        cursorX = cursorX + glyph.xadvance * sx
         prevCodepoint = codepoint
 
         ::continue::
@@ -259,9 +276,10 @@ function SlabAllocator:acquire(
     sx: number,
     sy: number
 ): glyph_slab.SlabEntry
-    -- Font uid (not face/page names, which collide across files) plus
+    -- Font object identity (not face/page names, which collide across files) plus
     -- text and scale form an exact dedup key.
-    local key = tostring(font._uid) .. "\0" .. text .. "\0" .. tostring(sx) .. "\0" .. tostring(sy)
+    local key = tostring(fontIdentity(font)) .. "\0" .. text .. "\0" ..
+        tostring(sx) .. "\0" .. tostring(sy)
 
     local existing = self.registry[key]
     if existing then
@@ -332,13 +350,14 @@ function SlabAllocator:getDataPtr(): any
 end
 
 function SlabAllocator:getFontId(font: bmfont.BMFont): integer
-    local existing = self.fontRegistry[font.atlas]
+    local atlas = assert(font.atlas, "BMFont atlas must be attached before layout")
+    local existing = self.fontRegistry[atlas]
     if existing then
         return existing
     end
 
     local fontId = self.nextFontId
-    self.fontRegistry[font.atlas] = fontId
+    self.fontRegistry[atlas] = fontId
     self.nextFontId = fontId + 1
     return fontId
 end

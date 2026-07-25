@@ -656,14 +656,11 @@ if brightness < 0.1 then
 end
 ```
 
-`queryLightAt` performs a GPU readback, which can stall the render pipeline. Avoid calling it for many positions every
-frame; cache results or sample at a lower rate for gameplay systems.
-
-The first call lazily activates an intermediate render canvas. There is zero performance cost until `queryLightAt` is
-first called; after that, one extra full-screen blit per frame is added. The first frame after activation returns 0
-while the canvas populates.
-
-In retro mode, the query reads from the virtual-resolution lit canvas (no extra cost).
+`queryLightAt` reads one pixel from the lit canvas that the pipeline already
+produces. It does not add a render pass, but the GPU readback can stall the
+pipeline. Avoid calling it for many positions every frame; cache results or
+sample at a lower rate for gameplay systems. In retro mode, it reads from the
+virtual-resolution lit canvas.
 
 ## Performance Considerations
 

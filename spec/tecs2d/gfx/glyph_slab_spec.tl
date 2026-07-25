@@ -5,9 +5,8 @@ local glyphslab <const> = require("tecs2d.gfx.internal.text.glyphslab")
 local bmfontMod <const> = require("tecs2d.gfx.bmfont")
 
 --- Build a minimal font table with one 8x8 glyph per given codepoint.
---- Distinct uid/atlas per font, but deliberately identical face/page
+--- Distinct objects/atlases per font, but deliberately identical face/page
 --- names (msdf-bmfont tools emit generic names).
-local nextUid = 1000
 local function makeFont(codepoints: {integer}, xadvance: number): bmfontMod.BMFont
     local chars: {integer: bmfontMod.BMFontChar} = {}
     for i, cp in ipairs(codepoints) do
@@ -16,9 +15,7 @@ local function makeFont(codepoints: {integer}, xadvance: number): bmfontMod.BMFo
             xoffset = 0, yoffset = 0, xadvance = xadvance, page = 0,
         }
     end
-    nextUid = nextUid + 1
     local font: {string: any} = {
-        _uid = nextUid,
         type = "bitmap",
         face = "atlas",
         page = "atlas.png",
