@@ -29,6 +29,7 @@ end
 
 local function isRed(p: {number}): boolean return p[1] > 0.8 and p[2] < 0.2 end
 local function isGreen(p: {number}): boolean return p[2] > 0.8 and p[1] < 0.2 end
+local function isBlue(p: {number}): boolean return p[3] > 0.8 and p[1] < 0.2 end
 local function notGreen(p: {number}): boolean return p[2] < 0.5 end
 
 describe("multi camera: secondary viewport with its own view", function()
@@ -45,6 +46,13 @@ describe("multi camera: secondary viewport with its own view", function()
             local Transform = tecs.builtins.Transform
             world:spawn(Transform(80, 120, 0, 1), gfx.Rectangle(20, 20), gfx.Color(1, 0, 0, 1))
             world:spawn(Transform(1000, 1000, 0, 2), gfx.Rectangle(30, 30), gfx.Color(0, 1, 0, 1))
+            local imageData = love.image.newImageData(16, 16)
+            imageData:mapPixel(function(_x, _y, _r, _g, _b, _a)
+                return 0, 0, 1, 1
+            end)
+            world:spawn(
+                Transform(1090, 992, 0.2, 2),
+                gfx.Image(love.graphics.newImage(imageData)))
             return true
         ]])
         waitPixel(app, 80, 120, isRed, "primary view marker")
@@ -67,6 +75,12 @@ describe("multi camera: secondary viewport with its own view", function()
         ]])
         -- The green far-away marker appears at the viewport's center.
         waitPixel(app, 220 + 45, 10 + 35, isGreen, "secondary viewport should show the layer-2 marker")
+        -- A direct Image outside the primary camera's view must still use
+        -- the active secondary camera for culling and projection.
+        -- The 320x240 virtual view scales into the 90x70 viewport. A
+        -- 90-world-unit offset lands about 26 pixels right of center.
+        waitPixel(app, 220 + 45 + 29, 10 + 35, isBlue,
+            "secondary viewport should show the layer-2 Image")
         -- The primary view still renders its own content.
         waitPixel(app, 80, 120, isRed, "primary view should keep rendering")
     end)

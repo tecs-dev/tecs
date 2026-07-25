@@ -12,7 +12,8 @@ format (.tmj), renders tilemaps using the `tecs2d.gfx` pipeline, and spawns enti
 - **[Tile animations](#animated-tiles)**: Animated tiles spawn as Sprite entities with globally-synced animation
 - **Object layers**: Access object data from Tiled object layers
 - **Parallax layers**: Built-in parallax scrolling support
-- **Image layers**: Background/foreground image layer rendering
+- **Image layers**: Background/foreground image layers rendered automatically
+  with [`gfx.Image`](/tecs2d/rendering/images)
 - **[Automatic material maps](#material-maps)**: Normal, emission, and specular maps detected from tileset naming
   convention
 - **[Tile modification](#tile-access)**: Runtime tile changes with automatic chunk rebuilding
@@ -94,6 +95,11 @@ For example, with `Transform.layer = 1`:
 | Foreground (ungrouped)      | 3              | 0          |
 
 Layer parallax from Tiled (`parallaxx`/`parallaxy`) is automatically applied to the corresponding render layer.
+
+Image layers use [`gfx.Image`](/tecs2d/rendering/images) automatically,
+including horizontal and vertical repetition configured in Tiled. Oversized
+tileset atlases also fall back to a compatible rendering path automatically;
+maps do not need different components or export settings.
 
 ### Debug Plugin
 
@@ -258,3 +264,4 @@ Tecs uses GPU-instanced [TileChunks](./tile-chunks) for high-performance renderi
 - Only visible chunks are rendered (frustum culling)
 - Animated tiles spawn as individual Sprite entities
 - Tile changes only mark affected chunks dirty for GPU re-sync
+- Oversized tileset atlases automatically use a compatible fallback

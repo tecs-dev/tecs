@@ -435,6 +435,11 @@ function RendererMethods:renderGBuffer(cameraX: number, cameraY: number, cameraZ
     end
     local rw = albedo:getWidth()
     local rh = albedo:getHeight()
+    -- Secondary cameras reuse the full-size G-buffer but render only the
+    -- active camera canvas dimensions. Match RenderParams' effective size
+    -- so Draw-phase content uses the same projection as GPU renderables.
+    local drawRW <const> = math.min(rw, self.screenWidth)
+    local drawRH <const> = math.min(rh, self.screenHeight)
 
     -- Camera is already snapped by the pipeline; use passed sub-pixel offsets
     subPixelX = subPixelX or 0.0
@@ -459,7 +464,14 @@ function RendererMethods:renderGBuffer(cameraX: number, cameraY: number, cameraZ
     if gBufferDrawCallback then
         zone("draws")
         lg.setDepthMode()  -- Disable depth testing/writing for G-buffer draws
-        gBufferDrawCallback(cameraX, cameraY, cameraZoom, rw, rh, rotation or 0.0)
+        gBufferDrawCallback(
+            cameraX,
+            cameraY,
+            cameraZoom,
+            drawRW,
+            drawRH,
+            rotation or 0.0
+        )
         zone()
     end
 

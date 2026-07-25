@@ -1979,10 +1979,13 @@ local archHasSprite <const>: {tecs.Archetype: boolean} =
     setmetatable({}, {__mode = "k"} as metatable<{tecs.Archetype: boolean}>)
 local archHasTileChunk <const>: {tecs.Archetype: boolean} =
     setmetatable({}, {__mode = "k"} as metatable<{tecs.Archetype: boolean}>)
+local archHasImage <const>: {tecs.Archetype: boolean} =
+    setmetatable({}, {__mode = "k"} as metatable<{tecs.Archetype: boolean}>)
 
 local function scanColumns(arch: tecs.Archetype)
     local hasSprite = false
     local hasTileChunk = false
+    local hasImage = false
     local columns = (arch as tecsInternal.ArchetypeInternal).columns
     for comp in pairs(columns) do
         local name = comp.componentName
@@ -1990,16 +1993,20 @@ local function scanColumns(arch: tecs.Archetype)
             hasSprite = true
         elseif name == "TileChunk" then
             hasTileChunk = true
+        elseif name == "Image" then
+            hasImage = true
         end
     end
     archHasSprite[arch] = hasSprite
     archHasTileChunk[arch] = hasTileChunk
+    archHasImage[arch] = hasImage
 end
 
 --- True when the occluder mask rendered last frame is still valid: same
 --- camera view, no occluder-bearing state changed this frame, and no
---- sprite occluders (their silhouettes are GPU-animated, so the CPU
---- can't prove them static).
+--- sprite occluders or Image occluders. Sprite silhouettes may be
+--- GPU-animated, while an Image may wrap a Canvas whose pixels change
+--- without an ECS component write, so neither can be proven static.
 function PipelineImpl:_shadowMaskFresh(camX: number, camY: number, zoom: number, rot: number): boolean
     if not self._maskValid
             or camX ~= self._maskCamX or camY ~= self._maskCamY
@@ -2024,27 +2031,27 @@ function PipelineImpl:_shadowMaskFresh(camX: number, camY: number, zoom: number,
         end
     end
 
-    -- Animated sprite occluders: silhouettes track gameTime on the GPU.
-    -- Any live sprite occluder forces a redraw (no break inside iter();
-    -- early exits would leak the query's deferred scope).
+    -- Animated Sprite and mutable-Canvas Image occluders force a redraw.
+    -- Do not break inside iter(); an early exit would leak the query's
+    -- deferred scope.
     if not self._occluderQuery then
         self._occluderQuery = self.world:query({
             name = "pipeline.ShadowMaskOccluders",
             include = {Occluder},
         })
     end
-    local hasSpriteOccluders = false
+    local hasDynamicOccluders = false
     for arch, len in self._occluderQuery:iter() do
         if len > 0 then
-            if archHasSprite[arch] == nil then
+            if archHasSprite[arch] == nil or archHasImage[arch] == nil then
                 scanColumns(arch)
             end
-            if archHasSprite[arch] then
-                hasSpriteOccluders = true
+            if archHasSprite[arch] or archHasImage[arch] then
+                hasDynamicOccluders = true
             end
         end
     end
-    return not hasSpriteOccluders
+    return not hasDynamicOccluders
 end
 
 function PipelineImpl:_stampShadowMask(camX: number, camY: number, zoom: number, rot: number)

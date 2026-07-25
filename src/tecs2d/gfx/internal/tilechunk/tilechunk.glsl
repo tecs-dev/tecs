@@ -98,7 +98,13 @@ vec4 position(mat4 transform_projection, vec4 vertex_position) {
     if (flipV) uvLocal.y = 1.0 - uvLocal.y;
 
     vec2 uvTileSize = vec2(tw, th) / TilesetSize;
-    vec2 uvBase = vec2(col * tw, row * th) / TilesetSize;
+    vec4 atlasInfo = chunksIn[srcIdx].occluderInfo;
+    float spacing = atlasInfo.y;
+    float margin = atlasInfo.w;
+    vec2 uvBase = (
+        vec2(margin)
+        + vec2(col, row) * (vec2(tw, th) + vec2(spacing))
+    ) / TilesetSize;
     vec2 uv = uvBase + uvLocal * uvTileSize;
 
     // Pass texture array layer from chunk data

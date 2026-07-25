@@ -2,7 +2,7 @@
 --- Entities with this component will render their silhouette to the shadow mask,
 --- allowing them to block light and cast shadows on surfaces behind them.
 ---
---- For sprites, the alpha channel is used to determine the silhouette.
+--- For Sprites and Images, the alpha channel determines the silhouette.
 --- For shapes (circle, rectangle, mesh), the filled geometry is used.
 ---
 --- Usage (table style):
@@ -17,14 +17,14 @@
 local tecs <const> = require("tecs")
 
 local record OccluderConfig
-    --- Alpha threshold for sprite shadows (0.0 - 1.0). Defaults to 0.5.
+    --- Alpha threshold for texture shadows (0.0 - 1.0). Defaults to 0.5.
     alphaThreshold: number
     --- Height of the occluder (0.0 - 1.0). Defaults to 0.5.
     height: number
 end
 
 local record Occluder is tecs.Component
-    --- Alpha threshold for sprite shadows (0.0 - 1.0).
+    --- Alpha threshold for Sprite and Image shadows (0.0 - 1.0).
     --- Pixels with alpha below this value won't cast shadows.
     --- Defaults to 0.5.
     alphaThreshold: number

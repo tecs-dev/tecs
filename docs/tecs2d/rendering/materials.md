@@ -283,10 +283,11 @@ MaterialOutput material(MaterialInput i) {
 
 ## Supported Systems
 
-Materials work with all shape types and sprites:
+Materials work with all shape types, sprites, and Images:
 
 - Rectangle, Circle, Ellipse, Arc, Line
 - Sprites (animated and static)
+- Images
 - Text
 
 Materials integrate with:

@@ -53,6 +53,14 @@ describe("layers: ordering and parallax factors", function()
             pipeline:setLayerParallax(3, 0.5, 1.0)
             world:spawn(Transform(160, 160, 0, 1), gfx.Rectangle(16, 16), gfx.Color(0, 1, 0, 1))
             world:spawn(Transform(160, 200, 0, 3), gfx.Rectangle(16, 16), gfx.Color(0, 0, 1, 1))
+            local imageData = love.image.newImageData(16, 16)
+            imageData:mapPixel(function()
+                return 0, 0, 1, 1
+            end)
+            world:spawn(
+                Transform(160, 220, 0, 3),
+                gfx.Image(love.graphics.newImage(imageData))
+            )
             return true
         ]])
     end)
@@ -94,8 +102,10 @@ describe("layers: ordering and parallax factors", function()
             return nil
         end)
         local blueBefore = findMarkerX(app, 200, isBlue)
+        local imageBefore = findMarkerX(app, 228, isBlue)
         luassert.is_number(greenBefore, "normal marker not found before the move")
         luassert.is_true(blueBefore >= 0, "parallax marker not found before the move")
+        luassert.is_true(imageBefore >= 0, "parallax Image not found before the move")
 
         fixture.runLua(app, [[
             local gfx = require("tecs2d.gfx")
@@ -118,5 +128,12 @@ describe("layers: ordering and parallax factors", function()
         luassert.is_true(math.abs(blueShift - 20) <= 6, string.format(
             "half-parallax marker should shift ~20px, shifted %d (before %d, after %d)",
             blueShift, blueBefore, blueAfter))
+
+        local imageAfter = findMarkerX(app, 228, isBlue)
+        luassert.is_true(imageAfter >= 0, "parallax Image vanished after the move")
+        local imageShift = imageBefore - imageAfter
+        luassert.is_true(math.abs(imageShift - 20) <= 6, string.format(
+            "half-parallax Image should shift ~20px, shifted %d (before %d, after %d)",
+            imageShift, imageBefore, imageAfter))
     end)
 end)

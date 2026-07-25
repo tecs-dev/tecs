@@ -25,7 +25,7 @@ export default defineConfig({
       llmstxt({
         description: "Typed entity component system and game framework for Lua.",
         details: "Tecs is a high-performance, typed Entity Component System for LuaJIT. " +
-          "The core tecs module is renderer-agnostic; tecs2d layers on LÖVE2D " +
+          "The core tecs module is renderer-agnostic; tecs2d layers on Love2D " +
           "integration, GPU-driven rendering, input, audio, UI, tiled maps, and MCP tooling."
       })
     ]
@@ -162,6 +162,7 @@ export default defineConfig({
             items: [
               { text: 'Overview', link: '/tecs2d/rendering/' },
               { text: 'Camera', link: '/tecs2d/rendering/camera' },
+              { text: 'Images', link: '/tecs2d/rendering/images' },
               { text: 'Shapes', link: '/tecs2d/rendering/shapes' },
               { text: 'Text', link: '/tecs2d/rendering/text' },
               { text: 'Styling', link: '/tecs2d/rendering/styling' },

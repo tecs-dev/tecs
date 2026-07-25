@@ -5,7 +5,7 @@ description: "The ClipBounds component masking any renderable to a rectangular w
 # ClipBounds
 
 Clips (hides) any part of an entity's rendering that falls outside a rectangular region. Works on all renderable
-types: sprites, shapes, text, lines, arcs, circles, ellipses, rectangles, and meshes.
+types: sprites, Images, shapes, text, lines, arcs, circles, ellipses, rectangles, and meshes.
 
 ClipBounds is a standalone component. You can add it directly to any entity; it does not require UI components. The
 [Viewport](./viewport) system uses ClipBounds internally to implement scroll container clipping, but you can use it

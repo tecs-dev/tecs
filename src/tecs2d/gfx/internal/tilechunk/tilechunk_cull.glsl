@@ -8,7 +8,7 @@ struct TileChunkIn {
     vec4 posSize;       // x, y (chunk world pos), tileWidth, tileHeight
     vec4 layerInfo;     // layer, z, columns, textureIndex
     vec4 color;         // r, g, b, a
-    vec4 occluderInfo;  // occluderHeight, _pad, hasOccluders, _pad
+    vec4 occluderInfo;  // occluderHeight, atlasSpacing, hasOccluders, atlasMargin
     // 256 tile IDs as 64 uvec4s (separate fields for Love2D buffer format compatibility)
     uvec4 t0;  uvec4 t1;  uvec4 t2;  uvec4 t3;  uvec4 t4;  uvec4 t5;  uvec4 t6;  uvec4 t7;
     uvec4 t8;  uvec4 t9;  uvec4 t10; uvec4 t11; uvec4 t12; uvec4 t13; uvec4 t14; uvec4 t15;

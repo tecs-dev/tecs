@@ -11,6 +11,7 @@ local sprite_module <const> = require("tecs2d.gfx.internal.sprite")
 local sprite_sheet <const> = require("tecs2d.gfx.internal.sprite.sheet")
 local sheet <const> = require("tecs2d.gfx.sheet")
 local collision_module <const> = require("tecs2d.tiled.collision")
+local tilechunk_module <const> = require("tecs2d.gfx.internal.tilechunk")
 
 local type TilemapData = types.TilemapData
 local type LayerData = types.LayerData
@@ -22,6 +23,7 @@ local TileSource <const> = types.TileSource
 local Transform <const> = tecs.builtins.Transform
 local TileChunk <const> = gfx.TileChunk
 local DirtyTileChunk <const> = gfx.DirtyTileChunk
+local DirectTileChunk <const> = tilechunk_module.DirectTileChunk
 local TILE_CHUNK_SIZE <const> = gfx.TILE_CHUNK_SIZE  -- 16
 
 local math_floor <const> = math.floor
@@ -114,8 +116,9 @@ local record chunk
     --- @param layer The layer data
     despawnLayerAnimatedTiles: function(world: tecs.World, layer: LayerData)
 
-    --- Spawn Sprite entities for all image layers in a tilemap.
-    --- Each image layer becomes a Sprite with optional RepeatedSprite.
+    --- Spawn Image entities for all image layers in a tilemap.
+    --- Image layers are direct, unbatched draws and may exceed Sprite's
+    --- texture-bucket limit.
     --- Parallax is configured at the layer level (not per-entity).
     --- @param world The ECS world
     --- @param map The tilemap data
@@ -164,12 +167,19 @@ local function buildChunkComponents(
         tileWidth = tw,
         tileHeight = th,
         columns = tileset.columns,
+        spacing = tileset.spacing,
+        margin = tileset.margin,
         tiles = tiles,
         occluderHeights = tileset._occluderHeights,
         -- Tile values are stored as 1-based LOCAL ids (+flip bits), so
         -- the occluder-height lookup subtracts 1, not the map firstgid.
         firstgid = 1,
     })
+    if tilechunk_module.usesDirectTexture(
+        tileset.image as love.graphics.Texture
+    ) then
+        components[#components + 1] = DirectTileChunk
+    end
     if layer.tintcolor then
         local tint = layer.tintcolor
         components[#components + 1] = gfx.Color(tint[1], tint[2], tint[3], tint[4] or 1)
@@ -564,7 +574,13 @@ function chunk.markTileDirty(world: tecs.World, map: TilemapData, layerIndex: in
         else
             -- Static tile: route to (or spawn) the chunk entity for the new tileset.
             local entityId = findOrCreateChunkEntity(world, map, layer, chunkY, chunkX, newTileset)
-            writeChunkTile(world, entityId, localIdx, newGid)
+            -- TileChunk stores tileset-local IDs. Preserve Tiled's flip bits,
+            -- but do not leak the map-level firstgid into atlas lookup.
+            local value = newLocalId + 1
+            if newFlipH then value = value + 0x80000000 end
+            if newFlipV then value = value + 0x40000000 end
+            if newFlipD then value = value + 0x20000000 end
+            writeChunkTile(world, entityId, localIdx, value)
         end
     end
 end
@@ -641,7 +657,9 @@ createAnimatedTileSpriteSheet = function(
     localId: integer
 ): sprite_sheet.SpriteSheet
     -- Create cache key
-    local cacheKey = tostring(tileset.firstgid) .. "_" .. tostring(localId)
+    local cacheKey = tostring(tileset.image)
+        .. "_" .. tostring(tileset.firstgid)
+        .. "_" .. tostring(localId)
     local cached = animatedTileSpriteSheets[cacheKey]
     if cached then
         return cached
@@ -654,6 +672,33 @@ createAnimatedTileSpriteSheet = function(
     local spacing = tileset.spacing or 0
     local margin = tileset.margin or 0
     local imgW, imgH = (image as love.graphics.Texture):getDimensions()
+    local useCompactSheet = tilechunk_module.usesDirectTexture(
+        image as love.graphics.Texture
+    )
+    local compactColumns = 0
+    local compactRows = 0
+    if useCompactSheet then
+        compactColumns = math_floor(2048 / tw)
+        if compactColumns < 1 then
+            error(string.format(
+                "Animated Tiled tile is %d pixels wide and cannot fit " ..
+                "Sprite's 2048-pixel texture limit",
+                tw
+            ))
+        end
+        if compactColumns > #tile.animation then
+            compactColumns = #tile.animation
+        end
+        compactRows = math_ceil(#tile.animation / compactColumns)
+        if compactRows * th > 2048 then
+            error(string.format(
+                "Tiled animation needs a %dx%d compact sheet, which exceeds " ..
+                "Sprite's 2048x2048 texture limit",
+                compactColumns * tw,
+                compactRows * th
+            ))
+        end
+    end
 
     -- Build frame data from Tiled animation
     local frames: {table} = {}
@@ -668,10 +713,72 @@ createAnimatedTileSpriteSheet = function(
         local x = margin + col * (tw + spacing)
         local y = margin + row * (th + spacing)
 
+        local frameX = x
+        local frameY = y
+        if useCompactSheet then
+            frameX = ((i - 1) % compactColumns) * tw
+            frameY = math_floor((i - 1) / compactColumns) * th
+        end
+
         frames[i] = {
-            frame = { x = x, y = y, w = tw, h = th },
+            frame = { x = frameX, y = frameY, w = tw, h = th },
             duration = frame.duration * 1000  -- Convert seconds back to ms for sprite_sheet
         }
+    end
+
+    if useCompactSheet then
+        local compactWidth <const> = compactColumns * tw
+        local compactHeight <const> = compactRows * th
+        local canvas <const> = love.graphics.newCanvas(
+            compactWidth,
+            compactHeight,
+            {format = "rgba8", mipmaps = "none"}
+        )
+        local previousCanvas <const> = love.graphics.getCanvas()
+        local previousShader <const> = love.graphics.getShader()
+        local blendMode, alphaMode = love.graphics.getBlendMode()
+        local red, green, blue, alpha = love.graphics.getColor()
+
+        love.graphics.setCanvas(canvas)
+        love.graphics.setShader()
+        love.graphics.setBlendMode("replace", "premultiplied")
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.clear(0, 0, 0, 0)
+        for i = 1, #tile.animation do
+            local frame <const> = tile.animation[i]
+            local frameLocalId <const> = frame.tileid
+            local sourceColumn <const> = frameLocalId % columns
+            local sourceRow <const> = math_floor(frameLocalId / columns)
+            local sourceQuad <const> = love.graphics.newQuad(
+                margin + sourceColumn * (tw + spacing),
+                margin + sourceRow * (th + spacing),
+                tw,
+                th,
+                imgW,
+                imgH
+            )
+            love.graphics.draw(
+                image as love.graphics.Texture,
+                sourceQuad,
+                ((i - 1) % compactColumns) * tw,
+                math_floor((i - 1) / compactColumns) * th,
+                0,
+                1,
+                1,
+                0,
+                0,
+                0,
+                0
+            )
+        end
+
+        love.graphics.setCanvas(previousCanvas)
+        love.graphics.setShader(previousShader)
+        love.graphics.setBlendMode(blendMode, alphaMode)
+        love.graphics.setColor(red, green, blue, alpha)
+        image = love.graphics.newImage(love.graphics.readbackTexture(canvas))
+        image:setFilter("nearest", "nearest")
+        imgW, imgH = compactWidth, compactHeight
     end
 
     -- Build Aseprite-compatible config
@@ -779,7 +886,7 @@ function chunk.despawnLayerAnimatedTiles(world: tecs.World, layer: LayerData)
     end
 end
 
--- Spawn Sprite entities for image layers
+-- Spawn direct Image entities for image layers
 function chunk.spawnImageLayerEntities(
     world: tecs.World,
     map: TilemapData,
@@ -801,19 +908,20 @@ function chunk.spawnImageLayerEntities(
             local layerBaseX = baseX + layer.offsetx
             local layerBaseY = baseY + layer.offsety
 
-            local imgW = layer.imagewidth
-            local imgH = layer.imageheight
-
-            -- Create sprite from texture (cast Image to Texture for type checker)
-            local sprite = gfx.Sprite.fromTexture(layer._image as love.graphics.Texture, {
-                centered = false,  -- Top-left origin like original render
-            })
+            local image = gfx.Image.fromTexture(
+                layer._image as love.graphics.Texture,
+                {
+                    repeatX = layer.repeatx,
+                    repeatY = layer.repeaty,
+                }
+            )
 
             -- Build component list
             local components: {tecs.Component} = {}
 
-            -- Transform at base position
-            -- Note: Parallax is handled at the layer level (configured in tiled/init.tl)
+            -- Transform at base position. Image uses a top-left origin by
+            -- default, matching Tiled image-layer coordinates.
+            -- Parallax is handled by the configured render layer.
             components[#components + 1] = Transform.new({
                 x = layerBaseX,
                 y = layerBaseY,
@@ -821,21 +929,7 @@ function chunk.spawnImageLayerEntities(
                 layer = renderLayer,
             })
 
-            -- Sprite component
-            components[#components + 1] = sprite
-
-            -- RepeatedSprite for tiling
-            if layer.repeatx or layer.repeaty then
-                -- For repeating, we need to set a large enough coverage area
-                -- Use a generous size to cover typical viewports
-                local REPEAT_SIZE <const> = 8192  -- Should cover most cases
-                components[#components + 1] = gfx.RepeatedSprite.new({
-                    repeatX = layer.repeatx,
-                    repeatY = layer.repeaty,
-                    width = layer.repeatx and REPEAT_SIZE or imgW,
-                    height = layer.repeaty and REPEAT_SIZE or imgH,
-                })
-            end
+            components[#components + 1] = image
 
             -- Tint color if specified
             if layer.tintcolor then

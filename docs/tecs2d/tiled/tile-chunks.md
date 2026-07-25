@@ -11,6 +11,8 @@ single draw call. TileChunks do not support animation; for animated tiles, use i
 ::: tip Automatic Creation
 When using [Tiled maps](./) with `tecs2d.tiled`, `TileChunk` entities are created automatically for static tiles.
 Animated tiles are automatically spawned as separate Sprite entities with synced animation.
+Tileset atlases that do not fit the normal batched path use an automatic
+fallback; no map or tileset changes are required.
 :::
 
 ## Quick Start
@@ -47,10 +49,12 @@ world:spawn(
 | `tileWidth`   | number      | 32       | Tile width in pixels                      |
 | `tileHeight`  | number      | 32       | Tile height in pixels                     |
 | `columns`     | integer     | 16       | Number of columns in the tileset          |
+| `spacing`     | number      | 0        | Pixel gap between atlas tiles             |
+| `margin`      | number      | 0        | Pixel inset around the atlas edge         |
 | `tiles`       | `{integer}` | `{}`     | 256 tile IDs (16×16 grid), 0 = empty      |
 | `normalMap`   | Texture     | nil      | Normal map for lighting                   |
 | `emissionMap` | Texture     | nil      | Emission/glow map                         |
-| `specularMap` | Texture     | nil      | Specular map (RGB=intensity, A=shininess) |
+| `ormMap`      | Texture     | nil      | AO, roughness, and metallic map           |
 
 ### Required Components
 
@@ -68,7 +72,7 @@ TileChunks use a mix of ECS components and built-in properties for styling:
 | Lighting    | [Layer configuration](/tecs2d/rendering/layers#layer-lighting) (not `Unlit`)       |
 | Normal maps | `normalMap` property                                                        |
 | Emission    | `emissionMap` property                                                      |
-| Specular    | `specularMap` property (RGB=intensity, A=shininess)                         |
+| Materials   | `ormMap` property (R=AO, G=roughness, B=metallic)                           |
 
 ::: details Limited styling support
 TileChunks do not support per-entity `Unlit`, blend tags, or `Material` components.

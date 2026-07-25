@@ -1,13 +1,13 @@
 ---
 name: love2d-integration-test
-description: Create or extend a Love2D integration test (lovespec) that boots a real LÖVE app and drives it over the MCP HTTP server. Use when adding coverage for rendering, input, physics, audio, or any tecs2d subsystem behavior that needs a live engine.
+description: Create or extend a Love2D integration test (lovespec) that boots a real Love app and drives it over the MCP HTTP server. Use when adding coverage for rendering, input, physics, audio, or any tecs2d subsystem behavior that needs a live engine.
 ---
 
 # Create a Love2D integration test
 
 Integration specs live in `spec/integration/*_lovespec.tl` (the suffix keeps
 them out of the fast `make test` suite). Each spec boots a fixture app under a
-real LÖVE 12 binary, then drives it through the MCP HTTP server: run Lua inside
+real Love 12 binary, then drives it through the MCP HTTP server: run Lua inside
 the app, sample framebuffer pixels, and call any MCP tool. The suite runs
 blocking in CI on macOS runners.
 
@@ -150,7 +150,7 @@ above SDL; copy that shim.
   repeats AFTER the initial play. `TweenComplete` is emitted to address 0
   with the entity in the payload.
 - TileChunk edits: mutate `chunk.tiles` then `world:set(id, gfx.DirtyTileChunk)`.
-- Drop shadows are sprite-only; text effects need the MSDF font
+- Drop shadows support sprites and Images; text effects need the MSDF font
   (`assets/firacode-nerd-msdf.json`).
 - `world:batchSpawn` skips FFI defaults — set every field in the callback.
 - Never `break`/early-return inside `query:iter()` (leaks the deferred scope);

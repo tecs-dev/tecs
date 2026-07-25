@@ -72,6 +72,18 @@ local ROUND_CALL_SITE <const> = [[
 -- MaterialOutput (used by standardMaterial()). The _std output captures the
 -- shape's standard G-buffer values so custom materials can build on them.
 local CALL_SITE <const>: {string: string} = {
+    image = [[
+    mi.color = finalColor;
+    mi.uv = VaryingTexCoord.xy;
+    mi.worldPos = vWorldPos;
+    mi.localPos = VaryingTexCoord.xy;
+    mi.sdfDist = 0.0;
+    _std.albedo = finalColor;
+    _std.normal = vec3(0.5, 0.5, 1.0);
+    _std.lit = tecs_Lit;
+    _std.orm = DEFAULT_ORM;
+    _std.emission = vec4(0.0);
+]],
     rectangle = [[
     mi.color = vColor;
     mi.uv = (vLocalPos / vHalfSize) * 0.5 + 0.5;
@@ -182,6 +194,16 @@ varying vec4 vMaterialParams;
 
 ]]
 
+-- Direct Image draws have one Material value at a time, so a regular
+-- uniform avoids constructing and uploading a one-element SSBO per draw.
+local DIRECT_DECL <const> = [[
+
+uniform vec4 MaterialParams;
+uniform float GlobalTime;
+varying vec4 vMaterialParams;
+
+]]
+
 -- Reusable buffer for building variant source
 local buf <const> = StringBuffer.new(8192)
 
@@ -205,6 +227,7 @@ vec2 materialVertex(vec2 worldPos, float time, vec4 params) {
 -- Finds all injection points first, then assembles with StringBuffer.
 local function buildVariantSource(baseSource: string, def: materialregistry.MaterialDef, shapeType: string): string
     local materialCommon = getMaterialCommon()
+    local directParams <const> = shapeType == "image"
 
     local beginMarker <const> = "// -- MATERIAL_BEGIN --"
     local endMarker <const> = "// -- MATERIAL_END --"
@@ -243,8 +266,14 @@ local function buildVariantSource(baseSource: string, def: materialregistry.Mate
     local hasVertexMaterial = def.vertexSource ~= nil
 
     -- Precompute the material params index expression once (text uses
-    -- vg.headerIndex, everything else uses instanceID). Avoids drift.
+    -- vg.headerIndex, everything else uses instanceID). Direct Image
+    -- draws use a uniform instead because they do not have an instance
+    -- data buffer.
     local paramsIndexExpr = shapeType == "text" and "vg.headerIndex" or "instanceID"
+    local paramsExpr = "materialParams[" .. paramsIndexExpr .. "]"
+    if directParams then
+        paramsExpr = "MaterialParams"
+    end
 
     -- Build the result in a single forward pass
     buf:reset()
@@ -252,8 +281,8 @@ local function buildVariantSource(baseSource: string, def: materialregistry.Mate
     -- [start .. #ifdef VERTEX)
     buf:put(baseSource:sub(1, vertexPos - 1))
 
-    -- Inject SSBO declarations before #ifdef VERTEX
-    buf:put(SSBO_DECL)
+    -- Inject material parameter declarations before #ifdef VERTEX.
+    buf:put(directParams and DIRECT_DECL or SSBO_DECL)
 
     -- Inject materialVertex() function declaration (before #ifdef VERTEX body)
     if hasVertexMaterial then
@@ -269,7 +298,7 @@ local function buildVariantSource(baseSource: string, def: materialregistry.Mate
         -- Inject materialVertex call at the marker
         buf:put(vtxMarker, "\n")
         buf:put("    {\n")
-        buf:put("        vec4 _mvp = materialParams[", paramsIndexExpr, "];\n")
+        buf:put("        vec4 _mvp = ", paramsExpr, ";\n")
         buf:put("        worldPos = materialVertex(worldPos, GlobalTime, _mvp);\n")
         buf:put("    }\n")
 
@@ -285,7 +314,7 @@ local function buildVariantSource(baseSource: string, def: materialregistry.Mate
     end
 
     -- Inject params read before "return result;"
-    buf:put("    vMaterialParams = materialParams[", paramsIndexExpr, "];\n    ")
+    buf:put("    vMaterialParams = ", paramsExpr, ";\n    ")
 
     -- [return result; .. #ifdef PIXEL)
     buf:put(baseSource:sub(returnPos, pixelPos - 1))

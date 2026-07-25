@@ -1,6 +1,6 @@
---- DropShadow component for dynamically projecting a sprite shadow based on
---- nearby light sources. One shadow per affecting light, stretched away from
---- the light with length proportional to entity height and light distance.
+--- DropShadow component for dynamically projecting a Sprite or Image shadow
+--- based on nearby light sources. One shadow per affecting light, stretched
+--- away from the light with length based on entity height and light distance.
 ---
 --- Renders to a standalone AO canvas that attenuates all lighting (ambient and
 --- dynamic). Emission is unaffected, so glowing objects shine through shadows.

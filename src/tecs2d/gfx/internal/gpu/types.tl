@@ -212,7 +212,7 @@ C.cdef[[
         float x, y, tileWidth, tileHeight;  // posSize (vec4): chunk world pos, tile dimensions
         float layer, z, columns, textureIndex;  // layerInfo (vec4): render layer, z, tileset columns, texture array index
         float r, g, b, a;                   // color (vec4): tint color
-        float occluderHeight, _padLM, hasOccluders, _pad;  // occluderInfo (vec4): shadow casting info
+        float occluderHeight, atlasSpacing, hasOccluders, atlasMargin;  // occluderInfo (vec4)
         uint32_t tiles[256];                // tile IDs (64 uvec4s), 0 = empty/skip
     } GPUTileChunkInstance;
 
@@ -890,7 +890,7 @@ types.TILECHUNK_FORMAT = {
     {format = "floatvec4"},  -- posSize (x, y, tileWidth, tileHeight)
     {format = "floatvec4"},  -- layerInfo (layer, z, columns, textureIndex)
     {format = "floatvec4"},  -- color (r, g, b, a)
-    {format = "floatvec4"},  -- occluderInfo (occluderHeight, _pad, hasOccluders, _pad)
+    {format = "floatvec4"},  -- occluderInfo (occluderHeight, atlasSpacing, hasOccluders, atlasMargin)
     -- 256 tile IDs as 64 uvec4s (4 uints per uvec4)
     {format = "uint32vec4"}, {format = "uint32vec4"}, {format = "uint32vec4"}, {format = "uint32vec4"},
     {format = "uint32vec4"}, {format = "uint32vec4"}, {format = "uint32vec4"}, {format = "uint32vec4"},

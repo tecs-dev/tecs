@@ -298,8 +298,8 @@ you write custom fragment shaders that output to all G-buffer targets while stay
 ## Shadows and Occluders
 
 Entities with the `Occluder` component cast shadows. Without this component, entities are lit but don't block light.
-Raymarched occluder shadows are supported by sprites, circles, rectangles, and tile chunks. Meshes, ellipses, arcs, and
-lines render normally but do not cast raymarched occluder shadows.
+Raymarched occluder shadows are supported by sprites, Images, circles, rectangles, and tile chunks. Meshes, ellipses,
+arcs, and lines render normally but do not cast raymarched occluder shadows.
 
 ### Basic Shadow Casting
 
@@ -371,9 +371,9 @@ world:spawn(
 - Occluders close to the light cast shorter shadows than distant ones
 - When `lightHeight <= occluderHeight`, full shadows are cast
 
-### Sprite Shadows
+### Texture Shadows
 
-For sprites, the alpha channel determines the shadow silhouette:
+For sprites and Images, the alpha channel determines the shadow silhouette:
 
 ```teal
 -- Tree sprite with alpha-tested shadows
@@ -386,6 +386,9 @@ world:spawn(
     })
 )
 ```
+
+Use `gfx.Image(texture)` in place of the Sprite for a complete, directly
+rendered texture.
 
 ### Tile Shadows
 
@@ -423,9 +426,9 @@ chunks containing occluding tiles are processed in the shadow pass.
 
 ## Drop Shadows
 
-The `DropShadow` component projects a sprite's silhouette onto the ground as a dynamic shadow, stretched away from
-nearby light sources. Unlike `Occluder` shadows (which use raymarching), drop shadows are computed per-entity on the GPU
-and work well for characters, trees, and other sprites that need ground-contact shadows.
+The `DropShadow` component projects a Sprite or Image silhouette onto the ground as a dynamic shadow, stretched away
+from nearby light sources. Unlike `Occluder` shadows (which use raymarching), drop shadows are computed per-entity on
+the GPU and work well for characters, trees, and props that need ground-contact shadows.
 
 ### Basic Usage
 
@@ -444,6 +447,14 @@ world:spawn(
     Sprite.fromSheet(characterSheet),
     gfx.Pivot(0.5, 1.0),
     gfx.DropShadow({ height = 0.8, opacity = 0.5 })
+)
+
+-- One-off complete texture
+world:spawn(
+    Transform(x, y, 0, 2),
+    gfx.Image(treeTexture),
+    gfx.Pivot(0.5, 1.0),
+    gfx.DropShadow()
 )
 ```
 
@@ -465,8 +476,9 @@ gfx.DropShadow({ height = 0.8 })  -- table style
 
 ### How Drop Shadows Work
 
-Each frame, the GPU cull shader checks every `DropShadow` sprite against nearby lights using tile-based light binning
-(the same tile structure used by the lighting pass). For each light affecting the sprite:
+Each frame, the renderer checks every `DropShadow` Sprite and Image against nearby lights. Sprites use tile-based
+light lookup; direct Images compare the visible lights because Image is intended for low-count use. For each affecting
+light:
 
 1. The shadow is **stretched away** from the light, with length proportional to `height / lightHeight`
 2. The shadow is **squashed vertically** to create a ground-contact perspective effect
@@ -484,17 +496,17 @@ glowing objects shine through shadows.
 | Light interaction | Attenuates all lighting at shadow location   | Blocks light along ray path            |
 | Self-shadowing    | Automatically prevented (two-pass stamp-out) | Automatically prevented (origin check) |
 | Best for          | Characters, trees, props                     | Walls, pillars, large obstacles        |
-| Performance       | One extra sprite draw per light per entity   | Raymarch steps per pixel per light     |
+| Performance       | One extra silhouette draw per light per entity | Raymarch steps per pixel per light   |
 
 You can combine both on the same entity: an `Occluder` blocks light rays while a `DropShadow` adds a visible ground
 shadow.
 
 ### Performance
 
-Drop shadow rendering cost scales with the number of visible drop shadow sprites multiplied by the number of affecting
-lights. The system includes several optimizations:
+Drop shadow rendering cost scales with the number of visible drop-shadow renderables multiplied by the number of
+affecting lights. The system includes several optimizations:
 
-- **Tile-based light lookup**: each sprite only considers lights in its screen tile, not all visible lights
+- **Tile-based Sprite light lookup**: each Sprite only considers lights in its screen tile
 - **Weak shadow culling**: light contributions below a threshold are skipped
 - **Half-resolution canvas**: the AO canvas defaults to 50% resolution with bilinear filtering, reducing fill-rate cost
 with no visible quality loss

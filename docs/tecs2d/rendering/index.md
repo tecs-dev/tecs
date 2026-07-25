@@ -43,16 +43,17 @@ love.run = tecs2d.run({
 
 ### Drawable Components
 
-| Component                       | Description                                  |
-| ------------------------------- | -------------------------------------------- |
-| [Sprite](./sprites/)            | Animated sprites from Aseprite sprite sheets |
-| [Circle](./shapes#circle)       | Filled or outlined circles                   |
-| [Ellipse](./shapes#ellipse)     | Filled or outlined ellipses                  |
-| [Arc](./shapes#arc)             | Partial circles/ellipses (pie slices)        |
-| [Rectangle](./shapes#rectangle) | Filled or outlined rectangles                |
-| [Line](./shapes#line)           | Line segments                                |
-| [Mesh](./shapes#mesh)           | Custom geometry                              |
-| [Text](./text)            | Text using BMFont atlases (bitmap or MSDF)   |
+| Component                       | Description                                           |
+| ------------------------------- | ----------------------------------------------------- |
+| [Sprite](./sprites/)            | Batched static or animated art                        |
+| [Image](./images)               | One-off, runtime-created, or very large textures      |
+| [Circle](./shapes#circle)       | Filled or outlined circles                            |
+| [Ellipse](./shapes#ellipse)     | Filled or outlined ellipses                           |
+| [Arc](./shapes#arc)             | Partial circles/ellipses (pie slices)                 |
+| [Rectangle](./shapes#rectangle) | Filled or outlined rectangles                         |
+| [Line](./shapes#line)           | Line segments                                         |
+| [Mesh](./shapes#mesh)           | Custom geometry                                       |
+| [Text](./text)                  | Text using BMFont atlases (bitmap or MSDF)            |
 
 ### Styling Components
 
@@ -89,6 +90,7 @@ love.run = tecs2d.run({
 | ---------------------------------------- | -------------------------------------------------------------------------------- |
 | [Camera](./camera)                       | Camera controls, multiple cameras, minimaps, split-screen, coordinate conversion |
 | [Sprites](./sprites/)                    | Sprite sheets, animation, slices, collisions                                     |
+| [Images](./images)                       | Direct rendering for one-off, runtime-created, and very large textures           |
 | [Shapes](./shapes)                       | Circles, rectangles, lines, and other primitives                                 |
 | [Text](./text)                           | Bitmap and MSDF text rendering                                                   |
 | [Styling](./styling)                     | Color, blend modes, render flags                                                 |

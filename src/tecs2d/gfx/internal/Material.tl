@@ -1,7 +1,8 @@
 local tecs <const> = require("tecs")
 
---- Material component for GPU fragment shader injection.
---- Entities with a Material stay fully GPU-batched and participate in deferred lighting.
+--- Material component for fragment and vertex shader injection.
+--- GPU-backed renderables stay batched; direct Images remain unbatched.
+--- Materials without a forward blend participate in deferred lighting.
 --- The materialId links to a registered material definition in the material registry.
 --- Per-entity variation is controlled by 4 float params (p0-p3).
 ---

@@ -8,6 +8,7 @@ local tecs <const> = require("tecs")
 local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
 local gpuTypes <const> = require("tecs2d.gfx.internal.gpu.types")
 local renderplugin <const> = require("tecs2d.gfx.internal.tilechunk.renderplugin")
+local directbatch <const> = require("tecs2d.gfx.internal.tilechunk.directbatch")
 local SlotManager <const> = require("tecs2d.gfx.internal.gpu.SlotManager")
 local Color <const> = require("tecs2d.gfx.internal.Color")
 local Occluder <const> = require("tecs2d.gfx.internal.Occluder")
@@ -48,6 +49,7 @@ end
 local LOGGER <const> = require("tecs.utils.logging").getLogger("tecs2d.gfx.tileChunk")
 
 local CHUNK_SIZE <const> = 16  -- 16x16 tiles per chunk
+local DIRECT_TEXTURE_LIMIT <const> = 2048
 
 local record tileChunk
     --- TileChunk component for 16x16 tile grids.
@@ -72,6 +74,12 @@ local record tileChunk
         --- Number of columns in the tileset (for UV math)
         columns: integer
 
+        --- Pixel gap between adjacent atlas tiles.
+        spacing: number
+
+        --- Pixel inset around the atlas edge.
+        margin: number
+
         --- 256 tile IDs (16x16 grid), 0 = empty/skip
         tiles: {integer}
 
@@ -95,6 +103,9 @@ local record tileChunk
     --- Automatically added when TileChunk is spawned; add it again after modifying tiles.
     DirtyTileChunk: tecs.Component
 
+    --- Internal marker for chunks that sample their source atlas directly.
+    DirectTileChunk: tecs.Component
+
     --- Configuration for creating a TileChunk
     record TileChunkConfig
         tileset: love.graphics.Texture
@@ -104,6 +115,8 @@ local record tileChunk
         tileWidth: number
         tileHeight: number
         columns: integer
+        spacing: number -- Optional: pixel gap between atlas tiles
+        margin: number -- Optional: pixel inset around the atlas edge
         tiles: {integer}
         occluderHeights: {integer: number} -- Optional: per-tile occluder heights from tileset
         firstgid: integer -- Optional: tileset's firstgid for GID to local ID conversion
@@ -111,6 +124,9 @@ local record tileChunk
 
     --- The chunk size (16x16)
     CHUNK_SIZE: integer
+
+    --- Whether a texture must bypass the TileChunk texture arrays.
+    usesDirectTexture: function(texture: love.graphics.Texture): boolean
 
     plugin: function(world: tecs.World)
 end
@@ -121,6 +137,13 @@ tileChunk.CHUNK_SIZE = CHUNK_SIZE
 -- Tag component for dirty tracking (no data, just marks entities for GPU sync)
 tileChunk.DirtyTileChunk = tecs.newTagComponent({name = "DirtyTileChunk"})
 local DirtyTileChunk <const> = tileChunk.DirtyTileChunk
+tileChunk.DirectTileChunk = tecs.newTagComponent({name = "DirectTileChunk"})
+local DirectTileChunk <const> = tileChunk.DirectTileChunk
+
+function tileChunk.usesDirectTexture(texture: love.graphics.Texture): boolean
+    local width, height = texture:getDimensions()
+    return width > DIRECT_TEXTURE_LIMIT or height > DIRECT_TEXTURE_LIMIT
+end
 
 -- Register TileChunk as a proper ECS component
 tecs.newComponent({
@@ -146,6 +169,8 @@ tecs.newComponent({
             tileWidth = config.tileWidth or 32,
             tileHeight = config.tileHeight or 32,
             columns = config.columns or 16,
+            spacing = config.spacing or 0,
+            margin = config.margin or 0,
             tiles = tiles,
             _textureIndex = -1,  -- Not yet registered
             _occluderHeights = config.occluderHeights,  -- May be nil
@@ -176,9 +201,9 @@ local record TileChunkHeaderFFI
     b: number
     a: number
     occluderHeight: number  -- Shadow casting height (0 = no shadows)
-    _padLM: number          -- Padding, keeps the 16-float struct layout
+    atlasSpacing: number    -- Pixel gap between atlas tiles
     hasOccluders: number    -- 1.0 if chunk has any occluding tiles, 0.0 otherwise
-    _pad: number
+    atlasMargin: number     -- Pixel inset around the atlas edge
 end
 
 -- Helper to write uint32 array to FFI pointer (bypasses Teal type checking)
@@ -481,6 +506,12 @@ function tileChunk.plugin(world: tecs.World)
         shadowIndirectBuffer = shadowIndirectBuffer,
         growable = growable,
     }))
+    directbatch.install(world, {
+        TileChunk = TileChunk,
+        DirectTileChunk = DirectTileChunk,
+        DirtyTileChunk = DirtyTileChunk,
+        renderer = gpuRenderer,
+    })
 
     -- Tracks freed slots for the activeCount shrink-tail walk in
     -- onEntitiesRemoved. SlotManager's freelist itself isn't a set, so
@@ -517,6 +548,7 @@ function tileChunk.plugin(world: tecs.World)
     world:query({
         name = "tileChunk.SlotManagement",
         include = {TileChunk, Transform},
+        exclude = {DirectTileChunk},
         onEntitiesAdded = function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer, _count: integer)
             local chunks = archetype:get(TileChunk) as {tileChunk.TileChunk}
             for row = firstRow, lastRow do
@@ -557,6 +589,7 @@ function tileChunk.plugin(world: tecs.World)
     local dirtyQuery = world:query({
         name = "tileChunk.DirtySync",
         include = {TileChunk, Transform, DirtyTileChunk},
+        exclude = {DirectTileChunk},
     })
 
     -- Sync only dirty chunks to GPU buffer
@@ -665,9 +698,9 @@ function tileChunk.plugin(world: tecs.World)
                     end
 
                     header.occluderHeight = occHeight
-                    header._padLM = 0
+                    header.atlasSpacing = chunk.spacing
                     header.hasOccluders = hasOccluders and 1.0 or 0.0
-                    header._pad = 0
+                    header.atlasMargin = chunk.margin
 
                     -- Write 256 tile IDs (1024 bytes) at offset 64 bytes
                     -- past the header.

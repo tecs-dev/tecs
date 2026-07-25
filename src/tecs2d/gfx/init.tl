@@ -3,6 +3,7 @@ local pipeline <const> = require("tecs2d.gfx.internal.pipeline")
 local types <const> = require("tecs2d.gfx.types")
 local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
 local sprite <const> = require("tecs2d.gfx.internal.sprite")
+local image <const> = require("tecs2d.gfx.internal.Image")
 local sprite_sheet <const> = require("tecs2d.gfx.internal.sprite.sheet")
 local sheet <const> = require("tecs2d.gfx.sheet")
 local circle <const> = require("tecs2d.gfx.internal.circle")
@@ -69,6 +70,16 @@ local record gfx
     type SpriteOptions = sprite.SpriteOptions
     --- Configuration accepted by Sprite.fromTexture, including snapshot source path.
     type TextureSpriteOptions = sprite.TextureSpriteOptions
+
+    --- A complete texture drawn directly through Love.
+    ---
+    --- Image is intentionally unbatched. Prefer Sprite for animation or
+    --- collections of textures that benefit from automatic batching. Use
+    --- Image for one-off textures, canvases, and textures too large for
+    --- Sprite's buckets. Requires a Transform component.
+    Image: image.Image
+    --- Options accepted by Image constructors.
+    type ImageOptions = image.ImageOptions
 
     --- SpriteSheet record for sprite frame data, textures, and animations.
     --- Factory methods: fromFile, fromImage, fromTexture, fromTextureFile
@@ -148,7 +159,7 @@ local record gfx
     --- Sets a love.graphics.color for a draw call.
     Color: Color
 
-    --- Blend mode tag components for GPU-batched rendering.
+    --- Blend mode tag components for deferred and direct renderables.
     --- Each blend mode is a separate tag component with mutual exclusivity.
     --- Example: gfx.blend.AdditiveBlend(), gfx.blend.MultiplyBlend()
     blend: blend
@@ -164,7 +175,7 @@ local record gfx
 
     --- Opts an entity into shadow casting. Entities with this component will render
     --- their silhouette to the shadow mask, blocking light and casting shadows.
-    --- For sprites, uses alpha channel. For shapes, uses filled geometry.
+    --- Sprites and Images use their alpha channel; shapes use filled geometry.
     Occluder: Occluder
 
     --- Adds a squashed, darkened copy of a sprite beneath it to simulate
@@ -176,7 +187,8 @@ local record gfx
     Light: lightMod.Light
 
     --- A Material component for GPU fragment shader injection.
-    --- Entities with a Material stay fully GPU-batched and participate in deferred lighting.
+    --- GPU-backed renderables stay batched; direct Images remain unbatched.
+    --- Materials without a forward blend participate in deferred lighting.
     --- Create materials with gfx.newMaterial() and use the returned value as a component.
     Material: Material
 
@@ -223,6 +235,7 @@ local record gfx
 end
 
 gfx.Sprite = sprite.Sprite
+gfx.Image = image.Image
 gfx.SpriteSheet = sprite_sheet.SpriteSheet as sheet.SpriteSheet
 gfx.SpriteCollision = sprite.SpriteCollision
 gfx.RepeatedSprite = sprite.RepeatedSprite
@@ -264,6 +277,7 @@ function gfx.newPipeline(config: pipeline.RenderConfig): types.Pipeline
 
     local resultInternal = result as gpu_types.PipelineInternal
     config.world:addPlugin(sprite.plugin(resultInternal))
+    config.world:addPlugin(image.plugin)
     config.world:addPlugin(circle.plugin)
     config.world:addPlugin(ellipse.plugin)
     config.world:addPlugin(arc.plugin)

@@ -183,20 +183,18 @@ This architecture enables:
 
 `Sprite` textures have a maximum size of 2048×2048 because every sprite is
 stored in a GPU texture-array bucket. Larger textures are not rendered by the
-Sprite pipeline. Split a large background into smaller textures, or draw it
-through a [`Draw` phase system](../custom-drawing):
+Sprite pipeline. Use [`gfx.Image`](../images) for a one-off or very large
+texture:
 
 ```teal
-world:addSystem({
-    name = "background.Draw",
-    phase = tecs.phases.Draw,
-    run = function()
-        pipeline:worldShader():at(1):attach()
-        love.graphics.draw(hugeBackgroundTexture)
-        pipeline:detachWorldShader()
-    end,
-})
+world:spawn(
+    tecs.builtins.Transform(0, 0),
+    gfx.Image(hugeBackgroundTexture)
+)
 ```
+
+Keep using `Sprite` for ordinary static art. It is the default batched path;
+`Image` is intentionally unbatched.
 
 ## Documentation
 
