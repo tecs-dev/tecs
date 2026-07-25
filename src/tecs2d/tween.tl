@@ -143,8 +143,11 @@ local record RunOptions
     count: integer
 end
 
---- A component field target used by timeline operations.
-local record Target
+--- A component-field animation target.
+local interface Target end
+
+--- Runtime target descriptor used by the tween compiler and evaluator.
+local record TargetImpl is Target
     --- Stable serialized target identity.
     id: string
     --- Component whose fields are animated.
@@ -168,8 +171,11 @@ local record Target
     )
 end
 
---- A live component-field source for a tracking operation.
-local record TrackSource
+--- A live component-field tracking source.
+local interface TrackSource end
+
+--- Runtime tracking descriptor used by the tween evaluator.
+local record TrackSourceImpl is TrackSource
     kind: TrackSourceKind
     key: string
     relationship: Component
@@ -190,8 +196,8 @@ local type TimelineNode = {any}
 
 local record Slot
     kind: OperationKind
-    target: Target
-    source: TrackSource
+    target: TargetImpl
+    source: TrackSourceImpl
     easingName: EasingName
     easing: EasingFunction
     t1: number
@@ -212,7 +218,7 @@ local record EmitSlot
 end
 
 local record RunSlot
-    timeline: Timeline
+    timeline: TimelineImpl
     timelineId: integer
     startTime: number
     effectiveDuration: number
@@ -227,7 +233,13 @@ local record TimelineSpec is {TimelineNode}
 end
 
 --- An immutable compiled tween timeline.
-local record Timeline
+local interface Timeline
+    --- Play this timeline on an entity.
+    play: function(self: Timeline, world: World, entity: integer, options?: PlaybackOptions)
+end
+
+--- Runtime representation of a compiled tween timeline.
+local record TimelineImpl is Timeline
     slots: {Slot}
     runs: {RunSlot}
     emits: {EmitSlot}
@@ -237,8 +249,6 @@ local record Timeline
     presetName: string
     pinned: boolean
 
-    --- Play this timeline on an entity.
-    play: function(self: Timeline, world: World, entity: integer, options?: PlaybackOptions)
 end
 
 local record Cursor
@@ -259,8 +269,11 @@ local record Cursor
     _lastCycleIndex: integer
 end
 
---- Internal playback state attached while an entity has active tweens.
-local record TweenPlayback is tecs.Component
+--- Component present while an entity has active tween playback.
+local interface TweenPlayback is tecs.Component end
+
+--- Snapshot-durable runtime playback state.
+local record TweenPlaybackImpl is TweenPlayback
     cursors: {Cursor}
 end
 
@@ -313,9 +326,9 @@ end
 
 local record Registry
     nextId: integer
-    byId: {integer: Timeline}
+    byId: {integer: TimelineImpl}
     refcounts: {integer: integer}
-    objectIds: {Timeline: integer}
+    objectIds: {TimelineImpl: integer}
     named: {string: integer}
 end
 
@@ -345,7 +358,7 @@ local record tween
     type PlaybackOptions = PlaybackOptions
     --- Nested timeline playback options.
     type RunOptions = RunOptions
-    --- Component holding active playback cursors.
+    --- Component present while an entity has active tween playback.
     TweenPlayback: TweenPlayback
     --- Component selecting a dynamic tracking source entity.
     TrackingTarget: TrackingTarget
@@ -686,8 +699,8 @@ end
 
 tween.TweenPlayback = tecs.newComponent({
     name = "TweenPlayback",
-    container = TweenPlayback,
-    new = function(data: {string:any}): TweenPlayback
+    container = TweenPlaybackImpl,
+    new = function(data: {string:any}): TweenPlaybackImpl
         local cursors: {Cursor} = {}
         local saved = data and (data.cursors as {{string:any}})
         if saved then
@@ -695,9 +708,9 @@ tween.TweenPlayback = tecs.newComponent({
                 cursors[i] = deserializeCursor(saved[i])
             end
         end
-        return { cursors = cursors } as TweenPlayback
+        return { cursors = cursors } as TweenPlaybackImpl
     end,
-    serialize = function(instance: TweenPlayback): {string:any}
+    serialize = function(instance: TweenPlaybackImpl): {string:any}
         local cursors: {{string:any}} = {}
         for i = 1, #(instance.cursors or {}) do
             cursors[i] = serializeCursor(instance.cursors[i])
@@ -722,12 +735,12 @@ tecs.newEvent(TweenComplete)
 -- Targets and tracking sources
 -------------------------------------------------------------------------------
 
-local TARGET_MT <const>: metatable<Target> = { __index = Target }
+local TARGET_MT <const>: metatable<TargetImpl> = { __index = TargetImpl }
 local targetInit: function(
-    Target, World, integer, boolean, number, number, number, number
+    TargetImpl, World, integer, boolean, number, number, number, number
 ): (number, number, number, number, number, number, number, number)
 local targetApply: function(
-    Target, World, integer, number, number, number, number, number, number, number, number, number
+    TargetImpl, World, integer, number, number, number, number, number, number, number, number, number
 )
 
 local function fieldsFrom(field: string | {string}): {string}
@@ -743,19 +756,19 @@ local function componentByName(name: string): Component
     return component
 end
 
-local function resolveTarget(t: Target): Target
+local function resolveTarget(t: TargetImpl): TargetImpl
     if not t.component and t.componentName then
         t.component = componentByName(t.componentName)
     end
     return t
 end
 
-local function newTarget(component: Component, fields: {string}, mode?: TargetMode, id?: string): Target
+local function newTarget(component: Component, fields: {string}, mode?: TargetMode, id?: string): TargetImpl
     local parts = component.componentName
     for i = 1, #fields do
         parts = parts .. "." .. fields[i]
     end
-    local t: Target = setmetatable({
+    local t: TargetImpl = setmetatable({
         id = id or parts,
         component = component,
         componentName = component.componentName,
@@ -778,7 +791,7 @@ local function newTarget(component: Component, fields: {string}, mode?: TargetMo
     return t
 end
 
-targetInit = function(self: Target,
+targetInit = function(self: TargetImpl,
     world: World, entity: integer, relative: boolean,
     t1: number, t2: number, t3: number, t4: number
 ): number, number, number, number, number, number, number, number
@@ -815,7 +828,7 @@ targetInit = function(self: Target,
     return startVal, 0, 0, 0, delta, 0, 0, 0
 end
 
-targetApply = function(self: Target,
+targetApply = function(self: TargetImpl,
     world: World, entity: integer, t: number,
     s1: number, s2: number, s3: number, s4: number,
     d1: number, d2: number, d3: number, d4: number
@@ -866,7 +879,7 @@ local function source(
         component = component,
         componentName = component.componentName,
         fields = fieldsFrom(field),
-    }
+    } as TrackSourceImpl
 end
 
 function tween.sourceSelf(component: Component, field: string | {string}): TrackSource
@@ -909,17 +922,17 @@ do
     tween.color = newTarget(colorComponent, {"r", "g", "b", "a"}, "color", "color.rgba")
 end
 
-local BUILTIN_TARGETS: {TargetName: Target} = {
-    ["transform.x"] = tween.translateX,
-    ["transform.y"] = tween.translateY,
-    ["transform.xy"] = tween.translateXY,
-    ["transform.rotation"] = tween.rotation,
-    ["transform.rotationShortest"] = tween.rotationShortest,
-    ["transform.scaleX"] = tween.scaleX,
-    ["transform.scaleY"] = tween.scaleY,
-    ["transform.scaleXY"] = tween.scaleXY,
-    ["color.a"] = tween.alpha,
-    ["color.rgba"] = tween.color,
+local BUILTIN_TARGETS: {TargetName: TargetImpl} = {
+    ["transform.x"] = tween.translateX as TargetImpl,
+    ["transform.y"] = tween.translateY as TargetImpl,
+    ["transform.xy"] = tween.translateXY as TargetImpl,
+    ["transform.rotation"] = tween.rotation as TargetImpl,
+    ["transform.rotationShortest"] = tween.rotationShortest as TargetImpl,
+    ["transform.scaleX"] = tween.scaleX as TargetImpl,
+    ["transform.scaleY"] = tween.scaleY as TargetImpl,
+    ["transform.scaleXY"] = tween.scaleXY as TargetImpl,
+    ["color.a"] = tween.alpha as TargetImpl,
+    ["color.rgba"] = tween.color as TargetImpl,
 }
 
 -------------------------------------------------------------------------------
@@ -927,15 +940,16 @@ local BUILTIN_TARGETS: {TargetName: Target} = {
 -------------------------------------------------------------------------------
 
 local function serializeTarget(t: Target): {string:any}
+    local impl <const> = t as TargetImpl
     return {
-        id = t.id,
-        component = t.componentName or (t.component and t.component.componentName),
-        fields = t.fields,
-        mode = t.mode,
+        id = impl.id,
+        component = impl.componentName or (impl.component and impl.component.componentName),
+        fields = impl.fields,
+        mode = impl.mode,
     }
 end
 
-local function deserializeTarget(data: {string:any}): Target
+local function deserializeTarget(data: {string:any}): TargetImpl
     local id = data.id as string
     local builtin = id and BUILTIN_TARGETS[id as TargetName]
     if builtin then return builtin end
@@ -949,16 +963,17 @@ end
 
 local function serializeSource(s: TrackSource): {string:any}
     if not s then return nil end
+    local impl <const> = s as TrackSourceImpl
     return {
-        kind = s.kind,
-        key = s.key,
-        relationship = s.relationshipName or (s.relationship and s.relationship.componentName),
-        component = s.componentName or (s.component and s.component.componentName),
-        fields = s.fields,
+        kind = impl.kind,
+        key = impl.key,
+        relationship = impl.relationshipName or (impl.relationship and impl.relationship.componentName),
+        component = impl.componentName or (impl.component and impl.component.componentName),
+        fields = impl.fields,
     }
 end
 
-local function deserializeSource(data: {string:any}): TrackSource
+local function deserializeSource(data: {string:any}): TrackSourceImpl
     if not data then return nil end
     local relName = data.relationship as string
     return {
@@ -969,13 +984,14 @@ local function deserializeSource(data: {string:any}): TrackSource
         componentName = data.component as string,
         component = componentByName(data.component as string),
         fields = data.fields as {string},
-    }
+    } as TrackSourceImpl
 end
 
 local function serializeTimeline(tl: Timeline): {string:any}
+    local impl <const> = tl as TimelineImpl
     local slots: {{string:any}} = {}
-    for i = 1, #(tl.slots or {}) do
-        local s <const> = tl.slots[i]
+    for i = 1, #(impl.slots or {}) do
+        local s <const> = impl.slots[i]
         slots[i] = {
             kind = s.kind,
             target = serializeTarget(s.target),
@@ -990,10 +1006,10 @@ local function serializeTimeline(tl: Timeline): {string:any}
         }
     end
     local runs: {{string:any}} = nil
-    if tl.runs then
+    if impl.runs then
         runs = {}
-        for i = 1, #tl.runs do
-            local r <const> = tl.runs[i]
+        for i = 1, #impl.runs do
+            local r <const> = impl.runs[i]
             runs[i] = {
                 timelineId = r.timelineId,
                 timeline = r.timeline and serializeTimeline(r.timeline) or nil,
@@ -1007,18 +1023,18 @@ local function serializeTimeline(tl: Timeline): {string:any}
     return {
         slots = slots,
         runs = runs,
-        emits = tl.emits,
-        totalDuration = tl.totalDuration,
-        stateSize = tl.stateSize,
-        channel = tl.channel,
-        presetName = tl.presetName,
-        pinned = tl.pinned,
+        emits = impl.emits,
+        totalDuration = impl.totalDuration,
+        stateSize = impl.stateSize,
+        channel = impl.channel,
+        presetName = impl.presetName,
+        pinned = impl.pinned,
     }
 end
 
-local TIMELINE_MT <const>: metatable<Timeline> = { __index = Timeline }
+local TIMELINE_MT <const>: metatable<TimelineImpl> = { __index = TimelineImpl }
 
-local function deserializeTimeline(data: {string:any}): Timeline
+local function deserializeTimeline(data: {string:any}): TimelineImpl
     local slots: {Slot} = {}
     local savedSlots = data.slots as {{string:any}}
     for i = 1, #(savedSlots or {}) do
@@ -1066,7 +1082,7 @@ local function deserializeTimeline(data: {string:any}): Timeline
         channel = data.channel as string,
         presetName = data.presetName as string,
         pinned = data.pinned == true,
-    }, TIMELINE_MT)
+    } as TimelineImpl, TIMELINE_MT)
 end
 
 -------------------------------------------------------------------------------
@@ -1078,7 +1094,7 @@ local function newRegistry(): Registry
         nextId = 1,
         byId = {},
         refcounts = {},
-        objectIds = setmetatable({} as {Timeline: integer}, { __mode = "k" }),
+        objectIds = setmetatable({} as {TimelineImpl: integer}, { __mode = "k" }),
         named = {},
     }
 end
@@ -1092,7 +1108,7 @@ local function registry(world: World): Registry
     return r
 end
 
-local function internTimeline(world: World, tl: Timeline): integer
+local function internTimeline(world: World, tl: TimelineImpl): integer
     local reg <const> = registry(world)
     local existing = reg.objectIds[tl]
     if existing then return existing end
@@ -1197,7 +1213,7 @@ end
 
 local function createCursor(
     world: World,
-    tl: Timeline,
+    tl: TimelineImpl,
     target: integer,
     mode: PlaybackMode,
     passCount: integer,
@@ -1231,23 +1247,23 @@ local function createCursor(
     }
 end
 
-local function playbackFor(world: World, entity: integer): TweenPlayback
-    local pb = world:getMut(entity, TweenPlayback)
+local function playbackFor(world: World, entity: integer): TweenPlaybackImpl
+    local pb = world:getMut(entity, TweenPlaybackImpl)
     if pb then return pb end
     -- A prior play in this defer scope may already have staged the component.
     -- Read through the ECS transaction before creating another staged value.
-    pb = (world as WorldImpl):oldValueOf(entity, TweenPlayback) as TweenPlayback
+    pb = (world as WorldImpl):oldValueOf(entity, TweenPlaybackImpl) as TweenPlaybackImpl
     if pb then return pb end
-    local created <const> = TweenPlayback.new({})
+    local created <const> = TweenPlaybackImpl.new({})
     world:set(entity, created)
     return created
 end
 
-local function cursorTimeline(world: World, c: Cursor): Timeline
+local function cursorTimeline(world: World, c: Cursor): TimelineImpl
     return registry(world).byId[c.timelineId]
 end
 
-local function addCursor(world: World, entity: integer, tl: Timeline, options?: PlaybackOptions): Cursor
+local function addCursor(world: World, entity: integer, tl: TimelineImpl, options?: PlaybackOptions): Cursor
     local pb <const> = playbackFor(world, entity)
     if tl.channel then
         for i = 1, #(pb.cursors or {}) do
@@ -1272,7 +1288,7 @@ local function addCursor(world: World, entity: integer, tl: Timeline, options?: 
     return c
 end
 
-function Timeline:play(world: World, entity: integer, options?: PlaybackOptions)
+function TimelineImpl:play(world: World, entity: integer, options?: PlaybackOptions)
     addCursor(world, entity, self, options)
 end
 
@@ -1283,14 +1299,15 @@ function tween.play(world: World, entity: integer, timelineOrName: Timeline | st
         addCursor(world, entity, registry(world).byId[id], options)
         return
     end
-    (timelineOrName as Timeline):play(world, entity, options)
+    addCursor(world, entity, timelineOrName as TimelineImpl, options)
 end
 
 local function selectorTimelineId(world: World, selector: Timeline): integer
+    local impl <const> = selector as TimelineImpl
     local reg <const> = registry(world)
-    local id = reg.objectIds[selector]
+    local id = reg.objectIds[impl]
     if id then return id end
-    if selector.presetName then return reg.named[selector.presetName] end
+    if impl.presetName then return reg.named[impl.presetName] end
     return nil
 end
 
@@ -1306,36 +1323,36 @@ local function matchesCursor(world: World, c: Cursor, selector?: ControlSelector
 end
 
 function tween.cancel(world: World, entity: integer, selector?: ControlSelector)
-    local pb = world:get(entity, TweenPlayback)
+    local pb = world:get(entity, TweenPlaybackImpl)
     if not pb then return end
-    local mutable: TweenPlayback = nil
+    local mutable: TweenPlaybackImpl = nil
     for i = 1, #(pb.cursors or {}) do
         if matchesCursor(world, pb.cursors[i], selector) then
-            if not mutable then mutable = world:getMut(entity, TweenPlayback) end
+            if not mutable then mutable = world:getMut(entity, TweenPlaybackImpl) end
             mutable.cursors[i].cancelled = true
         end
     end
 end
 
 function tween.pause(world: World, entity: integer, selector?: ControlSelector)
-    local pb = world:get(entity, TweenPlayback)
+    local pb = world:get(entity, TweenPlaybackImpl)
     if not pb then return end
-    local mutable: TweenPlayback = nil
+    local mutable: TweenPlaybackImpl = nil
     for i = 1, #(pb.cursors or {}) do
         if not pb.cursors[i].paused and matchesCursor(world, pb.cursors[i], selector) then
-            if not mutable then mutable = world:getMut(entity, TweenPlayback) end
+            if not mutable then mutable = world:getMut(entity, TweenPlaybackImpl) end
             mutable.cursors[i].paused = true
         end
     end
 end
 
 function tween.resume(world: World, entity: integer, selector?: ControlSelector)
-    local pb = world:get(entity, TweenPlayback)
+    local pb = world:get(entity, TweenPlaybackImpl)
     if not pb then return end
-    local mutable: TweenPlayback = nil
+    local mutable: TweenPlaybackImpl = nil
     for i = 1, #(pb.cursors or {}) do
         if pb.cursors[i].paused and matchesCursor(world, pb.cursors[i], selector) then
-            if not mutable then mutable = world:getMut(entity, TweenPlayback) end
+            if not mutable then mutable = world:getMut(entity, TweenPlaybackImpl) end
             mutable.cursors[i].paused = false
         end
     end
@@ -1355,11 +1372,11 @@ local function resolveEasing(value: any): EasingName, EasingFunction
         "Tween easing must be a built-in easing name or value"), easingFn
 end
 
-local function resolveTargetValue(value: any): Target
+local function resolveTargetValue(value: any): TargetImpl
     if value is string then
         return assert(BUILTIN_TARGETS[value as TargetName], "Unknown tween target " .. value)
     end
-    return value as Target
+    return value as TargetImpl
 end
 
 local function numericValue(value: any, position: integer): number
@@ -1409,9 +1426,9 @@ function tween.parallel(...: TimelineNode): TimelineNode
     return node
 end
 
-local compileNode: function(TimelineNode, number, Timeline): number
+local compileNode: function(TimelineNode, number, TimelineImpl): number
 
-local function compileBlock(block: {TimelineNode}, startTime: number, tl: Timeline): number
+local function compileBlock(block: {TimelineNode}, startTime: number, tl: TimelineImpl): number
     local time = startTime
     for i = 1, #block do
         time = compileNode(block[i], time, tl)
@@ -1419,7 +1436,7 @@ local function compileBlock(block: {TimelineNode}, startTime: number, tl: Timeli
     return time
 end
 
-local function compileSlot(node: TimelineNode, startTime: number, tl: Timeline): number
+local function compileSlot(node: TimelineNode, startTime: number, tl: TimelineImpl): number
     local compiled <const> = (node as any) as {any:any}
     local authoredKind <const> = compiled[1] as OperationKind
     local duration <const> = compiled[2] as number
@@ -1430,7 +1447,7 @@ local function compileSlot(node: TimelineNode, startTime: number, tl: Timeline):
 
     compiled.kind = authoredKind == "track" and "track" or "to"
     compiled.target = target
-    compiled.source = authoredKind == "track" and (compiled[5] as TrackSource) or nil
+    compiled.source = authoredKind == "track" and (compiled[5] as TrackSourceImpl) or nil
     compiled.easingName = easingName
     compiled.easing = easingFn
     compiled.t1 = authoredKind == "track" and 0 or numericValue(compiled[5], 5)
@@ -1447,7 +1464,7 @@ local function compileSlot(node: TimelineNode, startTime: number, tl: Timeline):
     return compiled.endTime as number
 end
 
-compileNode = function(node: TimelineNode, startTime: number, tl: Timeline): number
+compileNode = function(node: TimelineNode, startTime: number, tl: TimelineImpl): number
     local data <const> = (node as any) as {any:any}
     assert(data, "Tween timeline entry is required")
     local kind <const> = data[1]
@@ -1471,7 +1488,7 @@ compileNode = function(node: TimelineNode, startTime: number, tl: Timeline): num
         tl.emits[#tl.emits + 1] = node as EmitSlot
         return startTime
     elseif kind == "run" then
-        local child <const> = data[2] as Timeline
+        local child <const> = data[2] as TimelineImpl
         assert(child and child.totalDuration, "Tween run requires a compiled timeline")
         local options <const> = data[3] as RunOptions
         local mode, passCount = playbackMode(options and options.mode, options and options.count, true)
@@ -1498,7 +1515,7 @@ end
 function tween.timeline(spec: TimelineSpec): Timeline
     local authored <const> = spec as {any:any}
     assert(authored.sequence == nil, "Tween timelines use an implicit sequence")
-    local tl <const> = spec as Timeline
+    local tl <const> = spec as TimelineImpl
     tl.slots = {}
     tl.runs = {}
     tl.emits = {}
@@ -1512,22 +1529,23 @@ function tween.timeline(spec: TimelineSpec): Timeline
             return a.time < b.time or (a.time == b.time and a.order < b.order)
         end)
     end
-    return setmetatable(tl, TIMELINE_MT)
+    return setmetatable(tl, TIMELINE_MT) as Timeline
 end
 
 function tween.registerPreset(world: World, name: string, timeline: Timeline): Timeline
+    local impl <const> = timeline as TimelineImpl
     assert(name ~= "", "Tween preset name must not be empty")
     local reg <const> = registry(world)
     local existingId <const> = reg.named[name]
     if existingId then
-        assert(reg.byId[existingId] == timeline, "Tween preset " .. name .. " is already registered")
+        assert(reg.byId[existingId] == impl, "Tween preset " .. name .. " is already registered")
         return timeline
     end
-    assert(not timeline.presetName or timeline.presetName == name,
-        "Tween timeline is already registered as " .. tostring(timeline.presetName))
-    timeline.presetName = name
-    timeline.pinned = true
-    local id <const> = internTimeline(world, timeline)
+    assert(not impl.presetName or impl.presetName == name,
+        "Tween timeline is already registered as " .. tostring(impl.presetName))
+    impl.presetName = name
+    impl.pinned = true
+    local id <const> = internTimeline(world, impl)
     reg.named[name] = id
     return timeline
 end
@@ -1536,7 +1554,9 @@ end
 -- Evaluation
 -------------------------------------------------------------------------------
 
-local function targetValuesFromSource(world: World, entity: integer, src: TrackSource): number, number, number, number
+local function targetValuesFromSource(
+    world: World, entity: integer, src: TrackSourceImpl
+): number, number, number, number
     if not src then return 0, 0, 0, 0 end
     if not src.component and src.componentName then
         src.component = componentByName(src.componentName)
@@ -1620,7 +1640,7 @@ local function evaluateSlots(slots: {Slot}, state: {TweenSlotState}, world: Worl
     end
 end
 
-local function fireEmits(c: Cursor, tl: Timeline, world: World, target: integer, elapsed: number)
+local function fireEmits(c: Cursor, tl: TimelineImpl, world: World, target: integer, elapsed: number)
     local emits <const> = tl.emits
     if not emits then return end
     while c.nextEmit <= #emits do
@@ -1637,7 +1657,9 @@ end
 local evaluateCursor: function(Cursor, World, integer)
 local resetCursorCycle: function(Cursor, World)
 
-local function beginRunCycle(child: Cursor, childTl: Timeline, runSlot: RunSlot, cycleIndex: integer, world: World)
+local function beginRunCycle(
+    child: Cursor, childTl: TimelineImpl, runSlot: RunSlot, cycleIndex: integer, world: World
+)
     if runSlot.mode == "loop" or cycleIndex % 2 == 0 then
         resetCursorCycle(child, world)
     end
@@ -1652,7 +1674,7 @@ local function beginRunCycle(child: Cursor, childTl: Timeline, runSlot: RunSlot,
 end
 
 local function evaluateRun(
-    child: Cursor, childTl: Timeline, runSlot: RunSlot,
+    child: Cursor, childTl: TimelineImpl, runSlot: RunSlot,
     localElapsed: number, world: World, target: integer
 )
     local cycleDuration <const> = childTl.totalDuration
@@ -1801,7 +1823,7 @@ local function collectLiveTemplateIds(world: World, playbackQuery: tecs.Query): 
         end
     end
     for archetype, len in playbackQuery:iter() do
-        local playbacks = archetype:get(TweenPlayback)
+        local playbacks = archetype:get(TweenPlaybackImpl)
         for i = 1, len do
             local pb = playbacks[i]
             for j = 1, #(pb.cursors or {}) do
@@ -1827,10 +1849,10 @@ function tween.plugin(world: World)
 
     local playbackQuery = world:query({
         name = "tween.Playbacks",
-        include = {TweenPlayback},
+        include = {TweenPlaybackImpl},
         onEntitiesRemoved = function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer, _count: integer)
             local reg = registry(world)
-            local playbacks = archetype:get(TweenPlayback)
+            local playbacks = archetype:get(TweenPlaybackImpl)
             for row = firstRow, lastRow do
                 local pb = playbacks[row]
                 if pb then
@@ -1870,7 +1892,7 @@ function tween.plugin(world: World)
         for archetype, len in playbackQuery:iter() do
             -- Rebuilding the registry reads cursor ids but does not mutate
             -- playback components.
-            local playbacks = archetype:get(TweenPlayback)
+            local playbacks = archetype:get(TweenPlaybackImpl)
             for i = 1, len do
                 local pb = playbacks[i]
                 for j = 1, #(pb.cursors or {}) do
@@ -1896,7 +1918,7 @@ function tween.plugin(world: World)
             local reg <const> = registry(world)
             local emptyCount = 0
             for archetype, len, entities in playbackQuery:iter() do
-                local playbacks = archetype:getMut(TweenPlayback)
+                local playbacks = archetype:getMut(TweenPlaybackImpl)
                 for i = 1, len do
                     local entity <const> = entities[i]
                     local pb = playbacks[i]
@@ -1920,7 +1942,7 @@ function tween.plugin(world: World)
             end
             for i = 1, emptyCount do
                 if world:isAlive(emptyEntities[i]) then
-                    world:remove(emptyEntities[i], TweenPlayback)
+                    world:remove(emptyEntities[i], TweenPlaybackImpl)
                 end
                 emptyEntities[i] = nil
             end

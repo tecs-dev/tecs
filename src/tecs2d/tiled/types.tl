@@ -37,7 +37,7 @@ local record types
     end
 
     --- A loaded tileset with texture and tile metadata.
-    record TilesetData
+    interface TilesetData
         firstgid: integer        -- First Global ID in this tileset
         name: string
         tilewidth: integer
@@ -58,16 +58,6 @@ local record types
         -- Tile-specific data (sparse table, keyed by local ID)
         tiles: {integer: TileData}
 
-        -- Quad cache (keyed by local tile ID)
-        _quads: {integer: love.graphics.Quad}
-
-        -- Animation state
-        _animatedTiles: {integer}  -- Local IDs that have animations
-        _animationStates: {integer: AnimationState}  -- Global sync states
-
-        -- Occluder data (sparse table, keyed by local ID)
-        -- Maps local tile ID to occluder height (nil or 0 = not an occluder)
-        _occluderHeights: {integer: number}
     end
 
     --- Point structure for polygons/polylines.
@@ -97,7 +87,7 @@ local record types
     end
 
     --- Layer data from Tiled.
-    record LayerData
+    interface LayerData
         id: integer
         name: string
         type: string             -- "tilelayer" | "objectgroup" | "imagelayer" | "group"
@@ -114,8 +104,6 @@ local record types
         data: {integer}          -- GID array (0-indexed FFI, cast from uint32_t*)
         width: integer           -- Layer width in tiles
         height: integer          -- Layer height in tiles
-        _rawTileData: love.Data  -- Anchors decompressed data (prevents GC)
-
         -- For object layers
         objects: {ObjectData}
 
@@ -125,35 +113,8 @@ local record types
         imageheight: integer     -- Image height in pixels
         repeatx: boolean         -- Tile horizontally
         repeaty: boolean         -- Tile vertically
-        _image: love.graphics.Image  -- Loaded image (runtime)
-
         -- For group layers (flattened on load, so rarely used)
         layers: {LayerData}
-
-        -- Runtime state for GPU TileChunk mode.
-        -- A single (cy, cx) chunk can contain tiles from multiple tilesets;
-        -- each one becomes its own per-tileset TileChunk entity, keyed by
-        -- the tileset's firstgid so setTile can find the right one to update.
-        _chunkEntities: {integer}  -- Spawned TileChunk entity IDs (flat list, for despawn)
-        _chunkEntityMap: {integer: {integer: {integer: integer}}}  -- [cy][cx][firstgid] -> entityId
-
-        -- Per-layer spawn parameters captured at load time so setTile can
-        -- spawn a new per-tileset chunk entity on demand when a tile is set
-        -- to a tileset that didn't yet have a chunk entity at this position.
-        _baseX: number
-        _baseY: number
-        _baseLayer: integer
-
-        -- Runtime state for animated tile Sprite entities.
-        _animatedSpriteEntities: {integer}  -- Flat list (for despawn)
-        _animatedSpriteEntityMap: {integer: {integer: integer}}  -- [tileY][tileX] -> entityId
-
-        -- Runtime state for image layer sprite entity
-        _imageLayerEntity: integer  -- Spawned Sprite entity ID for image layer (0 if none)
-
-        -- Runtime state for per-chunk collision bodies
-        _chunkCollisionBodies: {integer: {integer: love.physics.Body}}  -- [chunkY][chunkX] -> body
-        _dirtyChunkCollisions: {string: boolean}  -- "chunkY,chunkX" -> true if needs rebuild
 
         -- Render grouping (assigned during loading based on Tiled groups)
         -- groupIndex determines which render layer this Tiled layer belongs to.
@@ -164,7 +125,7 @@ local record types
     end
 
     --- A fully loaded tilemap.
-    record TilemapData
+    interface TilemapData
         -- Map dimensions
         width: integer           -- Map width in tiles
         height: integer          -- Map height in tiles
@@ -175,17 +136,6 @@ local record types
         layers: {LayerData}      -- Ordered array of layers
         tilesets: {TilesetData}  -- Loaded tilesets (sorted by firstgid)
         properties: {string: any}
-
-        -- Runtime state
-        _gidToTileset: {integer: TilesetData}  -- Cache for GID lookups
-        _world: tecs.World  -- ECS world reference for TileChunk dirty marking
-        _physicsWorld: love.physics.World  -- Box2D physics world for collision rebuild
-        _collisionConfig: CollisionConfig  -- Collision config for rebuild
-        -- Tilemap entity Transform position at load time; collision
-        -- bodies are created at this origin so physics geometry lands
-        -- where the map renders.
-        _collisionOriginX: number
-        _collisionOriginY: number
 
         -- Fixed render/collision chunk size. Retained as data for callers
         -- that inspect map metadata; changing it does not reconfigure the

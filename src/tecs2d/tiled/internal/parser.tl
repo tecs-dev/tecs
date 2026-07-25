@@ -6,11 +6,15 @@
 
 local ffi <const> = require("ffi")
 local types <const> = require("tecs2d.tiled.types")
-local tileset_utils <const> = require("tecs2d.tiled.internal.tileset")
+local internaltypes <const> = require("tecs2d.tiled.internal.types")
+local tilesetmodule <const> = require("tecs2d.tiled.internal.tileset")
 local json <const> = require("tecs.utils.json")
 
 local type TilemapData = types.TilemapData
 local type TilesetData = types.TilesetData
+local type TilemapDataImpl = internaltypes.TilemapDataImpl
+local type TilesetDataImpl = internaltypes.TilesetDataImpl
+local type LayerDataImpl = internaltypes.LayerDataImpl
 local type TileData = types.TileData
 local type LayerData = types.LayerData
 local type ObjectData = types.ObjectData
@@ -61,16 +65,16 @@ local function getTileProperties(
     end
 
     -- Strip flip flags
-    local cleanGid = tileset_utils.getCleanGid(gid)
+    local cleanGid = tilesetmodule.getCleanGid(gid)
 
     -- Find tileset for this GID
-    local tileset = tileset_utils.getTilesetForGid(self, cleanGid)
+    local tileset = tilesetmodule.getTilesetForGid(self, cleanGid)
     if not tileset then
         return nil
     end
 
     -- Get local tile ID and look up tile data
-    local localId = tileset_utils.getLocalTileId(tileset, cleanGid)
+    local localId = tilesetmodule.getLocalTileId(tileset, cleanGid)
     return tileset.tiles[localId]
 end
 
@@ -595,7 +599,7 @@ local function parseTile(tileJson: {string: any}): TileData
 end
 
 function parser.parseTileset(data: {string: any}, firstgid: integer): TilesetData
-    local ts: TilesetData = {
+    local ts: TilesetDataImpl = {
         firstgid = firstgid,
         name = data.name as string or "",
         tilewidth = data.tilewidth as integer,
@@ -636,7 +640,7 @@ function parser.parseTileset(data: {string: any}, firstgid: integer): TilesetDat
     end
 
     -- Initialize animation states for this tileset
-    tileset_utils.initializeAnimationStates(ts)
+    tilesetmodule.initializeAnimationStates(ts)
 
     return ts
 end
@@ -704,7 +708,7 @@ local function parseLayer(
         layerZOffset = 0
     end
 
-    local layer: LayerData = {
+    local layer: LayerDataImpl = {
         id = layerJson.id as integer,
         name = layerJson.name as string or "",
         type = layerType,
@@ -861,7 +865,7 @@ function parser.parseTiledMap(data: {string: any}): TilemapData
         error("tiled: infinite maps are not supported; disable 'Infinite' in Tiled's map properties and set a fixed size")
     end
 
-    local map: TilemapData = {
+    local map: TilemapDataImpl = {
         width = data.width as integer,
         height = data.height as integer,
         tilewidth = data.tilewidth as integer,
@@ -884,7 +888,7 @@ function parser.parseTiledMap(data: {string: any}): TilemapData
             if tsJson.source then
                 -- External tileset: store source path for later loading
                 -- The asset loader will handle loading the external .tsj file
-                local externalTs: TilesetData = {
+                local externalTs: TilesetDataImpl = {
                     firstgid = firstgid,
                     name = "",
                     tilewidth = 0,
@@ -906,7 +910,7 @@ function parser.parseTiledMap(data: {string: any}): TilemapData
                 table.insert(map.tilesets, externalTs)
             else
                 -- Embedded tileset
-                local ts = parser.parseTileset(tsJson, firstgid)
+                local ts = parser.parseTileset(tsJson, firstgid) as TilesetDataImpl
                 table.insert(map.tilesets, ts)
             end
         end
@@ -928,7 +932,7 @@ function parser.parseTiledMap(data: {string: any}): TilemapData
     end
 
     -- Build GID cache
-    tileset_utils.buildGidCache(map)
+    tilesetmodule.buildGidCache(map)
 
     -- Attach method-style API (read-only methods only)
     parser.attachBaseMethods(map)

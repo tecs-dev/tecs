@@ -41,7 +41,7 @@ Each Tiled layer renders at an incrementing layer number starting from `Transfor
 After loading, `tilemap.data` contains:
 
 ```teal
-record TilemapData
+interface TilemapData
     width: integer           -- Map width in tiles
     height: integer          -- Map height in tiles
     tilewidth: integer       -- Tile width in pixels

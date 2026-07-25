@@ -5,10 +5,12 @@
 
 local tecs <const> = require("tecs")
 local types <const> = require("tecs2d.tiled.types")
+local internaltypes <const> = require("tecs2d.tiled.internal.types")
 local parser <const> = require("tecs2d.tiled.internal.parser")
-local chunk_utils <const> = require("tecs2d.tiled.internal.chunk")
+local chunk <const> = require("tecs2d.tiled.internal.chunk")
 
 local type TilemapData = types.TilemapData
+local type TilemapDataImpl = internaltypes.TilemapDataImpl
 
 -- setTile with chunk dirty tracking
 local function setTile(self: TilemapData, layerIndex: integer, tileX: integer, tileY: integer, gid: integer)
@@ -25,10 +27,11 @@ local function setTile(self: TilemapData, layerIndex: integer, tileX: integer, t
     local oldGid = layer.data[idx]
     if oldGid ~= gid then
         layer.data[idx] = gid
+        local runtime = self as TilemapDataImpl
         -- Mark chunk dirty if world is available (set when TileChunks spawned)
-        if self._world then
-            local world = self._world as tecs.World
-            chunk_utils.markTileDirty(world, self, layerIndex, tileX, tileY, oldGid)
+        if runtime._world then
+            local world = runtime._world as tecs.World
+            chunk.markTileDirty(world, runtime, layerIndex, tileX, tileY, oldGid)
         end
     end
 end

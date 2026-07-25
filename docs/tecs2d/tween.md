@@ -18,10 +18,9 @@ local slide = tween.timeline({
 slide:play(world, entity)
 ```
 
-A timeline is a reusable finite clip. Playing it creates a cursor in the
-entity's `tween.TweenPlayback` component. The cursor records elapsed time,
-playback mode, delay, speed, direction, and the values captured when operations
-start.
+A timeline is a reusable finite clip. Playing it adds `tween.TweenPlayback`
+while the timeline is active. Playback tracks elapsed time, mode, delay, speed,
+direction, and values captured when operations start.
 
 ## Timeline Data
 
@@ -551,8 +550,8 @@ instead of restarting or jumping.
 
 Snapshot support includes:
 
-- `TweenPlayback` serializes each cursor's elapsed time, mode, remaining passes,
-  direction, speed, delay, pause state, and captured slot values.
+- Active tweens preserve elapsed time, mode, remaining passes, direction,
+  speed, delay, pause state, and captured values.
 - Shared timeline templates and nested run templates are serialized once in
   snapshot metadata.
 - Built-in names and custom target/source descriptors are restored through

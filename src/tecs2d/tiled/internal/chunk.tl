@@ -5,17 +5,18 @@
 
 local tecs <const> = require("tecs")
 local types <const> = require("tecs2d.tiled.types")
-local tileset_utils <const> = require("tecs2d.tiled.internal.tileset")
+local internaltypes <const> = require("tecs2d.tiled.internal.types")
+local tilesetmodule <const> = require("tecs2d.tiled.internal.tileset")
 local gfx <const> = require("tecs2d.gfx")
-local sprite_module <const> = require("tecs2d.gfx.internal.sprite")
-local sprite_sheet <const> = require("tecs2d.gfx.internal.sprite.sheet")
+local sprite <const> = require("tecs2d.gfx.internal.sprite")
+local spritesheet <const> = require("tecs2d.gfx.internal.sprite.sheet")
 local sheet <const> = require("tecs2d.gfx.sheet")
-local collision_module <const> = require("tecs2d.tiled.collision")
-local tilechunk_module <const> = require("tecs2d.gfx.internal.tilechunk")
+local collisionmodule <const> = require("tecs2d.tiled.collision")
+local tilechunk <const> = require("tecs2d.gfx.internal.tilechunk")
 
-local type TilemapData = types.TilemapData
-local type LayerData = types.LayerData
-local type TilesetData = types.TilesetData
+local type TilemapData = internaltypes.TilemapDataImpl
+local type LayerData = internaltypes.LayerDataImpl
+local type TilesetData = internaltypes.TilesetDataImpl
 local type TileData = types.TileData
 
 local TileSource <const> = types.TileSource
@@ -23,16 +24,19 @@ local TileSource <const> = types.TileSource
 local Transform <const> = tecs.builtins.Transform
 local TileChunk <const> = gfx.TileChunk
 local DirtyTileChunk <const> = gfx.DirtyTileChunk
-local DirectTileChunk <const> = tilechunk_module.DirectTileChunk
+local DirectTileChunk <const> = tilechunk.DirectTileChunk
 local TILE_CHUNK_SIZE <const> = gfx.TILE_CHUNK_SIZE  -- 16
 
 local math_floor <const> = math.floor
 local math_ceil <const> = math.ceil
 local math_min <const> = math.min
 
-local decodeFlipFlags <const> = tileset_utils.decodeFlipFlags
-local getTilesetForGid <const> = tileset_utils.getTilesetForGid
-local getLocalTileId <const> = tileset_utils.getLocalTileId
+local decodeFlipFlags <const> = tilesetmodule.decodeFlipFlags
+local getLocalTileId <const> = tilesetmodule.getLocalTileId
+
+local function getTilesetForGid(map: TilemapData, gid: integer): TilesetData
+    return tilesetmodule.getTilesetForGid(map, gid) as TilesetData
+end
 
 local record chunk
     --- Spawn TileChunk entities for all tile layers in a tilemap.
@@ -175,7 +179,7 @@ local function buildChunkComponents(
         -- the occluder-height lookup subtracts 1, not the map firstgid.
         firstgid = 1,
     })
-    if tilechunk_module.usesDirectTexture(
+    if tilechunk.usesDirectTexture(
         tileset.image as love.graphics.Texture
     ) then
         components[#components + 1] = DirectTileChunk
@@ -228,7 +232,7 @@ function chunk.spawnTileChunkEntities(
                 layer._chunkEntityMap[cy] = {}
                 for cx = 0, chunksX - 1 do
                     -- Collect tiles for this chunk, grouped by tileset
-                    local tilesetTiles: {types.TilesetData: {integer}} = {}
+                    local tilesetTiles: {TilesetData: {integer}} = {}
                     local hasAnyTile = false
 
                     local startCol = cx * TILE_CHUNK_SIZE + 1
@@ -332,7 +336,7 @@ end
 -- spawnAnimatedSprite uses createAnimatedTileSpriteSheet which appears later
 -- in the file). The local function declared below picks up the closure ref
 -- once both sides are defined.
-local createAnimatedTileSpriteSheet: function(TilesetData, TileData, integer): sprite_sheet.SpriteSheet
+local createAnimatedTileSpriteSheet: function(TilesetData, TileData, integer): spritesheet.SpriteSheet
 
 -- Spawn an animated tile sprite at a specific tile position. Used by both the
 -- initial bulk spawn and runtime setTile transitions.
@@ -382,7 +386,7 @@ local function spawnAnimatedSprite(
             scaleX = sx,
             scaleY = sy,
         }),
-        sprite_module.Sprite.fromSheet(spriteSheet as sheet.SpriteSheet, "default", {
+        sprite.Sprite.fromSheet(spriteSheet as sheet.SpriteSheet, "default", {
             centered = true,
             startTime = 0,
         }),
@@ -465,8 +469,8 @@ function chunk.markTileDirty(world: tecs.World, map: TilemapData, layerIndex: in
     -- Check if collision is enabled and either old or new tile has collision
     if map._collisionConfig then
         local newGid = layer.data[(tileY - 1) * layer.width + (tileX - 1)] or 0
-        local oldHasCollision = oldGid and collision_module.tileHasCollision(map, oldGid)
-        local newHasCollision = newGid > 0 and collision_module.tileHasCollision(map, newGid)
+        local oldHasCollision = oldGid and collisionmodule.tileHasCollision(map, oldGid)
+        local newHasCollision = newGid > 0 and collisionmodule.tileHasCollision(map, newGid)
 
         if oldHasCollision or newHasCollision then
             chunk.markChunkCollisionDirty(map, layerIndex, chunkX, chunkY)
@@ -647,7 +651,7 @@ function chunk.getDirtyChunkCollisions(map: TilemapData, layerIndex: integer): f
 end
 
 -- Cache of SpriteSheets created for animated tiles (keyed by tileset + localId)
-local animatedTileSpriteSheets: {string: sprite_sheet.SpriteSheet} = {}
+local animatedTileSpriteSheets: {string: spritesheet.SpriteSheet} = {}
 
 -- Assign to the forward-declared local so spawnAnimatedSprite (above) picks up
 -- the real implementation. This is a single closure, not two functions.
@@ -655,7 +659,7 @@ createAnimatedTileSpriteSheet = function(
     tileset: TilesetData,
     tile: TileData,
     localId: integer
-): sprite_sheet.SpriteSheet
+): spritesheet.SpriteSheet
     -- Create cache key
     local cacheKey = tostring(tileset.image)
         .. "_" .. tostring(tileset.firstgid)
@@ -672,7 +676,7 @@ createAnimatedTileSpriteSheet = function(
     local spacing = tileset.spacing or 0
     local margin = tileset.margin or 0
     local imgW, imgH = (image as love.graphics.Texture):getDimensions()
-    local useCompactSheet = tilechunk_module.usesDirectTexture(
+    local useCompactSheet = tilechunk.usesDirectTexture(
         image as love.graphics.Texture
     )
     local compactColumns = 0
@@ -722,7 +726,7 @@ createAnimatedTileSpriteSheet = function(
 
         frames[i] = {
             frame = { x = frameX, y = frameY, w = tw, h = th },
-            duration = frame.duration * 1000  -- Convert seconds back to ms for sprite_sheet
+            duration = frame.duration * 1000  -- Convert seconds back to ms for spritesheet
         }
     end
 
@@ -798,7 +802,7 @@ createAnimatedTileSpriteSheet = function(
         }
     }
 
-    local spriteSheet = sprite_sheet.SpriteSheet.fromConfig(image, config, cacheKey)
+    local spriteSheet = spritesheet.SpriteSheet.fromConfig(image, config, cacheKey)
     animatedTileSpriteSheets[cacheKey] = spriteSheet
     return spriteSheet
 end

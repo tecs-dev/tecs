@@ -1,11 +1,14 @@
 --- Tileset utilities for GID lookups, quad generation, and animation state.
 
 local types <const> = require("tecs2d.tiled.types")
+local internaltypes <const> = require("tecs2d.tiled.internal.types")
 local bit <const> = require("bit")
 
 local type TilemapData = types.TilemapData
 local type TilesetData = types.TilesetData
 local type AnimationState = types.AnimationState
+local type TilemapDataImpl = internaltypes.TilemapDataImpl
+local type TilesetDataImpl = internaltypes.TilesetDataImpl
 
 local lg_newQuad <const> = love.graphics.newQuad
 local math_floor <const> = math.floor
@@ -83,9 +86,10 @@ function tileset.decodeFlipFlags(gid: integer): boolean, boolean, boolean, integ
 end
 
 function tileset.getTilesetForGid(map: TilemapData, gid: integer): TilesetData
+    local runtime = map as TilemapDataImpl
     -- Check cache first
-    if map._gidToTileset then
-        local cached = map._gidToTileset[gid]
+    if runtime._gidToTileset then
+        local cached = runtime._gidToTileset[gid]
         if cached then
             return cached
         end
@@ -103,8 +107,8 @@ function tileset.getTilesetForGid(map: TilemapData, gid: integer): TilesetData
     end
 
     -- Cache the result
-    if found and map._gidToTileset then
-        map._gidToTileset[gid] = found
+    if found and runtime._gidToTileset then
+        runtime._gidToTileset[gid] = found
     end
 
     return found
@@ -115,13 +119,14 @@ function tileset.getLocalTileId(ts: TilesetData, gid: integer): integer
 end
 
 function tileset.getOrCreateQuad(ts: TilesetData, localId: integer): love.graphics.Quad
+    local runtime = ts as TilesetDataImpl
     -- Initialize cache if needed
-    if not ts._quads then
-        ts._quads = {}
+    if not runtime._quads then
+        runtime._quads = {}
     end
 
     -- Check cache
-    local cached = ts._quads[localId]
+    local cached = runtime._quads[localId]
     if cached then
         return cached
     end
@@ -134,14 +139,15 @@ function tileset.getOrCreateQuad(ts: TilesetData, localId: integer): love.graphi
 
     -- Create and cache quad
     local quad = lg_newQuad(x, y, ts.tilewidth, ts.tileheight, ts.imagewidth, ts.imageheight)
-    ts._quads[localId] = quad
+    runtime._quads[localId] = quad
 
     return quad
 end
 
 function tileset.initializeAnimationStates(ts: TilesetData)
-    ts._animatedTiles = ts._animatedTiles or {}
-    ts._animationStates = ts._animationStates or {}
+    local runtime = ts as TilesetDataImpl
+    runtime._animatedTiles = runtime._animatedTiles or {}
+    runtime._animationStates = runtime._animationStates or {}
 
     -- Iterate through tiles with animation data
     if ts.tiles then
@@ -158,13 +164,13 @@ function tileset.initializeAnimationStates(ts: TilesetData)
                 -- frame durations as 0); the update loop's time wrap would
                 -- never terminate on totalTime == 0.
                 if totalTime > 0 then
-                    table.insert(ts._animatedTiles, localId)
+                    table.insert(runtime._animatedTiles, localId)
                     local state: AnimationState = {
                         totalTime = totalTime,
                         time = 0,
                         currentFrame = 1
                     }
-                    ts._animationStates[localId] = state
+                    runtime._animationStates[localId] = state
                 end
             end
         end
@@ -172,7 +178,7 @@ function tileset.initializeAnimationStates(ts: TilesetData)
 end
 
 function tileset.buildGidCache(map: TilemapData)
-    map._gidToTileset = {}
+    (map as TilemapDataImpl)._gidToTileset = {}
 end
 
 function tileset.getCleanGid(gid: integer): integer

@@ -17,24 +17,31 @@
 
 local table_clear <const> = require("table.clear")
 local tecs <const> = require("tecs")
-local tecs_assets <const> = require("tecs2d.assets")
+local assets <const> = require("tecs2d.assets")
 local json <const> = require("tecs.utils.json")
 local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
 
 local types <const> = require("tecs2d.tiled.types")
+local internaltypes <const> = require("tecs2d.tiled.internal.types")
 local loader <const> = require("tecs2d.tiled.internal.loader")
-local chunk_utils <const> = require("tecs2d.tiled.internal.chunk")
-local debug_plugin <const> = require("tecs2d.tiled.internal.debug")
-local collision_module <const> = require("tecs2d.tiled.collision")
-local tileset_utils <const> = require("tecs2d.tiled.internal.tileset")
+local chunk <const> = require("tecs2d.tiled.internal.chunk")
+local tileddebug <const> = require("tecs2d.tiled.internal.debug")
+local collisionmodule <const> = require("tecs2d.tiled.collision")
+local tilesetmodule <const> = require("tecs2d.tiled.internal.tileset")
 
 local builtins <const> = tecs.builtins
 local Transform <const> = builtins.Transform
 
 local type TilemapData = types.TilemapData
+local type TilemapDataImpl = internaltypes.TilemapDataImpl
+local type TilesetDataImpl = internaltypes.TilesetDataImpl
+local type TileSource = types.TileSource
+local type CollisionConfig = collisionmodule.Config
+local type DebugConfig = tileddebug.DebugConfig
+local type DebugToggle = tileddebug.DebugToggle
 
 -- Main module record
-local record tiled is tecs_assets.AssetHandler<TilemapData>
+local record tiled is assets.AssetHandler<TilemapData>
     --- Fully parsed Tiled map data.
     type TilemapData = types.TilemapData
     --- Parsed Tiled tileset data.
@@ -49,7 +56,7 @@ local record tiled is tecs_assets.AssetHandler<TilemapData>
     type Point = types.Point
 
     --- Collision generation options for a tilemap.
-    type CollisionConfig = collision_module.Config
+    type CollisionConfig = CollisionConfig
 
     --- Loads and projects a Tiled map. Requires Transform.
     record Tilemap is tecs.Component
@@ -64,27 +71,27 @@ local record tiled is tecs_assets.AssetHandler<TilemapData>
     end
 
     --- Collision geometry utilities.
-    collision: collision_module
+    collision: collisionmodule
 
     --- Associates a sprite with its source tile metadata.
-    TileSource: types.TileSource
+    TileSource: TileSource
 
     --- Install tilemap loading, projection, animation, and collision systems.
     plugin: function(world: tecs.World)
 
     --- Debug visualization configuration.
-    type DebugConfig = debug_plugin.DebugConfig
+    type DebugConfig = DebugConfig
     --- Tag placed on debug visualization entities.
     TiledDebugShape: tecs.Component
     --- Event that toggles Tiled debug visualization.
-    DebugToggle: debug_plugin.DebugToggle
+    DebugToggle: DebugToggle
 
     --- Debug plugin for visualizing Tiled objects.
     --- Observes DebugToggle events to spawn/despawn tagged shape entities.
     debugPlugin: function(world: tecs.World)
 
     --- Create a debug plugin with custom configuration.
-    createDebugPlugin: function(config?: debug_plugin.DebugConfig): function(world: tecs.World)
+    createDebugPlugin: function(config?: DebugConfig): function(world: tecs.World)
 
     -- Utilities
     --- Get tile at world position
@@ -110,21 +117,21 @@ local record tiled is tecs_assets.AssetHandler<TilemapData>
     --- @param map The loaded tilemap data.
     --- @param gid The global tile ID from ObjectData.gid or a tile layer.
     --- @return The TileSource component, or nil if gid is invalid.
-    tileSourceFromGid: function(map: TilemapData, gid: integer): types.TileSource | nil
+    tileSourceFromGid: function(map: TilemapData, gid: integer): TileSource | nil
 end
 
 local Tilemap <const> = tiled.Tilemap
 
 -- Export collision module
-tiled.collision = collision_module
+tiled.collision = collisionmodule
 
 -- Export debugger markers as ordinary typed runtime values.
-tiled.TiledDebugShape = debug_plugin.TiledDebugShape
-tiled.DebugToggle = debug_plugin.DebugToggle
+tiled.TiledDebugShape = tileddebug.TiledDebugShape
+tiled.DebugToggle = tileddebug.DebugToggle
 
 -- Debug plugin: observes DebugToggle events to spawn/despawn tagged debug shapes.
-function tiled.createDebugPlugin(config?: debug_plugin.DebugConfig): function(world: tecs.World)
-    local cfg = config or debug_plugin.defaultConfig
+function tiled.createDebugPlugin(config?: DebugConfig): function(world: tecs.World)
+    local cfg = config or tileddebug.defaultConfig
     return function(world: tecs.World)
         local tilemapQuery = world:query({
             name = "tiled.DebugTilemapQuery",
@@ -133,12 +140,12 @@ function tiled.createDebugPlugin(config?: debug_plugin.DebugConfig): function(wo
 
         local tagQuery = world:query({
             name = "tiled.DebugTagQuery",
-            include = {debug_plugin.TiledDebugShape}
+            include = {tileddebug.TiledDebugShape}
         })
 
         local enabled = false
 
-        world:observe(0, debug_plugin.DebugToggle, function()
+        world:observe(0, tileddebug.DebugToggle, function()
             if enabled then
                 -- Despawn all debug shapes
                 local toRemove: {integer} = {}
@@ -159,9 +166,9 @@ function tiled.createDebugPlugin(config?: debug_plugin.DebugConfig): function(wo
                     for i = 1, len do
                         local tilemap = tilemaps[i]
                         local data = tilemap.data
-                        if data and (data as TilemapData)._world then
+                        if data and (data as TilemapDataImpl)._world then
                             local transform = transforms[i]
-                            debug_plugin.spawnDebugShapes(
+                            tileddebug.spawnDebugShapes(
                                 world, cfg, data as TilemapData,
                                 transform.x, transform.y
                             )
@@ -195,7 +202,7 @@ tecs.newComponent({
         local collision = t.collision
         if collision then
             result.collision = {
-                enabled = (collision as collision_module.Config).enabled,
+                enabled = (collision as collisionmodule.Config).enabled,
             }
         end
         return result
@@ -218,16 +225,16 @@ tecs.newComponent({
 tiled.TileSource = types.TileSource
 
 function tiled.tileSourceFromGid(
-    map: types.TilemapData,
+    map: TilemapData,
     gid: integer
-): types.TileSource | nil
+): TileSource | nil
     if gid == 0 then return nil end
 
     -- Strip flip flags (4th return value is the clean GID)
-    local _, _, _, cleanGid = tileset_utils.decodeFlipFlags(gid)
+    local _, _, _, cleanGid = tilesetmodule.decodeFlipFlags(gid)
 
     -- Find the tileset
-    local tileset = tileset_utils.getTilesetForGid(map, cleanGid)
+    local tileset = tilesetmodule.getTilesetForGid(map, cleanGid)
     if not tileset then return nil end
 
     -- Get local tile ID
@@ -259,7 +266,7 @@ tiled.parseTiledMap = loader.parseTiledMap
 function tiled.plugin(world: tecs.World)
 
     -- Get dependencies
-    local assetManager = assert(tecs_assets.manager, "tecs2d.tiled requires the global asset manager")
+    local assetManager = assert(assets.manager, "tecs2d.tiled requires the global asset manager")
     local pipelineInstance = world.resources[pipelinekey.PIPELINE]
 
     if not pipelineInstance then
@@ -288,19 +295,19 @@ function tiled.plugin(world: tecs.World)
                 local tilemap = tilemaps[row]
                 if not tilemap then goto continue end
                 if tilemap.collisionBodies then
-                    collision_module.destroyColliders(tilemap.collisionBodies)
+                    collisionmodule.destroyColliders(tilemap.collisionBodies)
                     tilemap.collisionBodies = nil
                 end
                 local data = tilemap.data
                 if data then
-                    local mapLayers <const> = (data as TilemapData).layers
+                    local mapLayers <const> = (data as TilemapDataImpl).layers
                     for li = 1, #mapLayers do
                         local layer = mapLayers[li]
                         if layer.type == "tilelayer" then
-                            chunk_utils.despawnLayerChunks(world, layer)
-                            chunk_utils.despawnLayerAnimatedTiles(world, layer)
+                            chunk.despawnLayerChunks(world, layer)
+                            chunk.despawnLayerAnimatedTiles(world, layer)
                         elseif layer.type == "imagelayer" then
-                            chunk_utils.despawnImageLayerEntity(world, layer)
+                            chunk.despawnImageLayerEntity(world, layer)
                         end
                     end
                 end
@@ -314,10 +321,10 @@ function tiled.plugin(world: tecs.World)
     -- AssetLoader system below re-spawns them on load when it sees a
     -- restored Tilemap whose data._world is nil (always true post-load
     -- since `_world` is a runtime field that doesn't survive serialize).
-    local tilechunk_module <const> = require("tecs2d.gfx.internal.tilechunk")
+    local tilechunk <const> = require("tecs2d.gfx.internal.tilechunk")
     world:observe(0, builtins.OnSnapshotSave, function(ev: builtins.OnSnapshotSave)
-        ev:exclude(tilechunk_module.TileChunk as tecs.Component)
-        ev:exclude(tilechunk_module.DirtyTileChunk)
+        ev:exclude(tilechunk.TileChunk as tecs.Component)
+        ev:exclude(tilechunk.DirtyTileChunk)
         ev:exclude(types.TileSource as tecs.Component)
     end)
 
@@ -332,7 +339,7 @@ function tiled.plugin(world: tecs.World)
                     local tilemap = tilemaps[i]
                     local optionalData = tilemap.data
                     if optionalData then
-                        local data = optionalData as TilemapData
+                        local data = optionalData as TilemapDataImpl
                         if not data._collisionConfig or not data._physicsWorld then
                             goto continueCollisionMap
                         end
@@ -346,7 +353,7 @@ function tiled.plugin(world: tecs.World)
                             if layer.type == "tilelayer" and layer._dirtyChunkCollisions then
                                 -- Collect dirty chunks first (can't modify table during next() iteration)
                                 local dirtyList: {{integer, integer}} = {}
-                                for chunkX, chunkY in chunk_utils.getDirtyChunkCollisions(data, li) do
+                                for chunkX, chunkY in chunk.getDirtyChunkCollisions(data, li) do
                                     table.insert(dirtyList, {chunkX, chunkY})
                                 end
 
@@ -361,7 +368,7 @@ function tiled.plugin(world: tecs.World)
                                     if layer._chunkCollisionBodies and layer._chunkCollisionBodies[chunkY] then
                                         local oldBody = layer._chunkCollisionBodies[chunkY][chunkX]
                                         if oldBody then
-                                            collision_module.destroyCollider(oldBody)
+                                            collisionmodule.destroyCollider(oldBody)
                                             layer._chunkCollisionBodies[chunkY][chunkX] = nil
 
                                             -- Remove from tilemap.collisionBodies array
@@ -377,7 +384,7 @@ function tiled.plugin(world: tecs.World)
                                     end
 
                                     -- Create new collision body for this chunk
-                                    local newBody = collision_module.createChunkCollider(
+                                    local newBody = collisionmodule.createChunkCollider(
                                         data,
                                         physicsWorld,
                                         collisionConfig,
@@ -429,7 +436,8 @@ function tiled.plugin(world: tecs.World)
 
         -- Load tileset images
         -- Note: love.filesystem.read needs full path (resolvedPath), but assetManager:loadImage adds root automatically
-        local syncTilesets <const> = map.tilesets
+        local runtimeMap <const> = map as TilemapDataImpl
+        local syncTilesets <const> = runtimeMap.tilesets
         for ti = 1, #syncTilesets do
             local ts = syncTilesets[ti]
             if ts.imagePath then
@@ -451,7 +459,7 @@ function tiled.plugin(world: tecs.World)
                         error("Failed to read external tileset '" .. tsjPath .. "' referenced by " .. path)
                     end
                     local tsjParsed = json.parse(tsjData) as {string: any}
-                    local externalTs = loader.parseTileset(tsjParsed, ts.firstgid)
+                    local externalTs = loader.parseTileset(tsjParsed, ts.firstgid) as TilesetDataImpl
                     ts.name = externalTs.name
                     ts.tilewidth = externalTs.tilewidth
                     ts.tileheight = externalTs.tileheight
@@ -508,7 +516,7 @@ function tiled.plugin(world: tecs.World)
         end
 
         -- Load image layer images
-        local syncLayers <const> = map.layers
+        local syncLayers <const> = runtimeMap.layers
         for li = 1, #syncLayers do
             local layer = syncLayers[li]
             if layer.type == "imagelayer" and layer.imagePath then
@@ -544,7 +552,7 @@ function tiled.plugin(world: tecs.World)
 
                     -- Skip already-processed tilemaps
                     local existingData = tilemap.data
-                    if existingData and (existingData as TilemapData)._world then
+                    if existingData and (existingData as TilemapDataImpl)._world then
                         goto continue
                     end
 
@@ -562,15 +570,15 @@ function tiled.plugin(world: tecs.World)
                     end
 
                     if not tilemap.data then goto continue end
-                    local data = tilemap.data as TilemapData
+                    local data = tilemap.data as TilemapDataImpl
 
                     -- Set world reference for setTile dirty marking
                     data._world = world
 
                     -- Create per-chunk collision bodies if configured
                     local collision = tilemap.collision
-                    if collision and (collision as collision_module.Config).enabled then
-                        local collisionConfig = collision as collision_module.Config
+                    if collision and (collision as collisionmodule.Config).enabled then
+                        local collisionConfig = collision as collisionmodule.Config
                         local physics = require("tecs2d.physics")
                         local physicsState = world.resources[physics]
                         if physicsState and physicsState.world then
@@ -595,13 +603,13 @@ function tiled.plugin(world: tecs.World)
                                     layer._chunkCollisionBodies = {}
 
                                     -- Calculate number of chunks
-                                    local chunksX = math.ceil(layer.width / collision_module.CHUNK_SIZE)
-                                    local chunksY = math.ceil(layer.height / collision_module.CHUNK_SIZE)
+                                    local chunksX = math.ceil(layer.width / collisionmodule.CHUNK_SIZE)
+                                    local chunksY = math.ceil(layer.height / collisionmodule.CHUNK_SIZE)
 
                                     for cy = 0, chunksY - 1 do
                                         layer._chunkCollisionBodies[cy] = {}
                                         for cx = 0, chunksX - 1 do
-                                            local body = collision_module.createChunkCollider(
+                                            local body = collisionmodule.createChunkCollider(
                                                 data,
                                                 physicsWorld,
                                                 collisionConfig,
@@ -624,7 +632,7 @@ function tiled.plugin(world: tecs.World)
 
                     -- Spawn GPU TileChunk entities for tile layers
                     local transform = transforms[i]
-                    chunk_utils.spawnTileChunkEntities(
+                    chunk.spawnTileChunkEntities(
                         world,
                         data,
                         transform.x,
@@ -633,7 +641,7 @@ function tiled.plugin(world: tecs.World)
                     )
 
                     -- Spawn Sprite entities for animated tiles
-                    chunk_utils.spawnAnimatedTileEntities(
+                    chunk.spawnAnimatedTileEntities(
                         world,
                         data,
                         transform.x,
@@ -642,7 +650,7 @@ function tiled.plugin(world: tecs.World)
                     )
 
                     -- Spawn Sprite entities for image layers (GPU-driven parallax/tiling)
-                    chunk_utils.spawnImageLayerEntities(
+                    chunk.spawnImageLayerEntities(
                         world,
                         data,
                         transform.x,

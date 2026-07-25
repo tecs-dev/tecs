@@ -3,9 +3,43 @@ require("busted")
 local tecs <const> = require("tecs")
 local luassert <const> = require("luassert")
 local tween <const> = require("tecs2d.tween")
-local type EasingFunction = function(t: number): number
+local type EasingFunction = tween.EasingFunction
 
 local Transform <const> = tecs.builtins.Transform
+
+-- These structural views are intentionally test-only. The public handles are
+-- narrow; this suite inspects compiler/playback state only when testing the
+-- compiler and snapshot implementation itself.
+local interface TargetImpl
+    init: function(
+        world: tecs.World, entity: integer, relative: boolean,
+        t1: number, t2: number, t3: number, t4: number
+    ): number, number, number, number, number, number, number, number
+    apply: function(
+        world: tecs.World, entity: integer, t: number,
+        s1: number, s2: number, s3: number, s4: number,
+        d1: number, d2: number, d3: number, d4: number
+    )
+end
+
+local interface TimelineSlotImpl
+    startTime: number
+    endTime: number
+end
+
+local interface TimelineImpl
+    slots: {TimelineSlotImpl}
+    totalDuration: number
+end
+
+local interface CursorImpl
+    elapsed: number
+    remainingPasses: integer
+end
+
+local interface PlaybackImpl
+    cursors: {CursorImpl}
+end
 
 local function makeWorld(): tecs.World
     local world = tecs.newWorld()
@@ -95,7 +129,7 @@ describe("targets", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        local target <const> = tween.field(Transform, "x")
+        local target <const> = tween.field(Transform, "x") as TargetImpl
         local s1, s2, s3, s4, d1, d2, d3, d4 = target.init(world, entity, false, 200, 0, 0, 0)
 
         target.apply(world, entity, 0, s1, s2, s3, s4, d1, d2, d3, d4)
@@ -114,16 +148,19 @@ describe("targets", function()
 
         local s1, s2, s3, s4, d1, d2, d3, d4: number, number, number, number, number, number, number, number
 
-        s1, s2, s3, s4, d1, d2, d3, d4 = tween.translateX.init(world, entity, false, 100, 0, 0, 0)
-        tween.translateX.apply(world, entity, 1, s1, s2, s3, s4, d1, d2, d3, d4)
+        local translateX <const> = tween.translateX as TargetImpl
+        s1, s2, s3, s4, d1, d2, d3, d4 = translateX.init(world, entity, false, 100, 0, 0, 0)
+        translateX.apply(world, entity, 1, s1, s2, s3, s4, d1, d2, d3, d4)
         luassert.is_near(100, world:get(entity, Transform).x, 1e-3)
 
-        s1, s2, s3, s4, d1, d2, d3, d4 = tween.translateY.init(world, entity, false, 50, 0, 0, 0)
-        tween.translateY.apply(world, entity, 1, s1, s2, s3, s4, d1, d2, d3, d4)
+        local translateY <const> = tween.translateY as TargetImpl
+        s1, s2, s3, s4, d1, d2, d3, d4 = translateY.init(world, entity, false, 50, 0, 0, 0)
+        translateY.apply(world, entity, 1, s1, s2, s3, s4, d1, d2, d3, d4)
         luassert.is_near(50, world:get(entity, Transform).y, 1e-3)
 
-        s1, s2, s3, s4, d1, d2, d3, d4 = tween.rotation.init(world, entity, false, math.pi, 0, 0, 0)
-        tween.rotation.apply(world, entity, 1, s1, s2, s3, s4, d1, d2, d3, d4)
+        local rotation <const> = tween.rotation as TargetImpl
+        s1, s2, s3, s4, d1, d2, d3, d4 = rotation.init(world, entity, false, math.pi, 0, 0, 0)
+        rotation.apply(world, entity, 1, s1, s2, s3, s4, d1, d2, d3, d4)
         luassert.is_near(math.pi, world:get(entity, Transform).rotation, 1e-3)
     end)
 
@@ -140,7 +177,7 @@ describe("targets", function()
         local entity = world:spawn(Transform(0, 0), CustomComp(0) as tecs.Component)
         tick(world, 0)
 
-        local tweenFill <const> = tween.field(CustomComp, "fill")
+        local tweenFill <const> = tween.field(CustomComp, "fill") as TargetImpl
         local s1, s2, s3, s4, d1, d2, d3, d4 = tweenFill.init(world, entity, false, 1, 0, 0, 0)
         tweenFill.apply(world, entity, 0.5, s1, s2, s3, s4, d1, d2, d3, d4)
         luassert.is_near(0.5, (world:get(entity, CustomComp) as {string:number}).fill, 1e-3)
@@ -325,10 +362,10 @@ describe("timeline system", function()
         tick(world, 2.5)
         luassert.is_near(25, world:get(entity, Transform).x, 1e-9)
 
-        local playback <const> = world:get(entity, tween.TweenPlayback)
+        local playback <const> = world:get(entity, tween.TweenPlayback) as PlaybackImpl
         luassert.is_not_nil(playback)
         luassert.is_near(0.5, playback.cursors[1].elapsed, 1e-9)
-        luassert.are.equal(1, playback.cursors[1].remainingPasses)
+        luassert.equals(1, playback.cursors[1].remainingPasses)
     end)
 
     it("preserves ping-pong overshoot in the same update", function()
@@ -412,8 +449,9 @@ describe("timeline compilation", function()
                 tween.to(0.3, tween.linear, tween.translateY, 100)),
         })
 
-        luassert.is_equal(def.slots[1].startTime, def.slots[2].startTime)
-        luassert.is_equal(0, def.slots[1].startTime)
+        local impl <const> = def as TimelineImpl
+        luassert.is_equal(impl.slots[1].startTime, impl.slots[2].startTime)
+        luassert.is_equal(0, impl.slots[1].startTime)
     end)
 
     it("parallel advances by its longest entry", function()
@@ -424,7 +462,7 @@ describe("timeline compilation", function()
             tween.to(0.4, tween.linear, tween.rotation, 1),
         })
 
-        luassert.is_equal(0.5, def.slots[3].startTime)
+        luassert.is_equal(0.5, (def as TimelineImpl).slots[3].startTime)
     end)
 
     it("wait advances the time offset", function()
@@ -434,7 +472,7 @@ describe("timeline compilation", function()
             tween.to(0.4, tween.linear, tween.translateY, 100),
         })
 
-        luassert.is_equal(0.5, def.slots[2].startTime)
+        luassert.is_equal(0.5, (def as TimelineImpl).slots[2].startTime)
     end)
 
     it("compiles the supplied nodes in place", function()
@@ -443,9 +481,10 @@ describe("timeline compilation", function()
         local timeline <const> = tween.timeline(spec)
 
         luassert.is_true(rawequal(timeline, spec))
-        luassert.is_true(timeline.slots[1] == operation)
-        luassert.is_equal(0, timeline.slots[1].startTime)
-        luassert.is_equal(0.5, timeline.slots[1].endTime)
+        local impl <const> = timeline as TimelineImpl
+        luassert.is_true(rawequal(impl.slots[1], operation))
+        luassert.is_equal(0, impl.slots[1].startTime)
+        luassert.is_equal(0.5, impl.slots[1].endTime)
     end)
 
     it("resolves serializable easing and target names", function()
@@ -472,25 +511,26 @@ describe("timeline compilation", function()
             tween.to(0.1, "linear", "transform.scaleX", 2),
         })
 
-        luassert.is_equal(0, def.slots[1].startTime)
-        luassert.is_equal(0.2, def.slots[2].startTime)
-        luassert.is_equal(0, def.slots[3].startTime)
-        luassert.is_equal(0.5, def.slots[4].startTime)
+        local impl <const> = def as TimelineImpl
+        luassert.is_equal(0, impl.slots[1].startTime)
+        luassert.is_equal(0.2, impl.slots[2].startTime)
+        luassert.is_equal(0, impl.slots[3].startTime)
+        luassert.is_equal(0.5, impl.slots[4].startTime)
     end)
 
     it("rejects malformed entries", function()
         luassert.has_error(function()
-            tween.timeline({{} as any})
+            tween.timeline(({{} as any}) as tween.TimelineSpec)
         end, nil)
     end)
 
     it("does not accept a named sequence", function()
         luassert.has_error(function()
-            tween.timeline({
+            tween.timeline(({
                 sequence = {
                     tween.to(0.5, "linear", "transform.x", 100),
                 },
-            })
+            } as any) as tween.TimelineSpec)
         end, nil)
     end)
 
@@ -546,9 +586,9 @@ describe("timeline compilation", function()
         })
 
         tick(world, 0)
-        local playback <const> = world:get(entity, tween.TweenPlayback)
+        local playback <const> = world:get(entity, tween.TweenPlayback) as PlaybackImpl
         luassert.is_not_nil(playback)
-        luassert.are.equal(2, #playback.cursors)
+        luassert.equals(2, #playback.cursors)
         world:shutdown()
     end)
 
@@ -562,7 +602,7 @@ describe("timeline compilation", function()
             tween.run(sub),
         })
 
-        luassert.is_near(1.0, def.totalDuration, 1e-9)
+        luassert.is_near(1.0, (def as TimelineImpl).totalDuration, 1e-9)
     end)
 
     it("run options repeat a child for a finite pass count", function()
@@ -574,7 +614,7 @@ describe("timeline compilation", function()
             tween.run(sub, {mode = "loop", count = 3}),
         })
 
-        luassert.is_near(1.5, def.totalDuration, 1e-9)
+        luassert.is_near(1.5, (def as TimelineImpl).totalDuration, 1e-9)
     end)
 
     it("consumes every nested run pass crossed by one update", function()
@@ -877,7 +917,7 @@ describe("timeline compilation", function()
             tick(world, 0.5)
         end
         local final = world:saveSnapshot({format = "table"}) as {string:any}
-        luassert.are.equal(baseline, templateCount(final),
+        luassert.equals(baseline, templateCount(final),
             "template registry grew across save/load/play cycles")
 
         world:shutdown()

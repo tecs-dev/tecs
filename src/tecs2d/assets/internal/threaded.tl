@@ -1,11 +1,12 @@
 local types <const> = require("tecs2d.assets.types")
 local workers <const> = require("tecs2d.workers")
-local sprite_sheet <const> = require("tecs2d.gfx.internal.sprite.sheet")
+local spritesheet <const> = require("tecs2d.gfx.internal.sprite.sheet")
 local sheet <const> = require("tecs2d.gfx.sheet")
 local bmfont <const> = require("tecs2d.gfx.bmfont")
 local json <const> = require("tecs.utils.json")
-local tiled_parser <const> = require("tecs2d.tiled.internal.parser")
-local tiled_types <const> = require("tecs2d.tiled.types")
+local tiledparser <const> = require("tecs2d.tiled.internal.parser")
+local tiledtypes <const> = require("tecs2d.tiled.types")
+local tiledinternal <const> = require("tecs2d.tiled.internal.types")
 
 local LOGGER <const> = require("tecs.utils.logging").getLogger("tecs2d.assets")
 
@@ -470,7 +471,7 @@ function threaded.AssetManager:loadSpriteSheet(
         self:loadImage(base .. "_orm.png"):handle(optionalImage) as Handle<any>,
     }
     local result = self._queue:all(handles):map(function(values: {any}): sheet.SpriteSheet
-        local builder = sprite_sheet.SpriteSheet.builderFromImage(
+        local builder = spritesheet.SpriteSheet.builderFromImage(
             values[1] as love.graphics.Image,
             values[2] as love.filesystem.FileData,
             resolvedPath)
@@ -497,7 +498,7 @@ function threaded.AssetManager:loadStaticSheet(
     local result = self._queue:all(handles):map(function(values: {any}): sheet.SpriteSheet
         local image = values[1] as love.graphics.Image
         local width, height = image:getDimensions()
-        local builder = sprite_sheet.SpriteSheet.builder(image, resolvedPath)
+        local builder = spritesheet.SpriteSheet.builder(image, resolvedPath)
             :frame(0, 0, width, height, 1000000)
         if values[2] then builder:normalImage(values[2] as love.graphics.Image) end
         if values[3] then builder:emissionImage(values[3] as love.graphics.Image) end
@@ -519,11 +520,13 @@ function threaded.AssetManager:loadBMFont(path: string): Handle<bmfont.BMFont>
     return registerDerived(self, "loadBMFont", path, {}, result)
 end
 
-local type TilemapData = tiled_types.TilemapData
+local type TilemapData = tiledtypes.TilemapData
+local type TilemapDataImpl = tiledinternal.TilemapDataImpl
+local type TilesetDataImpl = tiledinternal.TilesetDataImpl
 
 function threaded.AssetManager:loadTiledMap(path: string): Handle<TilemapData>
     local result = self:loadFile(path):map(function(content: string): TilemapData
-        local map = tiled_parser.parseTiledMap(json.parse(content) as {string: any})
+        local map = tiledparser.parseTiledMap(json.parse(content) as {string: any}) as TilemapDataImpl
         local tilesets <const> = map.tilesets
         for ti = 1, #tilesets do
             local ts = tilesets[ti]
@@ -532,10 +535,13 @@ function threaded.AssetManager:loadTiledMap(path: string): Handle<TilemapData>
                     error("External .tsx tilesets are not supported; export as .tsj: " .. ts.imagePath)
                 end
                 if ts.imagePath:match("%.tsj$") then
-                    local tsjPath = tiled_parser.resolveRelativePath(path, ts.imagePath)
+                    local tsjPath = tiledparser.resolveRelativePath(path, ts.imagePath)
                     local tsjData = love.filesystem.read(tsjPath)
                     if tsjData then
-                        local external = tiled_parser.parseTileset(json.parse(tsjData) as {string: any}, ts.firstgid)
+                        local external = tiledparser.parseTileset(
+                            json.parse(tsjData) as {string: any},
+                            ts.firstgid
+                        ) as TilesetDataImpl
                         ts.name = external.name
                         ts.tilewidth = external.tilewidth
                         ts.tileheight = external.tileheight
@@ -553,7 +559,7 @@ function threaded.AssetManager:loadTiledMap(path: string): Handle<TilemapData>
                     end
                 end
                 if ts.imagePath and not ts.imagePath:match("%.tsj$") then
-                    local imagePath = tiled_parser.resolveRelativePath(path, ts.imagePath)
+                    local imagePath = tiledparser.resolveRelativePath(path, ts.imagePath)
                     ts.image = self:loadImage(imagePath).value
                     (ts.image as love.graphics.Texture):setFilter("nearest", "nearest")
                     local base = imagePath:gsub("%.png$", "")
@@ -576,7 +582,7 @@ function threaded.AssetManager:loadTiledMap(path: string): Handle<TilemapData>
         for i = 1, #layers do
             local layer = layers[i]
             if layer.type == "imagelayer" and layer.imagePath then
-                local imagePath = tiled_parser.resolveRelativePath(path, layer.imagePath)
+                local imagePath = tiledparser.resolveRelativePath(path, layer.imagePath)
                 layer._image = self:loadImage(imagePath).value
                 if layer.imagewidth == 0 then layer.imagewidth = (layer._image as love.graphics.Texture):getWidth() as integer end
                 if layer.imageheight == 0 then layer.imageheight = (layer._image as love.graphics.Texture):getHeight() as integer end
