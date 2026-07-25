@@ -80,7 +80,6 @@ local function benchPlugin(world: tecs.World)
 
     local startTime = pipeline:getTime()
     local probe = gfx.Sprite.fromSheet(sheet, "run", {centered = true, startTime = startTime})
-    local sharedSpriteId = probe.spriteId
 
     local Transform <const> = tecs.builtins.Transform
     local SpriteComponent <const> = gfx.Sprite
@@ -97,7 +96,6 @@ local function benchPlugin(world: tecs.World)
         {Transform as tecs.Component, SpriteComponent as tecs.Component},
         function(arch: tecs.Archetype, startRow: integer, lastRow: integer, _n: integer)
             local transforms = arch:getMut(Transform)
-            local sprites = arch:getMut(SpriteComponent) as {gfx.Sprite}
             for i = startRow, lastRow do
                 local idx = i - 1
                 local bx, by = baseFor(idx)
@@ -115,13 +113,8 @@ local function benchPlugin(world: tecs.World)
                 t.scaleX = 1
                 t.scaleY = 1
 
-                local s = sprites[i]
-                s.spriteId = sharedSpriteId
-                s._entity = 0
-                s.animStartTime = startTime - (idx * 0.0137)
-                s.pausedFrame = -1
-                s._pauseAtFrame = -1
-                s.pauseDepth = 0
+                probe.animStartTime = startTime - (idx * 0.0137)
+                arch:set(i, probe)
             end
         end)
 

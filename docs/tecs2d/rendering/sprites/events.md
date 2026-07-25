@@ -24,18 +24,18 @@ world's event system.
 | `entity` | integer | The entity ID                                |
 | `oldTag` | string  | Previous animation tag (empty on first load) |
 | `newTag` | string  | New animation tag                            |
-| `anim`   | Sprite  | Reference to the Sprite component            |
+| `sprite` | Sprite  | Reference to the Sprite component            |
 
 ### Examples
 
 ```teal
-world:observe(entityId, gfx.ChangeTag, function(event)
+world:observe(entityId, gfx.ChangeTag, function(event: gfx.ChangeTag)
     print("Entity", event.entity, "changed from", event.oldTag, "to", event.newTag)
 end)
 ```
 
 ```teal
-world:observe(entityId, gfx.ChangeTag, function(event)
+world:observe(entityId, gfx.ChangeTag, function(event: gfx.ChangeTag)
     if event.newTag == "death" then
         world:remove(entityId, PlayerController)
     end
@@ -48,7 +48,7 @@ local sounds = {
     attack = love.audio.newSource("sounds/sword.ogg", "static"),
 }
 
-world:observe(entityId, gfx.ChangeTag, function(event)
+world:observe(entityId, gfx.ChangeTag, function(event: gfx.ChangeTag)
     local sound = sounds[event.newTag]
     if sound then
         sound:stop()
@@ -66,7 +66,7 @@ not store references to event objects received from observers.
 ```teal
 local lastTag = ""
 
-world:observe(entityId, gfx.ChangeTag, function(event)
+world:observe(entityId, gfx.ChangeTag, function(event: gfx.ChangeTag)
     lastTag = event.newTag
 end)
 ```

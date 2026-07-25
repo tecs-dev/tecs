@@ -40,26 +40,17 @@ local function benchPlugin(world: tecs.World)
     local startX = -(gridWidth / 2)
     local startY = -(gridHeight / 2)
 
-    -- Bulk spawn sprites in a grid using batchSpawn. Resolve the
-    -- spriteId once outside the loop (sprite-instance lookup is cached
-    -- but the per-row dispatch was the spawn bottleneck). Inside the
-    -- callback, getMut + direct FFI writes avoid the per-row temp
-    -- Transform / Sprite allocations that the previous arch:set form
-    -- did.
+    -- Bulk spawn sprites in a grid using batchSpawn. One Sprite value is
+    -- copied into every row so setup avoids per-row allocations without
+    -- depending on Sprite's storage layout.
     local sharedStartTime = pipeline:getTime()
-    -- One sprite-instance row shared by every entity in the bench:
-    -- same sheet, tag, speed, centered, pivotSlice → same spriteId.
-    -- We grab the resolved id from a probe Sprite, then write that id
-    -- directly into the canonical column for each row.
     local probe = gfx.Sprite.fromSheet(runnerSheet, "run", {centered = true, startTime = sharedStartTime})
-    local sharedSpriteId = probe.spriteId
     local Transform <const> = tecs.builtins.Transform
     local SpriteComponent <const> = gfx.Sprite
     world:batchSpawn(spawnCount,
         {Transform as tecs.Component, SpriteComponent as tecs.Component},
         function(arch: tecs.Archetype, startRow: integer, lastRow: integer, _batchCount: integer)
             local transforms = arch:getMut(Transform)
-            local sprites = arch:getMut(SpriteComponent) as {gfx.Sprite}
             for i = startRow, lastRow do
                 local idx = i - startRow
                 local row = math.floor(idx / gridSize)
@@ -73,13 +64,7 @@ local function benchPlugin(world: tecs.World)
                 t.scaleX = 1
                 t.scaleY = 1
 
-                local s = sprites[i]
-                s.spriteId = sharedSpriteId
-                s._entity = 0
-                s.animStartTime = sharedStartTime
-                s.pausedFrame = -1
-                s._pauseAtFrame = -1
-                s.pauseDepth = 0
+                arch:set(i, probe)
             end
         end)
 

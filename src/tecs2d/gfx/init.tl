@@ -1,6 +1,7 @@
 local tecs <const> = require("tecs")
 local pipeline <const> = require("tecs2d.gfx.internal.pipeline")
 local types <const> = require("tecs2d.gfx.types")
+local spritetypes <const> = require("tecs2d.gfx.spritetypes")
 local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
 local sprite <const> = require("tecs2d.gfx.internal.sprite")
 local image <const> = require("tecs2d.gfx.internal.Image")
@@ -65,11 +66,11 @@ local record gfx
     --- A Sprite component used to draw Love2D sprites.
     ---
     --- Requires adding the Transform component to get the default rendering logic.
-    Sprite: sprite.Sprite
+    Sprite: spritetypes.Sprite
     --- Shared configuration accepted by Sprite factories.
-    type SpriteOptions = sprite.SpriteOptions
+    type SpriteOptions = spritetypes.SpriteOptions
     --- Configuration accepted by Sprite.fromTexture, including snapshot source path.
-    type TextureSpriteOptions = sprite.TextureSpriteOptions
+    type TextureSpriteOptions = spritetypes.TextureSpriteOptions
 
     --- A complete texture drawn directly through Love.
     ---
@@ -94,7 +95,7 @@ local record gfx
     RepeatedSprite: sprite.RepeatedSprite
 
     --- Event emitted when sprite animation tag changes.
-    ChangeTag: tecs.Event
+    ChangeTag: spritetypes.ChangeTag
 
     --- A Circle component used to draw filled circles.
     ---

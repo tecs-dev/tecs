@@ -4,7 +4,7 @@
 --- Every Sprite has a SpriteSheet, even for simple single-frame textures.
 
 local tecs <const> = require("tecs")
-local types <const> = require("tecs2d.gfx.types")
+local spritetypes <const> = require("tecs2d.gfx.spritetypes")
 local ColorComponent = require("tecs2d.gfx.internal.Color")
 local timingbuffer <const> = require("tecs2d.gfx.internal.gpu.timingbuffer")
 local worldregistry <const> = require("tecs2d.gfx.internal.worldregistry")
@@ -56,35 +56,20 @@ local type SpriteInstance = sprite_instance.SpriteInstance
 local getInstance <const> = sprite_instance.get
 
 local record sprite
+    --- Sprite component.
+    Sprite: spritetypes.Sprite
+    --- Options shared by all Sprite factories.
+    type SpriteOptions = spritetypes.SpriteOptions
+    --- Options for `Sprite.fromTexture`.
+    type TextureSpriteOptions = spritetypes.TextureSpriteOptions
+
     --- Re-export SpriteSheet
     SpriteSheet: sprite_sheet.SpriteSheet
 
     --- Re-export SpriteCollision component
     SpriteCollision: sprite_collision.SpriteCollision
     --- Re-export events
-    ChangeTag: sprite_events.ChangeTag
-
-    --- SpriteInstance type (exported for external access)
-    Instance: SpriteInstance
-
-    --- Options shared by all Sprite factories.
-    interface SpriteOptions
-        --- Animation speed multiplier. Defaults to 1.
-        speed: number
-        --- Center the sprite on its Transform. Defaults to true.
-        centered: boolean
-        --- Aseprite slice name to use as the pivot.
-        pivotSlice: string
-        --- Animation start time, used to stagger otherwise identical sprites.
-        startTime: number
-    end
-
-    --- Options for `Sprite.fromTexture`.
-    interface TextureSpriteOptions is SpriteOptions
-        --- Durable source path used to reconstruct the sprite during snapshot
-        --- load. The caller must keep this path and the supplied texture in sync.
-        path: string
-    end
+    ChangeTag: spritetypes.ChangeTag
 
     --- Texture bucket marker components - group sprites by texture array size tier.
     --- layerIndex is the 0-based layer within the texture array (for GLSL sampling).
@@ -117,111 +102,6 @@ local record sprite
     record XXLTextureBucket is tecs.Component
         layerIndex: integer
         generation: integer
-    end
-
-    --- Sprite component - holds spriteId and per-entity animation state (FFI storage)
-    record Sprite is tecs.Component, types.Rect
-        --- ID into the instance registry
-        spriteId: integer
-
-        --- Internal: Entity ID (set by the SpriteLifecycle query's onEntitiesAdded)
-        _entity: integer
-
-        --- Per-entity animation start time
-        animStartTime: number
-
-        --- Per-entity pause state: -1 = playing, >= 0 = paused at frame
-        pausedFrame: integer
-
-        --- Internal: deferred pause target frame (-1 = none, >= 0 = pause when reached)
-        _pauseAtFrame: integer
-
-        --- Ref-counted pause depth for tag-based pause/resume.
-        pauseDepth: integer
-
-        --- Mark sprite metadata as dirty, triggering GPU re-sync.
-        --- Call this after changing Color, ClipBounds, or pivot values.
-        markDirty: function(self)
-
-        --- Set the animation tag
-        --- @param tag The new animation tag
-        setTag: function(self, tag: string)
-
-        --- Play a tag once, then invoke the callback when the last frame is reached.
-        playOnce: function(self, tag: string, onComplete?: function(Sprite))
-
-        --- Pause the animation at current frame.
-        --- Optional time parameter for synchronized batch pausing.
-        pause: function(self, time?: number)
-
-        --- Resume the animation from paused frame
-        resume: function(self)
-
-        --- Set the animation to the last frame and pause
-        pauseAtEnd: function(self)
-
-        --- Set the animation to the first frame and pause
-        pauseAtStart: function(self)
-
-        --- Jump to a specific frame (0-based index within current tag)
-        --- @param frame The frame index to jump to
-        gotoFrame: function(self, frame: integer)
-
-        --- Get the current frame index (0-based within current tag)
-        --- @return The current frame being displayed
-        getFrame: function(self): integer
-
-        --- Get the absolute frame number (1-based, across entire spriteSheet)
-        --- @return The absolute frame number
-        getAbsoluteFrame: function(self): integer
-
-        --- Get the current tag
-        --- @return The current tag
-        getTag: function(self): string
-
-        --- Get the center point of the current frame
-        --- @return centerX, centerY
-        getCenter: function(self): number, number
-
-        --- Get the dimensions of the sprite
-        --- @return width, height
-        getDimensions: function(self): number, number
-
-        --- Get the proper origin point based on pivot configuration
-        --- @return pivotX, pivotY
-        getPivot: function(self): number, number
-
-        --- Get the instance data for this sprite
-        --- @return The SpriteInstance
-        getInstance: function(self): SpriteInstance
-
-        --- Creates a new Sprite with the given spriteId and startTime.
-        --- Most users should use fromSheet, fromAseprite, or fromTexture instead.
-        metamethod __call: function(self, spriteId: integer, startTime?: number): Sprite
-
-        --- Create a Sprite from a loaded SpriteSheet
-        --- @param spriteSheet The sprite spriteSheet
-        --- @param tag Optional animation tag (defaults to "" = all frames)
-        --- @param options Optional configuration (centered, pivotSlice, speed, startTime)
-        --- @return A new Sprite instance
-        fromSheet: function(
-            spriteSheet: sheet.SpriteSheet,
-            tag?: string,
-            options?: SpriteOptions
-        ): Sprite
-
-        --- Create a Sprite from an Aseprite file path
-        --- @param path Path to the image file (JSON data expected alongside with .json extension)
-        --- @param tag Optional animation tag
-        --- @param options Optional configuration
-        --- @return A new Sprite instance
-        fromAseprite: function(path: string, tag?: string, options?: SpriteOptions): Sprite
-
-        --- Create a simple Sprite from a texture (single-frame)
-        --- @param texture The texture to use
-        --- @param options Optional configuration
-        --- @return A new Sprite instance
-        fromTexture: function(texture: love.graphics.Texture, options?: TextureSpriteOptions): Sprite
     end
 
     --- Plugin to add sprite rendering and collision systems to a TECS world.
@@ -273,15 +153,33 @@ local record sprite
     end
 end
 
+local record SpriteImpl is spritetypes.Sprite
+    spriteId: integer
+    _entity: integer
+    animStartTime: number
+    pausedFrame: integer
+    _pauseAtFrame: integer
+    pauseDepth: integer
+
+    getInstance: function(self): SpriteInstance
+
+    metamethod __call: function(
+        self,
+        spriteId: integer,
+        startTime?: number
+    ): SpriteImpl
+end
+
 -- Re-exports
+sprite.Sprite = SpriteImpl as spritetypes.Sprite
 sprite.SpriteSheet = sprite_sheet.SpriteSheet
 sprite.SpriteCollision = sprite_collision.SpriteCollision
 sprite.ChangeTag = sprite_events.ChangeTag
 
-local Sprite <const> = sprite.Sprite
+local Sprite <const> = SpriteImpl
 
 local record SpriteRuntime
-    callbacks: {integer: function(sprite.Sprite)}
+    callbacks: {integer: function(spritetypes.Sprite)}
     pendingCount: integer
 end
 
@@ -292,7 +190,7 @@ local function runtimeOf(world: tecs.World): SpriteRuntime
     return world.resources[SPRITE_RUNTIME] as SpriteRuntime
 end
 
-local function resolveOwner(self: sprite.Sprite): tecs.World, integer, SpriteRuntime
+local function resolveOwner(self: SpriteImpl): tecs.World, integer, SpriteRuntime
     local world, entityId = worldregistry.resolveOwner(self._entity)
     if not world or not world:has(entityId, Sprite as tecs.Component) then
         error("Sprite component is no longer attached to a live render world entity", 2)
@@ -300,7 +198,7 @@ local function resolveOwner(self: sprite.Sprite): tecs.World, integer, SpriteRun
     return world, entityId, runtimeOf(world)
 end
 
-local function getGameTime(self: sprite.Sprite): number
+local function getGameTime(self: SpriteImpl): number
     local world = worldregistry.resolveOwner(self._entity)
     if world then
         local rp = world.resources[pipelinekey.PIPELINE] as {string: any}
@@ -317,7 +215,7 @@ local function clearPlayOnceCallback(runtime: SpriteRuntime, entityId: integer)
 end
 
 local function queuePlayOnceCallback(runtime: SpriteRuntime, entityId: integer,
-        callback: function(sprite.Sprite))
+        callback: function(spritetypes.Sprite))
     if runtime.callbacks[entityId] == nil then
         runtime.pendingCount = runtime.pendingCount + 1
     end
@@ -595,7 +493,7 @@ function Sprite:setTag(tag: string)
     world:markComponentDirty(entityId, Sprite as tecs.Component)
 end
 
-function Sprite:playOnce(tag: string, onComplete?: function(sprite.Sprite))
+function Sprite:playOnce(tag: string, onComplete?: function(spritetypes.Sprite))
     local world, entityId, runtime = resolveOwner(self)
     local inst <const> = getInstance(self.spriteId)
     local sameTag = inst and tag == self:getTag()
@@ -889,7 +787,7 @@ tecs.newFFIComponent({
     -- populates real values (frame UV / pivot / textureSlice etc).
     requires = { SpriteData },
 
-    init = function(instance: sprite.Sprite, spriteId: integer, startTime: number)
+    init = function(instance: SpriteImpl, spriteId: integer, startTime: number)
         assert(spriteId, "Sprite requires a spriteId")
         instance.spriteId = spriteId
         instance._entity = 0
@@ -903,7 +801,7 @@ tecs.newFFIComponent({
     -- that doesn't survive clear-all. Save the *durable* descriptor of the
     -- sprite (spriteSheet path + tag + config) so load can re-resolve through
     -- the normal creation path.
-    serialize = function(instance: sprite.Sprite): {string: any}
+    serialize = function(instance: SpriteImpl): {string: any}
         local inst = sprite_instance.get(instance.spriteId)
         if not inst then return nil end
         local spriteSheet = sprite_sheet.SpriteSheet.getById(inst.sheetId)
@@ -940,7 +838,7 @@ tecs.newFFIComponent({
         }
     end,
 
-    deserialize = function(_world: tecs.World, data: {string: any}): sprite.Sprite
+    deserialize = function(_world: tecs.World, data: {string: any}): SpriteImpl
         -- Serialize returns nil for sprites built from synthetic-path
         -- sheets (e.g. tiled animated tile sheets keyed by "tileset_tile").
         -- Skip the whole reconstruct in that case and return nil so the
@@ -967,7 +865,7 @@ tecs.newFFIComponent({
             centered   = data.centered as boolean,
             pivotSlice = data.pivotSlice as string,
             startTime  = data.animStartTime as number,
-        })
+        }) as SpriteImpl
         inst.pausedFrame   = (data.pausedFrame   as integer) or -1
         inst._pauseAtFrame = (data._pauseAtFrame as integer) or -1
         inst.pauseDepth    = (data.pauseDepth    as integer) or 0
@@ -983,7 +881,7 @@ tecs.newFFIComponent({
 -- Per-entity lifecycle handler for Sprite added to an entity.
 -- Assigns the bucket/TextureArray tag for the sprite's spriteSheet; the
 -- subsequent `bucket_sync` observer allocates a GPU slot.
-local function onSpriteAdded(world: tecs.World, entityId: integer, self: sprite.Sprite)
+local function onSpriteAdded(world: tecs.World, entityId: integer, self: SpriteImpl)
     self._entity = worldregistry.ownerToken(world, entityId)
 
     local inst = getInstance(self.spriteId)
@@ -1159,7 +1057,7 @@ function Sprite.fromSheet(
     spriteSheet: sheet.SpriteSheet,
     tag?: string,
     options?: sprite.SpriteOptions
-): sprite.Sprite
+): spritetypes.Sprite
     local opts = options or {}
     local tagStr = tag or ""
     local speed = (opts.speed as number) or 1.0
@@ -1179,7 +1077,11 @@ function Sprite.fromSheet(
     return Sprite(spriteId, startTime)
 end
 
-function Sprite.fromAseprite(path: string, tag?: string, options?: sprite.SpriteOptions): sprite.Sprite
+function Sprite.fromAseprite(
+    path: string,
+    tag?: string,
+    options?: sprite.SpriteOptions
+): spritetypes.Sprite
     return Sprite.fromSheet(
         sprite_sheet.SpriteSheet.fromFile(path) as sheet.SpriteSheet, tag, options)
 end
@@ -1187,7 +1089,7 @@ end
 function Sprite.fromTexture(
     texture: love.graphics.Texture,
     options?: sprite.TextureSpriteOptions
-): sprite.Sprite
+): spritetypes.Sprite
     -- `options.path`, when supplied, is threaded through to the underlying
     -- spriteSheet so the sprite round-trips through snapshot save/load. Caller is
     -- responsible for keeping the texture and path in sync.
@@ -1235,7 +1137,7 @@ function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(worl
                 clearPlayOnceCallback(runtime, entityId)
                 releaseInstance(oldSpriteId)
             end
-            onSpriteAdded(world, entityId, spr as sprite.Sprite)
+            onSpriteAdded(world, entityId, spr as SpriteImpl)
         end
 
         -- Renderer-owned shadow-column path. The bucket-aware shadow
@@ -1400,7 +1302,7 @@ function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(worl
             name = "sprite.SpriteLifecycle",
             include = {Sprite},
             onEntitiesAdded = function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer, _count: integer)
-                local sprites = archetype:get(Sprite) as {sprite.Sprite}
+                local sprites = archetype:get(Sprite) as {SpriteImpl}
                 local spriteDatas = archetype:get(SpriteData as tecs.Component) as {sprite.SpriteData}
                 local entities = archetype.entities
                 for row = firstRow, lastRow do
@@ -1420,7 +1322,7 @@ function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(worl
             onEntitiesRemoved = function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer, _count: integer, destArchetype?: tecs.Archetype)
                 -- Skip refcount release when moving between Sprite-bearing archetypes.
                 if destArchetype and destArchetype:get(Sprite) then return end
-                local sprites = archetype:get(Sprite) as {sprite.Sprite}
+                local sprites = archetype:get(Sprite) as {SpriteImpl}
                 local entities = archetype.entities
                 for row = firstRow, lastRow do
                     local self = sprites[row]
@@ -1441,13 +1343,13 @@ function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(worl
                 name = "sprite.PauseObserver",
                 include = {Sprite, Paused},
                 onEntitiesAdded = function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer, _count: integer)
-                    local sprites = archetype:getMut(Sprite) as {sprite.Sprite}
+                    local sprites = archetype:getMut(Sprite) as {SpriteImpl}
                     for row = firstRow, lastRow do
                         sprites[row]:pause()
                     end
                 end,
                 onEntitiesRemoved = function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer, _count: integer)
-                    local sprites = archetype:getMut(Sprite) as {sprite.Sprite}
+                    local sprites = archetype:getMut(Sprite) as {SpriteImpl}
                     for row = firstRow, lastRow do
                         local spr = sprites[row]
                         if spr and spr.spriteId ~= 0 then
@@ -1477,7 +1379,7 @@ function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(worl
                     -- Acquiring the whole column mutably here would force a
                     -- GPU upload for every Sprite in the archetype whenever
                     -- any one-shot callback is pending.
-                    local sprites = archetype:get(Sprite) as {sprite.Sprite}
+                    local sprites = archetype:get(Sprite) as {SpriteImpl}
                     local entities = archetype.entities
                     for row = 1, len do
                         local entityId = entities[row] as integer
