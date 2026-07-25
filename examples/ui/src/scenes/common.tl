@@ -23,7 +23,6 @@ local record common
     -- Standard scene header: title + optional subtitle
     header: function(
         world: tecs.World,
-        spawn: function(tecs.World, ...: tecs.Component): integer,
         WINDOW_WIDTH: number,
         title: string,
         subtitle?: string
@@ -32,7 +31,6 @@ local record common
     -- Standard scene footer: up to 2 lines of text
     footer: function(
         world: tecs.World,
-        spawn: function(tecs.World, ...: tecs.Component): integer,
         WINDOW_WIDTH: number,
         WINDOW_HEIGHT: number,
         line1: string,
@@ -42,7 +40,7 @@ local record common
     -- Scene interface type that all scenes should follow
     interface Scene
         name: string
-        setup: function(world: tecs.World, spawn: function(tecs.World, ...: tecs.Component): integer, WINDOW_WIDTH: number, WINDOW_HEIGHT: number)
+        setup: function(world: tecs.World, WINDOW_WIDTH: number, WINDOW_HEIGHT: number)
     end
 end
 
@@ -57,13 +55,12 @@ common.TITLE_SCALE = 1.0
 
 function common.header(
     world: tecs.World,
-    spawn: function(tecs.World, ...: tecs.Component): integer,
     WINDOW_WIDTH: number,
     title: string,
     subtitle?: string
 )
     -- Title (orange, larger)
-    spawn(world,
+    world:spawn(
         Transform(WINDOW_WIDTH / 2, 40),
         Text(common.DEFAULT_FONT, title, 1.5),
         LayoutBox(Text),
@@ -72,7 +69,7 @@ function common.header(
 
     -- Optional subtitle
     if subtitle then
-        spawn(world,
+        world:spawn(
             Transform(WINDOW_WIDTH / 2, 109),
             Text(common.DEFAULT_FONT, subtitle, common.SUBTITLE_SCALE),
             LayoutBox(Text),
@@ -83,13 +80,12 @@ end
 
 function common.footer(
     world: tecs.World,
-    spawn: function(tecs.World, ...: tecs.Component): integer,
     _WINDOW_WIDTH: number,
     _WINDOW_HEIGHT: number,
     line1: string,
     line2?: string
 )
-    spawn(world,
+    world:spawn(
         Transform(0, 0),
         Anchor(0.5, 1, 0, -130),
         Text(common.DEFAULT_FONT, line1, common.SUBTITLE_SCALE),
@@ -98,7 +94,7 @@ function common.footer(
     )
 
     if line2 then
-        spawn(world,
+        world:spawn(
             Transform(0, 0),
             Anchor(0.5, 1, 0, -100),
             Text(common.DEFAULT_FONT, line2, common.SUBTITLE_SCALE),

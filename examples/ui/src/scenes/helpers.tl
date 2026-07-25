@@ -22,12 +22,11 @@ helpers.name = "Flow Layout"
 
 function helpers.setup(
     world: tecs.World,
-    spawn: function(tecs.World, ...: tecs.Component): integer,
     WINDOW_WIDTH: number,
     _WINDOW_HEIGHT: number
 )
     -- Header
-    common.header(world, spawn, WINDOW_WIDTH, "Flow Layout")
+    common.header(world, WINDOW_WIDTH, "Flow Layout")
 
     local yOffset = 64
 
@@ -36,14 +35,14 @@ function helpers.setup(
     local vLabelX = 380
     local vContainerX, vContainerY = vLabelX - vContainerW/2, 140 + yOffset
 
-    spawn(world,
+    world:spawn(
         Transform(vLabelX, 100 + yOffset),
         Text(common.DEFAULT_FONT, 'Flow("down")', common.SUBTITLE_SCALE),
         LayoutBox(Text),
         gfx.Color(0.8, 0.8, 0.8)
     )
 
-    local vContainer = spawn(world,
+    local vContainer = world:spawn(
         Transform(vContainerX, vContainerY),
         gfx.Rectangle(vContainerW, vContainerH),
         gfx.RoundedCorners(8),
@@ -57,7 +56,7 @@ function helpers.setup(
         gfx.Color(0.15, 0.12, 0.20)
     )
     -- Border
-    spawn(world,
+    world:spawn(
         Transform(vContainerX, vContainerY, 0.5),
         gfx.Rectangle(vContainerW, vContainerH, 1),
         gfx.RoundedCorners(8),
@@ -68,7 +67,7 @@ function helpers.setup(
     -- Children stacked vertically
     local vChildW, vChildH = 180, 45
     for i = 1, 5 do
-        spawn(world,
+        world:spawn(
             Transform(0, 0, 1),
             ChildOf(vContainer),
             RelativeTransform.new({z = 1}),
@@ -84,14 +83,14 @@ function helpers.setup(
     local hLabelX = 840
     local hContainerX, hContainerY = hLabelX - hContainerW/2, 140 + yOffset
 
-    spawn(world,
+    world:spawn(
         Transform(hLabelX, 100 + yOffset),
         Text(common.DEFAULT_FONT, 'Flow("right")', common.SUBTITLE_SCALE),
         LayoutBox(Text),
         gfx.Color(0.8, 0.8, 0.8)
     )
 
-    local hContainer = spawn(world,
+    local hContainer = world:spawn(
         Transform(hContainerX, hContainerY),
         gfx.Rectangle(hContainerW, hContainerH),
         gfx.RoundedCorners(8),
@@ -105,7 +104,7 @@ function helpers.setup(
         gfx.Color(0.15, 0.12, 0.20)
     )
     -- Border
-    spawn(world,
+    world:spawn(
         Transform(hContainerX, hContainerY, 0.5),
         gfx.Rectangle(hContainerW, hContainerH, 1),
         gfx.RoundedCorners(8),
@@ -116,7 +115,7 @@ function helpers.setup(
     -- Children stacked horizontally
     local hChildW, hChildH = 85, 80
     for i = 1, 4 do
-        spawn(world,
+        world:spawn(
             Transform(0, 0, 1),
             ChildOf(hContainer),
             RelativeTransform.new({z = 1}),
@@ -132,14 +131,14 @@ function helpers.setup(
     local mLabelX = 840
     local mContainerX, mContainerY = mLabelX - mContainerW/2, 296 + yOffset
 
-    spawn(world,
+    world:spawn(
         Transform(mLabelX, 276 + yOffset),
         Text(common.DEFAULT_FONT, "measureContent()", common.SUBTITLE_SCALE),
         LayoutBox(Text),
         gfx.Color(0.8, 0.8, 0.8)
     )
 
-    local mContainer = spawn(world,
+    local mContainer = world:spawn(
         Transform(mContainerX, mContainerY),
         gfx.Rectangle(mContainerW, mContainerH),
         gfx.RoundedCorners(8),
@@ -147,7 +146,7 @@ function helpers.setup(
         gfx.Color(0.15, 0.12, 0.20)
     )
     -- Border
-    spawn(world,
+    world:spawn(
         Transform(mContainerX, mContainerY, 0.5),
         gfx.Rectangle(mContainerW, mContainerH, 1),
         gfx.RoundedCorners(8),
@@ -160,7 +159,7 @@ function helpers.setup(
     local positions = {{20, 20}, {200, 50}, {100, 130}, {280, 100}}
     local mChildren: {integer} = {}
     for i, pos in ipairs(positions) do
-        local child = spawn(world,
+        local child = world:spawn(
             Transform(0, 0, 1),
             ChildOf(mContainer),
             RelativeTransform.new({x = pos[1], y = pos[2], z = 1}),
@@ -173,7 +172,7 @@ function helpers.setup(
 
     -- Show calculated content dimensions
     local contentW, contentH = ui.measureContent(world, mChildren)
-    spawn(world,
+    world:spawn(
         Transform(mLabelX, 542 + yOffset),
         Text(
             common.DEFAULT_FONT,

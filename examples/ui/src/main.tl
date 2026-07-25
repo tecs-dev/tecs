@@ -25,26 +25,22 @@ local Transform <const> = tecs.builtins.Transform
 
 local WINDOW_WIDTH <const>, WINDOW_HEIGHT <const> = 1280, 768
 
--- Scene management
+-- Scene management. Entities spawned while the "scene" state is on top of
+-- the state stack are tagged with it automatically, and the state's default
+-- onExit = "despawn" policy cleans them up on pop. Scenes therefore call
+-- world:spawn directly: no entity list to track, and no manual commit
+-- between the despawns and the next scene's spawns, because popState
+-- drains its own despawns before returning.
 local scenes: {common.Scene} = {}
 local currentSceneIndex = 1
-local sceneEntities: {integer} = {}
 
--- Helper to clear current scene entities
-local function clearScene(world: tecs.World)
-    for _, entityId in ipairs(sceneEntities) do
-        if world:isAlive(entityId) then
-            world:despawn(entityId)
-        end
+local function showScene(world: tecs.World, index: integer)
+    if world:peekState() == "scene" then
+        world:popState()
     end
-    sceneEntities = {}
-end
-
--- Helper to track spawned entity
-local function spawn(world: tecs.World, ...: tecs.Component): integer
-    local id = world:spawn(...)
-    sceneEntities[#sceneEntities + 1] = id
-    return id
+    currentSceneIndex = index
+    world:pushState("scene")
+    scenes[index].setup(world, WINDOW_WIDTH, WINDOW_HEIGHT)
 end
 
 --------------------------------------------------------------------------------
@@ -64,30 +60,21 @@ local function tecsUiExamplePlugin(world: tecs.World)
         helpersScene as common.Scene
     }
 
-    -- Setup initial scene
-    scenes[currentSceneIndex].setup(world, spawn, WINDOW_WIDTH, WINDOW_HEIGHT)
+    world:createState("scene")
 
     -- Navigation and scroll handling
     world:addSystem({
         name = "HandleInput",
         phase = tecs.phases.Update,
         run = function(_dt: number)
-            -- Scene navigation
-            -- Force commit between despawns and spawns to avoid transaction conflicts
             if input.isKeyPressed("right") then
-                clearScene(world)
-                world:commit()  -- Commit despawns before spawning new entities
-                currentSceneIndex = currentSceneIndex % #scenes + 1
-                scenes[currentSceneIndex].setup(world, spawn, WINDOW_WIDTH, WINDOW_HEIGHT)
+                showScene(world, currentSceneIndex % #scenes + 1)
             elseif input.isKeyPressed("left") then
-                clearScene(world)
-                world:commit()  -- Commit despawns before spawning new entities
-                currentSceneIndex = (currentSceneIndex - 2) % #scenes + 1
-                scenes[currentSceneIndex].setup(world, spawn, WINDOW_WIDTH, WINDOW_HEIGHT)
+                showScene(world, (currentSceneIndex - 2) % #scenes + 1)
             end
 
             -- Scroll handling for scroll scene
-            local scrollContainer = world.resources["scrollContainer" as tecs.Key<integer>]
+            local scrollContainer = world:byKey("scrollContainer")
             if scrollContainer and world:isAlive(scrollContainer) then
                 local viewport = world:get(scrollContainer, Viewport)
                 local layoutBox = world:get(scrollContainer, LayoutBox)
@@ -118,7 +105,9 @@ local function tecsUiExamplePlugin(world: tecs.World)
         end
     })
 
-    -- Scene indicator using Text (Dracula green), anchored to bottom-center
+    -- Scene indicator using Text (Dracula green), anchored to bottom-center.
+    -- Spawned before the first pushState so it is not tagged with the scene
+    -- state, which would despawn it on the next scene switch.
     local indicatorText = string.format("< %d/%d: %s >", currentSceneIndex, #scenes, scenes[currentSceneIndex].name)
     local indicatorId = world:spawn(
         Transform(0, 0, 100),
@@ -154,9 +143,9 @@ local function tecsUiExamplePlugin(world: tecs.World)
         run = function(dt: number)
             animTime = animTime + dt
 
-            local rectId = world.resources["dynamicRect" as tecs.Key<integer>]
-            local circleId = world.resources["dynamicCircle" as tecs.Key<integer>]
-            local textId = world.resources["dynamicText" as tecs.Key<integer>]
+            local rectId = world:byKey("dynamicRect")
+            local circleId = world:byKey("dynamicCircle")
+            local textId = world:byKey("dynamicText")
 
             if rectId and world:isAlive(rectId) then
                 local rect = world:get(rectId, gfx.Rectangle)
@@ -188,9 +177,9 @@ local function tecsUiExamplePlugin(world: tecs.World)
             end
 
             -- Animate FitContent text (changes text, container auto-resizes)
-            local fitTextId = world.resources["fitText" as tecs.Key<integer>]
-            local fitContainerId = world.resources["fitContainer" as tecs.Key<integer>]
-            local fitBorderId = world.resources["fitBorder" as tecs.Key<integer>]
+            local fitTextId = world:byKey("fitText")
+            local fitContainerId = world:byKey("fitContainer")
+            local fitBorderId = world:byKey("fitBorder")
 
             if fitTextId and world:isAlive(fitTextId) then
                 local fitTextIndex = (math.floor(animTime / 1.5) % #fitTextVariants) + 1
@@ -214,6 +203,10 @@ local function tecsUiExamplePlugin(world: tecs.World)
             end
         end
     })
+
+    -- Enter the first scene last, so everything spawned above stays outside
+    -- the scene state and survives every switch.
+    showScene(world, currentSceneIndex)
 end
 
 
