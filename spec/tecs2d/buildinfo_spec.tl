@@ -61,4 +61,14 @@ describe("tecs2d.buildinfo", function()
         -- fresh() repairs the cache for later get() calls too.
         luassert.equal("2026-02-02T00:00:00Z", buildinfo.get().built)
     end)
+
+    it("fresh() clears stale metadata when the manifest disappears", function()
+        installManifest({dev = true, name = "my-game", built = "2026-01-01T00:00:00Z"})
+        local buildinfo = freshBuildinfo()
+        luassert.equal("my-game", buildinfo.get().name)
+
+        (package.preload as {string: any})["tecs_buildinfo"] = nil
+        luassert.is_nil(buildinfo.fresh())
+        luassert.is_nil(buildinfo.get())
+    end)
 end)

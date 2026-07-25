@@ -38,7 +38,7 @@ describe("asset handles", function()
             queue:update()
 
             local handledResult: {string: any} = nil
-            local handled = imageHandle:handle(function(value: any, err: any): {string: any}
+            local handled = imageHandle:handle(function(value: any, err: string | nil): {string: any}
                 return { gotValue = value ~= nil, gotErr = err }
             end)
 
@@ -57,7 +57,7 @@ describe("asset handles", function()
             resultChannel:push({1, nil, "File not found"})
             queue:update()
 
-            local handled = imageHandle:handle(function(value: any, err: any): {string: any}
+            local handled = imageHandle:handle(function(value: any, err: string | nil): {string: any}
                 return { gotValue = value, gotErr = err }
             end)
 
@@ -75,7 +75,7 @@ describe("asset handles", function()
             resultChannel:push({1, nil, "File not found"})
             queue:update()
 
-            local handled = imageHandle:handle(function(_value: any, err: any): string
+            local handled = imageHandle:handle(function(_value: any, err: string | nil): string
                 if err then
                     return "default"
                 end
@@ -85,6 +85,17 @@ describe("asset handles", function()
             queue:update()
             luassert.is_true(handled.isComplete)
             luassert.equals("default", handled.value)
+        end)
+    end)
+
+    describe("describe", function()
+        it("returns nil for a handle owned by another manager", function()
+            local otherManager = assets.new("other", queue)
+            local foreignHandle = otherManager:loadFile("foreign.txt")
+
+            luassert.is_nil(manager:describe(foreignHandle))
+
+            otherManager:shutdown()
         end)
     end)
 

@@ -55,9 +55,9 @@ local record types
         --- Load an image font from a file.
         ---
         --- @param path The path to the image file to load.
-        --- @param config The optional image font configuration.
+        --- @param config Image font glyphs and optional extra spacing.
         --- @return A handle that loads the image font and eventually returns a love.graphics.Font.
-        loadImageFont: function(self, path: string, config?: ImageFontConfig): Handle<love.graphics.Font>
+        loadImageFont: function(self, path: string, config: ImageFontConfig): Handle<love.graphics.Font>
 
         --- Load a TrueType font from a file.
         ---
@@ -122,8 +122,9 @@ local record types
         --- Keep an asset handle strongly reachable from this manager's cache.
         pin: function<T>(self, handle: Handle<T>): Handle<T>
 
-        --- Return the request metadata recorded for an asset handle.
-        describe: function<T>(self, handle: Handle<T>): AssetDescriptor
+        --- Return the request metadata recorded for an asset handle, or nil
+        --- when the handle belongs to another manager.
+        describe: function<T>(self, handle: Handle<T>): AssetDescriptor | nil
 
         --- Get detailed statistics about the asset manager's current state.
         ---

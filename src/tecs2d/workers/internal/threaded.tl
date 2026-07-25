@@ -3,7 +3,7 @@ local logging <const> = require("tecs.utils.logging")
 
 local LOGGER <const> = logging.getLogger("tecs2d.workers")
 
--- Example builds expose the compiled worker at this stable LÖVE filesystem
+-- Example builds expose the compiled worker at this stable Love filesystem
 -- path. The source is cached after the first queue is constructed.
 local WORKER_PATH <const> = "internal/worker.lua"
 local WORKER_CODE: string = nil
@@ -35,7 +35,7 @@ local record threaded
 
         _nextHandleId: function(self): integer
         _newDerived: function<T>(self): HandleImpl<T>
-        _settle: function<T>(self, handle: HandleImpl<T>, value: T, err: string)
+        _settle: function<T>(self, handle: HandleImpl<T>, value: T, err: string | nil)
     end
 
     new: function(config?: types.Config): types.Queue
@@ -46,7 +46,7 @@ local type Queue = threaded.Queue
 local record HandleImpl<T> is types.Handle<T>
     id: integer
     isComplete: boolean
-    err: string
+    err: string | nil
 
     _value: T
     _queue: Queue
@@ -112,7 +112,7 @@ function HandleImpl:flatMap<U>(transform: function(T): types.Handle<U>): types.H
     return result as types.Handle<U>
 end
 
-function HandleImpl:handle<U>(fn: function(T, any): U): types.Handle<U>
+function HandleImpl:handle<U>(fn: function(T | nil, string | nil): U): types.Handle<U>
     local result = self._queue:_newDerived() as HandleImpl<U>
     self:observe(function(source: types.Handle<T>)
         local sourceImpl = source as HandleImpl<T>
@@ -164,7 +164,7 @@ function threaded.Queue:_newDerived<T>(): HandleImpl<T>
     } as HandleImpl<T>, HANDLE_MT as metatable<HandleImpl<T>>) as HandleImpl<T>
 end
 
-function threaded.Queue:_settle<T>(handle: HandleImpl<T>, value: T, err: string)
+function threaded.Queue:_settle<T>(handle: HandleImpl<T>, value: T, err: string | nil)
     if handle.isComplete then return end
     handle._value = value
     handle.err = err

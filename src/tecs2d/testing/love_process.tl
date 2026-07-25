@@ -1,4 +1,4 @@
---- Launches a LÖVE app in the background for integration tests.
+--- Launches a Love app in the background for integration tests.
 --- The app is started detached with its output redirected to a log file and
 --- its pid captured, so tests can poll liveness, read diagnostics on
 --- failure, and escalate from MCP quit to SIGTERM/SIGKILL on cleanup.
@@ -21,17 +21,24 @@ local record love_process
     end
 
     record Proc
+        --- Host process ID.
         pid: integer
+        --- File receiving the process's standard output and error.
         logPath: string
 
+        --- Whether the host process still exists.
         isRunning: function(self: Proc): boolean
+        --- Wait up to `seconds` for the process to exit.
         waitExit: function(self: Proc, seconds: number): boolean
+        --- Send a POSIX signal name to the process.
         signal: function(self: Proc, sig: string)
         --- Force the process down: TERM, short grace, then KILL.
         stop: function(self: Proc)
+        --- Read the captured process output.
         readLog: function(self: Proc): string
     end
 
+    --- Launch a detached Love process.
     start: function(opts: Options): Proc
 end
 
@@ -85,7 +92,7 @@ end
 
 function ProcImpl.isRunning(self: love_process.Proc): boolean
     -- os.execute returns a number on plain LuaJIT and a boolean when LuaJIT
-    -- is built with 5.2 compatibility (as LÖVE's is); accept both.
+    -- is built with 5.2 compatibility (as Love's is); accept both.
     local status = os.execute("kill -0 " .. tostring(self.pid) .. " 2>/dev/null") as any
     return status == 0 or status == true
 end

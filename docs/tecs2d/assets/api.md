@@ -22,7 +22,7 @@ assets.loadJson(path: string): workers.Handle<any>
 assets.loadImage(path: string): workers.Handle<Image>
 assets.loadCompressedImage(path: string): workers.Handle<CompressedImageData>
 assets.loadFont(path: string, config?: FontConfig): workers.Handle<Font>
-assets.loadImageFont(path: string, config?: ImageFontConfig): workers.Handle<Font>
+assets.loadImageFont(path: string, config: ImageFontConfig): workers.Handle<Font>
 assets.loadAudio(path: string, sourceType: SourceType, streamType?: string): workers.Handle<Source>
 assets.loadShader(path: string): workers.Handle<Shader>
 assets.loadVideo(path: string): workers.Handle<Video>

@@ -10,7 +10,7 @@ outline: deep
 CLI. No busted, LuaRocks, or Lua installation is required.
 
 Specs named `*_lovespec.tl` are integration tests: they launch the built game
-under a real LÖVE process and drive it over the game's
+under a real Love process and drive it over the game's
 [MCP server](/tecs2d/mcp/). A spec can run Lua inside the game, send input
 events, read entity and component state, sample framebuffer pixels, and take
 screenshots. These are the same tools available to a debugger session or
@@ -63,7 +63,7 @@ describe("the game", function()
 end)
 ```
 
-`fixture.start(appDir)` launches `appDir` under the LÖVE runtime with
+`fixture.start(appDir)` launches `appDir` under the Love runtime with
 `TECS_MCP_PORT` set to a free port. The default `mcp.new()` plugin honors that
 variable, so games created by `tecs new` need no extra wiring. `fixture.stop`
 asks the game to quit over MCP and escalates to signals if it does not exit.

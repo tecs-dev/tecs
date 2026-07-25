@@ -5,14 +5,20 @@
 
 local record png_util
     record Header
+        --- Image width in pixels.
         width: integer
+        --- Image height in pixels.
         height: integer
+        --- PNG channel bit depth.
         bitDepth: integer
+        --- PNG color-type code.
         colorType: integer
     end
 
+    --- Decode base64 text into raw bytes.
     base64Decode: function(data: string): string
-    parseHeader: function(pngBytes: string): Header, string
+    --- Parse a PNG signature and IHDR header, or return an error.
+    parseHeader: function(pngBytes: string): Header | nil, string | nil
 end
 
 local B64_CHARS <const> = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
@@ -52,7 +58,7 @@ end
 
 local PNG_MAGIC <const> = "\137PNG\r\n\26\n"
 
-function png_util.parseHeader(pngBytes: string): png_util.Header, string
+function png_util.parseHeader(pngBytes: string): png_util.Header | nil, string | nil
     if #pngBytes < 33 then
         return nil, "too short to be a PNG (" .. tostring(#pngBytes) .. " bytes)"
     end

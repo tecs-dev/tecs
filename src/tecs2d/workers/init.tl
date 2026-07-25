@@ -14,14 +14,23 @@ local record workers
     --- Active process queue. Assignment performs no lifecycle work.
     queue: types.Queue
 
+    --- Create an independent worker queue.
     new: function(config?: types.Config): types.Queue
+    --- Create a typed module/function job descriptor.
     newJob: function<I, O>(moduleName: string, functionName?: string): types.Job<I, O>
+    --- Submit to the active process queue.
     submit: function<I, O>(job: types.Job<I, O>, input: I): types.Handle<O>
+    --- Combine handles from the active process queue.
     all: function<T>(handles: {types.Handle<T>}): types.Handle<{T}>
+    --- Settle available results on the active process queue.
     update: function(): boolean
+    --- Pump the active queue until idle or the timeout elapses.
     wait: function(timeout?: number): {string}
+    --- Whether the active process queue has pending jobs.
     isBusy: function(): boolean
+    --- Return a snapshot of the active queue's counters.
     getStats: function(): types.Stats
+    --- Shut down the active process queue.
     shutdown: function()
 end
 

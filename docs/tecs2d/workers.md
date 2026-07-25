@@ -6,13 +6,13 @@ outline: deep
 # Worker jobs
 
 `tecs2d.workers` is the process-wide background job queue used by the asset system and available for game-defined work.
-It belongs to the LÖVE runtime, not an ECS world, so jobs continue while a gameplay world is suspended.
+It belongs to the Love runtime, not an ECS world, so jobs continue while a gameplay world is suspended.
 
 This is an advanced API. Use [`tecs2d.assets`](/tecs2d/assets/) for file and game-asset loading.
 
 ## Defining a job
 
-LÖVE worker threads have separate Lua states. They cannot receive closures or captured values. A job therefore names a
+Love worker threads have separate Lua states. They cannot receive closures or captured values. A job therefore names a
 requireable module and sends channel-safe input to it.
 
 ```teal
@@ -55,11 +55,11 @@ jobs share implementation code.
 
 ## Transferable data
 
-Inputs and raw results cross `love.thread.Channel`. Use numbers, strings, booleans, transferable LÖVE data objects, and
+Inputs and raw results cross `love.thread.Channel`. Use numbers, strings, booleans, transferable Love data objects, and
 tables composed from those values. Do not send functions, world objects, entities with metatables, graphics objects, or
 main-thread state.
 
-Worker code may use thread-safe LÖVE modules. Graphics construction belongs in a main-thread handle transform.
+Worker code may use thread-safe Love modules. Graphics construction belongs in a main-thread handle transform.
 
 ## Handles
 

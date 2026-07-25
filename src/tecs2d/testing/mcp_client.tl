@@ -10,7 +10,9 @@ local json <const> = require("tecs.utils.json")
 
 local record mcp_client
     record Options
+        --- Server host. Defaults to `127.0.0.1`.
         host: string
+        --- Server TCP port.
         port: integer
         --- Default per-call timeout in seconds. Individual calls can override.
         timeout: number
@@ -22,14 +24,21 @@ local record mcp_client
         timeout: number
         nextId: integer
 
-        request: function(self: Client, payload: string, timeout?: number): string, string
-        rpc: function(self: Client, method: string, params: any, timeout?: number): {string: any}, string
-        tryCall: function(self: Client, tool: string, args?: {string: any}, timeout?: number): {string: any}, string
+        --- Send one HTTP POST and return its response body or a transport error.
+        request: function(self: Client, payload: string, timeout?: number): string | nil, string | nil
+        --- Send one JSON-RPC request and return its decoded response.
+        rpc: function(self: Client, method: string, params: any, timeout?: number): {string: any} | nil, string | nil
+        --- Call a tool and return its decoded envelope or a protocol error.
+        tryCall: function(self: Client, tool: string, args?: {string: any}, timeout?: number): {string: any} | nil, string | nil
+        --- Call a tool, raising on failure, and return the envelope result.
         call: function(self: Client, tool: string, args?: {string: any}, timeout?: number): {string: any}
+        --- Capture and return base64-encoded PNG bytes.
         screenshot: function(self: Client, args?: {string: any}, timeout?: number): string
-        waitReady: function(self: Client, seconds: number): boolean, string
+        --- Poll `ping` until the server answers or the deadline passes.
+        waitReady: function(self: Client, seconds: number): boolean, string | nil
     end
 
+    --- Create an MCP client. `port` is required.
     new: function(opts: Options): Client
 end
 
@@ -49,9 +58,11 @@ function mcp_client.new(opts: mcp_client.Options): mcp_client.Client
     return client
 end
 
---- Send one HTTP POST to /mcp and read one response body.
---- Returns the body, or nil and an error message.
-function ClientImpl.request(self: mcp_client.Client, payload: string, timeout?: number): string, string
+function ClientImpl.request(
+    self: mcp_client.Client,
+    payload: string,
+    timeout?: number
+): string | nil, string | nil
     local deadline = timeout or self.timeout
     local sock, sockErr = socket.tcp()
     if not sock then
@@ -125,8 +136,12 @@ function ClientImpl.request(self: mcp_client.Client, payload: string, timeout?: 
     return body, nil
 end
 
---- Send one JSON-RPC request and return the parsed response object.
-function ClientImpl.rpc(self: mcp_client.Client, method: string, params: any, timeout?: number): {string: any}, string
+function ClientImpl.rpc(
+    self: mcp_client.Client,
+    method: string,
+    params: any,
+    timeout?: number
+): {string: any} | nil, string | nil
     self.nextId = self.nextId + 1
     local message: {string: any} = {
         jsonrpc = "2.0",
@@ -149,10 +164,12 @@ function ClientImpl.rpc(self: mcp_client.Client, method: string, params: any, ti
     return parsed as {string: any}, nil
 end
 
---- Call an MCP tool. Returns the decoded JSON text envelope
---- ({ok = true, result = ...} or {ok = false, error = ...}), or nil and an
---- error message for transport/protocol failures.
-function ClientImpl.tryCall(self: mcp_client.Client, tool: string, args?: {string: any}, timeout?: number): {string: any}, string
+function ClientImpl.tryCall(
+    self: mcp_client.Client,
+    tool: string,
+    args?: {string: any},
+    timeout?: number
+): {string: any} | nil, string | nil
     local arguments: {string: any} = args
     if not arguments or next(arguments) == nil then
         arguments = json.EMPTY_OBJECT as {string: any}
@@ -164,15 +181,16 @@ function ClientImpl.tryCall(self: mcp_client.Client, tool: string, args?: {strin
     if not response then
         return nil, rpcErr
     end
+    local presentResponse = response as {string: any}
 
-    local rpcError = response.error as {string: any}
+    local rpcError = presentResponse.error as {string: any}
     if rpcError then
         return nil, tool .. " JSON-RPC error: " .. tostring(rpcError.message)
     end
 
-    local result = response.result as {string: any}
+    local result = presentResponse.result as {string: any}
     if not result then
-        return nil, tool .. " response had no result: " .. json.serialize(response)
+        return nil, tool .. " response had no result: " .. json.serialize(presentResponse)
     end
 
     local content = result.content as {{string: any}}
@@ -192,38 +210,37 @@ function ClientImpl.tryCall(self: mcp_client.Client, tool: string, args?: {strin
     return envelope as {string: any}, nil
 end
 
---- Call an MCP tool and assert success. Returns the envelope's `result`.
 function ClientImpl.call(self: mcp_client.Client, tool: string, args?: {string: any}, timeout?: number): {string: any}
     local envelope, callErr = self:tryCall(tool, args, timeout)
     if not envelope then
         error(callErr, 2)
     end
-    if envelope.ok == false then
-        error(tool .. " returned error: " .. json.serialize(envelope.error), 2)
+    local presentEnvelope = envelope as {string: any}
+    if presentEnvelope.ok == false then
+        error(tool .. " returned error: " .. json.serialize(presentEnvelope.error), 2)
     end
-    return envelope.result as {string: any}
+    return presentEnvelope.result as {string: any}
 end
 
---- Capture a screenshot; returns base64-encoded PNG bytes.
 function ClientImpl.screenshot(self: mcp_client.Client, args?: {string: any}, timeout?: number): string
     local envelope, callErr = self:tryCall("screenshot", args, timeout or 10)
     if not envelope then
         error(callErr, 2)
     end
-    local image = envelope.image as string
+    local presentEnvelope = envelope as {string: any}
+    local image = presentEnvelope.image as string
     if not image then
-        error("screenshot returned no image content: " .. json.serialize(envelope), 2)
+        error("screenshot returned no image content: " .. json.serialize(presentEnvelope), 2)
     end
     return image
 end
 
---- Poll ping until the server answers or the deadline passes.
-function ClientImpl.waitReady(self: mcp_client.Client, seconds: number): boolean, string
+function ClientImpl.waitReady(self: mcp_client.Client, seconds: number): boolean, string | nil
     local deadline = socket.gettime() + seconds
     local lastErr: string = "never attempted"
     while socket.gettime() < deadline do
         local envelope, pingErr = self:tryCall("ping", nil, 1)
-        if envelope and envelope.ok then
+        if envelope and (envelope as {string: any}).ok then
             return true, nil
         end
         lastErr = pingErr or ("ping envelope: " .. json.serialize(envelope))

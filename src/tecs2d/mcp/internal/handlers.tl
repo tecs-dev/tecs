@@ -1,4 +1,4 @@
---- Kernel MCP tool handlers: ping, screenshots and pixel sampling, LÖVE
+--- Kernel MCP tool handlers: ping, screenshots and pixel sampling, Love
 --- events, log reads, and run_lua. Every other capability is served by the
 --- debugger command registry's cmd_* tools (see tecs2d.debug.commands);
 --- run_lua executes inside the frame through the shared queued-op drain.
@@ -52,7 +52,12 @@ byName["ping"] = function(_: {string:any}, id: rpc.Id)
     -- load") forever after.
     local info = buildinfo.fresh()
     if info then
-        payload.build = {name = info.name, built = info.built, dev = info.dev}
+        local presentInfo = info as buildinfo.Info
+        payload.build = {
+            name = presentInfo.name,
+            built = presentInfo.built,
+            dev = presentInfo.dev,
+        }
     end
     sendToolOK(id, payload)
 end
@@ -172,7 +177,7 @@ end
 byName["send_love_event"] = function(args: {string:any}, id: rpc.Id)
     local eventName = requireArg(args, "event", id) as string
     if not eventName then return end
-    -- Accept mixed-type payloads (numbers, booleans, strings). LÖVE events
+    -- Accept mixed-type payloads (numbers, booleans, strings). Love events
     -- like resize, mousepressed, wheelmoved, focus, and touch events expect
     -- non-string arguments.
     local eventArgs = args.args as {any}

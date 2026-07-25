@@ -8,7 +8,7 @@ outline: deep
 `tecs2d.assets` is the process-wide asset cache for a Tecs2D application. It loads and decodes files on
 [`tecs2d.workers`](/tecs2d/workers), then performs graphics-only construction on the main thread.
 
-Assets are runtime services rather than world resources. Every world in one LÖVE process sees the same cache, which is
+Assets are runtime services rather than world resources. Every world in one Love process sees the same cache, which is
 particularly useful for loading screens, debug worlds, and composited render worlds.
 
 ## Loading assets

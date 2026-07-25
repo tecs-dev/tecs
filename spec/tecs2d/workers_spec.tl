@@ -33,8 +33,11 @@ describe("tecs2d.workers", function()
     end)
 
     it("propagates job errors and supports recovery", function()
-        local recovered = queue:submit(job, "bad"):handle(function(value: string, err: any): string
-            if err then return "recovered: " .. tostring(err) end
+        local recovered = queue:submit(job, "bad"):handle(function(
+            value: string | nil,
+            err: string | nil
+        ): string
+            if err then return "recovered: " .. err end
             return value
         end)
         results:push({1, nil, "boom"})

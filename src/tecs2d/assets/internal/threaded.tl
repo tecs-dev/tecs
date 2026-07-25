@@ -304,9 +304,9 @@ function threaded.AssetManager:loadImage(path: string): Handle<love.graphics.Ima
         function(data: love.image.ImageData): love.graphics.Image return love.graphics.newImage(data) end, nil)
 end
 
-function threaded.AssetManager:loadImageFont(path: string, config?: types.ImageFontConfig): Handle<love.graphics.Font>
-    local glyphs = config and config.glyphs
-    local spacing = config and config.extraSpacing or 0
+function threaded.AssetManager:loadImageFont(path: string, config: types.ImageFontConfig): Handle<love.graphics.Font>
+    local glyphs = assert(config and config.glyphs, "loadImageFont requires config.glyphs")
+    local spacing = config.extraSpacing or 0
     return createWorkerHandle(self, "loadImageFont", path, {glyphs, spacing}, LOAD_IMAGE_FONT,
         function(data: love.image.ImageData): love.graphics.Font
             return love.graphics.newImageFont(data, glyphs, spacing)
@@ -378,7 +378,7 @@ function threaded.AssetManager:pin<T>(handle: Handle<T>): Handle<T>
     return handle
 end
 
-function threaded.AssetManager:describe<T>(handle: Handle<T>): types.AssetDescriptor
+function threaded.AssetManager:describe<T>(handle: Handle<T>): types.AssetDescriptor | nil
     return self._descriptors[handle as Handle<any>]
 end
 
@@ -451,7 +451,7 @@ end
 -- Composite asset loaders
 --------------------------------------------------------------------------------
 
-local function optionalImage(value: love.graphics.Image, err: any): love.graphics.Image
+local function optionalImage(value: love.graphics.Image, err: string): love.graphics.Image
     if err then return nil end
     return value
 end

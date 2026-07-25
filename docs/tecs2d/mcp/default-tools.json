@@ -1158,7 +1158,7 @@
     "name": "cmd_query"
   },
   {
-    "description": "Quit the game process via a LÖVE quit event. Unsaved state is lost and the MCP connection drops. Take cmd_snapshot_save first if the state matters. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "description": "Quit the game process via a Love quit event. Unsaved state is lost and the MCP connection drops. Take cmd_snapshot_save first if the state matters. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {},

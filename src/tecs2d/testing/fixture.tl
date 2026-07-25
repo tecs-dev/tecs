@@ -1,5 +1,5 @@
 --- Shared boot/drive helpers for Love2D integration specs: starts a fixture
---- app under a real LÖVE binary on a free port, hands back an MCP client,
+--- app under a real Love binary on a free port, hands back an MCP client,
 --- and provides the common probe utilities (run_lua, pixel sampling,
 --- eventually-polling).
 
@@ -17,15 +17,22 @@ local sleep <const> = socket.sleep as function(number)
 
 local record fixture
     record App
+        --- Spawned Love process.
         proc: love_process.Proc
+        --- MCP client connected to the fixture app.
         client: mcp_client.Client
     end
 
+    --- Default timeout, in seconds, for fixture tool calls.
     callTimeout: number
 
+    --- Launch `appDir` and wait for its MCP server.
     start: function(appDir: string): App
+    --- Ask the app to quit and force-stop it if necessary.
     stop: function(app: App)
+    --- Run Lua in the app and return stringified result values.
     runLua: function(app: App, code: string, timeout?: number): {string}
+    --- Sample normalized framebuffer points as `{r, g, b}` triples.
     probePixels: function(app: App, points: {{number, number}}): {{number}}
     --- Poll `fn` until it returns a truthy value or the deadline passes;
     --- returns the last value either way. Return nil or false from the poll
@@ -85,17 +92,11 @@ function fixture.stop(app: fixture.App)
     end
 end
 
---- Run Lua in the app and return the stringified return values. (The run_lua
---- tool returns JSON by default; the fixture requests the Lua form so specs keep
---- getting plain strings. Call the tool directly with lua=false for JSON.)
 function fixture.runLua(app: fixture.App, code: string, timeout?: number): {string}
     local result = app.client:call("run_lua", {code = code, lua = true}, timeout)
     return result.values as {string}
 end
 
---- Probe framebuffer pixels through the sample_pixels MCP tool. `points`
---- are {fx, fy} fractions of the framebuffer size; returns one {r, g, b}
---- triple (0..1) per point.
 function fixture.probePixels(app: fixture.App, points: {{number, number}}): {{number}}
     local requestPoints: {{string: number}} = {}
     for i = 1, #points do
