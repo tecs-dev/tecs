@@ -101,6 +101,23 @@ including horizontal and vertical repetition configured in Tiled. Oversized
 tileset atlases also fall back to a compatible rendering path automatically;
 maps do not need different components or export settings.
 
+### Object Layers
+
+Bind a Tiled object class to a [bundle](/tecs/components/bundles) and every matching object spawns an entity when the
+map loads:
+
+```teal
+tiled.registerObject(world, "enemy", {
+    bundle = "Enemy",
+    values = function(_world: tecs.World, object: tiled.ObjectData): {tecs.Component}
+        return {Health(object.properties.health as number or 100)}
+    end,
+})
+```
+
+See [Object layers](./objects) for the transform Tiled supplies, lifetime, and how spawned objects interact with
+snapshots.
+
 ### Debug Plugin
 
 For quick object visualization, use the [debug plugin](./debug-plugin):

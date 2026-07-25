@@ -234,6 +234,7 @@ export default defineConfig({
               { text: 'Tilemap Component', link: '/tecs2d/tiled/tilemap' },
               { text: 'TileSource Component', link: '/tecs2d/tiled/tile-source' },
               { text: 'TileChunks', link: '/tecs2d/tiled/tile-chunks' },
+              { text: 'Object Layers', link: '/tecs2d/tiled/objects' },
               { text: 'Collision', link: '/tecs2d/tiled/collision' },
               { text: 'Debug Plugin', link: '/tecs2d/tiled/debug-plugin' },
               { text: 'Utility Functions', link: '/tecs2d/tiled/utility-functions' },

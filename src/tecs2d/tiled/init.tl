@@ -28,6 +28,7 @@ local chunk <const> = require("tecs2d.tiled.internal.chunk")
 local tileddebug <const> = require("tecs2d.tiled.internal.debug")
 local collisionmodule <const> = require("tecs2d.tiled.collision")
 local tilesetmodule <const> = require("tecs2d.tiled.internal.tileset")
+local objectsmodule <const> = require("tecs2d.tiled.internal.objects")
 
 local builtins <const> = tecs.builtins
 local Transform <const> = builtins.Transform
@@ -68,6 +69,23 @@ local record tiled is assets.AssetHandler<TilemapData>
         collision: CollisionConfig | nil -- Optional collision configuration
         --- Runtime Box2D bodies owned by this map.
         collisionBodies: {love.physics.Body}  -- Created physics bodies (runtime)
+        --- True once object layers have been spawned. Durable, so a
+        --- snapshot load restores the saved objects instead of spawning
+        --- a second copy from the map file.
+        objectsSpawned: boolean
+    end
+
+    --- Binds a Tiled object class to a bundle registered on the world.
+    record ObjectBinding
+        --- Name of a bundle created with `world:newBundle`. Its first
+        --- required component must be `Transform`.
+        bundle: string
+
+        --- Returns the bundle's remaining required components, in
+        --- declaration order. Tiled supplies the leading Transform from
+        --- the object's position, rotation, and render layer. Omit when
+        --- the bundle requires nothing but a Transform.
+        values: function(world: tecs.World, object: ObjectData): {tecs.Component}
     end
 
     --- Collision geometry utilities.
@@ -118,9 +136,25 @@ local record tiled is assets.AssetHandler<TilemapData>
     --- @param gid The global tile ID from ObjectData.gid or a tile layer.
     --- @return The TileSource component, or nil if gid is invalid.
     tileSourceFromGid: function(map: TilemapData, gid: integer): TileSource | nil
+
+    --- Bind a Tiled object class to a bundle for this world.
+    ---
+    --- Every object of that class in a loaded map's object layers spawns
+    --- through the bundle, parented to the map entity so despawning the
+    --- map despawns its objects. Objects whose class has no binding are
+    --- ignored. Register bindings before the map loads.
+    ---
+    --- @param world The world whose bundles and objects are bound.
+    --- @param class The Tiled object class (the "type" field in Tiled).
+    --- @param binding The bundle name and required-component builder.
+    registerObject: function(world: tecs.World, class: string, binding: ObjectBinding)
 end
 
 local Tilemap <const> = tiled.Tilemap
+
+function tiled.registerObject(world: tecs.World, class: string, binding: tiled.ObjectBinding)
+    objectsmodule.register(world, class, binding as objectsmodule.Binding)
+end
 
 -- Export collision module
 tiled.collision = collisionmodule
@@ -198,6 +232,7 @@ tecs.newComponent({
     serialize = function(t: tiled.Tilemap): {string: any}
         local result: {string: any} = {
             path = t.path,
+            objectsSpawned = t.objectsSpawned,
         }
         local collision = t.collision
         if collision then
@@ -210,6 +245,7 @@ tecs.newComponent({
     deserialize = function(_world: tecs.World, data: {string: any}): tiled.Tilemap
         local tilemap = Tilemap.new({
             path = data.path as string,
+            objectsSpawned = data.objectsSpawned as boolean,
         } as tiled.Tilemap)
         if data.collision then
             local collisionData = data.collision as {string: any}
@@ -542,7 +578,7 @@ function tiled.plugin(world: tecs.World)
         name = "tiled.AssetLoader",
         phase = tecs.phases.First,
         run = function()
-            for archetype, len in tilemapTransformQuery:iter() do
+            for archetype, len, entities in tilemapTransformQuery:iter() do
                 local tilemaps = archetype:get(Tilemap)
                 local mutTilemaps: {tiled.Tilemap} = nil
                 local transforms = archetype:get(Transform)
@@ -657,6 +693,22 @@ function tiled.plugin(world: tecs.World)
                         transform.y,
                         transform.layer
                     )
+
+                    -- Spawn bound object-layer entities. Unlike the derived
+                    -- projections above, these are durable gameplay entities:
+                    -- a snapshot saves them, so the flag keeps a load from
+                    -- spawning a second copy out of the map file.
+                    if not tilemap.objectsSpawned then
+                        tilemap.objectsSpawned = true
+                        objectsmodule.spawnAll(
+                            world,
+                            data,
+                            transform.x,
+                            transform.y,
+                            transform.layer,
+                            entities[i]
+                        )
+                    end
 
                     -- Configure layer parallax from Tiled layer settings
                     local dataLayers <const> = data.layers
