@@ -45,7 +45,6 @@ end
 | `id`            | `integer`                          | Unique identifier of the archetype.                                                                                |
 | `entities`      | `DoubleArray`                      | Entity IDs by row. `entities[0]` is the length; valid rows are `1..entities[0]`.                                    |
 | `componentList` | `{Component}`                      | Component types in this archetype's fixed signature. Use `#componentList` / `ipairs` to inspect the signature.      |
-| `columns`       | `{Component: {Component}}`         | Raw data columns. Treat as read-only; prefer `get` / `getMut` so sparse relationship proxies and dirty marking work correctly. |
 
 ## Archetype methods
 
@@ -185,21 +184,42 @@ function Archetype:dirtyComponents(): function(): Component
 
 Bits are cleared automatically at the end of each `world:update`.
 
-### clearDirtyComponents
-
-Clear every component-dirty bit on this archetype. The world's
-end-of-update loop calls this for each archetype that touched the
-dirty set during the frame; callers rarely invoke it directly.
-
-```teal
-function Archetype:clearDirtyComponents()
-```
-
 ## Observing entity lifecycle
 
-To receive callbacks when entities join or leave an archetype's match set, attach
-[query callbacks](/tecs/queries/callbacks) (`onEntitiesAdded` / `onEntitiesRemoved`) to a
-`world:query(...)`. Queries handle archetype discovery, filtering, and observer registration for you.
+`archetype:addEntityObserver(observer)` is the public low-level lifecycle API for one archetype. The observer may
+implement any subset of:
+
+- `onEntitiesAdded` and `onEntitiesRemoved` for contiguous row ranges;
+- `onEntityMove` for swap-pop row moves;
+- `onActivated` and `onDeactivated` for empty/non-empty transitions; and
+- `onArchetypeDestroyed` for permanent destruction during `world:compact()`.
+
+The observer remains attached for the archetype's lifetime. Registration applies only to that archetype instance:
+it does not discover other archetypes with the same component signature, and there is no separate unsubscribe
+operation.
+
+```teal
+local observer: tecs.ArchetypeEntityObserver = {
+    onActivated = function(
+        _self: tecs.ArchetypeEntityObserver,
+        activated: tecs.Archetype
+    )
+        print("archetype became active:", activated.id)
+    end,
+    onDeactivated = function(
+        _self: tecs.ArchetypeEntityObserver,
+        deactivated: tecs.Archetype
+    )
+        print("archetype became empty:", deactivated.id)
+    end,
+}
+
+archetype:addEntityObserver(observer)
+```
+
+For component-filtered lifecycle callbacks across current and future matching archetypes, attach
+[query callbacks](/tecs/queries/callbacks) (`onEntitiesAdded` / `onEntitiesRemoved`) to
+`world:query(...)`. Queries handle discovery, filtering, and observer registration for you.
 
 To discover new archetypes as they're created, observe the
 [`ArchetypeCreated`](/tecs/builtins#archetypecreated-event) event on the world (address 0).

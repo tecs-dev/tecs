@@ -84,5 +84,8 @@ end
 
 This two-pass pattern calculates offsets per group, then streams each group's contiguous run of entities in order.
 
+If a `groups()` or `group(id)` loop may break early, use a separate
+[`query:cursor()`](/tecs/queries/#breaking-out-early) for that traversal and call `cursor:close()` after the loop.
+
 Note that `groups()`, `group()`, `getGroup()`, and `getGroupCount()` return `nil`, empty iterators,
 or 0 when `groupBy` is not specified on the query.

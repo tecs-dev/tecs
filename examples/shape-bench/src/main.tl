@@ -45,13 +45,14 @@ end
 
 -- Configuration
 local REQUESTED_TARGET <const> = (tonumber(os.getenv("ENTITIES")) or tonumber(arg[2]) or 100000) as integer
-local MAX_LIVE_ENTITIES <const> = tecs.MAX_ENTITIES - 1
+local MAX_LIVE_ENTITIES <const> = tecs.MAX_ENTITIES
 local INITIAL_TARGET <const> = math.min(REQUESTED_TARGET, MAX_LIVE_ENTITIES)
 local WORLD_SIZE <const> = math.max(5000, math.floor(math.sqrt(INITIAL_TARGET) * 35))
 
 -- Entity arena sizing: headroom over INITIAL_TARGET so mid-run grows (I/U
 -- keys add thousands more) don't crash against the cap. Take 1.5x the target
--- or 1M, whichever is larger; round up to a power of 2 (required by arena).
+-- or 1M, whichever is larger; round up to a power of 2 for predictable
+-- headroom, then clamp to the public format limit.
 local function nextPow2(n: integer): integer
     local p = 1
     while p < n do p = p * 2 end

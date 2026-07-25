@@ -85,8 +85,9 @@ local record tecs2d
         --- `{origin = "topLeft"}` for conventional UI coordinates.
         ui: tecs_ui.Config
 
-        --- Optional. Maximum number of concurrent entity slots. Must be a
-        --- power of 2, at most 2^22. Defaults to 2^20 (~1M). See
+        --- Optional. Maximum number of concurrent entities. Must be a
+        --- positive integer no greater than 2^22 - 1. Defaults to
+        --- 2^20 (~1M). See
         --- `tecs.World.Config.maxEntities`.
         maxEntities: integer
 
@@ -585,7 +586,7 @@ local function runLoop(config: tecs2d.RunConfig): (function(): number | string)
     end
 end
 
--- Replacement for LÖVE's default error handler. The default blue screen
+-- Replacement for Love's default error handler. The default blue screen
 -- stops the world's systems dead: the MCP socket stays bound but nothing
 -- serves it, so an agent's next tool call hangs. This handler logs the
 -- traceback to the log ring and stderr (the bridge's game_logs captures

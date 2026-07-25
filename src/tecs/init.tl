@@ -36,7 +36,9 @@ local record tecs
     type Relationship = types.components.Relationship
     type Query = types.Query
     type QueryDescriptor = types.Query.Descriptor
+    type QueryCursor = types.Query.Cursor
     type Archetype = types.Archetype
+    type ArchetypeEntityObserver = types.ArchetypeEntityObserver
     type Event = types.events.Event
     type EventListener = types.events.EventListener
     type EventInit = types.events.EventInit
@@ -62,9 +64,8 @@ local record tecs
     builtins: builtins
     runif: runIfHelpers
 
-    --- Absolute ceiling for `World.Config.maxEntities` (2^22, the
-    --- entity-id format cap). A world can never hold more concurrent
-    --- entity slots than this.
+    --- Absolute ceiling for `World.Config.maxEntities` (2^22 - 1 usable
+    --- slots; slot 0 is reserved by the entity-id format).
     MAX_ENTITIES: integer
 
     --- Default `World.Config.maxEntities` when none is given (2^20).
@@ -117,7 +118,7 @@ local record tecs
     --- Find a named key created by `newKey`. Returns nil when unknown.
     ---
     --- @param name The name the key was created with.
-    findKey: function<T>(name: string): Key<T>
+    findKey: function<T>(name: string): Key<T> | nil
 
     --- All named keys, as a fresh name -> numeric key id table.
     listKeys: function(): {string: integer}

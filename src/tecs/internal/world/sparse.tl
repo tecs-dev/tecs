@@ -47,7 +47,7 @@ function WorldImpl:applySparseRaw(id: integer, value: any)
     local container = rel.relationshipType as Component
     local store = self.relationshipStores[container]
     if store then
-        store:set(id, value)
+        store:set(id, value as Component)
         local slot = IdAllocator.slotOf(id)
         local arch = self.archetypeIndex[
             (self.allocator.slots as {integer: IdAllocator.EntitySlot})[slot].archetypeId]

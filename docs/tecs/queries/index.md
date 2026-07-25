@@ -1,5 +1,5 @@
 ---
-description: "Creating and iterating queries with include, exclude, includeAny, temp, iter, and deferred mutations"
+description: "Creating and iterating queries with include, exclude, includeAny, temp, cursors, and deferred mutations"
 outline: deep
 ---
 
@@ -198,23 +198,27 @@ end
 
 #### Breaking out early
 
-Normal exhaustion of `for … in query:iter()` drains staged mutations automatically. An early `break` does not; the
-deferred scope stays open, and your staged writes stay invisible until the next flush point. Call
-`world:commit()` after the break to drain right away:
+The allocation-free iterators close their deferred scope only when exhausted. If an archetype-level loop may stop
+early, create a cursor and close it after leaving the loop:
 
 ```teal
-for archetype, len, entities in query:iter() do
-    if shouldStop then
-        world:set(entities[1], SomeFlag)  -- entities are 1-indexed
+local cursor = query:cursor()
+for archetype, len, entities in cursor:iter() do
+    if shouldSelect(archetype) then
+        selected = entities[1]  -- entities are 1-indexed
         break
     end
 end
-world:commit()  -- drains the leaked scope
+cursor:close()
 ```
 
-`world:commit()` is safe to call unconditionally: it's a no-op when no scope was leaked and nothing was
-dirtied. If you don't need same-frame visibility, you can skip it; the mutations flush at the next
-`world:update()`.
+`cursor:close()` is idempotent, so call it whether the loop breaks or runs to exhaustion. It closes only that
+cursor's scope and drains staged mutations when no outer scope remains. Call it immediately before returning from
+inside the loop.
+
+Cursors also mirror grouped traversal through `cursor:groups()` and `cursor:group(id)`. A cursor owns one traversal;
+use separate cursors for nested loops. Normal `query:iter()`, `query:groups()`, and `query:group(id)` remain the
+allocation-free path for loops that always run to exhaustion.
 
 Only the archetype-level query loop holds the deferred scope. Breaking out of an inner `for row = 1, len` row
 loop has no effect on it.

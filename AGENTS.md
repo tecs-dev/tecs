@@ -3,13 +3,13 @@
 ## Project Overview
 
 Tecs is a high-performance Entity Component System framework written in Teal, designed for LuaJIT. The core `tecs`
-module is renderer-agnostic. The `tecs2d` module layers on LÖVE2D integration, GPU-driven rendering, input, audio,
+module is renderer-agnostic. The `tecs2d` module layers on Love2D integration, GPU-driven rendering, input, audio,
 UI, tiled maps, and MCP tooling.
 
 Primary entry points:
 
 - `src/tecs/init.tl`: supported public API for the ECS framework
-- `src/tecs2d/init.tl`: supported public API for the LÖVE2D/game-engine layer
+- `src/tecs2d/init.tl`: supported public API for the Love2D/game-engine layer
 
 Documentation entry points:
 
@@ -22,7 +22,7 @@ Documentation entry points:
 ```bash
 make build           # Compile src/ into build/ and compile test deps
 make test            # Build, then run the Busted suite from build/test_deps
-make test-love       # Love2D integration tests: real LÖVE apps driven over the MCP HTTP server
+make test-love       # Love2D integration tests: real Love apps driven over the MCP HTTP server
 make bench-love      # Love2D perf benches: steady-state frame time + alloc per scenario (SCENARIO=, RUNS=)
 make all             # Build + test
 make check           # Type-check all source files
@@ -39,7 +39,7 @@ make help            # List all targets, including every example
 ```
 
 Examples run via `make example-<name>` (e.g. `make example-lighting`, `make example-tiled`). Run `make help` for
-the full, current list. If a target needs GPU features, the Makefile auto-downloads the configured LÖVE 12 nightly
+the full, current list. If a target needs GPU features, the Makefile auto-downloads the configured Love 12 nightly
 into `bin/love2d/`.
 
 ## Project Structure
@@ -52,7 +52,7 @@ tecs/
 │   │   ├── types.tl
 │   │   ├── internal/
 │   │   └── utils/
-│   └── tecs2d/            # LÖVE2D/game-engine layer
+│   └── tecs2d/            # Love2D/game-engine layer
 │       ├── init.tl
 │       ├── assets/
 │       ├── audio/
@@ -100,7 +100,7 @@ tecs/
 - `tecs2d.run` creates the `love.run` loop.
 - `tecs2d.run` auto-installs the asset manager, audio plugin, tween plugin, controller plugin, render pipeline,
   tiled plugin, and UI plugin before the user game plugin runs.
-- Rendering is GPU-oriented and depends on LÖVE 12 features for the modern pipeline.
+- Rendering is GPU-oriented and depends on Love 12 features for the modern pipeline.
 
 ### MCP debugging
 
@@ -182,8 +182,8 @@ tecs/
 - Dirty bits clear at the end of each `world:update`. Systems gated on dirty state that run before
   a mutation's phase need a frame-end carryover sampler (see `ui/internal/layout_dirty.tl`).
 - `world:batchSpawn` skips FFI defaults; set every field in the callback.
-- Never `break` or return early inside `query:iter()` - it leaks the deferred scope and spawns
-  silently queue. Loop to completion with a flag.
+- Keep `query:iter()` for loops that run to exhaustion. If an archetype-level query loop may `break` or return
+  early, use `query:cursor()` and call `cursor:close()` after the loop or immediately before returning.
 
 ### Code Style
 

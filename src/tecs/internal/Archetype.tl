@@ -135,27 +135,18 @@ local ARCHETYPE_MT <const>: metatable<Archetype> = {
     end
 }
 
---- Read-only column access. Returns the row-indexed column for the
---- given component type, or nil if the archetype doesn't carry it.
---- Does NOT mark the component dirty. Pair with `getMut` when
---- you intend to write.
----
---- Sparse relationships return a row-indexed proxy that resolves
---- through the world's relationship store; the proxy lives on the
---- archetype's raw table (set by `Archetype.new`). Dense components
---- return the underlying FFI cdata array or table from
---- `self.columns`.
+-- Sparse relationships return a row-indexed proxy that resolves
+-- through the world's relationship store; the proxy lives on the
+-- archetype's raw table (set by `Archetype.new`). Dense components
+-- return the underlying FFI cdata array or table from `self.columns`.
 function Archetype:get<T is Component>(component: T): {T}
     local proxy = rawget(self as table, component)
     if proxy ~= nil then return proxy as {T} end
     return rawget(self.columns, component) as {T}
 end
 
---- Mutable column access. Returns the row-indexed column AND marks
---- the component dirty on this archetype, signalling incremental-sync
---- consumers (renderer shadow buffers, snapshot diffs) that this column's
---- bytes are about to change. Idempotent -- repeated calls are O(1)
---- after the first.
+-- The first mutable access sets the dirty bit; repeated calls are O(1)
+-- no-ops after the membership check.
 function Archetype:getMut<T is Component>(component: T): {T}
     local column = rawget(self.columns, component)
     if column then
@@ -233,7 +224,7 @@ end
 -- Archetype move plans
 -------------------------------------------------------------------------------
 
---- Build or reuse the cached `MovePlan` for `dstArch`.
+-- Build or reuse the cached `MovePlan` for `dstArch`.
 function Archetype:getMovePlanTo(dstArch: ArchetypeInternal): MovePlan
     local plans = self.movePlansOut as {ArchetypeInternal: MovePlan}
     local plan = plans[dstArch]
@@ -429,7 +420,7 @@ end
 -- Queries depend on activated/deactivated to maintain active archetype lists.
 -------------------------------------------------------------------------------
 
---- Reserve column capacity for `targetRows`.
+-- Reserve column capacity for `targetRows`.
 function Archetype:reserveCapacity(targetRows: integer)
     if targetRows <= self.capacity then return end
 
@@ -517,7 +508,7 @@ function Archetype:removeEntity(row: integer, destArchetype?: Archetype): intege
     end
 end
 
---- Clear all entity rows while keeping the archetype structure intact.
+-- Clear all entity rows while keeping the archetype structure intact.
 function Archetype:clearEntities()
     local hadEntities = (self.entities[0] as integer) > 0
     local hasObservers = self.observerCount > 0
@@ -537,7 +528,7 @@ function Archetype:clearEntities()
     end
 end
 
---- Shrink storage to fit the current entity count.
+-- Shrink storage to fit the current entity count.
 function Archetype:compact()
     local count = self.entities[0] as integer
     local anySwapped = false
@@ -656,22 +647,16 @@ end
 -- is set so the world's clear loop visits it.
 -------------------------------------------------------------------------------
 
---- True if the given component's column on this archetype is marked dirty.
 function Archetype:isComponentDirty(component: Component): boolean
     local idx = self.columnIndexByComponent[component]
     if not idx then return false end
     return self._componentDirty:get(idx)
 end
 
---- True if any component on this archetype is currently marked dirty.
---- Useful for bulk re-sync paths that don't track dirty granularity
---- below the archetype level.
 function Archetype:anyComponentDirty(): boolean
     return not self._componentDirty:isEmpty()
 end
 
---- Mark a single component dirty. No-op if the archetype doesn't
---- carry the component or the bit is already set.
 function Archetype:markComponentDirty(component: Component)
     local idx = self.columnIndexByComponent[component]
     if not idx then return end
@@ -681,9 +666,6 @@ function Archetype:markComponentDirty(component: Component)
     end
 end
 
---- Mark every component on this archetype dirty. Used by spawn,
---- archetype move-in, and swap-pop, where every column's bytes have
---- changed for at least one row.
 function Archetype:markAllComponentsDirty()
     -- Runs per swap-pop and per move-in; after the first call in a frame
     -- every later call is a guaranteed no-op, so short-circuit on a flag
@@ -698,14 +680,11 @@ function Archetype:markAllComponentsDirty()
     if n > 0 then self._dirtySet[self] = true end
 end
 
---- Clear every component-dirty bit. Called by `world:update` at end
---- of frame for each archetype in the dirty set.
 function Archetype:clearDirtyComponents()
     self._allDirty = false
     self._componentDirty:clearAll()
 end
 
---- Iterate components currently marked dirty on this archetype.
 function Archetype:dirtyComponents(): function(): Component
     local componentList = self.componentList
     local bits = self._componentDirty
@@ -723,7 +702,6 @@ function Archetype:dirtyComponents(): function(): Component
     end
 end
 
---- Set a component value at a row and mark it dirty.
 function Archetype:set<C is Component>(row: integer, value: C)
     local valueAny = value as {string: any}
     local componentType = valueAny.componentType as C
@@ -753,7 +731,7 @@ end
 -- Constructor
 -------------------------------------------------------------------------------
 
---- Row-indexed proxy for sparse relationship columns.
+-- Row-indexed proxy for sparse relationship columns.
 local function createSparseColumnProxy(archetypeTable: table, store: RelationshipStore): {Component}
     local proxy: {Component} = {}
     local mt: metatable<{Component}> = {
@@ -769,7 +747,7 @@ local function createSparseColumnProxy(archetypeTable: table, store: Relationshi
     return setmetatable(proxy, mt)
 end
 
---- Construct an archetype for a sorted component list.
+-- Construct an archetype for a sorted component list.
 function Archetype.new(
     components: {Component},
     dirtySet: {Archetype: boolean},

@@ -62,7 +62,8 @@ function World:removeSystem(systemName: string)
 - `systemName`: Name of the system to remove.
 
 ::: warning
-Systems need an explicit `name` to be removable. Auto-named systems cannot be removed from user code.
+Give systems you plan to remove an explicit `name`. Auto-generated names are an internal scheduling detail and are
+not a stable user-facing handle.
 :::
 
 ## System configuration settings
@@ -76,8 +77,8 @@ Systems need an explicit `name` to be removable. Auto-named systems cannot be re
 | `before` | `{string}`                                                    | No       | System names this one should run before (soft; ignored if missing).    |
 | `after`  | `{string}`                                                    | No       | System names this one should run after (soft; ignored if missing).     |
 
-Systems without an explicit `name` are auto-named on insertion; `removeSystem(name)` only works when a name
-was declared explicitly.
+Systems without an explicit `name` are auto-named on insertion so scheduling helpers such as `runif.after` can
+remove them internally. User code should not depend on the generated naming scheme.
 
 Within a phase, systems run in the order they were added unless `before` / `after` constraints re-sort them.
 See [Deferred Operations](/tecs/world#deferred-operations) for the rules about when mutations inside a
@@ -301,7 +302,7 @@ world:addSystem({
 ## Removing systems
 
 Call `world:removeSystem(name)` to pull a system out of the pipeline. The system must have been registered
-with an explicit `name`; auto-named systems aren't removable from user code.
+with that explicit `name`; generated names are not a stable public handle.
 
 ```teal
 world:removeSystem("MyUpdateSystem")

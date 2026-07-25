@@ -203,12 +203,6 @@ function WorldImpl:get<T is Component>(id: integer, component: T): T
     end
 end
 
---- Mutable counterpart to `world:get`. Returns the entity's component
---- AND marks the component dirty on the entity's archetype, so the
---- shadow pipeline (or any other dirty-gated consumer) re-uploads after
---- subsequent cdata writes. Use this whenever you intend to mutate the
---- component through the returned reference; `world:get` followed by
---- writes silently skips dirty tracking and leaves stale GPU bytes.
 function WorldImpl:getMut<T is Component>(id: integer, component: T): T
     local slot = IdAllocator.slotOf(id)
     local s = self._slots[slot]
@@ -338,12 +332,13 @@ function WorldImpl:remove(id: integer, component: Component)
     end
 end
 
---- Mark a single component dirty on the entity's archetype. Used when
---- code mutates a component's bytes through a path that doesn't go
---- through `archetype:getMut` (e.g. a smart wrapper that holds an
---- entity id and writes through a fetched FFI cdata).
 function WorldImpl:markComponentDirty(id: integer, component: Component)
-    local s = self._slots[IdAllocator.slotOf(id)]
+    local slot = IdAllocator.slotOf(id)
+    if slot < 1 or slot > self._maxSlotCount then return end
+    local s = self._slots[slot]
+    if IdAllocator.generationOfWithSlot(id, slot) ~= s.generation then
+        return
+    end
     local archetype = self.archetypeIndex[s.archetypeId]
     if archetype then
         archetype:markComponentDirty(component)
@@ -446,14 +441,6 @@ function WorldImpl:forEachArchetype(callback: function(Archetype))
     end
 end
 
---- Iterate the archetypes whose rows were mutated since the last
---- `world:update`. The set is built incrementally as mutations happen
---- (`Archetype:markDirty` adds the archetype) and cleared at the end of
---- each `update()` after the pipeline finishes.
----
---- Use this from PreRender systems that consume dirty state (e.g., GPU
---- shadow upload). Same constraint as queries: do not mutate the world
---- during iteration.
 function WorldImpl:dirtyArchetypes(): function(): Archetype
     local set = self._dirtyArchetypes
     local nextFn, t = pairs(set)
@@ -590,10 +577,9 @@ function WorldImpl:batchDespawn(query: Query)
     self._archetypeSnapshotPool:release(targetArchetypes as {any})
 end
 
---- Bulk-set component data for every entity matching `query`.
---- Forms:
----   world:batchSet(query, instance)
----   world:batchSet(query, componentType, callback)
+-- Forms:
+--   world:batchSet(query, instance)
+--   world:batchSet(query, componentType, callback)
 function WorldImpl:batchSet(query: Query, componentOrInstance: Component, callback?: function(Archetype, integer, integer, integer))
     local targetArchetypes = archetypesOf(self, query)
 
@@ -631,9 +617,6 @@ function WorldImpl:batchSet(query: Query, componentOrInstance: Component, callba
     end
 end
 
---- Bulk-remove a component from every entity in matched archetypes
---- that carry it. Archetypes in the query that don't have the
---- component are skipped silently.
 function WorldImpl:batchRemove(query: Query, componentType: Component)
     local targetArchetypes = archetypesOf(self, query)
     local inScope = self._scopeDepth > 0
@@ -694,11 +677,6 @@ function WorldImpl:clearEntities()
     table_clear(self._dirtyArchetypes)
 end
 
---- Prune unreachable empty ephemeral archetypes and shrink survivors.
---- Requires a committed world.
----
---- @return archetypesPruned Number of dead archetypes removed.
---- @return archetypesCompacted Number of archetypes whose storage was shrunk.
 function WorldImpl:compact(): integer, integer
     assert(not self.isDirty, "compact requires a committed world")
 
@@ -861,7 +839,7 @@ local ACTIONS <const>: {string: function(WorldImpl, Component)} = {
     end
 }
 
---- Execute a built-in action (pause/resume/despawn/disable) on entities with the given state component.
+-- Execute a built-in state action on matching entities.
 local function executeAction(self: WorldImpl, actionStr: string, stateComponent: Component)
     local actionFunc = ACTIONS[actionStr]
     if not actionFunc then
@@ -1233,24 +1211,22 @@ end
 -- Phase methods
 -------------------------------------------------------------------------------
 
---- Internal: enter query iteration scope.
+-- Enter query iteration scope.
 function WorldImpl:_pushQueryScope()
     self._scopeDepth = self._scopeDepth + 1
 end
 
---- Internal: leave query iteration scope; drain when outer scope closes.
+-- Leave query iteration scope; drain when the outer scope closes.
 function WorldImpl:_popQueryScope()
     local depth = self._scopeDepth - 1
     self._scopeDepth = depth
     if depth == 0 and self.isDirty then self:_drain() end
 end
 
---- Begin defer scope.
 function WorldImpl:defer()
     self._scopeDepth = self._scopeDepth + 1
 end
 
---- Close one scope level and drain when depth reaches zero.
 function WorldImpl:commit()
     if self._scopeDepth > 0 then
         self._scopeDepth = self._scopeDepth - 1
@@ -1319,11 +1295,15 @@ function WorldImpl:spawnBundle(name: string, ...: Component): integer
     return bndl:spawn(...)
 end
 
-function WorldImpl:getBundles(): {string: any}
-    return self._bundles
+function WorldImpl:getBundles(): {string: types.Bundle}
+    local result: {string: types.Bundle} = {}
+    for name, bndl in pairs(self._bundles) do
+        result[name] = bndl
+    end
+    return result
 end
 
-function WorldImpl:getBundle(name: string): types.Bundle
+function WorldImpl:getBundle(name: string): types.Bundle | nil
     return self._bundles[name]
 end
 

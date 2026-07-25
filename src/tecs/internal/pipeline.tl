@@ -10,14 +10,19 @@ local type Pipeline = types.Pipeline
 local type Phase = types.Phase
 local type SystemConfig = types.SystemConfig
 
+-- Pipeline-owned fields are kept off the public SystemConfig contract.
+local record RegisteredSystem is SystemConfig
+    id: string
+end
+
 -- `jit.zone` has no Teal type declarations; go through an opaque require.
 local function loadUntyped(modName: string): any
     return require(modName)
 end
 local zone = loadUntyped("jit.zone") as function(?string): string
 
---- Flattened parallel arrays for a group of systems.
---- Avoids per-system hash reads in the hot loop.
+-- Flattened parallel arrays for a group of systems. Avoids per-system
+-- hash reads in the hot loop.
 local record FlatGroup
     runs: {System}
     runIfs: {function(number, World, string): boolean}
@@ -26,48 +31,36 @@ local record FlatGroup
     count: integer
 end
 
---- Pipeline for executing ECS systems in dependency order.
+-- Internal pipeline factory.
 local record pipeline
-    --- Creates a new pipeline with optimized execution paths.
-    ---
-    --- @param fixedTimestep Fixed timestep for physics/game logic (defaults to 1/60 = 60 FPS)
-    --- @return Optimized pipeline instance
     new: function(fixedTimestep: number): Pipeline
 end
 
---- Private implementation of the pipeline.
+-- Concrete state behind the public Pipeline interface.
 local record PipelineImpl is Pipeline
-    --- Set to true when the pipeline needs to be recreated.
     dirty: boolean
 
-    --- Index of phase ID to system configurations (array index is the phase position).
-    systems: {{SystemConfig}}
+    systems: {{RegisteredSystem}}
 
-    --- Index of phase ID to whether a phase is enabled or disabled (array index is the phase position).
     phaseStates: {boolean}
 
-    --- Fixed timestep to use (defaults to 1/60 or 60 FPS).
     fixedTimestep: number
 
-    --- Accumulator for fixed update loop.
     fixedAccumulator: number
 
-    --- The number of systems in the pipeline.
     count: integer
 
-    --- Flattened parallel arrays for the three update regions.
     beforeFixedGroup: FlatGroup
     fixedGroup: FlatGroup
     afterFixedGroup: FlatGroup
 
-    --- Per-phase flat caches for run(phase). Indexed by phase position.
-    --- Group phases contain the concatenated flat lists of their children.
+    -- Per-phase flat caches for run(phase). Group phases contain the
+    -- concatenated flat lists of their children.
     phaseGroups: {integer: FlatGroup}
 
-    --- Global registry of system names to their phase position for O(1) removal.
+    -- Global registry of system names to phase positions.
     systemNameRegistry: {string: integer}
 
-    --- Counter for assigning unique IDs to anonymous systems.
     anonymousSystemCount: integer
 end
 
@@ -118,11 +111,11 @@ end
 -- Perform a stable topological sort on the systems based on their
 -- before/after constraints. Keyed by config so two systems sharing one run
 -- function stay distinct; unconstrained systems keep registration order.
-local function topologicalSort(systems: {SystemConfig}): {SystemConfig}
+local function topologicalSort(systems: {RegisteredSystem}): {RegisteredSystem}
     local n = #systems
     if n < 2 then return systems end
 
-    local systemNameMap: {string: SystemConfig} = {}
+    local systemNameMap: {string: RegisteredSystem} = {}
     for i = 1, n do
         local name = systems[i].name
         if name then
@@ -133,14 +126,14 @@ local function topologicalSort(systems: {SystemConfig}): {SystemConfig}
     -- Normalize before/after into forward edges (first runs before second),
     -- deduplicated so a redundant pair ("A before B" plus "B after A")
     -- counts once instead of reading as a cycle.
-    local succs: {SystemConfig: {SystemConfig}} = {}
-    local edgeSeen: {SystemConfig: {SystemConfig: boolean}} = {}
-    local indegree: {SystemConfig: integer} = {}
+    local succs: {RegisteredSystem: {RegisteredSystem}} = {}
+    local edgeSeen: {RegisteredSystem: {RegisteredSystem: boolean}} = {}
+    local indegree: {RegisteredSystem: integer} = {}
     for i = 1, n do
         indegree[systems[i]] = 0
     end
 
-    local function addEdge(first: SystemConfig, second: SystemConfig)
+    local function addEdge(first: RegisteredSystem, second: RegisteredSystem)
         if first == second then return end
         local seen = edgeSeen[first]
         if not seen then
@@ -178,8 +171,8 @@ local function topologicalSort(systems: {SystemConfig}): {SystemConfig}
 
     -- Kahn's algorithm; each pass emits ready systems in registration
     -- order, independent of which side declared the constraint.
-    local sorted: {SystemConfig} = table_new(n, 0) as {SystemConfig}
-    local emitted: {SystemConfig: boolean} = {}
+    local sorted: {RegisteredSystem} = table_new(n, 0) as {RegisteredSystem}
+    local emitted: {RegisteredSystem: boolean} = {}
     local sortedCount = 0
     while sortedCount < n do
         local progressed = false
@@ -207,8 +200,8 @@ local function topologicalSort(systems: {SystemConfig}): {SystemConfig}
     return sorted
 end
 
---- Build a FlatGroup from a list of SystemConfigs.
-local function buildFlatGroup(configs: {SystemConfig}): FlatGroup
+-- Build a FlatGroup from a list of registered systems.
+local function buildFlatGroup(configs: {RegisteredSystem}): FlatGroup
     local n = #configs
     if n == 0 then return EMPTY_GROUP end
 
@@ -234,12 +227,12 @@ local function buildFlatGroup(configs: {SystemConfig}): FlatGroup
     }
 end
 
---- Collect systems from a list of phases into one flat SystemConfig list.
+-- Collect systems from a list of phases into one flat registered-system list.
 local function collectPhaseSystems(
     self: PipelineImpl,
     phaseList: {Phase}
-): {SystemConfig}
-    local result: {SystemConfig} = {}
+): {RegisteredSystem}
+    local result: {RegisteredSystem} = {}
     local n = 0
     for i = 1, #phaseList do
         local phase = phaseList[i]
@@ -291,16 +284,8 @@ local function recreatePipeline(self: PipelineImpl)
     self.dirty = false
 end
 
---- Execute a flat group of systems. Each system runs inside its own jit.zone
---- so the LuaJIT sampling profiler can attribute samples to the system's id
---- (e.g. "Update:Physics"). Zone push/pop is JIT-compiled and free when no
---- profiler is attached.
----
---- Does not commit the world -- the caller is responsible for draining the
---- transaction at phase (or sub-phase) boundaries. Per-system commit is
---- structural drain work that multiplies with system count and is almost
---- never necessary; a system that needs same-frame visibility into changes
---- made earlier in the same phase can call `world:commit()` explicitly.
+-- Execute a flat group of systems. Each system runs inside its own jit.zone
+-- so profiling can attribute samples. This does not commit the world.
 local function runGroup(group: FlatGroup, dt: number, world: World)
     local n = group.count
     if n == 0 then return end
@@ -320,13 +305,8 @@ local function runGroup(group: FlatGroup, dt: number, world: World)
     end
 end
 
---- Execute fixed timestep systems with death spiral protection.
---- Uses accumulator pattern for frame-rate independent physics.
----
---- Does not commit between iterations; systems that need same-step
---- visibility into staged changes call `world:commit()` themselves.
---- Structural changes otherwise drain at query-scope boundaries and at
---- the next `world:update()`.
+-- Execute fixed timestep systems with death-spiral protection. This does
+-- not commit between iterations.
 local function runFixedLoop(self: PipelineImpl, dt: number, world: World)
     local fixedTimestep = self.fixedTimestep
     self.fixedAccumulator = self.fixedAccumulator + dt
@@ -458,18 +438,17 @@ function PipelineImpl:addSystem(config: SystemConfig)
     self.systemNameRegistry[name] = phase.position
 
     local phaseName = phase.name or "Unknown"
-    config.id = phaseName .. ":" .. name
+    local registered = config as RegisteredSystem
+    registered.id = phaseName .. ":" .. name
     -- runIf left nil when absent; dispatch loops use a nil check instead of calling ALWAYS_RUN
     config.before = config.before or EMPTY as {string}
     config.after = config.after or EMPTY as {string}
-    self.systems[phase.position][#self.systems[phase.position] + 1] = config
+    self.systems[phase.position][#self.systems[phase.position] + 1] = registered
     self.count = self.count + 1
     self.dirty = true
 end
 
---- Recursive phase dispatch. Never commits: systems stage through query
---- scopes and drain at those boundaries; a caller that needs the staged
---- work applied right after a phase calls `world:commit()` itself.
+-- Recursive phase dispatch. Never commits.
 local function runPhaseNoCommit(self: PipelineImpl, phase: Phase, dt: number, world: World)
     if not phase.children then
         -- Leaf phase: use cached flat group, honoring the phase state like

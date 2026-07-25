@@ -65,6 +65,12 @@ describe("Pipeline", function()
         test.pipeline = pipeline.new(FPS)
     end)
 
+    it("exposes concrete phase positions through the public Phase type", function()
+        local update: tecs.Phase = tecs.phases.Update
+        luassert.is_true(update.position > 0)
+        luassert.equals("Update", update.name)
+    end)
+
     it("should add and run systems in the correct phases", function()
         -- Add systems to different phases
         test.pipeline:addSystem({

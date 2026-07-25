@@ -61,6 +61,9 @@ describe("bundle", function()
 
             local bundles = world:getBundles() as {string: Bundle}
             luassert.is_not_nil(bundles["RegisteredBundle"], "Bundle should be registered by name")
+            bundles["RegisteredBundle"] = nil
+            luassert.is_not_nil(world:getBundle("RegisteredBundle"),
+                "mutating the returned map must not change the world's registry")
         end)
     end)
 

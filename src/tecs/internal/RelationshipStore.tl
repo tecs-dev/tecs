@@ -23,6 +23,9 @@
 --- the relationship container itself.
 
 local InverseIndex <const> = require("tecs.internal.InverseIndex")
+local types <const> = require("tecs.types")
+
+local type Component = types.components.Component
 
 local record RelationshipStoreConfig
     sparse: boolean
@@ -64,11 +67,11 @@ local record RelationshipStore
     --- One relationship instance for the entity, or nil. For exclusive
     --- stores this is the value; for non-exclusive stores an arbitrary
     --- entry from the target map (never the map itself).
-    getFirst: function(self, entityId: integer): any
-    getTarget: function(self, entityId: integer, targetId: integer): any
-    set: function(self, entityId: integer, value: any): any
+    getFirst: function(self, entityId: integer): Component
+    getTarget: function(self, entityId: integer, targetId: integer): Component
+    set: function(self, entityId: integer, value: Component): Component
     remove: function(self, entityId: integer): any
-    removeOne: function(self, entityId: integer, targetId: integer): any, boolean
+    removeOne: function(self, entityId: integer, targetId: integer): Component, boolean
     has: function(self, entityId: integer): boolean
 
     --- Iterate all forward entries. Sparse yields its forward map; Dense yields nothing.
@@ -91,37 +94,37 @@ function SparseImpl:get(entityId: integer): any
     return self._forward[entityId]
 end
 
-function SparseImpl:getFirst(entityId: integer): any
+function SparseImpl:getFirst(entityId: integer): Component
     local val = self._forward[entityId]
     if val == nil or self._exclusive then
-        return val
+        return val as Component
     end
-    local _, first = next(val as {integer: any})
+    local _, first = next(val as {integer: Component})
     return first
 end
 
-function SparseImpl:getTarget(entityId: integer, targetId: integer): any
+function SparseImpl:getTarget(entityId: integer, targetId: integer): Component
     if self._exclusive then
         local val = self._forward[entityId]
         if val and (val as {string: integer}).target == targetId then
-            return val
+            return val as Component
         end
         return nil
     else
-        local map = self._forward[entityId] as {integer: any}
+        local map = self._forward[entityId] as {integer: Component}
         return map and map[targetId] or nil
     end
 end
 
-function SparseImpl:set(entityId: integer, value: any): any
-    local target = (value as {string: integer}).target
+function SparseImpl:set(entityId: integer, value: Component): Component
+    local target = value.target
     local inverse = self._inverse
 
     if self._exclusive then
         local oldValue = self._forward[entityId]
 
         if inverse and oldValue ~= nil then
-            local oldTarget = (oldValue as {string: integer}).target
+            local oldTarget = (oldValue as Component).target
             if oldTarget then
                 inverse:unlink(entityId, oldTarget)
             end
@@ -133,10 +136,10 @@ function SparseImpl:set(entityId: integer, value: any): any
             inverse:link(entityId, target)
         end
 
-        return oldValue
+        return oldValue as Component
     else
         -- Non-exclusive: {[targetId] = value, ...}
-        local map = self._forward[entityId] as {integer: any}
+        local map = self._forward[entityId] as {integer: Component}
         if not map then
             map = {}
             self._forward[entityId] = map
@@ -163,12 +166,12 @@ function SparseImpl:remove(entityId: integer): any
 
     if inverse then
         if self._exclusive then
-            local oldTarget = (oldValue as {string: integer}).target
+            local oldTarget = (oldValue as Component).target
             if oldTarget then
                 inverse:unlink(entityId, oldTarget)
             end
         else
-            local map = oldValue as {integer: any}
+            local map = oldValue as {integer: Component}
             for targetId in pairs(map) do
                 inverse:unlink(entityId, targetId)
             end
@@ -179,20 +182,20 @@ function SparseImpl:remove(entityId: integer): any
     return oldValue
 end
 
-function SparseImpl:removeOne(entityId: integer, targetId: integer): any, boolean
+function SparseImpl:removeOne(entityId: integer, targetId: integer): Component, boolean
     local inverse = self._inverse
     if self._exclusive then
         local val = self._forward[entityId]
-        if val and (val as {string: integer}).target == targetId then
+        if val and (val as Component).target == targetId then
             self._forward[entityId] = nil
             if inverse then
                 inverse:unlink(entityId, targetId)
             end
-            return val, false
+            return val as Component, false
         end
         return nil, self._forward[entityId] ~= nil
     else
-        local map = self._forward[entityId] as {integer: any}
+        local map = self._forward[entityId] as {integer: Component}
         if not map then return nil, false end
 
         local val = map[targetId]
@@ -263,7 +266,7 @@ function SparseImpl:removeTarget(targetId: integer): {integer: boolean}
             self._forward[sourceId] = nil
             fullyCleared[sourceId] = true
         else
-            local map = self._forward[sourceId] as {integer: any}
+            local map = self._forward[sourceId] as {integer: Component}
             if map then
                 map[targetId] = nil
                 if next(map) == nil then
@@ -289,11 +292,11 @@ end
 
 -- Forward storage methods are no-ops for dense -- forward data lives in archetype columns.
 function DenseImpl:get(_entityId: integer): any return nil end
-function DenseImpl:getFirst(_entityId: integer): any return nil end
-function DenseImpl:getTarget(_entityId: integer, _targetId: integer): any return nil end
-function DenseImpl:set(_entityId: integer, _value: any): any return nil end
+function DenseImpl:getFirst(_entityId: integer): Component return nil end
+function DenseImpl:getTarget(_entityId: integer, _targetId: integer): Component return nil end
+function DenseImpl:set(_entityId: integer, _value: Component): Component return nil end
 function DenseImpl:remove(_entityId: integer): any return nil end
-function DenseImpl:removeOne(_entityId: integer, _targetId: integer): any, boolean
+function DenseImpl:removeOne(_entityId: integer, _targetId: integer): Component, boolean
     return nil, false
 end
 function DenseImpl:has(_entityId: integer): boolean return false end

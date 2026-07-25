@@ -89,6 +89,46 @@ describe("Archetype tests", function()
     end)
 
     describe("entity observers", function()
+        it("supports a typed public observer on a queried archetype", function()
+            local w = tecs.newWorld()
+            local Tag = tecs.newTagComponent({
+                name = "PublicObsTag" .. math.random(1, 1000000),
+            })
+            w:spawn(Tag())
+            w:commit()
+
+            local query = w:query({include = {Tag}})
+            local observed: tecs.Archetype = nil
+            for arch in query:iter() do
+                observed = arch
+            end
+            luassert.is_not_nil(observed)
+
+            local added = 0
+            local observer: tecs.ArchetypeEntityObserver = {
+                onEntitiesAdded = function(
+                    _self: tecs.ArchetypeEntityObserver,
+                    arch: tecs.Archetype,
+                    firstRow: integer,
+                    lastRow: integer,
+                    count: integer,
+                    sourceArchetype?: tecs.Archetype
+                )
+                    added = added + count
+                    luassert.equals(observed, arch)
+                    luassert.equals(2, firstRow)
+                    luassert.equals(2, lastRow)
+                    luassert.is_nil(sourceArchetype)
+                end,
+            }
+            observed:addEntityObserver(observer)
+
+            w:spawn(Tag())
+            w:commit()
+
+            luassert.equals(1, added)
+        end)
+
         it("notifies a move-only observer on swap-pop", function()
             local WorldImpl <const> = require("tecs.internal.world")
             local w = tecs.newWorld()

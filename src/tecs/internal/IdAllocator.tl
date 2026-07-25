@@ -42,8 +42,9 @@ local SLOT_COUNT <const>: integer = (2^22) as integer
 local GEN_COUNT <const>: integer = (2^31) as integer
 
 -- Per-world ceilings. Default sizes the allocator for ~1M entities;
--- callers may raise up to the format cap (2^22, ~4M).
-local ABSOLUTE_MAX_SLOT_COUNT <const> = SLOT_COUNT -- 4194304 (format cap)
+-- callers may raise up to the usable format cap (2^22 - 1, ~4M).
+-- Slot 0 is reserved, so a 22-bit slot field has 2^22 - 1 usable values.
+local ABSOLUTE_MAX_SLOT_COUNT <const> = SLOT_COUNT - 1 -- 4194303 usable slots
 local DEFAULT_MAX_SLOT_COUNT <const> = 1048576    -- ~1M (2^20)
 
 local record IdAllocator
@@ -140,7 +141,8 @@ function IdAllocator.new(maxSlotCount?: integer): IdAllocator
             " (packed id has " .. SLOT_BITS .. " bits for slot)")
     end
     return {
-        slots = C.new(SLOT_ARRAY_T, n) as C.CData,
+        -- Index 0 is the null sentinel; configured slots are 1..n.
+        slots = C.new(SLOT_ARRAY_T, n + 1) as C.CData,
         maxSlotCount = n,
         nextFreshSlot = 1,                   -- slot 0 reserved as null
         freeStack = C.new(UINT32_ARRAY_T, n),
@@ -158,7 +160,7 @@ function IdAllocator.allocSlot(allocator: IdAllocator): integer
     end
 
     local slot = allocator.nextFreshSlot
-    if slot >= allocator.maxSlotCount then
+    if slot > allocator.maxSlotCount then
         error("entity ID exhaustion: maxSlotCount (" .. allocator.maxSlotCount .. ") reached")
     end
 
@@ -175,7 +177,7 @@ function IdAllocator.allocContiguousSlots(allocator: IdAllocator, count: integer
     -- freeStack are intentionally bypassed here.
     local firstSlot = allocator.nextFreshSlot
     local newNext = firstSlot + count
-    if newNext > allocator.maxSlotCount then
+    if newNext > allocator.maxSlotCount + 1 then
         error("entity slot exhaustion: maxSlotCount (" .. allocator.maxSlotCount .. ") reached")
     end
     allocator.nextFreshSlot = newNext

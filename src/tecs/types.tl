@@ -323,14 +323,14 @@ local record types
         --- Mark every component on this archetype dirty.
         markAllComponentsDirty: function(self)
 
-        --- Clear every component-dirty bit on this archetype.
-        clearDirtyComponents: function(self)
-
         --- Iterate components currently marked dirty on this archetype.
         dirtyComponents: function(self): function(): components.Component
 
-        --- Register an observer for entity add/remove ranges on this
-        --- archetype. See `ArchetypeEntityObserver`.
+        --- Register an observer for lifecycle changes on this archetype.
+        --- The observer remains attached for the archetype's lifetime.
+        --- Registration applies only to this archetype; it does not discover
+        --- other archetypes with the same components.
+        --- See `ArchetypeEntityObserver`.
         addEntityObserver: function(self, observer: ArchetypeEntityObserver)
     end
 
@@ -370,8 +370,8 @@ local record types
             destArchetype?: Archetype
         )
 
-        --- Called when an entity is swap-popped into a different row (the row your `onEntitiesAdded` saw is now
-        --- a different entity). Only fires when the observer also implements `onEntitiesAdded`.
+        --- Called when an entity is swap-popped into a different row.
+        --- Implementing `onEntitiesAdded` is not required.
         ---
         --- @param archetype The archetype.
         --- @param entity The entity ID that moved.
@@ -426,11 +426,40 @@ local record types
             groupBy: function(archetype: Archetype): integer
         end
 
+        --- An opt-in query iterator that can be closed before exhaustion.
+        ---
+        --- Create one with `query:cursor()` when an archetype-level loop may
+        --- `break` or return early. Call `close()` after leaving the loop.
+        --- Natural exhaustion closes the cursor automatically, and repeated
+        --- `close()` calls are safe.
+        interface Cursor
+            type IterFn = function(Cursor, any): (Archetype, integer, {integer})
+            type GroupsIterFn = function(Cursor, any): integer
+            type GroupIterFn = function(Cursor, any): (Archetype, integer, {integer})
+
+            --- Iterate over every active archetype matched by the query.
+            iter: function(self): (IterFn, Cursor, any)
+
+            --- Iterate over active group IDs in sorted order.
+            groups: function(self): (GroupsIterFn, Cursor, any)
+
+            --- Iterate over active archetypes in one group.
+            group: function(self, groupId: integer): (GroupIterFn, Cursor, any)
+
+            --- Close this cursor's deferred scope.
+            ---
+            --- Safe to call before iteration, after natural exhaustion, or
+            --- more than once. A closed cursor cannot be reused.
+            close: function(self)
+        end
+
         type IterFn = function(Query, any): (Archetype, integer, {integer})
         type GroupsIterFn = function(Query, any): integer
         type GroupIterFn = function(Query, any): (Archetype, integer, {integer})
 
         --- The query descriptor used to create the query.
+        --- Exposed for inspection. Mutating it after query construction does
+        --- not rebuild component masks, subscriptions, or grouping state.
         descriptor: Descriptor
 
         --- Explicit iterator protocol form.
@@ -440,6 +469,15 @@ local record types
         ---
         --- Usage: `for archetype, length, entities in query:iter() do ... end`
         iter: function(self): (IterFn, Query, any)
+
+        --- Create an opt-in cursor for a traversal that may stop early.
+        ---
+        --- Cursors allocate a small traversal object. Keep using `iter()`,
+        --- `groups()`, and `group(id)` for loops that run to exhaustion.
+        --- When breaking or returning early, retain the cursor and call
+        --- `cursor:close()` to close its deferred scope and drain staged
+        --- mutations.
+        cursor: function(self): Cursor
 
         --- Iterate over active group IDs in sorted order.
         --- Only available when groupBy is specified.
@@ -472,10 +510,7 @@ local record types
         --- The name of the phase.
         name: string
 
-        --- Whether the phase is enabled.
-        enabled: boolean
-
-        --- The position of the phase in the pipeline.
+        --- The public pipeline position for this phase.
         position: integer
 
         --- Child phases of this phase.
@@ -530,7 +565,6 @@ local record types
     --- System configuration used when adding systems to the world
     interface SystemConfig
         name: string
-        id: string
         phase: Phase
         run: System
         before: {string}
@@ -544,7 +578,8 @@ local record types
         interface Config
             timestep: number
             pipelineFactory: function(number): Pipeline
-            --- Maximum number of concurrent entity slots. Must be a positive integer, at most 2^22 (~4M, format cap).
+            --- Maximum number of concurrent entity slots. Must be a positive integer,
+            --- at most 2^22 - 1 (~4M; slot 0 is reserved by the packed-id format).
             --- Defaults to 2^20 (~1M). Arena memory is preallocated to accommodate this size.
             maxEntities: integer
         end
@@ -1192,14 +1227,14 @@ local record types
 
         --- Get all registered bundles.
         ---
-        --- @return Map of bundle name to bundle.
-        getBundles: function(self): {string: any}
+        --- @return A fresh map of bundle name to bundle.
+        getBundles: function(self): {string: Bundle}
 
         --- Get a registered bundle by name.
         ---
         --- @param name The bundle name.
         --- @return The bundle, or nil if not found.
-        getBundle: function(self, name: string): Bundle
+        getBundle: function(self, name: string): Bundle | nil
 
         --- World stats information.
         interface Stats

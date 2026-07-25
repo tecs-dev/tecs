@@ -15,7 +15,7 @@ Tecs is not yet stable and may change as development progresses.
 ## Installation
 
 Install the Tecs CLI. It bundles the Teal compiler, Tecs and Tecs2D sources,
-type definitions, and a project template. LÖVE 12 is downloaded on first use.
+type definitions, and a project template. Love 12 is downloaded on first use.
 You do not need a separate Lua, LuaRocks, Teal, or compiler installation.
 
 ::: code-group
@@ -49,7 +49,7 @@ tecs run
 
 ::: tip Building a game?
 Projects created by `tecs new` include Tecs2D, which provides rendering,
-audio, input, physics, UI, and LÖVE loop integration on top of Tecs. See
+audio, input, physics, UI, and Love loop integration on top of Tecs. See
 [Tecs2D Getting Started](/tecs2d/) for the game workflow and build commands.
 :::
 

@@ -9,36 +9,23 @@ local pool <const> = require("tecs.utils.pool")
 local type Event = types.events.Event
 local type EventInit = types.events.EventInit
 
---- The next event ID to assign when the next event type is created.
+-- The next event ID to assign when the next event type is created.
 local NEXT_ID: integer = 1
 
 local NOOP_INIT <const> = function(_instance: any) end
 
 local record events
 
-    --- Configure an event to have an appropriate __call based constructor.
-    ---
-    --- The event's `.init` callback configures each event instance.
-    --- It should not assign a metatable as that's handled by this method automatically.
-    ---
-    --- @param event The event instance to configure.
     newEvent: function<E is Event>(event: E)
 
-    --- Configure an FFI event to have an appropriate __call based constructor.
-    ---
-    --- The event's `.init` callback configures each event instance.
-    ---
-    --- @param event The event type to configure.
-    --- @param fields Field definitions in format {{"name", "type"}, ...}
-    --- @param structName Optional struct name (auto-generated if not provided)
     newFFIEvent: function<E is Event>(
         event: E,
         fields: {{string, string}},
         structName?: string
     )
 
-    --- Centralized message bus for address-based event routing.
-    --- Addresses are integers: 0 for world-level events, entity IDs for entity events.
+    -- Concrete bus state. Public method Tealdoc lives on
+    -- `types.events.MessageBus`.
     record MessageBus is types.events.MessageBus
         -- address -> eventId -> {id_or_false, cb, id_or_false, cb, ...}
         -- callbacks[0] stores the logical size of the interleaved array.
@@ -70,11 +57,8 @@ local record events
         -- may never be reused.
         _byAddressPool: pool.TablePool
 
-        --- Create a new MessageBus.
         new: function(): MessageBus
 
-        --- Observe an event type at a specific address.
-        --- Address 0 is for world-level events, entity IDs for entity events.
         observe: function<E is Event>(
             self: MessageBus,
             address: integer,
@@ -82,7 +66,6 @@ local record events
             observer: function(E), id?: string
         )
 
-        --- Observe an event type at a specific address, at most once.
         observeOnce: function<E is Event>(
             self: MessageBus,
             address: integer,
@@ -90,7 +73,6 @@ local record events
             observer: function(E)
         )
 
-        --- Stop observing an event type at a specific address.
         stopObserving: function<E is Event>(
             self: MessageBus,
             address: integer,
@@ -98,20 +80,14 @@ local record events
             observerOrId: function(E)|string
         )
 
-        --- Emit an event to all observers at the specified address.
         emit: function<E is Event>(self: MessageBus, address: integer, event: E)
 
-        --- Check if any observers exist for an event type at an address.
         hasObservers: function<E is Event>(self: MessageBus, address: integer, eventType: E): boolean
 
-        --- Clear all observers for an address (used on entity despawn).
         clearAddress: function(self: MessageBus, address: integer)
 
-        --- Clear per-entity observers (all addresses except global 0),
-        --- preserving global subscriptions like queries' ArchetypeCreated observer.
         clearEntityObservers: function(self: MessageBus)
 
-        --- Reset the entire message bus.
         reset: function(self: MessageBus)
     end
 end
@@ -273,8 +249,8 @@ function MessageBus:observeOnce<E is Event>(address: integer, eventType: E, obse
     self:observe(address, eventType, wrappedFunction)
 end
 
---- Remove a pair at index (interleaved format: id at idx, callback at idx+1).
---- Caller must update callbacks[0] after removal.
+-- Remove a pair at index (interleaved format: id at idx, callback at idx+1).
+-- Caller must update callbacks[0] after removal.
 local function removeAtIndex(callbacks: {any}, idx: integer, size: integer)
     -- Swap-pop: move last pair to this position
     if idx < size - 1 then

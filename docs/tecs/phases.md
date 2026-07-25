@@ -79,6 +79,16 @@ world:addSystem({
 })
 ```
 
+Concrete indexed phases expose a public `position`: their numeric slot in the pipeline. It can be used for
+inspection and ordering diagnostics:
+
+```teal
+print(tecs.phases.Update.name, tecs.phases.Update.position)
+```
+
+Phase groups expose their child phase tree through `children` instead. A custom leaf phase receives a position when
+it is registered. Systems should still select phases by object, not by hard-coded numeric positions.
+
 ## Managing phases
 
 These methods are available on every `World`.

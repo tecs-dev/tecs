@@ -472,7 +472,7 @@ Observe a specific entity:
 
 ```teal
 world:observe(entityId, tecs.builtins.OnDespawn, function(e: tecs.builtins.OnDespawn)
-    -- Entity is no longer "alive" but components are still accessible
+    -- The entity is still alive and readable until despawn commits.
     local pos = world:get(e.entity, Position)
     if pos then
         spawnExplosionAt(pos.x, pos.y)

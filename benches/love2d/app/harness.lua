@@ -63,13 +63,14 @@ function harness.plugin(opts)
                     for arch in world:dirtyArchetypes() do
                         local dirtyNames = {}
                         local allNames = {}
-                        for comp in pairs(arch.columns) do
+                        for _, comp in ipairs(arch.componentList) do
                             allNames[#allNames + 1] = tostring(comp.componentName)
-                            if arch:isComponentDirty(comp) then
-                                dirtyNames[#dirtyNames + 1] = tostring(comp.componentName)
-                            end
+                        end
+                        for comp in arch:dirtyComponents() do
+                            dirtyNames[#dirtyNames + 1] = tostring(comp.componentName)
                         end
                         table.sort(allNames)
+                        table.sort(dirtyNames)
                         print("DIRTY_ARCH dirty=[" .. table.concat(dirtyNames, ",")
                             .. "] all=[" .. table.concat(allNames, ",") .. "]")
                     end

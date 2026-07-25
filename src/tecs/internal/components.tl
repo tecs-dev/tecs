@@ -21,64 +21,26 @@ local type ScalarComponentOptions<T> = types.components.ScalarComponentOptions<T
 local type RelationshipOptions<R is Relationship> = types.components.RelationshipOptions<R>
 local type FFIRelationshipOptions<R is Relationship> = types.components.FFIRelationshipOptions<R>
 
---- The components module defines ECS components and methods for creating them.
+-- Internal implementation shape. Public Tealdoc lives on `tecs` and
+-- `types.components`.
 local record components
-    --- Create a new component.
-    ---
-    --- Constructors must return a plain Lua table (no metatable) or FFI cdata. The framework
-    --- applies its own instance metatable so component fields fall back to the container for
-    --- shared data.
-    ---
-    --- Raises an error if a component of the same name has already been registered.
-    ---
-    --- @param options Component configuration including name, container, and optional init/storage.
-    --- @return the new component.
     newComponent: function<C is Component>(options: ComponentOptions<C>): C
 
-    --- Create a tag component that uses bitset storage for efficiency.
-    ---
-    --- Tags are components with no data. Their presence alone carries meaning.
-    ---
-    --- @param options Tag component options.
-    --- @return The created tag component.
     newTagComponent: function(options: TagComponentOptions): Component
 
-    --- Create an FFI-backed component with contiguous struct-column storage.
-    ---
-    --- FFI components use LuaJIT structs for compact layout, bulk column copies,
-    --- and raw binary snapshot paths.
-    ---
-    --- @param options Configuration including name, container, fields, and optional recycling.
-    --- @return The created FFI component.
     newFFIComponent: function<C is Component>(options: FFIComponentOptions<C>): C
 
-    --- Create a scalar component backed by raw Lua array values.
     newScalarComponent: function<T>(options: ScalarComponentOptions<T>): types.components.ScalarComponent<T>
 
-    --- Create a new relationship component.
-    ---
-    --- @param config The configuration for the relationship component including name and options.
-    --- @return the created relationship component.
     newRelationship: function<R is Relationship>(config: RelationshipOptions<R>): R
 
-    --- Create a new relationship component that stores additional data in FFI structs.
-    ---
-    --- @param config The configuration for the relationship component including name and options.
-    --- @return the created relationship component.
     newFFIRelationship: function<R is Relationship>(config: FFIRelationshipOptions<R>): R
 
-    --- Manually register a new component that is already configured with a metatable and construction functions.
-    ---
-    --- Used by the component factories after they have installed storage,
-    --- constructors, and metadata. Assigns a component id if needed.
-    ---
-    --- @container The component container to register.
-    --- @return the registered component.
+    -- Internal registration hook used after factories install storage and
+    -- constructors.
     registerComponent: function<T is Component>(container: Component): T
 
-    --- The globally registered components.
-    ---
-    --- Don't modify this. It's used to detect conflicts between component names.
+    -- Mutable only inside this module.
     registeredComponents: {string: Component}
     componentsById: {integer: Component}
 end

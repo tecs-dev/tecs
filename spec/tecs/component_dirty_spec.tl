@@ -13,6 +13,7 @@
 -- pass; phase 3's API removals must not break any of them.
 
 local tecs <const> = require("tecs")
+local internal <const> = require("tecs.internal.types")
 
 local Pos = tecs.newComponent({
     name = "ComponentDirtySpecPos",
@@ -25,6 +26,10 @@ local Vel = tecs.newComponent({
     fields = {"dx", "dy"},
 })
 local Tag = tecs.newTagComponent({name = "ComponentDirtySpecTag"})
+
+local function clearDirty(arch: tecs.Archetype)
+    (arch as internal.ArchetypeInternal):clearDirtyComponents()
+end
 
 local function findArchetype(world: tecs.World, components: {tecs.Component}): tecs.Archetype
     -- forEachArchetype to avoid leaking a query scope (see
@@ -187,12 +192,12 @@ describe("component-dirty contract", function()
                 "post-pipeline clear should reset every archetype's dirty bits")
         end)
 
-        it("archetype:clearDirtyComponents clears every bit", function()
+        it("the internal clear clears every bit", function()
             local world = tecs.newWorld()
             world:spawn(Pos(1, 2), Vel(0, 0))
             local arch = findArchetype(world, {Pos, Vel})
 
-            arch:clearDirtyComponents()
+            clearDirty(arch)
 
             assert.is_false(arch:isComponentDirty(Pos))
             assert.is_false(arch:isComponentDirty(Vel))
@@ -204,7 +209,7 @@ describe("component-dirty contract", function()
             local world = tecs.newWorld()
             world:spawn(Pos(1, 2), Vel(0, 0))
             local arch = findArchetype(world, {Pos, Vel})
-            arch:clearDirtyComponents()
+            clearDirty(arch)
 
             arch:markComponentDirty(Pos)
 
@@ -212,11 +217,28 @@ describe("component-dirty contract", function()
             assert.is_false(arch:isComponentDirty(Vel))
         end)
 
+        it("world:markComponentDirty ignores a stale entity handle", function()
+            local world = tecs.newWorld()
+            local stale = world:spawn(Pos(1, 2))
+            world:despawn(stale)
+            local fresh = world:spawn(Pos(3, 4))
+            world:update(0)
+
+            local arch = findArchetype(world, {Pos})
+            assert.is_true(world:isAlive(fresh))
+            assert.is_false(arch:isComponentDirty(Pos))
+
+            world:markComponentDirty(stale, Pos)
+
+            assert.is_false(arch:isComponentDirty(Pos),
+                "a recycled handle must not dirty the replacement entity's archetype")
+        end)
+
         it("archetype:markAllComponentsDirty sets every component's bit", function()
             local world = tecs.newWorld()
             world:spawn(Pos(1, 2), Vel(0, 0))
             local arch = findArchetype(world, {Pos, Vel})
-            arch:clearDirtyComponents()
+            clearDirty(arch)
 
             arch:markAllComponentsDirty()
 
@@ -256,7 +278,7 @@ describe("component-dirty contract", function()
             local world = tecs.newWorld()
             world:spawn(Pos(1, 2), Vel(0, 0))
             local arch = findArchetype(world, {Pos, Vel})
-            arch:clearDirtyComponents()
+            clearDirty(arch)
 
             arch:markComponentDirty(Pos)
             -- Vel intentionally not marked.

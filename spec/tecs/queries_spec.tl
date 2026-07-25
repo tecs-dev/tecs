@@ -748,6 +748,156 @@ describe("Queries module tests", function()
         end)
     end)
 
+    describe("query cursors", function()
+        it("closes and drains a traversal after an early break", function()
+            world:spawn(Position(1, 1))
+            world:spawn(Position(2, 2), Velocity(1, 0))
+            world:update(0)
+
+            local query = world:query({include = {Position}})
+            local cursor: tecs.QueryCursor = query:cursor()
+            local selected: integer = nil
+
+            for _archetype, _len, entities in cursor:iter() do
+                selected = entities[1]
+                world:set(selected, Health(100))
+                luassert.is_nil(world:get(selected, Health),
+                    "structural mutation should remain staged while the cursor is open")
+                break
+            end
+
+            cursor:close()
+            luassert.is_not_nil(world:get(selected, Health),
+                "closing the cursor should drain its staged mutation")
+        end)
+
+        it("closes automatically on natural exhaustion and close is idempotent", function()
+            local first = world:spawn(Position(1, 1))
+            local second = world:spawn(Position(2, 2), Velocity(1, 0))
+            world:update(0)
+
+            local query = world:query({include = {Position}})
+            local cursor = query:cursor()
+            for _archetype, _len, entities in cursor:iter() do
+                for row = 1, _len do
+                    world:set(entities[row], Health(100))
+                end
+            end
+
+            luassert.is_not_nil(world:get(first, Health))
+            luassert.is_not_nil(world:get(second, Health))
+            cursor:close()
+            cursor:close()
+
+            world:set(first, Sprite("after-close.png"))
+            luassert.is_not_nil(world:get(first, Sprite),
+                "repeated close must not leave or underflow the world scope")
+        end)
+
+        it("keeps nested cursor scopes independent", function()
+            world:spawn(Position(1, 1))
+            world:spawn(Position(2, 2), Velocity(1, 0))
+            world:update(0)
+
+            local query = world:query({include = {Position}})
+            local outer = query:cursor()
+            local selected: integer = nil
+
+            for _outerArchetype in outer:iter() do
+                local inner = query:cursor()
+                for _innerArchetype, _len, entities in inner:iter() do
+                    selected = entities[1]
+                    world:set(selected, Health(100))
+                    break
+                end
+                inner:close()
+                inner:close()
+
+                luassert.is_nil(world:get(selected, Health),
+                    "closing the inner cursor must not drain the outer scope")
+                break
+            end
+
+            outer:close()
+            luassert.is_not_nil(world:get(selected, Health),
+                "closing the outer cursor should drain the pending mutation")
+        end)
+
+        it("supports closing interleaved cursors out of order", function()
+            local selected = world:spawn(Position(1, 1))
+            world:update(0)
+
+            local query = world:query({include = {Position}})
+            local first = query:cursor()
+            local firstNext, firstState, firstControl = first:iter()
+            luassert.is_not_nil(firstNext(firstState, firstControl))
+
+            local second = query:cursor()
+            local secondNext, secondState, secondControl = second:iter()
+            luassert.is_not_nil(secondNext(secondState, secondControl))
+
+            world:set(selected, Health(100))
+            first:close()
+            luassert.is_nil(world:get(selected, Health),
+                "the second cursor should keep the deferred scope open")
+
+            second:close()
+            luassert.is_not_nil(world:get(selected, Health),
+                "the final cursor close should drain the staged mutation")
+        end)
+
+        it("supports grouped cursor traversal", function()
+            world:spawn(Position(1, 1))
+            world:spawn(Position(2, 2), Velocity(1, 0))
+            world:update(0)
+
+            local query = world:query({
+                include = {Position},
+                groupBy = function(archetype: tecs.Archetype): integer
+                    return archetype.id
+                end,
+            })
+
+            local matchedArchetypes = 0
+            local iterCursor = query:cursor()
+            for _archetype in iterCursor:iter() do
+                matchedArchetypes = matchedArchetypes + 1
+                break
+            end
+            iterCursor:close()
+            luassert.equals(1, matchedArchetypes)
+
+            local groupId: integer = nil
+            local groupsCursor = query:cursor()
+            for currentGroupId in groupsCursor:groups() do
+                groupId = currentGroupId
+                break
+            end
+            groupsCursor:close()
+            luassert.is_not_nil(groupId)
+
+            local archetypeCount = 0
+            local groupCursor = query:cursor()
+            for _archetype in groupCursor:group(groupId) do
+                archetypeCount = archetypeCount + 1
+                break
+            end
+            groupCursor:close()
+            luassert.equals(1, archetypeCount)
+        end)
+
+        it("cannot reuse a closed cursor", function()
+            local query = world:query({include = {Position}})
+            local cursor = query:cursor()
+            cursor:close()
+            cursor:close()
+
+            luassert.has_error(function()
+                cursor:iter()
+            end)
+        end)
+    end)
+
     describe("Disabled component exclusion", function()
         it("excludes disabled entities from queries by default", function()
             local builtins = tecs.builtins

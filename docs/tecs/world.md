@@ -36,7 +36,7 @@ local world = tecs.newWorld({
 | ------------------- | ------------------------------------------------------ | ---------- | ---------- | -------------------------------------------------- |
 | `timestep`          | `number`                                               | No         | 1/60       | The fixed timestep of the game in seconds          |
 | `pipelineFactory`   | `function(number): Pipeline`                           | No         | Built-in   | Custom factory for creating the system pipeline    |
-| `maxEntities`       | `integer`                                              | No         | 2^20 (~1M) | Maximum allocated entity slots for the world. Must be positive and at most `2^22` (~4M). The allocator is preallocated, so raise it only when you need more concurrent entities. |
+| `maxEntities`       | `integer`                                              | No         | 2^20 (~1M) | Maximum concurrent entity slots for the world. Must be positive and at most `2^22 - 1`. |
 
 ## World Lifecycle
 
@@ -102,19 +102,14 @@ world:isAlive(a)        -- false
 world:isAlive(b)        -- true
 ```
 
-The packed layout reserves 22 bits for the slot and 31 bits for the generation. That means a world can be configured
-for at most `2^22` allocated slots (~4M), and each slot has `2^31` generation values before wrapping. The default
+The packed layout reserves 22 bits for the slot and 31 bits for the generation. Slot 0 is reserved, so a world can be
+configured for at most `2^22 - 1` concurrent entities (~4M), and each slot has `2^31` generation values before wrapping. The default
 `maxEntities` is lower (`2^20`, roughly one million slots) to keep the preallocated entity table smaller. Both limits
-are exported as constants: `tecs.MAX_ENTITIES` (the 2^22 format cap) and `tecs.DEFAULT_MAX_ENTITIES` (the 2^20
-default), so sizing code never hard-codes the numbers.
+are exported as `tecs.MAX_ENTITIES` and `tecs.DEFAULT_MAX_ENTITIES`, so sizing code never hard-codes the numbers.
 
-Don't inspect or unpack IDs with `bit.*`; packed IDs can exceed 32-bit range, and LuaJIT bit operations truncate to
-32 bits. If tooling needs the slot or generation, use the arithmetic layout:
-
-```teal
-local slot = id % 2^22
-local generation = math.floor(id / 2^22)
-```
+::: warning Treat entity IDs as opaque
+Do not inspect or unpack entity IDs with `bit.*`. Packed IDs can exceed 32 bits, so LuaJIT bit operations truncate them.
+:::
 
 Configure [`maxEntities`](#creating-a-world) if you need a different entity ceiling. To react when an entity
 disappears, listen for [`OnDespawn`](/tecs/builtins#ondespawn-event) rather than polling `isAlive`.
@@ -635,7 +630,7 @@ When the depth is zero and you call a mutating API, the change applies before th
 - `batchSpawn` / `batchSpawnAt` / `batchDespawn` / `batchSet` / `batchRemove`
   internally open a scope, stage their work, and drain before returning.
 
-When the depth is greater than zero, every one of those calls stages into a pending transaction and applies
+When the depth is greater than zero, structural changes from those calls stage into a pending transaction and apply
 only after the scope closes. From the caller's perspective, the rule is: *outside a scope a mutation is
 visible as soon as the call returns; inside a scope, structural changes (spawns, despawns, component adds and
 removes) stay invisible until the scope closes*. Value updates to a component an entity already carries write
@@ -645,8 +640,8 @@ including drain ordering and visibility guarantees, is specified in the
 
 Scopes are opened automatically by:
 
-- Iterating a [query](/tecs/queries/) (the iterator pushes a scope on its first step and pops it on
-  exhaustion or `break`).
+- Iterating a [query](/tecs/queries/) (the iterator pushes a scope on its first step and pops it on exhaustion;
+  use an opt-in [query cursor](/tecs/queries/#breaking-out-early) and close it when stopping early).
 - Query callbacks (`onEntitiesAdded` / `onEntitiesRemoved`) while the drain that triggered them is running.
 - Each batch call, for the duration of the call (including `batchSpawn`'s user `callback`).
 

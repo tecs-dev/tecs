@@ -673,7 +673,7 @@ describe("mutation differential fuzz", function()
                     -- exercises the fresh-range reconciliation.
                     local alloc = (wa as WorldImpl).allocator
                     local slot = alloc.nextFreshSlot + 7
-                    if slot >= alloc.maxSlotCount then return end
+                    if slot > alloc.maxSlotCount then return end
                     local id = slot + GEN_STRIDE
                     local compIdx = rng(#opComps)
                     local v = rng(1000)
@@ -784,7 +784,7 @@ describe("mutation differential fuzz", function()
                     local alloc = (wa as WorldImpl).allocator
                     local base = alloc.nextFreshSlot + 11
                     local n = rng(3)
-                    if base + n >= alloc.maxSlotCount then return end
+                    if base + n > alloc.maxSlotCount then return end
                     local idsList: {integer} = {}
                     for i = 1, n do
                         idsList[i] = (base + i) + GEN_STRIDE

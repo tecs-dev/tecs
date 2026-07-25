@@ -149,7 +149,7 @@ function World:spawnBundle(name: string, ...: Component): integer
 Returns a registered bundle by name.
 
 ```teal
-function World:getBundle(name: string): Bundle
+function World:getBundle(name: string): Bundle | nil
 ```
 
 **Parameters:**
@@ -162,7 +162,8 @@ function World:getBundle(name: string): Bundle
 
 ### world:getBundles {#world-get-bundles}
 
-Returns all registered bundles as a map keyed by bundle name.
+Returns all registered bundles as a fresh map keyed by bundle name. Mutating the returned map does not change the
+world's registry.
 
 ```teal
 function World:getBundles(): {string: Bundle}
@@ -170,7 +171,7 @@ function World:getBundles(): {string: Bundle}
 
 **Returns:**
 
-- Map of bundle name to bundle.
+- Fresh map of bundle name to bundle.
 
 ## Spawning from a Bundle
 

@@ -245,7 +245,7 @@ function WorldImpl:_deferBatchSpawn(
 ): integer | nil, {integer} | nil
     validateBatchCount("World:batchSpawn", count)
 
-    if self.allocator.nextFreshSlot + count > self.allocator.maxSlotCount then
+    if self.allocator.nextFreshSlot + count > self.allocator.maxSlotCount + 1 then
         return nil, self:_deferBatchSpawnList(count, componentTypes, callback)
     end
 
@@ -311,7 +311,7 @@ function WorldImpl:_deferBatchSpawnList(
     local slotStamp = self._slotStamp as {integer:integer}
     local epoch = self._transactionEpoch
     local archId = archetype.id
-    local freshAvail = allocator.maxSlotCount - allocator.nextFreshSlot
+    local freshAvail = allocator.maxSlotCount - allocator.nextFreshSlot + 1
     local totalAvail = freshAvail + allocator.freeCount
     if count > totalAvail then
         error("entity slot exhaustion: maxSlotCount (" .. allocator.maxSlotCount .. ") reached")

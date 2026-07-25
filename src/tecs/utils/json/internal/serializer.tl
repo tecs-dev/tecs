@@ -448,14 +448,14 @@ end
 -- Public API
 --------------------------------------------------------------------------------
 
-function serializer.serialize(value: any, sortKeys: any): string
+function serializer.serialize(value: any, sortKeys?: boolean): string
     BUF:reset()
     table_clear(SEEN)
     serializeValueCompact(value, sortKeys and true or false)
     return BUF:get()
 end
 
-function serializer.serializePretty(value: any, sortKeys: any, indent: string): string
+function serializer.serializePretty(value: any, sortKeys?: boolean, indent?: string): string
     BUF:reset()
     table_clear(SEEN)
     local indentStr = indent or "  "

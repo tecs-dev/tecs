@@ -433,10 +433,10 @@ function WorldImpl:_deferSpawnAt(id: integer, ...: Component)
     local generation = IdAllocator.generationOfWithSlot(id, slot)
     local allocator = self.allocator
     -- Guard against out-of-range decoded slots before touching arena cdata.
-    if slot < 1 or slot >= allocator.maxSlotCount then
+    if slot < 1 or slot > allocator.maxSlotCount then
         error("spawnAt: id " .. tostring(id) .. " decodes to slot " .. tostring(slot) ..
             " which is outside the configured slot range [1, " ..
-            tostring(allocator.maxSlotCount) .. "). Check the encoding " ..
+            tostring(allocator.maxSlotCount) .. "]. Check the encoding " ..
             "(IdAllocator.encodeId: slot + generation * 2^22).")
     end
     if slot >= allocator.nextFreshSlot then

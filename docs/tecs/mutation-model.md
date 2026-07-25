@@ -123,6 +123,7 @@ identical at every scope depth and on every path:
 | `get` / `getMut` | Returns `nil` |
 | `has` | Returns `false` |
 | `isAlive` | Returns `false` |
+| `markComponentDirty` | No-op |
 | `set` | Raises `"Entity ID not found: <id>"` |
 | `remove` | No-op |
 | `despawn` | No-op |

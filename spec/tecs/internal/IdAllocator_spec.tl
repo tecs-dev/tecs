@@ -76,7 +76,17 @@ describe("IdAllocator", function()
 
         it("errors when maxSlotCount is exhausted", function()
             local allocator = IdAllocator.new(64)
-            allocator.nextFreshSlot = 64
+            allocator.nextFreshSlot = 65
+            assert.has_error(function()
+                IdAllocator.allocSlot(allocator)
+            end)
+        end)
+
+        it("allocates exactly maxSlotCount usable slots", function()
+            local allocator = IdAllocator.new(3)
+            assert.equals(1, IdAllocator.allocSlot(allocator))
+            assert.equals(2, IdAllocator.allocSlot(allocator))
+            assert.equals(3, IdAllocator.allocSlot(allocator))
             assert.has_error(function()
                 IdAllocator.allocSlot(allocator)
             end)

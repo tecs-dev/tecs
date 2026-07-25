@@ -95,7 +95,7 @@ local record internal
         hasRemoveObservers: integer
         hasAddObservers: integer
         addEntityObserver: function(self, observer: types.ArchetypeEntityObserver)
-        clearDirty: function(self)
+        clearDirtyComponents: function(self)
 
         -- Transaction / drain staging state
         isEphemeral: boolean
@@ -449,8 +449,8 @@ local record internal
         runPhase: function(self: WorldImpl, phase: Phase, dt?: number)
         newBundle: function(self: WorldImpl, name: string, def?: types.Bundle.Definition): Bundle
         spawnBundle: function(self: WorldImpl, name: string, ...: Component): integer
-        getBundles: function(self: WorldImpl): {string: any}
-        getBundle: function(self: WorldImpl, name: string): Bundle
+        getBundles: function(self: WorldImpl): {string: Bundle}
+        getBundle: function(self: WorldImpl, name: string): Bundle | nil
         getStats: function(self: WorldImpl, fill?: types.World.Stats): types.World.Stats
         saveSnapshot: function(self: WorldImpl, opts?: types.World.SnapshotOptions): types.World.SnapshotOutput
         loadSnapshot: function(self: WorldImpl, source: any): types.World.SnapshotPrelude
