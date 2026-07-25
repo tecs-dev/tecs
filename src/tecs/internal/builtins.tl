@@ -195,9 +195,9 @@ local record builtins
 
     --- Marks an entity as paused.
     ---
-    --- Unlike Disabled, Paused is NOT auto-excluded from queries. Paused entities
-    --- should still render -- only gameplay systems need to exclude them explicitly
-    --- via `exclude = {Paused}` when needed (e.g., TTL, CameraTarget).
+    --- Unlike Disabled, Paused is not auto-excluded from every query, because
+    --- paused entities keep rendering. Queries declared `type = "logic"` skip
+    --- them; `exclude = {Paused}` does the same explicitly.
     Paused: Component
 
     --- A built-in child relationship.
@@ -466,7 +466,7 @@ function builtins.plugin(w: types.World)
 
     -- Handle despawning entities with TTLs.
     do
-        local ttlQuery = w:query({include = {TTL}, exclude = {builtins.Paused}})
+        local ttlQuery = w:query({include = {TTL}, type = "logic"})
         w:addSystem({
             name = "ttl",
             phase = phases.FixedUpdate,

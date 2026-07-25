@@ -331,8 +331,9 @@ See *[Disabled entities](/tecs/queries/#disabled-entities)* for more on how disa
 
 ### Paused component
 
-A tag component that marks an entity as paused. Unlike `Disabled`, `Paused` is **not** auto-excluded from queries.
-Paused entities should still render; only gameplay systems that need to skip them should use `exclude = {Paused}`.
+A tag component that marks an entity as paused. Unlike `Disabled`, `Paused` is **not** auto-excluded from every
+query, because paused entities keep rendering. Queries that drive simulation opt out by declaring
+[`type = "logic"`](/tecs/queries/#paused-entities).
 
 This is typically managed automatically by the [state stack](/tecs/states) when a state's `onBlur` policy
 is set to `"pause"`. You can also add it manually:

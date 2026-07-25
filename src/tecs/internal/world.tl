@@ -1088,6 +1088,14 @@ function WorldImpl:query(descriptor: QueryDescriptor): Query
     -- Auto-exclude Disabled entities from all queries (unless explicitly included)
     autoExcludeComponent(descriptor, builtins.Disabled)
 
+    -- Logic queries skip paused entities; render queries keep drawing them.
+    local kind = descriptor.type
+    if kind == "logic" then
+        autoExcludeComponent(descriptor, builtins.Paused)
+    elseif kind ~= nil and kind ~= "render" then
+        error("query type must be \"logic\" or \"render\", got: " .. tostring(kind))
+    end
+
     local masks = QueryImpl.compileMasks(descriptor.include, descriptor.includeAny, descriptor.exclude)
     local matchingArchetypes = self.archetypeIndex:findMatching(descriptor.include, masks)
     return QueryImpl.new(descriptor, matchingArchetypes, masks, self)

@@ -77,11 +77,10 @@ cameratarget.CameraTarget = CameraTarget
 
 function cameratarget.plugin(pipelineInstance: types.Pipeline): tecs.Plugin
     return function(world: tecs.World)
-        local Paused <const> = tecs.builtins.Paused
         local query <const> = world:query({
             name = "camera-target",
             include = { Transform, CameraTarget },
-            exclude = { Paused }
+            type = "logic"
         })
 
         world:addSystem({

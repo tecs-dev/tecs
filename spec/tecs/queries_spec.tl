@@ -950,6 +950,64 @@ describe("Queries module tests", function()
         end)
     end)
 
+    describe("query type", function()
+        local function countEntities(query: tecs.Query): integer
+            local count = 0
+            for _archetype, len in query:iter() do
+                count = count + len
+            end
+            return count
+        end
+
+        before_each(function()
+            world:spawn(Position(1, 1), Velocity(10, 10))
+            world:spawn(Position(2, 2), Velocity(20, 20), tecs.builtins.Paused)
+            world:update(0)
+        end)
+
+        it("excludes paused entities from logic queries", function()
+            local query = world:query({
+                include = {Position, Velocity},
+                type = "logic",
+            })
+
+            luassert.equals(1, countEntities(query), "Expected the unpaused entity only")
+        end)
+
+        it("keeps paused entities in render queries", function()
+            local query = world:query({
+                include = {Position, Velocity},
+                type = "render",
+            })
+
+            luassert.equals(2, countEntities(query), "Expected both entities")
+        end)
+
+        it("keeps paused entities when type is omitted", function()
+            local query = world:query({include = {Position, Velocity}})
+
+            luassert.equals(2, countEntities(query), "Expected both entities")
+        end)
+
+        it("keeps paused entities that a logic query includes explicitly", function()
+            local query = world:query({
+                include = {Position, Velocity, tecs.builtins.Paused},
+                type = "logic",
+            })
+
+            luassert.equals(1, countEntities(query), "Expected the paused entity only")
+        end)
+
+        it("rejects an unknown type", function()
+            luassert.has_error(function()
+                world:query({
+                    include = {Position},
+                    type = "gameplay" as tecs.Query.Kind,
+                })
+            end)
+        end)
+    end)
+
     describe("groupBy archetype grouping", function()
         local GroupA: tecs.Component
         local GroupB: tecs.Component

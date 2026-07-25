@@ -148,6 +148,12 @@ world:createState("cutscene", {
 
 If no policies are specified, the default is `onExit = "despawn"`.
 
+::: warning `"pause"` needs queries that opt out
+`"pause"` adds [`Paused`](/tecs/builtins#paused-component) to the state's entities, but a system only stops acting on
+them if its query declares [`type = "logic"`](/tecs/queries/#paused-entities). A movement query without it keeps
+moving paused entities, and nothing reports an error.
+:::
+
 ## Auto-tagging
 
 Entities spawned while a state is active automatically receive that state's tag component. This happens

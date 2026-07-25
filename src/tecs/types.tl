@@ -396,10 +396,25 @@ local record types
 
     --- A query for finding entities with specific components.
     interface Query
+        --- Whether a query drives simulation or presentation.
+        enum Kind
+            "logic"
+            "render"
+        end
+
         --- Query descriptor for creating queries.
         interface Descriptor
             --- An optional name to give the query, used in logging.
             name: string
+
+            --- Whether this query drives simulation or presentation.
+            ---
+            --- `"logic"` excludes `Paused` entities, so pausing a state stops
+            --- the systems that move, damage, or think. `"render"` records the
+            --- opposite intent: paused entities keep drawing. Omitting the
+            --- field leaves the query unfiltered, which matches every query
+            --- written before this option existed.
+            type: Kind
 
             --- The components an archetype must contain in order to match the query.
             include: {components.Component}

@@ -87,6 +87,7 @@ The full set of fields accepted by `world:query()`:
 | `exclude`           | `{Component}`                                                             | Archetype must contain **none** of these components.                                                                                                                           |
 | `includeAny`        | `{Component}`                                                             | Archetype must contain **at least one** of these components. Combined with `include` as AND (`include`) + OR (`includeAny`).                                                   |
 | `name`              | `string`                                                                  | Human-readable name shown in debug logs and the MCP inspector. Optional.                                                                                                       |
+| `type`              | `"logic" \| "render"`                                                     | Declares whether the query drives simulation or presentation. `"logic"` excludes [`Paused`](#paused-entities) entities. Optional.                                               |
 | `temp`              | `boolean`                                                                 | If `true`, the query is a one-shot snapshot of the currently-matching archetypes. Skips observer registration. Cannot be combined with `onEntitiesAdded` / `onEntitiesRemoved`. See [Temporary queries](#temporary-queries). |
 | `groupBy`           | `function`                                                                | Groups matching archetypes by an integer key for sorted iteration. See [Grouping](/tecs/queries/grouping).                                                                |
 | `onEntitiesAdded`   | `function`                                                                | Fires once per contiguous range of entities when they first match the query. See [Callbacks](/tecs/queries/callbacks#onentitiesadded-callback).                            |
@@ -299,6 +300,35 @@ local allPositionQuery = world:query({
     include = {Position, tecs.builtins.Disabled}
 })
 ```
+
+## Paused entities
+
+[`tecs.builtins.Paused`](/tecs/builtins#paused-component) marks an entity whose simulation should stop while its
+rendering continues, so it is not excluded from every query the way `Disabled` is. Declare which side of that line a
+query sits on with `type`:
+
+```teal
+-- Simulation: paused entities are skipped
+local movement = world:query({
+    include = {Transform, Velocity},
+    type = "logic",
+})
+
+-- Presentation: paused entities keep drawing
+local sprites = world:query({
+    include = {Transform, Sprite},
+    type = "render",
+})
+```
+
+`type = "logic"` is what makes a [state stack](/tecs/states) pause actually pause. A state declared with
+`onBlur = "pause"` adds `Paused` to its entities, but a movement system only stops moving them if its query opts out.
+
+Omitting `type` leaves the query unfiltered. Prefer setting it on every query: `"render"` is not merely the default
+spelled out, it records that paused entities are meant to appear, which is the fact a later reader needs.
+
+`exclude = {Paused}` does the same filtering as `type = "logic"`, and a query that includes `Paused` explicitly keeps
+it regardless of `type`.
 
 ## Ad-hoc archetype lookup
 
