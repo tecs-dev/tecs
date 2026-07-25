@@ -248,7 +248,19 @@ jobs:
         chmod +x "$HOME/bin/luarocks"
         export PATH="$HOME/bin:$PATH"
         make install-type-deps
-        for exe in tl busted luacov; do
+        # Calling tl.bat through cmd.exe caps the full command at 8,191
+        # characters. The project passes every source path to one tl process,
+        # so invoke the Lua entry point directly and retain the single-process
+        # build without cmd.exe's limit.
+        tl_rock_dir="$(cygpath -u "$(luarocks show tl --rock-dir)")"
+        tl_script="$tl_rock_dir/bin/tl"
+        test -f "$tl_script"
+        printf '%s\n' \
+          '#!/usr/bin/env bash' \
+          'exec /mingw64/bin/luajit.exe '"\"$(cygpath -m "$tl_script")\""' "$@"' \
+          > "$HOME/bin/tl"
+        chmod +x "$HOME/bin/tl"
+        for exe in busted luacov; do
           printf '%s\n' \
             '#!/usr/bin/env bash' \
             'bat="$HOME/.luarocks/bin/'"$exe"'.bat"' \
