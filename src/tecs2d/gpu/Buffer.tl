@@ -26,9 +26,9 @@ local K <const> = sdl.K
 local MAX_RANGES <const> = 64
 
 local record BufferOptions
-    --- Any of "storage", "indirect", "vertex", "index", "computeRead",
-    --- "computeWrite". A buffer written by compute and then drawn from needs
-    --- both "indirect" and "computeWrite".
+    --- Any of "storage", "indirect", "computeRead", "computeWrite". A buffer
+    --- written by compute and then drawn from needs both "indirect" and
+    --- "computeWrite".
     usage: {string}
     --- Size in bytes.
     size: integer
@@ -56,9 +56,9 @@ end
 
 local BufferMT <const>: metatable<Buffer> = { __index = Buffer }
 
+-- No vertex or index usage: the renderer reads geometry from storage buffers
+-- indexed by vertex and instance ID, so there are no vertex buffers to bind.
 local USAGE_FLAGS <const>: {string: integer} = {
-    vertex = K.SDL_GPU_BUFFERUSAGE_VERTEX,
-    index = K.SDL_GPU_BUFFERUSAGE_INDEX,
     indirect = K.SDL_GPU_BUFFERUSAGE_INDIRECT,
     storage = K.SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ,
     computeRead = K.SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ,

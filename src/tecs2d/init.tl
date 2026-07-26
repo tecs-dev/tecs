@@ -65,7 +65,6 @@ local record RunConfig
 
     load: function(app: App)
     update: function(app: App, dt: number)
-    draw: function(app: App, frame: Frame)
     event: function(app: App, event: loader.CValue)
     quit: function(app: App)
 end
@@ -164,9 +163,6 @@ function tecs2d.run(config: RunConfig): integer
         local frame = device:beginFrame()
         if frame ~= nil then
             renderer:render(frame)
-            if config.draw ~= nil then
-                config.draw(app, frame)
-            end
             frame:submit()
         end
 
