@@ -20,8 +20,16 @@
 --- cost that decides whether a large world is affordable, and most frames
 --- change very little. Layer zero is a white pixel, so an entity with no
 --- Sprite samples it and textured and untextured geometry share one path.
+---
+--- What is drawn is decided on the GPU. A compute pass tests each instance
+--- against the view, compacts the survivors into an index list, and writes the
+--- draw arguments, so the draw touches only what is visible and the CPU never
+--- learns how many that was. The instance buffer stays archetype-contiguous
+--- for the dirty gate; the compacted list is rebuilt every frame and is a
+--- separate array, so the two do not fight.
 
 local tecs <const> = require("tecs")
+local sdl <const> = require("tecs2d.ffi.sdl3")
 local loader <const> = require("tecs2d.ffi.loader")
 local Buffer <const> = require("tecs2d.gpu.Buffer")
 local Shader <const> = require("tecs2d.gpu.Shader")
@@ -29,9 +37,13 @@ local Frame <const> = require("tecs2d.gpu.Frame")
 local GraphicsPipeline <const> = require("tecs2d.gpu.GraphicsPipeline")
 local Deferred <const> = require("tecs2d.gpu.Deferred")
 local Sampler <const> = require("tecs2d.gpu.Sampler")
+local ComputePipeline <const> = require("tecs2d.gpu.ComputePipeline")
+local ComputePass <const> = require("tecs2d.gpu.ComputePass")
 local TextureArray <const> = require("tecs2d.gpu.TextureArray")
 local assets <const> = require("tecs2d.assets")
 local components <const> = require("tecs2d.components")
+
+local C <const> = sdl.C
 
 --- Floats per instance: four vec4s.
 local INSTANCE_FLOATS <const> = 16
@@ -47,6 +59,60 @@ local DEFAULT_CELL <const> = 512
 --- beyond it are dropped rather than growing the buffer mid-frame.
 local DEFAULT_CAPACITY <const> = 65536
 
+--- Zeroes the visible counter before the cull accumulates into it. A separate
+--- pass rather than a branch inside the cull, because invocations within one
+--- dispatch have no ordering against each other.
+local RESET_COMPUTE <const> = [[
+#version 450
+layout(local_size_x = 1) in;
+layout(set = 1, binding = 0) writeonly buffer DrawArgs { uint value[]; } args;
+void main() {
+    args.value[0] = 6u;   // vertices per quad
+    args.value[1] = 0u;   // instances, accumulated by the cull
+    args.value[2] = 0u;
+    args.value[3] = 0u;
+}
+]]
+
+--- Rejects instances outside the view and compacts the rest.
+local CULL_COMPUTE <const> = [[
+#version 450
+layout(local_size_x = 64) in;
+
+struct Instance {
+    vec4 xform;
+    vec4 origin;
+    vec4 color;
+    vec4 uvRect;
+};
+
+layout(set = 0, binding = 0) readonly buffer Instances { Instance item[]; } instances;
+layout(set = 1, binding = 0) buffer DrawArgs { uint value[]; } args;
+layout(set = 1, binding = 1) writeonly buffer Visible { uint index[]; } visible;
+layout(set = 2, binding = 0) uniform Cull { vec4 params; } cull;
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= uint(cull.params.z)) { return; }
+
+    Instance self = instances.item[i];
+
+    // The quad's half extent along each axis, from the columns of its basis.
+    // A rotated quad reaches further than its scale alone, so both columns
+    // contribute to both axes.
+    float ex = 0.5 * (abs(self.xform.x) + abs(self.xform.z));
+    float ey = 0.5 * (abs(self.xform.y) + abs(self.xform.w));
+
+    vec2 origin = self.origin.xy;
+    if (origin.x + ex < 0.0 || origin.x - ex > cull.params.x ||
+        origin.y + ey < 0.0 || origin.y - ey > cull.params.y) {
+        return;
+    }
+
+    visible.index[atomicAdd(args.value[1], 1u)] = i;
+}
+]]
+
 local INSTANCE_VERTEX <const> = [[
 #version 450
 
@@ -58,9 +124,7 @@ struct Instance {
 };
 
 layout(set = 0, binding = 0) readonly buffer Instances { Instance item[]; } instances;
-// z carries the batch's first instance. Deriving it from gl_BaseInstance
-// would need a SPIR-V capability that does not translate uniformly across
-// backends, and a uniform costs nothing here.
+layout(set = 0, binding = 1) readonly buffer Visible { uint index[]; } visible;
 layout(set = 1, binding = 0) uniform View { vec4 viewport; } view;
 
 layout(location = 0) out vec4 vColor;
@@ -72,7 +136,10 @@ const vec2 CORNERS[6] = vec2[6](
 );
 
 void main() {
-    Instance self = instances.item[gl_InstanceIndex + int(view.viewport.z)];
+    // The cull compacted the survivors, so this walks the visible list rather
+    // than the instance array.
+    uint slot = visible.index[gl_InstanceIndex];
+    Instance self = instances.item[slot];
     mat2 basis = mat2(self.xform.x, self.xform.y, self.xform.z, self.xform.w);
     vec2 corner = CORNERS[gl_VertexIndex];
     vec2 world = self.origin.xy + basis * corner;
@@ -133,6 +200,11 @@ local record Renderer
     dropped: integer
     --- Instances the last sync actually rewrote. Zero on a still frame.
     rewritten: integer
+    _reset: ComputePipeline
+    _cull: ComputePipeline
+    _visible: Buffer
+    _drawArgs: Buffer
+    _cullUniform: loader.CArray
     _device: loader.CPtr
     _view: loader.CArray
     _lights: {Deferred.Light}
@@ -344,24 +416,39 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
     self._whiteV1 = white.v1
 
     self.instances = Buffer.create(device, {
-        usage = { "storage" },
+        usage = { "storage", "computeRead" },
         size = self.capacity * INSTANCE_BYTES,
     })
+    self._visible = Buffer.create(device, {
+        usage = { "storage", "computeWrite" },
+        size = self.capacity * 4,
+    })
+    self._drawArgs = Buffer.create(device, {
+        usage = { "indirect", "computeWrite" },
+        size = 16,
+    })
+    self._cullUniform = loader.newArray("float[4]")
+
+    self._reset = ComputePipeline.fromGLSL(device, RESET_COMPUTE,
+        { name = "renderer.reset" })
+    self._cull = ComputePipeline.fromGLSL(device, CULL_COMPUTE,
+        { name = "renderer.cull" })
 
     self.deferred = Deferred.create(device, swapchainFormat, {
         ambient = options.ambient,
         geometry = function(context: Deferred.PassContext)
             if self.count == 0 then return end
             context.pass:bindPipeline(self.pipeline.handle)
-            context.pass:bindVertexStorageBuffers(0, { self.instances.handle })
 
             self._view[0] = context.width
             self._view[1] = context.height
-            self._view[2] = 0
             context.pass:pushVertexUniform(0, self._view, 16)
+            context.pass:bindVertexStorageBuffers(0,
+                { self.instances.handle, self._visible.handle })
             context.pass:bindTextures(0, { self.images.handle }, self.sampler.handle)
-            -- One draw for the scene: the texture is a per-instance layer.
-            context.pass:draw(6, self.count)
+            -- One draw for the scene, with its instance count decided by the
+            -- cull rather than by anything here.
+            context.pass:drawIndirect(self._drawArgs.handle, 0, 1)
         end,
     })
 
@@ -426,9 +513,38 @@ function Renderer:install(world: tecs.World)
     })
 end
 
---- Uploads what the sync produced and runs the pipeline for one frame.
+--- Uploads what the sync produced, culls, and runs the pipeline.
+---
+--- The cull runs on the frame's command buffer, after the upload and before
+--- the passes that consume it, so SDL orders all three without anything here
+--- having to wait.
 function Renderer:render(frame: Frame)
     self.instances:flush(frame.commandBuffer)
+
+    if self.count > 0 then
+        -- The counter must be zero before any invocation accumulates into it,
+        -- and invocations within a dispatch have no ordering against each
+        -- other, so the reset is its own pass.
+        local clear = ComputePass.begin(frame.commandBuffer,
+            { self._drawArgs.handle })
+        clear:bindPipeline(self._reset.handle)
+        clear:dispatch(1)
+        clear:finish()
+
+        self._cullUniform[0] = frame.width
+        self._cullUniform[1] = frame.height
+        self._cullUniform[2] = self.count
+
+        local cull = ComputePass.begin(frame.commandBuffer,
+            { self._drawArgs.handle, self._visible.handle })
+        cull:bindPipeline(self._cull.handle)
+        cull:bindStorageBuffers(0, { self.instances.handle })
+        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0,
+            self._cullUniform, 16)
+        cull:dispatch(math.ceil(self.count / self._cull.threadCount[1]))
+        cull:finish()
+    end
+
     self.deferred:render(frame)
 end
 
@@ -441,6 +557,10 @@ function Renderer:destroy()
     self.instances:destroy()
     self.sampler:destroy()
     self.images:destroy()
+    self._visible:destroy()
+    self._drawArgs:destroy()
+    self._reset:destroy()
+    self._cull:destroy()
 end
 
 return Renderer

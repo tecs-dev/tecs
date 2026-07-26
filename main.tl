@@ -16,6 +16,10 @@ local PointLight <const> = tecs2d.components.PointLight
 local Renderable <const> = tecs2d.components.Renderable
 
 local COUNT <const> = math.floor(tonumber(os.getenv("TECS2D_INSTANCES")) or 4000)
+
+--- How far the field spreads relative to the window. Above one, most of the
+--- world sits outside the view, which is the case culling exists for.
+local WORLD <const> = tonumber(os.getenv("TECS2D_WORLD")) or 1.0
 local LIGHTS <const> = 3
 
 --- Seeds a sunflower spiral of renderable quads.
@@ -28,7 +32,7 @@ local LIGHTS <const> = 3
 local function spawnField(world: tecs.World, width: number, height: number)
     local centreX = width * 0.5
     local centreY = height * 0.5
-    local extent = math.min(width, height) * 0.46
+    local extent = math.min(width, height) * 0.46 * WORLD
     local golden <const> = 2.39996
 
     world:batchSpawn(COUNT, { Transform2D, Tint, Renderable },

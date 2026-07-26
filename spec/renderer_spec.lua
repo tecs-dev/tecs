@@ -395,6 +395,63 @@ describe("ecs.Renderer", function()
         renderer:destroy()
     end)
 
+    it("culls geometry outside the view", function()
+        -- Nothing here tells the CPU what survived: the compute pass writes
+        -- the instance count into the draw arguments. So the check is what
+        -- reaches the screen, not a number this side could have got wrong.
+        local world, renderer = newScene()
+
+        -- Well off the right edge, and large enough that a failed cull would
+        -- be unmistakable if it were drawn at the origin instead.
+        world:spawn(
+            Transform2D(SIZE * 8, SIZE / 2, 0, SIZE, SIZE),
+            Tint(1.0, 0.0, 0.0, 1.0),
+            Renderable()
+        )
+
+        local pixels = frameOnce(world, renderer)
+        assert.are.equal(1, renderer.count, "it is still a resident instance")
+        assert.are.equal(0, screen:getPixel(pixels, SIZE / 2, SIZE / 2).r,
+            "but nothing offscreen should reach the target")
+        renderer:destroy()
+    end)
+
+    it("keeps geometry that straddles the edge", function()
+        -- A quad half outside must still draw. Culling on centre alone would
+        -- pop things out at the border, which reads as flicker rather than as
+        -- a culling bug.
+        local world, renderer = newScene()
+        world:spawn(
+            Transform2D(0, SIZE / 2, 0, SIZE * 0.8, SIZE * 0.8),
+            Tint(0.0, 1.0, 0.0, 1.0),
+            Renderable()
+        )
+
+        local pixels = frameOnce(world, renderer)
+        assert.are.equal(255, screen:getPixel(pixels, 2, SIZE / 2).g,
+            "the visible part of a straddling quad must survive the cull")
+        renderer:destroy()
+    end)
+
+    it("draws only the survivors when the view is crowded", function()
+        local world, renderer = newScene()
+        -- One on screen, three far outside in different directions.
+        world:spawn(Transform2D(SIZE / 2, SIZE / 2, 0, SIZE, SIZE),
+            Tint(0.0, 0.0, 1.0, 1.0), Renderable())
+        world:spawn(Transform2D(-SIZE * 8, SIZE / 2, 0, 4, 4),
+            Tint(1, 1, 1, 1), Renderable())
+        world:spawn(Transform2D(SIZE / 2, -SIZE * 8, 0, 4, 4),
+            Tint(1, 1, 1, 1), Renderable())
+        world:spawn(Transform2D(SIZE / 2, SIZE * 8, 0, 4, 4),
+            Tint(1, 1, 1, 1), Renderable())
+
+        local pixels = frameOnce(world, renderer)
+        assert.are.equal(4, renderer.count, "all four are resident")
+        assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, SIZE / 2).b,
+            "the one in view draws")
+        renderer:destroy()
+    end)
+
     it("drops rows past capacity rather than overrunning the buffer", function()
         local world = tecs.newWorld()
         local renderer = Renderer.create(device.handle, FORMAT,

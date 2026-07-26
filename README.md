@@ -95,17 +95,23 @@ decides whether a large world is affordable, and most frames change very
 little. A still scene resyncs nothing at any size:
 
 ```
- entities    spawn     frame     resynced
- ─────────   ───────   ───────   ────────
- 500,000       15 ms    7.8 ms          0
- 1,000,000     30 ms   15.6 ms          0
- 2,000,000     62 ms   32.3 ms          0
- 4,000,000    128 ms   72.5 ms          0
+ 4,000,000 entities, static      frame
+ ──────────────────────────────  ────────
+ world the size of the view      80.1 ms
+ world 4x the view               21.1 ms
+ world 8x the view               11.7 ms
+ world 16x the view               7.0 ms
 ```
 
 Four million is the ECS's ceiling: an entity id packs its slot into 22 bits.
-The frame cost there is the GPU rasterising four million overlapping quads
-with no frustum culling, which is a worst case rather than a workload.
+
+What is drawn is decided on the GPU. A compute pass tests each instance against
+the view, compacts the survivors into an index list, and writes the draw
+arguments, so the draw touches only what is visible and the CPU never learns
+how many that was. The first row above is the case the cull cannot help with,
+where the whole world is on screen; there it costs about a sixth of a frame
+for nothing. Every other row is what a world larger than its window looks
+like.
 
 Populate with `world:batchSpawn`, not a spawn per entity. A single spawn
 resolves an archetype, allocates an id, and moves a row every time it is
