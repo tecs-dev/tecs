@@ -49,6 +49,10 @@ local SPAWN_COUNT <const> = getSpawnCount()
 local WARMUP <const> = envNum("BENCH_WARMUP", 2.0)
 local MEASURE <const> = envNum("BENCH_MEASURE", 5.0)
 local MOVE <const> = envNum("BENCH_MOVE", 1) ~= 0
+local INTERPOLATE <const> =
+    envNum("BENCH_INTERPOLATE", 0) ~= 0
+local FIXED_UPDATE <const> =
+    envNum("BENCH_FIXED", INTERPOLATE and 1 or 0) ~= 0
 
 -- Split: first VIS sprites are visible, the rest are parked off-screen.
 -- BENCH_SPLIT=0 puts all sprites in the visible grid (no culled half).
@@ -137,7 +141,9 @@ local function benchPlugin(world: tecs.World)
         local benchQuery = world:query({include = {SpriteComponent}})
         world:addSystem({
             name = "bench.Move",
-            phase = tecs.phases.Update,
+            phase = FIXED_UPDATE
+                and tecs.phases.FixedUpdate
+                or tecs.phases.Update,
             run = function(dt: number)
                 -- Every sprite orbits at the same angular rate, so the
                 -- per-frame rotation is shared: compute it once, then rotate
@@ -212,6 +218,7 @@ love.run = tecs2d.run({
     render = {
         virtualHeight = math.floor(SCREEN_H),
         lightingMode = LIGHTING,
+        disableInterpolation = not INTERPOLATE,
         layers = {
             [1] = { name = "background" },
             [2] = { name = "sprites" },

@@ -1,5 +1,6 @@
 local types <const> = require("tecs.types")
 local phases <const> = require("tecs.internal.phases")
+local fixedtracking <const> = require("tecs.internal.fixedtracking")
 local EMPTY <const> = require("tecs.utils.pool").EMPTY
 
 local table_new <const> = require("table.new") as function(integer, integer): {any}
@@ -322,9 +323,11 @@ local function runFixedLoop(self: PipelineImpl, dt: number, world: World)
 
     repeat
         iterations = iterations + 1
+        fixedtracking.beginStep(world)
         if hasWork then
             runGroup(fixedGroup, fixedTimestep, world)
         end
+        fixedtracking.finishStep(world)
         self.fixedAccumulator = self.fixedAccumulator - fixedTimestep
         if self.fixedAccumulator < fixedTimestep or iterations >= MAX_ITERATIONS then
             break

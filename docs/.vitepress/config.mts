@@ -161,6 +161,7 @@ export default defineConfig({
             collapsed: true,
             items: [
               { text: 'Overview', link: '/tecs2d/rendering/' },
+              { text: 'Transform Interpolation', link: '/tecs2d/rendering/interpolation' },
               { text: 'Camera', link: '/tecs2d/rendering/camera' },
               { text: 'Images', link: '/tecs2d/rendering/images' },
               { text: 'Shapes', link: '/tecs2d/rendering/shapes' },
@@ -247,7 +248,6 @@ export default defineConfig({
               { text: 'Overview', link: '/tecs2d/physics/' },
               { text: 'Components', link: '/tecs2d/physics/components' },
               { text: 'Collision Events', link: '/tecs2d/physics/collisions' },
-              { text: 'Transform Smoothing', link: '/tecs2d/physics/smoothing' },
             ]
           },
           { text: 'Tween', link: '/tecs2d/tween' },

@@ -372,7 +372,7 @@ end
 - [Love events](/tecs2d/events) - typed, routable keyboard, mouse, touch, gamepad, window, and system events
 - [Input](/tecs2d/input/) - keyboard, mouse, and gamepad polling with layers, latches, and ownership
 - [Controllers](/tecs2d/input/controller/) - rebindable, multi-player controls across input devices
-- [Physics](/tecs2d/physics/) - Box2D bodies, forces, collision events, filtering, and smoothing
+- [Physics](/tecs2d/physics/) - Box2D bodies, forces, collision events, filtering, and transform synchronization
 - [Tweens](/tecs2d/tween) - serializable timelines with easing, channels, events, and presets
 - [Audio](/tecs2d/audio/) - spatial sound, groups, fades, effects, cooldowns, and voice limiting
 - [UI layout](/tecs2d/rendering/ui/) - anchors, flow, clipping, scrolling, and auto-sizing
@@ -386,6 +386,7 @@ end
 **Rendering**
 
 - [Render pipeline](/tecs2d/rendering/) - deferred GPU rendering with instancing, compute culling, and indirect drawing
+- [Transform interpolation](/tecs2d/rendering/interpolation) - GPU smoothing between fixed simulation samples
 - [Camera](/tecs2d/rendering/camera) - pixel-perfect scaling, smooth following, bounds, and multiple cameras
 - [Sprites and animation](/tecs2d/rendering/sprites/) - sheets, frame tags, pivots, tiling, and collision slices
 - [Shapes and meshes](/tecs2d/rendering/shapes) - circles, ellipses, rectangles, arcs, lines, and custom geometry

@@ -1,6 +1,7 @@
 local types <const> = require("tecs.types")
 local internal <const> = require("tecs.internal.types")
 local behavior <const> = require("tecs.internal.behavior")
+local fixedtracking <const> = require("tecs.internal.fixedtracking")
 local ffi <const> = require("tecs.internal.ffi")
 local Bitset <const> = require("tecs.utils.Bitset")
 local RelationshipStore <const> = require("tecs.internal.RelationshipStore")
@@ -49,6 +50,7 @@ local record Archetype is ArchetypeInternal
     _relInstancesByContainer: {Component: {Component}}
 
     _dirtySet: {Archetype: boolean}
+    _fixedTracking: boolean
 
     movePlansOut: {ArchetypeInternal: any}
 
@@ -150,6 +152,9 @@ end
 function Archetype:getMut<T is Component>(component: T): {T}
     local column = rawget(self.columns, component)
     if column then
+        if self._fixedTracking then
+            fixedtracking.mark(self, component)
+        end
         local idx = self.columnIndexByComponent[component]
         if idx and not self._componentDirty:get(idx) then
             self._componentDirty:set(idx)
@@ -660,6 +665,9 @@ end
 function Archetype:markComponentDirty(component: Component)
     local idx = self.columnIndexByComponent[component]
     if not idx then return end
+    if self._fixedTracking then
+        fixedtracking.mark(self, component)
+    end
     if not self._componentDirty:get(idx) then
         self._componentDirty:set(idx)
         self._dirtySet[self] = true
@@ -667,6 +675,9 @@ function Archetype:markComponentDirty(component: Component)
 end
 
 function Archetype:markAllComponentsDirty()
+    if self._fixedTracking then
+        fixedtracking.markAll(self)
+    end
     -- Runs per swap-pop and per move-in; after the first call in a frame
     -- every later call is a guaranteed no-op, so short-circuit on a flag
     -- instead of re-walking the bitset per entity.
@@ -868,6 +879,7 @@ function Archetype.new(
         _relInstancesByContainer = relInstancesByContainer,
         _componentDirty = Bitset.new(columnsCount + 1),
         _dirtySet = dirtySet as {Archetype: boolean},
+        _fixedTracking = fixedtracking.enabled(dirtySet as table),
         dirtyQueuedEpoch = 0,
     }
 

@@ -21,6 +21,7 @@
 
 local tecs <const> = require("tecs")
 local tecsInternal <const> = require("tecs.internal.types")
+local fixedtracking <const> = require("tecs.internal.fixedtracking")
 local archetyperegistry <const> = require("tecs2d.gfx.internal.archetyperegistry")
 local shadowstate <const> = require("tecs2d.gfx.internal.gpu.shadowstate")
 local shadowrenderstate <const> = require("tecs2d.gfx.internal.gpu.shadowrenderstate")
@@ -64,6 +65,8 @@ local record shadow_setup
         --- shadow flush after sync systems that write to the canonical
         --- columns (e.g. sprite.GPUSync).
         uploadAfter: {string}
+        --- Do not retain consecutive fixed-step Transform samples.
+        disableInterpolation: boolean
     end
 
     record Context
@@ -121,6 +124,10 @@ function shadow_setup.register(world: tecs.World, config: shadow_setup.Config): 
     local bucketMarkers <const> = config.bucketMarkers
     local specs <const> = buildSpecs(sprite, config.optional)
 
+    if not config.disableInterpolation then
+        fixedtracking.track(world, Transform)
+    end
+
     -- Back identity-layout columns (Transform, SpriteData, ...) with ByteData
     -- so the shadow path uploads them straight to their SSBO. Install-time, so
     -- columns are ByteData from first spawn.
@@ -137,6 +144,23 @@ function shadow_setup.register(world: tecs.World, config: shadow_setup.Config): 
             return shadowstate.new(arch, specs)
         end,
     })
+
+    local lastPresentedStep = fixedtracking.currentStep(world)
+    if not config.disableInterpolation then
+        fixedtracking.beforeStep(world, function()
+            if fixedtracking.currentStep(world) ~= lastPresentedStep + 1 then
+                return
+            end
+            for _, stateAny in shadowRegistry:archetypes() do
+                local state = stateAny as shadowstate.ArchetypeState
+                if not state.destroyed then
+                    -- Variable-rate writes before the fixed loop snap the
+                    -- presentation baseline once before catch-up starts.
+                    state.shadows:flushCurrent(Transform)
+                end
+            end
+        end)
+    end
 
     world:addSystem({
         name = config.renderStateSystemName,
@@ -162,6 +186,29 @@ function shadow_setup.register(world: tecs.World, config: shadow_setup.Config): 
         phase = tecs.phases.PreRender,
         after = uploadAfter,
         run = function()
+            if not config.disableInterpolation then
+                local currentStep = fixedtracking.currentStep(world)
+                local elapsedSteps = currentStep - lastPresentedStep
+                if elapsedSteps == 1 then
+                    for arch, stateAny in shadowRegistry:archetypes() do
+                        if fixedtracking.wroteThisStep(
+                            world,
+                            arch,
+                            Transform
+                        ) then
+                            local state =
+                                stateAny as shadowstate.ArchetypeState
+                            if not state.destroyed then
+                                state.shadows:flushFixed(
+                                    Transform,
+                                    currentStep
+                                )
+                            end
+                        end
+                    end
+                end
+                lastPresentedStep = currentStep
+            end
             shadowRegistry:flushAll()
         end,
     })

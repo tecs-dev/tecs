@@ -109,10 +109,6 @@ local record physics_components
         shapeList: {love.physics.Shape}  -- for multi-shape colliders
         -- Multi-shape config (stored for body creation)
         shapes: {ShapeConfig}
-        -- Interpolation state for smooth rendering between fixed timesteps
-        prevX: number
-        prevY: number
-        prevRotation: number
         -- Snapshot-restored runtime velocity. Box2D bodies are recreated
         -- after load, so these fields bridge saved body state into
         -- physics.createBodies.
@@ -196,9 +192,6 @@ tecs.newComponent({
             shape = nil,
             shapeList = nil,
             shapes = config.shapes,
-            prevX = 0,
-            prevY = 0,
-            prevRotation = 0,
             runtimeVx = (config as {string: number}).runtimeVx or 0,
             runtimeVy = (config as {string: number}).runtimeVy or 0,
             runtimeAngularVelocity = (config as {string: number}).runtimeAngularVelocity or 0,
@@ -426,12 +419,6 @@ tecs.newEvent(physics_events.PostSolve)
 -------------------------------------------------------------------------------
 
 local record physics is tecs.Key<physics.PhysicsState>
-    --- Transform synchronization mode used between fixed physics steps.
-    enum SmoothingMode
-        "interpolate"
-        "extrapolate"
-        "disabled"
-    end
     --- Collision geometry component.
     Collider: physics_components.Collider
     --- Dynamic-body configuration component.
@@ -467,8 +454,6 @@ local record physics is tecs.Key<physics.PhysicsState>
         contactFilter: ContactFilterFn
         --- Default for RigidBody.fixedRotation when not specified. Defaults to false.
         defaultFixedRotation: boolean
-        --- Transform smoothing mode: "interpolate" (default), "extrapolate", or "disabled" (direct).
-        smoothing: SmoothingMode
     end
 
     record PhysicsState
@@ -476,8 +461,6 @@ local record physics is tecs.Key<physics.PhysicsState>
         world: love.physics.World
         --- Default used for RigidBody values that omit fixedRotation.
         defaultFixedRotation: boolean
-        --- Active transform smoothing mode.
-        smoothing: SmoothingMode
     end
 
     --- Create a physics plugin for a Box2D world.
@@ -544,17 +527,10 @@ function physics.new(config: physics.Config): tecs.Plugin
         defaultFixedRotation = config.defaultFixedRotation
     end
     local contactFilterFn = config.contactFilter or defaultContactFilter
-    local smoothing = config.smoothing == nil and "interpolate" or config.smoothing
-    if smoothing ~= "interpolate" and smoothing ~= "extrapolate" and smoothing ~= "disabled" then
-        error("physics.new: invalid smoothing mode '" .. tostring(smoothing)
-            .. "' (expected 'interpolate', 'extrapolate', or 'disabled')")
-    end
-
     return function(world: World)
         local state: physics.PhysicsState = {
             world = physicsWorld,
-            defaultFixedRotation = defaultFixedRotation,
-            smoothing = smoothing
+            defaultFixedRotation = defaultFixedRotation
         }
         world.resources[physics] = state
 
@@ -864,9 +840,6 @@ function physics.new(config: physics.Config): tecs.Plugin
                             end
 
                             c.body = body
-                            c.prevX = t.x
-                            c.prevY = t.y
-                            c.prevRotation = t.rotation
                         end
                     end
                 end
@@ -890,9 +863,6 @@ function physics.new(config: physics.Config): tecs.Plugin
                             body:setAngle(t.rotation)
                             setupColliderShapes(body, c, t, entityId, c.restitution, c.friction, 1.0)
                             c.body = body
-                            c.prevX = t.x
-                            c.prevY = t.y
-                            c.prevRotation = t.rotation
                         end
                     end
                 end
@@ -913,53 +883,14 @@ function physics.new(config: physics.Config): tecs.Plugin
         })
 
         -----------------------------------------------------------------------
-        -- System: Store previous positions before physics step (for interpolation)
+        -- System: Apply authoritative transforms after each physics step
         -----------------------------------------------------------------------
         world:addSystem({
-            name = "physics.storePrevious",
-            phase = tecs.phases.FixedPreUpdate,
-            after = {"physics.createBodies"},
-            runIf = function(): boolean
-                return state.smoothing == "interpolate"
-            end,
-            run = function(_dt: number)
-                for archetype, len in colliderQuery:iter() do
-                    local colliders = archetype:get(Collider)
-                    local mutColliders: {physics_components.Collider} = nil
-
-                    for i = 1, len do
-                        local c = colliders[i]
-                        if c.body then
-                            local x, y = c.body:getPosition()
-                            local rotation = c.body:getAngle()
-                            if c.prevX ~= x or c.prevY ~= y or c.prevRotation ~= rotation then
-                                if not mutColliders then
-                                    mutColliders = archetype:getMut(Collider)
-                                end
-                                local mut = mutColliders[i]
-                                mut.prevX = x
-                                mut.prevY = y
-                                mut.prevRotation = rotation
-                            end
-                        end
-                    end
-                end
-            end
-        })
-
-        -----------------------------------------------------------------------
-        -- System: Apply transform from physics with optional smoothing
-        -----------------------------------------------------------------------
-        world:addSystem({
-            -- Physics writes back to Transform here. Runs in PostUpdate
-            -- (before PreRender) so the dirty-gated renderer shadow-upload
-            -- systems see the freshly-marked-dirty Transform when they flush.
+            -- Keep Transform at the latest completed fixed-step pose. Visual
+            -- interpolation belongs to render consumers, not physics.
             name = "physics.applyTransform",
-            phase = tecs.phases.PostUpdate,
+            phase = tecs.phases.FixedPostUpdate,
             run = function(_dt: number)
-                local smoothingMode = state.smoothing
-                local _, remainingTime, alpha = world:getFixedTiming()
-
                 for archetype, len in colliderQuery:iter() do
                     local transforms = archetype:get(Transform)
                     local mutTransforms: {tecs.builtins.Transform} = nil
@@ -969,29 +900,11 @@ function physics.new(config: physics.Config): tecs.Plugin
                         local c = colliders[i]
                         if c.body then
                             local t = transforms[i]
-                            local bx, by = c.body:getPosition()
-                            local brot = c.body:getAngle()
-                            local x, y, rotation = bx, by, brot
-
-                            if smoothingMode == "interpolate" then
-                                -- Interpolate: blend previous → current (smooth, 1 frame behind)
-                                x = c.prevX + (bx - c.prevX) * alpha
-                                y = c.prevY + (by - c.prevY) * alpha
-                                rotation = c.prevRotation + (brot - c.prevRotation) * alpha
-                            elseif smoothingMode == "extrapolate" then
-                                -- Extrapolate: predict beyond current using velocity (responsive, can overshoot)
-                                local vx, vy = c.body:getLinearVelocity()
-                                local vrot = c.body:getAngularVelocity()
-                                x = bx + vx * remainingTime
-                                y = by + vy * remainingTime
-                                rotation = brot + vrot * remainingTime
-                            elseif smoothingMode == "disabled" then
-                                -- Direct: no smoothing
-                                x, y, rotation = bx, by, brot
-                            end
+                            local x, y = c.body:getPosition()
+                            local rotation = c.body:getAngle()
 
                             -- Static and sleeping bodies often produce the
-                            -- same visual transform for thousands of frames.
+                            -- same transform for thousands of fixed steps.
                             -- Mark Transform dirty only when physics actually
                             -- changes one of the synchronized fields.
                             if t.x ~= x or t.y ~= y or t.rotation ~= rotation then

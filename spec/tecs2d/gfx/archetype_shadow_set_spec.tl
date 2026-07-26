@@ -9,6 +9,7 @@ rawset(_G, "love", love2d_mock)
 
 local C <const> = require("ffi")
 local tecs <const> = require("tecs")
+local fixedtracking <const> = require("tecs.internal.fixedtracking")
 local archetypeshadowset <const> = require("tecs2d.gfx.internal.gpu.archetypeshadowset")
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
 
@@ -213,5 +214,131 @@ describe("archetypeshadowset", function()
         local shadowPtr = (mb as {string:any}).shadowPtr as C.CData
         local shadow = C.cast("Std430Transform*", shadowPtr) as {integer: any}
         assert.equals(99.0, shadow[1].x, "value mutation must propagate to shadow via _dirtyBits scan")
+    end)
+
+    it("ping-pongs once at presentation after one fixed iteration", function()
+        local world = tecs.newWorld({timestep = 0.01})
+        fixedtracking.track(world, Transform)
+        world:spawn(Transform(1, 2, 0))
+
+        local arch = findArchetype(world, {Transform})
+        local set = archetypeshadowset.new(arch, {
+            [Transform] = std430.layouts.Transform,
+        })
+        set:flush()
+
+        local transformBuffer = set:get(Transform)
+        local initialGpuBuffer = transformBuffer.gpuBuffer
+        local lastPresentedStep = fixedtracking.currentStep(world)
+        fixedtracking.beforeStep(world, function()
+            if fixedtracking.currentStep(world) ==
+                    lastPresentedStep + 1 then
+                set:flushCurrent(Transform)
+            end
+        end)
+        world:addSystem({
+            phase = tecs.phases.FixedUpdate,
+            run = function()
+                arch:getMut(Transform)[1].x = 9
+            end,
+        })
+        -- A variable-rate mutation before the fixed loop becomes the
+        -- presentation baseline rather than being interpolated as part of
+        -- the fixed change.
+        world:getMut(1, Transform).x = 5
+        -- Exercise the same PreRender flush the renderer uses. It must
+        -- rotate and upload the final sample only once.
+        world:addSystem({
+            phase = tecs.phases.PreRender,
+            run = function()
+                local currentStep = fixedtracking.currentStep(world)
+                if currentStep - lastPresentedStep == 1
+                        and fixedtracking.wroteThisStep(
+                            world,
+                            arch,
+                            Transform
+                        ) then
+                    set:flushFixed(Transform, currentStep)
+                end
+                lastPresentedStep = currentStep
+                set:flush()
+            end,
+        })
+
+        world:update(0.01)
+
+        assert.is_not_equal(initialGpuBuffer, transformBuffer.gpuBuffer)
+        assert.is_equal(
+            initialGpuBuffer,
+            transformBuffer.previousGpuBuffer
+        )
+        assert.equals(
+            2,
+            #((initialGpuBuffer as {string:any})._writes as {any}),
+            "the pre-fixed variable value must upload as the snap baseline"
+        )
+        assert.equals(1, transformBuffer.interpolationStep)
+        local active = transformBuffer.gpuBuffer as {string:any}
+        assert.equals(1, #(active._writes as {any}),
+            "PreRender must not duplicate the fixed-step upload")
+    end)
+
+    it("snaps with one upload after multiple catch-up iterations", function()
+        local world = tecs.newWorld({timestep = 0.01})
+        fixedtracking.track(world, Transform)
+        world:spawn(Transform(1, 2, 0))
+
+        local arch = findArchetype(world, {Transform})
+        local set = archetypeshadowset.new(arch, {
+            [Transform] = std430.layouts.Transform,
+        })
+        set:flush()
+
+        local transformBuffer = set:get(Transform)
+        local initialGpuBuffer = transformBuffer.gpuBuffer
+        local writesBefore =
+            #((initialGpuBuffer as {string:any})._writes as {any})
+        local lastPresentedStep = fixedtracking.currentStep(world)
+        fixedtracking.beforeStep(world, function()
+            if fixedtracking.currentStep(world) ==
+                    lastPresentedStep + 1 then
+                set:flushCurrent(Transform)
+            end
+        end)
+        world:addSystem({
+            phase = tecs.phases.FixedUpdate,
+            run = function()
+                local transform = arch:getMut(Transform)
+                transform[1].x = transform[1].x + 1
+            end,
+        })
+        world:addSystem({
+            phase = tecs.phases.PreRender,
+            run = function()
+                local currentStep = fixedtracking.currentStep(world)
+                if currentStep - lastPresentedStep == 1
+                        and fixedtracking.wroteThisStep(
+                            world,
+                            arch,
+                            Transform
+                        ) then
+                    set:flushFixed(Transform, currentStep)
+                end
+                lastPresentedStep = currentStep
+                set:flush()
+            end,
+        })
+
+        world:update(0.025)
+
+        assert.is_equal(initialGpuBuffer, transformBuffer.gpuBuffer)
+        assert.is_nil(transformBuffer.previousGpuBuffer)
+        assert.equals(-1, transformBuffer.interpolationStep)
+        assert.equals(
+            writesBefore + 1,
+            #((initialGpuBuffer as {string:any})._writes as {any}),
+            "catch-up must upload only the final fixed sample"
+        )
+        assert.equals(3, arch:get(Transform)[1].x)
     end)
 end)

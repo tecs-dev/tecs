@@ -135,6 +135,11 @@ local record pipeline
         --- Custom shape plugins can use any string key.
         sizeHints: {string: integer}
 
+        --- Disable GPU presentation interpolation between fixed-step
+        --- Transform samples. Currently applies to sprite position and
+        --- rotation. Interpolation is enabled by default.
+        disableInterpolation: boolean
+
         --- The ambient light color as RGB. Defaults to {1.0, 1.0, 1.0} (full brightness).
         ambientLight: {number, number, number}
 
@@ -408,6 +413,7 @@ function pipeline.newPipeline(config: pipeline.RenderConfig): Pipeline
 
     local renderer = gpuModule.new({
         sizeHints = config.sizeHints,
+        disableInterpolation = config.disableInterpolation == true,
         maxLayers = MAX_LAYERS,
         maxZ = 1000,
         maxY = 100000,

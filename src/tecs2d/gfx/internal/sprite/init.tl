@@ -1187,6 +1187,8 @@ function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(worl
                 renderStateSystemName = "sprite.ShadowRenderState",
                 uploadSystemName = "sprite.ShadowUpload",
                 uploadAfter = {"sprite.GPUSync"},
+                disableInterpolation =
+                    gpuRenderer.config.disableInterpolation == true,
             })
 
             -- bucketProvider returns the arraySync object cast to

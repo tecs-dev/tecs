@@ -15,6 +15,7 @@
 
 local tecs <const> = require("tecs")
 local tecsInternal <const> = require("tecs.internal.types")
+local fixedtracking <const> = require("tecs.internal.fixedtracking")
 local archetyperegistry <const> = require("tecs2d.gfx.internal.archetyperegistry")
 local shadowstate <const> = require("tecs2d.gfx.internal.gpu.shadowstate")
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
@@ -156,6 +157,8 @@ function shadow_dispatch.new(config: shadow_dispatch.Config): shadow_dispatch.Co
         if bindGlobals then
             bindGlobals(shader, renderer, cullParamsBuffer)
         end
+        local currentFixedStep = fixedtracking.currentStep(registry.world)
+        local _, _, interpolationAlpha = registry.world:getFixedTiming()
 
         for arch, stateAny in registry:archetypes() do
             local state = stateAny as shadowstate.ArchetypeState
@@ -179,6 +182,21 @@ function shadow_dispatch.new(config: shadow_dispatch.Config): shadow_dispatch.Co
             local transformBuf = shadows:get(Transform)
             if not transformBuf then goto continue end
             shader:send("TransformInput", (transformBuf as {string:any}).gpuBuffer as love.graphics.Buffer)
+            if shader:hasUniform("PreviousTransformInput") then
+                local previous = transformBuf.previousGpuBuffer
+                    or transformBuf.gpuBuffer
+                shader:send("PreviousTransformInput", previous)
+                local active = transformBuf.previousGpuBuffer ~= nil
+                    and transformBuf.interpolationStep == currentFixedStep
+                shader:send(
+                    "TransformInterpolationActive",
+                    active and 1 or 0
+                )
+                shader:send(
+                    "TransformInterpolationAlpha",
+                    interpolationAlpha
+                )
+            end
 
             local spriteBuf = shadows:get(spriteComponent)
             if not spriteBuf then goto continue end

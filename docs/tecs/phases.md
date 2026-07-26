@@ -59,6 +59,11 @@ One-time cleanup phases run when `world:shutdown()` is called.
 - **Variable timestep phases** (`Update` and related): used for visual presentation, animations, camera smoothing,
   UI effects, and generally anything else that looks or feels better the faster the computer.
 
+Tecs2D's renderer can [interpolate supported Transforms](/tecs2d/rendering/interpolation)
+written in fixed phases. Keep the authoritative gameplay write in the fixed
+loop; interpolation does not require a second variable-rate presentation
+system.
+
 ## Using phases
 
 Access phases through `tecs.phases`:

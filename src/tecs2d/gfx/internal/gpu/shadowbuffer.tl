@@ -33,6 +33,9 @@ local record shadow_buffer
         shadowPtr: C.CData
         --- The std430-shaped `love.graphics.Buffer`.
         gpuBuffer: love.graphics.Buffer
+        --- Prior fixed-step sample. Allocated lazily on the first
+        --- fixed-step rotation, so non-interpolated columns pay no VRAM.
+        previousGpuBuffer: love.graphics.Buffer
         --- Row capacity (also tracks `gpuBuffer` and `byteData` size).
         capacity: integer
         --- Bytes per std430 row.
@@ -41,11 +44,18 @@ local record shadow_buffer
         format: love.graphics.BufferFormat
         --- Translator from canonical FFI rows to std430 rows.
         translate: TranslateFn
+        hasUploaded: boolean
+        uploadedMutationVersion: integer
+        uploadedStructureVersion: integer
+        interpolationStep: integer
 
         --- Translate + upload a contiguous live row range in one shot.
         --- The component-dirty signal lives on the archetype; callers
         --- gate their flushRange invocations there.
-        flushRange: function(self, canonicalPtr: C.CData, rowCount: integer)
+        flushRange: function(self, canonicalPtr: C.CData, rowCount: integer, mutationVersion?: integer, structureVersion?: integer)
+        uploadByteData: function(self, byteData: love.data.ByteData, rowCount: integer, mutationVersion?: integer, structureVersion?: integer)
+        flushFixedRange: function(self, canonicalPtr: C.CData, rowCount: integer, mutationVersion: integer, structureVersion: integer, step: integer)
+        uploadFixedByteData: function(self, byteData: love.data.ByteData, rowCount: integer, mutationVersion: integer, structureVersion: integer, step: integer)
         grow: function(self, newCapacity: integer)
     end
 
@@ -99,11 +109,61 @@ function shadow_buffer.new(
         elementSize = elementSize,
         format = format,
         translate = translate,
+        previousGpuBuffer = nil,
+        hasUploaded = false,
+        uploadedMutationVersion = -1,
+        uploadedStructureVersion = -1,
+        interpolationStep = -1,
     }
     return setmetatable(self, SHADOW_BUFFER_MT)
 end
 
-function ShadowBuffer:flushRange(canonicalPtr: C.CData, rowCount: integer)
+local function upload(
+    self: shadow_buffer.ShadowBuffer,
+    byteData: love.data.ByteData,
+    rowCount: integer,
+    mutationVersion?: integer,
+    structureVersion?: integer
+)
+    self.gpuBuffer:setArrayData(byteData, 2, 1, rowCount)
+    self.hasUploaded = true
+    self.uploadedMutationVersion = mutationVersion or -1
+    self.uploadedStructureVersion = structureVersion or -1
+    self.interpolationStep = -1
+end
+
+local function rotate(self: shadow_buffer.ShadowBuffer)
+    local previous = self.previousGpuBuffer
+    if previous then
+        self.previousGpuBuffer = self.gpuBuffer
+        self.gpuBuffer = previous
+        return
+    end
+
+    self.previousGpuBuffer = self.gpuBuffer
+    self.gpuBuffer = lg.newBuffer(self.format, self.capacity, {
+        usage = "dynamic",
+        shaderstorage = true,
+    })
+end
+
+function ShadowBuffer:uploadByteData(
+    byteData: love.data.ByteData,
+    rowCount: integer,
+    mutationVersion?: integer,
+    structureVersion?: integer
+)
+    if rowCount <= 0 then return end
+    if rowCount > self.capacity then rowCount = self.capacity end
+    upload(self, byteData, rowCount, mutationVersion, structureVersion)
+end
+
+function ShadowBuffer:flushRange(
+    canonicalPtr: C.CData,
+    rowCount: integer,
+    mutationVersion?: integer,
+    structureVersion?: integer
+)
     if rowCount <= 0 then return end
     if rowCount > self.capacity then rowCount = self.capacity end
     -- Translate writes into shadow rows 1..rowCount (matches canonical
@@ -113,7 +173,61 @@ function ShadowBuffer:flushRange(canonicalPtr: C.CData, rowCount: integer)
     -- the upload to skip the padding row at byteData element 1 and
     -- start the GPU buffer at element 1 (GLSL index 0), so the cull
     -- shader can read `transforms[row]` with row=0..rowCount-1 directly.
-    self.gpuBuffer:setArrayData(self.byteData, 2, 1, rowCount)
+    upload(
+        self,
+        self.byteData,
+        rowCount,
+        mutationVersion,
+        structureVersion
+    )
+end
+
+function ShadowBuffer:uploadFixedByteData(
+    byteData: love.data.ByteData,
+    rowCount: integer,
+    mutationVersion: integer,
+    structureVersion: integer,
+    step: integer
+)
+    if rowCount <= 0 then return end
+    if rowCount > self.capacity then rowCount = self.capacity end
+    if not self.hasUploaded
+            or self.uploadedStructureVersion ~= structureVersion then
+        upload(
+            self,
+            byteData,
+            rowCount,
+            mutationVersion,
+            structureVersion
+        )
+        return
+    end
+
+    rotate(self)
+    self.gpuBuffer:setArrayData(byteData, 2, 1, rowCount)
+    self.hasUploaded = true
+    self.uploadedMutationVersion = mutationVersion
+    self.uploadedStructureVersion = structureVersion
+    self.interpolationStep = step
+end
+
+function ShadowBuffer:flushFixedRange(
+    canonicalPtr: C.CData,
+    rowCount: integer,
+    mutationVersion: integer,
+    structureVersion: integer,
+    step: integer
+)
+    if rowCount <= 0 then return end
+    if rowCount > self.capacity then rowCount = self.capacity end
+    self.translate(canonicalPtr, self.shadowPtr, 1, rowCount)
+    self:uploadFixedByteData(
+        self.byteData,
+        rowCount,
+        mutationVersion,
+        structureVersion,
+        step
+    )
 end
 
 function ShadowBuffer:grow(newCapacity: integer)
@@ -141,11 +255,19 @@ function ShadowBuffer:grow(newCapacity: integer)
 
     -- In-flight GPU work may still read the old buffer; defer release.
     retire.push(self.gpuBuffer)
+    if self.previousGpuBuffer then
+        retire.push(self.previousGpuBuffer)
+    end
 
     self.byteData = newByteData
     self.shadowPtr = newShadowPtr
     self.gpuBuffer = newGpuBuffer
+    self.previousGpuBuffer = nil
     self.capacity = newCapacity
+    self.hasUploaded = false
+    self.uploadedMutationVersion = -1
+    self.uploadedStructureVersion = -1
+    self.interpolationStep = -1
 end
 
 return shadow_buffer

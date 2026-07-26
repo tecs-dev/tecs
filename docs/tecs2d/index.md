@@ -107,6 +107,10 @@ The pure-ECS pieces (`World`, components, queries, systems) come from [Tecs](/te
 adds the engine layer: rendering, audio, input, and more. Projects created by
 `tecs new` include both layers automatically.
 
+The renderer [interpolates supported Transforms](/tecs2d/rendering/interpolation)
+between fixed updates by default, including sprites driven by physics. Game
+systems continue to write authoritative values only in the fixed loop.
+
 ### CLI commands
 
 The full reference lives in the [Tecs CLI section](/cli/).

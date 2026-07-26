@@ -6,7 +6,7 @@
 	example-physics example-physics-bench example-shape-bench example-sprite-bench \
 	example-sprite-onloop example-tiled example-transform-demo example-ui example-mesh-demo example-layer-fx \
 	example-camera-target example-material-demo example-camera-multi example-msdf-text example-tween-demo \
-	example-save-game \
+	example-save-game example-interpolation \
 	newrock test-rockspec typecheck rebuild help rockspecs docs docs-dev docs-debug \
 	docs-descriptions \
 	json-bench ecs-bench snapshot-bench bitset-bench download-love12 check-love12 \
@@ -381,7 +381,7 @@ test-rockspec: build
 # Example directories (explicit list for autocomplete)
 EXAMPLE_DIRS := examples/text-bench examples/sprite-collision examples/assets examples/audio \
                 examples/ball-bench examples/controller examples/lighting \
-                examples/orbiting-shapes examples/particles examples/physics \
+                examples/interpolation examples/orbiting-shapes examples/particles examples/physics \
                 examples/physics-bench examples/shape-bench examples/sprite-bench \
                 examples/camera-target examples/camera-multi examples/tiled examples/transform-demo examples/ui
 
@@ -428,6 +428,9 @@ example-controller: build $(LOVE12_BIN)
 
 example-lighting: build $(LOVE12_BIN)
 	@cd examples/lighting && $(TEAL_ENV) tl run shared/run.tl $(ENTITIES)
+
+example-interpolation: build $(LOVE12_BIN)
+	@cd examples/interpolation && $(TEAL_ENV) tl run shared/run.tl
 
 example-love-interop: build $(LOVE12_BIN)
 	@cd examples/love-interop && $(TEAL_ENV) tl run shared/run.tl
@@ -633,6 +636,7 @@ help:
 	@echo "  example-ball-bench          - Ball physics benchmark"
 	@echo "  example-controller          - Gamepad input demo"
 	@echo "  example-lighting            - Lighting & shadows stress test"
+	@echo "  example-interpolation       - GPU Transform interpolation comparison"
 	@echo "  example-love-interop        - GPU/CPU draw interleaving demo"
 	@echo "  example-orbiting-shapes     - Hierarchical transform demo"
 	@echo "  example-particles           - Particle effects demo"

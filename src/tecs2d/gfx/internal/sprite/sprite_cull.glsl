@@ -20,6 +20,31 @@
 
 // ---------- Shape-specific source SSBOs ----------
 
+layout(std430) readonly buffer PreviousTransformInput {
+    Std430Transform previousTransforms[];
+};
+uniform uint TransformInterpolationActive;
+uniform float TransformInterpolationAlpha;
+
+Std430Transform readTransform(uint row) {
+    Std430Transform current = transforms[row];
+    if (TransformInterpolationActive == 0u) return current;
+
+    Std430Transform previous = previousTransforms[row];
+    current.x = mix(previous.x, current.x, TransformInterpolationAlpha);
+    current.y = mix(previous.y, current.y, TransformInterpolationAlpha);
+
+    const float PI = 3.14159265358979323846;
+    const float TAU = 6.28318530717958647692;
+    float rotationDelta = mod(
+        current.rotation - previous.rotation + PI,
+        TAU
+    ) - PI;
+    current.rotation =
+        previous.rotation + rotationDelta * TransformInterpolationAlpha;
+    return current;
+}
+
 struct Std430Sprite {
     int   spriteId;
     uint  entityId;
@@ -215,7 +240,7 @@ void computemain() {
     // Layer check first: it needs only the Transform, so rows on
     // invisible layers (e.g. all world sprites during the screen-phase
     // cull) exit before touching the Sprite/SpriteData columns.
-    Std430Transform t = transforms[row];
+    Std430Transform t = readTransform(row);
     float layer = float(t.layerInt);
     if (!isCameraLayerVisible(layer)) return;
 

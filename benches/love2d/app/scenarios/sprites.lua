@@ -10,6 +10,7 @@ local SpriteSheet = gfx.SpriteSheet
 local Transform = tecs.builtins.Transform
 
 local SPRITES = 20000
+local INTERPOLATE = os.getenv("TECS_BENCH_INTERPOLATE") == "1"
 
 return {
     render = {
@@ -17,9 +18,13 @@ return {
         ambientLight = {1.0, 1.0, 1.0},
         lerpingEnabled = false,
         cameraPosition = {0, 0},
+        disableInterpolation = not INTERPOLATE,
         sizeHints = {sprites = SPRITES + 64},
     },
-    meta = {sprites = SPRITES},
+    meta = {
+        sprites = SPRITES,
+        interpolationEnabled = INTERPOLATE,
+    },
     setup = function(world)
         local pipeline = world.resources[gfx.PIPELINE]
         local runnerSheet = SpriteSheet.fromFile("assets/running.png")

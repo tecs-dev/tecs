@@ -20,6 +20,7 @@
 local C <const> = require("ffi")
 local tecs <const> = require("tecs")
 local tecsInternal <const> = require("tecs.internal.types")
+local fixedtracking <const> = require("tecs.internal.fixedtracking")
 local shadowbuffer <const> = require("tecs2d.gfx.internal.gpu.shadowbuffer")
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
 local FFIStorage <const> = require("tecs.internal.ffi.FFIStorage") as {string:any}
@@ -50,6 +51,12 @@ local record archetype_shadow_set
         --- world's end-of-update clear leaves every component bit at
         --- 0 until the next frame's writes.
         flush: function(self)
+        flushFixed: function(
+            self,
+            component: tecs.Component,
+            step: integer
+        )
+        flushCurrent: function(self, component: tecs.Component)
 
         --- Get the ShadowBuffer for a specific component, or nil if
         --- not in this set.
@@ -133,50 +140,153 @@ function ShadowSet:get(component: tecs.Component): ShadowBuffer
     return nil
 end
 
+local function prepareEntry(
+    archetype: tecs.Archetype,
+    e: archetype_shadow_set.Entry
+): C.CData, integer, boolean
+    local archInternal = archetype as tecsInternal.ArchetypeInternal
+    local canonicalPtr = archInternal.columns[e.component] as C.CData
+    local drifted = false
+    if canonicalPtr ~= e.cachedCanonical
+            or archInternal.capacity > e.buffer.capacity then
+        local newCap = archInternal.capacity
+        if newCap < 1 then newCap = 1 end
+        if newCap > e.buffer.capacity then
+            e.buffer:grow(newCap)
+        end
+        e.cachedCanonical = canonicalPtr
+        drifted = true
+    end
+    return canonicalPtr, archInternal.entities[0], drifted
+end
+
+local function uploadEntry(
+    e: archetype_shadow_set.Entry,
+    canonicalPtr: C.CData,
+    rowCount: integer,
+    mutationVersion: integer,
+    structureVersion: integer
+)
+    local holder =
+        (FFIStorage.getColumnByteData as function(any): any)(canonicalPtr)
+    if holder ~= nil and e.layout.identity then
+        e.buffer:uploadByteData(
+            holder as love.data.ByteData,
+            rowCount,
+            mutationVersion,
+            structureVersion
+        )
+    else
+        e.buffer:flushRange(
+            canonicalPtr,
+            rowCount,
+            mutationVersion,
+            structureVersion
+        )
+    end
+end
+
+function ShadowSet:flushFixed(component: tecs.Component, step: integer)
+    local archetype = self.archetype
+    local mutationVersion = fixedtracking.version(archetype, component)
+    local structureVersion = fixedtracking.structureVersion(archetype)
+
+    for i = 1, #self.entries do
+        local e = self.entries[i]
+        if e.component == component then
+            local canonicalPtr, rowCount = prepareEntry(archetype, e)
+            if rowCount <= 0 then return end
+            local holder =
+                (FFIStorage.getColumnByteData as function(any): any)(
+                    canonicalPtr
+                )
+            if holder ~= nil and e.layout.identity then
+                e.buffer:uploadFixedByteData(
+                    holder as love.data.ByteData,
+                    rowCount,
+                    mutationVersion,
+                    structureVersion,
+                    step
+                )
+            else
+                e.buffer:flushFixedRange(
+                    canonicalPtr,
+                    rowCount,
+                    mutationVersion,
+                    structureVersion,
+                    step
+                )
+            end
+            return
+        end
+    end
+end
+
+function ShadowSet:flushCurrent(component: tecs.Component)
+    local archetype = self.archetype
+    local mutationVersion = fixedtracking.version(archetype, component)
+    local structureVersion = fixedtracking.structureVersion(archetype)
+
+    for i = 1, #self.entries do
+        local e = self.entries[i]
+        if e.component == component then
+            local canonicalPtr, rowCount, drifted =
+                prepareEntry(archetype, e)
+            if rowCount <= 0 then return end
+            if not drifted and e.buffer.hasUploaded
+                    and e.buffer.uploadedMutationVersion == mutationVersion
+                    and e.buffer.uploadedStructureVersion
+                        == structureVersion then
+                return
+            end
+            uploadEntry(
+                e,
+                canonicalPtr,
+                rowCount,
+                mutationVersion,
+                structureVersion
+            )
+            return
+        end
+    end
+end
+
 function ShadowSet:flush()
     local archetype = self.archetype
     local archInternal = archetype as tecsInternal.ArchetypeInternal
-    local columns = archInternal.columns
-    local archCap = archInternal.capacity
     local rowCount = archInternal.entities[0]
 
     if rowCount == 0 then return end
 
     for i = 1, #self.entries do
         local e = self.entries[i]
-        local canonical = columns[e.component]
-        local canonicalPtr = canonical as C.CData
-
-        -- Pointer drift detection: if the archetype's column was
-        -- reallocated (reserveCapacity creates a new cdata array), the
-        -- shadow buffer must grow to match. The freshly-allocated GPU
-        -- buffer has uninitialized contents, so an unconditional
-        -- flushRange follows regardless of the component-dirty bit.
-        local drifted = false
-        if canonicalPtr ~= e.cachedCanonical or archCap > e.buffer.capacity then
-            local newCap = archCap
-            if newCap < 1 then newCap = 1 end
-            if newCap > e.buffer.capacity then
-                e.buffer:grow(newCap)
-            end
-            e.cachedCanonical = canonicalPtr
-            drifted = true
-        end
+        local canonicalPtr, _, drifted = prepareEntry(archetype, e)
+        local mutationVersion = fixedtracking.version(archetype, e.component)
+        local structureVersion = fixedtracking.structureVersion(archetype)
 
         -- Per-component dirty gate: skip the upload entirely when the
         -- component's column hasn't changed this frame. Pointer drift
         -- forces an upload to repopulate the new GPU buffer.
         if drifted or archetype:isComponentDirty(e.component) then
-            local holder = (FFIStorage.getColumnByteData as function(any): any)(canonicalPtr)
-            if holder ~= nil and e.layout.identity then
-                -- Direct upload: the column's backing ByteData is already in
-                -- std430 layout (identity), so skip the staging translate and
-                -- push it straight to the SSBO.
-                e.buffer.gpuBuffer:setArrayData(holder as love.data.ByteData, 2, 1, rowCount)
-            else
-                e.buffer:flushRange(canonicalPtr, rowCount)
+            -- A fixed-step upload may already have consumed the same
+            -- mutation version. Dirty bits live for the whole outer frame,
+            -- so suppress that otherwise-redundant PreRender upload.
+            if not drifted and mutationVersion >= 0
+                    and e.buffer.hasUploaded
+                    and e.buffer.uploadedMutationVersion == mutationVersion
+                    and e.buffer.uploadedStructureVersion == structureVersion then
+                goto continue
             end
+            uploadEntry(
+                e,
+                canonicalPtr,
+                rowCount,
+                mutationVersion,
+                structureVersion
+            )
         end
+
+        ::continue::
     end
 end
 

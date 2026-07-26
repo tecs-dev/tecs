@@ -258,10 +258,12 @@ function engine.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                                 "physics",
                                 "  bodies\t" .. tostring(pworld:getBodyCount()),
                                 format("  gravity\t%.2f, %.2f", gx, gy),
-                                "  smoothing\t" .. tostring(st.smoothing),
                                 "  debug draw\t" .. (st.debug and "on" or "off"),
-                            }, data = {bodies = pworld:getBodyCount(), gravityX = gx, gravityY = gy,
-                                smoothing = st.smoothing}}
+                            }, data = {
+                                bodies = pworld:getBodyCount(),
+                                gravityX = gx,
+                                gravityY = gy,
+                            }}
                         end
                         local ids = resolveTargets(v)
                         local target = ids[1]

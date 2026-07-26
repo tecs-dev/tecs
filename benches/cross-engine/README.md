@@ -64,6 +64,9 @@ The Tecs example also accepts diagnostic env vars: `BENCH_ZOOM` (override the fi
 zoom), `BENCH_SPLIT=0` (all sprites visible, no culled half), `BENCH_MCP=1`
 (start the MCP server for screenshots and `get_fps`), and `BENCH_W` / `BENCH_H` /
 `BENCH_VH` / `BENCH_LIGHTING` (window and pipeline overrides).
+`BENCH_INTERPOLATE=1` moves the Tecs workload in `FixedUpdate` and enables GPU
+Transform interpolation. Set `BENCH_FIXED=1` independently to keep movement in
+`FixedUpdate` while interpolation is disabled for an isolated A/B comparison.
 
 ### Bevy only
 

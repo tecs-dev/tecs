@@ -310,6 +310,10 @@ local record types
         --- Custom shape plugins can use any string key.
         sizeHints: {string: integer}
 
+        --- Disable retaining consecutive fixed-step Transform samples
+        --- for render-time interpolation. Defaults to false.
+        disableInterpolation: boolean
+
         --- Maximum render layers for depth sorting (default: 16)
         maxLayers: integer
 

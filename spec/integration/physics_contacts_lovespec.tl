@@ -82,4 +82,100 @@ describe("physics contacts: begin/end events reach entity observers", function()
         end)
         luassert.is_true(left == true, "EndContact never fired after bouncing the ball up")
     end)
+
+    it("synchronizes the authoritative body pose before FixedLast", function()
+        fixture.runLua(app, [[
+            local tecs = require("tecs")
+            local physics = require("tecs2d.physics")
+            local Transform = tecs.builtins.Transform
+            _G.tecsFixedSync = {
+                samples = 0,
+                mismatches = 0,
+                kicked = false,
+                lastDx = 0,
+                lastDy = 0,
+                lastDr = 0,
+            }
+            _G.tecsFixedSyncEntity = world:spawn(
+                Transform(80, 20, 0, 1),
+                physics.Collider.new({
+                    shape = "circle",
+                    radius = 8,
+                }),
+                physics.RigidBody.new({mass = 1})
+            )
+            world:addSystem({
+                name = "spec.physicsKickFixedSyncBody",
+                phase = tecs.phases.FixedPreUpdate,
+                after = {"physics.createBodies"},
+                run = function()
+                    local c = world:get(
+                        _G.tecsFixedSyncEntity,
+                        physics.Collider
+                    )
+                    if c and c.body and not _G.tecsFixedSync.kicked then
+                        c.body:setLinearVelocity(180, -20)
+                        c.body:setAngularVelocity(2)
+                        _G.tecsFixedSync.kicked = true
+                    end
+                end,
+            })
+            world:addSystem({
+                name = "spec.physicsObserveFixedSync",
+                phase = tecs.phases.FixedLast,
+                run = function()
+                    local c = world:get(
+                        _G.tecsFixedSyncEntity,
+                        physics.Collider
+                    )
+                    if not c or not c.body or not _G.tecsFixedSync.kicked then
+                        return
+                    end
+                    local t = world:get(
+                        _G.tecsFixedSyncEntity,
+                        Transform
+                    )
+                    local bx, by = c.body:getPosition()
+                    local br = c.body:getAngle()
+                    local dx = math.abs(t.x - bx)
+                    local dy = math.abs(t.y - by)
+                    local dr = math.abs(t.rotation - br)
+                    _G.tecsFixedSync.samples =
+                        _G.tecsFixedSync.samples + 1
+                    _G.tecsFixedSync.lastDx = dx
+                    _G.tecsFixedSync.lastDy = dy
+                    _G.tecsFixedSync.lastDr = dr
+                    if dx > 1e-9 or dy > 1e-9 or dr > 1e-9 then
+                        _G.tecsFixedSync.mismatches =
+                            _G.tecsFixedSync.mismatches + 1
+                    end
+                end,
+            })
+            return true
+        ]])
+
+        local sampled = fixture.eventually(
+            fixture.callTimeout,
+            function(): boolean
+                local values = fixture.runLua(app, [[
+                    return _G.tecsFixedSync.samples,
+                        _G.tecsFixedSync.mismatches,
+                        _G.tecsFixedSync.lastDx,
+                        _G.tecsFixedSync.lastDy,
+                        _G.tecsFixedSync.lastDr
+                ]])
+                if tonumber(values[1]) and tonumber(values[1]) >= 4 then
+                    luassert.equals(0, tonumber(values[2]), string.format(
+                        "Transform lagged body pose by (%s, %s, %s)",
+                        values[3], values[4], values[5]))
+                    return true
+                end
+                return nil
+            end
+        )
+        luassert.is_true(
+            sampled == true,
+            "did not observe four fixed-step Transform synchronizations"
+        )
+    end)
 end)

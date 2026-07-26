@@ -8,6 +8,10 @@ outline: deep
 The physics module provides three components for adding physics to entities: `Collider`, `RigidBody`, and
 `StaticBody`. All require a `Transform` component.
 
+After each Box2D step, physics writes the body's exact position and rotation to
+`Transform` in `FixedPostUpdate`. Rendering smoothness is handled separately by
+[Transform interpolation](/tecs2d/rendering/interpolation).
+
 ## physics.Collider
 
 Defines the collision shape for an entity. By itself (without RigidBody or StaticBody), creates a kinematic body that

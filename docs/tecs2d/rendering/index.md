@@ -88,6 +88,7 @@ love.run = tecs2d.run({
 
 | Topic                                    | Description                                                                      |
 | ---------------------------------------- | -------------------------------------------------------------------------------- |
+| [Transform Interpolation](./interpolation) | GPU smoothing between fixed-step Transform samples                             |
 | [Camera](./camera)                       | Camera controls, multiple cameras, minimaps, split-screen, coordinate conversion |
 | [Sprites](./sprites/)                    | Sprite sheets, animation, slices, collisions                                     |
 | [Images](./images)                       | Direct rendering for one-off, runtime-created, and very large textures           |
@@ -145,6 +146,7 @@ love.run = tecs2d.run({
 | `worldBounds`        | `{minX, minY, maxX, maxY}`   | none            | World bounds for clamping                                                                                   |
 | `layers`             | `{integer: LayerConfig}`     | none            | Layer configurations keyed by layer number (1-16). See [Layers](/tecs2d/rendering/layers)                          |
 | `sizeHints`          | `{string: integer}`          | none            | Initial GPU buffer capacities keyed by name (sprites, circles, lights, etc.). Grows automatically           |
+| `disableInterpolation` | `boolean`                  | `false`         | Disable [GPU interpolation](./interpolation) between fixed-step Transform samples                         |
 | `dropShadowScale`    | `number`                     | `0.5`           | Drop shadow AO canvas resolution scale (0.5 = half res, 1.0 = full res)                                     |
 | `bloom`              | `BloomConfig`                | none            | Bloom post-processing config: `enabled`, `intensity`, `radius`, `threshold`                                 |
 | `composite`          | `boolean`                    | `false`         | **Advanced.** Render to a transparent canvas and composite it on explicit `render()`                         |
@@ -152,3 +154,8 @@ love.run = tecs2d.run({
 `world` is required when calling `gfx.newPipeline` directly. A world owns one
 immutable pipeline association. Use `pipeline:getWorldId()` for its stable
 generational render-world identity. See [Multiple render worlds and compositing](./multi-world).
+
+[Transform interpolation](./interpolation) is enabled by default. It currently
+applies to sprites, interpolating position and shortest-path rotation between
+fixed updates. Set `disableInterpolation = true` to render fixed-step samples
+directly.

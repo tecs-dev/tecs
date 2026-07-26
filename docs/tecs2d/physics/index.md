@@ -42,12 +42,11 @@ world:addPlugin(physics.new({
 
 ## Plugin Configuration
 
-| Option                   | Type                                                 | Default           | Description                                                 |
-| ------------------------ | ---------------------------------------------------- | ----------------- | ----------------------------------------------------------- |
-| `world`                  | [`World`](https://love2d.org/wiki/World)             | *required*        | Box2D physics world                                         |
-| `contactFilter`          | `function`                                           | *see below*       | Custom contact filter function                              |
-| `defaultFixedRotation`   | `boolean`                                            | `false`           | Default `fixedRotation` for RigidBody when not specified    |
-| `smoothing`              | "interpolate" / "extrapolate" / "disabled" | "interpolate" | Transform [smoothing](./smoothing) mode |
+| Option                 | Type                                         | Default     | Description                                              |
+| ---------------------- | -------------------------------------------- | ----------- | -------------------------------------------------------- |
+| `world`                | [`World`](https://love2d.org/wiki/World)     | *required*  | Box2D physics world                                      |
+| `contactFilter`        | `function`                                   | *see below* | Custom contact filter function                           |
+| `defaultFixedRotation` | `boolean`                                    | `false`     | Default `fixedRotation` for RigidBody when not specified |
 
 ### Default Contact Filter
 
@@ -67,16 +66,28 @@ local box2dWorld = state.world
 
 -- Change gravity
 box2dWorld:setGravity(0, 500)
-
--- Check current smoothing mode
-print(state.smoothing)
 ```
 
-| Field                    | Type        | Description                                       |
-| ------------------------ | ----------- | ------------------------------------------------- |
-| `world`                  | `World`     | The Box2D physics world                           |
-| `smoothing`              | `string`    | Current smoothing mode                            |
-| `defaultFixedRotation`   | `boolean`   | Default fixedRotation value for new RigidBodies   |
+| Field                    | Type      | Description                                     |
+| ------------------------ | --------- | ----------------------------------------------- |
+| `world`                  | `World`   | The Box2D physics world                         |
+| `defaultFixedRotation`   | `boolean` | Default fixedRotation value for new RigidBodies |
+
+## Transform Synchronization
+
+After each Box2D step, physics copies every body's authoritative position and
+rotation into its entity's `Transform` during `FixedPostUpdate`. Physics does
+not modify `Transform` between fixed steps. Systems in `FixedLast` therefore
+observe matching body and Transform poses.
+
+Physics has no interpolation, extrapolation, or smoothing mode. Presentation
+smoothing belongs to the renderer: supported GPU-rendered entities use
+[Transform interpolation](/tecs2d/rendering/interpolation) by default. Set
+`render.disableInterpolation = true` when direct fixed-step presentation is
+required.
+
+Currently the GPU interpolation path supports sprites. Physics-driven shapes
+display the authoritative fixed-step samples directly.
 
 ## Debug Drawing
 
