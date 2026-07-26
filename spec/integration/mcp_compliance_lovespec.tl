@@ -398,17 +398,21 @@ describe("mcp compliance: suspended step and input tape", function()
         setSuspended(app, true)
     end)
 
-    it("input_tape fires inside the stepped frame's input snapshot", function()
-        -- Queue a literal keypressed/keyreleased pair on the gameplay-frame
-        -- clock, then step across it. The fixture's Update probe counts frames
-        -- where input.isKeyPressed("up") was true: it must be exactly one, and
-        -- the Tecs KeyPressed event must have fired (lastKey).
+    it("a scripted program fires inside the stepped frame's input snapshot", function()
+        -- A keypressed/keyreleased pair as a program on the frame clock, then
+        -- step across it. The fixture's Update probe counts frames where
+        -- input.isKeyPressed("up") was true: it must be exactly one, and the
+        -- Tecs KeyPressed event must have fired (lastKey).
         local upBefore = tonumber(runLua(app, "return tecsTest.upFrames")[1]) as integer
-        local queued = app.client:call("cmd_input_tape", {events = {
-            {at = 1, event = "keypressed", args = {"up"}},
-            {at = 2, event = "keyreleased", args = {"up"}},
-        }})
-        luassert.are.equal(2, queued.queued as integer)
+        local played = app.client:call("cmd_program_play", {
+            clock = "frame",
+            steps = {
+                {op = "input", event = "keypressed", args = {"up"}},
+                {op = "waitSteps", steps = 1},
+                {op = "input", event = "keyreleased", args = {"up"}},
+            },
+        })
+        luassert.are.equal(3, played.steps as integer)
 
         app.client:call("cmd_step", {n = 3})
 
@@ -425,22 +429,22 @@ describe("mcp compliance: suspended step and input tape", function()
         luassert.is_true(tonumber(runLua(app, "return tecsTest.upFixedFrames")[1]) >= 1,
             "FixedUpdate-phase isKeyPressed must see the latched press")
 
-        -- The release row ran too: nothing held, nothing pending.
-        local status = app.client:call("cmd_input_tape")
-        luassert.are.equal(0, #(status.held as {string}))
-        luassert.are.equal(0, status.pending as integer)
+        -- The release step ran too, so the program is done and the context
+        -- report shows nothing left held.
+        local status = app.client:call("cmd_program_status", {handle = played.handle})
+        luassert.are.equal("completed", status.state as string)
+
+        local ctx = app.client:call("cmd_context", {})
+        local scripted = ctx.input as {string: any}
+        luassert.is_not_nil(scripted, "cmd_context should report scripted input state")
+        luassert.are.equal(0, #(scripted.held as {string}))
     end)
 
-    it("input_tape refuses untapeable and dangerous rows", function()
-        local pad = app.client:tryCall("cmd_input_tape", {events = {
-            {at = 1, event = "gamepadpressed", args = {1, "a"}},
-        }})
-        luassert.is_false(pad.ok as boolean, "gamepad rows need a device object")
-
-        local esc = app.client:tryCall("cmd_input_tape", {events = {
-            {at = 1, event = "keypressed", args = {"escape"}},
-        }})
-        luassert.is_false(esc.ok as boolean, "escape must be refused without force")
+    it("a program refuses a step it cannot express", function()
+        local pad = app.client:tryCall("cmd_program_play", {
+            steps = {{op = "nonsense"}},
+        })
+        luassert.is_false(pad.ok as boolean, "an unknown op must be refused")
     end)
 
     it("releasing suspension restores gameplay", function()

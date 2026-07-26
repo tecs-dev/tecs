@@ -47,6 +47,16 @@ end
 -- them; the rest are resolved into the world's scratch list. Either way the
 -- list belongs to the sequencer, and an action must read it rather than keep
 -- or modify it.
+local function contextBind(self: seqtypes.ActionContext, name: string, entity: integer)
+    local cursor = self._cursor as Cursor
+    local bindings = cursor.bindings
+    if not bindings then
+        bindings = {}
+        cursor.bindings = bindings
+    end
+    bindings[name] = entity
+end
+
 local function resolveArgs(
     world: World,
     state: WorldState,
@@ -196,7 +206,8 @@ local function run(
             end
             local ctx = state.context
             if not ctx then
-                ctx = {world = world, entity = contextEntity} as seqtypes.ActionContext
+                ctx = {world = world, entity = contextEntity, bind = contextBind}
+                    as seqtypes.ActionContext
                 state.context = ctx
             end
             ctx.handle = seqcursors.packHandle(cursor.slot, cursor.generation)

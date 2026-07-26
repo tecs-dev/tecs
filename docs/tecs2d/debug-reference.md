@@ -2266,10 +2266,10 @@ The debugger session itself.
 | Command | Description |
 | --- | --- |
 | [`help`](#cmd-help) | List all commands, or show one command's arguments. |
+| [`program`](#cmd-program) | Play a scripted program: input, waits, spawns, tweens. |
 | [`history`](#cmd-history) | Show the command history (persisted across sessions). |
 | [`agent`](#cmd-agent) | MCP session info and client config. |
 | [`step`](#cmd-step) | Tick the game forward N frames while otherwise frozen. |
-| [`input_tape`](#cmd-input_tape) | Queue frame-scheduled love events; no args = status. |
 | [`context`](#cmd-context) | The live debugger context: selection, camera, artifacts. |
 | [`restart`](#cmd-restart) | Restart the game process. |
 | [`quit`](#cmd-quit) | Quit the game. |
@@ -2289,6 +2289,127 @@ help
 help record
 help select
 ```
+
+### `program` {#cmd-program}
+
+Play a scripted program: input, waits, spawns, tweens.
+
+Play a sequencer program given as data, and get a handle back. A program is a list of steps -- call, emit, fork, join, loop, parallel, playTween, wait, waitQuery, waitSignal, waitSteps, waitTween, plus `input` for love events -- which run in order on a clock, so a scenario is scheduled rather than fired all at once. Unlike run_lua it survives a snapshot: save mid-program and the load resumes at the same step. Use `program status` to watch one and `program cancel` to stop it.
+
+```
+program play [{"op":"input","event":"keypressed","args":["space"]},{"op":"wait","seconds":0.5}] clock=frame
+program play [{"op":"call","action":"game.spawnWave"},{"op":"waitQuery","query":"game.adds","condition":"empty"}]
+program status 1048577
+program cancel 1048577
+```
+
+#### `program play <steps> [bindings={}] [clock=fixed|frame]` {#cmd-program-play}
+
+Compile a program from steps and play it.
+
+MCP tool: `cmd_program_play`
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `steps` | rows | the program: a list of {op = ...} steps (required) |
+| `bindings` | table | entity ids the program acts on, by name |
+| `clock` | fixed \| frame | fixed counts fixed steps; frame counts gameplay frames and runs while stepping (default: fixed) |
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "clock": {
+      "type": "string"
+    },
+    "handle": {
+      "description": "playback handle",
+      "type": "integer"
+    },
+    "steps": {
+      "description": "steps compiled",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "handle",
+    "steps",
+    "clock"
+  ],
+  "type": "object"
+}
+```
+:::
+
+#### `program status <handle>` {#cmd-program-status}
+
+Where a playback sits and what it will do next.
+
+MCP tool: `cmd_program_status` (read-only, idempotent)
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `handle` | number | playback handle from `program play` (required) |
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "handle": {
+      "type": "integer"
+    },
+    "pc": {
+      "type": "integer"
+    },
+    "state": {
+      "type": "string"
+    },
+    "upcoming": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "handle",
+    "state",
+    "pc"
+  ],
+  "type": "object"
+}
+```
+:::
+
+#### `program cancel <handle>` {#cmd-program-cancel}
+
+Stop a playback and its branches.
+
+MCP tool: `cmd_program_cancel` (destructive, idempotent)
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `handle` | number | playback handle from `program play` (required) |
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "cancelled": {
+      "type": "boolean"
+    },
+    "handle": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "handle",
+    "cancelled"
+  ],
+  "type": "object"
+}
+```
+:::
 
 ### `history` {#cmd-history}
 
@@ -2362,93 +2483,6 @@ MCP tool: `cmd_step`
 ```
 :::
 
-### `input_tape [events] [clear] [force]` {#cmd-input_tape}
-
-Queue frame-scheduled love events; no args = status.
-
-Queue frame-scheduled input independently from cmd_step. The no-argument status form returns the frame, pending rows, recently fired events, and held inputs. clear=true drops pending rows and synthesizes releases for anything held. Rows queued while unfrozen consume on live frames. Each row {at, event, args} dispatches through the real input path (the tecs2d.input snapshot, Tecs events, and love.* callbacks) on gameplay frame `at`, counted from now (1 = the next gameplay frame). Args are forgiving like send_love_event (keypressed needs just the key). Model releases as their own rows (keyreleased, mousereleased, ...). Gamepad/joystick events are not tapeable yet (they need device objects). Raw love.* polls do not see taped input; read tecs2d.input.
-
-MCP tool: `cmd_input_tape`
-
-| Argument | Type | Description |
-| --- | --- | --- |
-| `events` | rows | array of {at = &lt;gameplay frames from now>, event = &lt;love event>, args = {...}} |
-| `clear` | boolean | drop pending rows and release anything the tape holds down |
-| `force` | boolean | allow taping 'escape' |
-
-::: details Result data schema
-```json
-{
-  "properties": {
-    "dropped": {
-      "description": "rows dropped (clear form)",
-      "type": "integer"
-    },
-    "fired": {
-      "description": "recently dispatched rows, newest last (status form)",
-      "items": {
-        "properties": {
-          "event": {
-            "type": "string"
-          },
-          "frame": {
-            "type": "integer"
-          }
-        },
-        "type": "object"
-      },
-      "type": "array"
-    },
-    "frame": {
-      "description": "gameplay frames the tape has seen",
-      "type": "integer"
-    },
-    "held": {
-      "description": "press-type inputs without a release yet",
-      "items": {
-        "type": "string"
-      },
-      "type": "array"
-    },
-    "pending": {
-      "description": "rows waiting to fire",
-      "type": "integer"
-    },
-    "queued": {
-      "description": "rows accepted (queue form)",
-      "type": "integer"
-    },
-    "released": {
-      "description": "releases synthesized (clear form)",
-      "type": "integer"
-    },
-    "upcoming": {
-      "description": "pending rows, relative frames (status form)",
-      "items": {
-        "properties": {
-          "event": {
-            "type": "string"
-          },
-          "in": {
-            "type": "integer"
-          }
-        },
-        "type": "object"
-      },
-      "type": "array"
-    }
-  },
-  "type": "object"
-}
-```
-:::
-
-```
-input_tape {{at=1, event="keypressed", args={"up"}}, {at=2, event="keyreleased", args={"up"}}}
-input_tape
-input_tape clear=true
-```
-
 ### `context` {#cmd-context}
 
 The live debugger context: selection, camera, artifacts.
@@ -2489,6 +2523,10 @@ MCP tool: `cmd_context` (read-only, idempotent). MCP only; not typeable in the o
     },
     "grid": {
       "description": "grid size and origin; absent when the grid is off",
+      "type": "object"
+    },
+    "input": {
+      "description": "scripted-input frame, held presses, and recent events; absent when nothing has scripted input",
       "type": "object"
     },
     "marks": {

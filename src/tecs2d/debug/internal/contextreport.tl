@@ -5,6 +5,7 @@
 local tecs <const> = require("tecs")
 local debugcontext <const> = require("tecs2d.debug.internal.debugcontext")
 local worldregistry <const> = require("tecs2d.gfx.internal.worldregistry")
+local inputtape <const> = require("tecs2d.debug.internal.inputtape")
 local toolworldkey <const> = require("tecs2d.debug.internal.toolworldkey")
 
 local record contextreport
@@ -17,6 +18,19 @@ end
 -- Cap the artifact lists so a long-running session does not ship an
 -- unbounded history to the agent on every call.
 local CONTEXT_LIST_LIMIT <const> = 5
+
+-- The tape only exists once something has scripted input, so this is absent
+-- rather than empty on a world that never has.
+local function inputReport(w: tecs.World): {string: any}
+    local tape <const> = w.resources[inputtape.KEY]
+    if not tape then return nil end
+    local recent: {{string: any}} = {}
+    local fired <const> = tape.fired
+    for i = math.max(1, #fired - 7), #fired do
+        recent[#recent + 1] = {frame = fired[i].frame, event = fired[i].event}
+    end
+    return {frame = tape:frame(), held = tape:heldIds(), fired = recent}
+end
 
 local function lastN<T>(list: {T}, n: integer): {T}
     local total = #list
@@ -66,6 +80,9 @@ function contextreport.build(w: tecs.World, ctx: debugcontext.Context): {string:
         recordings = lastN(ctx.recordings, CONTEXT_LIST_LIMIT),
         profileTop = (#ctx.profileTop > 0) and ctx.profileTop or nil,
         entityCount = ctx.entityCount,
+        -- Scripted input the tape left logically down, and what it fired
+        -- recently. Nothing else reports it now that queueing is a program.
+        input = inputReport(w),
         area = ctx.hasArea and {
             x1 = ctx.areaX1, y1 = ctx.areaY1, x2 = ctx.areaX2, y2 = ctx.areaY2
         } or nil,

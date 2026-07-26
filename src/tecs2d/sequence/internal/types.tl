@@ -151,6 +151,11 @@ local record ActionContext
     --- supplied or its entity is no longer alive.
     entity: function(self: ActionContext, name: string): integer
 
+    --- Name an entity for the steps that follow, so an action that creates
+    --- one can hand it on. Bindings travel with the playback and survive a
+    --- snapshot; passing nil forgets the name.
+    bind: function(self: ActionContext, name: string, entity: integer)
+
     --- Internal cursor reference. Not part of the supported surface.
     _cursor: any
 end

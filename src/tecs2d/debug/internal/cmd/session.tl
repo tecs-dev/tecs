@@ -7,7 +7,6 @@
 
 local mcpinfo <const> = require("tecs2d.internal.mcpinfo")
 local frameclock <const> = require("tecs2d.internal.frameclock")
-local inputtape <const> = require("tecs2d.debug.internal.inputtape")
 local contextreport <const> = require("tecs2d.debug.internal.contextreport")
 local cmdargs <const> = require("tecs2d.debug.internal.cmdargs")
 local cmdtypes <const> = require("tecs2d.debug.internal.cmdtypes")
@@ -166,87 +165,6 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
             end,
         },
         {
-            name = "input_tape",
-            section = "Session",
-            shortHelp = "queue frame-scheduled love events; no args = status",
-            mcpHelp = "Queue frame-scheduled input independently from cmd_step. The no-argument "
-                .. "status form returns the frame, pending rows, recently fired events, and held "
-                .. "inputs. clear=true drops pending rows and synthesizes releases for anything "
-                .. "held. Rows queued while unfrozen consume on live frames. Each row "
-                .. "{at, event, args} dispatches through the real input path (the tecs2d.input "
-                .. "snapshot, Tecs events, and love.* callbacks) on gameplay frame `at`, counted "
-                .. "from now (1 = the next gameplay frame). Args are forgiving like "
-                .. "send_love_event (keypressed needs just the key). Model releases as their own "
-                .. "rows (keyreleased, mousereleased, ...). Gamepad/joystick events are not "
-                .. "tapeable yet (they need device objects). Raw love.* polls do not see taped "
-                .. "input; read tecs2d.input.",
-            schema = inputTapeSchema,
-            examples = {
-                'input_tape {{at=1, event="keypressed", args={"up"}}, {at=2, event="keyreleased", args={"up"}}}',
-                "input_tape",
-                "input_tape clear=true",
-            },
-            outputSchema = {
-                type = "object",
-                properties = {
-                    queued = {type = "integer", description = "rows accepted (queue form)"},
-                    pending = {type = "integer", description = "rows waiting to fire"},
-                    frame = {type = "integer", description = "gameplay frames the tape has seen"},
-                    upcoming = {type = "array", items = {type = "object", properties = {
-                        ["in"] = {type = "integer"},
-                        event = {type = "string"},
-                    }}, description = "pending rows, relative frames (status form)"},
-                    fired = {type = "array", items = {type = "object", properties = {
-                        frame = {type = "integer"},
-                        event = {type = "string"},
-                    }}, description = "recently dispatched rows, newest last (status form)"},
-                    held = {type = "array", items = {type = "string"},
-                        description = "press-type inputs without a release yet"},
-                    dropped = {type = "integer", description = "rows dropped (clear form)"},
-                    released = {type = "integer", description = "releases synthesized (clear form)"},
-                },
-            },
-            run = function(v: {string: any}, _parts: {string}): cmdtypes.Result
-                local tape = inputtape.ensure(w)
-
-                if v.clear == true then
-                    local dropped <const>, released <const> = tape:clear()
-                    return {ok = true,
-                        message = "input_tape: dropped " .. tostring(dropped)
-                            .. " row(s), released " .. tostring(released) .. " held input(s)",
-                        data = {dropped = dropped, released = released}}
-                end
-
-                if v.events == nil then
-                    local firedOut: {{string: any}} = {}
-                    local firstFired = math.max(1, #tape.fired - 15)
-                    for i = firstFired, #tape.fired do
-                        local f <const> = tape.fired[i]
-                        firedOut[#firedOut + 1] = {frame = f.frame, event = f.event}
-                    end
-                    local up <const> = tape:upcoming(2147483647)
-                    local popup: {string} = {"input_tape  (frame " .. tostring(tape:frame())
-                        .. ", " .. tostring(#up) .. " pending):"}
-                    for i = 1, math.min(#up, 12) do
-                        popup[#popup + 1] = "  +" .. tostring(up[i]["in"]) .. "\t"
-                            .. tostring(up[i].event)
-                    end
-                    return {ok = true, popup = popup,
-                        data = {frame = tape:frame(), pending = #up,
-                            upcoming = up, fired = firedOut, held = tape:heldIds()}}
-                end
-
-                local queued <const>, qerr <const> =
-                    tape:queue(v.events as {{string: any}}, v.force == true)
-                if not queued then
-                    return {ok = false, code = "invalid_tape", message = "input_tape: " .. qerr}
-                end
-                return {ok = true,
-                    message = "input_tape: queued " .. tostring(queued) .. " row(s)",
-                    data = {queued = queued, pending = #tape:upcoming(2147483647)}}
-            end,
-        },
-        {
             name = "context",
             section = "Session",
             overlay = false,
@@ -282,6 +200,8 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                     profileTop = {type = "array", items = {type = "string"},
                         description = "hot spots from the last profile; absent when none"},
                     entityCount = {type = "integer"},
+                    input = {type = "object",
+                        description = "scripted-input frame, held presses, and recent events; absent when nothing has scripted input"},
                     area = {type = "object",
                         description = "drag-selection rectangle; absent when none"},
                     mouse = {type = "object",

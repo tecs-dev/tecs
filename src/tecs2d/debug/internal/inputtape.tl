@@ -74,6 +74,10 @@ local record inputtape
 
     KEY: tecs.Key<Tape>
 
+    --- The registered action a queued row calls. Programs authored elsewhere
+    --- name it to inject input.
+    DISPATCH_ACTION: string
+
     --- Get or create the world's tape (installs its consumer system once).
     ensure: function(w: tecs.World): Tape
 
@@ -278,6 +282,8 @@ end
 function TapeImpl.frame(self: inputtape.Tape): integer
     return sequence.currentStep(self.world, "frame")
 end
+
+inputtape.DISPATCH_ACTION = DISPATCH_ACTION
 
 function inputtape.ensure(w: tecs.World): inputtape.Tape
     local existing = w.resources[inputtape.KEY]

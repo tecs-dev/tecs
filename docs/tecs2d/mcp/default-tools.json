@@ -618,31 +618,6 @@
     "name": "cmd_info"
   },
   {
-    "description": "Queue frame-scheduled input independently from cmd_step. The no-argument status form returns the frame, pending rows, recently fired events, and held inputs. clear=true drops pending rows and synthesizes releases for anything held. Rows queued while unfrozen consume on live frames. Each row {at, event, args} dispatches through the real input path (the tecs2d.input snapshot, Tecs events, and love.* callbacks) on gameplay frame `at`, counted from now (1 = the next gameplay frame). Args are forgiving like send_love_event (keypressed needs just the key). Model releases as their own rows (keyreleased, mousereleased, ...). Gamepad/joystick events are not tapeable yet (they need device objects). Raw love.* polls do not see taped input; read tecs2d.input. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
-    "inputSchema": {
-      "additionalProperties": false,
-      "properties": {
-        "clear": {
-          "description": "drop pending rows and release anything the tape holds down",
-          "type": "boolean"
-        },
-        "events": {
-          "description": "array of {at = <gameplay frames from now>, event = <love event>, args = {...}}",
-          "items": {
-            "type": "object"
-          },
-          "type": "array"
-        },
-        "force": {
-          "description": "allow taping 'escape'",
-          "type": "boolean"
-        }
-      },
-      "type": "object"
-    },
-    "name": "cmd_input_tape"
-  },
-  {
     "description": "layers all: show every layer (undo toggles and solo). In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
     "inputSchema": {
       "additionalProperties": false,
@@ -1135,6 +1110,72 @@
       "type": "object"
     },
     "name": "cmd_profile_path"
+  },
+  {
+    "description": "program cancel: stop a playback and its branches. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "handle": {
+          "description": "playback handle from `program play`",
+          "type": "number"
+        }
+      },
+      "required": [
+        "handle"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_program_cancel"
+  },
+  {
+    "description": "program play: compile a program from steps and play it. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "bindings": {
+          "description": "entity ids the program acts on, by name",
+          "type": "object"
+        },
+        "clock": {
+          "description": "fixed counts fixed steps; frame counts gameplay frames and runs while stepping (default: fixed)",
+          "enum": [
+            "fixed",
+            "frame"
+          ],
+          "type": "string"
+        },
+        "steps": {
+          "description": "the program: a list of {op = ...} steps",
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "steps"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_program_play"
+  },
+  {
+    "description": "program status: where a playback sits and what it will do next. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "handle": {
+          "description": "playback handle from `program play`",
+          "type": "number"
+        }
+      },
+      "required": [
+        "handle"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_program_status"
   },
   {
     "description": "Select every entity matching a component expression ('Enemy -Dead' means has Enemy, lacks Dead); invert=true instead de-selects matching entities from the current selection. Returns the match count. Follow with cmd_info or cmd_set on @selection. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
