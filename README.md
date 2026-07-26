@@ -24,11 +24,33 @@ Working today:
 - A declarative pass graph, and a deferred pipeline built on it
 - An ECS binding: Transform2D, Tint, PointLight, and Renderable components,
   with a sync that walks archetype columns straight into mapped GPU staging
+- Physics in the world: a RigidBody component holding a Box2D handle, stepped
+  in FixedUpdate and synced back to Transform2D
+- Input in three tiers behind a layer stack, latched for fixed steps
 - Box2D 3 simulation with value-typed body handles
 - Frame pacing from the swapchain, with no sleep heuristic
 
 Not built yet: shadows, post-processing, audio, workers, assets, and the MCP
 surface.
+
+## Input
+
+Live state answers "is it held". Frame events answer "did it change this
+frame". Latched events answer that for fixed-step systems, which is not the
+same question: a key pressed and released between two fixed steps is invisible
+to frame events, and losing it produces input loss that varies with frame
+timing and so cannot be reproduced on demand. Latched sets accumulate across
+every frame since the last fixed step and clear when it ends. The run loop
+brackets the fixed phases itself, because that bracketing is the entire
+mechanism.
+
+Queries are answered relative to a layer. A blocking layer hides input from
+everything beneath it, so a menu suppresses gameplay without gameplay code
+knowing a menu exists. Code that names no layer reads the base layer, which is
+the safe default: it goes quiet when anything is pushed over it.
+
+The state is fed one `SDL_Event` at a time and holds no globals, so a recorded
+session replays by feeding the same events back through `events.source`.
 
 ## The ECS binding
 

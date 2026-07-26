@@ -11,6 +11,7 @@ local loader <const> = require("tecs2d.ffi.loader")
 local clock <const> = require("tecs2d.platform.clock")
 local events <const> = require("tecs2d.platform.events")
 local Window <const> = require("tecs2d.platform.Window")
+local Input <const> = require("tecs2d.platform.Input")
 local Device <const> = require("tecs2d.gpu.Device")
 local Frame <const> = require("tecs2d.gpu.Frame")
 local RenderPass <const> = require("tecs2d.gpu.RenderPass")
@@ -28,6 +29,9 @@ local record App
     world: tecs.World
     --- Feeds the deferred pipeline from the world.
     renderer: Renderer
+    --- Input state for this app. Queries default to the base layer, so
+    --- gameplay code goes quiet when a menu layer is pushed over it.
+    input: Input
     --- Set to true to leave the loop at the end of the current frame.
     quitRequested: boolean
     --- Seconds since the loop started, advanced by the frame dt so a replay
@@ -71,6 +75,7 @@ end
 
 local record tecs2d
     App: App
+    Input: Input
     Renderer: Renderer
     components: components
     RunConfig: RunConfig
@@ -84,6 +89,7 @@ local record tecs2d
     version: string
 end
 
+tecs2d.Input = Input
 tecs2d.Renderer = Renderer
 tecs2d.components = components
 tecs2d.Window = Window
@@ -115,6 +121,7 @@ function tecs2d.run(config: RunConfig): integer
         device:setPresentMode(config.presentMode)
     end
 
+    local input = Input.create()
     local world = tecs.newWorld()
     local renderer = Renderer.create(device.handle, device:getSwapchainFormat(), {
         ambient = config.ambient,
@@ -127,9 +134,24 @@ function tecs2d.run(config: RunConfig): integer
     app.device = device
     app.world = world
     app.renderer = renderer
+    app.input = input
     app.quitRequested = false
     app.elapsed = 0.0
     app.frame = 0
+
+    -- Latched input is what makes a fixed step see a press that began and
+    -- ended between two steps. Bracketing the fixed phases is the whole
+    -- mechanism, so it is installed rather than left to the game.
+    world:addSystem({
+        name = "tecs2d.EnterFixedInput",
+        phase = tecs.phases.FixedFirst,
+        run = function() input:enterFixedPhase() end,
+    })
+    world:addSystem({
+        name = "tecs2d.ExitFixedInput",
+        phase = tecs.phases.FixedLast,
+        run = function() input:exitFixedPhase() end,
+    })
 
     if config.load ~= nil then config.load(app) end
 
@@ -138,6 +160,8 @@ function tecs2d.run(config: RunConfig): integer
 
     local onEvent = config.event
     local handler = function(event: loader.CValue)
+        input:handleEvent(event)
+
         local kind = event.type
         if kind == C.SDL_EVENT_QUIT then
             app.quitRequested = true
@@ -149,6 +173,7 @@ function tecs2d.run(config: RunConfig): integer
 
     while not app.quitRequested do
         local dt = clock.step()
+        input:beginFrame()
         events.poll(handler)
         if app.quitRequested then break end
 

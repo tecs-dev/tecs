@@ -10,11 +10,6 @@ package.path = "build/?.lua;build/?/init.lua;"
 
 local tecs <const> = require("tecs")
 local tecs2d <const> = require("tecs2d")
-local sdl <const> = require("tecs2d.ffi.sdl3")
-local loader <const> = require("tecs2d.ffi.loader")
-
-local C <const> = sdl.C
-
 local Transform2D <const> = tecs2d.components.Transform2D
 local Tint <const> = tecs2d.components.Tint
 local PointLight <const> = tecs2d.components.PointLight
@@ -129,9 +124,10 @@ os.exit(tecs2d.run({
         print("  escape or close the window to quit")
     end,
 
-    event = function(app: tecs2d.App, event: loader.CValue)
-        if event.type == C.SDL_EVENT_KEY_DOWN
-            and event.key.scancode == C.SDL_SCANCODE_ESCAPE then
+    update = function(app: tecs2d.App)
+        -- Reads the base layer, so this stops responding on its own if a
+        -- menu layer is ever pushed over it.
+        if app.input:isKeyPressed("escape") then
             app.quitRequested = true
         end
     end,
