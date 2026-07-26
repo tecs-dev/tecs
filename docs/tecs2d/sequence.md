@@ -10,9 +10,10 @@ spawn waves, tutorials, and scripted encounters are naturally written as corouti
 suspended coroutine lives in the Lua stack, which cannot be serialized. A sequence keeps its
 position as data, so it snapshots, rewinds, and hot reloads like any other game state.
 
-::: warning Runtime not implemented
-This page documents the contract. `tecs2d.sequence` currently declares its public API and every
-entry point raises. The runtime lands in the next phase.
+::: info Orchestration is still to come
+Programs, actions, bindings, playback, faults, snapshots, and disassembly all work. Signals, event
+and query waits, `fork`/`join`, and tween composition land in later phases; see
+[Planned](#planned).
 :::
 
 ## Quick start
@@ -70,13 +71,15 @@ and an explicit migration step. That is deliberately not supported.
 | `call(action, ...)` | Run a registered action with constant arguments |
 | `wait(seconds)` | Wait a duration |
 | `waitSteps(n)` | Wait a whole number of fixed steps |
-| `emit(event, ...)` | Emit an ECS event at address 0 |
+| `emit(event, ...)` | Emit a `sequence.Event` at address 0 |
 | `loop(count, nodes)` | Repeat a block, or forever when `count` is nil |
 
 ### Time
 
-`wait` is authored in seconds and converted to whole fixed steps at compile time, **rounded to
-nearest**, with any non-zero duration waiting at least one step. Use `waitSteps` when the exact
+`wait` is authored in seconds and converted to whole fixed steps **when the instruction runs**,
+using the world's fixed timestep, **rounded to nearest**, with any non-zero duration waiting at
+least one step. Converting at execution rather than compile time keeps a program independent of
+any one world's timestep. Use `waitSteps` when the exact
 step count matters more than the wall-clock duration.
 
 `waitSteps(0)` yields: the cursor resumes on the next fixed step rather than continuing within the
@@ -187,6 +190,17 @@ Prefer `waitSteps(0)` in a loop body over raising the budget.
 | `missingBinding` | A required binding was absent or its entity was not alive |
 
 A faulted playback stops and retains its `pc`, so the failure is inspectable rather than silent.
+
+## Events
+
+`emit` dispatches a `sequence.Event` at address 0, carrying the authored name, the arguments with
+bindings resolved, and the handle of the playback that emitted it:
+
+```teal
+world:observe(0, sequence.Event, function(e: sequence.Event)
+    if e.name == "boss.ready" then startFight() end
+end)
+```
 
 ## Debugging
 
