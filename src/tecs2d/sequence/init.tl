@@ -27,7 +27,7 @@ local seqprogram <const> = require("tecs2d.sequence.internal.program")
 local seqregistry <const> = require("tecs2d.sequence.internal.registry")
 local logging <const> = require("tecs.utils.logging")
 local tween <const> = require("tecs2d.tween")
-local wakeheap <const> = require("tecs2d.internal.wakeheap")
+local seqclock <const> = require("tecs2d.sequence.internal.clock")
 
 local type World = tecs.World
 
@@ -473,10 +473,8 @@ local function stateFor(world: World): WorldState
         nextSlot = 1,
         generations = {},
         actions = {},
-        step = 0,
-        seq = 0,
         budget = DEFAULT_BUDGET,
-        heap = wakeheap.new(),
+        fixed = seqclock.new(),
         channels = {},
         pendingSignals = {},
         queries = {},
@@ -500,10 +498,8 @@ end
 -------------------------------------------------------------------------------
 
 local function schedule(state: WorldState, cursor: Cursor, wakeAt: integer)
-    state.seq = state.seq + 1
     cursor.wakeAt = wakeAt
-    cursor.seq = state.seq
-    wakeheap.push(state.heap, wakeAt, cursor.seq,
+    cursor.seq = seqclock.schedule(state.fixed, wakeAt,
         packHandle(cursor.slot, cursor.generation))
 end
 
@@ -673,7 +669,7 @@ local function detachFromParent(
 
     if parent.joining and (not children or next(children) == nil) then
         parent.joining = false
-        schedule(state, parent, state.step)
+        schedule(state, parent, state.fixed.step)
     end
 end
 
@@ -882,7 +878,7 @@ local function run(
         elseif op == seqprogram.WAIT then
             local steps = a >= 0 and secondsToSteps(world, consts[a] as number) or b
             cursor.pc = cursor.pc + 1
-            schedule(state, cursor, state.step + (steps > 0 and steps or 1))
+            schedule(state, cursor, state.fixed.step + (steps > 0 and steps or 1))
             return budget
 
         elseif op == seqprogram.WAIT_SIGNAL then
@@ -1032,7 +1028,7 @@ local function run(
             children[child.slot] = true
 
             linkOwner(state, child)
-            schedule(state, child, state.step)
+            schedule(state, child, state.fixed.step)
             cursor.pc = b
 
         elseif op == seqprogram.JOIN then
@@ -1055,8 +1051,8 @@ end
 
 --- Run one cursor, arming its budget the first time it runs in a step.
 local function advance(world: World, state: WorldState, cursor: Cursor)
-    if cursor.budgetStep ~= state.step then
-        cursor.budgetStep = state.step
+    if cursor.budgetStep ~= state.fixed.step then
+        cursor.budgetStep = state.fixed.step
         cursor.budgetLeft = cursor.budget
     end
     cursor.budgetLeft = run(world, state, cursor, cursor.budgetLeft)
@@ -1113,7 +1109,7 @@ function sequence.play(
     linkOwner(state, cursor)
 
     -- The first instruction runs on the next fixed step, never inside play.
-    schedule(state, cursor, state.step + 1)
+    schedule(state, cursor, state.fixed.step + 1)
     return packHandle(cursor.slot, cursor.generation)
 end
 
@@ -1150,8 +1146,8 @@ local function resumeTree(state: WorldState, cursor: Cursor): boolean
     -- stays where it is. Otherwise it keeps its heap entry, and if its wake
     -- time passed while it was paused it runs on the next step rather than
     -- immediately.
-    if cursor.wakeAt and cursor.wakeAt <= state.step then
-        schedule(state, cursor, state.step + 1)
+    if cursor.wakeAt and cursor.wakeAt <= state.fixed.step then
+        schedule(state, cursor, state.fixed.step + 1)
     end
     return true
 end
@@ -1250,7 +1246,7 @@ function sequence.setInstructionBudget(world: World, instructions: integer)
 end
 
 function sequence.currentStep(world: World): integer
-    return stateFor(world).step
+    return stateFor(world).fixed.step
 end
 
 -------------------------------------------------------------------------------
@@ -1339,8 +1335,8 @@ local function saveState(world: World): any
 
     return {
         version = SNAPSHOT_VERSION,
-        step = state.step,
-        seq = state.seq,
+        step = state.fixed.step,
+        seq = state.fixed.seq,
         budget = state.budget,
         nextSlot = state.nextSlot,
         generations = state.generations,
@@ -1376,7 +1372,7 @@ local function loadState(world: World, value: any)
     state.cursors = {}
     state.freeSlots = {}
     state.ownerIndex = {}
-    wakeheap.clear(state.heap)
+    seqclock.clear(state.fixed)
     state.channels = {}
     state.pendingSignals = {}
     -- Registered queries are code, kept like actions; only the parked
@@ -1390,14 +1386,14 @@ local function loadState(world: World, value: any)
     state.argScratch = {}
     state.nextSlot = 1
     state.generations = {}
-    state.step = 0
-    state.seq = 0
+    state.fixed.step = 0
+    state.fixed.seq = 0
 
     local data = value as {string: any}
     if not data then return end
 
-    state.step = (data.step as integer) or 0
-    state.seq = (data.seq as integer) or 0
+    state.fixed.step = (data.step as integer) or 0
+    state.fixed.seq = (data.seq as integer) or 0
     state.budget = (data.budget as integer) or DEFAULT_BUDGET
     state.nextSlot = (data.nextSlot as integer) or 1
     state.generations = (data.generations as {integer: integer}) or {}
@@ -1460,7 +1456,7 @@ local function loadState(world: World, value: any)
             elseif cursor.waitingTween then
                 state.tweenWaiters[cursor.slot] = true
             elseif not cursor.joining then
-                wakeheap.push(state.heap, cursor.wakeAt, cursor.seq,
+                seqclock.requeue(state.fixed, cursor.wakeAt, cursor.seq,
                     packHandle(cursor.slot, cursor.generation))
             end
         else
@@ -1502,7 +1498,7 @@ local function loadState(world: World, value: any)
             LOGGER:warn("%s v%d: join at pc=%d lost its branches; resuming",
                 cursor.program.name, cursor.program.version, cursor.pc)
             cursor.joining = false
-            schedule(state, cursor, state.step + 1)
+            schedule(state, cursor, state.fixed.step + 1)
         end
     end
 
@@ -1536,7 +1532,7 @@ local function deliverSignals(state: WorldState)
                 local cursor = state.cursors[slots[j]]
                 if cursor and cursor.alive then
                     unlinkWaits(state, cursor)
-                    schedule(state, cursor, state.step)
+                    schedule(state, cursor, state.fixed.step)
                 end
             end
         end
@@ -1569,7 +1565,7 @@ local function deliverQueryWaits(state: WorldState)
                 local cursor = state.cursors[slots[j]]
                 if cursor and cursor.alive and cursor.waitCondition == matched then
                     unlinkWaits(state, cursor)
-                    schedule(state, cursor, state.step)
+                    schedule(state, cursor, state.fixed.step)
                 end
             end
         end
@@ -1605,26 +1601,25 @@ local function deliverTweenWaits(world: World, state: WorldState)
             if outcome then
                 unlinkWaits(state, cursor)
                 releaseTween(state, cursor)
-                schedule(state, cursor, state.step)
+                schedule(state, cursor, state.fixed.step)
             end
         end
     end
 end
 
 local function tick(world: World, state: WorldState)
-    state.step = state.step + 1
-    local step = state.step
+    state.fixed.step = state.fixed.step + 1
+    local step = state.fixed.step
 
     deliverSignals(state)
     deliverQueryWaits(state)
     deliverTweenWaits(world, state)
 
-    local heap <const> = state.heap
+    local fixed <const> = state.fixed
     while true do
-        local due <const> = wakeheap.peek(heap)
+        local due <const> = seqclock.next(fixed)
         if not due or due > step then break end
-        local _, seq, handle = wakeheap.pop(heap)
-        local packed = handle as integer
+        local seq, packed = seqclock.take(fixed)
         local slot = packed % SLOT_LIMIT
         local generation = (packed - slot) / SLOT_LIMIT
         local cursor = state.cursors[slot]

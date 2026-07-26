@@ -5,7 +5,7 @@
 --- be a cycle. `tecs2d.sequence` re-exports every one of them.
 
 local tecs <const> = require("tecs")
-local wakeheap <const> = require("tecs2d.internal.wakeheap")
+local seqclock <const> = require("tecs2d.sequence.internal.clock")
 
 local type World = tecs.World
 
@@ -292,14 +292,11 @@ local record WorldState
     generations: {integer: integer}
 
     actions: {string: Action}
-    step: integer
-    seq: integer
     budget: integer
 
-    -- Playbacks waiting on a step, ordered by (wakeAt, seq). Carries the
-    -- packed handle, so a slot reused by a new playback cannot be woken by
-    -- the entry the old one left behind.
-    heap: wakeheap.Heap
+    -- The clock playbacks are scheduled against. Phase 2 gives a world one
+    -- of these per named clock; today there is only the fixed step.
+    fixed: seqclock.Clock
 
     -- Cursors blocked on a signal are held here rather than in the heap:
     -- they have no wake time until the signal arrives.
