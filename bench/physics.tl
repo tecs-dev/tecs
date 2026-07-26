@@ -176,8 +176,12 @@ return tecs.application({
             return clock.nominal
         end
 
+        -- The A/B knob for the solver's thread pool. One worker starts no
+        -- threads and runs every task inline, which is the no-executor path.
         app.world:addPlugin(physics.plugin({
             gravity = { 0.0, 900.0 },
+            workerCount = math.floor(
+                tonumber(os.getenv("BENCH_WORKERS")) or 0) as integer,
         }))
         buildContainer(app.world)
 
