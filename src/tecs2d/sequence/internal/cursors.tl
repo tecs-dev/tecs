@@ -69,7 +69,11 @@ function cursors.stateFor(world: World): WorldState
         generations = {},
         actions = {},
         budget = DEFAULT_BUDGET,
-        clocks = {fixed = seqclock.new(), frame = seqclock.new()},
+        clocks = {
+            fixed = seqclock.new(),
+            frame = seqclock.new(),
+            presentation = seqclock.new(),
+        },
         channels = {},
         pendingSignals = {},
         queries = {},

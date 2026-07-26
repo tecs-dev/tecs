@@ -29,6 +29,7 @@ local tween <const> = require("tecs2d.tween")
 local seqsnapshot <const> = require("tecs2d.sequence.internal.snapshot")
 local seqvm <const> = require("tecs2d.sequence.internal.vm")
 local seqcursors <const> = require("tecs2d.sequence.internal.cursors")
+local seqevaluators <const> = require("tecs2d.sequence.internal.evaluators")
 local seqjson <const> = require("tecs2d.sequence.internal.json")
 
 local type World = tecs.World
@@ -204,6 +205,13 @@ local record sequence
     --- `waitTween` resumes at once reporting `targetLost`.
     playTween: function(preset: string, target: EntityRef, options?: tween.PlaybackOptions): Node
 
+    --- Evaluate a registered evaluator every tick until it finishes.
+    ---
+    --- Unlike every other step, this one does not hand the tick back: the
+    --- playback joins its clock's active set and is stepped each tick, which
+    --- is what a value that has to move every frame needs.
+    eval: function(evaluator: string): Node
+
     --- Wait for the tween the most recent `playTween` started.
     ---
     --- Resumes when that specific playback completes, is cancelled, is
@@ -220,6 +228,15 @@ local record sequence
     ---------------------------------------------------------------------------
     -- Actions
     ---------------------------------------------------------------------------
+
+    --- Register something an `eval` step can name.
+    ---
+    --- Registration is global, like a program: an evaluator is code, and two
+    --- worlds evaluating the same name run the same thing.
+    registerEvaluator: function(name: string, evaluator: Evaluator)
+
+    --- What an `eval` step runs every tick.
+    type Evaluator = seqtypes.Evaluator
 
     --- Register an effect a `call` node can name.
     ---
@@ -415,6 +432,13 @@ function sequence.playTween(
         as sequence.Node
 end
 
+function sequence.eval(evaluator: string): sequence.Node
+    if type(evaluator) ~= "string" or evaluator == "" then
+        error("sequence.eval requires a non-empty evaluator name", 2)
+    end
+    return {kind = "eval", text = evaluator} as sequence.Node
+end
+
 function sequence.waitTween(): sequence.Node
     return {kind = "waitTween"} as sequence.Node
 end
@@ -461,8 +485,8 @@ function sequence.define(
     end
 
     local clock: seqtypes.ClockId = options and options.clock or "fixed"
-    if clock ~= "fixed" and clock ~= "frame" then
-        error("sequence.define clock must be 'fixed' or 'frame'", 2)
+    if clock ~= "fixed" and clock ~= "frame" and clock ~= "presentation" then
+        error("sequence.define clock must be 'fixed', 'frame', or 'presentation'", 2)
     end
     local prog = seqprogram.compile(name, seqregistry.nextVersion(name), clock, nodes)
     seqregistry.publish(prog)
@@ -508,6 +532,10 @@ function sequence.registerAction(world: World, name: string, action: sequence.Ac
         error("sequence.registerAction requires a function", 2)
     end
     seqcursors.stateFor(world).actions[name] = action
+end
+
+function sequence.registerEvaluator(name: string, evaluator: sequence.Evaluator)
+    seqevaluators.register(name, evaluator)
 end
 
 function sequence.hasAction(world: World, name: string): boolean
@@ -783,8 +811,8 @@ function sequence.plugin(world: World)
     world:addSystem({
         name = "sequence.Advance",
         phase = tecs.phases.FixedFirst,
-        run = function()
-            seqvm.tick(world, state, "fixed")
+        run = function(dt: number)
+            seqvm.tick(world, state, "fixed", dt)
         end,
     })
 
@@ -795,8 +823,18 @@ function sequence.plugin(world: World)
     world:addSystem({
         name = "sequence.AdvanceFrame",
         phase = tecs.phases.First,
-        run = function()
-            seqvm.tick(world, state, "frame")
+        run = function(dt: number)
+            seqvm.tick(world, state, "frame", dt)
+        end,
+    })
+
+    -- Presentation runs in Update with the frame's real dt: what it carries
+    -- has to move at the display's rate, not the simulation's.
+    world:addSystem({
+        name = "sequence.AdvancePresentation",
+        phase = tecs.phases.Update,
+        run = function(dt: number)
+            seqvm.tick(world, state, "presentation", dt)
         end,
     })
 

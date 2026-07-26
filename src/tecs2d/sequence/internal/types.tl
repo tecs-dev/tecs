@@ -21,6 +21,8 @@ local enum FaultReason
     "branchFaulted"
     --- A `waitQuery` named a query that is not registered on this world.
     "unregisteredQuery"
+    --- An `eval` named an evaluator that is not registered.
+    "unregisteredEvaluator"
     --- A `playTween` named a preset that is not registered on this world.
     "unregisteredTween"
 end
@@ -57,6 +59,29 @@ local enum ClockId
     --- Advances in First, one per gameplay frame, including stepped frames
     --- while the game is otherwise frozen. Scripted input.
     "frame"
+    --- Advances in Update, once per frame, carrying the frame's dt.
+    --- Continuous evaluation: interpolation that has to look smooth at the
+    --- display's rate rather than the simulation's.
+    "presentation"
+end
+
+--- Something a cursor evaluates every tick rather than sleeping through.
+---
+--- A playback parked on a wait costs one comparison per tick. One that is
+--- interpolating has work to do on every one of them, so it lives in a dense
+--- array the tick walks and never touches the wake heap. This is what lets
+--- one runtime serve both without either paying for the other.
+local record Evaluator
+    --- Per-cursor working state for a program, or nil when it needs none.
+    newState: function(prog: ProgramImpl): any
+
+    --- Advance one cursor by `dt`. Returns true when it is finished and the
+    --- cursor should move on to the next instruction.
+    step: function(world: World, cursor: Cursor, dt: number): boolean
+
+    --- Turn working state into something a snapshot can carry, and back.
+    save: function(state: any): any
+    load: function(prog: ProgramImpl, data: any): any
 end
 
 --- The lifecycle state of one playback.
@@ -275,6 +300,11 @@ local record Cursor
     --- The clock this cursor is scheduled against, from its program.
     clock: ClockId
 
+    --- Set while the cursor is evaluating rather than waiting: it sits in
+    --- its clock's active array and is stepped every tick.
+    evaluator: string
+    evalState: any
+
     owner: integer
     bindings: {string: integer}
     budget: integer
@@ -356,6 +386,7 @@ local record seqtypes
     type PlaybackState = PlaybackState
     type QueryCondition = QueryCondition
     type ClockId = ClockId
+    type Evaluator = Evaluator
     type TweenOutcome = TweenOutcome
 
     type Program = Program

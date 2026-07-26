@@ -11,6 +11,7 @@ local logging <const> = require("tecs.utils.logging")
 local tween <const> = require("tecs2d.tween")
 local frameclock <const> = require("tecs2d.internal.frameclock")
 local seqclock <const> = require("tecs2d.sequence.internal.clock")
+local seqevaluators <const> = require("tecs2d.sequence.internal.evaluators")
 local seqregistry <const> = require("tecs2d.sequence.internal.registry")
 local seqcursors <const> = require("tecs2d.sequence.internal.cursors")
 local seqprogram <const> = require("tecs2d.sequence.internal.program")
@@ -30,7 +31,7 @@ local record vm
 
     --- One tick of a world's fixed clock: deliver what is due, then drain
     --- every cursor scheduled at or before the new step.
-    tick: function(world: World, state: WorldState, clockId: seqtypes.ClockId)
+    tick: function(world: World, state: WorldState, clockId: seqtypes.ClockId, dt?: number)
 end
 
 local function contextEntity(self: seqtypes.ActionContext, name: string): integer
@@ -184,6 +185,23 @@ local function run(
                 state.tweenOwners[cursor.tweenPlayback] = cursor.slot
             end
             cursor.pc = cursor.pc + 1
+
+        elseif op == seqprogram.EVAL then
+            local name <const> = consts[a] as string
+            local evaluator <const> = seqevaluators.get(name)
+            if not evaluator then
+                seqcursors.fault(state, cursor, "unregisteredEvaluator",
+                    "evaluator '" .. name .. "' is not registered")
+                return budget
+            end
+            -- The cursor leaves the heap and joins the active set: from here
+            -- the evaluator decides when it is done, not a wake time.
+            cursor.pc = cursor.pc + 1
+            cursor.evaluator = name
+            cursor.evalState = evaluator.newState and evaluator.newState(prog) or nil
+            cursor.wakeAt = nil
+            seqclock.activate(seqcursors.clockOf(state, cursor), cursor.slot)
+            return budget
 
         elseif op == seqprogram.WAIT_TWEEN then
             cursor.pc = cursor.pc + 1
@@ -408,7 +426,40 @@ local function deliverTweenWaits(world: World, state: WorldState)
     end
 end
 
-function vm.tick(world: World, state: WorldState, clockId: seqtypes.ClockId)
+-- Everything evaluating on this clock, stepped once. Finished cursors leave
+-- the set and carry on at the instruction after their eval; the walk is
+-- backwards so removing one does not skip its neighbour.
+local function stepActive(world: World, state: WorldState, clock: seqclock.Clock, dt: number)
+    local active <const> = clock.active
+    for i = #active, 1, -1 do
+        local cursor = state.cursors[active[i]]
+        if not cursor or not cursor.alive then
+            seqclock.deactivate(clock, active[i])
+        elseif cursor.state == "running" then
+            local evaluator <const> = seqevaluators.get(cursor.evaluator)
+            local done: boolean
+            if evaluator then
+                local ok, result = pcall(evaluator.step, world, cursor, dt) as (boolean, any)
+                if not ok then
+                    seqcursors.fault(state, cursor, "actionError", tostring(result))
+                    done = false
+                else
+                    done = result as boolean
+                end
+            else
+                done = true
+            end
+            if done and cursor.alive then
+                seqclock.deactivate(clock, cursor.slot)
+                cursor.evaluator = nil
+                cursor.evalState = nil
+                seqcursors.schedule(state, cursor, clock.step)
+            end
+        end
+    end
+end
+
+function vm.tick(world: World, state: WorldState, clockId: seqtypes.ClockId, dt?: number)
     local clock <const> = state.clocks[clockId]
     clock.step = clock.step + 1
     local step = clock.step
@@ -420,6 +471,8 @@ function vm.tick(world: World, state: WorldState, clockId: seqtypes.ClockId)
         deliverQueryWaits(state)
         deliverTweenWaits(world, state)
     end
+
+    stepActive(world, state, clock, dt or 0)
 
     local fixed <const> = clock
     while true do

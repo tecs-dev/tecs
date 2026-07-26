@@ -27,6 +27,7 @@ local record program
     WAIT_QUERY: integer
     PLAY_TWEEN: integer
     WAIT_TWEEN: integer
+    EVAL: integer
     STRIDE: integer
 
     --- Whether a value is a `bind(name)` reference. Shared by the compiler,
@@ -84,6 +85,7 @@ local OP_WAIT_QUERY <const> = 9   -- a = const index of query name
 local OP_PLAY_TWEEN <const> = 10  -- a = const index of preset name
                                   -- b = const index of {bind, options}
 local OP_WAIT_TWEEN <const> = 11
+local OP_EVAL <const> = 12    -- a = const index of evaluator name
 
 local STRIDE <const> = 3
 
@@ -167,6 +169,8 @@ local function compileNode(c: Compiler, node: NodeImpl, depth: integer)
         emitOp(c, OP_PLAY_TWEEN, intern(c, node.text), intern(c, node.args))
     elseif kind == "waitTween" then
         emitOp(c, OP_WAIT_TWEEN, -1, -1)
+    elseif kind == "eval" then
+        emitOp(c, OP_EVAL, intern(c, node.text), -1)
     elseif kind == "join" then
         emitOp(c, OP_JOIN, -1, -1)
     elseif kind == "parallel" then
@@ -298,6 +302,8 @@ function program.disassemble(prog: ProgramImpl, pc?: integer): string
                 prog.consts[a] as string, ref.bindName)
         elseif op == OP_WAIT_TWEEN then
             text = "WAITTWEEN"
+        elseif op == OP_EVAL then
+            text = string.format("EVAL      %q", prog.consts[a] as string)
         elseif op == OP_JOIN then
             text = "JOIN"
         elseif op == OP_END then
@@ -345,7 +351,8 @@ function program.ahead(
                 args = (consts[b] as {any}) or {},
             }
         else
-            -- Anything else needs the world to say where it goes next.
+            -- Anything else needs the world to say where it goes next: how
+            -- long an eval runs, or which way a branch turns.
             return out
         end
         at = at + 1
@@ -364,6 +371,7 @@ program.JOIN = OP_JOIN
 program.WAIT_QUERY = OP_WAIT_QUERY
 program.PLAY_TWEEN = OP_PLAY_TWEEN
 program.WAIT_TWEEN = OP_WAIT_TWEEN
+program.EVAL = OP_EVAL
 program.STRIDE = STRIDE
 
 program.isEntityRef = isEntityRef

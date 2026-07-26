@@ -1458,6 +1458,110 @@ describe("tecs2d.sequence", function()
         end)
     end)
 
+    describe("evaluators", function()
+        -- A playback that evaluates rather than waits: stepped every tick,
+        -- accumulating dt, finishing when it has had enough.
+        local function accumulator(name: string, duration: number): {number}
+            local elapsed = {0}
+            sequence.registerEvaluator(name, {
+                newState = function(): any return nil end,
+                step = function(_w: tecs.World, _c: any, dt: number): boolean
+                    elapsed[1] = elapsed[1] + dt
+                    return elapsed[1] >= duration
+                end,
+            })
+            return elapsed
+        end
+
+        it("steps every tick instead of sleeping", function()
+            local elapsed = accumulator("spec.accumulate", 1e9)
+            local prog = sequence.define(uniqueName(), {
+                sequence.eval("spec.accumulate"),
+            })
+            sequence.play(world, prog)
+
+            local timestep = world:getFixedTiming()
+            stepWorld(world, 3)
+            -- Ran on every step after the first, which is when it started.
+            luassert.is_near(timestep * 2, elapsed[1], timestep / 2)
+        end)
+
+        it("carries on at the next step when it finishes", function()
+            local calls = 0
+            sequence.registerAction(world, "spec.after", function() calls = calls + 1 end)
+            accumulator("spec.brief", world:getFixedTiming() * 2.5)
+            local prog = sequence.define(uniqueName(), {
+                sequence.eval("spec.brief"),
+                sequence.call("spec.after"),
+            })
+            sequence.play(world, prog)
+
+            stepWorld(world, 2)
+            luassert.equals(0, calls, "still evaluating")
+            stepWorld(world, 4)
+            luassert.equals(1, calls, "the step after it finished")
+        end)
+
+        it("gets the frame's dt on the presentation clock", function()
+            local seen: {number} = {}
+            sequence.registerEvaluator("spec.dt", {
+                step = function(_w: tecs.World, _c: any, dt: number): boolean
+                    seen[#seen + 1] = dt
+                    return false
+                end,
+            })
+            local prog = sequence.define(uniqueName(), {sequence.eval("spec.dt")},
+                {clock = "presentation"})
+            sequence.play(world, prog)
+
+            world:update(0.25)
+            world:update(0.5)
+            luassert.equals(1, #seen, "one tick per frame, whatever the dt")
+            luassert.is_near(0.5, seen[1], 1e-6, "the frame's own dt, not the timestep")
+        end)
+
+        it("stops evaluating when the playback is cancelled", function()
+            local elapsed = accumulator("spec.forever", 1e9)
+            local prog = sequence.define(uniqueName(), {sequence.eval("spec.forever")})
+            local handle = sequence.play(world, prog)
+
+            stepWorld(world, 2)
+            local before = elapsed[1]
+            luassert.is_true(before > 0)
+
+            sequence.cancel(world, handle)
+            stepWorld(world, 3)
+            luassert.equals(before, elapsed[1], "a cancelled playback stops being stepped")
+        end)
+
+        it("faults on an unregistered evaluator", function()
+            local prog = sequence.define(uniqueName(), {sequence.eval("spec.neverRegistered")})
+            local handle = sequence.play(world, prog)
+
+            stepWorld(world, 1)
+            local status = sequence.status(world, handle)
+            luassert.equals("faulted", status.state)
+            luassert.equals("unregisteredEvaluator", status.fault)
+        end)
+
+        it("faults the playback when an evaluator raises", function()
+            sequence.registerEvaluator("spec.boom", {
+                step = function(): boolean error("eval boom") end,
+            })
+            local prog = sequence.define(uniqueName(), {sequence.eval("spec.boom")})
+            local handle = sequence.play(world, prog)
+
+            stepWorld(world, 2)
+            local status = sequence.status(world, handle)
+            luassert.equals("faulted", status.state)
+            luassert.is_truthy(status.faultMessage:find("eval boom", 1, true))
+        end)
+
+        it("rejects a malformed eval step", function()
+            luassert.has_error(function() sequence.eval("") end)
+        end)
+    end)
+
     describe("programs as data", function()
         local order: {string}
 
