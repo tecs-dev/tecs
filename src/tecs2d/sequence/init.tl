@@ -28,15 +28,14 @@ local seqregistry <const> = require("tecs2d.sequence.internal.registry")
 local logging <const> = require("tecs.utils.logging")
 local tween <const> = require("tecs2d.tween")
 local seqclock <const> = require("tecs2d.sequence.internal.clock")
+local seqcursors <const> = require("tecs2d.sequence.internal.cursors")
 
 local type World = tecs.World
 
 local LOGGER <const> = logging.getLogger("tecs2d.sequence")
 
-
 -- The runtime records live in the leaf types module; bind them so the body
 -- below reads the same as when they were declared here.
-local type FaultReason = seqtypes.FaultReason
 local type PlaybackState = seqtypes.PlaybackState
 local type TweenOutcome = seqtypes.TweenOutcome
 local type ProgramImpl = seqtypes.ProgramImpl
@@ -57,7 +56,6 @@ local DEFAULT_BUDGET <const> = 512
 --   3: query waits
 --   4: tween playback waits
 local SNAPSHOT_VERSION <const> = 4
-
 
 local record sequence
     ---------------------------------------------------------------------------
@@ -110,7 +108,6 @@ local record sequence
 
     --- Emitted by an `emit` step, at address 0.
     Event: seqtypes.Event
-
 
     ---------------------------------------------------------------------------
     -- Authoring
@@ -306,16 +303,13 @@ end
 -- Program representation
 -------------------------------------------------------------------------------
 
-
 -- The event record lives in the leaf types module so the VM can emit it
 -- without requiring this one back; re-exported here as the public handle.
 sequence.Event = seqtypes.Event
 
-
 -------------------------------------------------------------------------------
 -- Authoring nodes
 -------------------------------------------------------------------------------
-
 
 function sequence.bind(name: string): sequence.EntityRef
     if type(name) ~= "string" or name == "" then
@@ -323,7 +317,6 @@ function sequence.bind(name: string): sequence.EntityRef
     end
     return {bindName = name, isBinding = true}
 end
-
 
 function sequence.call(action: string, ...: sequence.Argument): sequence.Node
     if type(action) ~= "string" or action == "" then
@@ -432,7 +425,6 @@ end
 -- Compiler
 -------------------------------------------------------------------------------
 
-
 function sequence.define(name: string, nodes: {sequence.Node}): sequence.Program
     if type(name) ~= "string" or name == "" then
         error("sequence.define requires a non-empty program name", 2)
@@ -459,251 +451,6 @@ end
 -- Per-world state: cursor arena, action registry, scheduler
 -------------------------------------------------------------------------------
 
-
-
-local states: {World: WorldState} =
-    setmetatable({}, {__mode = "k"} as metatable<{World: WorldState}>)
-
-local function stateFor(world: World): WorldState
-    local state = states[world]
-    if state then return state end
-    state = {
-        cursors = {},
-        freeSlots = {},
-        nextSlot = 1,
-        generations = {},
-        actions = {},
-        budget = DEFAULT_BUDGET,
-        fixed = seqclock.new(),
-        channels = {},
-        pendingSignals = {},
-        queries = {},
-        queryWaiters = {},
-        dirtyQueries = {},
-        tweenOwners = {},
-        tweenWaiters = {},
-        argScratch = {},
-        ownerIndex = {},
-    }
-    states[world] = state
-    return state
-end
-
-local function packHandle(slot: integer, generation: integer): sequence.Handle
-    return slot + generation * SLOT_LIMIT
-end
-
--------------------------------------------------------------------------------
--- Scheduling
--------------------------------------------------------------------------------
-
-local function schedule(state: WorldState, cursor: Cursor, wakeAt: integer)
-    cursor.wakeAt = wakeAt
-    cursor.seq = seqclock.schedule(state.fixed, wakeAt,
-        packHandle(cursor.slot, cursor.generation))
-end
-
--------------------------------------------------------------------------------
--- Arena
--------------------------------------------------------------------------------
-
-local function resolve(state: WorldState, handle: sequence.Handle): Cursor
-    if type(handle) ~= "number" then return nil end
-    local slot = handle % SLOT_LIMIT
-    local generation = (handle - slot) / SLOT_LIMIT
-    local cursor = state.cursors[slot]
-    if not cursor or cursor.generation ~= generation then return nil end
-    return cursor
-end
-
-local function allocCursor(state: WorldState): Cursor
-    local slot: integer
-    local freeCount = #state.freeSlots
-    if freeCount > 0 then
-        slot = state.freeSlots[freeCount]
-        state.freeSlots[freeCount] = nil
-    else
-        slot = state.nextSlot
-        state.nextSlot = slot + 1
-        if slot >= SLOT_LIMIT then
-            error("sequence: cursor arena exhausted")
-        end
-    end
-    local generation = (state.generations[slot] or 0) + 1
-    state.generations[slot] = generation
-    local cursor: Cursor = {
-        slot = slot,
-        generation = generation,
-        alive = true,
-        pc = 0,
-        state = "running",
-        owner = 0,
-        budget = state.budget,
-        wakeAt = 0,
-        seq = 0,
-        loopRegs = nil,
-    }
-    state.cursors[slot] = cursor
-    return cursor
-end
-
-local function park(
-    index: {string: {integer: boolean}},
-    key: string,
-    slot: integer
-)
-    local blocked = index[key]
-    if not blocked then
-        blocked = {}
-        index[key] = blocked
-    end
-    blocked[slot] = true
-end
-
-local function unpark(
-    index: {string: {integer: boolean}},
-    key: string,
-    slot: integer
-)
-    local blocked = index[key]
-    if not blocked then return end
-    blocked[slot] = nil
-    if next(blocked) == nil then index[key] = nil end
-end
-
--- Drop a cursor from whichever wait index holds it. Every wait that is not
--- a time lives in one of these, so every exit path goes through here.
-local function unlinkWaits(state: WorldState, cursor: Cursor)
-    local channel = cursor.waitChannel
-    if channel then
-        cursor.waitChannel = nil
-        unpark(state.channels, channel, cursor.slot)
-    end
-    local queryName = cursor.waitQuery
-    if queryName then
-        cursor.waitQuery = nil
-        cursor.waitCondition = nil
-        unpark(state.queryWaiters, queryName, cursor.slot)
-    end
-    if cursor.waitingTween then
-        cursor.waitingTween = false
-        state.tweenWaiters[cursor.slot] = nil
-    end
-end
-
--- Drop the cursor's claim on a tween token, so an end event for a playback
--- nothing is following no longer finds an owner.
-local function releaseTween(state: WorldState, cursor: Cursor)
-    local token = cursor.tweenPlayback
-    if not token then return end
-    if state.tweenOwners[token] == cursor.slot then
-        state.tweenOwners[token] = nil
-    end
-    cursor.tweenPlayback = nil
-    cursor.tweenEntity = nil
-end
-
-local function linkOwner(state: WorldState, cursor: Cursor)
-    if cursor.owner == 0 then return end
-    local owned = state.ownerIndex[cursor.owner]
-    if not owned then
-        owned = {}
-        state.ownerIndex[cursor.owner] = owned
-    end
-    owned[cursor.slot] = true
-end
-
-local function unlinkOwner(state: WorldState, cursor: Cursor)
-    if cursor.owner == 0 then return end
-    local owned = state.ownerIndex[cursor.owner]
-    if owned then
-        owned[cursor.slot] = nil
-        if next(owned) == nil then state.ownerIndex[cursor.owner] = nil end
-    end
-end
-
--- Branch slots in a stable order, so a subtree is torn down the same way on
--- every run regardless of hash iteration order.
-local function childSlots(cursor: Cursor): {integer}
-    local slots: {integer} = {}
-    local children = cursor.children
-    if not children then return slots end
-    for slot in pairs(children) do slots[#slots + 1] = slot end
-    table.sort(slots)
-    return slots
-end
-
--- Faulting a parent from a faulting branch retires it, so the two are
--- mutually recursive.
-local faultCursor: function(
-    state: WorldState,
-    cursor: Cursor,
-    reason: FaultReason,
-    message: string
-)
-
-local function detachFromParent(
-    state: WorldState,
-    cursor: Cursor,
-    finalState: PlaybackState
-)
-    local slot = cursor.parentSlot
-    if not slot then return end
-    cursor.parentSlot = nil
-    local parent = state.cursors[slot]
-    if not parent or parent.generation ~= cursor.parentGeneration then return end
-
-    local children = parent.children
-    if children then children[cursor.slot] = nil end
-    if not parent.alive then return end
-
-    -- A faulted branch is a defect in the program, so it surfaces rather
-    -- than leaving a join quietly one branch short. A cancelled branch is
-    -- deliberate, and the join simply proceeds without it.
-    if finalState == "faulted" then
-        faultCursor(state, parent, "branchFaulted",
-            "branch at pc=" .. tostring(cursor.pc) .. " faulted: "
-            .. tostring(cursor.faultMessage))
-        return
-    end
-
-    if parent.joining and (not children or next(children) == nil) then
-        parent.joining = false
-        schedule(state, parent, state.fixed.step)
-    end
-end
-
--- A finished cursor frees its slot immediately, so the arena is bounded by
--- peak concurrency rather than by every sequence ever played. Its record
--- stays until the slot is handed out again, which lets `status` report the
--- final state; once reused, the generation check makes the old handle report
--- nil instead of another playback's state.
-local function retire(state: WorldState, cursor: Cursor, finalState: PlaybackState)
-    if not cursor.alive then return end
-    cursor.state = finalState
-    cursor.alive = false
-    cursor.joining = false
-    unlinkWaits(state, cursor)
-    releaseTween(state, cursor)
-    unlinkOwner(state, cursor)
-    seqregistry.release(cursor.program)
-
-    -- A subtree dies from the root down: branches are cancelled first, so
-    -- each one finds a parent already gone and reports nothing back up.
-    local children = cursor.children
-    if children and next(children) ~= nil then
-        local slots = childSlots(cursor)
-        for i = 1, #slots do
-            local child = state.cursors[slots[i]]
-            if child and child.alive then retire(state, child, "cancelled") end
-        end
-    end
-    cursor.children = nil
-
-    detachFromParent(state, cursor, finalState)
-    state.freeSlots[#state.freeSlots + 1] = cursor.slot
-end
-
 -------------------------------------------------------------------------------
 -- Actions
 -------------------------------------------------------------------------------
@@ -715,11 +462,11 @@ function sequence.registerAction(world: World, name: string, action: sequence.Ac
     if type(action) ~= "function" then
         error("sequence.registerAction requires a function", 2)
     end
-    stateFor(world).actions[name] = action
+    seqcursors.stateFor(world).actions[name] = action
 end
 
 function sequence.hasAction(world: World, name: string): boolean
-    return stateFor(world).actions[name] ~= nil
+    return seqcursors.stateFor(world).actions[name] ~= nil
 end
 
 function sequence.registerQuery(
@@ -733,7 +480,7 @@ function sequence.registerQuery(
     if type(descriptor) ~= "table" then
         error("sequence.registerQuery requires a query descriptor", 2)
     end
-    local state = stateFor(world)
+    local state = seqcursors.stateFor(world)
 
     -- The callbacks only mark the name; the condition is tested once per
     -- step for every name that moved, not once per entity.
@@ -768,7 +515,7 @@ function sequence.registerQuery(
 end
 
 function sequence.hasQuery(world: World, name: string): boolean
-    return stateFor(world).queries[name] ~= nil
+    return seqcursors.stateFor(world).queries[name] ~= nil
 end
 
 function sequence.signalOnEvent<T is tecs.Event>(world: World, name: string, event: T)
@@ -823,19 +570,6 @@ local function resolveArgs(
     return out
 end
 
-faultCursor = function(
-    state: WorldState,
-    cursor: Cursor,
-    reason: FaultReason,
-    message: string
-)
-    cursor.fault = reason
-    cursor.faultMessage = message
-    LOGGER:error("%s v%d pc=%d: %s (%s)",
-        cursor.program.name, cursor.program.version, cursor.pc, message, reason)
-    retire(state, cursor, "faulted")
-end
-
 local function secondsToSteps(world: World, seconds: number): integer
     if seconds <= 0 then return 0 end
     local timestep = world:getFixedTiming()
@@ -860,7 +594,7 @@ local function run(
     while true do
         budget = budget - 1
         if budget < 0 then
-            faultCursor(state, cursor, "budgetExceeded",
+            seqcursors.fault(state, cursor, "budgetExceeded",
                 "exceeded " .. tostring(cursor.budget)
                 .. " instructions in one step without waiting")
             return budget
@@ -872,13 +606,13 @@ local function run(
         local b = code[base + 3]
 
         if op == seqprogram.END then
-            retire(state, cursor, "completed")
+            seqcursors.retire(state, cursor, "completed")
             return budget
 
         elseif op == seqprogram.WAIT then
             local steps = a >= 0 and secondsToSteps(world, consts[a] as number) or b
             cursor.pc = cursor.pc + 1
-            schedule(state, cursor, state.fixed.step + (steps > 0 and steps or 1))
+            seqcursors.schedule(state, cursor, state.fixed.step + (steps > 0 and steps or 1))
             return budget
 
         elseif op == seqprogram.WAIT_SIGNAL then
@@ -886,13 +620,13 @@ local function run(
             cursor.pc = cursor.pc + 1
             cursor.waitChannel = channel
             cursor.wakeAt = nil
-            park(state.channels, channel, cursor.slot)
+            seqcursors.park(state.channels, channel, cursor.slot)
             return budget
 
         elseif op == seqprogram.WAIT_QUERY then
             local name = consts[a] as string
             if not state.queries[name] then
-                faultCursor(state, cursor, "unregisteredQuery",
+                seqcursors.fault(state, cursor, "unregisteredQuery",
                     "query '" .. name .. "' is not registered on this world")
                 return budget
             end
@@ -900,7 +634,7 @@ local function run(
             cursor.waitQuery = name
             cursor.waitCondition = b
             cursor.wakeAt = nil
-            park(state.queryWaiters, name, cursor.slot)
+            seqcursors.park(state.queryWaiters, name, cursor.slot)
             -- Test at the next step rather than here: a spawn or despawn
             -- from this step is still staged, so the query cannot answer
             -- for the world this cursor has already asked for.
@@ -912,7 +646,7 @@ local function run(
             local spec = consts[b] as {any}
             local ref = spec[1] as sequence.EntityRef
             local id = cursor.bindings and cursor.bindings[ref.bindName]
-            releaseTween(state, cursor)
+            seqcursors.releaseTween(state, cursor)
             cursor.tweenOutcome = nil
             if not id or not world:isAlive(id) then
                 -- A missing or dead actor is a game state, not a defect in
@@ -923,7 +657,7 @@ local function run(
                 local ok, result = pcall(tween.play, world, id, preset,
                     spec[2] as tween.PlaybackOptions)
                 if not ok then
-                    faultCursor(state, cursor, "unregisteredTween",
+                    seqcursors.fault(state, cursor, "unregisteredTween",
                         "tween preset '" .. preset .. "': " .. tostring(result))
                     return budget
                 end
@@ -948,7 +682,7 @@ local function run(
             local name = consts[a] as string
             local action = state.actions[name]
             if not action then
-                faultCursor(state, cursor, "unregisteredAction",
+                seqcursors.fault(state, cursor, "unregisteredAction",
                     "action '" .. name .. "' is not registered on this world")
                 return budget
             end
@@ -957,14 +691,14 @@ local function run(
                 ctx = {world = world, entity = contextEntity} as sequence.ActionContext
                 state.context = ctx
             end
-            ctx.handle = packHandle(cursor.slot, cursor.generation)
+            ctx.handle = seqcursors.packHandle(cursor.slot, cursor.generation)
             ctx.owner = cursor.owner
             ctx.args = resolveArgs(world, state, cursor, b)
             ctx._cursor = cursor
 
             local ok, err = pcall(action, world, ctx) as (boolean, any)
             if not ok then
-                faultCursor(state, cursor, "actionError", tostring(err))
+                seqcursors.fault(state, cursor, "actionError", tostring(err))
                 return budget
             end
             -- An action may cancel its own playback.
@@ -979,7 +713,7 @@ local function run(
             for i = 1, #resolved do args[i] = resolved[i] end
             world:emit(0, seqtypes.Event,
                 consts[a] as string, args,
-                packHandle(cursor.slot, cursor.generation))
+                seqcursors.packHandle(cursor.slot, cursor.generation))
             cursor.pc = cursor.pc + 1
 
         elseif op == seqprogram.JUMP then
@@ -1010,7 +744,7 @@ local function run(
             -- here: it runs once this cursor yields, which keeps a tree of
             -- branches breadth-first, off the Lua stack, and ordered by the
             -- scheduler like everything else.
-            local child = allocCursor(state)
+            local child = seqcursors.alloc(state)
             child.program = prog
             seqregistry.retain(prog)
             child.pc = a
@@ -1027,8 +761,8 @@ local function run(
             end
             children[child.slot] = true
 
-            linkOwner(state, child)
-            schedule(state, child, state.fixed.step)
+            seqcursors.linkOwner(state, child)
+            seqcursors.schedule(state, child, state.fixed.step)
             cursor.pc = b
 
         elseif op == seqprogram.JOIN then
@@ -1042,7 +776,7 @@ local function run(
             end
 
         else
-            faultCursor(state, cursor, "actionError",
+            seqcursors.fault(state, cursor, "actionError",
                 "unknown opcode " .. tostring(op))
             return budget
         end
@@ -1066,7 +800,7 @@ function sequence.signal(world: World, name: string): integer
     if type(name) ~= "string" or name == "" then
         error("sequence.signal requires a non-empty signal name", 2)
     end
-    local state = stateFor(world)
+    local state = seqcursors.stateFor(world)
     local blocked = state.channels[name]
     if not blocked then return 0 end
     local count = 0
@@ -1078,7 +812,7 @@ function sequence.signal(world: World, name: string): integer
 end
 
 function sequence.waitingOn(world: World, name: string): integer
-    local blocked = stateFor(world).channels[name]
+    local blocked = seqcursors.stateFor(world).channels[name]
     if not blocked then return 0 end
     local count = 0
     for _ in pairs(blocked) do count = count + 1 end
@@ -1093,8 +827,8 @@ function sequence.play(
     if type(program) ~= "table" or (program as ProgramImpl).code == nil then
         error("sequence.play requires a program from sequence.define", 2)
     end
-    local state = stateFor(world)
-    local cursor = allocCursor(state)
+    local state = seqcursors.stateFor(world)
+    local cursor = seqcursors.alloc(state)
     cursor.program = program as ProgramImpl
     cursor.pc = 0
     cursor.state = "running"
@@ -1106,69 +840,38 @@ function sequence.play(
         if options.budget then cursor.budget = options.budget end
     end
 
-    linkOwner(state, cursor)
+    seqcursors.linkOwner(state, cursor)
 
     -- The first instruction runs on the next fixed step, never inside play.
-    schedule(state, cursor, state.fixed.step + 1)
-    return packHandle(cursor.slot, cursor.generation)
+    seqcursors.schedule(state, cursor, state.fixed.step + 1)
+    return seqcursors.packHandle(cursor.slot, cursor.generation)
 end
 
 function sequence.cancel(world: World, handle: sequence.Handle): boolean
-    local state = stateFor(world)
-    local cursor = resolve(state, handle)
+    local state = seqcursors.stateFor(world)
+    local cursor = seqcursors.resolve(state, handle)
     if not cursor or not cursor.alive then return false end
-    retire(state, cursor, "cancelled")
-    return true
-end
-
--- Pause and resume apply to the whole branch tree, so suspending a cutscene
--- suspends everything it started.
-local function pauseTree(state: WorldState, cursor: Cursor): boolean
-    local slots = childSlots(cursor)
-    for i = 1, #slots do
-        local child = state.cursors[slots[i]]
-        if child and child.alive then pauseTree(state, child) end
-    end
-    if cursor.state ~= "running" then return false end
-    cursor.state = "paused"
-    return true
-end
-
-local function resumeTree(state: WorldState, cursor: Cursor): boolean
-    local slots = childSlots(cursor)
-    for i = 1, #slots do
-        local child = state.cursors[slots[i]]
-        if child and child.alive then resumeTree(state, child) end
-    end
-    if cursor.state ~= "paused" then return false end
-    cursor.state = "running"
-    -- A cursor blocked on a signal or parked at a join has no wake time and
-    -- stays where it is. Otherwise it keeps its heap entry, and if its wake
-    -- time passed while it was paused it runs on the next step rather than
-    -- immediately.
-    if cursor.wakeAt and cursor.wakeAt <= state.fixed.step then
-        schedule(state, cursor, state.fixed.step + 1)
-    end
+    seqcursors.retire(state, cursor, "cancelled")
     return true
 end
 
 function sequence.pause(world: World, handle: sequence.Handle): boolean
-    local state = stateFor(world)
-    local cursor = resolve(state, handle)
+    local state = seqcursors.stateFor(world)
+    local cursor = seqcursors.resolve(state, handle)
     if not cursor or not cursor.alive then return false end
-    return pauseTree(state, cursor)
+    return seqcursors.pauseTree(state, cursor)
 end
 
 function sequence.resume(world: World, handle: sequence.Handle): boolean
-    local state = stateFor(world)
-    local cursor = resolve(state, handle)
+    local state = seqcursors.stateFor(world)
+    local cursor = seqcursors.resolve(state, handle)
     if not cursor or not cursor.alive then return false end
-    return resumeTree(state, cursor)
+    return seqcursors.resumeTree(state, cursor)
 end
 
 function sequence.status(world: World, handle: sequence.Handle): sequence.Status
-    local state = stateFor(world)
-    local cursor = resolve(state, handle)
+    local state = seqcursors.stateFor(world)
+    local cursor = seqcursors.resolve(state, handle)
     if not cursor then return nil end
     local branches = 0
     local children = cursor.children
@@ -1197,7 +900,7 @@ function sequence.status(world: World, handle: sequence.Handle): sequence.Status
 end
 
 function sequence.cancelOwnedBy(world: World, owner: integer): integer
-    local state = stateFor(world)
+    local state = seqcursors.stateFor(world)
     local owned = state.ownerIndex[owner]
     if not owned then return 0 end
     local slots: {integer} = {}
@@ -1207,7 +910,7 @@ function sequence.cancelOwnedBy(world: World, owner: integer): integer
     for i = 1, #slots do
         local cursor = state.cursors[slots[i]]
         if cursor and cursor.alive then
-            retire(state, cursor, "cancelled")
+            seqcursors.retire(state, cursor, "cancelled")
             cancelled = cancelled + 1
         end
     end
@@ -1215,7 +918,7 @@ function sequence.cancelOwnedBy(world: World, owner: integer): integer
 end
 
 function sequence.activeCount(world: World): integer
-    local state = stateFor(world)
+    local state = seqcursors.stateFor(world)
     local count = 0
     for _, cursor in pairs(state.cursors) do
         if cursor.alive then count = count + 1 end
@@ -1224,7 +927,7 @@ function sequence.activeCount(world: World): integer
 end
 
 function sequence.playbacks(world: World): {sequence.Handle}
-    local state = stateFor(world)
+    local state = seqcursors.stateFor(world)
     local slots: {integer} = {}
     for slot, cursor in pairs(state.cursors) do
         if cursor.alive then slots[#slots + 1] = slot end
@@ -1233,7 +936,7 @@ function sequence.playbacks(world: World): {sequence.Handle}
     local handles: {sequence.Handle} = {}
     for i = 1, #slots do
         local cursor = state.cursors[slots[i]]
-        handles[i] = packHandle(cursor.slot, cursor.generation)
+        handles[i] = seqcursors.packHandle(cursor.slot, cursor.generation)
     end
     return handles
 end
@@ -1242,17 +945,16 @@ function sequence.setInstructionBudget(world: World, instructions: integer)
     if type(instructions) ~= "number" or instructions < 1 then
         error("sequence.setInstructionBudget requires a positive count", 2)
     end
-    stateFor(world).budget = instructions
+    seqcursors.stateFor(world).budget = instructions
 end
 
 function sequence.currentStep(world: World): integer
-    return stateFor(world).fixed.step
+    return seqcursors.stateFor(world).fixed.step
 end
 
 -------------------------------------------------------------------------------
 -- Disassembler
 -------------------------------------------------------------------------------
-
 
 function sequence.disassemble(program: sequence.Program, pc?: integer): string
     local prog = program as ProgramImpl
@@ -1261,7 +963,6 @@ function sequence.disassemble(program: sequence.Program, pc?: integer): string
     end
     return seqprogram.disassemble(prog, pc)
 end
-
 
 -------------------------------------------------------------------------------
 -- Snapshot
@@ -1284,10 +985,8 @@ local function serializeProgram(prog: ProgramImpl): {string: any}
     }
 end
 
-
 local function saveState(world: World): any
-    local state = states[world]
-    if not state then return nil end
+    local state = seqcursors.stateFor(world)
 
     local programs: {{string: any}} = {}
     local seenPrograms: {string: boolean} = {}
@@ -1360,7 +1059,7 @@ local function loadState(world: World, value: any)
         end
     end
 
-    local state = stateFor(world)
+    local state = seqcursors.stateFor(world)
     -- The playbacks about to be discarded give up their claim on the program
     -- versions they were running, so a version this world was the last user
     -- of goes with them.
@@ -1438,7 +1137,7 @@ local function loadState(world: World, value: any)
             }
             seqregistry.retain(prog)
             state.cursors[cursor.slot] = cursor
-            linkOwner(state, cursor)
+            seqcursors.linkOwner(state, cursor)
             if cursor.tweenPlayback then
                 state.tweenOwners[cursor.tweenPlayback] = cursor.slot
             end
@@ -1447,9 +1146,9 @@ local function loadState(world: World, value: any)
             -- belongs in its wait index instead of the heap; one parked at a
             -- join belongs in neither and is woken by its last branch.
             if cursor.waitChannel then
-                park(state.channels, cursor.waitChannel, cursor.slot)
+                seqcursors.park(state.channels, cursor.waitChannel, cursor.slot)
             elseif cursor.waitQuery then
-                park(state.queryWaiters, cursor.waitQuery, cursor.slot)
+                seqcursors.park(state.queryWaiters, cursor.waitQuery, cursor.slot)
                 -- The world this cursor parked against is gone, so its
                 -- condition is re-tested against the restored one.
                 state.dirtyQueries[cursor.waitQuery] = true
@@ -1457,7 +1156,7 @@ local function loadState(world: World, value: any)
                 state.tweenWaiters[cursor.slot] = true
             elseif not cursor.joining then
                 seqclock.requeue(state.fixed, cursor.wakeAt, cursor.seq,
-                    packHandle(cursor.slot, cursor.generation))
+                    seqcursors.packHandle(cursor.slot, cursor.generation))
             end
         else
             LOGGER:warn("dropping cursor for missing program %s", key)
@@ -1498,7 +1197,7 @@ local function loadState(world: World, value: any)
             LOGGER:warn("%s v%d: join at pc=%d lost its branches; resuming",
                 cursor.program.name, cursor.program.version, cursor.pc)
             cursor.joining = false
-            schedule(state, cursor, state.fixed.step + 1)
+            seqcursors.schedule(state, cursor, state.fixed.step + 1)
         end
     end
 
@@ -1531,8 +1230,8 @@ local function deliverSignals(state: WorldState)
             for j = 1, #slots do
                 local cursor = state.cursors[slots[j]]
                 if cursor and cursor.alive then
-                    unlinkWaits(state, cursor)
-                    schedule(state, cursor, state.fixed.step)
+                    seqcursors.unlinkWaits(state, cursor)
+                    seqcursors.schedule(state, cursor, state.fixed.step)
                 end
             end
         end
@@ -1564,8 +1263,8 @@ local function deliverQueryWaits(state: WorldState)
             for j = 1, #slots do
                 local cursor = state.cursors[slots[j]]
                 if cursor and cursor.alive and cursor.waitCondition == matched then
-                    unlinkWaits(state, cursor)
-                    schedule(state, cursor, state.fixed.step)
+                    seqcursors.unlinkWaits(state, cursor)
+                    seqcursors.schedule(state, cursor, state.fixed.step)
                 end
             end
         end
@@ -1599,9 +1298,9 @@ local function deliverTweenWaits(world: World, state: WorldState)
                 cursor.tweenOutcome = outcome
             end
             if outcome then
-                unlinkWaits(state, cursor)
-                releaseTween(state, cursor)
-                schedule(state, cursor, state.fixed.step)
+                seqcursors.unlinkWaits(state, cursor)
+                seqcursors.releaseTween(state, cursor)
+                seqcursors.schedule(state, cursor, state.fixed.step)
             end
         end
     end
@@ -1640,7 +1339,7 @@ local function tick(world: World, state: WorldState)
 end
 
 function sequence.plugin(world: World)
-    local state = stateFor(world)
+    local state = seqcursors.stateFor(world)
 
     world:addSystem({
         name = "sequence.Advance",
