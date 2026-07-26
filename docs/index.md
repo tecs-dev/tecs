@@ -306,37 +306,37 @@ local moveX, moveY = player1:getPair("move")
 velocity.x = moveX * speed
 ```
 
-```teal [Tweens]
-local tween = require("tecs2d.tween")
+```teal [Timelines]
+local sequence = require("tecs2d.sequence")
 
 -- Simple move
-tween.timeline({
-    tween.to(0.5, "quadOut", "transform.x", 200),
-}):play(world, entity)
+sequence.play(world, sequence.timeline("game.slide", {
+    sequence.tweenTo(0.5, "quadOut", "transform.x", 200),
+}), { owner = entity })
 
--- Sequence with a serializable named event
-tween.timeline({
-    channel = "movement",
-    tween.to(0.5, "quadOut", "transform.xy", 200, 100),
-    tween.emit("whoosh"),
-    tween.to(0.3, "linear", "color.rgba", 1, 0, 0, 1),
-}):play(world, entity)
+-- A timeline with a serializable named event, on a channel so the next
+-- movement replaces it rather than fighting it
+sequence.play(world, sequence.timeline("game.dash", {
+    sequence.tweenTo(0.5, "quadOut", "transform.xy", 200, 100),
+    sequence.tweenEmit("whoosh"),
+    sequence.tweenTo(0.3, "linear", "color.rgba", 1, 0, 0, 1),
+}), { owner = entity, channel = "movement" })
 
-world:observe(0, tween.TweenEvent, function(ev)
+world:observe(0, sequence.Event, function(ev)
     if ev.name == "whoosh" then
         playSound("whoosh")
     end
 end)
 
--- Reusable timeline with stagger
-local pulse = tween.timeline({
-    tween.to(0.8, "sineInOut", "transform.scaleXY", 1.5, 1.5),
+-- One timeline, many playbacks, staggered by a per-playback delay
+local pulse = sequence.timeline("game.pulse", {
+    sequence.tweenTo(0.8, "sineInOut", "transform.scaleXY", 1.5, 1.5),
 })
 
 for i = 0, 4 do
-    pulse:play(world, buttons[i + 1], {
-        mode = "pingPong",
-        delay = i * 0.1,
+    sequence.play(world, pulse, {
+        owner = buttons[i + 1],
+        params = { mode = "pingPong", delay = i * 0.1 },
     })
 end
 ```
@@ -373,7 +373,7 @@ end
 - [Input](/tecs2d/input/) - keyboard, mouse, and gamepad polling with layers, latches, and ownership
 - [Controllers](/tecs2d/input/controller/) - rebindable, multi-player controls across input devices
 - [Physics](/tecs2d/physics/) - Box2D bodies, forces, collision events, filtering, and transform synchronization
-- [Tweens](/tecs2d/tween) - serializable timelines with easing, channels, events, and presets
+- [Timelines](/tecs2d/sequence#timelines) - serializable interpolation with easing, channels, and events
 - [Audio](/tecs2d/audio/) - spatial sound, groups, fades, effects, cooldowns, and voice limiting
 - [UI layout](/tecs2d/rendering/ui/) - anchors, flow, clipping, scrolling, and auto-sizing
 - [Assets](/tecs2d/assets/) - cached async loading, batches, pinning, and custom asset types

@@ -250,7 +250,6 @@ export default defineConfig({
               { text: 'Collision Events', link: '/tecs2d/physics/collisions' },
             ]
           },
-          { text: 'Tween', link: '/tecs2d/tween' },
           { text: 'Sequence', link: '/tecs2d/sequence' },
         ]
       },

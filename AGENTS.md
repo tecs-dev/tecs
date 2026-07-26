@@ -64,8 +64,8 @@ tecs/
 │       ├── internal/
 │       ├── mcp/
 │       ├── physics.tl
+│       ├── sequence/
 │       ├── tiled/
-│       ├── tween.tl
 │       └── ui/
 ├── docs/                  # VitePress docs site
 ├── cli/                   # Self-contained tecs command, launchers, templates, and release payload
@@ -98,7 +98,7 @@ tecs/
 ### Tecs2D integration
 
 - `tecs2d.run` creates the `love.run` loop.
-- `tecs2d.run` auto-installs the asset manager, audio plugin, tween plugin, controller plugin, render pipeline,
+- `tecs2d.run` auto-installs the asset manager, audio plugin, sequencer, controller plugin, render pipeline,
   tiled plugin, and UI plugin before the user game plugin runs.
 - Rendering is GPU-oriented and depends on Love 12 features for the modern pipeline.
 

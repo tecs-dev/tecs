@@ -70,12 +70,15 @@ and an explicit migration step. That is deliberately not supported.
 | `waitQuery(name, cond)` | Block until a registered query matches, or stops matching |
 | `emit(event, ...)` | Emit a `sequence.Event` at address 0 |
 | `loop(count, nodes)` | Repeat a block, or forever when `count` is nil |
-| `playTween(preset, bind)` | Play a tween preset on a bound entity |
-| `waitTween()` | Wait for the tween that `playTween` started |
+| `playTween(timeline, bind)` | Play a named timeline on a bound entity |
+| `waitTween()` | Wait for the playback that `playTween` started |
 | `fork(nodes)` | Start a branch that runs alongside the rest of the program |
 | `join()` | Wait for every outstanding branch |
 | `parallel(...)` | Fork several blocks and wait for all of them |
-| `eval(name)` | Run a registered evaluator every tick until it finishes |
+| `eval(name, data?)` | Run a registered evaluator every tick until it finishes |
+
+Timelines have [a step vocabulary of their own](#timelines): `tweenTo`, `tweenAdjust`,
+`tweenTrack`, `tweenWait`, `tweenEmit`, `tweenRun`, and `tweenParallel`.
 
 ### Time
 
@@ -329,10 +332,77 @@ life of the world.
 Naming a query that is not registered faults with `unregisteredQuery`. A parked wait survives a
 snapshot and is re-tested against the **restored** world, not the one it parked in.
 
-## Tweens
+## Timelines
 
-`playTween` starts a registered tween preset on a bound entity, and `waitTween` waits for **that
-playback**, not for the preset, the channel, or the entity:
+A timeline is a program too. `sequence.timeline` compiles interpolation steps into one whose body
+is a single `eval`, and the compiled slots travel in its const pool, so it is snapshot-safe for
+exactly the reason every other program is:
+
+```teal
+local fade = sequence.timeline("game.fadeOut", {
+    sequence.tweenTo(0.4, sequence.easing.quadOut, sequence.target.alpha, 0),
+})
+
+sequence.play(world, fade, { owner = sprite })
+```
+
+The entity a timeline animates is the playback's **owner**. Its mode, count, speed, and delay are
+[params](#parameters), so one compiled timeline plays slowly on one entity and quickly on another:
+
+```teal
+sequence.play(world, fade, { owner = sprite, params = { delay = 0.2 } })
+sequence.play(world, pulse, { owner = button, params = { mode = "pingPong", count = 4 } })
+```
+
+### Steps
+
+| Step | Does |
+| --- | --- |
+| `tweenTo(duration, curve, target, ...)` | Interpolate to an absolute destination |
+| `tweenAdjust(duration, curve, target, ...)` | Interpolate by a delta from wherever it starts |
+| `tweenTrack(duration, curve, target, source)` | Chase a destination that keeps moving |
+| `tweenWait(duration)` | Advance the cursor without changing anything |
+| `tweenEmit(name)` | Emit a `sequence.Event` at this point |
+| `tweenRun(spec, options?)` | Run a nested timeline, optionally repeating it |
+| `tweenParallel(...)` | Run steps together, ending with the longest |
+
+Names are prefixed because a timeline and a program are different languages that share three
+words. `sequence.wait` suspends a playback for a number of steps; `sequence.tweenWait` moves a
+timeline cursor along. Reading the two in one file, the prefix is what says which is which.
+
+Curves, targets, and tracking sources are namespaces rather than another fifty top-level fields:
+`sequence.easing.quadOut`, `sequence.target.translateX`, `sequence.source.own(Transform, "x")`.
+Built-in curves and targets also accept their names as strings, which is what a timeline authored
+as data uses: `sequence.tweenTo(0.4, "quadOut", "transform.x", 200)`.
+
+### Clocks
+
+A timeline runs on the **presentation** clock by default, which ticks once per frame with the
+frame's own dt, so it moves at the display's rate rather than the simulation's.
+
+`{clock = "fixed"}` makes it deterministic from a snapshot alone, at the cost of stepping at the
+simulation's rate. Only `Transform` is interpolated between fixed steps
+([interpolation](/tecs2d/rendering/interpolation)), so a fixed-clock tween of anything else --
+a colour, an alpha -- visibly steps. The authoring rule: **if the simulation can observe the
+tweened value, it belongs on `fixed`.**
+
+### Channels
+
+A playback can name a channel it occupies on its owner. Starting another on the same owner and
+channel cancels the first:
+
+```teal
+sequence.play(world, moveRight, { owner = actor, channel = "movement" })
+sequence.play(world, moveDown,  { owner = actor, channel = "movement" })  -- cancels moveRight
+```
+
+That is not a timeline idea; any playback can hold a channel. It is how a second fade replaces the
+first rather than fighting it for the same field.
+
+### Starting one from a program
+
+`playTween` starts a named timeline on a bound entity, and `waitTween` waits for **that playback**,
+not for the timeline, the channel, or the entity:
 
 ```teal
 local intro = sequence.define("game.bossIntro", {
@@ -342,10 +412,8 @@ local intro = sequence.define("game.bossIntro", {
 })
 ```
 
-`tween.play` returns a token identifying one run, and every playback ends exactly once, carrying
-that token on `TweenComplete` or `TweenCancelled` (see [Tween](/tecs2d/tween#playback-tokens)).
-`waitTween` follows the token, so the same tween running twice at once is never confused for
-itself.
+The timeline it starts is a playback of its own with its own handle, so the same timeline running
+twice at once is never confused for itself.
 
 **`waitTween` never waits forever.** It resumes on any of four endings, and `status` reports which
 in `tweenOutcome`:
@@ -353,17 +421,16 @@ in `tweenOutcome`:
 | Outcome | Cause |
 | --- | --- |
 | `completed` | The playback finished |
-| `cancelled` | `tween.cancel` matched it |
+| `cancelled` | Something cancelled it |
 | `replaced` | Another playback took over its channel |
-| `targetLost` | The bound entity died, was never bound, or lost its playback component |
+| `targetLost` | The bound entity died, or was never bound |
 
 A binding that is missing or already dead is not a fault. Nothing plays, and the following
-`waitTween` resumes immediately reporting `targetLost` — the actor being gone is a game state, and
-a program can branch on it. A preset that is not registered *is* a defect, and faults with
+`waitTween` resumes immediately reporting `targetLost` -- the actor being gone is a game state, and
+a program can branch on it. A timeline that was never defined *is* a defect, and faults with
 `unregisteredTween`.
 
-`playTween` needs the tween plugin, which `tecs2d.run` installs. Playback options pass straight
-through:
+Playback params pass straight through:
 
 ```teal
 sequence.playTween("boss.hover", sequence.bind("boss"), {mode = "pingPong", count = 4})
@@ -569,6 +636,5 @@ Actions are the exception: whatever a `call` does is the program's own cost.
 
 ## See also
 
-- [Tween](/tecs2d/tween) for animating numeric component fields
 - [Save games](/tecs/save-games) for what a snapshot captures
 - [Phases](/tecs/phases) for where `FixedFirst` sits in the frame

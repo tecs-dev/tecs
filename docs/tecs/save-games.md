@@ -126,7 +126,7 @@ The Tecs2D plugins take care of their own runtime state, so these survive a snap
 - **[Input layers](/tecs2d/input/#input-layers-and-game-states)**: the names and order of active game-owned input
   layers. Layer names are required and unique; create the same layers during plugin setup before loading. Runtime-only
   overlays, `input.raw`, callbacks, and physical device state are intentionally not serialized.
-- **[Tweens](/tecs2d/tween#snapshots)**: in-progress tween playback.
+- **[Timelines](/tecs2d/sequence#timelines)**: in-progress timeline playback.
 - **[Tiled maps](/tecs2d/tiled/)**: the [tilemap](/tecs2d/tiled/tilemap) and its rendered tiles.
 
 One caveat: cameras are matched by name on load, so a camera your code creates dynamically at runtime is restored only

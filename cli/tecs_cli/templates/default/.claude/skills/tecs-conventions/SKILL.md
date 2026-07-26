@@ -71,7 +71,7 @@ first time. For the full API, run `tecs docs <page>` (offline mirror of the docs
 - **Reach for the built-in subsystems before hand-rolling.** `tecs2d.physics` (Box2D) for
   collision response, bodies, and movement beyond trivial grid/AABB checks; `tecs2d.audio`
   for sound (grouped volumes, world lifecycle — never raw `love.audio`); `tecs2d.controller`
-  for input bindings; `tecs2d.tween` for animation/interpolation; `tecs2d.tiled` for maps;
+  for input bindings; `tecs2d.sequence` for scripted logic and timelines; `tecs2d.tiled` for maps;
   `tecs2d.ui` for anchored screen-space layout. Hand-roll only when the subsystem demonstrably
   doesn't fit (a snake's grid step needs no physics engine) — a hand-rolled replacement for a
   subsystem that exists is untested code the tooling can't see into.
