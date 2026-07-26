@@ -235,7 +235,7 @@ end
 --- An immutable compiled tween timeline.
 local interface Timeline
     --- Play this timeline on an entity.
-    play: function(self: Timeline, world: World, entity: integer, options?: PlaybackOptions)
+    play: function(self: Timeline, world: World, entity: integer, options?: PlaybackOptions): integer
 end
 
 --- Runtime representation of a compiled tween timeline.
@@ -252,6 +252,9 @@ local record TimelineImpl is Timeline
 end
 
 local record Cursor
+    --- Identifies this playback for its whole life, so a waiter can tell
+    --- one run of a timeline from another on the same entity and channel.
+    playbackId: integer
     timelineId: integer
     stateSize: integer
     state: {TweenSlotState}
@@ -307,8 +310,39 @@ local record TweenComplete is tecs.Event
     channel: string | nil
     --- Runtime timeline template id.
     timelineId: integer
+    --- The playback token `play` returned for this run.
+    playback: integer
 
-    init: function(self: TweenComplete, entity: integer, channel: string | nil, timelineId: integer)
+    init: function(self: TweenComplete, entity: integer, channel: string | nil, timelineId: integer, playback: integer)
+end
+
+--- Why a playback ended without completing.
+local enum CancelReason
+    --- `tween.cancel` matched it.
+    "cancelled"
+    --- Another playback took over its channel.
+    "replaced"
+    --- Its entity died, or lost its playback component.
+    "targetLost"
+end
+
+--- Event emitted when a root timeline playback ends without completing.
+---
+--- Every playback ends exactly once, with either this or `TweenComplete`,
+--- so a waiter on a token always hears back.
+local record TweenCancelled is tecs.Event
+    --- Entity whose timeline ended.
+    entity: integer
+    --- Timeline channel, when present.
+    channel: string | nil
+    --- Runtime timeline template id.
+    timelineId: integer
+    --- The playback token `play` returned for this run.
+    playback: integer
+    --- Why it ended.
+    reason: CancelReason
+
+    init: function(self: TweenCancelled, entity: integer, channel: string | nil, timelineId: integer, playback: integer, reason: CancelReason)
 end
 
 function TweenEvent.init(e: TweenEvent, entity: integer, name: string, channel: string | nil, timelineId: integer)
@@ -318,14 +352,25 @@ function TweenEvent.init(e: TweenEvent, entity: integer, name: string, channel: 
     e.timelineId = timelineId
 end
 
-function TweenComplete.init(e: TweenComplete, entity: integer, channel: string | nil, timelineId: integer)
+function TweenComplete.init(e: TweenComplete, entity: integer, channel: string | nil, timelineId: integer, playback: integer)
     e.entity = entity
     e.channel = channel
     e.timelineId = timelineId
+    e.playback = playback
+end
+
+function TweenCancelled.init(e: TweenCancelled, entity: integer, channel: string | nil, timelineId: integer, playback: integer, reason: CancelReason)
+    e.entity = entity
+    e.channel = channel
+    e.timelineId = timelineId
+    e.playback = playback
+    e.reason = reason
 end
 
 local record Registry
     nextId: integer
+    --- Monotonic playback token, handed out by `play`.
+    nextPlaybackId: integer
     byId: {integer: TimelineImpl}
     refcounts: {integer: integer}
     objectIds: {TimelineImpl: integer}
@@ -366,6 +411,10 @@ local record tween
     TweenEvent: TweenEvent
     --- Event emitted when root playback completes.
     TweenComplete: TweenComplete
+    --- Event emitted when root playback ends without completing.
+    TweenCancelled: TweenCancelled
+    --- Why a playback ended without completing.
+    type CancelReason = CancelReason
 
     --- Linear easing.
     linear: EasingFunction
@@ -508,9 +557,13 @@ local record tween
     --- Register a snapshot-safe named timeline preset in one world.
     registerPreset: function(world: World, name: string, timeline: Timeline): Timeline
     --- Play a compiled timeline or named preset on an entity.
-    play: function(world: World, entity: integer, timelineOrName: Timeline | string, options?: PlaybackOptions)
+    --- @return A token identifying this playback, carried by the
+    --- `TweenComplete` or `TweenCancelled` event that ends it.
+    play: function(world: World, entity: integer, timelineOrName: Timeline | string, options?: PlaybackOptions): integer
     --- Cancel matching playback; selector may be a channel, preset, or timeline.
     cancel: function(world: World, entity: integer, selector?: ControlSelector)
+    --- Whether a playback token is still running on an entity.
+    isPlaying: function(world: World, entity: integer, playback: integer): boolean
     --- Pause matching playback.
     pause: function(world: World, entity: integer, selector?: ControlSelector)
     --- Resume matching playback.
@@ -649,6 +702,7 @@ local function serializeCursor(c: Cursor): {string:any}
         end
     end
     local data: {string:any} = {
+        playbackId = c.playbackId,
         timelineId = c.timelineId,
         elapsed = c.elapsed,
         direction = c.direction,
@@ -678,6 +732,7 @@ local function deserializeCursor(data: {string:any}): Cursor
         end
     end
     return {
+        playbackId = data.playbackId as integer,
         timelineId = data.timelineId as integer,
         stateSize = (data.stateSize as integer) or #(data.state as {{number}} or {}),
         state = deserializeState(data.state as {{number}}),
@@ -728,8 +783,10 @@ tween.TrackingTarget = tecs.newComponent({
 
 tween.TweenEvent = TweenEvent
 tween.TweenComplete = TweenComplete
+tween.TweenCancelled = TweenCancelled
 tecs.newEvent(TweenEvent)
 tecs.newEvent(TweenComplete)
+tecs.newEvent(TweenCancelled)
 
 -------------------------------------------------------------------------------
 -- Targets and tracking sources
@@ -1092,6 +1149,7 @@ end
 local function newRegistry(): Registry
     return {
         nextId = 1,
+        nextPlaybackId = 1,
         byId = {},
         refcounts = {},
         objectIds = setmetatable({} as {TimelineImpl: integer}, { __mode = "k" }),
@@ -1188,6 +1246,9 @@ local function restoreRegistry(world: World, data: {string:any})
         end
     end
     reg.nextId = maxId + 1
+    -- Tokens keep counting up across a load, so a handle saved before the
+    -- snapshot cannot be reissued to a different playback after it.
+    reg.nextPlaybackId = (data and (data.nextPlaybackId as integer)) or 1
     world.resources[REGISTRY] = reg
 end
 
@@ -1263,6 +1324,17 @@ local function cursorTimeline(world: World, c: Cursor): TimelineImpl
     return registry(world).byId[c.timelineId]
 end
 
+-- A playback ends exactly once. Every path that ends one early routes
+-- through here, so a waiter on a token always hears back, and hears back
+-- once.
+local function endCursor(world: World, entity: integer, c: Cursor, reason: CancelReason)
+    if c.cancelled then return end
+    c.cancelled = true
+    local tl <const> = cursorTimeline(world, c)
+    world:emit(0, TweenCancelled, entity, tl and tl.channel or nil,
+        c.timelineId, c.playbackId, reason)
+end
+
 local function addCursor(world: World, entity: integer, tl: TimelineImpl, options?: PlaybackOptions): Cursor
     local pb <const> = playbackFor(world, entity)
     if tl.channel then
@@ -1270,7 +1342,7 @@ local function addCursor(world: World, entity: integer, tl: TimelineImpl, option
             local existing <const> = pb.cursors[i]
             local etl <const> = cursorTimeline(world, existing)
             if etl and etl.channel == tl.channel then
-                existing.cancelled = true
+                endCursor(world, entity, existing, "replaced")
             end
         end
     end
@@ -1284,22 +1356,29 @@ local function addCursor(world: World, entity: integer, tl: TimelineImpl, option
         world, tl, entity, mode, passCount,
         speed, delay
     )
+    local reg <const> = registry(world)
+    c.playbackId = reg.nextPlaybackId
+    reg.nextPlaybackId = c.playbackId + 1
     pb.cursors[#pb.cursors + 1] = c
     return c
 end
 
-function TimelineImpl:play(world: World, entity: integer, options?: PlaybackOptions)
-    addCursor(world, entity, self, options)
+function TimelineImpl:play(world: World, entity: integer, options?: PlaybackOptions): integer
+    return addCursor(world, entity, self, options).playbackId
 end
 
-function tween.play(world: World, entity: integer, timelineOrName: Timeline | string, options?: PlaybackOptions)
+function tween.play(
+    world: World,
+    entity: integer,
+    timelineOrName: Timeline | string,
+    options?: PlaybackOptions
+): integer
     if timelineOrName is string then
         local id = registry(world).named[timelineOrName]
         if not id then error("Unknown tween preset " .. timelineOrName) end
-        addCursor(world, entity, registry(world).byId[id], options)
-        return
+        return addCursor(world, entity, registry(world).byId[id], options).playbackId
     end
-    addCursor(world, entity, timelineOrName as TimelineImpl, options)
+    return addCursor(world, entity, timelineOrName as TimelineImpl, options).playbackId
 end
 
 local function selectorTimelineId(world: World, selector: Timeline): integer
@@ -1329,9 +1408,20 @@ function tween.cancel(world: World, entity: integer, selector?: ControlSelector)
     for i = 1, #(pb.cursors or {}) do
         if matchesCursor(world, pb.cursors[i], selector) then
             if not mutable then mutable = world:getMut(entity, TweenPlaybackImpl) end
-            mutable.cursors[i].cancelled = true
+            endCursor(world, entity, mutable.cursors[i], "cancelled")
         end
     end
+end
+
+function tween.isPlaying(world: World, entity: integer, playback: integer): boolean
+    if not world:isAlive(entity) then return false end
+    local pb = world:get(entity, TweenPlaybackImpl)
+    if not pb then return false end
+    for i = 1, #(pb.cursors or {}) do
+        local c = pb.cursors[i]
+        if c.playbackId == playback then return not c.cancelled end
+    end
+    return false
 end
 
 function tween.pause(world: World, entity: integer, selector?: ControlSelector)
@@ -1754,7 +1844,7 @@ local function advanceCursor(c: Cursor, dt: number, world: World, target: intege
     local totalDuration <const> = tl.totalDuration
     if totalDuration <= 0 then
         evaluateCursor(c, world, target)
-        world:emit(0, TweenComplete, target, tl.channel, c.timelineId)
+        world:emit(0, TweenComplete, target, tl.channel, c.timelineId, c.playbackId)
         return true
     end
 
@@ -1787,7 +1877,7 @@ local function advanceCursor(c: Cursor, dt: number, world: World, target: intege
                 resetCursorCycle(c, world)
             end
         else
-            world:emit(0, TweenComplete, target, tl.channel, c.timelineId)
+            world:emit(0, TweenComplete, target, tl.channel, c.timelineId, c.playbackId)
             return true
         end
     end
@@ -1853,10 +1943,14 @@ function tween.plugin(world: World)
         onEntitiesRemoved = function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer, _count: integer)
             local reg = registry(world)
             local playbacks = archetype:get(TweenPlaybackImpl)
+            local entities = archetype.entities
             for row = firstRow, lastRow do
                 local pb = playbacks[row]
                 if pb then
                     for i = 1, #(pb.cursors or {}) do
+                        -- Losing the component, usually with the entity,
+                        -- ends anything still running on it.
+                        endCursor(world, entities[row] as integer, pb.cursors[i], "targetLost")
                         releaseCursor(reg, pb.cursors[i])
                     end
                 end
@@ -1876,6 +1970,7 @@ function tween.plugin(world: World)
         end
         ev:addData(SNAPSHOT_DATA_KEY, {
             nextId = reg.nextId,
+            nextPlaybackId = reg.nextPlaybackId,
             templates = templates,
         })
     end)
@@ -1925,7 +2020,10 @@ function tween.plugin(world: World)
                     local cursors = pb.cursors
                     for cidx = #cursors, 1, -1 do
                         local c = cursors[cidx]
-                        local remove = c.cancelled or not world:isAlive(entity)
+                        if not c.cancelled and not world:isAlive(entity) then
+                            endCursor(world, entity, c, "targetLost")
+                        end
+                        local remove = c.cancelled
                         if not remove then
                             remove = advanceCursor(c, dt, world, entity)
                         end

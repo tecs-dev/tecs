@@ -433,8 +433,24 @@ function tween.play(
     entity: integer,
     timelineOrName: tween.Timeline | string,
     options?: tween.PlaybackOptions
-)
+): integer
 ```
+
+### Playback tokens
+
+`play` returns a token identifying that run. The same timeline played twice on
+one entity is two playbacks with two tokens, so a caller can follow the one it
+started rather than guessing from the preset, channel, or entity:
+
+```teal
+local token = tween.play(world, boss, "boss.enter")
+
+world:observe(0, tween.TweenComplete, function(ev: tween.TweenComplete)
+    if ev.playback == token then startFight() end
+end)
+```
+
+`tween.isPlaying(world, entity, token)` reports whether it is still running.
 
 ## Channels and Control
 
@@ -490,8 +506,21 @@ end)
 `TweenComplete` is emitted when a finite top-level playback finishes all its
 passes. Infinite playback does not complete naturally.
 
-Both events contain `entity`, optional `channel`, and `timelineId`; `TweenEvent`
-also contains `name`. `channel` is `nil` for an unchanneled timeline.
+`TweenCancelled` is emitted when a playback ends without completing, carrying a
+`reason`:
+
+| Reason | Cause |
+| --- | --- |
+| `cancelled` | `tween.cancel` matched it |
+| `replaced` | Another playback took over its channel |
+| `targetLost` | Its entity died, or lost its playback component |
+
+**Every playback ends exactly once**, with either `TweenComplete` or
+`TweenCancelled`, so waiting on a token always hears back and never hangs.
+
+Every event contains `entity`, optional `channel`, and `timelineId`;
+`TweenEvent` also contains `name`, and the two ending events carry the
+`playback` token. `channel` is `nil` for an unchanneled timeline.
 
 ```teal
 local record TweenEvent is tecs.Event

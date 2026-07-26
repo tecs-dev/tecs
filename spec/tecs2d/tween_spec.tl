@@ -438,6 +438,161 @@ describe("timeline system", function()
 end)
 
 -------------------------------------------------------------------------------
+-- Playback token tests
+-------------------------------------------------------------------------------
+
+describe("playback tokens", function()
+    local world: tecs.World
+
+    before_each(function()
+        world = makeWorld()
+    end)
+
+    after_each(function()
+        if world then world:shutdown() end
+    end)
+
+    local function shortTimeline(channel?: string): tween.Timeline
+        local spec: tween.TimelineSpec = {
+            tween.to(0.5, tween.linear, tween.translateX, 100),
+        }
+        spec.channel = channel
+        return tween.timeline(spec)
+    end
+
+    it("hands every playback its own token", function()
+        local a = world:spawn(Transform(0, 0))
+        local b = world:spawn(Transform(0, 0))
+        tick(world, 0)
+
+        local first = shortTimeline():play(world, a)
+        local second = shortTimeline():play(world, a)
+        local third = tween.play(world, b, shortTimeline())
+
+        luassert.is_number(first)
+        luassert.not_equals(first, second, "two runs on one entity are two playbacks")
+        luassert.not_equals(second, third)
+        luassert.is_true(tween.isPlaying(world, a, first))
+        luassert.is_false(tween.isPlaying(world, b, first),
+            "a token belongs to the entity it was issued for")
+    end)
+
+    it("carries the token on completion", function()
+        local entity = world:spawn(Transform(0, 0))
+        tick(world, 0)
+
+        local seen: integer = nil
+        world:observe(0, tween.TweenComplete, function(ev: tween.TweenComplete)
+            seen = ev.playback
+        end)
+        local token = shortTimeline():play(world, entity)
+
+        tick(world, 0.6)
+        luassert.equals(token, seen)
+        luassert.is_false(tween.isPlaying(world, entity, token))
+    end)
+
+    it("reports a cancelled playback", function()
+        local entity = world:spawn(Transform(0, 0))
+        tick(world, 0)
+
+        local ended: tween.TweenCancelled = nil
+        world:observe(0, tween.TweenCancelled, function(ev: tween.TweenCancelled)
+            ended = ev
+        end)
+        local token = shortTimeline():play(world, entity)
+        tween.cancel(world, entity)
+
+        luassert.is_not_nil(ended)
+        luassert.equals(token, ended.playback)
+        luassert.equals("cancelled", ended.reason)
+        luassert.is_false(tween.isPlaying(world, entity, token))
+    end)
+
+    it("reports a playback replaced on its channel", function()
+        local entity = world:spawn(Transform(0, 0))
+        tick(world, 0)
+
+        local ended: tween.TweenCancelled = nil
+        world:observe(0, tween.TweenCancelled, function(ev: tween.TweenCancelled)
+            ended = ev
+        end)
+        local first = shortTimeline("move"):play(world, entity)
+        local second = shortTimeline("move"):play(world, entity)
+
+        luassert.is_not_nil(ended)
+        luassert.equals(first, ended.playback)
+        luassert.equals("replaced", ended.reason)
+        luassert.equals("move", ended.channel)
+        luassert.is_true(tween.isPlaying(world, entity, second))
+    end)
+
+    it("reports a playback whose entity died", function()
+        local entity = world:spawn(Transform(0, 0))
+        tick(world, 0)
+
+        local ended: tween.TweenCancelled = nil
+        world:observe(0, tween.TweenCancelled, function(ev: tween.TweenCancelled)
+            ended = ev
+        end)
+        local token = shortTimeline():play(world, entity)
+        world:despawn(entity)
+        world:commit()
+
+        luassert.is_not_nil(ended, "a dead target must not leave a waiter hanging")
+        luassert.equals(token, ended.playback)
+        luassert.equals("targetLost", ended.reason)
+        luassert.is_false(tween.isPlaying(world, entity, token))
+    end)
+
+    it("ends a playback exactly once", function()
+        local entity = world:spawn(Transform(0, 0))
+        tick(world, 0)
+
+        local ends = 0
+        world:observe(0, tween.TweenCancelled, function() ends = ends + 1 end)
+        world:observe(0, tween.TweenComplete, function() ends = ends + 1 end)
+
+        shortTimeline():play(world, entity)
+        tween.cancel(world, entity)
+        tick(world, 1.0)
+        world:despawn(entity)
+        world:commit()
+
+        luassert.equals(1, ends)
+    end)
+
+    it("keeps a token across a snapshot", function()
+        local entity = world:spawn(Transform(0, 0))
+        tick(world, 0)
+        local token = shortTimeline():play(world, entity)
+
+        local saved = world:saveSnapshot().buffer
+        world:loadSnapshot(saved)
+
+        local seen: integer = nil
+        world:observe(0, tween.TweenComplete, function(ev: tween.TweenComplete)
+            seen = ev.playback
+        end)
+        luassert.is_true(tween.isPlaying(world, entity, token))
+        tick(world, 0.6)
+        luassert.equals(token, seen)
+    end)
+
+    it("does not reissue a token after a snapshot load", function()
+        local entity = world:spawn(Transform(0, 0))
+        tick(world, 0)
+        local first = shortTimeline():play(world, entity)
+
+        local saved = world:saveSnapshot().buffer
+        world:loadSnapshot(saved)
+
+        local second = shortTimeline():play(world, entity)
+        luassert.not_equals(first, second)
+    end)
+end)
+
+-------------------------------------------------------------------------------
 -- Timeline compilation tests
 -------------------------------------------------------------------------------
 
