@@ -493,10 +493,7 @@ end
 --- rather than at device creation.
 function shadercompiler.format(): integer
     if loadedPack ~= nil then return loadedPack.format end
-    if ffi.os == "OSX" or ffi.os == "iOS" then
-        return K.SDL_GPU_SHADERFORMAT_MSL
-    end
-    return K.SDL_GPU_SHADERFORMAT_SPIRV
+    return require("tecs2d.platform.adapter").current().shaderFormat()
 end
 
 --- Turns a pack entry into the same shape a fresh compile produces.

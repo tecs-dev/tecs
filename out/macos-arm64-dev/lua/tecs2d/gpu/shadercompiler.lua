@@ -493,10 +493,7 @@ end
 
 function shadercompiler.format()
    if loadedPack ~= nil then return loadedPack.format end
-   if ffi.os == "OSX" or ffi.os == "iOS" then
-      return K.SDL_GPU_SHADERFORMAT_MSL
-   end
-   return K.SDL_GPU_SHADERFORMAT_SPIRV
+   return require("tecs2d.platform.adapter").current().shaderFormat()
 end
 
 

@@ -5,14 +5,12 @@
 --- on mobile there is no meaningful working directory at all, and writing next
 --- to the executable is not permitted.
 ---
---- So the platform is asked. Assets sit beside the executable, or wherever the
---- bundle put them; writable state goes where the platform keeps it for this
---- application and nowhere else.
+--- So the platform is asked, through `adapter`, which is the seam a licensed
+--- port replaces. Assets sit beside the executable, or wherever the bundle put
+--- them; writable state goes where the platform keeps it for this application
+--- and nowhere else.
 
-local sdl <const> = require("tecs2d.ffi.sdl3")
-local loader <const> = require("tecs2d.ffi.loader")
-
-local C <const> = sdl.C
+local adapter <const> = require("tecs2d.platform.adapter")
 
 local record paths
     --- Organisation and application names, used to name the writable
@@ -24,18 +22,29 @@ end
 paths.organisation = "tecs2d"
 paths.application = "tecs2d"
 
+local cachedGeneration = -1
 local baseCache: string = nil
 local prefCache: string = nil
 local assetsCache: string = nil
+
+--- Drops cached roots when the platform has changed under us.
+local function fresh()
+    local generation = adapter.generation()
+    if generation == cachedGeneration then return end
+    cachedGeneration = generation
+    baseCache = nil
+    prefCache = nil
+    assetsCache = nil
+end
 
 --- Directory the executable was loaded from, with a trailing separator.
 ---
 --- Empty when the platform declines to say, which is the case on some targets
 --- rather than an error: callers fall back to a relative path.
 function paths.base(): string
+    fresh()
     if baseCache ~= nil then return baseCache end
-    local given = C.SDL_GetBasePath()
-    baseCache = given == nil and "" or loader.toString(given)
+    baseCache = adapter.current().basePath()
     return baseCache
 end
 
@@ -44,13 +53,9 @@ end
 --- The only place a build may write. Everything else is read-only on at least
 --- one target, and finding that out at run time on a device is expensive.
 function paths.pref(): string
+    fresh()
     if prefCache ~= nil then return prefCache end
-    local given = C.SDL_GetPrefPath(paths.organisation, paths.application)
-    if given == nil then
-        error(("tecs2d: no writable directory: %s"):format(sdl.error()), 2)
-    end
-    prefCache = loader.toString(given)
-    C.SDL_free(given)
+    prefCache = adapter.current().prefPath(paths.organisation, paths.application)
     return prefCache
 end
 
@@ -62,6 +67,7 @@ end
 --- installed and this is not something to sniff for. Then the executable's own
 --- directory, which is where a single-directory build puts everything.
 function paths.assets(): string
+    fresh()
     if assetsCache ~= nil then return assetsCache end
 
     local override = os.getenv("TECS2D_ASSETS")
@@ -86,8 +92,20 @@ function paths.writable(relative: string): string
     return paths.pref() .. relative
 end
 
+--- Forgets the cached roots. A platform change is noticed without this.
+function paths.reset()
+    cachedGeneration = adapter.generation()
+    baseCache = nil
+    prefCache = nil
+    assetsCache = nil
+end
+
 --- Overrides the asset root, for a test or a tool.
+---
+--- Synchronises first, so the override outlives the platform change that may
+--- have preceded it rather than being dropped by the next read.
 function paths.setAssets(root: string)
+    fresh()
     assetsCache = root:sub(-1) == "/" and root or root .. "/"
 end
 

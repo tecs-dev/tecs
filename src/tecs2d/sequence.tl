@@ -2070,13 +2070,13 @@ end
 -------------------------------------------------------------------------------
 
 local function deliverSignals(state: WorldState)
-    local pending = state.pendingSignals
-    local count = #pending
+    local signals = state.pendingSignals
+    local count = #signals
     if count == 0 then return end
     state.pendingSignals = {}
 
     for i = 1, count do
-        local blocked = state.channels[pending[i]]
+        local blocked = state.channels[signals[i]]
         if blocked then
             -- Sort by slot so wake order is reproducible regardless of the
             -- hash iteration order.

@@ -9,10 +9,8 @@
 
 
 
-local sdl = require("tecs2d.ffi.sdl3")
-local loader = require("tecs2d.ffi.loader")
 
-local C = sdl.C
+local adapter = require("tecs2d.platform.adapter")
 
 local paths = {}
 
@@ -24,18 +22,29 @@ local paths = {}
 paths.organisation = "tecs2d"
 paths.application = "tecs2d"
 
+local cachedGeneration = -1
 local baseCache = nil
 local prefCache = nil
 local assetsCache = nil
+
+
+local function fresh()
+   local generation = adapter.generation()
+   if generation == cachedGeneration then return end
+   cachedGeneration = generation
+   baseCache = nil
+   prefCache = nil
+   assetsCache = nil
+end
 
 
 
 
 
 function paths.base()
+   fresh()
    if baseCache ~= nil then return baseCache end
-   local given = C.SDL_GetBasePath()
-   baseCache = given == nil and "" or loader.toString(given)
+   baseCache = adapter.current().basePath()
    return baseCache
 end
 
@@ -44,13 +53,9 @@ end
 
 
 function paths.pref()
+   fresh()
    if prefCache ~= nil then return prefCache end
-   local given = C.SDL_GetPrefPath(paths.organisation, paths.application)
-   if given == nil then
-      error(("tecs2d: no writable directory: %s"):format(sdl.error()), 2)
-   end
-   prefCache = loader.toString(given)
-   C.SDL_free(given)
+   prefCache = adapter.current().prefPath(paths.organisation, paths.application)
    return prefCache
 end
 
@@ -62,6 +67,7 @@ end
 
 
 function paths.assets()
+   fresh()
    if assetsCache ~= nil then return assetsCache end
 
    local override = os.getenv("TECS2D_ASSETS")
@@ -87,7 +93,19 @@ function paths.writable(relative)
 end
 
 
+function paths.reset()
+   cachedGeneration = adapter.generation()
+   baseCache = nil
+   prefCache = nil
+   assetsCache = nil
+end
+
+
+
+
+
 function paths.setAssets(root)
+   fresh()
    assetsCache = root:sub(-1) == "/" and root or root .. "/"
 end
 

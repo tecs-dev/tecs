@@ -8,6 +8,7 @@
 local ffi <const> = require("ffi")
 local sdl <const> = require("tecs2d.ffi.sdl3")
 local loader <const> = require("tecs2d.ffi.loader")
+local adapter <const> = require("tecs2d.platform.adapter")
 local shadercompiler <const> = require("tecs2d.gpu.shadercompiler")
 local shaderpack <const> = require("tecs2d.gpu.shaderpack")
 
@@ -52,6 +53,7 @@ local record capabilities
 end
 
 local resolved: capabilities = nil
+local cachedGeneration = -1
 
 --- Whether the platform reports a touch device.
 ---
@@ -78,13 +80,27 @@ local function jitEnabled(): boolean
     return running == true
 end
 
+--- Forgets the cached answer. A platform change is noticed without this.
+function capabilities.reset()
+    resolved = nil
+end
+
 --- Reads the capabilities of the running build.
 ---
---- Cached: none of these change while the process lives.
+--- Cached, since none of these change while a platform is installed.
 function capabilities.get(): capabilities
+    local generation = adapter.generation()
+    if generation ~= cachedGeneration then
+        cachedGeneration = generation
+        resolved = nil
+    end
     if resolved ~= nil then return resolved end
 
+    -- The platform in use, which is not always SDL: a licensed port installs
+    -- its own and everything here has to describe that one.
     local platform = loader.toString(C.SDL_GetPlatform())
+    local installed = adapter.current()
+    if installed.name ~= "sdl" then platform = installed.name end
 
     -- The shader pipeline is asked rather than guessed at: whether a compiler
     -- was linked is a property of the build, and a loaded pack narrows the
@@ -101,7 +117,7 @@ function capabilities.get(): capabilities
         ffi = true,
         -- A registry means the libraries were linked, which is the case
         -- precisely where loading one by name is not available.
-        dynamicLibraries = not loader.isStatic("sdl3"),
+        dynamicLibraries = installed.dynamicLibraries,
         runtimeShaders = shadercompiler.available(),
         packagedShaders = pack ~= nil,
         shaderFormats = formats,

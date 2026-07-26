@@ -8,6 +8,7 @@
 local ffi = require("ffi")
 local sdl = require("tecs2d.ffi.sdl3")
 local loader = require("tecs2d.ffi.loader")
+local adapter = require("tecs2d.platform.adapter")
 local shadercompiler = require("tecs2d.gpu.shadercompiler")
 local shaderpack = require("tecs2d.gpu.shaderpack")
 
@@ -52,6 +53,7 @@ local capabilities = {}
 
 
 local resolved = nil
+local cachedGeneration = -1
 
 
 
@@ -79,12 +81,26 @@ local function jitEnabled()
 end
 
 
+function capabilities.reset()
+   resolved = nil
+end
+
+
 
 
 function capabilities.get()
+   local generation = adapter.generation()
+   if generation ~= cachedGeneration then
+      cachedGeneration = generation
+      resolved = nil
+   end
    if resolved ~= nil then return resolved end
 
+
+
    local platform = loader.toString(C.SDL_GetPlatform())
+   local installed = adapter.current()
+   if installed.name ~= "sdl" then platform = installed.name end
 
 
 
@@ -101,7 +117,7 @@ function capabilities.get()
       ffi = true,
 
 
-      dynamicLibraries = not loader.isStatic("sdl3"),
+      dynamicLibraries = installed.dynamicLibraries,
       runtimeShaders = shadercompiler.available(),
       packagedShaders = pack ~= nil,
       shaderFormats = formats,

@@ -265,6 +265,68 @@ translates. That is the one platform-specific seam, and this is the code that
 sits on it. Only MSL and SPIR-V are produced today, so Windows resolves to the
 Vulkan backend; D3D12 would need DXC for DXIL.
 
+A release compiles nothing. On iOS there is no writable executable memory to
+hand a compiler, on a console there is no compiler to link, and everywhere else
+it is tens of megabytes baked into a build that already knows every shader it
+will ever use. So every shader the engine can ask for is registered by name in
+`tecs2d.gpu.shaders`, and `make shaders` walks that registry and writes a pack:
+code, entry point, reflected counts, workgroup size, and a hash of the source it
+came from. Because the builder calls the same compiler a development build
+calls, the packaged reflection cannot drift from what would have happened at run
+time.
+
+Nothing about that path degrades quietly. `shadercompiler.plan` decides where a
+shader comes from and takes "can this build compile" as an argument, since a
+running process cannot unlink its own compiler to test the rule that matters
+most. A shader missing from the pack, or present but built from source that has
+since changed, is a recompile where one is possible and an error where it is
+not. The device claims the pack's format for the same reason: claiming a format
+the build cannot supply selects a backend that fails at shader creation rather
+than at startup.
+
+Content is never resolved against the working directory. That happens to work
+when a build is launched from a project root and is meaningless the moment
+anything else launches it, and on a device there is no useful working directory
+at all. The build states where content sits relative to the executable, the C
+host resolves both its entry chunk and the asset root against that, and an
+installed tree runs from an unrelated directory with nothing in the environment.
+
+## Porting to a platform SDL does not cover
+
+SDL covers every platform this engine can be built for openly. It does not
+cover the ones whose SDKs are licensed, and those cannot live in this repository
+even for someone who holds a licence, because their headers may not be
+redistributed. So the engine names its platform seams instead. There are five,
+and a port supplies these and touches nothing above them:
+
+```
+ Seam        What a port supplies                       Where it plugs in
+ ──────────  ─────────────────────────────────────────  ───────────────────────
+ lifecycle   A host that calls _init, _receive,         its own entry point
+             _iterate, _shutdown
+ events      Typed events, produced directly           adapter.events
+ static FFI  Function pointers taken at build time      native/registry.c
+ storage     Content and writable roots                 adapter.basePath/prefPath
+ shaders     A pack in the platform's own format        adapter.shaderFormat
+```
+
+Each is a seam rather than a fork because everything above it is already
+indifferent to the answer. The application is an object a host drives rather
+than a function that runs until done, which is why iOS and a console SDK can
+both call the same four methods. Events are one typed stream discriminated by
+`kind`, so a platform with no `SDL_Event` produces those values directly. A
+target that forbids `dlopen` reaches its libraries through a table of pointers
+taken at build time, and nothing calls `ffi.load` when one is present. The pack
+layout does not change for a platform with private bytecode; only the declared
+format does.
+
+`tecs2d.platform.adapter` holds the SDL implementation of all five, which
+doubles as the worked example. `spec/adapter_spec.lua` installs a platform that
+is not SDL and drives real work through it, because a seam nobody has ever
+substituted is a guess about what a port would need rather than a contract.
+That spec is not a console port and cannot be one; it is the evidence that a
+port has five things to supply.
+
 The fiddly part is bindings. SDL_GPU consumes compiled shaders and is told
 separately how many resources of each class they bind, and it fixes the
 descriptor sets shaders must be authored against. Those sets differ by stage:

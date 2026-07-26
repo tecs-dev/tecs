@@ -48,6 +48,7 @@ set(OLD_GLOB
   "/Users/dowling/projects/tecs2d/src/tecs2d/physics/init.tl"
   "/Users/dowling/projects/tecs2d/src/tecs2d/platform/Input.tl"
   "/Users/dowling/projects/tecs2d/src/tecs2d/platform/Window.tl"
+  "/Users/dowling/projects/tecs2d/src/tecs2d/platform/adapter.tl"
   "/Users/dowling/projects/tecs2d/src/tecs2d/platform/capabilities.tl"
   "/Users/dowling/projects/tecs2d/src/tecs2d/platform/clock.tl"
   "/Users/dowling/projects/tecs2d/src/tecs2d/platform/events.tl"
