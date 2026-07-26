@@ -24,6 +24,7 @@
 local tecs <const> = require("tecs")
 local logging <const> = require("tecs.utils.logging")
 local tween <const> = require("tecs2d.tween")
+local wakeheap <const> = require("tecs2d.internal.wakeheap")
 
 local type World = tecs.World
 
@@ -863,14 +864,10 @@ local record WorldState
     seq: integer
     budget: integer
 
-    -- Wake heap as parallel arrays rather than a heap of entry tables. One
-    -- table per reschedule is the single largest allocation in a stepping
-    -- population, and every playback reschedules on every wait.
-    heapWake: {integer}
-    heapSeq: {integer}
-    heapSlot: {integer}
-    heapGen: {integer}
-    heapSize: integer
+    -- Playbacks waiting on a step, ordered by (wakeAt, seq). Carries the
+    -- packed handle, so a slot reused by a new playback cannot be woken by
+    -- the entry the old one left behind.
+    heap: wakeheap.Heap
 
     -- Cursors blocked on a signal are held here rather than in the heap:
     -- they have no wake time until the signal arrives.
@@ -913,11 +910,7 @@ local function stateFor(world: World): WorldState
         step = 0,
         seq = 0,
         budget = DEFAULT_BUDGET,
-        heapWake = {},
-        heapSeq = {},
-        heapSlot = {},
-        heapGen = {},
-        heapSize = 0,
+        heap = wakeheap.new(),
         channels = {},
         pendingSignals = {},
         queries = {},
@@ -932,88 +925,8 @@ local function stateFor(world: World): WorldState
     return state
 end
 
--------------------------------------------------------------------------------
--- Deterministic min-heap keyed on (wakeAt, seq)
--------------------------------------------------------------------------------
-
--- Sifting moves the hole rather than swapping pairs: one write per level per
--- array instead of two reads and two writes, which is most of the cost of a
--- population that reschedules on every step.
-local function heapPush(
-    state: WorldState,
-    wakeAt: integer,
-    seq: integer,
-    slot: integer,
-    generation: integer
-)
-    local wake, seqs, slots, gens =
-        state.heapWake, state.heapSeq, state.heapSlot, state.heapGen
-    local i = state.heapSize + 1
-    state.heapSize = i
-
-    while i > 1 do
-        local parent = floor(i / 2)
-        local parentWake = wake[parent]
-        if wakeAt < parentWake or (wakeAt == parentWake and seq < seqs[parent]) then
-            wake[i], seqs[i] = parentWake, seqs[parent]
-            slots[i], gens[i] = slots[parent], gens[parent]
-            i = parent
-        else
-            break
-        end
-    end
-
-    wake[i], seqs[i], slots[i], gens[i] = wakeAt, seq, slot, generation
-end
-
---- Remove the earliest entry, returning its seq, slot, and generation.
-local function heapPop(state: WorldState): integer, integer, integer
-    local size = state.heapSize
-    if size == 0 then return nil, nil, nil end
-    local wake, seqs, slots, gens =
-        state.heapWake, state.heapSeq, state.heapSlot, state.heapGen
-
-    local seq <const> = seqs[1]
-    local slot <const> = slots[1]
-    local generation <const> = gens[1]
-
-    -- The tail element sifts down from the root into the hole the top left.
-    local tailWake, tailSeq = wake[size], seqs[size]
-    local tailSlot, tailGen = slots[size], gens[size]
-    wake[size], seqs[size], slots[size], gens[size] = nil, nil, nil, nil
-    size = size - 1
-    state.heapSize = size
-
-    local i = 1
-    while true do
-        local left = i * 2
-        if left > size then break end
-        local child = left
-        local right = left + 1
-        if right <= size then
-            local leftWake, rightWake = wake[left], wake[right]
-            if rightWake < leftWake
-                or (rightWake == leftWake and seqs[right] < seqs[left])
-            then
-                child = right
-            end
-        end
-        local childWake = wake[child]
-        if childWake < tailWake
-            or (childWake == tailWake and seqs[child] < tailSeq)
-        then
-            wake[i], seqs[i] = childWake, seqs[child]
-            slots[i], gens[i] = slots[child], gens[child]
-            i = child
-        else
-            break
-        end
-    end
-
-    if size > 0 then
-        wake[i], seqs[i], slots[i], gens[i] = tailWake, tailSeq, tailSlot, tailGen
-    end
-    return seq, slot, generation
+local function packHandle(slot: integer, generation: integer): sequence.Handle
+    return slot + generation * SLOT_LIMIT
 end
 
 -------------------------------------------------------------------------------
@@ -1024,16 +937,13 @@ local function schedule(state: WorldState, cursor: Cursor, wakeAt: integer)
     state.seq = state.seq + 1
     cursor.wakeAt = wakeAt
     cursor.seq = state.seq
-    heapPush(state, wakeAt, cursor.seq, cursor.slot, cursor.generation)
+    wakeheap.push(state.heap, wakeAt, cursor.seq,
+        packHandle(cursor.slot, cursor.generation))
 end
 
 -------------------------------------------------------------------------------
 -- Arena
 -------------------------------------------------------------------------------
-
-local function packHandle(slot: integer, generation: integer): sequence.Handle
-    return slot + generation * SLOT_LIMIT
-end
 
 local function resolve(state: WorldState, handle: sequence.Handle): Cursor
     if type(handle) ~= "number" then return nil end
@@ -1985,11 +1895,7 @@ local function loadState(world: World, value: any)
     state.cursors = {}
     state.freeSlots = {}
     state.ownerIndex = {}
-    state.heapWake = {}
-    state.heapSeq = {}
-    state.heapSlot = {}
-    state.heapGen = {}
-    state.heapSize = 0
+    wakeheap.clear(state.heap)
     state.channels = {}
     state.pendingSignals = {}
     -- Registered queries are code, kept like actions; only the parked
@@ -2072,8 +1978,8 @@ local function loadState(world: World, value: any)
             elseif cursor.waitingTween then
                 state.tweenWaiters[cursor.slot] = true
             elseif not cursor.joining then
-                heapPush(state, cursor.wakeAt, cursor.seq,
-                    cursor.slot, cursor.generation)
+                wakeheap.push(state.heap, cursor.wakeAt, cursor.seq,
+                    packHandle(cursor.slot, cursor.generation))
             end
         else
             LOGGER:warn("dropping cursor for missing program %s", key)
@@ -2231,9 +2137,14 @@ local function tick(world: World, state: WorldState)
     deliverQueryWaits(state)
     deliverTweenWaits(world, state)
 
-    while state.heapSize > 0 do
-        if state.heapWake[1] > step then break end
-        local seq, slot, generation = heapPop(state)
+    local heap <const> = state.heap
+    while true do
+        local due <const> = wakeheap.peek(heap)
+        if not due or due > step then break end
+        local _, seq, handle = wakeheap.pop(heap)
+        local packed = handle as integer
+        local slot = packed % SLOT_LIMIT
+        local generation = (packed - slot) / SLOT_LIMIT
         local cursor = state.cursors[slot]
         -- Stale entry: the cursor was cancelled, retired, or rescheduled.
         if cursor

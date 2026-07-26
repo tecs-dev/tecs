@@ -14,6 +14,7 @@
 local tecs <const> = require("tecs")
 local inputHandlers <const> = require("tecs2d.internal.handlers")
 local inputidentity <const> = require("tecs2d.debug.internal.inputidentity")
+local wakeheap <const> = require("tecs2d.internal.wakeheap")
 local logging <const> = require("tecs.utils.logging")
 
 local LOGGER <const> = logging.getLogger("tecs2d.debug.inputtape")
@@ -42,7 +43,7 @@ local record inputtape
         world: tecs.World
         frame: integer           -- gameplay frames observed by the tape
         seq: integer
-        rows: {Row}              -- pending, sorted by (at, seq)
+        rows: wakeheap.Heap      -- pending, ordered by (at, seq)
         fired: {Fired}           -- newest last, capped at FIRED_CAP
         held: {string: Held}     -- press-without-release, by identity
 
@@ -191,18 +192,15 @@ function TapeImpl.queue(self: inputtape.Tape, rows: {{string: any}}, force: bool
     end
 
     for i = 1, #prepared do
-        self.rows[#self.rows + 1] = prepared[i]
+        local row <const> = prepared[i]
+        wakeheap.push(self.rows, row.at, row.seq, row)
     end
-    table.sort(self.rows, function(a: inputtape.Row, b: inputtape.Row): boolean
-        if a.at ~= b.at then return a.at < b.at end
-        return a.seq < b.seq
-    end)
     return #prepared, nil
 end
 
 function TapeImpl.clear(self: inputtape.Tape): integer, integer
-    local dropped <const> = #self.rows
-    self.rows = {}
+    local dropped <const> = self.rows.size
+    wakeheap.clear(self.rows)
 
     local released = 0
     for _, holdInfo in pairs(self.held) do
@@ -213,14 +211,24 @@ function TapeImpl.clear(self: inputtape.Tape): integer, integer
     return dropped, released
 end
 
+-- The heap orders what comes next, not the whole queue, so a status report
+-- sorts the window it asks for. Reading the tape is a debugger action; only
+-- queueing and firing it are per frame.
 function TapeImpl.upcoming(self: inputtape.Tape, n: integer): {{string: any}}
+    local due: {inputtape.Row} = {}
+    local values <const> = self.rows.values
+    for i = 1, self.rows.size do
+        local row <const> = values[i] as inputtape.Row
+        if row.at - self.frame <= n then due[#due + 1] = row end
+    end
+    table.sort(due, function(a: inputtape.Row, b: inputtape.Row): boolean
+        if a.at ~= b.at then return a.at < b.at end
+        return a.seq < b.seq
+    end)
+
     local out: {{string: any}} = {}
-    for i = 1, #self.rows do
-        local row <const> = self.rows[i]
-        local rel <const> = row.at - self.frame
-        if rel <= n then
-            out[#out + 1] = {["in"] = rel, event = row.event}
-        end
+    for i = 1, #due do
+        out[i] = {["in"] = due[i].at - self.frame, event = due[i].event}
     end
     return out
 end
@@ -234,8 +242,11 @@ end
 
 function TapeImpl.tick(self: inputtape.Tape)
     self.frame = self.frame + 1
-    while self.rows[1] and self.rows[1].at <= self.frame do
-        local row <const> = table.remove(self.rows, 1)
+    while true do
+        local at <const> = wakeheap.peek(self.rows)
+        if not at or at > self.frame then break end
+        local _, _, value = wakeheap.pop(self.rows)
+        local row <const> = value as inputtape.Row
         dispatchRow(self, row.event, row.args)
     end
 end
@@ -248,7 +259,7 @@ function inputtape.ensure(w: tecs.World): inputtape.Tape
         world = w,
         frame = 0,
         seq = 0,
-        rows = {},
+        rows = wakeheap.new(),
         fired = {},
         held = {},
     } as inputtape.Tape, {__index = TapeImpl} as metatable<inputtape.Tape>)
