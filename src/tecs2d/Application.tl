@@ -20,6 +20,7 @@ local tween <const> = require("tecs2d.tween")
 local sequence <const> = require("tecs2d.sequence")
 local paths <const> = require("tecs2d.platform.paths")
 local log <const> = require("tecs2d.log")
+local mcp <const> = require("tecs2d.mcp")
 local shaderpack <const> = require("tecs2d.gpu.shaderpack")
 local shadercompiler <const> = require("tecs2d.gpu.shadercompiler")
 
@@ -47,6 +48,9 @@ local record Application
         --- Log file name, under the writable root. Defaults to `log.jsonl`.
         --- Set to "" to write only to the platform's own destination.
         logFile: string
+        --- Port for the MCP server. Omitted means no server, since a game
+        --- should not open a socket nobody asked for.
+        mcpPort: integer
         capacity: integer
         maxEntities: integer
         --- Stops after this many iterations. Lets an automated run drive a
@@ -64,6 +68,8 @@ local record Application
     world: tecs.World
     renderer: Renderer
     input: Input
+    --- The debug server, when one was asked for.
+    mcp: mcp.Server
 
     --- Set to true to leave the loop at the end of the current iteration.
     quitRequested: boolean
@@ -183,6 +189,11 @@ function Application:_init(): boolean
         run = function() input:exitFixedPhase() end,
     })
 
+    if config.mcpPort ~= nil then
+        require("tecs2d.mcp.tools")
+        self.mcp = mcp.listen(config.mcpPort)
+    end
+
     if config.load ~= nil then config.load(self) end
 
     -- Startup cost must not land in the first iteration's dt.
@@ -231,6 +242,10 @@ function Application:_iterate(queue: loader.CValue, count: integer): boolean
         if self._config.update ~= nil then self._config.update(self, dt) end
 
         local t0 = clock.now()
+        -- Answered on this thread, inside the frame, so a tool reads a world
+        -- that is not mid-update.
+        if self.mcp ~= nil then self.mcp:poll() end
+
         self.world:update(dt)
 
         local t1 = clock.now()
@@ -277,6 +292,7 @@ function Application:_shutdown(): boolean
         self._config.quit(self)
     end
 
+    if self.mcp ~= nil then self.mcp:destroy() end
     log.closeFile()
 
     if self.device ~= nil then

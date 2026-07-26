@@ -7,6 +7,8 @@
 local record cjson
     --- Sentinel that encodes as `[]` rather than `{}`.
     empty_array: any
+    --- Sentinel that encodes as `null`, and what a decoded null becomes.
+    null: any
     --- Marks a table to encode as an array regardless of its contents.
     empty_array_mt: any
 

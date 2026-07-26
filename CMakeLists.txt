@@ -39,6 +39,16 @@ else()
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(SDL3 REQUIRED IMPORTED_TARGET sdl3)
     pkg_check_modules(SDL3_IMAGE REQUIRED IMPORTED_TARGET sdl3-image)
+    # Found by hand rather than through its .pc file: Homebrew's sdl3-net.pc
+    # sets includedir to /include and libdir to /lib, which CMake rejects when
+    # it builds an imported target. The real paths are on the same prefix as
+    # SDL3 itself.
+    find_path(SDL3_NET_INCLUDE_DIR SDL3_net/SDL_net.h)
+    find_library(SDL3_NET_LIBRARY NAMES SDL3_net)
+    if(NOT SDL3_NET_INCLUDE_DIR OR NOT SDL3_NET_LIBRARY)
+        message(FATAL_ERROR
+            "SDL3_net not found. Set SDL3_NET_INCLUDE_DIR and SDL3_NET_LIBRARY.")
+    endif()
     pkg_check_modules(LUAJIT REQUIRED IMPORTED_TARGET luajit)
     pkg_check_modules(SHADERC REQUIRED IMPORTED_TARGET shaderc)
     pkg_check_modules(SPIRV_CROSS REQUIRED spirv-cross-c)
@@ -197,6 +207,8 @@ if(TECS2D_BUILD_LUA)
     tecs2d_cdef(sdl3 SDL3/SDL.h /SDL3/ SDL_ ${SDL3_INCLUDE_DIRS})
     tecs2d_cdef(sdl3image SDL3_image/SDL_image.h /SDL3_image/ IMG_
         ${SDL3_IMAGE_INCLUDE_DIRS} ${SDL3_INCLUDE_DIRS})
+    tecs2d_cdef(sdl3net SDL3_net/SDL_net.h /SDL3_net/ NET_
+        ${SDL3_NET_INCLUDE_DIR} ${SDL3_INCLUDE_DIRS})
     tecs2d_cdef(box2d box2d/box2d.h /box2d/ B2_ ${BOX2D_INCLUDE_DIR})
     tecs2d_cdef(shaderc shaderc/shaderc.h /shaderc/ shaderc_
         ${SHADERC_INCLUDE_DIRS})
@@ -215,6 +227,7 @@ if(TECS2D_BUILD_LUA)
     # through the table rather than through a handle it had to resolve.
     set(TECS2D_REGISTRY_SOURCES "")
     set(TECS2D_REGISTRY_ENTRIES "")
+    set(TECS2D_REGISTRY_PAIRS "")
 
     function(tecs2d_registry name struct prefix)
         set(source "${CMAKE_BINARY_DIR}/generated/${name}api.c")
@@ -235,6 +248,8 @@ if(TECS2D_BUILD_LUA)
                     "${CMAKE_SOURCE_DIR}/scripts/genregistry.py"
             COMMENT "Generating ${name} native API table"
             VERBATIM)
+        set(TECS2D_REGISTRY_PAIRS ${TECS2D_REGISTRY_PAIRS} "${name}:${struct}"
+            PARENT_SCOPE)
         set(TECS2D_REGISTRY_SOURCES ${TECS2D_REGISTRY_SOURCES} "${source}"
             PARENT_SCOPE)
         set(TECS2D_REGISTRY_ENTRIES
@@ -244,6 +259,7 @@ if(TECS2D_BUILD_LUA)
 
     tecs2d_registry(sdl3 Tecs2dSdl3Api SDL_ SDL3/SDL.h)
     tecs2d_registry(sdl3image Tecs2dSdl3ImageApi IMG_ SDL3_image/SDL_image.h)
+    tecs2d_registry(sdl3net Tecs2dSdl3NetApi NET_ SDL3_net/SDL_net.h)
     tecs2d_registry(box2d Tecs2dBox2dApi b2 box2d/box2d.h)
     tecs2d_registry(worker Tecs2dWorkerApi tecs2d worker.h)
     tecs2d_registry(logsink Tecs2dLogsinkApi tecs2d logsink.h)
@@ -256,6 +272,22 @@ if(TECS2D_BUILD_LUA)
         tecs2d_registry(spvc Tecs2dSpvcApi spvc_ spirv_cross_c.h)
     endif()
 
+    # The same mapping the loader needs, so the two cannot drift. It was a
+    # hand-written table, and adding a library to the build without adding it
+    # here failed only under the host, where the registry path is the one that
+    # runs.
+    set(TECS2D_REGISTRY_LUA
+        "-- Generated. Library name to the struct its registry table has.\nreturn {\n")
+    foreach(pair IN LISTS TECS2D_REGISTRY_PAIRS)
+        string(REPLACE ":" ";" parts "${pair}")
+        list(GET parts 0 pairName)
+        list(GET parts 1 pairStruct)
+        set(TECS2D_REGISTRY_LUA
+            "${TECS2D_REGISTRY_LUA}    ${pairName} = \"${pairStruct}\",\n")
+    endforeach()
+    file(WRITE "${TECS2D_LUA_OUT}/tecs2d/ffi/registrystructs.lua"
+        "${TECS2D_REGISTRY_LUA}}\n")
+
     file(WRITE "${CMAKE_BINARY_DIR}/generated/registry_entries.h"
         "/* Generated. Which libraries this target links. */\n"
         "${TECS2D_REGISTRY_ENTRIES}")
@@ -266,7 +298,7 @@ if(TECS2D_BUILD_LUA)
         "${CMAKE_BINARY_DIR}/generated" "${CMAKE_SOURCE_DIR}/native")
     target_link_libraries(tecs2d_registry PUBLIC
         PkgConfig::SDL3 PkgConfig::SDL3_IMAGE PkgConfig::LUAJIT
-        ${BOX2D_LIBRARY})
+        ${BOX2D_LIBRARY} ${SDL3_NET_LIBRARY})
 
     # Taking the address of a shader compiler's functions means linking it.
     # That is the coupling TECS2D_RUNTIME_SHADERS exists to remove: a release
@@ -276,7 +308,8 @@ if(TECS2D_BUILD_LUA)
             PkgConfig::SHADERC tecs2d_spirvcross)
     endif()
     target_include_directories(tecs2d_registry PRIVATE
-        ${BOX2D_INCLUDE_DIR} ${SHADERC_INCLUDE_DIRS} ${SPIRV_CROSS_INCLUDE_DIRS})
+        ${BOX2D_INCLUDE_DIR} ${SDL3_NET_INCLUDE_DIR}
+        ${SHADERC_INCLUDE_DIRS} ${SPIRV_CROSS_INCLUDE_DIRS})
 
     # Linked here rather than where the executables are declared, because the
     # registry's sources are generated from bindings produced above.
@@ -287,7 +320,7 @@ if(TECS2D_BUILD_LUA)
 
     add_custom_target(tecs2d_bindings ALL DEPENDS
         "${GEN}/workercdef.lua" "${GEN}/logsinkcdef.lua"
-        "${GEN}/sdl3cdef.lua" "${GEN}/sdl3imagecdef.lua"
+        "${GEN}/sdl3cdef.lua" "${GEN}/sdl3imagecdef.lua" "${GEN}/sdl3netcdef.lua"
         "${GEN}/box2dcdef.lua" "${GEN}/shaderccdef.lua"
         "${GEN}/spvccdef.lua")
 

@@ -118,6 +118,7 @@ return tecs2d.application({
     maxEntities = COUNT + 64,
     maxFrames = tonumber(os.getenv("TECS2D_FRAMES")) as integer,
     presentMode = os.getenv("TECS2D_PRESENT"),
+    mcpPort = tonumber(os.getenv("TECS2D_MCP")) as integer,
 
     load = function(app: tecs2d.Application)
         local width, height = app.window:getPixelSize()

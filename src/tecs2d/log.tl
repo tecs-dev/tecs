@@ -133,13 +133,24 @@ end
 --- The platform destination keeps receiving the human-readable form, so
 --- `tail -f`, logcat and Console.app are unaffected. The file is what makes a
 --- log queryable after the fact: seek to an offset, read to the end.
+local filePath: string = nil
+
 function log.openFile(path: string): boolean
-    return sink.tecs2dLogSinkOpen(path) as boolean
+    local ok = sink.tecs2dLogSinkOpen(path) as boolean
+    if ok then filePath = path end
+    return ok
+end
+
+--- Where the file is, or nil if none was opened. What `get_logs` hands back
+--- to an agent that shares a filesystem with the game.
+function log.filePath(): string
+    return filePath
 end
 
 --- Stops writing to the file and restores SDL's own output function.
 function log.closeFile()
     sink.tecs2dLogSinkClose()
+    filePath = nil
 end
 
 local function emit(self: log.Logger, priority: integer, message: string,
