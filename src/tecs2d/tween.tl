@@ -10,18 +10,14 @@ local type ControlSelector = string | Timeline
 -- Curves, targets, tracking sources, and the slot loop are the sequencer's
 -- evaluation core. What is left here is the scheduling around them: what a
 -- timeline is, when a playback advances, and how it ends.
-local type OperationKind = tweeneval.OperationKind
 local type EasingName = tweeneval.EasingName
 local type EasingFunction = tweeneval.EasingFunction
 local type TargetName = tweeneval.TargetName
 local type Target = tweeneval.Target
 local type TrackSource = tweeneval.TrackSource
-local type TrackSourceImpl = tweeneval.TrackSourceImpl
-local type Slot = tweeneval.Slot
 local type TweenSlotState = tweeneval.TweenSlotState
 local type PlaybackMode = tweeneval.PlaybackMode
 local type PlaybackOptions = tweeneval.PlaybackOptions
-local type EmitSlot = tweeneval.EmitSlot
 local type RunSlot = tweeneval.RunSlot
 local type Timeline = tweeneval.Timeline
 local type TimelineImpl = tweeneval.TimelineImpl
@@ -31,20 +27,9 @@ local evaluateSlots <const> = tweeneval.evaluateSlots
 local serializeTimeline <const> = tweeneval.serializeTimeline
 local deserializeTimeline <const> = tweeneval.deserializeTimeline
 
-local record RunOptions
-    --- Nested timeline playback mode. Defaults to "once".
-    mode: PlaybackMode
-    --- Pass count for the nested timeline.
-    count: integer
-end
-
-local type TimelineNode = {any}
-
---- Sequential timeline nodes with an optional replacement channel.
-local record TimelineSpec is {TimelineNode}
-    --- Playing another timeline on this channel cancels the current one.
-    channel: string
-end
+local type TimelineNode = tweeneval.TimelineNode
+local type TimelineSpec = tweeneval.TimelineSpec
+local type RunOptions = tweeneval.RunOptions
 
 local record Cursor
     --- Identifies this playback for its whole life, so a waiter can tell
@@ -835,161 +820,14 @@ end
 -- Timeline compilation
 -------------------------------------------------------------------------------
 
-local resolveEasing <const> = tweeneval.resolveEasing
-local resolveTargetValue <const> = tweeneval.resolveTargetValue
-
-local function numericValue(value: any, position: integer): number
-    if value == nil then return 0 end
-    assert(value is number, "Tween value at position " .. tostring(position) .. " must be a number")
-    return value as number
-end
-
-function tween.to(
-    duration: number, easing: EasingName | EasingFunction, target: TargetName | Target,
-    t1: number, t2?: number, t3?: number, t4?: number
-): TimelineNode
-    return {"to", duration, easing, target, t1, t2, t3, t4}
-end
-
-function tween.adjust(
-    duration: number, easing: EasingName | EasingFunction, target: TargetName | Target,
-    t1: number, t2?: number, t3?: number, t4?: number
-): TimelineNode
-    return {"adjust", duration, easing, target, t1, t2, t3, t4}
-end
-
-function tween.track(
-    duration: number, easing: EasingName | EasingFunction,
-    target: TargetName | Target, trackingSource: TrackSource
-): TimelineNode
-    return {"track", duration, easing, target, trackingSource}
-end
-
-function tween.wait(duration: number): TimelineNode
-    return {"wait", duration}
-end
-
-function tween.emit(name: string): TimelineNode
-    return {"emit", name}
-end
-
-function tween.run(timeline: Timeline, options?: RunOptions): TimelineNode
-    return {"run", timeline, options}
-end
-
-function tween.parallel(...: TimelineNode): TimelineNode
-    local node: {any} = {"parallel"}
-    for i = 1, select("#", ...) do
-        node[i + 1] = select(i, ...)
-    end
-    return node
-end
-
-local compileNode: function(TimelineNode, number, TimelineImpl): number
-
-local function compileBlock(block: {TimelineNode}, startTime: number, tl: TimelineImpl): number
-    local time = startTime
-    for i = 1, #block do
-        time = compileNode(block[i], time, tl)
-    end
-    return time
-end
-
-local function compileSlot(node: TimelineNode, startTime: number, tl: TimelineImpl): number
-    local compiled <const> = (node as any) as {any:any}
-    local authoredKind <const> = compiled[1] as OperationKind
-    local duration <const> = compiled[2] as number
-    assert(duration and duration > 0, "Tween duration must be greater than 0")
-    local easingName, easingFn = resolveEasing(compiled[3])
-    local target <const> = resolveTargetValue(compiled[4])
-    assert(target, "Tween target is required")
-
-    compiled.kind = authoredKind == "track" and "track" or "to"
-    compiled.target = target
-    compiled.source = authoredKind == "track" and (compiled[5] as TrackSourceImpl) or nil
-    compiled.easingName = easingName
-    compiled.easing = easingFn
-    compiled.t1 = authoredKind == "track" and 0 or numericValue(compiled[5], 5)
-    compiled.t2 = authoredKind == "track" and 0 or numericValue(compiled[6], 6)
-    compiled.t3 = authoredKind == "track" and 0 or numericValue(compiled[7], 7)
-    compiled.t4 = authoredKind == "track" and 0 or numericValue(compiled[8], 8)
-    compiled.relative = authoredKind == "adjust"
-    compiled.startTime = startTime
-    compiled.endTime = startTime + duration
-    compiled.duration = duration
-    compiled.stateIndex = #tl.slots
-
-    tl.slots[#tl.slots + 1] = node as Slot
-    return compiled.endTime as number
-end
-
-compileNode = function(node: TimelineNode, startTime: number, tl: TimelineImpl): number
-    local data <const> = (node as any) as {any:any}
-    assert(data, "Tween timeline entry is required")
-    local kind <const> = data[1]
-    if kind is table then
-        return compileBlock(data as {TimelineNode}, startTime, tl)
-    end
-    assert(kind is string, "Tween operation name must be a string")
-
-    if kind == "to" or kind == "adjust" or kind == "track" then
-        return compileSlot(node, startTime, tl)
-    elseif kind == "wait" then
-        local duration <const> = data[2] as number
-        assert(duration and duration >= 0, "Tween wait duration must be at least 0")
-        return startTime + duration
-    elseif kind == "emit" then
-        local name <const> = data[2] as string
-        assert(name, "Tween emit name is required")
-        data.time = startTime
-        data.name = name
-        data.order = #tl.emits + 1
-        tl.emits[#tl.emits + 1] = node as EmitSlot
-        return startTime
-    elseif kind == "run" then
-        local child <const> = data[2] as TimelineImpl
-        assert(child and child.totalDuration, "Tween run requires a compiled timeline")
-        local options <const> = data[3] as RunOptions
-        local mode, passCount = playbackMode(options and options.mode, options and options.count, true)
-        local duration <const> = child.totalDuration * passCount
-        data.timeline = child
-        data.startTime = startTime
-        data.effectiveDuration = duration
-        data.mode = mode
-        data.passCount = passCount
-        tl.runs[#tl.runs + 1] = node as RunSlot
-        return startTime + duration
-    elseif kind == "parallel" then
-        local endTime = startTime
-        local children <const> = data as {any}
-        for i = 2, #children do
-            local childEnd <const> = compileNode(children[i] as TimelineNode, startTime, tl)
-            if childEnd > endTime then endTime = childEnd end
-        end
-        return endTime
-    end
-    error("Unknown tween operation " .. kind)
-end
-
-function tween.timeline(spec: TimelineSpec): Timeline
-    local authored <const> = spec as {any:any}
-    assert(authored.sequence == nil, "Tween timelines use an implicit sequence")
-    local tl <const> = spec as TimelineImpl
-    tl.slots = {}
-    tl.runs = {}
-    tl.emits = {}
-    tl.totalDuration = compileBlock(spec, 0, tl)
-    tl.stateSize = #tl.slots
-    if #tl.runs == 0 then tl.runs = nil end
-    if #tl.emits == 0 then
-        tl.emits = nil
-    else
-        table.sort(tl.emits, function(a: EmitSlot, b: EmitSlot): boolean
-            return a.time < b.time or (a.time == b.time and a.order < b.order)
-        end)
-    end
-    return tweeneval.asTimeline(tl)
-end
+tween.to = tweeneval.to
+tween.adjust = tweeneval.adjust
+tween.track = tweeneval.track
+tween.wait = tweeneval.wait
+tween.emit = tweeneval.emit
+tween.run = tweeneval.run
+tween.parallel = tweeneval.parallel
+tween.timeline = tweeneval.compile
 
 function tween.registerPreset(world: World, name: string, timeline: Timeline): Timeline
     local impl <const> = timeline as TimelineImpl

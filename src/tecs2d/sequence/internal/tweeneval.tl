@@ -212,6 +212,21 @@ local enum PlaybackMode
     "pingPong"
 end
 
+--- Nested timeline playback options.
+local record RunOptions
+    --- Nested timeline playback mode. Defaults to "once".
+    mode: PlaybackMode
+    --- Pass count for the nested timeline.
+    count: integer
+end
+
+--- One authored timeline operation. Opaque; do not reuse a node across
+--- timelines, because compiling one writes its resolved form into it.
+local type TimelineNode = {any}
+
+--- Sequential timeline operations.
+local type TimelineSpec = {TimelineNode}
+
 --- Root playback options.
 local record PlaybackOptions
     --- Playback mode. Defaults to "once".
@@ -414,10 +429,53 @@ local record tweeneval
     type Sources = Sources
     type PlaybackMode = PlaybackMode
     type PlaybackOptions = PlaybackOptions
+    type RunOptions = RunOptions
+    type TimelineNode = TimelineNode
+    type TimelineSpec = TimelineSpec
     type EmitSlot = EmitSlot
     type RunSlot = RunSlot
     type Timeline = Timeline
     type TimelineImpl = TimelineImpl
+
+    --- Authoring nodes. `to` and `adjust` interpolate to an absolute or a
+    --- relative destination; `track` chases one that keeps moving.
+    to: function(
+        duration: number, easing: EasingName | EasingFunction,
+        target: TargetName | Target,
+        t1: number, t2?: number, t3?: number, t4?: number
+    ): TimelineNode
+    adjust: function(
+        duration: number, easing: EasingName | EasingFunction,
+        target: TargetName | Target,
+        t1: number, t2?: number, t3?: number, t4?: number
+    ): TimelineNode
+    track: function(
+        duration: number, easing: EasingName | EasingFunction,
+        target: TargetName | Target, source: TrackSource
+    ): TimelineNode
+
+    --- Advance the cursor without changing anything.
+    wait: function(duration: number): TimelineNode
+
+    --- Emit a named event at the cursor position.
+    emit: function(name: string): TimelineNode
+
+    --- Run a nested timeline, given as its own spec or already compiled.
+    --- Untyped because the two forms are both tables and Teal cannot tell
+    --- them apart; `compile` decides by looking for a compiled duration.
+    run: function(timeline: any, options?: RunOptions): TimelineNode
+
+    --- Run nodes concurrently, ending when the longest of them does.
+    parallel: function(...: TimelineNode): TimelineNode
+
+    --- Compile authored nodes into a timeline.
+    compile: function(spec: TimelineSpec): Timeline
+
+    --- Validate a mode and pass count, resolving the defaults. `finite`
+    --- rejects an endless repeat, which a nested run cannot express.
+    playbackMode: function(
+        mode?: PlaybackMode, count?: integer, finite?: boolean
+    ): PlaybackMode, integer
 
     --- Methods every compiled timeline answers to, as one shared table the
     --- timeline metatable indexes. Playback owns `play` and installs it here,
@@ -968,6 +1026,192 @@ function tweeneval.deserializeTimeline(data: {string:any}): TimelineImpl
         presetName = data.presetName as string,
         pinned = data.pinned == true,
     } as TimelineImpl, TIMELINE_MT)
+end
+
+-------------------------------------------------------------------------------
+-- Authoring and compilation
+--
+-- A node is a plain array the compiler writes its resolved form into, so an
+-- authored timeline becomes a compiled one in place rather than in a copy.
+-------------------------------------------------------------------------------
+
+function tweeneval.playbackMode(
+    mode?: PlaybackMode, count?: integer, finite?: boolean
+): PlaybackMode, integer
+    local resolved <const> = mode or "once"
+    assert(resolved == "once" or resolved == "loop" or resolved == "pingPong",
+        "Tween mode must be once, loop, or pingPong")
+    if resolved == "once" then
+        assert(count == nil, "Tween count is only valid with loop or pingPong mode")
+        return resolved, 1
+    end
+    if count ~= nil then
+        assert(count > 0, "Tween count must be greater than 0")
+        return resolved, count
+    end
+    assert(not finite, "Nested loop and pingPong runs require a finite count")
+    return resolved, -1
+end
+
+local function numericValue(value: any, position: integer): number
+    if value == nil then return 0 end
+    assert(value is number, "Tween value at position " .. tostring(position) .. " must be a number")
+    return value as number
+end
+
+function tweeneval.to(
+    duration: number, curve: EasingName | EasingFunction, target: TargetName | Target,
+    t1: number, t2?: number, t3?: number, t4?: number
+): TimelineNode
+    return {"to", duration, curve, target, t1, t2, t3, t4}
+end
+
+function tweeneval.adjust(
+    duration: number, curve: EasingName | EasingFunction, target: TargetName | Target,
+    t1: number, t2?: number, t3?: number, t4?: number
+): TimelineNode
+    return {"adjust", duration, curve, target, t1, t2, t3, t4}
+end
+
+function tweeneval.track(
+    duration: number, curve: EasingName | EasingFunction,
+    target: TargetName | Target, from: TrackSource
+): TimelineNode
+    return {"track", duration, curve, target, from}
+end
+
+function tweeneval.wait(duration: number): TimelineNode
+    return {"wait", duration}
+end
+
+function tweeneval.emit(name: string): TimelineNode
+    return {"emit", name}
+end
+
+function tweeneval.run(timeline: any, options?: RunOptions): TimelineNode
+    return {"run", timeline, options}
+end
+
+function tweeneval.parallel(...: TimelineNode): TimelineNode
+    local node: {any} = {"parallel"}
+    for i = 1, select("#", ...) do
+        node[i + 1] = select(i, ...)
+    end
+    return node
+end
+
+local compileNode: function(TimelineNode, number, TimelineImpl): number
+
+local function compileBlock(block: {TimelineNode}, startTime: number, tl: TimelineImpl): number
+    local time = startTime
+    for i = 1, #block do
+        time = compileNode(block[i], time, tl)
+    end
+    return time
+end
+
+local function compileSlot(node: TimelineNode, startTime: number, tl: TimelineImpl): number
+    local compiled <const> = (node as any) as {any:any}
+    local authoredKind <const> = compiled[1] as OperationKind
+    local duration <const> = compiled[2] as number
+    assert(duration and duration > 0, "Tween duration must be greater than 0")
+    local easingName, easingFn = tweeneval.resolveEasing(compiled[3])
+    local target <const> = tweeneval.resolveTargetValue(compiled[4])
+    assert(target, "Tween target is required")
+
+    compiled.kind = authoredKind == "track" and "track" or "to"
+    compiled.target = target
+    compiled.source = authoredKind == "track" and (compiled[5] as TrackSourceImpl) or nil
+    compiled.easingName = easingName
+    compiled.easing = easingFn
+    compiled.t1 = authoredKind == "track" and 0 or numericValue(compiled[5], 5)
+    compiled.t2 = authoredKind == "track" and 0 or numericValue(compiled[6], 6)
+    compiled.t3 = authoredKind == "track" and 0 or numericValue(compiled[7], 7)
+    compiled.t4 = authoredKind == "track" and 0 or numericValue(compiled[8], 8)
+    compiled.relative = authoredKind == "adjust"
+    compiled.startTime = startTime
+    compiled.endTime = startTime + duration
+    compiled.duration = duration
+    compiled.stateIndex = #tl.slots
+
+    tl.slots[#tl.slots + 1] = node as Slot
+    return compiled.endTime as number
+end
+
+compileNode = function(node: TimelineNode, startTime: number, tl: TimelineImpl): number
+    local data <const> = (node as any) as {any:any}
+    assert(data, "Tween timeline entry is required")
+    local kind <const> = data[1]
+    if kind is table then
+        return compileBlock(data as {TimelineNode}, startTime, tl)
+    end
+    assert(kind is string, "Tween operation name must be a string")
+
+    if kind == "to" or kind == "adjust" or kind == "track" then
+        return compileSlot(node, startTime, tl)
+    elseif kind == "wait" then
+        local duration <const> = data[2] as number
+        assert(duration and duration >= 0, "Tween wait duration must be at least 0")
+        return startTime + duration
+    elseif kind == "emit" then
+        local name <const> = data[2] as string
+        assert(name, "Tween emit name is required")
+        data.time = startTime
+        data.name = name
+        data.order = #tl.emits + 1
+        tl.emits[#tl.emits + 1] = node as EmitSlot
+        return startTime + 0
+    elseif kind == "run" then
+        -- A nested timeline is given either already compiled or as its own
+        -- spec. The second form is what authoring reaches for, since a
+        -- nested timeline needs no name of its own.
+        local nested <const> = data[2] as {any:any}
+        assert(nested, "Tween run requires a timeline")
+        local child = nested as TimelineImpl
+        if child.totalDuration == nil then
+            child = tweeneval.compile(nested as TimelineSpec) as TimelineImpl
+        end
+        local options <const> = data[3] as RunOptions
+        local mode, passCount =
+            tweeneval.playbackMode(options and options.mode, options and options.count, true)
+        local duration <const> = child.totalDuration * passCount
+        data.timeline = child
+        data.startTime = startTime
+        data.effectiveDuration = duration
+        data.mode = mode
+        data.passCount = passCount
+        tl.runs[#tl.runs + 1] = node as RunSlot
+        return startTime + duration
+    elseif kind == "parallel" then
+        local endTime = startTime
+        local children <const> = data as {any}
+        for i = 2, #children do
+            local childEnd <const> = compileNode(children[i] as TimelineNode, startTime, tl)
+            if childEnd > endTime then endTime = childEnd end
+        end
+        return endTime
+    end
+    error("Unknown tween operation " .. kind)
+end
+
+function tweeneval.compile(spec: TimelineSpec): Timeline
+    local authored <const> = spec as {any:any}
+    assert(authored.sequence == nil, "Tween timelines use an implicit sequence")
+    local tl <const> = spec as TimelineImpl
+    tl.slots = {}
+    tl.runs = {}
+    tl.emits = {}
+    tl.totalDuration = compileBlock(spec, 0, tl)
+    tl.stateSize = #tl.slots
+    if #tl.runs == 0 then tl.runs = nil end
+    if #tl.emits == 0 then
+        tl.emits = nil
+    else
+        table.sort(tl.emits, function(a: EmitSlot, b: EmitSlot): boolean
+            return a.time < b.time or (a.time == b.time and a.order < b.order)
+        end)
+    end
+    return tweeneval.asTimeline(tl)
 end
 
 -------------------------------------------------------------------------------

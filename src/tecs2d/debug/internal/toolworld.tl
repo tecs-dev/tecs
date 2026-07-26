@@ -3,6 +3,7 @@
 local tecs <const> = require("tecs")
 local events <const> = require("tecs2d.events")
 local gfx <const> = require("tecs2d.gfx")
+local sequence <const> = require("tecs2d.sequence")
 local tween <const> = require("tecs2d.tween")
 local ui <const> = require("tecs2d.ui")
 local debugdraw <const> = require("tecs2d.debug.internal.debugdraw")
@@ -48,16 +49,16 @@ function toolworld.install(world: tecs.World, uiHeight: number)
         },
     })
     tools:addPlugin(ui.new({origin = "topLeft"}))
-    tools:addPlugin(tween.plugin)
+    tools:addPlugin(sequence.plugin)
     local cursorAlphaEntity = tools:spawn(gfx.Color(1, 1, 1, 1))
     local cursorAlpha = tween.field(gfx.Color, "a")
-    tween.timeline({
-        channel = "debug.cursor",
+    local blink = sequence.timeline("tecs2d.debug.cursorBlink", {
         tween.wait(0.8),
         tween.to(0.06, tween.sineIn, cursorAlpha, 0),
         tween.wait(0.1),
         tween.to(0.06, tween.sineOut, cursorAlpha, 1),
-    }):play(tools, cursorAlphaEntity, {mode = "loop"})
+    })
+    sequence.play(tools, blink, {owner = cursorAlphaEntity, params = {mode = "loop"}})
     local state: State = {
         world = tools,
         pipeline = pipeline,
