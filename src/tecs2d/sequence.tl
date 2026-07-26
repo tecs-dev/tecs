@@ -57,8 +57,6 @@ local enum FaultReason
     "actionError"
     --- The cursor exceeded its per-step instruction budget.
     "budgetExceeded"
-    --- A `call` needed a binding that is absent or no longer alive.
-    "missingBinding"
 end
 
 --- The lifecycle state of one playback.
@@ -704,18 +702,16 @@ local function unlinkOwner(state: WorldState, cursor: Cursor)
     end
 end
 
--- Finished cursors keep their record until the handle is queried, then the
--- slot is recycled. Retiring immediately would make `status` unable to
--- distinguish "completed" from "never issued".
+-- A finished cursor frees its slot immediately, so the arena is bounded by
+-- peak concurrency rather than by every sequence ever played. Its record
+-- stays until the slot is handed out again, which lets `status` report the
+-- final state; once reused, the generation check makes the old handle report
+-- nil instead of another playback's state.
 local function retire(state: WorldState, cursor: Cursor, finalState: PlaybackState)
+    if not cursor.alive then return end
     cursor.state = finalState
     cursor.alive = false
     unlinkOwner(state, cursor)
-end
-
-local function releaseSlot(state: WorldState, cursor: Cursor)
-    if state.cursors[cursor.slot] ~= cursor then return end
-    state.cursors[cursor.slot] = nil
     state.freeSlots[#state.freeSlots + 1] = cursor.slot
 end
 
@@ -939,11 +935,7 @@ end
 function sequence.cancel(world: World, handle: sequence.Handle): boolean
     local state = stateFor(world)
     local cursor = resolve(state, handle)
-    if not cursor then return false end
-    if not cursor.alive then
-        releaseSlot(state, cursor)
-        return false
-    end
+    if not cursor or not cursor.alive then return false end
     retire(state, cursor, "cancelled")
     return true
 end

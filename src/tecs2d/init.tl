@@ -10,6 +10,7 @@ local workers <const> = require("tecs2d.workers")
 local tecs_audio <const> = require("tecs2d.audio")
 local tecs_controller <const> = require("tecs2d.controller")
 local tecs_tween <const> = require("tecs2d.tween")
+local tecs_sequence <const> = require("tecs2d.sequence")
 local gfx <const> = require("tecs2d.gfx")
 local tecs_tiled <const> = require("tecs2d.tiled")
 local tecs_ui <const> = require("tecs2d.ui")
@@ -205,6 +206,9 @@ local function gamePlugin(world: tecs.World)
 
     -- Register tween system
     world:addPlugin(tecs_tween.plugin)
+
+    -- Register the gameplay sequencer
+    world:addPlugin(tecs_sequence.plugin)
 
     -- Create and register controller manager
     world:addPlugin(tecs_controller.plugin())

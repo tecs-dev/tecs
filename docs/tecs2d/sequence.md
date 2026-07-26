@@ -109,8 +109,8 @@ sequence.play(world, cutscene, {
 ```
 
 Inside an action, `ctx:entity("villain")` resolves a binding, returning `nil` when it was not
-supplied or its entity is no longer alive. A `call` whose action requires a missing binding faults
-with `missingBinding`.
+supplied or its entity is no longer alive. That is not a fault: an action decides for itself
+whether a binding is optional.
 
 ## Actions
 
@@ -152,6 +152,10 @@ sequence.cancel(world, handle)
 local s = sequence.status(world, handle)   -- state, program, version, pc, wakeAt, fault
 ```
 
+A finished playback frees its arena slot immediately, so the arena is bounded by peak concurrency
+rather than by every sequence ever played. Its `status` stays readable until the slot is handed to
+a new playback, after which the old handle reports `nil` rather than another playback's state.
+
 A handle is generation checked and **remains meaningful across a snapshot load**: a handle saved
 before a snapshot refers to the same playback after restore, and reports `cancelled` if that
 playback did not survive.
@@ -187,7 +191,6 @@ Prefer `waitSteps(0)` in a loop body over raising the budget.
 | `unregisteredAction` | A `call` named an action not registered on this world |
 | `actionError` | A registered action raised |
 | `budgetExceeded` | The per-step instruction budget was exhausted |
-| `missingBinding` | A required binding was absent or its entity was not alive |
 
 A faulted playback stops and retains its `pc`, so the failure is inspectable rather than silent.
 

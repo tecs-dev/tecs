@@ -345,6 +345,37 @@ describe("tecs2d.sequence", function()
         end)
     end)
 
+    describe("arena", function()
+        it("recycles slots as playbacks finish", function()
+            sequence.registerAction(world, "spec.noop", function() end)
+            local prog = sequence.define(uniqueName(), {sequence.call("spec.noop")})
+
+            for _ = 1, 50 do
+                sequence.play(world, prog)
+                stepWorld(world, 1)
+            end
+
+            -- A bounded arena hands the next playback a low slot rather than
+            -- growing once per sequence ever played.
+            local handle = sequence.play(world, prog)
+            luassert.is_true(handle % 1048576 <= 2,
+                "expected a recycled slot, got slot " .. tostring(handle % 1048576))
+        end)
+
+        it("reports a finished playback until its slot is reused", function()
+            sequence.registerAction(world, "spec.noop", function() end)
+            local prog = sequence.define(uniqueName(), {sequence.call("spec.noop")})
+            local handle = sequence.play(world, prog)
+            stepWorld(world, 1)
+
+            luassert.equals("completed", sequence.status(world, handle).state)
+
+            sequence.play(world, prog)
+            luassert.is_nil(sequence.status(world, handle),
+                "a reused slot must not report the previous playback's state")
+        end)
+    end)
+
     describe("handles", function()
         it("returns nil status for a handle this world never issued", function()
             luassert.is_nil(sequence.status(world, 123456789))
@@ -355,8 +386,6 @@ describe("tecs2d.sequence", function()
             local prog = sequence.define(uniqueName(), {sequence.call("spec.noop")})
 
             local first = sequence.play(world, prog)
-            sequence.cancel(world, first)
-            -- Querying a finished handle releases its slot for reuse.
             sequence.cancel(world, first)
 
             local second = sequence.play(world, prog)
