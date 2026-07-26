@@ -433,6 +433,7 @@ local record Compiler
     consts: {any}
     constIndex: {any: integer}
     loopSlots: integer
+    loopCounts: {integer: integer}
 end
 
 local function intern(c: Compiler, value: any): integer
@@ -477,11 +478,10 @@ local function compileNode(c: Compiler, node: NodeImpl, depth: integer)
         local top = floor(#c.code / STRIDE)
         compileBlock(c, node.nodes, slot)
         -- A nil count loops forever; the register is unused in that case.
-        emitOp(c, OP_JUMP, top, node.count and slot or -1)
-        -- The count travels in the const pool via the register initializer,
-        -- stored alongside the jump so entry can seed it.
-        c.consts[#c.consts + 1] = node.count
-        c.code[#c.code] = c.code[#c.code]
+        local jumpPc = emitOp(c, OP_JUMP, top, node.count and slot or -1)
+        -- Counts are keyed by the jump's own pc, so a cursor reaching that
+        -- jump for the first time knows what to seed its register with.
+        if node.count then c.loopCounts[jumpPc] = node.count end
     else
         error("sequence: unknown node kind '" .. tostring(kind) .. "'")
     end
@@ -497,34 +497,6 @@ compileBlock = function(c: Compiler, nodes: {sequence.Node}, depth: integer)
     end
 end
 
--- Loop counts are keyed by the jump's pc so a cursor can seed its register
--- the first time it reaches that jump.
-local function compileLoopCounts(nodes: {sequence.Node}, prog: ProgramImpl)
-    -- Walk the compiled code and pair each conditional JUMP with the count
-    -- recorded during compilation, in emission order.
-    local counts: {integer: integer} = {}
-    local pending: {integer} = {}
-    local function collect(list: {sequence.Node})
-        for i = 1, #list do
-            local node = list[i] as NodeImpl
-            if node.kind == "loop" then
-                collect(node.nodes)
-                pending[#pending + 1] = node.count
-            end
-        end
-    end
-    collect(nodes)
-    local seen = 0
-    local pcCount = floor(#prog.code / STRIDE)
-    for pc = 0, pcCount - 1 do
-        if prog.code[pc * STRIDE + 1] == OP_JUMP then
-            seen = seen + 1
-            counts[pc] = pending[seen]
-        end
-    end
-    prog.loopCounts = counts
-end
-
 function sequence.define(name: string, nodes: {sequence.Node}): sequence.Program
     if type(name) ~= "string" or name == "" then
         error("sequence.define requires a non-empty program name", 2)
@@ -533,7 +505,13 @@ function sequence.define(name: string, nodes: {sequence.Node}): sequence.Program
         error("sequence.define requires an array of nodes", 2)
     end
 
-    local c: Compiler = {code = {}, consts = {}, constIndex = {}, loopSlots = 0}
+    local c: Compiler = {
+        code = {},
+        consts = {},
+        constIndex = {},
+        loopSlots = 0,
+        loopCounts = {},
+    }
     compileBlock(c, nodes, 0)
     emitOp(c, OP_END, -1, -1)
 
@@ -544,9 +522,8 @@ function sequence.define(name: string, nodes: {sequence.Node}): sequence.Program
         code = c.code,
         consts = c.consts,
         loopSlots = c.loopSlots,
-        loopCounts = {},
+        loopCounts = c.loopCounts,
     }
-    compileLoopCounts(nodes, prog)
 
     programsByName[name] = prog
     local versions = programVersions[name]

@@ -199,6 +199,24 @@ describe("tecs2d.sequence", function()
             luassert.equals(3, calls)
         end)
 
+        it("gives each loop in a nest its own count", function()
+            local calls = 0
+            sequence.registerAction(world, "spec.count", function() calls = calls + 1 end)
+            local prog = sequence.define(uniqueName(), {
+                sequence.loop(2, {
+                    sequence.loop(3, {
+                        sequence.call("spec.count"),
+                        sequence.waitSteps(0),
+                    }),
+                    sequence.waitSteps(0),
+                }),
+            })
+            sequence.play(world, prog)
+
+            stepWorld(world, 20)
+            luassert.equals(6, calls, "the inner block runs count(inner) x count(outer) times")
+        end)
+
         it("repeats forever when count is nil", function()
             local calls = 0
             sequence.registerAction(world, "spec.count", function() calls = calls + 1 end)
