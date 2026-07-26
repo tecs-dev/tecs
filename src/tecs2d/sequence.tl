@@ -39,7 +39,9 @@ local DEFAULT_BUDGET <const> = 512
 -- Layout version of this module's snapshot payload. Bumped whenever a cursor
 -- gains state an older reader would silently ignore, so a save written by a
 -- newer build is rejected rather than restored as a half-cursor.
-local SNAPSHOT_VERSION <const> = 1
+--   1: cursor, program, and signal state
+--   2: branch tree (parent link and join state)
+local SNAPSHOT_VERSION <const> = 2
 
 -- Instruction opcodes. Code is a flat array with stride 3: (op, a, b).
 local OP_WAIT <const> = 1     -- a = const index holding seconds, or -1
@@ -52,6 +54,9 @@ local OP_JUMP <const> = 4     -- a = target pc
                               -- b = loop register, or -1 for unconditional
 local OP_END <const> = 5
 local OP_WAIT_SIGNAL <const> = 6  -- a = const index of signal name
+local OP_FORK <const> = 7     -- a = first pc of the branch body
+                              -- b = pc the forking cursor continues at
+local OP_JOIN <const> = 8
 
 local STRIDE <const> = 3
 
@@ -63,6 +68,8 @@ local enum FaultReason
     "actionError"
     --- The cursor exceeded its per-step instruction budget.
     "budgetExceeded"
+    --- A branch this cursor forked faulted.
+    "branchFaulted"
 end
 
 --- The lifecycle state of one playback.
@@ -202,6 +209,12 @@ local record sequence
         --- Signal name this playback is blocked on, when it is.
         waitingFor: string
 
+        --- Live branches this playback forked and has not joined.
+        branches: integer
+
+        --- Whether it is parked at a `join` waiting for those branches.
+        joining: boolean
+
         --- Set when `state` is `"faulted"`.
         fault: FaultReason
         faultMessage: string
@@ -252,6 +265,29 @@ local record sequence
     --- Repeat a block.
     --- @param count Iterations, or nil to repeat until cancelled.
     loop: function(count: integer, nodes: {Node}): Node
+
+    --- Start a branch that runs alongside the rest of the program.
+    ---
+    --- The branch is a playback of its own running the same program at a
+    --- different instruction, and it inherits the owner, bindings, and
+    --- instruction budget of the playback that forked it. It starts once
+    --- that playback next waits, joins, or ends, within the same fixed step.
+    ---
+    --- A branch never outlives the playback that forked it: finishing or
+    --- cancelling that playback cancels the branches it has not joined.
+    fork: function(nodes: {Node}): Node
+
+    --- Wait for every branch forked and not yet joined.
+    ---
+    --- Falls straight through when there are none. When the last branch
+    --- finishes, the waiting playback resumes within that same step.
+    join: function(): Node
+
+    --- Fork several blocks and wait for all of them.
+    ---
+    --- Sugar for a `fork` per block followed by one `join`. Blocks start in
+    --- the order they are given.
+    parallel: function(...: {Node}): Node
 
     ---------------------------------------------------------------------------
     -- Actions
@@ -363,6 +399,7 @@ local record NodeImpl is sequence.Node
     number: number
     args: {any}
     nodes: {sequence.Node}
+    blocks: {{sequence.Node}}
     count: integer
 end
 
@@ -424,6 +461,31 @@ function sequence.loop(count: integer, nodes: {sequence.Node}): sequence.Node
     return {kind = "loop", count = count, nodes = nodes} as sequence.Node
 end
 
+function sequence.fork(nodes: {sequence.Node}): sequence.Node
+    if type(nodes) ~= "table" or #nodes == 0 then
+        error("sequence.fork requires a non-empty block", 2)
+    end
+    return {kind = "fork", nodes = nodes} as sequence.Node
+end
+
+function sequence.join(): sequence.Node
+    return {kind = "join"} as sequence.Node
+end
+
+function sequence.parallel(...: {sequence.Node}): sequence.Node
+    local blocks: {{sequence.Node}} = {...}
+    if #blocks == 0 then
+        error("sequence.parallel requires at least one block", 2)
+    end
+    for i = 1, #blocks do
+        local block = blocks[i]
+        if type(block) ~= "table" or #block == 0 then
+            error("sequence.parallel block " .. tostring(i) .. " is empty", 2)
+        end
+    end
+    return {kind = "parallel", blocks = blocks} as sequence.Node
+end
+
 -------------------------------------------------------------------------------
 -- Compiler
 -------------------------------------------------------------------------------
@@ -460,6 +522,18 @@ end
 
 local compileBlock: function(c: Compiler, nodes: {sequence.Node}, depth: integer)
 
+-- A branch body is laid out inline, between the fork and the instruction the
+-- forking cursor continues at, and terminated by its own END. One program
+-- holds the whole tree, so a snapshot carries one program and a disassembly
+-- shows every branch in place.
+local function compileFork(c: Compiler, nodes: {sequence.Node}, depth: integer)
+    local forkPc = emitOp(c, OP_FORK, 0, 0)
+    c.code[forkPc * STRIDE + 2] = forkPc + 1
+    compileBlock(c, nodes, depth)
+    emitOp(c, OP_END, -1, -1)
+    c.code[forkPc * STRIDE + 3] = floor(#c.code / STRIDE)
+end
+
 local function compileNode(c: Compiler, node: NodeImpl, depth: integer)
     local kind = node.kind
     if kind == "call" then
@@ -482,6 +556,16 @@ local function compileNode(c: Compiler, node: NodeImpl, depth: integer)
         -- Counts are keyed by the jump's own pc, so a cursor reaching that
         -- jump for the first time knows what to seed its register with.
         if node.count then c.loopCounts[jumpPc] = node.count end
+    elseif kind == "fork" then
+        compileFork(c, node.nodes, depth)
+    elseif kind == "join" then
+        emitOp(c, OP_JOIN, -1, -1)
+    elseif kind == "parallel" then
+        local blocks = node.blocks
+        for i = 1, #blocks do
+            compileFork(c, blocks[i], depth)
+        end
+        emitOp(c, OP_JOIN, -1, -1)
     else
         error("sequence: unknown node kind '" .. tostring(kind) .. "'")
     end
@@ -561,6 +645,18 @@ local record Cursor
     seq: integer
     loopRegs: {integer: integer}
     waitChannel: string
+
+    -- Branch tree. A child holds its parent by (slot, generation) so a
+    -- recycled slot can never be mistaken for the parent that forked it.
+    parentSlot: integer
+    parentGeneration: integer
+    children: {integer: boolean}
+    joining: boolean
+
+    -- Instruction budget is spent per fixed step, not per resume, so a
+    -- cursor that wakes again within the same step cannot re-arm it.
+    budgetStep: integer
+    budgetLeft: integer
 
     fault: FaultReason
     faultMessage: string
@@ -670,6 +766,22 @@ local function heapPop(state: WorldState): HeapEntry
 end
 
 -------------------------------------------------------------------------------
+-- Scheduling
+-------------------------------------------------------------------------------
+
+local function schedule(state: WorldState, cursor: Cursor, wakeAt: integer)
+    state.seq = state.seq + 1
+    cursor.wakeAt = wakeAt
+    cursor.seq = state.seq
+    heapPush(state, {
+        wakeAt = wakeAt,
+        seq = cursor.seq,
+        slot = cursor.slot,
+        generation = cursor.generation,
+    })
+end
+
+-------------------------------------------------------------------------------
 -- Arena
 -------------------------------------------------------------------------------
 
@@ -727,12 +839,73 @@ local function unlinkChannel(state: WorldState, cursor: Cursor)
     if next(blocked) == nil then state.channels[channel] = nil end
 end
 
+local function linkOwner(state: WorldState, cursor: Cursor)
+    if cursor.owner == 0 then return end
+    local owned = state.ownerIndex[cursor.owner]
+    if not owned then
+        owned = {}
+        state.ownerIndex[cursor.owner] = owned
+    end
+    owned[cursor.slot] = true
+end
+
 local function unlinkOwner(state: WorldState, cursor: Cursor)
     if cursor.owner == 0 then return end
     local owned = state.ownerIndex[cursor.owner]
     if owned then
         owned[cursor.slot] = nil
         if next(owned) == nil then state.ownerIndex[cursor.owner] = nil end
+    end
+end
+
+-- Branch slots in a stable order, so a subtree is torn down the same way on
+-- every run regardless of hash iteration order.
+local function childSlots(cursor: Cursor): {integer}
+    local slots: {integer} = {}
+    local children = cursor.children
+    if not children then return slots end
+    for slot in pairs(children) do slots[#slots + 1] = slot end
+    table.sort(slots)
+    return slots
+end
+
+-- Faulting a parent from a faulting branch retires it, so the two are
+-- mutually recursive.
+local faultCursor: function(
+    state: WorldState,
+    cursor: Cursor,
+    reason: FaultReason,
+    message: string
+)
+
+local function detachFromParent(
+    state: WorldState,
+    cursor: Cursor,
+    finalState: PlaybackState
+)
+    local slot = cursor.parentSlot
+    if not slot then return end
+    cursor.parentSlot = nil
+    local parent = state.cursors[slot]
+    if not parent or parent.generation ~= cursor.parentGeneration then return end
+
+    local children = parent.children
+    if children then children[cursor.slot] = nil end
+    if not parent.alive then return end
+
+    -- A faulted branch is a defect in the program, so it surfaces rather
+    -- than leaving a join quietly one branch short. A cancelled branch is
+    -- deliberate, and the join simply proceeds without it.
+    if finalState == "faulted" then
+        faultCursor(state, parent, "branchFaulted",
+            "branch at pc=" .. tostring(cursor.pc) .. " faulted: "
+            .. tostring(cursor.faultMessage))
+        return
+    end
+
+    if parent.joining and (not children or next(children) == nil) then
+        parent.joining = false
+        schedule(state, parent, state.step)
     end
 end
 
@@ -745,25 +918,24 @@ local function retire(state: WorldState, cursor: Cursor, finalState: PlaybackSta
     if not cursor.alive then return end
     cursor.state = finalState
     cursor.alive = false
+    cursor.joining = false
     unlinkChannel(state, cursor)
     unlinkOwner(state, cursor)
+
+    -- A subtree dies from the root down: branches are cancelled first, so
+    -- each one finds a parent already gone and reports nothing back up.
+    local children = cursor.children
+    if children and next(children) ~= nil then
+        local slots = childSlots(cursor)
+        for i = 1, #slots do
+            local child = state.cursors[slots[i]]
+            if child and child.alive then retire(state, child, "cancelled") end
+        end
+    end
+    cursor.children = nil
+
+    detachFromParent(state, cursor, finalState)
     state.freeSlots[#state.freeSlots + 1] = cursor.slot
-end
-
--------------------------------------------------------------------------------
--- Scheduling
--------------------------------------------------------------------------------
-
-local function schedule(state: WorldState, cursor: Cursor, wakeAt: integer)
-    state.seq = state.seq + 1
-    cursor.wakeAt = wakeAt
-    cursor.seq = state.seq
-    heapPush(state, {
-        wakeAt = wakeAt,
-        seq = cursor.seq,
-        slot = cursor.slot,
-        generation = cursor.generation,
-    })
 end
 
 -------------------------------------------------------------------------------
@@ -813,7 +985,7 @@ local function resolveArgs(world: World, cursor: Cursor, raw: {any}): {any}
     return out
 end
 
-local function faultCursor(
+faultCursor = function(
     state: WorldState,
     cursor: Cursor,
     reason: FaultReason,
@@ -835,12 +1007,17 @@ local function secondsToSteps(world: World, seconds: number): integer
     return steps
 end
 
---- Run one cursor until it waits, finishes, or faults.
-local function advance(world: World, state: WorldState, cursor: Cursor)
+--- Run one cursor until it waits, finishes, or faults, returning the
+--- instruction budget it has left for this step.
+local function run(
+    world: World,
+    state: WorldState,
+    cursor: Cursor,
+    budget: integer
+): integer
     local prog = cursor.program
     local code = prog.code
     local consts = prog.consts
-    local budget = cursor.budget
 
     while true do
         budget = budget - 1
@@ -848,7 +1025,7 @@ local function advance(world: World, state: WorldState, cursor: Cursor)
             faultCursor(state, cursor, "budgetExceeded",
                 "exceeded " .. tostring(cursor.budget)
                 .. " instructions in one step without waiting")
-            return
+            return budget
         end
 
         local base = cursor.pc * STRIDE
@@ -858,13 +1035,13 @@ local function advance(world: World, state: WorldState, cursor: Cursor)
 
         if op == OP_END then
             retire(state, cursor, "completed")
-            return
+            return budget
 
         elseif op == OP_WAIT then
             local steps = a >= 0 and secondsToSteps(world, consts[a] as number) or b
             cursor.pc = cursor.pc + 1
             schedule(state, cursor, state.step + (steps > 0 and steps or 1))
-            return
+            return budget
 
         elseif op == OP_WAIT_SIGNAL then
             local channel = consts[a] as string
@@ -877,7 +1054,7 @@ local function advance(world: World, state: WorldState, cursor: Cursor)
                 state.channels[channel] = blocked
             end
             blocked[cursor.slot] = true
-            return
+            return budget
 
         elseif op == OP_CALL then
             local name = consts[a] as string
@@ -885,7 +1062,7 @@ local function advance(world: World, state: WorldState, cursor: Cursor)
             if not action then
                 faultCursor(state, cursor, "unregisteredAction",
                     "action '" .. name .. "' is not registered on this world")
-                return
+                return budget
             end
             local ctx: sequence.ActionContext = {
                 world = world,
@@ -898,10 +1075,10 @@ local function advance(world: World, state: WorldState, cursor: Cursor)
             local result: {any} = {pcall(action, world, ctx)}
             if not result[1] then
                 faultCursor(state, cursor, "actionError", tostring(result[2]))
-                return
+                return budget
             end
             -- An action may cancel its own playback.
-            if not cursor.alive then return end
+            if not cursor.alive then return budget end
             cursor.pc = cursor.pc + 1
 
         elseif op == OP_EMIT then
@@ -934,12 +1111,56 @@ local function advance(world: World, state: WorldState, cursor: Cursor)
                 end
             end
 
+        elseif op == OP_FORK then
+            -- The branch is queued for this same step rather than entered
+            -- here: it runs once this cursor yields, which keeps a tree of
+            -- branches breadth-first, off the Lua stack, and ordered by the
+            -- scheduler like everything else.
+            local child = allocCursor(state)
+            child.program = prog
+            child.pc = a
+            child.owner = cursor.owner
+            child.bindings = cursor.bindings
+            child.budget = cursor.budget
+            child.parentSlot = cursor.slot
+            child.parentGeneration = cursor.generation
+
+            local children = cursor.children
+            if not children then
+                children = {}
+                cursor.children = children
+            end
+            children[child.slot] = true
+
+            linkOwner(state, child)
+            schedule(state, child, state.step)
+            cursor.pc = b
+
+        elseif op == OP_JOIN then
+            cursor.pc = cursor.pc + 1
+            local children = cursor.children
+            if children and next(children) ~= nil then
+                -- No wake time: the last branch to finish schedules it.
+                cursor.joining = true
+                cursor.wakeAt = nil
+                return budget
+            end
+
         else
             faultCursor(state, cursor, "actionError",
                 "unknown opcode " .. tostring(op))
-            return
+            return budget
         end
     end
+end
+
+--- Run one cursor, arming its budget the first time it runs in a step.
+local function advance(world: World, state: WorldState, cursor: Cursor)
+    if cursor.budgetStep ~= state.step then
+        cursor.budgetStep = state.step
+        cursor.budgetLeft = cursor.budget
+    end
+    cursor.budgetLeft = run(world, state, cursor, cursor.budgetLeft)
 end
 
 -------------------------------------------------------------------------------
@@ -989,14 +1210,7 @@ function sequence.play(
         if options.budget then cursor.budget = options.budget end
     end
 
-    if cursor.owner ~= 0 then
-        local owned = state.ownerIndex[cursor.owner]
-        if not owned then
-            owned = {}
-            state.ownerIndex[cursor.owner] = owned
-        end
-        owned[cursor.slot] = true
-    end
+    linkOwner(state, cursor)
 
     -- The first instruction runs on the next fixed step, never inside play.
     schedule(state, cursor, state.step + 1)
@@ -1011,32 +1225,61 @@ function sequence.cancel(world: World, handle: sequence.Handle): boolean
     return true
 end
 
-function sequence.pause(world: World, handle: sequence.Handle): boolean
-    local state = stateFor(world)
-    local cursor = resolve(state, handle)
-    if not cursor or not cursor.alive or cursor.state ~= "running" then return false end
+-- Pause and resume apply to the whole branch tree, so suspending a cutscene
+-- suspends everything it started.
+local function pauseTree(state: WorldState, cursor: Cursor): boolean
+    local slots = childSlots(cursor)
+    for i = 1, #slots do
+        local child = state.cursors[slots[i]]
+        if child and child.alive then pauseTree(state, child) end
+    end
+    if cursor.state ~= "running" then return false end
     cursor.state = "paused"
     return true
 end
 
-function sequence.resume(world: World, handle: sequence.Handle): boolean
-    local state = stateFor(world)
-    local cursor = resolve(state, handle)
-    if not cursor or not cursor.alive or cursor.state ~= "paused" then return false end
+local function resumeTree(state: WorldState, cursor: Cursor): boolean
+    local slots = childSlots(cursor)
+    for i = 1, #slots do
+        local child = state.cursors[slots[i]]
+        if child and child.alive then resumeTree(state, child) end
+    end
+    if cursor.state ~= "paused" then return false end
     cursor.state = "running"
-    -- A cursor blocked on a signal has no wake time and stays parked on its
-    -- channel. Otherwise it keeps its heap entry, and if its wake time passed
-    -- while it was paused it runs on the next step rather than immediately.
+    -- A cursor blocked on a signal or parked at a join has no wake time and
+    -- stays where it is. Otherwise it keeps its heap entry, and if its wake
+    -- time passed while it was paused it runs on the next step rather than
+    -- immediately.
     if cursor.wakeAt and cursor.wakeAt <= state.step then
         schedule(state, cursor, state.step + 1)
     end
     return true
 end
 
+function sequence.pause(world: World, handle: sequence.Handle): boolean
+    local state = stateFor(world)
+    local cursor = resolve(state, handle)
+    if not cursor or not cursor.alive then return false end
+    return pauseTree(state, cursor)
+end
+
+function sequence.resume(world: World, handle: sequence.Handle): boolean
+    local state = stateFor(world)
+    local cursor = resolve(state, handle)
+    if not cursor or not cursor.alive then return false end
+    return resumeTree(state, cursor)
+end
+
 function sequence.status(world: World, handle: sequence.Handle): sequence.Status
     local state = stateFor(world)
     local cursor = resolve(state, handle)
     if not cursor then return nil end
+    local branches = 0
+    local children = cursor.children
+    if children then
+        for _ in pairs(children) do branches = branches + 1 end
+    end
+
     local status: sequence.Status = {
         state = cursor.state,
         program = cursor.program.name,
@@ -1044,6 +1287,8 @@ function sequence.status(world: World, handle: sequence.Handle): sequence.Status
         pc = cursor.pc,
         wakeAt = cursor.alive and cursor.wakeAt or nil,
         waitingFor = cursor.alive and cursor.waitChannel or nil,
+        branches = branches,
+        joining = cursor.joining or false,
         fault = cursor.fault,
         faultMessage = cursor.faultMessage,
     }
@@ -1140,6 +1385,10 @@ function sequence.disassemble(program: sequence.Program): string
             local count = counts and counts[pc]
             text = string.format("JUMP      -> %d  (%s)", a,
                 b < 0 and "forever" or ("x" .. tostring(count or 1)))
+        elseif op == OP_FORK then
+            text = string.format("FORK      branch %d..%d, continue -> %d", a, b - 1, b)
+        elseif op == OP_JOIN then
+            text = "JOIN"
         elseif op == OP_END then
             text = "END"
         else
@@ -1236,6 +1485,9 @@ local function saveState(world: World): any
                 seq = cursor.seq,
                 loopRegs = cursor.loopRegs,
                 waitChannel = cursor.waitChannel,
+                parentSlot = cursor.parentSlot,
+                parentGeneration = cursor.parentGeneration,
+                joining = cursor.joining,
             }
         end
     end
@@ -1318,19 +1570,16 @@ local function loadState(world: World, value: any)
                 seq = row.seq as integer,
                 loopRegs = row.loopRegs as {integer: integer},
                 waitChannel = row.waitChannel as string,
+                parentSlot = row.parentSlot as integer,
+                parentGeneration = row.parentGeneration as integer,
+                joining = row.joining as boolean,
             }
             state.cursors[cursor.slot] = cursor
-            if cursor.owner ~= 0 then
-                local owned = state.ownerIndex[cursor.owner]
-                if not owned then
-                    owned = {}
-                    state.ownerIndex[cursor.owner] = owned
-                end
-                owned[cursor.slot] = true
-            end
+            linkOwner(state, cursor)
             -- Rebuild the wake indexes rather than serializing them. A
-            -- signal-blocked cursor has no wake time and belongs in its
-            -- channel instead of the heap.
+            -- cursor blocked on a signal has no wake time and belongs in its
+            -- channel instead of the heap; one parked at a join belongs in
+            -- neither and is woken by its last branch.
             if cursor.waitChannel then
                 local blocked = state.channels[cursor.waitChannel]
                 if not blocked then
@@ -1338,7 +1587,7 @@ local function loadState(world: World, value: any)
                     state.channels[cursor.waitChannel] = blocked
                 end
                 blocked[cursor.slot] = true
-            else
+            elseif not cursor.joining then
                 heapPush(state, {
                     wakeAt = cursor.wakeAt,
                     seq = cursor.seq,
@@ -1348,6 +1597,44 @@ local function loadState(world: World, value: any)
             end
         else
             LOGGER:warn("dropping cursor for missing program %s", key)
+        end
+    end
+
+    -- Restored slots in a stable order, so relinking and any recovery below
+    -- happen the same way on every load.
+    local liveSlots: {integer} = {}
+    for slot in pairs(state.cursors) do liveSlots[#liveSlots + 1] = slot end
+    table.sort(liveSlots)
+
+    -- Relink the branch tree from the parent references the cursors carry.
+    for i = 1, #liveSlots do
+        local cursor = state.cursors[liveSlots[i]]
+        local parentSlot = cursor.parentSlot
+        if parentSlot then
+            local parent = state.cursors[parentSlot]
+            if parent and parent.generation == cursor.parentGeneration then
+                local children = parent.children
+                if not children then
+                    children = {}
+                    parent.children = children
+                end
+                children[cursor.slot] = true
+            else
+                cursor.parentSlot = nil
+                cursor.parentGeneration = nil
+            end
+        end
+    end
+
+    -- A join whose branches all went missing would never wake, so give any
+    -- such cursor back to the scheduler rather than stranding it.
+    for i = 1, #liveSlots do
+        local cursor = state.cursors[liveSlots[i]]
+        if cursor.joining and (not cursor.children or next(cursor.children) == nil) then
+            LOGGER:warn("%s v%d: join at pc=%d lost its branches; resuming",
+                cursor.program.name, cursor.program.version, cursor.pc)
+            cursor.joining = false
+            schedule(state, cursor, state.step + 1)
         end
     end
 

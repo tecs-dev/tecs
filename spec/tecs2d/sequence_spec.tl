@@ -234,6 +234,276 @@ describe("tecs2d.sequence", function()
         end)
     end)
 
+    describe("branches", function()
+        local order: {string}
+
+        local function record(name: string)
+            sequence.registerAction(world, "spec." .. name, function()
+                order[#order + 1] = name
+            end)
+        end
+
+        before_each(function()
+            order = {}
+            record("a")
+            record("b")
+            record("c")
+            record("done")
+        end)
+
+        it("rejects a malformed branch block", function()
+            luassert.has_error(function() sequence.fork({}) end)
+            luassert.has_error(function() sequence.parallel() end)
+            luassert.has_error(function() sequence.parallel({sequence.call("spec.a")}, {}) end)
+        end)
+
+        it("runs every block of a parallel and continues after all of them", function()
+            local prog = sequence.define(uniqueName(), {
+                sequence.parallel(
+                    {sequence.waitSteps(3), sequence.call("spec.a")},
+                    {sequence.waitSteps(1), sequence.call("spec.b")}
+                ),
+                sequence.call("spec.done"),
+            })
+            local handle = sequence.play(world, prog)
+
+            stepWorld(world, 2)
+            luassert.same({"b"}, order, "the short block runs without waiting for the long one")
+
+            stepWorld(world, 3)
+            luassert.same({"b", "a", "done"}, order)
+            luassert.equals("completed", sequence.status(world, handle).state)
+            luassert.equals(0, sequence.activeCount(world))
+        end)
+
+        it("costs no extra step when the blocks do not wait", function()
+            local prog = sequence.define(uniqueName(), {
+                sequence.parallel(
+                    {sequence.call("spec.a")},
+                    {sequence.call("spec.b")}
+                ),
+                sequence.call("spec.done"),
+            })
+            sequence.play(world, prog)
+
+            stepWorld(world, 1)
+            luassert.same({"a", "b", "done"}, order,
+                "blocks run in fork order, and the join resumes in the same step")
+        end)
+
+        it("reports its live branches while parked at a join", function()
+            local prog = sequence.define(uniqueName(), {
+                sequence.parallel(
+                    {sequence.waitSteps(4), sequence.call("spec.a")},
+                    {sequence.waitSteps(2), sequence.call("spec.b")}
+                ),
+                sequence.call("spec.done"),
+            })
+            local handle = sequence.play(world, prog)
+
+            stepWorld(world, 1)
+            local status = sequence.status(world, handle)
+            luassert.equals(2, status.branches)
+            luassert.is_true(status.joining)
+            luassert.is_nil(status.wakeAt, "a joining playback waits on branches, not a time")
+            luassert.equals(3, sequence.activeCount(world))
+
+            stepWorld(world, 2)
+            luassert.equals(1, sequence.status(world, handle).branches)
+        end)
+
+        it("falls through a join with no branches", function()
+            local prog = sequence.define(uniqueName(), {
+                sequence.join(),
+                sequence.call("spec.done"),
+            })
+            sequence.play(world, prog)
+
+            stepWorld(world, 1)
+            luassert.same({"done"}, order)
+        end)
+
+        it("keeps running the program while an unjoined branch works", function()
+            local prog = sequence.define(uniqueName(), {
+                sequence.fork({sequence.waitSteps(2), sequence.call("spec.a")}),
+                sequence.call("spec.b"),
+                sequence.waitSteps(4),
+                sequence.call("spec.done"),
+            })
+            sequence.play(world, prog)
+
+            stepWorld(world, 5)
+            luassert.same({"b", "a", "done"}, order)
+        end)
+
+        it("cancels unjoined branches when the program ends", function()
+            local prog = sequence.define(uniqueName(), {
+                sequence.fork({sequence.waitSteps(3), sequence.call("spec.a")}),
+                sequence.call("spec.done"),
+            })
+            sequence.play(world, prog)
+
+            stepWorld(world, 6)
+            luassert.same({"done"}, order, "a branch never outlives the playback that forked it")
+            luassert.equals(0, sequence.activeCount(world))
+        end)
+
+        it("cancels the whole tree when the root is cancelled", function()
+            local prog = sequence.define(uniqueName(), {
+                sequence.parallel(
+                    {sequence.fork({sequence.waitSteps(2), sequence.call("spec.a")}),
+                     sequence.waitSteps(3), sequence.call("spec.b")},
+                    {sequence.waitSteps(3), sequence.call("spec.c")}
+                ),
+                sequence.call("spec.done"),
+            })
+            local handle = sequence.play(world, prog)
+
+            stepWorld(world, 1)
+            luassert.equals(4, sequence.activeCount(world), "root, two branches, one grandchild")
+
+            luassert.is_true(sequence.cancel(world, handle))
+            luassert.equals(0, sequence.activeCount(world))
+            stepWorld(world, 6)
+            luassert.same({}, order)
+        end)
+
+        it("cancels the whole tree when the owner despawns", function()
+            local owner = world:spawn()
+            local prog = sequence.define(uniqueName(), {
+                sequence.parallel(
+                    {sequence.waitSteps(3), sequence.call("spec.a")},
+                    {sequence.waitSteps(3), sequence.call("spec.b")}
+                ),
+                sequence.call("spec.done"),
+            })
+            sequence.play(world, prog, {owner = owner})
+
+            stepWorld(world, 1)
+            luassert.equals(3, sequence.activeCount(world))
+
+            world:despawn(owner)
+            world:commit()
+            luassert.equals(0, sequence.activeCount(world))
+            stepWorld(world, 6)
+            luassert.same({}, order)
+        end)
+
+        it("proceeds through a join when a branch cancels itself", function()
+            sequence.registerAction(world, "spec.selfCancel", function(w, ctx)
+                sequence.cancel(w, ctx.handle)
+            end)
+            local prog = sequence.define(uniqueName(), {
+                sequence.parallel(
+                    {sequence.call("spec.selfCancel"), sequence.call("spec.a")},
+                    {sequence.waitSteps(2), sequence.call("spec.b")}
+                ),
+                sequence.call("spec.done"),
+            })
+            local handle = sequence.play(world, prog)
+
+            stepWorld(world, 3)
+            luassert.same({"b", "done"}, order, "a cancelled branch leaves the join one short")
+            luassert.equals("completed", sequence.status(world, handle).state)
+        end)
+
+        it("faults the playback when a branch faults, taking its siblings", function()
+            sequence.registerAction(world, "spec.boom", function() error("branch boom") end)
+            local prog = sequence.define(uniqueName(), {
+                sequence.parallel(
+                    {sequence.call("spec.boom")},
+                    {sequence.waitSteps(3), sequence.call("spec.b")}
+                ),
+                sequence.call("spec.done"),
+            })
+            local handle = sequence.play(world, prog)
+
+            stepWorld(world, 5)
+            luassert.same({}, order, "a faulted branch stops the tree, siblings included")
+
+            local status = sequence.status(world, handle)
+            luassert.equals("faulted", status.state)
+            luassert.equals("branchFaulted", status.fault)
+            luassert.is_truthy(status.faultMessage:find("branch boom", 1, true))
+            luassert.equals(0, sequence.activeCount(world))
+        end)
+
+        it("charges one instruction budget per step across joins", function()
+            local prog = sequence.define(uniqueName(), {
+                sequence.loop(nil, {
+                    sequence.parallel({sequence.call("spec.a")}),
+                }),
+            })
+            local handle = sequence.play(world, prog, {budget = 32})
+
+            -- Without a per-step budget, each join would re-arm it and this
+            -- loop would never hand the step back.
+            stepWorld(world, 1)
+            local status = sequence.status(world, handle)
+            luassert.equals("faulted", status.state)
+            luassert.equals("budgetExceeded", status.fault)
+            luassert.equals(0, sequence.activeCount(world))
+        end)
+
+        it("pauses and resumes the whole tree", function()
+            local prog = sequence.define(uniqueName(), {
+                sequence.parallel(
+                    {sequence.waitSteps(2), sequence.call("spec.a")},
+                    {sequence.waitSteps(2), sequence.call("spec.b")}
+                ),
+                sequence.call("spec.done"),
+            })
+            local handle = sequence.play(world, prog)
+            stepWorld(world, 1)
+
+            luassert.is_true(sequence.pause(world, handle))
+            stepWorld(world, 5)
+            luassert.same({}, order, "pausing a playback pauses its branches")
+
+            luassert.is_true(sequence.resume(world, handle))
+            stepWorld(world, 3)
+            luassert.same({"a", "b", "done"}, order)
+        end)
+
+        it("restores a tree parked at a join", function()
+            local prog = sequence.define(uniqueName(), {
+                sequence.parallel(
+                    {sequence.waitSteps(3), sequence.call("spec.a")},
+                    {sequence.waitSteps(5), sequence.call("spec.b")}
+                ),
+                sequence.call("spec.done"),
+            })
+            local handle = sequence.play(world, prog)
+            stepWorld(world, 1)
+
+            local saved = world:saveSnapshot().buffer
+            stepWorld(world, 4)
+            luassert.same({"a"}, order)
+
+            world:loadSnapshot(saved)
+            order = {}
+
+            local status = sequence.status(world, handle)
+            luassert.is_true(status.joining, "the root belongs at its join, not in the wake heap")
+            luassert.equals(2, status.branches)
+            luassert.equals(3, sequence.activeCount(world))
+
+            stepWorld(world, 6)
+            luassert.same({"a", "b", "done"}, order)
+        end)
+
+        it("renders branches in a disassembly", function()
+            local prog = sequence.define(uniqueName(), {
+                sequence.parallel({sequence.call("spec.a")}, {sequence.call("spec.b")}),
+                sequence.call("spec.done"),
+            })
+            local text = sequence.disassemble(prog)
+
+            luassert.is_truthy(text:find("FORK", 1, true))
+            luassert.is_truthy(text:find("JOIN", 1, true))
+        end)
+    end)
+
     describe("signals", function()
         local function blockingProgram(): sequence.Program
             return sequence.define(uniqueName(), {
@@ -638,7 +908,7 @@ describe("tecs2d.sequence", function()
             for i = 1, #entries do
                 if entries[i].key == "tecs2d.sequence" then
                     local payload = entries[i].value as {string: any}
-                    luassert.equals(1, payload.version, "payload must carry its layout version")
+                    luassert.is_number(payload.version, "payload must carry its layout version")
                     payload.version = 99
                     patched = true
                 end

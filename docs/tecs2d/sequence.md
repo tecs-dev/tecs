@@ -11,9 +11,8 @@ suspended coroutine lives in the Lua stack, which cannot be serialized. A sequen
 position as data, so it snapshots, rewinds, and hot reloads like any other game state.
 
 ::: info Orchestration is still to come
-Programs, actions, bindings, playback, faults, snapshots, and disassembly all work. Signals, event
-and query waits, `fork`/`join`, and tween composition land in later phases; see
-[Planned](#planned).
+Programs, actions, bindings, playback, signals, branches, faults, snapshots, and disassembly all
+work. Event and query waits and tween composition land in later phases; see [Planned](#planned).
 :::
 
 ## Quick start
@@ -74,6 +73,9 @@ and an explicit migration step. That is deliberately not supported.
 | `waitSignal(name)` | Block until a named signal is raised |
 | `emit(event, ...)` | Emit a `sequence.Event` at address 0 |
 | `loop(count, nodes)` | Repeat a block, or forever when `count` is nil |
+| `fork(nodes)` | Start a branch that runs alongside the rest of the program |
+| `join()` | Wait for every outstanding branch |
+| `parallel(...)` | Fork several blocks and wait for all of them |
 
 ### Time
 
@@ -178,9 +180,11 @@ The first instruction of a new playback runs on the next fixed step, never insid
 
 ### Instruction budget
 
-A program that loops without waiting would never yield. Each playback has a per-step instruction
-budget; exceeding it faults with `budgetExceeded`, reporting the program name, version, and pc so
-the offending instruction is identifiable in a disassembly.
+A program that loops without waiting would never yield. Each playback has an instruction budget
+**per fixed step**, shared across every time it resumes within that step; exceeding it faults with
+`budgetExceeded`, reporting the program name, version, and pc so the offending instruction is
+identifiable in a disassembly. Counting per step rather than per resume is what bounds a
+`fork`/`join` loop, which would otherwise re-arm its budget on every join.
 
 ```teal
 sequence.setInstructionBudget(world, 512)   -- world default
@@ -196,6 +200,7 @@ Prefer `waitSteps(0)` in a loop body over raising the budget.
 | `unregisteredAction` | A `call` named an action not registered on this world |
 | `actionError` | A registered action raised |
 | `budgetExceeded` | The per-step instruction budget was exhausted |
+| `branchFaulted` | A forked branch faulted |
 
 A faulted playback stops and retains its `pc`, so the failure is inspectable rather than silent.
 
@@ -230,6 +235,50 @@ and blocked cursors both survive a snapshot.
 `sequence.waitingOn(world, name)` reports how many playbacks are parked on a name, which is useful
 in tests and in the debugger.
 
+## Branches
+
+Most cutscenes are not a single line of steps. `parallel` runs several blocks at once and continues
+once all of them finish:
+
+```teal
+local intro = sequence.define("game.bossIntro", {
+    sequence.parallel(
+        {sequence.call("game.panCamera"), sequence.wait(2.0)},
+        {sequence.call("game.bossWalkIn"), sequence.waitSignal("boss.inPlace")}
+    ),
+    sequence.call("game.startFight"),
+})
+```
+
+`fork(block)` and `join()` are the underlying pair: `fork` starts a branch and keeps going, `join`
+waits for every branch started and not yet joined. `parallel` is exactly a run of forks followed by
+a join.
+
+A branch is a playback of its own, running the same program at a different instruction. It
+inherits the parent's `owner`, bindings, and instruction budget, and it may fork branches of its
+own.
+
+**Ordering.** A branch is queued rather than entered: it starts once the playback that forked it
+next waits, joins, or ends, still within the same fixed step. Branches forked in one place run in
+the order they were forked. When the last branch of a joining playback finishes, that playback
+resumes **in the same step**, so a `parallel` of short blocks costs no extra steps.
+
+**Lifetime.** Branches never outlive the playback that forked them. Cancelling it, or letting it
+run off the end of its program, cancels the branches it has not joined. Cancelling a branch on its
+own is fine: `join` simply proceeds with one fewer branch. Despawning the owner cancels the whole
+tree.
+
+**Faults propagate up.** A branch that faults faults the playback that forked it, with reason
+`branchFaulted`, which in turn tears down its siblings. A faulted branch is a bug in the program,
+not a game state, so it surfaces rather than leaving a `join` short one branch. The branch's own
+fault is logged with its own pc.
+
+**`pause` and `resume` apply to the whole tree**, so pausing a cutscene pauses everything it
+started.
+
+`join` with no outstanding branches falls straight through, and `status` reports the number of live
+branches.
+
 ## Events
 
 `emit` dispatches a `sequence.Event` at address 0, carrying the authored name, the arguments with
@@ -251,7 +300,6 @@ from `status` or a fault points at a specific step.
 Later phases add orchestration and tween composition:
 
 - Event and query waits, so a sequence can block on an ECS event or a query transition
-- `fork` and `join` for parallel branches
 - `playTween` / `waitTween`, waiting on a specific tween playback and resuming on completion,
   cancellation, channel replacement, or binding destruction
 
