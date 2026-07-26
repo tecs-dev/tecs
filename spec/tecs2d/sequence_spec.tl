@@ -1884,6 +1884,48 @@ describe("tecs2d.sequence", function()
             luassert.equals("cancelled", sequence.status(world, handle).state)
         end)
 
+        it("authors a whole timeline without naming tween", function()
+            local entity <const> = spawn()
+            local prog = sequence.timeline(uniqueName(), {
+                sequence.tweenWait(0.1),
+                sequence.tweenParallel(
+                    sequence.tweenTo(0.2, sequence.easing.quadOut,
+                        sequence.target.translateX, 40),
+                    sequence.tweenAdjust(0.2, "linear", "transform.y", 10)),
+                sequence.tweenEmit("arrived"),
+                sequence.tweenRun({
+                    sequence.tweenTo(0.1, "linear",
+                        sequence.target.field(Transform, "scaleX"), 2),
+                }, {mode = "loop", count = 2}),
+            })
+            local seen: {string} = {}
+            world:observe(0, sequence.Event, function(e: sequence.Event)
+                seen[#seen + 1] = e.name
+            end)
+            sequence.play(world, prog, {owner = entity})
+
+            for _ = 1, 40 do world:update(1 / 60) end
+            local t <const> = world:get(entity, Transform)
+            luassert.is_near(40, t.x, 1e-6)
+            luassert.is_near(10, t.y, 1e-6)
+            luassert.is_near(2, t.scaleX, 1e-6)
+            luassert.same({"arrived"}, seen)
+        end)
+
+        it("tracks a source authored through the sequence namespace", function()
+            local leader <const> = world:spawn(
+                Transform(80, 0, 0, 1), tecs.builtins.Key("spec.leader"))
+            local follower <const> = spawn()
+            world:commit()
+            sequence.play(world, sequence.timeline(uniqueName(), {
+                sequence.tweenTrack(0.3, "linear", sequence.target.translateX,
+                    sequence.source.key("spec.leader", Transform, "x")),
+            }), {owner = follower})
+
+            for _ = 1, 30 do world:update(1 / 60) end
+            luassert.is_near(80, world:get(follower, Transform).x, 1e-6)
+        end)
+
         it("rejects a clock a timeline cannot run on", function()
             luassert.has_error(function()
                 sequence.timeline(uniqueName(), {

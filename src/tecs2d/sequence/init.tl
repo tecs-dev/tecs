@@ -25,7 +25,6 @@ local tecs <const> = require("tecs")
 local seqtypes <const> = require("tecs2d.sequence.internal.types")
 local seqprogram <const> = require("tecs2d.sequence.internal.program")
 local seqregistry <const> = require("tecs2d.sequence.internal.registry")
-local tween <const> = require("tecs2d.tween")
 local seqsnapshot <const> = require("tecs2d.sequence.internal.snapshot")
 local seqvm <const> = require("tecs2d.sequence.internal.vm")
 local seqcursors <const> = require("tecs2d.sequence.internal.cursors")
@@ -77,6 +76,75 @@ local record sequence
 
     --- Options for `play`.
     type PlayOptions = seqtypes.PlayOptions
+
+    ---------------------------------------------------------------------------
+    -- Timelines
+    ---------------------------------------------------------------------------
+
+    --- Name of a built-in easing curve, and the shape of any curve.
+    type EasingName = tweeneval.EasingName
+    type EasingFunction = tweeneval.EasingFunction
+
+    --- Name of a built-in component-field target, and a target value.
+    type TargetName = tweeneval.TargetName
+    type Target = tweeneval.Target
+
+    --- A live component-field tracking source.
+    type TrackSource = tweeneval.TrackSource
+
+    --- One authored timeline operation, and a list of them.
+    type TimelineNode = tweeneval.TimelineNode
+    type TimelineSpec = tweeneval.TimelineSpec
+
+    --- How a timeline repeats, and the options a nested run takes.
+    type PlaybackMode = tweeneval.PlaybackMode
+    type RunOptions = tweeneval.RunOptions
+
+    --- The built-in easing curves: `sequence.easing.quadOut`.
+    easing: tweeneval.Easings
+
+    --- The built-in targets and the constructors for new ones:
+    --- `sequence.target.translateX`, `sequence.target.field(C, "hp")`.
+    target: tweeneval.Targets
+
+    --- Where a `tweenTrack` step reads the value it chases:
+    --- `sequence.source.own(Transform, "x")`.
+    source: tweeneval.Sources
+
+    --- Component selecting a dynamic tracking source entity.
+    TrackingTarget: tweeneval.TrackingTarget
+
+    --- Interpolate to an absolute destination.
+    tweenTo: function(
+        duration: number, curve: EasingName | EasingFunction,
+        target: TargetName | Target,
+        t1: number, t2?: number, t3?: number, t4?: number
+    ): TimelineNode
+
+    --- Interpolate by a relative delta, read from wherever the value starts.
+    tweenAdjust: function(
+        duration: number, curve: EasingName | EasingFunction,
+        target: TargetName | Target,
+        t1: number, t2?: number, t3?: number, t4?: number
+    ): TimelineNode
+
+    --- Interpolate toward a destination that keeps moving.
+    tweenTrack: function(
+        duration: number, curve: EasingName | EasingFunction,
+        target: TargetName | Target, from: TrackSource
+    ): TimelineNode
+
+    --- Advance the timeline cursor without changing anything.
+    tweenWait: function(duration: number): TimelineNode
+
+    --- Emit a named `sequence.Event` when the cursor reaches this point.
+    tweenEmit: function(name: string): TimelineNode
+
+    --- Run a nested timeline, given as its own spec.
+    tweenRun: function(spec: TimelineSpec, options?: RunOptions): TimelineNode
+
+    --- Run timeline nodes concurrently, ending with the longest.
+    tweenParallel: function(...: TimelineNode): TimelineNode
 
     --- Which clock a program is scheduled against.
     type ClockId = seqtypes.ClockId
@@ -151,7 +219,7 @@ local record sequence
     ---     })
     ---     sequence.play(world, fade, {owner = e, params = {delay = 0.2}})
     timeline: function(
-        name: string, spec: tween.TimelineSpec, options?: TimelineOptions
+        name: string, spec: TimelineSpec, options?: TimelineOptions
     ): Program
 
     --- Look up a defined program: the newest version, or a specific one.
@@ -231,7 +299,9 @@ local record sequence
     --- Needs the tween plugin, which `tecs2d.run` installs. A binding that
     --- is missing or dead is not a fault: nothing plays, and a following
     --- `waitTween` resumes at once reporting `targetLost`.
-    playTween: function(preset: string, target: EntityRef, options?: tween.PlaybackOptions): Node
+    playTween: function(
+        timeline: string, target: EntityRef, params?: {string: any}
+    ): Node
 
     --- Evaluate a registered evaluator every tick until it finishes.
     ---
@@ -386,6 +456,20 @@ end
 -- without requiring this one back; re-exported here as the public handle.
 sequence.Event = seqtypes.Event
 
+-- The timeline authoring surface is the evaluation core's, re-exported here
+-- so a game reaches for one module rather than two.
+sequence.easing = tweeneval.easing
+sequence.target = tweeneval.target
+sequence.source = tweeneval.source
+sequence.TrackingTarget = tweeneval.TrackingTarget
+sequence.tweenTo = tweeneval.to
+sequence.tweenAdjust = tweeneval.adjust
+sequence.tweenTrack = tweeneval.track
+sequence.tweenWait = tweeneval.wait
+sequence.tweenEmit = tweeneval.emit
+sequence.tweenRun = tweeneval.run
+sequence.tweenParallel = tweeneval.parallel
+
 -------------------------------------------------------------------------------
 -- Authoring nodes
 -------------------------------------------------------------------------------
@@ -457,17 +541,17 @@ function sequence.loop(count: integer, nodes: {sequence.Node}): sequence.Node
 end
 
 function sequence.playTween(
-    preset: string,
+    timeline: string,
     target: sequence.EntityRef,
-    options?: tween.PlaybackOptions
+    params?: {string: any}
 ): sequence.Node
-    if type(preset) ~= "string" or preset == "" then
-        error("sequence.playTween requires a non-empty preset name", 2)
+    if type(timeline) ~= "string" or timeline == "" then
+        error("sequence.playTween requires a non-empty timeline name", 2)
     end
     if not seqprogram.isEntityRef(target) then
         error("sequence.playTween requires a sequence.bind(name) target", 2)
     end
-    return {kind = "playTween", text = preset, args = {target, options}}
+    return {kind = "playTween", text = timeline, args = {target, params}}
         as sequence.Node
 end
 
@@ -548,14 +632,14 @@ end
 
 function sequence.timeline(
     name: string,
-    spec: tween.TimelineSpec,
+    spec: sequence.TimelineSpec,
     options?: sequence.TimelineOptions
 ): sequence.Program
     local clock: seqtypes.ClockId = options and options.clock or "presentation"
     if clock ~= "fixed" and clock ~= "presentation" then
         error("sequence.timeline clock must be 'fixed' or 'presentation'", 2)
     end
-    local compiled <const> = tween.timeline(spec)
+    local compiled <const> = tweeneval.compile(spec)
     -- The serialized form is what the const pool carries; the evaluator
     -- resolves it back once, when the first playback of it starts.
     return sequence.define(name, {
