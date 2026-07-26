@@ -1998,6 +1998,9 @@ local function loadState(world: World, value: any)
     state.dirtyQueries = {}
     state.tweenOwners = {}
     state.tweenWaiters = {}
+    -- The call scratch points at cursors that are about to be replaced.
+    state.context = nil
+    state.argScratch = {}
     state.nextSlot = 1
     state.generations = {}
     state.step = 0
