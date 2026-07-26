@@ -20,11 +20,7 @@ local record ecs
     type ComponentOptions<C is Component> = types.components.ComponentOptions<C>
     type FFIComponentOptions<C is Component> = types.components.FFIComponentOptions<C>
     type Query = types.Query
-    type QueryDescriptor = types.Query.Descriptor
     type Archetype = types.Archetype
-    type System = types.System
-    type Plugin = types.Plugin
-    type Phase = types.Phase
 
     phases: phases
     builtins: builtins
