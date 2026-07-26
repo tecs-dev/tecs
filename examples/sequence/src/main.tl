@@ -301,9 +301,10 @@ local function plugin(world: tecs.World)
                         sequence.resume(world, encounter)
                         status = "Resumed."
                     elseif sequence.pause(world, encounter) then
-                        -- Branches pause with it. A timeline it started is
-                        -- a playback of its own, so it keeps going.
-                        status = "Paused (branches too; running tweens keep going)."
+                        -- Branches pause with it, and so does the timeline
+                        -- it started: that is a playback of its own, and the
+                        -- cascade reaches it.
+                        status = "Paused (branches and its tweens too)."
                     end
                 end
             end

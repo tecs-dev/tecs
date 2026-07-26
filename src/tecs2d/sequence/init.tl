@@ -36,6 +36,9 @@ local tweeneval <const> = require("tecs2d.sequence.internal.tweeneval")
 
 local type World = tecs.World
 
+-- Who holds a pause when the caller does not say.
+local DEFAULT_HOLDER <const> = "user"
+
 -- The runtime records live in the leaf types module; bind them so the body
 -- below reads the same as when they were declared here.
 local type ProgramImpl = seqtypes.ProgramImpl
@@ -413,11 +416,25 @@ local record sequence
     --- Stop a playback and release its cursor. Safe on a finished handle.
     cancel: function(world: World, handle: Handle): boolean
 
-    --- Suspend a playback. Its wait, if any, resumes from where it paused.
-    pause: function(world: World, handle: Handle): boolean
+    --- Suspend a playback, its branches, and anything it started.
+    ---
+    --- Pause is holder counted: two systems can hold the same playback for
+    --- unrelated reasons, and it runs again only when the last one lets go,
+    --- so whichever resumes first cannot undo the other. `holder` names who
+    --- is holding it and defaults to `"user"`.
+    ---
+    --- Its wait, if any, resumes from where it paused. What it is waiting on
+    --- stops with it when the awaitable provider knows how.
+    ---
+    --- @return Whether the playback stopped. A second holder taking a hold on
+    --- one that is already paused registers the hold and returns false,
+    --- because nothing observable changed.
+    pause: function(world: World, handle: Handle, holder?: string): boolean
 
-    --- Resume a paused playback.
-    resume: function(world: World, handle: Handle): boolean
+    --- Release one holder's claim.
+    --- @return Whether the playback started running again, which is only
+    --- true for the last holder to let go.
+    resume: function(world: World, handle: Handle, holder?: string): boolean
 
     --- Inspect a playback. Returns nil for a handle this world never issued.
     status: function(world: World, handle: Handle): Status
@@ -852,18 +869,22 @@ function sequence.cancel(world: World, handle: sequence.Handle): boolean
     return true
 end
 
-function sequence.pause(world: World, handle: sequence.Handle): boolean
+function sequence.pause(
+    world: World, handle: sequence.Handle, holder?: string
+): boolean
     local state = seqcursors.stateFor(world)
     local cursor = seqcursors.resolve(state, handle)
     if not cursor or not cursor.alive then return false end
-    return seqcursors.pauseTree(state, cursor)
+    return seqcursors.pauseTree(state, cursor, holder or DEFAULT_HOLDER)
 end
 
-function sequence.resume(world: World, handle: sequence.Handle): boolean
+function sequence.resume(
+    world: World, handle: sequence.Handle, holder?: string
+): boolean
     local state = seqcursors.stateFor(world)
     local cursor = seqcursors.resolve(state, handle)
     if not cursor or not cursor.alive then return false end
-    return seqcursors.resumeTree(state, cursor)
+    return seqcursors.resumeTree(state, cursor, holder or DEFAULT_HOLDER)
 end
 
 function sequence.status(world: World, handle: sequence.Handle): sequence.Status

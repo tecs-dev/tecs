@@ -234,4 +234,49 @@ describe("sprite play-once: pauseAtEnd clamps on the GPU", function()
         luassert.is_true(done == true,
             "the program never resumed after the animation finished")
     end)
+
+    it("stops the animation it is waiting on when the program pauses", function()
+        fixture.runLua(app, [[
+            local gfx = require("tecs2d.gfx")
+            local sequence = require("tecs2d.sequence")
+            _G.tecsPauseEntity = world:spawn(
+                gfx.Sprite.fromSheet(_G.tecsAwaitSheet, "run"))
+            _G.tecsPauseHandle = sequence.play(world,
+                sequence.define("spec.pauseAnim", {
+                    sequence.call("tecs2d.sprite.playTag",
+                        sequence.bind("actor"), "run"),
+                    sequence.await("tecs2d.sprite", sequence.bind("actor")),
+                }), {bindings = {actor = _G.tecsPauseEntity}})
+            return true
+        ]])
+
+        -- Let it start playing, then pause the program that is waiting on it.
+        local started = fixture.eventually(fixture.callTimeout, function(): boolean
+            local values = fixture.runLua(app, [[
+                local sequence = require("tecs2d.sequence")
+                local s = sequence.status(world, _G.tecsPauseHandle)
+                return s ~= nil and s.waitingAwaitable == "tecs2d.sprite"
+            ]])
+            if values[1] == "true" then return true end
+            return nil
+        end)
+        luassert.is_true(started == true, "the program never parked on the sprite")
+
+        local frozen = fixture.runLua(app, [[
+            local gfx = require("tecs2d.gfx")
+            local sequence = require("tecs2d.sequence")
+            sequence.pause(world, _G.tecsPauseHandle)
+            return world:get(_G.tecsPauseEntity, gfx.Sprite).pauseDepth > 0
+        ]])
+        luassert.equals("true", frozen[1],
+            "pausing the program left its animation running")
+
+        local thawed = fixture.runLua(app, [[
+            local gfx = require("tecs2d.gfx")
+            local sequence = require("tecs2d.sequence")
+            sequence.resume(world, _G.tecsPauseHandle)
+            return world:get(_G.tecsPauseEntity, gfx.Sprite).pauseDepth == 0
+        ]])
+        luassert.equals("true", thawed[1], "resuming did not release it")
+    end)
 end)

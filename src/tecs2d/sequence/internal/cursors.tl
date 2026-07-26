@@ -13,6 +13,7 @@
 
 local tecs <const> = require("tecs")
 local logging <const> = require("tecs.utils.logging")
+local seqawaitables <const> = require("tecs2d.sequence.internal.awaitables")
 local seqclock <const> = require("tecs2d.sequence.internal.clock")
 local seqregistry <const> = require("tecs2d.sequence.internal.registry")
 local seqtypes <const> = require("tecs2d.sequence.internal.types")
@@ -59,8 +60,8 @@ local record cursors
     )
     fault: function(state: WorldState, cursor: Cursor, reason: FaultReason, message: string)
 
-    pauseTree: function(state: WorldState, cursor: Cursor): boolean
-    resumeTree: function(state: WorldState, cursor: Cursor): boolean
+    pauseTree: function(state: WorldState, cursor: Cursor, holder: string): boolean
+    resumeTree: function(state: WorldState, cursor: Cursor, holder: string): boolean
 end
 
 local states: {World: WorldState} =
@@ -70,6 +71,7 @@ function cursors.stateFor(world: World): WorldState
     local state = states[world]
     if state then return state end
     state = {
+        world = world,
         cursors = {},
         freeSlots = {},
         nextSlot = 1,
@@ -401,27 +403,75 @@ function cursors.fault(
     cursors.retire(state, cursor, "faulted")
 end
 
--- Pause and resume apply to the whole branch tree, so suspending a cutscene
--- suspends everything it started.
-function cursors.pauseTree(state: WorldState, cursor: Cursor): boolean
+-- Pause is holder counted, and it applies to everything a playback started.
+--
+-- Counted because two systems can want the same cutscene stopped for
+-- unrelated reasons -- a menu is open, and the window lost focus -- and
+-- whichever resumes first must not undo the other. A playback runs again only
+-- when the last holder lets go.
+--
+-- The tree is branches and started playbacks alike: a timeline a cutscene
+-- began is a playback of its own, so cascading to it is what makes pausing
+-- the cutscene stop the animation it was driving.
+local function eachDescendant(
+    state: WorldState, cursor: Cursor, visit: function(Cursor)
+)
     local slots = cursors.childSlots(cursor)
     for i = 1, #slots do
         local child = state.cursors[slots[i]]
-        if child and child.alive then cursors.pauseTree(state, child) end
+        if child and child.alive then visit(child) end
     end
+    local handle = cursor.tweenPlayback
+    if handle then
+        local started = cursors.resolve(state, handle)
+        if started and started.alive then visit(started) end
+    end
+end
+
+-- What a paused playback is waiting on stops with it, when the provider says
+-- how. That is what makes pausing a cutscene stop the sprite animation it is
+-- parked on rather than leaving it running underneath.
+local function setAwaitPaused(state: WorldState, cursor: Cursor, paused: boolean)
+    local name = cursor.awaitProvider
+    if not name then return end
+    local provider = seqawaitables.get(name)
+    if not provider or not provider.setPaused then return end
+    local world = state.world
+    if not world or not world:isAlive(cursor.awaitEntity) then return end
+    provider.setPaused(world, cursor.awaitEntity, cursor.awaitKey, paused)
+end
+
+function cursors.pauseTree(state: WorldState, cursor: Cursor, holder: string): boolean
+    eachDescendant(state, cursor, function(child: Cursor)
+        cursors.pauseTree(state, child, holder)
+    end)
+    local holders = cursor.pauseHolders
+    if not holders then
+        holders = {}
+        cursor.pauseHolders = holders
+    end
+    holders[holder] = true
+    -- The result says whether the playback stopped, not whether the hold
+    -- registered: a second holder on an already-paused playback changes
+    -- nothing observable.
     if cursor.state ~= "running" then return false end
     cursor.state = "paused"
+    setAwaitPaused(state, cursor, true)
     return true
 end
 
-function cursors.resumeTree(state: WorldState, cursor: Cursor): boolean
-    local slots = cursors.childSlots(cursor)
-    for i = 1, #slots do
-        local child = state.cursors[slots[i]]
-        if child and child.alive then cursors.resumeTree(state, child) end
-    end
+function cursors.resumeTree(state: WorldState, cursor: Cursor, holder: string): boolean
+    eachDescendant(state, cursor, function(child: Cursor)
+        cursors.resumeTree(state, child, holder)
+    end)
+    local holders = cursor.pauseHolders
+    if not holders or not holders[holder] then return false end
+    holders[holder] = nil
+    if next(holders) ~= nil then return false end
+    cursor.pauseHolders = nil
     if cursor.state ~= "paused" then return false end
     cursor.state = "running"
+    setAwaitPaused(state, cursor, false)
     -- A cursor blocked on a signal or parked at a join has no wake time and
     -- stays where it is. Otherwise it keeps its heap entry, and if its wake
     -- time passed while it was paused it runs on the next step rather than

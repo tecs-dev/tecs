@@ -400,6 +400,11 @@ local record Cursor
     children: {integer: boolean}
     joining: boolean
 
+    --- Who is holding this playback paused. It runs again when the last one
+    --- lets go, so two systems pausing it for unrelated reasons cannot undo
+    --- each other.
+    pauseHolders: {string: boolean}
+
     -- Instruction budget is spent per fixed step, not per resume, so a
     -- cursor that wakes again within the same step cannot re-arm it.
     budgetStep: integer
@@ -410,6 +415,10 @@ local record Cursor
 end
 
 local record WorldState
+    --- The world this state belongs to, for the few paths that have to call
+    --- outward: an awaitable provider being told its work is paused.
+    world: World
+
     cursors: {integer: Cursor}
     freeSlots: {integer}
     nextSlot: integer

@@ -23,6 +23,14 @@ local record awaitables
         --- for something that never started is correct: a program waiting for
         --- an animation that is already over should carry on, not hang.
         isPending: function(world: World, entity: integer, key: string): boolean
+
+        --- Stop and start the work, when the provider knows how.
+        ---
+        --- Called when the playback parked on it is paused or resumed, so a
+        --- cutscene that is waiting for an animation stops it rather than
+        --- leaving it running underneath. Optional: a provider that cannot
+        --- pause its work simply does not offer this.
+        setPaused: function(world: World, entity: integer, key: string, paused: boolean)
     end
 
     --- Register a provider. Registering a name twice replaces it, which is

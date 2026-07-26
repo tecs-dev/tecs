@@ -171,12 +171,33 @@ Use `love.math.random`, whose generator state travels with snapshots (see
 ```teal
 local handle = sequence.play(world, intro, opts)
 
-sequence.pause(world, handle)
+sequence.pause(world, handle)              -- and its branches, and what it started
 sequence.resume(world, handle)
 sequence.cancel(world, handle)
 
 local s = sequence.status(world, handle)   -- state, program, version, pc, wakeAt, fault
 ```
+
+### Pausing
+
+Pausing a playback pauses **everything it started**: its branches, the timelines it began with
+`playTween`, and -- when the provider knows how -- whatever it is parked on in an `await`, so a
+cutscene waiting on a sprite animation stops that animation rather than leaving it running
+underneath.
+
+Pause is **holder counted**. Two systems can hold the same playback for unrelated reasons, and it
+runs again only when the last one lets go:
+
+```teal
+sequence.pause(world, cutscene, "menu")     -- true: it stopped
+sequence.pause(world, cutscene, "lostFocus")-- false: already stopped, hold registered
+sequence.resume(world, cutscene, "menu")    -- false: lostFocus still holds it
+sequence.resume(world, cutscene, "lostFocus")-- true: it runs again
+```
+
+The boolean says whether the playback's run state changed, not whether the hold registered.
+`holder` defaults to `"user"`, so a codebase that never needs two holders never sees them. Holders
+travel with a snapshot, so a playback saved while paused comes back paused and still held.
 
 A finished playback frees its arena slot immediately, so the arena is bounded by peak concurrency
 rather than by every sequence ever played. Its `status` stays readable until the slot is handed to

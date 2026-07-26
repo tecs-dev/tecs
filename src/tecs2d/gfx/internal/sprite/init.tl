@@ -1137,6 +1137,17 @@ function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(worl
             isPending = function(w: tecs.World, entity: integer, _key: string): boolean
                 return runtimeOf(w).awaiting[entity] ~= nil
             end,
+            -- A cutscene parked on an animation stops it when it pauses,
+            -- rather than letting it run to the end underneath. The sequencer
+            -- holds one pause at a time per playback, which is what Sprite's
+            -- own pause depth counts.
+            setPaused = function(
+                w: tecs.World, entity: integer, _key: string, paused: boolean
+            )
+                local s = w:get(entity, Sprite) as SpriteImpl
+                if not s then return end
+                if paused then s:pause() else s:resume() end
+            end,
         })
         -- Takes a bind reference, which the sequencer resolves to an entity
         -- id before the action runs, and the tag to play once.

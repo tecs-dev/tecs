@@ -2039,6 +2039,110 @@ describe("tecs2d.sequence", function()
         end)
     end)
 
+    describe("pause", function()
+        it("runs again only when the last holder lets go", function()
+            local calls = 0
+            sequence.registerAction(world, "spec.tick", function() calls = calls + 1 end)
+            local prog = sequence.define(uniqueName(), {
+                sequence.waitSteps(1),
+                sequence.call("spec.tick"),
+            })
+            local handle = sequence.play(world, prog)
+
+            luassert.is_true(sequence.pause(world, handle, "menu"),
+                "the first holder stopped it")
+            luassert.is_false(sequence.pause(world, handle, "focus"),
+                "a second hold on an already-paused playback changes nothing")
+            stepWorld(world, 4)
+            luassert.equals(0, calls)
+
+            luassert.is_false(sequence.resume(world, handle, "menu"),
+                "one holder let go, the other still holds it")
+            stepWorld(world, 4)
+            luassert.equals(0, calls, "still held")
+
+            luassert.is_true(sequence.resume(world, handle, "focus"))
+            stepWorld(world, 4)
+            luassert.equals(1, calls)
+        end)
+
+        it("ignores the same holder pausing twice", function()
+            local prog = sequence.define(uniqueName(), {sequence.waitSteps(10)})
+            local handle = sequence.play(world, prog)
+
+            luassert.is_true(sequence.pause(world, handle, "menu"))
+            luassert.is_false(sequence.pause(world, handle, "menu"),
+                "the same holder twice is one hold")
+            luassert.is_true(sequence.resume(world, handle, "menu"))
+            luassert.equals("running", sequence.status(world, handle).state)
+        end)
+
+        it("stops the branches and the timelines a playback started", function()
+            local Transform <const> = tecs.builtins.Transform
+            local actor <const> = world:spawn(Transform(0, 0, 0, 1))
+            world:commit()
+
+            local branchCalls = 0
+            sequence.registerAction(world, "spec.branchTick",
+                function() branchCalls = branchCalls + 1 end)
+            sequence.timeline("spec.pauseSlide", {
+                sequence.tweenTo(1.0, "linear", "transform.x", 100),
+            })
+
+            local handle = sequence.play(world, sequence.define(uniqueName(), {
+                sequence.playTween("spec.pauseSlide", sequence.bind("actor")),
+                sequence.fork({
+                    sequence.loop(nil, {
+                        sequence.waitSteps(1),
+                        sequence.call("spec.branchTick"),
+                    }),
+                }),
+                sequence.waitSteps(1000),
+            }), {bindings = {actor = actor}})
+
+            stepWorld(world, 4)
+            for _ = 1, 10 do world:update(1 / 60) end
+            luassert.is_true(branchCalls > 0, "the branch is running")
+            local movedBefore <const> = world:get(actor, Transform).x
+            luassert.is_true(movedBefore > 0, "the timeline is running")
+
+            sequence.pause(world, handle)
+            local branchAtPause <const> = branchCalls
+            stepWorld(world, 4)
+            for _ = 1, 20 do world:update(1 / 60) end
+
+            luassert.equals(branchAtPause, branchCalls, "the branch stopped too")
+            luassert.is_near(movedBefore, world:get(actor, Transform).x, 1e-9,
+                "the timeline it started stopped too")
+
+            sequence.resume(world, handle)
+            for _ = 1, 10 do world:update(1 / 60) end
+            luassert.is_true(world:get(actor, Transform).x > movedBefore,
+                "and both carry on")
+        end)
+
+        it("carries its holders through a snapshot", function()
+            local calls = 0
+            sequence.registerAction(world, "spec.held", function() calls = calls + 1 end)
+            local handle = sequence.play(world, sequence.define(uniqueName(), {
+                sequence.waitSteps(1),
+                sequence.call("spec.held"),
+            }))
+            sequence.pause(world, handle, "menu")
+
+            local saved = world:saveSnapshot().buffer
+            world:loadSnapshot(saved)
+
+            luassert.equals("paused", sequence.status(world, handle).state)
+            stepWorld(world, 4)
+            luassert.equals(0, calls, "restored still held")
+
+            luassert.is_true(sequence.resume(world, handle, "menu"))
+            stepWorld(world, 4)
+            luassert.equals(1, calls)
+        end)
+    end)
+
     describe("programs as data", function()
         local order: {string}
 
