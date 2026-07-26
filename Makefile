@@ -41,27 +41,28 @@ endif
 endif
 
 SOURCE_TL := $(shell find src -name '*.tl' 2>/dev/null)
-CDEFS     := $(GEN)/sdl3cdef.lua $(GEN)/box2dcdef.lua $(GEN)/shaderccdef.lua $(GEN)/spvccdef.lua
+CDEFS     := $(GEN)/sdl3cdef.lua $(GEN)/box2dcdef.lua $(GEN)/shaderccdef.lua $(GEN)/spvccdef.lua $(GEN)/workercdef.lua
 CONSTS    := $(GEN)/sdl3const.lua $(GEN)/box2dconst.lua $(GEN)/shadercconst.lua $(GEN)/spvcconst.lua
 SPVC_LIB  := $(BUILD)/lib/libspirvcrossc.dylib
+WORKER_LIB := $(BUILD)/lib/libtecs2dworker.dylib
 
 export TECS2D_SDL3_PATH    := $(SDL3_PREFIX)/lib/libSDL3.dylib
 export TECS2D_BOX2D_PATH   := $(BOX2D_PREFIX)/lib/libbox2d.dylib
 export TECS2D_SHADERC_PATH := $(SHADERC_PREFIX)/lib/libshaderc_shared.dylib
 export TECS2D_SPVC_PATH     := $(CURDIR)/$(SPVC_LIB)
 
-.PHONY: help all cdef host build run clean rebuild check abi-check deps test
+.PHONY: help all cdef host build run clean rebuild check abi-check deps test worker spvc
 
 help: ## List targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
 	  | awk -F':.*?## ' '{printf "  %-14s %s\n", $$1, $$2}'
 
-all: cdef spvc build host ## Generate cdefs, link deps, compile Teal, build the host
+all: cdef spvc worker build host ## Generate cdefs, link deps, compile Teal, build the host
 
 deps: ## Install native dependencies (macOS/Homebrew)
 	brew install sdl3 box2d shaderc spirv-cross luajit
 
-cdef: $(GEN)/.sdl3.stamp $(GEN)/.box2d.stamp $(GEN)/.shaderc.stamp $(GEN)/.spvc.stamp ## Regenerate FFI cdefs from installed headers
+cdef: $(GEN)/.sdl3.stamp $(GEN)/.box2d.stamp $(GEN)/.shaderc.stamp $(GEN)/.spvc.stamp $(GEN)/.worker.stamp ## Regenerate FFI cdefs from installed headers
 
 # Each generator run emits both a cdef and a constants table. macOS ships GNU
 # Make 3.81, which has no grouped-target syntax, so a stamp file stands in for
@@ -109,6 +110,24 @@ $(SPVC_LIB): $(SPVC_PREFIX)/lib/libspirv-cross-c.a
 	  $(SPVC_PREFIX)/lib/libspirv-cross-hlsl.a $(SPVC_PREFIX)/lib/libspirv-cross-reflect.a \
 	  $(SPVC_PREFIX)/lib/libspirv-cross-util.a $(SPVC_PREFIX)/lib/libspirv-cross-core.a -lc++
 
+# Worker threads must bootstrap natively: a LuaJIT FFI callback invoked from
+# a thread the VM did not create is unsafe, so a thread entry cannot be Lua.
+$(GEN)/.worker.stamp: native/worker.h scripts/gencdef.py
+	@python3 scripts/gencdef.py \
+	  --header worker.h --include $(CURDIR)/native \
+	  --keep /native/ --define-prefix TECS2D_ \
+	  --defines-out $(GEN)/workerconst.lua --out $(GEN)/workercdef.lua
+	@touch $@
+
+worker: $(WORKER_LIB) ## Build the worker and channel library
+
+$(WORKER_LIB): native/worker.c
+	@mkdir -p $(BUILD)/lib
+	$(CC) -dynamiclib -std=c99 -O2 -Wall -Wextra -o $@ $< \
+	  -I$(LUAJIT_INC) -I$(SDL3_PREFIX)/include \
+	  -L$(LUAJIT_PREFIX)/lib -lluajit-5.1 \
+	  -L$(SDL3_PREFIX)/lib -lSDL3
+
 host: $(HOST) ## Build the C host
 
 $(HOST): host/main.c
@@ -128,7 +147,7 @@ check: cdef ## Type-check Teal sources
 abi-check: cdef ## Verify generated cdefs match the C ABI
 	@python3 scripts/abicheck.py
 
-test: build spvc ## Run the spec suite
+test: build spvc worker ## Run the spec suite
 	@busted --lua=luajit spec/
 
 run: all ## Run the demo app
