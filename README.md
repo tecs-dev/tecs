@@ -1,7 +1,8 @@
 # tecs2d
 
 A LuaJIT game engine built directly on SDL3, SDL_GPU, and Box2D 3, replacing
-the Love2D layer that Tecs previously ran on.
+the Love2D layer that Tecs previously ran on. Entities are the interface:
+anything that renders or updates per frame is an entity in a Tecs world.
 
 Everything below Lua is reached through the FFI. There are no Lua C extensions:
 the only native code is a host that owns `main`, and even that is never called
@@ -21,11 +22,29 @@ Working today:
 - Compute pipelines with reflected workgroup size, and GPU-driven drawing: a
   compute pass writes the draw arguments, one indirect draw consumes them
 - A declarative pass graph, and a deferred pipeline built on it
+- An ECS binding: Transform2D, Tint, PointLight, and Renderable components,
+  with a sync that walks archetype columns straight into mapped GPU staging
 - Box2D 3 simulation with value-typed body handles
 - Frame pacing from the swapchain, with no sleep heuristic
 
 Not built yet: shadows, post-processing, audio, workers, assets, and the MCP
 surface.
+
+## The ECS binding
+
+`ecs/Renderer` is the bridge, and the only module that knows about both
+archetypes and GPU buffers. Everything below it is renderer; everything above
+it is ECS.
+
+Its sync reads columns with `get`, never `getMut`. Taking a mutable column to
+read would mark those components dirty on every archetype every frame, which
+defeats every dirty-gated consumer downstream. That distinction is the single
+easiest thing to get wrong here and the hardest to notice.
+
+Syncing runs in `RenderFirst` inside the world's update; rendering happens
+afterwards against a frame. The two stay separable because the sync needs no
+command buffer and the render needs no world, which also means the swapchain
+is held for as little of the frame as possible.
 
 ## Buffer writes
 
@@ -182,6 +201,7 @@ scripts/abicheck.py         cdef vs C compiler layout verification
 src/tecs2d/ffi/             library loading and generated binding wrappers
 src/tecs2d/platform/        window, clock, events
 src/tecs2d/gpu/             device, frame, passes, shaders, pipelines, buffers
+src/tecs2d/ecs/             components and the ECS-to-GPU bridge
 src/tecs2d/physics/         Box2D world and bodies
 spec/                       busted suite
 ```

@@ -7,7 +7,9 @@
 -- and SDL kept writing into freed LuaJIT heap. That corrupted the VM and
 -- crashed later, somewhere unrelated, a few runs in five.
 
-package.path = "build/?.lua;build/?/init.lua;" .. package.path
+-- Our build first, so it wins over the ECS repo's own engine tree.
+package.path = "build/?.lua;build/?/init.lua;"
+    .. "../tecs/build/?.lua;../tecs/build/?/init.lua;" .. package.path
 
 local ffi = require("ffi")
 local loader = require("tecs2d.ffi.loader")

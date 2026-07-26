@@ -5,7 +5,9 @@
 -- These tests use asymmetric content and read pixels back, so an orientation
 -- error cannot pass as a lighting result.
 
-package.path = "build/?.lua;build/?/init.lua;" .. package.path
+-- Our build first, so it wins over the ECS repo's own engine tree.
+package.path = "build/?.lua;build/?/init.lua;"
+    .. "../tecs/build/?.lua;../tecs/build/?/init.lua;" .. package.path
 
 local sdl = require("tecs2d.ffi.sdl3")
 local Window = require("tecs2d.platform.Window")

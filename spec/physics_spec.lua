@@ -2,7 +2,9 @@
 -- the FFI round trip and that the solver produces the motion it should, which
 -- together catch a mis-generated cdef in a way a smoke test would not.
 
-package.path = "build/?.lua;build/?/init.lua;" .. package.path
+-- Our build first, so it wins over the ECS repo's own engine tree.
+package.path = "build/?.lua;build/?/init.lua;"
+    .. "../tecs/build/?.lua;../tecs/build/?/init.lua;" .. package.path
 
 local World = require("tecs2d.physics.World")
 

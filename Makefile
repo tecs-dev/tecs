@@ -18,6 +18,10 @@ SPVC_PREFIX    ?= /usr/local
 LUAJIT_PREFIX  ?= /usr/local
 endif
 
+# The ECS is developed alongside this engine rather than vendored, so its
+# source and build tree are referenced in place.
+TECS_DIR ?= $(CURDIR)/../tecs
+
 BUILD   := build
 BIN     := bin
 GEN     := $(BUILD)/tecs2d/ffi
@@ -112,14 +116,14 @@ $(HOST): host/main.c
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
 build: cdef $(BUILD)/main.lua ## Compile src/*.tl into build/
-	@tl -q gen --root src --output-dir $(BUILD) $(SOURCE_TL)
+	@tl -q gen -I $(CURDIR)/vendor/tl -I $(TECS_DIR)/vendor/share/lua/5.1 --root src --output-dir $(BUILD) $(SOURCE_TL)
 
 $(BUILD)/main.lua: main.tl
 	@mkdir -p $(BUILD)
-	@tl gen main.tl -o $@
+	@tl gen -I $(CURDIR)/vendor/tl -I $(TECS_DIR)/vendor/share/lua/5.1 main.tl -o $@
 
 check: cdef ## Type-check Teal sources
-	@tl check $(SOURCE_TL) main.tl
+	@tl check -I $(CURDIR)/vendor/tl -I $(TECS_DIR)/vendor/share/lua/5.1 $(SOURCE_TL) main.tl
 
 abi-check: cdef ## Verify generated cdefs match the C ABI
 	@python3 scripts/abicheck.py

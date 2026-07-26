@@ -6,7 +6,9 @@
 -- pipeline creation, workgroup size reflection, read-write storage binding,
 -- the barrier SDL derives from the pass declaration, and indirect draw.
 
-package.path = "build/?.lua;build/?/init.lua;" .. package.path
+-- Our build first, so it wins over the ECS repo's own engine tree.
+package.path = "build/?.lua;build/?/init.lua;"
+    .. "../tecs/build/?.lua;../tecs/build/?/init.lua;" .. package.path
 
 local sdl = require("tecs2d.ffi.sdl3")
 local loader = require("tecs2d.ffi.loader")

@@ -1,7 +1,9 @@
 -- Binding-layer invariants: the generated cdefs load, resolve real symbols,
 -- and expose the constants that the preprocessor would otherwise have eaten.
 
-package.path = "build/?.lua;build/?/init.lua;" .. package.path
+-- Our build first, so it wins over the ECS repo's own engine tree.
+package.path = "build/?.lua;build/?/init.lua;"
+    .. "../tecs/build/?.lua;../tecs/build/?/init.lua;" .. package.path
 
 local loader = require("tecs2d.ffi.loader")
 

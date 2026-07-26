@@ -5,7 +5,9 @@
 -- whatever reads the buffer later. So these tests write disjoint regions in
 -- separate flushes and check that earlier regions survive.
 
-package.path = "build/?.lua;build/?/init.lua;" .. package.path
+-- Our build first, so it wins over the ECS repo's own engine tree.
+package.path = "build/?.lua;build/?/init.lua;"
+    .. "../tecs/build/?.lua;../tecs/build/?/init.lua;" .. package.path
 
 local ffi = require("ffi")
 local sdl = require("tecs2d.ffi.sdl3")

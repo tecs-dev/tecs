@@ -6,7 +6,9 @@
 -- so set/binding pairs are remapped to [[buffer]] and [[texture]] indices, and
 -- getting that wrong is invisible until a shader reads the wrong resource.
 
-package.path = "build/?.lua;build/?/init.lua;" .. package.path
+-- Our build first, so it wins over the ECS repo's own engine tree.
+package.path = "build/?.lua;build/?/init.lua;"
+    .. "../tecs/build/?.lua;../tecs/build/?/init.lua;" .. package.path
 
 local sdl = require("tecs2d.ffi.sdl3")
 local loader = require("tecs2d.ffi.loader")

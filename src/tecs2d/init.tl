@@ -5,6 +5,7 @@
 --- swapchain acquire blocking on the presentation engine, so the loop does
 --- not sleep or spin to hit a target frame rate.
 
+local tecs <const> = require("tecs")
 local sdl <const> = require("tecs2d.ffi.sdl3")
 local loader <const> = require("tecs2d.ffi.loader")
 local clock <const> = require("tecs2d.platform.clock")
@@ -13,6 +14,8 @@ local Window <const> = require("tecs2d.platform.Window")
 local Device <const> = require("tecs2d.gpu.Device")
 local Frame <const> = require("tecs2d.gpu.Frame")
 local RenderPass <const> = require("tecs2d.gpu.RenderPass")
+local Renderer <const> = require("tecs2d.ecs.Renderer")
+local components <const> = require("tecs2d.ecs.components")
 
 local C <const> = sdl.C
 local K <const> = sdl.K
@@ -20,6 +23,11 @@ local K <const> = sdl.K
 local record App
     window: Window
     device: Device
+    --- The world this app drives. Entities are the interface: anything that
+    --- renders or updates per frame lives here.
+    world: tecs.World
+    --- Feeds the deferred pipeline from the world.
+    renderer: Renderer
     --- Set to true to leave the loop at the end of the current frame.
     quitRequested: boolean
     --- Seconds since the loop started, advanced by the frame dt so a replay
@@ -44,6 +52,10 @@ local record RunConfig
     --- Frames the CPU may run ahead of the GPU. Resource retirement depth
     --- must match this.
     framesInFlight: integer
+    --- Ambient colour applied by the lighting pass.
+    ambient: {number}
+    --- Instances the render buffer is sized for.
+    capacity: integer
     --- Presentation pacing: "vsync" (default), "immediate", or "mailbox".
     --- Benchmarks use immediate so a frame's real cost is observable.
     presentMode: string
@@ -60,6 +72,8 @@ end
 
 local record tecs2d
     App: App
+    Renderer: Renderer
+    components: components
     RunConfig: RunConfig
     Window: Window
     Device: Device
@@ -71,6 +85,8 @@ local record tecs2d
     version: string
 end
 
+tecs2d.Renderer = Renderer
+tecs2d.components = components
 tecs2d.Window = Window
 tecs2d.Device = Device
 tecs2d.Frame = Frame
@@ -100,9 +116,18 @@ function tecs2d.run(config: RunConfig): integer
         device:setPresentMode(config.presentMode)
     end
 
+    local world = tecs.newWorld()
+    local renderer = Renderer.create(device.handle, device:getSwapchainFormat(), {
+        ambient = config.ambient,
+        capacity = config.capacity,
+    })
+    renderer:install(world)
+
     local app = setmetatable({} as App, { __index = App })
     app.window = window
     app.device = device
+    app.world = world
+    app.renderer = renderer
     app.quitRequested = false
     app.elapsed = 0.0
     app.frame = 0
@@ -131,8 +156,14 @@ function tecs2d.run(config: RunConfig): integer
         app.elapsed = app.elapsed + dt
         if config.update ~= nil then config.update(app, dt) end
 
+        -- The world runs to completion before a frame is acquired. Syncing
+        -- needs no command buffer and rendering needs no world, so the two
+        -- stay separable and the swapchain is held for as little as possible.
+        world:update(dt)
+
         local frame = device:beginFrame()
         if frame ~= nil then
+            renderer:render(frame)
             if config.draw ~= nil then
                 config.draw(app, frame)
             end
@@ -147,6 +178,8 @@ function tecs2d.run(config: RunConfig): integer
 
     if config.quit ~= nil then config.quit(app) end
 
+    device:waitForIdle()
+    renderer:destroy()
     device:destroy()
     window:destroy()
     C.SDL_Quit()

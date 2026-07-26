@@ -31,6 +31,10 @@ local record RenderPass
     end
 
     handle: loader.CPtr
+    --- The command buffer this pass records into. Uniform pushes target the
+    --- command buffer rather than the pass, so it is kept here to save every
+    --- caller from threading it alongside.
+    commandBuffer: loader.CValue
     --- Number of colour attachments this pass was begun with.
     targetCount: integer
     _finished: boolean
@@ -42,9 +46,11 @@ local RenderPassMT <const>: metatable<RenderPass> = { __index = RenderPass }
 local targets <const> = loader.newArray("SDL_GPUColorTargetInfo[?]", MAX_COLOR_TARGETS)
 
 --- Wraps an already-begun pass handle.
-function RenderPass.wrap(handle: loader.CPtr, targetCount?: integer): RenderPass
+function RenderPass.wrap(handle: loader.CPtr, commandBuffer: loader.CValue,
+                        targetCount?: integer): RenderPass
     local self = setmetatable({} as RenderPass, RenderPassMT)
     self.handle = handle
+    self.commandBuffer = commandBuffer
     self.targetCount = targetCount or 1
     self._finished = false
     return self
@@ -87,7 +93,7 @@ function RenderPass.begin(commandBuffer: loader.CValue,
 
     local handle = C.SDL_BeginGPURenderPass(commandBuffer, targets, count, nil)
     if handle == nil then sdl.fail("SDL_BeginGPURenderPass") end
-    return RenderPass.wrap(handle, count)
+    return RenderPass.wrap(handle, commandBuffer, count)
 end
 
 --- Binds a pipeline. All subsequent draws in this pass use its baked state.
@@ -128,6 +134,18 @@ function RenderPass:bindFragmentStorageBuffers(firstSlot: integer,
         handles[index - 1] = buffer
     end
     C.SDL_BindGPUFragmentStorageBuffers(self.handle, firstSlot, handles, #buffers)
+end
+
+--- Pushes uniform data to the vertex stage.
+function RenderPass:pushVertexUniform(slot: integer, data: loader.CArray,
+                                      byteCount: integer)
+    C.SDL_PushGPUVertexUniformData(self.commandBuffer, slot, data, byteCount)
+end
+
+--- Pushes uniform data to the fragment stage.
+function RenderPass:pushFragmentUniform(slot: integer, data: loader.CArray,
+                                        byteCount: integer)
+    C.SDL_PushGPUFragmentUniformData(self.commandBuffer, slot, data, byteCount)
 end
 
 --- Issues a draw.
