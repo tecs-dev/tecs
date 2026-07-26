@@ -36,6 +36,10 @@ local SIMULATE <const> = timing.stage("simulate")
 local ACQUIRE <const> = timing.stage("acquire")
 local RECORD <const> = timing.stage("record")
 local SUBMIT <const> = timing.stage("submit")
+--- The game's own per-frame callback. Its cost belongs to the simulation side
+--- of any split, so leaving it outside every stage understates that side and
+--- flatters anything that only moves the other one.
+local GAME <const> = timing.stage("game")
 
 local record WindowConfig
     title: string
@@ -267,7 +271,11 @@ function Application:_iterate(queue: loader.CValue, count: integer): boolean
 
     if not self.suspended then
         self.elapsed = self.elapsed + dt
-        if self._config.update ~= nil then self._config.update(self, dt) end
+        if self._config.update ~= nil then
+            local started = timing.begin()
+            self._config.update(self, dt)
+            timing.finish(GAME, started)
+        end
 
         -- Answered on this thread, inside the frame, so a tool reads a world
         -- that is not mid-update. Polled before the guard below, so it keeps

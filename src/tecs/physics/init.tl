@@ -14,6 +14,7 @@ local loader <const> = require("tecs.ffi.loader")
 local World <const> = require("tecs.physics.World")
 local box2d <const> = require("tecs.ffi.box2d")
 local components <const> = require("tecs.components")
+local timing <const> = require("tecs.timing")
 
 local B <const> = box2d.C
 local Transform2D <const> = components.Transform2D
@@ -209,15 +210,23 @@ function physics.plugin(options: PhysicsOptions): function(ecs.World)
         -- would take a different number of steps on every machine and produce
         -- a different result from the same inputs, which is the whole reason
         -- the fixed phases exist.
+        -- The solve and the write-back, apart. They are different work with
+        -- different fixes, and one number cannot say which of them is the
+        -- cost.
+        local STEP <const> = timing.stage("physics.step")
+        local SYNC <const> = timing.stage("physics.sync")
+
         world:addSystem({
             name = "tecs.StepPhysics",
             phase = ecs.phases.FixedUpdate,
             run = function()
+                local started = timing.begin()
                 -- The rate comes from the world rather than from an option
                 -- here. Two numbers that have to agree and can disagree is a
                 -- simulation that integrates at one rate while the phase
                 -- driving it runs at another.
                 physics.world:step((world:getFixedTiming()))
+                timing.finish(STEP, started)
             end,
         })
 
@@ -225,6 +234,7 @@ function physics.plugin(options: PhysicsOptions): function(ecs.World)
             name = "tecs.SyncBodyTransforms",
             phase = ecs.phases.FixedPostUpdate,
             run = function()
+                local started = timing.begin()
                 for archetype, length in bodies:iter() do
                     -- Transforms are written from the simulation, so the
                     -- column is taken mutable. The body column is only read.
@@ -238,6 +248,7 @@ function physics.plugin(options: PhysicsOptions): function(ecs.World)
                         transforms[row].rotation = World.getAngle(body)
                     end
                 end
+                timing.finish(SYNC, started)
             end,
         })
     end
