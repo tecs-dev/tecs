@@ -1,3 +1,0 @@
-systemDeps=ON
-system=Darwin
-arch=arm64
