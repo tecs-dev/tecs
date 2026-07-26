@@ -446,6 +446,7 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
         vertexShader = vertex,
         fragmentShader = fragment,
         colorFormats = { albedoFormat, normalFormat },
+        depth = self.deferred:geometryDepth(),
         name = "ecs.instances",
     })
     vertex:destroy()

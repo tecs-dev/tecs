@@ -11,6 +11,11 @@
 --- validated against what earlier passes produce, so a missing dependency is
 --- an error at build time instead of a black screen.
 ---
+--- One depth attachment is shared by whichever passes ask for it, sized and
+--- resized with the frame like every other target. Depth is per pass rather
+--- than per graph because a pass that must not have one is as ordinary as a
+--- pass that must, and a pipeline bound in either has to agree with it.
+---
 --- The graph knows nothing about entities, archetypes, or dirtiness. A pass
 --- that should be skipped says so through `enabled`, which is where an
 --- ECS-side dirty gate plugs in without the graph learning what dirty means.
@@ -19,6 +24,7 @@ local loader <const> = require("tecs.ffi.loader")
 local Texture <const> = require("tecs.gpu.Texture")
 local Sampler <const> = require("tecs.gpu.Sampler")
 local RenderPass <const> = require("tecs.gpu.RenderPass")
+local GraphicsPipeline <const> = require("tecs.gpu.GraphicsPipeline")
 local Frame <const> = require("tecs.gpu.Frame")
 
 --- Default colour format for intermediate targets. Eight bits per channel is
@@ -48,6 +54,28 @@ local record PassContext
     height: integer
 end
 
+--- How one pass uses the graph's depth attachment.
+---
+--- Declared per pass rather than per graph, because whether depth is attached
+--- at all differs between passes: geometry needs it and a fullscreen resolve
+--- covering every pixel once has nothing to be occluded by.
+local record DepthState
+    --- Tests each fragment against the attachment. Defaults to true; false
+    --- attaches depth without letting it reject anything.
+    test: boolean
+    --- Writes surviving fragments' depth back. Defaults to true, and has no
+    --- effect while `test` is false.
+    write: boolean
+    --- "never", "less", "equal", "lessOrEqual", "greater", "notEqual",
+    --- "greaterOrEqual", or "always". Defaults to "lessOrEqual", which keeps
+    --- draw order deciding ties: equal depths let the later fragment through,
+    --- so what a pass draws last is still what is seen.
+    compare: string
+    --- Value the attachment is cleared to when the pass begins. Omit to load
+    --- what is already there. One is the far plane.
+    clear: number
+end
+
 local record PassSpec
     name: string
     --- Targets sampled by this pass, bound to fragment slots in this order.
@@ -55,6 +83,8 @@ local record PassSpec
     --- Targets written by this pass. Empty or omitted renders to the
     --- swapchain, which is how the final composite reaches the screen.
     outputs: {string}
+    --- How this pass uses depth. Omit for a pass with no depth attachment.
+    depth: DepthState
     --- Consulted each frame. Returning false skips the pass entirely,
     --- including beginning it. This is the dirty gate.
     enabled: function(): boolean
@@ -65,15 +95,23 @@ local record PassGraph
     TargetSpec: TargetSpec
     PassSpec: PassSpec
     PassContext: PassContext
+    DepthState: DepthState
 
     device: loader.CPtr
     --- Format the swapchain expects, for passes that render to it.
     swapchainFormat: integer
+    --- Depth format this device supports, discovered at creation. The graph
+    --- owns one depth attachment in this format, shared by every pass that
+    --- declares depth.
+    depthFormat: integer
     _targets: {string: TargetSpec}
     _textures: {string: Texture}
     _order: {string}
     _passes: {PassSpec}
     _sampler: Sampler
+    _depth: Texture
+    _depthAttachment: RenderPass.DepthAttachment
+    _needsDepth: boolean
     _width: integer
     _height: integer
     _built: boolean
@@ -92,6 +130,11 @@ function PassGraph.create(device: loader.CPtr, swapchainFormat: integer): PassGr
     self._order = {}
     self._passes = {}
     self._sampler = Sampler.create(device, { filter = "nearest", address = "clamp" })
+    self.depthFormat = Texture.depthFormat(device)
+    self._needsDepth = false
+    -- Reused rather than rebuilt per pass per frame; only its texture and clear
+    -- value ever differ, and both are known when the pass runs.
+    self._depthAttachment = { texture = nil, clear = nil }
     self._width = 0
     self._height = 0
     self._built = false
@@ -140,6 +183,21 @@ function PassGraph:pass(spec: PassSpec): PassGraph
         end
     end
 
+    if spec.depth ~= nil then
+        -- One depth attachment at frame size serves every depth pass, so a
+        -- pass drawing into a scaled target cannot share it. SDL would reject
+        -- the mismatch when the pass began; saying so here names the pass.
+        for _, output in ipairs(spec.outputs or {}) do
+            local scale = self._targets[output].scale
+            if scale ~= 1.0 then
+                error(("tecs: pass '%s' uses depth but writes '%s' at scale " ..
+                    "%s, and the depth attachment is frame sized")
+                    :format(spec.name, output, tostring(scale)), 2)
+            end
+        end
+        self._needsDepth = true
+    end
+
     self._passes[#self._passes + 1] = spec
     return self
 end
@@ -161,28 +219,75 @@ function PassGraph:formatOf(name: string): integer
     return spec.format
 end
 
+--- Depth state a pipeline drawing in `passName` must bake, or nil when that
+--- pass has no depth attachment.
+---
+--- The depth counterpart to `formatOf`, and it answers both cases rather than
+--- assuming one. A pipeline's target info has to match the pass it is bound in
+--- exactly, so "no depth target" is as much a thing to get right as a format
+--- is, and both come from the pass's own declaration instead of being restated
+--- where the pipeline is built.
+---
+--- The defaults are the pipeline's: an omitted `test`, `write`, or `compare`
+--- means the same here as it does there.
+function PassGraph:depthOf(passName: string): GraphicsPipeline.DepthConfig
+    for _, spec in ipairs(self._passes) do
+        if spec.name == passName then
+            local state = spec.depth
+            if state == nil then return nil end
+            return {
+                format = self.depthFormat,
+                test = state.test,
+                write = state.write,
+                compare = state.compare,
+            }
+        end
+    end
+    error(("tecs: no pass named '%s'"):format(tostring(passName)), 2)
+end
+
 --- Allocates or reallocates targets for a frame size.
 local function resize(self: PassGraph, width: integer, height: integer)
-    if self._width == width and self._height == height then return end
+    if self._width ~= width or self._height ~= height then
+        for _, name in ipairs(self._order) do
+            local existing = self._textures[name]
+            if existing ~= nil then existing:destroy() end
 
-    for _, name in ipairs(self._order) do
-        local existing = self._textures[name]
-        if existing ~= nil then existing:destroy() end
+            local spec = self._targets[name]
+            local scaledWidth = math.max(1, math.floor(width * spec.scale))
+            local scaledHeight = math.max(1, math.floor(height * spec.scale))
+            self._textures[name] = Texture.create(self.device, {
+                width = scaledWidth,
+                height = scaledHeight,
+                format = spec.format,
+                usage = { "colorTarget", "sampled" },
+                name = name,
+            })
+        end
 
-        local spec = self._targets[name]
-        local scaledWidth = math.max(1, math.floor(width * spec.scale))
-        local scaledHeight = math.max(1, math.floor(height * spec.scale))
-        self._textures[name] = Texture.create(self.device, {
-            width = scaledWidth,
-            height = scaledHeight,
-            format = spec.format,
-            usage = { "colorTarget", "sampled" },
-            name = name,
-        })
+        if self._depth ~= nil then
+            self._depth:destroy()
+            self._depth = nil
+        end
+
+        self._width = width
+        self._height = height
     end
 
-    self._width = width
-    self._height = height
+    -- Frame sized, so it matches the unscaled targets a depth pass writes, and
+    -- allocated only once a pass has declared depth: a graph that never tests
+    -- it should not pay four bytes a pixel for an attachment nothing reads.
+    -- Gated on the attachment rather than on the frame size, because a pass may
+    -- be declared after the graph has already run a frame.
+    if self._needsDepth and self._depth == nil then
+        self._depth = Texture.create(self.device, {
+            width = width,
+            height = height,
+            format = self.depthFormat,
+            usage = { "depthTarget" },
+            name = "depth",
+        })
+    end
 end
 
 --- Runs every enabled pass against `frame`.
@@ -214,7 +319,15 @@ function PassGraph:execute(frame: Frame)
                 end
             end
 
-            local pass = RenderPass.begin(frame.commandBuffer, attachments)
+            local depth: RenderPass.DepthAttachment = nil
+            if spec.depth ~= nil then
+                depth = self._depthAttachment
+                depth.texture = self._depth.handle
+                depth.clear = spec.depth.clear
+            end
+
+            local pass = RenderPass.begin(frame.commandBuffer, attachments,
+                depth)
 
             local inputs = spec.inputs or {}
             if #inputs > 0 then
@@ -246,6 +359,10 @@ function PassGraph:destroy()
         texture:destroy()
     end
     self._textures = {}
+    if self._depth ~= nil then
+        self._depth:destroy()
+        self._depth = nil
+    end
     self._sampler:destroy()
 end
 

@@ -54,6 +54,37 @@ local USAGE_FLAGS <const>: {string: integer} = {
 
 local DEFAULT_USAGE <const>: {string} = { "colorTarget", "sampled" }
 
+--- SDL_GPU_TEXTURETYPE_2D
+local TEXTURE_TYPE_2D <const> = 0
+
+--- Depth formats, best precision first.
+---
+--- D16 is the only one SDL guarantees, so it is the floor rather than a
+--- preference. The two above it are asked for and taken only if the backend
+--- answers yes.
+local DEPTH_FORMATS <const>: {integer} = {
+    tonumber(C.SDL_GPU_TEXTUREFORMAT_D32_FLOAT) as integer,
+    tonumber(C.SDL_GPU_TEXTUREFORMAT_D24_UNORM) as integer,
+    tonumber(C.SDL_GPU_TEXTUREFORMAT_D16_UNORM) as integer,
+}
+
+--- The best depth format `device` supports as a depth target.
+---
+--- Asked rather than assumed. Backends disagree about which depth formats
+--- exist at all: Metal has no D24_UNORM, and a Vulkan driver may have that one
+--- and not D32_FLOAT. A hardcoded choice creates a texture on the machine it
+--- was written on and returns nil on the next one.
+function Texture.depthFormat(device: loader.CPtr): integer
+    local usage = USAGE_FLAGS.depthTarget
+    for _, format in ipairs(DEPTH_FORMATS) do
+        if C.SDL_GPUTextureSupportsFormat(device, format, TEXTURE_TYPE_2D,
+            usage) then
+            return format
+        end
+    end
+    error("tecs: this device supports no depth format as a depth target", 2)
+end
+
 --- Creates a texture.
 function Texture.create(device: loader.CPtr, options: TextureOptions): Texture
     local flags = 0
@@ -67,7 +98,7 @@ function Texture.create(device: loader.CPtr, options: TextureOptions): Texture
 
     local info = loader.newArray("SDL_GPUTextureCreateInfo[1]")
     local settings = info[0] as loader.CStruct
-    settings.type = 0                    -- SDL_GPU_TEXTURETYPE_2D
+    settings.type = TEXTURE_TYPE_2D
     settings.format = options.format
     settings.usage = flags
     settings.width = options.width

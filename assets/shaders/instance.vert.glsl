@@ -1,7 +1,7 @@
 #version 450
 
 struct Instance {
-    vec4 xform;   // rotation, scaleX, scaleY, spare
+    vec4 xform;   // rotation, scaleX, scaleY, depth
     vec4 origin;  // xy world position, z array layer, w material
     vec4 color;
     vec4 uvRect;  // u0 v0 u1 v1
@@ -53,6 +53,14 @@ void main() {
     // The camera owns the world-to-clip transform, including the Y flip, so
     // this does no coordinate arithmetic of its own.
     gl_Position = view.viewProjection * vec4(world, 0.0, 1.0);
+
+    // Depth is the transform's fourth float, in zero to one with zero nearest,
+    // and it goes straight into clip space rather than through the projection:
+    // it is already the value the depth test should compare. Scaling by W is
+    // what survives the perspective divide, and is a multiply by one under the
+    // orthographic projection this has today.
+    gl_Position.z = self.xform.w * gl_Position.w;
+
     vColor = self.color;
 
     // Corners run -0.5..0.5, and V is flipped because texture rows run down

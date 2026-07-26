@@ -8,6 +8,12 @@
 --- Deferred is what makes light count independent of object count: geometry is
 --- rasterised once regardless of how many lights touch it, and lighting runs
 --- once per pixel regardless of how many objects overlap it.
+---
+--- Geometry owns the depth attachment, testing and writing, so wherever two
+--- instances overlap the nearer one is what the G-buffer keeps. Lighting and
+--- composite have none: each covers every pixel exactly once and has nothing
+--- to be occluded by, so an attachment there would be state to keep in step
+--- for no result.
 
 local loader <const> = require("tecs.ffi.loader")
 local sdl <const> = require("tecs.ffi.sdl3")
@@ -127,6 +133,16 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer,
     graph:pass({
         name = "geometry",
         outputs = { "albedo", "normal" },
+        -- Cleared to the far plane every frame, and "lessOrEqual" rather than
+        -- "less" so equal depths still resolve to whatever drew last. Draw
+        -- order is deterministic and means something here, so depth decides
+        -- between instances that differ and leaves the rest alone.
+        depth = {
+            test = true,
+            write = true,
+            compare = "lessOrEqual",
+            clear = 1.0,
+        },
         execute = function(context: PassGraph.PassContext)
             if options.geometry ~= nil then options.geometry(context) end
         end,
@@ -207,6 +223,14 @@ end
 --- Returns the format a geometry pipeline must be created against.
 function Deferred:geometryFormats(): integer, integer
     return self.graph:formatOf("albedo"), self.graph:formatOf("normal")
+end
+
+--- Returns the depth state a geometry pipeline must be created with.
+---
+--- Taken from the pass rather than restated, so the pipeline cannot disagree
+--- with the attachment it draws into.
+function Deferred:geometryDepth(): GraphicsPipeline.DepthConfig
+    return self.graph:depthOf("geometry")
 end
 
 --- Releases everything the pipeline owns. Safe to call more than once.
