@@ -51,7 +51,8 @@ Working today:
 - Input in three tiers behind a layer stack, latched for fixed steps
 - Worker threads with serialized channels, and asset loading that decodes on
   one and uploads on the main thread
-- Box2D 3 simulation with value-typed body handles
+- Box2D 3 simulation with value-typed body handles, solved across a native
+  thread pool
 - Frame pacing from the swapchain, with no sleep heuristic
 
 - Shaders packaged as artifacts, so a release links no compiler
@@ -93,6 +94,42 @@ uploads. The worker returns the *address* of a decoded surface rather than its
 pixels: surfaces live in process memory, so the pointer is valid in either
 state, and passing it avoids copying an image through a serialized message
 only to copy it again into staging. Ownership transfers with the address.
+
+## Physics threads
+
+Box2D 3 solves across threads when a world is given a task system, and solves
+on one when it is not. Handing it one is worth the whole of the difference: a
+step is most of a frame in a scene where the bodies stay awake, and no amount
+of work moved off the main thread elsewhere touches it.
+
+The executor is native for the same reason worker threads are. Box2D calls the
+task function from whichever thread picks the work up, so an `enqueueTask`
+written in Lua would be an FFI callback invoked from a thread the VM did not
+create. `native/taskpool.c` is a fixed set of threads over one queue of chunks,
+and Lua's part is to install two function pointers and a context into
+`b2WorldDef` before the world is created.
+
+Worker slot zero is the thread that called `b2World_Step`, which drains the
+queue while it waits instead of idling; every other slot belongs to one thread
+for that thread's lifetime, which is what Box2D means when it says a worker
+exists on one thread at a time. So a pool of one worker starts no threads and
+runs every task inline, which is exactly a world with no executor.
+
+Claiming is oldest chunk first, and that is a correctness property rather than
+a fairness preference. Box2D puts one task per worker in flight and the first
+of them drives the rest through the solver's stages while they wait on it, so
+an order that could leave that one queued while the others occupied every
+thread would hang. FIFO puts it on a running thread before any of them starts.
+Enqueuing never blocks and never waits for a free slot: more tasks outstanding
+than the pool has room for means the task runs in the calling thread, which
+Box2D accounts for through a null result.
+
+The count defaults to the machine's performance cores where the platform will
+say which those are, because the workers wait on each other between stages and
+the slowest core sets the pace of the step. Adding workers does not change the
+answer: the solver colours its constraint graph so no colour holds two
+constraints sharing a body, and a 1,600-body pile lands bit-exactly where one
+worker left it whether it was solved by 2 or by 64.
 
 ## Events
 
@@ -419,6 +456,8 @@ worker that fails to start looks like a worker that had nothing to do.
  sdl3image    102
  shaderc       45
  worker        10
+ taskpool       7
+ logsink        3
 ```
 
 Signatures come from the generated cdef rather than being parsed again, so the

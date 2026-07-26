@@ -139,12 +139,17 @@ end
 --- @param registryName Key the host registered this library under.
 function loader.library(soname: string, formula: string, envVar: string,
                         registryName?: string): loader.CNamespace, string
-    local cached = loaded[soname]
+    -- Keyed by the registry name rather than the library, because several
+    -- registered APIs can share one library: the worker, the log sink and the
+    -- solver pool are all in libtecsworker, and each has its own table of
+    -- function pointers. Keyed by the library, the first one loaded would
+    -- answer for the rest, and a name only the others declare would miss.
+    local key = registryName or soname
+    local cached = loaded[key]
     if cached ~= nil then return cached, "(cached)" end
 
     -- Taken at build time, so this path needs no dlopen and works where one is
     -- not permitted.
-    local key = registryName or soname
     local table_ = registryTable(key)
     if table_ ~= nil then
         if structs == nil then
@@ -157,7 +162,7 @@ function loader.library(soname: string, formula: string, envVar: string,
         end
         local namespace = registryNamespace(
             ffi.cast(struct .. " *", table_ as string) as loader.CValue)
-        loaded[soname] = namespace
+        loaded[key] = namespace
         return namespace, "(registry)"
     end
 
@@ -179,7 +184,7 @@ function loader.library(soname: string, formula: string, envVar: string,
         local ok, result = pcall(ffi.load, path)
         if ok then
             local namespace = result as loader.CNamespace
-            loaded[soname] = namespace
+            loaded[key] = namespace
             return namespace, path
         end
         failures[#failures + 1] = path

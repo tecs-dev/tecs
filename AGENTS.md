@@ -8,7 +8,8 @@ top of a renderer-agnostic core.
 
 SDL owns the loop. An entry file returns an application and a C host drives it through `SDL_AppInit`,
 `SDL_AppEvent`, `SDL_AppIterate` and `SDL_AppQuit`. Everything below Lua is reached through the FFI against
-generated bindings; the only native code is that host, plus a worker thread runner and a log sink.
+generated bindings; the only native code is that host, plus a worker thread runner, a log sink, and the thread
+pool Box2D solves across.
 
 Entities are the interface. Anything that renders or updates per frame is an entity in a world.
 
@@ -61,7 +62,7 @@ tecs/
 │   ├── assets.tl
 │   ├── workers.tl
 │   └── log.tl
-├── native/                # Host, worker runner, log sink, registry
+├── native/                # Host, worker runner, log sink, solver pool, registry
 ├── assets/                # shaders/ and materials/, globbed at build time
 ├── cmake/                 # Pinned dependency revisions
 ├── scripts/               # cdef generation, ABI check, shader pack, package check
