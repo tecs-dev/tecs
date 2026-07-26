@@ -16,6 +16,7 @@ local Input <const> = require("tecs2d.platform.Input")
 local Window <const> = require("tecs2d.platform.Window")
 local Device <const> = require("tecs2d.gpu.Device")
 local Renderer <const> = require("tecs2d.Renderer")
+local components <const> = require("tecs2d.components")
 local tween <const> = require("tecs2d.tween")
 local sequence <const> = require("tecs2d.sequence")
 local paths <const> = require("tecs2d.platform.paths")
@@ -198,6 +199,24 @@ function Application:_init(): boolean
     if config.mcpPort ~= nil then
         local tools = require("tecs2d.mcp.tools")
         tools.bind(self.renderer, self.world)
+
+        -- The engine's own components, plus the ECS builtins. A game adds its
+        -- own through mcpWorld.register, since nothing here can know them.
+        local mcpWorld = require("tecs2d.mcp.world")
+        -- Both tables carry more than components, so a candidate has to look
+        -- like one rather than merely be present.
+        local known: {string: tecs.Component} = {}
+        local function collect(source: {string: any})
+            for name, value in pairs(source) do
+                if type(value) == "table"
+                    and (value as {string: any}).componentName ~= nil then
+                    known[name] = value as tecs.Component
+                end
+            end
+        end
+        collect(components as {string: any})
+        collect(tecs.builtins as {string: any})
+        mcpWorld.bind(self.world, known)
         self.mcp = mcp.listen(config.mcpPort)
     end
 
