@@ -1,8 +1,9 @@
 # tecs
 
-A LuaJIT game engine built directly on SDL3, SDL_GPU, and Box2D 3, replacing
-the rendering layer Tecs previously ran on. Entities are the interface:
-anything that renders or updates per frame is an entity in a Tecs world.
+A typed entity component system and the game engine built around it, in Teal
+for LuaJIT, on SDL3, SDL_GPU and Box2D 3. The two were separate projects and
+are now one: the ECS knows what the GPU reads. Entities are the interface,
+so anything that renders or updates per frame is an entity in a world.
 
 SDL owns the loop. An entry file returns an application and a C host drives it
 from `SDL_AppInit`, `SDL_AppEvent`, `SDL_AppIterate`, and `SDL_AppQuit`:
@@ -43,28 +44,28 @@ Working today:
 - Compute pipelines with reflected workgroup size, and GPU-driven drawing: a
   compute pass writes the draw arguments, one indirect draw consumes them
 - A declarative pass graph, and a deferred pipeline built on it
-- An ECS binding: Transform2D, Tint, Sprite, PointLight, and Renderable
-  components,
-  with a sync that walks archetype columns straight into mapped GPU staging
-- Physics in the world: a RigidBody component holding a Box2D handle, stepped
-  in FixedUpdate and synced back to Transform2D
+- An ECS binding: Transform2D, Tint, Sprite, Material, PointLight and
+  Renderable components, with a sync that walks archetype columns straight into
+  mapped GPU staging, and a depth-tested G-buffer
+- Physics in the world: a RigidBody component holding a value-typed Box2D
+  handle, stepped in the fixed phases, solved across a native thread pool, and
+  written back from the movement Box2D reports rather than by asking per body
 - Input in three tiers behind a layer stack, latched for fixed steps
 - Worker threads with serialized channels, and asset loading that decodes on
   one and uploads on the main thread
-- Box2D 3 simulation with value-typed body handles, solved across a native
-  thread pool
 - Frame pacing from the swapchain, with no sleep heuristic
-
 - Shaders packaged as artifacts, so a release links no compiler
 - A platform contract with five seams, and an SDL implementation of all five
-- Tweening and sequencing, ported with their suites
+- A debug server over HTTP that survives a crash in game code, with tools that
+  read and write the world
+- Per-stage frame timing with percentiles, which is how any of the numbers in
+  this file were arrived at
 
-Not built yet: shadows, post-processing, audio, text, UI, tiled maps, and the
-MCP surface.
+Not built yet: tween and sequence, shadows, post-processing, audio, text, UI,
+tiled maps, sprite animation, layers and multi-camera.
 
-This project is merging into `tecs`; the two are becoming one. Design notes
-live in `../tecs-plans`, kept outside this repository so plans and code have
-separate histories.
+Design notes live in `../tecs-plans`, kept outside this repository so plans and
+code have separate histories.
 
 ## Workers and assets
 
