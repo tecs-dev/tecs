@@ -103,6 +103,73 @@ describe("mcp protocol", function()
     end)
 end)
 
+describe("mcp after a crash", function()
+    -- The server outliving the game is the point of it. An agent debugging
+    -- something up to the moment it broke should get the reason, not a
+    -- refused connection.
+
+    setup(function()
+        assert(C.SDL_Init(0))
+        mcp.register({
+            name = "spec_world",
+            description = "Touches the world.",
+            handler = function() return { touched = true } end,
+        })
+        mcp.register({
+            name = "spec_survives",
+            description = "Does not touch the world.",
+            readOnly = true,
+            whenCrashed = true,
+            handler = function() return { alive = true } end,
+        })
+    end)
+
+    teardown(function()
+        mcp.setCrashed(nil)
+        C.SDL_Quit()
+    end)
+
+    it("refuses world tools and keeps the rest, with the traceback", function()
+        assert.is_nil(mcp.crashed())
+        assert.is_true(cjson.decode(
+            rpc("tools/call", { name = "spec_world" })).result.structuredContent.touched)
+
+        mcp.setCrashed("spec.lua:1: deliberate\nstack traceback:\n\t...")
+        assert.is_not_nil(mcp.crashed())
+
+        local refused = cjson.decode(
+            rpc("tools/call", { name = "spec_world" })).result
+        assert.is_true(refused.isError)
+        assert.is_true(refused.crashed)
+        assert.is_truthy(refused.content[1].text:find("deliberate", 1, true),
+            "the traceback is what the agent came for")
+
+        local survived = cjson.decode(
+            rpc("tools/call", { name = "spec_survives" })).result
+        assert.is_true(survived.structuredContent.alive)
+
+        -- And the protocol itself keeps working, so an agent can still find
+        -- out which tools remain.
+        assert.is_not_nil(cjson.decode(rpc("tools/list")).result.tools)
+    end)
+
+    it("advertises which tools outlive a crash", function()
+        for _, tool in ipairs(cjson.decode(rpc("tools/list")).result.tools) do
+            if tool.name == "spec_survives" then
+                assert.is_true(tool.annotations.whenCrashedHint)
+            elseif tool.name == "spec_world" then
+                assert.is_false(tool.annotations.whenCrashedHint)
+            end
+        end
+    end)
+
+    it("recovers when the crash is cleared", function()
+        mcp.setCrashed(nil)
+        assert.is_true(cjson.decode(
+            rpc("tools/call", { name = "spec_world" })).result.structuredContent.touched)
+    end)
+end)
+
 describe("mcp over a socket", function()
     local server
 

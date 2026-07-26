@@ -21,6 +21,8 @@ local sequence <const> = require("tecs2d.sequence")
 local paths <const> = require("tecs2d.platform.paths")
 local log <const> = require("tecs2d.log")
 local mcp <const> = require("tecs2d.mcp")
+
+local LOGGER <const> = log.get("tecs2d.app")
 local shaderpack <const> = require("tecs2d.gpu.shaderpack")
 local shadercompiler <const> = require("tecs2d.gpu.shadercompiler")
 
@@ -83,6 +85,10 @@ local record Application
     frame: integer
 
     _config: Application.Config
+    _simulate: function(self: Application, dt: number)
+    --- Traceback of a gameplay crash. Once set, the loop stops simulating and
+    --- rendering but keeps draining events and answering the debug server.
+    _crashed: string
     --- Per-phase frame timing, accumulated when TECS2D_TIMING is set.
     _timing: {string: number}
     _started: boolean
@@ -190,7 +196,8 @@ function Application:_init(): boolean
     })
 
     if config.mcpPort ~= nil then
-        require("tecs2d.mcp.tools")
+        local tools = require("tecs2d.mcp.tools")
+        tools.bind(self.renderer)
         self.mcp = mcp.listen(config.mcpPort)
     end
 
@@ -241,11 +248,31 @@ function Application:_iterate(queue: loader.CValue, count: integer): boolean
         self.elapsed = self.elapsed + dt
         if self._config.update ~= nil then self._config.update(self, dt) end
 
-        local t0 = clock.now()
         -- Answered on this thread, inside the frame, so a tool reads a world
-        -- that is not mid-update.
+        -- that is not mid-update. Polled before the guard below, so it keeps
+        -- answering after a crash.
         if self.mcp ~= nil then self.mcp:poll() end
 
+        if self._crashed == nil then self:_simulate(dt) end
+    end
+
+    self.frame = self.frame + 1
+    if self._config.maxFrames ~= nil and self.frame >= self._config.maxFrames then
+        return false
+    end
+    return true
+end
+
+
+--- One frame of simulation and rendering, guarded.
+---
+--- A crash here does not end the process. The loop keeps draining events so the
+--- window still closes, and keeps answering the debug server so an agent that
+--- was watching gets the traceback rather than a refused connection. That is
+--- the moment the tooling is most useful and the worst one to lose it in.
+function Application:_simulate(dt: number)
+    local t0 = clock.now()
+    local ok, failure = xpcall(function(): boolean
         self.world:update(dt)
 
         local t1 = clock.now()
@@ -265,13 +292,21 @@ function Application:_iterate(queue: loader.CValue, count: integer): boolean
                 t.frames = t.frames + 1
             end
         end
-    end
+        return true
+    end, function(err: any): string
+        return debug.traceback(tostring(err), 2)
+    end) as (boolean, string)
 
-    self.frame = self.frame + 1
-    if self._config.maxFrames ~= nil and self.frame >= self._config.maxFrames then
-        return false
-    end
-    return true
+    if ok then return end
+
+    self._crashed = failure as string
+    LOGGER:error("gameplay crashed, still serving:\n%s", self._crashed)
+    mcp.setCrashed(self._crashed)
+end
+
+--- The gameplay traceback, or nil while the game is healthy.
+function Application:crashed(): string
+    return self._crashed
 end
 
 --- Called once by the host, however the loop ended.

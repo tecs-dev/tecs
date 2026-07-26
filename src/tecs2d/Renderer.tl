@@ -40,6 +40,7 @@ local Sampler <const> = require("tecs2d.gpu.Sampler")
 local ComputePipeline <const> = require("tecs2d.gpu.ComputePipeline")
 local ComputePass <const> = require("tecs2d.gpu.ComputePass")
 local TextureArray <const> = require("tecs2d.gpu.TextureArray")
+local Texture <const> = require("tecs2d.gpu.Texture")
 local assets <const> = require("tecs2d.assets")
 local components <const> = require("tecs2d.components")
 
@@ -531,6 +532,16 @@ function Renderer:render(frame: Frame)
     end
 
     self.deferred:render(frame)
+end
+
+--- The composited image the last frame produced.
+---
+--- The lit target rather than the swapchain, because a swapchain texture
+--- belongs to the presenter once the frame is submitted while this one
+--- persists and can be read at any point between frames. What it does not
+--- include is anything drawn after compose, which today is nothing.
+function Renderer:captureTexture(): Texture
+    return self.deferred.graph:texture("lit")
 end
 
 --- Releases everything the renderer owns. Safe to call more than once.

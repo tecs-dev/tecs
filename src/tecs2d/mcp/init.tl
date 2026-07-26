@@ -38,6 +38,10 @@ local record mcp
         --- Declared so an agent can tell what a call will do before making it.
         readOnly: boolean
         destructive: boolean
+        --- Still callable after the game has crashed. False by default,
+        --- because a crashed world cannot answer anything about itself, and a
+        --- tool that read it would return nonsense rather than an error.
+        whenCrashed: boolean
     end
 
     record Server
@@ -51,6 +55,24 @@ local ServerMT <const>: metatable<mcp.Server> = { __index = mcp.Server }
 
 local tools <const>: {string: mcp.Tool} = {}
 local order <const>: {string} = {}
+
+--- Traceback of a gameplay crash, once one has happened.
+---
+--- The server outliving the game is the point. An agent that was debugging
+--- something up to the moment it broke should get the reason, not a refused
+--- connection, and the tools that do not touch the world keep working so it
+--- can still read the log and ask what the build was.
+local crashed: string = nil
+
+--- Records a crash. Every subsequent world-touching call reports it.
+function mcp.setCrashed(traceback: string)
+    crashed = traceback
+end
+
+--- The crash traceback, or nil while the game is healthy.
+function mcp.crashed(): string
+    return crashed
+end
 
 --- Registers a tool. Re-registering a name replaces it.
 function mcp.register(tool: mcp.Tool)
@@ -82,6 +104,9 @@ local function describe(): {any}
             annotations = {
                 readOnlyHint = tool.readOnly == true,
                 destructiveHint = tool.destructive == true,
+                --- Not an MCP annotation; ours, so an agent can tell which
+                --- tools remain after a crash without calling them.
+                whenCrashedHint = tool.whenCrashed == true,
             },
         }
     end
@@ -135,6 +160,14 @@ function mcp.dispatch(text: string): string
         if tool == nil then
             return fail(id, METHOD_NOT_FOUND,
                 ("no tool named '%s'"):format(tostring(name)))
+        end
+
+        if crashed ~= nil and not tool.whenCrashed then
+            return reply(id, {
+                isError = true,
+                crashed = true,
+                content = { { type = "text", text = crashed } },
+            })
         end
 
         local arguments = (params.arguments or {}) as {string: any}
