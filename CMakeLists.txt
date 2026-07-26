@@ -256,7 +256,9 @@ if(TECS2D_BUILD_LUA)
 
     # Teal compilation. Kept as one custom target rather than per-file rules
     # because the compiler resolves the module graph itself.
-    file(GLOB_RECURSE TECS2D_TL "${CMAKE_SOURCE_DIR}/src/*.tl")
+    # CONFIGURE_DEPENDS so adding a source is a build, not a reconfigure.
+    # Without it a new module is silently absent until someone remembers.
+    file(GLOB_RECURSE TECS2D_TL CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/*.tl")
     add_custom_target(tecs2d_lua ALL
         COMMAND tl -q gen -I "${CMAKE_SOURCE_DIR}/vendor/tl"
             -I "${CMAKE_SOURCE_DIR}/vendor/share/lua/5.1"
