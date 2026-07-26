@@ -86,6 +86,7 @@ local OP_PLAY_TWEEN <const> = 10  -- a = const index of preset name
                                   -- b = const index of {bind, options}
 local OP_WAIT_TWEEN <const> = 11
 local OP_EVAL <const> = 12    -- a = const index of evaluator name
+                              -- b = const index of the data it carries, or -1
 
 local STRIDE <const> = 3
 
@@ -170,7 +171,8 @@ local function compileNode(c: Compiler, node: NodeImpl, depth: integer)
     elseif kind == "waitTween" then
         emitOp(c, OP_WAIT_TWEEN, -1, -1)
     elseif kind == "eval" then
-        emitOp(c, OP_EVAL, intern(c, node.text), -1)
+        emitOp(c, OP_EVAL, intern(c, node.text),
+            node.args ~= nil and intern(c, node.args) or -1)
     elseif kind == "join" then
         emitOp(c, OP_JOIN, -1, -1)
     elseif kind == "parallel" then
@@ -303,7 +305,8 @@ function program.disassemble(prog: ProgramImpl, pc?: integer): string
         elseif op == OP_WAIT_TWEEN then
             text = "WAITTWEEN"
         elseif op == OP_EVAL then
-            text = string.format("EVAL      %q", prog.consts[a] as string)
+            text = string.format("EVAL      %q%s", prog.consts[a] as string,
+                b >= 0 and "  (+data)" or "")
         elseif op == OP_JOIN then
             text = "JOIN"
         elseif op == OP_END then

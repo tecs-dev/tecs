@@ -14,6 +14,7 @@ local tecs <const> = require("tecs")
 local logging <const> = require("tecs.utils.logging")
 local seqclock <const> = require("tecs2d.sequence.internal.clock")
 local seqcursors <const> = require("tecs2d.sequence.internal.cursors")
+local seqevaluators <const> = require("tecs2d.sequence.internal.evaluators")
 local seqregistry <const> = require("tecs2d.sequence.internal.registry")
 local seqtypes <const> = require("tecs2d.sequence.internal.types")
 
@@ -35,7 +36,8 @@ local DEFAULT_BUDGET <const> = seqcursors.DEFAULT_BUDGET
 --   3: query waits
 --   4: tween playback waits
 --   5: named clocks
-local SNAPSHOT_VERSION <const> = 5
+--   6: evaluator working state
+local SNAPSHOT_VERSION <const> = 6
 
 local record snapshot
     --- The payload layout this build writes and accepts.
@@ -117,9 +119,23 @@ function snapshot.save(world: World): any
                 seenPrograms[key] = true
                 programs[#programs + 1] = serializeProgram(prog)
             end
+            -- Only the evaluator says what of its working state is data;
+            -- one that does not say carries nothing and comes back at the
+            -- start of whatever it was evaluating.
+            local evalState: any = nil
+            if cursor.evaluator then
+                local evaluator = seqevaluators.get(cursor.evaluator)
+                if evaluator and evaluator.save then
+                    evalState = evaluator.save(cursor.evalState)
+                end
+            end
+
             cursors[#cursors + 1] = {
                 slot = cursor.slot,
                 generation = cursor.generation,
+                evaluator = cursor.evaluator,
+                evalIndex = cursor.evalIndex,
+                evalState = evalState,
                 program = prog.name,
                 version = prog.version,
                 pc = cursor.pc,
@@ -155,6 +171,34 @@ function snapshot.save(world: World): any
         cursors = cursors,
         pendingSignals = state.pendingSignals,
     }
+end
+
+-- An evaluating playback rejoins its clock's active set rather than the heap:
+-- it has no wake time, only work to do every tick. An evaluator this build no
+-- longer registers is not fatal; the playback gives up its working state and
+-- carries on at the instruction after its eval.
+local function restoreEvaluator(
+    state: seqtypes.WorldState,
+    cursor: Cursor,
+    prog: ProgramImpl,
+    saved: any
+)
+    local evaluator <const> = seqevaluators.get(cursor.evaluator)
+    if not evaluator then
+        LOGGER:warn("%s v%d: evaluator '%s' is gone; resuming past it",
+            prog.name, prog.version, cursor.evaluator)
+        cursor.evaluator = nil
+        cursor.evalIndex = nil
+        seqcursors.schedule(state, cursor, seqcursors.clockOf(state, cursor).step + 1)
+        return
+    end
+    if cursor.evalIndex then
+        cursor.evalData = seqevaluators.resolve(prog, evaluator, cursor.evalIndex)
+    end
+    cursor.evalState = evaluator.load
+        and evaluator.load(prog, cursor.evalData, saved)
+        or (evaluator.newState and evaluator.newState(prog, cursor.evalData) or nil)
+    seqclock.activate(seqcursors.clockOf(state, cursor), cursor.slot)
 end
 
 function snapshot.load(world: World, value: any)
@@ -245,6 +289,8 @@ function snapshot.load(world: World, value: any)
                 parentSlot = row.parentSlot as integer,
                 parentGeneration = row.parentGeneration as integer,
                 joining = row.joining as boolean,
+                evaluator = row.evaluator as string,
+                evalIndex = row.evalIndex as integer,
             }
             seqregistry.retain(prog)
             state.cursors[cursor.slot] = cursor
@@ -252,12 +298,16 @@ function snapshot.load(world: World, value: any)
             if cursor.tweenPlayback then
                 state.tweenOwners[cursor.tweenPlayback] = cursor.slot
             end
+
             -- Rebuild the wake indexes rather than serializing them. A
             -- cursor blocked on a signal or a query has no wake time and
-            -- belongs in its wait index instead of the heap; one parked at a
-            -- join belongs in neither and is woken by its last branch.
+            -- belongs in its wait index instead of the heap; one evaluating
+            -- belongs in its clock's active set; one parked at a join belongs
+            -- in none of them and is woken by its last branch.
             if cursor.waitChannel then
                 seqcursors.park(state.channels, cursor.waitChannel, cursor.slot)
+            elseif cursor.evaluator then
+                restoreEvaluator(state, cursor, prog, row.evalState)
             elseif cursor.waitQuery then
                 seqcursors.park(state.queryWaiters, cursor.waitQuery, cursor.slot)
                 -- The world this cursor parked against is gone, so its

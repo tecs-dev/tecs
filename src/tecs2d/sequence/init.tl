@@ -210,7 +210,12 @@ local record sequence
     --- Unlike every other step, this one does not hand the tick back: the
     --- playback joins its clock's active set and is stepped each tick, which
     --- is what a value that has to move every frame needs.
-    eval: function(evaluator: string): Node
+    ---
+    --- `data` is compiled into the program alongside the evaluator's name,
+    --- so it travels with a snapshot and has to be plain data for the same
+    --- reason a `call` argument does. What the evaluator makes of it is its
+    --- own business.
+    eval: function(evaluator: string, data?: any): Node
 
     --- Wait for the tween the most recent `playTween` started.
     ---
@@ -432,11 +437,11 @@ function sequence.playTween(
         as sequence.Node
 end
 
-function sequence.eval(evaluator: string): sequence.Node
+function sequence.eval(evaluator: string, data?: any): sequence.Node
     if type(evaluator) ~= "string" or evaluator == "" then
         error("sequence.eval requires a non-empty evaluator name", 2)
     end
-    return {kind = "eval", text = evaluator} as sequence.Node
+    return {kind = "eval", text = evaluator, args = data as {any}} as sequence.Node
 end
 
 function sequence.waitTween(): sequence.Node

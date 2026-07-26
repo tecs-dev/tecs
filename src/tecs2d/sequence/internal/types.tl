@@ -72,16 +72,27 @@ end
 --- array the tick walks and never touches the wake heap. This is what lets
 --- one runtime serve both without either paying for the other.
 local record Evaluator
-    --- Per-cursor working state for a program, or nil when it needs none.
-    newState: function(prog: ProgramImpl): any
+    --- Turn the constants an `eval` step carries into whatever form is
+    --- cheapest to read every tick: functions bound, names resolved.
+    ---
+    --- Called once per program constant and the result shared by every
+    --- playback of it, so this is where work that does not depend on the
+    --- playback belongs. Omit it to hand the constants over as authored.
+    resolve: function(data: any): any
+
+    --- Per-cursor working state, or nil when it needs none. `data` is what
+    --- the `eval` step carried, resolved.
+    newState: function(prog: ProgramImpl, data: any): any
 
     --- Advance one cursor by `dt`. Returns true when it is finished and the
     --- cursor should move on to the next instruction.
     step: function(world: World, cursor: Cursor, dt: number): boolean
 
     --- Turn working state into something a snapshot can carry, and back.
+    --- Without both, an evaluating playback comes back at the start of its
+    --- state rather than where it was.
     save: function(state: any): any
-    load: function(prog: ProgramImpl, data: any): any
+    load: function(prog: ProgramImpl, data: any, saved: any): any
 end
 
 --- The lifecycle state of one playback.
@@ -275,6 +286,11 @@ local record ProgramImpl is Program
     -- Const indexes whose argument list holds a `bind` reference, so a call
     -- with plain constants hands its arguments over without copying them.
     bindingArgs: {integer: boolean}
+
+    -- Resolved `eval` payloads, keyed by const index. Runtime only, and
+    -- derived from the consts like bindingArgs: a restored program rebuilds
+    -- the same thing on first use.
+    evalResolved: {integer: any}
 end
 
 local record NodeImpl is Node
@@ -304,6 +320,12 @@ local record Cursor
     --- its clock's active array and is stepped every tick.
     evaluator: string
     evalState: any
+
+    --- The constants that `eval` step carried: where they sit in the const
+    --- pool, and the resolved form the evaluator reads. Only the index is
+    --- data; the resolved form is rebuilt from the program on load.
+    evalIndex: integer
+    evalData: any
 
     owner: integer
     bindings: {string: integer}

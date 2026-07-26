@@ -1560,6 +1560,89 @@ describe("tecs2d.sequence", function()
         it("rejects a malformed eval step", function()
             luassert.has_error(function() sequence.eval("") end)
         end)
+
+        it("hands an evaluator the data its step was authored with", function()
+            local seen: {any} = {}
+            sequence.registerEvaluator("spec.payload", {
+                newState = function(_p: any, data: any): any
+                    seen[#seen + 1] = data
+                    return nil
+                end,
+                step = function(): boolean return true end,
+            })
+            local prog = sequence.define(uniqueName(), {
+                sequence.eval("spec.payload", {mode = "loop", count = 3}),
+            })
+            sequence.play(world, prog)
+
+            stepWorld(world, 2)
+            luassert.equals(1, #seen)
+            luassert.same({mode = "loop", count = 3}, seen[1])
+        end)
+
+        it("resolves an eval payload once and shares it between playbacks", function()
+            local resolves = 0
+            sequence.registerEvaluator("spec.resolved", {
+                resolve = function(data: any): any
+                    resolves = resolves + 1
+                    return {from = (data as {string: integer}).n}
+                end,
+                newState = function(_p: any, data: any): any return data end,
+                step = function(): boolean return false end,
+            })
+            local prog = sequence.define(uniqueName(), {
+                sequence.eval("spec.resolved", {n = 1}),
+            })
+            sequence.play(world, prog)
+            sequence.play(world, prog)
+
+            stepWorld(world, 3)
+            luassert.equals(1, resolves, "resolved once per program constant")
+        end)
+
+        -- An evaluating playback holds working state no other wait does, so a
+        -- snapshot has to carry it. The evaluator says what of it is data.
+        it("carries an evaluating playback through a snapshot", function()
+            sequence.registerEvaluator("spec.countdown", {
+                newState = function(_p: any, data: any): any
+                    return {left = (data as {string: integer}).ticks}
+                end,
+                step = function(_w: tecs.World, c: any, _dt: number): boolean
+                    local left = (c as {string: any}).evalState as {string: integer}
+                    left.left = left.left - 1
+                    return left.left <= 0
+                end,
+                save = function(state: any): any
+                    return (state as {string: integer}).left
+                end,
+                load = function(_p: any, _data: any, saved: any): any
+                    return {left = saved as integer}
+                end,
+            })
+            local calls = 0
+            sequence.registerAction(world, "spec.counted", function()
+                calls = calls + 1
+            end)
+            local prog = sequence.define(uniqueName(), {
+                sequence.eval("spec.countdown", {ticks = 6}),
+                sequence.call("spec.counted"),
+            })
+            sequence.play(world, prog)
+
+            -- Started, then two ticks of the countdown: four left.
+            stepWorld(world, 3)
+            local saved = world:saveSnapshot().buffer
+
+            stepWorld(world, 10)
+            luassert.equals(1, calls, "finished without a load")
+
+            calls = 0
+            world:loadSnapshot(saved)
+            stepWorld(world, 3)
+            luassert.equals(0, calls, "still counting down after the load")
+            stepWorld(world, 1)
+            luassert.equals(1, calls, "finished from where the snapshot left it")
+        end)
     end)
 
     describe("programs as data", function()

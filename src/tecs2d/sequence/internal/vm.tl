@@ -198,7 +198,10 @@ local function run(
             -- the evaluator decides when it is done, not a wake time.
             cursor.pc = cursor.pc + 1
             cursor.evaluator = name
-            cursor.evalState = evaluator.newState and evaluator.newState(prog) or nil
+            cursor.evalIndex = b >= 0 and b or nil
+            cursor.evalData = b >= 0 and seqevaluators.resolve(prog, evaluator, b) or nil
+            cursor.evalState = evaluator.newState
+                and evaluator.newState(prog, cursor.evalData) or nil
             cursor.wakeAt = nil
             seqclock.activate(seqcursors.clockOf(state, cursor), cursor.slot)
             return budget
@@ -453,6 +456,8 @@ local function stepActive(world: World, state: WorldState, clock: seqclock.Clock
                 seqclock.deactivate(clock, cursor.slot)
                 cursor.evaluator = nil
                 cursor.evalState = nil
+                cursor.evalIndex = nil
+                cursor.evalData = nil
                 seqcursors.schedule(state, cursor, clock.step)
             end
         end
