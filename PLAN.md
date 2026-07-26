@@ -280,8 +280,19 @@ This splits asset loading three ways, and only one part needs a thread:
  upload    copy pass             main thread
 ```
 
-The current asset path puts the read on a worker too, which is work SDL already
-does better with io_uring, IOCP, or whatever the platform provides.
+What that buys depends on the platform, and it is worth being exact. SDL has
+three backends: `io_uring` on Linux, IoRing on Windows, and a generic one
+everywhere else that is a thread pool blocking on synchronous reads, sized at
+twice the core count plus one. macOS and iOS get the generic one.
+
+So on Apple platforms this is not faster than the worker that does it today. It
+is one API instead of two, a thread pool SDL maintains rather than one we do,
+and a free upgrade to kernel async on Linux and Windows. Take it for those
+reasons, not for throughput.
+
+liburing is loaded through `SDL_LoadObject`, so a statically linked target
+silently falls back to the thread pool. Report which backend is live through
+capabilities rather than leaving it to be discovered in a profile.
 
 ### Storage and async IO are not alternatives
 
@@ -335,8 +346,10 @@ matters; and the Teal types go, so it needs a declaration file.
 
 ### HTTP is a platform seam, not a linked dependency
 
-curl brings a TLS stack, and consoles have their own networking stacks and
-certificate stores where it is generally not permitted. So the engine exposes an
+SDL has no HTTP client and will not grow one. curl brings a TLS stack, and
+consoles have their own networking stacks and certificate stores where it is
+generally not permitted; Apple platforms have NSURLSession as the blessed
+client. The seam therefore earns its keep well beyond console. So the engine exposes an
 HTTP API and curl implements it for open platforms, as a sixth seam alongside
 lifecycle, events, static FFI, storage, and shaders.
 
@@ -347,10 +360,16 @@ survives a snapshot.
 
 ### Sockets: SDL3_net
 
-Same ecosystem, same static-link story, non-blocking by design. luasocket is
+Same ecosystem, same static-link story, and it fits a poll-per-frame loop:
+`NET_GetAddressStatus`, `NET_GetConnectionStatus` and `NET_ReadFromStreamSocket`
+all return immediately, with the `NET_WaitUntil*` forms as opt-in. luasocket is
 blocking-oriented and predates everything about how this loop works. For
 reliable UDP gameplay traffic rather than raw sockets, ENet is the alternative
 worth considering.
+
+SDL3_net carries no TLS, which is why it is not a path to HTTP. Every real
+endpoint is HTTPS, so building on it would mean sourcing a TLS stack and writing
+a client, which is a worse trade than linking curl.
 
 ### Compression is two questions
 
