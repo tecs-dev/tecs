@@ -1,6 +1,6 @@
 # Tecs Style Guide
 
-Conventions for Teal code in Tecs, Tecs2D, and projects built on them. The
+Conventions for Teal code in Tecs and in projects built on it. The
 goal is code that reads uniformly, type-checks strictly, and stays fast on
 LuaJIT. Where this guide and existing code disagree, the guide wins for new
 code; migrate old code opportunistically.
@@ -61,7 +61,7 @@ hand:
 
 These rules apply to identifiers and schema keys **that Tecs controls**.
 Names fixed elsewhere are preserved verbatim: established MCP tool names
-(`run_lua`, `send_love_event`), FFI and C symbols, external Lua APIs, Lua
+(`run_lua`, `send_event`), FFI and C symbols, external Lua APIs, Lua
 metamethods (`__call`, `__index`), and generated bindings.
 
 - Functions, methods, record fields, option keys, and locals: **camelCase**.
@@ -144,7 +144,7 @@ metamethods (`__call`, `__index`), and generated bindings.
   columns. It also carries conversion, lifetime, and tooling tradeoffs, so
   choose it for measured hot data, not by default. Use `tecs.newComponent`
   (table storage) when fields hold Lua tables, varying strings, functions,
-  or userdata such as Love objects, or when the component is cold. Do not
+  or userdata, or when the component is cold. Do not
   mix: if one field needs a table, the component is a table component.
 - Tag components (no fields) beat boolean fields when the flag is stable
   and queried often: queries match archetypes directly instead of scanning.
@@ -166,8 +166,8 @@ metamethods (`__call`, `__index`), and generated bindings.
   condition is state-shaped. Use `tecs.runif.*` predicates for common gates
   and custom predicates when combining checks.
 - Systems receive `dt`; never read wall clocks in game logic.
-- Do not add manual `love.update`/`love.draw` callbacks; `tecs.run` owns
-  the loop.
+- The host owns the loop. An entry file returns `tecs.application(config)`
+  and its callbacks run from there; nothing drives frames itself.
 
 ## Queries
 
@@ -225,10 +225,8 @@ metamethods (`__call`, `__index`), and generated bindings.
 
 ## Tests
 
-- Fast specs are `*_spec.tl` and run headless with busted. Love-driven
-  integration specs are `*_lovespec.tl` and boot real fixture apps through
-  `tecs.testing.fixture`, driven over MCP.
+- Specs run headless under Busted. The engine's are Lua under `spec/`; the
+  ECS's are Teal under `spec/tecs/`. Both are collected by one `make test`.
 - Assert with luassert's flat API (`luassert.equal`, `luassert.is_true`).
-- Poll time-dependent assertions with `fixture.eventually`; do not sleep and
-  hope.
-- Boot one app per `describe` and walk it through states in order.
+- Do not sleep and hope: drive a deterministic number of frames and assert
+  on what they produced.

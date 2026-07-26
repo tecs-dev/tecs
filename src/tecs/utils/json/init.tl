@@ -20,7 +20,7 @@ local record json
 
     --- Parse JSON data from a CData pointer and length.
     ---
-    --- Useful for buffers such as Love2D ByteData.
+    --- Useful for a buffer that is not already a Lua string.
     ---
     --- @param data ffi.CData Pointer to the JSON data.
     --- @param length integer Length of the JSON data in bytes.

@@ -28,7 +28,8 @@ BENCH_TL  := $(shell find bench -name '*.tl' 2>/dev/null)
 TL_FLAGS  := -I $(CURDIR)/vendor/share/lua/5.1 -I $(CURDIR)/vendor/tl
 
 .PHONY: help all configure build check test abi-check run clean rebuild \
-        deps package check-package presets shaders bench bench-physics
+        deps package check-package presets shaders bench bench-physics \
+        bench-ecs bench-json bench-snapshot bench-bitset
 
 help: ## List targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -75,6 +76,31 @@ bench: build $(OUT)/bench/shapes.lua ## Run the shapes benchmark
 
 bench-physics: build $(OUT)/bench/physics.lua ## Run the physics benchmark
 	@$(BIN) --entry $(OUT)/bench/physics.lua
+
+# The ECS benchmarks run under a plain interpreter rather than the host, since
+# none of them draw. They still need TECS_LIB, which the exports above set:
+# requiring tecs loads the engine too, and the engine loads native libraries.
+#
+# All four accept the same filters:
+#   CASE=<n>            run only the case at that 1-based index
+#   VARIANTS=a,b        run only the named variants
+#   PARAMS='k=v,k=v'    run only expansions matching every given parameter
+BENCH_FILTERS = BENCH_CASE="$(CASE)" BENCH_VARIANTS="$(VARIANTS)" \
+                BENCH_PARAMS="$(PARAMS)"
+
+# Set EVOLVED_PATH to a checkout of https://github.com/BlackMATov/evolved.lua
+# (defaults to ~/projects/evolved.lua).
+bench-ecs: build ## Run the ECS benchmarks
+	@cd benches/ecs-bench && $(BENCH_FILTERS) luajit main.lua
+
+bench-json: build ## Run the JSON benchmarks
+	@cd benches/json-bench && $(BENCH_FILTERS) luajit main.lua
+
+bench-snapshot: build ## Run the snapshot benchmarks
+	@cd benches/snapshot-bench && $(BENCH_FILTERS) luajit main.lua
+
+bench-bitset: build ## Run the bitset benchmarks
+	@cd benches/bitset && $(BENCH_FILTERS) luajit main.lua
 
 run: build $(LUA)/main.lua ## Run the demo
 	@$(BIN) --entry $(LUA)/main.lua

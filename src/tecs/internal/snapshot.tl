@@ -342,7 +342,6 @@ local record snapshot
     --- Save the world. Returns the LuaJIT `string.buffer` holding the
     --- snapshot bytes. Pass `opts.buffer` to reuse an existing buffer
     --- (it gets `:reset()` first); otherwise a fresh buffer is allocated.
-    --- See the Love2D export patterns in the snapshot docs.
     saveSnapshot: function(world: World, opts: SnapshotOptions): SnapshotOutput
 
     --- Load a snapshot from a Lua string OR a `string.buffer`. Strings
@@ -1248,7 +1247,7 @@ function snapshot.loadSnapshot(world: World, source: any): SnapshotPrelude
         return snapshot.loadSnapshotTable(world, source as SnapshotTable)
     end
 
-    -- Accept a Lua string for ergonomic Love2D-style usage:
+    -- Accept a Lua string, since a caller usually has one:
     --   world:loadSnapshot(love.filesystem.read("save.bin"))
     -- The string is copied once into a fresh internal buffer.
     local buf: any

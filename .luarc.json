@@ -1,14 +1,10 @@
 {
     "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
     "runtime": {
-        "version": "LuaJIT",
-        "special": {
-            "love.filesystem.load": "loadfile"
-        }
+        "version": "LuaJIT"
     },
     "diagnostics": {
         "globals": [
-            "love",
             "jit"
         ],
         "disable": [

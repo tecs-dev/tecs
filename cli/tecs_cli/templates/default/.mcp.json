@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "tecs": {
-      "command": "tecs",
-      "args": ["mcp"]
-    }
-  }
-}

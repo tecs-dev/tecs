@@ -4,7 +4,7 @@
 -- Usage: `make snapshot-bench` or `luajit main.lua`
 --
 -- Measures throughput of `saveSnapshot` + `loadSnapshot` against the binary
--- buffer format. FFI components only -- no GPU, no Love2D. Case parameter
+-- buffer format. FFI components only, no GPU. Case parameter
 -- `count` ∈ {1K, 10K, 100K} sweeps entity counts; the bench harness expands
 -- each base case into one runtime case per value.
 --
@@ -15,8 +15,7 @@
 local home = os.getenv("HOME") or ""
 
 package.path = package.path
-        .. ";../../build/?.lua;../../build/?/init.lua;../../build/tecs/?.lua;"
-        .. "../../build/tecs/?/init.lua;"
+        .. ";../../out/macos-arm64-dev/lua/?.lua;../../out/macos-arm64-dev/lua/?/init.lua;"
         .. "../?.lua;../?/init.lua;"
         .. home .. "/.luarocks/share/lua/5.1/?.lua;"
         .. home .. "/.luarocks/share/lua/5.1/?/init.lua"
@@ -25,8 +24,6 @@ package.cpath = package.cpath .. ";" .. home .. "/.luarocks/lib/lua/5.1/?.so"
 assert(jit, "LuaJIT is required to run this benchmark")
 print("LuaJIT version:", jit.version)
 
--- Stub love2d timer so tecs can initialize without Love2D loaded
-love = love or {timer = {getTime = os.clock}}
 
 local bench = require("lib.bench")
 local tecs = require("tecs")

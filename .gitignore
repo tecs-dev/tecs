@@ -1,44 +1,16 @@
 .kiro/
 .vscode/
-# Personal Claude Code state stays local; repo-shared skills are checked in.
-.claude/*
-!.claude/skills/
+.claude/
 
 /out/
 /build/
-/vendor/
-/bin/love2d/
-.love12/
-node_modules/
-/docs/.vitepress/cache
-/docs/.vitepress/dist
 
-# Example build directories
-examples/**/build/
+# Development dependencies installed into the tree. The vendored C sources
+# under vendor/cjson are ours to carry, so they are exempt.
+/vendor/*
+!/vendor/cjson/
 
-# Benchmark copied modules
-benches/json-bench/tecs/
-
-# Benchmark profile output
-benches/*/profiles/
-
-# Benchmark result log (appended by bench.suite, diffed by compare.lua)
-benches/results/
+.mcp.json
 
 # macOS system files
 .DS_Store
-
-# Code coverage files (now in build/ but keep for backwards compat)
-luacov.stats.out
-luacov.report.out
-coverage-html/
-coverage.xml
-coverage.info
-
-*.lcov.mcp.json
-.mcp.json
-*.src.rock
-benches/love2d/app/tecs
-benches/love2d/app/internal
-benches/love2d/app/assets
-benches/love2d/results/

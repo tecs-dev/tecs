@@ -8,8 +8,7 @@ local BENCHMARK_ITERATIONS = 5000
 -- Set package paths
 local home = os.getenv("HOME") or ""
 package.path = package.path
-        .. ";../../build/?.lua;../../build/?/init.lua;../../build/tecs/?.lua;"
-        .. "../../build/tecs/?/init.lua;"
+        .. ";../../out/macos-arm64-dev/lua/?.lua;../../out/macos-arm64-dev/lua/?/init.lua;"
         .. "../?.lua;../?/init.lua;"
         .. home .. "/.luarocks/share/lua/5.1/?.lua;"
         .. home .. "/.luarocks/share/lua/5.1/?/init.lua"

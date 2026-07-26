@@ -33,8 +33,7 @@ local home = os.getenv("HOME") or ""
 local evolvedPath = os.getenv("EVOLVED_PATH") or (home .. "/projects/evolved.lua")
 
 package.path = package.path
-        .. ";../../build/?.lua;../../build/?/init.lua;../../build/tecs/?.lua;"
-        .. "../../build/tecs/?/init.lua;"
+        .. ";../../out/macos-arm64-dev/lua/?.lua;../../out/macos-arm64-dev/lua/?/init.lua;"
         .. "../?.lua;../?/init.lua;"
         .. ";" .. evolvedPath .. "/?.lua;"
         .. home .. "/.luarocks/share/lua/5.1/?.lua;"
@@ -46,8 +45,6 @@ assert(jit, "LuaJIT is required to run this benchmark")
 local _isBenchChild = os.getenv("BENCH_CHILD") == "1"
 if not _isBenchChild then print("LuaJIT version:", jit.version) end
 
--- Stub love2d timer so tecs can initialize without Love2D loaded.
-love = love or {timer = {getTime = os.clock}}
 
 local bench = require("lib.bench")
 local tecs = require("tecs")

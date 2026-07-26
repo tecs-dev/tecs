@@ -54,11 +54,11 @@ static pthread_mutex_t private_dtoa_lock[2] = {
  * pointer on Darwin, so the upstream definition does not compile there. The
  * value is only ever used modulo the thread-pool size to pick a lock, so any
  * stable per-thread number will do. */
-static inline unsigned int tecs2d_dtoa_threadno(void)
+static inline unsigned int tecs_dtoa_threadno(void)
 {
     return (unsigned int)(uintptr_t)pthread_self();
 }
-#define dtoa_get_threadno tecs2d_dtoa_threadno
+#define dtoa_get_threadno tecs_dtoa_threadno
 void
 set_max_dtoa_threads(unsigned int n);
 
