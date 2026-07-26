@@ -1,5 +1,8 @@
 --- Demo entry point.
 ---
+--- Returns an application rather than blocking: SDL owns the loop, so the host
+--- drives this from its callbacks.
+---
 --- Entities are the interface. Everything on screen is a spawned entity with a
 --- Transform2D, the lights are entities too, and systems move them. Nothing
 --- here touches a buffer, a pass, or a command buffer.
@@ -80,7 +83,7 @@ local function spawnLights(world: tecs.World, width: number, height: number)
     end
 end
 
-os.exit(tecs2d.run({
+return tecs2d.application({
     window = { title = "tecs2d", width = 1280, height = 720 },
     debug = true,
     ambient = { 0.05, 0.05, 0.08 },
@@ -89,7 +92,7 @@ os.exit(tecs2d.run({
     maxFrames = tonumber(os.getenv("TECS2D_FRAMES")) as integer,
     presentMode = os.getenv("TECS2D_PRESENT"),
 
-    load = function(app: tecs2d.App)
+    load = function(app: tecs2d.Application)
         local width, height = app.window:getPixelSize()
         print(("tecs2d %s"):format(tecs2d.version))
         print(("  driver: %s"):format(app.device.driver))
@@ -146,7 +149,7 @@ os.exit(tecs2d.run({
         print("  escape or close the window to quit")
     end,
 
-    update = function(app: tecs2d.App)
+    update = function(app: tecs2d.Application)
         -- Reads the base layer, so this stops responding on its own if a
         -- menu layer is ever pushed over it.
         if app.input:isKeyPressed("escape") then
@@ -154,10 +157,19 @@ os.exit(tecs2d.run({
         end
     end,
 
-    quit = function(app: tecs2d.App)
+    event = function(_app: tecs2d.Application, event: tecs2d.events.Event)
+        -- Every event reaches here, including ones the engine acted on, so a
+        -- game can observe lifecycle without the engine handing it a
+        -- second, parallel notification.
+        if event.kind == "appWillEnterBackground" then
+            print("  backgrounded, simulation suspended")
+        end
+    end,
+
+    quit = function(app: tecs2d.Application)
         print(("ran %d frames over %.2fs (%.2f ms/frame, %d drawn, %d resynced)")
             :format(app.frame, app.elapsed,
                 app.elapsed / math.max(app.frame, 1) * 1000,
                 app.renderer.count, app.renderer.rewritten))
     end,
-}))
+})

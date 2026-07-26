@@ -13,17 +13,16 @@
 --- code knowing a menu exists. Code that names no layer reads the base layer,
 --- which is the safe default: it goes quiet when anything is pushed over it.
 ---
---- The state is fed one `SDL_Event` at a time and holds no globals, so a
---- recorded session replays by feeding the same events back.
+--- The state is fed typed events and holds no globals, so a recorded session
+--- replays by feeding the same events back. It never sees an `SDL_Event`: the
+--- conversion happens once, in `events`, and everything downstream shares that
+--- one vocabulary.
 
 local sdl <const> = require("tecs2d.ffi.sdl3")
-local loader <const> = require("tecs2d.ffi.loader")
+local eventStream <const> = require("tecs2d.platform.events")
 
 local C <const> = sdl.C
 local K <const> = sdl.K
-
---- Axis values arrive as signed 16-bit and are reported as -1..1.
-local AXIS_SCALE <const> = 1.0 / 32767.0
 
 local record Layer
     name: string
@@ -190,39 +189,38 @@ local function release(state: ButtonState, code: integer)
     state.latchedReleased[code] = true
 end
 
---- Folds one SDL event into the state.
+--- Folds one typed event into the state.
 ---
---- Unknown events are ignored, so this can be handed the whole stream.
-function Input:handleEvent(event: loader.CValue)
-    local kind = tonumber(event.type) as integer
+--- Unrecognised kinds are ignored, so this can be handed the whole stream.
+function Input:handleEvent(event: eventStream.Event)
+    local kind = event.kind
 
-    if kind == tonumber(C.SDL_EVENT_KEY_DOWN) then
-        -- Key repeats are not presses: holding a key must not read as
-        -- pressing it many times.
-        if not (event.key["repeat"] as boolean) then
-            press(self._keys, tonumber(event.key.scancode) as integer)
+    if kind == "keyDown" then
+        -- A repeat is not a press: holding a key must not read as pressing it
+        -- many times.
+        if not event.repeated then
+            press(self._keys, event.scancode)
         end
-    elseif kind == tonumber(C.SDL_EVENT_KEY_UP) then
-        release(self._keys, tonumber(event.key.scancode) as integer)
-    elseif kind == tonumber(C.SDL_EVENT_MOUSE_BUTTON_DOWN) then
-        press(self._mouse, tonumber(event.button.button) as integer)
-    elseif kind == tonumber(C.SDL_EVENT_MOUSE_BUTTON_UP) then
-        release(self._mouse, tonumber(event.button.button) as integer)
-    elseif kind == tonumber(C.SDL_EVENT_MOUSE_MOTION) then
-        self.mouseX = tonumber(event.motion.x) as number
-        self.mouseY = tonumber(event.motion.y) as number
-        self.mouseDeltaX = self.mouseDeltaX + (tonumber(event.motion.xrel) as number)
-        self.mouseDeltaY = self.mouseDeltaY + (tonumber(event.motion.yrel) as number)
-    elseif kind == tonumber(C.SDL_EVENT_MOUSE_WHEEL) then
-        self.wheelX = self.wheelX + (tonumber(event.wheel.x) as number)
-        self.wheelY = self.wheelY + (tonumber(event.wheel.y) as number)
-    elseif kind == tonumber(C.SDL_EVENT_GAMEPAD_BUTTON_DOWN) then
-        press(self._pads, tonumber(event.gbutton.button) as integer)
-    elseif kind == tonumber(C.SDL_EVENT_GAMEPAD_BUTTON_UP) then
-        release(self._pads, tonumber(event.gbutton.button) as integer)
-    elseif kind == tonumber(C.SDL_EVENT_GAMEPAD_AXIS_MOTION) then
-        local axis = tonumber(event.gaxis.axis) as integer
-        self._axes[axis] = (tonumber(event.gaxis.value) as number) * AXIS_SCALE
+    elseif kind == "keyUp" then
+        release(self._keys, event.scancode)
+    elseif kind == "mouseDown" then
+        press(self._mouse, event.button)
+    elseif kind == "mouseUp" then
+        release(self._mouse, event.button)
+    elseif kind == "mouseMotion" then
+        self.mouseX = event.x
+        self.mouseY = event.y
+        self.mouseDeltaX = self.mouseDeltaX + event.dx
+        self.mouseDeltaY = self.mouseDeltaY + event.dy
+    elseif kind == "mouseWheel" then
+        self.wheelX = self.wheelX + event.wheelX
+        self.wheelY = self.wheelY + event.wheelY
+    elseif kind == "controllerButtonDown" then
+        press(self._pads, event.button)
+    elseif kind == "controllerButtonUp" then
+        release(self._pads, event.button)
+    elseif kind == "controllerAxis" then
+        self._axes[event.axis] = event.value
     end
 end
 

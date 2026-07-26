@@ -4,6 +4,27 @@ A LuaJIT game engine built directly on SDL3, SDL_GPU, and Box2D 3, replacing
 the Love2D layer that Tecs previously ran on. Entities are the interface:
 anything that renders or updates per frame is an entity in a Tecs world.
 
+SDL owns the loop. An entry file returns an application and a C host drives it
+from `SDL_AppInit`, `SDL_AppEvent`, `SDL_AppIterate`, and `SDL_AppQuit`:
+
+```lua
+return tecs2d.application({
+    load = function(app) end,
+    update = function(app, dt) end,
+    event = function(app, event)
+        if event.kind == "appWillEnterBackground" then end
+    end,
+    quit = function(app) end,
+})
+```
+
+That shape is not a preference. iOS never hands control back for a blocking
+loop to sit in, so a host that cannot be entered by callback cannot run there
+at all. The same shape works on desktop, so there is one lifecycle rather than
+one per platform. The callbacks are C reaching Lua through the Lua C API, not
+FFI callbacks, which are a trace barrier and unsafe from a thread the VM did
+not create.
+
 Everything below Lua is reached through the FFI. There are no Lua C extensions:
 the only native code is a host that owns `main`, and even that is never called
 from Lua.
@@ -64,6 +85,32 @@ uploads. The worker returns the *address* of a decoded surface rather than its
 pixels: surfaces live in process memory, so the pointer is valid in either
 state, and passing it avoids copying an image through a serialized message
 only to copy it again into staging. Ownership transfers with the address.
+
+## Events
+
+One typed stream, derived from SDL, shared by desktop, mobile, replay, and
+tests. Game code never sees an `SDL_Event`: the union is a poor thing to
+program against, and its pointer is only valid inside the callback that
+produced it, so the host copies each event into a queue and the conversion
+happens once.
+
+`Event` is one wide record discriminated by `kind` rather than a union of
+per-kind records. Teal can express the union but not a union that pools, and an
+event stream that allocates per event is not one this engine can use. Records
+handed to a handler are reused, so `events.copy` exists for anything that
+retains one.
+
+Unrecognised SDL events arrive as `unknown` carrying their numeric type instead
+of being dropped, so upgrading SDL surfaces new input rather than silently
+losing it.
+
+A touch finger's identity is 64 bits and does not fit a double, so it is
+carried as an opaque string. Reporting it as a number would round, and two
+distinct fingers could collapse into one.
+
+The engine acts on lifecycle and input events and then hands every event to the
+game anyway. An engine that consumed events would leave a game unable to tell
+an event it never received from one it mishandled.
 
 ## Input
 

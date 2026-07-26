@@ -123,6 +123,13 @@ $(GEN)/.sdl3image.stamp: $(IMAGE_PREFIX)/include/SDL3_image/SDL_image.h scripts/
 	  --defines-out $(GEN)/sdl3imageconst.lua --out $(GEN)/sdl3imagecdef.lua
 	@touch $@
 
+$(GEN)/.host.stamp: native/host.h scripts/gencdef.py
+	@python3 scripts/gencdef.py \
+	  --header host.h --include $(CURDIR)/native \
+	  --keep /native/ --define-prefix TECS2D_ \
+	  --defines-out $(GEN)/hostconst.lua --out $(GEN)/hostcdef.lua
+	@touch $@
+
 $(GEN)/.worker.stamp: native/worker.h scripts/gencdef.py
 	@python3 scripts/gencdef.py \
 	  --header worker.h --include $(CURDIR)/native \
@@ -141,9 +148,10 @@ $(WORKER_LIB): native/worker.c
 
 host: $(HOST) ## Build the C host
 
-$(HOST): host/main.c
+$(HOST): native/host.c
 	@mkdir -p $(BIN)
-	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+	$(CC) $(CFLAGS) -I$(SDL3_PREFIX)/include -o $@ $< \
+	  $(LDFLAGS) -L$(SDL3_PREFIX)/lib -lSDL3
 
 build: cdef $(BUILD)/main.lua ## Compile src/*.tl into build/
 	@tl -q gen -I $(CURDIR)/vendor/tl -I $(TECS_DIR)/vendor/share/lua/5.1 --root src --output-dir $(BUILD) $(SOURCE_TL)

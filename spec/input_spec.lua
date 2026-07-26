@@ -9,38 +9,26 @@
 package.path = "build/?.lua;build/?/init.lua;"
     .. "../tecs/build/?.lua;../tecs/build/?/init.lua;" .. package.path
 
-local sdl = require("tecs2d.ffi.sdl3")
-local loader = require("tecs2d.ffi.loader")
 local Input = require("tecs2d.platform.Input")
 
-local C = sdl.C
-
--- Builds a real SDL_Event, so the tests exercise the same field access the
--- live path does rather than a stand-in shape.
+-- Input consumes the engine's typed events, so the tests build those. The
+-- SDL-to-typed conversion is covered in events_spec; this covers what Input
+-- does with the result.
 local function keyEvent(scancode, down, isRepeat)
-    local event = loader.newStruct("SDL_Event")
-    event.type = down and C.SDL_EVENT_KEY_DOWN or C.SDL_EVENT_KEY_UP
-    event.key.scancode = scancode
-    event.key.down = down
-    event.key["repeat"] = isRepeat or false
-    return event
+    return {
+        kind = down and "keyDown" or "keyUp",
+        scancode = scancode,
+        repeated = isRepeat or false,
+    }
 end
 
 local function mouseEvent(button, down)
-    local event = loader.newStruct("SDL_Event")
-    event.type = down and C.SDL_EVENT_MOUSE_BUTTON_DOWN
-        or C.SDL_EVENT_MOUSE_BUTTON_UP
-    event.button.button = button
-    event.button.down = down
-    return event
+    return { kind = down and "mouseDown" or "mouseUp", button = button }
 end
 
 local function axisEvent(axis, value)
-    local event = loader.newStruct("SDL_Event")
-    event.type = C.SDL_EVENT_GAMEPAD_AXIS_MOTION
-    event.gaxis.axis = axis
-    event.gaxis.value = value
-    return event
+    -- Already scaled: the converter turns SDL's signed 16-bit into -1..1.
+    return { kind = "controllerAxis", axis = axis, value = value }
 end
 
 describe("platform.Input", function()
@@ -150,12 +138,12 @@ describe("platform.Input", function()
         assert.is_true(input:isMouseReleased(buttons.left))
     end)
 
-    it("scales axes and applies a deadzone", function()
+    it("applies a deadzone to axes", function()
         input:beginFrame()
-        input:handleEvent(axisEvent(0, 32767))
+        input:handleEvent(axisEvent(0, 1.0))
         assert.is_true(math.abs(input:axis(0) - 1.0) < 0.001)
 
-        input:handleEvent(axisEvent(0, 1000))
+        input:handleEvent(axisEvent(0, 0.0305))
         assert.are.equal(0.0, input:axis(0),
             "stick drift is hardware, not gameplay, so it is filtered here")
         assert.is_true(input:axis(0, 0.01) > 0.0,
@@ -163,10 +151,7 @@ describe("platform.Input", function()
     end)
 
     it("accumulates wheel and motion within a frame, then clears", function()
-        local wheel = loader.newStruct("SDL_Event")
-        wheel.type = C.SDL_EVENT_MOUSE_WHEEL
-        wheel.wheel.x = 0.0
-        wheel.wheel.y = 1.0
+        local wheel = { kind = "mouseWheel", wheelX = 0.0, wheelY = 1.0 }
 
         input:beginFrame()
         input:handleEvent(wheel)
