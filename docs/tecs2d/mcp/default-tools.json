@@ -1584,6 +1584,79 @@
     "name": "cmd_select"
   },
   {
+    "description": "sequence disasm: disassemble a program by name. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "program name (see `sequence programs`)",
+          "type": "string"
+        },
+        "version": {
+          "description": "program version; newest if omitted",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_sequence_disasm"
+  },
+  {
+    "description": "sequence info: show one playback's status and disassembly. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "handle": {
+          "description": "playback handle (see `sequence list`)",
+          "type": "number"
+        }
+      },
+      "required": [
+        "handle"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_sequence_info"
+  },
+  {
+    "description": "sequence list: list live playbacks and what each is waiting on. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_sequence_list"
+  },
+  {
+    "description": "sequence programs: list defined programs and their newest version. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "cmd_sequence_programs"
+  },
+  {
+    "description": "sequence signal: raise a named signal, waking the playbacks blocked on it. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "signal name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "name": "cmd_sequence_signal"
+  },
+  {
     "description": "Write one component on the target entities (an id, a mark name, the literal @selection, or an ids list). The value is a JSON object; omitted fields reset to the component's defaults (use cmd_modify to change fields in place). Adds the component when missing. Mutates the live world immediately. Returns how many entities were written. In-game debugger command; requires the debug plugin. Returns compact JSON text envelope.",
     "inputSchema": {
       "additionalProperties": false,

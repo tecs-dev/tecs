@@ -248,8 +248,12 @@ local record sequence
     --- Compile a program under a stable symbolic name.
     define: function(name: string, nodes: {Node}): Program
 
-    --- Look up the newest version of a defined program.
-    program: function(name: string): Program
+    --- Look up a defined program: the newest version, or a specific one.
+    --- Every version a playback still runs stays reachable.
+    program: function(name: string, version?: integer): Program
+
+    --- Names of every defined program, sorted.
+    programNames: function(): {string}
 
     --- Reference an entity supplied through `PlayOptions.bindings`.
     bind: function(name: string): EntityRef
@@ -391,6 +395,10 @@ local record sequence
     --- Number of live playbacks, for tests and diagnostics.
     activeCount: function(world: World): integer
 
+    --- Handles of every live playback, branches included, in a stable
+    --- order. For diagnostics and the debugger, not for hot paths.
+    playbacks: function(world: World): {Handle}
+
     ---------------------------------------------------------------------------
     -- Configuration and tooling
     ---------------------------------------------------------------------------
@@ -402,7 +410,8 @@ local record sequence
     currentStep: function(world: World): integer
 
     --- Render a program as readable instructions.
-    disassemble: function(program: Program): string
+    --- @param pc Mark this instruction, as a playback's `status` reports it.
+    disassemble: function(program: Program, pc?: integer): string
 
     --- Install the sequencer. Auto-installed by `tecs2d.run`.
     plugin: function(world: World)
@@ -686,8 +695,19 @@ function sequence.define(name: string, nodes: {sequence.Node}): sequence.Program
     return prog
 end
 
-function sequence.program(name: string): sequence.Program
+function sequence.program(name: string, version?: integer): sequence.Program
+    if version then
+        local versions = programVersions[name]
+        return versions and versions[version]
+    end
     return programsByName[name]
+end
+
+function sequence.programNames(): {string}
+    local names: {string} = {}
+    for name in pairs(programsByName) do names[#names + 1] = name end
+    table.sort(names)
+    return names
 end
 
 -------------------------------------------------------------------------------
@@ -1505,6 +1525,21 @@ function sequence.activeCount(world: World): integer
     return count
 end
 
+function sequence.playbacks(world: World): {sequence.Handle}
+    local state = stateFor(world)
+    local slots: {integer} = {}
+    for slot, cursor in pairs(state.cursors) do
+        if cursor.alive then slots[#slots + 1] = slot end
+    end
+    table.sort(slots)
+    local handles: {sequence.Handle} = {}
+    for i = 1, #slots do
+        local cursor = state.cursors[slots[i]]
+        handles[i] = packHandle(cursor.slot, cursor.generation)
+    end
+    return handles
+end
+
 function sequence.setInstructionBudget(world: World, instructions: integer)
     if type(instructions) ~= "number" or instructions < 1 then
         error("sequence.setInstructionBudget requires a positive count", 2)
@@ -1536,7 +1571,7 @@ local function describeArgs(args: {any}): string
     return ", " .. table.concat(parts, ", ")
 end
 
-function sequence.disassemble(program: sequence.Program): string
+function sequence.disassemble(program: sequence.Program, pc?: integer): string
     local prog = program as ProgramImpl
     if type(prog) ~= "table" or prog.code == nil then
         error("sequence.disassemble requires a program from sequence.define", 2)
@@ -1546,8 +1581,9 @@ function sequence.disassemble(program: sequence.Program): string
             prog.name, prog.version, floor(#prog.code / STRIDE)),
     }
     local counts = prog.loopCounts
-    for pc = 0, floor(#prog.code / STRIDE) - 1 do
-        local base = pc * STRIDE
+    local marked = pc
+    for at = 0, floor(#prog.code / STRIDE) - 1 do
+        local base = at * STRIDE
         local op = prog.code[base + 1]
         local a = prog.code[base + 2]
         local b = prog.code[base + 3]
@@ -1568,7 +1604,7 @@ function sequence.disassemble(program: sequence.Program): string
             text = string.format("EMIT      %q%s",
                 prog.consts[a] as string, describeArgs(prog.consts[b] as {any}))
         elseif op == OP_JUMP then
-            local count = counts and counts[pc]
+            local count = counts and counts[at]
             text = string.format("JUMP      -> %d  (%s)", a,
                 b < 0 and "forever" or ("x" .. tostring(count or 1)))
         elseif op == OP_FORK then
@@ -1580,7 +1616,8 @@ function sequence.disassemble(program: sequence.Program): string
         else
             text = "?? " .. tostring(op)
         end
-        out[#out + 1] = string.format("%4d  %s", pc, text)
+        out[#out + 1] = string.format("%s %4d  %s",
+            at == marked and "->" or "  ", at, text)
     end
     return table.concat(out, "\n")
 end

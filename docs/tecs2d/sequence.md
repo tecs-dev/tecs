@@ -338,8 +338,23 @@ end)
 
 ## Debugging
 
-`disassemble(program)` renders a program as readable instructions with their indices, so a `pc`
-from `status` or a fault points at a specific step.
+`disassemble(program, pc)` renders a program as readable instructions with their indices, marking
+one of them, so a `pc` from `status` or a fault points at a specific step.
+
+The debugger exposes the same view, in the overlay and as `cmd_*` MCP tools:
+
+```
+ Command              Shows
+ ───────────────────  ──────────────────────────────────────────────────
+ sequence list        every live playback, its pc, and what blocks it
+ sequence info <h>    one playback's status plus its disassembly, pc marked
+ sequence programs    defined programs and their newest version
+ sequence disasm <n>  a program by name, or a specific version of it
+ sequence signal <n>  raise a signal, waking the playbacks blocked on it
+```
+
+`sequence info` disassembles the exact version that playback is running, which is the version worth
+reading when a hot reload has moved on without it.
 
 ## Planned
 

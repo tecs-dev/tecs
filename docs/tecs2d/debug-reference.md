@@ -987,6 +987,7 @@ Engine introspection: systems, archetypes, components, states, physics, controll
 | [`audio`](#cmd-audio) | Audio info; stop everything or mute the master group. |
 | [`logs`](#cmd-logs) | Search recent engine logs or change logger verbosity. |
 | [`resources`](#cmd-resources) | List world resources; pass a name to read one value. |
+| [`sequence`](#cmd-sequence) | Inspect gameplay sequences: playbacks, programs, signals. |
 
 ### `systems` {#cmd-systems}
 
@@ -1389,6 +1390,194 @@ MCP tool: `cmd_resources` (read-only, idempotent)
 resources
 resources game.state
 ```
+
+### `sequence` {#cmd-sequence}
+
+Inspect gameplay sequences: playbacks, programs, signals.
+
+Inspect tecs2d.sequence playbacks. `list` reports every live playback with the instruction it sits on and what it is blocked on; `info` adds that program's disassembly with the playback's pc marked; `programs` and `disasm` read the compiled programs themselves; `signal` raises a named signal, waking the playbacks blocked on it on the next fixed step.
+
+```
+sequence list
+sequence info 1048577
+sequence programs
+sequence disasm game.bossIntro
+sequence signal adds.cleared
+```
+
+#### `sequence list` {#cmd-sequence-list}
+
+List live playbacks and what each is waiting on.
+
+MCP tool: `cmd_sequence_list` (read-only, idempotent)
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "count": {
+      "description": "live playbacks",
+      "type": "integer"
+    },
+    "playbacks": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "step": {
+      "description": "fixed step the sequencer has reached",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "count",
+    "step"
+  ],
+  "type": "object"
+}
+```
+:::
+
+#### `sequence info <handle>` {#cmd-sequence-info}
+
+Show one playback's status and disassembly.
+
+MCP tool: `cmd_sequence_info` (read-only, idempotent)
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `handle` | number | playback handle (see `sequence list`) (required) |
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "disassembly": {
+      "description": "the program, with pc marked",
+      "type": "string"
+    },
+    "handle": {
+      "type": "integer"
+    },
+    "pc": {
+      "description": "instruction it sits on",
+      "type": "integer"
+    },
+    "program": {
+      "type": "string"
+    },
+    "state": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "handle",
+    "program",
+    "pc",
+    "state"
+  ],
+  "type": "object"
+}
+```
+:::
+
+#### `sequence programs` {#cmd-sequence-programs}
+
+List defined programs and their newest version.
+
+MCP tool: `cmd_sequence_programs`
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "count": {
+      "type": "integer"
+    },
+    "programs": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "count"
+  ],
+  "type": "object"
+}
+```
+:::
+
+#### `sequence disasm <name> [version]` {#cmd-sequence-disasm}
+
+Disassemble a program by name.
+
+MCP tool: `cmd_sequence_disasm`
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `name` | string | program name (see `sequence programs`) (required) |
+| `version` | number | program version; newest if omitted |
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "disassembly": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "name",
+    "version",
+    "disassembly"
+  ],
+  "type": "object"
+}
+```
+:::
+
+#### `sequence signal <name>` {#cmd-sequence-signal}
+
+Raise a named signal, waking the playbacks blocked on it.
+
+MCP tool: `cmd_sequence_signal`
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `name` | string | signal name (required) |
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "woken": {
+      "description": "playbacks that will wake next step",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "name",
+    "woken"
+  ],
+  "type": "object"
+}
+```
+:::
 
 ## Capture
 

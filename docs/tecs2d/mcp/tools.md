@@ -258,6 +258,11 @@ and safety annotations) in the [Command Reference](../debug-reference).
 | [`cmd_record_open`](../debug-reference#cmd-record-open) | Open a completed recording (latest if omitted). |
 | [`cmd_record_path`](../debug-reference#cmd-record-path) | Copy the file's absolute path to the clipboard (latest if omitted). |
 | [`cmd_record_info`](../debug-reference#cmd-record-info) | Show one completed recording's details (latest if omitted). |
+| [`cmd_sequence_list`](../debug-reference#cmd-sequence-list) | List live playbacks and what each is waiting on. |
+| [`cmd_sequence_info`](../debug-reference#cmd-sequence-info) | Show one playback's status and disassembly. |
+| [`cmd_sequence_programs`](../debug-reference#cmd-sequence-programs) | List defined programs and their newest version. |
+| [`cmd_sequence_disasm`](../debug-reference#cmd-sequence-disasm) | Disassemble a program by name. |
+| [`cmd_sequence_signal`](../debug-reference#cmd-sequence-signal) | Raise a named signal, waking the playbacks blocked on it. |
 | [`cmd_history`](../debug-reference#cmd-history) | Show the command history (persisted across sessions). |
 | [`cmd_history_clear`](../debug-reference#cmd-history-clear) | Forget the history and delete its file. |
 | [`cmd_step`](../debug-reference#cmd-step) | Tick the game forward N frames while otherwise frozen. |
