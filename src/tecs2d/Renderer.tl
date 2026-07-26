@@ -60,6 +60,9 @@ local BOUND_BYTES <const> = BOUND_FLOATS * 4
 --- Indices per quad, over four distinct corners.
 local QUAD_INDICES <const> = 6
 
+--- Threads per cull workgroup, matching the scan shaders' local size.
+local CULL_GROUP <const> = 256
+
 local abs <const> = math.abs
 
 --- Layers the image array holds, including the white default in layer zero.
@@ -97,9 +100,12 @@ local record Renderer
     dropped: integer
     --- Instances the last sync actually rewrote. Zero on a still frame.
     rewritten: integer
-    _reset: ComputePipeline
-    _cull: ComputePipeline
+    _mark: ComputePipeline
+    _scan: ComputePipeline
+    _compact: ComputePipeline
     _bounds: Buffer
+    _slots: Buffer
+    _blocks: Buffer
     _visible: Buffer
     _drawArgs: Buffer
     _indices: Buffer
@@ -350,6 +356,14 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
         usage = { "computeRead" },
         size = self.capacity * BOUND_BYTES,
     })
+    self._slots = Buffer.create(device, {
+        usage = { "computeRead", "computeWrite" },
+        size = self.capacity * 4,
+    })
+    self._blocks = Buffer.create(device, {
+        usage = { "computeRead", "computeWrite" },
+        size = math.ceil(self.capacity / CULL_GROUP) * 4,
+    })
     self._visible = Buffer.create(device, {
         usage = { "storage", "computeWrite" },
         size = self.capacity * 4,
@@ -359,6 +373,14 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
         usage = { "indirect", "computeWrite" },
         size = 32,
     })
+
+    -- Every field but the instance count is constant, and the scan writes that
+    -- one. So the arguments are seeded once here rather than by a compute pass
+    -- that reruns every frame to write the same five numbers back.
+    local args = loader.newArray("uint32_t[8]")
+    args[0] = QUAD_INDICES
+    for slot = 1, 7 do args[slot] = 0 end
+    self._drawArgs:upload(args, 32)
 
     -- Two triangles over four corners, uploaded once and never touched again.
     self._indices = Buffer.create(device, {
@@ -371,8 +393,9 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
     self._indices:upload(quad, QUAD_INDICES * 2)
     self._cullUniform = loader.newArray("float[4]")
 
-    self._reset = ComputePipeline.load(device, "instance.reset.comp", {})
-    self._cull = ComputePipeline.load(device, "instance.cull.comp", {})
+    self._mark = ComputePipeline.load(device, "instance.mark.comp", {})
+    self._scan = ComputePipeline.load(device, "instance.scan.comp", {})
+    self._compact = ComputePipeline.load(device, "instance.compact.comp", {})
 
     self.deferred = Deferred.create(device, swapchainFormat, {
         ambient = options.ambient,
@@ -462,27 +485,40 @@ function Renderer:render(frame: Frame)
     self._bounds:flush(frame.commandBuffer)
 
     if self.count > 0 then
-        -- The counter must be zero before any invocation accumulates into it,
-        -- and invocations within a dispatch have no ordering against each
-        -- other, so the reset is its own pass.
-        local clear = ComputePass.begin(frame.commandBuffer,
-            { self._drawArgs.handle })
-        clear:bindPipeline(self._reset.handle)
-        clear:dispatch(1)
-        clear:finish()
-
+        local groups = math.ceil(self.count / CULL_GROUP)
         self._cullUniform[0] = frame.width
         self._cullUniform[1] = frame.height
         self._cullUniform[2] = self.count
+        self._cullUniform[3] = groups
 
-        local cull = ComputePass.begin(frame.commandBuffer,
-            { self._drawArgs.handle, self._visible.handle })
-        cull:bindPipeline(self._cull.handle)
-        cull:bindStorageBuffers(0, { self._bounds.handle })
+        -- Mark, scan, compact. Each pass reads what the one before it wrote,
+        -- and SDL orders them because each declares what it writes.
+        local mark = ComputePass.begin(frame.commandBuffer,
+            { self._slots.handle, self._blocks.handle })
+        mark:bindPipeline(self._mark.handle)
+        mark:bindStorageBuffers(0, { self._bounds.handle })
         C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0,
             self._cullUniform, 16)
-        cull:dispatch(math.ceil(self.count / self._cull.threadCount[1]))
-        cull:finish()
+        mark:dispatch(groups)
+        mark:finish()
+
+        local scan = ComputePass.begin(frame.commandBuffer,
+            { self._blocks.handle, self._drawArgs.handle })
+        scan:bindPipeline(self._scan.handle)
+        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0,
+            self._cullUniform, 16)
+        scan:dispatch(1)
+        scan:finish()
+
+        local compact = ComputePass.begin(frame.commandBuffer,
+            { self._visible.handle })
+        compact:bindPipeline(self._compact.handle)
+        compact:bindStorageBuffers(0,
+            { self._slots.handle, self._blocks.handle })
+        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0,
+            self._cullUniform, 16)
+        compact:dispatch(groups)
+        compact:finish()
     end
 
     self.deferred:render(frame)
@@ -498,11 +534,14 @@ function Renderer:destroy()
     self.sampler:destroy()
     self.images:destroy()
     self._bounds:destroy()
+    self._slots:destroy()
+    self._blocks:destroy()
     self._visible:destroy()
     self._drawArgs:destroy()
     self._indices:destroy()
-    self._reset:destroy()
-    self._cull:destroy()
+    self._mark:destroy()
+    self._scan:destroy()
+    self._compact:destroy()
 end
 
 return Renderer

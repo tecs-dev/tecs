@@ -137,59 +137,141 @@ end
 -- Instanced geometry
 -------------------------------------------------------------------------------
 
---- Zeroes the visible counter before the cull accumulates into it. A separate
---- pass rather than a branch inside the cull, because invocations within one
---- dispatch have no ordering against each other.
+--- Marks what survives the view test and prefixes it within its workgroup.
+---
+--- Three passes rather than one atomic append, because an atomic gives no
+--- ordering: the compacted list comes out differently every frame, so
+--- overlapping geometry swaps which one wins and the scene shimmers. A scan is
+--- deterministic, so the same scene draws the same way every frame.
 shaders.register({
-    name = "instance.reset.comp",
+    name = "instance.mark.comp",
     stage = "compute",
     source = [[
 #version 450
-layout(local_size_x = 1) in;
-layout(set = 1, binding = 0) writeonly buffer DrawArgs { uint value[]; } args;
-void main() {
-    // SDL_GPUIndexedIndirectDrawCommand: indices, instances, first index,
-    // vertex offset, first instance.
-    args.value[0] = 6u;   // indices per quad, over four distinct corners
-    args.value[1] = 0u;   // instances, accumulated by the cull
-    args.value[2] = 0u;
-    args.value[3] = 0u;
-    args.value[4] = 0u;
-}
-]],
-})
+layout(local_size_x = 256) in;
 
---- Rejects instances outside the view and compacts the rest.
-shaders.register({
-    name = "instance.cull.comp",
-    stage = "compute",
-    source = [[
-#version 450
-layout(local_size_x = 64) in;
-
-// Bounds only, never the instance. This pass runs over every entity every
-// frame whether or not it draws, so it is the one place where reading 64 bytes
-// to use 24 of them is the dominant cost. Sixteen bytes with the extents
-// already resolved is a quarter of the traffic.
 layout(set = 0, binding = 0) readonly buffer Bounds {
     vec4 item[];   // xy centre, zw half extent
 } bounds;
 
-layout(set = 1, binding = 0) buffer DrawArgs { uint value[]; } args;
-layout(set = 1, binding = 1) writeonly buffer Visible { uint index[]; } visible;
+layout(set = 1, binding = 0) writeonly buffer Slots { uint slot[]; } slots;
+layout(set = 1, binding = 1) writeonly buffer Counts { uint count[]; } counts;
 layout(set = 2, binding = 0) uniform Cull { vec4 params; } cull;
+
+const uint CULLED = 0xFFFFFFFFu;
+
+shared uint scratch[256];
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    uint t = gl_LocalInvocationID.x;
+
+    uint keep = 0u;
+    if (i < uint(cull.params.z)) {
+        vec4 box = bounds.item[i];
+        bool outside = box.x + box.z < 0.0 || box.x - box.z > cull.params.x ||
+                       box.y + box.w < 0.0 || box.y - box.w > cull.params.y;
+        keep = outside ? 0u : 1u;
+    }
+
+    // Inclusive scan across the workgroup. Each survivor learns how many
+    // survivors precede it here, which is its offset inside this block.
+    scratch[t] = keep;
+    barrier();
+    for (uint stride = 1u; stride < 256u; stride <<= 1) {
+        uint carried = 0u;
+        if (t >= stride) { carried = scratch[t - stride]; }
+        barrier();
+        scratch[t] += carried;
+        barrier();
+    }
+
+    if (i < uint(cull.params.z)) {
+        slots.slot[i] = keep == 1u ? scratch[t] - 1u : CULLED;
+    }
+    if (t == 255u) {
+        counts.count[gl_WorkGroupID.x] = scratch[t];
+    }
+}
+]],
+})
+
+--- Turns per-block survivor counts into per-block base offsets.
+---
+--- One workgroup, so the scan is over blocks rather than entities and stays a
+--- single dispatch however large the world is. Each thread folds a contiguous
+--- span serially, the folded totals are scanned, and the span is rewritten in
+--- place as running bases.
+shaders.register({
+    name = "instance.scan.comp",
+    stage = "compute",
+    source = [[
+#version 450
+layout(local_size_x = 256) in;
+
+layout(set = 1, binding = 0) buffer Counts { uint count[]; } counts;
+layout(set = 1, binding = 1) buffer DrawArgs { uint value[]; } args;
+layout(set = 2, binding = 0) uniform Cull { vec4 params; } cull;
+
+shared uint partial[256];
+
+void main() {
+    uint t = gl_LocalInvocationID.x;
+    uint blocks = uint(cull.params.w);
+    uint span = (blocks + 255u) / 256u;
+    uint begin = t * span;
+    uint end = min(begin + span, blocks);
+
+    uint sum = 0u;
+    for (uint i = begin; i < end; i++) { sum += counts.count[i]; }
+
+    partial[t] = sum;
+    barrier();
+    for (uint stride = 1u; stride < 256u; stride <<= 1) {
+        uint carried = 0u;
+        if (t >= stride) { carried = partial[t - stride]; }
+        barrier();
+        partial[t] += carried;
+        barrier();
+    }
+
+    // Exclusive: where this thread's span starts in the compacted list.
+    uint base = partial[t] - sum;
+    for (uint i = begin; i < end; i++) {
+        uint block = counts.count[i];
+        counts.count[i] = base;
+        base += block;
+    }
+
+    if (t == 255u) {
+        // The draw's instance count, which the CPU never reads back.
+        args.value[1] = partial[255];
+    }
+}
+]],
+})
+
+--- Writes each survivor at the offset the scan assigned it.
+shaders.register({
+    name = "instance.compact.comp",
+    stage = "compute",
+    source = [[
+#version 450
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) readonly buffer Slots { uint slot[]; } slots;
+layout(set = 0, binding = 1) readonly buffer Bases { uint base[]; } bases;
+layout(set = 1, binding = 0) writeonly buffer Visible { uint index[]; } visible;
+layout(set = 2, binding = 0) uniform Cull { vec4 params; } cull;
+
+const uint CULLED = 0xFFFFFFFFu;
 
 void main() {
     uint i = gl_GlobalInvocationID.x;
     if (i >= uint(cull.params.z)) { return; }
-
-    vec4 box = bounds.item[i];
-    if (box.x + box.z < 0.0 || box.x - box.z > cull.params.x ||
-        box.y + box.w < 0.0 || box.y - box.w > cull.params.y) {
-        return;
-    }
-
-    visible.index[atomicAdd(args.value[1], 1u)] = i;
+    uint offset = slots.slot[i];
+    if (offset == CULLED) { return; }
+    visible.index[bases.base[gl_WorkGroupID.x] + offset] = i;
 }
 ]],
 })

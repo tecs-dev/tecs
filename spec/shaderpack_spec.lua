@@ -41,7 +41,8 @@ describe("shaders registry", function()
         for _, entry in ipairs(shaders.list()) do names[entry.name] = entry end
 
         for _, expected in ipairs({
-            "instance.reset.comp", "instance.cull.comp",
+            "instance.mark.comp",
+            "instance.scan.comp", "instance.compact.comp",
             "instance.vert", "instance.frag",
             "deferred.fullscreen.vert", "deferred.lighting.frag",
             "deferred.composite.frag",
@@ -111,9 +112,9 @@ describe("shaderpack", function()
 
         -- Workgroup size is declared in GLSL and is a pipeline argument, so it
         -- has to survive too.
-        local cull = pack.shaders["instance.cull.comp"]
-        assert.are.equal(64, cull.threadCount[1])
-        assert.are.equal(1, cull.threadCount[2])
+        local mark = pack.shaders["instance.mark.comp"]
+        assert.are.equal(256, mark.threadCount[1])
+        assert.are.equal(1, mark.threadCount[2])
     end)
 
     it("rejects a file that is not a pack", function()

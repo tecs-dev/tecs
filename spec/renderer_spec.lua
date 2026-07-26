@@ -57,11 +57,11 @@ describe("ecs.Renderer", function()
 
     -- Builds a world with a renderer installed. Ambient is full white by
     -- default so transport can be tested without lighting in the way.
-    local function newScene(ambient)
+    local function newScene(ambient, capacity)
         local world = tecs.newWorld()
         local renderer = Renderer.create(device.handle, FORMAT, {
             ambient = ambient or { 1.0, 1.0, 1.0 },
-            capacity = 256,
+            capacity = capacity or 256,
         })
         renderer:install(world)
         return world, renderer
@@ -523,6 +523,57 @@ describe("ecs.Renderer", function()
         assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, SIZE / 2).b)
         assert.are.equal(0, screen:getPixel(pixels, 2, 2).b,
             "a fully rounded rectangle rejects its corners like a circle")
+        renderer:destroy()
+    end)
+
+
+    -- The compaction has to be ordered, not merely correct. An atomic append
+    -- produces a different list every frame, so overlapping geometry swaps
+    -- which one wins and a dense scene shimmers. These pin the guarantee that
+    -- replaced it: survivors keep their index order, so the highest index
+    -- draws last and is what you see.
+    it("draws overlapping entities in index order", function()
+        local COUNT = 700   -- more than two 256-wide cull workgroups
+        local world, renderer = newScene(nil, COUNT + 16)
+        for index = 1, COUNT do
+            -- Every entity covers the target. The last one spawned is blue and
+            -- must win; every earlier one is red.
+            local last = index == COUNT
+            world:spawn(
+                Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+                Tint(last and 0.0 or 1.0, 0.0, last and 1.0 or 0.0, 1.0),
+                Renderable()
+            )
+        end
+
+        local centre = screen:getPixel(frameOnce(world, renderer),
+            SIZE / 2, SIZE / 2)
+        assert.are.equal(255, centre.b,
+            "the highest-index entity must be the one on top")
+        assert.are.equal(0, centre.r)
+        renderer:destroy()
+    end)
+
+    it("draws the same scene the same way every frame", function()
+        local COUNT = 700
+        local world, renderer = newScene(nil, COUNT + 16)
+        for index = 1, COUNT do
+            world:spawn(
+                Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+                Tint(index / COUNT, 1.0 - index / COUNT, 0.5, 1.0),
+                Renderable()
+            )
+        end
+
+        -- Nothing changes between frames, so nothing about the output may
+        -- either. An unordered compaction fails this intermittently.
+        local first = screen:getPixel(frameOnce(world, renderer), 8, 8)
+        for _ = 1, 4 do
+            local again = screen:getPixel(frameOnce(world, renderer), 8, 8)
+            assert.are.equal(first.r, again.r)
+            assert.are.equal(first.g, again.g)
+            assert.are.equal(first.b, again.b)
+        end
         renderer:destroy()
     end)
 
