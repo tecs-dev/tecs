@@ -26,6 +26,7 @@
 #include <lauxlib.h>
 
 #include "registry.h"
+#include "luamods.h"
 
 typedef struct Tecs2dHost Tecs2dHost;
 
@@ -144,6 +145,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
     /* Before any Lua runs, so the first require can already reach the
      * libraries through it rather than trying to load them by name. */
     tecs2dRegistryInstall(host->L);
+    tecs2dLuaModulesInstall(host->L);
 
     lua_State *L = host->L;
     lua_newtable(L);

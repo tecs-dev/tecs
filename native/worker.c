@@ -21,6 +21,7 @@
 
 #include "worker.h"
 #include "registry.h"
+#include "luamods.h"
 
 typedef struct Message {
     struct Message *next;
@@ -182,6 +183,7 @@ static int workerEntry(void *data)
      * dynamic loading in the place it is hardest to notice: a worker that
      * fails to start looks like a worker that had nothing to do. */
     tecs2dRegistryInstall(L);
+    tecs2dLuaModulesInstall(L);
 
     if (worker->luaPath) {
         lua_getglobal(L, "package");

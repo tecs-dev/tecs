@@ -71,7 +71,32 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH ${TECS2D_SYSTEM_DEPS})
 # Worker threads and channels. Native because a LuaJIT FFI callback invoked
 # from a thread the VM did not create is unsafe, so a thread entry point cannot
 # be a Lua function.
-add_library(tecs2d_worker SHARED native/worker.c native/logsink.c)
+# JSON. Vendored rather than depended on, because a Lua C module cannot be
+# found by `require` on a target with no dlopen: it has to be compiled in and
+# announced through package.preload. Built twice from one set of sources, as a
+# static library for that, and as a loadable module so specs running under a
+# plain interpreter can require it the ordinary way.
+# fpconv.c is deliberately absent: with USE_INTERNAL_FPCONV the header defines
+# fpconv_init inline and the conversions come from g_fmt.c and dtoa.c instead.
+set(TECS2D_CJSON_SOURCES
+    vendor/cjson/lua_cjson.c vendor/cjson/strbuf.c
+    vendor/cjson/g_fmt.c vendor/cjson/dtoa.c)
+set(TECS2D_CJSON_DEFINES USE_INTERNAL_FPCONV MULTIPLE_THREADS)
+
+add_library(tecs2d_cjson STATIC ${TECS2D_CJSON_SOURCES})
+target_compile_definitions(tecs2d_cjson PRIVATE ${TECS2D_CJSON_DEFINES})
+target_include_directories(tecs2d_cjson PRIVATE ${LUAJIT_INCLUDE_DIRS})
+set_target_properties(tecs2d_cjson PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+add_library(cjson MODULE ${TECS2D_CJSON_SOURCES})
+target_compile_definitions(cjson PRIVATE ${TECS2D_CJSON_DEFINES})
+target_include_directories(cjson PRIVATE ${LUAJIT_INCLUDE_DIRS})
+set_target_properties(cjson PROPERTIES
+    PREFIX "" SUFFIX ".so"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+target_link_libraries(cjson PRIVATE ${LUAJIT_LINK_LIBRARIES})
+
+add_library(tecs2d_worker SHARED native/worker.c native/logsink.c native/luamods.c)
 set_target_properties(tecs2d_worker PROPERTIES
     OUTPUT_NAME tecs2dworker
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
@@ -114,7 +139,7 @@ set_target_properties(tecs2d_spirvcross PROPERTIES LINKER_LANGUAGE CXX)
 
 # The application host. SDL owns the loop, so this implements SDL's callback
 # entry points and reaches Lua through the Lua C API.
-add_executable(tecs2d native/host.c)
+add_executable(tecs2d native/host.c native/luamods.c)
 
 # Where content sits relative to the executable, in the tree this build
 # installs. The host resolves its entry chunk and the engine resolves assets
@@ -257,8 +282,8 @@ if(TECS2D_BUILD_LUA)
     # registry's sources are generated from bindings produced above.
     # The host also links the worker library, because its table holds the
     # addresses of that library's functions.
-    target_link_libraries(tecs2d PRIVATE tecs2d_registry tecs2d_worker)
-    target_link_libraries(tecs2d_worker PRIVATE tecs2d_registry)
+    target_link_libraries(tecs2d PRIVATE tecs2d_registry tecs2d_worker tecs2d_cjson)
+    target_link_libraries(tecs2d_worker PRIVATE tecs2d_registry tecs2d_cjson)
 
     add_custom_target(tecs2d_bindings ALL DEPENDS
         "${GEN}/workercdef.lua" "${GEN}/logsinkcdef.lua"
@@ -315,6 +340,7 @@ install(FILES "${CMAKE_BINARY_DIR}/build-info.txt"
 
 install(TARGETS tecs2d RUNTIME DESTINATION bin)
 install(TARGETS tecs2d_worker tecs2d_spirvcross LIBRARY DESTINATION lib)
+install(TARGETS cjson LIBRARY DESTINATION lib)
 if(TECS2D_BUILD_LUA)
     install(DIRECTORY "${TECS2D_LUA_OUT}/" DESTINATION share/tecs2d/lua)
     # The ECS is part of what ships: a game is written against it directly, so

@@ -16,6 +16,11 @@ local spec = os.getenv("TECS2D_SPEC") or "out/macos-arm64-dev/spec"
 -- engine living in that repo.
 local tecs = os.getenv("TECS_DIR") or "../tecs"
 
+-- Lua C modules are compiled into the executable for targets with no dlopen,
+-- so a spec running under a plain interpreter loads the same sources from the
+-- loadable build of them instead.
+local lib = os.getenv("TECS2D_LIB") or "out/macos-arm64-dev/lib"
+
 return {
     default = {
         lua = "luajit",
@@ -26,5 +31,6 @@ return {
             spec .. "/?.lua",
             tecs .. "/build/?.lua", tecs .. "/build/?/init.lua",
         }, ";"),
+        cpath = lib .. "/?.so",
     },
 }
