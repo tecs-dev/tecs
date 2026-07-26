@@ -96,6 +96,27 @@ describe("pass graph", function()
         graph:destroy()
     end)
 
+    it("rejects depth on a pass that writes a scaled target", function()
+        -- One frame-sized depth attachment serves every depth pass, so a pass
+        -- drawing into a half-size target cannot share it. SDL would reject the
+        -- mismatch when the pass began, which names nothing useful.
+        local graph = PassGraph.create(device.handle, FORMAT)
+        graph:target({ name = "half", format = FORMAT, scale = 0.5 })
+
+        local ok, err = pcall(function()
+            graph:pass({
+                name = "bloom",
+                outputs = { "half" },
+                depth = { test = true, write = true },
+                execute = function() end,
+            })
+        end)
+
+        assert.is_false(ok)
+        assert.is_truthy(tostring(err):find("frame sized"))
+        graph:destroy()
+    end)
+
     it("skips a pass whose gate returns false", function()
         local graph = PassGraph.create(device.handle, FORMAT)
         graph:target({ name = "scratch", format = FORMAT })
@@ -187,6 +208,7 @@ describe("deferred pipeline", function()
             vertexShader = vertex,
             fragmentShader = fragment,
             colorFormats = { albedoFormat, normalFormat },
+            depth = pipeline:geometryDepth(),
         })
         vertex:destroy()
         fragment:destroy()
@@ -236,6 +258,7 @@ void main() {
             vertexShader = vertex,
             fragmentShader = fragment,
             colorFormats = { albedoFormat, normalFormat },
+            depth = pipeline:geometryDepth(),
         })
         vertex:destroy()
         fragment:destroy()
@@ -260,6 +283,33 @@ void main() {
             ("beyond the radius should stay dark, got %d"):format(corner.r))
 
         geometryPipeline:destroy()
+        pipeline:destroy()
+    end)
+
+    it("attaches depth to geometry and to nothing else", function()
+        -- A pipeline's target info has to match the pass it draws in, so "no
+        -- depth" has to be an answer the graph gives rather than something the
+        -- caller assumes. The fullscreen passes cover every pixel once and
+        -- would only have an attachment to keep in step.
+        local pipeline = Deferred.create(device.handle, FORMAT, {})
+
+        local depth = pipeline:geometryDepth()
+        assert.is_not_nil(depth, "geometry must have a depth attachment")
+        assert.is_true(depth.test)
+        assert.is_true(depth.write)
+        assert.are.equal(pipeline.graph.depthFormat, depth.format)
+
+        assert.is_nil(pipeline.graph:depthOf("lighting"),
+            "a fullscreen resolve has nothing to be occluded by")
+        assert.is_nil(pipeline.graph:depthOf("composite"))
+        pipeline:destroy()
+    end)
+
+    it("refuses to answer for a pass it does not have", function()
+        local pipeline = Deferred.create(device.handle, FORMAT, {})
+        local ok, err = pcall(function() pipeline.graph:depthOf("noSuchPass") end)
+        assert.is_false(ok)
+        assert.is_truthy(tostring(err):find("no pass named"))
         pipeline:destroy()
     end)
 end)

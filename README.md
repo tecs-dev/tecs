@@ -242,12 +242,29 @@ The graph knows nothing about entities, archetypes, or dirtiness. A pass that
 should be skipped says so through `enabled`, which is where an ECS-side dirty
 gate plugs in without the graph learning what dirty means.
 
+One depth attachment is shared by whichever passes ask for it, sized and resized
+with the frame like every other target. Its format is discovered rather than
+assumed: Metal has no `D24_UNORM` and a Vulkan driver may have that one and not
+`D32_FLOAT`, so the device is asked which of the three it supports as a depth
+target and the best answer is taken. Depth state is declared per pass, because a
+pass that must not have an attachment is as ordinary as a pass that must, and a
+pipeline bakes its target info, so the graph answers both cases through
+`depthOf` rather than leaving the call site to assume one.
+
 `Deferred` assembles the standard pipeline on it: geometry fills a G-buffer,
 lighting resolves it against a storage buffer of lights, and composite puts the
 result on screen. Geometry is a callback because what to draw is the caller's
 problem. Deferred is what makes light count independent of object count:
 geometry rasterises once regardless of how many lights touch it, and lighting
 runs once per pixel regardless of how many objects overlap it.
+
+Geometry is the pass that owns depth, testing and writing, so wherever two
+instances overlap the nearer one is what the G-buffer keeps. An instance's depth
+is the fourth float of its transform vector, and the comparison is
+`lessOrEqual` rather than `less`: equal depths let the later fragment through,
+so draw order still decides ties and depth only decides between instances that
+differ. Lighting and composite have no attachment. Each covers every pixel
+exactly once and has nothing to be occluded by.
 
 ## GPU-driven by default
 

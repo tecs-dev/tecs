@@ -30,6 +30,15 @@ local record RenderPass
         clear: RenderPass.ClearColor
     end
 
+    record DepthAttachment
+        --- Depth texture handle the pass tests and writes against.
+        texture: loader.CValue
+        --- Clears to this value. Omit to load and preserve existing contents.
+        --- One is the far plane, so that is what a pass drawing a fresh frame
+        --- clears to.
+        clear: number
+    end
+
     handle: loader.CPtr
     --- The command buffer this pass records into. Uniform pushes target the
     --- command buffer rather than the pass, so it is kept here to save every
@@ -44,6 +53,7 @@ local RenderPassMT <const>: metatable<RenderPass> = { __index = RenderPass }
 
 -- Reused across passes; a pass is begun far too often to allocate for it.
 local targets <const> = loader.newArray("SDL_GPUColorTargetInfo[?]", MAX_COLOR_TARGETS)
+local depthTarget <const> = loader.newArray("SDL_GPUDepthStencilTargetInfo[1]")
 
 --- Wraps an already-begun pass handle.
 function RenderPass.wrap(handle: loader.CPtr, commandBuffer: loader.CValue,
@@ -57,8 +67,13 @@ function RenderPass.wrap(handle: loader.CPtr, commandBuffer: loader.CValue,
 end
 
 --- Begins a render pass over one or more colour attachments.
+---
+--- The depth attachment is optional and its absence is meaningful: a pass begun
+--- without one cannot test or write depth, and a pipeline bound in it must
+--- declare no depth-stencil target either.
 function RenderPass.begin(commandBuffer: loader.CValue,
-                          attachments: {RenderPass.Attachment}): RenderPass
+                          attachments: {RenderPass.Attachment},
+                          depth?: RenderPass.DepthAttachment): RenderPass
     local count = #attachments
     if count == 0 then
         error("tecs: a render pass needs at least one colour attachment", 2)
@@ -91,7 +106,33 @@ function RenderPass.begin(commandBuffer: loader.CValue,
         end
     end
 
-    local handle = C.SDL_BeginGPURenderPass(commandBuffer, targets, count, nil)
+    local depthInfo: loader.CArray = nil
+    if depth ~= nil then
+        depthInfo = depthTarget
+        local target = depthTarget[0] as loader.CStruct
+        target.texture = depth.texture
+        target.mip_level = 0
+        target.layer = 0
+        target.cycle = false
+        target.store_op = C.SDL_GPU_STOREOP_STORE
+        -- No stencil is ever attached, so these describe nothing. They are
+        -- written anyway because the struct is reused across passes and a value
+        -- left over from a previous one is worse than a meaningless one.
+        target.stencil_load_op = C.SDL_GPU_LOADOP_DONT_CARE
+        target.stencil_store_op = C.SDL_GPU_STOREOP_DONT_CARE
+        target.clear_stencil = 0
+
+        if depth.clear ~= nil then
+            target.load_op = C.SDL_GPU_LOADOP_CLEAR
+            target.clear_depth = depth.clear
+        else
+            target.load_op = C.SDL_GPU_LOADOP_LOAD
+            target.clear_depth = 0.0
+        end
+    end
+
+    local handle = C.SDL_BeginGPURenderPass(commandBuffer, targets, count,
+        depthInfo)
     if handle == nil then sdl.fail("SDL_BeginGPURenderPass") end
     return RenderPass.wrap(handle, commandBuffer, count)
 end

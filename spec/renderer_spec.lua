@@ -556,6 +556,73 @@ describe("ecs.Renderer", function()
         renderer:destroy()
     end)
 
+    -- Depth rides in the fourth float of an instance's transform vector, which
+    -- nothing on the host writes yet. So these two quads are spawned
+    -- identically and then have their depth and their colour written straight
+    -- into the instance buffer, which is exactly the memory the vertex shader
+    -- reads. Instance one draws after instance zero, so without a depth
+    -- attachment it wins every time and neither assertion below can hold.
+    local INSTANCE_FLOATS = 16
+
+    local function drawAtDepths(firstDepth, secondDepth)
+        local world, renderer = newScene()
+        for _ = 1, 2 do
+            world:spawn(
+                Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+                Tint(1.0, 1.0, 1.0, 1.0),
+                Renderable()
+            )
+        end
+
+        world:update(1 / 60)
+        assert.are.equal(2, renderer.count)
+
+        -- Instance zero is red and instance one is blue, so which one survived
+        -- the depth test is legible in the pixel rather than inferred.
+        local floats = renderer.instances:mapAs("float *")
+        floats[3] = firstDepth
+        floats[8], floats[9], floats[10] = 1.0, 0.0, 0.0
+        floats[INSTANCE_FLOATS + 3] = secondDepth
+        floats[INSTANCE_FLOATS + 8] = 0.0
+        floats[INSTANCE_FLOATS + 9] = 0.0
+        floats[INSTANCE_FLOATS + 10] = 1.0
+        renderer.instances:markDirty(0, 2 * INSTANCE_FLOATS * 4)
+
+        local commandBuffer = C.SDL_AcquireGPUCommandBuffer(device.handle)
+        renderer:render({
+            width = SIZE,
+            height = SIZE,
+            commandBuffer = commandBuffer,
+            swapchainTexture = screen.handle,
+        })
+        assert(C.SDL_SubmitGPUCommandBuffer(commandBuffer))
+
+        local centre = screen:getPixel(screen:readback(), SIZE / 2, SIZE / 2)
+        renderer:destroy()
+        return centre
+    end
+
+    it("lets the nearer instance win regardless of draw order", function()
+        local firstNearer = drawAtDepths(0.25, 0.75)
+        assert.are.equal(255, firstNearer.r,
+            "the nearer instance must win even though the other drew after it")
+        assert.are.equal(0, firstNearer.b)
+
+        local secondNearer = drawAtDepths(0.75, 0.25)
+        assert.are.equal(255, secondNearer.b,
+            "and must still win when it is the one that drew last")
+        assert.are.equal(0, secondNearer.r)
+    end)
+
+    it("keeps draw order deciding between instances at the same depth", function()
+        -- Every instance is at depth zero today, so the depth attachment has to
+        -- land without changing what is seen. Equal depths let the later
+        -- fragment through, which is what makes that true.
+        local tie = drawAtDepths(0.5, 0.5)
+        assert.are.equal(255, tie.b, "the later instance wins a tie")
+        assert.are.equal(0, tie.r)
+    end)
+
     it("draws the same scene the same way every frame", function()
         local COUNT = 700
         local world, renderer = newScene(nil, COUNT + 16)
