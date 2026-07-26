@@ -225,6 +225,8 @@ local record sequence
         --- Name supplied to `sequence.emit`.
         name: string
         --- Arguments supplied to `sequence.emit`, with bindings resolved.
+        --- Unlike an action's `ctx.args`, this list is the observer's to
+        --- keep: it is built per emit.
         args: {any}
         --- The playback that emitted it.
         handle: Handle
@@ -1497,9 +1499,13 @@ local function run(
             cursor.pc = cursor.pc + 1
 
         elseif op == OP_EMIT then
+            -- An emitted list is copied rather than borrowed: it leaves with
+            -- the event, and an observer is entitled to keep it.
+            local resolved = resolveArgs(world, state, cursor, b)
+            local args: {any} = {}
+            for i = 1, #resolved do args[i] = resolved[i] end
             world:emit(0, sequence.Event,
-                consts[a] as string,
-                resolveArgs(world, state, cursor, b),
+                consts[a] as string, args,
                 packHandle(cursor.slot, cursor.generation))
             cursor.pc = cursor.pc + 1
 
