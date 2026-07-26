@@ -355,7 +355,7 @@ if(TECS2D_BUILD_LUA)
         VERBATIM)
 
     # Specs written in Teal, compiled the same way. Subsystems migrating from
-    # the Love-backed engine arrive with their suites, and a suite rewritten
+    # the previous engine arrive with their suites, and a suite rewritten
     # into Lua on the way across would no longer be the proof it was.
     file(GLOB_RECURSE TECS2D_SPEC_TL CONFIGURE_DEPENDS
         "${CMAKE_SOURCE_DIR}/spec/*.tl")

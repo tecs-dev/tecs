@@ -1,7 +1,7 @@
 # tecs2d
 
 A LuaJIT game engine built directly on SDL3, SDL_GPU, and Box2D 3, replacing
-the Love2D layer that Tecs previously ran on. Entities are the interface:
+the rendering layer Tecs previously ran on. Entities are the interface:
 anything that renders or updates per frame is an entity in a Tecs world.
 
 SDL owns the loop. An entry file returns an application and a C host drives it
@@ -61,9 +61,9 @@ Working today:
 Not built yet: shadows, post-processing, audio, text, UI, tiled maps, and the
 MCP surface.
 
-This project is merging into `tecs`; the two are becoming one. See
-[PLAN.md](PLAN.md) for the merge, the render contract being locked, Clay for UI
-layout, fonts, and what is left to port.
+This project is merging into `tecs`; the two are becoming one. Design notes
+live in `../tecs-plans`, kept outside this repository so plans and code have
+separate histories.
 
 ## Workers and assets
 
@@ -384,7 +384,8 @@ to finalizers makes hot reload either leak or double-free depending on
 collection order.
 
 **The ECS and the engine are one project.** They were separate while this
-replaced Love2D and the ECS stayed renderer-agnostic. The renderer's whole job
+replaced the previous rendering layer and the ECS stayed renderer-agnostic.
+The renderer's whole job
 is reading archetype columns, and the ECS's storage layout decides whether that
 is fast, so the boundary stopped paying for itself. Storage that a GPU can read
 directly is the reason to merge, and it is not expressible with the two apart.

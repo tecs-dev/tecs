@@ -382,7 +382,7 @@ local record sequence
     ---
     --- Actions must obey the deterministic-action contract to keep replay and
     --- rewind meaningful: no wall-clock reads, no file or network access, and
-    --- randomness only through `love.math`, whose state travels with
+    --- randomness only through the world's own generator, whose state travels with
     --- snapshots.
     registerAction: function(world: World, name: string, action: Action)
 
