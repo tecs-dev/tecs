@@ -60,6 +60,74 @@ describe("tecs2d.sequence", function()
         it("returns nil for an undefined program", function()
             luassert.is_nil(sequence.program("spec.neverDefined"))
         end)
+
+        it("keeps a superseded version while a playback still runs it", function()
+            local name = uniqueName()
+            sequence.registerAction(world, "spec.noop", function() end)
+            local v1 = sequence.define(name, {
+                sequence.waitSteps(3),
+                sequence.call("spec.noop"),
+            })
+            local handle = sequence.play(world, v1)
+            sequence.define(name, {sequence.call("spec.noop")})
+
+            luassert.equals(1, sequence.program(name, 1).version,
+                "the running version must stay reachable after it is superseded")
+
+            stepWorld(world, 5)
+            luassert.equals("completed", sequence.status(world, handle).state)
+            luassert.is_nil(sequence.program(name, 1),
+                "the superseded version is released with its last playback")
+            luassert.equals(2, sequence.program(name).version,
+                "the newest version is always kept")
+        end)
+
+        it("keeps a superseded version alive for a branch of it", function()
+            local name = uniqueName()
+            sequence.registerAction(world, "spec.noop", function() end)
+            local v1 = sequence.define(name, {
+                sequence.parallel(
+                    {sequence.waitSteps(2), sequence.call("spec.noop")},
+                    {sequence.waitSteps(6), sequence.call("spec.noop")}
+                ),
+            })
+            sequence.play(world, v1)
+            sequence.define(name, {sequence.call("spec.noop")})
+
+            stepWorld(world, 4)
+            luassert.is_not_nil(sequence.program(name, 1),
+                "a live branch still holds the version its program came from")
+
+            stepWorld(world, 4)
+            luassert.is_nil(sequence.program(name, 1))
+        end)
+
+        it("releases a version when its last playback is cancelled", function()
+            local name = uniqueName()
+            local v1 = sequence.define(name, {sequence.waitSteps(20)})
+            local handle = sequence.play(world, v1)
+            sequence.define(name, {sequence.waitSteps(1)})
+
+            luassert.is_not_nil(sequence.program(name, 1))
+            sequence.cancel(world, handle)
+            luassert.is_nil(sequence.program(name, 1))
+        end)
+
+        it("releases versions the playbacks a snapshot load discarded held", function()
+            local name = uniqueName()
+            local v1 = sequence.define(name, {sequence.waitSteps(20)})
+
+            local empty = world:saveSnapshot().buffer
+            sequence.play(world, v1)
+            sequence.define(name, {sequence.waitSteps(1)})
+            luassert.is_not_nil(sequence.program(name, 1))
+
+            -- Loading a snapshot taken before it started throws the playback
+            -- away, and the version it was the last user of goes with it.
+            world:loadSnapshot(empty)
+            luassert.equals(0, sequence.activeCount(world))
+            luassert.is_nil(sequence.program(name, 1))
+        end)
     end)
 
     describe("playback", function()

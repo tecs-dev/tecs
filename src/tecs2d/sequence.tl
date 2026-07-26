@@ -494,11 +494,33 @@ end
 
 tecs.newEvent(sequence.Event)
 
--- Programs are process-global and keyed by name. Every version ever compiled
--- stays reachable by (name, version) so a snapshot taken against an older
--- version can restore a cursor that continues to run it.
+-- Programs are process-global and keyed by name. A superseded version stays
+-- reachable by (name, version) for as long as some playback is still running
+-- it, so a hot reload continues rather than resuming into changed
+-- instructions, and is dropped once the last one finishes. The newest version
+-- of a name is always kept: that is what `play` resolves.
 local programsByName: {string: ProgramImpl} = {}
 local programVersions: {string: {integer: ProgramImpl}} = {}
+local programRefs: {ProgramImpl: integer} = {}
+
+local function retainProgram(prog: ProgramImpl)
+    programRefs[prog] = (programRefs[prog] or 0) + 1
+end
+
+local function releaseProgram(prog: ProgramImpl)
+    if not prog then return end
+    local remaining = (programRefs[prog] or 1) - 1
+    if remaining > 0 then
+        programRefs[prog] = remaining
+        return
+    end
+    programRefs[prog] = nil
+    if programsByName[prog.name] == prog then return end
+    local versions = programVersions[prog.name]
+    if not versions then return end
+    versions[prog.version] = nil
+    if next(versions) == nil then programVersions[prog.name] = nil end
+end
 
 -------------------------------------------------------------------------------
 -- Authoring nodes
@@ -1124,6 +1146,7 @@ local function retire(state: WorldState, cursor: Cursor, finalState: PlaybackSta
     unlinkWaits(state, cursor)
     releaseTween(state, cursor)
     unlinkOwner(state, cursor)
+    releaseProgram(cursor.program)
 
     -- A subtree dies from the root down: branches are cancelled first, so
     -- each one finds a parent already gone and reports nothing back up.
@@ -1449,6 +1472,7 @@ local function run(
             -- scheduler like everything else.
             local child = allocCursor(state)
             child.program = prog
+            retainProgram(prog)
             child.pc = a
             child.owner = cursor.owner
             child.bindings = cursor.bindings
@@ -1534,6 +1558,7 @@ function sequence.play(
     cursor.program = program as ProgramImpl
     cursor.pc = 0
     cursor.state = "running"
+    retainProgram(cursor.program)
 
     if options then
         cursor.owner = options.owner or 0
@@ -1891,6 +1916,13 @@ local function loadState(world: World, value: any)
     end
 
     local state = stateFor(world)
+    -- The playbacks about to be discarded give up their claim on the program
+    -- versions they were running, so a version this world was the last user
+    -- of goes with them.
+    for _, cursor in pairs(state.cursors) do
+        if cursor.alive then releaseProgram(cursor.program) end
+    end
+
     -- Actions stay registered: they are code, rebound by name, not data.
     state.cursors = {}
     state.freeSlots = {}
@@ -1959,6 +1991,7 @@ local function loadState(world: World, value: any)
                 parentGeneration = row.parentGeneration as integer,
                 joining = row.joining as boolean,
             }
+            retainProgram(prog)
             state.cursors[cursor.slot] = cursor
             linkOwner(state, cursor)
             if cursor.tweenPlayback then

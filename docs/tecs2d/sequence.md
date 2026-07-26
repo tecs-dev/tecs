@@ -46,9 +46,10 @@ unambiguous.
 Programs are immutable. Redefining a name compiles a **new version** rather than mutating the
 existing one:
 
-- Playbacks already running keep the version they started with.
-- Later `play` calls use the newest version.
-- A superseded version is released once its last playback finishes.
+- Playbacks already running keep the version they started with, branches included.
+- Later `play` calls use the newest version, which is always kept.
+- A superseded version is dropped once its last playback finishes, is cancelled, or is discarded
+  by a snapshot load — so a hot-reload session does not accumulate every program it ever compiled.
 
 That is what makes hot reload safe. A saved program counter points into specific instructions, so
 a running sequence continues against the instructions it started with instead of resuming into
