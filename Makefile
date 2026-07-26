@@ -27,13 +27,14 @@ export TECS2D_SPEC := $(CURDIR)/$(OUT)/spec
 
 SOURCE_TL := $(shell find src -name '*.tl' 2>/dev/null)
 SPEC_TL   := $(shell find spec -name '*.tl' 2>/dev/null)
+BENCH_TL  := $(shell find bench -name '*.tl' 2>/dev/null)
 # tl searches include paths last-first, so ours come last and win. Listing them
 # the other way round silently hands precedence to the ECS repo's vendor.
 TL_FLAGS  := -I $(TECS_DIR)/vendor/share/lua/5.1 \
              -I $(CURDIR)/vendor/share/lua/5.1 -I $(CURDIR)/vendor/tl
 
 .PHONY: help all configure build check test abi-check run clean rebuild \
-        deps package check-package presets shaders
+        deps package check-package presets shaders bench
 
 help: ## List targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -57,7 +58,7 @@ build: ## Build the selected preset
 	@cmake --build --preset $(PRESET)
 
 check: ## Type-check Teal sources
-	@tl check $(TL_FLAGS) $(SOURCE_TL) $(SPEC_TL) main.tl
+	@tl check $(TL_FLAGS) $(SOURCE_TL) $(SPEC_TL) $(BENCH_TL) main.tl
 
 test: build $(LUA)/main.lua ## Run the spec suite
 	@busted
@@ -70,6 +71,13 @@ abi-check: build ## Verify generated cdefs against the C ABI
 
 $(LUA)/main.lua: main.tl
 	@tl gen $(TL_FLAGS) main.tl -o $@
+
+$(OUT)/bench/%.lua: bench/%.tl
+	@mkdir -p $(OUT)/bench
+	@tl gen $(TL_FLAGS) $< -o $@
+
+bench: build $(OUT)/bench/shapes.lua ## Run the shapes benchmark
+	@$(BIN) --entry $(OUT)/bench/shapes.lua
 
 run: build $(LUA)/main.lua ## Run the demo
 	@$(BIN) --entry $(LUA)/main.lua
