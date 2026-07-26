@@ -201,4 +201,37 @@ describe("sprite play-once: pauseAtEnd clamps on the GPU", function()
         end)
         luassert.is_true(fired == true, "a mid-animation save lost its completion")
     end)
+
+    -- The sequencer never learns what a sprite is: gfx registers the action
+    -- that starts a tag and the provider that answers whether it is still
+    -- going, so the dependency points inward.
+    it("lets a program play a tag and wait for it", function()
+        fixture.runLua(app, [[
+            local gfx = require("tecs2d.gfx")
+            local sequence = require("tecs2d.sequence")
+            _G.tecsAwaitSheet = gfx.SpriteSheet.fromFile("assets/running.png")
+            _G.tecsAwaitEntity = world:spawn(
+                gfx.Sprite.fromSheet(_G.tecsAwaitSheet, "run"))
+            _G.tecsAwaitDone = false
+            sequence.registerAction(world, "spec.awaited", function()
+                _G.tecsAwaitDone = true
+            end)
+            _G.tecsAwaitHandle = sequence.play(world,
+                sequence.define("spec.playAndWait", {
+                    sequence.call("tecs2d.sprite.playTag",
+                        sequence.bind("actor"), "run"),
+                    sequence.await("tecs2d.sprite", sequence.bind("actor")),
+                    sequence.call("spec.awaited"),
+                }), {bindings = {actor = _G.tecsAwaitEntity}})
+            return true
+        ]])
+
+        local done = fixture.eventually(fixture.callTimeout, function(): boolean
+            local values = fixture.runLua(app, "return _G.tecsAwaitDone")
+            if values[1] == "true" then return true end
+            return nil
+        end)
+        luassert.is_true(done == true,
+            "the program never resumed after the animation finished")
+    end)
 end)

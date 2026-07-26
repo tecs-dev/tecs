@@ -1138,10 +1138,12 @@ function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(worl
                 return runtimeOf(w).awaiting[entity] ~= nil
             end,
         })
+        -- Takes a bind reference, which the sequencer resolves to an entity
+        -- id before the action runs, and the tag to play once.
         sequence.registerAction(world, PLAY_TAG_ACTION,
             function(w: tecs.World, ctx: sequence.ActionContext)
-                local entity = ctx:entity(ctx.args[1] as string)
-                if not entity then return end
+                local entity = ctx.args[1] as integer
+                if not entity or not w:isAlive(entity) then return end
                 local s = w:get(entity, Sprite) as SpriteImpl
                 if s then s:playOnce(ctx.args[2] as string) end
             end)
