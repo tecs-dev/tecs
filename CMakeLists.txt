@@ -341,6 +341,19 @@ if(TECS2D_BUILD_LUA)
         COMMENT "Compiling Teal sources"
         VERBATIM)
 
+    # Content lives beside the compiled Lua, because that directory is the
+    # content root a development run resolves against and the one an install
+    # copies. CONFIGURE_DEPENDS so adding a shader is a build, not a
+    # reconfigure.
+    file(GLOB_RECURSE TECS2D_ASSET_FILES CONFIGURE_DEPENDS
+        "${CMAKE_SOURCE_DIR}/assets/*")
+    add_custom_target(tecs2d_assets ALL
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets" "${TECS2D_LUA_OUT}"
+        DEPENDS ${TECS2D_ASSET_FILES}
+        COMMENT "Copying assets"
+        VERBATIM)
+
     # Specs written in Teal, compiled the same way. Subsystems migrating from
     # the Love-backed engine arrive with their suites, and a suite rewritten
     # into Lua on the way across would no longer be the proof it was.

@@ -32,11 +32,11 @@ local Transform2D = components.Transform2D
 local Tint = components.Tint
 local Renderable = components.Renderable
 
-describe("shaders registry", function()
-    it("names every shader the engine loads", function()
-        -- The registry is what a packaging step enumerates, so a shader the
-        -- engine asks for at run time but that is not listed here is one no
-        -- pack can contain.
+describe("shaders", function()
+    it("finds every shader the engine loads by globbing", function()
+        -- The glob is what a packaging step enumerates, so a shader the engine
+        -- asks for at run time but that no root contains is one no pack can
+        -- hold.
         local names = {}
         for _, entry in ipairs(shaders.list()) do names[entry.name] = entry end
 
@@ -47,8 +47,95 @@ describe("shaders registry", function()
             "deferred.fullscreen.vert", "deferred.lighting.frag",
             "deferred.composite.frag",
         }) do
-            assert.is_not_nil(names[expected], expected .. " must be registered")
+            assert.is_not_nil(names[expected], expected .. " must be found")
         end
+    end)
+
+    it("takes the stage from the filename", function()
+        assert.are.equal("fragment", shaders.get("instance.frag").stage)
+        assert.are.equal("vertex", shaders.get("instance.vert").stage)
+        assert.are.equal("compute", shaders.get("instance.mark.comp").stage)
+    end)
+
+    it("refuses a name with no stage in it", function()
+        -- Otherwise an include would be compiled on its own, which fails much
+        -- further along and much less clearly.
+        assert.has_error(function() shaders.get("instance") end)
+    end)
+
+    it("says which directories it looked in when a file is missing", function()
+        local ok, reason = pcall(shaders.get, "nothing.frag")
+        assert.is_false(ok)
+        assert.is_truthy(tostring(reason):find("shaders/", 1, true))
+    end)
+
+    it("expands an include into the source it hashes", function()
+        -- The ordering is the point. The pack detects staleness by hashing
+        -- source, so an include resolved later by the compiler would leave the
+        -- hash unchanged when the include changed, and a stale pack would pass
+        -- its own check.
+        local mark = shaders.get("instance.mark.comp")
+        assert.is_truthy(mark.source:find("const uint CULLED", 1, true),
+            "the include's text must be present, not its directive")
+        assert.is_falsy(mark.source:find("#include", 1, true))
+
+        -- And the same include reaches the pass on the other side of it, which
+        -- is why it is an include rather than two copies.
+        local compact = shaders.get("instance.compact.comp")
+        assert.is_truthy(compact.source:find("const uint CULLED", 1, true))
+    end)
+
+    it("hashes what the include expanded to", function()
+        local before = shaders.hash(shaders.get("instance.mark.comp").source)
+        shaders.override("spec.probe.frag", '#version 450\n#include "cull.glsl"\n')
+        local probe = shaders.get("spec.probe.frag")
+        assert.is_truthy(probe.source:find("CULLED", 1, true))
+        shaders.override("spec.probe.frag", nil)
+        -- Unchanged by the probe, so the hash is of content and not of state.
+        assert.are.equal(before,
+            shaders.hash(shaders.get("instance.mark.comp").source))
+    end)
+
+    it("reads variants declared in the file", function()
+        shaders.override("spec.variants.frag", table.concat({
+            "#version 450",
+            "#pragma tecs2d variants LIGHTS=1",
+            "#pragma tecs2d variants LIGHTS=4 SHADOWS=1",
+            "void main() {}",
+        }, "\n"))
+
+        local entry = shaders.get("spec.variants.frag")
+        assert.are.equal(2, #entry.variants)
+        assert.are.equal("1", entry.variants[1].LIGHTS)
+        assert.are.equal("4", entry.variants[2].LIGHTS)
+        assert.are.equal("1", entry.variants[2].SHADOWS)
+
+        -- The empty set always counts too, so the file yields three entries.
+        local keys = {}
+        for _, variant in ipairs(shaders.buildList()) do
+            keys[variant.key] = true
+        end
+        assert.is_true(keys["spec.variants.frag"])
+        assert.is_true(keys["spec.variants.frag|LIGHTS=1"])
+        assert.is_true(keys["spec.variants.frag|LIGHTS=4,SHADOWS=1"])
+
+        shaders.override("spec.variants.frag", nil)
+    end)
+
+    it("stops on an include cycle rather than recursing", function()
+        shaders.override("spec.cycle.frag",
+            '#version 450\n#include "spec.cycle.frag"\n')
+        assert.has_error(function() shaders.get("spec.cycle.frag") end)
+        shaders.override("spec.cycle.frag", nil)
+    end)
+
+    it("names an include it cannot find", function()
+        shaders.override("spec.missing.frag",
+            '#version 450\n#include "no-such-include.glsl"\n')
+        local ok, reason = pcall(shaders.get, "spec.missing.frag")
+        assert.is_false(ok)
+        assert.is_truthy(tostring(reason):find("no-such-include", 1, true))
+        shaders.override("spec.missing.frag", nil)
     end)
 
     it("keys a variant by its defines, not by table order", function()

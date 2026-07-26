@@ -1,31 +1,50 @@
---- The engine's GLSL, and the registry it is reached through.
+--- Finds shader sources, resolves their includes, and reads their variants.
 ---
---- Every shader the engine can ask for at run time is named here. That is what
---- makes a build packageable: the packaging step enumerates this registry, so
---- it needs no device, no window, and no world, and a shader that is not
---- listed cannot appear on a target that ships no compiler.
+--- GLSL lives in `.glsl` files under `shaders/` in an asset root, not in Lua
+--- strings. The packaging step has to enumerate every shader the engine can
+--- ask for, and a directory glob does that without a device, a window, a world,
+--- or Lua running at all. Files also get syntax highlighting, a language server
+--- and a formatter, which a long string does not.
 ---
---- Keeping the sources here rather than beside the code that binds them costs
---- nothing in correctness, because the resource counts SDL_GPU is told are
---- reflected out of this text rather than declared at the binding site. The
---- binding code cannot disagree with a shader it does not describe.
+--- A console having no filesystem does not argue against this: files are read
+--- at build time on a developer's machine, and a release reads only the pack.
+---
+--- Stage is in the filename rather than a directory, because a shared include
+--- has no home under `fragment/` or `vertex/` and is included by both.
+---
+---   shaders/instance.frag.glsl        fragment
+---   shaders/instance.cull.comp.glsl   compute
+---   shaders/include/depth.glsl        included, never compiled alone
 
 local bit <const> = require("bit")
+local sdl <const> = require("tecs2d.ffi.sdl3")
+local loader <const> = require("tecs2d.ffi.loader")
+local paths <const> = require("tecs2d.platform.paths")
+
+local C <const> = sdl.C
+
+--- Filename suffix to stage.
+local STAGES <const>: {string: string} = {
+    vert = "vertex",
+    frag = "fragment",
+    comp = "compute",
+}
+
+--- Includes may nest this deep. Past it, the graph has a cycle.
+local MAX_INCLUDE_DEPTH <const> = 16
 
 local record shaders
-    --- One named shader source.
+    --- One shader source, resolved.
     record Entry
-        --- Stable name, `<subsystem>.<what>.<stage>`. This is the key a
-        --- packaged artifact is found under, so renaming one invalidates any
-        --- pack built before the rename.
+        --- Name without the `.glsl` extension, e.g. `instance.frag`. This is
+        --- the key a packaged artifact is found under, so renaming a file
+        --- invalidates any pack built before the rename.
         name: string
         --- "vertex", "fragment", or "compute".
         stage: string
+        --- Source with every include already expanded.
         source: string
-        --- Define sets that must be baked in addition to the empty one. A
-        --- variant the engine assembles at run time but does not declare here
-        --- is absent from every pack, which is a failure on a target that
-        --- cannot compile.
+        --- Define sets declared by the file, beyond the empty one.
         variants: {{string: string}}
     end
 
@@ -39,14 +58,53 @@ local record shaders
     end
 end
 
-local registry <const>: {string: shaders.Entry} = {}
-local order <const>: {string} = {}
+--- Sources substituted in memory, which only specs do.
+local overrides <const>: {string: string} = {}
+--- Resolved entries, keyed by name.
+local cache <const>: {string: shaders.Entry} = {}
+
+--- Directories searched, nearest first. A game's own root goes ahead of the
+--- engine's, so a game can replace an engine shader by name.
+local roots: {string} = nil
+
+local function searchRoots(): {string}
+    if roots == nil then roots = { paths.asset("shaders/") } end
+    return roots
+end
+
+--- Adds a directory to search before the ones already known.
+function shaders.addRoot(path: string)
+    local list = searchRoots()
+    table.insert(list, 1, path:sub(-1) == "/" and path or path .. "/")
+    for key in pairs(cache) do cache[key] = nil end
+end
+
+--- Reads a file through SDL, so this works wherever content lives.
+local function readFile(path: string): string
+    local size = loader.newArray("size_t[1]")
+    local data = C.SDL_LoadFile(path, size)
+    if data == nil then return nil end
+    local text = loader.toBytes(data, tonumber(size[0]) as integer)
+    C.SDL_free(data)
+    return text
+end
+
+--- Locates `relative` in the first root that has it.
+local function find(relative: string): string
+    for _, root in ipairs(searchRoots()) do
+        local text = readFile(root .. relative)
+        if text ~= nil then return text end
+    end
+    return nil
+end
 
 --- FNV-1a over the bytes, as eight hex digits.
 ---
---- Identifies a source, so a pack built from different text is detected rather
---- than trusted. The multiply is decomposed into shifts because the prime
---- times a 32-bit value exceeds what a double holds exactly.
+--- Identifies a source so a pack built from different text is detected rather
+--- than trusted. Hashed after includes are expanded, which is the whole reason
+--- they are expanded here rather than left to the compiler: a hash of the
+--- top-level file alone would not change when an include did, and a stale pack
+--- would pass its own check.
 function shaders.hash(text: string): string
     local h = 0x811c9dc5
     for i = 1, #text do
@@ -55,6 +113,60 @@ function shaders.hash(text: string): string
             + bit.lshift(h, 7) + bit.lshift(h, 4) + bit.lshift(h, 1) + h)
     end
     return bit.tohex(h)
+end
+
+--- Expands `#include "name"` against the include directory.
+---
+--- Textual, and deliberately so. The compiler's own include callbacks resolve
+--- after this point, which would leave the hash blind to an include changing,
+--- and they would need a filesystem that only the packaging step has.
+local function expand(text: string, depth: integer, seen: {string: boolean}): string
+    if depth > MAX_INCLUDE_DEPTH then
+        error("tecs2d: shader includes nest too deeply; check for a cycle", 0)
+    end
+
+    local result = text:gsub('#include%s+"([^"]+)"', function(name: string): string
+        if seen[name] then
+            error(("tecs2d: shader include cycle through '%s'"):format(name), 0)
+        end
+        -- Under `include/` first, then as given, so an include may carry its
+        -- own extension or sit in a subdirectory.
+        local included = find("include/" .. name) or find(name)
+        if included == nil then
+            error(("tecs2d: no shader include named '%s'"):format(name), 0)
+        end
+        seen[name] = true
+        local expanded = expand(included, depth + 1, seen)
+        seen[name] = nil
+        return expanded
+    end)
+    return result
+end
+
+--- Reads `#pragma tecs2d variants A=1 B=2` lines into define sets.
+---
+--- Declared in the file rather than a manifest beside it, so the two cannot
+--- disagree about what a shader needs. Each pragma line is one variant, and its
+--- assignments are that variant's defines.
+local function readVariants(text: string): {{string: string}}
+    local list: {{string: string}} = {}
+    for line in text:gmatch("#pragma%s+tecs2d%s+variants([^\n]*)") do
+        local defines: {string: string} = {}
+        local any = false
+        for macro, value in line:gmatch("([%w_]+)=([^%s]+)") do
+            defines[macro] = value
+            any = true
+        end
+        if any then list[#list + 1] = defines end
+    end
+    return list
+end
+
+--- Substitutes a source in memory, for a spec probing a pass in isolation.
+--- Pass nil to restore the file.
+function shaders.override(name: string, source: string)
+    overrides[name] = source
+    cache[name] = nil
 end
 
 --- The key a name and define set are stored under.
@@ -72,52 +184,89 @@ function shaders.key(name: string, defines?: {string: string}): string
     return name .. "|" .. table.concat(parts, ",")
 end
 
---- Registers a source under `entry.name`.
----
---- Re-registering a name replaces it, which is what a test wants when it
---- overrides an engine shader to probe a pass in isolation.
-function shaders.register(entry: shaders.Entry)
-    if entry.name == nil or entry.stage == nil or entry.source == nil then
-        error("tecs2d: a shader entry needs a name, a stage, and a source", 2)
-    end
-    if registry[entry.name] == nil then
-        order[#order + 1] = entry.name
-    end
-    registry[entry.name] = entry
+--- Stage implied by a name's suffix, or nil if it has none.
+local function stageOf(name: string): string
+    local suffix = name:match("%.([^.]+)$")
+    return suffix ~= nil and STAGES[suffix] or nil
 end
 
---- Returns the entry registered under `name`.
+--- Returns the entry named `name`, reading and resolving it once.
 function shaders.get(name: string): shaders.Entry
-    local entry = registry[name]
-    if entry == nil then
-        error(("tecs2d: no shader named '%s'"):format(tostring(name)), 2)
+    local cached = cache[name]
+    if cached ~= nil then return cached end
+
+    local stage = stageOf(name)
+    if stage == nil then
+        error(("tecs2d: '%s' does not name a stage; expected a .vert, .frag or "
+            .. ".comp suffix"):format(name), 2)
     end
+
+    local text = overrides[name]
+    if text == nil then
+        text = find(name .. ".glsl")
+        if text == nil then
+            error(("tecs2d: no shader file for '%s' under %s")
+                :format(name, table.concat(searchRoots(), ", ")), 2)
+        end
+    end
+
+    local entry: shaders.Entry = {
+        name = name,
+        stage = stage,
+        source = expand(text, 0, {}),
+        variants = readVariants(text),
+    }
+    cache[name] = entry
     return entry
 end
 
---- Returns the GLSL registered under `name`.
+--- Returns the resolved GLSL for `name`.
 function shaders.source(name: string): string
     return shaders.get(name).source
 end
 
---- Every registered entry, in registration order.
+--- Every shader in every root, by name, sorted.
+---
+--- `include/` is not searched: those are fragments meant to be pasted into a
+--- stage, and compiling one alone would fail. A file whose name carries no
+--- stage suffix is skipped for the same reason.
 function shaders.list(): {shaders.Entry}
-    local list: {shaders.Entry} = {}
-    for i = 1, #order do
-        list[i] = registry[order[i]]
+    local names: {string: boolean} = {}
+    for name in pairs(overrides) do names[name] = true end
+
+    for _, root in ipairs(searchRoots()) do
+        local count = loader.newArray("int[1]")
+        local found = C.SDL_GlobDirectory(root, "*.glsl", 0, count)
+        if found ~= nil then
+            local list = found as loader.CArray
+            for index = 0, (tonumber(count[0]) as integer) - 1 do
+                local file = loader.toString(list[index] as loader.CValue)
+                names[(file:gsub("%.glsl$", ""))] = true
+            end
+            C.SDL_free(found as loader.CValue)
+        end
     end
+
+    local sorted: {string} = {}
+    for name in pairs(names) do
+        if stageOf(name) ~= nil then sorted[#sorted + 1] = name end
+    end
+    table.sort(sorted)
+
+    local list: {shaders.Entry} = {}
+    for index, name in ipairs(sorted) do list[index] = shaders.get(name) end
     return list
 end
 
---- Every variant of every registered entry that a pack must contain.
+--- Every variant of every shader that a pack must contain.
 ---
---- The empty define set always counts as a variant, since that is what the
---- engine asks for unless it is assembling a material.
+--- The empty define set always counts, since that is what the engine asks for
+--- unless it is assembling a material.
 function shaders.buildList(): {shaders.Variant}
     local list: {shaders.Variant} = {}
     for _, entry in ipairs(shaders.list()) do
         local sets: {{string: string}} = { {} }
-        for _, defines in ipairs(entry.variants or {}) do
+        for _, defines in ipairs(entry.variants) do
             sets[#sets + 1] = defines
         end
         for _, defines in ipairs(sets) do
@@ -132,368 +281,5 @@ function shaders.buildList(): {shaders.Variant}
     end
     return list
 end
-
--------------------------------------------------------------------------------
--- Instanced geometry
--------------------------------------------------------------------------------
-
---- Marks what survives the view test and prefixes it within its workgroup.
----
---- Three passes rather than one atomic append, because an atomic gives no
---- ordering: the compacted list comes out differently every frame, so
---- overlapping geometry swaps which one wins and the scene shimmers. A scan is
---- deterministic, so the same scene draws the same way every frame.
-shaders.register({
-    name = "instance.mark.comp",
-    stage = "compute",
-    source = [[
-#version 450
-layout(local_size_x = 256) in;
-
-layout(set = 0, binding = 0) readonly buffer Bounds {
-    vec4 item[];   // xy centre, zw half extent
-} bounds;
-
-layout(set = 1, binding = 0) writeonly buffer Slots { uint slot[]; } slots;
-layout(set = 1, binding = 1) writeonly buffer Counts { uint count[]; } counts;
-layout(set = 2, binding = 0) uniform Cull { vec4 params; } cull;
-
-const uint CULLED = 0xFFFFFFFFu;
-
-shared uint scratch[256];
-
-void main() {
-    uint i = gl_GlobalInvocationID.x;
-    uint t = gl_LocalInvocationID.x;
-
-    uint keep = 0u;
-    if (i < uint(cull.params.z)) {
-        vec4 box = bounds.item[i];
-        bool outside = box.x + box.z < 0.0 || box.x - box.z > cull.params.x ||
-                       box.y + box.w < 0.0 || box.y - box.w > cull.params.y;
-        keep = outside ? 0u : 1u;
-    }
-
-    // Inclusive scan across the workgroup. Each survivor learns how many
-    // survivors precede it here, which is its offset inside this block.
-    scratch[t] = keep;
-    barrier();
-    for (uint stride = 1u; stride < 256u; stride <<= 1) {
-        uint carried = 0u;
-        if (t >= stride) { carried = scratch[t - stride]; }
-        barrier();
-        scratch[t] += carried;
-        barrier();
-    }
-
-    if (i < uint(cull.params.z)) {
-        slots.slot[i] = keep == 1u ? scratch[t] - 1u : CULLED;
-    }
-    if (t == 255u) {
-        counts.count[gl_WorkGroupID.x] = scratch[t];
-    }
-}
-]],
-})
-
---- Turns per-block survivor counts into per-block base offsets.
----
---- One workgroup, so the scan is over blocks rather than entities and stays a
---- single dispatch however large the world is. Each thread folds a contiguous
---- span serially, the folded totals are scanned, and the span is rewritten in
---- place as running bases.
-shaders.register({
-    name = "instance.scan.comp",
-    stage = "compute",
-    source = [[
-#version 450
-layout(local_size_x = 256) in;
-
-layout(set = 1, binding = 0) buffer Counts { uint count[]; } counts;
-layout(set = 1, binding = 1) buffer DrawArgs { uint value[]; } args;
-layout(set = 2, binding = 0) uniform Cull { vec4 params; } cull;
-
-shared uint partial[256];
-
-void main() {
-    uint t = gl_LocalInvocationID.x;
-    uint blocks = uint(cull.params.w);
-    uint span = (blocks + 255u) / 256u;
-    uint begin = t * span;
-    uint end = min(begin + span, blocks);
-
-    uint sum = 0u;
-    for (uint i = begin; i < end; i++) { sum += counts.count[i]; }
-
-    partial[t] = sum;
-    barrier();
-    for (uint stride = 1u; stride < 256u; stride <<= 1) {
-        uint carried = 0u;
-        if (t >= stride) { carried = partial[t - stride]; }
-        barrier();
-        partial[t] += carried;
-        barrier();
-    }
-
-    // Exclusive: where this thread's span starts in the compacted list.
-    uint base = partial[t] - sum;
-    for (uint i = begin; i < end; i++) {
-        uint block = counts.count[i];
-        counts.count[i] = base;
-        base += block;
-    }
-
-    if (t == 255u) {
-        // The draw's instance count, which the CPU never reads back.
-        args.value[1] = partial[255];
-    }
-}
-]],
-})
-
---- Writes each survivor at the offset the scan assigned it.
-shaders.register({
-    name = "instance.compact.comp",
-    stage = "compute",
-    source = [[
-#version 450
-layout(local_size_x = 256) in;
-
-layout(set = 0, binding = 0) readonly buffer Slots { uint slot[]; } slots;
-layout(set = 0, binding = 1) readonly buffer Bases { uint base[]; } bases;
-layout(set = 1, binding = 0) writeonly buffer Visible { uint index[]; } visible;
-layout(set = 2, binding = 0) uniform Cull { vec4 params; } cull;
-
-const uint CULLED = 0xFFFFFFFFu;
-
-void main() {
-    uint i = gl_GlobalInvocationID.x;
-    if (i >= uint(cull.params.z)) { return; }
-    uint offset = slots.slot[i];
-    if (offset == CULLED) { return; }
-    visible.index[bases.base[gl_WorkGroupID.x] + offset] = i;
-}
-]],
-})
-
-shaders.register({
-    name = "instance.vert",
-    stage = "vertex",
-    source = [[
-#version 450
-
-struct Instance {
-    vec4 xform;   // rotation, scaleX, scaleY, spare
-    vec4 origin;  // xy world position, z array layer, w material
-    vec4 color;
-    vec4 uvRect;  // u0 v0 u1 v1
-};
-
-layout(set = 0, binding = 0) readonly buffer Instances { Instance item[]; } instances;
-layout(set = 0, binding = 1) readonly buffer Visible { uint index[]; } visible;
-layout(set = 1, binding = 0) uniform View { vec4 viewport; } view;
-
-layout(location = 0) out vec4 vColor;
-layout(location = 1) out vec3 vUV;
-// Local quad coordinate, -0.5 to 0.5, for a distance field to be evaluated
-// over. Free: it is the corner the vertex already used.
-layout(location = 2) out vec2 vLocal;
-// Material and its parameter, flat because they are per instance.
-layout(location = 3) flat out int vMaterial;
-layout(location = 4) flat out float vParam;
-
-// Four distinct corners, visited through an index buffer. A non-indexed quad
-// runs the vertex shader six times for the four positions it actually has.
-const vec2 CORNERS[4] = vec2[4](
-    vec2(-0.5, -0.5), vec2( 0.5, -0.5),
-    vec2(-0.5,  0.5), vec2( 0.5,  0.5)
-);
-
-void main() {
-    // The cull compacted the survivors, so this walks the visible list rather
-    // than the instance array.
-    uint slot = visible.index[gl_InstanceIndex];
-    Instance self = instances.item[slot];
-
-    // The basis is built here rather than on the CPU. Sine and cosine are one
-    // hardware instruction on a GPU and a libm call on the host, and the host
-    // would pay them once per entity per frame while this pays them across
-    // however many cores are free.
-    float angle = self.xform.x;
-    float sx = self.xform.y;
-    float sy = self.xform.z;
-    float c = cos(angle);
-    float s = sin(angle);
-    // Column major, which is what the constructor takes: the first pair is
-    // the first column, not the first row. Transposing these gives a matrix
-    // that scales along world axes after rotating, so a turned rectangle keeps
-    // an upright footprint and only its sampling spins.
-    mat2 basis = mat2(c * sx, s * sx, -s * sy, c * sy);
-    vec2 corner = CORNERS[gl_VertexIndex];
-    vec2 world = self.origin.xy + basis * corner;
-
-    // World units are pixels with the origin at the top left, which is also
-    // what the lighting pass works in, so light positions need no conversion.
-    vec2 ndc = vec2(world.x / view.viewport.x * 2.0 - 1.0,
-                    1.0 - world.y / view.viewport.y * 2.0);
-    gl_Position = vec4(ndc, 0.0, 1.0);
-    vColor = self.color;
-
-    // Corners run -0.5..0.5, and V is flipped because texture rows run down
-    // from the top while the quad's local Y runs up.
-    vUV = vec3(mix(self.uvRect.xy, self.uvRect.zw,
-                   vec2(corner.x + 0.5, 0.5 - corner.y)),
-               self.origin.z);
-
-    vLocal = corner;
-    // Material and parameter share origin.w, which is otherwise spare: the
-    // integer part selects, the fraction carries the parameter.
-    float packed = self.origin.w;
-    vMaterial = int(floor(packed));
-    vParam = fract(packed);
-}
-]],
-})
-
-shaders.register({
-    name = "instance.frag",
-    stage = "fragment",
-    source = [[
-#version 450
-layout(location = 0) in vec4 vColor;
-layout(location = 1) in vec3 vUV;
-layout(location = 2) in vec2 vLocal;
-layout(location = 3) flat in int vMaterial;
-layout(location = 4) flat in float vParam;
-layout(location = 0) out vec4 albedo;
-layout(location = 1) out vec4 normal;
-
-layout(set = 2, binding = 0) uniform sampler2DArray images;
-
-const int MATERIAL_TEXTURED = 0;
-const int MATERIAL_CIRCLE = 1;
-const int MATERIAL_ROUNDED = 2;
-
-// Signed distance to a rounded box, negative inside.
-float roundedBox(vec2 p, vec2 extent, float radius) {
-    vec2 q = abs(p) - extent + radius;
-    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
-}
-
-void main() {
-    // Coverage decides membership, not opacity. The G-buffer pass writes with
-    // replace rather than blend, so a partially covered edge fragment would
-    // overwrite what is behind it instead of blending into it. Rejecting below
-    // half coverage keeps the silhouette right; smooth edges need either
-    // multisampling or the forward-blended path, both of which follow depth.
-    if (vMaterial != MATERIAL_TEXTURED) {
-        float distance;
-        if (vMaterial == MATERIAL_CIRCLE) {
-            distance = length(vLocal) - 0.5;
-        } else {
-            distance = roundedBox(vLocal, vec2(0.5), vParam);
-        }
-        if (distance > 0.0) { discard; }
-    }
-
-    // Untextured geometry samples layer zero, so both paths land here.
-    albedo = texture(images, vUV) * vColor;
-    normal = vec4(0.5, 0.5, 1.0, 1.0);
-}
-]],
-})
-
--------------------------------------------------------------------------------
--- Deferred passes
--------------------------------------------------------------------------------
-
---- Emits a fullscreen triangle and the UV to sample a full-target texture.
----
---- The V coordinate is flipped against the NDC Y: NDC +Y is up while texture
---- V runs down from the top-left, so a pass that samples its input without
---- this correction produces a vertically mirrored image, which reads as a
---- content bug rather than a coordinate one.
-shaders.register({
-    name = "deferred.fullscreen.vert",
-    stage = "vertex",
-    source = [[
-#version 450
-layout(location = 0) out vec2 vUV;
-void main() {
-    vec2 corner = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2);
-    gl_Position = vec4(corner * 2.0 - 1.0, 0.0, 1.0);
-    vUV = vec2(corner.x, 1.0 - corner.y);
-}
-]],
-})
-
-shaders.register({
-    name = "deferred.lighting.frag",
-    stage = "fragment",
-    source = [[
-#version 450
-
-layout(location = 0) in vec2 vUV;
-layout(location = 0) out vec4 outColor;
-
-layout(set = 2, binding = 0) uniform sampler2D gAlbedo;
-layout(set = 2, binding = 1) uniform sampler2D gNormal;
-
-struct Light {
-    vec4 position;   // xy in target pixels, z height, w radius
-    vec4 color;      // rgb colour, a intensity
-};
-
-layout(set = 2, binding = 2) readonly buffer Lights {
-    Light item[];
-} lights;
-
-layout(set = 3, binding = 0) uniform Scene {
-    vec4 ambient;      // rgb ambient colour, a unused
-    vec4 viewport;     // xy target size, z light count, w unused
-} scene;
-
-void main() {
-    vec4 albedo = texture(gAlbedo, vUV);
-
-    // Normals are stored biased into unsigned range, as the G-buffer format
-    // has no signed representation.
-    vec3 normal = normalize(texture(gNormal, vUV).xyz * 2.0 - 1.0);
-
-    vec2 fragment = vUV * scene.viewport.xy;
-    vec3 accumulated = scene.ambient.rgb;
-
-    int count = int(scene.viewport.z);
-    for (int i = 0; i < count; i++) {
-        Light light = lights.item[i];
-        vec3 toLight = vec3(light.position.xy - fragment, light.position.z);
-        float distance = length(toLight);
-        float radius = max(light.position.w, 1.0);
-
-        // Smooth falloff to zero at the radius so a light has bounded reach
-        // and the lighting cost stays proportional to what it touches.
-        float attenuation = clamp(1.0 - distance / radius, 0.0, 1.0);
-        attenuation *= attenuation;
-
-        float lambert = max(dot(normal, normalize(toLight)), 0.0);
-        accumulated += light.color.rgb * light.color.a * attenuation * lambert;
-    }
-
-    outColor = vec4(albedo.rgb * accumulated, albedo.a);
-}
-]],
-})
-
-shaders.register({
-    name = "deferred.composite.frag",
-    stage = "fragment",
-    source = [[
-#version 450
-layout(location = 0) in vec2 vUV;
-layout(location = 0) out vec4 outColor;
-layout(set = 2, binding = 0) uniform sampler2D litTexture;
-void main() { outColor = texture(litTexture, vUV); }
-]],
-})
 
 return shaders
