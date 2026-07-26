@@ -10,9 +10,9 @@
 -- their headers may not be redistributed. It is the evidence that a port has
 -- five things to supply and nothing above them to touch.
 
-local root = os.getenv("TECS2D_LUA") or "out/macos-arm64-dev/lua"
+local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. "../tecs/build/?.lua;../tecs/build/?/init.lua;" .. package.path
+    .. package.path
 
 local sdl = require("tecs.ffi.sdl3")
 local adapter = require("tecs.platform.adapter")
@@ -82,11 +82,11 @@ describe("platform contract", function()
         paths.reset()
 
         assert.are.equal("/dev/content/", paths.base())
-        assert.are.equal("/dev/save/tecs2d/tecs2d/", paths.pref())
-        assert.are.equal("/dev/save/tecs2d/tecs2d/save.json",
+        assert.are.equal("/dev/save/tecs/tecs/", paths.pref())
+        assert.are.equal("/dev/save/tecs/tecs/save.json",
             paths.writable("save.json"))
 
-        -- A development run has TECS2D_ASSETS set and it outranks everything,
+        -- A development run has TECS_ASSETS set and it outranks everything,
         -- so content is checked against the platform only where nothing has
         -- overridden it.
         paths.setAssets(paths.base())
@@ -100,7 +100,7 @@ describe("platform contract", function()
         paths.reset()
         paths.setAssets("/tmp/staging")
         assert.are.equal("/tmp/staging/", paths.assets())
-        assert.are.equal("/dev/save/tecs2d/tecs2d/", paths.pref(),
+        assert.are.equal("/dev/save/tecs/tecs/", paths.pref(),
             "the writable root is the platform's and is not overridable")
     end)
 

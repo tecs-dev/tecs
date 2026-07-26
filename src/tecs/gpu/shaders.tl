@@ -127,18 +127,18 @@ end
 --- and they would need a filesystem that only the packaging step has.
 local function expand(text: string, depth: integer, seen: {string: boolean}): string
     if depth > MAX_INCLUDE_DEPTH then
-        error("tecs2d: shader includes nest too deeply; check for a cycle", 0)
+        error("tecs: shader includes nest too deeply; check for a cycle", 0)
     end
 
     local result = text:gsub('#include%s+"([^"]+)"', function(name: string): string
         if seen[name] then
-            error(("tecs2d: shader include cycle through '%s'"):format(name), 0)
+            error(("tecs: shader include cycle through '%s'"):format(name), 0)
         end
         -- Under `include/` first, then as given, so an include may carry its
         -- own extension or sit in a subdirectory.
         local included = find("include/" .. name) or find(name)
         if included == nil then
-            error(("tecs2d: no shader include named '%s'"):format(name), 0)
+            error(("tecs: no shader include named '%s'"):format(name), 0)
         end
         seen[name] = true
         local expanded = expand(included, depth + 1, seen)
@@ -148,14 +148,14 @@ local function expand(text: string, depth: integer, seen: {string: boolean}): st
     return result
 end
 
---- Reads `#pragma tecs2d variants A=1 B=2` lines into define sets.
+--- Reads `#pragma tecs variants A=1 B=2` lines into define sets.
 ---
 --- Declared in the file rather than a manifest beside it, so the two cannot
 --- disagree about what a shader needs. Each pragma line is one variant, and its
 --- assignments are that variant's defines.
 local function readVariants(text: string): {{string: string}}
     local list: {{string: string}} = {}
-    for line in text:gmatch("#pragma%s+tecs2d%s+variants([^\n]*)") do
+    for line in text:gmatch("#pragma%s+tecs%s+variants([^\n]*)") do
         local defines: {string: string} = {}
         local any = false
         for macro, value in line:gmatch("([%w_]+)=([^%s]+)") do
@@ -212,7 +212,7 @@ function shaders.get(name: string): shaders.Entry
 
     local stage = stageOf(name)
     if stage == nil then
-        error(("tecs2d: '%s' does not name a stage; expected a .vert, .frag or "
+        error(("tecs: '%s' does not name a stage; expected a .vert, .frag or "
             .. ".comp suffix"):format(name), 2)
     end
 
@@ -220,7 +220,7 @@ function shaders.get(name: string): shaders.Entry
     if text == nil then
         text = find(name .. ".glsl")
         if text == nil then
-            error(("tecs2d: no shader file for '%s' under %s")
+            error(("tecs: no shader file for '%s' under %s")
                 :format(name, table.concat(searchRoots(), ", ")), 2)
         end
     end

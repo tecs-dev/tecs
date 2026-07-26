@@ -66,8 +66,8 @@ def generatedDir() -> Path:
     """
     if len(sys.argv) > 1:
         return Path(sys.argv[1])
-    for candidate in (REPO / "build" / "tecs2d" / "ffi",
-                      REPO / "out" / "lua" / "tecs2d" / "ffi"):
+    for candidate in (REPO / "build" / "tecs" / "ffi",
+                      REPO / "out" / "lua" / "tecs" / "ffi"):
         if candidate.is_dir():
             return candidate
     sys.exit("cannot find generated bindings; pass their directory")
@@ -189,7 +189,7 @@ def luaReport(name: str, records):
 local ffi = require("ffi")
 local json = ...
 package.path = "%s/?.lua;%s/?/init.lua;" .. package.path
-local cdefSource = require("tecs2d.ffi.%scdef")
+local cdefSource = require("tecs.ffi.%scdef")
 ffi.cdef(cdefSource)
 local out = {}
 for line in io.lines(json) do

@@ -28,7 +28,7 @@
 --- for the dirty gate; the compacted list is rebuilt every frame and is a
 --- separate array, so the two do not fight.
 
-local tecs <const> = require("tecs")
+local ecs <const> = require("tecs.ecs")
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
 local Buffer <const> = require("tecs.gpu.Buffer")
@@ -119,15 +119,15 @@ local record Renderer
     _cullUniform: loader.CArray
     _device: loader.CPtr
     _lights: {Deferred.Light}
-    _renderables: tecs.Query
-    _lightSources: tecs.Query
+    _renderables: ecs.Query
+    _lightSources: ecs.Query
     --- UV extent of the white pixel within its cell. An image smaller than a
     --- cell does not reach the cell's edge, so sampling 0..1 would read the
     --- undefined remainder rather than the image.
     _whiteU1: number
     _whiteV1: number
-    _runs: {tecs.Archetype: Run}
-    _seen: {tecs.Archetype: integer}
+    _runs: {ecs.Archetype: Run}
+    _seen: {ecs.Archetype: integer}
     _destroyed: boolean
 end
 
@@ -149,7 +149,7 @@ end
 --- Columns are read, not mutated, so `get` is correct here. Taking `getMut`
 --- would mark these components dirty on every archetype every frame, which
 --- would make the gate below always true and defeat its own purpose.
-local function writeRun(self: Renderer, archetype: tecs.Archetype,
+local function writeRun(self: Renderer, archetype: ecs.Archetype,
                         length: integer, offset: integer)
     local floats = self.instances:mapAs("float *")
     local bounds = self._bounds:mapAs("float *")
@@ -457,7 +457,7 @@ end
 --- The handle's pixels are released here: the array holds them now.
 function Renderer:registerImage(handle: assets.Handle): components.Sprite, TextureArray.Region
     if handle.status ~= "ready" then
-        error(("tecs2d: image '%s' is %s"):format(handle.path, handle.status), 2)
+        error(("tecs: image '%s' is %s"):format(handle.path, handle.status), 2)
     end
     local region = self.images:add(handle.pixels, handle.width, handle.height,
         handle.pitch)
@@ -471,7 +471,7 @@ end
 --- Syncing runs inside the world's update, in RenderFirst. Rendering happens
 --- afterwards against a frame, so the two stay separable: the sync needs no
 --- command buffer and the render needs no world.
-function Renderer:install(world: tecs.World)
+function Renderer:install(world: ecs.World)
     self._renderables = world:query({
         include = {
             components.Transform2D, components.Tint, components.Renderable,
@@ -483,7 +483,7 @@ function Renderer:install(world: tecs.World)
 
     world:addSystem({
         name = "tecs.SyncRenderState",
-        phase = tecs.phases.RenderFirst,
+        phase = ecs.phases.RenderFirst,
         run = function()
             self.count, self.dropped, self.rewritten = syncInstances(self)
             self.deferred:setLights(syncLights(self))

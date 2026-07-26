@@ -31,8 +31,8 @@ local C <const> = sdl.C
 loader.declare("logsink")
 
 --- The native sink, which shares the worker library.
-local sink <const> = loader.library("tecs2dworker", "tecs",
-    "TECS2D_WORKER_PATH", "logsink")
+local sink <const> = loader.library("tecsworker", "tecs",
+    "TECS_WORKER_PATH", "logsink")
 
 --- Where our categories begin. SDL's own occupy everything below, and the
 --- boundary is read from SDL rather than counted here, since the enum has
@@ -88,7 +88,7 @@ function log.get(name: string): log.Logger
     names[self.category] = name
     -- The sink writes names rather than numbers, and it cannot ask Lua for
     -- them because it runs on threads the VM has never seen.
-    sink.tecs2dLogSinkCategory(CUSTOM, self.category, name)
+    sink.tecsLogSinkCategory(CUSTOM, self.category, name)
     return self
 end
 
@@ -136,7 +136,7 @@ end
 local filePath: string = nil
 
 function log.openFile(path: string): boolean
-    local ok = sink.tecs2dLogSinkOpen(path) as boolean
+    local ok = sink.tecsLogSinkOpen(path) as boolean
     if ok then filePath = path end
     return ok
 end
@@ -149,7 +149,7 @@ end
 
 --- Stops writing to the file and restores SDL's own output function.
 function log.closeFile()
-    sink.tecs2dLogSinkClose()
+    sink.tecsLogSinkClose()
     filePath = nil
 end
 

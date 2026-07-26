@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 # C++ is enabled only to link SPIRV-Cross, which is a C++ library behind a C
 # API. No engine source is C++.
-project(tecs2d C CXX)
+project(tecs C CXX)
 
 # The canonical build. Make, Gradle, and Xcode are thin wrappers over this, so
 # there is one description of how the engine is assembled rather than one per
@@ -10,27 +10,21 @@ project(tecs2d C CXX)
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-option(TECS2D_SYSTEM_DEPS
+option(TECS_SYSTEM_DEPS
     "Resolve dependencies from the system rather than pinned sources" ON)
-option(TECS2D_BUILD_LUA
+option(TECS_BUILD_LUA
     "Generate FFI bindings and compile the Teal sources" ON)
-option(TECS2D_RUNTIME_SHADERS
+option(TECS_RUNTIME_SHADERS
     "Link a shader compiler, for development. Releases use packaged artifacts." ON)
 
-set(TECS2D_SPEC_OUT "${CMAKE_BINARY_DIR}/spec" CACHE PATH
+set(TECS_SPEC_OUT "${CMAKE_BINARY_DIR}/spec" CACHE PATH
     "Where compiled Teal specs are written")
-set(TECS2D_LUA_OUT "${CMAKE_BINARY_DIR}/lua" CACHE PATH
+set(TECS_LUA_OUT "${CMAKE_BINARY_DIR}/lua" CACHE PATH
     "Where compiled Lua and generated bindings are written")
-
-# The ECS is developed alongside this engine rather than vendored. Only its
-# source and type definitions are referenced; its own engine tree must not be
-# on the include path, or it would shadow this one.
-set(TECS2D_TECS_DIR "${CMAKE_SOURCE_DIR}/../tecs" CACHE PATH
-    "Root of the Tecs ECS checkout")
 
 # ---------------------------------------------------------------- dependencies
 
-if(NOT TECS2D_SYSTEM_DEPS)
+if(NOT TECS_SYSTEM_DEPS)
     # Pinned revisions for anything shipped. Left declared rather than fetched
     # by default because building this set from source is a long build, and
     # desktop development does not need it.
@@ -74,7 +68,7 @@ set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
 # against. A packaged one must not: leaving a developer's package-manager path
 # in a shipped binary is how a build that works only on the machine that made
 # it gets shipped.
-set(CMAKE_INSTALL_RPATH_USE_LINK_PATH ${TECS2D_SYSTEM_DEPS})
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH ${TECS_SYSTEM_DEPS})
 
 # ----------------------------------------------------------------- native code
 
@@ -88,105 +82,105 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH ${TECS2D_SYSTEM_DEPS})
 # plain interpreter can require it the ordinary way.
 # fpconv.c is deliberately absent: with USE_INTERNAL_FPCONV the header defines
 # fpconv_init inline and the conversions come from g_fmt.c and dtoa.c instead.
-set(TECS2D_CJSON_SOURCES
+set(TECS_CJSON_SOURCES
     vendor/cjson/lua_cjson.c vendor/cjson/strbuf.c
     vendor/cjson/g_fmt.c vendor/cjson/dtoa.c)
-set(TECS2D_CJSON_DEFINES USE_INTERNAL_FPCONV MULTIPLE_THREADS)
+set(TECS_CJSON_DEFINES USE_INTERNAL_FPCONV MULTIPLE_THREADS)
 
-add_library(tecs2d_cjson STATIC ${TECS2D_CJSON_SOURCES})
-target_compile_definitions(tecs2d_cjson PRIVATE ${TECS2D_CJSON_DEFINES})
-target_include_directories(tecs2d_cjson PRIVATE ${LUAJIT_INCLUDE_DIRS})
-set_target_properties(tecs2d_cjson PROPERTIES POSITION_INDEPENDENT_CODE ON)
+add_library(tecs_cjson STATIC ${TECS_CJSON_SOURCES})
+target_compile_definitions(tecs_cjson PRIVATE ${TECS_CJSON_DEFINES})
+target_include_directories(tecs_cjson PRIVATE ${LUAJIT_INCLUDE_DIRS})
+set_target_properties(tecs_cjson PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-add_library(cjson MODULE ${TECS2D_CJSON_SOURCES})
-target_compile_definitions(cjson PRIVATE ${TECS2D_CJSON_DEFINES})
+add_library(cjson MODULE ${TECS_CJSON_SOURCES})
+target_compile_definitions(cjson PRIVATE ${TECS_CJSON_DEFINES})
 target_include_directories(cjson PRIVATE ${LUAJIT_INCLUDE_DIRS})
 set_target_properties(cjson PROPERTIES
     PREFIX "" SUFFIX ".so"
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 target_link_libraries(cjson PRIVATE ${LUAJIT_LINK_LIBRARIES})
 
-add_library(tecs2d_worker SHARED native/worker.c native/logsink.c native/luamods.c)
-set_target_properties(tecs2d_worker PROPERTIES
-    OUTPUT_NAME tecs2dworker
+add_library(tecs_worker SHARED native/worker.c native/logsink.c native/luamods.c)
+set_target_properties(tecs_worker PROPERTIES
+    OUTPUT_NAME tecsworker
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
-target_link_libraries(tecs2d_worker PRIVATE
+target_link_libraries(tecs_worker PRIVATE
     PkgConfig::SDL3 PkgConfig::LUAJIT)
 
 # SPIRV-Cross ships static archives only, and the FFI needs a shared object.
 # Whole-archive linking is deliberate: the C API's symbols are not referenced
 # from this stub, so without it the linker would discard all of them.
-add_library(tecs2d_spirvcross SHARED native/spirvcross.c)
-set_target_properties(tecs2d_spirvcross PROPERTIES
+add_library(tecs_spirvcross SHARED native/spirvcross.c)
+set_target_properties(tecs_spirvcross PROPERTIES
     OUTPUT_NAME spirvcrossc
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
-target_include_directories(tecs2d_spirvcross PRIVATE ${SPIRV_CROSS_INCLUDE_DIRS})
+target_include_directories(tecs_spirvcross PRIVATE ${SPIRV_CROSS_INCLUDE_DIRS})
 
-set(TECS2D_SPVC_ARCHIVES
+set(TECS_SPVC_ARCHIVES
     spirv-cross-c spirv-cross-cpp spirv-cross-msl
     spirv-cross-glsl spirv-cross-hlsl spirv-cross-reflect
     spirv-cross-util spirv-cross-core)
-set(TECS2D_SPVC_WHOLE "")
-foreach(archive IN LISTS TECS2D_SPVC_ARCHIVES)
+set(TECS_SPVC_WHOLE "")
+foreach(archive IN LISTS TECS_SPVC_ARCHIVES)
     find_library(SPVC_${archive}_LIB NAMES ${archive}
         HINTS ${SPIRV_CROSS_LIBRARY_DIRS})
     if(NOT SPVC_${archive}_LIB)
         message(FATAL_ERROR "SPIRV-Cross archive ${archive} not found")
     endif()
-    list(APPEND TECS2D_SPVC_WHOLE "${SPVC_${archive}_LIB}")
+    list(APPEND TECS_SPVC_WHOLE "${SPVC_${archive}_LIB}")
 endforeach()
 
 if(APPLE)
-    target_link_options(tecs2d_spirvcross PRIVATE -Wl,-all_load)
+    target_link_options(tecs_spirvcross PRIVATE -Wl,-all_load)
 else()
-    target_link_options(tecs2d_spirvcross PRIVATE -Wl,--whole-archive)
+    target_link_options(tecs_spirvcross PRIVATE -Wl,--whole-archive)
 endif()
-target_link_libraries(tecs2d_spirvcross PRIVATE ${TECS2D_SPVC_WHOLE})
+target_link_libraries(tecs_spirvcross PRIVATE ${TECS_SPVC_WHOLE})
 if(NOT APPLE)
-    target_link_options(tecs2d_spirvcross PRIVATE -Wl,--no-whole-archive)
+    target_link_options(tecs_spirvcross PRIVATE -Wl,--no-whole-archive)
 endif()
-set_target_properties(tecs2d_spirvcross PROPERTIES LINKER_LANGUAGE CXX)
+set_target_properties(tecs_spirvcross PROPERTIES LINKER_LANGUAGE CXX)
 
 # The application host. SDL owns the loop, so this implements SDL's callback
 # entry points and reaches Lua through the Lua C API.
-add_executable(tecs2d native/host.c native/luamods.c)
+add_executable(tecs native/host.c native/luamods.c)
 
 # Where content sits relative to the executable, in the tree this build
 # installs. The host resolves its entry chunk and the engine resolves assets
 # against it, so the layout is described once here instead of being sniffed for
 # at run time.
-set(TECS2D_CONTENT "../share/tecs2d/lua/" CACHE STRING
+set(TECS_CONTENT "../share/tecs/lua/" CACHE STRING
     "Content directory relative to the installed executable")
-target_compile_definitions(tecs2d PRIVATE TECS2D_CONTENT="${TECS2D_CONTENT}")
-set_target_properties(tecs2d PROPERTIES
+target_compile_definitions(tecs PRIVATE TECS_CONTENT="${TECS_CONTENT}")
+set_target_properties(tecs PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
-target_link_libraries(tecs2d PRIVATE PkgConfig::SDL3 PkgConfig::LUAJIT)
+target_link_libraries(tecs PRIVATE PkgConfig::SDL3 PkgConfig::LUAJIT)
 
 if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
     # LuaJIT on x64 macOS needs its allocations below 2GB.
-    target_link_options(tecs2d PRIVATE
+    target_link_options(tecs PRIVATE
         -pagezero_size 10000 -image_base 100000000)
 endif()
 
 # ------------------------------------------------------- generated bindings
 
-if(TECS2D_BUILD_LUA)
+if(TECS_BUILD_LUA)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
-    set(GEN "${TECS2D_LUA_OUT}/tecs2d/ffi")
+    set(GEN "${TECS_LUA_OUT}/tecs/ffi")
     file(MAKE_DIRECTORY "${GEN}")
 
     # Bindings must be generated with the same preprocessor state the C is
     # compiled with. A header that declares different things under NDEBUG
     # would otherwise produce a binding for a function the build does not
     # have, which surfaces as a link error far from the cause.
-    set(TECS2D_CDEF_DEFINES "")
+    set(TECS_CDEF_DEFINES "")
     if(CMAKE_BUILD_TYPE MATCHES "Release|RelWithDebInfo|MinSizeRel")
-        list(APPEND TECS2D_CDEF_DEFINES --define NDEBUG)
+        list(APPEND TECS_CDEF_DEFINES --define NDEBUG)
     endif()
 
     # Include directories come from dependency discovery rather than from a
     # hardcoded package-manager prefix, which is what lets this cross-compile.
-    function(tecs2d_cdef name header keep prefix)
+    function(tecs_cdef name header keep prefix)
         set(includes "")
         foreach(dir IN LISTS ARGN)
             list(APPEND includes --include ${dir})
@@ -195,7 +189,7 @@ if(TECS2D_BUILD_LUA)
             OUTPUT "${GEN}/${name}cdef.lua" "${GEN}/${name}const.lua"
             COMMAND ${Python3_EXECUTABLE}
                 "${CMAKE_SOURCE_DIR}/scripts/gencdef.py"
-                --header ${header} ${includes} ${TECS2D_CDEF_DEFINES}
+                --header ${header} ${includes} ${TECS_CDEF_DEFINES}
                 --keep ${keep} --define-prefix ${prefix}
                 --defines-out "${GEN}/${name}const.lua"
                 --out "${GEN}/${name}cdef.lua"
@@ -204,32 +198,32 @@ if(TECS2D_BUILD_LUA)
             VERBATIM)
     endfunction()
 
-    tecs2d_cdef(sdl3 SDL3/SDL.h /SDL3/ SDL_ ${SDL3_INCLUDE_DIRS})
-    tecs2d_cdef(sdl3image SDL3_image/SDL_image.h /SDL3_image/ IMG_
+    tecs_cdef(sdl3 SDL3/SDL.h /SDL3/ SDL_ ${SDL3_INCLUDE_DIRS})
+    tecs_cdef(sdl3image SDL3_image/SDL_image.h /SDL3_image/ IMG_
         ${SDL3_IMAGE_INCLUDE_DIRS} ${SDL3_INCLUDE_DIRS})
-    tecs2d_cdef(sdl3net SDL3_net/SDL_net.h /SDL3_net/ NET_
+    tecs_cdef(sdl3net SDL3_net/SDL_net.h /SDL3_net/ NET_
         ${SDL3_NET_INCLUDE_DIR} ${SDL3_INCLUDE_DIRS})
-    tecs2d_cdef(box2d box2d/box2d.h /box2d/ B2_ ${BOX2D_INCLUDE_DIR})
-    tecs2d_cdef(shaderc shaderc/shaderc.h /shaderc/ shaderc_
+    tecs_cdef(box2d box2d/box2d.h /box2d/ B2_ ${BOX2D_INCLUDE_DIR})
+    tecs_cdef(shaderc shaderc/shaderc.h /shaderc/ shaderc_
         ${SHADERC_INCLUDE_DIRS})
     # pkg-config points into the spirv_cross directory rather than at its
     # parent, so the header is named relative to that.
-    tecs2d_cdef(spvc spirv_cross_c.h /spirv_cross/ SPVC_
+    tecs_cdef(spvc spirv_cross_c.h /spirv_cross/ SPVC_
         ${SPIRV_CROSS_INCLUDE_DIRS})
 
     # The engine's own native API. Generated the same way as a third-party
     # header so the binding cannot drift from the C even though both live here.
-    tecs2d_cdef(worker worker.h /native/ TECS2D_ "${CMAKE_SOURCE_DIR}/native")
-    tecs2d_cdef(logsink logsink.h /native/ TECS2D_ "${CMAKE_SOURCE_DIR}/native")
+    tecs_cdef(worker worker.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
+    tecs_cdef(logsink logsink.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
 
     # Each library also gets a table of function pointers, taken at build
     # time. A target that cannot dlopen still links, and the engine calls
     # through the table rather than through a handle it had to resolve.
-    set(TECS2D_REGISTRY_SOURCES "")
-    set(TECS2D_REGISTRY_ENTRIES "")
-    set(TECS2D_REGISTRY_PAIRS "")
+    set(TECS_REGISTRY_SOURCES "")
+    set(TECS_REGISTRY_ENTRIES "")
+    set(TECS_REGISTRY_PAIRS "")
 
-    function(tecs2d_registry name struct prefix)
+    function(tecs_registry name struct prefix)
         set(source "${CMAKE_BINARY_DIR}/generated/${name}api.c")
         set(headers "")
         foreach(header IN LISTS ARGN)
@@ -248,66 +242,66 @@ if(TECS2D_BUILD_LUA)
                     "${CMAKE_SOURCE_DIR}/scripts/genregistry.py"
             COMMENT "Generating ${name} native API table"
             VERBATIM)
-        set(TECS2D_REGISTRY_PAIRS ${TECS2D_REGISTRY_PAIRS} "${name}:${struct}"
+        set(TECS_REGISTRY_PAIRS ${TECS_REGISTRY_PAIRS} "${name}:${struct}"
             PARENT_SCOPE)
-        set(TECS2D_REGISTRY_SOURCES ${TECS2D_REGISTRY_SOURCES} "${source}"
+        set(TECS_REGISTRY_SOURCES ${TECS_REGISTRY_SOURCES} "${source}"
             PARENT_SCOPE)
-        set(TECS2D_REGISTRY_ENTRIES
-            "${TECS2D_REGISTRY_ENTRIES}TECS2D_API(${name}, ${struct})\n"
+        set(TECS_REGISTRY_ENTRIES
+            "${TECS_REGISTRY_ENTRIES}TECS_API(${name}, ${struct})\n"
             PARENT_SCOPE)
     endfunction()
 
-    tecs2d_registry(sdl3 Tecs2dSdl3Api SDL_ SDL3/SDL.h)
-    tecs2d_registry(sdl3image Tecs2dSdl3ImageApi IMG_ SDL3_image/SDL_image.h)
-    tecs2d_registry(sdl3net Tecs2dSdl3NetApi NET_ SDL3_net/SDL_net.h)
-    tecs2d_registry(box2d Tecs2dBox2dApi b2 box2d/box2d.h)
-    tecs2d_registry(worker Tecs2dWorkerApi tecs2d worker.h)
-    tecs2d_registry(logsink Tecs2dLogsinkApi tecs2d logsink.h)
+    tecs_registry(sdl3 TecsSdl3Api SDL_ SDL3/SDL.h)
+    tecs_registry(sdl3image TecsSdl3ImageApi IMG_ SDL3_image/SDL_image.h)
+    tecs_registry(sdl3net TecsSdl3NetApi NET_ SDL3_net/SDL_net.h)
+    tecs_registry(box2d TecsBox2dApi b2 box2d/box2d.h)
+    tecs_registry(worker TecsWorkerApi tecs worker.h)
+    tecs_registry(logsink TecsLogsinkApi tecs logsink.h)
 
     # Shader compilation is a development capability. A release consumes
     # packaged artifacts, so a target built without it links no compiler and
     # the registry simply has no entry for one.
-    if(TECS2D_RUNTIME_SHADERS)
-        tecs2d_registry(shaderc Tecs2dShadercApi shaderc_ shaderc/shaderc.h)
-        tecs2d_registry(spvc Tecs2dSpvcApi spvc_ spirv_cross_c.h)
+    if(TECS_RUNTIME_SHADERS)
+        tecs_registry(shaderc TecsShadercApi shaderc_ shaderc/shaderc.h)
+        tecs_registry(spvc TecsSpvcApi spvc_ spirv_cross_c.h)
     endif()
 
     # The same mapping the loader needs, so the two cannot drift. It was a
     # hand-written table, and adding a library to the build without adding it
     # here failed only under the host, where the registry path is the one that
     # runs.
-    set(TECS2D_REGISTRY_LUA
+    set(TECS_REGISTRY_LUA
         "-- Generated. Library name to the struct its registry table has.\nreturn {\n")
-    foreach(pair IN LISTS TECS2D_REGISTRY_PAIRS)
+    foreach(pair IN LISTS TECS_REGISTRY_PAIRS)
         string(REPLACE ":" ";" parts "${pair}")
         list(GET parts 0 pairName)
         list(GET parts 1 pairStruct)
-        set(TECS2D_REGISTRY_LUA
-            "${TECS2D_REGISTRY_LUA}    ${pairName} = \"${pairStruct}\",\n")
+        set(TECS_REGISTRY_LUA
+            "${TECS_REGISTRY_LUA}    ${pairName} = \"${pairStruct}\",\n")
     endforeach()
-    file(WRITE "${TECS2D_LUA_OUT}/tecs2d/ffi/registrystructs.lua"
-        "${TECS2D_REGISTRY_LUA}}\n")
+    file(WRITE "${TECS_LUA_OUT}/tecs/ffi/registrystructs.lua"
+        "${TECS_REGISTRY_LUA}}\n")
 
     file(WRITE "${CMAKE_BINARY_DIR}/generated/registry_entries.h"
         "/* Generated. Which libraries this target links. */\n"
-        "${TECS2D_REGISTRY_ENTRIES}")
+        "${TECS_REGISTRY_ENTRIES}")
 
-    add_library(tecs2d_registry STATIC
-        native/registry.c ${TECS2D_REGISTRY_SOURCES})
-    target_include_directories(tecs2d_registry PUBLIC
+    add_library(tecs_registry STATIC
+        native/registry.c ${TECS_REGISTRY_SOURCES})
+    target_include_directories(tecs_registry PUBLIC
         "${CMAKE_BINARY_DIR}/generated" "${CMAKE_SOURCE_DIR}/native")
-    target_link_libraries(tecs2d_registry PUBLIC
+    target_link_libraries(tecs_registry PUBLIC
         PkgConfig::SDL3 PkgConfig::SDL3_IMAGE PkgConfig::LUAJIT
         ${BOX2D_LIBRARY} ${SDL3_NET_LIBRARY})
 
     # Taking the address of a shader compiler's functions means linking it.
-    # That is the coupling TECS2D_RUNTIME_SHADERS exists to remove: a release
+    # That is the coupling TECS_RUNTIME_SHADERS exists to remove: a release
     # generates no table for them and links neither.
-    if(TECS2D_RUNTIME_SHADERS)
-        target_link_libraries(tecs2d_registry PUBLIC
-            PkgConfig::SHADERC tecs2d_spirvcross)
+    if(TECS_RUNTIME_SHADERS)
+        target_link_libraries(tecs_registry PUBLIC
+            PkgConfig::SHADERC tecs_spirvcross)
     endif()
-    target_include_directories(tecs2d_registry PRIVATE
+    target_include_directories(tecs_registry PRIVATE
         ${BOX2D_INCLUDE_DIR} ${SDL3_NET_INCLUDE_DIR}
         ${SHADERC_INCLUDE_DIRS} ${SPIRV_CROSS_INCLUDE_DIRS})
 
@@ -315,10 +309,10 @@ if(TECS2D_BUILD_LUA)
     # registry's sources are generated from bindings produced above.
     # The host also links the worker library, because its table holds the
     # addresses of that library's functions.
-    target_link_libraries(tecs2d PRIVATE tecs2d_registry tecs2d_worker tecs2d_cjson)
-    target_link_libraries(tecs2d_worker PRIVATE tecs2d_registry tecs2d_cjson)
+    target_link_libraries(tecs PRIVATE tecs_registry tecs_worker tecs_cjson)
+    target_link_libraries(tecs_worker PRIVATE tecs_registry tecs_cjson)
 
-    add_custom_target(tecs2d_bindings ALL DEPENDS
+    add_custom_target(tecs_bindings ALL DEPENDS
         "${GEN}/workercdef.lua" "${GEN}/logsinkcdef.lua"
         "${GEN}/sdl3cdef.lua" "${GEN}/sdl3imagecdef.lua" "${GEN}/sdl3netcdef.lua"
         "${GEN}/box2dcdef.lua" "${GEN}/shaderccdef.lua"
@@ -328,15 +322,14 @@ if(TECS2D_BUILD_LUA)
     # because the compiler resolves the module graph itself.
     # CONFIGURE_DEPENDS so adding a source is a build, not a reconfigure.
     # Without it a new module is silently absent until someone remembers.
-    file(GLOB_RECURSE TECS2D_TL CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/*.tl")
-    add_custom_target(tecs2d_lua ALL
+    file(GLOB_RECURSE TECS_TL CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/*.tl")
+    add_custom_target(tecs_lua ALL
         # tl searches include paths last-first, so ours come last and win.
-        COMMAND tl -q gen -I "${TECS2D_TECS_DIR}/vendor/share/lua/5.1"
-            -I "${CMAKE_SOURCE_DIR}/vendor/share/lua/5.1"
+        COMMAND tl -q gen -I "${CMAKE_SOURCE_DIR}/vendor/share/lua/5.1"
             -I "${CMAKE_SOURCE_DIR}/vendor/tl"
             --root "${CMAKE_SOURCE_DIR}/src"
-            --output-dir "${TECS2D_LUA_OUT}" ${TECS2D_TL}
-        DEPENDS ${TECS2D_TL} tecs2d_bindings
+            --output-dir "${TECS_LUA_OUT}" ${TECS_TL}
+        DEPENDS ${TECS_TL} tecs_bindings
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         COMMENT "Compiling Teal sources"
         VERBATIM)
@@ -345,28 +338,26 @@ if(TECS2D_BUILD_LUA)
     # content root a development run resolves against and the one an install
     # copies. CONFIGURE_DEPENDS so adding a shader is a build, not a
     # reconfigure.
-    file(GLOB_RECURSE TECS2D_ASSET_FILES CONFIGURE_DEPENDS
+    file(GLOB_RECURSE TECS_ASSET_FILES CONFIGURE_DEPENDS
         "${CMAKE_SOURCE_DIR}/assets/*")
-    add_custom_target(tecs2d_assets ALL
+    add_custom_target(tecs_assets ALL
         COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_SOURCE_DIR}/assets" "${TECS2D_LUA_OUT}"
-        DEPENDS ${TECS2D_ASSET_FILES}
+            "${CMAKE_SOURCE_DIR}/assets" "${TECS_LUA_OUT}"
+        DEPENDS ${TECS_ASSET_FILES}
         COMMENT "Copying assets"
         VERBATIM)
 
-    # Specs written in Teal, compiled the same way. Subsystems migrating from
-    # the previous engine arrive with their suites, and a suite rewritten
-    # into Lua on the way across would no longer be the proof it was.
-    file(GLOB_RECURSE TECS2D_SPEC_TL CONFIGURE_DEPENDS
+    # Specs written in Teal, compiled the same way. The ECS suites are written
+    # in Teal and the engine's in Lua, so both forms are built and Busted is
+    # pointed at both trees.
+    file(GLOB_RECURSE TECS_SPEC_TL CONFIGURE_DEPENDS
         "${CMAKE_SOURCE_DIR}/spec/*.tl")
-    if(TECS2D_SPEC_TL)
-        add_custom_target(tecs2d_spec ALL
-            COMMAND tl -q gen -I "${TECS2D_TECS_DIR}/vendor/share/lua/5.1"
-                -I "${CMAKE_SOURCE_DIR}/vendor/share/lua/5.1"
-                -I "${CMAKE_SOURCE_DIR}/vendor/tl"
-                --root "${CMAKE_SOURCE_DIR}/spec"
-                --output-dir "${TECS2D_SPEC_OUT}" ${TECS2D_SPEC_TL}
-            DEPENDS ${TECS2D_SPEC_TL} tecs2d_lua
+    if(TECS_SPEC_TL)
+        add_custom_target(tecs_spec ALL
+            COMMAND luajit "${CMAKE_SOURCE_DIR}/scripts/compile_specs.lua"
+                "${CMAKE_SOURCE_DIR}/spec" "${TECS_SPEC_OUT}"
+                "${CMAKE_SOURCE_DIR}/vendor/share/lua/5.1"
+            DEPENDS ${TECS_SPEC_TL} tecs_lua
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
             COMMENT "Compiling Teal specs"
             VERBATIM)
@@ -378,19 +369,15 @@ endif()
 # Records how the tree was built, so a check can tell a development install
 # from a shippable one rather than guessing from what it finds.
 file(WRITE "${CMAKE_BINARY_DIR}/build-info.txt"
-    "systemDeps=${TECS2D_SYSTEM_DEPS}\n"
+    "systemDeps=${TECS_SYSTEM_DEPS}\n"
     "system=${CMAKE_SYSTEM_NAME}\n"
     "arch=${CMAKE_SYSTEM_PROCESSOR}\n")
 install(FILES "${CMAKE_BINARY_DIR}/build-info.txt"
-    DESTINATION share/tecs2d)
+    DESTINATION share/tecs)
 
-install(TARGETS tecs2d RUNTIME DESTINATION bin)
-install(TARGETS tecs2d_worker tecs2d_spirvcross LIBRARY DESTINATION lib)
+install(TARGETS tecs RUNTIME DESTINATION bin)
+install(TARGETS tecs_worker tecs_spirvcross LIBRARY DESTINATION lib)
 install(TARGETS cjson LIBRARY DESTINATION lib)
-if(TECS2D_BUILD_LUA)
-    install(DIRECTORY "${TECS2D_LUA_OUT}/" DESTINATION share/tecs2d/lua)
-    # The ECS is part of what ships: a game is written against it directly, so
-    # an install without it is an install that cannot run.
-    install(DIRECTORY "${TECS2D_TECS_DIR}/build/tecs"
-        DESTINATION share/tecs2d/lua)
+if(TECS_BUILD_LUA)
+    install(DIRECTORY "${TECS_LUA_OUT}/" DESTINATION share/tecs/lua)
 endif()

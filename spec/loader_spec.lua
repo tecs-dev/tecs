@@ -4,9 +4,9 @@
 -- Our build first, so it wins over the ECS repo's own engine tree.
 -- The build directory is the build system's to choose, so it is passed in.
 -- Our tree comes first, so it wins over the ECS repo's own engine tree.
-local root = os.getenv("TECS2D_LUA") or "out/macos-arm64-dev/lua"
+local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. "../tecs/build/?.lua;../tecs/build/?/init.lua;" .. package.path
+    .. package.path
 
 local loader = require("tecs.ffi.loader")
 
@@ -18,14 +18,14 @@ describe("ffi.loader", function()
     end)
 
     it("caches a library across repeated loads", function()
-        local first = loader.library("SDL3", "sdl3", "TECS2D_SDL3_PATH")
-        local second = loader.library("SDL3", "sdl3", "TECS2D_SDL3_PATH")
+        local first = loader.library("SDL3", "sdl3", "TECS_SDL3_PATH")
+        local second = loader.library("SDL3", "sdl3", "TECS_SDL3_PATH")
         assert.are.equal(first, second)
     end)
 
     it("raises a directed error for a library that does not exist", function()
         local ok, err = pcall(loader.library,
-            "definitely-not-a-real-library", "nope", "TECS2D_NOPE_PATH")
+            "definitely-not-a-real-library", "nope", "TECS_NOPE_PATH")
         assert.is_false(ok)
         assert.is_truthy(tostring(err):find("cannot load"))
     end)

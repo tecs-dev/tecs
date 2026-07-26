@@ -244,7 +244,7 @@ function Input:scancode(name: string): integer
         code = tonumber(C.SDL_GetScancodeFromName(titled)) as integer
     end
     if code == 0 then
-        error(("tecs2d: no key named '%s'"):format(name), 2)
+        error(("tecs: no key named '%s'"):format(name), 2)
     end
     self._scancodes[name] = code
     return code

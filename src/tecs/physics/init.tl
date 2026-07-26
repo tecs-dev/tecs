@@ -9,7 +9,7 @@
 --- timestep and a variable one makes replay diverge, so the fixed phase is not
 --- a preference here, it is a requirement.
 
-local tecs <const> = require("tecs")
+local ecs <const> = require("tecs.ecs")
 local loader <const> = require("tecs.ffi.loader")
 local World <const> = require("tecs.physics.World")
 local box2d <const> = require("tecs.ffi.box2d")
@@ -18,7 +18,7 @@ local components <const> = require("tecs.components")
 local B <const> = box2d.C
 local Transform2D <const> = components.Transform2D
 
-local type Component = tecs.Component
+local type Component = ecs.Component
 
 --- Pixels per simulated metre.
 ---
@@ -37,7 +37,7 @@ local record RigidBody is Component
     generation: number
 end
 
-tecs.newFFIComponent({
+ecs.newFFIComponent({
     name = "RigidBody",
     container = RigidBody,
     fields = {
@@ -101,7 +101,7 @@ end
 ---
 --- Reads the entity's Transform2D for the initial pose, so an entity is
 --- positioned the same way whether or not it simulates.
-function physics.attach(world: tecs.World, entity: integer,
+function physics.attach(world: ecs.World, entity: integer,
                         options: BodyOptions): loader.CValue
     options = options or {}
 
@@ -165,7 +165,7 @@ end
 --- An impulse rather than a force, so the effect does not depend on how long
 --- the step happened to be. Wakes the body: Box2D lets a resting island sleep,
 --- and pushing a sleeping body without waking it does nothing.
-function physics.applyImpulse(world: tecs.World, entity: integer,
+function physics.applyImpulse(world: ecs.World, entity: integer,
                               x: number, y: number)
     local row = world:get(entity, RigidBody)
     if row == nil then return end
@@ -186,19 +186,19 @@ function physics.applyImpulseTo(row: RigidBody, x: number, y: number)
 end
 
 --- Reads a body's velocity, in pixels per second.
-function physics.velocity(world: tecs.World, entity: integer): number, number
+function physics.velocity(world: ecs.World, entity: integer): number, number
     local row = world:get(entity, RigidBody)
     if row == nil then return 0.0, 0.0 end
     return World.getVelocity(handleOf(row))
 end
 
 --- Installs the simulation and its sync.
-function physics.plugin(options: PhysicsOptions): function(tecs.World)
+function physics.plugin(options: PhysicsOptions): function(ecs.World)
     options = options or {}
     local gravity = options.gravity or { 0.0, 980.0 }
     local timeStep = options.timeStep or 1.0 / 60.0
 
-    return function(world: tecs.World)
+    return function(world: ecs.World)
         physics.world = World.create({
             gravity = {
                 x = toMetres(gravity[1]),
@@ -213,7 +213,7 @@ function physics.plugin(options: PhysicsOptions): function(tecs.World)
 
         world:addSystem({
             name = "tecs.StepPhysics",
-            phase = perFrame and tecs.phases.Update or tecs.phases.FixedUpdate,
+            phase = perFrame and ecs.phases.Update or ecs.phases.FixedUpdate,
             run = function()
                 physics.world:step(timeStep)
             end,
@@ -221,8 +221,8 @@ function physics.plugin(options: PhysicsOptions): function(tecs.World)
 
         world:addSystem({
             name = "tecs.SyncBodyTransforms",
-            phase = perFrame and tecs.phases.PostUpdate
-                or tecs.phases.FixedPostUpdate,
+            phase = perFrame and ecs.phases.PostUpdate
+                or ecs.phases.FixedPostUpdate,
             run = function()
                 for archetype, length in bodies:iter() do
                     -- Transforms are written from the simulation, so the

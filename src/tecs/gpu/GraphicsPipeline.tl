@@ -69,18 +69,18 @@ function GraphicsPipeline.create(device: loader.CPtr,
                                  options: PipelineOptions): GraphicsPipeline
     local primitive = PRIMITIVES[options.primitive or "triangleList"]
     if primitive == nil then
-        error(("tecs2d: unknown primitive type '%s'"):format(
+        error(("tecs: unknown primitive type '%s'"):format(
             tostring(options.primitive)), 2)
     end
     local cull = CULL_MODES[options.cull or "none"]
     if cull == nil then
-        error(("tecs2d: unknown cull mode '%s'"):format(tostring(options.cull)), 2)
+        error(("tecs: unknown cull mode '%s'"):format(tostring(options.cull)), 2)
     end
 
     local formats = options.colorFormats
     if formats == nil then
         if options.colorFormat == nil then
-            error("tecs2d: a pipeline needs colorFormat or colorFormats", 2)
+            error("tecs: a pipeline needs colorFormat or colorFormats", 2)
         end
         formats = { options.colorFormat }
     end

@@ -1,16 +1,29 @@
 --[[
-Build script: compile spec/**/*.tl to build/test_deps/spec/**/*.lua
-in a single Lua process, using `tl` as a library.
+Build script: compile <specDir>/**/*.tl to <outDir>/**/*.lua in a single Lua
+process, using `tl` as a library.
 
 Much faster than forking `tl gen` per file (~180ms startup overhead each).
 Does it in well under a second by keeping the Teal compiler loaded.
+
+Code is emitted even when a file does not type-check, which is the reason this
+exists rather than a `tl gen` rule. The suites predate the type checker being
+run over them and report errors that are in the test code, not in what it
+tests; refusing to build them would take the whole suite away over that.
 ]]
+
+local SPEC_DIR = ... or "spec"
+local OUT_PREFIX = select(2, ...) or "build/test_deps"
+local LUA_DIR = select(3, ...)
+
+-- The build system passes where the Teal compiler lives rather than relying on
+-- an inherited LUA_PATH, since a path list is a semicolon list and CMake reads
+-- one of those as its own.
+if LUA_DIR then
+    package.path = LUA_DIR .. "/?.lua;" .. LUA_DIR .. "/?/init.lua;" .. package.path
+end
 
 local tl = require("tl")
 local ok_lfs, lfs = pcall(require, "lfs")
-
-local SPEC_DIR = "spec"
-local OUT_PREFIX = "build/test_deps"
 
 local function path_join(a, b)
     if a == "" then return b end
@@ -63,9 +76,13 @@ local function write_file(path, content)
     local dir = path:match("(.+)/[^/]+$")
     if dir then
         if ok_lfs then
-            local current = ""
+            -- Seeded from the root when the path is absolute, since the build
+            -- system passes one and rebuilding it relatively would create the
+            -- tree under the working directory instead.
+            local current = dir:sub(1, 1) == "/" and "/" or ""
             for part in dir:gmatch("[^/]+") do
-                current = path_join(current, part)
+                current = current == "/" and ("/" .. part)
+                    or path_join(current, part)
                 if lfs.attributes(current, "mode") ~= "directory" then
                     assert(lfs.mkdir(current))
                 end
@@ -80,8 +97,16 @@ local function write_file(path, content)
     fh:close()
 end
 
+-- The input path is kept whole rather than made relative to SPEC_DIR, because
+-- a spec requires its helpers by full module name (`spec.tecs.test_helpers`)
+-- and dropping the leading directory would put them somewhere that name
+-- cannot reach.
 local function output_path_for(input)
-    return ((OUT_PREFIX .. "/" .. input):gsub("%.tl$", ".lua"))
+    local relative = input
+    if SPEC_DIR:sub(1, 1) == "/" then
+        relative = "spec/" .. input:sub(#SPEC_DIR + 2)
+    end
+    return ((OUT_PREFIX .. "/" .. relative):gsub("%.tl$", ".lua"))
 end
 
 local function file_mtime(path)

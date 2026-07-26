@@ -140,7 +140,7 @@ static const {struct} api = {{
 
 /* Returned untyped so the registry stays one shape regardless of which
  * libraries a target links. Lua casts it back using the cdef beside it. */
-const void *tecs2d_{args.name}_api(void)
+const void *tecs_{args.name}_api(void)
 {{
     return &api;
 }}

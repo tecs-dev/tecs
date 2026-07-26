@@ -74,7 +74,7 @@ function Buffer.create(device: loader.CPtr, options: BufferOptions): Buffer
     for _, name in ipairs(options.usage or { "storage" }) do
         local flag = USAGE_FLAGS[name]
         if flag == nil then
-            error(("tecs2d: unknown buffer usage '%s'"):format(tostring(name)), 2)
+            error(("tecs: unknown buffer usage '%s'"):format(tostring(name)), 2)
         end
         flags = flags + flag
     end

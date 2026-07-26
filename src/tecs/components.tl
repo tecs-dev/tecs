@@ -4,9 +4,9 @@
 --- which is what lets the sync walk rows and write straight into mapped GPU
 --- staging instead of reading fields one entity at a time through a table.
 
-local tecs <const> = require("tecs")
+local ecs <const> = require("tecs.ecs")
 
-local type Component = tecs.Component
+local type Component = ecs.Component
 
 --- Position, rotation, and scale in world units, which are pixels with the
 --- origin at the top left. Lighting works in the same units, so a light's
@@ -20,7 +20,7 @@ local record Transform2D is Component
     scaleY: number
 end
 
-tecs.newFFIComponent({
+ecs.newFFIComponent({
     name = "Transform2D",
     container = Transform2D,
     fields = {
@@ -39,7 +39,7 @@ local record Tint is Component
     a: number
 end
 
-tecs.newFFIComponent({
+ecs.newFFIComponent({
     name = "Tint",
     container = Tint,
     fields = {
@@ -62,7 +62,7 @@ local record PointLight is Component
     intensity: number
 end
 
-tecs.newFFIComponent({
+ecs.newFFIComponent({
     name = "PointLight",
     container = PointLight,
     fields = {
@@ -87,7 +87,7 @@ local record Sprite is Component
     v1: number
 end
 
-tecs.newFFIComponent({
+ecs.newFFIComponent({
     name = "Sprite",
     container = Sprite,
     fields = {
@@ -117,7 +117,7 @@ local record Material is Component
     param: number
 end
 
-tecs.newFFIComponent({
+ecs.newFFIComponent({
     name = "Material",
     container = Material,
     fields = {
@@ -131,7 +131,7 @@ tecs.newFFIComponent({
 --- a position, which is what most entities in a world actually are.
 local record Renderable is Component end
 
-tecs.newComponent({
+ecs.newComponent({
     name = "Renderable",
     container = Renderable,
 })

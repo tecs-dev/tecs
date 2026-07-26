@@ -44,7 +44,7 @@ local function create(device: loader.CPtr, stage: string,
                       compiled: shadercompiler.CompiledShader): Shader
     local stageEnum = STAGES[stage]
     if stageEnum == nil then
-        error(("tecs2d: '%s' is not a graphics shader stage"):format(tostring(stage)), 3)
+        error(("tecs: '%s' is not a graphics shader stage"):format(tostring(stage)), 3)
     end
 
     local info = loader.newArray("SDL_GPUShaderCreateInfo[1]")

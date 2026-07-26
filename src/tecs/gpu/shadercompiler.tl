@@ -64,7 +64,7 @@ end
 
 local function requireCompiler(level: integer)
     if loadCompiler() then return end
-    error("tecs2d: this build links no shader compiler, so every shader must "
+    error("tecs: this build links no shader compiler, so every shader must "
         .. "come from a pack: " .. compilerMissing, level + 1)
 end
 
@@ -129,7 +129,7 @@ local function shadercCompiler(): loader.CValue
         requireCompiler(3)
         compilerHandle = SC.shaderc_compiler_initialize()
         if compilerHandle == nil then
-            error("tecs2d: shaderc_compiler_initialize failed", 2)
+            error("tecs: shaderc_compiler_initialize failed", 2)
         end
         STAGE_KINDS = {
             vertex = SC.shaderc_vertex_shader,
@@ -149,7 +149,7 @@ local function toSpirv(source: string, stage: string, name: string,
     local compiler = shadercCompiler()
     local kind = STAGE_KINDS[stage]
     if kind == nil then
-        error(("tecs2d: unknown shader stage '%s'"):format(tostring(stage)), 3)
+        error(("tecs: unknown shader stage '%s'"):format(tostring(stage)), 3)
     end
 
     local options = SC.shaderc_compile_options_initialize()
@@ -174,7 +174,7 @@ local function toSpirv(source: string, stage: string, name: string,
     if tonumber(status) ~= 0 then
         local message = loader.toString(SC.shaderc_result_get_error_message(result))
         SC.shaderc_result_release(result)
-        error(("tecs2d: %s failed to compile:\n%s"):format(name or "shader", message), 3)
+        error(("tecs: %s failed to compile:\n%s"):format(name or "shader", message), 3)
     end
 
     local length = tonumber(SC.shaderc_result_get_length(result)) as integer
@@ -201,7 +201,7 @@ end
 local function spvcCheck(context: loader.CValue, result: any, what: string)
     if tonumber(result) ~= 0 then
         local message = loader.toString(SP.spvc_context_get_last_error_string(context))
-        error(("tecs2d: %s failed: %s"):format(what, message), 3)
+        error(("tecs: %s failed: %s"):format(what, message), 3)
     end
 end
 
@@ -271,7 +271,7 @@ local function reflect(words: loader.CArray, wordCount: integer,
                        stage: string, translate: boolean): string, ResourceCounts, {integer}
     local contextOut = loader.newArray("spvc_context[1]")
     if tonumber(SP.spvc_context_create(contextOut)) ~= 0 then
-        error("tecs2d: spvc_context_create failed", 3)
+        error("tecs: spvc_context_create failed", 3)
     end
     local context = contextOut[0] as loader.CValue
 
@@ -297,7 +297,7 @@ local function reflect(words: loader.CArray, wordCount: integer,
 
         local layout = SET_LAYOUTS[stage]
         if layout == nil then
-            error(("tecs2d: no descriptor layout for stage '%s'"):format(
+            error(("tecs: no descriptor layout for stage '%s'"):format(
                 tostring(stage)), 2)
         end
 
@@ -530,7 +530,7 @@ function shadercompiler.plan(name: string, defines: {string: string},
         local hash = shaders.hash(entry.source)
         if packed.sourceHash == hash then return "pack" end
         if not hasCompiler then
-            error(("tecs2d: packed shader '%s' was built from different source "
+            error(("tecs: packed shader '%s' was built from different source "
                 .. "(%s, now %s) and this build cannot recompile")
                 :format(key, packed.sourceHash, hash), 2)
         end
@@ -539,10 +539,10 @@ function shadercompiler.plan(name: string, defines: {string: string},
 
     if hasCompiler then return "compile" end
     if loadedPack == nil then
-        error(("tecs2d: no shader pack is loaded and this build cannot compile "
+        error(("tecs: no shader pack is loaded and this build cannot compile "
             .. "'%s'"):format(key), 2)
     end
-    error(("tecs2d: shader '%s' is not in the pack and this build cannot "
+    error(("tecs: shader '%s' is not in the pack and this build cannot "
         .. "compile it"):format(key), 2)
 end
 

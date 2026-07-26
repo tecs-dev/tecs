@@ -29,7 +29,7 @@ end
 --- here and is not pretended to be: cross-compiling MSL needs Metal's tooling.
 function shaderbuild.build(): shaderpack.Pack
     if not shadercompiler.available() then
-        error("tecs2d: building a shader pack needs a shader compiler", 2)
+        error("tecs: building a shader pack needs a shader compiler", 2)
     end
 
     -- Materials are compiled into the fragment shader, so they have to be read
@@ -50,7 +50,7 @@ function shaderbuild.build(): shaderpack.Pack
             defines = variant.defines,
         })
         if compiled.format ~= pack.format then
-            error(("tecs2d: '%s' compiled to %s but the pack is %s"):format(
+            error(("tecs: '%s' compiled to %s but the pack is %s"):format(
                 variant.key, shaderpack.formatName(compiled.format),
                 shaderpack.formatName(pack.format)), 2)
         end
@@ -79,7 +79,7 @@ function shaderbuild.manifest(pack: shaderpack.Pack): string
     table.sort(keys)
 
     local lines: {string} = {}
-    lines[#lines + 1] = ("tecs2d shader pack version %d"):format(pack.version)
+    lines[#lines + 1] = ("tecs shader pack version %d"):format(pack.version)
     lines[#lines + 1] = ("target %s, format %s, %d shaders"):format(
         pack.target, shaderpack.formatName(pack.format), #keys)
     lines[#lines + 1] = ""
@@ -116,7 +116,7 @@ function shaderbuild.writeTo(path: string): shaderpack.Pack
 
     local manifest, reason = io.open(path .. ".txt", "w")
     if manifest == nil then
-        error(("tecs2d: cannot write %s.txt: %s"):format(path, tostring(reason)), 2)
+        error(("tecs: cannot write %s.txt: %s"):format(path, tostring(reason)), 2)
     end
     manifest:write(shaderbuild.manifest(pack))
     manifest:close()

@@ -29,7 +29,7 @@ typedef struct Message {
     unsigned char data[];
 } Message;
 
-struct Tecs2dChannel {
+struct TecsChannel {
     SDL_Mutex *lock;
     SDL_Condition *arrived;
     Message *head;
@@ -39,19 +39,19 @@ struct Tecs2dChannel {
     bool closed;
 };
 
-struct Tecs2dWorker {
+struct TecsWorker {
     SDL_Thread *thread;
     char *source;
     char *luaPath;
-    Tecs2dChannel *toWorker;
-    Tecs2dChannel *fromWorker;
+    TecsChannel *toWorker;
+    TecsChannel *fromWorker;
 };
 
 /* ---------------------------------------------------------------- channels */
 
-Tecs2dChannel *tecs2dChannelCreate(void)
+TecsChannel *tecsChannelCreate(void)
 {
-    Tecs2dChannel *channel = (Tecs2dChannel *)SDL_calloc(1, sizeof(Tecs2dChannel));
+    TecsChannel *channel = (TecsChannel *)SDL_calloc(1, sizeof(TecsChannel));
     if (!channel) return NULL;
     channel->lock = SDL_CreateMutex();
     channel->arrived = SDL_CreateCondition();
@@ -64,7 +64,7 @@ Tecs2dChannel *tecs2dChannelCreate(void)
     return channel;
 }
 
-void tecs2dChannelDestroy(Tecs2dChannel *channel)
+void tecsChannelDestroy(TecsChannel *channel)
 {
     if (!channel) return;
     Message *message = channel->head;
@@ -79,7 +79,7 @@ void tecs2dChannelDestroy(Tecs2dChannel *channel)
 }
 
 /* Wakes every blocked reader so they can observe the close and stop. */
-void tecs2dChannelClose(Tecs2dChannel *channel)
+void tecsChannelClose(TecsChannel *channel)
 {
     if (!channel) return;
     SDL_LockMutex(channel->lock);
@@ -88,7 +88,7 @@ void tecs2dChannelClose(Tecs2dChannel *channel)
     SDL_UnlockMutex(channel->lock);
 }
 
-bool tecs2dChannelPush(Tecs2dChannel *channel, const void *data, uint32_t size)
+bool tecsChannelPush(TecsChannel *channel, const void *data, uint32_t size)
 {
     Message *message = (Message *)SDL_malloc(sizeof(Message) + size);
     if (!message) return false;
@@ -110,10 +110,10 @@ bool tecs2dChannelPush(Tecs2dChannel *channel, const void *data, uint32_t size)
 }
 
 /* Returns the message size and stores a freshly allocated copy in *out, which
- * the caller releases with tecs2dChannelFree. Returns 0 when nothing arrived
+ * the caller releases with tecsChannelFree. Returns 0 when nothing arrived
  * before the timeout, or when the channel closed. A negative timeout waits
  * indefinitely; zero polls. */
-uint32_t tecs2dChannelPop(Tecs2dChannel *channel, void **out, int32_t timeoutMs)
+uint32_t tecsChannelPop(TecsChannel *channel, void **out, int32_t timeoutMs)
 {
     SDL_LockMutex(channel->lock);
     while (!channel->head && !channel->closed) {
@@ -145,17 +145,17 @@ uint32_t tecs2dChannelPop(Tecs2dChannel *channel, void **out, int32_t timeoutMs)
 }
 
 /* The payload begins after the header; callers read from here. */
-void *tecs2dChannelData(void *message)
+void *tecsChannelData(void *message)
 {
     return ((Message *)message)->data;
 }
 
-void tecs2dChannelFree(void *message)
+void tecsChannelFree(void *message)
 {
     SDL_free(message);
 }
 
-uint32_t tecs2dChannelCount(Tecs2dChannel *channel)
+uint32_t tecsChannelCount(TecsChannel *channel)
 {
     SDL_LockMutex(channel->lock);
     uint32_t count = channel->count;
@@ -173,7 +173,7 @@ static void setPointer(lua_State *L, const char *name, void *value)
 
 static int workerEntry(void *data)
 {
-    Tecs2dWorker *worker = (Tecs2dWorker *)data;
+    TecsWorker *worker = (TecsWorker *)data;
 
     lua_State *L = luaL_newstate();
     if (!L) return 1;
@@ -182,8 +182,8 @@ static int workerEntry(void *data)
     /* A worker resolving its own libraries would reintroduce the dependency on
      * dynamic loading in the place it is hardest to notice: a worker that
      * fails to start looks like a worker that had nothing to do. */
-    tecs2dRegistryInstall(L);
-    tecs2dLuaModulesInstall(L);
+    tecsRegistryInstall(L);
+    tecsLuaModulesInstall(L);
 
     if (worker->luaPath) {
         lua_getglobal(L, "package");
@@ -195,13 +195,13 @@ static int workerEntry(void *data)
     /* The channels reach Lua as light userdata, which the FFI casts to a
      * pointer. There is no other way in: the worker shares no Lua heap with
      * the state that spawned it. */
-    setPointer(L, "__tecs2dWorkerIn", worker->toWorker);
-    setPointer(L, "__tecs2dWorkerOut", worker->fromWorker);
+    setPointer(L, "__tecsWorkerIn", worker->toWorker);
+    setPointer(L, "__tecsWorkerOut", worker->fromWorker);
 
     if (luaL_loadbuffer(L, worker->source, strlen(worker->source), "=worker")
         || lua_pcall(L, 0, 0, 0)) {
         const char *message = lua_tostring(L, -1);
-        SDL_Log("tecs2d worker: %s", message ? message : "unknown error");
+        SDL_Log("tecs worker: %s", message ? message : "unknown error");
         lua_close(L);
         return 1;
     }
@@ -210,11 +210,11 @@ static int workerEntry(void *data)
     return 0;
 }
 
-Tecs2dWorker *tecs2dWorkerSpawn(const char *source, const char *luaPath,
-                                Tecs2dChannel *toWorker,
-                                Tecs2dChannel *fromWorker)
+TecsWorker *tecsWorkerSpawn(const char *source, const char *luaPath,
+                                TecsChannel *toWorker,
+                                TecsChannel *fromWorker)
 {
-    Tecs2dWorker *worker = (Tecs2dWorker *)SDL_calloc(1, sizeof(Tecs2dWorker));
+    TecsWorker *worker = (TecsWorker *)SDL_calloc(1, sizeof(TecsWorker));
     if (!worker) return NULL;
 
     /* Copied because the spawning state's strings are its own to collect. */
@@ -233,7 +233,7 @@ Tecs2dWorker *tecs2dWorkerSpawn(const char *source, const char *luaPath,
     return worker;
 }
 
-int tecs2dWorkerJoin(Tecs2dWorker *worker)
+int tecsWorkerJoin(TecsWorker *worker)
 {
     if (!worker) return 1;
     int status = 0;

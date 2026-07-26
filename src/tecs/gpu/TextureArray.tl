@@ -112,10 +112,10 @@ end
 function TextureArray:add(pixels: loader.CValue, width: integer,
                           height: integer, pitch: integer): TextureArray.Region
     if self.used >= self.layers then
-        error(("tecs2d: texture array is full at %d layers"):format(self.layers), 2)
+        error(("tecs: texture array is full at %d layers"):format(self.layers), 2)
     end
     if width > self.width or height > self.height then
-        error(("tecs2d: image %dx%d exceeds the %dx%d cell")
+        error(("tecs: image %dx%d exceeds the %dx%d cell")
             :format(width, height, self.width, self.height), 2)
     end
 

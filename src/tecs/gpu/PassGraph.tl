@@ -102,7 +102,7 @@ end
 --- Declares a target the graph owns.
 function PassGraph:target(spec: TargetSpec): PassGraph
     if self._targets[spec.name] ~= nil then
-        error(("tecs2d: target '%s' is already declared"):format(spec.name), 2)
+        error(("tecs: target '%s' is already declared"):format(spec.name), 2)
     end
     spec.format = spec.format or DEFAULT_FORMAT
     spec.scale = spec.scale or 1.0
@@ -124,18 +124,18 @@ function PassGraph:pass(spec: PassSpec): PassGraph
 
     for _, input in ipairs(spec.inputs or {}) do
         if self._targets[input] == nil then
-            error(("tecs2d: pass '%s' reads undeclared target '%s'")
+            error(("tecs: pass '%s' reads undeclared target '%s'")
                 :format(spec.name, input), 2)
         end
         if not produced[input] then
-            error(("tecs2d: pass '%s' reads '%s' before any pass writes it")
+            error(("tecs: pass '%s' reads '%s' before any pass writes it")
                 :format(spec.name, input), 2)
         end
     end
 
     for _, output in ipairs(spec.outputs or {}) do
         if self._targets[output] == nil then
-            error(("tecs2d: pass '%s' writes undeclared target '%s'")
+            error(("tecs: pass '%s' writes undeclared target '%s'")
                 :format(spec.name, output), 2)
         end
     end
@@ -156,7 +156,7 @@ end
 function PassGraph:formatOf(name: string): integer
     local spec = self._targets[name]
     if spec == nil then
-        error(("tecs2d: no target named '%s'"):format(tostring(name)), 2)
+        error(("tecs: no target named '%s'"):format(tostring(name)), 2)
     end
     return spec.format
 end

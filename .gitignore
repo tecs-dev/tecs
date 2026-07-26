@@ -4,6 +4,7 @@
 .claude/*
 !.claude/skills/
 
+/out/
 /build/
 /vendor/
 /bin/love2d/
@@ -38,7 +39,6 @@ coverage.info
 .mcp.json
 *.src.rock
 benches/love2d/app/tecs
-benches/love2d/app/tecs2d
 benches/love2d/app/internal
 benches/love2d/app/assets
 benches/love2d/results/

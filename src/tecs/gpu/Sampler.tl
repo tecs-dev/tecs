@@ -42,11 +42,11 @@ function Sampler.create(device: loader.CPtr, options: SamplerOptions): Sampler
 
     local filter = FILTERS[options.filter or "nearest"]
     if filter == nil then
-        error(("tecs2d: unknown filter '%s'"):format(tostring(options.filter)), 2)
+        error(("tecs: unknown filter '%s'"):format(tostring(options.filter)), 2)
     end
     local address = ADDRESS_MODES[options.address or "clamp"]
     if address == nil then
-        error(("tecs2d: unknown address mode '%s'"):format(tostring(options.address)), 2)
+        error(("tecs: unknown address mode '%s'"):format(tostring(options.address)), 2)
     end
 
     local info = loader.newArray("SDL_GPUSamplerCreateInfo[1]")

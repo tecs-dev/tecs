@@ -6,15 +6,15 @@
 -- the file, and that the file is the structured one while the platform keeps
 -- getting the readable one.
 
-local root = os.getenv("TECS2D_LUA") or "out/macos-arm64-dev/lua"
+local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. "../tecs/build/?.lua;../tecs/build/?/init.lua;" .. package.path
+    .. package.path
 
 local sdl = require("tecs.ffi.sdl3")
 local log = require("tecs.log")
 
 local C = sdl.C
-local PATH = "/tmp/tecs2d-log-spec.jsonl"
+local PATH = "/tmp/tecs-log-spec.jsonl"
 
 local function readLines(path)
     local file = io.open(path, "r")

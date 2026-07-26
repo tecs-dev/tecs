@@ -9,7 +9,7 @@ local loader <const> = require("tecs.ffi.loader")
 loader.declare("sdl3")
 
 local namespace <const>, libraryPath <const> =
-    loader.library("SDL3", "sdl3", "TECS2D_SDL3_PATH", "sdl3")
+    loader.library("SDL3", "sdl3", "TECS_SDL3_PATH", "sdl3")
 
 local record sdl3
     --- Functions and enum constants, resolved through the loaded library.
@@ -34,7 +34,7 @@ end
 
 --- Raises with the pending SDL error, prefixed by `what`.
 function sdl3.fail(what: string)
-    error(("tecs2d: %s failed: %s"):format(what, sdl3.error()), 3)
+    error(("tecs: %s failed: %s"):format(what, sdl3.error()), 3)
 end
 
 --- Asserts an SDL boolean result, raising with the pending error on failure.

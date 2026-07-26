@@ -5,9 +5,9 @@
 -- is refused rather than guessed at, and a write reaches the GPU rather than
 -- only the memory, which is the failure the dirty model exists to prevent.
 
-local root = os.getenv("TECS2D_LUA") or "out/macos-arm64-dev/lua"
+local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. "../tecs/build/?.lua;../tecs/build/?/init.lua;" .. package.path
+    .. package.path
 
 local cjson = require("cjson")
 local tecs = require("tecs")

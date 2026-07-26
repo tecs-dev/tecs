@@ -23,7 +23,7 @@ static void preload(lua_State *L, const char *name, lua_CFunction opener)
     lua_pop(L, 2);
 }
 
-void tecs2dLuaModulesInstall(lua_State *L)
+void tecsLuaModulesInstall(lua_State *L)
 {
     preload(L, "cjson", luaopen_cjson);
 }

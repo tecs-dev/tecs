@@ -9,9 +9,9 @@
 -- registry, so the registry path is exercised inside a worker: the worker
 -- library installs one into every state it starts.
 
-local root = os.getenv("TECS2D_LUA") or "out/macos-arm64-dev/lua"
+local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. "../tecs/build/?.lua;../tecs/build/?/init.lua;" .. package.path
+    .. package.path
 
 local loader = require("tecs.ffi.loader")
 local workers = require("tecs.workers")
@@ -23,7 +23,7 @@ describe("ffi registry", function()
     it("falls back to dynamic loading when no host installed one", function()
         -- This process has no host, so the engine must still resolve its
         -- libraries the development way.
-        assert.is_nil(_G.__tecs2dRegistry)
+        assert.is_nil(_G.__tecsRegistry)
         assert.is_false(loader.isStatic("sdl3"))
 
         local sdl = require("tecs.ffi.sdl3")
@@ -42,7 +42,7 @@ while true do
 
     local sdl = require("tecs.ffi.sdl3")
     self:send({
-        installed = _G.__tecs2dRegistry ~= nil,
+        installed = _G.__tecsRegistry ~= nil,
         static = loader.isStatic("sdl3"),
         path = sdl.path,
         -- A call through the table, to prove the pointers are live rather

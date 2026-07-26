@@ -11,31 +11,31 @@
 --- gains is a component these tools gain.
 
 local cjson <const> = require("cjson")
-local tecs <const> = require("tecs")
+local ecs <const> = require("tecs.ecs")
 local mcp <const> = require("tecs.mcp")
 
 local record world
     --- Makes `w` the world these tools act on, and `known` the components they
     --- can name. A game adds its own.
-    bind: function(w: tecs.World, known: {string: tecs.Component})
+    bind: function(w: ecs.World, known: {string: ecs.Component})
     --- Adds components to the set these tools can name.
-    register: function(known: {string: tecs.Component})
+    register: function(known: {string: ecs.Component})
 end
 
-local bound: tecs.World = nil
-local byName <const>: {string: tecs.Component} = {}
+local bound: ecs.World = nil
+local byName <const>: {string: ecs.Component} = {}
 
-function world.register(known: {string: tecs.Component})
+function world.register(known: {string: ecs.Component})
     for name, component in pairs(known) do byName[name] = component end
 end
 
-function world.bind(w: tecs.World, known: {string: tecs.Component})
+function world.bind(w: ecs.World, known: {string: ecs.Component})
     bound = w
     if known ~= nil then world.register(known) end
 end
 
 --- The bound world, or an error naming why there is not one.
-local function current(): tecs.World
+local function current(): ecs.World
     if bound == nil then
         error("no world is bound; the application has not started", 0)
     end
@@ -43,7 +43,7 @@ local function current(): tecs.World
 end
 
 --- Resolves a component by name, listing what exists when it cannot.
-local function component(name: string): tecs.Component
+local function component(name: string): ecs.Component
     local found = byName[name]
     if found == nil then
         local names: {string} = {}
@@ -56,8 +56,8 @@ local function component(name: string): tecs.Component
 end
 
 --- Resolves a list of component names.
-local function componentList(names: {any}): {tecs.Component}
-    local list: {tecs.Component} = {}
+local function componentList(names: {any}): {ecs.Component}
+    local list: {ecs.Component} = {}
     if names == nil then return list end
     for index = 1, #names do
         list[index] = component(names[index] as string)
@@ -88,7 +88,7 @@ end
 
 --- Serializes an instance, or returns nil for a component that carries no
 --- data. A tag is presence, so it has nothing to show.
-local function valueOf(kind: tecs.Component, instance: any): {string: any}
+local function valueOf(kind: ecs.Component, instance: any): {string: any}
     local ok, serialized = pcall(function(): {string: any}
         return (kind.serialize as function(any): {string: any})(instance)
     end)
@@ -99,7 +99,7 @@ local function valueOf(kind: tecs.Component, instance: any): {string: any}
 end
 
 --- Reads one entity's components as plain tables.
-local function describe(w: tecs.World, entity: integer): {string: any}
+local function describe(w: ecs.World, entity: integer): {string: any}
     local values: {string: any} = {}
     local count = 0
     for name, kind in pairs(byName) do
@@ -252,7 +252,7 @@ mcp.register({
 --- are declared rather than from a copy of them here. A field the payload
 --- omits therefore takes the component's default, which is what makes `set` a
 --- replacement rather than a merge.
-local function construct(kind: tecs.Component, values: {string: any}): any
+local function construct(kind: ecs.Component, values: {string: any}): any
     local instance = (kind as function(): any)()
     if values == nil then return instance end
     local fields = instance as {string: any}
@@ -292,7 +292,7 @@ mcp.register({
         -- LuaJIT is 5.1, where unpack is a global rather than table.unpack.
         local unpackAll = (_G as {string: any})["unpack"]
             as function({any}): any...
-        local entity = (w.spawn as function(tecs.World, ...: any): integer)(
+        local entity = (w.spawn as function(ecs.World, ...: any): integer)(
             w, unpackAll(instances))
         return describe(w, entity)
     end,

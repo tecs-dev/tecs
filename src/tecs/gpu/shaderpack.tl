@@ -19,7 +19,7 @@ local buffer <const> = require("string.buffer")
 --- Identifies the file and its layout. The magic is checked so a wrong or
 --- truncated file is reported as such rather than surfacing as a decode error
 --- from somewhere inside the deserializer.
-local MAGIC <const> = "TECS2DSP"
+local MAGIC <const> = "TECSSP"
 
 local record shaderpack
     --- Resources a shader binds, as SDL_GPU counts them.
@@ -95,7 +95,7 @@ function shaderpack.formatValue(name: string): integer
             return K[("SDL_GPU_SHADERFORMAT_%s"):format(candidate:upper())]
         end
     end
-    error(("tecs2d: '%s' is not a shader format"):format(tostring(name)), 2)
+    error(("tecs: '%s' is not a shader format"):format(tostring(name)), 2)
 end
 
 --- Serializes a pack.
@@ -109,18 +109,18 @@ end
 function shaderpack.decode(bytes: string, origin?: string): shaderpack.Pack
     origin = origin or "<memory>"
     if #bytes < #MAGIC + 1 or bytes:sub(1, #MAGIC) ~= MAGIC then
-        error(("tecs2d: %s is not a shader pack"):format(origin), 2)
+        error(("tecs: %s is not a shader pack"):format(origin), 2)
     end
     local version = bytes:byte(#MAGIC + 1)
     if version ~= shaderpack.VERSION then
-        error(("tecs2d: %s is a version %d shader pack, this build reads %d")
+        error(("tecs: %s is a version %d shader pack, this build reads %d")
             :format(origin, version, shaderpack.VERSION), 2)
     end
     local ok, decoded = pcall(function(): any
         return buffer.decode(bytes:sub(#MAGIC + 2)) as any
     end)
     if not ok then
-        error(("tecs2d: %s is a corrupt shader pack: %s")
+        error(("tecs: %s is a corrupt shader pack: %s")
             :format(origin, tostring(decoded)), 2)
     end
     return decoded as shaderpack.Pack
@@ -133,7 +133,7 @@ end
 function shaderpack.write(path: string, pack: shaderpack.Pack)
     local file, reason = io.open(path, "wb")
     if file == nil then
-        error(("tecs2d: cannot write %s: %s"):format(path, tostring(reason)), 2)
+        error(("tecs: cannot write %s: %s"):format(path, tostring(reason)), 2)
     end
     file:write(shaderpack.encode(pack))
     file:close()

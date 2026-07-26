@@ -10,7 +10,7 @@ local image <const> = require("tecs.ffi.sdl3image")
 local capabilities <const> = require("tecs.platform.capabilities")
 local paths <const> = require("tecs.platform.paths")
 local log <const> = require("tecs.log")
-local tecs <const> = require("tecs")
+local ecs <const> = require("tecs.ecs")
 local mcp <const> = require("tecs.mcp")
 local events <const> = require("tecs.platform.events")
 local sandbox <const> = require("tecs.mcp.sandbox")
@@ -21,19 +21,19 @@ local C <const> = sdl.C
 local record tools
     --- Set by the application so the frame-facing tools have something to
     --- look at. Absent means those tools report why rather than failing.
-    bind: function(renderer: Renderer, world: tecs.World)
+    bind: function(renderer: Renderer, world: ecs.World)
 end
 
 local bound: Renderer = nil
-local boundWorld: tecs.World = nil
+local boundWorld: ecs.World = nil
 
-function tools.bind(renderer: Renderer, world: tecs.World)
+function tools.bind(renderer: Renderer, world: ecs.World)
     bound = renderer
     boundWorld = world
 end
 
 --- The bound world, or an error naming why there is not one.
-local function world(): tecs.World
+local function world(): ecs.World
     if boundWorld == nil then
         error("no world is bound; the application has not started", 0)
     end

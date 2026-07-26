@@ -300,7 +300,7 @@ function events.push(kind: string, fields: Event)
         if name == kind then sdlType = value break end
     end
     if sdlType == nil then
-        error(("tecs2d: no event kind named '%s'"):format(tostring(kind)), 2)
+        error(("tecs: no event kind named '%s'"):format(tostring(kind)), 2)
     end
 
     local holder = loader.newArray("SDL_Event[1]")

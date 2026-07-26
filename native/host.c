@@ -28,25 +28,25 @@
 #include "registry.h"
 #include "luamods.h"
 
-typedef struct Tecs2dHost Tecs2dHost;
+typedef struct TecsHost TecsHost;
 
-#ifndef TECS2D_ENTRY
-#define TECS2D_ENTRY "main.lua"
+#ifndef TECS_ENTRY
+#define TECS_ENTRY "main.lua"
 #endif
 
 /* Where content sits relative to the executable. The build knows the layout it
  * installed, so it says; nothing here guesses and nothing resolves against the
  * working directory, which is meaningless once an application is launched by
  * anything other than a shell. */
-#ifndef TECS2D_CONTENT
-#define TECS2D_CONTENT ""
+#ifndef TECS_CONTENT
+#define TECS_CONTENT ""
 #endif
 
 /* Events arriving in one iteration before growth. Sized past a burst of mouse
  * motion so warmup reaches steady state and stays there. */
-#define TECS2D_EVENTS_INITIAL 256
+#define TECS_EVENTS_INITIAL 256
 
-struct Tecs2dHost {
+struct TecsHost {
     lua_State *L;
     /* Registry index of the application returned by the entry chunk. */
     int application;
@@ -59,11 +59,11 @@ struct Tecs2dHost {
 
 /* ------------------------------------------------------------------ queue */
 
-static bool reserveEvents(Tecs2dHost *host, uint32_t needed)
+static bool reserveEvents(TecsHost *host, uint32_t needed)
 {
     if (needed <= host->capacity) return true;
 
-    uint32_t capacity = host->capacity ? host->capacity : TECS2D_EVENTS_INITIAL;
+    uint32_t capacity = host->capacity ? host->capacity : TECS_EVENTS_INITIAL;
     while (capacity < needed) capacity *= 2;
 
     SDL_Event *grown = (SDL_Event *)SDL_realloc(host->events,
@@ -85,8 +85,8 @@ static int traceback(lua_State *L)
 
 /* Calls application:<method>(...) with `extra` arguments already pushed by
  * `push`, and reports failure with a traceback. */
-static bool callMethod(Tecs2dHost *host, const char *method,
-                       void (*push)(lua_State *, Tecs2dHost *), int extra)
+static bool callMethod(TecsHost *host, const char *method,
+                       void (*push)(lua_State *, TecsHost *), int extra)
 {
     lua_State *L = host->L;
     int base = lua_gettop(L);
@@ -96,7 +96,7 @@ static bool callMethod(Tecs2dHost *host, const char *method,
     lua_getfield(L, -1, method);
 
     if (!lua_isfunction(L, -1)) {
-        SDL_Log("tecs2d: application has no %s method", method);
+        SDL_Log("tecs: application has no %s method", method);
         lua_settop(L, base);
         return false;
     }
@@ -106,7 +106,7 @@ static bool callMethod(Tecs2dHost *host, const char *method,
     if (push) push(L, host);
 
     if (lua_pcall(L, 1 + extra, 1, base + 1) != 0) {
-        SDL_Log("tecs2d: %s", lua_tostring(L, -1));
+        SDL_Log("tecs: %s", lua_tostring(L, -1));
         lua_settop(L, base);
         return false;
     }
@@ -120,7 +120,7 @@ static bool callMethod(Tecs2dHost *host, const char *method,
 /* The queue is handed over as a pointer and a count rather than exposed
  * through functions Lua has to resolve. C owns its lifetime either way, and
  * this keeps the host's symbols out of the dynamic namespace entirely. */
-static void pushQueue(lua_State *L, Tecs2dHost *host)
+static void pushQueue(lua_State *L, TecsHost *host)
 {
     lua_pushlightuserdata(L, host->events);
     lua_pushinteger(L, (lua_Integer)host->count);
@@ -130,22 +130,22 @@ static void pushQueue(lua_State *L, Tecs2dHost *host)
 
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
 {
-    Tecs2dHost *host = (Tecs2dHost *)SDL_calloc(1, sizeof(Tecs2dHost));
+    TecsHost *host = (TecsHost *)SDL_calloc(1, sizeof(TecsHost));
     if (!host) return SDL_APP_FAILURE;
     host->application = LUA_NOREF;
     *appstate = host;
 
     host->L = luaL_newstate();
     if (!host->L) {
-        SDL_Log("tecs2d: cannot create Lua state");
+        SDL_Log("tecs: cannot create Lua state");
         return SDL_APP_FAILURE;
     }
     luaL_openlibs(host->L);
 
     /* Before any Lua runs, so the first require can already reach the
      * libraries through it rather than trying to load them by name. */
-    tecs2dRegistryInstall(host->L);
-    tecs2dLuaModulesInstall(host->L);
+    tecsRegistryInstall(host->L);
+    tecsLuaModulesInstall(host->L);
 
     lua_State *L = host->L;
     lua_newtable(L);
@@ -161,11 +161,11 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
     const char *base = SDL_GetBasePath();
     char *content = NULL;
     if (base) {
-        SDL_asprintf(&content, "%s%s", base, TECS2D_CONTENT);
+        SDL_asprintf(&content, "%s%s", base, TECS_CONTENT);
     }
     if (content) {
         lua_pushstring(L, content);
-        lua_setglobal(L, "__tecs2dContent");
+        lua_setglobal(L, "__tecsContent");
     }
 
     char *resolved = NULL;
@@ -174,15 +174,15 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
         if (strcmp(argv[i], "--entry") == 0) entry = argv[i + 1];
     }
     if (!entry) {
-        if (content) SDL_asprintf(&resolved, "%s%s", content, TECS2D_ENTRY);
-        entry = resolved ? resolved : TECS2D_ENTRY;
+        if (content) SDL_asprintf(&resolved, "%s%s", content, TECS_ENTRY);
+        entry = resolved ? resolved : TECS_ENTRY;
     }
     SDL_free(content);
 
     lua_pushcfunction(L, traceback);
     int loaded = luaL_loadfile(L, entry) == 0 && lua_pcall(L, 0, 1, -2) == 0;
     if (!loaded) {
-        SDL_Log("tecs2d: %s", lua_tostring(L, -1));
+        SDL_Log("tecs: %s", lua_tostring(L, -1));
         SDL_free(resolved);
         return SDL_APP_FAILURE;
     }
@@ -190,7 +190,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
     /* The entry chunk returns its application, which the host retains for the
      * life of the process. */
     if (!lua_istable(L, -1)) {
-        SDL_Log("tecs2d: %s must return tecs.application(config)", entry);
+        SDL_Log("tecs: %s must return tecs.application(config)", entry);
         SDL_free(resolved);
         return SDL_APP_FAILURE;
     }
@@ -198,14 +198,14 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
     host->application = luaL_ref(L, LUA_REGISTRYINDEX);
     lua_pop(L, 1);
 
-    if (!reserveEvents(host, TECS2D_EVENTS_INITIAL)) return SDL_APP_FAILURE;
+    if (!reserveEvents(host, TECS_EVENTS_INITIAL)) return SDL_APP_FAILURE;
     if (!callMethod(host, "_init", NULL, 0)) return SDL_APP_FAILURE;
     return SDL_APP_CONTINUE;
 }
 
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 {
-    Tecs2dHost *host = (Tecs2dHost *)appstate;
+    TecsHost *host = (TecsHost *)appstate;
 
     /* Copied rather than dispatched here. The pointer is only valid for this
      * call, and dispatching mid-frame would show the application a world that
@@ -217,7 +217,7 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 
 SDL_AppResult SDL_AppIterate(void *appstate)
 {
-    Tecs2dHost *host = (Tecs2dHost *)appstate;
+    TecsHost *host = (TecsHost *)appstate;
     bool keepGoing = callMethod(host, "_iterate", pushQueue, 2);
 
     /* Drained whether or not the iteration succeeded, so a failing frame does
@@ -235,7 +235,7 @@ SDL_AppResult SDL_AppIterate(void *appstate)
 void SDL_AppQuit(void *appstate, SDL_AppResult result)
 {
     (void)result;
-    Tecs2dHost *host = (Tecs2dHost *)appstate;
+    TecsHost *host = (TecsHost *)appstate;
     if (!host) return;
 
     /* Exactly once, however the loop ended. */

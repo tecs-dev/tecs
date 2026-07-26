@@ -101,7 +101,7 @@ end
 --- Queues an image for loading and returns its handle immediately.
 function assets.loadImage(path: string): Handle
     if worker == nil then
-        error("tecs2d: assets.install must run before loading", 2)
+        error("tecs: assets.install must run before loading", 2)
     end
 
     local handle = setmetatable({ status = "loading", path = path } as Handle,

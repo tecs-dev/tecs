@@ -60,7 +60,7 @@ function Texture.create(device: loader.CPtr, options: TextureOptions): Texture
     for _, name in ipairs(options.usage or DEFAULT_USAGE) do
         local flag = USAGE_FLAGS[name]
         if flag == nil then
-            error(("tecs2d: unknown texture usage '%s'"):format(tostring(name)), 2)
+            error(("tecs: unknown texture usage '%s'"):format(tostring(name)), 2)
         end
         flags = flags + flag
     end

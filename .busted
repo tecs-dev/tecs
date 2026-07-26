@@ -1,0 +1,30 @@
+-- Busted configuration.
+--
+-- Two roots, because specs are written in two languages. The ECS suites are
+-- Teal and are compiled into the build tree; the engine's are Lua and run from
+-- where they sit. Both are collected, rather than rewriting a suite into the
+-- other language and losing what it proved.
+--
+-- The pattern matches compiled Lua only, so the Teal sources sitting in spec/
+-- are not handed to the interpreter.
+
+local lua = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
+local spec = os.getenv("TECS_SPEC") or "out/macos-arm64-dev/spec"
+
+-- Lua C modules are compiled into the executable for targets with no dlopen,
+-- so a spec running under a plain interpreter loads the same sources from the
+-- loadable build of them instead.
+local lib = os.getenv("TECS_LIB") or "out/macos-arm64-dev/lib"
+
+return {
+    default = {
+        lua = "luajit",
+        ROOT = { "spec", spec },
+        pattern = "_spec%.lua$",
+        lpath = table.concat({
+            lua .. "/?.lua", lua .. "/?/init.lua",
+            spec .. "/?.lua",
+        }, ";"),
+        cpath = lib .. "/?.so",
+    },
+}

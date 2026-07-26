@@ -90,7 +90,7 @@ function Device:setPresentMode(mode: string): boolean
     }
     local selected = modes[mode]
     if selected == nil then
-        error(("tecs2d: unknown present mode '%s'"):format(tostring(mode)), 2)
+        error(("tecs: unknown present mode '%s'"):format(tostring(mode)), 2)
     end
     if not C.SDL_WindowSupportsGPUPresentMode(self.handle, self.window.handle,
         selected) then

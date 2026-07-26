@@ -10,7 +10,7 @@ local loader <const> = require("tecs.ffi.loader")
 loader.declare("box2d")
 
 local namespace <const>, libraryPath <const> =
-    loader.library("box2d", "box2d", "TECS2D_BOX2D_PATH", "box2d")
+    loader.library("box2d", "box2d", "TECS_BOX2D_PATH", "box2d")
 
 local record box2d
     --- Functions and enum constants, resolved through the loaded library.

@@ -86,7 +86,7 @@ local sdlPlatform <const>: adapter.Platform = {
     prefPath = function(organisation: string, application: string): string
         local given = C.SDL_GetPrefPath(organisation, application)
         if given == nil then
-            error(("tecs2d: no writable directory: %s"):format(sdl.error()), 2)
+            error(("tecs: no writable directory: %s"):format(sdl.error()), 2)
         end
         local path = loader.toString(given)
         C.SDL_free(given)
@@ -125,11 +125,11 @@ local generation = 0
 --- would be half in effect.
 function adapter.install(platform: adapter.Platform)
     if platform == nil then
-        error("tecs2d: a platform is required", 2)
+        error("tecs: a platform is required", 2)
     end
     for _, required in ipairs({ "basePath", "prefPath", "shaderFormat" }) do
         if (platform as {string: any})[required] == nil then
-            error(("tecs2d: a platform must supply %s"):format(required), 2)
+            error(("tecs: a platform must supply %s"):format(required), 2)
         end
     end
     installed = platform

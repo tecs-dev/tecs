@@ -8,7 +8,7 @@ local loader <const> = require("tecs.ffi.loader")
 loader.declare("spvc")
 
 local namespace <const>, libraryPath <const> =
-    loader.library("spirvcrossc", "spirv-cross", "TECS2D_SPVC_PATH", "spvc")
+    loader.library("spirvcrossc", "spirv-cross", "TECS_SPVC_PATH", "spvc")
 
 local record spvc
     C: loader.CNamespace

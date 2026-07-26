@@ -6,9 +6,9 @@
 -- other way: a Content-Length that disagrees with the body, or a response
 -- closed before it drained, both look fine from inside.
 
-local root = os.getenv("TECS2D_LUA") or "out/macos-arm64-dev/lua"
+local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. "../tecs/build/?.lua;../tecs/build/?/init.lua;" .. package.path
+    .. package.path
 
 local cjson = require("cjson")
 local sdl = require("tecs.ffi.sdl3")

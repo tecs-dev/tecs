@@ -7,9 +7,9 @@
 -- one renders the same pixels as a build that compiled the shaders itself, and
 -- that a build with neither says so instead of opening a black window.
 
-local root = os.getenv("TECS2D_LUA") or "out/macos-arm64-dev/lua"
+local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. "../tecs/build/?.lua;../tecs/build/?/init.lua;" .. package.path
+    .. package.path
 
 local tecs = require("tecs")
 local sdl = require("tecs.ffi.sdl3")
@@ -108,8 +108,8 @@ describe("shaders", function()
     it("reads variants declared in the file", function()
         shaders.override("spec.variants.frag", table.concat({
             "#version 450",
-            "#pragma tecs2d variants LIGHTS=1",
-            "#pragma tecs2d variants LIGHTS=4 SHADOWS=1",
+            "#pragma tecs variants LIGHTS=1",
+            "#pragma tecs variants LIGHTS=4 SHADOWS=1",
             "void main() {}",
         }, "\n"))
 
@@ -220,15 +220,21 @@ describe("shaderpack", function()
 
     it("rejects a pack whose layout this build does not read", function()
         local encoded = shaderpack.encode(shaderbuild.build())
-        -- Same magic, a version this build does not know.
-        local wrong = encoded:sub(1, 8) .. string.char(99) .. encoded:sub(10)
+        -- Same magic, a version this build does not know. The offset is taken
+        -- from the magic rather than written as a literal, since a magic of a
+        -- different length would otherwise move the version byte and leave
+        -- this patching payload bytes while still reading as a pass.
+        local MAGIC = "TECSSP"
+        assert.are.equal(MAGIC, encoded:sub(1, #MAGIC))
+        local wrong = encoded:sub(1, #MAGIC) .. string.char(99)
+            .. encoded:sub(#MAGIC + 2)
         local ok, reason = pcall(shaderpack.decode, wrong, "wrong.tsp")
         assert.is_false(ok)
         assert.is_truthy(tostring(reason):find("version 99"))
     end)
 
     it("returns nil for a path with no pack", function()
-        assert.is_nil(shaderpack.read("/tmp/tecs2d-no-such-pack.tsp"))
+        assert.is_nil(shaderpack.read("/tmp/tecs-no-such-pack.tsp"))
     end)
 
     it("names the formats it can carry", function()

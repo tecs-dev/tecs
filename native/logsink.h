@@ -4,20 +4,20 @@
  * drift.
  */
 
-#ifndef TECS2D_LOGSINK_H
-#define TECS2D_LOGSINK_H
+#ifndef TECS_LOGSINK_H
+#define TECS_LOGSINK_H
 
 #include <stdbool.h>
 
 /* Starts writing to `path`, truncating it, and installs the sink in front of
  * SDL's own output function rather than instead of it. */
-bool tecs2dLogSinkOpen(const char *path);
+bool tecsLogSinkOpen(const char *path);
 
 /* Names a category so the sink can write it rather than a number. `base` is
  * where the caller's categories start. */
-void tecs2dLogSinkCategory(int base, int category, const char *name);
+void tecsLogSinkCategory(int base, int category, const char *name);
 
 /* Restores SDL's output function and closes the file. */
-void tecs2dLogSinkClose(void);
+void tecsLogSinkClose(void);
 
 #endif

@@ -6,9 +6,9 @@
 -- cannot encode raises rather than being skipped. Both matter wherever a
 -- structure round-trips, which is the MCP protocol and Tiled maps.
 
-local root = os.getenv("TECS2D_LUA") or "out/macos-arm64-dev/lua"
+local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. "../tecs/build/?.lua;../tecs/build/?/init.lua;" .. package.path
+    .. package.path
 
 local cjson = require("cjson")
 

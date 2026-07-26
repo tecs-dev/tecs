@@ -14,7 +14,7 @@ local loader <const> = require("tecs.ffi.loader")
 loader.declare("sdl3net")
 
 local namespace <const>, libraryPath <const> =
-    loader.library("SDL3_net", "sdl3_net", "TECS2D_SDL3NET_PATH", "sdl3net")
+    loader.library("SDL3_net", "sdl3_net", "TECS_SDL3NET_PATH", "sdl3net")
 
 local record sdl3net
     C: loader.CNamespace

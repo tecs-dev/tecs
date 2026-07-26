@@ -178,7 +178,7 @@ function materials.id(name: string): integer
     materials.install()
     local material = byName[name]
     if material == nil then
-        error(("tecs2d: no material named '%s'; found %s")
+        error(("tecs: no material named '%s'; found %s")
             :format(name, table.concat(materials.names(), ", ")), 2)
     end
     return material.id

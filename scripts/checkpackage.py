@@ -62,7 +62,7 @@ def main():
     # A development install links the build machine's libraries on purpose.
     # Reporting that as a failure would train people to ignore this check, so
     # it is stated and passed instead; only a packaged build is held to it.
-    info = prefix / "share" / "tecs2d" / "build-info.txt"
+    info = prefix / "share" / "tecs" / "build-info.txt"
     development = "systemDeps=ON" in info.read_text() if info.exists() else False
 
     binaries = [p for p in prefix.rglob("*")

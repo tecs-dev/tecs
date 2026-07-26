@@ -5,9 +5,9 @@
 -- meaningless on a device; `ffi.os` cannot tell a build that linked a shader
 -- compiler from one that did not.
 
-local root = os.getenv("TECS2D_LUA") or "out/macos-arm64-dev/lua"
+local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. "../tecs/build/?.lua;../tecs/build/?/init.lua;" .. package.path
+    .. package.path
 
 local sdl = require("tecs.ffi.sdl3")
 local paths = require("tecs.platform.paths")

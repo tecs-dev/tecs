@@ -6,8 +6,8 @@ require("tecs.internal.compat")
 local types <const> = require("tecs.types")
 local Context <const> = require("tecs.internal.Context")
 local builtins <const> = require("tecs.internal.builtins")
-local components <const> = require("tecs.internal.components")
-local events <const> = require("tecs.internal.events")
+local internalComponents <const> = require("tecs.internal.components")
+local internalEvents <const> = require("tecs.internal.events")
 local phases <const> = require("tecs.internal.phases")
 local runIfHelpers <const> = require("tecs.internal.runif")
 local json <const> = require("tecs.utils.json")
@@ -20,6 +20,26 @@ local WorldImpl <const> = require("tecs.internal.world")
 --- supported API, as are the `tecs.utils.*` modules (json, logging, profile,
 --- pool, Bitset), which may be required directly. `tecs.internal.*` modules
 --- are implementation details unless re-exported here.
+-- The engine half. Plain requires: these modules depend on `tecs.ecs` rather
+-- than on this surface, so the graph runs one way and there is no cycle to
+-- work around.
+local Application <const> = require("tecs.Application")
+local Renderer <const> = require("tecs.Renderer")
+local Camera <const> = require("tecs.gfx.Camera")
+local Window <const> = require("tecs.platform.Window")
+local Input <const> = require("tecs.platform.Input")
+local clock <const> = require("tecs.platform.clock")
+local events <const> = require("tecs.platform.events")
+local capabilities <const> = require("tecs.platform.capabilities")
+local paths <const> = require("tecs.platform.paths")
+local components <const> = require("tecs.components")
+local materials <const> = require("tecs.gpu.materials")
+local assets <const> = require("tecs.assets")
+local workers <const> = require("tecs.workers")
+local physics <const> = require("tecs.physics")
+local log <const> = require("tecs.log")
+local mcp <const> = require("tecs.mcp")
+
 local record tecs
     type World = types.World
     type System = types.System
@@ -59,25 +79,26 @@ local record tecs
     type SnapshotOutput = types.World.SnapshotOutput
     type SnapshotHandler = types.World.SnapshotHandler
 
-    --- The engine surface. Resolved on first use; see the note by ENGINE.
-    Application: any
-    Renderer: any
-    Camera: any
-    Window: any
-    Input: any
-    clock: any
-    events: any
-    capabilities: any
-    paths: any
-    components: any
-    materials: any
-    assets: any
-    workers: any
-    physics: any
-    log: any
-    mcp: any
+    --- The engine surface.
+    Application: Application
+    Renderer: Renderer
+    Camera: Camera
+    Window: Window
+    Input: Input
+    clock: clock
+    events: events
+    capabilities: capabilities
+    paths: paths
+    components: components
+    materials: materials
+    assets: assets
+    workers: workers
+    physics: physics
+    log: log
+    mcp: mcp
+    --- Version of this build.
     version: string
-    application: function(config: any): any
+    application: function(config: Application.Config): Application
 
     json: json
     phases: phases
@@ -174,25 +195,25 @@ end
 
 -- Teal does not accept bare assignment of these polymorphic function values between record fields, even when the
 -- signatures are structurally identical.
-tecs.newComponent = components.newComponent
+tecs.newComponent = internalComponents.newComponent
     as function<C is types.components.Component>(options: types.components.ComponentOptions<C>): C
-tecs.newScalarComponent = components.newScalarComponent
+tecs.newScalarComponent = internalComponents.newScalarComponent
     as function<T>(options: types.components.ScalarComponentOptions<T>): types.components.ScalarComponent<T>
-tecs.newTagComponent = components.newTagComponent
+tecs.newTagComponent = internalComponents.newTagComponent
     as function(options: types.components.TagComponentOptions): types.components.Component
-tecs.newFFIComponent = components.newFFIComponent
+tecs.newFFIComponent = internalComponents.newFFIComponent
     as function<C is types.components.Component>(options: types.components.FFIComponentOptions<C>): C
-tecs.newRelationship = components.newRelationship
+tecs.newRelationship = internalComponents.newRelationship
     as function<R is types.components.Relationship>(config: types.components.RelationshipOptions<R>): R
-tecs.newFFIRelationship = components.newFFIRelationship
+tecs.newFFIRelationship = internalComponents.newFFIRelationship
     as function<R is types.components.Relationship>(config: types.components.FFIRelationshipOptions<R>): R
 
 function tecs.getComponentById(id: integer): types.components.Component
-    return components.componentsById[id]
+    return internalComponents.componentsById[id]
 end
 
 function tecs.componentByName(name: string): types.components.Component
-    return components.registeredComponents[name]
+    return internalComponents.registeredComponents[name]
 end
 
 tecs.newWorld = WorldImpl.new
@@ -200,9 +221,9 @@ tecs.newKey = Context.newKey
 tecs.findKey = Context.findKey
 tecs.listKeys = Context.listKeys
 tecs.newContext = Context.new
-tecs.newEvent = events.newEvent
-tecs.newFFIEvent = events.newFFIEvent
-tecs.newMessageBus = events.MessageBus.new
+tecs.newEvent = internalEvents.newEvent
+tecs.newFFIEvent = internalEvents.newFFIEvent
+tecs.newMessageBus = internalEvents.MessageBus.new
 tecs.json = json
 tecs.phases = phases
 tecs.builtins = builtins
@@ -210,54 +231,31 @@ tecs.runif = runIfHelpers
 tecs.MAX_ENTITIES = IdAllocator.ABSOLUTE_MAX_SLOT_COUNT
 tecs.DEFAULT_MAX_ENTITIES = IdAllocator.DEFAULT_MAX_SLOT_COUNT
 
--- The engine half of the surface, resolved on first use.
---
--- Lazily, because every one of these modules requires `tecs` itself for
--- worlds, phases and components, so requiring them here would be a cycle. The
--- names are listed rather than discovered, so `tecs.Aplication` is an error at
--- the point of the typo instead of a nil at the point of the call.
-local ENGINE <const>: {string: string} = {
-    Application = "tecs.Application",
-    Renderer = "tecs.Renderer",
-    Camera = "tecs.gfx.Camera",
-    Window = "tecs.platform.Window",
-    Input = "tecs.platform.Input",
-    clock = "tecs.platform.clock",
-    events = "tecs.platform.events",
-    capabilities = "tecs.platform.capabilities",
-    paths = "tecs.platform.paths",
-    components = "tecs.components",
-    materials = "tecs.gpu.materials",
-    assets = "tecs.assets",
-    workers = "tecs.workers",
-    physics = "tecs.physics",
-    log = "tecs.log",
-    mcp = "tecs.mcp",
-}
-
-local engineTable <const> = tecs as {string: any}
-
-setmetatable(engineTable, {
-    __index = function(self: {string: any}, name: string): any
-        local module = ENGINE[name]
-        if module == nil then return nil end
-        local resolved = require(module)
-        rawset(self, name, resolved)
-        return resolved
-    end,
-})
-
 --- Builds the application an entry file returns.
 ---
 --- Not a function that runs until done: an entry file ends with
 --- `return tecs.application(config)` and the host drives it from there,
 --- because a platform that never hands control back has no loop to block in.
-function tecs.application(config: any): any
-    local Application = require("tecs.Application") as {string: any}
-    local create = Application.create as function(any): any
-    return create(config)
+function tecs.application(config: Application.Config): Application
+    return Application.create(config)
 end
 
+tecs.Application = Application
+tecs.Renderer = Renderer
+tecs.Camera = Camera
+tecs.Window = Window
+tecs.Input = Input
+tecs.clock = clock
+tecs.events = events
+tecs.capabilities = capabilities
+tecs.paths = paths
+tecs.components = components
+tecs.materials = materials
+tecs.assets = assets
+tecs.workers = workers
+tecs.physics = physics
+tecs.log = log
+tecs.mcp = mcp
 tecs.version = "0.1.0"
 
 return tecs

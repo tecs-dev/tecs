@@ -77,7 +77,7 @@ end
 --- Registers a tool. Re-registering a name replaces it.
 function mcp.register(tool: mcp.Tool)
     if tool.name == nil or tool.handler == nil then
-        error("tecs2d: a tool needs a name and a handler", 2)
+        error("tecs: a tool needs a name and a handler", 2)
     end
     if tools[tool.name] == nil then
         order[#order + 1] = tool.name

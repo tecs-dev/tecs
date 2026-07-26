@@ -22,7 +22,7 @@ local loader <const> = require("tecs.ffi.loader")
 loader.declare("worker")
 
 local C <const>, libraryPath <const> =
-    loader.library("tecs2dworker", "tecs", "TECS2D_WORKER_PATH", "worker")
+    loader.library("tecsworker", "tecs", "TECS_WORKER_PATH", "worker")
 
 --- Waits indefinitely in `receive`.
 local FOREVER <const> = -1
@@ -63,8 +63,8 @@ local messageOut <const> = loader.newArray("void*[1]")
 
 --- Creates a channel.
 function Channel.create(): Channel
-    local handle = C.tecs2dChannelCreate()
-    if handle == nil then error("tecs2d: cannot create channel", 2) end
+    local handle = C.tecsChannelCreate()
+    if handle == nil then error("tecs: cannot create channel", 2) end
     local self = setmetatable({} as Channel, ChannelMT)
     self.handle = handle
     self._destroyed = false
@@ -118,14 +118,14 @@ end
 function Channel:send(value: any)
     local rejected = unsendable(value, "value", 0)
     if rejected ~= nil then
-        error(("tecs2d: cannot send to a worker: %s"):format(rejected), 2)
+        error(("tecs: cannot send to a worker: %s"):format(rejected), 2)
     end
 
     -- The cast is to satisfy the buffer type declaration, which names only
     -- scalars; the encoder handles tables of scalars fine.
     local encoded = buffer.encode(value as string) as string
-    if not C.tecs2dChannelPush(self.handle, encoded, #encoded) then
-        error("tecs2d: channel send failed", 2)
+    if not C.tecsChannelPush(self.handle, encoded, #encoded) then
+        error("tecs: channel send failed", 2)
     end
 end
 
@@ -135,33 +135,33 @@ end
 --- other value waits that long.
 function Channel:receive(timeoutMs?: number): any
     local size = tonumber(
-        C.tecs2dChannelPop(self.handle, messageOut, timeoutMs or 0)) as integer
+        C.tecsChannelPop(self.handle, messageOut, timeoutMs or 0)) as integer
     if size == 0 then return nil end
 
     local message = messageOut[0]
-    local payload = C.tecs2dChannelData(message)
+    local payload = C.tecsChannelData(message)
     -- Copied out before the message is freed; the decoded value must not
     -- reference storage the native side is about to release.
     local encoded = ffi.string(payload as string, size) as string
-    C.tecs2dChannelFree(message)
+    C.tecsChannelFree(message)
     return buffer.decode(encoded) as any
 end
 
 --- Messages waiting on the channel.
 function Channel:count(): integer
-    return tonumber(C.tecs2dChannelCount(self.handle)) as integer
+    return tonumber(C.tecsChannelCount(self.handle)) as integer
 end
 
 --- Wakes anything blocked on this channel so it can stop.
 function Channel:close()
-    C.tecs2dChannelClose(self.handle)
+    C.tecsChannelClose(self.handle)
 end
 
 --- Releases the channel. Safe to call more than once.
 function Channel:destroy()
     if self._destroyed then return end
     self._destroyed = true
-    C.tecs2dChannelDestroy(self.handle)
+    C.tecsChannelDestroy(self.handle)
     self.handle = nil
 end
 
@@ -181,18 +181,18 @@ end
 --- Starts a worker running `options.source` on its own thread and state.
 function workers.spawn(options: SpawnOptions): Worker
     if options.source == nil then
-        error("tecs2d: a worker needs source", 2)
+        error("tecs: a worker needs source", 2)
     end
 
     local toWorker = Channel.create()
     local fromWorker = Channel.create()
 
-    local handle = C.tecs2dWorkerSpawn(options.source,
+    local handle = C.tecsWorkerSpawn(options.source,
         options.luaPath or package.path, toWorker.handle, fromWorker.handle)
     if handle == nil then
         toWorker:destroy()
         fromWorker:destroy()
-        error("tecs2d: cannot spawn worker", 2)
+        error("tecs: cannot spawn worker", 2)
     end
 
     local self = setmetatable({} as Worker, WorkerMT)
@@ -228,7 +228,7 @@ function Worker:stop(): integer
     if self._joined then return 0 end
     self._joined = true
     self._toWorker:close()
-    local status = tonumber(C.tecs2dWorkerJoin(self._handle)) as integer
+    local status = tonumber(C.tecsWorkerJoin(self._handle)) as integer
     self._handle = nil
     self._toWorker:destroy()
     self._fromWorker:destroy()
@@ -252,10 +252,10 @@ end
 --- pointers as globals before running the source.
 function workers.current(): Self
     local globals = _G as {string: any}
-    local inbox = globals["__tecs2dWorkerIn"]
-    local outbox = globals["__tecs2dWorkerOut"]
+    local inbox = globals["__tecsWorkerIn"]
+    local outbox = globals["__tecsWorkerOut"]
     if inbox == nil or outbox == nil then
-        error("tecs2d: workers.current is only valid inside a worker", 2)
+        error("tecs: workers.current is only valid inside a worker", 2)
     end
 
     local incoming = Channel.wrap(ffi.cast("void *", inbox) as loader.CPtr)

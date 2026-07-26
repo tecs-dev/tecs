@@ -13,14 +13,14 @@
       "hidden": true,
       "inherits": "base",
       "description": "System dependencies. Development only: a package manager's paths must not reach a shipped build.",
-      "cacheVariables": { "TECS2D_SYSTEM_DEPS": "ON" }
+      "cacheVariables": { "TECS_SYSTEM_DEPS": "ON" }
     },
     {
       "name": "packaged",
       "hidden": true,
       "inherits": "base",
       "description": "Pinned dependency sources, so a release is reproducible and carries no system paths.",
-      "cacheVariables": { "TECS2D_SYSTEM_DEPS": "OFF" }
+      "cacheVariables": { "TECS_SYSTEM_DEPS": "OFF" }
     },
 
     {

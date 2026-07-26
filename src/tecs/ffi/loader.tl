@@ -57,7 +57,7 @@ loader.searchPaths = {
     -- Libraries this project links itself, such as the shared SPIRV-Cross that
     -- is only distributed as static archives. The build system chooses where
     -- those land, so it says where rather than this guessing.
-    (os.getenv("TECS2D_LIB") or "") .. "/",
+    (os.getenv("TECS_LIB") or "") .. "/",
     "/opt/homebrew/lib/",
     "/opt/homebrew/opt/%s/lib/",
     "/usr/local/lib/",
@@ -88,7 +88,7 @@ local structs: {string: string} = nil
 
 --- The function-pointer table the host installed for `name`, if any.
 local function registryTable(name: string): loader.CValue
-    local registry = (_G as {string: any})["__tecs2dRegistry"]
+    local registry = (_G as {string: any})["__tecsRegistry"]
     if registry == nil then return nil end
     return (registry as {string: any})[name] as loader.CValue
 end
@@ -153,7 +153,7 @@ function loader.library(soname: string, formula: string, envVar: string,
         end
         local struct = structs[key]
         if struct == nil then
-            error(("tecs2d: %s is in the registry with no declared table"):format(key), 2)
+            error(("tecs: %s is in the registry with no declared table"):format(key), 2)
         end
         local namespace = registryNamespace(
             ffi.cast(struct .. " *", table_ as string) as loader.CValue)
@@ -185,7 +185,7 @@ function loader.library(soname: string, formula: string, envVar: string,
         failures[#failures + 1] = path
     end
 
-    error(("tecs2d: cannot load %s. Tried:\n  %s\nSet %s to an absolute path.")
+    error(("tecs: cannot load %s. Tried:\n  %s\nSet %s to an absolute path.")
         :format(soname, table.concat(failures, "\n  "), envVar), 2)
 end
 
@@ -200,14 +200,14 @@ function loader.declare(name: string)
     if declared[name] then return end
     local ok, source = requireGenerated(name .. "cdef")
     if not ok then
-        error(("tecs2d: missing generated cdef for %s. Run the build."):format(name), 2)
+        error(("tecs: missing generated cdef for %s. Run the build."):format(name), 2)
     end
     ffi.cdef(source as string)
 
     if registryTable(name) ~= nil then
         local hasApi, api = requireGenerated(name .. "apicdef")
         if not hasApi then
-            error(("tecs2d: %s is registered but its table declaration is missing")
+            error(("tecs: %s is registered but its table declaration is missing")
                 :format(name), 2)
         end
         ffi.cdef(api as string)
@@ -301,7 +301,7 @@ end
 function loader.constants(name: string): {string: integer}
     local ok, table_ = requireGenerated(name .. "const")
     if not ok then
-        error(("tecs2d: missing generated constants for %s. Run `make cdef`."):format(name), 2)
+        error(("tecs: missing generated constants for %s. Run `make cdef`."):format(name), 2)
     end
     return table_ as {string: integer}
 end

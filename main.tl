@@ -10,16 +10,14 @@
 -- Where this tree was compiled to: the build says so during development, the
 -- host says so for an installed run, and neither is the working directory. Our
 -- tree comes first so it wins over the ECS repo's own copy of the engine.
-local root = os.getenv("TECS2D_LUA")
-    or (_G as {string: any})["__tecs2dContent"] as string
+local root = os.getenv("TECS_LUA")
+    or (_G as {string: any})["__tecsContent"] as string
     or "out/macos-arm64-dev/lua"
 if root:sub(-1) == "/" then root = root:sub(1, -2) end
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    -- Development only: the ECS is referenced in place rather than installed.
-    .. "../tecs/build/?.lua;../tecs/build/?/init.lua;" .. package.path
+    .. package.path
 
 local tecs <const> = require("tecs")
-local tecs2d <const> = require("tecs")
 local shadercompiler <const> = require("tecs.gpu.shadercompiler")
 local shaderpack <const> = require("tecs.gpu.shaderpack")
 local Transform2D <const> = tecs.components.Transform2D
@@ -27,16 +25,16 @@ local Tint <const> = tecs.components.Tint
 local PointLight <const> = tecs.components.PointLight
 local Renderable <const> = tecs.components.Renderable
 
-local COUNT <const> = math.floor(tonumber(os.getenv("TECS2D_INSTANCES")) or 4000)
+local COUNT <const> = math.floor(tonumber(os.getenv("TECS_INSTANCES")) or 4000)
 
 --- How far the field spreads relative to the window. Above one, most of the
 --- world sits outside the view, which is the case culling exists for.
-local WORLD <const> = tonumber(os.getenv("TECS2D_WORLD")) or 1.0
+local WORLD <const> = tonumber(os.getenv("TECS_WORLD")) or 1.0
 
 -- Scales quad size without moving anything, so a bench can separate the cost
 -- of covering pixels from the cost of having instances.
-local SCALE <const> = tonumber(os.getenv("TECS2D_SCALE")) or 1.0
-local LIGHTS <const> = math.floor(tonumber(os.getenv("TECS2D_LIGHTS")) or 3)
+local SCALE <const> = tonumber(os.getenv("TECS_SCALE")) or 1.0
+local LIGHTS <const> = math.floor(tonumber(os.getenv("TECS_LIGHTS")) or 3)
 
 --- Seeds a sunflower spiral of renderable quads.
 ---
@@ -108,21 +106,21 @@ end
 return tecs.application({
     window = {
         title = "tecs",
-        width = math.floor(tonumber(os.getenv("TECS2D_WIDTH")) or 1280),
-        height = math.floor(tonumber(os.getenv("TECS2D_HEIGHT")) or 720),
+        width = math.floor(tonumber(os.getenv("TECS_WIDTH")) or 1280),
+        height = math.floor(tonumber(os.getenv("TECS_HEIGHT")) or 720),
     },
-    framesInFlight = tonumber(os.getenv("TECS2D_INFLIGHT")) as integer,
+    framesInFlight = tonumber(os.getenv("TECS_INFLIGHT")) as integer,
     debug = true,
     ambient = { 0.05, 0.05, 0.08 },
     capacity = COUNT + 16,
     maxEntities = COUNT + 64,
-    maxFrames = tonumber(os.getenv("TECS2D_FRAMES")) as integer,
-    presentMode = os.getenv("TECS2D_PRESENT"),
-    mcpPort = tonumber(os.getenv("TECS2D_MCP")) as integer,
+    maxFrames = tonumber(os.getenv("TECS_FRAMES")) as integer,
+    presentMode = os.getenv("TECS_PRESENT"),
+    mcpPort = tonumber(os.getenv("TECS_MCP")) as integer,
 
     load = function(app: tecs.Application)
         local width, height = app.window:getPixelSize()
-        print(("tecs2d %s"):format(tecs.version))
+        print(("tecs %s"):format(tecs.version))
         print(("  driver: %s"):format(app.device.driver))
         print(("  window: %dx%d px"):format(width, height))
 
@@ -150,7 +148,7 @@ return tecs.application({
         -- Rotation is a write, so the column is taken with getMut. Reads use
         -- get: taking getMut to read would mark the component dirty on every
         -- archetype every frame and defeat every dirty-gated consumer.
-        local static = os.getenv("TECS2D_STATIC") ~= nil
+        local static = os.getenv("TECS_STATIC") ~= nil
         local spinning = app.world:query({ include = { Transform2D, Renderable } })
         if not static then
         app.world:addSystem({

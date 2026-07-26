@@ -19,19 +19,19 @@
 /* Each generated table declares its accessor. Kept as declarations rather than
  * an include so a target can link a subset: a release with packaged shaders
  * links no shader compiler, and the entries for it are simply absent. */
-#define TECS2D_API(name, struct_) extern const void *tecs2d_##name##_api(void);
+#define TECS_API(name, struct_) extern const void *tecs_##name##_api(void);
 #include "registry_entries.h"
-#undef TECS2D_API
+#undef TECS_API
 
-void tecs2dRegistryInstall(lua_State *L)
+void tecsRegistryInstall(lua_State *L)
 {
     lua_newtable(L);
 
-#define TECS2D_API(name, struct_) \
-    lua_pushlightuserdata(L, (void *)tecs2d_##name##_api()); \
+#define TECS_API(name, struct_) \
+    lua_pushlightuserdata(L, (void *)tecs_##name##_api()); \
     lua_setfield(L, -2, #name);
 #include "registry_entries.h"
-#undef TECS2D_API
+#undef TECS_API
 
-    lua_setglobal(L, "__tecs2dRegistry");
+    lua_setglobal(L, "__tecsRegistry");
 }

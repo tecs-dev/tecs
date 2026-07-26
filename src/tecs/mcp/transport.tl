@@ -55,7 +55,7 @@ local started = false
 local function ensure()
     if started then return end
     if not C.NET_Init() then
-        error(("tecs2d: NET_Init failed: %s"):format(sdl.error()), 3)
+        error(("tecs: NET_Init failed: %s"):format(sdl.error()), 3)
     end
     started = true
 end
@@ -70,7 +70,7 @@ function transport.listen(port: integer): transport.Server
 
     local handle = C.NET_CreateServer(nil, port, 0)
     if handle == nil then
-        error(("tecs2d: cannot listen on port %d: %s")
+        error(("tecs: cannot listen on port %d: %s")
             :format(port, sdl.error()), 2)
     end
 

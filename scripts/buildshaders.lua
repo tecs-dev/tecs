@@ -4,9 +4,9 @@
 -- artifact a target without one consumes. The pack lands beside the Lua tree
 -- so it sits next to the executable in an installed package.
 
-local root = os.getenv("TECS2D_LUA") or arg[1]
+local root = os.getenv("TECS_LUA") or arg[1]
 if root == nil then
-    io.stderr:write("usage: TECS2D_LUA=<lua dir> buildshaders.lua [output]\n")
+    io.stderr:write("usage: TECS_LUA=<lua dir> buildshaders.lua [output]\n")
     os.exit(1)
 end
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path

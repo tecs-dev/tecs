@@ -5,6 +5,6 @@ return {
     gen_compat = "off",
     include_dir = { "src/", "vendor/tl/", "vendor/share/lua/5.1/" },
     dont_prune = {
-        "tecs2d/ffi/*cdef.lua",
+        "tecs/ffi/*cdef.lua",
     },
 }

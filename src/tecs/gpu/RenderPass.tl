@@ -61,10 +61,10 @@ function RenderPass.begin(commandBuffer: loader.CValue,
                           attachments: {RenderPass.Attachment}): RenderPass
     local count = #attachments
     if count == 0 then
-        error("tecs2d: a render pass needs at least one colour attachment", 2)
+        error("tecs: a render pass needs at least one colour attachment", 2)
     end
     if count > MAX_COLOR_TARGETS then
-        error(("tecs2d: %d colour attachments exceeds the limit of %d")
+        error(("tecs: %d colour attachments exceeds the limit of %d")
             :format(count, MAX_COLOR_TARGETS), 2)
     end
 

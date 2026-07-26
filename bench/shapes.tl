@@ -12,15 +12,14 @@
 --- second is what the comparison's work per rendered frame looks like. Both are
 --- reported rather than one being chosen.
 
-local root = os.getenv("TECS2D_LUA")
-    or (_G as {string: any})["__tecs2dContent"] as string
+local root = os.getenv("TECS_LUA")
+    or (_G as {string: any})["__tecsContent"] as string
     or "out/macos-arm64-dev/lua"
 if root:sub(-1) == "/" then root = root:sub(1, -2) end
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. "../tecs/build/?.lua;../tecs/build/?/init.lua;" .. package.path
+    .. package.path
 
 local tecs <const> = require("tecs")
-local tecs2d <const> = require("tecs")
 local Transform2D <const> = tecs.components.Transform2D
 local Tint <const> = tecs.components.Tint
 local Renderable <const> = tecs.components.Renderable

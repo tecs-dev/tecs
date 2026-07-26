@@ -16,15 +16,14 @@
 --- while worsening the tail has made the game feel worse, and physics is where
 --- that trade shows up.
 
-local root = os.getenv("TECS2D_LUA")
-    or (_G as {string: any})["__tecs2dContent"] as string
+local root = os.getenv("TECS_LUA")
+    or (_G as {string: any})["__tecsContent"] as string
     or "out/macos-arm64-dev/lua"
 if root:sub(-1) == "/" then root = root:sub(1, -2) end
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. "../tecs/build/?.lua;../tecs/build/?/init.lua;" .. package.path
+    .. package.path
 
 local tecs <const> = require("tecs")
-local tecs2d <const> = require("tecs")
 local physics <const> = require("tecs.physics")
 local materials <const> = require("tecs.gpu.materials")
 local Transform2D <const> = tecs.components.Transform2D

@@ -7,7 +7,7 @@
 ---
 --- The underscored methods are the host's contract, not the game's.
 
-local tecs <const> = require("tecs")
+local ecs <const> = require("tecs.ecs")
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
 local clock <const> = require("tecs.platform.clock")
@@ -66,7 +66,7 @@ local record Application
 
     window: Window
     device: Device
-    world: tecs.World
+    world: ecs.World
     renderer: Renderer
     input: Input
     --- The debug server, when one was asked for.
@@ -88,7 +88,7 @@ local record Application
     --- Traceback of a gameplay crash. Once set, the loop stops simulating and
     --- rendering but keeps draining events and answering the debug server.
     _crashed: string
-    --- Per-phase frame timing, accumulated when TECS2D_TIMING is set.
+    --- Per-phase frame timing, accumulated when TECS_TIMING is set.
     _timing: {string: number}
     _started: boolean
     _shutdownDone: boolean
@@ -106,7 +106,7 @@ function Application.create(config: Application.Config): Application
     self.suspended = false
     self.elapsed = 0.0
     self.frame = 0
-    if os.getenv("TECS2D_TIMING") ~= nil then
+    if os.getenv("TECS_TIMING") ~= nil then
         self._timing = { update = 0, acquire = 0, record = 0, submit = 0, frames = 0 }
     end
     return self
@@ -138,7 +138,7 @@ function Application:_init(): boolean
     if pack ~= nil then
         shadercompiler.usePack(pack)
     elseif not shadercompiler.available() then
-        error(("tecs2d: this build links no shader compiler and there is no "
+        error(("tecs: this build links no shader compiler and there is no "
             .. "pack at %s"):format(packPath))
     end
 
@@ -160,7 +160,7 @@ function Application:_init(): boolean
     end
 
     self.input = Input.create()
-    self.world = tecs.newWorld({ maxEntities = config.maxEntities })
+    self.world = ecs.newWorld({ maxEntities = config.maxEntities })
     self.renderer = Renderer.create(self.device.handle,
         self.device:getSwapchainFormat(), {
             ambient = config.ambient,
@@ -184,12 +184,12 @@ function Application:_init(): boolean
     local input = self.input
     self.world:addSystem({
         name = "tecs.EnterFixedInput",
-        phase = tecs.phases.FixedFirst,
+        phase = ecs.phases.FixedFirst,
         run = function() input:enterFixedPhase() end,
     })
     self.world:addSystem({
         name = "tecs.ExitFixedInput",
-        phase = tecs.phases.FixedLast,
+        phase = ecs.phases.FixedLast,
         run = function() input:exitFixedPhase() end,
     })
 
@@ -202,17 +202,17 @@ function Application:_init(): boolean
         local mcpWorld = require("tecs.mcp.world")
         -- Both tables carry more than components, so a candidate has to look
         -- like one rather than merely be present.
-        local known: {string: tecs.Component} = {}
+        local known: {string: ecs.Component} = {}
         local function collect(source: {string: any})
             for name, value in pairs(source) do
                 if type(value) == "table"
                     and (value as {string: any}).componentName ~= nil then
-                    known[name] = value as tecs.Component
+                    known[name] = value as ecs.Component
                 end
             end
         end
         collect(components as {string: any})
-        collect(tecs.builtins as {string: any})
+        collect(ecs.builtins as {string: any})
         mcpWorld.bind(self.world, known)
         self.mcp = mcp.listen(config.mcpPort)
     end

@@ -23,8 +23,8 @@ static SDL_Mutex *sinkLock = NULL;
 static SDL_IOStream *sinkFile = NULL;
 
 /* Category names are owned by Lua, which registers them as it creates them. */
-#define TECS2D_MAX_CATEGORIES 128
-static char categoryNames[TECS2D_MAX_CATEGORIES][64];
+#define TECS_MAX_CATEGORIES 128
+static char categoryNames[TECS_MAX_CATEGORIES][64];
 static int categoryBase = 0;
 
 static const char *priorityName(SDL_LogPriority priority)
@@ -44,7 +44,7 @@ static const char *priorityName(SDL_LogPriority priority)
 static const char *categoryName(int category)
 {
     int index = category - categoryBase;
-    if (categoryBase > 0 && index >= 0 && index < TECS2D_MAX_CATEGORIES
+    if (categoryBase > 0 && index >= 0 && index < TECS_MAX_CATEGORIES
         && categoryNames[index][0] != '\0') {
         return categoryNames[index];
     }
@@ -118,7 +118,7 @@ static void SDLCALL sink(void *userdata, int category,
 }
 
 /* Starts writing to `path`, truncating it. Returns false on failure. */
-bool tecs2dLogSinkOpen(const char *path)
+bool tecsLogSinkOpen(const char *path)
 {
     if (sinkFile) return true;
     if (!sinkLock) {
@@ -134,15 +134,15 @@ bool tecs2dLogSinkOpen(const char *path)
 }
 
 /* Tells the sink where Lua's categories start and what they are called. */
-void tecs2dLogSinkCategory(int base, int category, const char *name)
+void tecsLogSinkCategory(int base, int category, const char *name)
 {
     categoryBase = base;
     int index = category - base;
-    if (index < 0 || index >= TECS2D_MAX_CATEGORIES) return;
+    if (index < 0 || index >= TECS_MAX_CATEGORIES) return;
     SDL_strlcpy(categoryNames[index], name, sizeof(categoryNames[index]));
 }
 
-void tecs2dLogSinkClose(void)
+void tecsLogSinkClose(void)
 {
     if (!sinkFile) return;
     SDL_SetLogOutputFunction(previousFunction, previousUserdata);

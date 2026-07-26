@@ -75,7 +75,7 @@ function ComputePipeline.load(device: loader.CPtr, name: string,
     options = options or {}
     local entry = shaders.get(name)
     if entry.stage ~= "compute" then
-        error(("tecs2d: '%s' is a %s shader, not compute"):format(
+        error(("tecs: '%s' is a %s shader, not compute"):format(
             name, entry.stage), 2)
     end
     return create(device, shadercompiler.load(name, options.defines))
