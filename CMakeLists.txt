@@ -195,8 +195,18 @@ if(TECS_BUILD_LUA)
     # hardcoded package-manager prefix, which is what lets this cross-compile.
     function(tecs_cdef name header keep prefix)
         set(includes "")
+        # The header is named the way a C file would name it, so it is resolved
+        # against the same directories the generator searches. Found, it becomes
+        # a dependency: editing a header this project owns has to regenerate its
+        # binding, and without this the build is happy to link Lua declarations
+        # that no longer describe the C. That failure is a wrong offset rather
+        # than a missing symbol, so it does not announce itself.
+        set(headerPath "")
         foreach(dir IN LISTS ARGN)
             list(APPEND includes --include ${dir})
+            if(headerPath STREQUAL "" AND EXISTS "${dir}/${header}")
+                set(headerPath "${dir}/${header}")
+            endif()
         endforeach()
         add_custom_command(
             OUTPUT "${GEN}/${name}cdef.lua" "${GEN}/${name}const.lua"
@@ -206,7 +216,7 @@ if(TECS_BUILD_LUA)
                 --keep ${keep} --define-prefix ${prefix}
                 --defines-out "${GEN}/${name}const.lua"
                 --out "${GEN}/${name}cdef.lua"
-            DEPENDS "${CMAKE_SOURCE_DIR}/scripts/gencdef.py"
+            DEPENDS "${CMAKE_SOURCE_DIR}/scripts/gencdef.py" ${headerPath}
             COMMENT "Generating ${name} FFI bindings"
             VERBATIM)
     endfunction()
