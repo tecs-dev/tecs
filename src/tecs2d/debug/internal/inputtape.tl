@@ -1,10 +1,15 @@
 --- Frame-scheduled Love event injection: the input tape. Rows of
 --- {at, event, args} -- literal love event shapes -- dispatch through the
---- exact path real events take (tecs2d.internal.handlers.dispatch), on
---- GAMEPLAY frames: the tape's consumer system runs in phases.First, which
---- the suspension controller disables while held and enables during cmd_step,
---- so queueing input before a step is deterministic.
---- Unfrozen, the same system consumes the tape on live frames.
+--- exact path real events take (tecs2d.internal.handlers.dispatch).
+---
+--- A queued batch is a sequencer program on the frame clock: waits between
+--- rows, a call per row. That clock advances in phases.First, which the
+--- suspension controller disables while held and enables during cmd_step, so
+--- queueing input before a step is deterministic; unfrozen, the same clock
+--- advances on live frames.
+---
+--- What the tape still owns is the input bookkeeping the sequencer has no
+--- business knowing: which presses are outstanding, and what fired recently.
 ---
 --- `at` counts gameplay frames from queue time: at=1 fires on the next
 --- gameplay frame. Taped input updates the tecs2d.input snapshot, emits Tecs
@@ -14,16 +19,20 @@
 local tecs <const> = require("tecs")
 local inputHandlers <const> = require("tecs2d.internal.handlers")
 local inputidentity <const> = require("tecs2d.debug.internal.inputidentity")
-local wakeheap <const> = require("tecs2d.internal.wakeheap")
+local sequence <const> = require("tecs2d.sequence")
 local logging <const> = require("tecs.utils.logging")
 
 local LOGGER <const> = logging.getLogger("tecs2d.debug.inputtape")
 local FIRED_CAP <const> = 64
 
+-- One program name, re-versioned per queued batch. A version is dropped when
+-- its playback finishes, so a long session does not accumulate them.
+local PROGRAM_NAME <const> = "tecs2d.debug.inputTape"
+local DISPATCH_ACTION <const> = "tecs2d.debug.inputTape.dispatch"
+
 local record inputtape
     record Row
-        at: integer      -- absolute gameplay frame this fires on
-        seq: integer     -- insertion order, to keep same-frame rows stable
+        at: integer      -- gameplay frames from queue time
         event: string
         args: {any}
     end
@@ -41,11 +50,12 @@ local record inputtape
 
     record Tape
         world: tecs.World
-        frame: integer           -- gameplay frames observed by the tape
-        seq: integer
-        rows: wakeheap.Heap      -- pending, ordered by (at, seq)
         fired: {Fired}           -- newest last, capped at FIRED_CAP
         held: {string: Held}     -- press-without-release, by identity
+        playbacks: {integer}     -- queued batches still to finish
+
+        --- Gameplay frames the tape has seen, from the frame clock.
+        frame: function(self: Tape): integer
 
         --- Queue rows (each {at, event, args}). Returns the count queued, or
         --- nil and a message when any row is invalid (nothing is queued).
@@ -60,10 +70,6 @@ local record inputtape
 
         --- Held identities, sorted.
         heldIds: function(self: Tape): {string}
-
-        --- Per-gameplay-frame consumer; installed as the debug.InputTape
-        --- system in phases.First.
-        tick: function(self: Tape)
     end
 
     KEY: tecs.Key<Tape>
@@ -132,7 +138,7 @@ local TapeImpl <const> = {}
 local function dispatchRow(self: inputtape.Tape, event: string, args: {any})
     inputHandlers.dispatch(self.world, event, table.unpack(args))
 
-    self.fired[#self.fired + 1] = {frame = self.frame, event = event, args = args}
+    self.fired[#self.fired + 1] = {frame = self:frame(), event = event, args = args}
     if #self.fired > FIRED_CAP then
         table.remove(self.fired, 1)
     end
@@ -182,25 +188,59 @@ function TapeImpl.queue(self: inputtape.Tape, rows: {{string: any}}, force: bool
         if argErr then
             return nil, "row " .. i .. ": " .. event .. " " .. argErr
         end
-        self.seq = self.seq + 1
         prepared[#prepared + 1] = {
-            at = self.frame + (at as integer),
-            seq = self.seq,
+            at = at as integer,
             event = event,
             args = args,
         }
     end
 
+    -- Rows due on one frame keep the order they were given, and a batch
+    -- queued later keeps its place behind one queued earlier at the same
+    -- frame, because playbacks scheduled for the same tick run in play order.
+    table.sort(prepared, function(a: inputtape.Row, b: inputtape.Row): boolean
+        return a.at < b.at
+    end)
+
+    local nodes: {sequence.Node} = {}
+    local at = 0
     for i = 1, #prepared do
         local row <const> = prepared[i]
-        wakeheap.push(self.rows, row.at, row.seq, row)
+        -- The first instruction already runs one frame out, so the first
+        -- wait is one short.
+        local delta <const> = row.at - at - (i == 1 and 1 or 0)
+        if delta > 0 then nodes[#nodes + 1] = sequence.waitSteps(delta) end
+        nodes[#nodes + 1] = sequence.call(DISPATCH_ACTION, row.event, row.args)
+        at = row.at
     end
+
+    local program <const> = sequence.define(PROGRAM_NAME, nodes, {clock = "frame"})
+    self.playbacks[#self.playbacks + 1] =
+        sequence.play(self.world, program, {owner = 0})
     return #prepared, nil
 end
 
+-- Playbacks that have finished are dropped lazily: the tape only looks when
+-- something asks what is pending.
+local function livePlaybacks(self: inputtape.Tape): {integer}
+    local live: {integer} = {}
+    for i = 1, #self.playbacks do
+        local handle <const> = self.playbacks[i]
+        local status <const> = sequence.status(self.world, handle)
+        if status and status.state == "running" then live[#live + 1] = handle end
+    end
+    self.playbacks = live
+    return live
+end
+
 function TapeImpl.clear(self: inputtape.Tape): integer, integer
-    local dropped <const> = self.rows.size
-    wakeheap.clear(self.rows)
+    local dropped = 0
+    local live <const> = livePlaybacks(self)
+    for i = 1, #live do
+        dropped = dropped + #sequence.upcoming(self.world, live[i])
+        sequence.cancel(self.world, live[i])
+    end
+    self.playbacks = {}
 
     local released = 0
     for _, holdInfo in pairs(self.held) do
@@ -211,26 +251,21 @@ function TapeImpl.clear(self: inputtape.Tape): integer, integer
     return dropped, released
 end
 
--- The heap orders what comes next, not the whole queue, so a status report
--- sorts the window it asks for. Reading the tape is a debugger action; only
--- queueing and firing it are per frame.
 function TapeImpl.upcoming(self: inputtape.Tape, n: integer): {{string: any}}
-    local due: {inputtape.Row} = {}
-    local values <const> = self.rows.values
-    for i = 1, self.rows.size do
-        local row <const> = values[i] as inputtape.Row
-        if row.at - self.frame <= n then due[#due + 1] = row end
+    local due: {{string: any}} = {}
+    local live <const> = livePlaybacks(self)
+    for i = 1, #live do
+        local ahead <const> = sequence.upcoming(self.world, live[i], n)
+        for j = 1, #ahead do
+            due[#due + 1] = {["in"] = ahead[j].ticks, event = ahead[j].args[1]}
+        end
     end
-    table.sort(due, function(a: inputtape.Row, b: inputtape.Row): boolean
-        if a.at ~= b.at then return a.at < b.at end
-        return a.seq < b.seq
+    -- Merged across batches, so the soonest row leads whichever batch it
+    -- came from. Ties keep batch order, which is queue order.
+    table.sort(due, function(a: {string: any}, b: {string: any}): boolean
+        return (a["in"] as integer) < (b["in"] as integer)
     end)
-
-    local out: {{string: any}} = {}
-    for i = 1, #due do
-        out[i] = {["in"] = due[i].at - self.frame, event = due[i].event}
-    end
-    return out
+    return due
 end
 
 function TapeImpl.heldIds(self: inputtape.Tape): {string}
@@ -240,15 +275,8 @@ function TapeImpl.heldIds(self: inputtape.Tape): {string}
     return ids
 end
 
-function TapeImpl.tick(self: inputtape.Tape)
-    self.frame = self.frame + 1
-    while true do
-        local at <const> = wakeheap.peek(self.rows)
-        if not at or at > self.frame then break end
-        local _, _, value = wakeheap.pop(self.rows)
-        local row <const> = value as inputtape.Row
-        dispatchRow(self, row.event, row.args)
-    end
+function TapeImpl.frame(self: inputtape.Tape): integer
+    return sequence.currentStep(self.world, "frame")
 end
 
 function inputtape.ensure(w: tecs.World): inputtape.Tape
@@ -257,25 +285,26 @@ function inputtape.ensure(w: tecs.World): inputtape.Tape
 
     local tape: inputtape.Tape = setmetatable({
         world = w,
-        frame = 0,
-        seq = 0,
-        rows = wakeheap.new(),
         fired = {},
         held = {},
+        playbacks = {},
     } as inputtape.Tape, {__index = TapeImpl} as metatable<inputtape.Tape>)
 
     w.resources[inputtape.KEY] = tape
 
-    -- phases.First is the earliest gameplay phase: disabled while frozen,
-    -- enabled during steps, and ahead of Update either way -- so a row fires
-    -- into the same frame's input snapshot its consumers read.
-    w:addSystem({
-        name = "debug.InputTape",
-        phase = tecs.phases.First,
-        run = function()
-            tape:tick()
-        end,
-    })
+    -- The frame clock is what carries a queued batch, and a world that
+    -- scripts input may not have installed the sequencer for any other
+    -- reason.
+    sequence.plugin(w)
+
+    -- Dispatch is an action rather than an instruction so the sequencer stays
+    -- a control-flow machine: it knows nothing about input, and the tape
+    -- keeps the press bookkeeping that goes with dispatching.
+    sequence.registerAction(w, DISPATCH_ACTION,
+        function(_w: tecs.World, ctx: sequence.ActionContext)
+            dispatchRow(tape, ctx.args[1] as string, ctx.args[2] as {any})
+        end)
+
     LOGGER:debug("input tape installed")
     return tape
 end

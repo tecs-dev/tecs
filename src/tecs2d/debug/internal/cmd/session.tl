@@ -224,15 +224,15 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                         local f <const> = tape.fired[i]
                         firedOut[#firedOut + 1] = {frame = f.frame, event = f.event}
                     end
-                    local popup: {string} = {"input_tape  (frame " .. tostring(tape.frame)
-                        .. ", " .. tostring(tape.rows.size) .. " pending):"}
                     local up <const> = tape:upcoming(2147483647)
+                    local popup: {string} = {"input_tape  (frame " .. tostring(tape:frame())
+                        .. ", " .. tostring(#up) .. " pending):"}
                     for i = 1, math.min(#up, 12) do
                         popup[#popup + 1] = "  +" .. tostring(up[i]["in"]) .. "\t"
                             .. tostring(up[i].event)
                     end
                     return {ok = true, popup = popup,
-                        data = {frame = tape.frame, pending = tape.rows.size,
+                        data = {frame = tape:frame(), pending = #up,
                             upcoming = up, fired = firedOut, held = tape:heldIds()}}
                 end
 
@@ -243,7 +243,7 @@ function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
                 end
                 return {ok = true,
                     message = "input_tape: queued " .. tostring(queued) .. " row(s)",
-                    data = {queued = queued, pending = tape.rows.size}}
+                    data = {queued = queued, pending = #tape:upcoming(2147483647)}}
             end,
         },
         {

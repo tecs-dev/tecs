@@ -317,7 +317,8 @@ local record sequence
     --- @param pc Mark this instruction, as a playback's `status` reports it.
     disassemble: function(program: Program, pc?: integer): string
 
-    --- Install the sequencer. Auto-installed by `tecs2d.run`.
+    --- Install the sequencer. Auto-installed by `tecs2d.run`, and safe to
+    --- call again: a second install on the same world does nothing.
     plugin: function(world: World)
 end
 
@@ -769,7 +770,14 @@ end
 -- Plugin
 -------------------------------------------------------------------------------
 
+-- Worlds that script input install the sequencer themselves rather than
+-- relying on tecs2d.run having done it, so installing twice has to be safe.
+local installed: {World: boolean} =
+    setmetatable({}, {__mode = "k"} as metatable<{World: boolean}>)
+
 function sequence.plugin(world: World)
+    if installed[world] then return end
+    installed[world] = true
     local state = seqcursors.stateFor(world)
 
     world:addSystem({
