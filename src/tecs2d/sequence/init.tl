@@ -655,6 +655,7 @@ function sequence.play(
     if options then
         cursor.owner = options.owner or 0
         cursor.bindings = options.bindings
+        cursor.params = options.params
         if options.budget then cursor.budget = options.budget end
     end
 

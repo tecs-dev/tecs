@@ -81,8 +81,10 @@ local record Evaluator
     resolve: function(data: any): any
 
     --- Per-cursor working state, or nil when it needs none. `data` is what
-    --- the `eval` step carried, resolved.
-    newState: function(prog: ProgramImpl, data: any): any
+    --- the `eval` step carried, resolved; the cursor is there for what
+    --- belongs to the playback rather than the program, chiefly its `owner`
+    --- and its `params`.
+    newState: function(prog: ProgramImpl, data: any, cursor: Cursor): any
 
     --- Advance one cursor by `dt`. Returns true when it is finished and the
     --- cursor should move on to the next instruction.
@@ -160,6 +162,13 @@ local record PlayOptions
     --- Entities the program acts on, addressed by `sequence.bind(name)`.
     bindings: {string: integer}
 
+    --- Constants this playback runs with, readable by its actions and its
+    --- evaluators. A program is shared by every playback of it, so anything
+    --- that differs between two of them belongs here rather than in the
+    --- program. Plain data, for the same reason a `call` argument is: it
+    --- travels with a snapshot.
+    params: {string: any}
+
     --- Per-step instruction budget for this playback. Defaults to the
     --- world's configured budget. See `setInstructionBudget`.
     budget: integer
@@ -182,6 +191,11 @@ local record ActionContext
     --- Constants supplied by the `call` node, with any `bind` references
     --- already resolved to entity ids.
     args: {any}
+
+    --- The `params` supplied at `play`, or nil. Unlike `args`, this is the
+    --- playback's own table rather than borrowed scratch, and it is the same
+    --- one every step of the playback sees.
+    params: {string: any}
 
     --- Resolve a named binding. Returns nil when the binding was not
     --- supplied or its entity is no longer alive.
@@ -329,6 +343,7 @@ local record Cursor
 
     owner: integer
     bindings: {string: integer}
+    params: {string: any}
     budget: integer
 
     wakeAt: integer

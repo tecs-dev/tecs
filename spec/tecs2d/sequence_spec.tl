@@ -1645,6 +1645,78 @@ describe("tecs2d.sequence", function()
         end)
     end)
 
+    -- A program is shared by every playback of it, so anything that differs
+    -- between two playbacks of the same program has to travel with the
+    -- playback. Bindings do that for entities; params do it for constants.
+    describe("playback parameters", function()
+        it("hands an evaluator the params its playback was started with", function()
+            local seen: {any} = {}
+            sequence.registerEvaluator("spec.params", {
+                newState = function(_p: any, _d: any, c: any): any
+                    seen[#seen + 1] = (c as {string: any}).params
+                    return nil
+                end,
+                step = function(): boolean return true end,
+            })
+            local prog = sequence.define(uniqueName(), {sequence.eval("spec.params")})
+            sequence.play(world, prog, {params = {speed = 2}})
+            sequence.play(world, prog, {params = {speed = 0.5}})
+
+            stepWorld(world, 2)
+            luassert.same({{speed = 2}, {speed = 0.5}}, seen)
+        end)
+
+        it("hands an action the same params", function()
+            local seen: {any} = {}
+            sequence.registerAction(world, "spec.readParams",
+                function(_w: tecs.World, ctx: sequence.ActionContext)
+                    seen[#seen + 1] = ctx.params
+                end)
+            local prog = sequence.define(uniqueName(), {
+                sequence.call("spec.readParams"),
+            })
+            sequence.play(world, prog, {params = {tint = "red"}})
+
+            stepWorld(world, 2)
+            luassert.same({{tint = "red"}}, seen)
+        end)
+
+        it("gives a forked branch the params of the playback that forked it", function()
+            local seen: {any} = {}
+            sequence.registerAction(world, "spec.branchParams",
+                function(_w: tecs.World, ctx: sequence.ActionContext)
+                    seen[#seen + 1] = ctx.params
+                end)
+            local prog = sequence.define(uniqueName(), {
+                sequence.fork({sequence.call("spec.branchParams")}),
+                sequence.join(),
+            })
+            sequence.play(world, prog, {params = {n = 7}})
+
+            stepWorld(world, 3)
+            luassert.same({{n = 7}}, seen)
+        end)
+
+        it("carries params through a snapshot", function()
+            local seen: {any} = {}
+            sequence.registerAction(world, "spec.afterLoad",
+                function(_w: tecs.World, ctx: sequence.ActionContext)
+                    seen[#seen + 1] = ctx.params
+                end)
+            local prog = sequence.define(uniqueName(), {
+                sequence.waitSteps(4),
+                sequence.call("spec.afterLoad"),
+            })
+            sequence.play(world, prog, {params = {level = 3}})
+
+            stepWorld(world, 1)
+            local saved = world:saveSnapshot().buffer
+            world:loadSnapshot(saved)
+            stepWorld(world, 6)
+            luassert.same({{level = 3}}, seen)
+        end)
+    end)
+
     describe("programs as data", function()
         local order: {string}
 

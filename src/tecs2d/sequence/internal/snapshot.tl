@@ -143,6 +143,7 @@ function snapshot.save(world: World): any
                 clock = cursor.clock,
                 owner = cursor.owner,
                 bindings = cursor.bindings,
+                params = cursor.params,
                 budget = cursor.budget,
                 wakeAt = cursor.wakeAt,
                 seq = cursor.seq,
@@ -197,7 +198,8 @@ local function restoreEvaluator(
     end
     cursor.evalState = evaluator.load
         and evaluator.load(prog, cursor.evalData, saved)
-        or (evaluator.newState and evaluator.newState(prog, cursor.evalData) or nil)
+        or (evaluator.newState
+            and evaluator.newState(prog, cursor.evalData, cursor) or nil)
     seqclock.activate(seqcursors.clockOf(state, cursor), cursor.slot)
 end
 
@@ -275,6 +277,7 @@ function snapshot.load(world: World, value: any)
                 clock = (row.clock as seqtypes.ClockId) or "fixed",
                 owner = (row.owner as integer) or 0,
                 bindings = row.bindings as {string: integer},
+                params = row.params as {string: any},
                 budget = (row.budget as integer) or state.budget,
                 wakeAt = row.wakeAt as integer,
                 seq = row.seq as integer,

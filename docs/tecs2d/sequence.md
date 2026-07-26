@@ -115,6 +115,24 @@ Inside an action, `ctx:entity("villain")` resolves a binding, returning `nil` wh
 supplied or its entity is no longer alive. That is not a fault: an action decides for itself
 whether a binding is optional.
 
+### Parameters
+
+A program is shared by every playback of it, so anything that differs between two playbacks of
+the same program travels with the playback. Bindings do that for entities; **`params`** does it
+for constants:
+
+```teal
+sequence.play(world, patrol, {
+    owner = guard,
+    bindings = { guard = guardId },
+    params = { speed = 2, radius = 120 },
+})
+```
+
+Actions read them as `ctx.params`, and evaluators receive the cursor holding them. Params are
+plain data for the same reason a `call` argument is: they travel with a snapshot. A forked branch
+runs with the params of the playback that forked it.
+
 ## Actions
 
 ```teal
@@ -359,20 +377,41 @@ is done.
 
 ```teal
 sequence.registerEvaluator("game.shake", {
-    newState = function(_program) return {elapsed = 0} end,
+    newState = function(_program, data, _cursor)
+        return {elapsed = 0, duration = data.duration}
+    end,
     step = function(world, cursor, dt)
         local s = cursor.evalState
         s.elapsed = s.elapsed + dt
         -- ... move something ...
-        return s.elapsed >= 0.4          -- true when finished
+        return s.elapsed >= s.duration    -- true when finished
     end,
 })
 
 sequence.define("game.hit", {
-    sequence.eval("game.shake"),
+    sequence.eval("game.shake", { duration = 0.4 }),
     sequence.call("game.resume"),
 })
 ```
+
+An `eval` step carries constants of its own. They are compiled into the program's const pool, so
+they travel with a snapshot, and an optional `resolve` hook turns them into whatever is cheapest
+to read every tick — bound functions, resolved names — once per constant rather than once per
+playback. What differs between two playbacks of the same program belongs in
+[`params`](#parameters) instead.
+
+Working state travels too, when the evaluator says what of it is data:
+
+```teal
+    save = function(state) return state.elapsed end,
+    load = function(_program, data, saved)
+        return {elapsed = saved, duration = data.duration}
+    end,
+```
+
+Without both, a restored playback comes back at the start of what it was evaluating rather than
+where it was. An evaluator a later build no longer registers is not fatal: the playback gives up
+its working state and carries on at the step after its `eval`.
 
 That split is the whole reason one runtime can serve both kinds of work:
 

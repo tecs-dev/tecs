@@ -201,7 +201,7 @@ local function run(
             cursor.evalIndex = b >= 0 and b or nil
             cursor.evalData = b >= 0 and seqevaluators.resolve(prog, evaluator, b) or nil
             cursor.evalState = evaluator.newState
-                and evaluator.newState(prog, cursor.evalData) or nil
+                and evaluator.newState(prog, cursor.evalData, cursor) or nil
             cursor.wakeAt = nil
             seqclock.activate(seqcursors.clockOf(state, cursor), cursor.slot)
             return budget
@@ -234,6 +234,7 @@ local function run(
             ctx.handle = seqcursors.packHandle(cursor.slot, cursor.generation)
             ctx.owner = cursor.owner
             ctx.args = resolveArgs(world, state, cursor, b)
+            ctx.params = cursor.params
             ctx._cursor = cursor
 
             local ok, err = pcall(action, world, ctx) as (boolean, any)
@@ -292,6 +293,7 @@ local function run(
             child.pc = a
             child.owner = cursor.owner
             child.bindings = cursor.bindings
+            child.params = cursor.params
             child.budget = cursor.budget
             child.parentSlot = cursor.slot
             child.parentGeneration = cursor.generation
