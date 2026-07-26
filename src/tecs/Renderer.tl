@@ -192,7 +192,7 @@ local function writeRun(self: Renderer, archetype: ecs.Archetype,
                         length: integer, offset: integer)
     local floats = self.instances:mapAs("float *")
     local bounds = self._bounds:mapAs("float *")
-    local transforms = archetype:get(components.Transform2D)
+    local transforms = archetype:get(components.Transform)
     local tints = archetype:get(components.Tint)
     local sprites = archetype:get(components.Sprite)
     local materialColumn = archetype:get(components.Material)
@@ -290,7 +290,7 @@ end
 ---
 --- The layout is rebuilt when the set of archetypes or their lengths move,
 --- because a run cannot grow in place without shifting its neighbours. Short
---- of that, an archetype whose Transform2D, Tint, and Sprite columns are all
+--- of that, an archetype whose Transform, Tint, and Sprite columns are all
 --- clean is skipped entirely: its bytes are already resident and correct.
 local function syncInstances(self: Renderer): integer, integer, integer
     local runs = self._runs
@@ -332,7 +332,7 @@ local function syncInstances(self: Renderer): integer, integer, integer
 
         local run = runs[archetype]
         local dirty = relayout
-            or archetype:isComponentDirty(components.Transform2D)
+            or archetype:isComponentDirty(components.Transform)
             or archetype:isComponentDirty(components.Tint)
             or archetype:isComponentDirty(components.Sprite)
             or archetype:isComponentDirty(components.Material)
@@ -360,7 +360,7 @@ local function syncLights(self: Renderer): {Deferred.Light}
     for index = #lights, 1, -1 do lights[index] = nil end
 
     for archetype, length in self._lightSources:iter() do
-        local transforms = archetype:get(components.Transform2D)
+        local transforms = archetype:get(components.Transform)
         local sources = archetype:get(components.PointLight)
         for row = 1, length do
             local transform = transforms[row]
@@ -560,11 +560,11 @@ end
 function Renderer:install(world: ecs.World)
     self._renderables = world:query({
         include = {
-            components.Transform2D, components.Tint, components.Renderable,
+            components.Transform, components.Tint, components.Renderable,
         },
     })
     self._lightSources = world:query({
-        include = { components.Transform2D, components.PointLight },
+        include = { components.Transform, components.PointLight },
     })
 
     world:addSystem({

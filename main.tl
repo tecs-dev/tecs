@@ -4,7 +4,7 @@
 --- drives this from its callbacks.
 ---
 --- Entities are the interface. Everything on screen is a spawned entity with a
---- Transform2D, the lights are entities too, and systems move them. Nothing
+--- Transform, the lights are entities too, and systems move them. Nothing
 --- here touches a buffer, a pass, or a command buffer.
 
 -- Where this tree was compiled to: the build says so during development, the
@@ -20,7 +20,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
 local tecs <const> = require("tecs")
 local shadercompiler <const> = require("tecs.gpu.shadercompiler")
 local shaderpack <const> = require("tecs.gpu.shaderpack")
-local Transform2D <const> = tecs.components.Transform2D
+local Transform <const> = tecs.components.Transform
 local Tint <const> = tecs.components.Tint
 local PointLight <const> = tecs.components.PointLight
 local Renderable <const> = tecs.components.Renderable
@@ -49,10 +49,10 @@ local function spawnField(world: tecs.World, width: number, height: number)
     local extent = math.min(width, height) * 0.46 * WORLD
     local golden <const> = 2.39996
 
-    world:batchSpawn(COUNT, { Transform2D, Tint, Renderable },
+    world:batchSpawn(COUNT, { Transform, Tint, Renderable },
         function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer)
             -- batchSpawn skips FFI defaults, so every field is written here.
-            local transforms = archetype:getMut(Transform2D)
+            local transforms = archetype:getMut(Transform)
             local tints = archetype:getMut(Tint)
 
             for row = firstRow, lastRow do
@@ -96,7 +96,7 @@ local function spawnLights(world: tecs.World, width: number, height: number)
             y = y + math.sin(index * golden) * radius
         end
         world:spawn(
-            Transform2D(x, y, 0, 1, 1),
+            Transform(x, y, 0, 1, 0, 1, 1),
             PointLight(120.0, math.min(width, height) * 0.7,
                 colour[1], colour[2], colour[3], 3.0)
         )
@@ -149,7 +149,7 @@ return tecs.application({
         -- get: taking getMut to read would mark the component dirty on every
         -- archetype every frame and defeat every dirty-gated consumer.
         local static = os.getenv("TECS_STATIC") ~= nil
-        local spinning = app.world:query({ include = { Transform2D, Renderable } })
+        local spinning = app.world:query({ include = { Transform, Renderable } })
         if not static then
         app.world:addSystem({
             name = "demo.Spin",
@@ -157,7 +157,7 @@ return tecs.application({
             run = function(dt: number)
                 elapsed = elapsed + dt
                 for archetype, length in spinning:iter() do
-                    local transforms = archetype:getMut(Transform2D)
+                    local transforms = archetype:getMut(Transform)
                     for row = 1, length do
                         transforms[row].rotation = transforms[row].rotation + dt * 1.5
                     end
@@ -166,14 +166,14 @@ return tecs.application({
         })
         end
 
-        local orbiting = app.world:query({ include = { Transform2D, PointLight } })
+        local orbiting = app.world:query({ include = { Transform, PointLight } })
         app.world:addSystem({
             name = "demo.OrbitLights",
             phase = tecs.phases.Update,
             run = function()
                 local index = 0
                 for archetype, length in orbiting:iter() do
-                    local transforms = archetype:getMut(Transform2D)
+                    local transforms = archetype:getMut(Transform)
                     for row = 1, length do
                         local angle = elapsed * 0.6 + index * 2.094
                         transforms[row].x = width * (0.5 + 0.3 * math.cos(angle))

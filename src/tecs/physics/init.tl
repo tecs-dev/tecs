@@ -19,7 +19,7 @@ local timing <const> = require("tecs.timing")
 local atan2 <const> = math.atan2
 
 local B <const> = box2d.C
-local Transform2D <const> = components.Transform2D
+local Transform <const> = components.Transform
 
 local type Component = ecs.Component
 
@@ -98,13 +98,13 @@ end
 
 --- Creates a body for `entity` and attaches a RigidBody to it.
 ---
---- Reads the entity's Transform2D for the initial pose, so an entity is
+--- Reads the entity's Transform for the initial pose, so an entity is
 --- positioned the same way whether or not it simulates.
 function physics.attach(world: ecs.World, entity: integer,
                         options: BodyOptions): loader.CValue
     options = options or {}
 
-    local transform = world:get(entity, Transform2D)
+    local transform = world:get(entity, Transform)
     local x, y, angle = 0.0, 0.0, 0.0
     if transform ~= nil then
         x, y, angle = transform.x, transform.y, transform.rotation
@@ -206,7 +206,7 @@ function physics.plugin(options: PhysicsOptions): function(ecs.World)
             workerCount = options.workerCount,
         })
 
-        local bodies = world:query({ include = { Transform2D, RigidBody } })
+        local bodies = world:query({ include = { Transform, RigidBody } })
 
         -- The fixed phases, always. A simulation that advanced by the frame
         -- would take a different number of steps on every machine and produce
@@ -256,9 +256,9 @@ function physics.plugin(options: PhysicsOptions): function(ecs.World)
                             simulation:moveOf(rows[row].index1 as integer)
                         if px ~= nil then
                             if transforms == nil then
-                                transforms = archetype:getMut(Transform2D) as {any}
+                                transforms = archetype:getMut(Transform) as {any}
                             end
-                            local transform = transforms[row] as Transform2D
+                            local transform = transforms[row] as Transform
                             transform.x = toPixels(px)
                             transform.y = toPixels(py)
                             transform.rotation = atan2(sine, cosine)

@@ -116,15 +116,15 @@ describe("tecs headless", function()
                 world:addPlugin(tecs.physics.plugin({
                     gravity = { 0, 980 }, workerCount = 2,
                 }))
-                local Transform2D = tecs.components.Transform2D
-                local entity = world:spawn(Transform2D(0, 0, 0, 10, 10))
+                local Transform = tecs.components.Transform
+                local entity = world:spawn(Transform(0, 0, 0, 1, 0, 10, 10))
                 tecs.physics.attach(world, entity, {
                     type = "dynamic", halfWidth = 5, halfHeight = 5,
                     density = 1.0,
                 })
                 for _ = 1, 60 do world:update(1 / 60) end
                 -- One second of that gravity, so it is a long way down.
-                print(world:get(entity, Transform2D).y > 400 and "fell" or "stuck")
+                print(world:get(entity, Transform).y > 400 and "fell" or "stuck")
             ]], true)
             assert.are.equal("fell\n", output)
         end)

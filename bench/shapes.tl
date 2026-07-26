@@ -20,7 +20,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
     .. package.path
 
 local tecs <const> = require("tecs")
-local Transform2D <const> = tecs.components.Transform2D
+local Transform <const> = tecs.components.Transform
 local Tint <const> = tecs.components.Tint
 local Renderable <const> = tecs.components.Renderable
 local Material <const> = tecs.components.Material
@@ -64,10 +64,10 @@ local function spawnField(world: tecs.World)
     --- reference scene's size distribution.
     local function fill(material: string, param: number, base: number, spread: number)
         local id = materials.id(material)
-        world:batchSpawn(PER_KIND, { Transform2D, Tint, Material, Renderable },
+        world:batchSpawn(PER_KIND, { Transform, Tint, Material, Renderable },
         function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer)
             -- batchSpawn skips FFI defaults, so every field is written here.
-            local transforms = archetype:getMut(Transform2D)
+            local transforms = archetype:getMut(Transform)
             local tints = archetype:getMut(Tint)
             local materialColumn = archetype:getMut(Material)
 
@@ -79,6 +79,12 @@ local function spawnField(world: tecs.World)
                 local transform = transforms[row]
                 transform.x = originX + rand() * AREA_W
                 transform.y = originY + rand() * AREA_H
+                -- Written because batchSpawn skips defaults, so an unset field
+                -- holds whatever the column's memory held before. Neither is
+                -- read while depth comes from elsewhere, and both would be read
+                -- as garbage the moment it does.
+                transform.z = 0.0
+                transform.layer = 1
                 -- Unrotated, as the reference is. Rotation would not change
                 -- what the sync costs, since the basis is built either way.
                 transform.rotation = 0.0
@@ -119,7 +125,7 @@ return tecs.application({
         -- Translation only, matching the reference scene. Rotation would make
         -- the sync recompute a basis per entity per frame, which is a different
         -- amount of work and would not be comparable.
-        local moving = app.world:query({ include = { Transform2D, Renderable } })
+        local moving = app.world:query({ include = { Transform, Renderable } })
         local phase = MODE == "fixed" and tecs.phases.FixedUpdate
             or tecs.phases.Update
 
@@ -129,7 +135,7 @@ return tecs.application({
             run = function(dt: number)
                 local step = dt * 40.0
                 for archetype, length in moving:iter() do
-                    local transforms = archetype:getMut(Transform2D)
+                    local transforms = archetype:getMut(Transform)
                     for row = 1, length do
                         local transform = transforms[row]
                         local x = transform.x + step

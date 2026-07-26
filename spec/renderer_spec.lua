@@ -29,7 +29,7 @@ local C = sdl.C
 local FORMAT = 4  -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
 local SIZE = 64
 
-local Transform2D = components.Transform2D
+local Transform = components.Transform
 local Tint = components.Tint
 local PointLight = components.PointLight
 local Renderable = components.Renderable
@@ -121,7 +121,7 @@ describe("ecs.Renderer", function()
         local world, renderer = newScene()
         -- Covers the whole target, so any position error shows as a miss.
         world:spawn(
-            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
             Tint(1.0, 0.0, 0.0, 1.0),
             Renderable()
         )
@@ -141,7 +141,7 @@ describe("ecs.Renderer", function()
         -- what pins the world-to-clip conversion including its Y flip.
         local world, renderer = newScene()
         world:spawn(
-            Transform2D(SIZE * 0.25, SIZE * 0.25, 0, SIZE * 0.3, SIZE * 0.3),
+            Transform(SIZE * 0.25, SIZE * 0.25, 0, 1, 0, SIZE * 0.3, SIZE * 0.3),
             Tint(0.0, 1.0, 0.0, 1.0),
             Renderable()
         )
@@ -158,7 +158,7 @@ describe("ecs.Renderer", function()
     it("ignores entities without Renderable", function()
         local world, renderer = newScene()
         world:spawn(
-            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
             Tint(1.0, 0.0, 0.0, 1.0)
         )
 
@@ -174,7 +174,7 @@ describe("ecs.Renderer", function()
         assert.are.equal(0, renderer.count)
 
         world:spawn(
-            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
             Tint(0.0, 0.0, 1.0, 1.0),
             Renderable()
         )
@@ -189,7 +189,7 @@ describe("ecs.Renderer", function()
     it("lights the scene from light entities", function()
         local world, renderer = newScene({ 0.0, 0.0, 0.0 })
         world:spawn(
-            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
             Tint(1.0, 1.0, 1.0, 1.0),
             Renderable()
         )
@@ -199,7 +199,7 @@ describe("ecs.Renderer", function()
             "no ambient and no lights must be black")
 
         world:spawn(
-            Transform2D(SIZE / 2, SIZE / 2, 0, 1, 1),
+            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, 1, 1),
             PointLight(12.0, 30.0, 1.0, 1.0, 1.0, 4.0)
         )
 
@@ -217,18 +217,18 @@ describe("ecs.Renderer", function()
     it("moves geometry when a system writes the transform", function()
         local world, renderer = newScene()
         world:spawn(
-            Transform2D(SIZE * 0.25, SIZE / 2, 0, SIZE * 0.3, SIZE * 0.3),
+            Transform(SIZE * 0.25, SIZE / 2, 0, 1, 0, SIZE * 0.3, SIZE * 0.3),
             Tint(1.0, 1.0, 0.0, 1.0),
             Renderable()
         )
 
-        local moving = world:query({ include = { Transform2D, Renderable } })
+        local moving = world:query({ include = { Transform, Renderable } })
         world:addSystem({
             name = "spec.Move",
             phase = tecs.phases.Update,
             run = function()
                 for archetype, length in moving:iter() do
-                    local transforms = archetype:getMut(Transform2D)
+                    local transforms = archetype:getMut(Transform)
                     for row = 1, length do
                         transforms[row].x = SIZE * 0.75
                     end
@@ -255,7 +255,7 @@ describe("ecs.Renderer", function()
         -- does not reach the cell's edge, so the UV range is not 0..1.
         local sprite = renderer:registerImage(handle)
         world:spawn(
-            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
             Tint(1.0, 1.0, 1.0, 1.0),
             sprite,
             Renderable()
@@ -281,7 +281,7 @@ describe("ecs.Renderer", function()
         renderer:registerImage(readyFixture())
         -- Sample only the right half of the image.
         world:spawn(
-            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
             Tint(1.0, 1.0, 1.0, 1.0),
             renderer:sprite(FIXTURE, 0.55, 0.0, 1.0, 1.0),
             Renderable()
@@ -301,7 +301,7 @@ describe("ecs.Renderer", function()
         local world, renderer = newScene()
         renderer:registerImage(readyFixture())
         world:spawn(
-            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
             -- Half brightness, so the red half reads as half red.
             Tint(0.5, 0.5, 0.5, 1.0),
             renderer:sprite(FIXTURE, 0.0, 0.0, 0.45, 1.0),
@@ -322,13 +322,13 @@ describe("ecs.Renderer", function()
 
         -- Left quad untextured (layer 0, white default) tinted blue.
         world:spawn(
-            Transform2D(SIZE * 0.25, SIZE / 2, 0, SIZE * 0.4, SIZE * 0.4),
+            Transform(SIZE * 0.25, SIZE / 2, 0, 1, 0, SIZE * 0.4, SIZE * 0.4),
             Tint(0.0, 0.0, 1.0, 1.0),
             Renderable()
         )
         -- Right quad sampling the green half of the fixture.
         world:spawn(
-            Transform2D(SIZE * 0.75, SIZE / 2, 0, SIZE * 0.4, SIZE * 0.4),
+            Transform(SIZE * 0.75, SIZE / 2, 0, 1, 0, SIZE * 0.4, SIZE * 0.4),
             Tint(1.0, 1.0, 1.0, 1.0),
             renderer:sprite(FIXTURE, 0.55, 0.0, 1.0, 1.0),
             Renderable()
@@ -366,7 +366,7 @@ describe("ecs.Renderer", function()
         -- And it still draws: the second registration answers with the layer
         -- the first one uploaded into, not with an empty one.
         world:spawn(
-            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
             Tint(1.0, 1.0, 1.0, 1.0),
             second,
             Renderable()
@@ -387,7 +387,7 @@ describe("ecs.Renderer", function()
         first:registerImage(solid("spec://green", 0, 255, 0))
         local green = first:sprite("spec://green")
         world:spawn(
-            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
             Tint(1.0, 1.0, 1.0, 1.0),
             green,
             Renderable()
@@ -426,7 +426,7 @@ describe("ecs.Renderer", function()
         -- whatever layer happens to hold that number is the failure a name
         -- exists to prevent.
         world:spawn(
-            Transform2D(SIZE / 2, SIZE / 2, 0, 4, 4),
+            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, 4, 4),
             Tint(1.0, 1.0, 1.0, 1.0),
             Sprite(components.imageId("spec://missing"), 0.0, 0.0, 1.0, 1.0),
             Renderable()
@@ -444,7 +444,7 @@ describe("ecs.Renderer", function()
         local world, renderer = newScene()
         for _ = 1, 8 do
             world:spawn(
-                Transform2D(SIZE / 2, SIZE / 2, 0, 4, 4),
+                Transform(SIZE / 2, SIZE / 2, 0, 1, 0, 4, 4),
                 Tint(1, 1, 1, 1),
                 Renderable()
             )
@@ -463,7 +463,7 @@ describe("ecs.Renderer", function()
 
     it("rewrites only when a component is actually written", function()
         local world, renderer = newScene()
-        world:spawn(Transform2D(SIZE / 2, SIZE / 2, 0, 4, 4), Tint(1, 1, 1, 1),
+        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1),
             Renderable())
 
         frameOnce(world, renderer)
@@ -472,13 +472,13 @@ describe("ecs.Renderer", function()
 
         -- getMut is what marks the column dirty, so a system that writes is
         -- what wakes the sync back up.
-        local moving = world:query({ include = { Transform2D, Renderable } })
+        local moving = world:query({ include = { Transform, Renderable } })
         world:addSystem({
             name = "spec.Nudge",
             phase = tecs.phases.Update,
             run = function()
                 for archetype, length in moving:iter() do
-                    local transforms = archetype:getMut(Transform2D)
+                    local transforms = archetype:getMut(Transform)
                     for row = 1, length do
                         transforms[row].x = transforms[row].x + 1
                     end
@@ -494,12 +494,12 @@ describe("ecs.Renderer", function()
 
     it("re-lays out when an entity is spawned", function()
         local world, renderer = newScene()
-        world:spawn(Transform2D(0, 0, 0, 4, 4), Tint(1, 1, 1, 1), Renderable())
+        world:spawn(Transform(0, 0, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable())
         frameOnce(world, renderer)
         frameOnce(world, renderer)
         assert.are.equal(0, renderer.rewritten)
 
-        world:spawn(Transform2D(8, 8, 0, 4, 4), Tint(1, 1, 1, 1), Renderable())
+        world:spawn(Transform(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable())
         frameOnce(world, renderer)
         assert.are.equal(2, renderer.count)
         assert.are.equal(2, renderer.rewritten,
@@ -516,7 +516,7 @@ describe("ecs.Renderer", function()
         -- Well off the right edge, and large enough that a failed cull would
         -- be unmistakable if it were drawn at the origin instead.
         world:spawn(
-            Transform2D(SIZE * 8, SIZE / 2, 0, SIZE, SIZE),
+            Transform(SIZE * 8, SIZE / 2, 0, 1, 0, SIZE, SIZE),
             Tint(1.0, 0.0, 0.0, 1.0),
             Renderable()
         )
@@ -534,7 +534,7 @@ describe("ecs.Renderer", function()
         -- a culling bug.
         local world, renderer = newScene()
         world:spawn(
-            Transform2D(0, SIZE / 2, 0, SIZE * 0.8, SIZE * 0.8),
+            Transform(0, SIZE / 2, 0, 1, 0, SIZE * 0.8, SIZE * 0.8),
             Tint(0.0, 1.0, 0.0, 1.0),
             Renderable()
         )
@@ -548,13 +548,13 @@ describe("ecs.Renderer", function()
     it("draws only the survivors when the view is crowded", function()
         local world, renderer = newScene()
         -- One on screen, three far outside in different directions.
-        world:spawn(Transform2D(SIZE / 2, SIZE / 2, 0, SIZE, SIZE),
+        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE, SIZE),
             Tint(0.0, 0.0, 1.0, 1.0), Renderable())
-        world:spawn(Transform2D(-SIZE * 8, SIZE / 2, 0, 4, 4),
+        world:spawn(Transform(-SIZE * 8, SIZE / 2, 0, 1, 0, 4, 4),
             Tint(1, 1, 1, 1), Renderable())
-        world:spawn(Transform2D(SIZE / 2, -SIZE * 8, 0, 4, 4),
+        world:spawn(Transform(SIZE / 2, -SIZE * 8, 0, 1, 0, 4, 4),
             Tint(1, 1, 1, 1), Renderable())
-        world:spawn(Transform2D(SIZE / 2, SIZE * 8, 0, 4, 4),
+        world:spawn(Transform(SIZE / 2, SIZE * 8, 0, 1, 0, 4, 4),
             Tint(1, 1, 1, 1), Renderable())
 
         local pixels = frameOnce(world, renderer)
@@ -571,7 +571,7 @@ describe("ecs.Renderer", function()
         renderer:install(world)
 
         for _ = 1, 10 do
-            world:spawn(Transform2D(0, 0, 0, 1, 1), Tint(1, 1, 1, 1), Renderable())
+            world:spawn(Transform(0, 0, 0, 1, 0, 1, 1), Tint(1, 1, 1, 1), Renderable())
         end
 
         frameOnce(world, renderer)
@@ -586,7 +586,7 @@ describe("ecs.Renderer", function()
     it("renders a circle as a circle, not as its quad", function()
         local world, renderer = newScene()
         world:spawn(
-            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE, SIZE),
+            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE, SIZE),
             Tint(1.0, 0.0, 0.0, 1.0),
             components.Material(materials.id("circle"), 0),
             Renderable()
@@ -607,7 +607,7 @@ describe("ecs.Renderer", function()
         -- default material, which covers the whole quad, corners included.
         local world, renderer = newScene()
         world:spawn(
-            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE, SIZE),
+            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE, SIZE),
             Tint(0.0, 1.0, 0.0, 1.0),
             Renderable()
         )
@@ -621,7 +621,7 @@ describe("ecs.Renderer", function()
     it("rounds a rectangle's corners by its radius", function()
         local world, renderer = newScene()
         world:spawn(
-            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE, SIZE),
+            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE, SIZE),
             Tint(0.0, 0.0, 1.0, 1.0),
             -- Radius is a ratio of the quad, so half of it is a circle.
             components.Material(materials.id("rounded"), 0.5),
@@ -649,7 +649,7 @@ describe("ecs.Renderer", function()
             -- must win; every earlier one is red.
             local last = index == COUNT
             world:spawn(
-                Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+                Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
                 Tint(last and 0.0 or 1.0, 0.0, last and 1.0 or 0.0, 1.0),
                 Renderable()
             )
@@ -675,7 +675,7 @@ describe("ecs.Renderer", function()
         local world, renderer = newScene()
         for _ = 1, 2 do
             world:spawn(
-                Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+                Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
                 Tint(1.0, 1.0, 1.0, 1.0),
                 Renderable()
             )
@@ -735,7 +735,7 @@ describe("ecs.Renderer", function()
         local world, renderer = newScene(nil, COUNT + 16)
         for index = 1, COUNT do
             world:spawn(
-                Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+                Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
                 Tint(index / COUNT, 1.0 - index / COUNT, 0.5, 1.0),
                 Renderable()
             )
@@ -761,7 +761,7 @@ describe("ecs.Renderer", function()
     local function bandScene(rotation)
         local world, renderer = newScene()
         world:spawn(
-            Transform2D(SIZE / 2, SIZE / 2, rotation, SIZE * 2, SIZE / 4),
+            Transform(SIZE / 2, SIZE / 2, 0, 1, rotation, SIZE * 2, SIZE / 4),
             Tint(1.0, 0.0, 0.0, 1.0),
             Renderable()
         )
@@ -771,7 +771,7 @@ describe("ecs.Renderer", function()
     it("leaves an unrotated quad on its own axes", function()
         local world, renderer = newScene()
         world:spawn(
-            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE / 4),
+            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE / 4),
             Tint(1.0, 0.0, 0.0, 1.0),
             Renderable()
         )
@@ -786,7 +786,7 @@ describe("ecs.Renderer", function()
     it("turns a quad a quarter turn", function()
         local world, renderer = newScene()
         world:spawn(
-            Transform2D(SIZE / 2, SIZE / 2, math.pi / 2, SIZE * 2, SIZE / 4),
+            Transform(SIZE / 2, SIZE / 2, 0, 1, math.pi / 2, SIZE * 2, SIZE / 4),
             Tint(1.0, 0.0, 0.0, 1.0),
             Renderable()
         )
@@ -807,7 +807,7 @@ describe("ecs.Renderer", function()
         -- swings into view and it must survive the cull.
         local world, renderer = newScene()
         world:spawn(
-            Transform2D(-SIZE / 3, SIZE / 2, math.pi / 2, SIZE / 4, SIZE * 2),
+            Transform(-SIZE / 3, SIZE / 2, 0, 1, math.pi / 2, SIZE / 4, SIZE * 2),
             Tint(0.0, 1.0, 0.0, 1.0),
             Renderable()
         )
@@ -835,7 +835,7 @@ describe("ecs.Renderer", function()
 
         local world, renderer = newScene()
         world:spawn(
-            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
             Tint(1.0, 1.0, 1.0, 1.0),
             components.Material(materials.id("spec.halfplane"), 0),
             Renderable()
@@ -911,7 +911,7 @@ describe("ecs.Renderer", function()
         local function draw(material)
             local world, renderer = newScene({ 0.25, 0.25, 0.25 })
             world:spawn(
-                Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+                Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
                 Tint(1.0, 1.0, 1.0, 1.0),
                 components.Material(materials.id(material), 0),
                 Renderable()
@@ -937,7 +937,7 @@ describe("ecs.Renderer", function()
     it("defaults to leaving world coordinates as screen coordinates", function()
         local world, renderer = newScene()
         world:spawn(
-            Transform2D(SIZE * 0.25, SIZE * 0.25, 0, SIZE * 0.3, SIZE * 0.3),
+            Transform(SIZE * 0.25, SIZE * 0.25, 0, 1, 0, SIZE * 0.3, SIZE * 0.3),
             Tint(1.0, 0.0, 0.0, 1.0),
             Renderable()
         )
@@ -949,7 +949,7 @@ describe("ecs.Renderer", function()
     it("pans what is drawn", function()
         local world, renderer = newScene()
         world:spawn(
-            Transform2D(SIZE * 0.25, SIZE / 2, 0, SIZE * 0.3, SIZE * 0.3),
+            Transform(SIZE * 0.25, SIZE / 2, 0, 1, 0, SIZE * 0.3, SIZE * 0.3),
             Tint(1.0, 0.0, 0.0, 1.0),
             Renderable()
         )
@@ -971,7 +971,7 @@ describe("ecs.Renderer", function()
         -- rejected before it could draw.
         local world, renderer = newScene()
         world:spawn(
-            Transform2D(SIZE * 10, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+            Transform(SIZE * 10, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
             Tint(0.0, 1.0, 0.0, 1.0),
             Renderable()
         )
@@ -988,7 +988,7 @@ describe("ecs.Renderer", function()
         local world, renderer = newScene()
         -- A quarter-size square at the centre, which zooming doubles.
         world:spawn(
-            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 0.25, SIZE * 0.25),
+            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 0.25, SIZE * 0.25),
             Tint(1.0, 0.0, 0.0, 1.0),
             Renderable()
         )

@@ -29,7 +29,7 @@ local C = sdl.C
 local FORMAT = 4  -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
 local SIZE = 64
 
-local Transform2D = components.Transform2D
+local Transform = components.Transform
 local Tint = components.Tint
 local Renderable = components.Renderable
 
@@ -277,7 +277,7 @@ describe("rendering from a pack", function()
         })
         renderer:install(world)
         world:spawn(
-            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
             Tint(1.0, 0.0, 0.0, 1.0),
             Renderable()
         )

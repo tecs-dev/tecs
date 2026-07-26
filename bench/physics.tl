@@ -28,7 +28,7 @@ local physics <const> = require("tecs.physics")
 local materials <const> = require("tecs.gpu.materials")
 local timing <const> = require("tecs.timing")
 local clock <const> = require("tecs.platform.clock")
-local Transform2D <const> = tecs.components.Transform2D
+local Transform <const> = tecs.components.Transform
 local Tint <const> = tecs.components.Tint
 local Material <const> = tecs.components.Material
 local Renderable <const> = tecs.components.Renderable
@@ -95,7 +95,7 @@ local MIN_Y <const> = WALL * 2
 local function buildContainer(world: tecs.World)
     local function wall(x: number, y: number, halfWidth: number, halfHeight: number)
         local entity = world:spawn(
-            Transform2D(x, y, 0, halfWidth * 2, halfHeight * 2),
+            Transform(x, y, 0, 1, 0, halfWidth * 2, halfHeight * 2),
             Tint(0.18, 0.18, 0.22, 1.0),
             Renderable()
         )
@@ -129,7 +129,7 @@ local function dropWave(world: tecs.World, count: integer, rand: function(): num
 
         local round = index % 3 == 0
         local entity = world:spawn(
-            Transform2D(x, y, 0, SIZE * 2, SIZE * 2),
+            Transform(x, y, 0, 1, 0, SIZE * 2, SIZE * 2),
             Tint(0.3 + rand() * 0.7, 0.3 + rand() * 0.7, 0.5 + rand() * 0.5, 1.0),
             -- A mix, so the fragment shader's material branch is exercised
             -- rather than every instance taking the same path.
@@ -222,7 +222,7 @@ return tecs.application({
         local radiusSq <const> = BLOWER_RADIUS * BLOWER_RADIUS
 
         local blown = app.world:query({
-            include = { Transform2D, physics.RigidBody },
+            include = { Transform, physics.RigidBody },
         })
 
         app.world:addSystem({
@@ -239,7 +239,7 @@ return tecs.application({
                     -- through Box2D, and the transform is written back by the
                     -- physics sync. Taking it mutable here would mark the
                     -- column dirty every frame and defeat the gate.
-                    local transforms = archetype:get(Transform2D)
+                    local transforms = archetype:get(Transform)
                     local bodies = archetype:get(physics.RigidBody)
                     for row = 1, length do
                         local transform = transforms[row]

@@ -8,28 +8,15 @@ local ecs <const> = require("tecs.ecs")
 
 local type Component = ecs.Component
 
---- Position, rotation, and scale in world units, which are pixels with the
+--- Position, rotation and scale in world units, which are pixels with the
 --- origin at the top left. Lighting works in the same units, so a light's
 --- position needs no conversion.
-local record Transform2D is Component
-    x: number
-    y: number
-    --- Radians.
-    rotation: number
-    scaleX: number
-    scaleY: number
-end
-
-ecs.newFFIComponent({
-    name = "Transform2D",
-    container = Transform2D,
-    fields = {
-        { "x", "float" }, { "y", "float" },
-        { "rotation", "float" },
-        { "scaleX", "float" }, { "scaleY", "float" },
-    },
-    defaults = { 0, 0, 0, 1, 1 },
-})
+---
+--- The ECS builtin rather than a component declared here. It is a superset,
+--- carrying `z` and `layer` besides, and it is what the hierarchy and the
+--- authoring systems already move: a renderer reading its own transform would
+--- draw an entity that a parent transform or a tween had moved somewhere else.
+local Transform <const> = ecs.builtins.Transform
 
 --- Base colour written into the G-buffer's albedo target.
 local record Tint is Component
@@ -191,7 +178,7 @@ ecs.newFFIComponent({
     defaults = { 0, 0.25 },
 })
 
---- Marks an entity as contributing geometry. Without it a Transform2D is just
+--- Marks an entity as contributing geometry. Without it a Transform is just
 --- a position, which is what most entities in a world actually are.
 local record Renderable is Component end
 
@@ -201,7 +188,7 @@ ecs.newComponent({
 })
 
 local record components
-    Transform2D: Transform2D
+    Transform: Transform
     Tint: Tint
     Sprite: Sprite
     Material: Material
@@ -215,7 +202,7 @@ local record components
     imageName: function(id: integer): string
 end
 
-components.Transform2D = Transform2D
+components.Transform = Transform
 components.Tint = Tint
 components.Sprite = Sprite
 components.Material = Material

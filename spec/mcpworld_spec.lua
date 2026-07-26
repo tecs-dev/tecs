@@ -62,7 +62,7 @@ describe("mcp world tools", function()
 
         assert.are.same({ "id", "param" }, found.Material.fields)
         assert.is_false(found.Material.tag)
-        for _, field in ipairs(found.Transform2D.fields) do
+        for _, field in ipairs(found.Transform.fields) do
             assert.is_falsy(field:find("^_"))
             assert.are_not.equal("componentName", field)
             assert.are_not.equal("storageType", field)
@@ -84,33 +84,33 @@ describe("mcp world tools", function()
 
     it("queries by component and reports what it did not return", function()
         for index = 1, 5 do
-            world:spawn(components.Transform2D(index, 0, 0, 1, 1),
+            world:spawn(components.Transform(index, 0, 0, 1, 0, 1, 1),
                 components.Renderable())
         end
         local result = ok("query",
-            { include = { "Transform2D", "Renderable" }, limit = 2 })
+            { include = { "Transform", "Renderable" }, limit = 2 })
 
         assert.are.equal(5, result.matched, "the total is not the page")
         assert.are.equal(2, result.returned)
         assert.are.equal(2, #result.entities)
-        assert.are.equal(1, result.entities[1].components.Transform2D.x)
+        assert.are.equal(1, result.entities[1].components.Transform.x)
     end)
 
     it("names the components it knows when given one it does not", function()
         local result = call("query", { include = { "Nonexistent" } })
         assert.is_true(result.isError)
-        assert.is_truthy(result.content[1].text:find("Transform2D", 1, true),
+        assert.is_truthy(result.content[1].text:find("Transform", 1, true),
             "the error should list what can be named")
     end)
 
     it("spawns with defaults for whatever the payload omits", function()
         local spawned = ok("spawn", {
             components = {
-                Transform2D = { x = 10, y = 20 },
+                Transform = { x = 10, y = 20 },
                 Renderable = {},
             },
         })
-        local transform = spawned.components.Transform2D
+        local transform = spawned.components.Transform
         assert.are.equal(10, transform.x)
         -- Not sent, so the component's own default rather than zero.
         assert.are.equal(1, transform.scaleX)
