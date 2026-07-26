@@ -1,129 +1,33 @@
 local tecs <const> = require("tecs")
-local ffi <const> = require("ffi")
-local components <const> = require("tecs.internal.components")
 local tecsInternal <const> = require("tecs.internal.types")
-
-local mathPi, mathSin, mathCos, mathPow <const> = math.pi, math.sin, math.cos, math.pow
+local tweeneval <const> = require("tecs2d.sequence.internal.tweeneval")
 
 local type World = tecs.World
 local type WorldImpl = tecsInternal.WorldImpl
 local type Component = tecs.Component
 local type ControlSelector = string | Timeline
 
+-- Curves, targets, tracking sources, and the slot loop are the sequencer's
+-- evaluation core. What is left here is the scheduling around them: what a
+-- timeline is, when a playback advances, and how it ends.
+local type OperationKind = tweeneval.OperationKind
+local type EasingName = tweeneval.EasingName
+local type EasingFunction = tweeneval.EasingFunction
+local type TargetName = tweeneval.TargetName
+local type Target = tweeneval.Target
+local type TrackSource = tweeneval.TrackSource
+local type TrackSourceImpl = tweeneval.TrackSourceImpl
+local type Slot = tweeneval.Slot
+local type TweenSlotState = tweeneval.TweenSlotState
+
+local EASINGS <const> = tweeneval.easings
+local evaluateSlots <const> = tweeneval.evaluateSlots
+
 local enum PlaybackMode
     "once"
     "loop"
     "pingPong"
 end
-
-local enum OperationKind
-    "to"
-    "adjust"
-    "track"
-    "wait"
-    "emit"
-    "run"
-    "parallel"
-end
-
-local enum TargetMode
-    "field"
-    "field2"
-    "angle"
-    "color"
-end
-
-local enum TrackSourceKind
-    "self"
-    "key"
-    "trackingTarget"
-    "relationship"
-end
-
-local enum EasingName
-    "linear"
-    "quadIn"
-    "quadOut"
-    "quadInOut"
-    "quadOutIn"
-    "cubicIn"
-    "cubicOut"
-    "cubicInOut"
-    "cubicOutIn"
-    "quartIn"
-    "quartOut"
-    "quartInOut"
-    "quartOutIn"
-    "quintIn"
-    "quintOut"
-    "quintInOut"
-    "quintOutIn"
-    "sineIn"
-    "sineOut"
-    "sineInOut"
-    "sineOutIn"
-    "expoIn"
-    "expoOut"
-    "expoInOut"
-    "expoOutIn"
-    "backIn"
-    "backOut"
-    "backInOut"
-    "backOutIn"
-    "elasticIn"
-    "elasticOut"
-    "elasticInOut"
-    "elasticOutIn"
-    "bounceIn"
-    "bounceOut"
-    "bounceInOut"
-    "bounceOutIn"
-end
-
-local enum TargetName
-    "transform.x"
-    "transform.y"
-    "transform.xy"
-    "transform.rotation"
-    "transform.rotationShortest"
-    "transform.scaleX"
-    "transform.scaleY"
-    "transform.scaleXY"
-    "color.a"
-    "color.rgba"
-end
-
-ffi.cdef[[
-    typedef struct {
-        double init;
-        double applied;
-        double lastT;
-        double s1;
-        double s2;
-        double s3;
-        double s4;
-        double d1;
-        double d2;
-        double d3;
-        double d4;
-    } TweenSlotState;
-]]
-
-local record TweenSlotState
-    init: number
-    applied: number
-    lastT: number
-    s1: number
-    s2: number
-    s3: number
-    s4: number
-    d1: number
-    d2: number
-    d3: number
-    d4: number
-end
-
-local type EasingFunction = function(t: number): number
 
 local record PlaybackOptions
     --- Playback mode. Defaults to "once".
@@ -143,73 +47,7 @@ local record RunOptions
     count: integer
 end
 
---- A component-field animation target.
-local interface Target end
-
---- Runtime target descriptor used by the tween compiler and evaluator.
-local record TargetImpl is Target
-    --- Stable serialized target identity.
-    id: string
-    --- Component whose fields are animated.
-    component: Component
-    --- Serialized component name.
-    componentName: string
-    --- Fields animated by this target.
-    fields: {string}
-    --- Target interpolation behavior.
-    mode: TargetMode
-
-    init: function(
-        world: World, entity: integer, relative: boolean,
-        t1: number, t2: number, t3: number, t4: number
-    ): number, number, number, number, number, number, number, number
-
-    apply: function(
-        world: World, entity: integer, t: number,
-        s1: number, s2: number, s3: number, s4: number,
-        d1: number, d2: number, d3: number, d4: number
-    )
-end
-
---- A live component-field tracking source.
-local interface TrackSource end
-
---- Runtime tracking descriptor used by the tween evaluator.
-local record TrackSourceImpl is TrackSource
-    kind: TrackSourceKind
-    key: string
-    relationship: Component
-    relationshipName: string
-    component: Component
-    componentName: string
-    fields: {string}
-end
-
--- Structural value returned for a targeted relationship instance. The
--- generic public Relationship container type intentionally does not expose
--- instance storage fields.
-local interface RelationshipValue
-    target: integer
-end
-
 local type TimelineNode = {any}
-
-local record Slot
-    kind: OperationKind
-    target: TargetImpl
-    source: TrackSourceImpl
-    easingName: EasingName
-    easing: EasingFunction
-    t1: number
-    t2: number
-    t3: number
-    t4: number
-    relative: boolean
-    startTime: number
-    endTime: number
-    duration: number
-    stateIndex: integer
-end
 
 local record EmitSlot
     time: number
@@ -278,14 +116,6 @@ local interface TweenPlayback is tecs.Component end
 --- Snapshot-durable runtime playback state.
 local record TweenPlaybackImpl is TweenPlayback
     cursors: {Cursor}
-end
-
---- Selects another entity as a dynamic tracking source.
-local record TrackingTarget is tecs.Component
-    --- Direct source entity, or zero to use key.
-    entity: integer
-    --- Source entity key used when entity is zero.
-    key: string
 end
 
 --- Event emitted by an `emit` timeline node.
@@ -406,7 +236,7 @@ local record tween
     --- Component present while an entity has active tween playback.
     TweenPlayback: TweenPlayback
     --- Component selecting a dynamic tracking source entity.
-    TrackingTarget: TrackingTarget
+    TrackingTarget: tweeneval.TrackingTarget
     --- Event emitted by authored `emit` nodes.
     TweenEvent: TweenEvent
     --- Event emitted when root playback completes.
@@ -576,86 +406,13 @@ end
 -- Easing
 -------------------------------------------------------------------------------
 
-function tween.linear(t: number): number return t end
-
-local EASING_NAMES: {EasingFunction: EasingName} = {}
-local EASINGS: {EasingName: EasingFunction} = {}
-
-local function registerEasing(name: EasingName, fn: EasingFunction)
-    EASING_NAMES[fn] = name
-    EASINGS[name] = fn
-end
-
-local function makeVariants(name: string, inFn: EasingFunction)
-    local tw = tween as {string: EasingFunction}
-    tw[name .. "In"] = inFn
-    tw[name .. "Out"] = function(t: number): number return 1 - inFn(1 - t) end
-    tw[name .. "InOut"] = function(t: number): number
-        if t < 0.5 then return 0.5 * inFn(2 * t) end
-        return 1 - 0.5 * inFn(2 - 2 * t)
-    end
-    tw[name .. "OutIn"] = function(t: number): number
-        if t < 0.5 then return 0.5 - 0.5 * inFn(1 - 2 * t) end
-        return 0.5 + 0.5 * inFn(2 * t - 1)
-    end
-end
-
-makeVariants("quad", function(t: number): number return t * t end)
-makeVariants("cubic", function(t: number): number return t * t * t end)
-makeVariants("quart", function(t: number): number return t * t * t * t end)
-makeVariants("quint", function(t: number): number return t * t * t * t * t end)
-makeVariants("sine", function(t: number): number return 1 - mathCos(t * mathPi * 0.5) end)
-makeVariants("expo", function(t: number): number
-    if t == 0 then return 0 end
-    return mathPow(2, 10 * (t - 1))
-end)
-makeVariants("back", function(t: number): number
-    local s <const> = 1.70158
-    return t * t * ((s + 1) * t - s)
-end)
-makeVariants("elastic", function(t: number): number
-    if t == 0 then return 0 end
-    if t == 1 then return 1 end
-    local p <const> = 0.3
-    return -mathPow(2, 10 * (t - 1)) * mathSin((t - 1 - p / 4) * (2 * mathPi) / p)
-end)
-
+-- Every curve is a top-level field here, and the same set is a namespace on
+-- the evaluation core. Copied by name so adding a curve there needs no edit
+-- beyond the field declaration above.
 do
-    local function bounceOut(t: number): number
-        if t < 1 / 2.75 then return 7.5625 * t * t
-        elseif t < 2 / 2.75 then local u <const> = t - 1.5 / 2.75; return 7.5625 * u * u + 0.75
-        elseif t < 2.5 / 2.75 then local u <const> = t - 2.25 / 2.75; return 7.5625 * u * u + 0.9375 end
-        local u <const> = t - 2.625 / 2.75; return 7.5625 * u * u + 0.984375
-    end
-    local function bounceIn(t: number): number return 1 - bounceOut(1 - t) end
-    tween.bounceIn = bounceIn
-    tween.bounceOut = bounceOut
-    tween.bounceInOut = function(t: number): number
-        if t < 0.5 then return 0.5 * bounceIn(2 * t) end
-        return 0.5 * bounceOut(2 * t - 1) + 0.5
-    end
-    tween.bounceOutIn = function(t: number): number
-        if t < 0.5 then return 0.5 * bounceOut(2 * t) end
-        return 0.5 * bounceIn(2 * t - 1) + 0.5
-    end
-end
-
-do
-    local names <const>: {EasingName} = {
-        "linear",
-        "quadIn", "quadOut", "quadInOut", "quadOutIn",
-        "cubicIn", "cubicOut", "cubicInOut", "cubicOutIn",
-        "quartIn", "quartOut", "quartInOut", "quartOutIn",
-        "quintIn", "quintOut", "quintInOut", "quintOutIn",
-        "sineIn", "sineOut", "sineInOut", "sineOutIn",
-        "expoIn", "expoOut", "expoInOut", "expoOutIn",
-        "backIn", "backOut", "backInOut", "backOutIn",
-        "elasticIn", "elasticOut", "elasticInOut", "elasticOutIn",
-        "bounceIn", "bounceOut", "bounceInOut", "bounceOutIn",
-    }
     local tw = tween as {string: EasingFunction}
-    for i = 1, #names do
-        registerEasing(names[i], tw[names[i]])
+    for name, fn in pairs(EASINGS) do
+        tw[name as string] = fn
     end
 end
 
@@ -674,7 +431,7 @@ end
 
 local function deserializeState(rows: {{number}}): {TweenSlotState}
     local count = rows and #rows or 0
-    local state = ffi.new("TweenSlotState[?]", count) as {TweenSlotState}
+    local state = tweeneval.newState(count)
     for i = 1, count do
         local row <const> = rows[i]
         local s <const> = state[i - 1]
@@ -774,12 +531,7 @@ tween.TweenPlayback = tecs.newComponent({
     end,
 })
 
-tween.TrackingTarget = tecs.newComponent({
-    name = "TweenTrackingTarget",
-    container = TrackingTarget,
-    fields = {"entity", "key"},
-    defaults = {0, ""},
-})
+tween.TrackingTarget = tweeneval.TrackingTarget
 
 tween.TweenEvent = TweenEvent
 tween.TweenComplete = TweenComplete
@@ -792,257 +544,34 @@ tecs.newEvent(TweenCancelled)
 -- Targets and tracking sources
 -------------------------------------------------------------------------------
 
-local TARGET_MT <const>: metatable<TargetImpl> = { __index = TargetImpl }
-local targetInit: function(
-    TargetImpl, World, integer, boolean, number, number, number, number
-): (number, number, number, number, number, number, number, number)
-local targetApply: function(
-    TargetImpl, World, integer, number, number, number, number, number, number, number, number, number
-)
+tween.field = tweeneval.target.field
+tween.field2 = tweeneval.target.field2
+tween.angle = tweeneval.target.angle
+tween.target = tweeneval.target.of
+tween.sourceSelf = tweeneval.source.own
+tween.sourceKey = tweeneval.source.key
+tween.sourceTrackingTarget = tweeneval.source.tracking
+tween.sourceRelationship = tweeneval.source.related
 
-local function fieldsFrom(field: string | {string}): {string}
-    if field is string then
-        return { field }
-    end
-    return field as {string}
-end
-
-local function componentByName(name: string): Component
-    local component = components.registeredComponents[name]
-    if not component then error("Unknown tween component " .. name) end
-    return component
-end
-
-local function resolveTarget(t: TargetImpl): TargetImpl
-    if not t.component and t.componentName then
-        t.component = componentByName(t.componentName)
-    end
-    return t
-end
-
-local function newTarget(component: Component, fields: {string}, mode?: TargetMode, id?: string): TargetImpl
-    local parts = component.componentName
-    for i = 1, #fields do
-        parts = parts .. "." .. fields[i]
-    end
-    local t: TargetImpl = setmetatable({
-        id = id or parts,
-        component = component,
-        componentName = component.componentName,
-        fields = fields,
-        mode = mode or (#fields == 2 and "field2" or "field"),
-    }, TARGET_MT)
-    t.init = function(
-        world: World, entity: integer, relative: boolean,
-        t1: number, t2: number, t3: number, t4: number
-    ): (number, number, number, number, number, number, number, number)
-        return targetInit(t, world, entity, relative, t1, t2, t3, t4)
-    end
-    t.apply = function(
-        world: World, entity: integer, tv: number,
-        s1: number, s2: number, s3: number, s4: number,
-        d1: number, d2: number, d3: number, d4: number
-    )
-        targetApply(t, world, entity, tv, s1, s2, s3, s4, d1, d2, d3, d4)
-    end
-    return t
-end
-
-targetInit = function(self: TargetImpl,
-    world: World, entity: integer, relative: boolean,
-    t1: number, t2: number, t3: number, t4: number
-): number, number, number, number, number, number, number, number
-    resolveTarget(self)
-    local c = world:get(entity, self.component)
-    if not c then
-        return 0, 0, 0, 0, 0, 0, 0, 0
-    end
-    local cany = c as {string:number}
-    local f <const> = self.fields
-    local mode <const> = self.mode
-    if mode == "color" then
-        local r, g, b, a <const> = cany[f[1]], cany[f[2]], cany[f[3]], cany[f[4]]
-        if relative then return r, g, b, a, t1, t2, t3, t4 end
-        return r, g, b, a, t1 - r, t2 - g, t3 - b, t4 - a
-    elseif mode == "field2" then
-        local a, b <const> = cany[f[1]], cany[f[2]]
-        if relative then return a, b, 0, 0, t1, t2, 0, 0 end
-        return a, b, 0, 0, t1 - a, t2 - b, 0, 0
-    elseif mode == "angle" then
-        local startVal <const> = cany[f[1]]
-        local delta: number
-        if relative then
-            delta = t1
-        else
-            local twoPi <const> = mathPi * 2
-            local diff <const> = (t1 - startVal) % twoPi
-            delta = 2 * diff % twoPi - diff
-        end
-        return startVal, 0, 0, 0, delta, 0, 0, 0
-    end
-    local startVal <const> = cany[f[1]]
-    local delta <const> = relative and t1 or (t1 - startVal)
-    return startVal, 0, 0, 0, delta, 0, 0, 0
-end
-
-targetApply = function(self: TargetImpl,
-    world: World, entity: integer, t: number,
-    s1: number, s2: number, s3: number, s4: number,
-    d1: number, d2: number, d3: number, d4: number
-)
-    resolveTarget(self)
-    local c = world:getMut(entity, self.component)
-    if not c then return end
-    local cany = c as {string:number}
-    local f <const> = self.fields
-    local mode <const> = self.mode
-    cany[f[1]] = s1 + d1 * t
-    if mode == "field2" or mode == "color" then
-        cany[f[2]] = s2 + d2 * t
-    end
-    if mode == "color" then
-        cany[f[3]] = s3 + d3 * t
-        cany[f[4]] = s4 + d4 * t
-    end
-end
-
-function tween.field(component: Component, fieldName: string): Target
-    return newTarget(component, {fieldName}, "field")
-end
-
-function tween.field2(component: Component, fieldA: string, fieldB: string): Target
-    return newTarget(component, {fieldA, fieldB}, "field2")
-end
-
-function tween.angle(component: Component, fieldName: string): Target
-    return newTarget(component, {fieldName}, "angle")
-end
-
-function tween.target(component: Component, field: string | {string}): Target
-    local fields <const> = fieldsFrom(field)
-    assert(#fields >= 1 and #fields <= 2, "tween.target supports one or two fields")
-    return newTarget(component, fields)
-end
-
-local function source(
-    kind: TrackSourceKind, component: Component, field: string | {string},
-    key?: string, relationship?: Component
-): TrackSource
-    return {
-        kind = kind,
-        key = key,
-        relationship = relationship,
-        relationshipName = relationship and relationship.componentName or nil,
-        component = component,
-        componentName = component.componentName,
-        fields = fieldsFrom(field),
-    } as TrackSourceImpl
-end
-
-function tween.sourceSelf(component: Component, field: string | {string}): TrackSource
-    return source("self", component, field)
-end
-
-function tween.sourceKey(key: string, component: Component, field: string | {string}): TrackSource
-    return source("key", component, field, key)
-end
-
-function tween.sourceTrackingTarget(component: Component, field: string | {string}): TrackSource
-    return source("trackingTarget", component, field)
-end
-
-function tween.sourceRelationship(relationship: Component, component: Component, field: string | {string}): TrackSource
-    return source("relationship", component, field, nil, relationship)
-end
-
-local Transform <const> = tecs.builtins.Transform
-tween.translateX = newTarget(Transform, {"x"}, "field", "transform.x")
-tween.translateY = newTarget(Transform, {"y"}, "field", "transform.y")
-tween.translateXY = newTarget(Transform, {"x", "y"}, "field2", "transform.xy")
-tween.rotation = newTarget(Transform, {"rotation"}, "field", "transform.rotation")
-tween.rotationShortest = newTarget(Transform, {"rotation"}, "angle", "transform.rotationShortest")
-tween.scaleX = newTarget(Transform, {"scaleX"}, "field", "transform.scaleX")
-tween.scaleY = newTarget(Transform, {"scaleY"}, "field", "transform.scaleY")
-tween.scaleXY = newTarget(Transform, {"scaleX", "scaleY"}, "field2", "transform.scaleXY")
-
-do
-    local colorComponent: Component = nil
-    local function color(): Component
-        if not colorComponent then
-            local ok, mod = pcall(require, "tecs2d.gfx.internal.Color")
-            assert(ok, "tween.alpha/color requires tecs2d.gfx (Color component)")
-            colorComponent = mod as Component
-        end
-        return colorComponent
-    end
-    tween.alpha = newTarget(color(), {"a"}, "field", "color.a")
-    tween.color = newTarget(colorComponent, {"r", "g", "b", "a"}, "color", "color.rgba")
-end
-
-local BUILTIN_TARGETS: {TargetName: TargetImpl} = {
-    ["transform.x"] = tween.translateX as TargetImpl,
-    ["transform.y"] = tween.translateY as TargetImpl,
-    ["transform.xy"] = tween.translateXY as TargetImpl,
-    ["transform.rotation"] = tween.rotation as TargetImpl,
-    ["transform.rotationShortest"] = tween.rotationShortest as TargetImpl,
-    ["transform.scaleX"] = tween.scaleX as TargetImpl,
-    ["transform.scaleY"] = tween.scaleY as TargetImpl,
-    ["transform.scaleXY"] = tween.scaleXY as TargetImpl,
-    ["color.a"] = tween.alpha as TargetImpl,
-    ["color.rgba"] = tween.color as TargetImpl,
-}
+tween.translateX = tweeneval.target.translateX
+tween.translateY = tweeneval.target.translateY
+tween.translateXY = tweeneval.target.translateXY
+tween.rotation = tweeneval.target.rotation
+tween.rotationShortest = tweeneval.target.rotationShortest
+tween.scaleX = tweeneval.target.scaleX
+tween.scaleY = tweeneval.target.scaleY
+tween.scaleXY = tweeneval.target.scaleXY
+tween.alpha = tweeneval.target.alpha
+tween.color = tweeneval.target.color
 
 -------------------------------------------------------------------------------
 -- Template serialization
 -------------------------------------------------------------------------------
 
-local function serializeTarget(t: Target): {string:any}
-    local impl <const> = t as TargetImpl
-    return {
-        id = impl.id,
-        component = impl.componentName or (impl.component and impl.component.componentName),
-        fields = impl.fields,
-        mode = impl.mode,
-    }
-end
-
-local function deserializeTarget(data: {string:any}): TargetImpl
-    local id = data.id as string
-    local builtin = id and BUILTIN_TARGETS[id as TargetName]
-    if builtin then return builtin end
-    return newTarget(
-        componentByName(data.component as string),
-        data.fields as {string},
-        (data.mode as TargetMode) or "field",
-        id
-    )
-end
-
-local function serializeSource(s: TrackSource): {string:any}
-    if not s then return nil end
-    local impl <const> = s as TrackSourceImpl
-    return {
-        kind = impl.kind,
-        key = impl.key,
-        relationship = impl.relationshipName or (impl.relationship and impl.relationship.componentName),
-        component = impl.componentName or (impl.component and impl.component.componentName),
-        fields = impl.fields,
-    }
-end
-
-local function deserializeSource(data: {string:any}): TrackSourceImpl
-    if not data then return nil end
-    local relName = data.relationship as string
-    return {
-        kind = data.kind as TrackSourceKind,
-        key = data.key as string,
-        relationshipName = relName,
-        relationship = relName and componentByName(relName) or nil,
-        componentName = data.component as string,
-        component = componentByName(data.component as string),
-        fields = data.fields as {string},
-    } as TrackSourceImpl
-end
+local serializeTarget <const> = tweeneval.serializeTarget
+local deserializeTarget <const> = tweeneval.deserializeTarget
+local serializeSource <const> = tweeneval.serializeSource
+local deserializeSource <const> = tweeneval.deserializeSource
 
 local function serializeTimeline(tl: Timeline): {string:any}
     local impl <const> = tl as TimelineImpl
@@ -1282,7 +811,7 @@ local function createCursor(
     delay: number
 ): Cursor
     local id <const> = internTimeline(world, tl)
-    local state = ffi.new("TweenSlotState[?]", tl.stateSize) as {TweenSlotState}
+    local state = tweeneval.newState(tl.stateSize)
     local children: {Cursor} = nil
     if tl.runs then
         children = {}
@@ -1452,22 +981,8 @@ end
 -- Timeline compilation
 -------------------------------------------------------------------------------
 
-local function resolveEasing(value: any): EasingName, EasingFunction
-    if value is string then
-        local name <const> = value as EasingName
-        return name, assert(EASINGS[name], "Unknown tween easing " .. value)
-    end
-    local easingFn <const> = value as EasingFunction
-    return assert(EASING_NAMES[easingFn],
-        "Tween easing must be a built-in easing name or value"), easingFn
-end
-
-local function resolveTargetValue(value: any): TargetImpl
-    if value is string then
-        return assert(BUILTIN_TARGETS[value as TargetName], "Unknown tween target " .. value)
-    end
-    return value as TargetImpl
-end
+local resolveEasing <const> = tweeneval.resolveEasing
+local resolveTargetValue <const> = tweeneval.resolveTargetValue
 
 local function numericValue(value: any, position: integer): number
     if value == nil then return 0 end
@@ -1644,92 +1159,6 @@ end
 -- Evaluation
 -------------------------------------------------------------------------------
 
-local function targetValuesFromSource(
-    world: World, entity: integer, src: TrackSourceImpl
-): number, number, number, number
-    if not src then return 0, 0, 0, 0 end
-    if not src.component and src.componentName then
-        src.component = componentByName(src.componentName)
-    end
-    local sourceEntity = entity
-    if src.kind == "key" then
-        sourceEntity = world:requireKey(src.key)
-    elseif src.kind == "trackingTarget" then
-        local tt = world:get(entity, TrackingTarget)
-        if not tt then return 0, 0, 0, 0 end
-        if tt.entity and tt.entity ~= 0 then
-            sourceEntity = tt.entity
-        elseif tt.key and tt.key ~= "" then
-            sourceEntity = world:requireKey(tt.key)
-        else
-            return 0, 0, 0, 0
-        end
-    elseif src.kind == "relationship" then
-        if not src.relationship and src.relationshipName then
-            src.relationship = componentByName(src.relationshipName)
-        end
-        local rel = world:get(entity, src.relationship)
-        if not rel then return 0, 0, 0, 0 end
-        sourceEntity = (rel as RelationshipValue).target
-    end
-    local c = world:get(sourceEntity, src.component)
-    if not c then return 0, 0, 0, 0 end
-    local cany = c as {string:number}
-    local f <const> = src.fields
-    return cany[f[1]] or 0, cany[f[2]] or 0, cany[f[3]] or 0, cany[f[4]] or 0
-end
-
-local function evaluateSlots(slots: {Slot}, state: {TweenSlotState}, world: World, target: integer, elapsed: number)
-    for i = 1, #(slots or {}) do
-        local slot <const> = slots[i]
-        local ss <const> = state[slot.stateIndex]
-        local shouldEvaluate = false
-        local active = false
-        local localT: number = 0
-        if elapsed >= slot.startTime and elapsed <= slot.endTime then
-            shouldEvaluate = true
-            active = true
-            localT = (elapsed - slot.startTime) / slot.duration
-        elseif elapsed > slot.endTime then
-            shouldEvaluate = true
-            localT = 1
-        elseif ss.init ~= 0 then
-            shouldEvaluate = true
-            localT = 0
-        end
-
-        if shouldEvaluate then
-            if ss.init == 0 then
-                local t1, t2, t3, t4 = slot.t1, slot.t2, slot.t3, slot.t4
-                if slot.kind == "track" then
-                    t1, t2, t3, t4 = targetValuesFromSource(world, target, slot.source)
-                end
-                ss.s1, ss.s2, ss.s3, ss.s4, ss.d1, ss.d2, ss.d3, ss.d4 =
-                    slot.target.init(world, target, slot.relative, t1, t2, t3, t4)
-                ss.init = 1
-            end
-            if localT < 0 then localT = 0 end
-            if localT > 1 then localT = 1 end
-            if slot.kind == "track" and active then
-                local t1, t2, t3, t4 = targetValuesFromSource(world, target, slot.source)
-                ss.d1 = t1 - ss.s1
-                ss.d2 = t2 - ss.s2
-                ss.d3 = t3 - ss.s3
-                ss.d4 = t4 - ss.s4
-            end
-            if ss.applied == 0 or ss.lastT ~= localT or (slot.kind == "track" and active) then
-                slot.target.apply(
-                    world, target, slot.easing(localT),
-                    ss.s1, ss.s2, ss.s3, ss.s4,
-                    ss.d1, ss.d2, ss.d3, ss.d4
-                )
-                ss.applied = 1
-                ss.lastT = localT
-            end
-        end
-    end
-end
-
 local function fireEmits(c: Cursor, tl: TimelineImpl, world: World, target: integer, elapsed: number)
     local emits <const> = tl.emits
     if not emits then return end
@@ -1818,7 +1247,7 @@ end
 resetCursorCycle = function(c: Cursor, world: World)
     local tl <const> = cursorTimeline(world, c)
     if not tl then return end
-    ffi.fill(c.state as ffi.CData, ffi.sizeof("TweenSlotState") * tl.stateSize, 0)
+    tweeneval.clearState(c.state, tl.stateSize)
     c.elapsed = 0
     c.direction = 1
     c.nextEmit = 1
