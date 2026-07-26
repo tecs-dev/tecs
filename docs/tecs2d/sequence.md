@@ -157,9 +157,13 @@ A finished playback frees its arena slot immediately, so the arena is bounded by
 rather than by every sequence ever played. Its `status` stays readable until the slot is handed to
 a new playback, after which the old handle reports `nil` rather than another playback's state.
 
-A handle is generation checked and **remains meaningful across a snapshot load**: a handle saved
-before a snapshot refers to the same playback after restore, and reports `cancelled` if that
-playback did not survive.
+A handle is generation checked and **remains meaningful across a snapshot load**: it refers to the
+same playback before and after a restore. A handle whose playback the snapshot did not carry
+reports no status at all, exactly like a handle this world never issued.
+
+A snapshot's sequence payload carries a layout version. Loading a save written by a build whose
+cursor layout this one does not understand raises rather than restoring a half-cursor, and the
+world's live playbacks are left untouched.
 
 `status` reports one of `running`, `paused`, `completed`, `cancelled`, or `faulted`, along with the
 program name, version, and program counter — the same values the disassembler indexes.

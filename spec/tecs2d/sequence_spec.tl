@@ -577,6 +577,29 @@ describe("tecs2d.sequence", function()
             luassert.equals(target, seen)
         end)
 
+        it("rejects a payload written by an unknown layout version", function()
+            local prog = sequence.define(uniqueName(), {sequence.waitSteps(4)})
+            local handle = sequence.play(world, prog)
+
+            local saved = world:saveSnapshot({format = "table"})
+            local entries = saved.snapshot.data
+            local patched = false
+            for i = 1, #entries do
+                if entries[i].key == "tecs2d.sequence" then
+                    local payload = entries[i].value as {string: any}
+                    luassert.equals(1, payload.version, "payload must carry its layout version")
+                    payload.version = 99
+                    patched = true
+                end
+            end
+            luassert.is_true(patched, "the sequencer must write a snapshot payload")
+
+            luassert.has_error(function() world:loadSnapshot(saved) end)
+            -- A rejected load must not have half-cleared the arena.
+            luassert.equals("running", sequence.status(world, handle).state)
+            luassert.equals(1, sequence.activeCount(world))
+        end)
+
         it("drops nothing when no sequences are active", function()
             local saved = world:saveSnapshot().buffer
             world:loadSnapshot(saved)

@@ -36,6 +36,11 @@ local SLOT_LIMIT <const> = 1048576
 
 local DEFAULT_BUDGET <const> = 512
 
+-- Layout version of this module's snapshot payload. Bumped whenever a cursor
+-- gains state an older reader would silently ignore, so a save written by a
+-- newer build is rejected rather than restored as a half-cursor.
+local SNAPSHOT_VERSION <const> = 1
+
 -- Instruction opcodes. Code is a flat array with stride 3: (op, a, b).
 local OP_WAIT <const> = 1     -- a = const index holding seconds, or -1
                               -- b = literal step count when a is -1
@@ -110,9 +115,10 @@ local record sequence
     end
 
     --- A generation-checked reference to one playback. Remains meaningful
-    --- across a snapshot load: a handle saved before the snapshot refers to
-    --- the same playback after it is restored, and reports `cancelled` if
-    --- that playback did not survive.
+    --- across a snapshot load: a handle refers to the same playback before
+    --- and after a restore. A handle whose playback the snapshot did not
+    --- carry reports no status at all, the same as a handle this world
+    --- never issued.
     type Handle = integer
 
     --- Constants a `call` passes to its action: numbers, strings, booleans,
@@ -1257,6 +1263,7 @@ local function saveState(world: World): any
     end
 
     return {
+        version = SNAPSHOT_VERSION,
         step = state.step,
         seq = state.seq,
         budget = state.budget,
@@ -1269,6 +1276,19 @@ local function saveState(world: World): any
 end
 
 local function loadState(world: World, value: any)
+    -- Validate before touching live state: a rejected snapshot leaves the
+    -- world's playbacks exactly as they were rather than half-cleared.
+    if value ~= nil then
+        if type(value) ~= "table" then
+            error("tecs2d.sequence snapshot data must be a table", 2)
+        end
+        local header = value as {string: any}
+        if header.version ~= SNAPSHOT_VERSION then
+            error("unsupported tecs2d.sequence snapshot version: "
+                .. tostring(header.version), 2)
+        end
+    end
+
     local state = stateFor(world)
     -- Actions stay registered: they are code, rebound by name, not data.
     state.cursors = {}
