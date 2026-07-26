@@ -73,29 +73,93 @@ ecs.newFFIComponent({
     defaults = { 64, 256, 1, 1, 1, 1 },
 })
 
+--- Interned image names.
+---
+--- An image's name is its identity. A texture-array slot is not: slots are
+--- handed out in registration order, so slot seven means whichever image
+--- registered seventh, and a number that depends on load order cannot survive
+--- being written to a snapshot and read back by a run that loads its assets
+--- in a different order.
+---
+--- A component is plain C memory and a string does not fit there, so what a
+--- Sprite carries is the name's intern index. The index is process-local and
+--- never leaves the process: `Sprite.serialize` writes the name and
+--- `deserialize` interns it again, so what a saved Sprite refers to is decided
+--- by the name on both sides.
+local imageIds: {string: integer} = {}
+local imageNames: {integer: string} = {}
+local imageCount = 0
+
+--- Index of the given image name, assigning one the first time it is seen.
+---
+--- Indices start at one, so zero is the index of no image at all and that is
+--- what a Sprite carries until something names one.
+local function imageId(name: string): integer
+    if name == nil or name == "" then
+        error("tecs: an image name cannot be empty", 2)
+    end
+    local id = imageIds[name]
+    if id ~= nil then return id end
+    imageCount = imageCount + 1
+    imageIds[name] = imageCount
+    imageNames[imageCount] = name
+    return imageCount
+end
+
+--- Name an index stands for, or nil when the index names nothing.
+local function imageName(id: integer): string
+    return imageNames[id]
+end
+
 --- Samples a texture instead of drawing flat colour.
 ---
---- `slot` indexes the renderer's texture registry rather than holding a
---- texture directly: components are plain C memory, and a registry index is
---- what fits there. The UV rect selects a region, so an atlas is the same
---- thing as a whole image with the rect set to the full range.
+--- `image` is an index from `imageId`, which names the image; `slot` is the
+--- texture-array layer the renderer resolved that name to. Both are here
+--- because extraction reads the slot for every row it writes and wants a
+--- field, not a lookup, while a snapshot needs something a slot cannot give
+--- it. Only the name is written to a snapshot.
+---
+--- A negative slot means unresolved. The renderer fills it in the first time
+--- it writes the row, so a Sprite restored from a snapshot or built by hand
+--- resolves once rather than once per frame. Pointing a live Sprite at another
+--- image therefore means writing a negative slot along with the new `image`,
+--- or the row keeps drawing the layer the old name resolved to.
+---
+--- The UV rect selects a region, so an atlas is the same thing as a whole
+--- image with the rect set to the full range.
 local record Sprite is Component
-    slot: number
+    image: number
     u0: number
     v0: number
     u1: number
     v1: number
+    slot: number
 end
 
 ecs.newFFIComponent({
     name = "Sprite",
     container = Sprite,
     fields = {
-        { "slot", "int32_t" },
+        { "image", "int32_t" },
         { "u0", "float" }, { "v0", "float" },
         { "u1", "float" }, { "v1", "float" },
+        { "slot", "int32_t" },
     },
-    defaults = { 0, 0, 0, 1, 1 },
+    defaults = { 0, 0, 0, 1, 1, -1 },
+    serialize = function(instance: Sprite): {string: any}
+        return {
+            image = imageNames[instance.image as integer],
+            u0 = instance.u0, v0 = instance.v0,
+            u1 = instance.u1, v1 = instance.v1,
+        }
+    end,
+    deserialize = function(_world: ecs.World, data: {string: any}): Sprite
+        local name = data.image as string
+        local image = 0
+        if name ~= nil and name ~= "" then image = imageId(name) end
+        return Sprite(image, data.u0 as number, data.v0 as number,
+            data.u1 as number, data.v1 as number)
+    end,
 })
 
 --- Which material shades a renderable's quad.
@@ -143,6 +207,12 @@ local record components
     Material: Material
     PointLight: PointLight
     Renderable: Renderable
+
+    --- Index of an image name, assigning one the first time it is seen.
+    imageId: function(name: string): integer
+
+    --- Name an image index stands for, or nil when it names nothing.
+    imageName: function(id: integer): string
 end
 
 components.Transform2D = Transform2D
@@ -151,5 +221,7 @@ components.Sprite = Sprite
 components.Material = Material
 components.PointLight = PointLight
 components.Renderable = Renderable
+components.imageId = imageId
+components.imageName = imageName
 
 return components
