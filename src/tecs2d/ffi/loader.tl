@@ -47,9 +47,10 @@ local record loader
 end
 
 loader.searchPaths = {
-    -- Libraries this project links itself, such as the shared SPIRV-Cross
-    -- that Homebrew only ships as static archives.
-    "build/lib/",
+    -- Libraries this project links itself, such as the shared SPIRV-Cross that
+    -- is only distributed as static archives. The build system chooses where
+    -- those land, so it says where rather than this guessing.
+    (os.getenv("TECS2D_LIB") or "") .. "/",
     "/opt/homebrew/lib/",
     "/opt/homebrew/opt/%s/lib/",
     "/usr/local/lib/",

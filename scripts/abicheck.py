@@ -17,12 +17,11 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-GEN = REPO / "build" / "tecs2d" / "ffi"
 
 LIBRARIES = [
-    {"name": "sdl3", "headers": ["SDL3/SDL.h"], "formula": "sdl3"},
-    {"name": "box2d", "headers": ["box2d/box2d.h"], "formula": "box2d"},
-    {"name": "shaderc", "headers": ["shaderc/shaderc.h"], "formula": "shaderc"},
+    {"name": "sdl3", "headers": ["SDL3/SDL.h"], "module": "sdl3"},
+    {"name": "box2d", "headers": ["box2d/box2d.h"], "module": None},
+    {"name": "shaderc", "headers": ["shaderc/shaderc.h"], "module": "shaderc"},
 ]
 
 # `typedef struct Name {` opening a record body.
@@ -33,13 +32,48 @@ RECORD_END_RE = re.compile(r"\s*(\w+)\s*;")
 FIELD_RE = re.compile(r"(\w+)\s*(?:\[[^\]]*\])*\s*;\s*$")
 
 
-def brewPrefix(formula: str) -> str:
-    try:
-        out = subprocess.run(["brew", "--prefix", formula],
-                             capture_output=True, text=True, check=True)
-        return out.stdout.strip()
-    except Exception:
-        return "/usr/local"
+def includeDirs(module):
+    """Include directories for a dependency, from pkg-config where it has one.
+
+    Asking pkg-config rather than a package manager keeps this working on a
+    machine that has no Homebrew, which is every CI runner and every
+    cross-compilation host.
+    """
+    if module:
+        try:
+            out = subprocess.run(["pkg-config", "--cflags-only-I", module],
+                                 capture_output=True, text=True, check=True)
+            dirs = [flag[2:] for flag in out.stdout.split() if flag.startswith("-I")]
+            if dirs:
+                return dirs
+        except Exception:
+            pass
+
+    # Box2D ships no pkg-config file, and a fallback keeps the common case
+    # working without configuration.
+    for candidate in ("/opt/homebrew/include", "/usr/local/include",
+                      "/usr/include"):
+        if Path(candidate).is_dir():
+            return [candidate]
+    return []
+
+
+def generatedDir() -> Path:
+    """Where the bindings were written.
+
+    CMake writes under its own build directory, so the location is passed in
+    rather than assumed.
+    """
+    if len(sys.argv) > 1:
+        return Path(sys.argv[1])
+    for candidate in (REPO / "build" / "tecs2d" / "ffi",
+                      REPO / "out" / "lua" / "tecs2d" / "ffi"):
+        if candidate.is_dir():
+            return candidate
+    sys.exit("cannot find generated bindings; pass their directory")
+
+
+GEN = None
 
 
 def readCdef(name: str) -> str:
@@ -154,7 +188,7 @@ def luaReport(name: str, records):
     script = """
 local ffi = require("ffi")
 local json = ...
-package.path = "build/?.lua;build/?/init.lua;" .. package.path
+package.path = "%s/?.lua;%s/?/init.lua;" .. package.path
 local cdefSource = require("tecs2d.ffi.%scdef")
 ffi.cdef(cdefSource)
 local out = {}
@@ -173,7 +207,7 @@ for line in io.lines(json) do
     end
 end
 print(table.concat(out, "\\n"))
-""" % name
+""" % (GEN.parent.parent, GEN.parent.parent, name)
 
     with tempfile.TemporaryDirectory() as d:
         listing = Path(d) / "records.txt"
@@ -202,13 +236,14 @@ print(table.concat(out, "\\n"))
 
 
 def main():
+    global GEN
+    GEN = generatedDir()
     totalChecked = 0
     mismatches = []
 
     for lib in LIBRARIES:
         name = lib["name"]
-        prefix = brewPrefix(lib["formula"])
-        includeDirs = [f"{prefix}/include"]
+        includes = includeDirs(lib["module"])
 
         cdef = readCdef(name)
         records = parseRecords(cdef)
@@ -216,7 +251,7 @@ def main():
             print(f"{name}: no records found")
             continue
 
-        fromC = cReport(lib["headers"], includeDirs, records)
+        fromC = cReport(lib["headers"], includes, records)
         fromLua = luaReport(name, records)
 
         checked = 0

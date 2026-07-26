@@ -3,7 +3,10 @@
 -- together catch a mis-generated cdef in a way a smoke test would not.
 
 -- Our build first, so it wins over the ECS repo's own engine tree.
-package.path = "build/?.lua;build/?/init.lua;"
+-- The build directory is the build system's to choose, so it is passed in.
+-- Our tree comes first, so it wins over the ECS repo's own engine tree.
+local root = os.getenv("TECS2D_LUA") or "out/macos-arm64-dev/lua"
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
     .. "../tecs/build/?.lua;../tecs/build/?/init.lua;" .. package.path
 
 local World = require("tecs2d.physics.World")

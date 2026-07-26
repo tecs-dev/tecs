@@ -1,0 +1,1 @@
+/usr/bin/cc -O2 -g -DNDEBUG -arch arm64 -Wl,-rpath,/opt/homebrew/lib -dynamiclib -Wl,-headerpad_max_install_names -o lib/libtecs2dworker.dylib -install_name @rpath/libtecs2dworker.dylib CMakeFiles/tecs2d_worker.dir/native/worker.c.o  /opt/homebrew/lib/libSDL3.dylib /opt/homebrew/Cellar/luajit/2.1.1753364724/lib/libluajit-5.1.dylib

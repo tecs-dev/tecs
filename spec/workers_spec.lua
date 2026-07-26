@@ -5,7 +5,10 @@
 -- bytes, and these tests exist mostly to pin that boundary: what survives the
 -- trip, what order it arrives in, and that a blocked worker can be stopped.
 
-package.path = "build/?.lua;build/?/init.lua;"
+-- The build directory is the build system's to choose, so it is passed in.
+-- Our tree comes first, so it wins over the ECS repo's own engine tree.
+local root = os.getenv("TECS2D_LUA") or "out/macos-arm64-dev/lua"
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
     .. "../tecs/build/?.lua;../tecs/build/?/init.lua;" .. package.path
 
 local workers = require("tecs2d.workers")

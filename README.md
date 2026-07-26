@@ -353,28 +353,51 @@ src/tecs2d/physics/         Box2D binding and its world plugin
 spec/                       busted suite
 ```
 
-## Commands
+## Build
+
+CMake is canonical. Make is a wrapper that forwards to it, so there is one
+description of how the engine is assembled rather than one per platform to keep
+in step.
 
 ```
-make deps        install SDL3, Box2D, shaderc, SPIRV-Cross, LuaJIT (Homebrew)
-make all         generate cdefs, compile Teal, build the host
-make run         run the demo
-make test        run the spec suite
-make check       type-check Teal sources
-make abi-check   verify generated cdefs against the C ABI
-make spvc        link SPIRV-Cross into a shared library
-make cdef        regenerate bindings from installed headers
+make presets        list the platform matrix
+make build          build the selected preset
+make run            run the demo
+make test           run the spec suite
+make check          type-check Teal sources
+make abi-check      verify generated cdefs against the C ABI
+make package        install a tree into out/package
+make check-package  verify a package carries its own dependencies
+make deps           install development dependencies (Homebrew)
 ```
+
+`PRESET=` selects the target; it defaults to `macos-arm64-dev`. Presets come in
+two kinds. A development preset resolves dependencies from the system, which is
+convenient and not shippable: it links the build machine's libraries by
+absolute path. A packaged preset builds pinned revisions from source, so a
+release is reproducible and carries no path from the machine that made it.
+
+`make check-package` is the gate on that distinction. It inspects the installed
+binaries for search paths and absolute references that leave the package, and
+for a shader compiler a release is not meant to ship. On a development install
+it reports what it found and passes, because those references are expected
+there; on a packaged one it fails. A package that resolved a library from the
+build machine works there and nowhere else, and the failure only appears once
+someone else unpacks it.
 
 `TECS2D_FRAMES=N make run` exits after N frames, so an automated run can drive
 a real window to completion.
 
 ## Requirements
 
-LuaJIT, SDL3 (3.4+, for SDL_GPU), Box2D 3.x, shaderc, SPIRV-Cross, and Teal
-(`tl`). Library paths are discovered through Homebrew or `/usr/local`, and each
-can be overridden with `TECS2D_SDL3_PATH`, `TECS2D_BOX2D_PATH`,
-`TECS2D_SHADERC_PATH`, or `TECS2D_SPVC_PATH`.
+CMake 3.24+, LuaJIT, SDL3 (3.4+, for SDL_GPU), SDL3_image, Box2D 3.x, shaderc,
+SPIRV-Cross, and Teal (`tl`). `make deps` installs them on macOS.
 
-Homebrew ships SPIRV-Cross as static archives only, so `make spvc` links the
-shared object the FFI needs into `build/lib/`.
+Dependencies are found through pkg-config rather than a package manager's
+paths, which is what lets the same build description cross-compile. Box2D ships
+no pkg-config file and is located directly.
+
+SPIRV-Cross is distributed as static archives only, and the FFI needs a shared
+object, so the build links one. Whole-archive linking is deliberate there: the C
+API's symbols are not referenced from the stub, so the linker would otherwise
+discard every one of them.

@@ -1,0 +1,1 @@
+/usr/bin/cc -O2 -g -DNDEBUG -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names -Wl,-rpath,/opt/homebrew/lib CMakeFiles/tecs2d.dir/native/host.c.o -o bin/tecs2d  /opt/homebrew/lib/libSDL3.dylib /opt/homebrew/Cellar/luajit/2.1.1753364724/lib/libluajit-5.1.dylib

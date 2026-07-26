@@ -1,0 +1,9 @@
+# Hashes of file build rules.
+36dd7b384f86022043a2d7036a3963d0 CMakeFiles/tecs2d_bindings
+8534780139681427ae0f9bbcd5a8e842 CMakeFiles/tecs2d_lua
+856f0271bfe36d7b6c79969ce88c7003 lua/tecs2d/ffi/box2dcdef.lua
+29493a73e55b22734f1a94042378bbe9 lua/tecs2d/ffi/sdl3cdef.lua
+71c2b43bd85ad4862f2ed820c363fddb lua/tecs2d/ffi/sdl3imagecdef.lua
+7f78025ae4e4990805f8b4e88e5b7669 lua/tecs2d/ffi/shaderccdef.lua
+c3c53514f4fd80412361dc3a4b7f71b7 lua/tecs2d/ffi/spvccdef.lua
+9221772af7908390c14e33d215a5a2dc lua/tecs2d/ffi/workercdef.lua

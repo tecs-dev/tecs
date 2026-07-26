@@ -5,7 +5,10 @@
 -- ownership were confused the symptom would be a use-after-free rather than a
 -- wrong image, so these tests load the same file repeatedly as well as once.
 
-package.path = "build/?.lua;build/?/init.lua;"
+-- The build directory is the build system's to choose, so it is passed in.
+-- Our tree comes first, so it wins over the ECS repo's own engine tree.
+local root = os.getenv("TECS2D_LUA") or "out/macos-arm64-dev/lua"
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
     .. "../tecs/build/?.lua;../tecs/build/?/init.lua;" .. package.path
 
 local sdl = require("tecs2d.ffi.sdl3")
