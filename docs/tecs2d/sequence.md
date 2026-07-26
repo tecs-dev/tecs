@@ -600,20 +600,24 @@ usually a tool and the message is all it gets. `sequence.dataOps()` lists what i
 `disassemble(program, pc)` renders a program as readable instructions with their indices, marking
 one of them, so a `pc` from `status` or a fault points at a specific step.
 
-The debugger exposes the same view, in the overlay and as `cmd_*` MCP tools:
+The debugger exposes the same view, in the overlay and as `cmd_*` MCP tools. Playing a program and
+reading one are the same group, because they are the same subject:
 
 ```
- Command              Shows
- ───────────────────  ──────────────────────────────────────────────────
- sequence list        every live playback, its pc, and what blocks it
- sequence info <h>    one playback's status plus its disassembly, pc marked
- sequence programs    defined programs and their newest version
- sequence disasm <n>  a program by name, or a specific version of it
- sequence signal <n>  raise a signal, waking the playbacks blocked on it
+ Command              Does
+ ───────────────────  ────────────────────────────────────────────────────
+ program play         compile a list of steps and play it, returning a handle
+ program status <h>   where a playback sits, what blocks it, what it does
+                      next, and its disassembly with the pc marked
+ program cancel <h>   stop a playback and its branches
+ program list         every live playback, its pc, and what blocks it
+ program defined      defined programs and their newest version
+ program disasm <n>   a program by name, or a specific version of it
+ program signal <n>   raise a signal, waking the playbacks blocked on it
 ```
 
-`sequence info` disassembles the exact version that playback is running, which is the version worth
-reading when a hot reload has moved on without it.
+`program status` disassembles the exact version that playback is running, which is the version
+worth reading when a hot reload has moved on without it.
 
 `sequence.upcoming(world, handle, withinTicks?)` reports what a playback will **certainly** do
 next: it follows the straight-line run ahead, accumulating waits, and stops at the first
@@ -621,16 +625,6 @@ instruction whose successor cannot be known without running it — a jump, a for
 signal, a query, or a tween. It reports what will happen, not everything that might.
 
 ### Scripting from an agent
-
-The debugger's `program` commands take a whole scenario as data and schedule it:
-
-```
- Command             Does
- ──────────────────  ───────────────────────────────────────────────
- program play        compile a list of steps and play it, returning a handle
- program status      where a playback sits, and what it will do next
- program cancel      stop a playback and its branches
-```
 
 `program play` accepts every `defineData` step plus `input`, which injects a Love event, and takes
 `clock` and `bindings`. It replaces queueing input through one tool and doing everything else

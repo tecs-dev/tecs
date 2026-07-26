@@ -38,7 +38,6 @@ local profilecmds <const> = require("tecs2d.debug.internal.cmd.profile")
 local rendercmds <const> = require("tecs2d.debug.internal.cmd.render")
 local selectcmds <const> = require("tecs2d.debug.internal.cmd.select")
 local programcmds <const> = require("tecs2d.debug.internal.cmd.program")
-local sequencecmds <const> = require("tecs2d.debug.internal.cmd.sequence")
 local sessioncmds <const> = require("tecs2d.debug.internal.cmd.session")
 
 local Transform <const> = tecs.builtins.Transform
@@ -817,7 +816,6 @@ function commands.build(env: commands.Env): commands.Registry
             worldcapturecmds.commands(d),
             capturecmds.commands(d),
             programcmds.commands(d),
-            sequencecmds.commands(d),
             sessioncmds.commands(d),
         }) do
         for _, c in ipairs(group) do

@@ -987,7 +987,6 @@ Engine introspection: systems, archetypes, components, states, physics, controll
 | [`audio`](#cmd-audio) | Audio info; stop everything or mute the master group. |
 | [`logs`](#cmd-logs) | Search recent engine logs or change logger verbosity. |
 | [`resources`](#cmd-resources) | List world resources; pass a name to read one value. |
-| [`sequence`](#cmd-sequence) | Inspect gameplay sequences: playbacks, programs, signals. |
 
 ### `systems` {#cmd-systems}
 
@@ -1390,194 +1389,6 @@ MCP tool: `cmd_resources` (read-only, idempotent)
 resources
 resources game.state
 ```
-
-### `sequence` {#cmd-sequence}
-
-Inspect gameplay sequences: playbacks, programs, signals.
-
-Inspect tecs2d.sequence playbacks. `list` reports every live playback with the instruction it sits on and what it is blocked on; `info` adds that program's disassembly with the playback's pc marked; `programs` and `disasm` read the compiled programs themselves; `signal` raises a named signal, waking the playbacks blocked on it on the next fixed step.
-
-```
-sequence list
-sequence info 1048577
-sequence programs
-sequence disasm game.bossIntro
-sequence signal adds.cleared
-```
-
-#### `sequence list` {#cmd-sequence-list}
-
-List live playbacks and what each is waiting on.
-
-MCP tool: `cmd_sequence_list` (read-only, idempotent)
-
-::: details Result data schema
-```json
-{
-  "properties": {
-    "count": {
-      "description": "live playbacks",
-      "type": "integer"
-    },
-    "playbacks": {
-      "items": {
-        "type": "object"
-      },
-      "type": "array"
-    },
-    "step": {
-      "description": "fixed step the sequencer has reached",
-      "type": "integer"
-    }
-  },
-  "required": [
-    "count",
-    "step"
-  ],
-  "type": "object"
-}
-```
-:::
-
-#### `sequence info <handle>` {#cmd-sequence-info}
-
-Show one playback's status and disassembly.
-
-MCP tool: `cmd_sequence_info` (read-only, idempotent)
-
-| Argument | Type | Description |
-| --- | --- | --- |
-| `handle` | number | playback handle (see `sequence list`) (required) |
-
-::: details Result data schema
-```json
-{
-  "properties": {
-    "disassembly": {
-      "description": "the program, with pc marked",
-      "type": "string"
-    },
-    "handle": {
-      "type": "integer"
-    },
-    "pc": {
-      "description": "instruction it sits on",
-      "type": "integer"
-    },
-    "program": {
-      "type": "string"
-    },
-    "state": {
-      "type": "string"
-    },
-    "version": {
-      "type": "integer"
-    }
-  },
-  "required": [
-    "handle",
-    "program",
-    "pc",
-    "state"
-  ],
-  "type": "object"
-}
-```
-:::
-
-#### `sequence programs` {#cmd-sequence-programs}
-
-List defined programs and their newest version.
-
-MCP tool: `cmd_sequence_programs`
-
-::: details Result data schema
-```json
-{
-  "properties": {
-    "count": {
-      "type": "integer"
-    },
-    "programs": {
-      "items": {
-        "type": "object"
-      },
-      "type": "array"
-    }
-  },
-  "required": [
-    "count"
-  ],
-  "type": "object"
-}
-```
-:::
-
-#### `sequence disasm <name> [version]` {#cmd-sequence-disasm}
-
-Disassemble a program by name.
-
-MCP tool: `cmd_sequence_disasm`
-
-| Argument | Type | Description |
-| --- | --- | --- |
-| `name` | string | program name (see `sequence programs`) (required) |
-| `version` | number | program version; newest if omitted |
-
-::: details Result data schema
-```json
-{
-  "properties": {
-    "disassembly": {
-      "type": "string"
-    },
-    "name": {
-      "type": "string"
-    },
-    "version": {
-      "type": "integer"
-    }
-  },
-  "required": [
-    "name",
-    "version",
-    "disassembly"
-  ],
-  "type": "object"
-}
-```
-:::
-
-#### `sequence signal <name>` {#cmd-sequence-signal}
-
-Raise a named signal, waking the playbacks blocked on it.
-
-MCP tool: `cmd_sequence_signal`
-
-| Argument | Type | Description |
-| --- | --- | --- |
-| `name` | string | signal name (required) |
-
-::: details Result data schema
-```json
-{
-  "properties": {
-    "name": {
-      "type": "string"
-    },
-    "woken": {
-      "description": "playbacks that will wake next step",
-      "type": "integer"
-    }
-  },
-  "required": [
-    "name",
-    "woken"
-  ],
-  "type": "object"
-}
-```
-:::
 
 ## Capture
 
@@ -2266,7 +2077,7 @@ The debugger session itself.
 | Command | Description |
 | --- | --- |
 | [`help`](#cmd-help) | List all commands, or show one command's arguments. |
-| [`program`](#cmd-program) | Play a scripted program: input, waits, spawns, tweens. |
+| [`program`](#cmd-program) | Play and inspect sequencer programs. |
 | [`history`](#cmd-history) | Show the command history (persisted across sessions). |
 | [`agent`](#cmd-agent) | MCP session info and client config. |
 | [`step`](#cmd-step) | Tick the game forward N frames while otherwise frozen. |
@@ -2292,15 +2103,19 @@ help select
 
 ### `program` {#cmd-program}
 
-Play a scripted program: input, waits, spawns, tweens.
+Play and inspect sequencer programs.
 
-Play a sequencer program given as data, and get a handle back. A program is a list of steps -- call, emit, fork, join, loop, parallel, playTween, wait, waitQuery, waitSignal, waitSteps, waitTween, plus `input` for love events -- which run in order on a clock, so a scenario is scheduled rather than fired all at once. Unlike run_lua it survives a snapshot: save mid-program and the load resumes at the same step. Use `program status` to watch one and `program cancel` to stop it.
+Play a sequencer program given as data, and get a handle back. A program is a list of steps -- call, emit, fork, join, loop, parallel, playTween, wait, waitQuery, waitSignal, waitSteps, waitTween, plus `input` for love events -- which run in order on a clock, so a scenario is scheduled rather than fired all at once. Unlike run_lua it survives a snapshot: save mid-program and the load resumes at the same step. `status` reports where one playback sits, what blocks it, and its disassembly with the pc marked; `list` reports every live playback; `defined` and `disasm` read the compiled programs themselves; `signal` wakes the playbacks blocked on a name; `cancel` stops a playback and its branches.
 
 ```
 program play [{"op":"input","event":"keypressed","args":["space"]},{"op":"wait","seconds":0.5}] clock=frame
 program play [{"op":"call","action":"game.spawnWave"},{"op":"waitQuery","query":"game.adds","condition":"empty"}]
 program status 1048577
 program cancel 1048577
+program list
+program defined
+program disasm game.bossIntro
+program signal adds.cleared
 ```
 
 #### `program play <steps> [bindings={}] [clock=fixed|frame]` {#cmd-program-play}
@@ -2343,7 +2158,7 @@ MCP tool: `cmd_program_play`
 
 #### `program status <handle>` {#cmd-program-status}
 
-Where a playback sits and what it will do next.
+Where a playback sits, what blocks it, what it does next.
 
 MCP tool: `cmd_program_status` (read-only, idempotent)
 
@@ -2355,6 +2170,10 @@ MCP tool: `cmd_program_status` (read-only, idempotent)
 ```json
 {
   "properties": {
+    "disassembly": {
+      "description": "the program, with pc marked",
+      "type": "string"
+    },
     "handle": {
       "type": "integer"
     },
@@ -2405,6 +2224,134 @@ MCP tool: `cmd_program_cancel` (destructive, idempotent)
   "required": [
     "handle",
     "cancelled"
+  ],
+  "type": "object"
+}
+```
+:::
+
+#### `program list` {#cmd-program-list}
+
+List live playbacks and what each is waiting on.
+
+MCP tool: `cmd_program_list` (read-only, idempotent)
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "count": {
+      "description": "live playbacks",
+      "type": "integer"
+    },
+    "playbacks": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "step": {
+      "description": "fixed step the sequencer has reached",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "count",
+    "step"
+  ],
+  "type": "object"
+}
+```
+:::
+
+#### `program defined` {#cmd-program-defined}
+
+List defined programs and their newest version.
+
+MCP tool: `cmd_program_defined`
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "count": {
+      "type": "integer"
+    },
+    "programs": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "count"
+  ],
+  "type": "object"
+}
+```
+:::
+
+#### `program disasm <name> [version]` {#cmd-program-disasm}
+
+Disassemble a program by name.
+
+MCP tool: `cmd_program_disasm`
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `name` | string | program name (see `program defined`) (required) |
+| `version` | number | program version; newest if omitted |
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "disassembly": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "name",
+    "version",
+    "disassembly"
+  ],
+  "type": "object"
+}
+```
+:::
+
+#### `program signal <name>` {#cmd-program-signal}
+
+Raise a named signal, waking the playbacks blocked on it.
+
+MCP tool: `cmd_program_signal`
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `name` | string | signal name (required) |
+
+::: details Result data schema
+```json
+{
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "woken": {
+      "description": "playbacks that will wake next step",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "name",
+    "woken"
   ],
   "type": "object"
 }

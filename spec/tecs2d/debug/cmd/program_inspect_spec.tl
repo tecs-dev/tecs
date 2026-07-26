@@ -15,7 +15,7 @@ local function uniqueName(): string
     return "dbgseq.program" .. tostring(nameCounter)
 end
 
-describe("sequence debugger commands", function()
+describe("program debugger commands: inspection", function()
     local reg: any
     local world: tecs.World
 
@@ -32,7 +32,7 @@ describe("sequence debugger commands", function()
     end
 
     it("lists live playbacks with what each is waiting on", function()
-        local empty = reg:execute("sequence list")
+        local empty = reg:execute("program list")
         luassert.is_true(empty.ok)
         luassert.equals(0, empty.data.count)
 
@@ -43,7 +43,7 @@ describe("sequence debugger commands", function()
         local handle = sequence.play(world, program)
         stepWorld(1)
 
-        local r = reg:execute("sequence list")
+        local r = reg:execute("program list")
         luassert.is_true(r.ok)
         luassert.equals(1, r.data.count)
         local rows = r.data.playbacks as {{string: any}}
@@ -61,7 +61,7 @@ describe("sequence debugger commands", function()
         local handle = sequence.play(world, program)
         stepWorld(1)
 
-        local r = reg:execute("sequence info " .. tostring(handle))
+        local r = reg:execute("program status " .. tostring(handle))
         luassert.is_true(r.ok)
         luassert.equals(name, r.data.program)
         luassert.equals(1, r.data.pc)
@@ -71,7 +71,7 @@ describe("sequence debugger commands", function()
     end)
 
     it("reports a handle it never issued", function()
-        local r = reg:execute("sequence info 999999")
+        local r = reg:execute("program status 999999")
         luassert.is_false(r.ok)
         luassert.equals("no_playback", r.code)
     end)
@@ -86,11 +86,11 @@ describe("sequence debugger commands", function()
         stepWorld(1)
         sequence.define(name, {sequence.call("dbgseq.noop")})
 
-        local r = reg:execute("sequence info " .. tostring(handle))
+        local r = reg:execute("program status " .. tostring(handle))
         luassert.equals(1, r.data.version)
         luassert.is_truthy((r.data.disassembly as string):find("WAIT", 1, true))
 
-        local newest = reg:execute("sequence disasm " .. name)
+        local newest = reg:execute("program disasm " .. name)
         luassert.equals(2, newest.data.version)
     end)
 
@@ -98,7 +98,7 @@ describe("sequence debugger commands", function()
         local name = uniqueName()
         sequence.define(name, {sequence.call("dbgseq.noop")})
 
-        local list = reg:execute("sequence programs")
+        local list = reg:execute("program defined")
         luassert.is_true(list.ok)
         local found = false
         for _, row in ipairs(list.data.programs as {{string: any}}) do
@@ -106,11 +106,11 @@ describe("sequence debugger commands", function()
         end
         luassert.is_true(found, "the defined program must appear in the listing")
 
-        local dis = reg:execute("sequence disasm " .. name)
+        local dis = reg:execute("program disasm " .. name)
         luassert.is_true(dis.ok)
         luassert.is_truthy((dis.data.disassembly as string):find("CALL", 1, true))
 
-        local missing = reg:execute("sequence disasm dbgseq.neverDefined")
+        local missing = reg:execute("program disasm dbgseq.neverDefined")
         luassert.is_false(missing.ok)
         luassert.equals("no_program", missing.code)
     end)
@@ -125,7 +125,7 @@ describe("sequence debugger commands", function()
         sequence.play(world, program)
         stepWorld(1)
 
-        local r = reg:execute("sequence signal dbgseq.gate")
+        local r = reg:execute("program signal dbgseq.gate")
         luassert.is_true(r.ok)
         luassert.equals(1, r.data.woken)
 
@@ -136,10 +136,13 @@ describe("sequence debugger commands", function()
     it("projects every subcommand as a cmd_* tool", function()
         local names: {string: boolean} = {}
         for _, tool in ipairs(reg:mcpTools()) do names[tool.name] = true end
-        luassert.is_true(names["cmd_sequence_list"])
-        luassert.is_true(names["cmd_sequence_info"])
-        luassert.is_true(names["cmd_sequence_programs"])
-        luassert.is_true(names["cmd_sequence_disasm"])
-        luassert.is_true(names["cmd_sequence_signal"])
+        luassert.is_true(names["cmd_program_list"])
+        luassert.is_true(names["cmd_program_status"])
+        luassert.is_true(names["cmd_program_defined"])
+        luassert.is_true(names["cmd_program_disasm"])
+        luassert.is_true(names["cmd_program_signal"])
+        -- One group, so the old split no longer exists.
+        luassert.is_nil(names["cmd_sequence_list"])
+        luassert.is_nil(names["cmd_sequence_info"])
     end)
 end)
