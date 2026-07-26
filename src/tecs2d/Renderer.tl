@@ -165,7 +165,13 @@ local function writeRun(self: Renderer, archetype: tecs.Archetype,
         local material = 0.0
         if shapes ~= nil then
             local shape = shapes[row]
-            material = shape.kind + math.min(math.max(shape.radius, 0.0), 0.999)
+            local radius = shape.radius
+            if radius < 0.0 then
+                radius = 0.0
+            elseif radius > 0.999 then
+                radius = 0.999
+            end
+            material = shape.kind + radius
         end
 
         local angle = transform.rotation

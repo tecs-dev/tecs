@@ -51,14 +51,19 @@ local function spawnField(world: tecs.World)
     local originX <const> = (WIDTH - AREA_W) * 0.5
     local originY <const> = (HEIGHT - AREA_H) * 0.5
 
-    -- A fixed multiplier rather than a random source: the layout has to be the
-    -- same on every run for the numbers to be comparable between them.
-    local golden <const> = 2.39996
+    -- Seeded exactly as the reference scene does, so the field is uniform and
+    -- identical on every run. An arithmetic sequence was tried first and gave a
+    -- lattice of diagonal stripes rather than a field, which changes both the
+    -- visible fraction and the overdraw.
+    math.randomseed(42)
+    local rand <const> = math.random
 
     -- Circles and rectangles are separate spawns, so each lands in its own
     -- archetype and stays contiguous. That is also what keeps the fragment
     -- shader's material branch coherent across a warp.
-    local function fill(kind: number, radius: number)
+    --- Circles are 6 to 16 across, rectangles 10 to 30 per side, matching the
+    --- reference scene's size distribution.
+    local function fill(kind: number, radius: number, base: number, spread: number)
         world:batchSpawn(PER_KIND, { Transform2D, Tint, Shape, Renderable },
         function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer)
             -- batchSpawn skips FFI defaults, so every field is written here.
@@ -70,29 +75,27 @@ local function spawnField(world: tecs.World)
                 local shape = shapes[row]
                 shape.kind = kind
                 shape.radius = radius
-                local index = row - firstRow
-                local angle = index * golden
-                local u = (index % 977) / 977.0
-                local v = (index % 1583) / 1583.0
 
                 local transform = transforms[row]
-                transform.x = originX + u * AREA_W
-                transform.y = originY + v * AREA_H
-                transform.rotation = angle
-                transform.scaleX = 12.0
-                transform.scaleY = 12.0
+                transform.x = originX + rand() * AREA_W
+                transform.y = originY + rand() * AREA_H
+                -- Unrotated, as the reference is. Rotation would not change
+                -- what the sync costs, since the basis is built either way.
+                transform.rotation = 0.0
+                transform.scaleX = base + rand() * spread
+                transform.scaleY = base + rand() * spread
 
                 local tint = tints[row]
-                tint.r = 0.35 + 0.65 * u
-                tint.g = 0.35 + 0.65 * v
-                tint.b = 0.85
+                tint.r = rand()
+                tint.g = rand()
+                tint.b = rand()
                 tint.a = 1.0
             end
         end)
     end
 
-    fill(1, 0.0)     -- circles
-    fill(2, 0.25)    -- rounded rectangles
+    fill(1, 0.0, 6.0, 10.0)      -- circles
+    fill(2, 0.25, 10.0, 20.0)    -- rounded rectangles
 end
 
 --- Sorts a copy and reads a percentile out of it.
