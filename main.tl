@@ -106,7 +106,12 @@ local function spawnLights(world: tecs.World, width: number, height: number)
 end
 
 return tecs2d.application({
-    window = { title = "tecs2d", width = 1280, height = 720 },
+    window = {
+        title = "tecs2d",
+        width = math.floor(tonumber(os.getenv("TECS2D_WIDTH")) or 1280),
+        height = math.floor(tonumber(os.getenv("TECS2D_HEIGHT")) or 720),
+    },
+    framesInFlight = tonumber(os.getenv("TECS2D_INFLIGHT")) as integer,
     debug = true,
     ambient = { 0.05, 0.05, 0.08 },
     capacity = COUNT + 16,

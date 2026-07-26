@@ -73,6 +73,8 @@ local record Application
     frame: integer
 
     _config: Application.Config
+    --- Per-phase frame timing, accumulated when TECS2D_TIMING is set.
+    _timing: {string: number}
     _started: boolean
     _shutdownDone: boolean
 end
@@ -89,6 +91,9 @@ function Application.create(config: Application.Config): Application
     self.suspended = false
     self.elapsed = 0.0
     self.frame = 0
+    if os.getenv("TECS2D_TIMING") ~= nil then
+        self._timing = { update = 0, acquire = 0, record = 0, submit = 0, frames = 0 }
+    end
     return self
 end
 
@@ -213,12 +218,25 @@ function Application:_iterate(queue: loader.CValue, count: integer): boolean
         self.elapsed = self.elapsed + dt
         if self._config.update ~= nil then self._config.update(self, dt) end
 
+        local t0 = clock.now()
         self.world:update(dt)
 
+        local t1 = clock.now()
         local frame = self.device:beginFrame()
+        local t2 = clock.now()
         if frame ~= nil then
             self.renderer:render(frame)
+            local t3 = clock.now()
             frame:submit()
+            local t4 = clock.now()
+            if self._timing ~= nil then
+                local t = self._timing
+                t.update = t.update + (t1 - t0)
+                t.acquire = t.acquire + (t2 - t1)
+                t.record = t.record + (t3 - t2)
+                t.submit = t.submit + (t4 - t3)
+                t.frames = t.frames + 1
+            end
         end
     end
 
@@ -233,6 +251,15 @@ end
 function Application:_shutdown(): boolean
     if self._shutdownDone then return true end
     self._shutdownDone = true
+
+    local t = self._timing
+    if t ~= nil and t.frames > 0 then
+        local n = t.frames
+        io.stderr:write(("timing over %d frames (ms/frame):\n"):format(math.floor(n) as integer))
+        io.stderr:write(("  update  %.3f\n  acquire %.3f\n  record  %.3f\n  submit  %.3f\n")
+            :format(t.update / n * 1000, t.acquire / n * 1000,
+                    t.record / n * 1000, t.submit / n * 1000))
+    end
 
     if self._started and self._config.quit ~= nil then
         self._config.quit(self)
