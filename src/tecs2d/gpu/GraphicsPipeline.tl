@@ -18,8 +18,12 @@ local C <const> = sdl.C
 local record PipelineOptions
     vertexShader: Shader
     fragmentShader: Shader
-    --- Swapchain or render-target format this pipeline writes to.
+    --- Format of the single colour target this pipeline writes to. Use
+    --- `colorFormats` for a G-buffer or any other multi-target pass.
     colorFormat: integer
+    --- Formats of every colour target, in attachment order. A pipeline bakes
+    --- these, so they must match the pass it is used in exactly.
+    colorFormats: {integer}
     --- "triangleList", "triangleStrip", "lineList", "lineStrip", "pointList".
     primitive: string
     --- "none", "front", or "back".
@@ -73,21 +77,31 @@ function GraphicsPipeline.create(device: loader.CPtr,
         error(("tecs2d: unknown cull mode '%s'"):format(tostring(options.cull)), 2)
     end
 
-    local targets = loader.newArray("SDL_GPUColorTargetDescription[1]")
-    local target = targets[0] as loader.CStruct
-    target.format = options.colorFormat
+    local formats = options.colorFormats
+    if formats == nil then
+        if options.colorFormat == nil then
+            error("tecs2d: a pipeline needs colorFormat or colorFormats", 2)
+        end
+        formats = { options.colorFormat }
+    end
 
-    local blend = target.blend_state as loader.CStruct
-    if options.blend then
-        blend.enable_blend = true
-        blend.src_color_blendfactor = BLEND_FACTOR_SRC_ALPHA
-        blend.dst_color_blendfactor = BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
-        blend.color_blend_op = BLEND_OP_ADD
-        blend.src_alpha_blendfactor = BLEND_FACTOR_ONE
-        blend.dst_alpha_blendfactor = BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
-        blend.alpha_blend_op = BLEND_OP_ADD
-    else
-        blend.enable_blend = false
+    local targets = loader.newArray("SDL_GPUColorTargetDescription[?]", #formats)
+    for index, format in ipairs(formats) do
+        local target = targets[index - 1] as loader.CStruct
+        target.format = format
+
+        local blend = target.blend_state as loader.CStruct
+        if options.blend then
+            blend.enable_blend = true
+            blend.src_color_blendfactor = BLEND_FACTOR_SRC_ALPHA
+            blend.dst_color_blendfactor = BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
+            blend.color_blend_op = BLEND_OP_ADD
+            blend.src_alpha_blendfactor = BLEND_FACTOR_ONE
+            blend.dst_alpha_blendfactor = BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
+            blend.alpha_blend_op = BLEND_OP_ADD
+        else
+            blend.enable_blend = false
+        end
     end
 
     local info = loader.newArray("SDL_GPUGraphicsPipelineCreateInfo[1]")
@@ -103,7 +117,7 @@ function GraphicsPipeline.create(device: loader.CPtr,
 
     local targetInfo = settings.target_info as loader.CStruct
     targetInfo.color_target_descriptions = targets
-    targetInfo.num_color_targets = 1
+    targetInfo.num_color_targets = #formats
     targetInfo.has_depth_stencil_target = false
 
     local handle = C.SDL_CreateGPUGraphicsPipeline(device, info)

@@ -15,7 +15,8 @@ local Device = require("tecs2d.gpu.Device")
 local Shader = require("tecs2d.gpu.Shader")
 local Buffer = require("tecs2d.gpu.Buffer")
 local GraphicsPipeline = require("tecs2d.gpu.GraphicsPipeline")
-local RenderTarget = require("tecs2d.gpu.RenderTarget")
+local RenderPass = require("tecs2d.gpu.RenderPass")
+local Texture = require("tecs2d.gpu.Texture")
 
 local C = sdl.C
 local FORMAT = 4  -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
@@ -37,7 +38,7 @@ describe("gpu rendering", function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
         window = Window.create({ title = "spec", width = SIZE, height = SIZE })
         device = Device.create(window, { debug = true })
-        target = RenderTarget.create(device.handle, SIZE, SIZE, FORMAT)
+        target = Texture.create(device.handle, { width = SIZE, height = SIZE, format = FORMAT })
     end)
 
     teardown(function()
@@ -62,12 +63,12 @@ describe("gpu rendering", function()
         fragment:destroy()
 
         local commandBuffer = C.SDL_AcquireGPUCommandBuffer(device.handle)
-        local pass = target:beginRenderPass(commandBuffer,
-            { r = 0, g = 0, b = 0, a = 1 })
-        C.SDL_BindGPUGraphicsPipeline(pass, pipeline.handle)
+        local pass = RenderPass.begin(commandBuffer,
+            { { texture = target.handle, clear = { r = 0, g = 0, b = 0, a = 1 } } })
+        pass:bindPipeline(pipeline.handle)
         if bind then bind(commandBuffer, pass) end
-        C.SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0)
-        C.SDL_EndGPURenderPass(pass)
+        pass:draw(3)
+        pass:finish()
         assert(C.SDL_SubmitGPUCommandBuffer(commandBuffer))
 
         local pixels = target:readback()
@@ -159,9 +160,7 @@ layout(set = 2, binding = 0) readonly buffer Colors { vec4 color[]; } colors;
 layout(location = 0) out vec4 o;
 void main() { o = colors.color[0]; }
 ]], function(commandBuffer, pass)
-            local handles = loader.newArray("SDL_GPUBuffer*[1]")
-            handles[0] = storage.handle
-            C.SDL_BindGPUFragmentStorageBuffers(pass, 0, handles, 1)
+            pass:bindFragmentStorageBuffers(0, { storage.handle })
         end)
 
         local center = target:getPixel(pixels, SIZE / 2, SIZE / 2)

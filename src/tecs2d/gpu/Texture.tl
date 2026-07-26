@@ -1,20 +1,17 @@
---- An offscreen colour target that can be rendered to and read back.
+--- A GPU texture.
 ---
---- Readback exists so that rendering can be asserted on rather than eyeballed.
---- A draw that silently produces nothing (a mis-flattened binding, a pipeline
---- built against the wrong format) still runs at full frame rate, so "it did
---- not error" is not evidence that it drew.
+--- Usage is declared rather than assumed. SDL_GPU validates that a texture is
+--- only used the ways it was created for, and the flags are not in the order
+--- one would guess, so they are taken from the generated constants.
+---
+--- Readback exists so rendering can be asserted on rather than eyeballed. A
+--- pass that silently produces nothing still runs at full frame rate.
 
 local sdl <const> = require("tecs2d.ffi.sdl3")
 local loader <const> = require("tecs2d.ffi.loader")
 
 local C <const> = sdl.C
 local K <const> = sdl.K
-
--- Renderable and samplable. Taken from the generated constants rather than
--- written as literals: the usage bits are not in the order one would guess.
-local USAGE_COLOR_TARGET <const> =
-    K.SDL_GPU_TEXTUREUSAGE_COLOR_TARGET + K.SDL_GPU_TEXTUREUSAGE_SAMPLER
 
 local record Pixel
     r: integer
@@ -23,28 +20,58 @@ local record Pixel
     a: integer
 end
 
-local record RenderTarget
+local record TextureOptions
+    width: integer
+    height: integer
+    format: integer
+    --- Any of "colorTarget", "sampled", "depthTarget", "computeWrite",
+    --- "computeRead". Defaults to a samplable colour target.
+    usage: {string}
+    name: string
+end
+
+local record Texture
     handle: loader.CPtr
     width: integer
     height: integer
     format: integer
     _device: loader.CPtr
     _transfer: loader.CPtr
+    _transferSize: integer
     _destroyed: boolean
 end
 
-local RenderTargetMT <const>: metatable<RenderTarget> = { __index = RenderTarget }
+local TextureMT <const>: metatable<Texture> = { __index = Texture }
 
---- Creates an offscreen colour target.
-function RenderTarget.create(device: loader.CPtr, width: integer,
-                             height: integer, format: integer): RenderTarget
+local USAGE_FLAGS <const>: {string: integer} = {
+    sampled = K.SDL_GPU_TEXTUREUSAGE_SAMPLER,
+    colorTarget = K.SDL_GPU_TEXTUREUSAGE_COLOR_TARGET,
+    depthTarget = K.SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET,
+    computeRead = K.SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ,
+    computeWrite = K.SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE,
+    graphicsRead = K.SDL_GPU_TEXTUREUSAGE_GRAPHICS_STORAGE_READ,
+}
+
+local DEFAULT_USAGE <const>: {string} = { "colorTarget", "sampled" }
+
+--- Creates a texture.
+function Texture.create(device: loader.CPtr, options: TextureOptions): Texture
+    local flags = 0
+    for _, name in ipairs(options.usage or DEFAULT_USAGE) do
+        local flag = USAGE_FLAGS[name]
+        if flag == nil then
+            error(("tecs2d: unknown texture usage '%s'"):format(tostring(name)), 2)
+        end
+        flags = flags + flag
+    end
+
     local info = loader.newArray("SDL_GPUTextureCreateInfo[1]")
     local settings = info[0] as loader.CStruct
     settings.type = 0                    -- SDL_GPU_TEXTURETYPE_2D
-    settings.format = format
-    settings.usage = USAGE_COLOR_TARGET
-    settings.width = width
-    settings.height = height
+    settings.format = options.format
+    settings.usage = flags
+    settings.width = options.width
+    settings.height = options.height
     settings.layer_count_or_depth = 1
     settings.num_levels = 1
     settings.sample_count = 0
@@ -53,53 +80,22 @@ function RenderTarget.create(device: loader.CPtr, width: integer,
     local handle = C.SDL_CreateGPUTexture(device, info)
     if handle == nil then sdl.fail("SDL_CreateGPUTexture") end
 
-    local self = setmetatable({} as RenderTarget, RenderTargetMT)
+    local self = setmetatable({} as Texture, TextureMT)
     self.handle = handle
-    self.width = width
-    self.height = height
-    self.format = format
+    self.width = options.width
+    self.height = options.height
+    self.format = options.format
     self._device = device
+    self._transferSize = 0
     self._destroyed = false
     return self
-end
-
---- Begins a render pass targeting this texture.
----
---- Mirrors `Frame:beginRenderPass`, taking the frame explicitly rather than
---- reaching for device state.
-function RenderTarget:beginRenderPass(frame: loader.CValue,
-                                      clear: {string: number}): loader.CValue
-    local targets = loader.newArray("SDL_GPUColorTargetInfo[1]")
-    local target = targets[0] as loader.CStruct
-    target.texture = self.handle
-    target.mip_level = 0
-    target.layer_or_depth_plane = 0
-    target.resolve_texture = nil
-    target.cycle = false
-    target.cycle_resolve_texture = false
-    target.store_op = C.SDL_GPU_STOREOP_STORE
-
-    if clear ~= nil then
-        target.load_op = C.SDL_GPU_LOADOP_CLEAR
-        local color = target.clear_color as loader.CStruct
-        color.r = clear.r or 0.0
-        color.g = clear.g or 0.0
-        color.b = clear.b or 0.0
-        color.a = clear.a or 1.0
-    else
-        target.load_op = C.SDL_GPU_LOADOP_LOAD
-    end
-
-    local handle = C.SDL_BeginGPURenderPass(frame, targets, 1, nil)
-    if handle == nil then sdl.fail("SDL_BeginGPURenderPass") end
-    return handle as loader.CValue
 end
 
 --- Copies the texture into a mapped transfer buffer and returns the pixels.
 ---
 --- Blocks until the GPU has finished, so this is a diagnostic and test path,
 --- not something a frame should call.
-function RenderTarget:readback(): loader.CArray
+function Texture:readback(): loader.CArray
     local byteCount = self.width * self.height * 4
 
     if self._transfer == nil then
@@ -110,11 +106,11 @@ function RenderTarget:readback(): loader.CArray
         settings.props = 0
         self._transfer = C.SDL_CreateGPUTransferBuffer(self._device, info)
         if self._transfer == nil then sdl.fail("SDL_CreateGPUTransferBuffer") end
+        self._transferSize = byteCount
     end
 
     local commandBuffer = C.SDL_AcquireGPUCommandBuffer(self._device)
     if commandBuffer == nil then sdl.fail("SDL_AcquireGPUCommandBuffer") end
-
     local copyPass = C.SDL_BeginGPUCopyPass(commandBuffer)
 
     local region = loader.newArray("SDL_GPUTextureRegion[1]")
@@ -148,7 +144,6 @@ function RenderTarget:readback(): loader.CArray
 
     local mapped = C.SDL_MapGPUTransferBuffer(self._device, self._transfer, false)
     if mapped == nil then sdl.fail("SDL_MapGPUTransferBuffer") end
-
     local pixels = loader.newArray("uint8_t[?]", byteCount)
     loader.copyBytes(pixels, mapped as loader.CValue, byteCount)
     C.SDL_UnmapGPUTransferBuffer(self._device, self._transfer)
@@ -157,7 +152,7 @@ function RenderTarget:readback(): loader.CArray
 end
 
 --- Reads one pixel out of a buffer returned by `readback`.
-function RenderTarget:getPixel(pixels: loader.CArray, x: integer, y: integer): Pixel
+function Texture:getPixel(pixels: loader.CArray, x: integer, y: integer): Pixel
     local offset = (y * self.width + x) * 4
     return {
         r = pixels[offset] as integer,
@@ -168,7 +163,7 @@ function RenderTarget:getPixel(pixels: loader.CArray, x: integer, y: integer): P
 end
 
 --- Releases the texture and any transfer buffer. Safe to call more than once.
-function RenderTarget:destroy()
+function Texture:destroy()
     if self._destroyed then return end
     self._destroyed = true
     if self._transfer ~= nil then
@@ -179,4 +174,4 @@ function RenderTarget:destroy()
     self.handle = nil
 end
 
-return RenderTarget
+return Texture

@@ -18,7 +18,7 @@ local GraphicsPipeline = require("tecs2d.gpu.GraphicsPipeline")
 local ComputePipeline = require("tecs2d.gpu.ComputePipeline")
 local ComputePass = require("tecs2d.gpu.ComputePass")
 local RenderPass = require("tecs2d.gpu.RenderPass")
-local RenderTarget = require("tecs2d.gpu.RenderTarget")
+local Texture = require("tecs2d.gpu.Texture")
 
 local C = sdl.C
 local FORMAT = 4  -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
@@ -63,7 +63,7 @@ describe("gpu-driven drawing", function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
         window = Window.create({ title = "indirect", width = SIZE, height = SIZE })
         device = Device.create(window, { debug = true })
-        target = RenderTarget.create(device.handle, SIZE, SIZE, FORMAT)
+        target = Texture.create(device.handle, { width = SIZE, height = SIZE, format = FORMAT })
     end)
 
     teardown(function()
@@ -117,8 +117,8 @@ void main() { o.v[0] = 1u; }
         compute:dispatch(1)
         compute:finish()
 
-        local pass = RenderPass.wrap(
-            target:beginRenderPass(commandBuffer, { r = 0, g = 0, b = 0, a = 1 }))
+        local pass = RenderPass.begin(commandBuffer,
+            { { texture = target.handle, clear = { r = 0, g = 0, b = 0, a = 1 } } })
         pass:bindPipeline(pipeline.handle)
         pass:drawIndirect(args.handle, 0, 1)
         pass:finish()
@@ -212,12 +212,10 @@ void main() { o = vColor; }
         compute:dispatch(1)
         compute:finish()
 
-        local pass = RenderPass.wrap(
-            target:beginRenderPass(commandBuffer, { r = 0, g = 0, b = 0, a = 1 }))
+        local pass = RenderPass.begin(commandBuffer,
+            { { texture = target.handle, clear = { r = 0, g = 0, b = 0, a = 1 } } })
         pass:bindPipeline(pipeline.handle)
-        local handles = loader.newArray("SDL_GPUBuffer*[1]")
-        handles[0] = instances.handle
-        C.SDL_BindGPUVertexStorageBuffers(pass.handle, 0, handles, 1)
+        pass:bindVertexStorageBuffers(0, { instances.handle })
         pass:drawIndirect(args.handle, 0, 1)
         pass:finish()
         assert(C.SDL_SubmitGPUCommandBuffer(commandBuffer))
@@ -275,8 +273,8 @@ void main() {
         compute:dispatch(1)
         compute:finish()
 
-        local pass = RenderPass.wrap(
-            target:beginRenderPass(commandBuffer, { r = 0, g = 0, b = 0, a = 1 }))
+        local pass = RenderPass.begin(commandBuffer,
+            { { texture = target.handle, clear = { r = 0, g = 0, b = 0, a = 1 } } })
         pass:bindPipeline(pipeline.handle)
         pass:drawIndirect(args.handle, 0, 1)
         pass:finish()

@@ -20,11 +20,36 @@ Working today:
   render targets with pixel readback
 - Compute pipelines with reflected workgroup size, and GPU-driven drawing: a
   compute pass writes the draw arguments, one indirect draw consumes them
+- A declarative pass graph, and a deferred pipeline built on it
 - Box2D 3 simulation with value-typed body handles
 - Frame pacing from the swapchain, with no sleep heuristic
 
-Not built yet: the deferred renderer, audio, workers, assets, and the MCP
+Not built yet: shadows, post-processing, audio, workers, assets, and the MCP
 surface.
+
+## The pass graph
+
+Passes name the targets they read and write. The graph owns those targets,
+resizes them with the frame, begins and ends each pass, and binds each pass's
+inputs as fragment samplers, so a pass body only draws.
+
+Execution follows declaration order rather than a topological sort. The order
+of a deferred pipeline is a design decision, not something worth rediscovering
+every frame, and a graph that silently reorders is harder to reason about than
+one that refuses to run. Declared inputs are validated against what earlier
+passes produce, so a missing dependency is an error when the graph is built
+instead of a black screen later.
+
+The graph knows nothing about entities, archetypes, or dirtiness. A pass that
+should be skipped says so through `enabled`, which is where an ECS-side dirty
+gate plugs in without the graph learning what dirty means.
+
+`Deferred` assembles the standard pipeline on it: geometry fills a G-buffer,
+lighting resolves it against a storage buffer of lights, and composite puts the
+result on screen. Geometry is a callback because what to draw is the caller's
+problem. Deferred is what makes light count independent of object count:
+geometry rasterises once regardless of how many lights touch it, and lighting
+runs once per pixel regardless of how many objects overlap it.
 
 ## GPU-driven by default
 

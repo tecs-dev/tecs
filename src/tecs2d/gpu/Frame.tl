@@ -12,17 +12,10 @@ local ComputePass <const> = require("tecs2d.gpu.ComputePass")
 
 local C <const> = sdl.C
 
-local record ClearColor
-    r: number
-    g: number
-    b: number
-    a: number
-end
-
 local record RenderPassOptions
     --- Clears the target to this colour. Omit to load and preserve existing
     --- contents.
-    clear: ClearColor
+    clear: RenderPass.ClearColor
 end
 
 local record Frame
@@ -33,56 +26,28 @@ local record Frame
     --- Swapchain dimensions in pixels, which may differ from the window size.
     width: integer
     height: integer
-    _colorTargets: loader.CArray
     _done: boolean
 end
 
 local FrameMT <const>: metatable<Frame> = { __index = Frame }
 
 --- Wraps an acquired command buffer and swapchain texture.
----
---- `colorTargets` is owned by the device and reused every frame, so acquiring
---- a frame performs no allocation.
 function Frame.wrap(commandBuffer: loader.CPtr, swapchainTexture: loader.CPtr,
-                    width: integer, height: integer,
-                    colorTargets: loader.CArray): Frame
+                    width: integer, height: integer): Frame
     local self = setmetatable({} as Frame, FrameMT)
     self.commandBuffer = commandBuffer
     self.swapchainTexture = swapchainTexture
     self.width = width
     self.height = height
-    self._colorTargets = colorTargets
     self._done = false
     return self
 end
 
 --- Begins a render pass targeting the swapchain.
 function Frame:beginRenderPass(options: RenderPassOptions): RenderPass
-    local target = self._colorTargets[0] as loader.CStruct
-    target.texture = self.swapchainTexture
-    target.mip_level = 0
-    target.layer_or_depth_plane = 0
-    target.resolve_texture = nil
-    target.cycle = false
-    target.cycle_resolve_texture = false
-    target.store_op = C.SDL_GPU_STOREOP_STORE
-
-    local clear = options and options.clear
-    if clear ~= nil then
-        target.load_op = C.SDL_GPU_LOADOP_CLEAR
-        local clearColor = target.clear_color as loader.CStruct
-        clearColor.r = clear.r or 0.0
-        clearColor.g = clear.g or 0.0
-        clearColor.b = clear.b or 0.0
-        clearColor.a = clear.a or 1.0
-    else
-        target.load_op = C.SDL_GPU_LOADOP_LOAD
-    end
-
-    local handle = C.SDL_BeginGPURenderPass(self.commandBuffer,
-        self._colorTargets, 1, nil)
-    if handle == nil then sdl.fail("SDL_BeginGPURenderPass") end
-    return RenderPass.wrap(handle)
+    return RenderPass.begin(self.commandBuffer, {
+        { texture = self.swapchainTexture, clear = options and options.clear },
+    })
 end
 
 --- Begins a compute pass on this frame's command buffer.

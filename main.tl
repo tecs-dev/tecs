@@ -15,6 +15,7 @@ local Shader <const> = require("tecs2d.gpu.Shader")
 local Buffer <const> = require("tecs2d.gpu.Buffer")
 local GraphicsPipeline <const> = require("tecs2d.gpu.GraphicsPipeline")
 local ComputePipeline <const> = require("tecs2d.gpu.ComputePipeline")
+local Deferred <const> = require("tecs2d.gpu.Deferred")
 
 local C <const> = sdl.C
 
@@ -95,14 +96,21 @@ void main() {
 }
 ]]
 
+-- Writes the G-buffer rather than a final colour: albedo at location 0 and a
+-- normal biased into unsigned range at location 1.
 local FRAGMENT_SOURCE <const> = [[
 #version 450
 layout(location = 0) in vec4 vColor;
-layout(location = 0) out vec4 outColor;
-void main() { outColor = vColor; }
+layout(location = 0) out vec4 albedo;
+layout(location = 1) out vec4 normal;
+void main() {
+    albedo = vColor;
+    normal = vec4(0.5, 0.5, 1.0, 1.0);
+}
 ]]
 
 local animate: ComputePipeline = nil
+local deferred: Deferred = nil
 local pipeline: GraphicsPipeline = nil
 local drawArgs: Buffer = nil
 local instances: Buffer = nil
@@ -125,6 +133,17 @@ os.exit(tecs2d.run({
         animate = ComputePipeline.fromGLSL(app.device.handle, ANIMATE_SOURCE,
             { name = "animate.comp" })
 
+        deferred = Deferred.create(app.device.handle,
+            app.device:getSwapchainFormat(), {
+                ambient = { 0.06, 0.06, 0.09 },
+                geometry = function(context: Deferred.PassContext)
+                    context.pass:bindPipeline(pipeline.handle)
+                    context.pass:bindVertexStorageBuffers(0, { instances.handle })
+                    context.pass:drawIndirect(drawArgs.handle, 0, 1)
+                end,
+            })
+
+        local albedoFormat, normalFormat = deferred:geometryFormats()
         local vertex = Shader.fromGLSL(app.device.handle, VERTEX_SOURCE,
             "vertex", { name = "instance.vert" })
         local fragment = Shader.fromGLSL(app.device.handle, FRAGMENT_SOURCE,
@@ -132,7 +151,7 @@ os.exit(tecs2d.run({
         pipeline = GraphicsPipeline.create(app.device.handle, {
             vertexShader = vertex,
             fragmentShader = fragment,
-            colorFormat = app.device:getSwapchainFormat(),
+            colorFormats = { albedoFormat, normalFormat },
             name = "instances",
         })
         vertex:destroy()
@@ -153,6 +172,7 @@ os.exit(tecs2d.run({
             animate.threadCount[1], animate.threadCount[2], animate.threadCount[3]))
         print(("  %d instances, one dispatch and one indirect draw per frame"):format(
             INSTANCES))
+        print("  deferred: geometry, lighting, composite")
         print("  escape or close the window to quit")
     end,
 
@@ -175,20 +195,29 @@ os.exit(tecs2d.run({
         compute:dispatch(math.ceil(INSTANCES / animate.threadCount[1]))
         compute:finish()
 
-        local pass = frame:beginRenderPass({
-            clear = { r = 0.05, g = 0.06, b = 0.08, a = 1.0 },
-        })
-        pass:bindPipeline(pipeline.handle)
+        -- Lights orbit against the instance field so the deferred resolve is
+        -- visibly doing work rather than passing albedo through.
+        local lights: {Deferred.Light} = {}
+        for index = 1, 3 do
+            local angle = app.elapsed * 0.5 + index * 2.094
+            lights[index] = {
+                x = frame.width * (0.5 + 0.32 * math.cos(angle)),
+                y = frame.height * (0.5 + 0.32 * math.sin(angle)),
+                z = 90.0,
+                radius = frame.height * 0.75,
+                r = index == 1 and 1.0 or 0.35,
+                g = index == 2 and 1.0 or 0.4,
+                b = index == 3 and 1.0 or 0.5,
+                intensity = 2.6,
+            }
+        end
+        deferred:setLights(lights)
 
-        local buffers = loader.newArray("SDL_GPUBuffer*[1]")
-        buffers[0] = instances.handle
-        C.SDL_BindGPUVertexStorageBuffers(pass.handle, 0, buffers, 1)
-
-        pass:drawIndirect(drawArgs.handle, 0, 1)
-        pass:finish()
+        deferred:render(frame)
     end,
 
     quit = function(app: tecs2d.App)
+        if deferred ~= nil then deferred:destroy() end
         if pipeline ~= nil then pipeline:destroy() end
         if animate ~= nil then animate:destroy() end
         if drawArgs ~= nil then drawArgs:destroy() end

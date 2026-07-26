@@ -13,9 +13,6 @@ local Window <const> = require("tecs2d.platform.Window")
 local C <const> = sdl.C
 local K <const> = sdl.K
 
---- Largest number of simultaneous colour attachments a pass may bind.
-local MAX_COLOR_TARGETS <const> = 8
-
 local record DeviceOptions
     --- Enables the backend's validation layers.
     debug: boolean
@@ -35,7 +32,6 @@ local record Device
     _swapchainOut: loader.CArray
     _widthOut: loader.CArray
     _heightOut: loader.CArray
-    _colorTargets: loader.CArray
     _destroyed: boolean
 end
 
@@ -81,9 +77,6 @@ function Device.create(window: Window, options: DeviceOptions): Device
     self._swapchainOut = loader.newArray("SDL_GPUTexture*[1]")
     self._widthOut = loader.newArray("Uint32[1]")
     self._heightOut = loader.newArray("Uint32[1]")
-    self._colorTargets =
-        loader.newArray("SDL_GPUColorTargetInfo[?]", MAX_COLOR_TARGETS)
-
     return self
 end
 
@@ -120,8 +113,7 @@ function Device:beginFrame(): Frame
     end
 
     return Frame.wrap(commandBuffer, texture as loader.CPtr,
-        self._widthOut[0] as integer, self._heightOut[0] as integer,
-        self._colorTargets)
+        self._widthOut[0] as integer, self._heightOut[0] as integer)
 end
 
 --- Returns the swapchain's texture format, which pipelines writing to it must
