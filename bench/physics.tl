@@ -27,6 +27,7 @@ local tecs <const> = require("tecs")
 local physics <const> = require("tecs.physics")
 local materials <const> = require("tecs.gpu.materials")
 local timing <const> = require("tecs.timing")
+local clock <const> = require("tecs.platform.clock")
 local Transform2D <const> = tecs.components.Transform2D
 local Tint <const> = tecs.components.Tint
 local Material <const> = tecs.components.Material
@@ -78,9 +79,9 @@ local spawned = 0
 -- Measuring is the whole point of this file, so it does not wait to be asked.
 timing.enable()
 
---- Wall time between iterations, which is the frame time a player feels. The
---- engine's own `frame` stage covers the iteration only, so the gap between
---- the two is the host loop and the presentation wait around it.
+--- Real wall time between iterations, which is the frame time a player feels.
+--- Recorded from the clock provider, since the dt the world receives is pinned
+--- and reporting that back would only restate the constant.
 local DELTA <const> = timing.stage("delta")
 
 --- Interior of the box, in world pixels.
@@ -157,15 +158,26 @@ return tecs.application({
     logFile = "",
 
     load = function(app: tecs.Application)
-        -- One step per frame, not per fixed step. Otherwise the workload is a
-        -- function of the frame rate it produces: cheap physics makes frames
-        -- fast, fast frames run fewer fixed steps, fewer steps means less jet
-        -- impulse, the bodies settle, and the cost oscillates between runs. A
-        -- benchmark has to do the same work every frame for frame time to mean
-        -- anything.
+        -- Physics runs in the fixed phases, as it always does. The comparison
+        -- problem that creates is solved where it belongs: dt is pinned, so
+        -- the accumulator releases exactly one fixed step per frame.
+        --
+        -- Left measured, the workload would be a function of the frame rate it
+        -- produces. Cheap physics makes frames fast, fast frames accumulate
+        -- fewer steps, fewer steps means less jet impulse, the pile settles,
+        -- and the cost oscillates between runs by more than any change being
+        -- measured. `clock.provider` exists for exactly this: frames are the
+        -- coordinate system and dt is data.
+        -- The real dt is recorded here rather than in `update`, which now
+        -- receives the pinned value: a stage fed the fiction would report the
+        -- fiction. This is the one place that sees both.
+        clock.provider = function(realDt: number): number
+            timing.mark(DELTA, realDt)
+            return clock.nominal
+        end
+
         app.world:addPlugin(physics.plugin({
             gravity = { 0.0, 900.0 },
-            stepping = "frame",
         }))
         buildContainer(app.world)
 
@@ -211,7 +223,10 @@ return tecs.application({
 
         app.world:addSystem({
             name = "bench.Blowers",
-            phase = tecs.phases.Update,
+            -- Beside the step rather than beside the frame, so a body takes
+            -- the same impulse per step of simulated time however the frames
+            -- fall.
+            phase = tecs.phases.FixedUpdate,
             run = function()
                 -- The physics step is fixed, so the push is too.
                 local push = BLOWER_FORCE / 60.0
@@ -250,13 +265,12 @@ return tecs.application({
             :format(BODIES, WAVES, WAVE_FRAMES, FRAMES, WARMUP))
     end,
 
-    update = function(app: tecs.Application, dt: number)
+    update = function(app: tecs.Application, _: number)
         -- Everything before this built the scene: waves still landing, the
         -- pile still settling, archetypes still moving. Dropping those frames
         -- from every stage at once is what makes the report a distribution of
         -- the steady state rather than of the run.
         if app.frame == WARMUP then timing.reset() end
-        if app.frame >= WARMUP then timing.mark(DELTA, dt) end
     end,
 
     quit = function(app: tecs.Application)

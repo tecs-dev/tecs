@@ -67,14 +67,6 @@ local record PhysicsOptions
     gravity: {number}
     --- Solver substeps per step.
     subStepCount: integer
-    --- Fixed timestep in seconds.
-    timeStep: number
-    --- "fixed" steps in the fixed phases, which is what a game wants: the
-    --- simulation advances at a constant rate however fast frames are.
-    --- "frame" steps exactly once per frame instead. That decouples the work
-    --- done from the frame rate it produces, which a benchmark needs and a
-    --- game does not.
-    stepping: string
 end
 
 local record physics
@@ -196,7 +188,6 @@ end
 function physics.plugin(options: PhysicsOptions): function(ecs.World)
     options = options or {}
     local gravity = options.gravity or { 0.0, 980.0 }
-    local timeStep = options.timeStep or 1.0 / 60.0
 
     return function(world: ecs.World)
         physics.world = World.create({
@@ -209,20 +200,25 @@ function physics.plugin(options: PhysicsOptions): function(ecs.World)
 
         local bodies = world:query({ include = { Transform2D, RigidBody } })
 
-        local perFrame <const> = options.stepping == "frame"
-
+        -- The fixed phases, always. A simulation that advanced by the frame
+        -- would take a different number of steps on every machine and produce
+        -- a different result from the same inputs, which is the whole reason
+        -- the fixed phases exist.
         world:addSystem({
             name = "tecs.StepPhysics",
-            phase = perFrame and ecs.phases.Update or ecs.phases.FixedUpdate,
+            phase = ecs.phases.FixedUpdate,
             run = function()
-                physics.world:step(timeStep)
+                -- The rate comes from the world rather than from an option
+                -- here. Two numbers that have to agree and can disagree is a
+                -- simulation that integrates at one rate while the phase
+                -- driving it runs at another.
+                physics.world:step((world:getFixedTiming()))
             end,
         })
 
         world:addSystem({
             name = "tecs.SyncBodyTransforms",
-            phase = perFrame and ecs.phases.PostUpdate
-                or ecs.phases.FixedPostUpdate,
+            phase = ecs.phases.FixedPostUpdate,
             run = function()
                 for archetype, length in bodies:iter() do
                     -- Transforms are written from the simulation, so the
