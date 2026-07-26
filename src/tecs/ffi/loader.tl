@@ -53,17 +53,68 @@ local record loader
     searchPaths: {string}
 end
 
-loader.searchPaths = {
-    -- Libraries this project links itself, such as the shared SPIRV-Cross that
-    -- is only distributed as static archives. The build system chooses where
-    -- those land, so it says where rather than this guessing.
-    (os.getenv("TECS_LIB") or "") .. "/",
+--- Directory this file was loaded from, or nil when that cannot be told.
+---
+--- The libraries this project builds itself sit beside the Lua it ships, so
+--- where this module came from is the one thing that locates them without being
+--- told. A tool installed under a prefix nobody chose in advance still finds
+--- them, which is what a command line program needs: an environment variable
+--- that has to be set is a program that does not run.
+local function ownDirectory(): string
+    local source = debug.getinfo(1, "S").source
+    if source == nil or source:sub(1, 1) ~= "@" then return nil end
+    local directory = source:sub(2):match("^(.*)[/\\][^/\\]*$")
+    if directory == nil or directory == "" then return nil end
+    return directory
+end
+
+--- Every `lib` directory beside this file or any of its parents.
+---
+--- Walked rather than computed, because the depth differs: a build tree has the
+--- Lua at `<root>/lua` and the libraries at `<root>/lib`, and an installed one
+--- has them at `<prefix>/share/tecs/lua` and `<prefix>/lib`. Walking up finds
+--- both without either layout being written down here, and finds neither when
+--- the answer is somewhere else entirely.
+local function siblingLibraryPaths(): {string}
+    local paths: {string} = {}
+    local directory = ownDirectory()
+    if directory == nil then return paths end
+
+    -- Six is past the deepest layout either tree uses, so this stops rather
+    -- than walking to the filesystem root on a path it does not recognise.
+    for _ = 1, 6 do
+        paths[#paths + 1] = directory .. "/lib/"
+        local parent = directory:match("^(.*)[/\\][^/\\]+$")
+        if parent == nil or parent == "" or parent == directory then break end
+        directory = parent
+    end
+    return paths
+end
+
+loader.searchPaths = {}
+
+-- The build system knows where it put them, so it is asked first.
+local configured <const> = os.getenv("TECS_LIB")
+if configured ~= nil and configured ~= "" then
+    loader.searchPaths[#loader.searchPaths + 1] = configured .. "/"
+end
+
+-- Then wherever this file is, which is how an installed tree answers.
+for _, path in ipairs(siblingLibraryPaths()) do
+    loader.searchPaths[#loader.searchPaths + 1] = path
+end
+
+-- Then the system, where a dependency such as SDL lives. Homebrew installs
+-- outside the default linker path, hence the prefixes.
+for _, path in ipairs({
     "/opt/homebrew/lib/",
     "/opt/homebrew/opt/%s/lib/",
     "/usr/local/lib/",
     "/usr/local/opt/%s/lib/",
     "/usr/lib/",
-}
+}) do
+    loader.searchPaths[#loader.searchPaths + 1] = path
+end
 
 local suffix <const> = ffi.os == "Windows" and ".dll"
     or ffi.os == "OSX" and ".dylib"

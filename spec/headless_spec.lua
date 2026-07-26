@@ -129,6 +129,27 @@ describe("tecs headless", function()
             assert.are.equal("fell\n", output)
         end)
 
+        it("finds its libraries with nothing in the environment", function()
+            -- The build system sets TECS_LIB, so every other test here is told
+            -- where to look. A tool is not: it is unpacked under a prefix
+            -- nobody chose in advance and run by whoever installed it. The
+            -- loader answers by walking up from wherever it was itself loaded,
+            -- and the libraries carry a loader-relative runtime path so one
+            -- resolves its siblings even though the process belongs to a plain
+            -- interpreter rather than to the engine's own host.
+            local output = run([[
+                local tecs = require("tecs")
+                local worker = tecs.workers.spawn({
+                    source = "local s = require('tecs.workers').current()" ..
+                        " s:send(s:receive(3000) + 1)",
+                })
+                worker:send(41)
+                print(worker:receive(3000))
+                worker:stop()
+            ]], false)
+            assert.are.equal("42\n", output)
+        end)
+
         it("runs work on a worker thread", function()
             -- What a resource pipeline is: fan work out, collect answers, no
             -- graphics anywhere in it.

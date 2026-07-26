@@ -55,12 +55,19 @@ else()
     endif()
 endif()
 
-# Runtime search paths are relative to the executable, so a package finds its
-# own libraries wherever it is unpacked.
+# Runtime search paths are relative, so a package finds its own libraries
+# wherever it is unpacked.
+#
+# Both forms are needed, because two different things load these libraries. The
+# executable-relative one is for the host in bin. The loader-relative one is for
+# a library resolving a sibling, which is what happens when the process is not
+# ours at all: a command line tool or a resource pipeline runs under a plain
+# luajit, and there `@executable_path` is that interpreter's own bin directory,
+# so a package would reach past itself into whatever the machine has installed.
 if(APPLE)
-    set(CMAKE_INSTALL_RPATH "@executable_path/../lib")
+    set(CMAKE_INSTALL_RPATH "@executable_path/../lib;@loader_path")
 elseif(UNIX)
-    set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib")
+    set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib;$ORIGIN")
 endif()
 set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
 
