@@ -80,6 +80,31 @@ function Device.create(window: Window, options: DeviceOptions): Device
     return self
 end
 
+--- Selects how presentation is paced.
+---
+--- "vsync" blocks the swapchain acquire on the display, which is what paces
+--- the loop in normal use. "immediate" and "mailbox" do not, so a benchmark
+--- can observe what a frame actually costs instead of what the display allows.
+function Device:setPresentMode(mode: string): boolean
+    local modes: {string: any} = {
+        vsync = C.SDL_GPU_PRESENTMODE_VSYNC,
+        immediate = C.SDL_GPU_PRESENTMODE_IMMEDIATE,
+        mailbox = C.SDL_GPU_PRESENTMODE_MAILBOX,
+    }
+    local selected = modes[mode]
+    if selected == nil then
+        error(("tecs2d: unknown present mode '%s'"):format(tostring(mode)), 2)
+    end
+    if not C.SDL_WindowSupportsGPUPresentMode(self.handle, self.window.handle,
+        selected) then
+        return false
+    end
+    sdl.check(C.SDL_SetGPUSwapchainParameters(self.handle, self.window.handle,
+        C.SDL_GPU_SWAPCHAINCOMPOSITION_SDR, selected) as boolean,
+        "SDL_SetGPUSwapchainParameters")
+    return true
+end
+
 --- Sets how many frames the CPU may run ahead of the GPU.
 ---
 --- Resource retirement must match this depth: a buffer replaced this frame

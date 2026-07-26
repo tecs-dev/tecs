@@ -44,6 +44,9 @@ local record RunConfig
     --- Frames the CPU may run ahead of the GPU. Resource retirement depth
     --- must match this.
     framesInFlight: integer
+    --- Presentation pacing: "vsync" (default), "immediate", or "mailbox".
+    --- Benchmarks use immediate so a frame's real cost is observable.
+    presentMode: string
     --- Stops after this many frames. Lets an automated run drive a real
     --- window to completion without a human closing it.
     maxFrames: integer
@@ -92,6 +95,9 @@ function tecs2d.run(config: RunConfig): integer
     local device = Device.create(window, { debug = config.debug })
     if config.framesInFlight ~= nil then
         device:setFramesInFlight(config.framesInFlight)
+    end
+    if config.presentMode ~= nil then
+        device:setPresentMode(config.presentMode)
     end
 
     local app = setmetatable({} as App, { __index = App })

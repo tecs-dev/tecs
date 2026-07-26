@@ -19,8 +19,12 @@ end
 
 -- One event struct for the lifetime of the process. SDL_Event is a 128 byte
 -- union; reusing it keeps the poll loop allocation-free.
-local scratch <const> = loader.newArray("SDL_Event[1]")
-local scratchEvent <const> = scratch[0] as loader.CValue
+--
+-- Allocated as a struct rather than a one-element array on purpose. Indexing
+-- an array returns a reference into it, and a reference does not keep the
+-- array alive, so the array would be collected while SDL kept writing 128
+-- bytes through the reference into freed heap.
+local scratchEvent <const> = loader.newStruct("SDL_Event")
 
 local function pollReal(event: loader.CValue): boolean
     return C.SDL_PollEvent(event) as boolean
@@ -39,10 +43,10 @@ end
 
 --- Pushes a quit request onto the real SDL queue.
 function events.quit()
-    local holder = loader.newArray("SDL_Event[1]")
-    local event = holder[0] as loader.CStruct
-    event.type = C.SDL_EVENT_QUIT
-    C.SDL_PushEvent(holder[0])
+    local event = loader.newStruct("SDL_Event")
+    local fields = event as loader.CStruct
+    fields.type = C.SDL_EVENT_QUIT
+    C.SDL_PushEvent(event)
 end
 
 return events

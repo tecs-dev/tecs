@@ -127,6 +127,17 @@ function loader.toString(value: loader.CValue): string
     return ffi.string(value as string) as string
 end
 
+--- Allocates a single C struct.
+---
+--- Prefer this to a one-element array when a reusable scratch struct is
+--- wanted. Indexing an array yields a *reference* into it, and a reference
+--- does not keep its parent alive: if nothing else holds the array, the
+--- collector frees it while the reference still points inside, and the next
+--- write through that reference corrupts the heap.
+function loader.newStruct(declaration: string): loader.CValue
+    return ffi.new(declaration) as loader.CValue
+end
+
 --- Allocates a C array and types it for integer indexing.
 function loader.newArray(declaration: string, count?: integer): loader.CArray
     if count ~= nil then

@@ -19,11 +19,28 @@ local Deferred <const> = require("tecs2d.gpu.Deferred")
 
 local C <const> = sdl.C
 
-local INSTANCES <const> = 512
+local INSTANCES <const> = math.floor(tonumber(os.getenv("TECS2D_INSTANCES")) or 512)
 --- vec4 position/scale plus vec4 colour, per instance.
 local INSTANCE_STRIDE <const> = 32
 
--- Animates instances and emits the draw arguments for them.
+-- Zeroes the visible counter before culling accumulates into it. A separate
+-- pass rather than a branch inside the cull, because invocations within one
+-- dispatch have no ordering against each other.
+local RESET_SOURCE <const> = [[
+#version 450
+layout(local_size_x = 1) in;
+layout(set = 1, binding = 0) writeonly buffer DrawArgs { uint value[]; } args;
+void main() {
+    args.value[0] = 3u;   // vertices per instance
+    args.value[1] = 0u;   // instances, accumulated by the cull
+    args.value[2] = 0u;
+    args.value[3] = 0u;
+}
+]]
+
+-- Animates instances, discards those outside the view, and compacts the
+-- survivors into an index buffer. The instance count in the draw arguments is
+-- an atomic total, so the CPU never learns how many survived.
 local ANIMATE_SOURCE <const> = ([[
 #version 450
 layout(local_size_x = 64) in;
@@ -33,41 +50,47 @@ struct Instance {
     vec4 color;
 };
 
-layout(set = 1, binding = 0) writeonly buffer DrawArgs { uint value[]; } args;
+layout(set = 1, binding = 0) buffer DrawArgs { uint value[]; } args;
 layout(set = 1, binding = 1) buffer Instances { Instance item[]; } instances;
+layout(set = 1, binding = 2) writeonly buffer Visible { uint index[]; } visible;
 layout(set = 2, binding = 0) uniform Frame { float time; float aspect; } frame;
 
 const uint COUNT = %du;
+
+// The field spans several screens, so most instances are off view and the
+// cull has something to reject. This is the case that matters: world size and
+// drawn size are different numbers.
+const float WORLD = %f;
 
 void main() {
     uint i = gl_GlobalInvocationID.x;
     if (i >= COUNT) { return; }
 
-    // One invocation emits the draw for the whole batch.
-    if (i == 0u) {
-        args.value[0] = 3u;      // vertices per instance
-        args.value[1] = COUNT;   // instances, decided on the GPU
-        args.value[2] = 0u;
-        args.value[3] = 0u;
-    }
-
     float t = frame.time;
     float golden = 2.39996;
     float a = float(i) * golden + t * 0.35;
-    float radius = sqrt(float(i) / float(COUNT)) * 0.86;
+    float radius = sqrt(float(i) / float(COUNT)) * WORLD;
 
-    instances.item[i].transform = vec4(
-        cos(a) * radius / frame.aspect,
-        sin(a) * radius,
-        0.020 + 0.028 * (1.0 - radius),
-        0.0
-    );
+    float scale = 0.020 + 0.028 * (1.0 - radius / WORLD);
+    vec2 centre = vec2(cos(a) * radius / frame.aspect, sin(a) * radius);
+
+    instances.item[i].transform = vec4(centre, scale, 0.0);
 
     float hue = fract(float(i) / float(COUNT) + t * 0.05);
     vec3 c = 0.55 + 0.45 * cos(6.28318 * (hue + vec3(0.0, 0.33, 0.67)));
     instances.item[i].color = vec4(c, 1.0);
+
+    // Reject anything whose bounds fall outside clip space, then compact the
+    // survivors so the draw touches only what is visible.
+    float extent = scale * 1.2;
+    if (abs(centre.x) - extent > 1.0 || abs(centre.y) - extent > 1.0) {
+        return;
+    }
+
+    uint slot = atomicAdd(args.value[1], 1u);
+    visible.index[slot] = i;
 }
-]]):format(INSTANCES)
+]]):format(INSTANCES, 3.0)
 
 -- Reads its instance out of the storage buffer; there are no vertex buffers.
 local VERTEX_SOURCE <const> = [[
@@ -79,6 +102,7 @@ struct Instance {
 };
 
 layout(set = 0, binding = 0) readonly buffer Instances { Instance item[]; } instances;
+layout(set = 0, binding = 1) readonly buffer Visible { uint index[]; } visible;
 
 layout(location = 0) out vec4 vColor;
 
@@ -89,7 +113,10 @@ const vec2 CORNERS[3] = vec2[3](
 );
 
 void main() {
-    Instance self = instances.item[gl_InstanceIndex];
+    // Indexed in two steps: nesting the lookups would spell a doubled
+    // closing bracket and end the enclosing Lua long string.
+    uint slot = visible.index[gl_InstanceIndex];
+    Instance self = instances.item[slot];
     vec2 local = CORNERS[gl_VertexIndex] * self.transform.z;
     gl_Position = vec4(self.transform.xy + local, 0.0, 1.0);
     vColor = self.color;
@@ -109,17 +136,20 @@ void main() {
 }
 ]]
 
+local reset: ComputePipeline = nil
 local animate: ComputePipeline = nil
 local deferred: Deferred = nil
 local pipeline: GraphicsPipeline = nil
 local drawArgs: Buffer = nil
 local instances: Buffer = nil
+local visible: Buffer = nil
 local frameUniform = loader.newArray("float[2]")
 
 os.exit(tecs2d.run({
     window = { title = "tecs2d", width = 1280, height = 720 },
     debug = true,
     maxFrames = tonumber(os.getenv("TECS2D_FRAMES")) as integer,
+    presentMode = os.getenv("TECS2D_PRESENT"),
 
     load = function(app: tecs2d.App)
         print(("tecs2d %s"):format(tecs2d.version))
@@ -130,6 +160,8 @@ os.exit(tecs2d.run({
 
         local started = tecs2d.clock.now()
 
+        reset = ComputePipeline.fromGLSL(app.device.handle, RESET_SOURCE,
+            { name = "reset.comp" })
         animate = ComputePipeline.fromGLSL(app.device.handle, ANIMATE_SOURCE,
             { name = "animate.comp" })
 
@@ -138,7 +170,8 @@ os.exit(tecs2d.run({
                 ambient = { 0.06, 0.06, 0.09 },
                 geometry = function(context: Deferred.PassContext)
                     context.pass:bindPipeline(pipeline.handle)
-                    context.pass:bindVertexStorageBuffers(0, { instances.handle })
+                    context.pass:bindVertexStorageBuffers(0,
+                        { instances.handle, visible.handle })
                     context.pass:drawIndirect(drawArgs.handle, 0, 1)
                 end,
             })
@@ -165,6 +198,10 @@ os.exit(tecs2d.run({
             usage = { "storage", "computeWrite" },
             size = INSTANCES * INSTANCE_STRIDE,
         })
+        visible = Buffer.create(app.device.handle, {
+            usage = { "storage", "computeWrite" },
+            size = INSTANCES * 4,
+        })
 
         print(("  shaders: compiled in %.0f ms"):format(
             (tecs2d.clock.now() - started) * 1000))
@@ -187,9 +224,18 @@ os.exit(tecs2d.run({
         frameUniform[0] = app.elapsed
         frameUniform[1] = frame.width / frame.height
 
-        -- Both written buffers are declared to the pass, which is what lets
-        -- SDL order the draw below against this dispatch.
-        local compute = frame:beginComputePass({ drawArgs.handle, instances.handle })
+        -- Two passes rather than one: the counter must be zero before any
+        -- invocation accumulates into it, and invocations within a dispatch
+        -- have no ordering against each other.
+        local clear = frame:beginComputePass({ drawArgs.handle })
+        clear:bindPipeline(reset.handle)
+        clear:dispatch(1)
+        clear:finish()
+
+        -- Every written buffer is declared to the pass, which is what lets SDL
+        -- order the draw below against this dispatch.
+        local compute = frame:beginComputePass({
+            drawArgs.handle, instances.handle, visible.handle })
         compute:bindPipeline(animate.handle)
         C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0, frameUniform, 8)
         compute:dispatch(math.ceil(INSTANCES / animate.threadCount[1]))
@@ -220,8 +266,12 @@ os.exit(tecs2d.run({
         if deferred ~= nil then deferred:destroy() end
         if pipeline ~= nil then pipeline:destroy() end
         if animate ~= nil then animate:destroy() end
+        if reset ~= nil then reset:destroy() end
+        if visible ~= nil then visible:destroy() end
         if drawArgs ~= nil then drawArgs:destroy() end
         if instances ~= nil then instances:destroy() end
-        print(("ran %d frames over %.1fs"):format(app.frame, app.elapsed))
+        print(("ran %d frames over %.2fs (%.2f ms/frame, %d instances)"):format(
+            app.frame, app.elapsed, app.elapsed / math.max(app.frame, 1) * 1000,
+            INSTANCES))
     end,
 }))
