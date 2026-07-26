@@ -49,6 +49,19 @@ local C <const> = sdl.C
 local INSTANCE_FLOATS <const> = 16
 local INSTANCE_BYTES <const> = INSTANCE_FLOATS * 4
 
+--- Floats per cull bound: centre xy and half extent xy.
+---
+--- Kept apart from the instance because the cull reads it for every entity
+--- every frame, drawn or not, while the instance is only read for what
+--- survives. Sixteen bytes streamed beats sixty-four bytes gathered.
+local BOUND_FLOATS <const> = 4
+local BOUND_BYTES <const> = BOUND_FLOATS * 4
+
+--- Indices per quad, over four distinct corners.
+local QUAD_INDICES <const> = 6
+
+local abs <const> = math.abs
+
 --- Layers the image array holds, including the white default in layer zero.
 local MAX_LAYERS <const> = 64
 
@@ -86,8 +99,10 @@ local record Renderer
     rewritten: integer
     _reset: ComputePipeline
     _cull: ComputePipeline
+    _bounds: Buffer
     _visible: Buffer
     _drawArgs: Buffer
+    _indices: Buffer
     _cullUniform: loader.CArray
     _device: loader.CPtr
     _view: loader.CArray
@@ -125,6 +140,7 @@ end
 local function writeRun(self: Renderer, archetype: tecs.Archetype,
                         length: integer, offset: integer)
     local floats = self.instances:mapAs("float *")
+    local bounds = self._bounds:mapAs("float *")
     local transforms = archetype:get(components.Transform2D)
     local tints = archetype:get(components.Tint)
     local sprites = archetype:get(components.Sprite)
@@ -168,9 +184,19 @@ local function writeRun(self: Renderer, archetype: tecs.Archetype,
         floats[base + 13] = v0
         floats[base + 14] = u1
         floats[base + 15] = v1
+
+        -- A rotated quad reaches further than its scale alone, so both columns
+        -- of the basis contribute to both axes. Resolved here so the cull does
+        -- not repeat it for every entity every frame.
+        local bound = (offset + row - 1) * BOUND_FLOATS
+        bounds[bound] = transform.x
+        bounds[bound + 1] = transform.y
+        bounds[bound + 2] = 0.5 * (abs(cosine * scaleX) + abs(sine * scaleX))
+        bounds[bound + 3] = 0.5 * (abs(sine * scaleY) + abs(cosine * scaleY))
     end
 
     self.instances:markDirty(offset * INSTANCE_BYTES, length * INSTANCE_BYTES)
+    self._bounds:markDirty(offset * BOUND_BYTES, length * BOUND_BYTES)
 end
 
 --- Rewrites only what changed.
@@ -303,14 +329,29 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
         usage = { "storage", "computeRead" },
         size = self.capacity * INSTANCE_BYTES,
     })
+    self._bounds = Buffer.create(device, {
+        usage = { "computeRead" },
+        size = self.capacity * BOUND_BYTES,
+    })
     self._visible = Buffer.create(device, {
         usage = { "storage", "computeWrite" },
         size = self.capacity * 4,
     })
     self._drawArgs = Buffer.create(device, {
+        -- Five uints: SDL_GPUIndexedIndirectDrawCommand.
         usage = { "indirect", "computeWrite" },
-        size = 16,
+        size = 32,
     })
+
+    -- Two triangles over four corners, uploaded once and never touched again.
+    self._indices = Buffer.create(device, {
+        usage = { "index" },
+        size = QUAD_INDICES * 2,
+    })
+    local quad = loader.newArray("uint16_t[6]")
+    quad[0], quad[1], quad[2] = 0, 1, 2
+    quad[3], quad[4], quad[5] = 1, 3, 2
+    self._indices:upload(quad, QUAD_INDICES * 2)
     self._cullUniform = loader.newArray("float[4]")
 
     self._reset = ComputePipeline.load(device, "instance.reset.comp", {})
@@ -328,9 +369,10 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
             context.pass:bindVertexStorageBuffers(0,
                 { self.instances.handle, self._visible.handle })
             context.pass:bindTextures(0, { self.images.handle }, self.sampler.handle)
+            context.pass:bindIndexBuffer(self._indices.handle)
             -- One draw for the scene, with its instance count decided by the
             -- cull rather than by anything here.
-            context.pass:drawIndirect(self._drawArgs.handle, 0, 1)
+            context.pass:drawIndexedIndirect(self._drawArgs.handle, 0, 1)
         end,
     })
 
@@ -400,6 +442,7 @@ end
 --- having to wait.
 function Renderer:render(frame: Frame)
     self.instances:flush(frame.commandBuffer)
+    self._bounds:flush(frame.commandBuffer)
 
     if self.count > 0 then
         -- The counter must be zero before any invocation accumulates into it,
@@ -418,7 +461,7 @@ function Renderer:render(frame: Frame)
         local cull = ComputePass.begin(frame.commandBuffer,
             { self._drawArgs.handle, self._visible.handle })
         cull:bindPipeline(self._cull.handle)
-        cull:bindStorageBuffers(0, { self.instances.handle })
+        cull:bindStorageBuffers(0, { self._bounds.handle })
         C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0,
             self._cullUniform, 16)
         cull:dispatch(math.ceil(self.count / self._cull.threadCount[1]))
@@ -437,8 +480,10 @@ function Renderer:destroy()
     self.instances:destroy()
     self.sampler:destroy()
     self.images:destroy()
+    self._bounds:destroy()
     self._visible:destroy()
     self._drawArgs:destroy()
+    self._indices:destroy()
     self._reset:destroy()
     self._cull:destroy()
 end

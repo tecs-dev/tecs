@@ -148,10 +148,13 @@ shaders.register({
 layout(local_size_x = 1) in;
 layout(set = 1, binding = 0) writeonly buffer DrawArgs { uint value[]; } args;
 void main() {
-    args.value[0] = 6u;   // vertices per quad
+    // SDL_GPUIndexedIndirectDrawCommand: indices, instances, first index,
+    // vertex offset, first instance.
+    args.value[0] = 6u;   // indices per quad, over four distinct corners
     args.value[1] = 0u;   // instances, accumulated by the cull
     args.value[2] = 0u;
     args.value[3] = 0u;
+    args.value[4] = 0u;
 }
 ]],
 })
@@ -164,14 +167,14 @@ shaders.register({
 #version 450
 layout(local_size_x = 64) in;
 
-struct Instance {
-    vec4 xform;
-    vec4 origin;
-    vec4 color;
-    vec4 uvRect;
-};
+// Bounds only, never the instance. This pass runs over every entity every
+// frame whether or not it draws, so it is the one place where reading 64 bytes
+// to use 24 of them is the dominant cost. Sixteen bytes with the extents
+// already resolved is a quarter of the traffic.
+layout(set = 0, binding = 0) readonly buffer Bounds {
+    vec4 item[];   // xy centre, zw half extent
+} bounds;
 
-layout(set = 0, binding = 0) readonly buffer Instances { Instance item[]; } instances;
 layout(set = 1, binding = 0) buffer DrawArgs { uint value[]; } args;
 layout(set = 1, binding = 1) writeonly buffer Visible { uint index[]; } visible;
 layout(set = 2, binding = 0) uniform Cull { vec4 params; } cull;
@@ -180,17 +183,9 @@ void main() {
     uint i = gl_GlobalInvocationID.x;
     if (i >= uint(cull.params.z)) { return; }
 
-    Instance self = instances.item[i];
-
-    // The quad's half extent along each axis, from the columns of its basis.
-    // A rotated quad reaches further than its scale alone, so both columns
-    // contribute to both axes.
-    float ex = 0.5 * (abs(self.xform.x) + abs(self.xform.z));
-    float ey = 0.5 * (abs(self.xform.y) + abs(self.xform.w));
-
-    vec2 origin = self.origin.xy;
-    if (origin.x + ex < 0.0 || origin.x - ex > cull.params.x ||
-        origin.y + ey < 0.0 || origin.y - ey > cull.params.y) {
+    vec4 box = bounds.item[i];
+    if (box.x + box.z < 0.0 || box.x - box.z > cull.params.x ||
+        box.y + box.w < 0.0 || box.y - box.w > cull.params.y) {
         return;
     }
 
@@ -219,9 +214,11 @@ layout(set = 1, binding = 0) uniform View { vec4 viewport; } view;
 layout(location = 0) out vec4 vColor;
 layout(location = 1) out vec3 vUV;
 
-const vec2 CORNERS[6] = vec2[6](
-    vec2(-0.5, -0.5), vec2( 0.5, -0.5), vec2(-0.5,  0.5),
-    vec2( 0.5, -0.5), vec2( 0.5,  0.5), vec2(-0.5,  0.5)
+// Four distinct corners, visited through an index buffer. A non-indexed quad
+// runs the vertex shader six times for the four positions it actually has.
+const vec2 CORNERS[4] = vec2[4](
+    vec2(-0.5, -0.5), vec2( 0.5, -0.5),
+    vec2(-0.5,  0.5), vec2( 0.5,  0.5)
 );
 
 void main() {

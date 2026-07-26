@@ -56,9 +56,12 @@ end
 
 local BufferMT <const>: metatable<Buffer> = { __index = Buffer }
 
--- No vertex or index usage: the renderer reads geometry from storage buffers
--- indexed by vertex and instance ID, so there are no vertex buffers to bind.
+-- No vertex usage: geometry comes from storage buffers indexed by vertex and
+-- instance ID, so there is no vertex buffer to bind. An index buffer is the one
+-- exception, because indices are what let a quad cost four vertex invocations
+-- instead of six.
 local USAGE_FLAGS <const>: {string: integer} = {
+    index = K.SDL_GPU_BUFFERUSAGE_INDEX,
     indirect = K.SDL_GPU_BUFFERUSAGE_INDIRECT,
     storage = K.SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ,
     computeRead = K.SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ,

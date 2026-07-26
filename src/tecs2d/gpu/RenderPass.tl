@@ -169,6 +169,26 @@ end
 
 --- Ends the pass. Every begun pass must be finished before its frame submits.
 --- Safe to call more than once.
+--- Binds the index buffer subsequent indexed draws read.
+---
+--- 16-bit indices: a quad needs four distinct corners, so the values never
+--- approach the limit and the buffer stays half the size of a 32-bit one.
+function RenderPass:bindIndexBuffer(buffer: loader.CValue, offset?: integer)
+    local binding = loader.newArray("SDL_GPUBufferBinding[1]")
+    local slot = binding[0] as loader.CStruct
+    slot.buffer = buffer
+    slot.offset = offset or 0
+    C.SDL_BindGPUIndexBuffer(self.handle, binding,
+        C.SDL_GPU_INDEXELEMENTSIZE_16BIT)
+end
+
+--- Issues an indexed draw whose parameters the GPU wrote.
+function RenderPass:drawIndexedIndirect(buffer: loader.CValue, offset: integer,
+                                        drawCount: integer)
+    C.SDL_DrawGPUIndexedPrimitivesIndirect(self.handle, buffer, offset,
+        drawCount)
+end
+
 function RenderPass:finish()
     if self._finished then return end
     self._finished = true
