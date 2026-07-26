@@ -314,6 +314,39 @@ describe("tecs2d.sequence", function()
             luassert.equals(1, calls)
         end)
 
+        it("keeps a resumed waiter parked when the signal has not arrived", function()
+            local calls = 0
+            sequence.registerAction(world, "spec.count", function() calls = calls + 1 end)
+            local handle = sequence.play(world, blockingProgram())
+            stepWorld(world, 1)
+
+            luassert.is_true(sequence.pause(world, handle))
+            luassert.is_true(sequence.resume(world, handle))
+            stepWorld(world, 2)
+            luassert.equals(0, calls, "resuming must not stand in for the signal")
+            luassert.equals(1, sequence.waitingOn(world, "gate"))
+
+            sequence.signal(world, "gate")
+            stepWorld(world, 1)
+            luassert.equals(1, calls)
+        end)
+
+        it("holds a signal delivered while the waiter is paused", function()
+            local calls = 0
+            sequence.registerAction(world, "spec.count", function() calls = calls + 1 end)
+            local handle = sequence.play(world, blockingProgram())
+            stepWorld(world, 1)
+
+            luassert.is_true(sequence.pause(world, handle))
+            sequence.signal(world, "gate")
+            stepWorld(world, 2)
+            luassert.equals(0, calls, "a paused waiter must not run on delivery")
+
+            luassert.is_true(sequence.resume(world, handle))
+            stepWorld(world, 2)
+            luassert.equals(1, calls, "the delivered signal must not be lost")
+        end)
+
         it("rejects an empty signal name", function()
             luassert.has_error(function() sequence.waitSignal("") end)
             luassert.has_error(function() sequence.signal(world, "") end)

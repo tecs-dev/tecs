@@ -1047,9 +1047,10 @@ function sequence.resume(world: World, handle: sequence.Handle): boolean
     local cursor = resolve(state, handle)
     if not cursor or not cursor.alive or cursor.state ~= "paused" then return false end
     cursor.state = "running"
-    -- A paused cursor keeps its heap entry; if its wake time already passed
-    -- while paused, run it on the next step rather than immediately.
-    if cursor.wakeAt <= state.step then
+    -- A cursor blocked on a signal has no wake time and stays parked on its
+    -- channel. Otherwise it keeps its heap entry, and if its wake time passed
+    -- while it was paused it runs on the next step rather than immediately.
+    if cursor.wakeAt and cursor.wakeAt <= state.step then
         schedule(state, cursor, state.step + 1)
     end
     return true
