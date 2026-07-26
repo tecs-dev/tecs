@@ -67,6 +67,10 @@ local record PhysicsOptions
     gravity: {number}
     --- Solver substeps per step.
     subStepCount: integer
+    --- Worker slots the solver runs across, counting the thread that steps
+    --- the world. One is single threaded. Defaults to a count derived from
+    --- the machine.
+    workerCount: integer
 end
 
 local record physics
@@ -196,6 +200,7 @@ function physics.plugin(options: PhysicsOptions): function(ecs.World)
                 y = toMetres(gravity[2]),
             },
             subStepCount = options.subStepCount,
+            workerCount = options.workerCount,
         })
 
         local bodies = world:query({ include = { Transform2D, RigidBody } })

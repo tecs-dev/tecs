@@ -8,6 +8,7 @@
 local ffi <const> = require("ffi")
 local box2d <const> = require("tecs.ffi.box2d")
 local loader <const> = require("tecs.ffi.loader")
+local TaskPool <const> = require("tecs.physics.TaskPool")
 
 local C <const> = box2d.C
 
@@ -37,11 +38,18 @@ local record WorldOptions
     gravity: Vec2
     --- Simulation substeps per step. Box2D's solver default is 4.
     subStepCount: integer
+    --- Worker slots the solver runs across, counting the thread that steps
+    --- the world. One is single threaded. Defaults to a count derived from
+    --- the machine.
+    workerCount: integer
 end
 
 local record World
     handle: loader.CValue
     subStepCount: integer
+    --- The threads the solver runs on. Owned by the world, because its
+    --- lifetime is exactly the world's.
+    taskPool: TaskPool
     _destroyed: boolean
 end
 
@@ -67,9 +75,15 @@ function World.create(options: WorldOptions): World
         gravity.y = options.gravity.y or 0.0
     end
 
+    -- Box2D creates no threads of its own; it solves across the ones the
+    -- executor already has, so the pool exists before the world does.
+    local pool = TaskPool.create(options.workerCount)
+    pool:install(settings)
+
     local self = setmetatable({} as World, WorldMT)
     self.handle = C.b2CreateWorld(def) as loader.CValue
     self.subStepCount = options.subStepCount or 4
+    self.taskPool = pool
     self._destroyed = false
     return self
 end
@@ -176,11 +190,17 @@ function World.getVelocity(body: loader.CValue): number, number
 end
 
 --- Destroys the world and invalidates every handle it issued.
+---
+--- The solver threads go after the world, not before: they run solver code, so
+--- joining them second is what guarantees none is inside a step when the pool
+--- is released.
 function World:destroy()
     if self._destroyed then return end
     self._destroyed = true
     C.b2DestroyWorld(self.handle)
     self.handle = nil
+    self.taskPool:destroy()
+    self.taskPool = nil
 end
 
 return World

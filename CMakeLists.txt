@@ -100,12 +100,17 @@ set_target_properties(cjson PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 target_link_libraries(cjson PRIVATE ${LUAJIT_LINK_LIBRARIES})
 
-add_library(tecs_worker SHARED native/worker.c native/logsink.c native/luamods.c)
+add_library(tecs_worker SHARED
+    native/worker.c native/logsink.c native/taskpool.c native/luamods.c)
 set_target_properties(tecs_worker PROPERTIES
     OUTPUT_NAME tecsworker
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 target_link_libraries(tecs_worker PRIVATE
     PkgConfig::SDL3 PkgConfig::LUAJIT)
+# Box2D's headers, for the task callback types the pool is declared with. No
+# Box2D symbol is referenced: the solver calls in, through pointers it was
+# given, so this links nothing.
+target_include_directories(tecs_worker PRIVATE ${BOX2D_INCLUDE_DIR})
 
 # SPIRV-Cross ships static archives only, and the FFI needs a shared object.
 # Whole-archive linking is deliberate: the C API's symbols are not referenced
@@ -215,6 +220,7 @@ if(TECS_BUILD_LUA)
     # header so the binding cannot drift from the C even though both live here.
     tecs_cdef(worker worker.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
     tecs_cdef(logsink logsink.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
+    tecs_cdef(taskpool taskpool.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
 
     # Each library also gets a table of function pointers, taken at build
     # time. A target that cannot dlopen still links, and the engine calls
@@ -257,6 +263,7 @@ if(TECS_BUILD_LUA)
     tecs_registry(box2d TecsBox2dApi b2 box2d/box2d.h)
     tecs_registry(worker TecsWorkerApi tecs worker.h)
     tecs_registry(logsink TecsLogsinkApi tecs logsink.h)
+    tecs_registry(taskpool TecsTaskpoolApi tecs taskpool.h)
 
     # Shader compilation is a development capability. A release consumes
     # packaged artifacts, so a target built without it links no compiler and
@@ -314,6 +321,7 @@ if(TECS_BUILD_LUA)
 
     add_custom_target(tecs_bindings ALL DEPENDS
         "${GEN}/workercdef.lua" "${GEN}/logsinkcdef.lua"
+        "${GEN}/taskpoolcdef.lua"
         "${GEN}/sdl3cdef.lua" "${GEN}/sdl3imagecdef.lua" "${GEN}/sdl3netcdef.lua"
         "${GEN}/box2dcdef.lua" "${GEN}/shaderccdef.lua"
         "${GEN}/spvccdef.lua")
