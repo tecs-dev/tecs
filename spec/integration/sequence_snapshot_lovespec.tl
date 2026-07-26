@@ -46,17 +46,27 @@ describe("sequence: a save resumes in a process that never compiled it", functio
         -- A program with work on both sides of a long wait, so the save
         -- lands mid-sequence with instructions still ahead of it.
         fixture.runLua(first, [[
+            local tecs = require("tecs")
             local sequence = require("tecs2d.sequence")
+            _G.tecsSeqActor = world:spawn(tecs.builtins.Transform(0, 0, 0, 1))
+            world:commit()
+            sequence.timeline("lovespec.slide", {
+                sequence.tweenTo(0.4, "linear", "transform.x", 100),
+            })
             local program = sequence.define("lovespec.encounter", {
                 sequence.call("lovespec.mark", "before"),
                 sequence.waitSignal("lovespec.go"),
                 sequence.call("lovespec.mark", "after"),
+                sequence.playTween("lovespec.slide", sequence.bind("actor")),
+                sequence.waitTween(),
+                sequence.call("lovespec.mark", "moved"),
                 sequence.loop(2, {
                     sequence.call("lovespec.mark", "again"),
                     sequence.waitSteps(1),
                 }),
             })
-            _G.tecsSeqHandle = sequence.play(world, program)
+            _G.tecsSeqHandle = sequence.play(world, program,
+                {bindings = {actor = _G.tecsSeqActor}})
             return true
         ]])
     end)
@@ -126,6 +136,16 @@ describe("sequence: a save resumes in a process that never compiled it", functio
             return sequence.waitingOn(world, "lovespec.go")
         ]])
         luassert.equals("1", waiting[1], "the restored playback is not parked on its signal")
+
+        -- A program can name another: playTween carries a timeline's name.
+        -- The named one is not running when the save is written, so nothing
+        -- would have collected it from the live cursors.
+        local timeline = fixture.runLua(second, [[
+            local sequence = require("tecs2d.sequence")
+            return sequence.program("lovespec.slide") ~= nil
+        ]])
+        luassert.equals("true", timeline[1],
+            "the timeline the program names did not travel with it")
     end)
 
     it("runs the restored instructions to the end", function()
@@ -136,9 +156,11 @@ describe("sequence: a save resumes in a process that never compiled it", functio
         ]])
 
         local finished = fixture.eventually(fixture.callTimeout, function(): boolean
-            if marks(second) == "after,again,again" then return true end
+            if marks(second) == "after,moved,again,again" then return true end
             return nil
         end)
+        -- "moved" is only reached by playing the timeline the save carried
+        -- and waiting for that playback to finish.
         luassert.is_true(finished == true,
             "restored program did not run to completion, saw: " .. marks(second))
 
@@ -148,4 +170,5 @@ describe("sequence: a save resumes in a process that never compiled it", functio
         ]])
         luassert.equals("0", live[1], "the restored playback never retired")
     end)
+
 end)

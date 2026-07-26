@@ -15,6 +15,7 @@ local logging <const> = require("tecs.utils.logging")
 local seqclock <const> = require("tecs2d.sequence.internal.clock")
 local seqcursors <const> = require("tecs2d.sequence.internal.cursors")
 local seqevaluators <const> = require("tecs2d.sequence.internal.evaluators")
+local seqprogram <const> = require("tecs2d.sequence.internal.program")
 local seqregistry <const> = require("tecs2d.sequence.internal.registry")
 local seqtypes <const> = require("tecs2d.sequence.internal.types")
 
@@ -25,6 +26,8 @@ local type PlaybackState = seqtypes.PlaybackState
 local type TweenOutcome = seqtypes.TweenOutcome
 
 local LOGGER <const> = logging.getLogger("tecs2d.sequence")
+
+local floor <const> = math.floor
 
 local DEFAULT_BUDGET <const> = seqcursors.DEFAULT_BUDGET
 
@@ -88,6 +91,31 @@ local function restoreClockCounters(
     end
 end
 
+-- A program can name another: `playTween` carries a timeline's name in its
+-- const pool. The named one is not running when the save is written -- the
+-- playback has not reached that step yet -- so collecting only what live
+-- cursors run would leave the restored playback to fault the moment it got
+-- there. Referenced programs travel too, transitively.
+local function collectReferenced(prog: ProgramImpl, out: {ProgramImpl}, seen: {string: boolean})
+    local code <const> = prog.code
+    local stride <const> = seqprogram.STRIDE
+    for at = 0, floor(#code / stride) - 1 do
+        local base <const> = at * stride
+        if code[base + 1] == seqprogram.PLAY_TWEEN then
+            local name <const> = prog.consts[code[base + 2]] as string
+            local referenced = name and seqregistry.newest(name)
+            if referenced then
+                local key <const> = referenced.name .. "@" .. tostring(referenced.version)
+                if not seen[key] then
+                    seen[key] = true
+                    out[#out + 1] = referenced
+                    collectReferenced(referenced, out, seen)
+                end
+            end
+        end
+    end
+end
+
 local function serializeProgram(prog: ProgramImpl): {string: any}
     return {
         name = prog.name,
@@ -105,6 +133,7 @@ function snapshot.save(world: World): any
 
     local programs: {{string: any}} = {}
     local seenPrograms: {string: boolean} = {}
+    local referenced: {ProgramImpl} = {}
     local cursors: {{string: any}} = {}
 
     local slots: {integer} = {}
@@ -119,6 +148,7 @@ function snapshot.save(world: World): any
             if not seenPrograms[key] then
                 seenPrograms[key] = true
                 programs[#programs + 1] = serializeProgram(prog)
+                collectReferenced(prog, referenced, seenPrograms)
             end
             -- Only the evaluator says what of its working state is data;
             -- one that does not say carries nothing and comes back at the
@@ -167,6 +197,10 @@ function snapshot.save(world: World): any
                 joining = cursor.joining,
             }
         end
+    end
+
+    for i = 1, #referenced do
+        programs[#programs + 1] = serializeProgram(referenced[i])
     end
 
     return {

@@ -1,17 +1,38 @@
 ---
-description: "The gfx.ChangeTag event fired on animation tag changes, its properties, and observer lifetime caveats"
+description: "The gfx.ChangeTag and gfx.AnimationComplete events, their properties, and observer lifetime caveats"
 ---
 
 # Animation Events
 
-Sprites emit `gfx.ChangeTag` when their animation tag changes. Events are emitted to the entity's address in the
-world's event system.
+Sprites emit `gfx.ChangeTag` when their animation tag changes, and `gfx.AnimationComplete` when a
+`playOnce` animation reaches its last frame.
 
 ## Available Events
 
-| Event           | When It Fires                                   |
-| --------------- | ----------------------------------------------- |
-| `gfx.ChangeTag` | When the animation tag changes via `setTag()`   |
+| Event                   | Address | When It Fires                                 |
+| ----------------------- | ------- | --------------------------------------------- |
+| `gfx.ChangeTag`         | entity  | The animation tag changes via `setTag()`      |
+| `gfx.AnimationComplete` | 0       | A `playOnce` animation reaches its last frame |
+
+## AnimationComplete Event
+
+`playOnce` reports completion as an event rather than a callback, because a correlation that is
+data survives a snapshot and a closure does not.
+
+| Property | Type    | Description                        |
+| -------- | ------- | ---------------------------------- |
+| `entity` | integer | The entity whose animation ended   |
+| `tag`    | string  | The tag that finished playing      |
+
+```teal
+world:observe(0, gfx.AnimationComplete, function(e)
+    if e.tag == "death" then despawnLater(e.entity) end
+end)
+```
+
+It is emitted at address 0, so an observer rebound by name after a snapshot load hears about an
+animation that was still playing when the save was written. See
+[Animation](./animation#reacting-to-the-end).
 
 ## ChangeTag Event
 

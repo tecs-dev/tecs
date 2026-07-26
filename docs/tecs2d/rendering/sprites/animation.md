@@ -195,19 +195,36 @@ local sprite = world:get(entityId, gfx.Sprite)
 sprite:playOnce("attack")
 ```
 
-### Hold Last Frame
+### Reacting To The End
 
-Play animation once, then switch to idle:
+`playOnce` emits `AnimationComplete` at address 0 when the animation reaches its terminal frame,
+carrying the entity and the tag that finished:
 
 ```teal
-local sprite = world:get(entityId, gfx.Sprite)
-sprite:playOnce("death", function(anim)
-    anim:setTag("idle")
+world:observe(0, gfx.AnimationComplete, function(e)
+    if e.tag == "death" then
+        (world:get(e.entity, gfx.Sprite) as gfx.Sprite):setTag("idle")
+    end
 end)
+
+local sprite = world:get(entityId, gfx.Sprite)
+sprite:playOnce("death")
 ```
 
-`playOnce` uses the same CPU timing data as sprite playback, so the callback runs when the animation reaches its terminal
-frame without needing GPU readback.
+An event rather than a callback, because a correlation that is data survives a snapshot and a
+closure does not: save mid-animation with a callback pending and the completion is simply gone.
+What the runtime keeps is a set of entities still playing, and it rebuilds that from the sprites
+themselves on load, so an animation saved mid-play still finishes and still reports it.
+
+`playOnce` uses the same CPU timing data as sprite playback, so the event fires when the animation
+reaches its terminal frame without needing GPU readback.
+
+A [sequence](/tecs2d/sequence) can drive and wait for one without touching either:
+
+```teal
+sequence.call("tecs2d.sprite.playTag", sequence.bind("hero"), "death"),
+sequence.await("tecs2d.sprite", sequence.bind("hero")),
+```
 
 ## Tiled Animated Tiles
 

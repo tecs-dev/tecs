@@ -26,18 +26,6 @@ local stepSchema <const>: cmdargs.Schema = {
 }
 cmdargs.validate(stepSchema)
 
-local inputTapeSchema <const>: cmdargs.Schema = {
-    args = {
-        events = {kind = "rows",
-            help = "array of {at = <gameplay frames from now>, event = <love event>, args = {...}}"},
-        clear = {kind = "boolean",
-            help = "drop pending rows and release anything the tape holds down"},
-        force = {kind = "boolean", help = "allow taping 'escape'"},
-    },
-    positional = {"events"},
-}
-cmdargs.validate(inputTapeSchema)
-
 function session.commands(d: cmdtypes.Deps): {cmdtypes.Command}
     -- The shared context, aliased once so command bodies stay terse.
     local w <const> = d.world
