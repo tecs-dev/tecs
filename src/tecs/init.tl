@@ -20,25 +20,32 @@ local WorldImpl <const> = require("tecs.internal.world")
 --- supported API, as are the `tecs.utils.*` modules (json, logging, profile,
 --- pool, Bitset), which may be required directly. `tecs.internal.*` modules
 --- are implementation details unless re-exported here.
--- The engine half. Plain requires: these modules depend on `tecs.ecs` rather
--- than on this surface, so the graph runs one way and there is no cycle to
--- work around.
-local Application <const> = require("tecs.Application")
-local Renderer <const> = require("tecs.Renderer")
-local Camera <const> = require("tecs.gfx.Camera")
-local Window <const> = require("tecs.platform.Window")
-local Input <const> = require("tecs.platform.Input")
-local clock <const> = require("tecs.platform.clock")
-local events <const> = require("tecs.platform.events")
-local capabilities <const> = require("tecs.platform.capabilities")
-local paths <const> = require("tecs.platform.paths")
-local components <const> = require("tecs.components")
-local materials <const> = require("tecs.gpu.materials")
-local assets <const> = require("tecs.assets")
-local workers <const> = require("tecs.workers")
-local physics <const> = require("tecs.physics")
-local log <const> = require("tecs.log")
-local mcp <const> = require("tecs.mcp")
+-- The engine half, named for its types and loaded on demand.
+--
+-- `local type` is erased at codegen, so these lines cost nothing at runtime and
+-- the surface can still name `tecs.Application` as a type. The values arrive
+-- through the metatable below.
+--
+-- Loading them here instead would end headless use. The engine reaches SDL,
+-- Box2D and the worker library through the FFI, and those load when the module
+-- that declares them loads, so a plain `require("tecs")` would demand a
+-- graphics stack from a test, a server or a tool that only wanted the ECS.
+local type Application = require("tecs.Application")
+local type Renderer = require("tecs.Renderer")
+local type Camera = require("tecs.gfx.Camera")
+local type Window = require("tecs.platform.Window")
+local type Input = require("tecs.platform.Input")
+local type clock = require("tecs.platform.clock")
+local type events = require("tecs.platform.events")
+local type capabilities = require("tecs.platform.capabilities")
+local type paths = require("tecs.platform.paths")
+local type components = require("tecs.components")
+local type materials = require("tecs.gpu.materials")
+local type assets = require("tecs.assets")
+local type workers = require("tecs.workers")
+local type physics = require("tecs.physics")
+local type log = require("tecs.log")
+local type mcp = require("tecs.mcp")
 
 local record tecs
     type World = types.World
@@ -237,25 +244,47 @@ tecs.DEFAULT_MAX_ENTITIES = IdAllocator.DEFAULT_MAX_SLOT_COUNT
 --- `return tecs.application(config)` and the host drives it from there,
 --- because a platform that never hands control back has no loop to block in.
 function tecs.application(config: Application.Config): Application
-    return Application.create(config)
+    -- Required here rather than at the top, so the module that reaches SDL
+    -- loads when a game asks for an application and not when a tool asks for
+    -- the ECS.
+    local module = require("tecs.Application") as {string: any}
+    local create = module.create as function(Application.Config): Application
+    return create(config)
 end
 
-tecs.Application = Application
-tecs.Renderer = Renderer
-tecs.Camera = Camera
-tecs.Window = Window
-tecs.Input = Input
-tecs.clock = clock
-tecs.events = events
-tecs.capabilities = capabilities
-tecs.paths = paths
-tecs.components = components
-tecs.materials = materials
-tecs.assets = assets
-tecs.workers = workers
-tecs.physics = physics
-tecs.log = log
-tecs.mcp = mcp
+--- Engine module paths, resolved on first use.
+---
+--- Listed rather than discovered, so `tecs.Aplication` is an error where it is
+--- written instead of a nil where it is called.
+local ENGINE <const>: {string: string} = {
+    Application = "tecs.Application",
+    Renderer = "tecs.Renderer",
+    Camera = "tecs.gfx.Camera",
+    Window = "tecs.platform.Window",
+    Input = "tecs.platform.Input",
+    clock = "tecs.platform.clock",
+    events = "tecs.platform.events",
+    capabilities = "tecs.platform.capabilities",
+    paths = "tecs.platform.paths",
+    components = "tecs.components",
+    materials = "tecs.gpu.materials",
+    assets = "tecs.assets",
+    workers = "tecs.workers",
+    physics = "tecs.physics",
+    log = "tecs.log",
+    mcp = "tecs.mcp",
+}
+
+setmetatable(tecs as {string: any}, {
+    __index = function(self: {string: any}, name: string): any
+        local module = ENGINE[name]
+        if module == nil then return nil end
+        local resolved = require(module)
+        rawset(self, name, resolved)
+        return resolved
+    end,
+})
+
 tecs.version = "0.1.0"
 
 return tecs

@@ -10,6 +10,7 @@
 
 local types <const> = require("tecs.types")
 local components <const> = require("tecs.internal.components")
+local events <const> = require("tecs.internal.events")
 local builtins <const> = require("tecs.internal.builtins")
 local phases <const> = require("tecs.internal.phases")
 local WorldImpl <const> = require("tecs.internal.world")
@@ -19,6 +20,7 @@ local record ecs
     type Component = types.components.Component
     type ComponentOptions<C is Component> = types.components.ComponentOptions<C>
     type FFIComponentOptions<C is Component> = types.components.FFIComponentOptions<C>
+    type Event = types.events.Event
     type Query = types.Query
     type Archetype = types.Archetype
 
@@ -28,11 +30,13 @@ local record ecs
     newWorld: function(config?: types.World.Config): World
     newComponent: function<C is Component>(options: ComponentOptions<C>): C
     newFFIComponent: function<C is Component>(options: FFIComponentOptions<C>): C
+    newEvent: function<E is Event>(event: E)
 end
 
 ecs.phases = phases
 ecs.builtins = builtins
 ecs.newWorld = WorldImpl.new
+ecs.newEvent = events.newEvent
 -- Cast, because Teal does not accept bare assignment of these polymorphic
 -- function values between record fields even when the signatures match.
 ecs.newComponent = components.newComponent
