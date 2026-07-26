@@ -98,31 +98,33 @@ tecs.newFFIComponent({
     defaults = { 0, 0, 0, 1, 1 },
 })
 
---- How a renderable's quad is shaded.
+--- Which material shades a renderable's quad.
 ---
---- Absent means a textured quad, which is what a Sprite produces and what an
---- untextured entity gets by sampling the white layer. Present means the
---- fragment shader evaluates a distance field over the quad instead, so a
---- circle stays a circle at any scale rather than becoming a texture that
---- pixelates. One instance format either way: the batch, the cull and the draw
---- do not know the difference, which is what keeps the whole scene one draw.
-local record Shape is Component
-    --- 1 circle, 2 rounded rectangle. Zero is the textured quad and is what
-    --- absence already means, so it is not spelled here.
-    kind: number
-    --- Corner radius for a rounded rectangle, in local units where the quad
-    --- spans one. Ignored by a circle.
-    radius: number
+--- Absent means the default, which samples the image array and covers the whole
+--- quad, so an entity with neither a Sprite nor a Material still draws. Present
+--- selects one of the materials found under `materials/`.
+---
+--- The id comes from `materials.id(name)` rather than being written as a
+--- number, because the numbering depends on which material files exist and a
+--- literal would break the moment one was added ahead of it alphabetically.
+---
+--- One instance format either way: the batch, the cull and the draw do not know
+--- which material an entity uses, which is what keeps the whole scene one draw.
+local record Material is Component
+    id: number
+    --- Passed to the material, 0 to 1. What it means is the material's
+    --- business; the rounded rectangle reads it as a corner radius.
+    param: number
 end
 
 tecs.newFFIComponent({
-    name = "Shape",
-    container = Shape,
+    name = "Material",
+    container = Material,
     fields = {
-        { "kind", "int32_t" },
-        { "radius", "float" },
+        { "id", "int32_t" },
+        { "param", "float" },
     },
-    defaults = { 1, 0.25 },
+    defaults = { 0, 0.25 },
 })
 
 --- Marks an entity as contributing geometry. Without it a Transform2D is just
@@ -138,7 +140,7 @@ local record components
     Transform2D: Transform2D
     Tint: Tint
     Sprite: Sprite
-    Shape: Shape
+    Material: Material
     PointLight: PointLight
     Renderable: Renderable
 end
@@ -146,7 +148,7 @@ end
 components.Transform2D = Transform2D
 components.Tint = Tint
 components.Sprite = Sprite
-components.Shape = Shape
+components.Material = Material
 components.PointLight = PointLight
 components.Renderable = Renderable
 

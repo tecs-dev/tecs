@@ -60,6 +60,9 @@ end
 
 --- Sources substituted in memory, which only specs do.
 local overrides <const>: {string: string} = {}
+--- Includes generated rather than read from disk. Materials are assembled
+--- from many files into one dispatch, and that result has no file of its own.
+local provided <const>: {string: string} = {}
 --- Resolved entries, keyed by name.
 local cache <const>: {string: shaders.Entry} = {}
 
@@ -91,6 +94,8 @@ end
 
 --- Locates `relative` in the first root that has it.
 local function find(relative: string): string
+    local generated = provided[relative]
+    if generated ~= nil then return generated end
     for _, root in ipairs(searchRoots()) do
         local text = readFile(root .. relative)
         if text ~= nil then return text end
@@ -167,6 +172,16 @@ end
 function shaders.override(name: string, source: string)
     overrides[name] = source
     cache[name] = nil
+end
+
+--- Supplies an include that has no file, resolved before any root is searched.
+---
+--- Everything cached is dropped, because a shader already resolved may have
+--- included an older version of this one and its hash would no longer describe
+--- what it would compile to.
+function shaders.provide(name: string, source: string)
+    provided[name] = source
+    for key in pairs(cache) do cache[key] = nil end
 end
 
 --- The key a name and define set are stored under.

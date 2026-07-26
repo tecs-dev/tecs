@@ -552,6 +552,11 @@ end
 --- a source is what lets a build ship artifacts: a name is enumerable ahead of
 --- time and a source assembled at the call site is not.
 function shadercompiler.load(name: string, defines?: {string: string}): CompiledShader
+    -- Materials are compiled into a shader rather than bound to it, so they
+    -- have to be read before one is resolved. Done here rather than by each
+    -- caller, since forgetting would produce a shader that knows about no
+    -- materials and renders everything as the unknown-id colour.
+    require("tecs2d.gpu.materials").install()
     local entry = shaders.get(name)
     if shadercompiler.plan(name, defines, shadercompiler.available()) == "pack" then
         return fromPack(loadedPack.shaders[shaders.key(name, defines)])

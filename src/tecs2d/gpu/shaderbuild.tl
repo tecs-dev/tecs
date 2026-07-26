@@ -11,6 +11,7 @@
 --- should be checked.
 
 local shaders <const> = require("tecs2d.gpu.shaders")
+local materials <const> = require("tecs2d.gpu.materials")
 local shaderpack <const> = require("tecs2d.gpu.shaderpack")
 local shadercompiler <const> = require("tecs2d.gpu.shadercompiler")
 local loader <const> = require("tecs2d.ffi.loader")
@@ -30,6 +31,11 @@ function shaderbuild.build(): shaderpack.Pack
     if not shadercompiler.available() then
         error("tecs2d: building a shader pack needs a shader compiler", 2)
     end
+
+    -- Materials are compiled into the fragment shader, so they have to be read
+    -- before anything is enumerated or the pack would bake a dispatch that
+    -- knows about none of them.
+    materials.install()
 
     local pack: shaderpack.Pack = {
         version = shaderpack.VERSION,

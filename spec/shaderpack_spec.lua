@@ -22,6 +22,7 @@ local components = require("tecs2d.components")
 local shaders = require("tecs2d.gpu.shaders")
 local shaderpack = require("tecs2d.gpu.shaderpack")
 local shaderbuild = require("tecs2d.gpu.shaderbuild")
+local materials = require("tecs2d.gpu.materials")
 local shadercompiler = require("tecs2d.gpu.shadercompiler")
 
 local C = sdl.C
@@ -33,6 +34,14 @@ local Tint = components.Tint
 local Renderable = components.Renderable
 
 describe("shaders", function()
+    -- The fragment shader includes the material dispatch, which is generated
+    -- rather than read from a file, so resolving one means reading the other.
+    setup(function()
+        assert(C.SDL_Init(0))
+        materials.install()
+    end)
+    teardown(function() C.SDL_Quit() end)
+
     it("finds every shader the engine loads by globbing", function()
         -- The glob is what a packaging step enumerates, so a shader the engine
         -- asks for at run time but that no root contains is one no pack can

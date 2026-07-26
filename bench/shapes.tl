@@ -24,7 +24,8 @@ local tecs2d <const> = require("tecs2d")
 local Transform2D <const> = tecs2d.components.Transform2D
 local Tint <const> = tecs2d.components.Tint
 local Renderable <const> = tecs2d.components.Renderable
-local Shape <const> = tecs2d.components.Shape
+local Material <const> = tecs2d.components.Material
+local materials <const> = require("tecs2d.gpu.materials")
 
 --- Shapes of each kind: this many circles and this many rectangles, matching
 --- the reference bench. Both are the same quad with the same instance format;
@@ -63,18 +64,19 @@ local function spawnField(world: tecs.World)
     -- shader's material branch coherent across a warp.
     --- Circles are 6 to 16 across, rectangles 10 to 30 per side, matching the
     --- reference scene's size distribution.
-    local function fill(kind: number, radius: number, base: number, spread: number)
-        world:batchSpawn(PER_KIND, { Transform2D, Tint, Shape, Renderable },
+    local function fill(material: string, param: number, base: number, spread: number)
+        local id = materials.id(material)
+        world:batchSpawn(PER_KIND, { Transform2D, Tint, Material, Renderable },
         function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer)
             -- batchSpawn skips FFI defaults, so every field is written here.
             local transforms = archetype:getMut(Transform2D)
             local tints = archetype:getMut(Tint)
-            local shapes = archetype:getMut(Shape)
+            local materialColumn = archetype:getMut(Material)
 
             for row = firstRow, lastRow do
-                local shape = shapes[row]
-                shape.kind = kind
-                shape.radius = radius
+                local entry = materialColumn[row]
+                entry.id = id
+                entry.param = param
 
                 local transform = transforms[row]
                 transform.x = originX + rand() * AREA_W
@@ -94,8 +96,8 @@ local function spawnField(world: tecs.World)
         end)
     end
 
-    fill(1, 0.0, 6.0, 10.0)      -- circles
-    fill(2, 0.25, 10.0, 20.0)    -- rounded rectangles
+    fill("circle", 0.0, 6.0, 10.0)
+    fill("rounded", 0.25, 10.0, 20.0)
 end
 
 --- Sorts a copy and reads a percentile out of it.

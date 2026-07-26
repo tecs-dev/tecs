@@ -21,6 +21,7 @@ local Texture = require("tecs2d.gpu.Texture")
 local Renderer = require("tecs2d.Renderer")
 local assets = require("tecs2d.assets")
 local components = require("tecs2d.components")
+local materials = require("tecs2d.gpu.materials")
 
 local C = sdl.C
 local FORMAT = 4  -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
@@ -479,7 +480,7 @@ describe("ecs.Renderer", function()
         world:spawn(
             Transform2D(SIZE / 2, SIZE / 2, 0, SIZE, SIZE),
             Tint(1.0, 0.0, 0.0, 1.0),
-            components.Shape(1, 0),
+            components.Material(materials.id("circle"), 0),
             Renderable()
         )
 
@@ -493,9 +494,9 @@ describe("ecs.Renderer", function()
         renderer:destroy()
     end)
 
-    it("keeps a textured quad square when no Shape is present", function()
-        -- The default path must be untouched: absence of Shape means the whole
-        -- quad draws, corners included.
+    it("keeps a quad square when no Material is present", function()
+        -- The default path must be untouched: absence of Material means the
+        -- default material, which covers the whole quad, corners included.
         local world, renderer = newScene()
         world:spawn(
             Transform2D(SIZE / 2, SIZE / 2, 0, SIZE, SIZE),
@@ -515,7 +516,7 @@ describe("ecs.Renderer", function()
             Transform2D(SIZE / 2, SIZE / 2, 0, SIZE, SIZE),
             Tint(0.0, 0.0, 1.0, 1.0),
             -- Radius is a ratio of the quad, so half of it is a circle.
-            components.Shape(2, 0.5),
+            components.Material(materials.id("rounded"), 0.5),
             Renderable()
         )
 
@@ -639,6 +640,72 @@ describe("ecs.Renderer", function()
         assert.are.equal(255, screen:getPixel(pixels, 4, SIZE / 2).g,
             "the turned quad reaches into view and must not be culled")
         renderer:destroy()
+    end)
+
+
+    it("dispatches to a material supplied in memory", function()
+        -- A material is a file, but it does not have to be: this is the same
+        -- path a game's own material takes, minus the file. What it proves is
+        -- that a material nobody built into the engine reaches the shader.
+        materials.reset()
+        materials.define("spec.halfplane", [[
+            MaterialOutput material(MaterialInput frag) {
+                MaterialOutput result;
+                result.albedo = vec4(0.0, 0.0, 1.0, 1.0);
+                // Keeps the left half of the quad only.
+                result.coverage = -frag.local.x;
+                return result;
+            }
+        ]])
+
+        local world, renderer = newScene()
+        world:spawn(
+            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+            Tint(1.0, 1.0, 1.0, 1.0),
+            components.Material(materials.id("spec.halfplane"), 0),
+            Renderable()
+        )
+
+        local pixels = frameOnce(world, renderer)
+        assert.are.equal(255, screen:getPixel(pixels, 8, SIZE / 2).b,
+            "the kept half must draw in the material's colour")
+        assert.are.equal(0, screen:getPixel(pixels, SIZE - 8, SIZE / 2).b,
+            "and the discarded half must not")
+        renderer:destroy()
+        materials.reset()
+    end)
+
+    it("gives the default material id zero", function()
+        -- An entity with no Material component writes a zero, so zero has to
+        -- mean something specific rather than whatever sorted first. It sorts
+        -- last of the three, which is how this was found.
+        materials.reset()
+        assert.are.equal(0, materials.id(materials.defaultName))
+        assert.are.equal(materials.defaultName, materials.names()[1])
+    end)
+
+    it("numbers the rest by sorted name", function()
+        materials.reset()
+        local names = materials.names()
+        for index, name in ipairs(names) do
+            assert.are.equal(index - 1, materials.id(name))
+        end
+
+        -- Everything after the default is in sorted order, so the same files
+        -- always produce the same numbering.
+        local rest = {}
+        for index = 2, #names do rest[#rest + 1] = names[index] end
+        local sorted = {}
+        for index, name in ipairs(rest) do sorted[index] = name end
+        table.sort(sorted)
+        assert.are.same(sorted, rest)
+    end)
+
+    it("names what it found when a material is missing", function()
+        local ok, reason = pcall(materials.id, "no.such.material")
+        assert.is_false(ok)
+        assert.is_truthy(tostring(reason):find("circle", 1, true),
+            "the error should list what is available")
     end)
 
 end)
