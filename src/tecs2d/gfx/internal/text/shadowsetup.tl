@@ -23,6 +23,8 @@ local tecsInternal <const> = require("tecs.internal.types")
 local archetyperegistry <const> = require("tecs2d.gfx.internal.archetyperegistry")
 local shadowstate <const> = require("tecs2d.gfx.internal.gpu.shadowstate")
 local shadowrenderstate <const> = require("tecs2d.gfx.internal.gpu.shadowrenderstate")
+local transforminterpolation <const> =
+    require("tecs2d.gfx.internal.gpu.transforminterpolation")
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
 local gpubacking <const> = require("tecs2d.gfx.internal.gpu.gpubacking")
 local Material <const> = require("tecs2d.gfx.internal.Material")
@@ -56,6 +58,7 @@ local record shadow_setup
         --- write to the canonical columns (e.g. `text_sync.Sync`
         --- writing `gpuStartIdx` / `fontLayer` to Text).
         uploadAfter: {string}
+        disableInterpolation: boolean
     end
 
     record Context
@@ -106,6 +109,11 @@ function shadow_setup.register(world: tecs.World, config: shadow_setup.Config): 
             return shadowstate.new(arch, specs)
         end,
     })
+    local interpolation <const> = transforminterpolation.new(
+        world,
+        shadowRegistry,
+        config.disableInterpolation
+    )
 
     world:addSystem({
         name = config.renderStateSystemName,
@@ -131,7 +139,7 @@ function shadow_setup.register(world: tecs.World, config: shadow_setup.Config): 
         phase = tecs.phases.PreRender,
         after = uploadAfter,
         run = function()
-            shadowRegistry:flushAll()
+            interpolation:flush()
         end,
     })
 

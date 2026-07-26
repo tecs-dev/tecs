@@ -9,9 +9,13 @@ rawset(_G, "love", love2d_mock)
 
 local C <const> = require("ffi")
 local tecs <const> = require("tecs")
-local fixedtracking <const> = require("tecs.internal.fixedtracking")
+local archetyperegistry <const> =
+    require("tecs2d.gfx.internal.archetyperegistry")
 local archetypeshadowset <const> = require("tecs2d.gfx.internal.gpu.archetypeshadowset")
+local shadowstate <const> = require("tecs2d.gfx.internal.gpu.shadowstate")
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
+local transforminterpolation <const> =
+    require("tecs2d.gfx.internal.gpu.transforminterpolation")
 
 local Transform <const> = tecs.builtins.Transform
 
@@ -49,6 +53,27 @@ local function findArchetype(world: tecs.World, components: {tecs.Component}): t
         match = arch
     end)
     return match
+end
+
+local function interpolatedSet(
+    world: tecs.World,
+    archetype: tecs.Archetype
+): archetypeshadowset.ShadowSet, transforminterpolation.Controller
+    local registry = archetyperegistry.new(world, {
+        name = "spec.interpolation",
+        matches = function(candidate: tecs.Archetype): boolean
+            return candidate == archetype
+        end,
+        create = function(candidate: tecs.Archetype): any
+            return shadowstate.new(candidate, {
+                [Transform] = std430.layouts.Transform,
+            })
+        end,
+    })
+    local state =
+        registry:get(archetype) as shadowstate.ArchetypeState
+    return state.shadows,
+        transforminterpolation.new(world, registry, false)
 end
 
 describe("archetypeshadowset", function()
@@ -218,24 +243,14 @@ describe("archetypeshadowset", function()
 
     it("ping-pongs once at presentation after one fixed iteration", function()
         local world = tecs.newWorld({timestep = 0.01})
-        fixedtracking.track(world, Transform)
         world:spawn(Transform(1, 2, 0))
 
         local arch = findArchetype(world, {Transform})
-        local set = archetypeshadowset.new(arch, {
-            [Transform] = std430.layouts.Transform,
-        })
-        set:flush()
+        local set, interpolation = interpolatedSet(world, arch)
+        interpolation:flush()
 
         local transformBuffer = set:get(Transform)
         local initialGpuBuffer = transformBuffer.gpuBuffer
-        local lastPresentedStep = fixedtracking.currentStep(world)
-        fixedtracking.beforeStep(world, function()
-            if fixedtracking.currentStep(world) ==
-                    lastPresentedStep + 1 then
-                set:flushCurrent(Transform)
-            end
-        end)
         world:addSystem({
             phase = tecs.phases.FixedUpdate,
             run = function()
@@ -251,17 +266,7 @@ describe("archetypeshadowset", function()
         world:addSystem({
             phase = tecs.phases.PreRender,
             run = function()
-                local currentStep = fixedtracking.currentStep(world)
-                if currentStep - lastPresentedStep == 1
-                        and fixedtracking.wroteThisStep(
-                            world,
-                            arch,
-                            Transform
-                        ) then
-                    set:flushFixed(Transform, currentStep)
-                end
-                lastPresentedStep = currentStep
-                set:flush()
+                interpolation:flush()
             end,
         })
 
@@ -285,26 +290,16 @@ describe("archetypeshadowset", function()
 
     it("snaps with one upload after multiple catch-up iterations", function()
         local world = tecs.newWorld({timestep = 0.01})
-        fixedtracking.track(world, Transform)
         world:spawn(Transform(1, 2, 0))
 
         local arch = findArchetype(world, {Transform})
-        local set = archetypeshadowset.new(arch, {
-            [Transform] = std430.layouts.Transform,
-        })
-        set:flush()
+        local set, interpolation = interpolatedSet(world, arch)
+        interpolation:flush()
 
         local transformBuffer = set:get(Transform)
         local initialGpuBuffer = transformBuffer.gpuBuffer
         local writesBefore =
             #((initialGpuBuffer as {string:any})._writes as {any})
-        local lastPresentedStep = fixedtracking.currentStep(world)
-        fixedtracking.beforeStep(world, function()
-            if fixedtracking.currentStep(world) ==
-                    lastPresentedStep + 1 then
-                set:flushCurrent(Transform)
-            end
-        end)
         world:addSystem({
             phase = tecs.phases.FixedUpdate,
             run = function()
@@ -315,17 +310,7 @@ describe("archetypeshadowset", function()
         world:addSystem({
             phase = tecs.phases.PreRender,
             run = function()
-                local currentStep = fixedtracking.currentStep(world)
-                if currentStep - lastPresentedStep == 1
-                        and fixedtracking.wroteThisStep(
-                            world,
-                            arch,
-                            Transform
-                        ) then
-                    set:flushFixed(Transform, currentStep)
-                end
-                lastPresentedStep = currentStep
-                set:flush()
+                interpolation:flush()
             end,
         })
 

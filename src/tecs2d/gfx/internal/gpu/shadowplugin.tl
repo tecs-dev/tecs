@@ -29,6 +29,8 @@ local archetyperegistry <const> = require("tecs2d.gfx.internal.archetyperegistry
 local shadowstate <const> = require("tecs2d.gfx.internal.gpu.shadowstate")
 local shadowrenderstate <const> = require("tecs2d.gfx.internal.gpu.shadowrenderstate")
 local shadowdispatch <const> = require("tecs2d.gfx.internal.gpu.shadowdispatch")
+local transforminterpolation <const> =
+    require("tecs2d.gfx.internal.gpu.transforminterpolation")
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
 local gpubacking <const> = require("tecs2d.gfx.internal.gpu.gpubacking")
 local retire <const> = require("tecs2d.gfx.internal.gpu.retire")
@@ -237,6 +239,11 @@ function shadow_plugin.register(world: tecs.World, descriptor: shadow_plugin.Sha
             return shadowstate.new(arch, buildSpecs())
         end,
     })
+    local interpolation <const> = transforminterpolation.new(
+        world,
+        shadowRegistry,
+        gpuRenderer.config.disableInterpolation == true
+    )
 
     local dispatch <const> = shadowdispatch.new({
         shader = descriptor.cullShader,
@@ -275,7 +282,7 @@ function shadow_plugin.register(world: tecs.World, descriptor: shadow_plugin.Sha
         phase = tecs.phases.PreRender,
         after = {descriptor.renderStateSystemName},
         run = function()
-            shadowRegistry:flushAll()
+            interpolation:flush()
             local total = 0
             for arch, _state in shadowRegistry:archetypes() do
                 total = total + ((arch as {string:any}).entities as {integer})[0]

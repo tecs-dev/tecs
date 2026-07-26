@@ -99,6 +99,8 @@ function mesh.plugin(world: tecs.World)
         LOGGER:error("No render pipeline found in world resources")
         return
     end
+    local gpuRenderer =
+        pipelineInstance:getRenderer() as gpuTypes.Renderer
 
     -- Build the per-archetype shadow registry + render-state /
     -- upload PreRender systems.
@@ -116,6 +118,8 @@ function mesh.plugin(world: tecs.World)
         registryName = "mesh.shadows",
         renderStateSystemName = "mesh.ShadowRenderState",
         uploadSystemName = "mesh.ShadowUpload",
+        disableInterpolation =
+            gpuRenderer.config.disableInterpolation == true,
     })
 
     -- Per-(definition, archetype) cull dispatch. Each archetype's
@@ -159,7 +163,6 @@ function mesh.plugin(world: tecs.World)
     -- runs alongside cull (which fires from the renderer plugin's
     -- `cull` hook) so we don't traverse archetypes twice per frame.
 
-    local gpuRenderer = pipelineInstance:getRenderer() as gpuTypes.Renderer
     local liveCounts: {integer: integer} = {}
 
     gpuRenderer:registerPlugin({

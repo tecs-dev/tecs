@@ -1,9 +1,8 @@
 --- GPU Transform interpolation demo.
 ---
 --- Rendering runs at 60 Hz while the simulation advances at 5 Hz. The
---- sprite and rectangle receive identical Transform samples in FixedUpdate:
---- the sprite uses GPU ping-pong interpolation, while the rectangle shows
---- the unsmoothed authoritative samples.
+--- sprite uses automatic GPU interpolation, while a custom draw shows the
+--- unsmoothed authoritative fixed samples.
 
 local tecs <const> = require("tecs")
 local tecs2d <const> = require("tecs2d")
@@ -30,8 +29,8 @@ local function interpolationDemo(world: tecs.World)
 
     local sheet = gfx.SpriteSheet.fromFile("assets/running.png")
 
-    -- Static tracks make the shared position of the two moving entities
-    -- obvious. Shapes currently use the raw Transform path.
+    -- Static tracks make the shared position of the two presentations
+    -- obvious.
     world:spawn(
         Transform(0, TOP_Y, 0, 1),
         gfx.Rectangle(560, 2),
@@ -48,12 +47,6 @@ local function interpolationDemo(world: tecs.World)
         gfx.Sprite.fromSheet(sheet, "run", {centered = true}),
         gfx.Color(1, 1, 1, 1)
     )
-    local sampleId = world:spawn(
-        Transform(-LIMIT, BOTTOM_Y, 0, 2),
-        gfx.Rectangle(42, 28),
-        gfx.Color(0.2, 0.85, 1, 1)
-    )
-
     local position = -LIMIT
     local direction = 1
     local rotation: number = 0
@@ -75,13 +68,11 @@ local function interpolationDemo(world: tecs.World)
             local spriteTransform = world:getMut(spriteId, Transform)
             spriteTransform.x = position
             spriteTransform.rotation = rotation
-
-            local sampleTransform = world:getMut(sampleId, Transform)
-            sampleTransform.x = position
-            sampleTransform.rotation = rotation
         end,
     })
 
+    local pipeline = world.resources[gfx.PIPELINE] as gfx.Pipeline
+    local camera = pipeline:getCamera()
     local titleFont = lg.newFont(24)
     local labelFont = lg.newFont(16)
     world:addSystem({
@@ -92,6 +83,14 @@ local function interpolationDemo(world: tecs.World)
             lg.setDepthMode()
 
             local width = lg.getWidth()
+            local rawX, rawY = camera:toScreen(position, BOTTOM_Y)
+            lg.push()
+            lg.translate(rawX, rawY)
+            lg.rotate(rotation)
+            lg.setColor(0.2, 0.85, 1, 1)
+            lg.rectangle("fill", -21, -14, 42, 28)
+            lg.pop()
+
             lg.setFont(titleFont)
             lg.setColor(0.95, 0.97, 1, 1)
             local title = "GPU TRANSFORM PING-PONG"
@@ -103,13 +102,13 @@ local function interpolationDemo(world: tecs.World)
             lg.print(timing, (width - labelFont:getWidth(timing)) / 2, 62)
 
             lg.setColor(0.8, 1, 0.85, 1)
-            lg.print("GPU-interpolated sprite", 28, 150)
+            lg.print("Automatic built-in interpolation", 28, 150)
             lg.setColor(0.4, 0.9, 1, 1)
-            lg.print("Raw fixed samples (comparison)", 28, 348)
+            lg.print("Raw custom draw (comparison)", 28, 348)
 
             lg.setColor(0.55, 0.6, 0.7, 1)
             lg.print(
-                "Both receive the same Transform writes in FixedUpdate",
+                "Custom drawing owns its presentation policy",
                 28,
                 lg.getHeight() - 42
             )

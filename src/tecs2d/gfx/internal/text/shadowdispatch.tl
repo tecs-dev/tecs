@@ -22,6 +22,8 @@ local tecs <const> = require("tecs")
 local tecsInternal <const> = require("tecs.internal.types")
 local archetyperegistry <const> = require("tecs2d.gfx.internal.archetyperegistry")
 local shadowstate <const> = require("tecs2d.gfx.internal.gpu.shadowstate")
+local transforminterpolation <const> =
+    require("tecs2d.gfx.internal.gpu.transforminterpolation")
 local std430 <const> = require("tecs2d.gfx.internal.gpu.std430")
 local gpuTypes <const> = require("tecs2d.gfx.internal.gpu.types")
 local blend <const> = require("tecs2d.gfx.internal.blend")
@@ -181,7 +183,11 @@ function shadow_dispatch.new(config: shadow_dispatch.Config): function(any, love
 
             local transformBuf = shadows:get(Transform)
             if not transformBuf then goto continue end
-            shader:send("TransformInput", (transformBuf as {string:any}).gpuBuffer as love.graphics.Buffer)
+            transforminterpolation.bind(
+                shader,
+                transformBuf,
+                registry.world
+            )
 
             local textBuf = shadows:get(textComponent)
             if not textBuf then goto continue end

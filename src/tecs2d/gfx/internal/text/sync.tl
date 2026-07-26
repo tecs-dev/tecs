@@ -393,6 +393,8 @@ function text_sync.plugin(_world: tecs.World, renderer: gpuTypes.Renderer, TextC
             -- must run after, otherwise the cull shader sees stale
             -- bytes on first-frame entities and renders garbled glyphs.
             uploadAfter = {"text_sync.Sync"},
+            disableInterpolation =
+                gpuRenderer.config.disableInterpolation == true,
         })
 
         local shadowBuffers = shadowdispatch.newBuffers(initialTextEntities, initialTextGlyphs)

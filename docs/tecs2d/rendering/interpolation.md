@@ -28,7 +28,7 @@ changes only the transform consumed by rendering.
 
 ## How It Works
 
-For every sprite archetype whose `Transform` changes during one fixed
+For every supported archetype whose `Transform` changes during one fixed
 iteration between rendered frames, the renderer retains the previous
 presentation sample and uploads the new fixed sample:
 
@@ -36,9 +36,9 @@ presentation sample and uploads the new fixed sample:
 previous fixed sample → current fixed sample
 ```
 
-On each rendered frame, the sprite cull shader blends those samples using the
-world's fixed-step alpha. Culling, sprite output, occluders, and drop shadows
-all use the same interpolated transform.
+On each rendered frame, the GPU cull shader blends those samples using the
+world's fixed-step alpha. Culling and render output therefore consume the same
+interpolated transform.
 
 Fixed iterations only record that the column changed. The renderer performs
 the upload once in `PreRender`, regardless of how many iterations ran.
@@ -50,11 +50,11 @@ feedback loop. A frame with no fixed iteration simply advances alpha between
 the existing samples without uploading the column again.
 
 New rows seed the previous sample from the current value, so newly spawned
-sprites do not interpolate from the origin.
+entities do not interpolate from the origin.
 
 ## Interpolated Fields
 
-The sprite renderer currently interpolates:
+The renderer interpolates:
 
 - `Transform.x`
 - `Transform.y`
@@ -62,8 +62,9 @@ The sprite renderer currently interpolates:
 
 It does not interpolate `z`, `layer`, `scaleX`, or `scaleY`.
 
-Only sprites currently use this path. Shapes, text, images, meshes, and custom
-draw calls consume the current `Transform` directly.
+This applies to sprites, lines, circles, arcs, ellipses, rectangles, text, and
+meshes. `Image`, tile chunks, particles, physics debug drawing, and custom draw
+calls consume their current presentation data directly.
 
 ## Physics
 
@@ -71,9 +72,8 @@ Physics does not perform presentation smoothing. After every Box2D step, it
 copies the exact body position and rotation into `Transform` during
 `FixedPostUpdate`.
 
-Physics-driven sprites therefore follow the normal renderer interpolation path
-without physics-specific configuration. Physics-driven shapes currently show
-the raw fixed-step samples because shape cull shaders do not yet interpolate.
+Physics-driven supported renderables therefore follow the normal renderer
+interpolation path without physics-specific configuration.
 
 The physics plugin has no interpolation, extrapolation, or smoothing option.
 
@@ -112,12 +112,12 @@ that pipeline.
 
 Interpolation adds one fixed interval of visual latency, an additional GPU
 buffer read, and a lazily allocated previous-Transform buffer (28 bytes per
-allocated sprite row).
+allocated row in each participating renderer).
 
 Uploads are column-granular but coalesced to one final fixed sample per
 rendered frame. Catch-up frames snap instead of uploading every fixed sample.
 Static archetypes allocate no previous buffer, and the renderer performs no
-per-sprite Lua scan.
+per-entity Lua scan.
 
 Code reading `Transform` sees the authoritative simulation value, which is one
 sample ahead of presentation.
@@ -130,6 +130,6 @@ Run the comparison demo:
 make example-interpolation
 ```
 
-It renders at 60 Hz while simulation advances at 5 Hz. The upper sprite uses
-GPU interpolation; the lower rectangle receives the same fixed-step samples
-and shows the current non-interpolated shape behavior.
+It renders at 60 Hz while simulation advances at 5 Hz. The upper built-in
+sprite uses automatic GPU interpolation; the lower custom draw shows the raw
+authoritative samples that custom presentation code receives.

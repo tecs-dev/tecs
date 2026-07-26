@@ -80,7 +80,7 @@ void computemain() {
     Std430Mesh m = meshes[row];
     if (m.definitionId != TargetDefinitionId) return;
 
-    Std430Transform t = transforms[row];
+    Std430Transform t = readTransform(row);
 
     float x = t.x;
     float y = t.y;

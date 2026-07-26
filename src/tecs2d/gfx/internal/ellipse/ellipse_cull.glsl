@@ -56,7 +56,7 @@ void computemain() {
     uint row = gl_GlobalInvocationID.x;
     if (row >= ArchetypeRowCount) return;
 
-    Std430Transform t = transforms[row];
+    Std430Transform t = readTransform(row);
     Std430Ellipse e = ellipsesIn[row];
 
     float x = t.x;

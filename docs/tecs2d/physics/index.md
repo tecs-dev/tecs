@@ -81,13 +81,10 @@ not modify `Transform` between fixed steps. Systems in `FixedLast` therefore
 observe matching body and Transform poses.
 
 Physics has no interpolation, extrapolation, or smoothing mode. Presentation
-smoothing belongs to the renderer: supported GPU-rendered entities use
+smoothing belongs to the renderer: supported GPU-culled renderables use
 [Transform interpolation](/tecs2d/rendering/interpolation) by default. Set
 `render.disableInterpolation = true` when direct fixed-step presentation is
 required.
-
-Currently the GPU interpolation path supports sprites. Physics-driven shapes
-display the authoritative fixed-step samples directly.
 
 ## Debug Drawing
 

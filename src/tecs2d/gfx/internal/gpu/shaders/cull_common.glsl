@@ -86,6 +86,30 @@ struct Std430Transform {
 layout(std430) readonly buffer TransformInput {
     Std430Transform transforms[];
 };
+layout(std430) readonly buffer PreviousTransformInput {
+    Std430Transform previousTransforms[];
+};
+uniform uint TransformInterpolationActive;
+uniform float TransformInterpolationAlpha;
+
+Std430Transform readTransform(uint row) {
+    Std430Transform current = transforms[row];
+    if (TransformInterpolationActive == 0u) return current;
+
+    Std430Transform previous = previousTransforms[row];
+    current.x = mix(previous.x, current.x, TransformInterpolationAlpha);
+    current.y = mix(previous.y, current.y, TransformInterpolationAlpha);
+
+    const float PI = 3.14159265358979323846;
+    const float TAU = 6.28318530717958647692;
+    float rotationDelta = mod(
+        current.rotation - previous.rotation + PI,
+        TAU
+    ) - PI;
+    current.rotation =
+        previous.rotation + rotationDelta * TransformInterpolationAlpha;
+    return current;
+}
 
 struct Std430Color {
     vec4 rgba;
@@ -216,4 +240,3 @@ uint packRenderFlags(uint flags, bool isScreenSpace, bool ignoresZoom, bool uses
         | (blendId << 20u)
         | (materialId << 24u);
 }
-

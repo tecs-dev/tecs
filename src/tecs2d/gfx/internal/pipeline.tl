@@ -136,8 +136,8 @@ local record pipeline
         sizeHints: {string: integer}
 
         --- Disable GPU presentation interpolation between fixed-step
-        --- Transform samples. Currently applies to sprite position and
-        --- rotation. Interpolation is enabled by default.
+        --- Transform samples for GPU-culled built-in renderables.
+        --- Interpolation is enabled by default.
         disableInterpolation: boolean
 
         --- The ambient light color as RGB. Defaults to {1.0, 1.0, 1.0} (full brightness).

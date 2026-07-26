@@ -156,6 +156,6 @@ immutable pipeline association. Use `pipeline:getWorldId()` for its stable
 generational render-world identity. See [Multiple render worlds and compositing](./multi-world).
 
 [Transform interpolation](./interpolation) is enabled by default. It currently
-applies to sprites, interpolating position and shortest-path rotation between
-fixed updates. Set `disableInterpolation = true` to render fixed-step samples
-directly.
+applies to GPU-culled built-ins, interpolating position and shortest-path
+rotation between fixed updates. Set `disableInterpolation = true` to render
+fixed-step samples directly.
