@@ -188,6 +188,9 @@ local record sequence
     end
 
     --- What a registered action receives.
+    ---
+    --- The context and its `args` belong to the sequencer and are reused by
+    --- the next call. Read them; do not keep or modify them.
     record ActionContext
         --- The world this playback belongs to.
         world: World

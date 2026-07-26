@@ -125,7 +125,9 @@ Registration is per world and by stable name, so a snapshot load or hot reload r
 program to the freshly registered function.
 
 Actions run **synchronously and atomically from the sequencer's perspective**: they must return
-before the cursor advances, and they may not yield. An action that raises faults the playback with
+before the cursor advances, and they may not yield. `ctx` and `ctx.args` belong to the sequencer
+and are reused by the next call, like a pooled event: read them, and copy anything worth keeping
+rather than holding the tables themselves. An action that raises faults the playback with
 `actionError`, and mutations it already made are kept — the sequencer does not roll them back.
 
 ### Deterministic-action contract
