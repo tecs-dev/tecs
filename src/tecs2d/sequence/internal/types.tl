@@ -27,15 +27,15 @@ local enum FaultReason
     "unregisteredTween"
 end
 
---- How the tween a `waitTween` step was waiting on ended.
+--- How the playback a `waitTween` step was waiting on ended.
 local enum TweenOutcome
     --- It played to the end.
     "completed"
-    --- `tween.cancel` matched it.
+    --- Something cancelled it.
     "cancelled"
     --- Another playback took over its channel.
     "replaced"
-    --- Its entity died, was never bound, or lost its playback component.
+    --- Its entity died, or was never bound in the first place.
     "targetLost"
 end
 

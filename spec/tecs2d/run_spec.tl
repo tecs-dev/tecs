@@ -32,7 +32,6 @@ local STUBBED <const>: {string} = {
     "tecs2d.workers",
     "tecs2d.audio",
     "tecs2d.controller",
-    "tecs2d.tween",
     "tecs2d.tiled",
     "tecs2d.ui",
     "run_spec.baseline",
@@ -109,9 +108,6 @@ local function installTecs2dStubs()
         plugin = function(): tecs.Plugin
             return function(_world: tecs.World) end
         end,
-    }
-    package.loaded["tecs2d.tween"] = {
-        plugin = function(_world: tecs.World) end,
     }
     package.loaded["tecs2d.tiled"] = {
         plugin = function(_world: tecs.World) end,

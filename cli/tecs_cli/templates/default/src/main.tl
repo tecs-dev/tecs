@@ -4,7 +4,7 @@ package.cpath = package.cpath .. ";./vendor/lib/lua/5.1/?.so;./vendor/lib/lua/5.
 local tecs <const> = require("tecs")
 local tecs2d <const> = require("tecs2d")
 local gfx <const> = require("tecs2d.gfx")
-local tween <const> = require("tecs2d.tween")
+local sequence <const> = require("tecs2d.sequence")
 local mcp <const> = require("tecs2d.mcp")
 local debugPlugin <const> = require("tecs2d.debug")
 
@@ -56,10 +56,13 @@ local function gamePlugin(world: tecs.World)
             )
 
             -- Idle bob: ease up by one text height and back, forever. Tweens
-            -- are ECS data (snapshot-safe); see `tecs docs tecs2d/tween`.
-            tween.timeline({
-                tween.to(0.9, tween.sineInOut, tween.translateY, -BOB),
-            }):play(world, hello, {mode = "pingPong"})
+            -- are ECS data (snapshot-safe); see `tecs docs tecs2d/sequence`.
+            local bob = sequence.timeline("game.bob", {
+                sequence.tweenTo(0.9, sequence.easing.sineInOut,
+                    sequence.target.translateY, -BOB),
+            })
+            sequence.play(world, bob,
+                {owner = hello, params = {mode = "pingPong"}})
         end,
     })
 end

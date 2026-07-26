@@ -19,7 +19,6 @@ local tecs2d <const> = require("tecs2d")
 local gfx <const> = require("tecs2d.gfx")
 local input <const> = require("tecs2d.input")
 local sequence <const> = require("tecs2d.sequence")
-local tween <const> = require("tecs2d.tween")
 local logging <const> = require("tecs.utils.logging")
 
 local LOGGER <const> = logging.getLogger("sequence-demo")
@@ -141,16 +140,20 @@ local function plugin(world: tecs.World)
     -- A query the sequence blocks on: "wait until no adds remain".
     sequence.registerQuery(world, "demo.adds", {include = {Add}})
 
-    tween.registerPreset(world, "demo.bossWalkIn", tween.timeline({
-        tween.to(1.6, tween.quadOut, tween.translateX, BOSS_HOME_X),
-    }))
-    tween.registerPreset(world, "demo.bannerDrop", tween.timeline({
-        tween.to(0.9, tween.quadOut, tween.translateY, BANNER_SHOWN_Y),
-    }))
-    tween.registerPreset(world, "demo.bossEnrage", tween.timeline({
-        tween.to(0.35, tween.quadOut, tween.scaleXY, 1.25, 1.25),
-        tween.to(0.35, tween.quadIn, tween.scaleXY, 1.0, 1.0),
-    }))
+    sequence.timeline("demo.bossWalkIn", {
+        sequence.tweenTo(1.6, sequence.easing.quadOut,
+            sequence.target.translateX, BOSS_HOME_X),
+    })
+    sequence.timeline("demo.bannerDrop", {
+        sequence.tweenTo(0.9, sequence.easing.quadOut,
+            sequence.target.translateY, BANNER_SHOWN_Y),
+    })
+    sequence.timeline("demo.bossEnrage", {
+        sequence.tweenTo(0.35, sequence.easing.quadOut,
+            sequence.target.scaleXY, 1.25, 1.25),
+        sequence.tweenTo(0.35, sequence.easing.quadIn,
+            sequence.target.scaleXY, 1.0, 1.0),
+    })
 
     sequence.registerAction(world, "demo.announce",
         function(_w: tecs.World, ctx: sequence.ActionContext)
@@ -298,9 +301,8 @@ local function plugin(world: tecs.World)
                         sequence.resume(world, encounter)
                         status = "Resumed."
                     elseif sequence.pause(world, encounter) then
-                        -- Branches pause with it; a tween it started does
-                        -- not, since tween pausing selects by channel or
-                        -- preset rather than by playback.
+                        -- Branches pause with it. A timeline it started is
+                        -- a playback of its own, so it keeps going.
                         status = "Paused (branches too; running tweens keep going)."
                     end
                 end
@@ -319,7 +321,7 @@ local function plugin(world: tecs.World)
         elseif s.waitingQuery then
             blocked = string.format("query %s %s", s.waitingQuery, s.waitingCondition)
         elseif s.waitingTween then
-            blocked = "tween " .. tostring(s.waitingTween)
+            blocked = "timeline " .. tostring(s.waitingTween)
         elseif s.joining then
             blocked = string.format("%d branch(es)", s.branches)
         elseif s.wakeAt then
