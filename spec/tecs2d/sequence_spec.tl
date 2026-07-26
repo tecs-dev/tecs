@@ -641,6 +641,223 @@ describe("tecs2d.sequence", function()
         end)
     end)
 
+    describe("query waits", function()
+        local Add <const> = tecs.newComponent({
+            name = "SpecSequenceAdd",
+            container = {} as tecs.Component,
+            fields = {"hp"},
+            init = function(instance: tecs.Component, hp: number)
+                (instance as {string: any}).hp = hp
+            end,
+        })
+
+        local calls: integer
+        local spawned: {integer}
+
+        before_each(function()
+            calls = 0
+            spawned = {}
+            sequence.registerQuery(world, "spec.adds", {include = {Add}})
+            sequence.registerAction(world, "spec.done", function() calls = calls + 1 end)
+            sequence.registerAction(world, "spec.spawnAdd", function(w)
+                spawned[#spawned + 1] = w:spawn(Add(1) as tecs.Component)
+            end)
+            sequence.registerAction(world, "spec.clearAdds", function(w)
+                for i = 1, #spawned do w:despawn(spawned[i]) end
+                spawned = {}
+            end)
+        end)
+
+        it("rejects a malformed wait", function()
+            luassert.has_error(function() sequence.waitQuery("", "any") end)
+            luassert.has_error(function()
+                sequence.waitQuery("spec.adds", "sometimes" as sequence.QueryCondition)
+            end)
+        end)
+
+        it("blocks until the query matches", function()
+            local prog = sequence.define(uniqueName(), {
+                sequence.waitQuery("spec.adds", "any"),
+                sequence.call("spec.done"),
+            })
+            local handle = sequence.play(world, prog)
+
+            stepWorld(world, 4)
+            luassert.equals(0, calls)
+            local status = sequence.status(world, handle)
+            luassert.equals("spec.adds", status.waitingQuery)
+            luassert.equals("any", status.waitingCondition)
+            luassert.is_nil(status.wakeAt)
+
+            world:spawn(Add(1) as tecs.Component)
+            world:commit()
+            stepWorld(world, 1)
+            luassert.equals(1, calls)
+        end)
+
+        it("resumes a wait whose condition already holds", function()
+            local prog = sequence.define(uniqueName(), {
+                sequence.waitQuery("spec.adds", "empty"),
+                sequence.call("spec.done"),
+            })
+            sequence.play(world, prog)
+
+            -- A condition, not an edge: nothing has to change for this to
+            -- proceed, so it costs one step rather than waiting forever.
+            stepWorld(world, 1)
+            luassert.equals(0, calls)
+            stepWorld(world, 1)
+            luassert.equals(1, calls)
+        end)
+
+        it("sees an entity a call spawned in the same step", function()
+            local prog = sequence.define(uniqueName(), {
+                sequence.call("spec.spawnAdd"),
+                sequence.waitQuery("spec.adds", "any"),
+                sequence.call("spec.done"),
+            })
+            sequence.play(world, prog)
+
+            stepWorld(world, 2)
+            luassert.equals(1, calls)
+        end)
+
+        it("does not resolve against an iteration that has not run", function()
+            -- Sequences advance first in a fixed iteration, so at the
+            -- instruction itself the world still reflects the previous one.
+            -- Testing there would find this query empty and walk straight
+            -- past the wait, moments before the wave system fills it.
+            local pending = true
+            world:addSystem({
+                name = "spec.wave",
+                phase = tecs.phases.FixedUpdate,
+                run = function()
+                    if not pending then return end
+                    pending = false
+                    spawned[1] = world:spawn(Add(1) as tecs.Component)
+                end,
+            })
+
+            local prog = sequence.define(uniqueName(), {
+                sequence.waitQuery("spec.adds", "empty"),
+                sequence.call("spec.done"),
+            })
+            sequence.play(world, prog)
+
+            stepWorld(world, 5)
+            luassert.equals(0, calls)
+
+            world:despawn(spawned[1])
+            world:commit()
+            stepWorld(world, 2)
+            luassert.equals(1, calls)
+        end)
+
+        it("waits for a wave to be cleared", function()
+            local prog = sequence.define(uniqueName(), {
+                sequence.loop(3, {sequence.call("spec.spawnAdd")}),
+                sequence.waitQuery("spec.adds", "empty"),
+                sequence.call("spec.done"),
+            })
+            sequence.play(world, prog)
+
+            stepWorld(world, 3)
+            luassert.equals(0, calls)
+            luassert.equals(3, #spawned)
+
+            world:despawn(spawned[1])
+            world:commit()
+            stepWorld(world, 2)
+            luassert.equals(0, calls, "one of three is not the wave")
+
+            world:despawn(spawned[2])
+            world:despawn(spawned[3])
+            world:commit()
+            stepWorld(world, 2)
+            luassert.equals(1, calls)
+        end)
+
+        it("faults on an unregistered query", function()
+            local prog = sequence.define(uniqueName(), {
+                sequence.waitQuery("spec.neverRegistered", "any"),
+            })
+            local handle = sequence.play(world, prog)
+
+            stepWorld(world, 1)
+            local status = sequence.status(world, handle)
+            luassert.equals("faulted", status.state)
+            luassert.equals("unregisteredQuery", status.fault)
+        end)
+
+        it("releases the wait when a parked playback is cancelled", function()
+            local prog = sequence.define(uniqueName(), {
+                sequence.waitQuery("spec.adds", "any"),
+                sequence.call("spec.done"),
+            })
+            local handle = sequence.play(world, prog)
+            stepWorld(world, 2)
+
+            luassert.is_true(sequence.cancel(world, handle))
+            world:spawn(Add(1) as tecs.Component)
+            world:commit()
+            stepWorld(world, 2)
+            luassert.equals(0, calls)
+            luassert.equals(0, sequence.activeCount(world))
+        end)
+
+        it("re-tests a restored wait against the restored world", function()
+            local prog = sequence.define(uniqueName(), {
+                sequence.waitQuery("spec.adds", "any"),
+                sequence.call("spec.done"),
+            })
+            local handle = sequence.play(world, prog)
+            stepWorld(world, 2)
+            luassert.equals("spec.adds", sequence.status(world, handle).waitingQuery)
+
+            local saved = world:saveSnapshot().buffer
+            world:spawn(Add(1) as tecs.Component)
+            world:commit()
+            stepWorld(world, 2)
+            luassert.equals(1, calls)
+
+            -- The restored world has no matching entity, so the restored
+            -- cursor goes back to waiting rather than resuming on a
+            -- condition that only held in the world it left.
+            world:loadSnapshot(saved)
+            calls = 0
+            stepWorld(world, 3)
+            luassert.equals(0, calls)
+            luassert.equals("spec.adds", sequence.status(world, handle).waitingQuery)
+
+            world:spawn(Add(1) as tecs.Component)
+            world:commit()
+            stepWorld(world, 1)
+            luassert.equals(1, calls)
+        end)
+    end)
+
+    describe("event signals", function()
+        it("raises a signal every time an event is emitted", function()
+            local calls = 0
+            sequence.registerAction(world, "spec.done", function() calls = calls + 1 end)
+            sequence.signalOnEvent(world, "died", tecs.builtins.OnDespawn)
+
+            local prog = sequence.define(uniqueName(), {
+                sequence.waitSignal("died"),
+                sequence.call("spec.done"),
+            })
+            sequence.play(world, prog)
+            local victim = world:spawn()
+            stepWorld(world, 2)
+            luassert.equals(0, calls)
+
+            world:despawn(victim)
+            world:commit()
+            stepWorld(world, 1)
+            luassert.equals(1, calls)
+        end)
+    end)
+
     describe("bindings and ownership", function()
         it("resolves a binding through the context", function()
             local seen: integer = nil

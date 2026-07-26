@@ -41,7 +41,8 @@ local DEFAULT_BUDGET <const> = 512
 -- newer build is rejected rather than restored as a half-cursor.
 --   1: cursor, program, and signal state
 --   2: branch tree (parent link and join state)
-local SNAPSHOT_VERSION <const> = 2
+--   3: query waits
+local SNAPSHOT_VERSION <const> = 3
 
 -- Instruction opcodes. Code is a flat array with stride 3: (op, a, b).
 local OP_WAIT <const> = 1     -- a = const index holding seconds, or -1
@@ -57,6 +58,8 @@ local OP_WAIT_SIGNAL <const> = 6  -- a = const index of signal name
 local OP_FORK <const> = 7     -- a = first pc of the branch body
                               -- b = pc the forking cursor continues at
 local OP_JOIN <const> = 8
+local OP_WAIT_QUERY <const> = 9   -- a = const index of query name
+                                  -- b = 1 to wait for a match, 0 for none
 
 local STRIDE <const> = 3
 
@@ -70,6 +73,16 @@ local enum FaultReason
     "budgetExceeded"
     --- A branch this cursor forked faulted.
     "branchFaulted"
+    --- A `waitQuery` named a query that is not registered on this world.
+    "unregisteredQuery"
+end
+
+--- What a `waitQuery` step is waiting for.
+local enum QueryCondition
+    --- At least one entity matches the query.
+    "any"
+    --- No entity matches the query.
+    "empty"
 end
 
 --- The lifecycle state of one playback.
@@ -91,6 +104,9 @@ local record sequence
 
     --- The lifecycle state of one playback.
     type PlaybackState = PlaybackState
+
+    --- What a `waitQuery` step is waiting for.
+    type QueryCondition = QueryCondition
 
     --- A compiled, immutable program. Produced by `define`, shared by every
     --- playback of it, and reference counted.
@@ -209,6 +225,11 @@ local record sequence
         --- Signal name this playback is blocked on, when it is.
         waitingFor: string
 
+        --- Query name this playback is blocked on, when it is, and the
+        --- condition it is waiting for.
+        waitingQuery: string
+        waitingCondition: QueryCondition
+
         --- Live branches this playback forked and has not joined.
         branches: integer
 
@@ -252,6 +273,18 @@ local record sequence
     --- That bounds a chain of signals to one link per step and keeps delivery
     --- order independent of which cursor happened to run first.
     waitSignal: function(name: string): Node
+
+    --- Block until a registered query matches, or stops matching.
+    ---
+    --- Unlike a signal, which is an edge, this is a condition on the world:
+    --- a wait whose condition already holds resumes rather than waiting for
+    --- a transition that has already happened.
+    ---
+    --- The condition is evaluated at the start of the next fixed step, never
+    --- at the instruction itself, so it never reads a world that a spawn or
+    --- despawn from the current step has not been committed to yet. A query
+    --- wait therefore costs at least one step.
+    waitQuery: function(name: string, condition: QueryCondition): Node
 
     --- Wait for a whole number of fixed steps.
     ---
@@ -303,6 +336,24 @@ local record sequence
 
     --- Whether an action name is registered on this world.
     hasAction: function(world: World, name: string): boolean
+
+    --- Register a query a `waitQuery` step can name.
+    ---
+    --- The query subscribes to archetype transitions, so a wait on it stays
+    --- event driven rather than polling. Registration is startup work: a
+    --- name registered twice keeps the newer query, and the replaced one
+    --- holds its subscriptions for the life of the world.
+    registerQuery: function(world: World, name: string, descriptor: tecs.Query.Descriptor)
+
+    --- Whether a query name is registered on this world.
+    hasQuery: function(world: World, name: string): boolean
+
+    --- Raise a signal every time an event is emitted at address 0.
+    ---
+    --- An ECS event is an edge, like a signal, so this wires one to the
+    --- other rather than adding a separate kind of wait. Delivery follows
+    --- the ordinary signal rule: waiters wake on the next fixed step.
+    signalOnEvent: function<T is tecs.Event>(world: World, name: string, event: T)
 
     --- Raise a named signal, waking every playback blocked on it.
     ---
@@ -444,6 +495,20 @@ function sequence.waitSignal(name: string): sequence.Node
     return {kind = "waitSignal", text = name} as sequence.Node
 end
 
+function sequence.waitQuery(
+    name: string,
+    condition: sequence.QueryCondition
+): sequence.Node
+    if type(name) ~= "string" or name == "" then
+        error("sequence.waitQuery requires a non-empty query name", 2)
+    end
+    if condition ~= "any" and condition ~= "empty" then
+        error("sequence.waitQuery condition must be 'any' or 'empty'", 2)
+    end
+    return {kind = "waitQuery", text = name, count = condition == "any" and 1 or 0}
+        as sequence.Node
+end
+
 function sequence.emit(event: string, ...: sequence.Argument): sequence.Node
     if type(event) ~= "string" or event == "" then
         error("sequence.emit requires a non-empty event name", 2)
@@ -544,6 +609,8 @@ local function compileNode(c: Compiler, node: NodeImpl, depth: integer)
         emitOp(c, OP_WAIT, intern(c, node.number), -1)
     elseif kind == "waitSignal" then
         emitOp(c, OP_WAIT_SIGNAL, intern(c, node.text), -1)
+    elseif kind == "waitQuery" then
+        emitOp(c, OP_WAIT_QUERY, intern(c, node.text), node.count)
     elseif kind == "waitSteps" then
         emitOp(c, OP_WAIT, -1, node.number as integer)
     elseif kind == "loop" then
@@ -645,6 +712,8 @@ local record Cursor
     seq: integer
     loopRegs: {integer: integer}
     waitChannel: string
+    waitQuery: string
+    waitCondition: integer
 
     -- Branch tree. A child holds its parent by (slot, generation) so a
     -- recycled slot can never be mistaken for the parent that forked it.
@@ -688,6 +757,13 @@ local record WorldState
     channels: {string: {integer: boolean}}
     pendingSignals: {string}
 
+    -- Query waits work the same way, except a query is a condition rather
+    -- than an edge: a name is marked dirty when its query gains or loses
+    -- entities, and every cursor parked on it re-tests at the next step.
+    queries: {string: tecs.Query}
+    queryWaiters: {string: {integer: boolean}}
+    dirtyQueries: {string: boolean}
+
     ownerIndex: {integer: {integer: boolean}}
 end
 
@@ -710,6 +786,9 @@ local function stateFor(world: World): WorldState
         heapSize = 0,
         channels = {},
         pendingSignals = {},
+        queries = {},
+        queryWaiters = {},
+        dirtyQueries = {},
         ownerIndex = {},
     }
     states[world] = state
@@ -829,14 +908,44 @@ local function allocCursor(state: WorldState): Cursor
     return cursor
 end
 
-local function unlinkChannel(state: WorldState, cursor: Cursor)
-    local channel = cursor.waitChannel
-    if not channel then return end
-    cursor.waitChannel = nil
-    local blocked = state.channels[channel]
+local function park(
+    index: {string: {integer: boolean}},
+    key: string,
+    slot: integer
+)
+    local blocked = index[key]
+    if not blocked then
+        blocked = {}
+        index[key] = blocked
+    end
+    blocked[slot] = true
+end
+
+local function unpark(
+    index: {string: {integer: boolean}},
+    key: string,
+    slot: integer
+)
+    local blocked = index[key]
     if not blocked then return end
-    blocked[cursor.slot] = nil
-    if next(blocked) == nil then state.channels[channel] = nil end
+    blocked[slot] = nil
+    if next(blocked) == nil then index[key] = nil end
+end
+
+-- Drop a cursor from whichever wait index holds it. Every wait that is not
+-- a time lives in one of these, so every exit path goes through here.
+local function unlinkWaits(state: WorldState, cursor: Cursor)
+    local channel = cursor.waitChannel
+    if channel then
+        cursor.waitChannel = nil
+        unpark(state.channels, channel, cursor.slot)
+    end
+    local queryName = cursor.waitQuery
+    if queryName then
+        cursor.waitQuery = nil
+        cursor.waitCondition = nil
+        unpark(state.queryWaiters, queryName, cursor.slot)
+    end
 end
 
 local function linkOwner(state: WorldState, cursor: Cursor)
@@ -919,7 +1028,7 @@ local function retire(state: WorldState, cursor: Cursor, finalState: PlaybackSta
     cursor.state = finalState
     cursor.alive = false
     cursor.joining = false
-    unlinkChannel(state, cursor)
+    unlinkWaits(state, cursor)
     unlinkOwner(state, cursor)
 
     -- A subtree dies from the root down: branches are cancelled first, so
@@ -954,6 +1063,64 @@ end
 
 function sequence.hasAction(world: World, name: string): boolean
     return stateFor(world).actions[name] ~= nil
+end
+
+function sequence.registerQuery(
+    world: World,
+    name: string,
+    descriptor: tecs.Query.Descriptor
+)
+    if type(name) ~= "string" or name == "" then
+        error("sequence.registerQuery requires a non-empty query name", 2)
+    end
+    if type(descriptor) ~= "table" then
+        error("sequence.registerQuery requires a query descriptor", 2)
+    end
+    local state = stateFor(world)
+
+    -- The callbacks only mark the name; the condition is tested once per
+    -- step for every name that moved, not once per entity.
+    local userAdded = descriptor.onEntitiesAdded
+    local userRemoved = descriptor.onEntitiesRemoved
+    local spec: tecs.Query.Descriptor = {}
+    for key, value in pairs(descriptor as {string: any}) do
+        (spec as {string: any})[key] = value
+    end
+    spec.onEntitiesAdded = function(
+        archetype: tecs.Archetype,
+        firstRow: integer,
+        lastRow: integer,
+        count: integer
+    )
+        state.dirtyQueries[name] = true
+        if userAdded then userAdded(archetype, firstRow, lastRow, count) end
+    end
+    spec.onEntitiesRemoved = function(
+        archetype: tecs.Archetype,
+        firstRow: integer,
+        lastRow: integer,
+        count: integer
+    )
+        state.dirtyQueries[name] = true
+        if userRemoved then userRemoved(archetype, firstRow, lastRow, count) end
+    end
+
+    state.queries[name] = world:query(spec)
+    -- Anything already parked on the name re-tests against the new query.
+    state.dirtyQueries[name] = true
+end
+
+function sequence.hasQuery(world: World, name: string): boolean
+    return stateFor(world).queries[name] ~= nil
+end
+
+function sequence.signalOnEvent<T is tecs.Event>(world: World, name: string, event: T)
+    if type(name) ~= "string" or name == "" then
+        error("sequence.signalOnEvent requires a non-empty signal name", 2)
+    end
+    world:observe(0, event, function()
+        sequence.signal(world, name)
+    end)
 end
 
 -------------------------------------------------------------------------------
@@ -1048,12 +1215,25 @@ local function run(
             cursor.pc = cursor.pc + 1
             cursor.waitChannel = channel
             cursor.wakeAt = nil
-            local blocked = state.channels[channel]
-            if not blocked then
-                blocked = {}
-                state.channels[channel] = blocked
+            park(state.channels, channel, cursor.slot)
+            return budget
+
+        elseif op == OP_WAIT_QUERY then
+            local name = consts[a] as string
+            if not state.queries[name] then
+                faultCursor(state, cursor, "unregisteredQuery",
+                    "query '" .. name .. "' is not registered on this world")
+                return budget
             end
-            blocked[cursor.slot] = true
+            cursor.pc = cursor.pc + 1
+            cursor.waitQuery = name
+            cursor.waitCondition = b
+            cursor.wakeAt = nil
+            park(state.queryWaiters, name, cursor.slot)
+            -- Test at the next step rather than here: a spawn or despawn
+            -- from this step is still staged, so the query cannot answer
+            -- for the world this cursor has already asked for.
+            state.dirtyQueries[name] = true
             return budget
 
         elseif op == OP_CALL then
@@ -1287,6 +1467,9 @@ function sequence.status(world: World, handle: sequence.Handle): sequence.Status
         pc = cursor.pc,
         wakeAt = cursor.alive and cursor.wakeAt or nil,
         waitingFor = cursor.alive and cursor.waitChannel or nil,
+        waitingQuery = cursor.alive and cursor.waitQuery or nil,
+        waitingCondition = cursor.alive and cursor.waitQuery
+            and (cursor.waitCondition == 1 and "any" or "empty") or nil,
         branches = branches,
         joining = cursor.joining or false,
         fault = cursor.fault,
@@ -1375,6 +1558,9 @@ function sequence.disassemble(program: sequence.Program): string
                 or string.format("WAIT      %d step(s)", b)
         elseif op == OP_WAIT_SIGNAL then
             text = string.format("WAITSIG   %q", prog.consts[a] as string)
+        elseif op == OP_WAIT_QUERY then
+            text = string.format("WAITQUERY %q %s",
+                prog.consts[a] as string, b == 1 and "any" or "empty")
         elseif op == OP_CALL then
             text = string.format("CALL      %q%s",
                 prog.consts[a] as string, describeArgs(prog.consts[b] as {any}))
@@ -1485,6 +1671,8 @@ local function saveState(world: World): any
                 seq = cursor.seq,
                 loopRegs = cursor.loopRegs,
                 waitChannel = cursor.waitChannel,
+                waitQuery = cursor.waitQuery,
+                waitCondition = cursor.waitCondition,
                 parentSlot = cursor.parentSlot,
                 parentGeneration = cursor.parentGeneration,
                 joining = cursor.joining,
@@ -1528,6 +1716,10 @@ local function loadState(world: World, value: any)
     state.heapSize = 0
     state.channels = {}
     state.pendingSignals = {}
+    -- Registered queries are code, kept like actions; only the parked
+    -- cursors are data.
+    state.queryWaiters = {}
+    state.dirtyQueries = {}
     state.nextSlot = 1
     state.generations = {}
     state.step = 0
@@ -1570,6 +1762,8 @@ local function loadState(world: World, value: any)
                 seq = row.seq as integer,
                 loopRegs = row.loopRegs as {integer: integer},
                 waitChannel = row.waitChannel as string,
+                waitQuery = row.waitQuery as string,
+                waitCondition = row.waitCondition as integer,
                 parentSlot = row.parentSlot as integer,
                 parentGeneration = row.parentGeneration as integer,
                 joining = row.joining as boolean,
@@ -1577,16 +1771,16 @@ local function loadState(world: World, value: any)
             state.cursors[cursor.slot] = cursor
             linkOwner(state, cursor)
             -- Rebuild the wake indexes rather than serializing them. A
-            -- cursor blocked on a signal has no wake time and belongs in its
-            -- channel instead of the heap; one parked at a join belongs in
-            -- neither and is woken by its last branch.
+            -- cursor blocked on a signal or a query has no wake time and
+            -- belongs in its wait index instead of the heap; one parked at a
+            -- join belongs in neither and is woken by its last branch.
             if cursor.waitChannel then
-                local blocked = state.channels[cursor.waitChannel]
-                if not blocked then
-                    blocked = {}
-                    state.channels[cursor.waitChannel] = blocked
-                end
-                blocked[cursor.slot] = true
+                park(state.channels, cursor.waitChannel, cursor.slot)
+            elseif cursor.waitQuery then
+                park(state.queryWaiters, cursor.waitQuery, cursor.slot)
+                -- The world this cursor parked against is gone, so its
+                -- condition is re-tested against the restored one.
+                state.dirtyQueries[cursor.waitQuery] = true
             elseif not cursor.joining then
                 heapPush(state, {
                     wakeAt = cursor.wakeAt,
@@ -1667,7 +1861,40 @@ local function deliverSignals(state: WorldState)
             for j = 1, #slots do
                 local cursor = state.cursors[slots[j]]
                 if cursor and cursor.alive then
-                    unlinkChannel(state, cursor)
+                    unlinkWaits(state, cursor)
+                    schedule(state, cursor, state.step)
+                end
+            end
+        end
+    end
+end
+
+-- Re-test every query name that gained or lost entities since the last step,
+-- and wake the cursors parked on it whose condition now holds. Names that
+-- did not move are never looked at, so the cost tracks world churn rather
+-- than the number of waiters.
+local function deliverQueryWaits(state: WorldState)
+    local dirty = state.dirtyQueries
+    if next(dirty) == nil then return end
+    state.dirtyQueries = {}
+
+    local names: {string} = {}
+    for name in pairs(dirty) do names[#names + 1] = name end
+    table.sort(names)
+
+    for i = 1, #names do
+        local name = names[i]
+        local waiting = state.queryWaiters[name]
+        local query = state.queries[name]
+        if waiting and query then
+            local matched = query:count() > 0 and 1 or 0
+            local slots: {integer} = {}
+            for slot in pairs(waiting) do slots[#slots + 1] = slot end
+            table.sort(slots)
+            for j = 1, #slots do
+                local cursor = state.cursors[slots[j]]
+                if cursor and cursor.alive and cursor.waitCondition == matched then
+                    unlinkWaits(state, cursor)
                     schedule(state, cursor, state.step)
                 end
             end
@@ -1680,6 +1907,7 @@ local function tick(world: World, state: WorldState)
     local step = state.step
 
     deliverSignals(state)
+    deliverQueryWaits(state)
 
     while state.heapSize > 0 do
         local top = state.heap[1]

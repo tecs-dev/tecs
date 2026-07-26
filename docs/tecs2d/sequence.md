@@ -10,9 +10,9 @@ spawn waves, tutorials, and scripted encounters are naturally written as corouti
 suspended coroutine lives in the Lua stack, which cannot be serialized. A sequence keeps its
 position as data, so it snapshots, rewinds, and hot reloads like any other game state.
 
-::: info Orchestration is still to come
-Programs, actions, bindings, playback, signals, branches, faults, snapshots, and disassembly all
-work. Event and query waits and tween composition land in later phases; see [Planned](#planned).
+::: info Tween composition is still to come
+Programs, actions, bindings, playback, signals, query waits, branches, faults, snapshots, and
+disassembly all work. Tween composition lands in a later phase; see [Planned](#planned).
 :::
 
 ## Quick start
@@ -71,6 +71,7 @@ and an explicit migration step. That is deliberately not supported.
 | `wait(seconds)` | Wait a duration |
 | `waitSteps(n)` | Wait a whole number of fixed steps |
 | `waitSignal(name)` | Block until a named signal is raised |
+| `waitQuery(name, cond)` | Block until a registered query matches, or stops matching |
 | `emit(event, ...)` | Emit a `sequence.Event` at address 0 |
 | `loop(count, nodes)` | Repeat a block, or forever when `count` is nil |
 | `fork(nodes)` | Start a branch that runs alongside the rest of the program |
@@ -201,6 +202,7 @@ Prefer `waitSteps(0)` in a loop body over raising the budget.
 | `actionError` | A registered action raised |
 | `budgetExceeded` | The per-step instruction budget was exhausted |
 | `branchFaulted` | A forked branch faulted |
+| `unregisteredQuery` | A `waitQuery` named a query not registered on this world |
 
 A faulted playback stops and retains its `pc`, so the failure is inspectable rather than silent.
 
@@ -234,6 +236,50 @@ and blocked cursors both survive a snapshot.
 
 `sequence.waitingOn(world, name)` reports how many playbacks are parked on a name, which is useful
 in tests and in the debugger.
+
+### Signals from events
+
+An ECS event is an edge too, so it is wired to a signal rather than given a separate kind of wait:
+
+```teal
+sequence.signalOnEvent(world, "boss.died", BossDied)
+```
+
+Every `BossDied` emitted at address 0 now raises `boss.died`, delivered next step like any other
+signal.
+
+## Query waits
+
+`waitQuery` blocks on a **condition on the world** rather than an edge:
+
+```teal
+sequence.registerQuery(world, "game.adds", {include = {Add}})
+
+local fight = sequence.define("game.bossFight", {
+    sequence.call("game.spawnAdds"),
+    sequence.waitQuery("game.adds", "empty"),
+    sequence.call("game.phaseTwo"),
+})
+```
+
+The condition is `"any"` (at least one entity matches) or `"empty"` (none do). Because it is a
+condition and not an edge, **a wait whose condition already holds resumes** instead of waiting
+forever for a transition that has already happened — the failure mode that makes "wait until the
+wave is cleared" hang when the wave was never spawned.
+
+**The condition is tested at the start of the next fixed step, never at the instruction itself.**
+Sequences advance first in a fixed iteration, so at the instruction the world still reflects the
+previous one: nothing the rest of this iteration does has happened yet, and any mutation staged
+inside a deferred scope has not landed. Testing one step later gives the condition a settled world.
+A query wait therefore costs at least one step, including one that resolves immediately.
+
+Waits stay event driven: the registered query subscribes to archetype transitions, and only names
+that gained or lost entities since the last step are re-tested. Registration is startup work — a
+name registered twice keeps the newer query, and the replaced one holds its subscriptions for the
+life of the world.
+
+Naming a query that is not registered faults with `unregisteredQuery`. A parked wait survives a
+snapshot and is re-tested against the **restored** world, not the one it parked in.
 
 ## Branches
 
@@ -297,9 +343,8 @@ from `status` or a fault points at a specific step.
 
 ## Planned
 
-Later phases add orchestration and tween composition:
+A later phase adds tween composition:
 
-- Event and query waits, so a sequence can block on an ECS event or a query transition
 - `playTween` / `waitTween`, waiting on a specific tween playback and resuming on completion,
   cancellation, channel replacement, or binding destruction
 
