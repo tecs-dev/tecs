@@ -237,7 +237,6 @@ function cursors.releaseTween(state: WorldState, cursor: Cursor)
         started.awaitedBy = nil
     end
     cursor.tweenPlayback = nil
-    cursor.tweenEntity = nil
 end
 
 -- Channels are per owner: one entity's "move" is not another's. A world
@@ -285,7 +284,6 @@ local function wakeAwaiter(
         or (finalState == "completed" and "completed" or "cancelled")
     waiter.waitingTween = false
     waiter.tweenPlayback = nil
-    waiter.tweenEntity = nil
     cursors.schedule(state, waiter, cursors.clockOf(state, waiter).step)
 end
 
@@ -363,7 +361,6 @@ function cursors.retire(
 )
     if not cursor.alive then return end
     cursor.state = finalState
-    cursor.endReason = reason
     cursor.alive = false
     cursor.joining = false
     cursors.deactivate(state, cursor)

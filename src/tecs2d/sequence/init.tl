@@ -215,8 +215,14 @@ local record sequence
     ---
     --- The compiled slots travel in the program's const pool, so a timeline
     --- is snapshot-safe for the same reason every other program is. Play it
-    --- with `play`, giving the entity it animates as the `owner` and its
-    --- mode, count, speed, and delay as `params`.
+    --- with `play`, giving the entity it animates as the `owner`.
+    ---
+    --- It reads four `params`, all optional:
+    ---
+    ---   mode   "once" (default), "loop", or "pingPong"
+    ---   count  passes for a finite loop or ping-pong; endless without it
+    ---   speed  playback multiplier, defaulting to 1
+    ---   delay  seconds to wait before the first frame
     ---
     ---     local fade = sequence.timeline("game.fade", {
     ---         sequence.tweenTo(0.4, "quadOut", "color.a", 0),

@@ -103,7 +103,6 @@ local record Compiler
     code: {integer}
     consts: {any}
     constIndex: {any: integer}
-    loopSlots: integer
     loopCounts: {integer: integer}
 end
 
@@ -159,7 +158,6 @@ local function compileNode(c: Compiler, node: NodeImpl, depth: integer)
         emitOp(c, OP_WAIT, -1, node.number as integer)
     elseif kind == "loop" then
         local slot = depth + 1
-        if slot > c.loopSlots then c.loopSlots = slot end
         local top = floor(#c.code / STRIDE)
         compileBlock(c, node.nodes, slot)
         -- A nil count loops forever; the register is unused in that case.
@@ -232,7 +230,6 @@ function program.compile(
         code = {},
         consts = {},
         constIndex = {},
-        loopSlots = 0,
         loopCounts = {},
     }
     compileBlock(c, nodes, 0)
@@ -244,7 +241,6 @@ function program.compile(
         clock = clock,
         code = c.code,
         consts = c.consts,
-        loopSlots = c.loopSlots,
         loopCounts = c.loopCounts,
         bindingArgs = {},
     }

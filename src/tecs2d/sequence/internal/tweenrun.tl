@@ -69,31 +69,10 @@ end
 -- Construction
 -------------------------------------------------------------------------------
 
-local function playbackMode(
-    mode?: PlaybackMode, count?: integer, finite?: boolean
-): PlaybackMode, integer
-    local resolved <const> = mode or "once"
-    if resolved ~= "once" and resolved ~= "loop" and resolved ~= "pingPong" then
-        error("Tween mode must be once, loop, or pingPong")
-    end
-    if resolved == "once" then
-        if count ~= nil then
-            error("Tween count is only valid with loop or pingPong mode")
-        end
-        return resolved, 1
-    end
-    if count ~= nil then
-        if count <= 0 then error("Tween count must be greater than 0") end
-        return resolved, count
-    end
-    if finite then error("Nested loop and pingPong runs require a finite count") end
-    return resolved, -1
-end
-
 function tweenrun.resolveOptions(
     params: {string: any}, totalDuration: number
 ): PlaybackMode, integer, number, number
-    local mode, passCount = playbackMode(
+    local mode, passCount = tweeneval.playbackMode(
         params and params.mode as PlaybackMode,
         params and params.count as integer)
     local speed <const> = (params and params.speed as number) or 1

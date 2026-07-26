@@ -195,7 +195,6 @@ local function run(
                 seqcursors.claimChannel(state, started)
                 seqcursors.schedule(state, started,
                     seqcursors.clockOf(state, started).step + 1)
-                cursor.tweenEntity = id
                 cursor.tweenPlayback =
                     seqcursors.packHandle(started.slot, started.generation)
             end
@@ -280,7 +279,6 @@ local function run(
                 cursor.tweenOutcome = "cancelled"
             end
             cursor.tweenPlayback = nil
-            cursor.tweenEntity = nil
 
         elseif op == seqprogram.CALL then
             local name = consts[a] as string

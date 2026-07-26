@@ -307,7 +307,6 @@ local record ProgramImpl is Program
     clock: ClockId
     code: {integer}
     consts: {any}
-    loopSlots: integer
     loopCounts: {integer: integer}
     -- Const indexes whose argument list holds a `bind` reference, so a call
     -- with plain constants hands its arguments over without copying them.
@@ -373,7 +372,6 @@ local record Cursor
 
     -- The playback the last playTween started, as a handle, and how it ended
     -- once it has. The cursor it names carries the back reference.
-    tweenEntity: integer
     tweenPlayback: integer
     tweenOutcome: TweenOutcome
     waitingTween: boolean
@@ -388,10 +386,6 @@ local record Cursor
     --- channel this playback occupies on its owner.
     awaitedBy: integer
     channel: string
-
-    --- Why this playback ended, when something more specific than its final
-    --- state is known. Read by whatever was waiting for it.
-    endReason: TweenOutcome
 
     -- Branch tree. A child holds its parent by (slot, generation) so a
     -- recycled slot can never be mistaken for the parent that forked it.

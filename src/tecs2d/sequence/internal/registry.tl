@@ -93,7 +93,6 @@ function registry.restore(data: {string: any}): ProgramImpl
         clock = (data.clock as seqtypes.ClockId) or "fixed",
         code = data.code as {integer},
         consts = data.consts as {any},
-        loopSlots = data.loopSlots as integer,
         loopCounts = (data.loopCounts as {integer: integer}) or {},
         bindingArgs = {},
     }

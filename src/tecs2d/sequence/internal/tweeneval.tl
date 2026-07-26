@@ -227,18 +227,6 @@ local type TimelineNode = {any}
 --- Sequential timeline operations.
 local type TimelineSpec = {TimelineNode}
 
---- Root playback options.
-local record PlaybackOptions
-    --- Playback mode. Defaults to "once".
-    mode: PlaybackMode
-    --- Pass count for finite loop/ping-pong playback.
-    count: integer
-    --- Playback speed multiplier. Defaults to 1.
-    speed: number
-    --- Delay before playback begins, in seconds.
-    delay: number
-end
-
 --- A named event the timeline emits when the cursor reaches its time.
 local record EmitSlot
     time: number
@@ -256,11 +244,9 @@ local record RunSlot
     passCount: integer
 end
 
---- An immutable compiled tween timeline.
-local interface Timeline
-    --- Play this timeline on an entity.
-    play: function(self: Timeline, world: World, entity: integer, options?: PlaybackOptions): integer
-end
+--- An immutable compiled tween timeline. Playing one is `sequence.play` on
+--- the program it compiles to, so there is nothing to call on it directly.
+local interface Timeline end
 
 --- Runtime representation of a compiled tween timeline.
 local record TimelineImpl is Timeline
@@ -428,7 +414,6 @@ local record tweeneval
     type Targets = Targets
     type Sources = Sources
     type PlaybackMode = PlaybackMode
-    type PlaybackOptions = PlaybackOptions
     type RunOptions = RunOptions
     type TimelineNode = TimelineNode
     type TimelineSpec = TimelineSpec
@@ -477,11 +462,6 @@ local record tweeneval
         mode?: PlaybackMode, count?: integer, finite?: boolean
     ): PlaybackMode, integer
 
-    --- Methods every compiled timeline answers to, as one shared table the
-    --- timeline metatable indexes. Playback owns `play` and installs it here,
-    --- so the compiled form stays free of the runtime that drives it.
-    timelineMethods: {string: any}
-
     --- Turn a compiled timeline into plain data, and back. The const pool of
     --- a program carries the first form; the evaluator reads the second.
     serializeTimeline: function(tl: Timeline): {string:any}
@@ -502,13 +482,8 @@ local record tweeneval
     --- The tracking-source constructors.
     source: Sources
 
-    --- Every built-in easing keyed by its name, and the reverse lookup that
-    --- turns a curve back into the name a program can carry.
+    --- Every built-in easing keyed by its name.
     easings: {EasingName: EasingFunction}
-    easingNames: {EasingFunction: EasingName}
-
-    --- Every built-in target keyed by its stable serialized id.
-    builtinTargets: {TargetName: TargetImpl}
 
     --- Resolve an authored easing, given either as a name or as one of the
     --- built-in functions, to both.
@@ -925,8 +900,7 @@ end
 -- The compiled timeline, and its codec
 -------------------------------------------------------------------------------
 
-local TIMELINE_METHODS: {string: any} = {}
-local TIMELINE_MT <const>: metatable<TimelineImpl> = { __index = TIMELINE_METHODS }
+local TIMELINE_MT <const>: metatable<TimelineImpl> = {}
 
 function tweeneval.asTimeline(tl: TimelineImpl): Timeline
     return setmetatable(tl, TIMELINE_MT) as Timeline
@@ -1321,12 +1295,9 @@ function tweeneval.clearState(state: {TweenSlotState}, count: integer)
     ffi.fill(state as ffi.CData, STATE_BYTES * count, 0)
 end
 
-tweeneval.timelineMethods = TIMELINE_METHODS
 tweeneval.easing = easing
 tweeneval.target = targets
 tweeneval.source = source
 tweeneval.easings = EASINGS
-tweeneval.easingNames = EASING_NAMES
-tweeneval.builtinTargets = BUILTIN_TARGETS
 
 return tweeneval

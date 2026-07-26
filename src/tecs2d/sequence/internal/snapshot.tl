@@ -123,7 +123,6 @@ local function serializeProgram(prog: ProgramImpl): {string: any}
         code = prog.code,
         consts = prog.consts,
         clock = prog.clock,
-        loopSlots = prog.loopSlots,
         loopCounts = prog.loopCounts,
     }
 end
@@ -183,7 +182,6 @@ function snapshot.save(world: World): any
                 waitChannel = cursor.waitChannel,
                 waitQuery = cursor.waitQuery,
                 waitCondition = cursor.waitCondition,
-                tweenEntity = cursor.tweenEntity,
                 tweenPlayback = cursor.tweenPlayback,
                 tweenOutcome = cursor.tweenOutcome,
                 waitingTween = cursor.waitingTween,
@@ -328,7 +326,6 @@ function snapshot.load(world: World, value: any)
                 waitChannel = row.waitChannel as string,
                 waitQuery = row.waitQuery as string,
                 waitCondition = row.waitCondition as integer,
-                tweenEntity = row.tweenEntity as integer,
                 tweenPlayback = row.tweenPlayback as integer,
                 tweenOutcome = row.tweenOutcome as TweenOutcome,
                 waitingTween = row.waitingTween as boolean,
