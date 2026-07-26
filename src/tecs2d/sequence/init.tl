@@ -31,6 +31,8 @@ local seqvm <const> = require("tecs2d.sequence.internal.vm")
 local seqcursors <const> = require("tecs2d.sequence.internal.cursors")
 local seqevaluators <const> = require("tecs2d.sequence.internal.evaluators")
 local seqjson <const> = require("tecs2d.sequence.internal.json")
+local seqtweenrun <const> = require("tecs2d.sequence.internal.tweenrun")
+local tweeneval <const> = require("tecs2d.sequence.internal.tweeneval")
 
 local type World = tecs.World
 
@@ -125,6 +127,33 @@ local record sequence
     --- `"frame"` counts gameplay frames and keeps running while the game is
     --- frozen and stepping, which is what scripted input needs.
     define: function(name: string, nodes: {Node}, options?: DefineOptions): Program
+
+    --- Options for `timeline`.
+    record TimelineOptions
+        --- Clock the timeline is evaluated on. Defaults to `"presentation"`,
+        --- which moves at the display's rate. `"fixed"` makes it
+        --- deterministic from a snapshot alone, at the cost of stepping at
+        --- the simulation's rate: only `Transform` is interpolated between
+        --- fixed steps, so a fixed-clock tween of anything else visibly
+        --- steps. If the simulation can observe the value, put it on
+        --- `"fixed"`.
+        clock: ClockId
+    end
+
+    --- Compile a tween timeline into a program under a stable name.
+    ---
+    --- The compiled slots travel in the program's const pool, so a timeline
+    --- is snapshot-safe for the same reason every other program is. Play it
+    --- with `play`, giving the entity it animates as the `owner` and its
+    --- mode, count, speed, and delay as `params`.
+    ---
+    ---     local fade = sequence.timeline("game.fade", {
+    ---         sequence.tweenTo(0.4, "quadOut", "color.a", 0),
+    ---     })
+    ---     sequence.play(world, fade, {owner = e, params = {delay = 0.2}})
+    timeline: function(
+        name: string, spec: tween.TimelineSpec, options?: TimelineOptions
+    ): Program
 
     --- Look up a defined program: the newest version, or a specific one.
     --- Every version a playback still runs stays reachable.
@@ -512,6 +541,23 @@ function sequence.dataOps(): {string}
     return seqjson.ops()
 end
 
+function sequence.timeline(
+    name: string,
+    spec: tween.TimelineSpec,
+    options?: sequence.TimelineOptions
+): sequence.Program
+    local clock: seqtypes.ClockId = options and options.clock or "presentation"
+    if clock ~= "fixed" and clock ~= "presentation" then
+        error("sequence.timeline clock must be 'fixed' or 'presentation'", 2)
+    end
+    local compiled <const> = tween.timeline(spec)
+    -- The serialized form is what the const pool carries; the evaluator
+    -- resolves it back once, when the first playback of it starts.
+    return sequence.define(name, {
+        sequence.eval(seqtweenrun.EVALUATOR, tweeneval.serializeTimeline(compiled)),
+    }, {clock = clock})
+end
+
 function sequence.program(name: string, version?: integer): sequence.Program
     if version then return seqregistry.version(name, version) end
     return seqregistry.newest(name)
@@ -813,6 +859,10 @@ function sequence.plugin(world: World)
     if installed[world] then return end
     installed[world] = true
     local state = seqcursors.stateFor(world)
+
+    -- Evaluators are global, so this registers once however many worlds
+    -- install the sequencer.
+    seqtweenrun.install()
 
     world:addSystem({
         name = "sequence.Advance",

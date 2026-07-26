@@ -25,11 +25,17 @@ local record clock
         --- playback left behind.
         waiting: wakeheap.Heap
 
-        --- Playbacks evaluating rather than waiting, as a dense array of
-        --- slots walked every tick. They never enter the heap: there is no
-        --- wake time to order them by, and paying log n per tick to schedule
-        --- something that runs every tick anyway is the cost this avoids.
-        active: {integer}
+        --- Playbacks evaluating rather than waiting, as a dense array walked
+        --- every tick. They never enter the heap: there is no wake time to
+        --- order them by, and paying log n per tick to schedule something
+        --- that runs every tick anyway is the cost this avoids.
+        ---
+        --- It holds the cursors themselves rather than their slots. This is
+        --- the one array walked per evaluating playback per tick, so it
+        --- carries what the walk needs instead of a key to look it up.
+        --- `cursors.activate` owns the bookkeeping, because only it knows
+        --- what a cursor is.
+        active: {any}
     end
 
     --- A clock at step zero with nothing waiting.
@@ -53,11 +59,6 @@ local record clock
     --- Remove the earliest entry, returning its seq and handle.
     take: function(c: Clock): integer, integer
 
-    --- Add a slot to the evaluating set. Safe to call twice.
-    activate: function(c: Clock, slot: integer)
-
-    --- Drop a slot from the evaluating set.
-    deactivate: function(c: Clock, slot: integer)
 end
 
 function clock.new(): clock.Clock
@@ -70,27 +71,6 @@ function clock.clear(c: clock.Clock)
     wakeheap.clear(c.waiting)
     local active <const> = c.active
     for i = #active, 1, -1 do active[i] = nil end
-end
-
-function clock.activate(c: clock.Clock, slot: integer)
-    local active <const> = c.active
-    for i = 1, #active do
-        if active[i] == slot then return end
-    end
-    active[#active + 1] = slot
-end
-
-function clock.deactivate(c: clock.Clock, slot: integer)
-    local active <const> = c.active
-    for i = 1, #active do
-        if active[i] == slot then
-            -- Order among evaluating playbacks is not observable -- they all
-            -- run every tick -- so the last one fills the hole.
-            active[i] = active[#active]
-            active[#active] = nil
-            return
-        end
-    end
 end
 
 function clock.schedule(c: clock.Clock, wakeAt: integer, handle: integer): integer

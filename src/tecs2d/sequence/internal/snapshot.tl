@@ -200,7 +200,8 @@ local function restoreEvaluator(
         and evaluator.load(prog, cursor.evalData, saved)
         or (evaluator.newState
             and evaluator.newState(prog, cursor.evalData, cursor) or nil)
-    seqclock.activate(seqcursors.clockOf(state, cursor), cursor.slot)
+    cursor.evalImpl = evaluator
+    seqcursors.activate(state, cursor)
 end
 
 function snapshot.load(world: World, value: any)

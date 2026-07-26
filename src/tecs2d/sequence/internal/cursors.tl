@@ -42,6 +42,9 @@ local record cursors
     alloc: function(state: WorldState): Cursor
     schedule: function(state: WorldState, cursor: Cursor, wakeAt: integer)
 
+    activate: function(state: WorldState, cursor: Cursor)
+    deactivate: function(state: WorldState, cursor: Cursor)
+
     park: function(index: {string: {integer: boolean}}, key: string, slot: integer)
     unpark: function(index: {string: {integer: boolean}}, key: string, slot: integer)
     unlinkWaits: function(state: WorldState, cursor: Cursor)
@@ -141,6 +144,34 @@ function cursors.alloc(state: WorldState): Cursor
     }
     state.cursors[slot] = cursor
     return cursor
+end
+
+-- Join and leave the evaluating set. A cursor remembers where it sits, so
+-- leaving is a swap with the last entry rather than a scan: 20k evaluating
+-- playbacks would otherwise make every completion linear in the rest.
+function cursors.activate(state: WorldState, cursor: Cursor)
+    if cursor.activeIndex then return end
+    local active <const> = cursors.clockOf(state, cursor).active
+    local at <const> = #active + 1
+    active[at] = cursor
+    cursor.activeIndex = at
+end
+
+function cursors.deactivate(state: WorldState, cursor: Cursor)
+    local at <const> = cursor.activeIndex
+    if not at then return end
+    cursor.activeIndex = nil
+    local active <const> = cursors.clockOf(state, cursor).active
+    local last <const> = #active
+    -- Order among evaluating playbacks is not observable -- they all run
+    -- every tick -- so the last one fills the hole. The tick walks backwards,
+    -- so the entry that moves down has already been visited.
+    if at ~= last then
+        local moved <const> = active[last] as Cursor
+        active[at] = moved
+        moved.activeIndex = at
+    end
+    active[last] = nil
 end
 
 function cursors.park(
@@ -270,6 +301,7 @@ function cursors.retire(state: WorldState, cursor: Cursor, finalState: PlaybackS
     cursor.state = finalState
     cursor.alive = false
     cursor.joining = false
+    cursors.deactivate(state, cursor)
     cursors.unlinkWaits(state, cursor)
     cursors.releaseTween(state, cursor)
     unlinkOwner(state, cursor)

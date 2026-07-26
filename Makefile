@@ -9,7 +9,7 @@
 	example-save-game example-interpolation example-sequence \
 	newrock test-rockspec typecheck rebuild help rockspecs docs docs-dev docs-debug \
 	docs-descriptions \
-	json-bench ecs-bench snapshot-bench bitset-bench download-love12 check-love12 \
+	json-bench ecs-bench snapshot-bench tween-bench bitset-bench download-love12 check-love12 \
 	cli-build cli-test cli-check cli-package
 
 .SILENT: clean test test-no-ffi find-busted
@@ -564,6 +564,9 @@ json-bench: build
 # (defaults to ~/projects/evolved.lua).
 ecs-bench: build
 	@cd benches/ecs-bench && BENCH_CASE="$(CASE)" BENCH_VARIANTS="$(VARIANTS)" BENCH_PARAMS="$(PARAMS)" luajit main.lua
+
+tween-bench: build
+	@cd benches/tween-bench && BENCH_CASE="$(CASE)" BENCH_VARIANTS="$(VARIANTS)" BENCH_PARAMS="$(PARAMS)" luajit main.lua
 
 snapshot-bench: build
 	@cd benches/snapshot-bench && BENCH_CASE="$(CASE)" BENCH_VARIANTS="$(VARIANTS)" BENCH_PARAMS="$(PARAMS)" luajit main.lua

@@ -341,6 +341,12 @@ local record Cursor
     evalIndex: integer
     evalData: any
 
+    --- The registered evaluator itself, held rather than looked up by name,
+    --- and where the cursor sits in its clock's active array. Both exist so
+    --- the per-tick walk touches no hash table at all.
+    evalImpl: Evaluator
+    activeIndex: integer
+
     owner: integer
     bindings: {string: integer}
     params: {string: any}

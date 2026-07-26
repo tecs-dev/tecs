@@ -199,11 +199,29 @@ local function run(
             cursor.pc = cursor.pc + 1
             cursor.evaluator = name
             cursor.evalIndex = b >= 0 and b or nil
-            cursor.evalData = b >= 0 and seqevaluators.resolve(prog, evaluator, b) or nil
-            cursor.evalState = evaluator.newState
-                and evaluator.newState(prog, cursor.evalData, cursor) or nil
+            if b >= 0 then
+                -- Resolving and building state both run the evaluator's own
+                -- code, so both fault the playback rather than the tick.
+                local ok, resolved = pcall(seqevaluators.resolve, prog, evaluator, b)
+                    as (boolean, any)
+                if not ok then
+                    seqcursors.fault(state, cursor, "actionError", tostring(resolved))
+                    return budget
+                end
+                cursor.evalData = resolved
+            end
+            if evaluator.newState then
+                local ok, built = pcall(
+                    evaluator.newState, prog, cursor.evalData, cursor) as (boolean, any)
+                if not ok then
+                    seqcursors.fault(state, cursor, "actionError", tostring(built))
+                    return budget
+                end
+                cursor.evalState = built
+            end
+            cursor.evalImpl = evaluator
             cursor.wakeAt = nil
-            seqclock.activate(seqcursors.clockOf(state, cursor), cursor.slot)
+            seqcursors.activate(state, cursor)
             return budget
 
         elseif op == seqprogram.WAIT_TWEEN then
@@ -431,39 +449,71 @@ local function deliverTweenWaits(world: World, state: WorldState)
     end
 end
 
--- Everything evaluating on this clock, stepped once. Finished cursors leave
--- the set and carry on at the instruction after their eval; the walk is
--- backwards so removing one does not skip its neighbour.
-local function stepActive(world: World, state: WorldState, clock: seqclock.Clock, dt: number)
+-- Everything evaluating on this clock, stepped once. The walk is backwards so
+-- that a cursor leaving the set, which swaps the last entry into its place,
+-- cannot make the walk skip its neighbour.
+--
+-- The loop below is the one piece of this module that runs per playback per
+-- frame rather than per playback per wait, so it is written to touch nothing
+-- but fields: the cursor is the array entry, and the evaluator is held on the
+-- cursor. A hash lookup here costs more than the interpolation it guards.
+local walkWorld: World
+local walkState: WorldState
+local walkClock: seqclock.Clock
+local walkDt: number
+local walkAt: integer
+local walkCursor: Cursor
+
+local function walkActive()
+    local state <const> = walkState
+    local clock <const> = walkClock
+    local world <const> = walkWorld
+    local dt <const> = walkDt
     local active <const> = clock.active
-    for i = #active, 1, -1 do
-        local cursor = state.cursors[active[i]]
-        if not cursor or not cursor.alive then
-            seqclock.deactivate(clock, active[i])
-        elseif cursor.state == "running" then
-            local evaluator <const> = seqevaluators.get(cursor.evaluator)
-            local done: boolean
-            if evaluator then
-                local ok, result = pcall(evaluator.step, world, cursor, dt) as (boolean, any)
-                if not ok then
-                    seqcursors.fault(state, cursor, "actionError", tostring(result))
-                    done = false
-                else
-                    done = result as boolean
-                end
-            else
-                done = true
-            end
+    while walkAt >= 1 do
+        local cursor <const> = active[walkAt] as Cursor
+        walkCursor = cursor
+        if cursor.state == "running" then
+            local evaluator <const> = cursor.evalImpl
+            local done = evaluator == nil or evaluator.step(world, cursor, dt)
             if done and cursor.alive then
-                seqclock.deactivate(clock, cursor.slot)
+                seqcursors.deactivate(state, cursor)
                 cursor.evaluator = nil
+                cursor.evalImpl = nil
                 cursor.evalState = nil
                 cursor.evalIndex = nil
                 cursor.evalData = nil
                 seqcursors.schedule(state, cursor, clock.step)
             end
         end
+        walkAt = walkAt - 1
     end
+end
+
+-- An evaluator that raises faults its own playback and the walk carries on,
+-- but protecting each step separately would put a pcall in the hot loop and
+-- cost more than everything it guards. One pcall covers the whole walk, and a
+-- raise resumes it below the cursor that caused it.
+local function stepActive(world: World, state: WorldState, clock: seqclock.Clock, dt: number)
+    walkAt = #clock.active
+    if walkAt == 0 then return end
+    walkWorld, walkState, walkClock, walkDt = world, state, clock, dt
+    while walkAt >= 1 do
+        local ok, err = pcall(walkActive) as (boolean, any)
+        if ok then break end
+        local cursor <const> = walkCursor
+        if cursor and cursor.alive then
+            seqcursors.fault(state, cursor, "actionError", tostring(err))
+        end
+        -- Faulting retires the cursor, which fills its place from the end of
+        -- the array, so the walk resumes at the same index rather than past
+        -- the entry that just moved into it.
+        local active <const> = clock.active
+        if walkAt > #active or active[walkAt] == cursor then
+            walkAt = walkAt - 1
+        end
+    end
+    walkWorld, walkState, walkClock, walkCursor = nil, nil, nil, nil
 end
 
 function vm.tick(world: World, state: WorldState, clockId: seqtypes.ClockId, dt?: number)

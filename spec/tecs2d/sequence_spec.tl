@@ -1717,6 +1717,172 @@ describe("tecs2d.sequence", function()
         end)
     end)
 
+    -- A timeline compiled to a program has to animate exactly what the tween
+    -- runtime animates. Every case here plays both and compares the numbers.
+    describe("timelines as programs", function()
+        local Transform <const> = tecs.builtins.Transform
+
+        -- The comparison needs both runtimes in the same world.
+        before_each(function()
+            world:addPlugin(tween.plugin)
+        end)
+
+        local function spawn(): integer
+            return world:spawn(Transform(0, 0, 0, 1))
+        end
+
+        local function x(entity: integer): number
+            return world:get(entity, Transform).x
+        end
+
+        -- Play the same spec both ways and advance them together. `play`
+        -- schedules its first instruction one tick out, so the first update
+        -- lands the eval and the two are in step from there.
+        local function both(spec: tween.TimelineSpec, params?: {string: any}): integer, integer
+            local legacy <const> = spawn()
+            local merged <const> = spawn()
+            tween.timeline(spec):play(world, legacy,
+                params as tween.PlaybackOptions)
+            sequence.play(world, sequence.timeline(uniqueName(), spec),
+                {owner = merged, params = params})
+            world:update(0)
+            return legacy, merged
+        end
+
+        it("moves a value the same way the tween runtime does", function()
+            local legacy, merged = both({
+                tween.to(1.0, tween.quadOut, tween.translateX, 100),
+            })
+            for _ = 1, 12 do
+                world:update(1 / 30)
+                luassert.is_near(x(legacy), x(merged), 1e-9)
+            end
+            luassert.is_true(x(merged) > 0, "it actually moved")
+        end)
+
+        it("matches on a parallel timeline with several slots", function()
+            local legacy, merged = both({
+                tween.parallel(
+                    tween.to(0.8, tween.sineInOut, tween.translateX, 60),
+                    tween.to(0.5, tween.linear, tween.translateY, 30),
+                    tween.to(0.9, tween.backOut, tween.rotation, 2)),
+            })
+            for _ = 1, 20 do
+                world:update(1 / 60)
+                luassert.is_near(x(legacy), x(merged), 1e-9)
+            end
+            local a <const> = world:get(legacy, Transform)
+            local b <const> = world:get(merged, Transform)
+            luassert.is_near(a.y, b.y, 1e-9)
+            luassert.is_near(a.rotation, b.rotation, 1e-9)
+        end)
+
+        it("matches a nested run", function()
+            local child <const> = tween.timeline({
+                tween.to(0.25, tween.linear, tween.translateX, 10),
+            })
+            local legacy, merged = both({
+                tween.wait(0.1),
+                tween.run(child, {mode = "loop", count = 3}),
+            })
+            for _ = 1, 30 do
+                world:update(1 / 60)
+                luassert.is_near(x(legacy), x(merged), 1e-9)
+            end
+        end)
+
+        it("takes mode, count, speed, and delay from params", function()
+            local legacy, merged = both({
+                tween.to(0.4, tween.linear, tween.translateX, 50),
+            }, {mode = "pingPong", count = 2, speed = 2, delay = 0.2})
+            for _ = 1, 40 do
+                world:update(1 / 60)
+                luassert.is_near(x(legacy), x(merged), 1e-9)
+            end
+        end)
+
+        it("rejects playback params a timeline cannot run", function()
+            local prog = sequence.timeline(uniqueName(), {
+                tween.to(0.2, tween.linear, tween.translateX, 1),
+            })
+            local handle = sequence.play(world, prog,
+                {owner = spawn(), params = {speed = 0}})
+
+            world:update(0)
+            luassert.equals("faulted", sequence.status(world, handle).state)
+        end)
+
+        it("delivers an authored emit as a sequence event", function()
+            local seen: {string} = {}
+            world:observe(0, sequence.Event, function(e: sequence.Event)
+                seen[#seen + 1] = e.name
+            end)
+            local entity <const> = spawn()
+            sequence.play(world, sequence.timeline(uniqueName(), {
+                tween.to(0.1, tween.linear, tween.translateX, 5),
+                tween.emit("halfway"),
+                tween.to(0.1, tween.linear, tween.translateX, 10),
+            }), {owner = entity})
+
+            for _ = 1, 10 do world:update(1 / 60) end
+            luassert.same({"halfway"}, seen)
+        end)
+
+        it("completes the playback when the timeline ends", function()
+            local handle = sequence.play(world,
+                sequence.timeline(uniqueName(), {
+                    tween.to(0.1, tween.linear, tween.translateX, 5),
+                }), {owner = spawn()})
+
+            world:update(0)
+            luassert.equals("running", sequence.status(world, handle).state)
+            for _ = 1, 10 do world:update(1 / 60) end
+            luassert.equals("completed", sequence.status(world, handle).state)
+        end)
+
+        it("resumes mid-timeline after a snapshot", function()
+            local entity <const> = spawn()
+            sequence.play(world, sequence.timeline(uniqueName(), {
+                tween.to(1.0, tween.linear, tween.translateX, 100),
+            }), {owner = entity})
+
+            world:update(0)
+            for _ = 1, 6 do world:update(1 / 60) end
+            local midway <const> = x(entity)
+            luassert.is_true(midway > 0 and midway < 100)
+
+            local saved = world:saveSnapshot().buffer
+            for _ = 1, 6 do world:update(1 / 60) end
+            local without <const> = x(entity)
+
+            world:loadSnapshot(saved)
+            luassert.is_near(midway, x(entity), 1e-9, "restored where it was")
+            for _ = 1, 6 do world:update(1 / 60) end
+            luassert.is_near(without, x(entity), 1e-9, "and carried on the same")
+        end)
+
+        it("cancels with its owner", function()
+            local entity <const> = spawn()
+            local handle = sequence.play(world, sequence.timeline(uniqueName(), {
+                tween.to(10.0, tween.linear, tween.translateX, 100),
+            }), {owner = entity})
+
+            world:update(0)
+            world:update(1 / 60)
+            world:despawn(entity)
+            world:update(1 / 60)
+            luassert.equals("cancelled", sequence.status(world, handle).state)
+        end)
+
+        it("rejects a clock a timeline cannot run on", function()
+            luassert.has_error(function()
+                sequence.timeline(uniqueName(), {
+                    tween.to(0.1, tween.linear, tween.translateX, 1),
+                }, {clock = "frame"})
+            end)
+        end)
+    end)
+
     describe("programs as data", function()
         local order: {string}
 
