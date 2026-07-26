@@ -11,6 +11,7 @@ include(FetchContent)
 
 set(TECS2D_SDL3_TAG      "release-3.4.12"  CACHE STRING "SDL3 revision")
 set(TECS2D_SDL3_IMAGE_TAG "release-3.4.4"  CACHE STRING "SDL3_image revision")
+set(TECS2D_SDL3_NET_TAG  "release-3.2.0"   CACHE STRING "SDL3_net revision")
 set(TECS2D_BOX2D_TAG     "v3.1.1"          CACHE STRING "Box2D revision")
 set(TECS2D_LUAJIT_TAG    "v2.1"            CACHE STRING "LuaJIT revision")
 set(TECS2D_SHADERC_TAG   "v2026.3"         CACHE STRING "shaderc revision")
@@ -22,6 +23,9 @@ FetchContent_Declare(SDL3
 FetchContent_Declare(SDL3_image
     GIT_REPOSITORY https://github.com/libsdl-org/SDL_image.git
     GIT_TAG ${TECS2D_SDL3_IMAGE_TAG} GIT_SHALLOW TRUE)
+FetchContent_Declare(SDL3_net
+    GIT_REPOSITORY https://github.com/libsdl-org/SDL_net.git
+    GIT_TAG ${TECS2D_SDL3_NET_TAG} GIT_SHALLOW TRUE)
 FetchContent_Declare(box2d
     GIT_REPOSITORY https://github.com/erincatto/box2d.git
     GIT_TAG ${TECS2D_BOX2D_TAG} GIT_SHALLOW TRUE)
@@ -33,4 +37,4 @@ FetchContent_Declare(SPIRV-Cross
 # are driven as external projects rather than added as subdirectories.
 message(STATUS "tecs2d: pinned dependencies declared; run cmake --build to fetch")
 
-FetchContent_MakeAvailable(SDL3 SDL3_image box2d SPIRV-Cross)
+FetchContent_MakeAvailable(SDL3 SDL3_image SDL3_net box2d SPIRV-Cross)
