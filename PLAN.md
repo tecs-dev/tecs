@@ -231,7 +231,140 @@ handle at run time, with the handle being the texture-array slot the GPU already
 indexes. Paths exist only inside the packaging step. The shader pack built in
 step 5 of the portability work is the working precedent to copy.
 
-## 7. What is still to port
+## 7. Batteries
+
+A game on a console or on iOS cannot load a library, because there is no
+`dlopen`. So anything a shipped game needs at run time is either in the engine's
+build or it does not exist, and that is the whole case for shipping batteries.
+The same rule splits the list:
+
+```
+ runtime, ships in the game    in-engine, static, console-capable
+ tooling only                  may be dev-only, dynamic, host-only
+```
+
+### SDL3 already covers most of it
+
+All of these are bound and generated today. Nothing new gets added for them:
+
+```
+ filesystem   SDL_EnumerateDirectory, SDL_GlobDirectory, SDL_CreateDirectory,
+              SDL_CopyFile, SDL_RemovePath, SDL_RenamePath, SDL_GetPathInfo
+ storage      SDL_OpenTitleStorage, SDL_OpenUserStorage, SDL_OpenFileStorage,
+              SDL_ReadStorageFile, SDL_WriteStorageFile, SDL_StorageReady
+ async io     SDL_AsyncIOFromFile, SDL_LoadFileAsync, SDL_CreateAsyncIOQueue,
+              SDL_GetAsyncIOResult, SDL_AsyncIOOutcome
+ process      SDL_CreateProcess, SDL_GetProcessInput, SDL_ReadProcess
+ time         SDL_GetCurrentTime, SDL_TimeToDateTime, locale preferences
+ misc         SDL_rand with explicit state, SDL_murmur3_32, SDL_OpenURL,
+              clipboard, power, preferred locales
+```
+
+`SDL_Storage` replaces the base-path and pref-path pair currently in `paths.tl`.
+It splits read-only title content from per-user save data and has an explicit
+ready state, because on a console storage is not available synchronously at
+boot. That is the shape the platform seam should expose.
+
+### Asynchronous IO is SDL's, not ours
+
+`SDL_GetAsyncIOResult` is non-blocking and fills an outcome, so the whole
+mechanism is a drain in a phase. `SDL_LoadFileAsync` reads a whole file in one
+call, and the `userdata` pointer round-trips, so an asset handle travels with
+the request and comes back with the result.
+
+This splits asset loading three ways, and only one part needs a thread:
+
+```
+ read      SDL_AsyncIO           native async, no worker
+ decode    worker                CPU-bound, genuinely needs a thread
+ upload    copy pass             main thread
+```
+
+The current asset path puts the read on a worker too, which is work SDL already
+does better with io_uring, IOCP, or whatever the platform provides.
+
+One caveat that keeps this behind the seam: `SDL_Storage`'s read functions are
+synchronous, and the container becomes ready asynchronously instead. So the
+async file path is `SDL_AsyncIO` where content is a filesystem, and Storage
+where it is not. Both live behind the same handle-based asset API.
+
+### JSON: take lua-cjson, delete ours
+
+The recorded bench decides it. Parsing a small object:
+
+```
+ implementation   min_us   p50_us
+ ──────────────   ──────   ──────
+ lua-cjson        0.1658   0.2910
+ tecs.json        0.2496   0.3329
+ loadstring       0.6659   0.7921
+ dkjson           2.0410   2.2091
+```
+
+lua-cjson is 1.5 to 2x faster and removes 1,229 lines. Two migration risks: it
+cannot distinguish an empty array from an empty object without a sentinel, and
+both the MCP protocol and the Tiled loader round-trip structures where that
+matters; and the Teal types go, so it needs a declaration file.
+
+### HTTP is a platform seam, not a linked dependency
+
+curl brings a TLS stack, and consoles have their own networking stacks and
+certificate stores where it is generally not permitted. So the engine exposes an
+HTTP API and curl implements it for open platforms, as a sixth seam alongside
+lifecycle, events, static FFI, storage, and shaders.
+
+The integration shape matters more than the library. Requests are components, a
+worker owns the multi handle, and completions arrive as typed events. curl never
+touches the frame path, and an in-flight request is component state that
+survives a snapshot.
+
+### Sockets: SDL3_net
+
+Same ecosystem, same static-link story, non-blocking by design. luasocket is
+blocking-oriented and predates everything about how this loop works. For
+reliable UDP gameplay traffic rather than raw sockets, ENet is the alternative
+worth considering.
+
+### Compression is two questions
+
+zlib is interop: HTTP content encoding, `.gz`, anything produced elsewhere. It
+arrives with curl, so it costs nothing extra.
+
+Asset and snapshot compression is a different job, where decompression speed
+matters more than ratio, so it is LZ4 or zstd and not gzip. Having zlib present
+is not a reason to use it for content.
+
+### base64 is not a dependency
+
+curl does not export it publicly and SDL does not have it. Forty lines.
+
+### Headless is the one worth prioritising
+
+A world without a device makes the asset pipeline tecs programs rather than a
+second language. MSDF baking, shader packing, texture array building, and
+manifest generation currently live across `gencdef.py`, `genregistry.py`,
+`abicheck.py`, `checkpackage.py`, and `buildshaders.lua`. One toolchain, and the
+tooling exercises the engine it ships with.
+
+It is nearly true already. The blockers are that the host always creates a
+window and there is no non-application entry point.
+
+### Not included
+
+Crypto beyond hashing, an image codec beyond SDL_image, a regular expression
+engine, and anything XML. Each is real surface, and none is something a game
+cannot live without or a tool cannot reach through `SDL_CreateProcess`.
+
+### The rule for all of them
+
+Every integration is a tecs-shaped API, never a raw binding in the public
+surface. HTTP requests are components with events, not a curl handle. Storage is
+handles, not paths. Sockets are components, not descriptors. That is what lets a
+console port substitute an implementation, lets the underlying library be
+swapped, and keeps the whole surface explainable as a world, components, and
+phases.
+
+## 8. What is still to port
 
 Roughly 55k lines of the legacy engine, in dependency order:
 
@@ -251,7 +384,7 @@ Roughly 55k lines of the legacy engine, in dependency order:
 Already across: tween and sequence, 4,292 lines with their 2,874-line suites,
 paused pending upstream iteration.
 
-## 8. Open problems
+## 9. Open problems
 
 **A 1.74 ms fixed cost per frame.** It does not move with instance count from 4k
 to 1M, with quad size across a 100x coverage change, or with light count. The
@@ -274,16 +407,21 @@ while 32 works. And when `TECS2D_LUA` is unset, the development fallback in
 `package.path` silently loads the legacy engine instead of this one, which needs
 to go or become loud.
 
-## 9. Sequence
+## 10. Sequence
 
 ```
  0  merge                    mechanical, unblocks the rest
  1  column experiment        A against B, decides the instance layout
  2  lock the contract        section 2, everything else depends on it
- 3  Clay and UI
- 4  fonts
- 5  remaining port           debug and MCP first, they make the rest visible
+ 3  headless + async IO      cheap, and makes the tooling one language
+ 4  Clay and UI
+ 5  fonts
+ 6  remaining port           debug and MCP first, they make the rest visible
 ```
+
+Batteries land opportunistically rather than as a phase. lua-cjson and
+SDL_AsyncIO are worth taking early because both delete code; HTTP and sockets
+can wait until something needs them.
 
 The 1.74 ms floor is independent and should be chased in parallel, before any
 performance claim is made.
