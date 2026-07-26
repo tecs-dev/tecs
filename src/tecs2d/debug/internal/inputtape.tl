@@ -13,6 +13,7 @@
 
 local tecs <const> = require("tecs")
 local inputHandlers <const> = require("tecs2d.internal.handlers")
+local inputidentity <const> = require("tecs2d.debug.internal.inputidentity")
 local logging <const> = require("tecs.utils.logging")
 
 local LOGGER <const> = logging.getLogger("tecs2d.debug.inputtape")
@@ -125,30 +126,6 @@ local function defaultArgs(event: string, args: {any}): string
     return nil
 end
 
--- Press events the tape tracks so `clear` (and the status report) can see
--- what it left logically held down. Returns identity and the paired release.
-local function pressIdentity(event: string, args: {any}): string, string
-    if event == "keypressed" then
-        return "key:" .. tostring(args[1]), "keyreleased"
-    elseif event == "mousepressed" then
-        return "mouse:" .. tostring(args[3]), "mousereleased"
-    elseif event == "touchpressed" then
-        return "touch:" .. tostring(args[1]), "touchreleased"
-    end
-    return nil, nil
-end
-
-local function releaseIdentity(event: string, args: {any}): string
-    if event == "keyreleased" then
-        return "key:" .. tostring(args[1])
-    elseif event == "mousereleased" then
-        return "mouse:" .. tostring(args[3])
-    elseif event == "touchreleased" then
-        return "touch:" .. tostring(args[1])
-    end
-    return nil
-end
-
 local TapeImpl <const> = {}
 
 local function dispatchRow(self: inputtape.Tape, event: string, args: {any})
@@ -159,11 +136,13 @@ local function dispatchRow(self: inputtape.Tape, event: string, args: {any})
         table.remove(self.fired, 1)
     end
 
-    local id <const>, releaseEvent <const> = pressIdentity(event, args)
+    -- A press stays held until its release arrives, so `clear` and the
+    -- status report can see what the tape left down.
+    local id <const> = inputidentity.press(event, args)
     if id then
-        self.held[id] = {event = releaseEvent, args = args}
+        self.held[id] = {event = inputidentity.pairedRelease(event), args = args}
     else
-        local released <const> = releaseIdentity(event, args)
+        local released <const> = inputidentity.release(event, args)
         if released then
             self.held[released] = nil
         end

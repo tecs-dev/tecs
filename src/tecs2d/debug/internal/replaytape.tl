@@ -14,6 +14,7 @@
 local tecs <const> = require("tecs")
 local inputHandlers <const> = require("tecs2d.internal.handlers")
 local frameclock <const> = require("tecs2d.internal.frameclock")
+local inputidentity <const> = require("tecs2d.debug.internal.inputidentity")
 local inputtape <const> = require("tecs2d.debug.internal.inputtape")
 local logging <const> = require("tecs.utils.logging")
 
@@ -64,25 +65,6 @@ local record replaytape
 end
 
 replaytape.KEY = tecs.newKey("tecs2d.debug.replayTape")
-
--- Held-input identity, mirroring the input tape's pairing rules (see
--- inputtape.tl): a press without its release leaves the input logically down.
-local function pressIdentity(event: string, args: {any}): string
-    if event == "keypressed" then
-        return "key:" .. tostring(args[1])
-    elseif event == "mousepressed" then
-        return "mouse:" .. tostring(args[3])
-    elseif event == "touchpressed" then
-        return "touch:" .. tostring(args[1])
-    end
-    return nil
-end
-
-local RELEASE_TO_PRESS <const>: {string: string} = {
-    keyreleased = "keypressed",
-    mousereleased = "mousepressed",
-    touchreleased = "touchpressed",
-}
 
 local RecorderImpl <const> = {}
 
@@ -162,14 +144,14 @@ function RecorderImpl.tick(self: replaytape.Recorder, dt: number)
             for j = 2, #ev do args[j - 1] = ev[j] end
             self.rows[#self.rows + 1] = {frame = self.frame, event = name, args = args}
 
-            local id <const> = pressIdentity(name, args)
+            -- A press without its release leaves the input logically down,
+            -- so the anchor can synthesize it when a replay starts.
+            local id <const> = inputidentity.press(name, args)
             if id then
                 self.down[id] = {frame = self.frame, event = name, args = args}
             else
-                local pressName <const> = RELEASE_TO_PRESS[name]
-                if pressName then
-                    self.down[pressIdentity(pressName, args)] = nil
-                end
+                local released <const> = inputidentity.release(name, args)
+                if released then self.down[released] = nil end
             end
         end
         self.pendingEvents = {}
