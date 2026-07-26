@@ -70,6 +70,7 @@ os.exit(tecs2d.run({
     debug = true,
     ambient = { 0.05, 0.05, 0.08 },
     capacity = COUNT + 16,
+    maxEntities = COUNT + 64,
     maxFrames = tonumber(os.getenv("TECS2D_FRAMES")) as integer,
     presentMode = os.getenv("TECS2D_PRESENT"),
 
@@ -87,7 +88,9 @@ os.exit(tecs2d.run({
         -- Rotation is a write, so the column is taken with getMut. Reads use
         -- get: taking getMut to read would mark the component dirty on every
         -- archetype every frame and defeat every dirty-gated consumer.
+        local static = os.getenv("TECS2D_STATIC") ~= nil
         local spinning = app.world:query({ include = { Transform2D, Renderable } })
+        if not static then
         app.world:addSystem({
             name = "demo.Spin",
             phase = tecs.phases.Update,
@@ -101,6 +104,7 @@ os.exit(tecs2d.run({
                 end
             end,
         })
+        end
 
         local orbiting = app.world:query({ include = { Transform2D, PointLight } })
         app.world:addSystem({
@@ -133,8 +137,9 @@ os.exit(tecs2d.run({
     end,
 
     quit = function(app: tecs2d.App)
-        print(("ran %d frames over %.2fs (%.2f ms/frame, %d drawn)"):format(
-            app.frame, app.elapsed,
-            app.elapsed / math.max(app.frame, 1) * 1000, app.renderer.count))
+        print(("ran %d frames over %.2fs (%.2f ms/frame, %d drawn, %d resynced)")
+            :format(app.frame, app.elapsed,
+                app.elapsed / math.max(app.frame, 1) * 1000,
+                app.renderer.count, app.renderer.rewritten))
     end,
 }))

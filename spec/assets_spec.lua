@@ -25,7 +25,7 @@ describe("assets", function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
         window = Window.create({ title = "assets", width = 64, height = 64 })
         device = Device.create(window, { debug = true })
-        assets.install(device.handle)
+        assets.install()
     end)
 
     teardown(function()
@@ -42,27 +42,26 @@ describe("assets", function()
 
         assets.waitAll()
         assert.are.equal("ready", handle.status)
-        assert.is_not_nil(handle.texture)
-        assert.are.equal(4, handle.texture.width)
-        assert.are.equal(4, handle.texture.height)
+        assert.is_not_nil(handle.pixels)
+        assert.are.equal(4, handle.width)
+        assert.are.equal(4, handle.height)
+        handle:release()
     end)
 
     it("decodes the actual pixels, in the right order", function()
-        -- The fixture is red on the left, green on the right. Checking both
-        -- halves catches a channel swap and a row order flip, which a size
-        -- assertion cannot.
+        -- The fixture is red on the left, green on the right. Reading the
+        -- decoded bytes directly catches a channel swap and a row order flip,
+        -- which a size assertion cannot.
+        local ffi = require("ffi")
         local handle = assets.loadImage(FIXTURE)
         assets.waitAll()
 
-        local texture = handle.texture
-        local pixels = texture:readback()
-        local left = texture:getPixel(pixels, 0, 0)
-        local right = texture:getPixel(pixels, 3, 0)
-
-        assert.are.equal(255, left.r, "left half is red")
-        assert.are.equal(0, left.g)
-        assert.are.equal(0, right.r, "right half is green")
-        assert.are.equal(255, right.g)
+        local bytes = ffi.cast("uint8_t *", handle.pixels)
+        assert.are.equal(255, bytes[0], "left half is red")
+        assert.are.equal(0, bytes[1])
+        assert.are.equal(0, bytes[12], "right half is green")
+        assert.are.equal(255, bytes[13])
+        handle:release()
     end)
 
     it("reports a missing file as failed rather than raising", function()
@@ -71,7 +70,7 @@ describe("assets", function()
 
         assert.are.equal("failed", handle.status)
         assert.is_truthy(handle.error:find("cannot decode"))
-        assert.is_nil(handle.texture)
+        assert.is_nil(handle.pixels)
     end)
 
     it("loads several images concurrently", function()
@@ -86,21 +85,24 @@ describe("assets", function()
         for index = 1, 6 do
             assert.are.equal("ready", handles[index].status,
                 "handle " .. index .. " never resolved")
-            assert.is_not_nil(handles[index].texture)
+            assert.is_not_nil(handles[index].pixels)
+            handles[index]:release()
         end
     end)
 
-    it("gives each load its own texture", function()
+    it("gives each load its own decoded buffer", function()
         -- Surfaces are handed over by address and destroyed by the receiver.
-        -- Two loads sharing a texture would mean the ownership transfer went
-        -- wrong somewhere.
+        -- Two loads sharing pixels would mean the ownership transfer went
+        -- wrong somewhere, and releasing one would corrupt the other.
         local first = assets.loadImage(FIXTURE)
         local second = assets.loadImage(FIXTURE)
         assets.waitAll()
 
-        assert.is_not_nil(first.texture)
-        assert.is_not_nil(second.texture)
-        assert.are_not.equal(first.texture, second.texture)
+        assert.is_not_nil(first.pixels)
+        assert.is_not_nil(second.pixels)
+        assert.are_not.equal(tostring(first.pixels), tostring(second.pixels))
+        first:release()
+        second:release()
     end)
 
     it("reports nothing to do when idle", function()

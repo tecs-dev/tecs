@@ -9,8 +9,8 @@ package.path = "build/?.lua;build/?/init.lua;"
     .. "../tecs/build/?.lua;../tecs/build/?/init.lua;" .. package.path
 
 local tecs = require("tecs")
-local components = require("tecs2d.ecs.components")
-local physics = require("tecs2d.ecs.physics")
+local components = require("tecs2d.components")
+local physics = require("tecs2d.physics")
 
 local Transform2D = components.Transform2D
 

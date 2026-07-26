@@ -12,7 +12,7 @@
 local tecs <const> = require("tecs")
 local loader <const> = require("tecs2d.ffi.loader")
 local World <const> = require("tecs2d.physics.World")
-local components <const> = require("tecs2d.ecs.components")
+local components <const> = require("tecs2d.components")
 
 local Transform2D <const> = components.Transform2D
 

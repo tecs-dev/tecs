@@ -1,7 +1,7 @@
 --- Feeds the deferred pipeline from a world.
 ---
 --- This is the bridge, and the only module that knows about both archetypes
---- and GPU buffers. Everything below it is renderer; everything above is ECS.
+--- and GPU buffers. Everything below it is renderer; above it is Tecs.
 ---
 --- The sync walks archetype columns and writes instances straight into mapped
 --- staging. There is no intermediate array: the column is contiguous C memory
@@ -11,12 +11,15 @@
 --- Instances pack as four vec4s: a 2x2 basis, an origin, a colour, and a UV
 --- rect. A precomputed basis costs less on the GPU than a per-vertex sincos.
 ---
---- SDL_GPU binds samplers per pipeline rather than bindlessly, so instances
---- are grouped by texture and drawn one batch per texture. The grouping is a
---- counting sort over the registry, which is why the registry is small and
---- indexed rather than open. Entities with no Sprite land in slot zero, a
---- one-pixel white texture, so untextured and textured geometry go through
---- one shader instead of two.
+--- Images live in one array texture, so the texture is a per-instance integer
+--- and the whole scene is one draw. That is also what frees the instance
+--- layout: with nothing to sort by, each archetype keeps a contiguous run,
+--- and a run whose components did not change does not have to be rewritten.
+---
+--- That dirty gating is the point. Walking every entity every frame is the
+--- cost that decides whether a large world is affordable, and most frames
+--- change very little. Layer zero is a white pixel, so an entity with no
+--- Sprite samples it and textured and untextured geometry share one path.
 
 local tecs <const> = require("tecs")
 local loader <const> = require("tecs2d.ffi.loader")
@@ -25,16 +28,20 @@ local Shader <const> = require("tecs2d.gpu.Shader")
 local Frame <const> = require("tecs2d.gpu.Frame")
 local GraphicsPipeline <const> = require("tecs2d.gpu.GraphicsPipeline")
 local Deferred <const> = require("tecs2d.gpu.Deferred")
-local Texture <const> = require("tecs2d.gpu.Texture")
 local Sampler <const> = require("tecs2d.gpu.Sampler")
-local components <const> = require("tecs2d.ecs.components")
+local TextureArray <const> = require("tecs2d.gpu.TextureArray")
+local assets <const> = require("tecs2d.assets")
+local components <const> = require("tecs2d.components")
 
 --- Floats per instance: four vec4s.
 local INSTANCE_FLOATS <const> = 16
 local INSTANCE_BYTES <const> = INSTANCE_FLOATS * 4
 
---- Textures the registry holds, including the white default in slot zero.
-local MAX_TEXTURES <const> = 64
+--- Layers the image array holds, including the white default in layer zero.
+local MAX_LAYERS <const> = 64
+
+--- Cell size of the image array. Every image must fit within it.
+local DEFAULT_CELL <const> = 512
 
 --- Instances the buffer is sized for. This is a ceiling, not a hint: rows
 --- beyond it are dropped rather than growing the buffer mid-frame.
@@ -45,7 +52,7 @@ local INSTANCE_VERTEX <const> = [[
 
 struct Instance {
     vec4 xform;   // 2x2 basis of rotation and scale
-    vec4 origin;  // xy world position, zw spare
+    vec4 origin;  // xy world position, z array layer, w spare
     vec4 color;
     vec4 uvRect;  // u0 v0 u1 v1
 };
@@ -57,7 +64,7 @@ layout(set = 0, binding = 0) readonly buffer Instances { Instance item[]; } inst
 layout(set = 1, binding = 0) uniform View { vec4 viewport; } view;
 
 layout(location = 0) out vec4 vColor;
-layout(location = 1) out vec2 vUV;
+layout(location = 1) out vec3 vUV;
 
 const vec2 CORNERS[6] = vec2[6](
     vec2(-0.5, -0.5), vec2( 0.5, -0.5), vec2(-0.5,  0.5),
@@ -79,23 +86,24 @@ void main() {
 
     // Corners run -0.5..0.5, and V is flipped because texture rows run down
     // from the top while the quad's local Y runs up.
-    vUV = mix(self.uvRect.xy, self.uvRect.zw,
-              vec2(corner.x + 0.5, 0.5 - corner.y));
+    vUV = vec3(mix(self.uvRect.xy, self.uvRect.zw,
+                   vec2(corner.x + 0.5, 0.5 - corner.y)),
+               self.origin.z);
 }
 ]]
 
 local INSTANCE_FRAGMENT <const> = [[
 #version 450
 layout(location = 0) in vec4 vColor;
-layout(location = 1) in vec2 vUV;
+layout(location = 1) in vec3 vUV;
 layout(location = 0) out vec4 albedo;
 layout(location = 1) out vec4 normal;
 
-layout(set = 2, binding = 0) uniform sampler2D image;
+layout(set = 2, binding = 0) uniform sampler2DArray images;
 
 void main() {
-    // Untextured geometry samples the white default, so both paths land here.
-    albedo = texture(image, vUV) * vColor;
+    // Untextured geometry samples layer zero, so both paths land here.
+    albedo = texture(images, vUV) * vColor;
     normal = vec4(0.5, 0.5, 1.0, 1.0);
 }
 ]]
@@ -105,6 +113,10 @@ local record RendererOptions
     ambient: {number}
     --- Instances the buffer is sized for.
     capacity: integer
+    --- Cell size of the image array.
+    cell: integer
+    --- Layers the image array holds.
+    layers: integer
 end
 
 local record Renderer
@@ -112,23 +124,27 @@ local record Renderer
     instances: Buffer
     pipeline: GraphicsPipeline
     sampler: Sampler
+    --- Every image, one binding, so the scene is one draw.
+    images: TextureArray
     capacity: integer
-    --- Instances written by the last sync.
+    --- Instances the last sync left resident.
     count: integer
     --- Instances the last sync could not fit.
     dropped: integer
-    --- Distinct textures drawn by the last sync.
-    batches: integer
+    --- Instances the last sync actually rewrote. Zero on a still frame.
+    rewritten: integer
     _device: loader.CPtr
     _view: loader.CArray
     _lights: {Deferred.Light}
     _renderables: tecs.Query
-    _sprites: tecs.Query
     _lightSources: tecs.Query
-    _textures: {Texture}
-    --- Instances per slot, then the running offset of each slot's run.
-    _slotCount: {integer: integer}
-    _slotStart: {integer: integer}
+    --- UV extent of the white pixel within its cell. An image smaller than a
+    --- cell does not reach the cell's edge, so sampling 0..1 would read the
+    --- undefined remainder rather than the image.
+    _whiteU1: number
+    _whiteV1: number
+    _runs: {tecs.Archetype: Run}
+    _seen: {tecs.Archetype: integer}
     _destroyed: boolean
 end
 
@@ -139,109 +155,133 @@ local RendererMT <const>: metatable<Renderer> = { __index = Renderer }
 --- Columns are read, not mutated, so `get` is correct here. Taking `getMut`
 --- would mark these components dirty on every archetype every frame and
 --- defeat every dirty-gated consumer downstream.
-local function syncInstances(self: Renderer): integer, integer, integer
-    local counts = self._slotCount
-    local starts = self._slotStart
-    local highest = #self._textures - 1
-    for slot = 0, highest do counts[slot] = 0 end
+--- One archetype's contiguous run in the instance buffer.
+local record Run
+    offset: integer
+    length: integer
+end
 
-    -- First pass counts per texture so each slot's rows can be written into
-    -- one contiguous run. Sorting the rows themselves would mean moving
-    -- instance data twice.
+--- Writes one archetype's rows into its run.
+---
+--- Columns are read, not mutated, so `get` is correct here. Taking `getMut`
+--- would mark these components dirty on every archetype every frame, which
+--- would make the gate below always true and defeat its own purpose.
+local function writeRun(self: Renderer, archetype: tecs.Archetype,
+                        length: integer, offset: integer)
+    local floats = self.instances:mapAs("float *")
+    local transforms = archetype:get(components.Transform2D)
+    local tints = archetype:get(components.Tint)
+    local sprites = archetype:get(components.Sprite)
+
+    for row = 1, length do
+        local transform = transforms[row]
+        local tint = tints[row]
+
+        local layer = 0.0
+        local u0, v0 = 0.0, 0.0
+        local u1, v1 = self._whiteU1, self._whiteV1
+        if sprites ~= nil then
+            local sprite = sprites[row]
+            layer = sprite.slot
+            u0, v0, u1, v1 = sprite.u0, sprite.v0, sprite.u1, sprite.v1
+        end
+
+        local angle = transform.rotation
+        local cosine = math.cos(angle)
+        local sine = math.sin(angle)
+        local scaleX = transform.scaleX
+        local scaleY = transform.scaleY
+
+        local base = (offset + row - 1) * INSTANCE_FLOATS
+        floats[base] = cosine * scaleX
+        floats[base + 1] = -sine * scaleY
+        floats[base + 2] = sine * scaleX
+        floats[base + 3] = cosine * scaleY
+
+        floats[base + 4] = transform.x
+        floats[base + 5] = transform.y
+        floats[base + 6] = layer
+        floats[base + 7] = 0.0
+
+        floats[base + 8] = tint.r
+        floats[base + 9] = tint.g
+        floats[base + 10] = tint.b
+        floats[base + 11] = tint.a
+
+        floats[base + 12] = u0
+        floats[base + 13] = v0
+        floats[base + 14] = u1
+        floats[base + 15] = v1
+    end
+
+    self.instances:markDirty(offset * INSTANCE_BYTES, length * INSTANCE_BYTES)
+end
+
+--- Rewrites only what changed.
+---
+--- The layout is rebuilt when the set of archetypes or their lengths move,
+--- because a run cannot grow in place without shifting its neighbours. Short
+--- of that, an archetype whose Transform2D, Tint, and Sprite columns are all
+--- clean is skipped entirely: its bytes are already resident and correct.
+local function syncInstances(self: Renderer): integer, integer, integer
+    local runs = self._runs
+    local seen = self._seen
+    for archetype in pairs(seen) do seen[archetype] = nil end
+
     local total = 0
-    local dropped = 0
+    local relayout = false
     for archetype, length in self._renderables:iter() do
-        local sprites = archetype:get(components.Sprite)
-        if sprites == nil then
-            counts[0] = counts[0] + length
-            total = total + length
-        else
-            for row = 1, length do
-                local slot = sprites[row].slot as integer
-                if slot < 0 or slot > highest then slot = 0 end
-                counts[slot] = counts[slot] + 1
-                total = total + 1
-            end
+        seen[archetype] = length
+        local run = runs[archetype]
+        if run == nil or run.length ~= length or run.offset ~= total then
+            relayout = true
+        end
+        total = total + length
+    end
+
+    -- An archetype that went away leaves a hole, so the layout must move.
+    for archetype in pairs(runs) do
+        if seen[archetype] == nil then
+            runs[archetype] = nil
+            relayout = true
         end
     end
 
+    local dropped = 0
     if total > self.capacity then
         dropped = total - self.capacity
+        total = self.capacity
     end
 
+    local rewritten = 0
     local offset = 0
-    local batches = 0
-    for slot = 0, highest do
-        starts[slot] = offset
-        if counts[slot] > 0 then batches = batches + 1 end
-        offset = offset + counts[slot]
-    end
-
-    local floats = self.instances:mapAs("float *")
-    local cursor: {integer: integer} = {}
-    for slot = 0, highest do cursor[slot] = starts[slot] end
-
-    local capacity = self.capacity
-    local written = 0
-
     for archetype, length in self._renderables:iter() do
-        local transforms = archetype:get(components.Transform2D)
-        local tints = archetype:get(components.Tint)
-        local sprites = archetype:get(components.Sprite)
-
-        for row = 1, length do
-            local slot = 0
-            local u0, v0, u1, v1 = 0.0, 0.0, 1.0, 1.0
-            if sprites ~= nil then
-                local sprite = sprites[row]
-                slot = sprite.slot as integer
-                if slot < 0 or slot > highest then slot = 0 end
-                u0, v0, u1, v1 = sprite.u0, sprite.v0, sprite.u1, sprite.v1
-            end
-
-            local index = cursor[slot]
-            if index < capacity then
-                cursor[slot] = index + 1
-
-                local transform = transforms[row]
-                local tint = tints[row]
-
-                local angle = transform.rotation
-                local cosine = math.cos(angle)
-                local sine = math.sin(angle)
-                local scaleX = transform.scaleX
-                local scaleY = transform.scaleY
-
-                local base = index * INSTANCE_FLOATS
-                floats[base] = cosine * scaleX
-                floats[base + 1] = -sine * scaleY
-                floats[base + 2] = sine * scaleX
-                floats[base + 3] = cosine * scaleY
-
-                floats[base + 4] = transform.x
-                floats[base + 5] = transform.y
-                floats[base + 6] = 0.0
-                floats[base + 7] = 0.0
-
-                floats[base + 8] = tint.r
-                floats[base + 9] = tint.g
-                floats[base + 10] = tint.b
-                floats[base + 11] = tint.a
-
-                floats[base + 12] = u0
-                floats[base + 13] = v0
-                floats[base + 14] = u1
-                floats[base + 15] = v1
-
-                written = written + 1
-            end
+        if offset >= self.capacity then break end
+        if offset + length > self.capacity then
+            length = self.capacity - offset
         end
+
+        local run = runs[archetype]
+        local dirty = relayout
+            or archetype:isComponentDirty(components.Transform2D)
+            or archetype:isComponentDirty(components.Tint)
+            or archetype:isComponentDirty(components.Sprite)
+
+        if dirty then
+            writeRun(self, archetype, length, offset)
+            rewritten = rewritten + length
+        end
+
+        if run == nil then
+            runs[archetype] = { offset = offset, length = length }
+        else
+            run.offset = offset
+            run.length = length
+        end
+        offset = offset + length
     end
 
-    if written > 0 then
-        self.instances:markDirty(0, written * INSTANCE_BYTES)
-    end
-    return written, dropped, batches
+    return total, dropped, rewritten
 end
 
 --- Collects lights from the world.
@@ -280,25 +320,28 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
     self.capacity = options.capacity or DEFAULT_CAPACITY
     self.count = 0
     self.dropped = 0
-    self.batches = 0
+    self.rewritten = 0
     self._view = loader.newArray("float[4]")
     self._lights = {}
-    self._slotCount = {}
-    self._slotStart = {}
+    self._runs = {}
+    self._seen = {}
     self._destroyed = false
 
     self.sampler = Sampler.create(device, { filter = "nearest", address = "clamp" })
+    self.images = TextureArray.create(device, {
+        width = options.cell or DEFAULT_CELL,
+        height = options.cell or DEFAULT_CELL,
+        layers = options.layers or MAX_LAYERS,
+    })
 
-    -- Slot zero is a single white pixel. Entities without a Sprite sample it,
+    -- Layer zero is a single white pixel. Entities without a Sprite sample it,
     -- so textured and untextured geometry share one shader and one pipeline
     -- rather than needing a branch or a second path.
-    local white = Texture.create(device, {
-        width = 1, height = 1, format = 4, usage = { "sampled" },
-    })
     local pixel = loader.newArray("uint8_t[4]")
     pixel[0], pixel[1], pixel[2], pixel[3] = 255, 255, 255, 255
-    white:upload(pixel as loader.CValue, 4)
-    self._textures = { white }
+    local white = self.images:add(pixel as loader.CValue, 1, 1, 4)
+    self._whiteU1 = white.u1
+    self._whiteV1 = white.v1
 
     self.instances = Buffer.create(device, {
         usage = { "storage" },
@@ -314,21 +357,11 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
 
             self._view[0] = context.width
             self._view[1] = context.height
-
-            -- One draw per texture. The sort put each slot's instances in a
-            -- contiguous run, so a batch is a base and a count.
-            local highest = #self._textures - 1
-            for slot = 0, highest do
-                local count = self._slotCount[slot] or 0
-                if count > 0 then
-                    self._view[2] = self._slotStart[slot]
-                    context.pass:pushVertexUniform(0, self._view, 16)
-                    context.pass:bindTextures(0,
-                        { self._textures[slot + 1].handle }, self.sampler.handle)
-                    -- Six vertices per quad, one instance per renderable.
-                    context.pass:draw(6, count)
-                end
-            end
+            self._view[2] = 0
+            context.pass:pushVertexUniform(0, self._view, 16)
+            context.pass:bindTextures(0, { self.images.handle }, self.sampler.handle)
+            -- One draw for the scene: the texture is a per-instance layer.
+            context.pass:draw(6, self.count)
         end,
     })
 
@@ -349,17 +382,22 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
     return self
 end
 
---- Registers a texture and returns the slot a Sprite should name.
+--- Uploads a decoded image into the array and returns a Sprite for it.
 ---
---- Slots are zero-based because slot zero is the white default, so a Sprite
---- left at its default value samples white rather than pointing at nothing.
---- The backing list is one-based, which is the only place that offset lives.
-function Renderer:registerTexture(texture: Texture): integer
-    if #self._textures >= MAX_TEXTURES then
-        error(("tecs2d: texture registry is full at %d"):format(MAX_TEXTURES), 2)
+--- A Sprite is returned rather than a bare layer index because an image
+--- smaller than a cell does not reach the cell's edge, so the UV range is not
+--- 0..1 and a caller guessing it would sample the undefined remainder. The
+--- second return is the region, for building sub-rects of an atlas.
+---
+--- The handle's pixels are released here: the array holds them now.
+function Renderer:registerImage(handle: assets.Handle): components.Sprite, TextureArray.Region
+    if handle.status ~= "ready" then
+        error(("tecs2d: image '%s' is %s"):format(handle.path, handle.status), 2)
     end
-    self._textures[#self._textures + 1] = texture
-    return #self._textures - 1
+    local region = self.images:add(handle.pixels, handle.width, handle.height,
+        handle.pitch)
+    handle:release()
+    return components.Sprite(region.layer, 0.0, 0.0, region.u1, region.v1), region
 end
 
 
@@ -382,7 +420,7 @@ function Renderer:install(world: tecs.World)
         name = "tecs2d.SyncRenderState",
         phase = tecs.phases.RenderFirst,
         run = function()
-            self.count, self.dropped, self.batches = syncInstances(self)
+            self.count, self.dropped, self.rewritten = syncInstances(self)
             self.deferred:setLights(syncLights(self))
         end,
     })
@@ -402,9 +440,7 @@ function Renderer:destroy()
     self.deferred:destroy()
     self.instances:destroy()
     self.sampler:destroy()
-    -- Only the white default belongs to the renderer; registered textures are
-    -- owned by whoever loaded them.
-    self._textures[1]:destroy()
+    self.images:destroy()
 end
 
 return Renderer

@@ -15,8 +15,8 @@ local Input <const> = require("tecs2d.platform.Input")
 local Device <const> = require("tecs2d.gpu.Device")
 local Frame <const> = require("tecs2d.gpu.Frame")
 local RenderPass <const> = require("tecs2d.gpu.RenderPass")
-local Renderer <const> = require("tecs2d.ecs.Renderer")
-local components <const> = require("tecs2d.ecs.components")
+local Renderer <const> = require("tecs2d.Renderer")
+local components <const> = require("tecs2d.components")
 
 local C <const> = sdl.C
 local K <const> = sdl.K
@@ -60,6 +60,9 @@ local record RunConfig
     ambient: {number}
     --- Instances the render buffer is sized for.
     capacity: integer
+    --- Entity slots the world reserves. Defaults to the ECS default of 2^20,
+    --- which a world larger than a million entities must raise.
+    maxEntities: integer
     --- Presentation pacing: "vsync" (default), "immediate", or "mailbox".
     --- Benchmarks use immediate so a frame's real cost is observable.
     presentMode: string
@@ -122,7 +125,7 @@ function tecs2d.run(config: RunConfig): integer
     end
 
     local input = Input.create()
-    local world = tecs.newWorld()
+    local world = tecs.newWorld({ maxEntities = config.maxEntities })
     local renderer = Renderer.create(device.handle, device:getSwapchainFormat(), {
         ambient = config.ambient,
         capacity = config.capacity,

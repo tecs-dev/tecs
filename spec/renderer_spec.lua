@@ -15,9 +15,9 @@ local sdl = require("tecs2d.ffi.sdl3")
 local Window = require("tecs2d.platform.Window")
 local Device = require("tecs2d.gpu.Device")
 local Texture = require("tecs2d.gpu.Texture")
-local Renderer = require("tecs2d.ecs.Renderer")
+local Renderer = require("tecs2d.Renderer")
 local assets = require("tecs2d.assets")
-local components = require("tecs2d.ecs.components")
+local components = require("tecs2d.components")
 
 local C = sdl.C
 local FORMAT = 4  -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
@@ -41,7 +41,7 @@ describe("ecs.Renderer", function()
         device = Device.create(window, { debug = true })
         screen = Texture.create(device.handle,
             { width = SIZE, height = SIZE, format = FORMAT })
-        assets.install(device.handle)
+        assets.install()
     end)
 
     teardown(function()
@@ -221,11 +221,13 @@ describe("ecs.Renderer", function()
         assets.waitAll()
         assert.are.equal("ready", handle.status)
 
-        local slot = renderer:registerTexture(handle.texture)
+        -- registerImage returns a ready Sprite: an image smaller than a cell
+        -- does not reach the cell's edge, so the UV range is not 0..1.
+        local sprite = renderer:registerImage(handle)
         world:spawn(
             Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
             Tint(1.0, 1.0, 1.0, 1.0),
-            Sprite(slot, 0.0, 0.0, 1.0, 1.0),
+            sprite,
             Renderable()
         )
 
@@ -249,11 +251,12 @@ describe("ecs.Renderer", function()
         local handle = assets.loadImage(FIXTURE)
         assets.waitAll()
 
-        local slot = renderer:registerTexture(handle.texture)
+        local _, region = renderer:registerImage(handle)
+        -- Sample only the right half of the image within its cell.
         world:spawn(
             Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
             Tint(1.0, 1.0, 1.0, 1.0),
-            Sprite(slot, 0.55, 0.0, 1.0, 1.0),
+            Sprite(region.layer, region.u1 * 0.55, 0.0, region.u1, region.v1),
             Renderable()
         )
 
@@ -272,12 +275,12 @@ describe("ecs.Renderer", function()
         local handle = assets.loadImage(FIXTURE)
         assets.waitAll()
 
-        local slot = renderer:registerTexture(handle.texture)
+        local _, region = renderer:registerImage(handle)
         world:spawn(
             Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
             -- Half brightness, so the red half reads as half red.
             Tint(0.5, 0.5, 0.5, 1.0),
-            Sprite(slot, 0.0, 0.4, 0.45, 0.6),
+            Sprite(region.layer, 0.0, 0.0, region.u1 * 0.45, region.v1),
             Renderable()
         )
 
@@ -287,16 +290,15 @@ describe("ecs.Renderer", function()
         renderer:destroy()
     end)
 
-    it("batches by texture and still places each correctly", function()
-        -- Two textures means two draws. The counting sort puts each slot's
-        -- rows in one run, so a batch that read the wrong range would put the
-        -- wrong image on the wrong quad.
+    it("mixes textured and untextured geometry in one draw", function()
+        -- Both quads go through one draw because the texture is a layer
+        -- index, so a wrong layer would put the wrong image on a quad.
         local world, renderer = newScene()
         local handle = assets.loadImage(FIXTURE)
         assets.waitAll()
-        local slot = renderer:registerTexture(handle.texture)
+        local _, region = renderer:registerImage(handle)
 
-        -- Left quad untextured (slot 0, white default) tinted blue.
+        -- Left quad untextured (layer 0, white default) tinted blue.
         world:spawn(
             Transform2D(SIZE * 0.25, SIZE / 2, 0, SIZE * 0.4, SIZE * 0.4),
             Tint(0.0, 0.0, 1.0, 1.0),
@@ -306,13 +308,12 @@ describe("ecs.Renderer", function()
         world:spawn(
             Transform2D(SIZE * 0.75, SIZE / 2, 0, SIZE * 0.4, SIZE * 0.4),
             Tint(1.0, 1.0, 1.0, 1.0),
-            Sprite(slot, 0.55, 0.0, 1.0, 1.0),
+            Sprite(region.layer, region.u1 * 0.55, 0.0, region.u1, region.v1),
             Renderable()
         )
 
         local pixels = frameOnce(world, renderer)
         assert.are.equal(2, renderer.count)
-        assert.are.equal(2, renderer.batches, "two textures means two draws")
 
         local left = screen:getPixel(pixels, SIZE * 0.25, SIZE / 2)
         local right = screen:getPixel(pixels, SIZE * 0.75, SIZE / 2)
@@ -321,6 +322,76 @@ describe("ecs.Renderer", function()
         assert.are.equal(0, left.g)
         assert.are.equal(255, right.g, "the sprite quad samples green")
         assert.are.equal(0, right.b)
+        renderer:destroy()
+    end)
+
+    it("rewrites nothing on a frame where nothing changed", function()
+        -- This is the whole point of the layout being archetype-contiguous.
+        -- Walking every entity every frame is the cost that decides whether a
+        -- large world is affordable, and most frames change very little.
+        local world, renderer = newScene()
+        for _ = 1, 8 do
+            world:spawn(
+                Transform2D(SIZE / 2, SIZE / 2, 0, 4, 4),
+                Tint(1, 1, 1, 1),
+                Renderable()
+            )
+        end
+
+        frameOnce(world, renderer)
+        assert.are.equal(8, renderer.count)
+        assert.are.equal(8, renderer.rewritten, "the first frame writes everything")
+
+        frameOnce(world, renderer)
+        assert.are.equal(8, renderer.count, "the instances are still resident")
+        assert.are.equal(0, renderer.rewritten,
+            "a still frame must not touch the buffer")
+        renderer:destroy()
+    end)
+
+    it("rewrites only when a component is actually written", function()
+        local world, renderer = newScene()
+        world:spawn(Transform2D(SIZE / 2, SIZE / 2, 0, 4, 4), Tint(1, 1, 1, 1),
+            Renderable())
+
+        frameOnce(world, renderer)
+        frameOnce(world, renderer)
+        assert.are.equal(0, renderer.rewritten)
+
+        -- getMut is what marks the column dirty, so a system that writes is
+        -- what wakes the sync back up.
+        local moving = world:query({ include = { Transform2D, Renderable } })
+        world:addSystem({
+            name = "spec.Nudge",
+            phase = tecs.phases.Update,
+            run = function()
+                for archetype, length in moving:iter() do
+                    local transforms = archetype:getMut(Transform2D)
+                    for row = 1, length do
+                        transforms[row].x = transforms[row].x + 1
+                    end
+                end
+            end,
+        })
+
+        frameOnce(world, renderer)
+        assert.are.equal(1, renderer.rewritten,
+            "writing a transform must re-sync its archetype")
+        renderer:destroy()
+    end)
+
+    it("re-lays out when an entity is spawned", function()
+        local world, renderer = newScene()
+        world:spawn(Transform2D(0, 0, 0, 4, 4), Tint(1, 1, 1, 1), Renderable())
+        frameOnce(world, renderer)
+        frameOnce(world, renderer)
+        assert.are.equal(0, renderer.rewritten)
+
+        world:spawn(Transform2D(8, 8, 0, 4, 4), Tint(1, 1, 1, 1), Renderable())
+        frameOnce(world, renderer)
+        assert.are.equal(2, renderer.count)
+        assert.are.equal(2, renderer.rewritten,
+            "a changed length moves runs, so the layout is rebuilt")
         renderer:destroy()
     end)
 

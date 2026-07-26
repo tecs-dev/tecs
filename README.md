@@ -75,18 +75,30 @@ the safe default: it goes quiet when anything is pushed over it.
 The state is fed one `SDL_Event` at a time and holds no globals, so a recorded
 session replays by feeding the same events back through `events.source`.
 
-## The ECS binding
+## The Tecs binding
 
-`ecs/Renderer` is the bridge, and the only module that knows about both
-archetypes and GPU buffers. Everything below it is renderer; everything above
-it is ECS.
+Tecs itself is unchanged and consumed as a dependency. What lives here is
+tecs2d's own surface on top of it: components, a renderer that syncs from a
+world, and a physics plugin.
 
-Instances pack as four vec4s: a 2x2 basis, an origin, a colour, and a UV rect.
-SDL_GPU binds samplers per pipeline rather than bindlessly, so the sync groups
-instances by texture with a counting sort and the geometry pass issues one
-draw per texture. Entities without a `Sprite` land in slot zero, a one-pixel
-white texture, so textured and untextured geometry share one shader and one
-pipeline instead of needing a branch or a second path.
+`Renderer` is the bridge, and the only module that knows about both
+archetypes and GPU buffers. Everything below it is renderer; above it is
+Tecs.
+
+Images live in one array texture, so the texture is a per-instance layer index
+and the whole scene is one draw. That is also what frees the instance layout:
+with nothing to sort by, each archetype keeps a contiguous run, and a run whose
+components did not change is not rewritten.
+
+That gating is the point. Walking every entity every frame is the cost that
+decides whether a large world is affordable, and most frames change very
+little. A still scene of half a million entities resyncs nothing.
+
+Layer zero is a white pixel, so an entity with no `Sprite` samples it and
+textured and untextured geometry share one shader and one pipeline. An image
+smaller than a cell does not reach the cell's edge, so `registerImage` returns
+a ready `Sprite` rather than a bare index: a caller guessing the UV range
+would sample the undefined remainder.
 
 Its sync reads columns with `get`, never `getMut`. Taking a mutable column to
 read would mark those components dirty on every archetype every frame, which
@@ -253,8 +265,9 @@ scripts/abicheck.py         cdef vs C compiler layout verification
 src/tecs2d/ffi/             library loading and generated binding wrappers
 src/tecs2d/platform/        window, clock, events
 src/tecs2d/gpu/             device, frame, passes, shaders, pipelines, buffers
-src/tecs2d/ecs/             components and the ECS-to-GPU bridge
-src/tecs2d/physics/         Box2D world and bodies
+src/tecs2d/components.tl    components the engine renders and simulates
+src/tecs2d/Renderer.tl      the world-to-GPU bridge
+src/tecs2d/physics/         Box2D binding and its world plugin
 spec/                       busted suite
 ```
 

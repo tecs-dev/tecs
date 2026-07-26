@@ -10,18 +10,18 @@
 --- valid in either state, and passing it avoids copying a decoded image
 --- through a serialized message only to copy it again into staging. Ownership
 --- transfers with it: whoever receives the address destroys the surface.
+---
+--- Nothing here creates a GPU resource. Decoding and residency are separate
+--- decisions: the renderer knows what layout its textures need, and an asset
+--- that has been decoded is useful before anything has decided where it will
+--- live.
 
 local ffi <const> = require("ffi")
 local sdl <const> = require("tecs2d.ffi.sdl3")
 local loader <const> = require("tecs2d.ffi.loader")
 local workers <const> = require("tecs2d.workers")
-local Texture <const> = require("tecs2d.gpu.Texture")
 
 local C <const> = sdl.C
-
---- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, which every decode is converted to
---- so the upload path has one layout to handle.
-local RGBA8 <const> = 4
 
 --- Runs on the worker. Decodes to RGBA and returns the surface address.
 local DECODER <const> = [==[
@@ -58,6 +58,7 @@ while true do
                 surface = tonumber(require("ffi").cast("uintptr_t", converted)),
                 width = converted.w,
                 height = converted.h,
+                pitch = converted.pitch,
             })
         end
     end
@@ -68,24 +69,29 @@ local record Handle
     --- "loading", "ready", or "failed".
     status: string
     path: string
-    --- Set once loading succeeds.
-    texture: Texture
+    --- Decoded RGBA pixels, valid until `release`.
+    pixels: loader.CValue
+    width: integer
+    height: integer
+    --- Row stride in bytes, which a decoder may pad beyond width * 4.
+    pitch: integer
     --- Set if loading failed.
     error: string
+    _surface: loader.CValue
 end
 
 local record assets
     Handle: Handle
 end
 
+local HandleMT <const>: metatable<Handle> = { __index = Handle }
+
 local pending: {integer: Handle} = {}
 local nextId = 1
 local worker: workers.Worker = nil
-local device: loader.CPtr = nil
 
 --- Starts the loading worker.
-function assets.install(gpuDevice: loader.CPtr, luaPath?: string)
-    device = gpuDevice
+function assets.install(luaPath?: string)
     worker = workers.spawn({
         source = DECODER,
         luaPath = luaPath or package.path,
@@ -98,7 +104,8 @@ function assets.loadImage(path: string): Handle
         error("tecs2d: assets.install must run before loading", 2)
     end
 
-    local handle: Handle = { status = "loading", path = path }
+    local handle = setmetatable({ status = "loading", path = path } as Handle,
+        HandleMT)
     local id = nextId
     nextId = nextId + 1
     pending[id] = handle
@@ -107,9 +114,6 @@ function assets.loadImage(path: string): Handle
 end
 
 --- Resolves one decode result into its handle.
----
---- Uploading here rather than on the worker is not a limitation to route
---- around: GPU resource creation belongs to the thread that owns the device.
 local function complete(result: {string: any}): boolean
     local id = result.id as integer
     local handle = pending[id]
@@ -122,25 +126,28 @@ local function complete(result: {string: any}): boolean
         return true
     end
 
+    -- Ownership arrived with the address. The surface stays alive until the
+    -- handle is released, because the pixels are what the caller came for.
     local surface = ffi.cast("SDL_Surface *",
         ffi.cast("uintptr_t", result.surface)) as loader.CValue
-    local width = result.width as integer
-    local height = result.height as integer
-
-    local texture = Texture.create(device, {
-        width = width,
-        height = height,
-        format = RGBA8,
-        usage = { "sampled" },
-    })
-    texture:upload(surface.pixels as loader.CValue, width * height * 4)
-
-    -- Ownership arrived with the address, so it is released here.
-    C.SDL_DestroySurface(surface)
-
-    handle.texture = texture
+    handle._surface = surface
+    handle.pixels = surface.pixels as loader.CValue
+    handle.width = result.width as integer
+    handle.height = result.height as integer
+    handle.pitch = result.pitch as integer
     handle.status = "ready"
     return true
+end
+
+--- Frees the decoded pixels.
+---
+--- Called once whatever needed them has taken a copy, which for an image
+--- means after it has been uploaded.
+function Handle:release()
+    if self._surface == nil then return end
+    C.SDL_DestroySurface(self._surface)
+    self._surface = nil
+    self.pixels = nil
 end
 
 --- Takes finished decodes and uploads them. Call once per frame.
