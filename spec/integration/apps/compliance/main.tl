@@ -7,10 +7,10 @@
 --- so specs can read it via the run_lua MCP tool.
 
 local tecs <const> = require("tecs")
-local tecs2d <const> = require("tecs2d")
-local mcp <const> = require("tecs2d.mcp")
-local gfx <const> = require("tecs2d.gfx")
-local input <const> = require("tecs2d.input")
+local tecs2d <const> = require("tecs")
+local mcp <const> = require("tecs.mcp")
+local gfx <const> = require("tecs.gfx")
+local input <const> = require("tecs.input")
 
 local Transform <const> = tecs.builtins.Transform
 
@@ -82,12 +82,12 @@ local function gamePlugin(world: tecs.World)
         end,
     })
 
-    world:observe(0, tecs2d.KeyPressed, function(e: tecs2d.KeyPressed)
+    world:observe(0, tecs.KeyPressed, function(e: tecs.KeyPressed)
         state.lastKey = e.key
     end)
 end
 
-love.run = tecs2d.run({
+love.run = tecs.run({
     fps = 60,
     game = gamePlugin,
     render = {

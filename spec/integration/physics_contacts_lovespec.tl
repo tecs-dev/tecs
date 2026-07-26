@@ -9,7 +9,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/tiledphysics"
 
@@ -22,7 +22,7 @@ describe("physics contacts: begin/end events reach entity observers", function()
         -- away from the fixture's own ball.
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local physics = require("tecs2d.physics")
+            local physics = require("tecs.physics")
             local Transform = tecs.builtins.Transform
             _G.tecsContactBall = world:spawn(
                 Transform(220, 40, 0, 1),
@@ -70,7 +70,7 @@ describe("physics contacts: begin/end events reach entity observers", function()
 
     it("leaving the floor emits EndContact", function()
         fixture.runLua(app, [[
-            local physics = require("tecs2d.physics")
+            local physics = require("tecs.physics")
             local collider = world:get(_G.tecsContactBall, physics.Collider)
             collider.body:setLinearVelocity(0, -250)
             return true
@@ -86,7 +86,7 @@ describe("physics contacts: begin/end events reach entity observers", function()
     it("synchronizes the authoritative body pose before FixedLast", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local physics = require("tecs2d.physics")
+            local physics = require("tecs.physics")
             local Transform = tecs.builtins.Transform
             _G.tecsFixedSync = {
                 samples = 0,

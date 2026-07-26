@@ -11,7 +11,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/shapes"
 local SAVE_PATH <const> = "sequence-lovespec.save"
@@ -19,7 +19,7 @@ local SAVE_PATH <const> = "sequence-lovespec.save"
 -- Registering the actions is all a fresh process should need: actions are
 -- code, rebound by name, and the program itself has to arrive in the save.
 local REGISTER_ACTIONS <const> = [[
-    local sequence = require("tecs2d.sequence")
+    local sequence = require("tecs.sequence")
     _G.tecsSeq = {marks = {}}
     sequence.registerAction(world, "lovespec.mark", function(_w, ctx)
         local marks = _G.tecsSeq.marks
@@ -47,7 +47,7 @@ describe("sequence: a save resumes in a process that never compiled it", functio
         -- lands mid-sequence with instructions still ahead of it.
         fixture.runLua(first, [[
             local tecs = require("tecs")
-            local sequence = require("tecs2d.sequence")
+            local sequence = require("tecs.sequence")
             _G.tecsSeqActor = world:spawn(tecs.builtins.Transform(0, 0, 0, 1))
             world:commit()
             sequence.timeline("lovespec.slide", {
@@ -87,7 +87,7 @@ describe("sequence: a save resumes in a process that never compiled it", functio
         luassert.is_true(parked == true, "the sequence never reached its wait")
 
         local blocked = fixture.runLua(first, [[
-            local sequence = require("tecs2d.sequence")
+            local sequence = require("tecs.sequence")
             local status = sequence.status(world, _G.tecsSeqHandle)
             return status.waitingFor, status.pc, status.program
         ]])
@@ -109,7 +109,7 @@ describe("sequence: a save resumes in a process that never compiled it", functio
         fixture.runLua(second, REGISTER_ACTIONS)
 
         local before = fixture.runLua(second, [[
-            local sequence = require("tecs2d.sequence")
+            local sequence = require("tecs.sequence")
             return sequence.program("lovespec.encounter") == nil
         ]])
         luassert.equals("true", before[1],
@@ -119,7 +119,7 @@ describe("sequence: a save resumes in a process that never compiled it", functio
             local payload = love.filesystem.read("]] .. SAVE_PATH .. [[")
             if not payload then return "missing save" end
             world:loadSnapshot(payload)
-            local sequence = require("tecs2d.sequence")
+            local sequence = require("tecs.sequence")
             local program = sequence.program("lovespec.encounter")
             return program ~= nil and program.version or "no program"
         ]])
@@ -132,7 +132,7 @@ describe("sequence: a save resumes in a process that never compiled it", functio
         luassert.equals("", resumedMarks, "the restored playback re-ran its first call")
 
         local waiting = fixture.runLua(second, [[
-            local sequence = require("tecs2d.sequence")
+            local sequence = require("tecs.sequence")
             return sequence.waitingOn(world, "lovespec.go")
         ]])
         luassert.equals("1", waiting[1], "the restored playback is not parked on its signal")
@@ -141,7 +141,7 @@ describe("sequence: a save resumes in a process that never compiled it", functio
         -- The named one is not running when the save is written, so nothing
         -- would have collected it from the live cursors.
         local timeline = fixture.runLua(second, [[
-            local sequence = require("tecs2d.sequence")
+            local sequence = require("tecs.sequence")
             return sequence.program("lovespec.slide") ~= nil
         ]])
         luassert.equals("true", timeline[1],
@@ -150,7 +150,7 @@ describe("sequence: a save resumes in a process that never compiled it", functio
 
     it("runs the restored instructions to the end", function()
         fixture.runLua(second, [[
-            local sequence = require("tecs2d.sequence")
+            local sequence = require("tecs.sequence")
             sequence.signal(world, "lovespec.go")
             return true
         ]])
@@ -165,7 +165,7 @@ describe("sequence: a save resumes in a process that never compiled it", functio
             "restored program did not run to completion, saw: " .. marks(second))
 
         local live = fixture.runLua(second, [[
-            local sequence = require("tecs2d.sequence")
+            local sequence = require("tecs.sequence")
             return sequence.activeCount(world)
         ]])
         luassert.equals("0", live[1], "the restored playback never retired")

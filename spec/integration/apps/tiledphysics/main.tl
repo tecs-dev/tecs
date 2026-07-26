@@ -10,11 +10,11 @@
 --- (radius 8) drops from (248, 40) and should rest at y = 120.
 
 local tecs <const> = require("tecs")
-local tecs2d <const> = require("tecs2d")
-local mcp <const> = require("tecs2d.mcp")
-local gfx <const> = require("tecs2d.gfx")
-local tiled <const> = require("tecs2d.tiled")
-local physics <const> = require("tecs2d.physics")
+local tecs2d <const> = require("tecs")
+local mcp <const> = require("tecs.mcp")
+local gfx <const> = require("tecs.gfx")
+local tiled <const> = require("tecs.tiled")
+local physics <const> = require("tecs.physics")
 
 local Transform <const> = tecs.builtins.Transform
 
@@ -74,7 +74,7 @@ local function buildMap(): tiled.TilemapData
 end
 
 local function gamePlugin(world: tecs.World)
-    world:addPlugin(require("tecs2d.debug").new({uiHeight = HEIGHT}))
+    world:addPlugin(require("tecs.debug").new({uiHeight = HEIGHT}))
     world:addPlugin(mcp.new({
         port = tonumber(os.getenv("TECS_MCP_PORT")) or mcp.DEFAULT_PORT,
     }))
@@ -106,7 +106,7 @@ local function gamePlugin(world: tecs.World)
     )
 end
 
-love.run = tecs2d.run({
+love.run = tecs.run({
     fps = 60,
     game = gamePlugin,
     render = {

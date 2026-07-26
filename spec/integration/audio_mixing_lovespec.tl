@@ -9,7 +9,7 @@
 require("busted")
 local luassert <const> = require("luassert")
 local socket <const> = require("socket")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/compliance"
 
@@ -25,7 +25,7 @@ describe("audio mixing: groups, fades, and component sources", function()
     setup(function()
         app = fixture.start(APP_DIR)
         run(app, [[
-            local audio = require("tecs2d.audio")
+            local audio = require("tecs.audio")
             _G.mgr = world.resources[audio]
             _G.audioMod = audio
             math.randomseed(42)

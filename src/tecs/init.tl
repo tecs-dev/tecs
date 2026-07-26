@@ -59,6 +59,26 @@ local record tecs
     type SnapshotOutput = types.World.SnapshotOutput
     type SnapshotHandler = types.World.SnapshotHandler
 
+    --- The engine surface. Resolved on first use; see the note by ENGINE.
+    Application: any
+    Renderer: any
+    Camera: any
+    Window: any
+    Input: any
+    clock: any
+    events: any
+    capabilities: any
+    paths: any
+    components: any
+    materials: any
+    assets: any
+    workers: any
+    physics: any
+    log: any
+    mcp: any
+    version: string
+    application: function(config: any): any
+
     json: json
     phases: phases
     builtins: builtins
@@ -189,5 +209,55 @@ tecs.builtins = builtins
 tecs.runif = runIfHelpers
 tecs.MAX_ENTITIES = IdAllocator.ABSOLUTE_MAX_SLOT_COUNT
 tecs.DEFAULT_MAX_ENTITIES = IdAllocator.DEFAULT_MAX_SLOT_COUNT
+
+-- The engine half of the surface, resolved on first use.
+--
+-- Lazily, because every one of these modules requires `tecs` itself for
+-- worlds, phases and components, so requiring them here would be a cycle. The
+-- names are listed rather than discovered, so `tecs.Aplication` is an error at
+-- the point of the typo instead of a nil at the point of the call.
+local ENGINE <const>: {string: string} = {
+    Application = "tecs.Application",
+    Renderer = "tecs.Renderer",
+    Camera = "tecs.gfx.Camera",
+    Window = "tecs.platform.Window",
+    Input = "tecs.platform.Input",
+    clock = "tecs.platform.clock",
+    events = "tecs.platform.events",
+    capabilities = "tecs.platform.capabilities",
+    paths = "tecs.platform.paths",
+    components = "tecs.components",
+    materials = "tecs.gpu.materials",
+    assets = "tecs.assets",
+    workers = "tecs.workers",
+    physics = "tecs.physics",
+    log = "tecs.log",
+    mcp = "tecs.mcp",
+}
+
+local engineTable <const> = tecs as {string: any}
+
+setmetatable(engineTable, {
+    __index = function(self: {string: any}, name: string): any
+        local module = ENGINE[name]
+        if module == nil then return nil end
+        local resolved = require(module)
+        rawset(self, name, resolved)
+        return resolved
+    end,
+})
+
+--- Builds the application an entry file returns.
+---
+--- Not a function that runs until done: an entry file ends with
+--- `return tecs.application(config)` and the host drives it from there,
+--- because a platform that never hands control back has no loop to block in.
+function tecs.application(config: any): any
+    local Application = require("tecs.Application") as {string: any}
+    local create = Application.create as function(any): any
+    return create(config)
+end
+
+tecs.version = "0.1.0"
 
 return tecs

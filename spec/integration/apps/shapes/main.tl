@@ -5,9 +5,9 @@
 --- blend mode suites.
 
 local tecs <const> = require("tecs")
-local tecs2d <const> = require("tecs2d")
-local mcp <const> = require("tecs2d.mcp")
-local gfx <const> = require("tecs2d.gfx")
+local tecs2d <const> = require("tecs")
+local mcp <const> = require("tecs.mcp")
+local gfx <const> = require("tecs.gfx")
 
 local WIDTH <const> = 320
 local HEIGHT <const> = 240
@@ -54,7 +54,7 @@ local function gamePlugin(world: tecs.World)
     pipeline:getCamera():setPosition(WIDTH / 2, HEIGHT / 2)
 end
 
-love.run = tecs2d.run({
+love.run = tecs.run({
     fps = 60,
     game = gamePlugin,
     render = {

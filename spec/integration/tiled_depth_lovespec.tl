@@ -8,7 +8,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/shapes"
 
@@ -74,7 +74,7 @@ describe("tiled depth: external tilesets, flips, infinite rejection", function()
 
         fixture.runLua(app, string.format([[
             local tecs = require("tecs")
-            local tiled = require("tecs2d.tiled")
+            local tiled = require("tecs.tiled")
             local Transform = tecs.builtins.Transform
             _G.tecsDepthMap = world:spawn(
                 tiled.Tilemap.new({path = "tdepth_map.tmj"}),
@@ -128,7 +128,7 @@ describe("tiled depth: external tilesets, flips, infinite rejection", function()
 
     it("rejects infinite maps with the documented error", function()
         local values = fixture.runLua(app, [[
-            local tiled = require("tecs2d.tiled")
+            local tiled = require("tecs.tiled")
             local ok, err = pcall(function()
                 tiled.parseTiledMap({
                     width = 2, height = 2, tilewidth = 16, tileheight = 16,

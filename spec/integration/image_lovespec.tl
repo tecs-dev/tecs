@@ -6,7 +6,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/shapes"
 local W <const> = 320.0
@@ -58,7 +58,7 @@ describe("Image rendering", function()
         app = fixture.start(APP_DIR)
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
 
             local whiteData = love.image.newImageData(32, 32)
@@ -194,7 +194,7 @@ describe("Image rendering", function()
         waitPixel(app, 256, 104, isDark, "hidden Image layer")
 
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local pipeline = world.resources[gfx.PIPELINE]
             pipeline:setLayerVisibility(4, true)
             return true
@@ -204,7 +204,7 @@ describe("Image rendering", function()
         end, "visible Image layer")
 
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             world.resources[gfx.PIPELINE]:getCamera():setPosition(1000, 120)
             return true
         ]])
@@ -242,7 +242,7 @@ describe("Image lighting composition", function()
         app = fixture.start("build/test_deps/spec/integration/apps/lighting")
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             world:spawn(Transform(100, 120, 0, 1), gfx.Light(400, 2.0, 0.5))
             return true
@@ -263,7 +263,7 @@ describe("Image lighting composition", function()
     it("uses Image alpha as an Occluder silhouette", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             local data = love.image.newImageData(32, 32)
             data:mapPixel(function(_x, _y, _r, _g, _b, _a)
@@ -291,7 +291,7 @@ describe("Image lighting composition", function()
     it("projects an Image DropShadow beside the caster", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             local data = love.image.newImageData(24, 24)
             data:mapPixel(function(_x, _y, _r, _g, _b, _a)

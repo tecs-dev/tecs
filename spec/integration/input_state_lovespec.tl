@@ -11,7 +11,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local socket <const> = require("socket")
 local sleep <const> = socket.sleep as function(number)
@@ -39,7 +39,7 @@ describe("input state: per-frame edge and hold semantics", function()
         app = fixture.start(APP_DIR)
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local input = require("tecs2d.input")
+            local input = require("tecs.input")
             _G.tecsInputRec = {
                 pressed = 0, released = 0, downFrames = 0,
                 fixedPressed = 0,

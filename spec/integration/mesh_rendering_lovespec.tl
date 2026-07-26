@@ -8,7 +8,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/shapes"
 
@@ -42,7 +42,7 @@ describe("mesh rendering: definitions, instances, and growth", function()
         -- A 20x20 quad definition (two triangles around the origin).
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             local lg = love.graphics
 
@@ -95,7 +95,7 @@ describe("mesh rendering: definitions, instances, and growth", function()
     it("renders a material variant on a mesh", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             _G.tecsMeshB = world:spawn(
                 Transform(200, 120, 0, 1), gfx.Mesh("testquad"),
@@ -111,7 +111,7 @@ describe("mesh rendering: definitions, instances, and growth", function()
         for round = 1, 2 do
             fixture.runLua(app, string.format([[
                 local tecs = require("tecs")
-                local gfx = require("tecs2d.gfx")
+                local gfx = require("tecs.gfx")
                 local Transform = tecs.builtins.Transform
                 math.randomseed(%d)
                 local spawned = {}

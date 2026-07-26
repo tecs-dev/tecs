@@ -8,7 +8,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/shapes"
 
@@ -39,7 +39,7 @@ describe("material variants: params drive shape albedo", function()
         app = fixture.start(APP_DIR)
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             local flat = _G.tecsFlatMaterial
 
@@ -77,7 +77,7 @@ describe("material variants: params drive shape albedo", function()
 
     it("updates per-entity params at runtime", function()
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local mat = world:getMut(_G.tecsMatRect, gfx.Material)
             mat.p0, mat.p1, mat.p2 = 1, 0, 0
             return true

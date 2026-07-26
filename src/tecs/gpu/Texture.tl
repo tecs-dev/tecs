@@ -1,0 +1,223 @@
+--- A GPU texture.
+---
+--- Usage is declared rather than assumed. SDL_GPU validates that a texture is
+--- only used the ways it was created for, and the flags are not in the order
+--- one would guess, so they are taken from the generated constants.
+---
+--- Readback exists so rendering can be asserted on rather than eyeballed. A
+--- pass that silently produces nothing still runs at full frame rate.
+
+local sdl <const> = require("tecs.ffi.sdl3")
+local loader <const> = require("tecs.ffi.loader")
+
+local C <const> = sdl.C
+local K <const> = sdl.K
+
+local record Pixel
+    r: integer
+    g: integer
+    b: integer
+    a: integer
+end
+
+local record TextureOptions
+    width: integer
+    height: integer
+    format: integer
+    --- Any of "colorTarget", "sampled", "depthTarget", "computeWrite",
+    --- "computeRead". Defaults to a samplable colour target.
+    usage: {string}
+    name: string
+end
+
+local record Texture
+    handle: loader.CPtr
+    width: integer
+    height: integer
+    format: integer
+    _device: loader.CPtr
+    _transfer: loader.CPtr
+    _transferSize: integer
+    _destroyed: boolean
+end
+
+local TextureMT <const>: metatable<Texture> = { __index = Texture }
+
+local USAGE_FLAGS <const>: {string: integer} = {
+    sampled = K.SDL_GPU_TEXTUREUSAGE_SAMPLER,
+    colorTarget = K.SDL_GPU_TEXTUREUSAGE_COLOR_TARGET,
+    depthTarget = K.SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET,
+    computeRead = K.SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ,
+    computeWrite = K.SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE,
+    graphicsRead = K.SDL_GPU_TEXTUREUSAGE_GRAPHICS_STORAGE_READ,
+}
+
+local DEFAULT_USAGE <const>: {string} = { "colorTarget", "sampled" }
+
+--- Creates a texture.
+function Texture.create(device: loader.CPtr, options: TextureOptions): Texture
+    local flags = 0
+    for _, name in ipairs(options.usage or DEFAULT_USAGE) do
+        local flag = USAGE_FLAGS[name]
+        if flag == nil then
+            error(("tecs2d: unknown texture usage '%s'"):format(tostring(name)), 2)
+        end
+        flags = flags + flag
+    end
+
+    local info = loader.newArray("SDL_GPUTextureCreateInfo[1]")
+    local settings = info[0] as loader.CStruct
+    settings.type = 0                    -- SDL_GPU_TEXTURETYPE_2D
+    settings.format = options.format
+    settings.usage = flags
+    settings.width = options.width
+    settings.height = options.height
+    settings.layer_count_or_depth = 1
+    settings.num_levels = 1
+    settings.sample_count = 0
+    settings.props = 0
+
+    local handle = C.SDL_CreateGPUTexture(device, info)
+    if handle == nil then sdl.fail("SDL_CreateGPUTexture") end
+
+    local self = setmetatable({} as Texture, TextureMT)
+    self.handle = handle
+    self.width = options.width
+    self.height = options.height
+    self.format = options.format
+    self._device = device
+    self._transferSize = 0
+    self._destroyed = false
+    return self
+end
+
+--- Uploads tightly packed RGBA pixels into the texture.
+---
+--- Submits its own command buffer, so this is a load-time path. It exists
+--- because an asset arrives once, not once per frame.
+function Texture:upload(pixels: loader.CValue, byteCount: integer)
+    local info = loader.newArray("SDL_GPUTransferBufferCreateInfo[1]")
+    local settings = info[0] as loader.CStruct
+    settings.usage = C.SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD
+    settings.size = byteCount
+    settings.props = 0
+
+    local transfer = C.SDL_CreateGPUTransferBuffer(self._device, info)
+    if transfer == nil then sdl.fail("SDL_CreateGPUTransferBuffer") end
+
+    local mapped = C.SDL_MapGPUTransferBuffer(self._device, transfer, true)
+    if mapped == nil then sdl.fail("SDL_MapGPUTransferBuffer") end
+    loader.copyBytes(mapped as loader.CArray, pixels, byteCount)
+    C.SDL_UnmapGPUTransferBuffer(self._device, transfer)
+
+    local commandBuffer = C.SDL_AcquireGPUCommandBuffer(self._device)
+    if commandBuffer == nil then sdl.fail("SDL_AcquireGPUCommandBuffer") end
+    local copyPass = C.SDL_BeginGPUCopyPass(commandBuffer)
+
+    local source = loader.newArray("SDL_GPUTextureTransferInfo[1]")
+    local from = source[0] as loader.CStruct
+    from.transfer_buffer = transfer
+    from.offset = 0
+    from.pixels_per_row = self.width
+    from.rows_per_layer = self.height
+
+    local region = loader.newArray("SDL_GPUTextureRegion[1]")
+    local to = region[0] as loader.CStruct
+    to.texture = self.handle
+    to.mip_level = 0
+    to.layer = 0
+    to.x, to.y, to.z = 0, 0, 0
+    to.w, to.h, to.d = self.width, self.height, 1
+
+    C.SDL_UploadToGPUTexture(copyPass, source, region, false)
+    C.SDL_EndGPUCopyPass(copyPass)
+    sdl.check(C.SDL_SubmitGPUCommandBuffer(commandBuffer) as boolean,
+        "SDL_SubmitGPUCommandBuffer")
+
+    C.SDL_ReleaseGPUTransferBuffer(self._device, transfer)
+end
+
+--- Copies the texture into a mapped transfer buffer and returns the pixels.
+---
+--- Blocks until the GPU has finished, so this is a diagnostic and test path,
+--- not something a frame should call.
+function Texture:readback(): loader.CArray
+    local byteCount = self.width * self.height * 4
+
+    if self._transfer == nil then
+        local info = loader.newArray("SDL_GPUTransferBufferCreateInfo[1]")
+        local settings = info[0] as loader.CStruct
+        settings.usage = C.SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD
+        settings.size = byteCount
+        settings.props = 0
+        self._transfer = C.SDL_CreateGPUTransferBuffer(self._device, info)
+        if self._transfer == nil then sdl.fail("SDL_CreateGPUTransferBuffer") end
+        self._transferSize = byteCount
+    end
+
+    local commandBuffer = C.SDL_AcquireGPUCommandBuffer(self._device)
+    if commandBuffer == nil then sdl.fail("SDL_AcquireGPUCommandBuffer") end
+    local copyPass = C.SDL_BeginGPUCopyPass(commandBuffer)
+
+    local region = loader.newArray("SDL_GPUTextureRegion[1]")
+    local source = region[0] as loader.CStruct
+    source.texture = self.handle
+    source.mip_level = 0
+    source.layer = 0
+    source.x = 0
+    source.y = 0
+    source.z = 0
+    source.w = self.width
+    source.h = self.height
+    source.d = 1
+
+    local destination = loader.newArray("SDL_GPUTextureTransferInfo[1]")
+    local sink = destination[0] as loader.CStruct
+    sink.transfer_buffer = self._transfer
+    sink.offset = 0
+    sink.pixels_per_row = self.width
+    sink.rows_per_layer = self.height
+
+    C.SDL_DownloadFromGPUTexture(copyPass, region, destination)
+    C.SDL_EndGPUCopyPass(copyPass)
+
+    local fence = C.SDL_SubmitGPUCommandBufferAndAcquireFence(commandBuffer)
+    if fence == nil then sdl.fail("SDL_SubmitGPUCommandBufferAndAcquireFence") end
+    local fences = loader.newArray("SDL_GPUFence*[1]")
+    fences[0] = fence
+    C.SDL_WaitForGPUFences(self._device, true, fences, 1)
+    C.SDL_ReleaseGPUFence(self._device, fence)
+
+    local mapped = C.SDL_MapGPUTransferBuffer(self._device, self._transfer, false)
+    if mapped == nil then sdl.fail("SDL_MapGPUTransferBuffer") end
+    local pixels = loader.newArray("uint8_t[?]", byteCount)
+    loader.copyBytes(pixels, mapped as loader.CValue, byteCount)
+    C.SDL_UnmapGPUTransferBuffer(self._device, self._transfer)
+
+    return pixels
+end
+
+--- Reads one pixel out of a buffer returned by `readback`.
+function Texture:getPixel(pixels: loader.CArray, x: integer, y: integer): Pixel
+    local offset = (y * self.width + x) * 4
+    return {
+        r = pixels[offset] as integer,
+        g = pixels[offset + 1] as integer,
+        b = pixels[offset + 2] as integer,
+        a = pixels[offset + 3] as integer,
+    }
+end
+
+--- Releases the texture and any transfer buffer. Safe to call more than once.
+function Texture:destroy()
+    if self._destroyed then return end
+    self._destroyed = true
+    if self._transfer ~= nil then
+        C.SDL_ReleaseGPUTransferBuffer(self._device, self._transfer)
+        self._transfer = nil
+    end
+    C.SDL_ReleaseGPUTexture(self._device, self.handle)
+    self.handle = nil
+end
+
+return Texture

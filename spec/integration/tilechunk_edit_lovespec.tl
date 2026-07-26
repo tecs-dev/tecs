@@ -9,7 +9,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/shapes"
 
@@ -45,7 +45,7 @@ describe("tilechunk: renders and resyncs edited tiles", function()
         app = fixture.start(APP_DIR)
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
 
             -- Two-tile tileset: local id 1 = red, id 2 = green.
@@ -89,7 +89,7 @@ describe("tilechunk: renders and resyncs edited tiles", function()
 
     it("resyncs edited tiles when DirtyTileChunk is re-added", function()
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local chunk = world:getMut(_G.tecsChunk, gfx.TileChunk)
             chunk.tiles[1] = 2      -- red -> green
             chunk.tiles[17] = 0     -- clear

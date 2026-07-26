@@ -8,7 +8,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/shapes"
 
@@ -38,7 +38,7 @@ describe("layers: ordering and parallax factors", function()
         app = fixture.start(APP_DIR)
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             -- Overlapping pair: red on layer 1 under green on layer 2.
             world:spawn(Transform(80, 60, 0, 1), gfx.Rectangle(40, 40), gfx.Color(1, 0, 0, 1))
@@ -108,7 +108,7 @@ describe("layers: ordering and parallax factors", function()
         luassert.is_true(imageBefore >= 0, "parallax Image not found before the move")
 
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             world.resources[gfx.PIPELINE]:getCamera():setPosition(200, 120)
             return true
         ]])

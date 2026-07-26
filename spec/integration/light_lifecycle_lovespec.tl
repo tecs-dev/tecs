@@ -8,7 +8,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/lighting"
 
@@ -39,7 +39,7 @@ end
 
 local function spawnCenterLight(app: fixture.App, globalName: string)
     fixture.runLua(app, string.format([[
-        local gfx = require("tecs2d.gfx")
+        local gfx = require("tecs.gfx")
         local Transform = require("tecs").builtins.Transform
         _G[%q] = world:spawn(Transform(160, 120, 0, 1), gfx.Light(300, 2.0, 0.5))
         return true
@@ -71,7 +71,7 @@ describe("light lifecycle: GPU slot release", function()
 
     it("removing the Light component extinguishes it", function()
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             world:remove(_G.tecsTestLightA, gfx.Light)
             return true
         ]])

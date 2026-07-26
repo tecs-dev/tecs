@@ -9,7 +9,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/shapes"
 
@@ -41,7 +41,7 @@ describe("cpu draws: world shader participates in the G-buffer", function()
         -- can move it through the depth order.
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
 
             local greenId = world:spawn(Transform(160, 120, 5, 2),
@@ -82,7 +82,7 @@ describe("cpu draws: world shader participates in the G-buffer", function()
     it("CPU draws render standalone where no GPU content sits", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local pipeline = world.resources[gfx.PIPELINE]
             world:addSystem({
                 name = "test.CpuDrawLone",

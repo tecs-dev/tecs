@@ -8,7 +8,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/lighting"
 
@@ -35,7 +35,7 @@ describe("spot lights and cookies", function()
         -- Cone pointing right (+x) from (120, 120).
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             _G.tecsSpot = world:spawn(
                 Transform(120, 120, 0, 1),
@@ -61,7 +61,7 @@ describe("spot lights and cookies", function()
         -- Cookie: left half black (blocked), right half white (open).
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             local imgData = love.image.newImageData(64, 64)
             for y = 0, 63 do

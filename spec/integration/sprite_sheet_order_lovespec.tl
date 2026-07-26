@@ -15,7 +15,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/sprites"
 local SAVE_PATH <const> = "sprite-sheet-order.save"
@@ -35,7 +35,7 @@ local SPRITE_DATA <const> = [[
 --- Register the two sheets in the given order and return the sprite's slice.
 local function registerAndSpawn(app: fixture.App, first: string, second: string): string
     return fixture.runLua(app, [[
-        local gfx = require("tecs2d.gfx")
+        local gfx = require("tecs.gfx")
         _G.tecsOrderFirst = gfx.SpriteSheet.fromTextureFile("]] .. first .. [[")
         _G.tecsOrderSecond = gfx.SpriteSheet.fromTextureFile("]] .. second .. [[")
         return true
@@ -86,7 +86,7 @@ describe("sprite sheets: a save names the sheet, not the slot", function()
 
         fixture.runLua(first, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             _G.tecsOrderSprite = world:spawn(
                 tecs.builtins.Transform(40, 40, 0, 1),
                 gfx.Sprite.fromSheet(_G.tecsOrderSecond, ""))
@@ -127,7 +127,7 @@ describe("sprite sheets: a save names the sheet, not the slot", function()
         ]])
 
         local found = fixture.runLua(second, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             _G.tecsOrderSprite = ]] .. savedEntity .. [[
             return world:get(_G.tecsOrderSprite, gfx.Sprite) ~= nil
         ]])
@@ -139,7 +139,7 @@ describe("sprite sheets: a save names the sheet, not the slot", function()
         -- what layer that sheet occupies in this process.
         fixture.runLua(second, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             _G.tecsOrderFresh = world:spawn(
                 tecs.builtins.Transform(80, 40, 0, 1),
                 gfx.Sprite.fromSheet(_G.tecsOrderFirst, ""))

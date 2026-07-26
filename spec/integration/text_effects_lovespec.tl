@@ -8,7 +8,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/shapes"
 
@@ -52,7 +52,7 @@ describe("text effects: MSDF glyphs, glow, and shadow", function()
         app = fixture.start(APP_DIR)
         fixture.runLua(app, string.format([[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             _G.tecsFxText = world:spawn(
                 Transform(%d, %d, 0, 1),
@@ -95,7 +95,7 @@ describe("text effects: MSDF glyphs, glow, and shadow", function()
     it("a glow tints pixels around the glyphs", function()
         local before = denseCount(app, isGreenish)
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             world:set(_G.tecsFxText, gfx.TextEffects.new({
                 glow = {radius = 1.0, color = {0, 1, 0, 1}},
             }))
@@ -111,7 +111,7 @@ describe("text effects: MSDF glyphs, glow, and shadow", function()
 
     it("an offset shadow paints beside the glyphs", function()
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             world:set(_G.tecsFxText, gfx.TextEffects.new({
                 shadow = {offset = {10, 10}, blur = 0, color = {1, 0, 0, 1}},
             }))
@@ -127,7 +127,7 @@ describe("text effects: MSDF glyphs, glow, and shadow", function()
 
     it("removing TextEffects returns to plain glyphs", function()
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             world:remove(_G.tecsFxText, gfx.TextEffects)
             return true
         ]])

@@ -1,6 +1,6 @@
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/shapes"
 local W <const> = 320.0
@@ -13,7 +13,7 @@ describe("immutable composited render worlds", function()
         app = fixture.start(APP_DIR)
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             local primary = world.resources[gfx.PIPELINE]
 
@@ -105,7 +105,7 @@ describe("immutable composited render worlds", function()
 
     it("keeps world identity and clocks independent", function()
         local values = fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local primary = world.resources[gfx.PIPELINE]
             local secondary = _G.tecsOverlayPipeline
             local primaryBefore = primary:getTime()
@@ -124,7 +124,7 @@ describe("immutable composited render worlds", function()
 
     it("shares device resources while isolating mutable renderer state", function()
         local values = fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local primary = world.resources[gfx.PIPELINE]:getRenderer()
             local secondary = _G.tecsOverlayPipeline:getRenderer()
             return primary ~= secondary,
@@ -140,7 +140,7 @@ describe("immutable composited render worlds", function()
 
     it("rejects replacing a world's pipeline", function()
         local values = fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local ok, err = pcall(gfx.newPipeline, {world = _G.tecsOverlayWorld})
             return ok, tostring(err):find("already owns a render pipeline", 1, true) ~= nil
         ]])
@@ -150,7 +150,7 @@ describe("immutable composited render worlds", function()
 
     it("keeps Sprite and Text ownership independent when entity IDs collide", function()
         local values = fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local ids = _G.tecsRenderWorldIds
             local primarySprite = world:get(ids[1], gfx.Sprite)
             local overlaySprite = _G.tecsOverlayWorld:get(ids[2], gfx.Sprite)

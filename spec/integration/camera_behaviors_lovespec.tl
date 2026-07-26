@@ -10,7 +10,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/shapes"
 
@@ -25,7 +25,7 @@ local MARKER_Y <const> = 120
 --- screen pixel reads red.
 local function waitMarkerAtToScreen(app: fixture.App, label: string)
     local values = fixture.runLua(app, string.format([[
-        local gfx = require("tecs2d.gfx")
+        local gfx = require("tecs.gfx")
         local cam = world.resources[gfx.PIPELINE]:getCamera()
         local sx, sy = cam:toScreen(%d, %d)
         return sx, sy
@@ -55,7 +55,7 @@ describe("camera behaviors: toScreen matches the rendered frame", function()
         app = fixture.start(APP_DIR)
         fixture.runLua(app, string.format([[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             world:spawn(Transform(%d, %d, 0, 1), gfx.Rectangle(12, 12), gfx.Color(1, 0, 0, 1))
             return true
@@ -68,7 +68,7 @@ describe("camera behaviors: toScreen matches the rendered frame", function()
 
     local function setCamera(x: number, y: number, zoom: number, rotation: number)
         fixture.runLua(app, string.format([[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local cam = world.resources[gfx.PIPELINE]:getCamera()
             cam:setPosition(%f, %f)
             cam:setZoom(%f)
@@ -79,7 +79,7 @@ describe("camera behaviors: toScreen matches the rendered frame", function()
 
     it("toWorld inverts toScreen", function()
         local values = fixture.runLua(app, string.format([[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local cam = world.resources[gfx.PIPELINE]:getCamera()
             local sx, sy = cam:toScreen(%d, %d)
             local wx, wy = cam:toWorld(sx, sy)

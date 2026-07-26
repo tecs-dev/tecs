@@ -8,7 +8,7 @@
 require("busted")
 
 local socket <const> = require("socket")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/sprites"
 local sleep <const> = socket.sleep as function(number)
@@ -112,7 +112,7 @@ describe("shared GPU Transform interpolation", function()
     it("interpolates shapes, text, and meshes", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             local lg = love.graphics
 

@@ -7,7 +7,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/shapes"
 local W <const> = 320.0
@@ -116,7 +116,7 @@ describe("tiled: oversized tileset fallback", function()
             }))
 
             local tecs = require("tecs")
-            local tiled = require("tecs2d.tiled")
+            local tiled = require("tecs.tiled")
             _G.tecsOversizedMap = world:spawn(
                 tiled.Tilemap.new({path = "toversized_map.tmj"}),
                 tecs.builtins.Transform(%d, %d, 0, 1))
@@ -153,8 +153,8 @@ describe("tiled: oversized tileset fallback", function()
             "unflipped tile right half should be blue")
 
         local values = fixture.runLua(app, [[
-            local tiled = require("tecs2d.tiled")
-            local internal = require("tecs2d.gfx.internal.tilechunk")
+            local tiled = require("tecs.tiled")
+            local internal = require("tecs.gfx.internal.tilechunk")
             local map = world:get(_G.tecsOversizedMap, tiled.Tilemap).data
             local chunkId = map.layers[1]._chunkEntities[1]
             local imageWidth = map.tilesets[1].image:getWidth()
@@ -177,7 +177,7 @@ describe("tiled: oversized tileset fallback", function()
         waitPixel(app, MAP_X + 4, MAP_Y + 8, isRed,
             "tile should render before its runtime edit")
         fixture.runLua(app, [[
-            local tiled = require("tecs2d.tiled")
+            local tiled = require("tecs.tiled")
             local map = world:get(_G.tecsOversizedMap, tiled.Tilemap).data
             map:setTile(1, 1, 1, 102)
             return true
@@ -194,9 +194,9 @@ describe("tiled: oversized tileset fallback", function()
             "oversized-atlas animation should advance to its green frame")
 
         local values = fixture.runLua(app, [[
-            local tiled = require("tecs2d.tiled")
-            local gfx = require("tecs2d.gfx")
-            local instances = require("tecs2d.gfx.internal.sprite.instance")
+            local tiled = require("tecs.tiled")
+            local gfx = require("tecs.gfx")
+            local instances = require("tecs.gfx.internal.sprite.instance")
             local map = world:get(_G.tecsOversizedMap, tiled.Tilemap).data
             local spriteId = map.layers[1]._animatedSpriteEntities[1]
             local sprite = world:get(spriteId, gfx.Sprite)

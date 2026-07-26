@@ -6,7 +6,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/shapes"
 
@@ -42,8 +42,8 @@ describe("timelines drive transforms in the live loop", function()
     it("to reaches its absolute target and cleans up playback", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
-            local sequence = require("tecs2d.sequence")
+            local gfx = require("tecs.gfx")
+            local sequence = require("tecs.sequence")
             local Transform = tecs.builtins.Transform
             _G.tecsTweenA = world:spawn(Transform(60, 60, 0, 1), gfx.Rectangle(8, 8), gfx.Color(1, 0, 0, 1))
             _G.tecsTweenAHandle = sequence.play(world,
@@ -57,7 +57,7 @@ describe("timelines drive transforms in the live loop", function()
         -- The playback retires itself once the timeline finishes.
         local cleaned = fixture.eventually(fixture.callTimeout, function(): boolean
             local values = fixture.runLua(app, [[
-                local sequence = require("tecs2d.sequence")
+                local sequence = require("tecs.sequence")
                 local status = sequence.status(world, _G.tecsTweenAHandle)
                 return status ~= nil and status.state == "completed"
             ]])
@@ -70,8 +70,8 @@ describe("timelines drive transforms in the live loop", function()
     it("adjust moves relative to the start value", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
-            local sequence = require("tecs2d.sequence")
+            local gfx = require("tecs.gfx")
+            local sequence = require("tecs.sequence")
             local Transform = tecs.builtins.Transform
             _G.tecsTweenB = world:spawn(Transform(50, 90, 0, 1), gfx.Rectangle(8, 8), gfx.Color(0, 1, 0, 1))
             sequence.play(world, sequence.timeline("spec.tweenB", {
@@ -85,8 +85,8 @@ describe("timelines drive transforms in the live loop", function()
     it("loop count is the total number of passes", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
-            local sequence = require("tecs2d.sequence")
+            local gfx = require("tecs.gfx")
+            local sequence = require("tecs.sequence")
             local Transform = tecs.builtins.Transform
             _G.tecsTweenC = world:spawn(Transform(30, 150, 0, 1), gfx.Rectangle(8, 8), gfx.Color(0, 0, 1, 1))
             sequence.play(world, sequence.timeline("spec.tweenC", {
@@ -100,8 +100,8 @@ describe("timelines drive transforms in the live loop", function()
     it("completes the playback when a timeline finishes", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
-            local sequence = require("tecs2d.sequence")
+            local gfx = require("tecs.gfx")
+            local sequence = require("tecs.sequence")
             local Transform = tecs.builtins.Transform
             _G.tecsTweenD = world:spawn(Transform(60, 200, 0, 1), gfx.Rectangle(8, 8), gfx.Color(1, 1, 0, 1))
             _G.tecsTweenDHandle = sequence.play(world,
@@ -112,7 +112,7 @@ describe("timelines drive transforms in the live loop", function()
         ]])
         local done = fixture.eventually(fixture.callTimeout, function(): boolean
             local values = fixture.runLua(app, [[
-                local sequence = require("tecs2d.sequence")
+                local sequence = require("tecs.sequence")
                 local status = sequence.status(world, _G.tecsTweenDHandle)
                 return status ~= nil and status.state == "completed"
             ]])

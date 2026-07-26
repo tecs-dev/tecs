@@ -6,9 +6,9 @@
 --- cam:toScreen() visibly.
 
 local tecs <const> = require("tecs")
-local tecs2d <const> = require("tecs2d")
-local mcp <const> = require("tecs2d.mcp")
-local gfx <const> = require("tecs2d.gfx")
+local tecs2d <const> = require("tecs")
+local mcp <const> = require("tecs.mcp")
+local gfx <const> = require("tecs.gfx")
 
 local Transform <const> = tecs.builtins.Transform
 
@@ -32,7 +32,7 @@ local function gamePlugin(world: tecs.World)
     )
 end
 
-love.run = tecs2d.run({
+love.run = tecs.run({
     fps = 60,
     game = gamePlugin,
     render = {

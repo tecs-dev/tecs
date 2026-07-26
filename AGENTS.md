@@ -84,7 +84,7 @@ tecs/
 ### Public API boundaries
 
 - The supported ECS surface is exposed from `require("tecs")`.
-- The supported 2D engine surface is exposed from `require("tecs2d")`.
+- The supported 2D engine surface is exposed from `require("tecs")`.
 - `tecs.internal.*` and deep `tecs2d.*.internal.*` modules are implementation details with no stability guarantee.
 
 ### ECS model
@@ -97,8 +97,8 @@ tecs/
 
 ### Tecs2D integration
 
-- `tecs2d.run` creates the `love.run` loop.
-- `tecs2d.run` auto-installs the asset manager, audio plugin, sequencer, controller plugin, render pipeline,
+- `tecs.run` creates the `love.run` loop.
+- `tecs.run` auto-installs the asset manager, audio plugin, sequencer, controller plugin, render pipeline,
   tiled plugin, and UI plugin before the user game plugin runs.
 - Rendering is GPU-oriented and depends on Love 12 features for the modern pipeline.
 
@@ -140,10 +140,10 @@ tecs/
   omitted fields reset to defaults) while `cmd_modify` changes only the named fields and skips
   targets that lack the component, so prefer `cmd_modify` for tweaking live values.
 - `get_logs` returns captured engine log lines with a seq cursor (`after`); the operator-action
-  feed (selection, marks, notes, edits, artifacts) logs under `tecs2d.debug.events`, so poll it
+  feed (selection, marks, notes, edits, artifacts) logs under `tecs.debug.events`, so poll it
   with `get_logs {after = <seq>, contains = "debug.events"}`. `cmd_components_info` gives field
   names, C types, and defaults for building component payloads.
-- Games can register custom debugger commands via `require("tecs2d.debug.commands").register`;
+- Games can register custom debugger commands via `require("tecs.debug.commands").register`;
   registered commands appear as `cmd_<name>` tools too.
 
 ## Development Guidelines
@@ -203,7 +203,7 @@ lowercase modules (never snake_case).
 - **Filenames and their import bindings** follow a class/module split:
   - The whole file *is* a class (one dominant type you construct and call
     methods on, including component records): **PascalCase**, e.g. `Camera.tl`
-    → `local Camera = require("tecs2d.gfx.Camera")`.
+    → `local Camera = require("tecs.gfx.Camera")`.
   - The file is a *module* that contains a class or is a namespace of
     functions/data: **luacase** (all lowercase, no separators, no camelCase),
     e.g. `bucketmanager.tl` → `local bucketmanager = require("...bucketmanager")`.

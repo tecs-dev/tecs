@@ -8,7 +8,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/layereffects"
 
@@ -50,7 +50,7 @@ describe("layer effects: canvases track render resolution", function()
 
     it("creates effect canvases at the virtual resolution", function()
         local values = fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local p = world.resources[gfx.PIPELINE]
             return p.layerEffectsManager.accumulator:getWidth(),
                 p.layerEffectsManager.accumulator:getHeight(),
@@ -73,7 +73,7 @@ describe("layer effects: canvases track render resolution", function()
 
     it("renders the full frame after setPixelMode(false)", function()
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             world.resources[gfx.PIPELINE]:setPixelMode(false)
             return true
         ]])
@@ -82,7 +82,7 @@ describe("layer effects: canvases track render resolution", function()
 
     it("renders the full frame after toggling pixel mode back on", function()
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             world.resources[gfx.PIPELINE]:setPixelMode(true)
             return true
         ]])

@@ -8,7 +8,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/compliance"
 
@@ -46,7 +46,7 @@ describe("tiled features: flips and external tilesets", function()
         -- clockwise (Tiled's D+H), the left edge becomes the top edge.
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local tiled = require("tecs2d.tiled")
+            local tiled = require("tecs.tiled")
             local Transform = tecs.builtins.Transform
 
             local mapData = {
@@ -91,7 +91,7 @@ describe("tiled features: flips and external tilesets", function()
     it("resolves external tileset images relative to the .tsj directory", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local tiled = require("tecs2d.tiled")
+            local tiled = require("tecs.tiled")
             local Transform = tecs.builtins.Transform
 
             love.filesystem.createDirectory("assets/maps")

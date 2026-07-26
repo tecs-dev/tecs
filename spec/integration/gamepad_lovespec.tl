@@ -10,7 +10,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/shapes"
 
@@ -129,8 +129,8 @@ describe("gamepad: virtual SDL3 device end to end", function()
         -- Recorder + controller with gamepad bindings + hotplug counters.
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local tecs2d = require("tecs2d")
-            local controller = require("tecs2d.controller")
+            local tecs2d = require("tecs")
+            local controller = require("tecs.controller")
             local manager = world.resources[controller]
             _G.tecsGamepadCtrl = manager:addController({
                 controls = {
@@ -146,10 +146,10 @@ describe("gamepad: virtual SDL3 device end to end", function()
                 moveRaw = 0, moveRightRaw = 0,
             }
             local r = _G.tecsPadRec
-            world:observe(0, tecs2d.JoystickAdded, function()
+            world:observe(0, tecs.JoystickAdded, function()
                 r.added = r.added + 1
             end)
-            world:observe(0, tecs2d.JoystickRemoved, function()
+            world:observe(0, tecs.JoystickRemoved, function()
                 r.removed = r.removed + 1
             end)
             world:addSystem({

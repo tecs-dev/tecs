@@ -9,7 +9,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/compliance"
 
@@ -82,7 +82,7 @@ describe("text fonts: UTF-8 and multi-font atlases", function()
     it("renders ASCII glyphs from font A", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             world:spawn(Transform(60, 60, 0, 1), gfx.Text("testfontA.fnt", "A", 4, 4))
             return true
@@ -93,7 +93,7 @@ describe("text fonts: UTF-8 and multi-font atlases", function()
     it("renders non-ASCII glyphs (UTF-8 decode)", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             world:spawn(Transform(60, 180, 0, 1), gfx.Text("testfontA.fnt", "\195\169", 4, 4))
             return true
@@ -104,7 +104,7 @@ describe("text fonts: UTF-8 and multi-font atlases", function()
     it("keeps both fonts correct when atlases differ in size", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             world:spawn(Transform(240, 60, 0, 1), gfx.Text("testfontB.fnt", "B", 4, 4))
             return true

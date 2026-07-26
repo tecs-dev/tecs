@@ -1,6 +1,6 @@
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/debugger"
 
@@ -565,7 +565,7 @@ describe("in-game debugger overlay", function()
         openDebugger()
         local first = tonumber(fixture.runLua(app, [[
             local tools = world.resources[_G.tecsTestHooks.toolworld.KEY]
-            local Color = require("tecs2d.gfx").Color
+            local Color = require("tecs.gfx").Color
             local color = tools.world:get(tools.cursorAlphaEntity, Color)
             return color.a, color.r, color.g, color.b
         ]])[1])
@@ -573,7 +573,7 @@ describe("in-game debugger overlay", function()
         local changed = fixture.eventually(1.5, function(): boolean
             local values = fixture.runLua(app, [[
                 local tools = world.resources[_G.tecsTestHooks.toolworld.KEY]
-                local Color = require("tecs2d.gfx").Color
+                local Color = require("tecs.gfx").Color
                 local color = tools.world:get(tools.cursorAlphaEntity, Color)
                 return color.a, color.r, color.g, color.b
             ]])
@@ -589,7 +589,7 @@ describe("in-game debugger overlay", function()
         local forwardBlended = fixture.runLua(app, [[
             local tools = world.resources[_G.tecsTestHooks.toolworld.KEY]
             local cursor = tools.view.owners.overlay.elements["command.cursor"]
-            local blend = require("tecs2d.gfx").blend.ForwardAlphaBlend
+            local blend = require("tecs.gfx").blend.ForwardAlphaBlend
             return cursor and tools.world:has(cursor.state.id, blend) or false
         ]])[1]
         luassert.equals("true", tostring(forwardBlended),
@@ -900,7 +900,7 @@ describe("in-game debugger overlay", function()
         typeCommand("light color 0.30 0.40 0.50")
         local ok = fixture.eventually(fixture.callTimeout, function(): boolean
             local s = fixture.runLua(app, [[
-                local gfx = require("tecs2d.gfx")
+                local gfx = require("tecs.gfx")
                 local p = world.resources[gfx.PIPELINE]
                 local r, g, b = p:getAmbientLight()
                 return string.format("%.2f,%.2f,%.2f", r, g, b)
@@ -914,7 +914,7 @@ describe("in-game debugger overlay", function()
     it("light toggle and light shadows flip the pipeline flags", function()
         local function flags(): string, string
             local vals = fixture.runLua(app, [[
-                local gfx = require("tecs2d.gfx")
+                local gfx = require("tecs.gfx")
                 local p = world.resources[gfx.PIPELINE]
                 return tostring(p:isLightingEnabled()), tostring(p.shadowsEnabled)
             ]])
@@ -941,7 +941,7 @@ describe("in-game debugger overlay", function()
         typeCommand("light bloom 2 1.5 0.1")
         local ok = fixture.eventually(fixture.callTimeout, function(): boolean
             local s = fixture.runLua(app, [[
-                local gfx = require("tecs2d.gfx")
+                local gfx = require("tecs.gfx")
                 local b = world.resources[gfx.PIPELINE]:getBloom()
                 return string.format("%s,%.2f,%.2f", tostring(b.enabled), b.intensity, b.radius)
             ]])[1]
@@ -1534,13 +1534,13 @@ describe("in-game debugger overlay", function()
             "popup arrows escaped into command history")
 
         local before = tonumber(fixture.runLua(app, [[
-            local key = require("tecs2d.gfx.internal.pipelinekey")
+            local key = require("tecs.gfx.internal.pipelinekey")
             return world.resources[key.PIPELINE]:getCamera():getZoom()
         ]])[1])
         moveCursor(160, 100)
         app.client:call("send_love_event", {event = "wheelmoved", args = {0, -2}})
         local after = tonumber(fixture.runLua(app, [[
-            local key = require("tecs2d.gfx.internal.pipelinekey")
+            local key = require("tecs.gfx.internal.pipelinekey")
             return world.resources[key.PIPELINE]:getCamera():getZoom()
         ]])[1])
         luassert.near(before, after, 0.0001,
@@ -1671,7 +1671,7 @@ describe("in-game debugger overlay", function()
 
     it("the toggle works while a game modal owns an input layer", function()
         fixture.runLua(app, [[
-            local input = require("tecs2d.input")
+            local input = require("tecs.input")
             _G.testInputLayer = input.newLayer("test-modal")
             input.pushLayer(_G.testInputLayer)
             return true
@@ -1683,7 +1683,7 @@ describe("in-game debugger overlay", function()
         luassert.is_true(waitOpen(false) == true,
             "Ctrl+/ did not close the debugger over a game input layer")
         fixture.runLua(app, [[
-            require("tecs2d.input").popLayer(_G.testInputLayer)
+            require("tecs.input").popLayer(_G.testInputLayer)
             _G.testInputLayer = nil
             return true
         ]])
@@ -1691,7 +1691,7 @@ describe("in-game debugger overlay", function()
 
     it("stays top when a game layer beneath it is popped externally", function()
         fixture.runLua(app, [[
-            local input = require("tecs2d.input")
+            local input = require("tecs.input")
             _G.testInputLayer = input.newLayer("pause-menu")
             input.pushLayer(_G.testInputLayer)
             return true
@@ -1700,7 +1700,7 @@ describe("in-game debugger overlay", function()
         luassert.is_true(waitOpen(true) == true, "debugger did not open over pause-menu")
 
         local values = fixture.runLua(app, [[
-            local input = require("tecs2d.input")
+            local input = require("tecs.input")
             local popped = input.popLayer(_G.testInputLayer)
             _G.testInputLayer = nil
             return popped, input.topLayer().name, input.topLayer().parent.name,
@@ -1717,7 +1717,7 @@ describe("in-game debugger overlay", function()
 
     it("restores snapshotted game input beneath the open debugger", function()
         fixture.runLua(app, [[
-            local input = require("tecs2d.input")
+            local input = require("tecs.input")
             _G.snapshotInputLayer = input.newLayer("snapshot-pause-menu")
             input.pushLayer(_G.snapshotInputLayer)
             _G.snapshotWithInput = world:saveSnapshot({format = "table"}).snapshot
@@ -1729,7 +1729,7 @@ describe("in-game debugger overlay", function()
         luassert.is_true(waitOpen(true) == true, "debugger did not open before snapshot load")
 
         local loaded = fixture.runLua(app, [[
-            local input = require("tecs2d.input")
+            local input = require("tecs.input")
             world:loadSnapshot(_G.snapshotWithInput)
             return input.topLayer().name, input.topLayer().parent.name,
                 tostring(_G.snapshotInputLayer:isActive())
@@ -1741,7 +1741,7 @@ describe("in-game debugger overlay", function()
         tap()
         luassert.is_true(waitOpen(false) == true, "debugger did not close after snapshot load")
         local revealed = fixture.runLua(app, [[
-            local input = require("tecs2d.input")
+            local input = require("tecs.input")
             local name = input.topLayer().name
             input.popLayer(_G.snapshotInputLayer)
             _G.snapshotInputLayer = nil
@@ -2071,7 +2071,7 @@ return "hello"
         -- assert against the live pipeline camera instead.
         local function liveCamera(): number, number, number
             local vals = fixture.runLua(app, [[
-                local gfx = require("tecs2d.gfx")
+                local gfx = require("tecs.gfx")
                 local cam = world.resources[gfx.PIPELINE]:getCamera()
                 local x, y = cam:getPosition()
                 return x, y, cam:getZoom()
@@ -2101,14 +2101,14 @@ return "hello"
         local ts = app.client:call("cmd_camera_timescale", {scale = 0.25})
         luassert.equals(0.25, tonumber(ts.scale))
         local live = fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             return world.resources[gfx.PIPELINE]:getTimeScale()
         ]])[1]
         luassert.equals("0.25", live, "timescale did not apply to the pipeline")
         app.client:call("cmd_camera_timescale", {scale = 1})
 
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             world.resources[gfx.PIPELINE]:newCamera("speccam", {})
             return true
         ]])
@@ -2156,7 +2156,7 @@ return "hello"
         -- Layers: hiding layer 1 removes pixels, not just the flag.
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             _G.layerProbe = world:spawn(tecs.builtins.Transform(160, 120, 0, 1),
                 gfx.Rectangle(80, 80), gfx.Color(1, 0, 0, 1))
             world:commit()
@@ -2216,7 +2216,7 @@ return "hello"
         luassert.equals(-5, tonumber(gridContext.offsetY))
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local image = love.graphics.newImage(love.image.newImageData(8, 8))
             _G.debugBoundsSprite = world:spawn(
                 tecs.builtins.Transform(40, 40, 0),
@@ -2246,8 +2246,8 @@ return "hello"
         -- physics debug installs the drawer plugin on first use.
         app.client:call("cmd_physics_debug", {})
         local drawer = fixture.runLua(app, [[
-            local systemcontrol = require("tecs2d.internal.systemcontrol")
-            return tostring(systemcontrol.info(world, "tecs2d.gfx.physicsdebug") ~= nil)
+            local systemcontrol = require("tecs.internal.systemcontrol")
+            return tostring(systemcontrol.info(world, "tecs.gfx.physicsdebug") ~= nil)
         ]])[1]
         luassert.equals("true", drawer, "physics debug did not install the drawer system")
         app.client:call("cmd_physics_debug", {})
@@ -2372,7 +2372,7 @@ return "hello"
         local eid = spawnAt(60, 140)
         openDebugger()
         local out = fixture.runLua(app, [[
-            local pipelinekey = require("tecs2d.gfx.internal.pipelinekey")
+            local pipelinekey = require("tecs.gfx.internal.pipelinekey")
             local cam = world.resources[pipelinekey.PIPELINE]:getCamera()
             local sx, sy = cam:toScreen(60, 140)
             return tostring(sx) .. "," .. tostring(sy)

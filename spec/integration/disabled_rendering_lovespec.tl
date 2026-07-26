@@ -8,7 +8,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/compliance"
 
@@ -28,7 +28,7 @@ describe("disabled rendering: Disabled hides entities", function()
         app = fixture.start(APP_DIR)
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             _G.tecsTestRect = world:spawn(
                 Transform(80, 120, 0, 1), gfx.Rectangle(60, 60), gfx.Color(0, 1, 0, 1))

@@ -13,7 +13,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/retro"
 
@@ -50,7 +50,7 @@ describe("retro camera: toScreen matches rendered positions", function()
         -- The window (320x250) is a scale-up of the 80x60 virtual space;
         -- captures default to virtual scale so readers pay for the game's
         -- actual pixels, not the blowup. full=true keeps the native size.
-        local png_util = require("tecs2d.testing.png_util")
+        local png_util = require("tecs.testing.png_util")
         local function shotHeight(args: {string: any}): integer
             local res = app.client:call("cmd_screenshot", args)
             local fullPath = res.full as string
@@ -72,7 +72,7 @@ describe("retro camera: toScreen matches rendered positions", function()
 
     it("toScreen agrees with the rendered position", function()
         local values = fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local pipeline = world.resources[gfx.PIPELINE]
             local sx, sy = pipeline:getCamera():toScreen(75, 55)
             return sx, sy
@@ -93,7 +93,7 @@ describe("retro camera: toScreen matches rendered positions", function()
 
     it("toWorld inverts toScreen", function()
         local values = fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local cam = world.resources[gfx.PIPELINE]:getCamera()
             local sx, sy = cam:toScreen(75, 55)
             local wx, wy = cam:toWorld(sx, sy)

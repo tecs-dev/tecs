@@ -11,7 +11,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/compliance"
 
@@ -42,8 +42,8 @@ describe("asset loader: robustness", function()
             -- runs; remove leftovers so failure cases actually fail.
             love.filesystem.remove("late.png")
             love.filesystem.remove("imgfont.png")
-            _G.wq = require("tecs2d.workers").new()
-            _G.am = require("tecs2d.assets").new("", _G.wq)
+            _G.wq = require("tecs.workers").new()
+            _G.am = require("tecs.assets").new("", _G.wq)
             return true
         ]])
     end)
@@ -115,8 +115,8 @@ describe("asset loader: robustness", function()
 
     it("shutdown resolves pending handles", function()
         local values = run(app, [[
-            local wq2 = require("tecs2d.workers").new()
-            local am2 = require("tecs2d.assets").new("", wq2)
+            local wq2 = require("tecs.workers").new()
+            local am2 = require("tecs.assets").new("", wq2)
             local handles = {}
             for i = 1, 8 do
                 handles[i] = am2:loadImage("pending-" .. i .. ".png")

@@ -9,7 +9,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/shapes"
 
@@ -49,8 +49,8 @@ describe("ui layout: containers position, scroll, and clip children", function()
         app = fixture.start(APP_DIR)
         fixture.runLua(app, string.format([[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
-            local ui = require("tecs2d.ui")
+            local gfx = require("tecs.gfx")
+            local ui = require("tecs.ui")
             local Transform = tecs.builtins.Transform
             local ChildOf = tecs.builtins.ChildOf
             local RelativeTransform = tecs.builtins.RelativeTransform
@@ -98,8 +98,8 @@ describe("ui layout: containers position, scroll, and clip children", function()
     it("renders a centered LayoutBox around its Transform exactly once", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
-            local ui = require("tecs2d.ui")
+            local gfx = require("tecs.gfx")
+            local ui = require("tecs.ui")
             world:spawn(
                 tecs.builtins.Transform(40, 210, 5),
                 gfx.Rectangle(40, 20),
@@ -122,7 +122,7 @@ describe("ui layout: containers position, scroll, and clip children", function()
 
     it("scrolling moves children and reveals clipped content", function()
         fixture.runLua(app, [[
-            local ui = require("tecs2d.ui")
+            local ui = require("tecs.ui")
             local viewport = world:getMut(_G.tecsUiContainer, ui.Viewport)
             viewport.scrollY = 150
             return true

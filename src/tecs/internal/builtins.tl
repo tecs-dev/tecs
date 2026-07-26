@@ -159,7 +159,7 @@ local record builtins
     record OnSnapshotSave is types.events.Event
         --- Encode a (key, value) pair into the snapshot's data section.
         --- Keys MUST be strings; values must be `string.buffer`-encodable.
-        --- Plugins typically use namespaced keys (e.g. `"tecs2d.physics"`,
+        --- Plugins typically use namespaced keys (e.g. `"tecs.physics"`,
         --- `"mygame.scoreboard"`) to avoid collisions.
         addData: function(self, key: string, value: any)
         --- Exclude every entity that carries `component` from the
@@ -432,7 +432,7 @@ components.newFFIComponent({
 -------------------------------------------------------------------------------
 
 --- Composes a parent transform with a relative transform, mutating the output transform in place.
---- This is the simple version without origin awareness. For origin-aware positioning, use tecs2d.ui.
+--- This is the simple version without origin awareness. For origin-aware positioning, use tecs.ui.
 local function composeTransforms(
     parentTransform: builtins.Transform,
     relativeTransform: builtins.RelativeTransform,

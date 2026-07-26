@@ -13,7 +13,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/shapes"
 
@@ -57,7 +57,7 @@ describe("shape matrix: SDF shapes render where and how they should", function()
         -- One spawn batch; every case gets its own grid cell and color.
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
 
             -- Row 1: filled circle, outlined circle, ellipse, arc

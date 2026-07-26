@@ -9,7 +9,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/shapes"
 
@@ -75,7 +75,7 @@ describe("text churn: edits and respawns reuse glyph storage", function()
     it("renders text and follows setText edits", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             _G.tecsChurnText = world:spawn(
                 Transform(60, 120, 0, 1),
@@ -91,7 +91,7 @@ describe("text churn: edits and respawns reuse glyph storage", function()
 
         -- Grow the string; the rendered span must widen accordingly.
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             world:get(_G.tecsChurnText, gfx.Text):setText("ABAB")
             return true
         ]])
@@ -110,7 +110,7 @@ describe("text churn: edits and respawns reuse glyph storage", function()
         local function churnRound(round: integer): {string}
             return fixture.runLua(app, string.format([[
                 local tecs = require("tecs")
-                local gfx = require("tecs2d.gfx")
+                local gfx = require("tecs.gfx")
                 local Transform = tecs.builtins.Transform
                 math.randomseed(%d)
                 local spawned = {}
@@ -153,7 +153,7 @@ describe("text churn: edits and respawns reuse glyph storage", function()
 
         -- The survivor text still renders after all the churn.
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             world:get(_G.tecsChurnText, gfx.Text):setText("A")
             return true
         ]])

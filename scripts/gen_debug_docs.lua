@@ -4,11 +4,11 @@ command registry:
 
  - docs/tecs2d/debug-reference.md, the full command reference
  - docs/tecs2d/mcp/tools.md, the MCP tools page: kernel tools rendered
-   from tecs2d.mcp.tools plus the projected cmd_* tool index
+   from tecs.mcp.tools plus the projected cmd_* tool index
 
 Run via `make docs-debug`. Builds the same mock-backed registry the unit
 specs use (spec/tecs2d/debug/cmdharness) and renders it with
-tecs2d.debug.internal.docgen. A spec asserts both committed outputs match a
+tecs.debug.internal.docgen. A spec asserts both committed outputs match a
 fresh render, so forgetting to rerun this fails `make test`.
 ]]
 
@@ -16,8 +16,8 @@ local REFERENCE = "docs/tecs2d/debug-reference.md"
 local TOOLS_DOC = "docs/tecs2d/mcp/tools.md"
 local MANIFEST = "docs/tecs2d/mcp/default-tools.json"
 
-local cmdharness = require("spec.tecs2d.debug.cmdharness")
-local docgen = require("tecs2d.debug.internal.docgen")
+local cmdharness = require("spec.tecs.debug.cmdharness")
+local docgen = require("tecs.debug.internal.docgen")
 
 local reg = cmdharness.makeRegistry()
 

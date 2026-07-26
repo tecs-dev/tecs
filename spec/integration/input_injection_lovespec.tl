@@ -8,7 +8,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/shapes"
 
@@ -28,17 +28,17 @@ describe("input injection: love events reach world observers", function()
     setup(function()
         app = fixture.start(APP_DIR)
         fixture.runLua(app, [[
-            local tecs2d = require("tecs2d")
+            local tecs2d = require("tecs")
             _G.tecsKey = nil
             _G.tecsKeyUp = nil
             _G.tecsMouse = nil
-            world:observe(0, tecs2d.KeyPressed, function(e)
+            world:observe(0, tecs.KeyPressed, function(e)
                 _G.tecsKey = {key = e.key, isrepeat = e.isrepeat}
             end)
-            world:observe(0, tecs2d.KeyReleased, function(e)
+            world:observe(0, tecs.KeyReleased, function(e)
                 _G.tecsKeyUp = {key = e.key}
             end)
-            world:observe(0, tecs2d.MousePressed, function(e)
+            world:observe(0, tecs.MousePressed, function(e)
                 _G.tecsMouse = {x = e.x, y = e.y, button = e.button}
             end)
             return true
@@ -86,8 +86,8 @@ describe("input injection: love events reach world observers", function()
 
     it("intercepts at the top target while raw observers still receive the event", function()
         fixture.runLua(app, [[
-            local input = require("tecs2d.input")
-            local events = require("tecs2d.events")
+            local input = require("tecs.input")
+            local events = require("tecs.events")
             _G.tecsKey = nil
             _G.routeCounts = {top = 0, raw = 0}
             _G.routeLayer = input.newLayer("integration-modal")
@@ -114,9 +114,9 @@ describe("input injection: love events reach world observers", function()
         luassert.equals("true", values[3], "base observer received an intercepted key")
 
         fixture.runLua(app, [[
-            local input = require("tecs2d.input")
+            local input = require("tecs.input")
             input.popLayer(_G.routeLayer)
-            input.raw:stopObserving(require("tecs2d.events").KeyPressed, "integration-raw")
+            input.raw:stopObserving(require("tecs.events").KeyPressed, "integration-raw")
             _G.routeLayer = nil
             return true
         ]])
@@ -124,8 +124,8 @@ describe("input injection: love events reach world observers", function()
 
     it("rewires a popped parent and forwards the same event to the base", function()
         fixture.runLua(app, [[
-            local input = require("tecs2d.input")
-            local events = require("tecs2d.events")
+            local input = require("tecs.input")
+            local events = require("tecs.events")
             _G.tecsMouse = nil
             local lower = input.newLayer("lower")
             local upper = input.newLayer("upper")
@@ -152,7 +152,7 @@ describe("input injection: love events reach world observers", function()
         luassert.equals("true", values[3])
 
         fixture.runLua(app, [[
-            require("tecs2d.input").popLayer(_G.routeLayer)
+            require("tecs.input").popLayer(_G.routeLayer)
             _G.routeLayer = nil
             return true
         ]])

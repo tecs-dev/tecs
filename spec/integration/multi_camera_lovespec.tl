@@ -8,7 +8,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/shapes"
 
@@ -42,7 +42,7 @@ describe("multi camera: secondary viewport with its own view", function()
         -- only through the secondary camera.
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             world:spawn(Transform(80, 120, 0, 1), gfx.Rectangle(20, 20), gfx.Color(1, 0, 0, 1))
             world:spawn(Transform(1000, 1000, 0, 2), gfx.Rectangle(30, 30), gfx.Color(0, 1, 0, 1))
@@ -64,7 +64,7 @@ describe("multi camera: secondary viewport with its own view", function()
 
     it("a secondary camera renders its own world position in its viewport", function()
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local pipeline = world.resources[gfx.PIPELINE]
             local mini = pipeline:newCamera("mini", {
                 viewport = {220, 10, 90, 70},
@@ -89,7 +89,7 @@ describe("multi camera: secondary viewport with its own view", function()
         -- Point the mini camera at the red layer-1 marker; the mask
         -- (layers = {2}) must hide it.
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             world.resources[gfx.PIPELINE]:getCamera("mini"):setPosition(80, 120)
             return true
         ]])
@@ -104,7 +104,7 @@ describe("multi camera: secondary viewport with its own view", function()
 
     it("removing the camera restores the primary view in its viewport", function()
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             world.resources[gfx.PIPELINE]:removeCamera("mini")
             return true
         ]])

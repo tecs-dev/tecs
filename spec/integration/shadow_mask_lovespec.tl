@@ -11,7 +11,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/lighting"
 
@@ -45,7 +45,7 @@ describe("shadow mask: occluder lifecycle", function()
         app = fixture.start(APP_DIR)
         -- A light to the left of the probe point, tall enough to reach it.
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = require("tecs").builtins.Transform
             _G.tecsShadowLight = world:spawn(
                 Transform(100, 120, 0, 1), gfx.Light(400, 2.0, 0.5))
@@ -66,7 +66,7 @@ describe("shadow mask: occluder lifecycle", function()
 
     it("a spawned occluder casts a shadow on pixels behind it", function()
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = require("tecs").builtins.Transform
             _G.tecsShadowOccluder = world:spawn(
                 Transform(160, 120, 0.1, 2),

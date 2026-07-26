@@ -8,7 +8,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/tiledphysics"
 
@@ -64,7 +64,7 @@ describe("tiled collision: geometry follows the tilemap Transform", function()
             lastR, lastG, lastB))
 
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             world:emit(0, gfx.PhysicsDebugToggle())
             return true
         ]])
@@ -76,7 +76,7 @@ describe("tiled collision: geometry follows the tilemap Transform", function()
         luassert.is_true(cleared == true, "debug overlay did not clear after toggling off")
 
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             world:emit(0, gfx.PhysicsDebugToggle())
             return true
         ]])

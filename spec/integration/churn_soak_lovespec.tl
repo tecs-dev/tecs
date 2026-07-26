@@ -10,7 +10,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/shapes"
 
@@ -42,7 +42,7 @@ describe("churn soak: buffer growth and slot reuse survive", function()
         app = fixture.start(APP_DIR)
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             world:spawn(Transform(160, 120, 0.5, 2), gfx.Rectangle(40, 40), gfx.Color(1, 1, 1, 1))
             return true
@@ -67,7 +67,7 @@ describe("churn soak: buffer growth and slot reuse survive", function()
             -- visible and culled paths see the rows.
             local values = fixture.runLua(app, string.format([[
                 local tecs = require("tecs")
-                local gfx = require("tecs2d.gfx")
+                local gfx = require("tecs.gfx")
                 local Transform = tecs.builtins.Transform
                 local Rectangle = gfx.Rectangle
                 local Circle = gfx.Circle

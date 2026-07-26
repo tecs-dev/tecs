@@ -9,7 +9,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/shapes"
 
@@ -54,7 +54,7 @@ describe("snapshot round-trip: world and pixels restore", function()
         fixture.runLua(app, string.format([[
             love.filesystem.remove(%q)
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             _G.tecsSnapRect = world:spawn(
                 Transform(80, 120, 0, 1), gfx.Rectangle(30, 30), gfx.Color(1, 0, 0, 1))
@@ -86,7 +86,7 @@ describe("snapshot round-trip: world and pixels restore", function()
     it("mutations change the world after the save", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             -- Recolor the rect blue, drop the circle, add an extra shape.
             local color = world:getMut(_G.tecsSnapRect, gfx.Color)
@@ -114,7 +114,7 @@ describe("snapshot round-trip: world and pixels restore", function()
 
         local values = fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             local rects, circles = 0, 0
             local q = world:query({include = {Transform, gfx.Rectangle}})

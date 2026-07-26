@@ -12,7 +12,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/compliance"
 
@@ -45,7 +45,7 @@ describe("shape culling: bounds cover pivot and rotation", function()
         -- padded viewport.
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             world:spawn(
                 Transform(-220, 120, 0, 1),
@@ -63,7 +63,7 @@ describe("shape culling: bounds cover pivot and rotation", function()
         -- viewport.
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             world:spawn(
                 Transform(430, 120, 0, 1, math.pi),
@@ -81,7 +81,7 @@ describe("shape culling: bounds cover pivot and rotation", function()
         -- vertical line at x=160 spanning y in [200, 500].
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             world:spawn(
                 Transform(10, 350, 0, 1, math.pi / 2),
@@ -95,7 +95,7 @@ describe("shape culling: bounds cover pivot and rotation", function()
     it("draws a mirrored (negative scale) circle", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             world:spawn(
                 Transform(280, 180, 0, 1, 0, -1, 1),

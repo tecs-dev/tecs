@@ -9,7 +9,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/shapes"
 
@@ -33,7 +33,7 @@ describe("bloom: emission glows past the silhouette", function()
         app = fixture.start(APP_DIR)
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             world:spawn(Transform(160, 120, 0, 1),
                 gfx.Rectangle(16, 16), gfx.Color(0, 0, 0, 1),
@@ -59,7 +59,7 @@ describe("bloom: emission glows past the silhouette", function()
 
     it("enabling bloom spills the glow past the shape", function()
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             world.resources[gfx.PIPELINE]:setBloom({
                 enabled = true, intensity = 2.0, radius = 3.0,
             })
@@ -75,7 +75,7 @@ describe("bloom: emission glows past the silhouette", function()
 
     it("disabling bloom removes the halo but keeps the core", function()
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             world.resources[gfx.PIPELINE]:setBloom({enabled = false})
             return true
         ]])

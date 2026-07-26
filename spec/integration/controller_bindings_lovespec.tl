@@ -8,7 +8,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local socket <const> = require("socket")
 local sleep <const> = socket.sleep as function(number)
@@ -44,7 +44,7 @@ describe("controller bindings: keys drive logical actions", function()
         app = fixture.start(APP_DIR)
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local controller = require("tecs2d.controller")
+            local controller = require("tecs.controller")
             local manager = world.resources[controller]
             _G.tecsCtrl = manager:addController({
                 controls = {

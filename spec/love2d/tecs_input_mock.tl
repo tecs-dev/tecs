@@ -2,12 +2,12 @@
 local love2d_mock <const> = require("spec.love2d.love2d_mock")
 
 local record InputMock
-    -- Constants matching tecs2d.input
+    -- Constants matching tecs.input
     PRESS: integer
     RELEASE: integer
     REPEAT: integer
 
-    -- Public state matching tecs2d.input module
+    -- Public state matching tecs.input module
     textInput: string
     mouseX: number
     mouseY: number

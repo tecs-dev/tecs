@@ -8,7 +8,7 @@
 require("busted")
 local luassert <const> = require("luassert")
 local socket <const> = require("socket")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/sprites"
 
@@ -48,7 +48,7 @@ describe("sprite play-once: pauseAtEnd clamps on the GPU", function()
 
     it("pauseAtEnd holds the last frame instead of looping", function()
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             world:get(_G.tecsTestSprite, gfx.Sprite):pauseAtEnd()
             return true
         ]])
@@ -67,7 +67,7 @@ describe("sprite play-once: pauseAtEnd clamps on the GPU", function()
     it("does not dirty unrelated Sprite archetypes while a pause is pending", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             local ProbeTag = tecs.newComponent({
                 name = "SpritePlayOnceDirtyProbe",
@@ -153,7 +153,7 @@ describe("sprite play-once: pauseAtEnd clamps on the GPU", function()
     -- one loads a real sheet off disk instead.
     it("still completes an animation that was saved mid-play", function()
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             _G.tecsMidSaveSheet = gfx.SpriteSheet.fromFile("assets/running.png")
             _G.tecsMidSave = world:spawn(
                 gfx.Sprite.fromSheet(_G.tecsMidSaveSheet, "run"))
@@ -168,7 +168,7 @@ describe("sprite play-once: pauseAtEnd clamps on the GPU", function()
         -- playing until a frame has run.
         local ready = fixture.eventually(fixture.callTimeout, function(): boolean
             local values = fixture.runLua(app, [[
-                local gfx = require("tecs2d.gfx")
+                local gfx = require("tecs.gfx")
                 local s = world:get(_G.tecsMidSave, gfx.Sprite)
                 return s ~= nil and s:getTag() ~= ""
             ]])
@@ -180,7 +180,7 @@ describe("sprite play-once: pauseAtEnd clamps on the GPU", function()
         -- Play and save in one call, so the snapshot is certainly taken
         -- before the animation can reach its last frame.
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             world:get(_G.tecsMidSave, gfx.Sprite):playOnce("run")
             _G.tecsMidSaveBuffer = world:saveSnapshot().buffer
             return true
@@ -207,8 +207,8 @@ describe("sprite play-once: pauseAtEnd clamps on the GPU", function()
     -- going, so the dependency points inward.
     it("lets a program play a tag and wait for it", function()
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
-            local sequence = require("tecs2d.sequence")
+            local gfx = require("tecs.gfx")
+            local sequence = require("tecs.sequence")
             _G.tecsAwaitSheet = gfx.SpriteSheet.fromFile("assets/running.png")
             _G.tecsAwaitEntity = world:spawn(
                 gfx.Sprite.fromSheet(_G.tecsAwaitSheet, "run"))
@@ -218,9 +218,9 @@ describe("sprite play-once: pauseAtEnd clamps on the GPU", function()
             end)
             _G.tecsAwaitHandle = sequence.play(world,
                 sequence.define("spec.playAndWait", {
-                    sequence.call("tecs2d.sprite.playTag",
+                    sequence.call("tecs.sprite.playTag",
                         sequence.bind("actor"), "run"),
-                    sequence.await("tecs2d.sprite", sequence.bind("actor")),
+                    sequence.await("tecs.sprite", sequence.bind("actor")),
                     sequence.call("spec.awaited"),
                 }), {bindings = {actor = _G.tecsAwaitEntity}})
             return true
@@ -237,15 +237,15 @@ describe("sprite play-once: pauseAtEnd clamps on the GPU", function()
 
     it("stops the animation it is waiting on when the program pauses", function()
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
-            local sequence = require("tecs2d.sequence")
+            local gfx = require("tecs.gfx")
+            local sequence = require("tecs.sequence")
             _G.tecsPauseEntity = world:spawn(
                 gfx.Sprite.fromSheet(_G.tecsAwaitSheet, "run"))
             _G.tecsPauseHandle = sequence.play(world,
                 sequence.define("spec.pauseAnim", {
-                    sequence.call("tecs2d.sprite.playTag",
+                    sequence.call("tecs.sprite.playTag",
                         sequence.bind("actor"), "run"),
-                    sequence.await("tecs2d.sprite", sequence.bind("actor")),
+                    sequence.await("tecs.sprite", sequence.bind("actor")),
                 }), {bindings = {actor = _G.tecsPauseEntity}})
             return true
         ]])
@@ -253,9 +253,9 @@ describe("sprite play-once: pauseAtEnd clamps on the GPU", function()
         -- Let it start playing, then pause the program that is waiting on it.
         local started = fixture.eventually(fixture.callTimeout, function(): boolean
             local values = fixture.runLua(app, [[
-                local sequence = require("tecs2d.sequence")
+                local sequence = require("tecs.sequence")
                 local s = sequence.status(world, _G.tecsPauseHandle)
-                return s ~= nil and s.waitingAwaitable == "tecs2d.sprite"
+                return s ~= nil and s.waitingAwaitable == "tecs.sprite"
             ]])
             if values[1] == "true" then return true end
             return nil
@@ -263,8 +263,8 @@ describe("sprite play-once: pauseAtEnd clamps on the GPU", function()
         luassert.is_true(started == true, "the program never parked on the sprite")
 
         local frozen = fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
-            local sequence = require("tecs2d.sequence")
+            local gfx = require("tecs.gfx")
+            local sequence = require("tecs.sequence")
             sequence.pause(world, _G.tecsPauseHandle)
             return world:get(_G.tecsPauseEntity, gfx.Sprite).pauseDepth > 0
         ]])
@@ -272,8 +272,8 @@ describe("sprite play-once: pauseAtEnd clamps on the GPU", function()
             "pausing the program left its animation running")
 
         local thawed = fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
-            local sequence = require("tecs2d.sequence")
+            local gfx = require("tecs.gfx")
+            local sequence = require("tecs.sequence")
             sequence.resume(world, _G.tecsPauseHandle)
             return world:get(_G.tecsPauseEntity, gfx.Sprite).pauseDepth == 0
         ]])

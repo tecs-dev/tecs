@@ -8,7 +8,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/sprites"
 
@@ -29,7 +29,7 @@ describe("sprite replacement: world:set swaps the rendered sheet", function()
         app = fixture.start(APP_DIR)
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
 
             local function solidSheet(name, r, g, b)
@@ -67,7 +67,7 @@ describe("sprite replacement: world:set swaps the rendered sheet", function()
 
     it("renders the new sheet after world:set replacement", function()
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             world:set(_G.testEntity, gfx.Sprite.fromSheet(_G.blueSheet))
             return true
         ]])

@@ -13,7 +13,7 @@ code; migrate old code opportunistically.
   (`.d.tl`), entrypoints, tests, and generated or macro-support files sit
   outside that split and follow the conventions of their kind.
 - Class files and their import bindings are **PascalCase**: `Camera.tl`,
-  `local Camera <const> = require("tecs2d.gfx.Camera")`.
+  `local Camera <const> = require("tecs.gfx.Camera")`.
 - Module files and their bindings are **luacase** (all lowercase, no
   separators): `bucketmanager.tl`, `local bucketmanager <const> = ...`.
   Never snake_case, never camelCase for module names.
@@ -26,7 +26,7 @@ code; migrate old code opportunistically.
   or prevent ambiguity: `local C <const> = require("ffi")`, or
   distinguishing a public module from an internal one with the same name.
 - Package roots use `init.tl`; public leaf modules may be named `.tl` files
-  (`tecs2d.input`, `tecs2d.tween`, `tecs.utils.logging`). Internal helpers
+  (`tecs.input`, `tecs.tween`, `tecs.utils.logging`). Internal helpers
   live under `internal/` and are not part of the supported surface.
 
 ## Formatting and alignment
@@ -166,7 +166,7 @@ metamethods (`__call`, `__index`), and generated bindings.
   condition is state-shaped. Use `tecs.runif.*` predicates for common gates
   and custom predicates when combining checks.
 - Systems receive `dt`; never read wall clocks in game logic.
-- Do not add manual `love.update`/`love.draw` callbacks; `tecs2d.run` owns
+- Do not add manual `love.update`/`love.draw` callbacks; `tecs.run` owns
   the loop.
 
 ## Queries
@@ -227,7 +227,7 @@ metamethods (`__call`, `__index`), and generated bindings.
 
 - Fast specs are `*_spec.tl` and run headless with busted. Love-driven
   integration specs are `*_lovespec.tl` and boot real fixture apps through
-  `tecs2d.testing.fixture`, driven over MCP.
+  `tecs.testing.fixture`, driven over MCP.
 - Assert with luassert's flat API (`luassert.equal`, `luassert.is_true`).
 - Poll time-dependent assertions with `fixture.eventually`; do not sleep and
   hope.

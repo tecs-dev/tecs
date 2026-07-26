@@ -9,7 +9,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/shapes"
 
@@ -17,7 +17,7 @@ local APP_DIR <const> = "build/test_deps/spec/integration/apps/shapes"
 --- app's reported window size, so assertions hold at any resolution.
 local function waitMarkerVisible(app: fixture.App, label: string)
     local values = fixture.runLua(app, [[
-        local gfx = require("tecs2d.gfx")
+        local gfx = require("tecs.gfx")
         local cam = world.resources[gfx.PIPELINE]:getCamera()
         local sx, sy = cam:toScreen(160, 120)
         local w, h = love.graphics.getDimensions()
@@ -45,7 +45,7 @@ describe("resize: pipeline follows window size changes", function()
         app = fixture.start(APP_DIR)
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             world:spawn(Transform(160, 120, 0, 1), gfx.Rectangle(14, 14), gfx.Color(1, 0, 0, 1))
             return true
@@ -61,7 +61,7 @@ describe("resize: pipeline follows window size changes", function()
         fixture.runLua(app, "love.window.setMode(640, 480) return true")
         local resized = fixture.eventually(fixture.callTimeout, function(): boolean
             local values = fixture.runLua(app, [[
-                local gfx = require("tecs2d.gfx")
+                local gfx = require("tecs.gfx")
                 local p = world.resources[gfx.PIPELINE]
                 return p.screenWidth, p.screenHeight
             ]])
@@ -78,7 +78,7 @@ describe("resize: pipeline follows window size changes", function()
         fixture.runLua(app, "love.window.setMode(320, 240) return true")
         local resized = fixture.eventually(fixture.callTimeout, function(): boolean
             local values = fixture.runLua(app, [[
-                local gfx = require("tecs2d.gfx")
+                local gfx = require("tecs.gfx")
                 return world.resources[gfx.PIPELINE].screenWidth
             ]])
             if tonumber(values[1]) == 320 then return true end

@@ -10,7 +10,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/lighting"
 
@@ -44,7 +44,7 @@ describe("drop shadow: AO darkens ground beside the caster", function()
         app = fixture.start(APP_DIR)
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             world:spawn(Transform(100, 120, 0, 1), gfx.Light(400, 2.0, 0.5))
             return true
@@ -67,7 +67,7 @@ describe("drop shadow: AO darkens ground beside the caster", function()
         -- procedural opaque sprite.
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             local imgData = love.image.newImageData(24, 24)
             for y = 0, 23 do
@@ -95,7 +95,7 @@ describe("drop shadow: AO darkens ground beside the caster", function()
         -- The debugger's `light shadows off` flips this same field; drop
         -- shadows must go dark with the raymarch shadows, not outlive them.
         fixture.runLua(app, [[
-            local pipelinekey = require("tecs2d.gfx.internal.pipelinekey")
+            local pipelinekey = require("tecs.gfx.internal.pipelinekey")
             world.resources[pipelinekey.PIPELINE].shadowsEnabled = false
             return true
         ]])
@@ -109,7 +109,7 @@ describe("drop shadow: AO darkens ground beside the caster", function()
         luassert.is_true(cleared == true, "drop shadow survived shadowsEnabled = false")
 
         fixture.runLua(app, [[
-            local pipelinekey = require("tecs2d.gfx.internal.pipelinekey")
+            local pipelinekey = require("tecs.gfx.internal.pipelinekey")
             world.resources[pipelinekey.PIPELINE].shadowsEnabled = true
             return true
         ]])
@@ -125,7 +125,7 @@ describe("drop shadow: AO darkens ground beside the caster", function()
 
     it("removing DropShadow restores the ground", function()
         fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             world:remove(_G.tecsDropCaster, gfx.DropShadow)
             return true
         ]])

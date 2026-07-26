@@ -9,7 +9,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/shapes"
 local SAVE_PATH <const> = "program-lovespec.save"
@@ -24,7 +24,7 @@ describe("program: one tool schedules a whole scenario", function()
     setup(function()
         app = fixture.start(APP_DIR)
         fixture.runLua(app, [[
-            local sequence = require("tecs2d.sequence")
+            local sequence = require("tecs.sequence")
             _G.tecsMarks = {}
             sequence.registerAction(world, "spec.mark", function(_w, ctx)
                 _G.tecsMarks[#_G.tecsMarks + 1] = ctx.args[1]
@@ -81,7 +81,7 @@ describe("program: one tool schedules a whole scenario", function()
     it("injects input on the frame clock", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local input = require("tecs2d.input")
+            local input = require("tecs.input")
             _G.tecsKeys = 0
             world:addSystem({name = "spec.Keys", phase = tecs.phases.Update,
                 run = function()
@@ -125,7 +125,7 @@ describe("program: one tool schedules a whole scenario", function()
         -- Earlier cases left playbacks running; they would mark into this
         -- one's list.
         fixture.runLua(app, [[
-            local sequence = require("tecs2d.sequence")
+            local sequence = require("tecs.sequence")
             for _, handle in ipairs(sequence.playbacks(world)) do
                 sequence.cancel(world, handle)
             end
@@ -165,7 +165,7 @@ describe("program: one tool schedules a whole scenario", function()
             "the restored playback should still be mid-program")
 
         fixture.runLua(app, [[
-            local sequence = require("tecs2d.sequence")
+            local sequence = require("tecs.sequence")
             sequence.registerAction(world, "spec.mark", function(_w, ctx)
                 _G.tecsMarks[#_G.tecsMarks + 1] = ctx.args[1]
             end)

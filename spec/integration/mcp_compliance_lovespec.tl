@@ -7,9 +7,9 @@
 require("busted")
 local luassert <const> = require("luassert")
 local socket <const> = require("socket")
-local mcp_client <const> = require("tecs2d.testing.mcp_client")
-local love_process <const> = require("tecs2d.testing.love_process")
-local png_util <const> = require("tecs2d.testing.png_util")
+local mcp_client <const> = require("tecs.testing.mcp_client")
+local love_process <const> = require("tecs.testing.love_process")
+local png_util <const> = require("tecs.testing.png_util")
 local json <const> = require("tecs.utils.json")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/compliance"
@@ -90,7 +90,7 @@ end
 
 local function setSuspended(app: App, suspended: boolean)
     local action = suspended and "suspend" or "resume"
-    runLua(app, "require('tecs2d.internal.suspension').ensure(world):"
+    runLua(app, "require('tecs.internal.suspension').ensure(world):"
         .. action .. "('spec') return true")
 end
 
@@ -167,7 +167,7 @@ describe("mcp compliance: boot and introspection", function()
         -- love2d and the ECS world stay reachable.
         luassert.are.equal("table", runLua(app, "return type(love.graphics)")[1])
         luassert.are.equal("true",
-            runLua(app, "return tostring(require('tecs2d.gfx') ~= nil)")[1])
+            runLua(app, "return tostring(require('tecs.gfx') ~= nil)")[1])
         -- Filesystem and process escape hatches are gone from the environment.
         luassert.are.equal("nil", runLua(app, "return type(io)")[1])
         luassert.are.equal("nil", runLua(app, "return type(os.execute)")[1])
@@ -179,7 +179,7 @@ describe("mcp compliance: boot and introspection", function()
         luassert.are.equal("false", runLua(app, "return tostring((pcall(require, 'io')))")[1])
         luassert.are.equal("false", runLua(app, "return tostring((pcall(require, 'ffi')))")[1])
         luassert.are.equal("false",
-            runLua(app, "return tostring((pcall(require, 'tecs2d.testing.love_process')))")[1])
+            runLua(app, "return tostring((pcall(require, 'tecs.testing.love_process')))")[1])
         -- love escape hatches are stripped, but ordinary love APIs remain.
         luassert.are.equal("nil", runLua(app, "return type(love.thread)")[1])
         luassert.are.equal("nil", runLua(app, "return type(love.filesystem.load)")[1])
@@ -240,7 +240,7 @@ describe("mcp compliance: boot and introspection", function()
         luassert.are.equal("false", runLua(app, "return tostring((pcall(modules, 'package')))")[1])
         luassert.are.equal("false", runLua(app, "return tostring((pcall(modules, 'socket')))")[1])
         luassert.are.equal("false",
-            runLua(app, "return tostring((pcall(modules, 'tecs2d.debug.commands')))")[1])
+            runLua(app, "return tostring((pcall(modules, 'tecs.debug.commands')))")[1])
         -- Never-loaded modules do not load on demand.
         luassert.are.equal("false",
             runLua(app, "return tostring((pcall(modules, 'spec.never.loaded')))")[1])
@@ -604,7 +604,7 @@ describe("mcp compliance: rendering", function()
         -- away from the red fixture rect so no depth ordering is involved.
         runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             world:spawn(Transform(80, 120, 0, 1), gfx.Rectangle(60, 60), gfx.Color(0, 1, 0, 1))
             return true

@@ -59,7 +59,7 @@ describe("my feature", function()
         app = fixture.start(APP_DIR)
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             _G.tecsMyEntity = world:spawn(
                 Transform(160, 120, 0, 1), gfx.Rectangle(20, 20), gfx.Color(1, 0, 0, 1))

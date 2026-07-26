@@ -7,7 +7,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/screenlayers"
 
@@ -61,7 +61,7 @@ describe("screen phase: world content renders exactly once", function()
 
     it("rejects unnamed screen-space layers", function()
         local values = fixture.runLua(app, [[
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local pipeline = world.resources[gfx.PIPELINE]
             local ok, err = pcall(function()
                 pipeline:configureLayer(3, {space = "screen"})

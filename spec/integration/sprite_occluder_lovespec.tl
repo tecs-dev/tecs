@@ -10,7 +10,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/lighting"
 
@@ -37,7 +37,7 @@ describe("sprite occluders: alpha shapes the 2D shadow", function()
         app = fixture.start(APP_DIR)
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             world:spawn(Transform(80, 120, 0, 1), gfx.Light(400, 2.0, 0.5))
             return true
@@ -58,7 +58,7 @@ describe("sprite occluders: alpha shapes the 2D shadow", function()
     it("shadows only behind the opaque half of the sprite", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
             local imgData = love.image.newImageData(32, 32)
             for y = 0, 15 do

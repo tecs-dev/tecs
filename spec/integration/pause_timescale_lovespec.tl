@@ -10,7 +10,7 @@
 
 require("busted")
 local luassert <const> = require("luassert")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local socket <const> = require("socket")
 local sleep <const> = socket.sleep as function(number)
@@ -28,7 +28,7 @@ end
 
 local function setSuspended(app: fixture.App, suspended: boolean)
     local action = suspended and "suspend" or "resume"
-    fixture.runLua(app, "require('tecs2d.internal.suspension').ensure(world):"
+    fixture.runLua(app, "require('tecs.internal.suspension').ensure(world):"
         .. action .. "('spec') return true")
 end
 
@@ -39,8 +39,8 @@ describe("pause and time scale: motion control from MCP", function()
         app = fixture.start(APP_DIR)
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
-            local sequence = require("tecs2d.sequence")
+            local gfx = require("tecs.gfx")
+            local sequence = require("tecs.sequence")
             local Transform = tecs.builtins.Transform
             _G.tecsMover = world:spawn(
                 Transform(20, 120, 0, 1), gfx.Rectangle(10, 10), gfx.Color(1, 0, 0, 1))

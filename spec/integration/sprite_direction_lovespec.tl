@@ -11,7 +11,7 @@
 require("busted")
 local luassert <const> = require("luassert")
 local socket <const> = require("socket")
-local fixture <const> = require("tecs2d.testing.fixture")
+local fixture <const> = require("tecs.testing.fixture")
 
 local APP_DIR <const> = "build/test_deps/spec/integration/apps/sprites"
 
@@ -62,7 +62,7 @@ describe("sprite animation: direction and tag layout", function()
         --               starting mid-row and wrapping to the second row
         fixture.runLua(app, [[
             local tecs = require("tecs")
-            local gfx = require("tecs2d.gfx")
+            local gfx = require("tecs.gfx")
             local Transform = tecs.builtins.Transform
 
             local function solid(imageData, x0, y0, r, g, b)

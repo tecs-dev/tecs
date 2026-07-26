@@ -42,7 +42,7 @@ where they diverge is the bug.
 
    ```lua
    -- Where should this render? (CPU camera math vs GPU output)
-   local gfx = require("tecs2d.gfx")
+   local gfx = require("tecs.gfx")
    local cam = world.resources[gfx.PIPELINE]:getCamera()
    return cam:toScreen(worldX, worldY)
    ```
