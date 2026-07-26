@@ -190,4 +190,5 @@ CMakeFiles/tecs2d_worker.dir/native/worker.c.o: \
   /opt/homebrew/Cellar/luajit/2.1.1753364724/include/luajit-2.1/luaconf.h \
   /opt/homebrew/Cellar/luajit/2.1.1753364724/include/luajit-2.1/lualib.h \
   /opt/homebrew/Cellar/luajit/2.1.1753364724/include/luajit-2.1/lauxlib.h \
-  /Users/dowling/projects/tecs2d/native/worker.h
+  /Users/dowling/projects/tecs2d/native/worker.h \
+  /Users/dowling/projects/tecs2d/native/registry.h

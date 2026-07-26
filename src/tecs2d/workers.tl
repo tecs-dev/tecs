@@ -22,7 +22,7 @@ local loader <const> = require("tecs2d.ffi.loader")
 loader.declare("worker")
 
 local C <const>, libraryPath <const> =
-    loader.library("tecs2dworker", "tecs2d", "TECS2D_WORKER_PATH")
+    loader.library("tecs2dworker", "tecs2d", "TECS2D_WORKER_PATH", "worker")
 
 --- Waits indefinitely in `receive`.
 local FOREVER <const> = -1

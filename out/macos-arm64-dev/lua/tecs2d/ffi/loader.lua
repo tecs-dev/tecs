@@ -5,6 +5,13 @@
 
 
 
+
+
+
+
+
+
+
 local ffi = require("ffi")
 
 local loader = { CValue = {}, BytePointer = {}, CNamespace = {} }
@@ -67,15 +74,85 @@ local loaded = {}
 
 
 
+local STRUCTS = {
+   sdl3 = "Tecs2dSdl3Api",
+   sdl3image = "Tecs2dSdl3ImageApi",
+   box2d = "Tecs2dBox2dApi",
+   shaderc = "Tecs2dShadercApi",
+   spvc = "Tecs2dSpvcApi",
+   worker = "Tecs2dWorkerApi",
+}
+
+
+local function registryTable(name)
+   local registry = (_G)["__tecs2dRegistry"]
+   if registry == nil then return nil end
+   return (registry)[name]
+end
 
 
 
 
 
 
-function loader.library(soname, formula, envVar)
+
+
+
+
+
+local function registryNamespace(functions)
+   local proxy = {}
+   return setmetatable(proxy, {
+      __index = function(_self, name)
+
+
+
+         local ok, found = pcall(function()
+            return (functions)[name]
+         end)
+         if not ok or found == nil then
+            found = (ffi.C)[name]
+         end
+         rawset(proxy, name, found)
+         return found
+      end,
+   })
+end
+
+
+function loader.isStatic(name)
+   return registryTable(name) ~= nil
+end
+
+
+
+
+
+
+
+
+
+
+
+function loader.library(soname, formula, envVar,
+   registryName)
    local cached = loaded[soname]
    if cached ~= nil then return cached, "(cached)" end
+
+
+
+   local key = registryName or soname
+   local table_ = registryTable(key)
+   if table_ ~= nil then
+      local struct = STRUCTS[key]
+      if struct == nil then
+         error(("tecs2d: %s is in the registry with no declared table"):format(key), 2)
+      end
+      local namespace = registryNamespace(
+      ffi.cast(struct .. " *", table_))
+      loaded[soname] = namespace
+      return namespace, "(registry)"
+   end
 
    local attempts = {}
 
@@ -115,13 +192,26 @@ end
 
 
 
+
+
+
 function loader.declare(name)
    if declared[name] then return end
    local ok, source = requireGenerated(name .. "cdef")
    if not ok then
-      error(("tecs2d: missing generated cdef for %s. Run `make cdef`."):format(name), 2)
+      error(("tecs2d: missing generated cdef for %s. Run the build."):format(name), 2)
    end
    ffi.cdef(source)
+
+   if registryTable(name) ~= nil then
+      local hasApi, api = requireGenerated(name .. "apicdef")
+      if not hasApi then
+         error(("tecs2d: %s is registered but its table declaration is missing"):
+         format(name), 2)
+      end
+      ffi.cdef(api)
+   end
+
    declared[name] = true
 end
 

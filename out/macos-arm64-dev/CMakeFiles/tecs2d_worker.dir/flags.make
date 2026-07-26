@@ -4,9 +4,9 @@
 # compile C with /usr/bin/cc
 C_DEFINES = -Dtecs2d_worker_EXPORTS
 
-C_INCLUDES = -isystem /opt/homebrew/include -isystem /opt/homebrew/Cellar/luajit/2.1.1753364724/include/luajit-2.1
+C_INCLUDES = -I/Users/dowling/projects/tecs2d/out/macos-arm64-dev/generated -I/Users/dowling/projects/tecs2d/native -isystem /opt/homebrew/include -isystem /opt/homebrew/Cellar/luajit/2.1.1753364724/include/luajit-2.1 -isystem /opt/homebrew/Cellar/sdl3_image/3.4.4_1/include -isystem /opt/homebrew/Cellar/libavif/1.4.2/include -isystem /opt/homebrew/Cellar/dav1d/1.5.3/include -isystem /opt/homebrew/Cellar/aom/3.14.1/include -isystem /opt/homebrew/Cellar/libvmaf/3.2.0/include -isystem /opt/homebrew/Cellar/libvmaf/3.2.0/include/libvmaf -isystem /opt/homebrew/opt/jpeg-xl/include -isystem /opt/homebrew/Cellar/highway/1.4.0/include -isystem /opt/homebrew/Cellar/brotli/1.2.0/include -isystem /opt/homebrew/opt/little-cms2/include -isystem /opt/homebrew/opt/libpng/include/libpng16 -isystem /opt/homebrew/opt/libtiff/include -isystem /opt/homebrew/opt/zstd/include -isystem /opt/homebrew/Cellar/xz/5.8.3/include -isystem /opt/homebrew/opt/jpeg-turbo/include -isystem /opt/homebrew/opt/webp/include -isystem /opt/homebrew/opt/webp/include/webp -isystem /opt/homebrew/Cellar/shaderc/2026.3/include
 
-C_FLAGSarm64 = -O2 -g -DNDEBUG -std=gnu99 -arch arm64 -fPIC
+C_FLAGSarm64 = -O2 -g -DNDEBUG -std=gnu99 -arch arm64 -fPIC -DAVIF_DLL -DHWY_SHARED_DEFINE
 
-C_FLAGS = -O2 -g -DNDEBUG -std=gnu99 -arch arm64 -fPIC
+C_FLAGS = -O2 -g -DNDEBUG -std=gnu99 -arch arm64 -fPIC -DAVIF_DLL -DHWY_SHARED_DEFINE
 

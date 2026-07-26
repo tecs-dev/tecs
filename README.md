@@ -317,6 +317,47 @@ collection order.
 threads the VM did not create are unsafe, so raw thread creation will not be
 exposed even though the symbols are bound.
 
+## Reaching native code
+
+A library is reached through a registry the host installed if there is one, and
+through `ffi.load` otherwise.
+
+`ffi.load` needs a shared object and a working `dlopen`. iOS has neither: every
+library is linked into the executable and loading one by name at run time is
+not permitted. A target like that can still call C, but the addresses have to
+be taken at build time.
+
+So the build emits, for each library, a struct of typed function pointers and
+one C file that fills it by taking the address of each function. The host
+installs those tables into every Lua state, including every worker state, before
+any Lua runs. A worker resolving its own libraries would reintroduce the
+dependency on dynamic loading in the place it is hardest to notice, since a
+worker that fails to start looks like a worker that had nothing to do.
+
+```
+ sdl3        1231 functions
+ box2d        421
+ spvc         169
+ sdl3image    102
+ shaderc       45
+ worker        10
+```
+
+Signatures come from the generated cdef rather than being parsed again, so the
+pointer table cannot disagree with the bindings. Both are generated with the
+same preprocessor defines the C is compiled with: a header that declares
+different things under `NDEBUG` would otherwise produce a binding for a
+function the build does not have.
+
+The tables hold functions only. Enum constants are compile-time values that
+need no library loaded, so they resolve through the FFI's own namespace and the
+engine finds both through one handle. Resolved names are memoised, so a name
+costs a lookup once rather than on every call.
+
+Taking the address of a shader compiler's functions means linking it, which is
+the coupling `TECS2D_RUNTIME_SHADERS=OFF` removes: a release generates no table
+for shaderc or SPIRV-Cross and links neither.
+
 ## Bindings are generated, never hand-written
 
 `scripts/gencdef.py` runs the system preprocessor over the installed headers,

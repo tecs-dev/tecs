@@ -9,7 +9,7 @@ local loader = require("tecs2d.ffi.loader")
 loader.declare("sdl3image")
 
 local namespace, libraryPath =
-loader.library("SDL3_image", "sdl3_image", "TECS2D_SDL3IMAGE_PATH")
+loader.library("SDL3_image", "sdl3_image", "TECS2D_SDL3IMAGE_PATH", "sdl3image")
 
 local sdl3image = {}
 

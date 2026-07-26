@@ -66,6 +66,7 @@ CMAKE_BINARY_DIR = /Users/dowling/projects/tecs2d/out/macos-arm64-dev
 all: CMakeFiles/tecs2d_worker.dir/all
 all: CMakeFiles/tecs2d_spirvcross.dir/all
 all: CMakeFiles/tecs2d.dir/all
+all: CMakeFiles/tecs2d_registry.dir/all
 all: CMakeFiles/tecs2d_bindings.dir/all
 all: CMakeFiles/tecs2d_lua.dir/all
 .PHONY : all
@@ -74,6 +75,7 @@ all: CMakeFiles/tecs2d_lua.dir/all
 codegen: CMakeFiles/tecs2d_worker.dir/codegen
 codegen: CMakeFiles/tecs2d_spirvcross.dir/codegen
 codegen: CMakeFiles/tecs2d.dir/codegen
+codegen: CMakeFiles/tecs2d_registry.dir/codegen
 codegen: CMakeFiles/tecs2d_bindings.dir/codegen
 codegen: CMakeFiles/tecs2d_lua.dir/codegen
 .PHONY : codegen
@@ -86,6 +88,7 @@ preinstall:
 clean: CMakeFiles/tecs2d_worker.dir/clean
 clean: CMakeFiles/tecs2d_spirvcross.dir/clean
 clean: CMakeFiles/tecs2d.dir/clean
+clean: CMakeFiles/tecs2d_registry.dir/clean
 clean: CMakeFiles/tecs2d_bindings.dir/clean
 clean: CMakeFiles/tecs2d_lua.dir/clean
 .PHONY : clean
@@ -94,15 +97,16 @@ clean: CMakeFiles/tecs2d_lua.dir/clean
 # Target rules for target CMakeFiles/tecs2d_worker.dir
 
 # All Build rule for target.
-CMakeFiles/tecs2d_worker.dir/all:
+CMakeFiles/tecs2d_worker.dir/all: CMakeFiles/tecs2d_spirvcross.dir/all
+CMakeFiles/tecs2d_worker.dir/all: CMakeFiles/tecs2d_registry.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_worker.dir/build.make CMakeFiles/tecs2d_worker.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_worker.dir/build.make CMakeFiles/tecs2d_worker.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles --progress-num=12,13 "Built target tecs2d_worker"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles --progress-num=32,33 "Built target tecs2d_worker"
 .PHONY : CMakeFiles/tecs2d_worker.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/tecs2d_worker.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles 2
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles 24
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/tecs2d_worker.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles 0
 .PHONY : CMakeFiles/tecs2d_worker.dir/rule
@@ -114,7 +118,7 @@ tecs2d_worker: CMakeFiles/tecs2d_worker.dir/rule
 # codegen rule for target.
 CMakeFiles/tecs2d_worker.dir/codegen:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_worker.dir/build.make CMakeFiles/tecs2d_worker.dir/codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles --progress-num=12,13 "Finished codegen for target tecs2d_worker"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles --progress-num=32,33 "Finished codegen for target tecs2d_worker"
 .PHONY : CMakeFiles/tecs2d_worker.dir/codegen
 
 # clean rule for target.
@@ -129,7 +133,7 @@ CMakeFiles/tecs2d_worker.dir/clean:
 CMakeFiles/tecs2d_spirvcross.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_spirvcross.dir/build.make CMakeFiles/tecs2d_spirvcross.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_spirvcross.dir/build.make CMakeFiles/tecs2d_spirvcross.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles --progress-num=10,11 "Built target tecs2d_spirvcross"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles --progress-num=30,31 "Built target tecs2d_spirvcross"
 .PHONY : CMakeFiles/tecs2d_spirvcross.dir/all
 
 # Build rule for subdir invocation for target.
@@ -146,7 +150,7 @@ tecs2d_spirvcross: CMakeFiles/tecs2d_spirvcross.dir/rule
 # codegen rule for target.
 CMakeFiles/tecs2d_spirvcross.dir/codegen:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_spirvcross.dir/build.make CMakeFiles/tecs2d_spirvcross.dir/codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles --progress-num=10,11 "Finished codegen for target tecs2d_spirvcross"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles --progress-num=30,31 "Finished codegen for target tecs2d_spirvcross"
 .PHONY : CMakeFiles/tecs2d_spirvcross.dir/codegen
 
 # clean rule for target.
@@ -158,7 +162,9 @@ CMakeFiles/tecs2d_spirvcross.dir/clean:
 # Target rules for target CMakeFiles/tecs2d.dir
 
 # All Build rule for target.
-CMakeFiles/tecs2d.dir/all:
+CMakeFiles/tecs2d.dir/all: CMakeFiles/tecs2d_worker.dir/all
+CMakeFiles/tecs2d.dir/all: CMakeFiles/tecs2d_spirvcross.dir/all
+CMakeFiles/tecs2d.dir/all: CMakeFiles/tecs2d_registry.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d.dir/build.make CMakeFiles/tecs2d.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d.dir/build.make CMakeFiles/tecs2d.dir/build
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles --progress-num=1,2 "Built target tecs2d"
@@ -166,7 +172,7 @@ CMakeFiles/tecs2d.dir/all:
 
 # Build rule for subdir invocation for target.
 CMakeFiles/tecs2d.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles 2
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles 26
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/tecs2d.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles 0
 .PHONY : CMakeFiles/tecs2d.dir/rule
@@ -185,6 +191,38 @@ CMakeFiles/tecs2d.dir/codegen:
 CMakeFiles/tecs2d.dir/clean:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d.dir/build.make CMakeFiles/tecs2d.dir/clean
 .PHONY : CMakeFiles/tecs2d.dir/clean
+
+#=============================================================================
+# Target rules for target CMakeFiles/tecs2d_registry.dir
+
+# All Build rule for target.
+CMakeFiles/tecs2d_registry.dir/all: CMakeFiles/tecs2d_spirvcross.dir/all
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_registry.dir/build.make CMakeFiles/tecs2d_registry.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_registry.dir/build.make CMakeFiles/tecs2d_registry.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles --progress-num=10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29 "Built target tecs2d_registry"
+.PHONY : CMakeFiles/tecs2d_registry.dir/all
+
+# Build rule for subdir invocation for target.
+CMakeFiles/tecs2d_registry.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles 22
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/tecs2d_registry.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles 0
+.PHONY : CMakeFiles/tecs2d_registry.dir/rule
+
+# Convenience name for target.
+tecs2d_registry: CMakeFiles/tecs2d_registry.dir/rule
+.PHONY : tecs2d_registry
+
+# codegen rule for target.
+CMakeFiles/tecs2d_registry.dir/codegen:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_registry.dir/build.make CMakeFiles/tecs2d_registry.dir/codegen
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles --progress-num=10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29 "Finished codegen for target tecs2d_registry"
+.PHONY : CMakeFiles/tecs2d_registry.dir/codegen
+
+# clean rule for target.
+CMakeFiles/tecs2d_registry.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_registry.dir/build.make CMakeFiles/tecs2d_registry.dir/clean
+.PHONY : CMakeFiles/tecs2d_registry.dir/clean
 
 #=============================================================================
 # Target rules for target CMakeFiles/tecs2d_bindings.dir

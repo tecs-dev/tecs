@@ -95,8 +95,13 @@ tecs2d_worker_EXTERNAL_OBJECTS =
 
 lib/libtecs2dworker.dylib: CMakeFiles/tecs2d_worker.dir/native/worker.c.o
 lib/libtecs2dworker.dylib: CMakeFiles/tecs2d_worker.dir/build.make
-lib/libtecs2dworker.dylib: /opt/homebrew/lib/libSDL3.dylib
+lib/libtecs2dworker.dylib: libtecs2d_registry.a
 lib/libtecs2dworker.dylib: /opt/homebrew/Cellar/luajit/2.1.1753364724/lib/libluajit-5.1.dylib
+lib/libtecs2dworker.dylib: /opt/homebrew/Cellar/sdl3_image/3.4.4_1/lib/libSDL3_image.dylib
+lib/libtecs2dworker.dylib: /opt/homebrew/lib/libSDL3.dylib
+lib/libtecs2dworker.dylib: /opt/homebrew/lib/libbox2d.dylib
+lib/libtecs2dworker.dylib: /opt/homebrew/Cellar/shaderc/2026.3/lib/libshaderc_shared.dylib
+lib/libtecs2dworker.dylib: lib/libspirvcrossc.dylib
 lib/libtecs2dworker.dylib: CMakeFiles/tecs2d_worker.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Linking C shared library lib/libtecs2dworker.dylib"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/tecs2d_worker.dir/link.txt --verbose=$(VERBOSE)

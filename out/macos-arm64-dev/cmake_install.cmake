@@ -46,6 +46,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
   if(EXISTS "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/tecs2d" AND
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/tecs2d")
     execute_process(COMMAND /usr/bin/install_name_tool
+      -delete_rpath "/Users/dowling/projects/tecs2d/out/macos-arm64-dev/lib"
       -add_rpath "@executable_path/../lib"
       "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/tecs2d")
     if(CMAKE_INSTALL_DO_STRIP)
@@ -59,6 +60,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
   if(EXISTS "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/lib/libtecs2dworker.dylib" AND
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/lib/libtecs2dworker.dylib")
     execute_process(COMMAND /usr/bin/install_name_tool
+      -delete_rpath "/Users/dowling/projects/tecs2d/out/macos-arm64-dev/lib"
       -add_rpath "@executable_path/../lib"
       "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/lib/libtecs2dworker.dylib")
     if(CMAKE_INSTALL_DO_STRIP)

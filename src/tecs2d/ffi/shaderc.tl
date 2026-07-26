@@ -9,7 +9,7 @@ local loader <const> = require("tecs2d.ffi.loader")
 loader.declare("shaderc")
 
 local namespace <const>, libraryPath <const> =
-    loader.library("shaderc_shared", "shaderc", "TECS2D_SHADERC_PATH")
+    loader.library("shaderc_shared", "shaderc", "TECS2D_SHADERC_PATH", "shaderc")
 
 local record shaderc
     C: loader.CNamespace

@@ -95,8 +95,14 @@ tecs2d_EXTERNAL_OBJECTS =
 
 bin/tecs2d: CMakeFiles/tecs2d.dir/native/host.c.o
 bin/tecs2d: CMakeFiles/tecs2d.dir/build.make
-bin/tecs2d: /opt/homebrew/lib/libSDL3.dylib
+bin/tecs2d: libtecs2d_registry.a
+bin/tecs2d: lib/libtecs2dworker.dylib
 bin/tecs2d: /opt/homebrew/Cellar/luajit/2.1.1753364724/lib/libluajit-5.1.dylib
+bin/tecs2d: /opt/homebrew/Cellar/sdl3_image/3.4.4_1/lib/libSDL3_image.dylib
+bin/tecs2d: /opt/homebrew/lib/libSDL3.dylib
+bin/tecs2d: /opt/homebrew/lib/libbox2d.dylib
+bin/tecs2d: /opt/homebrew/Cellar/shaderc/2026.3/lib/libshaderc_shared.dylib
+bin/tecs2d: lib/libspirvcrossc.dylib
 bin/tecs2d: CMakeFiles/tecs2d.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Linking C executable bin/tecs2d"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/tecs2d.dir/link.txt --verbose=$(VERBOSE)

@@ -1,0 +1,2 @@
+/usr/bin/ar qc libtecs2d_registry.a CMakeFiles/tecs2d_registry.dir/native/registry.c.o CMakeFiles/tecs2d_registry.dir/generated/sdl3api.c.o CMakeFiles/tecs2d_registry.dir/generated/sdl3imageapi.c.o CMakeFiles/tecs2d_registry.dir/generated/box2dapi.c.o CMakeFiles/tecs2d_registry.dir/generated/workerapi.c.o CMakeFiles/tecs2d_registry.dir/generated/shadercapi.c.o CMakeFiles/tecs2d_registry.dir/generated/spvcapi.c.o
+/usr/bin/ranlib libtecs2d_registry.a

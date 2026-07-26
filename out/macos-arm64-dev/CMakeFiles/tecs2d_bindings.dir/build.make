@@ -75,42 +75,42 @@ CMakeFiles/tecs2d_bindings: lua/tecs2d/ffi/spvccdef.lua
 
 lua/tecs2d/ffi/box2dcdef.lua: /Users/dowling/projects/tecs2d/scripts/gencdef.py
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Generating box2d FFI bindings"
-	/opt/homebrew/Frameworks/Python.framework/Versions/3.14/bin/python3.14 /Users/dowling/projects/tecs2d/scripts/gencdef.py --header box2d/box2d.h --include /opt/homebrew/include --keep /box2d/ --define-prefix B2_ --defines-out /Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua/tecs2d/ffi/box2dconst.lua --out /Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua/tecs2d/ffi/box2dcdef.lua
+	/opt/homebrew/Frameworks/Python.framework/Versions/3.14/bin/python3.14 /Users/dowling/projects/tecs2d/scripts/gencdef.py --header box2d/box2d.h --include /opt/homebrew/include --define NDEBUG --keep /box2d/ --define-prefix B2_ --defines-out /Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua/tecs2d/ffi/box2dconst.lua --out /Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua/tecs2d/ffi/box2dcdef.lua
 
 lua/tecs2d/ffi/box2dconst.lua: lua/tecs2d/ffi/box2dcdef.lua
 	@$(CMAKE_COMMAND) -E touch_nocreate lua/tecs2d/ffi/box2dconst.lua
 
 lua/tecs2d/ffi/sdl3cdef.lua: /Users/dowling/projects/tecs2d/scripts/gencdef.py
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Generating sdl3 FFI bindings"
-	/opt/homebrew/Frameworks/Python.framework/Versions/3.14/bin/python3.14 /Users/dowling/projects/tecs2d/scripts/gencdef.py --header SDL3/SDL.h --include /opt/homebrew/include --keep /SDL3/ --define-prefix SDL_ --defines-out /Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua/tecs2d/ffi/sdl3const.lua --out /Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua/tecs2d/ffi/sdl3cdef.lua
+	/opt/homebrew/Frameworks/Python.framework/Versions/3.14/bin/python3.14 /Users/dowling/projects/tecs2d/scripts/gencdef.py --header SDL3/SDL.h --include /opt/homebrew/include --define NDEBUG --keep /SDL3/ --define-prefix SDL_ --defines-out /Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua/tecs2d/ffi/sdl3const.lua --out /Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua/tecs2d/ffi/sdl3cdef.lua
 
 lua/tecs2d/ffi/sdl3const.lua: lua/tecs2d/ffi/sdl3cdef.lua
 	@$(CMAKE_COMMAND) -E touch_nocreate lua/tecs2d/ffi/sdl3const.lua
 
 lua/tecs2d/ffi/sdl3imagecdef.lua: /Users/dowling/projects/tecs2d/scripts/gencdef.py
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Generating sdl3image FFI bindings"
-	/opt/homebrew/Frameworks/Python.framework/Versions/3.14/bin/python3.14 /Users/dowling/projects/tecs2d/scripts/gencdef.py --header SDL3_image/SDL_image.h --include /opt/homebrew/Cellar/sdl3_image/3.4.4_1/include --include /opt/homebrew/include --include /opt/homebrew/Cellar/libavif/1.4.2/include --include /opt/homebrew/Cellar/dav1d/1.5.3/include --include /opt/homebrew/Cellar/aom/3.14.1/include --include /opt/homebrew/Cellar/libvmaf/3.2.0/include --include /opt/homebrew/Cellar/libvmaf/3.2.0/include/libvmaf --include /opt/homebrew/opt/jpeg-xl/include --include /opt/homebrew/Cellar/highway/1.4.0/include --include /opt/homebrew/Cellar/brotli/1.2.0/include --include /opt/homebrew/opt/little-cms2/include --include /opt/homebrew/opt/libpng/include/libpng16 --include /opt/homebrew/opt/libtiff/include --include /opt/homebrew/opt/zstd/include --include /opt/homebrew/Cellar/xz/5.8.3/include --include /opt/homebrew/opt/jpeg-turbo/include --include /opt/homebrew/opt/webp/include --include /opt/homebrew/opt/webp/include/webp --include /opt/homebrew/include --keep /SDL3_image/ --define-prefix IMG_ --defines-out /Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua/tecs2d/ffi/sdl3imageconst.lua --out /Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua/tecs2d/ffi/sdl3imagecdef.lua
+	/opt/homebrew/Frameworks/Python.framework/Versions/3.14/bin/python3.14 /Users/dowling/projects/tecs2d/scripts/gencdef.py --header SDL3_image/SDL_image.h --include /opt/homebrew/Cellar/sdl3_image/3.4.4_1/include --include /opt/homebrew/include --include /opt/homebrew/Cellar/libavif/1.4.2/include --include /opt/homebrew/Cellar/dav1d/1.5.3/include --include /opt/homebrew/Cellar/aom/3.14.1/include --include /opt/homebrew/Cellar/libvmaf/3.2.0/include --include /opt/homebrew/Cellar/libvmaf/3.2.0/include/libvmaf --include /opt/homebrew/opt/jpeg-xl/include --include /opt/homebrew/Cellar/highway/1.4.0/include --include /opt/homebrew/Cellar/brotli/1.2.0/include --include /opt/homebrew/opt/little-cms2/include --include /opt/homebrew/opt/libpng/include/libpng16 --include /opt/homebrew/opt/libtiff/include --include /opt/homebrew/opt/zstd/include --include /opt/homebrew/Cellar/xz/5.8.3/include --include /opt/homebrew/opt/jpeg-turbo/include --include /opt/homebrew/opt/webp/include --include /opt/homebrew/opt/webp/include/webp --include /opt/homebrew/include --define NDEBUG --keep /SDL3_image/ --define-prefix IMG_ --defines-out /Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua/tecs2d/ffi/sdl3imageconst.lua --out /Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua/tecs2d/ffi/sdl3imagecdef.lua
 
 lua/tecs2d/ffi/sdl3imageconst.lua: lua/tecs2d/ffi/sdl3imagecdef.lua
 	@$(CMAKE_COMMAND) -E touch_nocreate lua/tecs2d/ffi/sdl3imageconst.lua
 
 lua/tecs2d/ffi/shaderccdef.lua: /Users/dowling/projects/tecs2d/scripts/gencdef.py
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Generating shaderc FFI bindings"
-	/opt/homebrew/Frameworks/Python.framework/Versions/3.14/bin/python3.14 /Users/dowling/projects/tecs2d/scripts/gencdef.py --header shaderc/shaderc.h --include /opt/homebrew/Cellar/shaderc/2026.3/include --keep /shaderc/ --define-prefix shaderc_ --defines-out /Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua/tecs2d/ffi/shadercconst.lua --out /Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua/tecs2d/ffi/shaderccdef.lua
+	/opt/homebrew/Frameworks/Python.framework/Versions/3.14/bin/python3.14 /Users/dowling/projects/tecs2d/scripts/gencdef.py --header shaderc/shaderc.h --include /opt/homebrew/Cellar/shaderc/2026.3/include --define NDEBUG --keep /shaderc/ --define-prefix shaderc_ --defines-out /Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua/tecs2d/ffi/shadercconst.lua --out /Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua/tecs2d/ffi/shaderccdef.lua
 
 lua/tecs2d/ffi/shadercconst.lua: lua/tecs2d/ffi/shaderccdef.lua
 	@$(CMAKE_COMMAND) -E touch_nocreate lua/tecs2d/ffi/shadercconst.lua
 
 lua/tecs2d/ffi/spvccdef.lua: /Users/dowling/projects/tecs2d/scripts/gencdef.py
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Generating spvc FFI bindings"
-	/opt/homebrew/Frameworks/Python.framework/Versions/3.14/bin/python3.14 /Users/dowling/projects/tecs2d/scripts/gencdef.py --header spirv_cross_c.h --include /opt/homebrew/Cellar/spirv-cross/1.4.350.1/include/spirv_cross --keep /spirv_cross/ --define-prefix SPVC_ --defines-out /Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua/tecs2d/ffi/spvcconst.lua --out /Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua/tecs2d/ffi/spvccdef.lua
+	/opt/homebrew/Frameworks/Python.framework/Versions/3.14/bin/python3.14 /Users/dowling/projects/tecs2d/scripts/gencdef.py --header spirv_cross_c.h --include /opt/homebrew/Cellar/spirv-cross/1.4.350.1/include/spirv_cross --define NDEBUG --keep /spirv_cross/ --define-prefix SPVC_ --defines-out /Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua/tecs2d/ffi/spvcconst.lua --out /Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua/tecs2d/ffi/spvccdef.lua
 
 lua/tecs2d/ffi/spvcconst.lua: lua/tecs2d/ffi/spvccdef.lua
 	@$(CMAKE_COMMAND) -E touch_nocreate lua/tecs2d/ffi/spvcconst.lua
 
 lua/tecs2d/ffi/workercdef.lua: /Users/dowling/projects/tecs2d/scripts/gencdef.py
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Generating worker FFI bindings"
-	/opt/homebrew/Frameworks/Python.framework/Versions/3.14/bin/python3.14 /Users/dowling/projects/tecs2d/scripts/gencdef.py --header worker.h --include /Users/dowling/projects/tecs2d/native --keep /native/ --define-prefix TECS2D_ --defines-out /Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua/tecs2d/ffi/workerconst.lua --out /Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua/tecs2d/ffi/workercdef.lua
+	/opt/homebrew/Frameworks/Python.framework/Versions/3.14/bin/python3.14 /Users/dowling/projects/tecs2d/scripts/gencdef.py --header worker.h --include /Users/dowling/projects/tecs2d/native --define NDEBUG --keep /native/ --define-prefix TECS2D_ --defines-out /Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua/tecs2d/ffi/workerconst.lua --out /Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua/tecs2d/ffi/workercdef.lua
 
 lua/tecs2d/ffi/workerconst.lua: lua/tecs2d/ffi/workercdef.lua
 	@$(CMAKE_COMMAND) -E touch_nocreate lua/tecs2d/ffi/workerconst.lua

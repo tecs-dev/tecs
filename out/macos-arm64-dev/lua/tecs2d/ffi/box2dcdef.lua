@@ -14,7 +14,6 @@ typedef struct b2Version
  int revision;
 } b2Version;
        b2Version b2GetVersion( void );
-       int b2InternalAssertFcn( const char* condition, const char* fileName, int lineNumber );
        uint64_t b2GetTicks( void );
        float b2GetMilliseconds( uint64_t ticks );
        float b2GetMillisecondsAndReset( uint64_t* ticks );

@@ -14,6 +14,8 @@ option(TECS2D_SYSTEM_DEPS
     "Resolve dependencies from the system rather than pinned sources" ON)
 option(TECS2D_BUILD_LUA
     "Generate FFI bindings and compile the Teal sources" ON)
+option(TECS2D_RUNTIME_SHADERS
+    "Link a shader compiler, for development. Releases use packaged artifacts." ON)
 
 set(TECS2D_LUA_OUT "${CMAKE_BINARY_DIR}/lua" CACHE PATH
     "Where compiled Lua and generated bindings are written")
@@ -128,6 +130,15 @@ if(TECS2D_BUILD_LUA)
     set(GEN "${TECS2D_LUA_OUT}/tecs2d/ffi")
     file(MAKE_DIRECTORY "${GEN}")
 
+    # Bindings must be generated with the same preprocessor state the C is
+    # compiled with. A header that declares different things under NDEBUG
+    # would otherwise produce a binding for a function the build does not
+    # have, which surfaces as a link error far from the cause.
+    set(TECS2D_CDEF_DEFINES "")
+    if(CMAKE_BUILD_TYPE MATCHES "Release|RelWithDebInfo|MinSizeRel")
+        list(APPEND TECS2D_CDEF_DEFINES --define NDEBUG)
+    endif()
+
     # Include directories come from dependency discovery rather than from a
     # hardcoded package-manager prefix, which is what lets this cross-compile.
     function(tecs2d_cdef name header keep prefix)
@@ -139,7 +150,7 @@ if(TECS2D_BUILD_LUA)
             OUTPUT "${GEN}/${name}cdef.lua" "${GEN}/${name}const.lua"
             COMMAND ${Python3_EXECUTABLE}
                 "${CMAKE_SOURCE_DIR}/scripts/gencdef.py"
-                --header ${header} ${includes}
+                --header ${header} ${includes} ${TECS2D_CDEF_DEFINES}
                 --keep ${keep} --define-prefix ${prefix}
                 --defines-out "${GEN}/${name}const.lua"
                 --out "${GEN}/${name}cdef.lua"
@@ -162,6 +173,80 @@ if(TECS2D_BUILD_LUA)
     # The engine's own native API. Generated the same way as a third-party
     # header so the binding cannot drift from the C even though both live here.
     tecs2d_cdef(worker worker.h /native/ TECS2D_ "${CMAKE_SOURCE_DIR}/native")
+
+    # Each library also gets a table of function pointers, taken at build
+    # time. A target that cannot dlopen still links, and the engine calls
+    # through the table rather than through a handle it had to resolve.
+    set(TECS2D_REGISTRY_SOURCES "")
+    set(TECS2D_REGISTRY_ENTRIES "")
+
+    function(tecs2d_registry name struct prefix)
+        set(source "${CMAKE_BINARY_DIR}/generated/${name}api.c")
+        set(headers "")
+        foreach(header IN LISTS ARGN)
+            list(APPEND headers --header ${header})
+        endforeach()
+        add_custom_command(
+            OUTPUT "${source}" "${GEN}/${name}apicdef.lua"
+            COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/scripts/genregistry.py"
+                --cdef "${GEN}/${name}cdef.lua"
+                --name ${name} --struct ${struct} --prefix ${prefix}
+                ${headers}
+                --source-out "${source}"
+                --cdef-out "${GEN}/${name}apicdef.lua"
+            DEPENDS "${GEN}/${name}cdef.lua"
+                    "${CMAKE_SOURCE_DIR}/scripts/genregistry.py"
+            COMMENT "Generating ${name} native API table"
+            VERBATIM)
+        set(TECS2D_REGISTRY_SOURCES ${TECS2D_REGISTRY_SOURCES} "${source}"
+            PARENT_SCOPE)
+        set(TECS2D_REGISTRY_ENTRIES
+            "${TECS2D_REGISTRY_ENTRIES}TECS2D_API(${name}, ${struct})\n"
+            PARENT_SCOPE)
+    endfunction()
+
+    tecs2d_registry(sdl3 Tecs2dSdl3Api SDL_ SDL3/SDL.h)
+    tecs2d_registry(sdl3image Tecs2dSdl3ImageApi IMG_ SDL3_image/SDL_image.h)
+    tecs2d_registry(box2d Tecs2dBox2dApi b2 box2d/box2d.h)
+    tecs2d_registry(worker Tecs2dWorkerApi tecs2d worker.h)
+
+    # Shader compilation is a development capability. A release consumes
+    # packaged artifacts, so a target built without it links no compiler and
+    # the registry simply has no entry for one.
+    if(TECS2D_RUNTIME_SHADERS)
+        tecs2d_registry(shaderc Tecs2dShadercApi shaderc_ shaderc/shaderc.h)
+        tecs2d_registry(spvc Tecs2dSpvcApi spvc_ spirv_cross_c.h)
+    endif()
+
+    file(WRITE "${CMAKE_BINARY_DIR}/generated/registry_entries.h"
+        "/* Generated. Which libraries this target links. */\n"
+        "${TECS2D_REGISTRY_ENTRIES}")
+
+    add_library(tecs2d_registry STATIC
+        native/registry.c ${TECS2D_REGISTRY_SOURCES})
+    target_include_directories(tecs2d_registry PUBLIC
+        "${CMAKE_BINARY_DIR}/generated" "${CMAKE_SOURCE_DIR}/native")
+    target_link_libraries(tecs2d_registry PUBLIC
+        PkgConfig::SDL3 PkgConfig::SDL3_IMAGE PkgConfig::LUAJIT
+        ${BOX2D_LIBRARY})
+
+    # Taking the address of a shader compiler's functions means linking it.
+    # That is the coupling TECS2D_RUNTIME_SHADERS exists to remove: a release
+    # generates no table for them and links neither.
+    if(TECS2D_RUNTIME_SHADERS)
+        target_link_libraries(tecs2d_registry PUBLIC
+            PkgConfig::SHADERC tecs2d_spirvcross)
+    endif()
+    target_include_directories(tecs2d_registry PRIVATE
+        ${BOX2D_INCLUDE_DIR} ${SHADERC_INCLUDE_DIRS} ${SPIRV_CROSS_INCLUDE_DIRS})
+
+    # Linked here rather than where the executables are declared, because the
+    # registry's sources are generated from bindings produced above.
+    # The host also links the worker library, because its table holds the
+    # addresses of that library's functions.
+    target_link_libraries(tecs2d PRIVATE tecs2d_registry tecs2d_worker)
+    target_link_libraries(tecs2d_worker PRIVATE tecs2d_registry)
 
     add_custom_target(tecs2d_bindings ALL DEPENDS
         "${GEN}/workercdef.lua"

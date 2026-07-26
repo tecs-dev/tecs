@@ -20,6 +20,7 @@
 #include <lauxlib.h>
 
 #include "worker.h"
+#include "registry.h"
 
 typedef struct Message {
     struct Message *next;
@@ -176,6 +177,11 @@ static int workerEntry(void *data)
     lua_State *L = luaL_newstate();
     if (!L) return 1;
     luaL_openlibs(L);
+
+    /* A worker resolving its own libraries would reintroduce the dependency on
+     * dynamic loading in the place it is hardest to notice: a worker that
+     * fails to start looks like a worker that had nothing to do. */
+    tecs2dRegistryInstall(L);
 
     if (worker->luaPath) {
         lua_getglobal(L, "package");

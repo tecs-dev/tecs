@@ -10,7 +10,7 @@ local loader = require("tecs2d.ffi.loader")
 loader.declare("box2d")
 
 local namespace, libraryPath =
-loader.library("box2d", "box2d", "TECS2D_BOX2D_PATH")
+loader.library("box2d", "box2d", "TECS2D_BOX2D_PATH", "box2d")
 
 local box2d = {}
 

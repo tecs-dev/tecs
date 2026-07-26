@@ -1,6 +1,7 @@
 /Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles/tecs2d_worker.dir
 /Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles/tecs2d_spirvcross.dir
 /Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles/tecs2d.dir
+/Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles/tecs2d_registry.dir
 /Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles/tecs2d_bindings.dir
 /Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles/tecs2d_lua.dir
 /Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles/edit_cache.dir

@@ -273,6 +273,10 @@ TECS2D_BUILD_LUA:BOOL=ON
 //Where compiled Lua and generated bindings are written
 TECS2D_LUA_OUT:PATH=/Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua
 
+//Link a shader compiler, for development. Releases use packaged
+// artifacts.
+TECS2D_RUNTIME_SHADERS:BOOL=ON
+
 //Resolve dependencies from the system rather than pinned sources
 TECS2D_SYSTEM_DEPS:BOOL=ON
 

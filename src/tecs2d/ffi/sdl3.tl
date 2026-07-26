@@ -9,7 +9,7 @@ local loader <const> = require("tecs2d.ffi.loader")
 loader.declare("sdl3")
 
 local namespace <const>, libraryPath <const> =
-    loader.library("SDL3", "sdl3", "TECS2D_SDL3_PATH")
+    loader.library("SDL3", "sdl3", "TECS2D_SDL3_PATH", "sdl3")
 
 local record sdl3
     --- Functions and enum constants, resolved through the loaded library.

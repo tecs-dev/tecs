@@ -1,9 +1,16 @@
---- Shared library resolution, cdef installation, and FFI-boundary types.
+--- Native library resolution, cdef installation, and FFI-boundary types.
 ---
---- Generated cdefs live in `build/tecs2d/ffi/<name>cdef.lua` and are produced
---- by `make cdef` from the installed headers. Loading them here, rather than
---- hand-maintaining declarations, is what keeps the bindings honest: a cdef
---- that drifts from the real ABI corrupts memory instead of failing to link.
+--- Generated cdefs are produced by the build from the installed headers.
+--- Loading them here, rather than hand-maintaining declarations, is what keeps
+--- the bindings honest: a cdef that drifts from the real ABI corrupts memory
+--- instead of failing to link.
+---
+--- A library is reached through the registry the host installed if there is
+--- one, and through `ffi.load` otherwise. The registry is a table of function
+--- pointers taken at build time, which is the only way to call C on a target
+--- that links everything statically and forbids loading a library by name.
+--- `ffi.load` remains for desktop development, where running under a plain
+--- `luajit` means no host installed anything.
 
 local ffi <const> = require("ffi")
 
@@ -64,18 +71,88 @@ local suffix <const> = ffi.os == "Windows" and ".dll"
 
 local loaded <const>: {string: loader.CNamespace} = {}
 
---- Resolves and loads a shared library.
+--- Struct name of each library's function-pointer table, by registry key.
+--- The cdef beside it is loaded on demand, so a target that links a subset
+--- pays nothing for the rest.
+local STRUCTS <const>: {string: string} = {
+    sdl3 = "Tecs2dSdl3Api",
+    sdl3image = "Tecs2dSdl3ImageApi",
+    box2d = "Tecs2dBox2dApi",
+    shaderc = "Tecs2dShadercApi",
+    spvc = "Tecs2dSpvcApi",
+    worker = "Tecs2dWorkerApi",
+}
+
+--- The function-pointer table the host installed for `name`, if any.
+local function registryTable(name: string): loader.CValue
+    local registry = (_G as {string: any})["__tecs2dRegistry"]
+    if registry == nil then return nil end
+    return (registry as {string: any})[name] as loader.CValue
+end
+
+--- Wraps a function-pointer table so it answers like a C namespace.
 ---
---- Tries, in order: an explicit override from `envVar`, the plain soname (so
---- the dynamic linker's own search applies), then each known prefix. Returns
---- the C namespace and the path that satisfied it.
+--- The table holds functions only. Enum constants are compile-time values the
+--- FFI resolves through any namespace, so those come from `ffi.C`, which needs
+--- no library loaded to answer.
+---
+--- Resolved names are written back into the proxy, so a name costs a
+--- metatable miss once and is a plain table read afterwards. Leaving every
+--- access on the metamethod would put a lookup in front of every C call the
+--- engine makes.
+local function registryNamespace(functions: loader.CValue): loader.CNamespace
+    local proxy = {}
+    return setmetatable(proxy, {
+        __index = function(_self: any, name: string): any
+            -- Indexing a struct with a name it does not have raises rather
+            -- than answering nil, so the miss has to be caught to fall
+            -- through to the constants.
+            local ok, found = pcall(function(): any
+                return (functions as loader.CValue)[name]
+            end)
+            if not ok or found == nil then
+                found = (ffi.C as loader.CValue)[name]
+            end
+            rawset(proxy, name, found)
+            return found
+        end,
+    }) as loader.CNamespace
+end
+
+--- Whether a library is reachable without dynamic loading.
+function loader.isStatic(name: string): boolean
+    return registryTable(name) ~= nil
+end
+
+--- Resolves a native library.
+---
+--- Prefers the registry, then an explicit override from `envVar`, then the
+--- plain soname so the dynamic linker's own search applies, then each known
+--- prefix. Returns the namespace and what satisfied it.
 ---
 --- @param soname Library name without the `lib` prefix or extension.
 --- @param formula Package name used to expand per-package prefixes.
 --- @param envVar Environment variable holding an absolute override path.
-function loader.library(soname: string, formula: string, envVar: string): loader.CNamespace, string
+--- @param registryName Key the host registered this library under.
+function loader.library(soname: string, formula: string, envVar: string,
+                        registryName?: string): loader.CNamespace, string
     local cached = loaded[soname]
     if cached ~= nil then return cached, "(cached)" end
+
+    -- Taken at build time, so this path needs no dlopen and works where one is
+    -- not permitted.
+    local key = registryName or soname
+    local table_ = registryTable(key)
+    if table_ ~= nil then
+        local struct = STRUCTS[key]
+        if struct == nil then
+            error(("tecs2d: %s is in the registry with no declared table"):format(key), 2)
+        end
+        local namespace = registryNamespace(
+            ffi.cast(struct .. " *", table_ as string) as loader.CValue)
+        loaded[soname] = namespace
+        return namespace, "(registry)"
+    end
 
     local attempts: {string} = {}
 
@@ -114,14 +191,27 @@ local function requireGenerated(name: string): boolean, any
 end
 
 --- Installs a generated cdef exactly once.
+---
+--- Also installs the function-pointer table's declaration when the host
+--- registered one, since that is what `library` casts through.
 --- @param name Module basename, e.g. "sdl3" for `tecs2d.ffi.sdl3cdef`.
 function loader.declare(name: string)
     if declared[name] then return end
     local ok, source = requireGenerated(name .. "cdef")
     if not ok then
-        error(("tecs2d: missing generated cdef for %s. Run `make cdef`."):format(name), 2)
+        error(("tecs2d: missing generated cdef for %s. Run the build."):format(name), 2)
     end
     ffi.cdef(source as string)
+
+    if registryTable(name) ~= nil then
+        local hasApi, api = requireGenerated(name .. "apicdef")
+        if not hasApi then
+            error(("tecs2d: %s is registered but its table declaration is missing")
+                :format(name), 2)
+        end
+        ffi.cdef(api as string)
+    end
+
     declared[name] = true
 end
 

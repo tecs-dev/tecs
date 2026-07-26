@@ -152,6 +152,7 @@ set(CMAKE_DEPEND_INFO_FILES
   "CMakeFiles/tecs2d_worker.dir/DependInfo.cmake"
   "CMakeFiles/tecs2d_spirvcross.dir/DependInfo.cmake"
   "CMakeFiles/tecs2d.dir/DependInfo.cmake"
+  "CMakeFiles/tecs2d_registry.dir/DependInfo.cmake"
   "CMakeFiles/tecs2d_bindings.dir/DependInfo.cmake"
   "CMakeFiles/tecs2d_lua.dir/DependInfo.cmake"
   )

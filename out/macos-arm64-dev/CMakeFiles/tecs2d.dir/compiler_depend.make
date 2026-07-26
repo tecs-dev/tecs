@@ -128,6 +128,7 @@ CMakeFiles/tecs2d.dir/native/host.c.o: /Users/dowling/projects/tecs2d/native/hos
   /Library/Developer/CommandLineTools/usr/lib/clang/16/include/stdbool.h \
   /Library/Developer/CommandLineTools/usr/lib/clang/16/include/stddef.h \
   /Library/Developer/CommandLineTools/usr/lib/clang/16/include/stdint.h \
+  /Users/dowling/projects/tecs2d/native/registry.h \
   /opt/homebrew/Cellar/luajit/2.1.1753364724/include/luajit-2.1/lauxlib.h \
   /opt/homebrew/Cellar/luajit/2.1.1753364724/include/luajit-2.1/lua.h \
   /opt/homebrew/Cellar/luajit/2.1.1753364724/include/luajit-2.1/luaconf.h \
@@ -325,6 +326,8 @@ CMakeFiles/tecs2d.dir/native/host.c.o: /Users/dowling/projects/tecs2d/native/hos
 /opt/homebrew/include/SDL3/SDL_oldnames.h:
 
 /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/sys/_types/_u_int8_t.h:
+
+/Users/dowling/projects/tecs2d/native/registry.h:
 
 /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/sys/_types/_timeval.h:
 

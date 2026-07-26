@@ -22,7 +22,7 @@ local loader = require("tecs2d.ffi.loader")
 loader.declare("worker")
 
 local C, libraryPath =
-loader.library("tecs2dworker", "tecs2d", "TECS2D_WORKER_PATH")
+loader.library("tecs2dworker", "tecs2d", "TECS2D_WORKER_PATH", "worker")
 
 
 local FOREVER = -1

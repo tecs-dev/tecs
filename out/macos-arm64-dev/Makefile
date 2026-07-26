@@ -201,6 +201,19 @@ tecs2d/fast:
 .PHONY : tecs2d/fast
 
 #=============================================================================
+# Target rules for targets named tecs2d_registry
+
+# Build rule for target.
+tecs2d_registry: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 tecs2d_registry
+.PHONY : tecs2d_registry
+
+# fast build rule for target.
+tecs2d_registry/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_registry.dir/build.make CMakeFiles/tecs2d_registry.dir/build
+.PHONY : tecs2d_registry/fast
+
+#=============================================================================
 # Target rules for targets named tecs2d_bindings
 
 # Build rule for target.
@@ -226,6 +239,150 @@ tecs2d_lua/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_lua.dir/build.make CMakeFiles/tecs2d_lua.dir/build
 .PHONY : tecs2d_lua/fast
 
+generated/box2dapi.o: generated/box2dapi.c.o
+.PHONY : generated/box2dapi.o
+
+# target to build an object file
+generated/box2dapi.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_registry.dir/build.make CMakeFiles/tecs2d_registry.dir/generated/box2dapi.c.o
+.PHONY : generated/box2dapi.c.o
+
+generated/box2dapi.i: generated/box2dapi.c.i
+.PHONY : generated/box2dapi.i
+
+# target to preprocess a source file
+generated/box2dapi.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_registry.dir/build.make CMakeFiles/tecs2d_registry.dir/generated/box2dapi.c.i
+.PHONY : generated/box2dapi.c.i
+
+generated/box2dapi.s: generated/box2dapi.c.s
+.PHONY : generated/box2dapi.s
+
+# target to generate assembly for a file
+generated/box2dapi.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_registry.dir/build.make CMakeFiles/tecs2d_registry.dir/generated/box2dapi.c.s
+.PHONY : generated/box2dapi.c.s
+
+generated/sdl3api.o: generated/sdl3api.c.o
+.PHONY : generated/sdl3api.o
+
+# target to build an object file
+generated/sdl3api.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_registry.dir/build.make CMakeFiles/tecs2d_registry.dir/generated/sdl3api.c.o
+.PHONY : generated/sdl3api.c.o
+
+generated/sdl3api.i: generated/sdl3api.c.i
+.PHONY : generated/sdl3api.i
+
+# target to preprocess a source file
+generated/sdl3api.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_registry.dir/build.make CMakeFiles/tecs2d_registry.dir/generated/sdl3api.c.i
+.PHONY : generated/sdl3api.c.i
+
+generated/sdl3api.s: generated/sdl3api.c.s
+.PHONY : generated/sdl3api.s
+
+# target to generate assembly for a file
+generated/sdl3api.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_registry.dir/build.make CMakeFiles/tecs2d_registry.dir/generated/sdl3api.c.s
+.PHONY : generated/sdl3api.c.s
+
+generated/sdl3imageapi.o: generated/sdl3imageapi.c.o
+.PHONY : generated/sdl3imageapi.o
+
+# target to build an object file
+generated/sdl3imageapi.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_registry.dir/build.make CMakeFiles/tecs2d_registry.dir/generated/sdl3imageapi.c.o
+.PHONY : generated/sdl3imageapi.c.o
+
+generated/sdl3imageapi.i: generated/sdl3imageapi.c.i
+.PHONY : generated/sdl3imageapi.i
+
+# target to preprocess a source file
+generated/sdl3imageapi.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_registry.dir/build.make CMakeFiles/tecs2d_registry.dir/generated/sdl3imageapi.c.i
+.PHONY : generated/sdl3imageapi.c.i
+
+generated/sdl3imageapi.s: generated/sdl3imageapi.c.s
+.PHONY : generated/sdl3imageapi.s
+
+# target to generate assembly for a file
+generated/sdl3imageapi.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_registry.dir/build.make CMakeFiles/tecs2d_registry.dir/generated/sdl3imageapi.c.s
+.PHONY : generated/sdl3imageapi.c.s
+
+generated/shadercapi.o: generated/shadercapi.c.o
+.PHONY : generated/shadercapi.o
+
+# target to build an object file
+generated/shadercapi.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_registry.dir/build.make CMakeFiles/tecs2d_registry.dir/generated/shadercapi.c.o
+.PHONY : generated/shadercapi.c.o
+
+generated/shadercapi.i: generated/shadercapi.c.i
+.PHONY : generated/shadercapi.i
+
+# target to preprocess a source file
+generated/shadercapi.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_registry.dir/build.make CMakeFiles/tecs2d_registry.dir/generated/shadercapi.c.i
+.PHONY : generated/shadercapi.c.i
+
+generated/shadercapi.s: generated/shadercapi.c.s
+.PHONY : generated/shadercapi.s
+
+# target to generate assembly for a file
+generated/shadercapi.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_registry.dir/build.make CMakeFiles/tecs2d_registry.dir/generated/shadercapi.c.s
+.PHONY : generated/shadercapi.c.s
+
+generated/spvcapi.o: generated/spvcapi.c.o
+.PHONY : generated/spvcapi.o
+
+# target to build an object file
+generated/spvcapi.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_registry.dir/build.make CMakeFiles/tecs2d_registry.dir/generated/spvcapi.c.o
+.PHONY : generated/spvcapi.c.o
+
+generated/spvcapi.i: generated/spvcapi.c.i
+.PHONY : generated/spvcapi.i
+
+# target to preprocess a source file
+generated/spvcapi.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_registry.dir/build.make CMakeFiles/tecs2d_registry.dir/generated/spvcapi.c.i
+.PHONY : generated/spvcapi.c.i
+
+generated/spvcapi.s: generated/spvcapi.c.s
+.PHONY : generated/spvcapi.s
+
+# target to generate assembly for a file
+generated/spvcapi.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_registry.dir/build.make CMakeFiles/tecs2d_registry.dir/generated/spvcapi.c.s
+.PHONY : generated/spvcapi.c.s
+
+generated/workerapi.o: generated/workerapi.c.o
+.PHONY : generated/workerapi.o
+
+# target to build an object file
+generated/workerapi.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_registry.dir/build.make CMakeFiles/tecs2d_registry.dir/generated/workerapi.c.o
+.PHONY : generated/workerapi.c.o
+
+generated/workerapi.i: generated/workerapi.c.i
+.PHONY : generated/workerapi.i
+
+# target to preprocess a source file
+generated/workerapi.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_registry.dir/build.make CMakeFiles/tecs2d_registry.dir/generated/workerapi.c.i
+.PHONY : generated/workerapi.c.i
+
+generated/workerapi.s: generated/workerapi.c.s
+.PHONY : generated/workerapi.s
+
+# target to generate assembly for a file
+generated/workerapi.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_registry.dir/build.make CMakeFiles/tecs2d_registry.dir/generated/workerapi.c.s
+.PHONY : generated/workerapi.c.s
+
 native/host.o: native/host.c.o
 .PHONY : native/host.o
 
@@ -249,6 +406,30 @@ native/host.s: native/host.c.s
 native/host.c.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d.dir/build.make CMakeFiles/tecs2d.dir/native/host.c.s
 .PHONY : native/host.c.s
+
+native/registry.o: native/registry.c.o
+.PHONY : native/registry.o
+
+# target to build an object file
+native/registry.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_registry.dir/build.make CMakeFiles/tecs2d_registry.dir/native/registry.c.o
+.PHONY : native/registry.c.o
+
+native/registry.i: native/registry.c.i
+.PHONY : native/registry.i
+
+# target to preprocess a source file
+native/registry.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_registry.dir/build.make CMakeFiles/tecs2d_registry.dir/native/registry.c.i
+.PHONY : native/registry.c.i
+
+native/registry.s: native/registry.c.s
+.PHONY : native/registry.s
+
+# target to generate assembly for a file
+native/registry.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_registry.dir/build.make CMakeFiles/tecs2d_registry.dir/native/registry.c.s
+.PHONY : native/registry.c.s
 
 native/spirvcross.o: native/spirvcross.c.o
 .PHONY : native/spirvcross.o
@@ -313,11 +494,33 @@ help:
 	@echo "... tecs2d_bindings"
 	@echo "... tecs2d_lua"
 	@echo "... tecs2d"
+	@echo "... tecs2d_registry"
 	@echo "... tecs2d_spirvcross"
 	@echo "... tecs2d_worker"
+	@echo "... generated/box2dapi.o"
+	@echo "... generated/box2dapi.i"
+	@echo "... generated/box2dapi.s"
+	@echo "... generated/sdl3api.o"
+	@echo "... generated/sdl3api.i"
+	@echo "... generated/sdl3api.s"
+	@echo "... generated/sdl3imageapi.o"
+	@echo "... generated/sdl3imageapi.i"
+	@echo "... generated/sdl3imageapi.s"
+	@echo "... generated/shadercapi.o"
+	@echo "... generated/shadercapi.i"
+	@echo "... generated/shadercapi.s"
+	@echo "... generated/spvcapi.o"
+	@echo "... generated/spvcapi.i"
+	@echo "... generated/spvcapi.s"
+	@echo "... generated/workerapi.o"
+	@echo "... generated/workerapi.i"
+	@echo "... generated/workerapi.s"
 	@echo "... native/host.o"
 	@echo "... native/host.i"
 	@echo "... native/host.s"
+	@echo "... native/registry.o"
+	@echo "... native/registry.i"
+	@echo "... native/registry.s"
 	@echo "... native/spirvcross.o"
 	@echo "... native/spirvcross.i"
 	@echo "... native/spirvcross.s"

@@ -8,7 +8,7 @@ local loader = require("tecs2d.ffi.loader")
 loader.declare("spvc")
 
 local namespace, libraryPath =
-loader.library("spirvcrossc", "spirv-cross", "TECS2D_SPVC_PATH")
+loader.library("spirvcrossc", "spirv-cross", "TECS2D_SPVC_PATH", "spvc")
 
 local spvc = {}
 

@@ -191,4 +191,5 @@ CMakeFiles/tecs2d.dir/native/host.c.o: \
   /Library/Developer/CommandLineTools/usr/lib/clang/16/include/__stddef_offsetof.h \
   /opt/homebrew/Cellar/luajit/2.1.1753364724/include/luajit-2.1/luaconf.h \
   /opt/homebrew/Cellar/luajit/2.1.1753364724/include/luajit-2.1/lualib.h \
-  /opt/homebrew/Cellar/luajit/2.1.1753364724/include/luajit-2.1/lauxlib.h
+  /opt/homebrew/Cellar/luajit/2.1.1753364724/include/luajit-2.1/lauxlib.h \
+  /Users/dowling/projects/tecs2d/native/registry.h
