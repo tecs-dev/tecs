@@ -867,7 +867,12 @@ tecs.newFFIComponent({
         if not data then return nil end
         local path = data.path as string
         path = resolveDurableSpritePath(path) or path
+        -- Prefer a sheet this process already loaded from the same file:
+        -- building a second one would put the same image in its own
+        -- texture-array layer, so restored and freshly spawned sprites of
+        -- one sheet would never batch together.
         local spriteSheet = sheetCacheByPath[path]
+            or sprite_sheet.SpriteSheet.findByPath(path)
         if not spriteSheet then
             -- Aseprite sheets need an adjacent .json; plain textures don't.
             -- Probe for the JSON alongside the path to pick the right loader.

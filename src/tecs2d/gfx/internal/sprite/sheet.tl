@@ -153,6 +153,14 @@ local record sprite_sheet
 
         getById: function(id: integer): SpriteSheet
 
+        --- The sheet already built from `file`, or nil.
+        ---
+        --- A snapshot names a sprite's sheet by path. Without this, restoring
+        --- one builds a second sheet for a file the process already has, and
+        --- the same image ends up in two texture-array layers: restored and
+        --- freshly spawned sprites of one sheet then never batch together.
+        findByPath: function(file: string): SpriteSheet
+
         preloadAll: function()
 
         fromImage: function(
@@ -217,6 +225,10 @@ sprite_sheet.Direction = DIRECTION
 
 local sheetRegistry: {integer: sprite_sheet.SpriteSheet} = {}
 local nextSheetId: integer = 1
+
+-- Sheets by the file they were built from, so a snapshot that names a path
+-- resolves to the sheet the process already loaded rather than a duplicate.
+local sheetsByPath: {string: sprite_sheet.SpriteSheet} = {}
 
 local SpriteSheet <const> = sprite_sheet.SpriteSheet
 local SHEET_MT <const>: metatable<sprite_sheet.SpriteSheet> = {__index = SpriteSheet}
@@ -471,6 +483,11 @@ end
 -- Module-level function to get sheet by ID
 function SpriteSheet.getById(id: integer): sprite_sheet.SpriteSheet
     return sheetRegistry[id]
+end
+
+function SpriteSheet.findByPath(file: string): sprite_sheet.SpriteSheet
+    if not file or file == "" then return nil end
+    return sheetsByPath[file]
 end
 
 function SpriteSheet.preloadAll()
@@ -1028,6 +1045,9 @@ function SpriteSheetBuilder:build(): sprite_sheet.SpriteSheet
     }, SHEET_MT)
 
     sheetRegistry[sheetId] = sheetImpl
+    if sheetImpl._path ~= "" then
+        sheetsByPath[sheetImpl._path] = sheetImpl
+    end
     return sheetImpl
 end
 
