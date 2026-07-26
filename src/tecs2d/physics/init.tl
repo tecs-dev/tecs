@@ -12,8 +12,10 @@
 local tecs <const> = require("tecs")
 local loader <const> = require("tecs2d.ffi.loader")
 local World <const> = require("tecs2d.physics.World")
+local box2d <const> = require("tecs2d.ffi.box2d")
 local components <const> = require("tecs2d.components")
 
+local B <const> = box2d.C
 local Transform2D <const> = components.Transform2D
 
 local type Component = tecs.Component
@@ -67,6 +69,12 @@ local record PhysicsOptions
     subStepCount: integer
     --- Fixed timestep in seconds.
     timeStep: number
+    --- "fixed" steps in the fixed phases, which is what a game wants: the
+    --- simulation advances at a constant rate however fast frames are.
+    --- "frame" steps exactly once per frame instead. That decouples the work
+    --- done from the frame rate it produces, which a benchmark needs and a
+    --- game does not.
+    stepping: string
 end
 
 local record physics
@@ -74,6 +82,8 @@ local record physics
     --- Pixels per simulated metre.
     scale: number
     world: World
+
+    applyImpulseTo: function(row: RigidBody, x: number, y: number)
 end
 
 physics.RigidBody = RigidBody
@@ -150,6 +160,38 @@ local function handleOf(row: RigidBody): loader.CValue
     return scratchHandle
 end
 
+--- Pushes a body, in pixels per second squared applied at its centre.
+---
+--- An impulse rather than a force, so the effect does not depend on how long
+--- the step happened to be. Wakes the body: Box2D lets a resting island sleep,
+--- and pushing a sleeping body without waking it does nothing.
+function physics.applyImpulse(world: tecs.World, entity: integer,
+                              x: number, y: number)
+    local row = world:get(entity, RigidBody)
+    if row == nil then return end
+    physics.applyImpulseTo(row, x, y)
+end
+
+--- The same, given a RigidBody row already in hand.
+---
+--- For a system walking a column, where going back through the entity would
+--- cost a lookup per body per frame.
+function physics.applyImpulseTo(row: RigidBody, x: number, y: number)
+    local body = handleOf(row)
+    local impulse = loader.newStruct("b2Vec2")
+    local fields = impulse as loader.CStruct
+    fields.x = toMetres(x)
+    fields.y = toMetres(y)
+    B.b2Body_ApplyLinearImpulseToCenter(body, impulse, true)
+end
+
+--- Reads a body's velocity, in pixels per second.
+function physics.velocity(world: tecs.World, entity: integer): number, number
+    local row = world:get(entity, RigidBody)
+    if row == nil then return 0.0, 0.0 end
+    return World.getVelocity(handleOf(row))
+end
+
 --- Installs the simulation and its sync.
 function physics.plugin(options: PhysicsOptions): function(tecs.World)
     options = options or {}
@@ -167,9 +209,11 @@ function physics.plugin(options: PhysicsOptions): function(tecs.World)
 
         local bodies = world:query({ include = { Transform2D, RigidBody } })
 
+        local perFrame <const> = options.stepping == "frame"
+
         world:addSystem({
             name = "tecs2d.StepPhysics",
-            phase = tecs.phases.FixedUpdate,
+            phase = perFrame and tecs.phases.Update or tecs.phases.FixedUpdate,
             run = function()
                 physics.world:step(timeStep)
             end,
@@ -177,7 +221,8 @@ function physics.plugin(options: PhysicsOptions): function(tecs.World)
 
         world:addSystem({
             name = "tecs2d.SyncBodyTransforms",
-            phase = tecs.phases.FixedPostUpdate,
+            phase = perFrame and tecs.phases.PostUpdate
+                or tecs.phases.FixedPostUpdate,
             run = function()
                 for archetype, length in bodies:iter() do
                     -- Transforms are written from the simulation, so the
