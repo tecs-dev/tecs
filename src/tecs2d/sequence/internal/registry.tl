@@ -90,6 +90,7 @@ function registry.restore(data: {string: any}): ProgramImpl
     local prog: ProgramImpl = {
         name = name,
         version = version,
+        clock = (data.clock as seqtypes.ClockId) or "fixed",
         code = data.code as {integer},
         consts = data.consts as {any},
         loopSlots = data.loopSlots as integer,

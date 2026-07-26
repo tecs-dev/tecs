@@ -36,6 +36,7 @@ local record cursors
     DEFAULT_BUDGET: integer
 
     stateFor: function(world: World): WorldState
+    clockOf: function(state: WorldState, cursor: Cursor): seqclock.Clock
     packHandle: function(slot: integer, generation: integer): seqtypes.Handle
     resolve: function(state: WorldState, handle: seqtypes.Handle): Cursor
     alloc: function(state: WorldState): Cursor
@@ -68,7 +69,7 @@ function cursors.stateFor(world: World): WorldState
         generations = {},
         actions = {},
         budget = DEFAULT_BUDGET,
-        fixed = seqclock.new(),
+        clocks = {fixed = seqclock.new(), frame = seqclock.new()},
         channels = {},
         pendingSignals = {},
         queries = {},
@@ -89,8 +90,13 @@ end
 
 function cursors.schedule(state: WorldState, cursor: Cursor, wakeAt: integer)
     cursor.wakeAt = wakeAt
-    cursor.seq = seqclock.schedule(state.fixed, wakeAt,
+    cursor.seq = seqclock.schedule(state.clocks[cursor.clock], wakeAt,
         cursors.packHandle(cursor.slot, cursor.generation))
+end
+
+--- The clock a cursor is scheduled against.
+function cursors.clockOf(state: WorldState, cursor: Cursor): seqclock.Clock
+    return state.clocks[cursor.clock]
 end
 
 function cursors.resolve(state: WorldState, handle: seqtypes.Handle): Cursor
@@ -246,7 +252,7 @@ local function detachFromParent(
 
     if parent.joining and (not children or next(children) == nil) then
         parent.joining = false
-        cursors.schedule(state, parent, state.fixed.step)
+        cursors.schedule(state, parent, cursors.clockOf(state, parent).step)
     end
 end
 
@@ -319,8 +325,8 @@ function cursors.resumeTree(state: WorldState, cursor: Cursor): boolean
     -- stays where it is. Otherwise it keeps its heap entry, and if its wake
     -- time passed while it was paused it runs on the next step rather than
     -- immediately.
-    if cursor.wakeAt and cursor.wakeAt <= state.fixed.step then
-        cursors.schedule(state, cursor, state.fixed.step + 1)
+    if cursor.wakeAt and cursor.wakeAt <= cursors.clockOf(state, cursor).step then
+        cursors.schedule(state, cursor, cursors.clockOf(state, cursor).step + 1)
     end
     return true
 end

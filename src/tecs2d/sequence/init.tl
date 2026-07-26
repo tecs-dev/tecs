@@ -75,6 +75,15 @@ local record sequence
     --- Options for `play`.
     type PlayOptions = seqtypes.PlayOptions
 
+    --- Which clock a program is scheduled against.
+    type ClockId = seqtypes.ClockId
+
+    --- Options for `define`.
+    record DefineOptions
+        --- Clock the program's waits count. Defaults to `"fixed"`.
+        clock: ClockId
+    end
+
     --- What a registered action receives. The context and its `args` belong
     --- to the sequencer and are reused by the next call.
     type ActionContext = seqtypes.ActionContext
@@ -93,7 +102,12 @@ local record sequence
     ---------------------------------------------------------------------------
 
     --- Compile a program under a stable symbolic name.
-    define: function(name: string, nodes: {Node}): Program
+    ---
+    --- `options.clock` picks what the program's waits count. `"fixed"`, the
+    --- default, counts fixed steps and is what gameplay logic wants.
+    --- `"frame"` counts gameplay frames and keeps running while the game is
+    --- frozen and stepping, which is what scripted input needs.
+    define: function(name: string, nodes: {Node}, options?: DefineOptions): Program
 
     --- Look up a defined program: the newest version, or a specific one.
     --- Every version a playback still runs stays reachable.
@@ -404,7 +418,11 @@ end
 -- Compiler
 -------------------------------------------------------------------------------
 
-function sequence.define(name: string, nodes: {sequence.Node}): sequence.Program
+function sequence.define(
+    name: string,
+    nodes: {sequence.Node},
+    options?: sequence.DefineOptions
+): sequence.Program
     if type(name) ~= "string" or name == "" then
         error("sequence.define requires a non-empty program name", 2)
     end
@@ -412,7 +430,11 @@ function sequence.define(name: string, nodes: {sequence.Node}): sequence.Program
         error("sequence.define requires an array of nodes", 2)
     end
 
-    local prog = seqprogram.compile(name, seqregistry.nextVersion(name), nodes)
+    local clock: seqtypes.ClockId = options and options.clock or "fixed"
+    if clock ~= "fixed" and clock ~= "frame" then
+        error("sequence.define clock must be 'fixed' or 'frame'", 2)
+    end
+    local prog = seqprogram.compile(name, seqregistry.nextVersion(name), clock, nodes)
     seqregistry.publish(prog)
     return prog
 end
@@ -548,6 +570,7 @@ function sequence.play(
     local state = seqcursors.stateFor(world)
     local cursor = seqcursors.alloc(state)
     cursor.program = program as ProgramImpl
+    cursor.clock = cursor.program.clock or "fixed"
     cursor.pc = 0
     cursor.state = "running"
     seqregistry.retain(cursor.program)
@@ -560,8 +583,9 @@ function sequence.play(
 
     seqcursors.linkOwner(state, cursor)
 
-    -- The first instruction runs on the next fixed step, never inside play.
-    seqcursors.schedule(state, cursor, state.fixed.step + 1)
+    -- The first instruction runs on the next tick of its clock, never inside
+    -- the play call.
+    seqcursors.schedule(state, cursor, seqcursors.clockOf(state, cursor).step + 1)
     return seqcursors.packHandle(cursor.slot, cursor.generation)
 end
 
@@ -667,7 +691,7 @@ function sequence.setInstructionBudget(world: World, instructions: integer)
 end
 
 function sequence.currentStep(world: World): integer
-    return seqcursors.stateFor(world).fixed.step
+    return seqcursors.stateFor(world).clocks.fixed.step
 end
 
 -------------------------------------------------------------------------------
@@ -693,7 +717,19 @@ function sequence.plugin(world: World)
         name = "sequence.Advance",
         phase = tecs.phases.FixedFirst,
         run = function()
-            seqvm.tick(world, state)
+            seqvm.tick(world, state, "fixed")
+        end,
+    })
+
+    -- phases.First is the earliest gameplay phase, which the suspension
+    -- controller disables while frozen and enables during a step. A
+    -- frame-clock program therefore lands on a stepped frame, which is the
+    -- whole reason scripted input cannot ride the fixed clock.
+    world:addSystem({
+        name = "sequence.AdvanceFrame",
+        phase = tecs.phases.First,
+        run = function()
+            seqvm.tick(world, state, "frame")
         end,
     })
 

@@ -34,7 +34,8 @@ local DEFAULT_BUDGET <const> = seqcursors.DEFAULT_BUDGET
 --   2: branch tree (parent link and join state)
 --   3: query waits
 --   4: tween playback waits
-local SNAPSHOT_VERSION <const> = 4
+--   5: named clocks
+local SNAPSHOT_VERSION <const> = 5
 
 local record snapshot
     --- The payload layout this build writes and accepts.
@@ -60,12 +61,37 @@ end
 -- for later `play` calls.
 -------------------------------------------------------------------------------
 
+-- Each clock's counters travel separately: a cursor resumes on the clock its
+-- program declared, and the two do not advance together.
+local function clockCounters(state: seqtypes.WorldState): {string: {string: integer}}
+    local out: {string: {string: integer}} = {}
+    for id, c in pairs(state.clocks) do
+        out[id as string] = {step = c.step, seq = c.seq}
+    end
+    return out
+end
+
+local function restoreClockCounters(
+    state: seqtypes.WorldState,
+    saved: {string: {string: integer}}
+)
+    if not saved then return end
+    for id, counters in pairs(saved) do
+        local c = state.clocks[id as seqtypes.ClockId]
+        if c then
+            c.step = counters.step or 0
+            c.seq = counters.seq or 0
+        end
+    end
+end
+
 local function serializeProgram(prog: ProgramImpl): {string: any}
     return {
         name = prog.name,
         version = prog.version,
         code = prog.code,
         consts = prog.consts,
+        clock = prog.clock,
         loopSlots = prog.loopSlots,
         loopCounts = prog.loopCounts,
     }
@@ -98,6 +124,7 @@ function snapshot.save(world: World): any
                 version = prog.version,
                 pc = cursor.pc,
                 state = cursor.state,
+                clock = cursor.clock,
                 owner = cursor.owner,
                 bindings = cursor.bindings,
                 budget = cursor.budget,
@@ -120,8 +147,7 @@ function snapshot.save(world: World): any
 
     return {
         version = SNAPSHOT_VERSION,
-        step = state.fixed.step,
-        seq = state.fixed.seq,
+        clocks = clockCounters(state),
         budget = state.budget,
         nextSlot = state.nextSlot,
         generations = state.generations,
@@ -157,7 +183,7 @@ function snapshot.load(world: World, value: any)
     state.cursors = {}
     state.freeSlots = {}
     state.ownerIndex = {}
-    seqclock.clear(state.fixed)
+    
     state.channels = {}
     state.pendingSignals = {}
     -- Registered queries are code, kept like actions; only the parked
@@ -171,14 +197,12 @@ function snapshot.load(world: World, value: any)
     state.argScratch = {}
     state.nextSlot = 1
     state.generations = {}
-    state.fixed.step = 0
-    state.fixed.seq = 0
+    for _, c in pairs(state.clocks) do seqclock.clear(c) end
 
     local data = value as {string: any}
     if not data then return end
 
-    state.fixed.step = (data.step as integer) or 0
-    state.fixed.seq = (data.seq as integer) or 0
+    restoreClockCounters(state, data.clocks as {string: {string: integer}})
     state.budget = (data.budget as integer) or DEFAULT_BUDGET
     state.nextSlot = (data.nextSlot as integer) or 1
     state.generations = (data.generations as {integer: integer}) or {}
@@ -204,6 +228,7 @@ function snapshot.load(world: World, value: any)
                 program = prog,
                 pc = row.pc as integer,
                 state = row.state as PlaybackState,
+                clock = (row.clock as seqtypes.ClockId) or "fixed",
                 owner = (row.owner as integer) or 0,
                 bindings = row.bindings as {string: integer},
                 budget = (row.budget as integer) or state.budget,
@@ -241,7 +266,7 @@ function snapshot.load(world: World, value: any)
             elseif cursor.waitingTween then
                 state.tweenWaiters[cursor.slot] = true
             elseif not cursor.joining then
-                seqclock.requeue(state.fixed, cursor.wakeAt, cursor.seq,
+                seqclock.requeue(seqcursors.clockOf(state, cursor), cursor.wakeAt, cursor.seq,
                     seqcursors.packHandle(cursor.slot, cursor.generation))
             end
         else
@@ -283,7 +308,7 @@ function snapshot.load(world: World, value: any)
             LOGGER:warn("%s v%d: join at pc=%d lost its branches; resuming",
                 cursor.program.name, cursor.program.version, cursor.pc)
             cursor.joining = false
-            seqcursors.schedule(state, cursor, state.fixed.step + 1)
+            seqcursors.schedule(state, cursor, seqcursors.clockOf(state, cursor).step + 1)
         end
     end
 

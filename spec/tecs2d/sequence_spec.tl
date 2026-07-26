@@ -130,6 +130,103 @@ describe("tecs2d.sequence", function()
         end)
     end)
 
+    describe("clocks", function()
+        it("defaults a program to the fixed clock", function()
+            local calls = 0
+            sequence.registerAction(world, "spec.count", function() calls = calls + 1 end)
+            local prog = sequence.define(uniqueName(), {
+                sequence.waitSteps(2),
+                sequence.call("spec.count"),
+            })
+            sequence.play(world, prog)
+
+            stepWorld(world, 2)
+            luassert.equals(0, calls)
+            stepWorld(world, 1)
+            luassert.equals(1, calls)
+        end)
+
+        it("counts frames, not fixed steps, on the frame clock", function()
+            local fixedCalls, frameCalls = 0, 0
+            sequence.registerAction(world, "spec.fixed", function()
+                fixedCalls = fixedCalls + 1
+            end)
+            sequence.registerAction(world, "spec.frame", function()
+                frameCalls = frameCalls + 1
+            end)
+
+            local onFixed = sequence.define(uniqueName(), {
+                sequence.waitSteps(1),
+                sequence.call("spec.fixed"),
+            })
+            local onFrame = sequence.define(uniqueName(), {
+                sequence.waitSteps(1),
+                sequence.call("spec.frame"),
+            }, {clock = "frame"})
+
+            sequence.play(world, onFixed)
+            sequence.play(world, onFrame)
+
+            -- Three frames worth of dt in one update runs three fixed
+            -- iterations but only one frame. The two clocks must not agree.
+            local timestep = world:getFixedTiming()
+            world:update(timestep * 3)
+
+            luassert.equals(1, fixedCalls, "the fixed clock ticks per fixed iteration")
+            luassert.equals(0, frameCalls, "the frame clock ticks once per frame")
+
+            world:update(timestep)
+            luassert.equals(1, frameCalls)
+        end)
+
+        it("measures a frame wait in frames however many steps pass", function()
+            local calls = 0
+            sequence.registerAction(world, "spec.count", function() calls = calls + 1 end)
+            local prog = sequence.define(uniqueName(), {
+                sequence.waitSteps(2),
+                sequence.call("spec.count"),
+            }, {clock = "frame"})
+            sequence.play(world, prog)
+
+            -- Five fixed iterations in one update is still one frame, so the
+            -- two counters walk away from each other.
+            local timestep = world:getFixedTiming()
+            world:update(timestep * 5)
+            luassert.equals(0, calls)
+            world:update(timestep * 5)
+            luassert.equals(0, calls, "two frames in, the wait is not up")
+
+            world:update(timestep)
+            luassert.equals(1, calls, "three frames in, it is")
+            luassert.is_true(sequence.currentStep(world) > 10,
+                "the fixed clock ran far ahead while the frame clock counted three")
+        end)
+
+        it("runs a forked branch on its program's clock", function()
+            local calls = 0
+            sequence.registerAction(world, "spec.count", function() calls = calls + 1 end)
+            local prog = sequence.define(uniqueName(), {
+                sequence.parallel(
+                    {sequence.waitSteps(1), sequence.call("spec.count")},
+                    {sequence.waitSteps(1), sequence.call("spec.count")}
+                ),
+            }, {clock = "frame"})
+            sequence.play(world, prog)
+
+            local timestep = world:getFixedTiming()
+            world:update(timestep)
+            world:update(timestep)
+            luassert.equals(2, calls, "branches inherit the clock they were forked on")
+        end)
+
+        it("rejects an unknown clock", function()
+            luassert.has_error(function()
+                sequence.define(uniqueName(), {sequence.waitSteps(1)},
+                    {clock = "wallclock" as sequence.ClockId})
+            end)
+        end)
+    end)
+
     describe("playback", function()
         it("runs the first instruction on the next step, not inside play", function()
             local ran = false

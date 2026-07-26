@@ -45,6 +45,20 @@ local enum QueryCondition
     "empty"
 end
 
+--- Which clock a program is scheduled against.
+---
+--- A clock's unit is its own business: `fixed` counts fixed steps and
+--- `frame` counts gameplay frames. The `frame` clock keeps ticking while
+--- gameplay is suspended and a step is requested, which is what lets scripted
+--- input land on a stepped frame.
+local enum ClockId
+    --- Advances in FixedFirst, one per fixed step. Gameplay logic.
+    "fixed"
+    --- Advances in First, one per gameplay frame, including stepped frames
+    --- while the game is otherwise frozen. Scripted input.
+    "frame"
+end
+
 --- The lifecycle state of one playback.
 local enum PlaybackState
     "running"
@@ -223,6 +237,7 @@ tecs.newEvent(Event)
 local record ProgramImpl is Program
     name: string
     version: integer
+    clock: ClockId
     code: {integer}
     consts: {any}
     loopSlots: integer
@@ -251,6 +266,9 @@ local record Cursor
     program: ProgramImpl
     pc: integer
     state: PlaybackState
+
+    --- The clock this cursor is scheduled against, from its program.
+    clock: ClockId
 
     owner: integer
     bindings: {string: integer}
@@ -294,9 +312,9 @@ local record WorldState
     actions: {string: Action}
     budget: integer
 
-    -- The clock playbacks are scheduled against. Phase 2 gives a world one
-    -- of these per named clock; today there is only the fixed step.
-    fixed: seqclock.Clock
+    -- One clock per ClockId. A cursor is scheduled against the clock its
+    -- program declared.
+    clocks: {ClockId: seqclock.Clock}
 
     -- Cursors blocked on a signal are held here rather than in the heap:
     -- they have no wake time until the signal arrives.
@@ -332,6 +350,7 @@ local record seqtypes
     type FaultReason = FaultReason
     type PlaybackState = PlaybackState
     type QueryCondition = QueryCondition
+    type ClockId = ClockId
     type TweenOutcome = TweenOutcome
 
     type Program = Program

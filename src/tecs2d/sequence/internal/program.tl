@@ -34,7 +34,7 @@ local record program
     isEntityRef: function(value: any): boolean
 
     --- Compile authored nodes into a program under `name` at `version`.
-    compile: function(name: string, version: integer, nodes: {Node}): ProgramImpl
+    compile: function(name: string, version: integer, clock: seqtypes.ClockId, nodes: {Node}): ProgramImpl
 
     --- Mark the argument lists that hold a `bind` reference. Derived rather
     --- than stored: a restored program computes the same from its consts.
@@ -193,6 +193,7 @@ end
 function program.compile(
     name: string,
     version: integer,
+    clock: seqtypes.ClockId,
     nodes: {Node}
 ): ProgramImpl
     local c: Compiler = {
@@ -208,6 +209,7 @@ function program.compile(
     local prog: ProgramImpl = {
         name = name,
         version = version,
+        clock = clock,
         code = c.code,
         consts = c.consts,
         loopSlots = c.loopSlots,

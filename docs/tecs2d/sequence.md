@@ -173,11 +173,37 @@ program name, version, and program counter — the same values the disassembler 
 
 ## Execution model
 
-Sequences advance in **`FixedFirst`**. A sequence establishes commands and state for that fixed
-iteration and gameplay consumes them afterward, so a `call` runs before physics and before the
-gameplay systems of the same iteration.
+A program declares which clock its waits count, and the two do not advance together:
 
-The first instruction of a new playback runs on the next fixed step, never inside the `play` call.
+```
+ Clock     Advances in   Unit           While frozen   For
+ ────────  ────────────  ─────────────  ─────────────  ──────────────────
+ fixed     FixedFirst    fixed step     stops          gameplay logic
+ frame     First         gameplay frame ticks on step  scripted input
+```
+
+`"fixed"` is the default and what gameplay logic wants. A sequence establishes commands and state
+for that fixed iteration and gameplay consumes them afterward, so a `call` runs before physics and
+before the gameplay systems of the same iteration.
+
+```teal
+sequence.define("game.bossIntro", nodes)                      -- fixed
+sequence.define("test.scriptedInput", nodes, {clock = "frame"})
+```
+
+`"frame"` counts gameplay frames and keeps running while the game is suspended and stepping, which
+is what makes scripted input land on a stepped frame. One update can run several fixed iterations
+but is always one frame, so a program's timing depends on the clock it declared: `wait(1.0)`
+converts with the world's fixed timestep on `fixed` and with the run loop's nominal frame dt on
+`frame`.
+
+Signals, query waits, and tween waits are delivered on the fixed clock, which is the one gameplay
+runs on. A frame-clock program waits on ticks alone.
+
+Branches inherit the clock of the program that forked them.
+
+The first instruction of a new playback runs on the next tick of its clock, never inside the `play`
+call.
 
 ### Instruction budget
 

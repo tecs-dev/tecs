@@ -9,6 +9,7 @@
 local tecs <const> = require("tecs")
 local logging <const> = require("tecs.utils.logging")
 local tween <const> = require("tecs2d.tween")
+local frameclock <const> = require("tecs2d.internal.frameclock")
 local seqclock <const> = require("tecs2d.sequence.internal.clock")
 local seqregistry <const> = require("tecs2d.sequence.internal.registry")
 local seqcursors <const> = require("tecs2d.sequence.internal.cursors")
@@ -29,7 +30,7 @@ local record vm
 
     --- One tick of a world's fixed clock: deliver what is due, then drain
     --- every cursor scheduled at or before the new step.
-    tick: function(world: World, state: WorldState)
+    tick: function(world: World, state: WorldState, clockId: seqtypes.ClockId)
 end
 
 local function contextEntity(self: seqtypes.ActionContext, name: string): integer
@@ -71,9 +72,14 @@ local function resolveArgs(
     return out
 end
 
-local function secondsToSteps(world: World, seconds: number): integer
+-- Seconds are authored; a clock counts ticks. The fixed clock converts with
+-- the world's timestep, the frame clock with the run loop's nominal frame dt,
+-- so the same program waits the same wall-clock time on either.
+local function secondsToSteps(world: World, clock: seqtypes.ClockId, seconds: number): integer
     if seconds <= 0 then return 0 end
-    local timestep = world:getFixedTiming()
+    local timestep = clock == "frame"
+        and (frameclock.nominal > 0 and frameclock.nominal or 1 / 60)
+        or world:getFixedTiming()
     if not timestep or timestep <= 0 then return 1 end
     local steps = math.floor(seconds / timestep + 0.5)
     if steps < 1 then steps = 1 end
@@ -111,9 +117,10 @@ local function run(
             return budget
 
         elseif op == seqprogram.WAIT then
-            local steps = a >= 0 and secondsToSteps(world, consts[a] as number) or b
+            local steps = a >= 0 and secondsToSteps(world, cursor.clock, consts[a] as number) or b
             cursor.pc = cursor.pc + 1
-            seqcursors.schedule(state, cursor, state.fixed.step + (steps > 0 and steps or 1))
+            seqcursors.schedule(state, cursor,
+                seqcursors.clockOf(state, cursor).step + (steps > 0 and steps or 1))
             return budget
 
         elseif op == seqprogram.WAIT_SIGNAL then
@@ -247,6 +254,8 @@ local function run(
             -- scheduler like everything else.
             local child = seqcursors.alloc(state)
             child.program = prog
+            -- A branch runs the same program, so it runs on the same clock.
+            child.clock = cursor.clock
             seqregistry.retain(prog)
             child.pc = a
             child.owner = cursor.owner
@@ -263,7 +272,8 @@ local function run(
             children[child.slot] = true
 
             seqcursors.linkOwner(state, child)
-            seqcursors.schedule(state, child, state.fixed.step)
+            seqcursors.schedule(state, child,
+                seqcursors.clockOf(state, child).step)
             cursor.pc = b
 
         elseif op == seqprogram.JOIN then
@@ -286,8 +296,9 @@ end
 
 --- Run one cursor, arming its budget the first time it runs in a step.
 function vm.advance(world: World, state: WorldState, cursor: Cursor)
-    if cursor.budgetStep ~= state.fixed.step then
-        cursor.budgetStep = state.fixed.step
+    local step <const> = seqcursors.clockOf(state, cursor).step
+    if cursor.budgetStep ~= step then
+        cursor.budgetStep = step
         cursor.budgetLeft = cursor.budget
     end
     cursor.budgetLeft = run(world, state, cursor, cursor.budgetLeft)
@@ -311,7 +322,7 @@ local function deliverSignals(state: WorldState)
                 local cursor = state.cursors[slots[j]]
                 if cursor and cursor.alive then
                     seqcursors.unlinkWaits(state, cursor)
-                    seqcursors.schedule(state, cursor, state.fixed.step)
+                    seqcursors.schedule(state, cursor, seqcursors.clockOf(state, cursor).step)
                 end
             end
         end
@@ -344,7 +355,7 @@ local function deliverQueryWaits(state: WorldState)
                 local cursor = state.cursors[slots[j]]
                 if cursor and cursor.alive and cursor.waitCondition == matched then
                     seqcursors.unlinkWaits(state, cursor)
-                    seqcursors.schedule(state, cursor, state.fixed.step)
+                    seqcursors.schedule(state, cursor, seqcursors.clockOf(state, cursor).step)
                 end
             end
         end
@@ -380,21 +391,26 @@ local function deliverTweenWaits(world: World, state: WorldState)
             if outcome then
                 seqcursors.unlinkWaits(state, cursor)
                 seqcursors.releaseTween(state, cursor)
-                seqcursors.schedule(state, cursor, state.fixed.step)
+                seqcursors.schedule(state, cursor, seqcursors.clockOf(state, cursor).step)
             end
         end
     end
 end
 
-function vm.tick(world: World, state: WorldState)
-    state.fixed.step = state.fixed.step + 1
-    local step = state.fixed.step
+function vm.tick(world: World, state: WorldState, clockId: seqtypes.ClockId)
+    local clock <const> = state.clocks[clockId]
+    clock.step = clock.step + 1
+    local step = clock.step
 
-    deliverSignals(state)
-    deliverQueryWaits(state)
-    deliverTweenWaits(world, state)
+    -- Waits that are not times are delivered on the fixed clock, which is the
+    -- one gameplay runs on. A frame-clock program waits on ticks alone.
+    if clockId == "fixed" then
+        deliverSignals(state)
+        deliverQueryWaits(state)
+        deliverTweenWaits(world, state)
+    end
 
-    local fixed <const> = state.fixed
+    local fixed <const> = clock
     while true do
         local due <const> = seqclock.next(fixed)
         if not due or due > step then break end
