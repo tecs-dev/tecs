@@ -155,6 +155,8 @@ function snapshot.save(world: World): any
                 tweenPlayback = cursor.tweenPlayback,
                 tweenOutcome = cursor.tweenOutcome,
                 waitingTween = cursor.waitingTween,
+                awaitedBy = cursor.awaitedBy,
+                channel = cursor.channel,
                 parentSlot = cursor.parentSlot,
                 parentGeneration = cursor.parentGeneration,
                 joining = cursor.joining,
@@ -237,8 +239,7 @@ function snapshot.load(world: World, value: any)
     -- cursors are data.
     state.queryWaiters = {}
     state.dirtyQueries = {}
-    state.tweenOwners = {}
-    state.tweenWaiters = {}
+    state.channelled = {}
     -- The call scratch points at cursors that are about to be replaced.
     state.context = nil
     state.argScratch = {}
@@ -290,6 +291,8 @@ function snapshot.load(world: World, value: any)
                 tweenPlayback = row.tweenPlayback as integer,
                 tweenOutcome = row.tweenOutcome as TweenOutcome,
                 waitingTween = row.waitingTween as boolean,
+                awaitedBy = row.awaitedBy as integer,
+                channel = row.channel as string,
                 parentSlot = row.parentSlot as integer,
                 parentGeneration = row.parentGeneration as integer,
                 joining = row.joining as boolean,
@@ -299,8 +302,9 @@ function snapshot.load(world: World, value: any)
             seqregistry.retain(prog)
             state.cursors[cursor.slot] = cursor
             seqcursors.linkOwner(state, cursor)
-            if cursor.tweenPlayback then
-                state.tweenOwners[cursor.tweenPlayback] = cursor.slot
+            if cursor.channel then
+                state.channelled[tostring(cursor.owner) .. "\0" .. cursor.channel] =
+                    cursor.slot
             end
 
             -- Rebuild the wake indexes rather than serializing them. A
@@ -318,7 +322,8 @@ function snapshot.load(world: World, value: any)
                 -- condition is re-tested against the restored one.
                 state.dirtyQueries[cursor.waitQuery] = true
             elseif cursor.waitingTween then
-                state.tweenWaiters[cursor.slot] = true
+                -- Nothing to rebuild: the playback it waits on carries the
+                -- back reference and wakes it when it ends.
             elseif not cursor.joining then
                 seqclock.requeue(seqcursors.clockOf(state, cursor), cursor.wakeAt, cursor.seq,
                     seqcursors.packHandle(cursor.slot, cursor.generation))

@@ -1093,30 +1093,39 @@ describe("tecs2d.sequence", function()
         local Transform <const> = tecs.builtins.Transform
         local calls: integer
         local actor: integer
+        local slide: string
+        local channelled: string
 
         before_each(function()
-            world:addPlugin(tween.plugin)
             calls = 0
             actor = world:spawn(Transform(0, 0))
             world:commit()
             sequence.registerAction(world, "spec.done", function() calls = calls + 1 end)
-            tween.registerPreset(world, "spec.slide", tween.timeline({
+            slide = uniqueName()
+            sequence.timeline(slide, {
                 tween.to(0.5, tween.linear, tween.translateX, 100),
-            }))
-            local channelled: tween.TimelineSpec = {
+            })
+            channelled = uniqueName()
+            sequence.timeline(channelled, {
                 tween.to(0.5, tween.linear, tween.translateY, 100),
-            }
-            channelled.channel = "move"
-            tween.registerPreset(world, "spec.channelled", tween.timeline(channelled))
+            })
         end)
 
-        local function playAndWait(preset: string): sequence.Handle
+        local function playAndWait(
+            timeline: string, options?: {string: any}
+        ): sequence.Handle
             local prog = sequence.define(uniqueName(), {
-                sequence.playTween(preset, sequence.bind("actor")),
+                sequence.playTween(timeline, sequence.bind("actor"), options),
                 sequence.waitTween(),
                 sequence.call("spec.done"),
             })
             return sequence.play(world, prog, {bindings = {actor = actor}})
+        end
+
+        -- The playback a playTween started, which status reports as what the
+        -- waiting one is waiting for.
+        local function started(handle: sequence.Handle): sequence.Handle
+            return sequence.status(world, handle).waitingTween
         end
 
         it("rejects a malformed step", function()
@@ -1124,16 +1133,16 @@ describe("tecs2d.sequence", function()
                 sequence.playTween("", sequence.bind("actor"))
             end)
             luassert.has_error(function()
-                sequence.playTween("spec.slide", "actor" as sequence.EntityRef)
+                sequence.playTween(slide, "actor" as sequence.EntityRef)
             end)
         end)
 
         it("waits for the playback it started", function()
-            local handle = playAndWait("spec.slide")
+            local handle = playAndWait(slide)
 
             stepWorld(world, 2)
-            luassert.equals(0, calls, "the tween is still running")
-            luassert.is_number(sequence.status(world, handle).waitingTween)
+            luassert.equals(0, calls, "the timeline is still running")
+            luassert.is_number(started(handle))
 
             stepWorld(world, 60)
             luassert.equals(1, calls)
@@ -1142,27 +1151,28 @@ describe("tecs2d.sequence", function()
         end)
 
         it("resumes when the playback is cancelled", function()
-            local handle = playAndWait("spec.slide")
+            local handle = playAndWait(slide)
             stepWorld(world, 2)
 
-            tween.cancel(world, actor)
+            sequence.cancel(world, started(handle))
             stepWorld(world, 2)
-            luassert.equals(1, calls, "a cancelled tween must not leave the sequence waiting")
+            luassert.equals(1, calls, "a cancelled timeline must not leave a waiter")
             luassert.equals("cancelled", sequence.status(world, handle).tweenOutcome)
         end)
 
         it("resumes when another playback takes its channel", function()
-            local handle = playAndWait("spec.channelled")
+            local handle = playAndWait(channelled, {channel = "move"})
             stepWorld(world, 2)
 
-            tween.play(world, actor, "spec.channelled")
+            sequence.play(world, sequence.program(channelled),
+                {owner = actor, channel = "move"})
             stepWorld(world, 2)
             luassert.equals(1, calls)
             luassert.equals("replaced", sequence.status(world, handle).tweenOutcome)
         end)
 
         it("resumes when the bound entity dies", function()
-            local handle = playAndWait("spec.slide")
+            local handle = playAndWait(slide)
             stepWorld(world, 2)
 
             world:despawn(actor)
@@ -1175,15 +1185,15 @@ describe("tecs2d.sequence", function()
         it("does not wait at all when the binding is already gone", function()
             world:despawn(actor)
             world:commit()
-            local handle = playAndWait("spec.slide")
+            local handle = playAndWait(slide)
 
             stepWorld(world, 1)
             luassert.equals(1, calls, "a dead actor is a game state, not a wait")
             luassert.equals("targetLost", sequence.status(world, handle).tweenOutcome)
         end)
 
-        it("faults on an unregistered preset", function()
-            local handle = playAndWait("spec.neverRegistered")
+        it("faults on an undefined timeline", function()
+            local handle = playAndWait("spec.neverDefined")
 
             stepWorld(world, 1)
             local status = sequence.status(world, handle)
@@ -1192,7 +1202,7 @@ describe("tecs2d.sequence", function()
         end)
 
         it("resumes the same wait after a snapshot", function()
-            local handle = playAndWait("spec.slide")
+            local handle = playAndWait(slide)
             stepWorld(world, 2)
             local pc = sequence.status(world, handle).pc
 
@@ -1210,7 +1220,7 @@ describe("tecs2d.sequence", function()
 
         it("renders tween steps in a disassembly", function()
             local prog = sequence.define(uniqueName(), {
-                sequence.playTween("spec.slide", sequence.bind("actor")),
+                sequence.playTween(slide, sequence.bind("actor")),
                 sequence.waitTween(),
             })
             local text = sequence.disassemble(prog)

@@ -38,7 +38,6 @@ local type World = tecs.World
 
 -- The runtime records live in the leaf types module; bind them so the body
 -- below reads the same as when they were declared here.
-local type TweenOutcome = seqtypes.TweenOutcome
 local type ProgramImpl = seqtypes.ProgramImpl
 local record sequence
     ---------------------------------------------------------------------------
@@ -332,7 +331,13 @@ local record sequence
     status: function(world: World, handle: Handle): Status
 
     --- Cancel every playback owned by an entity.
-    cancelOwnedBy: function(world: World, owner: integer): integer
+    ---
+    --- `reason` is what anything waiting on one of them is told. The owner
+    --- despawning reports `targetLost`, which is what a waiter needs to tell
+    --- "it was stopped" from "what it was moving is gone".
+    cancelOwnedBy: function(
+        world: World, owner: integer, reason?: TweenOutcome
+    ): integer
 
     --- Number of live playbacks, for tests and diagnostics.
     activeCount: function(world: World): integer
@@ -702,10 +707,14 @@ function sequence.play(
         cursor.owner = options.owner or 0
         cursor.bindings = options.bindings
         cursor.params = options.params
+        cursor.channel = options.channel
         if options.budget then cursor.budget = options.budget end
     end
 
     seqcursors.linkOwner(state, cursor)
+    -- Taking a channel cancels whatever held it, reporting "replaced" to
+    -- anything that was waiting on it.
+    seqcursors.claimChannel(state, cursor)
 
     -- The first instruction runs on the next tick of its clock, never inside
     -- the play call.
@@ -765,7 +774,9 @@ function sequence.status(world: World, handle: sequence.Handle): sequence.Status
     return status
 end
 
-function sequence.cancelOwnedBy(world: World, owner: integer): integer
+function sequence.cancelOwnedBy(
+    world: World, owner: integer, reason?: sequence.TweenOutcome
+): integer
     local state = seqcursors.stateFor(world)
     local owned = state.ownerIndex[owner]
     if not owned then return 0 end
@@ -776,7 +787,7 @@ function sequence.cancelOwnedBy(world: World, owner: integer): integer
     for i = 1, #slots do
         local cursor = state.cursors[slots[i]]
         if cursor and cursor.alive then
-            seqcursors.retire(state, cursor, "cancelled")
+            seqcursors.retire(state, cursor, "cancelled", reason)
             cancelled = cancelled + 1
         end
     end
@@ -907,29 +918,10 @@ function sequence.plugin(world: World)
     -- Owner lifetime: a despawned owner cancels the playbacks it governs.
     world:observe(0, tecs.builtins.OnDespawn, function(event: tecs.builtins.OnDespawn)
         if state.ownerIndex[event.entity] then
-            sequence.cancelOwnedBy(world, event.entity)
+            sequence.cancelOwnedBy(world, event.entity, "targetLost")
         end
     end)
 
-    -- How a tween ended is only knowable from the event that ends it. The
-    -- cursor records it and waits for the step boundary, so a waiter never
-    -- resumes in the middle of another system's frame.
-    local function endTween(slotOwner: integer, playback: integer, outcome: TweenOutcome)
-        local cursor = state.cursors[slotOwner]
-        if not cursor or not cursor.alive then return end
-        if cursor.tweenPlayback ~= playback then return end
-        cursor.tweenOutcome = outcome
-    end
-
-    world:observe(0, tween.TweenComplete, function(event: tween.TweenComplete)
-        local owner = state.tweenOwners[event.playback]
-        if owner then endTween(owner, event.playback, "completed") end
-    end)
-
-    world:observe(0, tween.TweenCancelled, function(event: tween.TweenCancelled)
-        local owner = state.tweenOwners[event.playback]
-        if owner then endTween(owner, event.playback, event.reason as TweenOutcome) end
-    end)
 end
 
 return sequence

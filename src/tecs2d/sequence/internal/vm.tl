@@ -7,8 +7,6 @@
 --- rather than a tick later.
 
 local tecs <const> = require("tecs")
-local logging <const> = require("tecs.utils.logging")
-local tween <const> = require("tecs2d.tween")
 local frameclock <const> = require("tecs2d.internal.frameclock")
 local seqclock <const> = require("tecs2d.sequence.internal.clock")
 local seqevaluators <const> = require("tecs2d.sequence.internal.evaluators")
@@ -20,8 +18,6 @@ local seqtypes <const> = require("tecs2d.sequence.internal.types")
 local type World = tecs.World
 local type Cursor = seqtypes.Cursor
 local type WorldState = seqtypes.WorldState
-
-local LOGGER <const> = logging.getLogger("tecs2d.sequence")
 
 local SLOT_LIMIT <const> = seqcursors.SLOT_LIMIT
 
@@ -167,22 +163,40 @@ local function run(
             local id = cursor.bindings and cursor.bindings[ref.bindName]
             seqcursors.releaseTween(state, cursor)
             cursor.tweenOutcome = nil
+            local timeline = seqregistry.newest(preset)
+            if not timeline then
+                seqcursors.fault(state, cursor, "unregisteredTween",
+                    "timeline '" .. preset .. "' is not defined")
+                return budget
+            end
             if not id or not world:isAlive(id) then
                 -- A missing or dead actor is a game state, not a defect in
                 -- the program. Nothing plays, and a following waitTween has
                 -- its answer already.
                 cursor.tweenOutcome = "targetLost"
             else
-                local ok, result = pcall(tween.play, world, id, preset,
-                    spec[2] as tween.PlaybackOptions)
-                if not ok then
-                    seqcursors.fault(state, cursor, "unregisteredTween",
-                        "tween preset '" .. preset .. "': " .. tostring(result))
-                    return budget
-                end
+                -- A timeline is a program, so starting one is starting a
+                -- playback: it gets its own cursor on the timeline's clock,
+                -- and this one holds its handle.
+                local params = spec[2] as {string: any}
+                local started = seqcursors.alloc(state)
+                started.program = timeline
+                started.clock = timeline.clock or "fixed"
+                started.pc = 0
+                started.state = "running"
+                started.owner = id
+                started.params = params
+                started.budget = cursor.budget
+                started.channel = params and params.channel as string
+                started.awaitedBy = cursor.slot
+                seqregistry.retain(timeline)
+                seqcursors.linkOwner(state, started)
+                seqcursors.claimChannel(state, started)
+                seqcursors.schedule(state, started,
+                    seqcursors.clockOf(state, started).step + 1)
                 cursor.tweenEntity = id
-                cursor.tweenPlayback = result as integer
-                state.tweenOwners[cursor.tweenPlayback] = cursor.slot
+                cursor.tweenPlayback =
+                    seqcursors.packHandle(started.slot, started.generation)
             end
             cursor.pc = cursor.pc + 1
 
@@ -226,14 +240,22 @@ local function run(
 
         elseif op == seqprogram.WAIT_TWEEN then
             cursor.pc = cursor.pc + 1
-            if cursor.tweenPlayback then
+            local started = cursor.tweenPlayback
+                and seqcursors.resolve(state, cursor.tweenPlayback)
+            if started and started.alive then
+                -- No wake time: the playback wakes this one when it ends,
+                -- however it ends, so a waiter never parks forever.
                 cursor.waitingTween = true
                 cursor.wakeAt = nil
-                state.tweenWaiters[cursor.slot] = true
                 return budget
             end
-            -- Nothing to wait for: either no playTween ran or its target
-            -- was already gone, and the outcome says which.
+            -- Nothing to wait for: either no playTween ran, its target was
+            -- already gone, or it has finished and left its outcome behind.
+            if cursor.tweenPlayback and not cursor.tweenOutcome then
+                cursor.tweenOutcome = "cancelled"
+            end
+            cursor.tweenPlayback = nil
+            cursor.tweenEntity = nil
 
         elseif op == seqprogram.CALL then
             local name = consts[a] as string
@@ -414,41 +436,6 @@ local function deliverQueryWaits(state: WorldState)
     end
 end
 
--- Release every cursor whose tween has ended. The end events set the
--- outcome; this also asks the tween runtime directly, so a playback that
--- disappears without one still frees its waiter rather than parking it for
--- the life of the world.
-local function deliverTweenWaits(world: World, state: WorldState)
-    local waiting = state.tweenWaiters
-    if next(waiting) == nil then return end
-
-    local slots: {integer} = {}
-    for slot in pairs(waiting) do slots[#slots + 1] = slot end
-    table.sort(slots)
-
-    for i = 1, #slots do
-        local cursor = state.cursors[slots[i]]
-        if not cursor or not cursor.alive then
-            waiting[slots[i]] = nil
-        elseif cursor.state == "running" then
-            local outcome = cursor.tweenOutcome
-            if not outcome
-                and not tween.isPlaying(world, cursor.tweenEntity, cursor.tweenPlayback)
-            then
-                LOGGER:warn("%s v%d: tween %d ended without an event",
-                    cursor.program.name, cursor.program.version, cursor.tweenPlayback)
-                outcome = "targetLost"
-                cursor.tweenOutcome = outcome
-            end
-            if outcome then
-                seqcursors.unlinkWaits(state, cursor)
-                seqcursors.releaseTween(state, cursor)
-                seqcursors.schedule(state, cursor, seqcursors.clockOf(state, cursor).step)
-            end
-        end
-    end
-end
-
 -- Everything evaluating on this clock, stepped once. The walk is backwards so
 -- that a cursor leaving the set, which swaps the last entry into its place,
 -- cannot make the walk skip its neighbour.
@@ -526,7 +513,6 @@ function vm.tick(world: World, state: WorldState, clockId: seqtypes.ClockId, dt?
     if clockId == "fixed" then
         deliverSignals(state)
         deliverQueryWaits(state)
-        deliverTweenWaits(world, state)
     end
 
     stepActive(world, state, clock, dt or 0)

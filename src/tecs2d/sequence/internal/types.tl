@@ -172,6 +172,11 @@ local record PlayOptions
     --- Per-step instruction budget for this playback. Defaults to the
     --- world's configured budget. See `setInstructionBudget`.
     budget: integer
+
+    --- Names a slot this playback occupies on its owner. Starting another
+    --- playback on the same owner and channel cancels this one, which is how
+    --- a second fade replaces the first rather than fighting it.
+    channel: string
 end
 
 --- What a registered action receives.
@@ -359,11 +364,21 @@ local record Cursor
     waitQuery: string
     waitCondition: integer
 
-    -- The tween the last playTween started, and how it ended once it has.
+    -- The playback the last playTween started, as a handle, and how it ended
+    -- once it has. The cursor it names carries the back reference.
     tweenEntity: integer
     tweenPlayback: integer
     tweenOutcome: TweenOutcome
     waitingTween: boolean
+
+    --- Slot of the cursor parked on this one finishing, if any, and the
+    --- channel this playback occupies on its owner.
+    awaitedBy: integer
+    channel: string
+
+    --- Why this playback ended, when something more specific than its final
+    --- state is known. Read by whatever was waiting for it.
+    endReason: TweenOutcome
 
     -- Branch tree. A child holds its parent by (slot, generation) so a
     -- recycled slot can never be mistaken for the parent that forked it.
@@ -406,11 +421,9 @@ local record WorldState
     queryWaiters: {string: {integer: boolean}}
     dirtyQueries: {string: boolean}
 
-    -- Tween waits are resolved by the end events, and swept every step
-    -- against the tween runtime so a playback that vanishes without one
-    -- still releases its waiter.
-    tweenOwners: {integer: integer}
-    tweenWaiters: {integer: boolean}
+    -- Occupied channels, keyed by owner and channel name, so starting a
+    -- playback on one can cancel whatever held it.
+    channelled: {string: integer}
 
     -- Scratch reused across calls: one argument list and one context. Calls
     -- never overlap, since a cursor runs to a wait before any other does.

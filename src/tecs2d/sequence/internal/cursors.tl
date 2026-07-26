@@ -52,7 +52,11 @@ local record cursors
     linkOwner: function(state: WorldState, cursor: Cursor)
     childSlots: function(cursor: Cursor): {integer}
 
-    retire: function(state: WorldState, cursor: Cursor, finalState: PlaybackState)
+    claimChannel: function(state: WorldState, cursor: Cursor)
+    retire: function(
+        state: WorldState, cursor: Cursor, finalState: PlaybackState,
+        reason?: seqtypes.TweenOutcome
+    )
     fault: function(state: WorldState, cursor: Cursor, reason: FaultReason, message: string)
 
     pauseTree: function(state: WorldState, cursor: Cursor): boolean
@@ -78,12 +82,11 @@ function cursors.stateFor(world: World): WorldState
             presentation = seqclock.new(),
         },
         channels = {},
+        channelled = {},
         pendingSignals = {},
         queries = {},
         queryWaiters = {},
         dirtyQueries = {},
-        tweenOwners = {},
-        tweenWaiters = {},
         argScratch = {},
         ownerIndex = {},
     }
@@ -212,22 +215,69 @@ function cursors.unlinkWaits(state: WorldState, cursor: Cursor)
         cursor.waitCondition = nil
         cursors.unpark(state.queryWaiters, queryName, cursor.slot)
     end
-    if cursor.waitingTween then
-        cursor.waitingTween = false
-        state.tweenWaiters[cursor.slot] = nil
-    end
+    cursor.waitingTween = false
 end
 
--- Drop the cursor's claim on a tween token, so an end event for a playback
--- nothing is following no longer finds an owner.
+-- Drop the cursor's claim on the playback it started, so one that ends while
+-- nothing is following it no longer reports back.
 function cursors.releaseTween(state: WorldState, cursor: Cursor)
-    local token = cursor.tweenPlayback
-    if not token then return end
-    if state.tweenOwners[token] == cursor.slot then
-        state.tweenOwners[token] = nil
+    local handle = cursor.tweenPlayback
+    if not handle then return end
+    local started = cursors.resolve(state, handle)
+    if started and started.awaitedBy == cursor.slot then
+        started.awaitedBy = nil
     end
     cursor.tweenPlayback = nil
     cursor.tweenEntity = nil
+end
+
+-- Channels are per owner: one entity's "move" is not another's. A world
+-- scoped playback has no owner to hold a channel on and so holds none.
+local function channelKey(owner: integer, channel: string): string
+    return tostring(owner) .. "\0" .. channel
+end
+
+--- Take the cursor's channel, cancelling whatever held it.
+function cursors.claimChannel(state: WorldState, cursor: Cursor)
+    local channel <const> = cursor.channel
+    if not channel then return end
+    local key <const> = channelKey(cursor.owner, channel)
+    local held <const> = state.channelled[key]
+    if held then
+        local previous = state.cursors[held]
+        if previous and previous.alive and previous ~= cursor then
+            cursors.retire(state, previous, "cancelled", "replaced")
+        end
+    end
+    state.channelled[key] = cursor.slot
+end
+
+local function releaseChannel(state: WorldState, cursor: Cursor)
+    local channel <const> = cursor.channel
+    if not channel then return end
+    local key <const> = channelKey(cursor.owner, channel)
+    if state.channelled[key] == cursor.slot then
+        state.channelled[key] = nil
+    end
+end
+
+-- Whatever was parked on this playback finishing hears how it ended, then
+-- runs on the next tick of its own clock rather than inside this one.
+local function wakeAwaiter(
+    state: WorldState, cursor: Cursor, finalState: PlaybackState,
+    reason: seqtypes.TweenOutcome
+)
+    local slot <const> = cursor.awaitedBy
+    if not slot then return end
+    cursor.awaitedBy = nil
+    local waiter = state.cursors[slot]
+    if not waiter or not waiter.alive or not waiter.waitingTween then return end
+    waiter.tweenOutcome = reason
+        or (finalState == "completed" and "completed" or "cancelled")
+    waiter.waitingTween = false
+    waiter.tweenPlayback = nil
+    waiter.tweenEntity = nil
+    cursors.schedule(state, waiter, cursors.clockOf(state, waiter).step)
 end
 
 function cursors.linkOwner(state: WorldState, cursor: Cursor)
@@ -296,12 +346,19 @@ end
 -- stays until the slot is handed out again, which lets `status` report the
 -- final state; once reused, the generation check makes the old handle report
 -- nil instead of another playback's state.
-function cursors.retire(state: WorldState, cursor: Cursor, finalState: PlaybackState)
+function cursors.retire(
+    state: WorldState,
+    cursor: Cursor,
+    finalState: PlaybackState,
+    reason?: seqtypes.TweenOutcome
+)
     if not cursor.alive then return end
     cursor.state = finalState
+    cursor.endReason = reason
     cursor.alive = false
     cursor.joining = false
     cursors.deactivate(state, cursor)
+    releaseChannel(state, cursor)
     cursors.unlinkWaits(state, cursor)
     cursors.releaseTween(state, cursor)
     unlinkOwner(state, cursor)
@@ -320,6 +377,7 @@ function cursors.retire(state: WorldState, cursor: Cursor, finalState: PlaybackS
     cursor.children = nil
 
     detachFromParent(state, cursor, finalState)
+    wakeAwaiter(state, cursor, finalState, reason)
     state.freeSlots[#state.freeSlots + 1] = cursor.slot
 end
 
