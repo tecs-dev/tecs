@@ -1,0 +1,36 @@
+-- Busted configuration.
+--
+-- Two roots, because specs arrive from two places. Ones written here are Lua;
+-- ones that came across with a subsystem from the Love-backed engine are Teal
+-- and are compiled into the build tree, so both are collected rather than
+-- rewriting a suite on the way across and losing what it proved.
+--
+-- The pattern matches compiled Lua only, so the Teal sources sitting in spec/
+-- are not handed to the interpreter.
+
+local lua = os.getenv("TECS2D_LUA") or "out/macos-arm64-dev/lua"
+local spec = os.getenv("TECS2D_SPEC") or "out/macos-arm64-dev/spec"
+
+-- The ECS is referenced in place rather than vendored, since it is developed
+-- alongside this engine. Our tree comes first so it wins over the copy of the
+-- engine living in that repo.
+local tecs = os.getenv("TECS_DIR") or "../tecs"
+
+-- Lua C modules are compiled into the executable for targets with no dlopen,
+-- so a spec running under a plain interpreter loads the same sources from the
+-- loadable build of them instead.
+local lib = os.getenv("TECS2D_LIB") or "out/macos-arm64-dev/lib"
+
+return {
+    default = {
+        lua = "luajit",
+        ROOT = { "spec", spec },
+        pattern = "_spec%.lua$",
+        lpath = table.concat({
+            lua .. "/?.lua", lua .. "/?/init.lua",
+            spec .. "/?.lua",
+            tecs .. "/build/?.lua", tecs .. "/build/?/init.lua",
+        }, ";"),
+        cpath = lib .. "/?.so",
+    },
+}
