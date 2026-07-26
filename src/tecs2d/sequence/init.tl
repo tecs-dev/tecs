@@ -22,6 +22,7 @@
 ---   sequence.play(world, intro, {owner = encounter, bindings = {boss = bossId}})
 
 local tecs <const> = require("tecs")
+local seqtypes <const> = require("tecs2d.sequence.internal.types")
 local logging <const> = require("tecs.utils.logging")
 local tween <const> = require("tecs2d.tween")
 local wakeheap <const> = require("tecs2d.internal.wakeheap")
@@ -31,6 +32,16 @@ local type World = tecs.World
 local LOGGER <const> = logging.getLogger("tecs2d.sequence")
 
 local floor <const> = math.floor
+
+-- The runtime records live in the leaf types module; bind them so the body
+-- below reads the same as when they were declared here.
+local type FaultReason = seqtypes.FaultReason
+local type PlaybackState = seqtypes.PlaybackState
+local type TweenOutcome = seqtypes.TweenOutcome
+local type ProgramImpl = seqtypes.ProgramImpl
+local type NodeImpl = seqtypes.NodeImpl
+local type Cursor = seqtypes.Cursor
+local type WorldState = seqtypes.WorldState
 
 -- Handle packing. A handle is slot + generation * SLOT_LIMIT, so it stays a
 -- plain integer that survives snapshots and compares by value.
@@ -69,211 +80,58 @@ local OP_WAIT_TWEEN <const> = 11
 
 local STRIDE <const> = 3
 
---- Why a cursor stopped running.
-local enum FaultReason
-    --- A `call` named an action that is not registered on this world.
-    "unregisteredAction"
-    --- A registered action raised.
-    "actionError"
-    --- The cursor exceeded its per-step instruction budget.
-    "budgetExceeded"
-    --- A branch this cursor forked faulted.
-    "branchFaulted"
-    --- A `waitQuery` named a query that is not registered on this world.
-    "unregisteredQuery"
-    --- A `playTween` named a preset that is not registered on this world.
-    "unregisteredTween"
-end
-
---- How the tween a `waitTween` step was waiting on ended.
-local enum TweenOutcome
-    --- It played to the end.
-    "completed"
-    --- `tween.cancel` matched it.
-    "cancelled"
-    --- Another playback took over its channel.
-    "replaced"
-    --- Its entity died, was never bound, or lost its playback component.
-    "targetLost"
-end
-
---- What a `waitQuery` step is waiting for.
-local enum QueryCondition
-    --- At least one entity matches the query.
-    "any"
-    --- No entity matches the query.
-    "empty"
-end
-
---- The lifecycle state of one playback.
-local enum PlaybackState
-    "running"
-    "paused"
-    "completed"
-    "cancelled"
-    "faulted"
-end
-
 local record sequence
     ---------------------------------------------------------------------------
     -- Types
     ---------------------------------------------------------------------------
 
     --- Why a cursor stopped running.
-    type FaultReason = FaultReason
+    type FaultReason = seqtypes.FaultReason
 
     --- The lifecycle state of one playback.
-    type PlaybackState = PlaybackState
+    type PlaybackState = seqtypes.PlaybackState
 
     --- What a `waitQuery` step is waiting for.
-    type QueryCondition = QueryCondition
+    type QueryCondition = seqtypes.QueryCondition
 
     --- How the tween a `waitTween` step was waiting on ended.
-    type TweenOutcome = TweenOutcome
+    type TweenOutcome = seqtypes.TweenOutcome
 
-    --- A compiled, immutable program. Produced by `define`, shared by every
-    --- playback of it, and reference counted.
-    ---
-    --- Redefining a name compiles a new version. Playbacks already running
-    --- keep the version they started with, so a hot reload continues rather
-    --- than resuming against changed instructions. Later `play` calls use the
-    --- newest version, and a superseded version is released once its last
-    --- playback finishes.
-    interface Program
-        --- The name passed to `define`.
-        name: string
+    --- A compiled, immutable program, produced by `define` and shared by
+    --- every playback of it. See `internal/types` for the full contract.
+    type Program = seqtypes.Program
 
-        --- Monotonic version, starting at 1. Incremented per redefinition.
-        version: integer
-    end
-
-    --- One authored step. Produced by the node constructors below; treat the
+    --- One authored step, produced by the node constructors below. Treat the
     --- returned value as opaque and do not reuse a node across programs.
-    interface Node end
+    type Node = seqtypes.Node
 
-    --- A reference to an entity supplied at `play` time. Resolved when the
-    --- instruction that uses it runs, not when the program is defined.
-    record EntityRef
-        --- Name of the binding this reference resolves.
-        bindName: string
-        --- Marker distinguishing a reference from an ordinary table argument.
-        isBinding: boolean
-    end
+    --- A reference to an entity supplied at `play` time, resolved when the
+    --- instruction that uses it runs.
+    type EntityRef = seqtypes.EntityRef
 
-    --- A generation-checked reference to one playback. Remains meaningful
-    --- across a snapshot load: a handle refers to the same playback before
-    --- and after a restore. A handle whose playback the snapshot did not
-    --- carry reports no status at all, the same as a handle this world
-    --- never issued.
-    type Handle = integer
+    --- A generation-checked reference to one playback, meaningful across a
+    --- snapshot load.
+    type Handle = seqtypes.Handle
 
-    --- Constants a `call` passes to its action: numbers, strings, booleans,
-    --- and arrays or maps composed of those, plus `bind(name)` references,
-    --- which resolve to entity ids when the instruction runs. Anything else
-    --- (functions, cdata, entities) is rejected by `define`, because a
-    --- program has to survive a snapshot.
-    type Argument = any
+    --- Constants a `call` passes to its action.
+    type Argument = seqtypes.Argument
 
     --- Options for `play`.
-    record PlayOptions
-        --- Entity whose lifetime governs the playback. When it despawns, the
-        --- playback is cancelled. Omit for a world-scoped sequence.
-        owner: integer
+    type PlayOptions = seqtypes.PlayOptions
 
-        --- Entities the program acts on, addressed by `sequence.bind(name)`.
-        bindings: {string: integer}
+    --- What a registered action receives. The context and its `args` belong
+    --- to the sequencer and are reused by the next call.
+    type ActionContext = seqtypes.ActionContext
 
-        --- Per-step instruction budget for this playback. Defaults to the
-        --- world's configured budget. See `setInstructionBudget`.
-        budget: integer
-    end
-
-    --- What a registered action receives.
-    ---
-    --- The context and its `args` belong to the sequencer and are reused by
-    --- the next call. Read them; do not keep or modify them.
-    record ActionContext
-        --- The world this playback belongs to.
-        world: World
-
-        --- The playback, for `status` or `cancel` from inside an action.
-        handle: Handle
-
-        --- The `owner` supplied at `play`, or 0 for a world-scoped sequence.
-        owner: integer
-
-        --- Constants supplied by the `call` node, with any `bind` references
-        --- already resolved to entity ids.
-        args: {any}
-
-        --- Resolve a named binding. Returns nil when the binding was not
-        --- supplied or its entity is no longer alive.
-        entity: function(self: ActionContext, name: string): integer
-
-        --- Internal cursor reference. Not part of the supported surface.
-        _cursor: any
-    end
-
-    --- A registered effect. Runs synchronously and must return before the
-    --- cursor advances; it may not yield.
-    ---
-    --- Raising faults the playback with `actionError`. Mutations the action
-    --- already made are kept: the sequencer does not roll them back.
-    type Action = function(world: World, ctx: ActionContext)
-
-    --- Emitted by an `emit` step, at address 0.
-    record Event is tecs.Event
-        --- Name supplied to `sequence.emit`.
-        name: string
-        --- Arguments supplied to `sequence.emit`, with bindings resolved.
-        --- Unlike an action's `ctx.args`, this list is the observer's to
-        --- keep: it is built per emit.
-        args: {any}
-        --- The playback that emitted it.
-        handle: Handle
-
-        init: function(self: Event, name: string, args: {any}, handle: Handle)
-    end
+    --- A registered effect. Runs synchronously and may not yield.
+    type Action = seqtypes.Action
 
     --- A playback's current state.
-    record Status
-        state: PlaybackState
+    type Status = seqtypes.Status
 
-        --- Program name and version this playback is running.
-        program: string
-        version: integer
+    --- Emitted by an `emit` step, at address 0.
+    Event: seqtypes.Event
 
-        --- Instruction index, for disassembly and debugging.
-        pc: integer
-
-        --- Fixed step this playback next runs on. Nil when it is blocked on
-        --- a signal rather than a time.
-        wakeAt: integer
-
-        --- Signal name this playback is blocked on, when it is.
-        waitingFor: string
-
-        --- Query name this playback is blocked on, when it is, and the
-        --- condition it is waiting for.
-        waitingQuery: string
-        waitingCondition: QueryCondition
-
-        --- Tween playback token this playback is blocked on, when it is.
-        waitingTween: integer
-
-        --- How the last tween it waited on ended.
-        tweenOutcome: TweenOutcome
-
-        --- Live branches this playback forked and has not joined.
-        branches: integer
-
-        --- Whether it is parked at a `join` waiting for those branches.
-        joining: boolean
-
-        --- Set when `state` is `"faulted"`.
-        fault: FaultReason
-        faultMessage: string
-    end
 
     ---------------------------------------------------------------------------
     -- Authoring
@@ -469,30 +327,10 @@ end
 -- Program representation
 -------------------------------------------------------------------------------
 
-local record ProgramImpl is sequence.Program
-    name: string
-    version: integer
-    code: {integer}
-    consts: {any}
-    loopSlots: integer
-    loopCounts: {integer: integer}
-    -- Const indexes whose argument list holds a `bind` reference, so a call
-    -- with plain constants hands its arguments over without copying them.
-    bindingArgs: {integer: boolean}
-end
 
-function sequence.Event.init(
-    e: sequence.Event,
-    name: string,
-    args: {any},
-    handle: sequence.Handle
-)
-    e.name = name
-    e.args = args
-    e.handle = handle
-end
-
-tecs.newEvent(sequence.Event)
+-- The event record lives in the leaf types module so the VM can emit it
+-- without requiring this one back; re-exported here as the public handle.
+sequence.Event = seqtypes.Event
 
 -- Programs are process-global and keyed by name. A superseded version stays
 -- reachable by (name, version) for as long as some playback is still running
@@ -526,15 +364,6 @@ end
 -- Authoring nodes
 -------------------------------------------------------------------------------
 
-local record NodeImpl is sequence.Node
-    kind: string
-    text: string
-    number: number
-    args: {any}
-    nodes: {sequence.Node}
-    blocks: {{sequence.Node}}
-    count: integer
-end
 
 function sequence.bind(name: string): sequence.EntityRef
     if type(name) ~= "string" or name == "" then
@@ -832,90 +661,7 @@ end
 -- Per-world state: cursor arena, action registry, scheduler
 -------------------------------------------------------------------------------
 
-local record Cursor
-    -- Arena bookkeeping
-    slot: integer
-    generation: integer
-    alive: boolean
 
-    program: ProgramImpl
-    pc: integer
-    state: PlaybackState
-
-    owner: integer
-    bindings: {string: integer}
-    budget: integer
-
-    wakeAt: integer
-    seq: integer
-    loopRegs: {integer: integer}
-    waitChannel: string
-    waitQuery: string
-    waitCondition: integer
-
-    -- The tween the last playTween started, and how it ended once it has.
-    tweenEntity: integer
-    tweenPlayback: integer
-    tweenOutcome: TweenOutcome
-    waitingTween: boolean
-
-    -- Branch tree. A child holds its parent by (slot, generation) so a
-    -- recycled slot can never be mistaken for the parent that forked it.
-    parentSlot: integer
-    parentGeneration: integer
-    children: {integer: boolean}
-    joining: boolean
-
-    -- Instruction budget is spent per fixed step, not per resume, so a
-    -- cursor that wakes again within the same step cannot re-arm it.
-    budgetStep: integer
-    budgetLeft: integer
-
-    fault: FaultReason
-    faultMessage: string
-end
-
-local record WorldState
-    cursors: {integer: Cursor}
-    freeSlots: {integer}
-    nextSlot: integer
-    generations: {integer: integer}
-
-    actions: {string: sequence.Action}
-    step: integer
-    seq: integer
-    budget: integer
-
-    -- Playbacks waiting on a step, ordered by (wakeAt, seq). Carries the
-    -- packed handle, so a slot reused by a new playback cannot be woken by
-    -- the entry the old one left behind.
-    heap: wakeheap.Heap
-
-    -- Cursors blocked on a signal are held here rather than in the heap:
-    -- they have no wake time until the signal arrives.
-    channels: {string: {integer: boolean}}
-    pendingSignals: {string}
-
-    -- Query waits work the same way, except a query is a condition rather
-    -- than an edge: a name is marked dirty when its query gains or loses
-    -- entities, and every cursor parked on it re-tests at the next step.
-    queries: {string: tecs.Query}
-    queryWaiters: {string: {integer: boolean}}
-    dirtyQueries: {string: boolean}
-
-    -- Tween waits are resolved by the end events, and swept every step
-    -- against the tween runtime so a playback that vanishes without one
-    -- still releases its waiter.
-    tweenOwners: {integer: integer}
-    tweenWaiters: {integer: boolean}
-
-    -- Scratch reused across calls: one argument list and one context. Calls
-    -- never overlap, since a cursor runs to a wait before any other does.
-    argScratch: {any}
-    context: sequence.ActionContext
-
-    ownerIndex: {integer: {integer: boolean}}
-end
 
 local states: {World: WorldState} =
     setmetatable({}, {__mode = "k"} as metatable<{World: WorldState}>)
@@ -1437,7 +1183,7 @@ local function run(
             local resolved = resolveArgs(world, state, cursor, b)
             local args: {any} = {}
             for i = 1, #resolved do args[i] = resolved[i] end
-            world:emit(0, sequence.Event,
+            world:emit(0, seqtypes.Event,
                 consts[a] as string, args,
                 packHandle(cursor.slot, cursor.generation))
             cursor.pc = cursor.pc + 1
