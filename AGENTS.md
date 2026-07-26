@@ -55,6 +55,7 @@ tecs/
 │   ├── gfx/               # Camera
 │   ├── platform/          # Window, input, events, clock, paths, capabilities
 │   ├── physics/           # Box2D 3
+│   ├── sequence/          # Sequencer, with the tween runtime inside it
 │   ├── mcp/               # Debug server: transport, tools, sandbox
 │   ├── Application.tl     # The lifecycle the host drives
 │   ├── Renderer.tl        # World to GPU
@@ -103,10 +104,9 @@ Compaction is an ordered three-pass scan rather than an `atomicAdd`, because dra
 ### Ported, and not yet
 
 Working: windowing, input in three tiers behind a layer stack, events, the GPU pipeline, materials, camera,
-physics, workers and asset loading, logging, and the debug server.
+physics, workers and asset loading, logging, the debug server, and sequencing with tweening merged into it.
 
-Not ported: tween and sequence, shadows, post-processing, audio, text, UI, tiled maps, sprite animation, layers
-and multi-camera. `Application.tl` notes where tween and sequence reattach.
+Not ported: shadows, post-processing, audio, text, UI, tiled maps, sprite animation, layers and multi-camera.
 
 ## Development Guidelines
 

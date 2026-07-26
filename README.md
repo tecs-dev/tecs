@@ -60,9 +60,13 @@ Working today:
   read and write the world
 - Per-stage frame timing with percentiles, which is how any of the numbers in
   this file were arrived at
+- Deterministic sequencing with tweening merged into it: programs compiled to
+  instructions, playback position kept as data so it survives a snapshot, and
+  three clocks (fixed, frame, presentation) for the three rates gameplay,
+  scripted input and presentation run at
 
-Not built yet: tween and sequence, shadows, post-processing, audio, text, UI,
-tiled maps, sprite animation, layers and multi-camera.
+Not built yet: shadows, post-processing, audio, text, UI, tiled maps, sprite
+animation, layers and multi-camera.
 
 Design notes live in `../tecs-plans`, kept outside this repository so plans and
 code have separate histories.
@@ -537,6 +541,7 @@ src/tecs/gpu/             device, frame, passes, shaders, pipelines, buffers
 src/tecs/components.tl    components the engine renders and simulates
 src/tecs/Renderer.tl      the world-to-GPU bridge
 src/tecs/physics/         Box2D binding and its world plugin
+src/tecs/sequence/        the sequencer, and the tween runtime inside it
 spec/                       busted suite
 ```
 

@@ -17,6 +17,7 @@ local Window <const> = require("tecs.platform.Window")
 local Device <const> = require("tecs.gpu.Device")
 local Renderer <const> = require("tecs.Renderer")
 local components <const> = require("tecs.components")
+local sequence <const> = require("tecs.sequence")
 local paths <const> = require("tecs.platform.paths")
 local log <const> = require("tecs.log")
 local mcp <const> = require("tecs.mcp")
@@ -176,10 +177,11 @@ function Application:_init(): boolean
         })
     self.renderer:install(self.world)
 
-    -- Tweening and sequencing are installed here once they are ported. They
-    -- belong to the engine rather than to the game, because both drive
-    -- entities through the fixed phases and a game that forgot one would find
-    -- its own authored timelines silently never advancing.
+    -- Tweening and sequencing are one plugin, and it belongs to the engine
+    -- rather than to the game: both drive entities through the fixed phases,
+    -- and a game that forgot to install it would find its own authored
+    -- timelines silently never advancing.
+    sequence.plugin(self.world)
 
     -- Touch arrives normalised, so the converter needs the window size to
     -- report it in the same units as a mouse position.
