@@ -205,6 +205,60 @@ local record Slot
     stateIndex: integer
 end
 
+--- Root playback behavior.
+local enum PlaybackMode
+    "once"
+    "loop"
+    "pingPong"
+end
+
+--- Root playback options.
+local record PlaybackOptions
+    --- Playback mode. Defaults to "once".
+    mode: PlaybackMode
+    --- Pass count for finite loop/ping-pong playback.
+    count: integer
+    --- Playback speed multiplier. Defaults to 1.
+    speed: number
+    --- Delay before playback begins, in seconds.
+    delay: number
+end
+
+--- A named event the timeline emits when the cursor reaches its time.
+local record EmitSlot
+    time: number
+    name: string
+    order: integer
+end
+
+--- A nested timeline, and the window of the parent it occupies.
+local record RunSlot
+    timeline: TimelineImpl
+    timelineId: integer
+    startTime: number
+    effectiveDuration: number
+    mode: PlaybackMode
+    passCount: integer
+end
+
+--- An immutable compiled tween timeline.
+local interface Timeline
+    --- Play this timeline on an entity.
+    play: function(self: Timeline, world: World, entity: integer, options?: PlaybackOptions): integer
+end
+
+--- Runtime representation of a compiled tween timeline.
+local record TimelineImpl is Timeline
+    slots: {Slot}
+    runs: {RunSlot}
+    emits: {EmitSlot}
+    totalDuration: number
+    stateSize: integer
+    channel: string
+    presetName: string
+    pinned: boolean
+end
+
 --- Selects another entity as a dynamic tracking source.
 local record TrackingTarget is tecs.Component
     --- Direct source entity, or zero to use key.
@@ -358,6 +412,25 @@ local record tweeneval
     type Easings = Easings
     type Targets = Targets
     type Sources = Sources
+    type PlaybackMode = PlaybackMode
+    type PlaybackOptions = PlaybackOptions
+    type EmitSlot = EmitSlot
+    type RunSlot = RunSlot
+    type Timeline = Timeline
+    type TimelineImpl = TimelineImpl
+
+    --- Methods every compiled timeline answers to, as one shared table the
+    --- timeline metatable indexes. Playback owns `play` and installs it here,
+    --- so the compiled form stays free of the runtime that drives it.
+    timelineMethods: {string: any}
+
+    --- Turn a compiled timeline into plain data, and back. The const pool of
+    --- a program carries the first form; the evaluator reads the second.
+    serializeTimeline: function(tl: Timeline): {string:any}
+    deserializeTimeline: function(data: {string:any}): TimelineImpl
+
+    --- Attach the timeline metatable to a freshly compiled timeline.
+    asTimeline: function(tl: TimelineImpl): Timeline
 
     --- Component selecting a dynamic tracking source entity.
     TrackingTarget: TrackingTarget
@@ -791,6 +864,113 @@ function tweeneval.deserializeSource(data: {string:any}): TrackSourceImpl
 end
 
 -------------------------------------------------------------------------------
+-- The compiled timeline, and its codec
+-------------------------------------------------------------------------------
+
+local TIMELINE_METHODS: {string: any} = {}
+local TIMELINE_MT <const>: metatable<TimelineImpl> = { __index = TIMELINE_METHODS }
+
+function tweeneval.asTimeline(tl: TimelineImpl): Timeline
+    return setmetatable(tl, TIMELINE_MT) as Timeline
+end
+
+function tweeneval.serializeTimeline(tl: Timeline): {string:any}
+    local impl <const> = tl as TimelineImpl
+    local slots: {{string:any}} = {}
+    for i = 1, #(impl.slots or {}) do
+        local s <const> = impl.slots[i]
+        slots[i] = {
+            kind = s.kind,
+            target = tweeneval.serializeTarget(s.target),
+            source = tweeneval.serializeSource(s.source),
+            easing = s.easingName,
+            t1 = s.t1, t2 = s.t2, t3 = s.t3, t4 = s.t4,
+            relative = s.relative,
+            startTime = s.startTime,
+            endTime = s.endTime,
+            duration = s.duration,
+            stateIndex = s.stateIndex,
+        }
+    end
+    local runs: {{string:any}} = nil
+    if impl.runs then
+        runs = {}
+        for i = 1, #impl.runs do
+            local r <const> = impl.runs[i]
+            runs[i] = {
+                timelineId = r.timelineId,
+                timeline = r.timeline and tweeneval.serializeTimeline(r.timeline) or nil,
+                startTime = r.startTime,
+                effectiveDuration = r.effectiveDuration,
+                mode = r.mode,
+                passCount = r.passCount,
+            }
+        end
+    end
+    return {
+        slots = slots,
+        runs = runs,
+        emits = impl.emits,
+        totalDuration = impl.totalDuration,
+        stateSize = impl.stateSize,
+        channel = impl.channel,
+        presetName = impl.presetName,
+        pinned = impl.pinned,
+    }
+end
+
+function tweeneval.deserializeTimeline(data: {string:any}): TimelineImpl
+    local slots: {Slot} = {}
+    local savedSlots = data.slots as {{string:any}}
+    for i = 1, #(savedSlots or {}) do
+        local s <const> = savedSlots[i]
+        local easingName <const> = s.easing as EasingName
+        slots[i] = {
+            kind = (s.kind as OperationKind) or "to",
+            target = tweeneval.deserializeTarget(s.target as {string:any}),
+            source = tweeneval.deserializeSource(s.source as {string:any}),
+            easingName = easingName,
+            easing = assert(EASINGS[easingName], "Unknown tween easing " .. tostring(easingName)),
+            t1 = (s.t1 as number) or 0,
+            t2 = (s.t2 as number) or 0,
+            t3 = (s.t3 as number) or 0,
+            t4 = (s.t4 as number) or 0,
+            relative = s.relative == true,
+            startTime = (s.startTime as number) or 0,
+            endTime = (s.endTime as number) or 0,
+            duration = (s.duration as number) or 0,
+            stateIndex = (s.stateIndex as integer) or (i - 1),
+        }
+    end
+    local runs: {RunSlot} = nil
+    local savedRuns = data.runs as {{string:any}}
+    if savedRuns then
+        runs = {}
+        for i = 1, #savedRuns do
+            local r <const> = savedRuns[i]
+            runs[i] = {
+                timeline = r.timeline and tweeneval.deserializeTimeline(r.timeline as {string:any}) or nil,
+                timelineId = (r.timelineId as integer) or 0,
+                startTime = (r.startTime as number) or 0,
+                effectiveDuration = (r.effectiveDuration as number) or 0,
+                mode = assert(r.mode as PlaybackMode, "Tween snapshot run mode is required"),
+                passCount = assert(r.passCount as integer, "Tween snapshot run passCount is required"),
+            }
+        end
+    end
+    return setmetatable({
+        slots = slots,
+        runs = runs,
+        emits = data.emits as {EmitSlot},
+        totalDuration = (data.totalDuration as number) or 0,
+        stateSize = (data.stateSize as integer) or #slots,
+        channel = data.channel as string,
+        presetName = data.presetName as string,
+        pinned = data.pinned == true,
+    } as TimelineImpl, TIMELINE_MT)
+end
+
+-------------------------------------------------------------------------------
 -- Evaluation
 -------------------------------------------------------------------------------
 
@@ -897,6 +1077,7 @@ function tweeneval.clearState(state: {TweenSlotState}, count: integer)
     ffi.fill(state as ffi.CData, STATE_BYTES * count, 0)
 end
 
+tweeneval.timelineMethods = TIMELINE_METHODS
 tweeneval.easing = easing
 tweeneval.target = targets
 tweeneval.source = source

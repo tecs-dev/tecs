@@ -19,26 +19,17 @@ local type TrackSource = tweeneval.TrackSource
 local type TrackSourceImpl = tweeneval.TrackSourceImpl
 local type Slot = tweeneval.Slot
 local type TweenSlotState = tweeneval.TweenSlotState
+local type PlaybackMode = tweeneval.PlaybackMode
+local type PlaybackOptions = tweeneval.PlaybackOptions
+local type EmitSlot = tweeneval.EmitSlot
+local type RunSlot = tweeneval.RunSlot
+local type Timeline = tweeneval.Timeline
+local type TimelineImpl = tweeneval.TimelineImpl
 
 local EASINGS <const> = tweeneval.easings
 local evaluateSlots <const> = tweeneval.evaluateSlots
-
-local enum PlaybackMode
-    "once"
-    "loop"
-    "pingPong"
-end
-
-local record PlaybackOptions
-    --- Playback mode. Defaults to "once".
-    mode: PlaybackMode
-    --- Pass count for finite loop/ping-pong playback.
-    count: integer
-    --- Playback speed multiplier. Defaults to 1.
-    speed: number
-    --- Delay before playback begins, in seconds.
-    delay: number
-end
+local serializeTimeline <const> = tweeneval.serializeTimeline
+local deserializeTimeline <const> = tweeneval.deserializeTimeline
 
 local record RunOptions
     --- Nested timeline playback mode. Defaults to "once".
@@ -49,44 +40,10 @@ end
 
 local type TimelineNode = {any}
 
-local record EmitSlot
-    time: number
-    name: string
-    order: integer
-end
-
-local record RunSlot
-    timeline: TimelineImpl
-    timelineId: integer
-    startTime: number
-    effectiveDuration: number
-    mode: PlaybackMode
-    passCount: integer
-end
-
 --- Sequential timeline nodes with an optional replacement channel.
 local record TimelineSpec is {TimelineNode}
     --- Playing another timeline on this channel cancels the current one.
     channel: string
-end
-
---- An immutable compiled tween timeline.
-local interface Timeline
-    --- Play this timeline on an entity.
-    play: function(self: Timeline, world: World, entity: integer, options?: PlaybackOptions): integer
-end
-
---- Runtime representation of a compiled tween timeline.
-local record TimelineImpl is Timeline
-    slots: {Slot}
-    runs: {RunSlot}
-    emits: {EmitSlot}
-    totalDuration: number
-    stateSize: integer
-    channel: string
-    presetName: string
-    pinned: boolean
-
 end
 
 local record Cursor
@@ -565,113 +522,6 @@ tween.alpha = tweeneval.target.alpha
 tween.color = tweeneval.target.color
 
 -------------------------------------------------------------------------------
--- Template serialization
--------------------------------------------------------------------------------
-
-local serializeTarget <const> = tweeneval.serializeTarget
-local deserializeTarget <const> = tweeneval.deserializeTarget
-local serializeSource <const> = tweeneval.serializeSource
-local deserializeSource <const> = tweeneval.deserializeSource
-
-local function serializeTimeline(tl: Timeline): {string:any}
-    local impl <const> = tl as TimelineImpl
-    local slots: {{string:any}} = {}
-    for i = 1, #(impl.slots or {}) do
-        local s <const> = impl.slots[i]
-        slots[i] = {
-            kind = s.kind,
-            target = serializeTarget(s.target),
-            source = serializeSource(s.source),
-            easing = s.easingName,
-            t1 = s.t1, t2 = s.t2, t3 = s.t3, t4 = s.t4,
-            relative = s.relative,
-            startTime = s.startTime,
-            endTime = s.endTime,
-            duration = s.duration,
-            stateIndex = s.stateIndex,
-        }
-    end
-    local runs: {{string:any}} = nil
-    if impl.runs then
-        runs = {}
-        for i = 1, #impl.runs do
-            local r <const> = impl.runs[i]
-            runs[i] = {
-                timelineId = r.timelineId,
-                timeline = r.timeline and serializeTimeline(r.timeline) or nil,
-                startTime = r.startTime,
-                effectiveDuration = r.effectiveDuration,
-                mode = r.mode,
-                passCount = r.passCount,
-            }
-        end
-    end
-    return {
-        slots = slots,
-        runs = runs,
-        emits = impl.emits,
-        totalDuration = impl.totalDuration,
-        stateSize = impl.stateSize,
-        channel = impl.channel,
-        presetName = impl.presetName,
-        pinned = impl.pinned,
-    }
-end
-
-local TIMELINE_MT <const>: metatable<TimelineImpl> = { __index = TimelineImpl }
-
-local function deserializeTimeline(data: {string:any}): TimelineImpl
-    local slots: {Slot} = {}
-    local savedSlots = data.slots as {{string:any}}
-    for i = 1, #(savedSlots or {}) do
-        local s <const> = savedSlots[i]
-        local easingName <const> = s.easing as EasingName
-        slots[i] = {
-            kind = (s.kind as OperationKind) or "to",
-            target = deserializeTarget(s.target as {string:any}),
-            source = deserializeSource(s.source as {string:any}),
-            easingName = easingName,
-            easing = assert(EASINGS[easingName], "Unknown tween easing " .. tostring(easingName)),
-            t1 = (s.t1 as number) or 0,
-            t2 = (s.t2 as number) or 0,
-            t3 = (s.t3 as number) or 0,
-            t4 = (s.t4 as number) or 0,
-            relative = s.relative == true,
-            startTime = (s.startTime as number) or 0,
-            endTime = (s.endTime as number) or 0,
-            duration = (s.duration as number) or 0,
-            stateIndex = (s.stateIndex as integer) or (i - 1),
-        }
-    end
-    local runs: {RunSlot} = nil
-    local savedRuns = data.runs as {{string:any}}
-    if savedRuns then
-        runs = {}
-        for i = 1, #savedRuns do
-            local r <const> = savedRuns[i]
-            runs[i] = {
-                timeline = r.timeline and deserializeTimeline(r.timeline as {string:any}) or nil,
-                timelineId = (r.timelineId as integer) or 0,
-                startTime = (r.startTime as number) or 0,
-                effectiveDuration = (r.effectiveDuration as number) or 0,
-                mode = assert(r.mode as PlaybackMode, "Tween snapshot run mode is required"),
-                passCount = assert(r.passCount as integer, "Tween snapshot run passCount is required"),
-            }
-        end
-    end
-    return setmetatable({
-        slots = slots,
-        runs = runs,
-        emits = data.emits as {EmitSlot},
-        totalDuration = (data.totalDuration as number) or 0,
-        stateSize = (data.stateSize as integer) or #slots,
-        channel = data.channel as string,
-        presetName = data.presetName as string,
-        pinned = data.pinned == true,
-    } as TimelineImpl, TIMELINE_MT)
-end
-
--------------------------------------------------------------------------------
 -- Registry
 -------------------------------------------------------------------------------
 
@@ -892,7 +742,11 @@ local function addCursor(world: World, entity: integer, tl: TimelineImpl, option
     return c
 end
 
-function TimelineImpl:play(world: World, entity: integer, options?: PlaybackOptions): integer
+-- The compiled form of a timeline knows nothing about playback, so the method
+-- that starts one is installed here rather than declared there.
+tweeneval.timelineMethods.play = function(
+    self: TimelineImpl, world: World, entity: integer, options?: PlaybackOptions
+): integer
     return addCursor(world, entity, self, options).playbackId
 end
 
@@ -1134,7 +988,7 @@ function tween.timeline(spec: TimelineSpec): Timeline
             return a.time < b.time or (a.time == b.time and a.order < b.order)
         end)
     end
-    return setmetatable(tl, TIMELINE_MT) as Timeline
+    return tweeneval.asTimeline(tl)
 end
 
 function tween.registerPreset(world: World, name: string, timeline: Timeline): Timeline
