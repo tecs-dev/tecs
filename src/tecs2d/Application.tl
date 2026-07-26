@@ -16,6 +16,8 @@ local Input <const> = require("tecs2d.platform.Input")
 local Window <const> = require("tecs2d.platform.Window")
 local Device <const> = require("tecs2d.gpu.Device")
 local Renderer <const> = require("tecs2d.Renderer")
+local tween <const> = require("tecs2d.tween")
+local sequence <const> = require("tecs2d.sequence")
 local paths <const> = require("tecs2d.platform.paths")
 local shaderpack <const> = require("tecs2d.gpu.shaderpack")
 local shadercompiler <const> = require("tecs2d.gpu.shadercompiler")
@@ -137,6 +139,12 @@ function Application:_init(): boolean
             capacity = config.capacity,
         })
     self.renderer:install(self.world)
+
+    -- Installed by the engine rather than by the game. Both drive entities
+    -- through the fixed phases and a game that forgot one would find its own
+    -- authored timelines silently never advancing.
+    self.world:addPlugin(tween.plugin)
+    self.world:addPlugin(sequence.plugin)
 
     -- Touch arrives normalised, so the converter needs the window size to
     -- report it in the same units as a mouse position.

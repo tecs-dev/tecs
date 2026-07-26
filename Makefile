@@ -23,10 +23,14 @@ export TECS2D_LIB := $(CURDIR)/$(OUT)/lib
 # against the working directory, so this is how the shader pack and any other
 # asset are found without installing a package first.
 export TECS2D_ASSETS := $(CURDIR)/$(LUA)
+export TECS2D_SPEC := $(CURDIR)/$(OUT)/spec
 
 SOURCE_TL := $(shell find src -name '*.tl' 2>/dev/null)
-TL_FLAGS  := -I $(CURDIR)/vendor/tl -I $(CURDIR)/vendor/share/lua/5.1 \
-             -I $(TECS_DIR)/vendor/share/lua/5.1
+SPEC_TL   := $(shell find spec -name '*.tl' 2>/dev/null)
+# tl searches include paths last-first, so ours come last and win. Listing them
+# the other way round silently hands precedence to the ECS repo's vendor.
+TL_FLAGS  := -I $(TECS_DIR)/vendor/share/lua/5.1 \
+             -I $(CURDIR)/vendor/share/lua/5.1 -I $(CURDIR)/vendor/tl
 
 .PHONY: help all configure build check test abi-check run clean rebuild \
         deps package check-package presets shaders
@@ -53,10 +57,10 @@ build: ## Build the selected preset
 	@cmake --build --preset $(PRESET)
 
 check: ## Type-check Teal sources
-	@tl check $(TL_FLAGS) $(SOURCE_TL) main.tl
+	@tl check $(TL_FLAGS) $(SOURCE_TL) $(SPEC_TL) main.tl
 
 test: build $(LUA)/main.lua ## Run the spec suite
-	@busted --lua=luajit spec/
+	@busted
 
 shaders: build ## Build the shader pack a target without a compiler consumes
 	@luajit scripts/buildshaders.lua

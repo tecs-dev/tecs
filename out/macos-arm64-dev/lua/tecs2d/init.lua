@@ -17,8 +17,12 @@ local RenderPass = require("tecs2d.gpu.RenderPass")
 local Renderer = require("tecs2d.Renderer")
 local Application = require("tecs2d.Application")
 local components = require("tecs2d.components")
+local tween = require("tecs2d.tween")
+local sequence = require("tecs2d.sequence")
 
 local tecs2d = {}
+
+
 
 
 
@@ -43,6 +47,8 @@ tecs2d.Input = Input
 tecs2d.clock = clock
 tecs2d.events = events
 tecs2d.components = components
+tecs2d.tween = tween
+tecs2d.sequence = sequence
 tecs2d.version = "0.1.0"
 
 

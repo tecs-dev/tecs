@@ -16,6 +16,8 @@ local Input = require("tecs2d.platform.Input")
 local Window = require("tecs2d.platform.Window")
 local Device = require("tecs2d.gpu.Device")
 local Renderer = require("tecs2d.Renderer")
+local tween = require("tecs2d.tween")
+local sequence = require("tecs2d.sequence")
 local paths = require("tecs2d.platform.paths")
 local shaderpack = require("tecs2d.gpu.shaderpack")
 local shadercompiler = require("tecs2d.gpu.shadercompiler")
@@ -137,6 +139,12 @@ function Application:_init()
       capacity = config.capacity,
    })
    self.renderer:install(self.world)
+
+
+
+
+   self.world:addPlugin(tween.plugin)
+   self.world:addPlugin(sequence.plugin)
 
 
 

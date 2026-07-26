@@ -17,6 +17,8 @@ local RenderPass <const> = require("tecs2d.gpu.RenderPass")
 local Renderer <const> = require("tecs2d.Renderer")
 local Application <const> = require("tecs2d.Application")
 local components <const> = require("tecs2d.components")
+local tween <const> = require("tecs2d.tween")
+local sequence <const> = require("tecs2d.sequence")
 
 local record tecs2d
     Application: Application
@@ -29,6 +31,8 @@ local record tecs2d
     clock: clock
     events: events
     components: components
+    tween: tween
+    sequence: sequence
     --- Version of this engine build.
     version: string
 end
@@ -43,6 +47,8 @@ tecs2d.Input = Input
 tecs2d.clock = clock
 tecs2d.events = events
 tecs2d.components = components
+tecs2d.tween = tween
+tecs2d.sequence = sequence
 tecs2d.version = "0.1.0"
 
 --- Builds the application the entry chunk returns.

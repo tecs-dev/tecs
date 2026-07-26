@@ -69,4 +69,5 @@ set(CMAKE_DEPEND_INFO_FILES
   "CMakeFiles/tecs2d_registry.dir/DependInfo.cmake"
   "CMakeFiles/tecs2d_bindings.dir/DependInfo.cmake"
   "CMakeFiles/tecs2d_lua.dir/DependInfo.cmake"
+  "CMakeFiles/tecs2d_spec.dir/DependInfo.cmake"
   )

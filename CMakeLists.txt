@@ -17,6 +17,8 @@ option(TECS2D_BUILD_LUA
 option(TECS2D_RUNTIME_SHADERS
     "Link a shader compiler, for development. Releases use packaged artifacts." ON)
 
+set(TECS2D_SPEC_OUT "${CMAKE_BINARY_DIR}/spec" CACHE PATH
+    "Where compiled Teal specs are written")
 set(TECS2D_LUA_OUT "${CMAKE_BINARY_DIR}/lua" CACHE PATH
     "Where compiled Lua and generated bindings are written")
 
@@ -268,15 +270,34 @@ if(TECS2D_BUILD_LUA)
     # Without it a new module is silently absent until someone remembers.
     file(GLOB_RECURSE TECS2D_TL CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/*.tl")
     add_custom_target(tecs2d_lua ALL
-        COMMAND tl -q gen -I "${CMAKE_SOURCE_DIR}/vendor/tl"
+        # tl searches include paths last-first, so ours come last and win.
+        COMMAND tl -q gen -I "${TECS2D_TECS_DIR}/vendor/share/lua/5.1"
             -I "${CMAKE_SOURCE_DIR}/vendor/share/lua/5.1"
-            -I "${TECS2D_TECS_DIR}/vendor/share/lua/5.1"
+            -I "${CMAKE_SOURCE_DIR}/vendor/tl"
             --root "${CMAKE_SOURCE_DIR}/src"
             --output-dir "${TECS2D_LUA_OUT}" ${TECS2D_TL}
         DEPENDS ${TECS2D_TL} tecs2d_bindings
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         COMMENT "Compiling Teal sources"
         VERBATIM)
+
+    # Specs written in Teal, compiled the same way. Subsystems migrating from
+    # the Love-backed engine arrive with their suites, and a suite rewritten
+    # into Lua on the way across would no longer be the proof it was.
+    file(GLOB_RECURSE TECS2D_SPEC_TL CONFIGURE_DEPENDS
+        "${CMAKE_SOURCE_DIR}/spec/*.tl")
+    if(TECS2D_SPEC_TL)
+        add_custom_target(tecs2d_spec ALL
+            COMMAND tl -q gen -I "${TECS2D_TECS_DIR}/vendor/share/lua/5.1"
+                -I "${CMAKE_SOURCE_DIR}/vendor/share/lua/5.1"
+                -I "${CMAKE_SOURCE_DIR}/vendor/tl"
+                --root "${CMAKE_SOURCE_DIR}/spec"
+                --output-dir "${TECS2D_SPEC_OUT}" ${TECS2D_SPEC_TL}
+            DEPENDS ${TECS2D_SPEC_TL} tecs2d_lua
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+            COMMENT "Compiling Teal specs"
+            VERBATIM)
+    endif()
 endif()
 
 # --------------------------------------------------------------- packaging

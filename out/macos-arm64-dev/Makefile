@@ -240,6 +240,19 @@ tecs2d_lua/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_lua.dir/build.make CMakeFiles/tecs2d_lua.dir/build
 .PHONY : tecs2d_lua/fast
 
+#=============================================================================
+# Target rules for targets named tecs2d_spec
+
+# Build rule for target.
+tecs2d_spec: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 tecs2d_spec
+.PHONY : tecs2d_spec
+
+# fast build rule for target.
+tecs2d_spec/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/tecs2d_spec.dir/build.make CMakeFiles/tecs2d_spec.dir/build
+.PHONY : tecs2d_spec/fast
+
 generated/box2dapi.o: generated/box2dapi.c.o
 .PHONY : generated/box2dapi.o
 
@@ -494,6 +507,7 @@ help:
 	@echo "... rebuild_cache"
 	@echo "... tecs2d_bindings"
 	@echo "... tecs2d_lua"
+	@echo "... tecs2d_spec"
 	@echo "... tecs2d"
 	@echo "... tecs2d_registry"
 	@echo "... tecs2d_spirvcross"

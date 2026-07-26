@@ -4,6 +4,7 @@
 /Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles/tecs2d_registry.dir
 /Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles/tecs2d_bindings.dir
 /Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles/tecs2d_lua.dir
+/Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles/tecs2d_spec.dir
 /Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles/edit_cache.dir
 /Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles/rebuild_cache.dir
 /Users/dowling/projects/tecs2d/out/macos-arm64-dev/CMakeFiles/list_install_components.dir

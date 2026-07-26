@@ -280,6 +280,9 @@ TECS2D_LUA_OUT:PATH=/Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua
 // artifacts.
 TECS2D_RUNTIME_SHADERS:BOOL=ON
 
+//Where compiled Teal specs are written
+TECS2D_SPEC_OUT:PATH=/Users/dowling/projects/tecs2d/out/macos-arm64-dev/spec
+
 //Resolve dependencies from the system rather than pinned sources
 TECS2D_SYSTEM_DEPS:BOOL=ON
 
