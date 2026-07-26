@@ -224,6 +224,59 @@ code; `glyphslab.tl` caches GPU glyph data keyed by text, font, and scale, which
 is a different problem. What Clay saves is a measurement cache that would
 otherwise have to be written.
 
+## 5b. Shaders are files, and so are materials
+
+GLSL lives in `.glsl` files under an asset root, not in Lua strings.
+
+```
+ assets/shaders/instance.vert.glsl
+ assets/shaders/instance.frag.glsl
+ assets/shaders/instance.cull.comp.glsl
+ assets/shaders/include/depth.glsl
+ assets/materials/water.glsl
+```
+
+The registry that preceded this existed to make every shader enumerable at
+build time without a device, a window or a world. A directory glob does that
+better, and does not need Lua to run at all. The objection that a console has
+no filesystem does not apply: files are read at build time on a developer's
+machine, and at run time a release reads only the pack.
+
+What the convention buys is the thing that matters daily. GLSL in a file gets
+syntax highlighting, a language server and a formatter; GLSL in a Lua long
+string gets none of them, and the four hundred lines of it that used to sit in
+`shaders.tl` were a bad trade.
+
+Stage goes in the filename rather than a directory, because a shared include
+has no home under `fragment/` or `vertex/` and `depth.glsl` is included by
+both. It also keeps a shader's stages adjacent when they are read together.
+
+Two roots are globbed, the engine's own and the game's, so a game's materials
+are not a special case: a material is a file holding a `material()` function,
+expanded against each shape template it applies to.
+
+`#include` resolves against `assets/shaders/include/`, which is what every GLSL
+toolchain expects, and is resolved before the source is hashed. That ordering is
+load-bearing: the pack detects staleness by hashing source, so an include
+resolved later by shaderc's own callbacks would leave the top-level hash
+unchanged when an included file changed, and a stale pack would pass.
+
+Variants are declared in the file rather than a sidecar, so they cannot drift
+from the source they describe:
+
+```glsl
+#pragma tecs2d variants LIGHTS=1 LIGHTS=4 LIGHTS=16
+```
+
+The one thing registration gave that files do not is a spec substituting a
+shader in memory to probe a pass in isolation. That stays as `shaders.override`,
+used only by specs.
+
+**What a game gives up** is assembling GLSL from strings at run time on a
+packaged build, since no compiler ships there. User-supplied GLSL is unaffected:
+it is a file, compiled and baked like the engine's own. `precompileAll` stops
+being something to call, because baking is the precompile.
+
 ## 6. Assets are handles
 
 No filesystem in game code. Content is a manifest built at package time and a
