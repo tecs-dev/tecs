@@ -75,6 +75,7 @@ and an explicit migration step. That is deliberately not supported.
 | `fork(nodes)` | Start a branch that runs alongside the rest of the program |
 | `join()` | Wait for every outstanding branch |
 | `parallel(...)` | Fork several blocks and wait for all of them |
+| `eval(name)` | Run a registered evaluator every tick until it finishes |
 
 ### Time
 
@@ -176,10 +177,11 @@ program name, version, and program counter — the same values the disassembler 
 A program declares which clock its waits count, and the two do not advance together:
 
 ```
- Clock     Advances in   Unit           While frozen   For
- ────────  ────────────  ─────────────  ─────────────  ──────────────────
- fixed     FixedFirst    fixed step     stops          gameplay logic
- frame     First         gameplay frame ticks on step  scripted input
+ Clock         Advances in   Unit            While frozen   For
+ ────────────  ────────────  ──────────────  ─────────────  ────────────────
+ fixed         FixedFirst    fixed step      stops          gameplay logic
+ frame         First         gameplay frame  ticks on step  scripted input
+ presentation  Update        frame, with dt  stops          interpolation
 ```
 
 `"fixed"` is the default and what gameplay logic wants. A sequence establishes commands and state
@@ -230,6 +232,7 @@ Prefer `waitSteps(0)` in a loop body over raising the budget.
 | `branchFaulted` | A forked branch faulted |
 | `unregisteredQuery` | A `waitQuery` named a query not registered on this world |
 | `unregisteredTween` | A `playTween` named a preset not registered on this world |
+| `unregisteredEvaluator` | An `eval` named an evaluator that is not registered |
 
 A faulted playback stops and retains its `pc`, so the failure is inspectable rather than silent.
 
@@ -348,6 +351,45 @@ through:
 sequence.playTween("boss.hover", sequence.bind("boss"), {mode = "pingPong", count = 4})
 ```
 
+## Evaluators
+
+Every other step runs once and hands the tick back. `eval` does not: the playback leaves the wake
+heap, joins a dense set its clock walks **every tick**, and a registered evaluator decides when it
+is done.
+
+```teal
+sequence.registerEvaluator("game.shake", {
+    newState = function(_program) return {elapsed = 0} end,
+    step = function(world, cursor, dt)
+        local s = cursor.evalState
+        s.elapsed = s.elapsed + dt
+        -- ... move something ...
+        return s.elapsed >= 0.4          -- true when finished
+    end,
+})
+
+sequence.define("game.hit", {
+    sequence.eval("game.shake"),
+    sequence.call("game.resume"),
+})
+```
+
+That split is the whole reason one runtime can serve both kinds of work:
+
+```
+ Playback     Costs while idle       Costs per tick
+ ───────────  ─────────────────────  ────────────────────────
+ waiting      one comparison, total  nothing until it is due
+ evaluating   n/a, never idle        one walk, no heap traffic
+```
+
+A cutscene asleep for ninety steps is one comparison a tick no matter how many there are. Something
+interpolating has work on every tick, and paying to schedule it each time is exactly the cost this
+avoids.
+
+Evaluators register **globally**, like programs and unlike actions: an evaluator is code, so two
+worlds evaluating the same name run the same thing. A snapshot carries the name, not the function.
+
 ## Branches
 
 Most cutscenes are not a single line of steps. `parallel` runs several blocks at once and continues
@@ -403,6 +445,29 @@ world:observe(0, sequence.Event, function(e: sequence.Event)
 end)
 ```
 
+## Programs as data
+
+`define` takes node constructors, which are Lua functions. `defineData` takes the same program as a
+list of objects, for anything that cannot call Lua — a tool over MCP, a file on disk, a table you
+wrote by hand:
+
+```teal
+sequence.defineData("game.intro", {
+    {op = "call", action = "game.lockControls"},
+    {op = "wait", seconds = 1.5},
+    {op = "parallel", blocks = {
+        {{op = "playTween", preset = "boss.enter", bind = "boss"}, {op = "waitTween"}},
+        {{op = "waitQuery", query = "game.adds", condition = "empty"}},
+    }},
+    {op = "emit", event = "boss.ready"},
+})
+```
+
+Every control-flow step is expressible, and `{bind = "name"}` in an argument list rebuilds a
+binding reference. It returns `nil` plus a message rather than raising, and the message carries the
+path to the offending entry — `program[2]`, `program[1].blocks[2][1]` — because the author is
+usually a tool and the message is all it gets. `sequence.dataOps()` lists what it accepts.
+
 ## Debugging
 
 `disassemble(program, pc)` renders a program as readable instructions with their indices, marking
@@ -422,6 +487,29 @@ The debugger exposes the same view, in the overlay and as `cmd_*` MCP tools:
 
 `sequence info` disassembles the exact version that playback is running, which is the version worth
 reading when a hot reload has moved on without it.
+
+`sequence.upcoming(world, handle, withinTicks?)` reports what a playback will **certainly** do
+next: it follows the straight-line run ahead, accumulating waits, and stops at the first
+instruction whose successor cannot be known without running it — a jump, a fork, or a wait on a
+signal, a query, or a tween. It reports what will happen, not everything that might.
+
+### Scripting from an agent
+
+The debugger's `program` commands take a whole scenario as data and schedule it:
+
+```
+ Command             Does
+ ──────────────────  ───────────────────────────────────────────────
+ program play        compile a list of steps and play it, returning a handle
+ program status      where a playback sits, and what it will do next
+ program cancel      stop a playback and its branches
+```
+
+`program play` accepts every `defineData` step plus `input`, which injects a Love event, and takes
+`clock` and `bindings`. It replaces queueing input through one tool and doing everything else
+through `run_lua`: a program is data, so it survives a save, and a scenario interrupted by a
+snapshot load resumes at the same step. `send_love_event` remains for a one-shot press that does
+not need a program around it.
 
 ## Performance
 
