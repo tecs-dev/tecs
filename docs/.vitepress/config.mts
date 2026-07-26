@@ -251,6 +251,7 @@ export default defineConfig({
             ]
           },
           { text: 'Tween', link: '/tecs2d/tween' },
+          { text: 'Sequence', link: '/tecs2d/sequence' },
         ]
       },
       {
