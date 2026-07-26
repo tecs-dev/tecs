@@ -1922,6 +1922,123 @@ describe("tecs2d.sequence", function()
         end)
     end)
 
+    -- Waiting for something the sequencer knows nothing about. The provider
+    -- answers; the runtime never learns what the work is.
+    describe("awaitables", function()
+        local pending: {integer: boolean}
+
+        before_each(function()
+            pending = {}
+            sequence.registerAwaitable("spec.work", {
+                isPending = function(
+                    _w: tecs.World, entity: integer, _key: string
+                ): boolean
+                    return pending[entity] == true
+                end,
+            })
+        end)
+
+        it("parks until the provider says the work is done", function()
+            local actor <const> = world:spawn(tecs.builtins.Transform(0, 0))
+            world:commit()
+            pending[actor] = true
+
+            local calls = 0
+            sequence.registerAction(world, "spec.after", function() calls = calls + 1 end)
+            local handle = sequence.play(world, sequence.define(uniqueName(), {
+                sequence.await("spec.work", sequence.bind("actor")),
+                sequence.call("spec.after"),
+            }), {bindings = {actor = actor}})
+
+            stepWorld(world, 3)
+            luassert.equals(0, calls, "the work is still going")
+            luassert.equals("spec.work", sequence.status(world, handle).waitingAwaitable)
+
+            pending[actor] = nil
+            stepWorld(world, 2)
+            luassert.equals(1, calls)
+        end)
+
+        it("does not wait for work that was never started", function()
+            local actor <const> = world:spawn(tecs.builtins.Transform(0, 0))
+            world:commit()
+
+            local calls = 0
+            sequence.registerAction(world, "spec.after", function() calls = calls + 1 end)
+            sequence.play(world, sequence.define(uniqueName(), {
+                sequence.await("spec.work", sequence.bind("actor")),
+                sequence.call("spec.after"),
+            }), {bindings = {actor = actor}})
+
+            stepWorld(world, 2)
+            luassert.equals(1, calls, "nothing pending is not something to wait for")
+        end)
+
+        it("releases a waiter whose entity died", function()
+            local actor <const> = world:spawn(tecs.builtins.Transform(0, 0))
+            world:commit()
+            pending[actor] = true
+
+            local calls = 0
+            sequence.registerAction(world, "spec.after", function() calls = calls + 1 end)
+            sequence.play(world, sequence.define(uniqueName(), {
+                sequence.await("spec.work", sequence.bind("actor")),
+                sequence.call("spec.after"),
+            }), {bindings = {actor = actor}})
+
+            stepWorld(world, 2)
+            luassert.equals(0, calls)
+            world:despawn(actor)
+            world:commit()
+            stepWorld(world, 2)
+            luassert.equals(1, calls, "a dead entity must not strand a waiter")
+        end)
+
+        it("carries an await through a snapshot", function()
+            local actor <const> = world:spawn(tecs.builtins.Transform(0, 0))
+            world:commit()
+            pending[actor] = true
+
+            local calls = 0
+            sequence.registerAction(world, "spec.after", function() calls = calls + 1 end)
+            local handle = sequence.play(world, sequence.define(uniqueName(), {
+                sequence.await("spec.work", sequence.bind("actor")),
+                sequence.call("spec.after"),
+            }), {bindings = {actor = actor}})
+
+            stepWorld(world, 2)
+            local saved = world:saveSnapshot().buffer
+            world:loadSnapshot(saved)
+
+            luassert.equals("spec.work", sequence.status(world, handle).waitingAwaitable,
+                "the restored playback is parked where it was")
+            stepWorld(world, 2)
+            luassert.equals(0, calls)
+
+            pending[actor] = nil
+            stepWorld(world, 2)
+            luassert.equals(1, calls)
+        end)
+
+        it("faults on an unregistered provider", function()
+            local actor <const> = world:spawn(tecs.builtins.Transform(0, 0))
+            world:commit()
+            local handle = sequence.play(world, sequence.define(uniqueName(), {
+                sequence.await("spec.neverRegistered", sequence.bind("actor")),
+            }), {bindings = {actor = actor}})
+
+            stepWorld(world, 2)
+            luassert.equals("unregisteredAwaitable", sequence.status(world, handle).fault)
+        end)
+
+        it("rejects a malformed await", function()
+            luassert.has_error(function() sequence.await("", sequence.bind("a")) end)
+            luassert.has_error(function()
+                sequence.await("spec.work", "a" as sequence.EntityRef)
+            end)
+        end)
+    end)
+
     describe("programs as data", function()
         local order: {string}
 

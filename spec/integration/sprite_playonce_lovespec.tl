@@ -64,7 +64,7 @@ describe("sprite play-once: pauseAtEnd clamps on the GPU", function()
         end
     end)
 
-    it("does not dirty unrelated Sprite archetypes while a callback is pending", function()
+    it("does not dirty unrelated Sprite archetypes while a pause is pending", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
             local gfx = require("tecs2d.gfx")
@@ -89,6 +89,12 @@ describe("sprite play-once: pauseAtEnd clamps on the GPU", function()
                 dirtySamples = 0,
                 complete = false,
             }
+            -- Completion is an event now, so the observer is what records it.
+            world:observe(0, gfx.AnimationComplete, function(e)
+                if e.entity == _G.tecsTestSprite then
+                    _G.tecsPlayOnceDirty.complete = true
+                end
+            end)
             world:addSystem({
                 name = "test.SpritePlayOnceDirtyRecorder",
                 phase = tecs.phases.Update,
@@ -104,12 +110,7 @@ describe("sprite play-once: pauseAtEnd clamps on the GPU", function()
 
                     if rec.stage == "settling" then
                         if not probeDirty then
-                            world:get(_G.tecsTestSprite, gfx.Sprite):playOnce(
-                                "play",
-                                function()
-                                    rec.complete = true
-                                end
-                            )
+                            world:get(_G.tecsTestSprite, gfx.Sprite):playOnce("play")
                             rec.stage = "pending"
                         end
                     elseif rec.stage == "pending" and not rec.complete then
@@ -138,9 +139,66 @@ describe("sprite play-once: pauseAtEnd clamps on the GPU", function()
             return nil
         end)
 
-        luassert.is_true(ok == true, "playOnce callback did not complete")
+        luassert.is_true(ok == true, "playOnce never completed")
         luassert.is_true(samples > 0, "dirty recorder did not observe a pending frame")
         luassert.are.equal(0, dirtySamples,
             "pending callback dirtied an unrelated Sprite archetype")
+    end)
+    -- Fails against a build where completion is a Lua callback: nothing in a
+    -- snapshot can carry a closure, so a save taken mid-animation comes back
+    -- with the correlation gone and the completion never fires.
+    --
+    -- The fixture's own sheet is built from an in-memory image, and Sprite
+    -- deliberately refuses to serialize a sheet with no durable path, so this
+    -- one loads a real sheet off disk instead.
+    it("still completes an animation that was saved mid-play", function()
+        fixture.runLua(app, [[
+            local gfx = require("tecs2d.gfx")
+            _G.tecsMidSaveSheet = gfx.SpriteSheet.fromFile("assets/running.png")
+            _G.tecsMidSave = world:spawn(
+                gfx.Sprite.fromSheet(_G.tecsMidSaveSheet, "run"))
+            _G.tecsMidSaveDone = false
+            world:observe(0, gfx.AnimationComplete, function(e)
+                if e.entity == _G.tecsMidSave then _G.tecsMidSaveDone = true end
+            end)
+            return true
+        ]])
+
+        -- The instance is created by the sprite sync, so the tag cannot start
+        -- playing until a frame has run.
+        local ready = fixture.eventually(fixture.callTimeout, function(): boolean
+            local values = fixture.runLua(app, [[
+                local gfx = require("tecs2d.gfx")
+                local s = world:get(_G.tecsMidSave, gfx.Sprite)
+                return s ~= nil and s:getTag() ~= ""
+            ]])
+            if values[1] == "true" then return true end
+            return nil
+        end)
+        luassert.is_true(ready == true, "the sprite never synced an instance")
+
+        -- Play and save in one call, so the snapshot is certainly taken
+        -- before the animation can reach its last frame.
+        fixture.runLua(app, [[
+            local gfx = require("tecs2d.gfx")
+            world:get(_G.tecsMidSave, gfx.Sprite):playOnce("run")
+            _G.tecsMidSaveBuffer = world:saveSnapshot().buffer
+            return true
+        ]])
+
+        -- Restore it. The completion had not fired when that was written, so
+        -- what comes back has to carry it.
+        fixture.runLua(app, [[
+            world:loadSnapshot(_G.tecsMidSaveBuffer)
+            _G.tecsMidSaveDone = false
+            return true
+        ]])
+
+        local fired = fixture.eventually(fixture.callTimeout, function(): boolean
+            local values = fixture.runLua(app, "return _G.tecsMidSaveDone")
+            if values[1] == "true" then return true end
+            return nil
+        end)
+        luassert.is_true(fired == true, "a mid-animation save lost its completion")
     end)
 end)

@@ -42,7 +42,12 @@ local record spritetypes
         setTag: function(self, tag: string)
 
         --- Play a tag once, then invoke the callback when the last frame is reached.
-        playOnce: function(self, tag: string, onComplete?: function(Sprite))
+        --- Play a tag once and stop on its last frame.
+        ---
+        --- Completion is an event, not a callback: `AnimationComplete` is
+        --- emitted at address 0 when the last frame is reached. A correlation
+        --- that is data survives a snapshot, which a closure cannot.
+        playOnce: function(self, tag: string)
 
         --- Pause the animation at its current frame.
         pause: function(self, time?: number)
@@ -92,6 +97,19 @@ local record spritetypes
             texture: love.graphics.Texture,
             options?: TextureSpriteOptions
         ): Sprite
+    end
+
+    --- Event emitted when a `playOnce` animation reaches its last frame.
+    ---
+    --- Emitted at address 0, so an observer rebound by name after a snapshot
+    --- load hears about an animation that was mid-play when it was saved.
+    interface AnimationComplete is tecs.Event
+        --- Entity whose animation finished.
+        entity: integer
+        --- Tag that finished playing.
+        tag: string
+
+        metamethod __call: function(self, entity: integer, tag: string): AnimationComplete
     end
 
     --- Event emitted when a Sprite changes animation tags.

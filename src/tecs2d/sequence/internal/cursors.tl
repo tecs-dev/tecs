@@ -83,6 +83,7 @@ function cursors.stateFor(world: World): WorldState
         },
         channels = {},
         channelled = {},
+        awaitWaiters = {},
         pendingSignals = {},
         queries = {},
         queryWaiters = {},
@@ -216,6 +217,12 @@ function cursors.unlinkWaits(state: WorldState, cursor: Cursor)
         cursors.unpark(state.queryWaiters, queryName, cursor.slot)
     end
     cursor.waitingTween = false
+    if cursor.awaitProvider then
+        cursor.awaitProvider = nil
+        cursor.awaitEntity = nil
+        cursor.awaitKey = nil
+        state.awaitWaiters[cursor.slot] = nil
+    end
 end
 
 -- Drop the cursor's claim on the playback it started, so one that ends while

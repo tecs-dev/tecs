@@ -97,6 +97,11 @@ local record gfx
     --- Event emitted when sprite animation tag changes.
     ChangeTag: spritetypes.ChangeTag
 
+    --- Event emitted when a `Sprite:playOnce` animation reaches its last
+    --- frame. Correlate on `entity` and `tag`; a snapshot taken mid-animation
+    --- comes back mid-animation and still fires it.
+    AnimationComplete: spritetypes.AnimationComplete
+
     --- A Circle component used to draw filled circles.
     ---
     --- Requires adding the Transform component to get the default rendering logic.
@@ -241,6 +246,7 @@ gfx.SpriteSheet = sprite_sheet.SpriteSheet as sheet.SpriteSheet
 gfx.SpriteCollision = sprite.SpriteCollision
 gfx.RepeatedSprite = sprite.RepeatedSprite
 gfx.ChangeTag = sprite.ChangeTag
+gfx.AnimationComplete = sprite.AnimationComplete
 gfx.Circle = circle.Circle
 gfx.Ellipse = ellipse.Ellipse
 gfx.Arc = arc.Arc

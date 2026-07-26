@@ -14,6 +14,7 @@ local sprite_events <const> = require("tecs2d.gfx.internal.sprite.events")
 local sprite_collision <const> = require("tecs2d.gfx.internal.sprite.collision")
 local sprite_instance <const> = require("tecs2d.gfx.internal.sprite.instance")
 local pipelinekey <const> = require("tecs2d.gfx.internal.pipelinekey")
+local sequence <const> = require("tecs2d.sequence")
 local bucketsync <const> = require("tecs2d.gfx.internal.sprite.bucketsync")
 local bucketmanager <const> = require("tecs2d.gfx.internal.sprite.bucketmanager")
 local gpuTypes <const> = require("tecs2d.gfx.internal.gpu.types")
@@ -70,6 +71,7 @@ local record sprite
     SpriteCollision: sprite_collision.SpriteCollision
     --- Re-export events
     ChangeTag: spritetypes.ChangeTag
+    AnimationComplete: spritetypes.AnimationComplete
 
     --- Texture bucket marker components - group sprites by texture array size tier.
     --- layerIndex is the 0-based layer within the texture array (for GLSL sampling).
@@ -175,11 +177,18 @@ sprite.Sprite = SpriteImpl as spritetypes.Sprite
 sprite.SpriteSheet = sprite_sheet.SpriteSheet
 sprite.SpriteCollision = sprite_collision.SpriteCollision
 sprite.ChangeTag = sprite_events.ChangeTag
+sprite.AnimationComplete = sprite_events.AnimationComplete
 
 local Sprite <const> = SpriteImpl
 
+-- Which entities are playing a tag once and have not reached its end.
+--
+-- The tag rather than a callback: a correlation that is data survives a
+-- snapshot, and a closure cannot. The index itself is rebuilt on load from
+-- the sprites that carry a pending pause frame, so it is a cache rather than
+-- state of its own.
 local record SpriteRuntime
-    callbacks: {integer: function(spritetypes.Sprite)}
+    awaiting: {integer: boolean}
     pendingCount: integer
 end
 
@@ -207,22 +216,27 @@ local function getGameTime(self: SpriteImpl): number
     return love.timer.getTime()
 end
 
-local function clearPlayOnceCallback(runtime: SpriteRuntime, entityId: integer)
-    if runtime.callbacks[entityId] ~= nil then
-        runtime.callbacks[entityId] = nil
+local function clearAwaiting(runtime: SpriteRuntime, entityId: integer)
+    if runtime.awaiting[entityId] ~= nil then
+        runtime.awaiting[entityId] = nil
         runtime.pendingCount = runtime.pendingCount - 1
     end
 end
 
-local function queuePlayOnceCallback(runtime: SpriteRuntime, entityId: integer,
-        callback: function(spritetypes.Sprite))
-    if runtime.callbacks[entityId] == nil then
+local function markAwaiting(runtime: SpriteRuntime, entityId: integer)
+    if runtime.awaiting[entityId] == nil then
         runtime.pendingCount = runtime.pendingCount + 1
     end
-    runtime.callbacks[entityId] = callback
+    runtime.awaiting[entityId] = true
 end
 
 local ChangeTag <const> = sprite_events.ChangeTag
+local AnimationComplete <const> = sprite_events.AnimationComplete
+
+--- The provider name an `await` step uses to wait for a `playOnce`, and the
+--- action name that starts one.
+local AWAITABLE <const> = "tecs2d.sprite"
+local PLAY_TAG_ACTION <const> = "tecs2d.sprite.playTag"
 
 -------------------------------------------------------------------------------
 -- Instance helpers
@@ -464,7 +478,7 @@ function Sprite:setTag(tag: string)
         return
     end
 
-    clearPlayOnceCallback(runtime, entityId)
+    clearAwaiting(runtime, entityId)
 
     local oldTag <const> = sheetVal:getTagName(inst.tagId)
 
@@ -493,12 +507,12 @@ function Sprite:setTag(tag: string)
     world:markComponentDirty(entityId, Sprite as tecs.Component)
 end
 
-function Sprite:playOnce(tag: string, onComplete?: function(spritetypes.Sprite))
+function Sprite:playOnce(tag: string)
     local world, entityId, runtime = resolveOwner(self)
     local inst <const> = getInstance(self.spriteId)
     local sameTag = inst and tag == self:getTag()
 
-    clearPlayOnceCallback(runtime, entityId)
+    clearAwaiting(runtime, entityId)
 
     if sameTag then
         local renderPipeline = world.resources[pipelinekey.PIPELINE] as {string: any}
@@ -512,9 +526,7 @@ function Sprite:playOnce(tag: string, onComplete?: function(spritetypes.Sprite))
         self:setTag(tag)
     end
 
-    if onComplete then
-        queuePlayOnceCallback(runtime, entityId, onComplete)
-    end
+    markAwaiting(runtime, entityId)
     self:pauseAtEnd()
 end
 
@@ -614,6 +626,11 @@ function Sprite:getFrame(): integer
         return self.pausedFrame
     end
     local inst <const> = getInstance(self.spriteId)
+    if not inst then
+        -- No live instance: zero-initialized, or restored by a snapshot load
+        -- that the sprite sync has not caught up with yet.
+        return 0
+    end
     local elapsed = getGameTime(self) - self.animStartTime
     local localTime: number
     if self._pauseAtFrame >= 0 then
@@ -634,10 +651,12 @@ function Sprite:getFrame(): integer
         self._pauseAtFrame = -1
         local world, entityId, runtime = resolveOwner(self)
         world:markComponentDirty(entityId, Sprite as tecs.Component)
-        local onComplete = runtime.callbacks[entityId]
-        if onComplete then
-            clearPlayOnceCallback(runtime, entityId)
-            onComplete(self)
+        if runtime.awaiting[entityId] then
+            clearAwaiting(runtime, entityId)
+            -- The tag is read here rather than remembered: the instance is
+            -- certainly live at this point, and a snapshot load restores the
+            -- sprite long before it restores what the sprite points at.
+            world:emit(0, AnimationComplete, entityId, self:getTag())
         end
         return self.pausedFrame
     end
@@ -660,6 +679,7 @@ end
 
 function Sprite:getTag(): string
     local inst <const> = getInstance(self.spriteId)
+    if not inst then return "" end
     local sheetVal = sprite_sheet.SpriteSheet.getById(inst.sheetId)
     if sheetVal then
         return sheetVal:getTagName(inst.tagId)
@@ -1107,8 +1127,44 @@ end
 
 function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(world: tecs.World)
     return function(world: tecs.World)
-        local runtime: SpriteRuntime = {callbacks = {}, pendingCount = 0}
+        local runtime: SpriteRuntime = {awaiting = {}, pendingCount = 0}
         world.resources[SPRITE_RUNTIME] = runtime
+
+        -- A program can play a tag and wait for it without the sequencer
+        -- knowing what a sprite is: the action and the provider are
+        -- registered from here, so the dependency points inward.
+        sequence.registerAwaitable(AWAITABLE, {
+            isPending = function(w: tecs.World, entity: integer, _key: string): boolean
+                return runtimeOf(w).awaiting[entity] ~= nil
+            end,
+        })
+        sequence.registerAction(world, PLAY_TAG_ACTION,
+            function(w: tecs.World, ctx: sequence.ActionContext)
+                local entity = ctx:entity(ctx.args[1] as string)
+                if not entity then return end
+                local s = w:get(entity, Sprite) as SpriteImpl
+                if s then s:playOnce(ctx.args[2] as string) end
+            end)
+
+        -- The index is a cache over what the sprites already carry: a pending
+        -- pause frame is a playOnce that has not finished. Rebuilding it from
+        -- them is what makes a mid-animation save come back mid-animation and
+        -- still fire its completion.
+        world:observe(0, tecs.builtins.FinishSnapshotLoad, function()
+            runtime.awaiting = {}
+            runtime.pendingCount = 0
+            local pending = world:query({include = {Sprite}})
+            for archetype, len in pending:iter() do
+                local sprites = archetype:get(Sprite) as {SpriteImpl}
+                local entities = archetype.entities
+                for row = 1, len do
+                    local s = sprites[row]
+                    if s and s._pauseAtFrame >= 0 then
+                        markAwaiting(runtime, entities[row] as integer)
+                    end
+                end
+            end
+        end)
 
         local renderer = renderPipeline:getRenderer()
 
@@ -1134,7 +1190,7 @@ function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(worl
         -- assignment for the new spriteSheet.
         sync.onSpriteReplaced = function(entityId: integer, spr: any, oldSpriteId: integer)
             if oldSpriteId ~= 0 then
-                clearPlayOnceCallback(runtime, entityId)
+                clearAwaiting(runtime, entityId)
                 releaseInstance(oldSpriteId)
             end
             onSpriteAdded(world, entityId, spr as SpriteImpl)
@@ -1329,7 +1385,7 @@ function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(worl
                 for row = firstRow, lastRow do
                     local self = sprites[row]
                     if self and self.spriteId ~= 0 then
-                        clearPlayOnceCallback(runtime, entities[row])
+                        clearAwaiting(runtime, entities[row])
                         releaseInstance(self.spriteId)
                     end
                 end
@@ -1385,7 +1441,7 @@ function sprite.plugin(renderPipeline: gpuTypes.PipelineInternal): function(worl
                     local entities = archetype.entities
                     for row = 1, len do
                         local entityId = entities[row] as integer
-                        if runtime.callbacks[entityId] ~= nil then
+                        if runtime.awaiting[entityId] ~= nil then
                             sprites[row]:getFrame()
                         end
                     end

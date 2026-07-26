@@ -23,6 +23,8 @@ local enum FaultReason
     "unregisteredQuery"
     --- An `eval` named an evaluator that is not registered.
     "unregisteredEvaluator"
+    --- An `await` named a provider that is not registered on this build.
+    "unregisteredAwaitable"
     --- A `playTween` named a preset that is not registered on this world.
     "unregisteredTween"
 end
@@ -259,6 +261,11 @@ local record Status
     waitingQuery: string
     waitingCondition: QueryCondition
 
+    --- Awaitable provider this playback is blocked on, when it is, and the
+    --- entity it is waiting on.
+    waitingAwaitable: string
+    waitingAwaitableEntity: integer
+
     --- Tween playback token this playback is blocked on, when it is.
     waitingTween: integer
 
@@ -371,6 +378,12 @@ local record Cursor
     tweenOutcome: TweenOutcome
     waitingTween: boolean
 
+    --- What an `await` step is parked on: the provider name, the entity it
+    --- resolved, and the key it was given.
+    awaitProvider: string
+    awaitEntity: integer
+    awaitKey: string
+
     --- Slot of the cursor parked on this one finishing, if any, and the
     --- channel this playback occupies on its owner.
     awaitedBy: integer
@@ -424,6 +437,9 @@ local record WorldState
     -- Occupied channels, keyed by owner and channel name, so starting a
     -- playback on one can cancel whatever held it.
     channelled: {string: integer}
+
+    -- Cursors parked on an awaitable provider, re-tested each fixed step.
+    awaitWaiters: {integer: boolean}
 
     -- Scratch reused across calls: one argument list and one context. Calls
     -- never overlap, since a cursor runs to a wait before any other does.

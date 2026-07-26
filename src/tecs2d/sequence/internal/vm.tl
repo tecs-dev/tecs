@@ -9,6 +9,7 @@
 local tecs <const> = require("tecs")
 local frameclock <const> = require("tecs2d.internal.frameclock")
 local seqclock <const> = require("tecs2d.sequence.internal.clock")
+local seqawaitables <const> = require("tecs2d.sequence.internal.awaitables")
 local seqevaluators <const> = require("tecs2d.sequence.internal.evaluators")
 local seqregistry <const> = require("tecs2d.sequence.internal.registry")
 local seqcursors <const> = require("tecs2d.sequence.internal.cursors")
@@ -199,6 +200,30 @@ local function run(
                     seqcursors.packHandle(started.slot, started.generation)
             end
             cursor.pc = cursor.pc + 1
+
+        elseif op == seqprogram.AWAIT then
+            local name = consts[a] as string
+            if not seqawaitables.get(name) then
+                seqcursors.fault(state, cursor, "unregisteredAwaitable",
+                    "awaitable '" .. name .. "' is not registered")
+                return budget
+            end
+            local spec = consts[b] as {any}
+            local ref = spec[1] as seqtypes.EntityRef
+            local id = cursor.bindings and cursor.bindings[ref.bindName]
+            cursor.pc = cursor.pc + 1
+            -- A binding that is missing or dead is not a fault: there is
+            -- nothing to wait for, and the program carries on.
+            if not id or not world:isAlive(id) then
+                -- nothing to park on
+            else
+                cursor.awaitProvider = name
+                cursor.awaitEntity = id
+                cursor.awaitKey = spec[2] as string
+                cursor.wakeAt = nil
+                state.awaitWaiters[cursor.slot] = true
+                return budget
+            end
 
         elseif op == seqprogram.EVAL then
             local name <const> = consts[a] as string
@@ -436,6 +461,45 @@ local function deliverQueryWaits(state: WorldState)
     end
 end
 
+-- Re-test every cursor parked on an awaitable provider. A provider answers
+-- for something outside the sequencer -- an animation, a load -- so there is
+-- no edge to subscribe to and the condition is asked at each step boundary,
+-- the same way a query wait is.
+local function deliverAwaits(world: World, state: WorldState)
+    local waiting = state.awaitWaiters
+    if next(waiting) == nil then return end
+
+    local slots: {integer} = {}
+    for slot in pairs(waiting) do slots[#slots + 1] = slot end
+    table.sort(slots)
+
+    for i = 1, #slots do
+        local cursor = state.cursors[slots[i]]
+        if not cursor or not cursor.alive then
+            waiting[slots[i]] = nil
+        elseif cursor.state == "running" then
+            local provider = seqawaitables.get(cursor.awaitProvider)
+            local pending = false
+            if provider and world:isAlive(cursor.awaitEntity) then
+                local ok, result = pcall(provider.isPending, world,
+                    cursor.awaitEntity, cursor.awaitKey) as (boolean, any)
+                if not ok then
+                    seqcursors.fault(state, cursor, "actionError", tostring(result))
+                    pending = true
+                else
+                    pending = result as boolean
+                end
+            end
+            -- A provider that is gone, or an entity that is, releases the
+            -- cursor rather than stranding it for the life of the world.
+            if not pending and cursor.alive then
+                seqcursors.unlinkWaits(state, cursor)
+                seqcursors.schedule(state, cursor, seqcursors.clockOf(state, cursor).step)
+            end
+        end
+    end
+end
+
 -- Everything evaluating on this clock, stepped once. The walk is backwards so
 -- that a cursor leaving the set, which swaps the last entry into its place,
 -- cannot make the walk skip its neighbour.
@@ -513,6 +577,7 @@ function vm.tick(world: World, state: WorldState, clockId: seqtypes.ClockId, dt?
     if clockId == "fixed" then
         deliverSignals(state)
         deliverQueryWaits(state)
+        deliverAwaits(world, state)
     end
 
     stepActive(world, state, clock, dt or 0)

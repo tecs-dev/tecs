@@ -28,6 +28,7 @@ local seqregistry <const> = require("tecs2d.sequence.internal.registry")
 local seqsnapshot <const> = require("tecs2d.sequence.internal.snapshot")
 local seqvm <const> = require("tecs2d.sequence.internal.vm")
 local seqcursors <const> = require("tecs2d.sequence.internal.cursors")
+local seqawaitables <const> = require("tecs2d.sequence.internal.awaitables")
 local seqevaluators <const> = require("tecs2d.sequence.internal.evaluators")
 local seqjson <const> = require("tecs2d.sequence.internal.json")
 local seqtweenrun <const> = require("tecs2d.sequence.internal.tweenrun")
@@ -315,6 +316,27 @@ local record sequence
     --- own business.
     eval: function(evaluator: string, data?: any): Node
 
+    --- Wait for something outside the sequencer to finish.
+    ---
+    --- A subsystem registers a provider under a name and answers whether the
+    --- work is still going; this parks the playback until it is not. The
+    --- sequencer never learns what the work is, which is how a program waits
+    --- on a sprite animation without the runtime requiring `tecs2d.gfx`.
+    ---
+    --- A binding that is missing or dead is not a fault: there is nothing to
+    --- wait for and the program carries on. So is a provider reporting a
+    --- thing that never started.
+    ---     sequence.call("tecs2d.sprite.playTag", sequence.bind("hero"), "hurt"),
+    ---     sequence.await("tecs2d.sprite", sequence.bind("hero")),
+    await: function(provider: string, target: EntityRef, key?: string): Node
+
+    --- What a registered awaitable provider has to answer.
+    type Awaitable = seqawaitables.Provider
+
+    --- Register something an `await` step can name. Global, like an
+    --- evaluator, because a provider is code.
+    registerAwaitable: function(name: string, provider: Awaitable)
+
     --- Wait for the tween the most recent `playTween` started.
     ---
     --- Resumes when that specific playback completes, is cancelled, is
@@ -560,6 +582,22 @@ function sequence.eval(evaluator: string, data?: any): sequence.Node
         error("sequence.eval requires a non-empty evaluator name", 2)
     end
     return {kind = "eval", text = evaluator, args = data as {any}} as sequence.Node
+end
+
+function sequence.await(
+    provider: string, target: sequence.EntityRef, key?: string
+): sequence.Node
+    if type(provider) ~= "string" or provider == "" then
+        error("sequence.await requires a non-empty provider name", 2)
+    end
+    if not seqprogram.isEntityRef(target) then
+        error("sequence.await requires a sequence.bind(name) target", 2)
+    end
+    return {kind = "await", text = provider, args = {target, key}} as sequence.Node
+end
+
+function sequence.registerAwaitable(name: string, provider: sequence.Awaitable)
+    seqawaitables.register(name, provider)
 end
 
 function sequence.waitTween(): sequence.Node
@@ -847,6 +885,8 @@ function sequence.status(world: World, handle: sequence.Handle): sequence.Status
         waitingFor = cursor.alive and cursor.waitChannel or nil,
         waitingQuery = cursor.alive and cursor.waitQuery or nil,
         waitingTween = cursor.waitingTween and cursor.tweenPlayback or nil,
+        waitingAwaitable = cursor.alive and cursor.awaitProvider or nil,
+        waitingAwaitableEntity = cursor.alive and cursor.awaitEntity or nil,
         tweenOutcome = cursor.tweenOutcome,
         waitingCondition = cursor.alive and cursor.waitQuery
             and (cursor.waitCondition == 1 and "any" or "empty") or nil,

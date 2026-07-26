@@ -1,5 +1,5 @@
 -- Sprite playOnce Example
--- Demonstrates Sprite:playOnce(tag, callback) for animation completion callbacks.
+-- Demonstrates Sprite:playOnce(tag) and the AnimationComplete event it emits.
 
 local tecs <const> = require("tecs")
 local tecs2d <const> = require("tecs2d")
@@ -49,20 +49,21 @@ local function examplePlugin(w: tecs.World)
         gfx.Pivot(0, 0)
     )
 
-    -- Track completion count (updated by playOnce callback, displayed by system)
+    -- Track completion count (updated by the observer, displayed by a system)
     local loopCount = 0
     local lastDisplayedCount = 0
 
-    -- Continuously replay the animation and count completions using playOnce.
-    local onComplete: function(Sprite) = nil
-    onComplete = function(anim: Sprite)
+    -- Completion is an event rather than a callback, so the correlation is
+    -- data and a save taken mid-animation still fires it after a load.
+    w:observe(0, gfx.AnimationComplete, function(e: gfx.AnimationComplete)
+        if e.entity ~= spriteId then return end
         loopCount = loopCount + 1
         print("Animation completed! Total completions: " .. tostring(loopCount))
-        anim:playOnce("run", onComplete)
-    end
+        (w:get(spriteId, gfx.Sprite) as Sprite):playOnce(e.tag)
+    end)
 
     local sprite = w:get(spriteId, gfx.Sprite) as Sprite
-    sprite:playOnce("run", onComplete)
+    sprite:playOnce("run")
 
     -- Update HUD text in a system (setText requires system context)
     w:addSystem({

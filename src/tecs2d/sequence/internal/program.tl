@@ -28,6 +28,7 @@ local record program
     PLAY_TWEEN: integer
     WAIT_TWEEN: integer
     EVAL: integer
+    AWAIT: integer
     STRIDE: integer
 
     --- Whether a value is a `bind(name)` reference. Shared by the compiler,
@@ -87,6 +88,8 @@ local OP_PLAY_TWEEN <const> = 10  -- a = const index of preset name
 local OP_WAIT_TWEEN <const> = 11
 local OP_EVAL <const> = 12    -- a = const index of evaluator name
                               -- b = const index of the data it carries, or -1
+local OP_AWAIT <const> = 13   -- a = const index of provider name
+                              -- b = const index of {bind, key}
 
 local STRIDE <const> = 3
 
@@ -170,6 +173,8 @@ local function compileNode(c: Compiler, node: NodeImpl, depth: integer)
         emitOp(c, OP_PLAY_TWEEN, intern(c, node.text), intern(c, node.args))
     elseif kind == "waitTween" then
         emitOp(c, OP_WAIT_TWEEN, -1, -1)
+    elseif kind == "await" then
+        emitOp(c, OP_AWAIT, intern(c, node.text), intern(c, node.args))
     elseif kind == "eval" then
         emitOp(c, OP_EVAL, intern(c, node.text),
             node.args ~= nil and intern(c, node.args) or -1)
@@ -304,6 +309,11 @@ function program.disassemble(prog: ProgramImpl, pc?: integer): string
                 prog.consts[a] as string, ref.bindName)
         elseif op == OP_WAIT_TWEEN then
             text = "WAITTWEEN"
+        elseif op == OP_AWAIT then
+            local spec = prog.consts[b] as {any}
+            local ref = spec[1] as EntityRef
+            text = string.format("AWAIT     %q, bind(%s)",
+                prog.consts[a] as string, ref.bindName)
         elseif op == OP_EVAL then
             text = string.format("EVAL      %q%s", prog.consts[a] as string,
                 b >= 0 and "  (+data)" or "")
@@ -375,6 +385,7 @@ program.WAIT_QUERY = OP_WAIT_QUERY
 program.PLAY_TWEEN = OP_PLAY_TWEEN
 program.WAIT_TWEEN = OP_WAIT_TWEEN
 program.EVAL = OP_EVAL
+program.AWAIT = OP_AWAIT
 program.STRIDE = STRIDE
 
 program.isEntityRef = isEntityRef

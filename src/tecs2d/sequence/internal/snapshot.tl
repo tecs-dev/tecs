@@ -37,7 +37,8 @@ local DEFAULT_BUDGET <const> = seqcursors.DEFAULT_BUDGET
 --   4: tween playback waits
 --   5: named clocks
 --   6: evaluator working state
-local SNAPSHOT_VERSION <const> = 6
+--   7: awaitable waits
+local SNAPSHOT_VERSION <const> = 7
 
 local record snapshot
     --- The payload layout this build writes and accepts.
@@ -157,6 +158,9 @@ function snapshot.save(world: World): any
                 waitingTween = cursor.waitingTween,
                 awaitedBy = cursor.awaitedBy,
                 channel = cursor.channel,
+                awaitProvider = cursor.awaitProvider,
+                awaitEntity = cursor.awaitEntity,
+                awaitKey = cursor.awaitKey,
                 parentSlot = cursor.parentSlot,
                 parentGeneration = cursor.parentGeneration,
                 joining = cursor.joining,
@@ -240,6 +244,7 @@ function snapshot.load(world: World, value: any)
     state.queryWaiters = {}
     state.dirtyQueries = {}
     state.channelled = {}
+    state.awaitWaiters = {}
     -- The call scratch points at cursors that are about to be replaced.
     state.context = nil
     state.argScratch = {}
@@ -293,6 +298,9 @@ function snapshot.load(world: World, value: any)
                 waitingTween = row.waitingTween as boolean,
                 awaitedBy = row.awaitedBy as integer,
                 channel = row.channel as string,
+                awaitProvider = row.awaitProvider as string,
+                awaitEntity = row.awaitEntity as integer,
+                awaitKey = row.awaitKey as string,
                 parentSlot = row.parentSlot as integer,
                 parentGeneration = row.parentGeneration as integer,
                 joining = row.joining as boolean,
@@ -321,6 +329,10 @@ function snapshot.load(world: World, value: any)
                 -- The world this cursor parked against is gone, so its
                 -- condition is re-tested against the restored one.
                 state.dirtyQueries[cursor.waitQuery] = true
+            elseif cursor.awaitProvider then
+                -- Re-tested at the next step against the restored world,
+                -- which is the only thing that can answer for it.
+                state.awaitWaiters[cursor.slot] = true
             elseif cursor.waitingTween then
                 -- Nothing to rebuild: the playback it waits on carries the
                 -- back reference and wakes it when it ends.
