@@ -6,7 +6,7 @@
 	example-physics example-physics-bench example-shape-bench example-sprite-bench \
 	example-sprite-onloop example-tiled example-transform-demo example-ui example-mesh-demo example-layer-fx \
 	example-camera-target example-material-demo example-camera-multi example-msdf-text example-tween-demo \
-	example-save-game example-interpolation \
+	example-save-game example-interpolation example-sequence \
 	newrock test-rockspec typecheck rebuild help rockspecs docs docs-dev docs-debug \
 	docs-descriptions \
 	json-bench ecs-bench snapshot-bench bitset-bench download-love12 check-love12 \
@@ -383,7 +383,8 @@ EXAMPLE_DIRS := examples/text-bench examples/sprite-collision examples/assets ex
                 examples/ball-bench examples/controller examples/lighting \
                 examples/interpolation examples/orbiting-shapes examples/particles examples/physics \
                 examples/physics-bench examples/shape-bench examples/sprite-bench \
-                examples/camera-target examples/camera-multi examples/tiled examples/transform-demo examples/ui
+                examples/camera-target examples/camera-multi examples/sequence examples/tiled \
+                examples/transform-demo examples/ui
 
 # Type check all examples
 check-examples: build
@@ -491,6 +492,9 @@ example-tween-demo: build $(LOVE12_BIN)
 
 example-save-game: build $(LOVE12_BIN)
 	@cd examples/save-game && $(TEAL_ENV) tl run shared/run.tl
+
+example-sequence: build $(LOVE12_BIN)
+	@cd examples/sequence && $(TEAL_ENV) tl run shared/run.tl
 
 # Create a new example from template
 new-example:
