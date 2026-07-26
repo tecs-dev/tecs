@@ -15,6 +15,7 @@ local sdl = require("tecs2d.ffi.sdl3")
 local net = require("tecs2d.ffi.sdl3net")
 local loader = require("tecs2d.ffi.loader")
 local mcp = require("tecs2d.mcp")
+local sandbox = require("tecs2d.mcp.sandbox")
 
 local C = sdl.C
 local N = net.C
@@ -100,6 +101,69 @@ describe("mcp protocol", function()
 
     it("preserves the request id, including a string one", function()
         assert.are.equal("abc", cjson.decode(rpc("initialize", nil, "abc")).id)
+    end)
+end)
+
+describe("run_lua sandbox", function()
+    before_each(function() sandbox.reset() end)
+
+    it("runs a statement block and a bare expression alike", function()
+        -- An agent types `1 + 1` as often as `return 1 + 1`, and having to
+        -- know which is being parsed is friction with no upside.
+        local block = sandbox.compile("return 1 + 1")
+        assert.are.equal(2, block())
+        local expression = sandbox.compile("2 + 3")
+        assert.are.equal(5, expression())
+    end)
+
+    it("passes the world as the first argument", function()
+        local chunk = sandbox.compile("return world.marker")
+        assert.are.equal("here", chunk({ marker = "here" }))
+    end)
+
+    it("keeps globals between calls", function()
+        -- What makes an exploratory session possible: stash a handle now, read
+        -- it back in the next call.
+        sandbox.compile("stashed = 41")()
+        assert.are.equal(42, sandbox.compile("return stashed + 1")())
+    end)
+
+    it("forgets them on reset", function()
+        sandbox.compile("stashed = 1")()
+        sandbox.reset()
+        assert.is_nil(sandbox.compile("return stashed")())
+    end)
+
+    it("withholds what damages the machine rather than the game", function()
+        -- A guard rail, not a security boundary. An agent exploring a world
+        -- should not delete a file by mistyping a table name.
+        assert.is_nil(sandbox.compile("return io")())
+        assert.is_nil(sandbox.compile("return os.execute")())
+        assert.is_nil(sandbox.compile("return os.remove")())
+        assert.is_nil(sandbox.compile("return dofile")())
+        -- But the things a session actually needs are there.
+        assert.is_not_nil(sandbox.compile("return os.time")())
+        assert.is_not_nil(sandbox.compile("return require")())
+        assert.is_not_nil(sandbox.compile("return math.floor")())
+    end)
+
+    it("reports a syntax error rather than raising", function()
+        local chunk, reason = sandbox.compile("this is not lua")
+        assert.is_nil(chunk)
+        assert.is_string(reason)
+    end)
+
+    it("describes values JSON cannot carry", function()
+        -- Returning a function by accident should answer, not fail the call.
+        assert.are.equal(1, sandbox.describe(1))
+        assert.is_truthy(tostring(sandbox.describe(print)):find("function", 1, true))
+        assert.are.same({ 1, 2, 3 }, sandbox.describe({ 1, 2, 3 }))
+        assert.are.equal("b", sandbox.describe({ a = "b" }).a)
+
+        -- And a cycle terminates instead of hanging.
+        local loop = {}
+        loop.self = loop
+        assert.is_not_nil(sandbox.describe(loop))
     end)
 end)
 

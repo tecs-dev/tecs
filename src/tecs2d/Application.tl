@@ -197,7 +197,7 @@ function Application:_init(): boolean
 
     if config.mcpPort ~= nil then
         local tools = require("tecs2d.mcp.tools")
-        tools.bind(self.renderer)
+        tools.bind(self.renderer, self.world)
         self.mcp = mcp.listen(config.mcpPort)
     end
 

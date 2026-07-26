@@ -10,7 +10,10 @@ local image <const> = require("tecs2d.ffi.sdl3image")
 local capabilities <const> = require("tecs2d.platform.capabilities")
 local paths <const> = require("tecs2d.platform.paths")
 local log <const> = require("tecs2d.log")
+local tecs <const> = require("tecs")
 local mcp <const> = require("tecs2d.mcp")
+local events <const> = require("tecs2d.platform.events")
+local sandbox <const> = require("tecs2d.mcp.sandbox")
 local Renderer <const> = require("tecs2d.Renderer")
 
 local C <const> = sdl.C
@@ -18,13 +21,23 @@ local C <const> = sdl.C
 local record tools
     --- Set by the application so the frame-facing tools have something to
     --- look at. Absent means those tools report why rather than failing.
-    bind: function(renderer: Renderer)
+    bind: function(renderer: Renderer, world: tecs.World)
 end
 
 local bound: Renderer = nil
+local boundWorld: tecs.World = nil
 
-function tools.bind(renderer: Renderer)
+function tools.bind(renderer: Renderer, world: tecs.World)
     bound = renderer
+    boundWorld = world
+end
+
+--- The bound world, or an error naming why there is not one.
+local function world(): tecs.World
+    if boundWorld == nil then
+        error("no world is bound; the application has not started", 0)
+    end
+    return boundWorld
 end
 
 --- The bound renderer, or an error naming why there is not one.
@@ -241,6 +254,104 @@ mcp.register({
         end
 
         return { width = width, height = height, pixels = sampled }
+    end,
+})
+
+--- Pushes a synthetic event into the same stream real input arrives on.
+---
+--- Still available after a crash, deliberately: quit and escape are exactly
+--- what a game that has stopped simulating still needs to be told, and a
+--- window nobody can close is worse than one that is not drawing.
+mcp.register({
+    name = "send_event",
+    description = "Pushes an event into the input stream, as if it had come "
+        .. "from the platform.",
+    destructive = true,
+    whenCrashed = true,
+    inputSchema = {
+        type = "object",
+        properties = {
+            kind = {
+                type = "string",
+                description = "Event kind. Call with no kind to list them.",
+            },
+            scancode = { type = "integer", description = "For keyDown, keyUp." },
+            button = { type = "integer", description = "For mouseDown, mouseUp." },
+            x = { type = "number" },
+            y = { type = "number" },
+            repeated = { type = "boolean", description = "For keyDown." },
+        },
+    },
+    handler = function(args: {string: any}): {string: any}
+        local kind = args.kind as string
+        if kind == nil then
+            return { kinds = events.kinds() }
+        end
+        -- events.push validates the kind against the same table the drain
+        -- decodes with, so an unknown one cannot be pushed and then ignored.
+        events.push(kind, {
+            scancode = args.scancode as integer,
+            button = args.button as integer,
+            x = args.x as number,
+            y = args.y as number,
+            repeated = args.repeated as boolean,
+        } as events.Event)
+        return { pushed = kind }
+    end,
+})
+
+--- Runs Lua in the game, with the world in scope.
+---
+--- Synchronous, because tools are answered inside the frame before the world
+--- updates. The engine this replaces had to queue the code and answer a frame
+--- later, keeping the client socket open in between; there is nothing to defer
+--- here, so there is no deferral machinery.
+mcp.register({
+    name = "run_lua",
+    description = "Runs Lua with `world` in scope. Returns an envelope "
+        .. "{returned, values}. State persists between calls, so a handle "
+        .. "stashed in a global is there next time. Prefer a structured tool "
+        .. "where one covers the operation.",
+    destructive = true,
+    inputSchema = {
+        type = "object",
+        properties = {
+            code = {
+                type = "string",
+                description = "Lua to run. A bare expression is returned.",
+            },
+        },
+        required = { "code" },
+    },
+    handler = function(args: {string: any}): {string: any}
+        local code = args.code as string
+        if code == nil or code == "" then
+            error("code is required", 0)
+        end
+
+        local chunk, reason = sandbox.compile(code)
+        if chunk == nil then
+            error("does not compile: " .. tostring(reason), 0)
+        end
+
+        -- Counted through select rather than table.pack, which LuaJIT does
+        -- not have: it is 5.1, while the type checker describes 5.4. A
+        -- returning nil has to be distinguishable from returning nothing.
+        local function collect(ok: boolean, ...: any): integer, {any}
+            if not ok then error(tostring((...)), 0) end
+            local count = select("#", ...)
+            local values: {any} = {}
+            for index = 1, count do
+                values[index] = sandbox.describe((select(index, ...)))
+            end
+            return count, values
+        end
+
+        local count, values = collect(pcall(chunk, world()))
+        return {
+            returned = count,
+            values = count > 0 and values or cjson.empty_array,
+        }
     end,
 })
 
