@@ -395,6 +395,56 @@ tooling exercises the engine it ships with.
 It is nearly true already. The blockers are that the host always creates a
 window and there is no non-application entry point.
 
+### Logging: SDL_Log, and nothing else
+
+`logging.tl` and `logtap.tl` both go, 318 lines, and nothing replaces them. No
+timestamp cache, no sinks, no prefixes, no level options, no ring buffer.
+
+The reason is not that SDL writes to stderr. It is that SDL's default output
+function is a per-platform destination:
+
+```
+ Windows   OutputDebugString, plus console with attach handling
+ Android   __android_log_write, so logcat with a tag
+ Apple     SDL_NSLog
+ other     fprintf to stderr
+```
+
+Writing to stderr from Lua on Android reaches nobody.
+
+`SDL_LogMessageV` checks the priority before it formats, and renders into a
+stack buffer that only mallocs on overflow, so a filtered message costs nothing
+and an emitted one allocates nothing. `SDL_GetLogPriority` bypasses the mutex
+for known categories and is a plain array read; the lock guards the output
+dispatch, which happens after the filter. Formatting in Lua and passing `"%s"`
+would throw all of that away and allocate a collectable string per call, so the
+guard goes outside:
+
+```lua
+if C.SDL_GetLogPriority(category) <= INFO then
+    C.SDL_LogMessage(category, INFO, "%s", fmt:format(...))
+end
+```
+
+Disabled, that is a load and a compare after LuaJIT inlines the call. Enabled,
+SDL formats and dispatches.
+
+Logger names map onto `SDL_LOG_CATEGORY_CUSTOM + n`. `SDL_GetLogPriority` is
+then the only source of truth, so `SDL_SetLogPriority` works without anything
+mirroring it, and per-subsystem verbosity becomes a debugger command with no
+state to keep in sync. SDL's own diagnostics, GPU errors and driver selection
+and audio device problems, arrive in the same stream with no tee.
+
+What is lost: timestamps on desktop stderr. logcat and os_log stamp for us.
+
+A log file is the one thing SDL has no sink for. If one is wanted, it is a small
+C output function that writes the line and then delegates to
+`SDL_GetDefaultLogOutputFunction()`. It lives in C rather than Lua because SDL
+logs from its own audio and async IO threads, and an FFI callback from a thread
+the VM did not create is the unsafe pattern behind the unexplained worker crash
+in section 9. With a file, `get_logs` returns its path, mirroring how
+`cmd_screenshot` already prefers an artifact over inline base64.
+
 ### Not included
 
 Crypto beyond hashing, an image codec beyond SDL_image, a regular expression
