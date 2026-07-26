@@ -98,6 +98,33 @@ tecs.newFFIComponent({
     defaults = { 0, 0, 0, 1, 1 },
 })
 
+--- How a renderable's quad is shaded.
+---
+--- Absent means a textured quad, which is what a Sprite produces and what an
+--- untextured entity gets by sampling the white layer. Present means the
+--- fragment shader evaluates a distance field over the quad instead, so a
+--- circle stays a circle at any scale rather than becoming a texture that
+--- pixelates. One instance format either way: the batch, the cull and the draw
+--- do not know the difference, which is what keeps the whole scene one draw.
+local record Shape is Component
+    --- 1 circle, 2 rounded rectangle. Zero is the textured quad and is what
+    --- absence already means, so it is not spelled here.
+    kind: number
+    --- Corner radius for a rounded rectangle, in local units where the quad
+    --- spans one. Ignored by a circle.
+    radius: number
+end
+
+tecs.newFFIComponent({
+    name = "Shape",
+    container = Shape,
+    fields = {
+        { "kind", "int32_t" },
+        { "radius", "float" },
+    },
+    defaults = { 1, 0.25 },
+})
+
 --- Marks an entity as contributing geometry. Without it a Transform2D is just
 --- a position, which is what most entities in a world actually are.
 local record Renderable is Component end
@@ -111,6 +138,7 @@ local record components
     Transform2D: Transform2D
     Tint: Tint
     Sprite: Sprite
+    Shape: Shape
     PointLight: PointLight
     Renderable: Renderable
 end
@@ -118,6 +146,7 @@ end
 components.Transform2D = Transform2D
 components.Tint = Tint
 components.Sprite = Sprite
+components.Shape = Shape
 components.PointLight = PointLight
 components.Renderable = Renderable
 

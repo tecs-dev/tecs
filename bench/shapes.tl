@@ -24,10 +24,11 @@ local tecs2d <const> = require("tecs2d")
 local Transform2D <const> = tecs2d.components.Transform2D
 local Tint <const> = tecs2d.components.Tint
 local Renderable <const> = tecs2d.components.Renderable
+local Shape <const> = tecs2d.components.Shape
 
---- Shapes of each kind. The reference bench spawns this many circles and this
---- many rectangles; everything here is a quad, which is noted in the report
---- because it is the one part of the scene that is not equivalent.
+--- Shapes of each kind: this many circles and this many rectangles, matching
+--- the reference bench. Both are the same quad with the same instance format;
+--- only the material the fragment shader evaluates differs.
 local PER_KIND <const> = math.floor(tonumber(os.getenv("BENCH_SHAPES")) or 100000)
 local COUNT <const> = PER_KIND * 2
 
@@ -54,13 +55,21 @@ local function spawnField(world: tecs.World)
     -- same on every run for the numbers to be comparable between them.
     local golden <const> = 2.39996
 
-    world:batchSpawn(COUNT, { Transform2D, Tint, Renderable },
+    -- Circles and rectangles are separate spawns, so each lands in its own
+    -- archetype and stays contiguous. That is also what keeps the fragment
+    -- shader's material branch coherent across a warp.
+    local function fill(kind: number, radius: number)
+        world:batchSpawn(PER_KIND, { Transform2D, Tint, Shape, Renderable },
         function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer)
             -- batchSpawn skips FFI defaults, so every field is written here.
             local transforms = archetype:getMut(Transform2D)
             local tints = archetype:getMut(Tint)
+            local shapes = archetype:getMut(Shape)
 
             for row = firstRow, lastRow do
+                local shape = shapes[row]
+                shape.kind = kind
+                shape.radius = radius
                 local index = row - firstRow
                 local angle = index * golden
                 local u = (index % 977) / 977.0
@@ -80,6 +89,10 @@ local function spawnField(world: tecs.World)
                 tint.a = 1.0
             end
         end)
+    end
+
+    fill(1, 0.0)     -- circles
+    fill(2, 0.25)    -- rounded rectangles
 end
 
 --- Sorts a copy and reads a percentile out of it.
@@ -129,8 +142,8 @@ return tecs2d.application({
             end,
         })
 
-        print(("shapes: %d quads over %.0fx%.0f, viewport %dx%d, mode %s")
-            :format(COUNT, AREA_W, AREA_H, WIDTH, HEIGHT, MODE))
+        print(("shapes: %d circles + %d rects over %.0fx%.0f, viewport %dx%d, mode %s")
+            :format(PER_KIND, PER_KIND, AREA_W, AREA_H, WIDTH, HEIGHT, MODE))
     end,
 
     update = function(app: tecs2d.Application, dt: number)

@@ -470,4 +470,60 @@ describe("ecs.Renderer", function()
         assert.are.equal(6, renderer.dropped)
         renderer:destroy()
     end)
+
+    -- Shapes are a fragment-side material on the same quad, same instance
+    -- format, same batch. What must be true is that the silhouette is the
+    -- shape and not the quad, which only a corner sample can tell you.
+    it("renders a circle as a circle, not as its quad", function()
+        local world, renderer = newScene()
+        world:spawn(
+            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE, SIZE),
+            Tint(1.0, 0.0, 0.0, 1.0),
+            components.Shape(1, 0),
+            Renderable()
+        )
+
+        local pixels = frameOnce(world, renderer)
+        local centre = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
+        local corner = screen:getPixel(pixels, 2, 2)
+
+        assert.are.equal(255, centre.r, "the middle of the circle is filled")
+        assert.are.equal(0, corner.r,
+            "the quad's corner falls outside the circle and must be rejected")
+        renderer:destroy()
+    end)
+
+    it("keeps a textured quad square when no Shape is present", function()
+        -- The default path must be untouched: absence of Shape means the whole
+        -- quad draws, corners included.
+        local world, renderer = newScene()
+        world:spawn(
+            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE, SIZE),
+            Tint(0.0, 1.0, 0.0, 1.0),
+            Renderable()
+        )
+
+        local pixels = frameOnce(world, renderer)
+        local corner = screen:getPixel(pixels, 2, 2)
+        assert.are.equal(255, corner.g, "a quad covers its own corners")
+        renderer:destroy()
+    end)
+
+    it("rounds a rectangle's corners by its radius", function()
+        local world, renderer = newScene()
+        world:spawn(
+            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE, SIZE),
+            Tint(0.0, 0.0, 1.0, 1.0),
+            -- Radius is a ratio of the quad, so half of it is a circle.
+            components.Shape(2, 0.5),
+            Renderable()
+        )
+
+        local pixels = frameOnce(world, renderer)
+        assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, SIZE / 2).b)
+        assert.are.equal(0, screen:getPixel(pixels, 2, 2).b,
+            "a fully rounded rectangle rejects its corners like a circle")
+        renderer:destroy()
+    end)
+
 end)

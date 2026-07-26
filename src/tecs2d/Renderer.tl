@@ -144,6 +144,7 @@ local function writeRun(self: Renderer, archetype: tecs.Archetype,
     local transforms = archetype:get(components.Transform2D)
     local tints = archetype:get(components.Tint)
     local sprites = archetype:get(components.Sprite)
+    local shapes = archetype:get(components.Shape)
 
     for row = 1, length do
         local transform = transforms[row]
@@ -156,6 +157,15 @@ local function writeRun(self: Renderer, archetype: tecs.Archetype,
             local sprite = sprites[row]
             layer = sprite.slot
             u0, v0, u1, v1 = sprite.u0, sprite.v0, sprite.u1, sprite.v1
+        end
+
+        -- Material and parameter share one float: the integer part selects and
+        -- the fraction carries the parameter, which is a ratio in 0..1 for
+        -- every material that has one. Keeps the instance at four vec4s.
+        local material = 0.0
+        if shapes ~= nil then
+            local shape = shapes[row]
+            material = shape.kind + math.min(math.max(shape.radius, 0.0), 0.999)
         end
 
         local angle = transform.rotation
@@ -173,7 +183,7 @@ local function writeRun(self: Renderer, archetype: tecs.Archetype,
         floats[base + 4] = transform.x
         floats[base + 5] = transform.y
         floats[base + 6] = layer
-        floats[base + 7] = 0.0
+        floats[base + 7] = material
 
         floats[base + 8] = tint.r
         floats[base + 9] = tint.g
@@ -248,6 +258,7 @@ local function syncInstances(self: Renderer): integer, integer, integer
             or archetype:isComponentDirty(components.Transform2D)
             or archetype:isComponentDirty(components.Tint)
             or archetype:isComponentDirty(components.Sprite)
+            or archetype:isComponentDirty(components.Shape)
 
         if dirty then
             writeRun(self, archetype, length, offset)
