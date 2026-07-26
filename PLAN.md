@@ -283,10 +283,37 @@ This splits asset loading three ways, and only one part needs a thread:
 The current asset path puts the read on a worker too, which is work SDL already
 does better with io_uring, IOCP, or whatever the platform provides.
 
-One caveat that keeps this behind the seam: `SDL_Storage`'s read functions are
-synchronous, and the container becomes ready asynchronously instead. So the
-async file path is `SDL_AsyncIO` where content is a filesystem, and Storage
-where it is not. Both live behind the same handle-based asset API.
+### Storage and async IO are not alternatives
+
+They answer different questions. AsyncIO answers when the bytes arrive. Storage
+answers which namespace is being read and whether it is available yet.
+
+The friction is that Storage is closed: `SDL_ReadStorageFile` never yields a
+path, so nothing can be handed to AsyncIO. That is a real fork, so split it by
+use case rather than by platform:
+
+```
+ assets     read, hot, streaming    AsyncIO
+ save data  write, cold, once       Storage
+```
+
+Assets take AsyncIO, for native async with no worker. Where a target has no
+filesystem, a Storage-backed implementation does the read on a worker instead,
+and the synchronous read stops mattering once it is off the main thread. That
+substitution is only cheap because assets are handles and game code never sees a
+path, which is the rule in section 6.
+
+Save data takes Storage now, because saving is infrequent and two things there
+have no AsyncIO equivalent. `SDL_StorageReady` models storage that is not
+mounted at boot, which happens on a console before a profile is chosen, and is
+polled in a phase rather than spun on as the header's example does.
+`SDL_GetStorageSpaceRemaining` is what certification generally requires before a
+write.
+
+`SDL_OpenStorage` also takes an `SDL_StorageInterface`, twelve function pointers
+covering read, write, enumerate, info, mkdir, remove, rename, copy, space and
+ready. A licensed port implements those and nothing above changes, so Storage is
+a better seam for content than anything hand-rolled here.
 
 ### JSON: take lua-cjson, delete ours
 
