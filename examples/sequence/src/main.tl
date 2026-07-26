@@ -298,7 +298,10 @@ local function plugin(world: tecs.World)
                         sequence.resume(world, encounter)
                         status = "Resumed."
                     elseif sequence.pause(world, encounter) then
-                        status = "Paused. Its tweens and branches paused too."
+                        -- Branches pause with it; a tween it started does
+                        -- not, since tween pausing selects by channel or
+                        -- preset rather than by playback.
+                        status = "Paused (branches too; running tweens keep going)."
                     end
                 end
             end
