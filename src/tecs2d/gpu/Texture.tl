@@ -91,6 +91,52 @@ function Texture.create(device: loader.CPtr, options: TextureOptions): Texture
     return self
 end
 
+--- Uploads tightly packed RGBA pixels into the texture.
+---
+--- Submits its own command buffer, so this is a load-time path. It exists
+--- because an asset arrives once, not once per frame.
+function Texture:upload(pixels: loader.CValue, byteCount: integer)
+    local info = loader.newArray("SDL_GPUTransferBufferCreateInfo[1]")
+    local settings = info[0] as loader.CStruct
+    settings.usage = C.SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD
+    settings.size = byteCount
+    settings.props = 0
+
+    local transfer = C.SDL_CreateGPUTransferBuffer(self._device, info)
+    if transfer == nil then sdl.fail("SDL_CreateGPUTransferBuffer") end
+
+    local mapped = C.SDL_MapGPUTransferBuffer(self._device, transfer, true)
+    if mapped == nil then sdl.fail("SDL_MapGPUTransferBuffer") end
+    loader.copyBytes(mapped as loader.CArray, pixels, byteCount)
+    C.SDL_UnmapGPUTransferBuffer(self._device, transfer)
+
+    local commandBuffer = C.SDL_AcquireGPUCommandBuffer(self._device)
+    if commandBuffer == nil then sdl.fail("SDL_AcquireGPUCommandBuffer") end
+    local copyPass = C.SDL_BeginGPUCopyPass(commandBuffer)
+
+    local source = loader.newArray("SDL_GPUTextureTransferInfo[1]")
+    local from = source[0] as loader.CStruct
+    from.transfer_buffer = transfer
+    from.offset = 0
+    from.pixels_per_row = self.width
+    from.rows_per_layer = self.height
+
+    local region = loader.newArray("SDL_GPUTextureRegion[1]")
+    local to = region[0] as loader.CStruct
+    to.texture = self.handle
+    to.mip_level = 0
+    to.layer = 0
+    to.x, to.y, to.z = 0, 0, 0
+    to.w, to.h, to.d = self.width, self.height, 1
+
+    C.SDL_UploadToGPUTexture(copyPass, source, region, false)
+    C.SDL_EndGPUCopyPass(copyPass)
+    sdl.check(C.SDL_SubmitGPUCommandBuffer(commandBuffer) as boolean,
+        "SDL_SubmitGPUCommandBuffer")
+
+    C.SDL_ReleaseGPUTransferBuffer(self._device, transfer)
+end
+
 --- Copies the texture into a mapped transfer buffer and returns the pixels.
 ---
 --- Blocks until the GPU has finished, so this is a diagnostic and test path,

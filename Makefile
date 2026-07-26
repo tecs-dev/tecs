@@ -9,12 +9,14 @@ SDL3_PREFIX    ?= $(shell brew --prefix sdl3)
 BOX2D_PREFIX   ?= $(shell brew --prefix box2d)
 SHADERC_PREFIX ?= $(shell brew --prefix shaderc)
 SPVC_PREFIX    ?= $(shell brew --prefix spirv-cross)
+IMAGE_PREFIX   ?= $(shell brew --prefix sdl3_image)
 LUAJIT_PREFIX  ?= $(shell brew --prefix luajit)
 else
 SDL3_PREFIX    ?= /usr/local
 BOX2D_PREFIX   ?= /usr/local
 SHADERC_PREFIX ?= /usr/local
 SPVC_PREFIX    ?= /usr/local
+IMAGE_PREFIX   ?= /usr/local
 LUAJIT_PREFIX  ?= /usr/local
 endif
 
@@ -41,7 +43,7 @@ endif
 endif
 
 SOURCE_TL := $(shell find src -name '*.tl' 2>/dev/null)
-CDEFS     := $(GEN)/sdl3cdef.lua $(GEN)/box2dcdef.lua $(GEN)/shaderccdef.lua $(GEN)/spvccdef.lua $(GEN)/workercdef.lua
+CDEFS     := $(GEN)/sdl3cdef.lua $(GEN)/box2dcdef.lua $(GEN)/shaderccdef.lua $(GEN)/spvccdef.lua $(GEN)/workercdef.lua $(GEN)/sdl3imagecdef.lua
 CONSTS    := $(GEN)/sdl3const.lua $(GEN)/box2dconst.lua $(GEN)/shadercconst.lua $(GEN)/spvcconst.lua
 SPVC_LIB  := $(BUILD)/lib/libspirvcrossc.dylib
 WORKER_LIB := $(BUILD)/lib/libtecs2dworker.dylib
@@ -50,6 +52,7 @@ export TECS2D_SDL3_PATH    := $(SDL3_PREFIX)/lib/libSDL3.dylib
 export TECS2D_BOX2D_PATH   := $(BOX2D_PREFIX)/lib/libbox2d.dylib
 export TECS2D_SHADERC_PATH := $(SHADERC_PREFIX)/lib/libshaderc_shared.dylib
 export TECS2D_SPVC_PATH     := $(CURDIR)/$(SPVC_LIB)
+export TECS2D_SDL3IMAGE_PATH := $(IMAGE_PREFIX)/lib/libSDL3_image.dylib
 
 .PHONY: help all cdef host build run clean rebuild check abi-check deps test worker spvc
 
@@ -60,9 +63,9 @@ help: ## List targets
 all: cdef spvc worker build host ## Generate cdefs, link deps, compile Teal, build the host
 
 deps: ## Install native dependencies (macOS/Homebrew)
-	brew install sdl3 box2d shaderc spirv-cross luajit
+	brew install sdl3 sdl3_image box2d shaderc spirv-cross luajit
 
-cdef: $(GEN)/.sdl3.stamp $(GEN)/.box2d.stamp $(GEN)/.shaderc.stamp $(GEN)/.spvc.stamp $(GEN)/.worker.stamp ## Regenerate FFI cdefs from installed headers
+cdef: $(GEN)/.sdl3.stamp $(GEN)/.box2d.stamp $(GEN)/.shaderc.stamp $(GEN)/.spvc.stamp $(GEN)/.worker.stamp $(GEN)/.sdl3image.stamp ## Regenerate FFI cdefs from installed headers
 
 # Each generator run emits both a cdef and a constants table. macOS ships GNU
 # Make 3.81, which has no grouped-target syntax, so a stamp file stands in for
@@ -112,6 +115,14 @@ $(SPVC_LIB): $(SPVC_PREFIX)/lib/libspirv-cross-c.a
 
 # Worker threads must bootstrap natively: a LuaJIT FFI callback invoked from
 # a thread the VM did not create is unsafe, so a thread entry cannot be Lua.
+$(GEN)/.sdl3image.stamp: $(IMAGE_PREFIX)/include/SDL3_image/SDL_image.h scripts/gencdef.py
+	@python3 scripts/gencdef.py \
+	  --header SDL3_image/SDL_image.h \
+	  --include $(IMAGE_PREFIX)/include --include $(SDL3_PREFIX)/include \
+	  --keep /SDL3_image/ --define-prefix IMG_ \
+	  --defines-out $(GEN)/sdl3imageconst.lua --out $(GEN)/sdl3imagecdef.lua
+	@touch $@
+
 $(GEN)/.worker.stamp: native/worker.h scripts/gencdef.py
 	@python3 scripts/gencdef.py \
 	  --header worker.h --include $(CURDIR)/native \

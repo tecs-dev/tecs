@@ -27,11 +27,33 @@ Working today:
 - Physics in the world: a RigidBody component holding a Box2D handle, stepped
   in FixedUpdate and synced back to Transform2D
 - Input in three tiers behind a layer stack, latched for fixed steps
+- Worker threads with serialized channels, and asset loading that decodes on
+  one and uploads on the main thread
 - Box2D 3 simulation with value-typed body handles
 - Frame pacing from the swapchain, with no sleep heuristic
 
 Not built yet: shadows, post-processing, audio, workers, assets, and the MCP
 surface.
+
+## Workers and assets
+
+Workers are the only sanctioned way to run work off the main thread. Raw
+thread creation stays unexposed: a LuaJIT FFI callback invoked from a thread
+the VM did not create is unsafe, and a thread entry written in Lua is exactly
+that mistake. The native side starts a thread with a fresh `lua_State` and
+moves opaque byte blocks between queues; it never learns what a message
+contains, because serialization stays in Lua.
+
+That boundary is not a style choice. LuaJIT has no shared mutable heap across
+threads, so a worker cannot see the spawning state's objects at all. What
+crosses is what `string.buffer` encodes.
+
+Asset loading rides on that. Decoding a PNG is milliseconds of pure CPU work
+with no GPU involvement, so it happens on a worker and the main thread only
+uploads. The worker returns the *address* of a decoded surface rather than its
+pixels: surfaces live in process memory, so the pointer is valid in either
+state, and passing it avoids copying an image through a serialized message
+only to copy it again into staging. Ownership transfers with the address.
 
 ## Input
 
