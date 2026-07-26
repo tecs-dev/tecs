@@ -1458,6 +1458,113 @@ describe("tecs2d.sequence", function()
         end)
     end)
 
+    describe("programs as data", function()
+        local order: {string}
+
+        before_each(function()
+            order = {}
+            sequence.registerAction(world, "spec.mark", function(_w, ctx)
+                order[#order + 1] = tostring(ctx.args[1])
+            end)
+        end)
+
+        it("builds the same program a node list would", function()
+            local prog = sequence.defineData(uniqueName(), {
+                {op = "call", action = "spec.mark", args = {"a"}},
+                {op = "waitSteps", steps = 2},
+                {op = "call", action = "spec.mark", args = {"b"}},
+            })
+            luassert.is_not_nil(prog)
+            sequence.play(world, prog)
+
+            stepWorld(world, 1)
+            luassert.same({"a"}, order)
+            stepWorld(world, 2)
+            luassert.same({"a", "b"}, order)
+        end)
+
+        it("carries every control-flow step", function()
+            local prog = sequence.defineData(uniqueName(), {
+                {op = "parallel", blocks = {
+                    {{op = "waitSteps", steps = 1}, {op = "call", action = "spec.mark", args = {"x"}}},
+                    {{op = "call", action = "spec.mark", args = {"y"}}},
+                }},
+                {op = "loop", count = 2, nodes = {
+                    {op = "call", action = "spec.mark", args = {"loop"}},
+                    {op = "waitSteps", steps = 1},
+                }},
+                {op = "emit", event = "spec.done"},
+            })
+            luassert.is_not_nil(prog)
+            sequence.play(world, prog)
+
+            stepWorld(world, 6)
+            luassert.same({"y", "x", "loop", "loop"}, order)
+        end)
+
+        it("rebuilds a binding reference", function()
+            local seen: any = nil
+            local target = world:spawn()
+            sequence.registerAction(world, "spec.look", function(_w, ctx)
+                seen = ctx.args[1]
+            end)
+            local prog = sequence.defineData(uniqueName(), {
+                {op = "call", action = "spec.look", args = {{bind = "boss"}}},
+            })
+            sequence.play(world, prog, {bindings = {boss = target}})
+
+            stepWorld(world, 1)
+            luassert.equals(target, seen)
+        end)
+
+        it("takes the clock like define does", function()
+            local prog = sequence.defineData(uniqueName(),
+                {{op = "waitSteps", steps = 1}, {op = "call", action = "spec.mark", args = {"f"}}},
+                {clock = "frame"})
+            sequence.play(world, prog)
+
+            local timestep = world:getFixedTiming()
+            world:update(timestep * 4)
+            luassert.same({}, order, "one update is one frame")
+            world:update(timestep)
+            luassert.same({"f"}, order)
+        end)
+
+        it("reports the path to a bad entry rather than raising", function()
+            local prog, err = sequence.defineData(uniqueName(), {
+                {op = "call", action = "spec.mark"},
+                {op = "nonsense"},
+            })
+            luassert.is_nil(prog)
+            luassert.is_truthy(err:find("program[2]", 1, true), err)
+            luassert.is_truthy(err:find("unknown op", 1, true), err)
+
+            local nested, nestedErr = sequence.defineData(uniqueName(), {
+                {op = "parallel", blocks = {
+                    {{op = "call", action = "spec.mark"}},
+                    {{op = "wait"}},
+                }},
+            })
+            luassert.is_nil(nested)
+            luassert.is_truthy(nestedErr:find("blocks[2]", 1, true), nestedErr)
+        end)
+
+        it("rejects an empty program and a missing field", function()
+            luassert.is_nil(sequence.defineData(uniqueName(), {}))
+            luassert.is_nil(sequence.defineData(uniqueName(), {{op = "call"}}))
+            luassert.is_nil(sequence.defineData(uniqueName(),
+                {{op = "waitQuery", query = "q", condition = "sometimes"}}))
+        end)
+
+        it("names the steps it accepts", function()
+            local ops = sequence.dataOps()
+            luassert.is_true(#ops > 5)
+            local seen: {string: boolean} = {}
+            for i = 1, #ops do seen[ops[i]] = true end
+            luassert.is_true(seen.call and seen.wait and seen.parallel and seen.playTween)
+        end)
+    end)
+
     describe("upcoming", function()
         before_each(function()
             sequence.registerAction(world, "spec.noop", function() end)

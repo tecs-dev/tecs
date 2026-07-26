@@ -29,6 +29,7 @@ local tween <const> = require("tecs2d.tween")
 local seqsnapshot <const> = require("tecs2d.sequence.internal.snapshot")
 local seqvm <const> = require("tecs2d.sequence.internal.vm")
 local seqcursors <const> = require("tecs2d.sequence.internal.cursors")
+local seqjson <const> = require("tecs2d.sequence.internal.json")
 
 local type World = tecs.World
 
@@ -100,6 +101,21 @@ local record sequence
     ---------------------------------------------------------------------------
     -- Authoring
     ---------------------------------------------------------------------------
+
+    --- Compile a program written as plain data rather than node calls.
+    ---
+    --- The same authoring surface as a list of steps, for callers that
+    --- cannot invoke Lua: a tool over MCP, a file on disk, a hand-written
+    --- table. Returns nil plus the path to the first bad entry.
+    ---
+    ---     sequence.defineData("game.intro", {
+    ---         {op = "call", action = "game.lockControls"},
+    ---         {op = "wait", seconds = 1.5},
+    ---     })
+    defineData: function(name: string, rows: {any}, options?: DefineOptions): Program, string
+
+    --- The step names `defineData` accepts, sorted.
+    dataOps: function(): {string}
 
     --- Compile a program under a stable symbolic name.
     ---
@@ -450,6 +466,20 @@ function sequence.define(
     local prog = seqprogram.compile(name, seqregistry.nextVersion(name), clock, nodes)
     seqregistry.publish(prog)
     return prog
+end
+
+function sequence.defineData(
+    name: string,
+    rows: {any},
+    options?: sequence.DefineOptions
+): sequence.Program, string
+    local nodes, err = seqjson.decode(sequence as seqjson.Builders, rows)
+    if not nodes then return nil, err end
+    return sequence.define(name, nodes, options)
+end
+
+function sequence.dataOps(): {string}
+    return seqjson.ops()
 end
 
 function sequence.program(name: string, version?: integer): sequence.Program
