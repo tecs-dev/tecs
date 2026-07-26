@@ -3,6 +3,7 @@ require("busted")
 local luassert <const> = require("luassert")
 local tecs <const> = require("tecs")
 local sequence <const> = require("tecs2d.sequence")
+local tween <const> = require("tecs2d.tween")
 
 -- Programs are process-global and keyed by name, so every test uses a unique
 -- name to keep versions from leaking between cases.
@@ -920,6 +921,137 @@ describe("tecs2d.sequence", function()
 
             luassert.equals(0, calls)
             luassert.equals("cancelled", sequence.status(world, handle).state)
+        end)
+    end)
+
+    describe("tweens", function()
+        local Transform <const> = tecs.builtins.Transform
+        local calls: integer
+        local actor: integer
+
+        before_each(function()
+            world:addPlugin(tween.plugin)
+            calls = 0
+            actor = world:spawn(Transform(0, 0))
+            world:commit()
+            sequence.registerAction(world, "spec.done", function() calls = calls + 1 end)
+            tween.registerPreset(world, "spec.slide", tween.timeline({
+                tween.to(0.5, tween.linear, tween.translateX, 100),
+            }))
+            local channelled: tween.TimelineSpec = {
+                tween.to(0.5, tween.linear, tween.translateY, 100),
+            }
+            channelled.channel = "move"
+            tween.registerPreset(world, "spec.channelled", tween.timeline(channelled))
+        end)
+
+        local function playAndWait(preset: string): sequence.Handle
+            local prog = sequence.define(uniqueName(), {
+                sequence.playTween(preset, sequence.bind("actor")),
+                sequence.waitTween(),
+                sequence.call("spec.done"),
+            })
+            return sequence.play(world, prog, {bindings = {actor = actor}})
+        end
+
+        it("rejects a malformed step", function()
+            luassert.has_error(function()
+                sequence.playTween("", sequence.bind("actor"))
+            end)
+            luassert.has_error(function()
+                sequence.playTween("spec.slide", "actor" as sequence.EntityRef)
+            end)
+        end)
+
+        it("waits for the playback it started", function()
+            local handle = playAndWait("spec.slide")
+
+            stepWorld(world, 2)
+            luassert.equals(0, calls, "the tween is still running")
+            luassert.is_number(sequence.status(world, handle).waitingTween)
+
+            stepWorld(world, 60)
+            luassert.equals(1, calls)
+            luassert.equals("completed", sequence.status(world, handle).tweenOutcome)
+            luassert.is_near(100, world:get(actor, Transform).x, 1e-1)
+        end)
+
+        it("resumes when the playback is cancelled", function()
+            local handle = playAndWait("spec.slide")
+            stepWorld(world, 2)
+
+            tween.cancel(world, actor)
+            stepWorld(world, 2)
+            luassert.equals(1, calls, "a cancelled tween must not leave the sequence waiting")
+            luassert.equals("cancelled", sequence.status(world, handle).tweenOutcome)
+        end)
+
+        it("resumes when another playback takes its channel", function()
+            local handle = playAndWait("spec.channelled")
+            stepWorld(world, 2)
+
+            tween.play(world, actor, "spec.channelled")
+            stepWorld(world, 2)
+            luassert.equals(1, calls)
+            luassert.equals("replaced", sequence.status(world, handle).tweenOutcome)
+        end)
+
+        it("resumes when the bound entity dies", function()
+            local handle = playAndWait("spec.slide")
+            stepWorld(world, 2)
+
+            world:despawn(actor)
+            world:commit()
+            stepWorld(world, 2)
+            luassert.equals(1, calls)
+            luassert.equals("targetLost", sequence.status(world, handle).tweenOutcome)
+        end)
+
+        it("does not wait at all when the binding is already gone", function()
+            world:despawn(actor)
+            world:commit()
+            local handle = playAndWait("spec.slide")
+
+            stepWorld(world, 1)
+            luassert.equals(1, calls, "a dead actor is a game state, not a wait")
+            luassert.equals("targetLost", sequence.status(world, handle).tweenOutcome)
+        end)
+
+        it("faults on an unregistered preset", function()
+            local handle = playAndWait("spec.neverRegistered")
+
+            stepWorld(world, 1)
+            local status = sequence.status(world, handle)
+            luassert.equals("faulted", status.state)
+            luassert.equals("unregisteredTween", status.fault)
+        end)
+
+        it("resumes the same wait after a snapshot", function()
+            local handle = playAndWait("spec.slide")
+            stepWorld(world, 2)
+            local pc = sequence.status(world, handle).pc
+
+            local saved = world:saveSnapshot().buffer
+            world:loadSnapshot(saved)
+
+            local status = sequence.status(world, handle)
+            luassert.equals(pc, status.pc, "the restored cursor sits where it was")
+            luassert.is_number(status.waitingTween)
+
+            stepWorld(world, 60)
+            luassert.equals(1, calls)
+            luassert.equals("completed", sequence.status(world, handle).tweenOutcome)
+        end)
+
+        it("renders tween steps in a disassembly", function()
+            local prog = sequence.define(uniqueName(), {
+                sequence.playTween("spec.slide", sequence.bind("actor")),
+                sequence.waitTween(),
+            })
+            local text = sequence.disassemble(prog)
+            luassert.is_truthy(text:find("PLAYTWEEN", 1, true))
+            luassert.is_truthy(text:find("WAITTWEEN", 1, true))
+            luassert.is_truthy(text:find("bind(actor)", 1, true))
         end)
     end)
 

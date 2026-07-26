@@ -23,6 +23,7 @@
 
 local tecs <const> = require("tecs")
 local logging <const> = require("tecs.utils.logging")
+local tween <const> = require("tecs2d.tween")
 
 local type World = tecs.World
 
@@ -42,7 +43,8 @@ local DEFAULT_BUDGET <const> = 512
 --   1: cursor, program, and signal state
 --   2: branch tree (parent link and join state)
 --   3: query waits
-local SNAPSHOT_VERSION <const> = 3
+--   4: tween playback waits
+local SNAPSHOT_VERSION <const> = 4
 
 -- Instruction opcodes. Code is a flat array with stride 3: (op, a, b).
 local OP_WAIT <const> = 1     -- a = const index holding seconds, or -1
@@ -60,6 +62,9 @@ local OP_FORK <const> = 7     -- a = first pc of the branch body
 local OP_JOIN <const> = 8
 local OP_WAIT_QUERY <const> = 9   -- a = const index of query name
                                   -- b = 1 to wait for a match, 0 for none
+local OP_PLAY_TWEEN <const> = 10  -- a = const index of preset name
+                                  -- b = const index of {bind, options}
+local OP_WAIT_TWEEN <const> = 11
 
 local STRIDE <const> = 3
 
@@ -75,6 +80,20 @@ local enum FaultReason
     "branchFaulted"
     --- A `waitQuery` named a query that is not registered on this world.
     "unregisteredQuery"
+    --- A `playTween` named a preset that is not registered on this world.
+    "unregisteredTween"
+end
+
+--- How the tween a `waitTween` step was waiting on ended.
+local enum TweenOutcome
+    --- It played to the end.
+    "completed"
+    --- `tween.cancel` matched it.
+    "cancelled"
+    --- Another playback took over its channel.
+    "replaced"
+    --- Its entity died, was never bound, or lost its playback component.
+    "targetLost"
 end
 
 --- What a `waitQuery` step is waiting for.
@@ -107,6 +126,9 @@ local record sequence
 
     --- What a `waitQuery` step is waiting for.
     type QueryCondition = QueryCondition
+
+    --- How the tween a `waitTween` step was waiting on ended.
+    type TweenOutcome = TweenOutcome
 
     --- A compiled, immutable program. Produced by `define`, shared by every
     --- playback of it, and reference counted.
@@ -230,6 +252,12 @@ local record sequence
         waitingQuery: string
         waitingCondition: QueryCondition
 
+        --- Tween playback token this playback is blocked on, when it is.
+        waitingTween: integer
+
+        --- How the last tween it waited on ended.
+        tweenOutcome: TweenOutcome
+
         --- Live branches this playback forked and has not joined.
         branches: integer
 
@@ -319,6 +347,20 @@ local record sequence
     --- Falls straight through when there are none. When the last branch
     --- finishes, the waiting playback resumes within that same step.
     join: function(): Node
+
+    --- Play a registered tween preset on a bound entity.
+    ---
+    --- Needs the tween plugin, which `tecs2d.run` installs. A binding that
+    --- is missing or dead is not a fault: nothing plays, and a following
+    --- `waitTween` resumes at once reporting `targetLost`.
+    playTween: function(preset: string, target: EntityRef, options?: tween.PlaybackOptions): Node
+
+    --- Wait for the tween the most recent `playTween` started.
+    ---
+    --- Resumes when that specific playback completes, is cancelled, is
+    --- replaced on its channel, or loses its entity, so it never waits
+    --- forever. `status` reports which of those happened.
+    waitTween: function(): Node
 
     --- Fork several blocks and wait for all of them.
     ---
@@ -535,6 +577,25 @@ function sequence.loop(count: integer, nodes: {sequence.Node}): sequence.Node
     return {kind = "loop", count = count, nodes = nodes} as sequence.Node
 end
 
+function sequence.playTween(
+    preset: string,
+    target: sequence.EntityRef,
+    options?: tween.PlaybackOptions
+): sequence.Node
+    if type(preset) ~= "string" or preset == "" then
+        error("sequence.playTween requires a non-empty preset name", 2)
+    end
+    if not isEntityRef(target) then
+        error("sequence.playTween requires a sequence.bind(name) target", 2)
+    end
+    return {kind = "playTween", text = preset, args = {target, options}}
+        as sequence.Node
+end
+
+function sequence.waitTween(): sequence.Node
+    return {kind = "waitTween"} as sequence.Node
+end
+
 function sequence.fork(nodes: {sequence.Node}): sequence.Node
     if type(nodes) ~= "table" or #nodes == 0 then
         error("sequence.fork requires a non-empty block", 2)
@@ -634,6 +695,10 @@ local function compileNode(c: Compiler, node: NodeImpl, depth: integer)
         if node.count then c.loopCounts[jumpPc] = node.count end
     elseif kind == "fork" then
         compileFork(c, node.nodes, depth)
+    elseif kind == "playTween" then
+        emitOp(c, OP_PLAY_TWEEN, intern(c, node.text), intern(c, node.args))
+    elseif kind == "waitTween" then
+        emitOp(c, OP_WAIT_TWEEN, -1, -1)
     elseif kind == "join" then
         emitOp(c, OP_JOIN, -1, -1)
     elseif kind == "parallel" then
@@ -735,6 +800,12 @@ local record Cursor
     waitQuery: string
     waitCondition: integer
 
+    -- The tween the last playTween started, and how it ended once it has.
+    tweenEntity: integer
+    tweenPlayback: integer
+    tweenOutcome: TweenOutcome
+    waitingTween: boolean
+
     -- Branch tree. A child holds its parent by (slot, generation) so a
     -- recycled slot can never be mistaken for the parent that forked it.
     parentSlot: integer
@@ -784,6 +855,12 @@ local record WorldState
     queryWaiters: {string: {integer: boolean}}
     dirtyQueries: {string: boolean}
 
+    -- Tween waits are resolved by the end events, and swept every step
+    -- against the tween runtime so a playback that vanishes without one
+    -- still releases its waiter.
+    tweenOwners: {integer: integer}
+    tweenWaiters: {integer: boolean}
+
     ownerIndex: {integer: {integer: boolean}}
 end
 
@@ -809,6 +886,8 @@ local function stateFor(world: World): WorldState
         queries = {},
         queryWaiters = {},
         dirtyQueries = {},
+        tweenOwners = {},
+        tweenWaiters = {},
         ownerIndex = {},
     }
     states[world] = state
@@ -966,6 +1045,22 @@ local function unlinkWaits(state: WorldState, cursor: Cursor)
         cursor.waitCondition = nil
         unpark(state.queryWaiters, queryName, cursor.slot)
     end
+    if cursor.waitingTween then
+        cursor.waitingTween = false
+        state.tweenWaiters[cursor.slot] = nil
+    end
+end
+
+-- Drop the cursor's claim on a tween token, so an end event for a playback
+-- nothing is following no longer finds an owner.
+local function releaseTween(state: WorldState, cursor: Cursor)
+    local token = cursor.tweenPlayback
+    if not token then return end
+    if state.tweenOwners[token] == cursor.slot then
+        state.tweenOwners[token] = nil
+    end
+    cursor.tweenPlayback = nil
+    cursor.tweenEntity = nil
 end
 
 local function linkOwner(state: WorldState, cursor: Cursor)
@@ -1049,6 +1144,7 @@ local function retire(state: WorldState, cursor: Cursor, finalState: PlaybackSta
     cursor.alive = false
     cursor.joining = false
     unlinkWaits(state, cursor)
+    releaseTween(state, cursor)
     unlinkOwner(state, cursor)
 
     -- A subtree dies from the root down: branches are cancelled first, so
@@ -1255,6 +1351,43 @@ local function run(
             -- for the world this cursor has already asked for.
             state.dirtyQueries[name] = true
             return budget
+
+        elseif op == OP_PLAY_TWEEN then
+            local preset = consts[a] as string
+            local spec = consts[b] as {any}
+            local ref = spec[1] as sequence.EntityRef
+            local id = cursor.bindings and cursor.bindings[ref.bindName]
+            releaseTween(state, cursor)
+            cursor.tweenOutcome = nil
+            if not id or not world:isAlive(id) then
+                -- A missing or dead actor is a game state, not a defect in
+                -- the program. Nothing plays, and a following waitTween has
+                -- its answer already.
+                cursor.tweenOutcome = "targetLost"
+            else
+                local ok, result = pcall(tween.play, world, id, preset,
+                    spec[2] as tween.PlaybackOptions)
+                if not ok then
+                    faultCursor(state, cursor, "unregisteredTween",
+                        "tween preset '" .. preset .. "': " .. tostring(result))
+                    return budget
+                end
+                cursor.tweenEntity = id
+                cursor.tweenPlayback = result as integer
+                state.tweenOwners[cursor.tweenPlayback] = cursor.slot
+            end
+            cursor.pc = cursor.pc + 1
+
+        elseif op == OP_WAIT_TWEEN then
+            cursor.pc = cursor.pc + 1
+            if cursor.tweenPlayback then
+                cursor.waitingTween = true
+                cursor.wakeAt = nil
+                state.tweenWaiters[cursor.slot] = true
+                return budget
+            end
+            -- Nothing to wait for: either no playTween ran or its target
+            -- was already gone, and the outcome says which.
 
         elseif op == OP_CALL then
             local name = consts[a] as string
@@ -1488,6 +1621,8 @@ function sequence.status(world: World, handle: sequence.Handle): sequence.Status
         wakeAt = cursor.alive and cursor.wakeAt or nil,
         waitingFor = cursor.alive and cursor.waitChannel or nil,
         waitingQuery = cursor.alive and cursor.waitQuery or nil,
+        waitingTween = cursor.waitingTween and cursor.tweenPlayback or nil,
+        tweenOutcome = cursor.tweenOutcome,
         waitingCondition = cursor.alive and cursor.waitQuery
             and (cursor.waitCondition == 1 and "any" or "empty") or nil,
         branches = branches,
@@ -1609,6 +1744,13 @@ function sequence.disassemble(program: sequence.Program, pc?: integer): string
                 b < 0 and "forever" or ("x" .. tostring(count or 1)))
         elseif op == OP_FORK then
             text = string.format("FORK      branch %d..%d, continue -> %d", a, b - 1, b)
+        elseif op == OP_PLAY_TWEEN then
+            local spec = prog.consts[b] as {any}
+            local ref = spec[1] as sequence.EntityRef
+            text = string.format("PLAYTWEEN %q, bind(%s)",
+                prog.consts[a] as string, ref.bindName)
+        elseif op == OP_WAIT_TWEEN then
+            text = "WAITTWEEN"
         elseif op == OP_JOIN then
             text = "JOIN"
         elseif op == OP_END then
@@ -1710,6 +1852,10 @@ local function saveState(world: World): any
                 waitChannel = cursor.waitChannel,
                 waitQuery = cursor.waitQuery,
                 waitCondition = cursor.waitCondition,
+                tweenEntity = cursor.tweenEntity,
+                tweenPlayback = cursor.tweenPlayback,
+                tweenOutcome = cursor.tweenOutcome,
+                waitingTween = cursor.waitingTween,
                 parentSlot = cursor.parentSlot,
                 parentGeneration = cursor.parentGeneration,
                 joining = cursor.joining,
@@ -1757,6 +1903,8 @@ local function loadState(world: World, value: any)
     -- cursors are data.
     state.queryWaiters = {}
     state.dirtyQueries = {}
+    state.tweenOwners = {}
+    state.tweenWaiters = {}
     state.nextSlot = 1
     state.generations = {}
     state.step = 0
@@ -1801,12 +1949,19 @@ local function loadState(world: World, value: any)
                 waitChannel = row.waitChannel as string,
                 waitQuery = row.waitQuery as string,
                 waitCondition = row.waitCondition as integer,
+                tweenEntity = row.tweenEntity as integer,
+                tweenPlayback = row.tweenPlayback as integer,
+                tweenOutcome = row.tweenOutcome as TweenOutcome,
+                waitingTween = row.waitingTween as boolean,
                 parentSlot = row.parentSlot as integer,
                 parentGeneration = row.parentGeneration as integer,
                 joining = row.joining as boolean,
             }
             state.cursors[cursor.slot] = cursor
             linkOwner(state, cursor)
+            if cursor.tweenPlayback then
+                state.tweenOwners[cursor.tweenPlayback] = cursor.slot
+            end
             -- Rebuild the wake indexes rather than serializing them. A
             -- cursor blocked on a signal or a query has no wake time and
             -- belongs in its wait index instead of the heap; one parked at a
@@ -1818,6 +1973,8 @@ local function loadState(world: World, value: any)
                 -- The world this cursor parked against is gone, so its
                 -- condition is re-tested against the restored one.
                 state.dirtyQueries[cursor.waitQuery] = true
+            elseif cursor.waitingTween then
+                state.tweenWaiters[cursor.slot] = true
             elseif not cursor.joining then
                 heapPush(state, {
                     wakeAt = cursor.wakeAt,
@@ -1939,12 +2096,48 @@ local function deliverQueryWaits(state: WorldState)
     end
 end
 
+-- Release every cursor whose tween has ended. The end events set the
+-- outcome; this also asks the tween runtime directly, so a playback that
+-- disappears without one still frees its waiter rather than parking it for
+-- the life of the world.
+local function deliverTweenWaits(world: World, state: WorldState)
+    local waiting = state.tweenWaiters
+    if next(waiting) == nil then return end
+
+    local slots: {integer} = {}
+    for slot in pairs(waiting) do slots[#slots + 1] = slot end
+    table.sort(slots)
+
+    for i = 1, #slots do
+        local cursor = state.cursors[slots[i]]
+        if not cursor or not cursor.alive then
+            waiting[slots[i]] = nil
+        elseif cursor.state == "running" then
+            local outcome = cursor.tweenOutcome
+            if not outcome
+                and not tween.isPlaying(world, cursor.tweenEntity, cursor.tweenPlayback)
+            then
+                LOGGER:warn("%s v%d: tween %d ended without an event",
+                    cursor.program.name, cursor.program.version, cursor.tweenPlayback)
+                outcome = "targetLost"
+                cursor.tweenOutcome = outcome
+            end
+            if outcome then
+                unlinkWaits(state, cursor)
+                releaseTween(state, cursor)
+                schedule(state, cursor, state.step)
+            end
+        end
+    end
+end
+
 local function tick(world: World, state: WorldState)
     state.step = state.step + 1
     local step = state.step
 
     deliverSignals(state)
     deliverQueryWaits(state)
+    deliverTweenWaits(world, state)
 
     while state.heapSize > 0 do
         local top = state.heap[1]
@@ -1993,6 +2186,26 @@ function sequence.plugin(world: World)
         if state.ownerIndex[event.entity] then
             sequence.cancelOwnedBy(world, event.entity)
         end
+    end)
+
+    -- How a tween ended is only knowable from the event that ends it. The
+    -- cursor records it and waits for the step boundary, so a waiter never
+    -- resumes in the middle of another system's frame.
+    local function endTween(slotOwner: integer, playback: integer, outcome: TweenOutcome)
+        local cursor = state.cursors[slotOwner]
+        if not cursor or not cursor.alive then return end
+        if cursor.tweenPlayback ~= playback then return end
+        cursor.tweenOutcome = outcome
+    end
+
+    world:observe(0, tween.TweenComplete, function(event: tween.TweenComplete)
+        local owner = state.tweenOwners[event.playback]
+        if owner then endTween(owner, event.playback, "completed") end
+    end)
+
+    world:observe(0, tween.TweenCancelled, function(event: tween.TweenCancelled)
+        local owner = state.tweenOwners[event.playback]
+        if owner then endTween(owner, event.playback, event.reason as TweenOutcome) end
     end)
 end
 

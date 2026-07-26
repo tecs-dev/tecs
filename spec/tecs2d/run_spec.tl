@@ -20,7 +20,44 @@ local RunTest: RunTestComp = tecs.newComponent({
 local assetUpdates = 0
 local assetShutdowns = 0
 
+-- Modules this spec replaces with stubs, restored afterwards. Nil-ing them
+-- instead would make the next require re-execute the real module, and one
+-- that registers a component cannot be loaded twice.
+local STUBBED <const>: {string} = {
+    "tecs2d",
+    "tecs2d.input",
+    "tecs2d.internal.handlers",
+    "tecs2d.gfx",
+    "tecs2d.assets",
+    "tecs2d.workers",
+    "tecs2d.audio",
+    "tecs2d.controller",
+    "tecs2d.tween",
+    "tecs2d.tiled",
+    "tecs2d.ui",
+    "run_spec.baseline",
+    "run_spec.reloadable",
+}
+
+local originalModules: {string: any} = {}
+
+local function saveLoadedModules()
+    local loaded = package.loaded as {string: any}
+    for i = 1, #STUBBED do
+        originalModules[STUBBED[i]] = loaded[STUBBED[i]]
+    end
+end
+
+local function restoreLoadedModules()
+    local loaded = package.loaded as {string: any}
+    for i = 1, #STUBBED do
+        loaded[STUBBED[i]] = originalModules[STUBBED[i]]
+        originalModules[STUBBED[i]] = nil
+    end
+end
+
 local function installTecs2dStubs()
+    saveLoadedModules()
     package.loaded["tecs2d"] = nil
     local escapePressed = false
     package.loaded["tecs2d.input"] = {
@@ -162,19 +199,7 @@ describe("tecs2d.run hotReload", function()
     end)
 
     after_each(function()
-        package.loaded["tecs2d"] = nil
-        package.loaded["tecs2d.input"] = nil
-        package.loaded["tecs2d.internal.handlers"] = nil
-        package.loaded["tecs2d.gfx"] = nil
-        package.loaded["tecs2d.assets"] = nil
-        package.loaded["tecs2d.workers"] = nil
-        package.loaded["tecs2d.audio"] = nil
-        package.loaded["tecs2d.controller"] = nil
-        package.loaded["tecs2d.tween"] = nil
-        package.loaded["tecs2d.tiled"] = nil
-        package.loaded["tecs2d.ui"] = nil
-        package.loaded["run_spec.baseline"] = nil
-        package.loaded["run_spec.reloadable"] = nil
+        restoreLoadedModules()
     end)
 
     it("restores hot reload snapshots between Startup and PostStartup", function()

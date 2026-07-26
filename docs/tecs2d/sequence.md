@@ -10,11 +10,6 @@ spawn waves, tutorials, and scripted encounters are naturally written as corouti
 suspended coroutine lives in the Lua stack, which cannot be serialized. A sequence keeps its
 position as data, so it snapshots, rewinds, and hot reloads like any other game state.
 
-::: info Tween composition is still to come
-Programs, actions, bindings, playback, signals, query waits, branches, faults, snapshots, and
-disassembly all work. Tween composition lands in a later phase; see [Planned](#planned).
-:::
-
 ## Quick start
 
 ```teal
@@ -74,6 +69,8 @@ and an explicit migration step. That is deliberately not supported.
 | `waitQuery(name, cond)` | Block until a registered query matches, or stops matching |
 | `emit(event, ...)` | Emit a `sequence.Event` at address 0 |
 | `loop(count, nodes)` | Repeat a block, or forever when `count` is nil |
+| `playTween(preset, bind)` | Play a tween preset on a bound entity |
+| `waitTween()` | Wait for the tween that `playTween` started |
 | `fork(nodes)` | Start a branch that runs alongside the rest of the program |
 | `join()` | Wait for every outstanding branch |
 | `parallel(...)` | Fork several blocks and wait for all of them |
@@ -203,6 +200,7 @@ Prefer `waitSteps(0)` in a loop body over raising the budget.
 | `budgetExceeded` | The per-step instruction budget was exhausted |
 | `branchFaulted` | A forked branch faulted |
 | `unregisteredQuery` | A `waitQuery` named a query not registered on this world |
+| `unregisteredTween` | A `playTween` named a preset not registered on this world |
 
 A faulted playback stops and retains its `pc`, so the failure is inspectable rather than silent.
 
@@ -281,6 +279,46 @@ life of the world.
 Naming a query that is not registered faults with `unregisteredQuery`. A parked wait survives a
 snapshot and is re-tested against the **restored** world, not the one it parked in.
 
+## Tweens
+
+`playTween` starts a registered tween preset on a bound entity, and `waitTween` waits for **that
+playback**, not for the preset, the channel, or the entity:
+
+```teal
+local intro = sequence.define("game.bossIntro", {
+    sequence.playTween("boss.enter", sequence.bind("boss")),
+    sequence.waitTween(),
+    sequence.call("game.startFight"),
+})
+```
+
+`tween.play` returns a token identifying one run, and every playback ends exactly once, carrying
+that token on `TweenComplete` or `TweenCancelled` (see [Tween](/tecs2d/tween#playback-tokens)).
+`waitTween` follows the token, so the same tween running twice at once is never confused for
+itself.
+
+**`waitTween` never waits forever.** It resumes on any of four endings, and `status` reports which
+in `tweenOutcome`:
+
+| Outcome | Cause |
+| --- | --- |
+| `completed` | The playback finished |
+| `cancelled` | `tween.cancel` matched it |
+| `replaced` | Another playback took over its channel |
+| `targetLost` | The bound entity died, was never bound, or lost its playback component |
+
+A binding that is missing or already dead is not a fault. Nothing plays, and the following
+`waitTween` resumes immediately reporting `targetLost` — the actor being gone is a game state, and
+a program can branch on it. A preset that is not registered *is* a defect, and faults with
+`unregisteredTween`.
+
+`playTween` needs the tween plugin, which `tecs2d.run` installs. Playback options pass straight
+through:
+
+```teal
+sequence.playTween("boss.hover", sequence.bind("boss"), {mode = "pingPong", count = 4})
+```
+
 ## Branches
 
 Most cutscenes are not a single line of steps. `parallel` runs several blocks at once and continues
@@ -355,13 +393,6 @@ The debugger exposes the same view, in the overlay and as `cmd_*` MCP tools:
 
 `sequence info` disassembles the exact version that playback is running, which is the version worth
 reading when a hot reload has moved on without it.
-
-## Planned
-
-A later phase adds tween composition:
-
-- `playTween` / `waitTween`, waiting on a specific tween playback and resuming on completion,
-  cancellation, channel replacement, or binding destruction
 
 ## See also
 
