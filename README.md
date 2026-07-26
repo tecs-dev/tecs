@@ -22,7 +22,8 @@ Working today:
 - Compute pipelines with reflected workgroup size, and GPU-driven drawing: a
   compute pass writes the draw arguments, one indirect draw consumes them
 - A declarative pass graph, and a deferred pipeline built on it
-- An ECS binding: Transform2D, Tint, PointLight, and Renderable components,
+- An ECS binding: Transform2D, Tint, Sprite, PointLight, and Renderable
+  components,
   with a sync that walks archetype columns straight into mapped GPU staging
 - Physics in the world: a RigidBody component holding a Box2D handle, stepped
   in FixedUpdate and synced back to Transform2D
@@ -79,6 +80,13 @@ session replays by feeding the same events back through `events.source`.
 `ecs/Renderer` is the bridge, and the only module that knows about both
 archetypes and GPU buffers. Everything below it is renderer; everything above
 it is ECS.
+
+Instances pack as four vec4s: a 2x2 basis, an origin, a colour, and a UV rect.
+SDL_GPU binds samplers per pipeline rather than bindlessly, so the sync groups
+instances by texture with a counting sort and the geometry pass issues one
+draw per texture. Entities without a `Sprite` land in slot zero, a one-pixel
+white texture, so textured and untextured geometry share one shader and one
+pipeline instead of needing a branch or a second path.
 
 Its sync reads columns with `get`, never `getMut`. Taking a mutable column to
 read would mark those components dirty on every archetype every frame, which

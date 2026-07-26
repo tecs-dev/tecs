@@ -16,6 +16,7 @@ local Window = require("tecs2d.platform.Window")
 local Device = require("tecs2d.gpu.Device")
 local Texture = require("tecs2d.gpu.Texture")
 local Renderer = require("tecs2d.ecs.Renderer")
+local assets = require("tecs2d.assets")
 local components = require("tecs2d.ecs.components")
 
 local C = sdl.C
@@ -26,6 +27,10 @@ local Transform2D = components.Transform2D
 local Tint = components.Tint
 local PointLight = components.PointLight
 local Renderable = components.Renderable
+local Sprite = components.Sprite
+
+-- Four by four: the left half red, the right half green.
+local FIXTURE = "spec/fixtures/split.png"
 
 describe("ecs.Renderer", function()
     local window, device, screen
@@ -36,9 +41,11 @@ describe("ecs.Renderer", function()
         device = Device.create(window, { debug = true })
         screen = Texture.create(device.handle,
             { width = SIZE, height = SIZE, format = FORMAT })
+        assets.install(device.handle)
     end)
 
     teardown(function()
+        assets.shutdown()
         if screen then screen:destroy() end
         if device then device:destroy() end
         if window then window:destroy() end
@@ -205,6 +212,115 @@ describe("ecs.Renderer", function()
 
         assert.are.equal(0, left.r, "the system moved it off the left")
         assert.are.equal(255, right.r, "and onto the right")
+        renderer:destroy()
+    end)
+
+    it("samples a registered texture through a Sprite", function()
+        local world, renderer = newScene()
+        local handle = assets.loadImage(FIXTURE)
+        assets.waitAll()
+        assert.are.equal("ready", handle.status)
+
+        local slot = renderer:registerTexture(handle.texture)
+        world:spawn(
+            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+            Tint(1.0, 1.0, 1.0, 1.0),
+            Sprite(slot, 0.0, 0.0, 1.0, 1.0),
+            Renderable()
+        )
+
+        local pixels = frameOnce(world, renderer)
+        -- The fixture is red on the left and green on the right, so a quad
+        -- covering the target reproduces that split on screen.
+        local left = screen:getPixel(pixels, SIZE / 4, SIZE / 2)
+        local right = screen:getPixel(pixels, SIZE * 3 / 4, SIZE / 2)
+
+        assert.are.equal(255, left.r, "the sprite's left half is red")
+        assert.are.equal(0, left.g)
+        assert.are.equal(255, right.g, "and its right half is green")
+        assert.are.equal(0, right.r)
+        renderer:destroy()
+    end)
+
+    it("selects a region with the UV rect", function()
+        -- Sampling only the right half must make the whole quad green, which
+        -- is what makes an atlas the same thing as a whole image.
+        local world, renderer = newScene()
+        local handle = assets.loadImage(FIXTURE)
+        assets.waitAll()
+
+        local slot = renderer:registerTexture(handle.texture)
+        world:spawn(
+            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+            Tint(1.0, 1.0, 1.0, 1.0),
+            Sprite(slot, 0.55, 0.0, 1.0, 1.0),
+            Renderable()
+        )
+
+        local pixels = frameOnce(world, renderer)
+        local left = screen:getPixel(pixels, SIZE / 4, SIZE / 2)
+        local right = screen:getPixel(pixels, SIZE * 3 / 4, SIZE / 2)
+
+        assert.are.equal(255, left.g, "the whole quad samples the green half")
+        assert.are.equal(255, right.g)
+        assert.are.equal(0, left.r)
+        renderer:destroy()
+    end)
+
+    it("tints a sampled texture", function()
+        local world, renderer = newScene()
+        local handle = assets.loadImage(FIXTURE)
+        assets.waitAll()
+
+        local slot = renderer:registerTexture(handle.texture)
+        world:spawn(
+            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+            -- Half brightness, so the red half reads as half red.
+            Tint(0.5, 0.5, 0.5, 1.0),
+            Sprite(slot, 0.0, 0.4, 0.45, 0.6),
+            Renderable()
+        )
+
+        local centre = screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2)
+        assert.is_true(math.abs(centre.r - 128) <= 2,
+            ("expected the tint to halve red, got %d"):format(centre.r))
+        renderer:destroy()
+    end)
+
+    it("batches by texture and still places each correctly", function()
+        -- Two textures means two draws. The counting sort puts each slot's
+        -- rows in one run, so a batch that read the wrong range would put the
+        -- wrong image on the wrong quad.
+        local world, renderer = newScene()
+        local handle = assets.loadImage(FIXTURE)
+        assets.waitAll()
+        local slot = renderer:registerTexture(handle.texture)
+
+        -- Left quad untextured (slot 0, white default) tinted blue.
+        world:spawn(
+            Transform2D(SIZE * 0.25, SIZE / 2, 0, SIZE * 0.4, SIZE * 0.4),
+            Tint(0.0, 0.0, 1.0, 1.0),
+            Renderable()
+        )
+        -- Right quad sampling the green half of the fixture.
+        world:spawn(
+            Transform2D(SIZE * 0.75, SIZE / 2, 0, SIZE * 0.4, SIZE * 0.4),
+            Tint(1.0, 1.0, 1.0, 1.0),
+            Sprite(slot, 0.55, 0.0, 1.0, 1.0),
+            Renderable()
+        )
+
+        local pixels = frameOnce(world, renderer)
+        assert.are.equal(2, renderer.count)
+        assert.are.equal(2, renderer.batches, "two textures means two draws")
+
+        local left = screen:getPixel(pixels, SIZE * 0.25, SIZE / 2)
+        local right = screen:getPixel(pixels, SIZE * 0.75, SIZE / 2)
+
+        assert.are.equal(255, left.b, "the untextured quad stays blue")
+        assert.are.equal(0, left.g)
+        assert.are.equal(255, right.g, "the sprite quad samples green")
+        assert.are.equal(0, right.b)
         renderer:destroy()
     end)
 

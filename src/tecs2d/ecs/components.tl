@@ -73,6 +73,31 @@ tecs.newFFIComponent({
     defaults = { 64, 256, 1, 1, 1, 1 },
 })
 
+--- Samples a texture instead of drawing flat colour.
+---
+--- `slot` indexes the renderer's texture registry rather than holding a
+--- texture directly: components are plain C memory, and a registry index is
+--- what fits there. The UV rect selects a region, so an atlas is the same
+--- thing as a whole image with the rect set to the full range.
+local record Sprite is Component
+    slot: number
+    u0: number
+    v0: number
+    u1: number
+    v1: number
+end
+
+tecs.newFFIComponent({
+    name = "Sprite",
+    container = Sprite,
+    fields = {
+        { "slot", "int32_t" },
+        { "u0", "float" }, { "v0", "float" },
+        { "u1", "float" }, { "v1", "float" },
+    },
+    defaults = { 0, 0, 0, 1, 1 },
+})
+
 --- Marks an entity as contributing geometry. Without it a Transform2D is just
 --- a position, which is what most entities in a world actually are.
 local record Renderable is Component end
@@ -85,12 +110,14 @@ tecs.newComponent({
 local record components
     Transform2D: Transform2D
     Tint: Tint
+    Sprite: Sprite
     PointLight: PointLight
     Renderable: Renderable
 end
 
 components.Transform2D = Transform2D
 components.Tint = Tint
+components.Sprite = Sprite
 components.PointLight = PointLight
 components.Renderable = Renderable
 
