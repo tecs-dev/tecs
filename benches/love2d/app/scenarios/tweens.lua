@@ -1,6 +1,5 @@
---- Tween playback load: N entities each running a long timeline that never
---- completes, on an otherwise empty scene. Measures the tween runtime -- how a
---- playback is reached and evaluated -- rather than rendering.
+--- Timeline playback load: N playbacks each running a long timeline that
+--- never completes, on an otherwise empty scene.
 ---
 --- This is the baseline the unified-runtime work is measured against. The
 --- shipping path reaches a cursor through
@@ -17,10 +16,8 @@
 ---                         a moving Transform re-uploads to the GPU every
 ---                         frame, which scales with entities, while reaching
 ---                         and evaluating a playback scales with playbacks.
---- TECS_BENCH_TWEEN_PATH   "tween" (the shipping runtime), "sequence" (the
----                         same timeline compiled to a program and run as an
----                         evaluator), or "none" (spawn the entities and play
----                         nothing). Default "tween".
+--- TECS_BENCH_TWEEN_PATH   "play" or "none" (spawn the entities and play
+---                         nothing). Default "play".
 ---
 --- "none" is the floor the other two are read against: the entities alone
 --- cost transform sync and rendering every frame, and that is charged to both
@@ -28,14 +25,13 @@
 --- cost swamps the difference being measured.
 
 local tecs = require("tecs")
-local tween = require("tecs2d.tween")
 local sequence = require("tecs2d.sequence")
 
 local Transform = tecs.builtins.Transform
 
 local TWEENS = tonumber(os.getenv("TECS_BENCH_TWEENS")) or 20000
 local SLOTS = tonumber(os.getenv("TECS_BENCH_TWEEN_SLOTS")) or 1
-local PATH = os.getenv("TECS_BENCH_TWEEN_PATH") or "tween"
+local PATH = os.getenv("TECS_BENCH_TWEEN_PATH") or "play"
 local ENTS = tonumber(os.getenv("TECS_BENCH_TWEEN_ENTS")) or TWEENS
 
 -- A duration far past the bench window, so every playback stays live for the
@@ -43,15 +39,15 @@ local ENTS = tonumber(os.getenv("TECS_BENCH_TWEEN_ENTS")) or TWEENS
 local function spec()
     if SLOTS == 1 then
         return {
-            tween.to(1000.0, tween.linear, tween.translateX, 500),
+            sequence.tweenTo(1000.0, "linear", sequence.target.translateX, 500),
         }
     end
     return {
-        tween.parallel(
-            tween.to(1000.0, tween.linear, tween.translateX, 500),
-            tween.to(1000.0, tween.linear, tween.translateY, 500),
-            tween.to(1000.0, tween.linear, tween.rotation, 3),
-            tween.to(1000.0, tween.linear, tween.scaleX, 2)),
+        sequence.tweenParallel(
+            sequence.tweenTo(1000.0, "linear", sequence.target.translateX, 500),
+            sequence.tweenTo(1000.0, "linear", sequence.target.translateY, 500),
+            sequence.tweenTo(1000.0, "linear", sequence.target.rotation, 3),
+            sequence.tweenTo(1000.0, "linear", sequence.target.scaleX, 2)),
     }
 end
 
@@ -73,20 +69,12 @@ return {
         end
         if PATH == "none" then return end
 
-        if PATH == "sequence" then
-            local program = sequence.timeline("bench.tweens", spec())
-            for i = 1, TWEENS do
-                sequence.play(world, program,
-                    {owner = entities[(i - 1) % ENTS + 1]})
-            end
-            return
+        if PATH ~= "play" then
+            error("TECS_BENCH_TWEEN_PATH must be 'play' or 'none'")
         end
-        if PATH ~= "tween" then
-            error("TECS_BENCH_TWEEN_PATH must be 'tween', 'sequence', or 'none'")
-        end
-        local timeline = tween.timeline(spec())
+        local program = sequence.timeline("bench.tweens", spec())
         for i = 1, TWEENS do
-            timeline:play(world, entities[(i - 1) % ENTS + 1])
+            sequence.play(world, program, {owner = entities[(i - 1) % ENTS + 1]})
         end
     end,
 }

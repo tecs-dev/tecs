@@ -6,22 +6,19 @@
 --
 -- The Love scenario (benches/love2d/app/scenarios/tweens.lua) measures the
 -- same work inside a real frame, where it is swamped by what a moving
--- Transform costs the renderer. This one runs a bare tecs world and one
--- world:update per iteration, so what it reports is the runtime itself:
+-- Transform costs the renderer: the transform sync and the GPU upload cost
+-- more per frame than the interpolation that dirtied them, and that cost
+-- scales with entities rather than with playbacks.
 --
---   tween     the shipping runtime -- query, archetype, TweenPlayback,
---             cursor list, registry lookup, per playback per frame
---   sequence  the same timeline compiled to a program, walked from its
---             clock's dense active array
---
--- Both variants are asserted to produce identical Transform.x before timing,
--- so a difference in speed is never a difference in work.
+-- This one runs a bare tecs world with one world:update per iteration, so
+-- what it reports is the runtime itself: the dense active walk, the
+-- evaluator, and the slot loop. "none" spawns the same entities and plays
+-- nothing, which is the floor to read the rest against.
 
 package.path = "../../build/?.lua;../../build/?/init.lua;../?.lua;" .. package.path
 
 local bench = require("lib.bench")
 local tecs = require("tecs")
-local tween = require("tecs2d.tween")
 local sequence = require("tecs2d.sequence")
 
 local Transform = tecs.builtins.Transform
@@ -31,15 +28,15 @@ local DT = 1 / 60
 local function spec(slots)
     if slots == 1 then
         return {
-            tween.to(1000.0, tween.linear, tween.translateX, 500),
+            sequence.tweenTo(1000.0, "linear", sequence.target.translateX, 500),
         }
     end
     return {
-        tween.parallel(
-            tween.to(1000.0, tween.linear, tween.translateX, 500),
-            tween.to(1000.0, tween.linear, tween.translateY, 500),
-            tween.to(1000.0, tween.linear, tween.rotation, 3),
-            tween.to(1000.0, tween.linear, tween.scaleX, 2)),
+        sequence.tweenParallel(
+            sequence.tweenTo(1000.0, "linear", sequence.target.translateX, 500),
+            sequence.tweenTo(1000.0, "linear", sequence.target.translateY, 500),
+            sequence.tweenTo(1000.0, "linear", sequence.target.rotation, 3),
+            sequence.tweenTo(1000.0, "linear", sequence.target.scaleX, 2)),
     }
 end
 
@@ -47,17 +44,6 @@ local programSeq = 0
 local function uniqueProgramName()
     programSeq = programSeq + 1
     return "bench.tween" .. programSeq
-end
-
-local function setupTween(case)
-    local world = tecs.newWorld()
-    world:addPlugin(tween.plugin)
-    world:startup()
-    local timeline = tween.timeline(spec(case.params.slots))
-    for _ = 1, case.params.count do
-        timeline:play(world, world:spawn(Transform(0, 0, 0, 1)))
-    end
-    return world
 end
 
 local function setupSequence(case)
@@ -90,22 +76,16 @@ local function update(world)
     world:update(DT)
 end
 
--- Same work, or the comparison means nothing.
+-- A timeline that does nothing is a measurement of nothing.
 local function verify()
-    local case = {params = {count = 4, slots = 1}}
-    local a, b = setupTween(case), setupSequence(case)
-    for _ = 1, 20 do
-        update(a)
-        update(b)
-    end
-    local ax = a:get(1, Transform).x
-    local bx = b:get(1, Transform).x
-    if math.abs(ax - bx) > 1e-9 then
-        error(string.format(
-            "variants disagree: tween x=%.17g, sequence x=%.17g", ax, bx))
+    local world = setupSequence({params = {count = 4, slots = 1}})
+    for _ = 1, 20 do update(world) end
+    local x = world:get(1, Transform).x
+    if not (x > 0) then
+        error("the timeline did not move anything; the bench would measure idling")
     end
     io.write(string.format(
-        "verified: both paths reach Transform.x = %.6f after 20 frames\n\n", ax))
+        "verified: Transform.x = %.6f after 20 frames\n\n", x))
 end
 
 verify()
@@ -114,9 +94,8 @@ bench.suite({
     name = "Tween runtime",
     warmupIterations = 50,
     iterations = 300,
-    baseline = "tween",
+    baseline = "none",
     variants = {
-        {name = "tween", setup = setupTween, run = update},
         {name = "sequence", setup = setupSequence, run = update},
         {name = "none", setup = setupNone, run = update},
     },

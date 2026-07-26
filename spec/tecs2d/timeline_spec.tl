@@ -2,8 +2,8 @@ require("busted")
 
 local tecs <const> = require("tecs")
 local luassert <const> = require("luassert")
-local tween <const> = require("tecs2d.tween")
-local type EasingFunction = tween.EasingFunction
+local sequence <const> = require("tecs2d.sequence")
+local type EasingFunction = sequence.EasingFunction
 
 local Transform <const> = tecs.builtins.Transform
 
@@ -32,23 +32,54 @@ local interface TimelineImpl
     totalDuration: number
 end
 
-local interface CursorImpl
-    elapsed: number
-    remainingPasses: integer
-end
-
-local interface PlaybackImpl
-    cursors: {CursorImpl}
+-- Timelines compile to programs, which are global and keyed by name, so
+-- every test compiles under a name of its own.
+local nameCounter = 0
+local function uniqueName(): string
+    nameCounter = nameCounter + 1
+    return "spec.timeline" .. tostring(nameCounter)
 end
 
 local function makeWorld(): tecs.World
     local world = tecs.newWorld()
-    world:addPlugin(tween.plugin)
+    world:addPlugin(sequence.plugin)
+    world:startup()
     return world
 end
 
 local function tick(world: tecs.World, dt: number)
     world:update(dt)
+end
+
+--- Compile a spec and start it on an entity, returning the handle.
+---
+--- `play` schedules a playback's first instruction one tick out, so the
+--- zero-length update below lands the eval and leaves the timeline running
+--- from elapsed zero. Every test after it advances real time.
+local function play(
+    world: tecs.World,
+    entity: integer,
+    spec: sequence.TimelineSpec,
+    params?: {string: any},
+    channel?: string
+): sequence.Handle
+    local handle <const> = sequence.play(world, sequence.timeline(uniqueName(), spec),
+        {owner = entity, params = params, channel = channel})
+    world:update(0)
+    return handle
+end
+
+--- Compile a spec and hand back its compiled form. Compiling writes the
+--- resolved slots into the spec table itself, so the same table is both.
+local function compile(spec: sequence.TimelineSpec): sequence.TimelineSpec
+    sequence.timeline(uniqueName(), spec)
+    return spec
+end
+
+--- Whether a playback is still running.
+local function isPlaying(world: tecs.World, handle: sequence.Handle): boolean
+    local status <const> = sequence.status(world, handle)
+    return status ~= nil and status.state == "running"
 end
 
 -------------------------------------------------------------------------------
@@ -57,43 +88,43 @@ end
 
 describe("easing", function()
     local allEasings: {string: EasingFunction} = {
-        linear = tween.linear,
-        quadIn = tween.quadIn,
-        quadOut = tween.quadOut,
-        quadInOut = tween.quadInOut,
-        quadOutIn = tween.quadOutIn,
-        cubicIn = tween.cubicIn,
-        cubicOut = tween.cubicOut,
-        cubicInOut = tween.cubicInOut,
-        cubicOutIn = tween.cubicOutIn,
-        quartIn = tween.quartIn,
-        quartOut = tween.quartOut,
-        quartInOut = tween.quartInOut,
-        quartOutIn = tween.quartOutIn,
-        quintIn = tween.quintIn,
-        quintOut = tween.quintOut,
-        quintInOut = tween.quintInOut,
-        quintOutIn = tween.quintOutIn,
-        sineIn = tween.sineIn,
-        sineOut = tween.sineOut,
-        sineInOut = tween.sineInOut,
-        sineOutIn = tween.sineOutIn,
-        expoIn = tween.expoIn,
-        expoOut = tween.expoOut,
-        expoInOut = tween.expoInOut,
-        expoOutIn = tween.expoOutIn,
-        backIn = tween.backIn,
-        backOut = tween.backOut,
-        backInOut = tween.backInOut,
-        backOutIn = tween.backOutIn,
-        elasticIn = tween.elasticIn,
-        elasticOut = tween.elasticOut,
-        elasticInOut = tween.elasticInOut,
-        elasticOutIn = tween.elasticOutIn,
-        bounceIn = tween.bounceIn,
-        bounceOut = tween.bounceOut,
-        bounceInOut = tween.bounceInOut,
-        bounceOutIn = tween.bounceOutIn,
+        linear = sequence.easing.linear,
+        quadIn = sequence.easing.quadIn,
+        quadOut = sequence.easing.quadOut,
+        quadInOut = sequence.easing.quadInOut,
+        quadOutIn = sequence.easing.quadOutIn,
+        cubicIn = sequence.easing.cubicIn,
+        cubicOut = sequence.easing.cubicOut,
+        cubicInOut = sequence.easing.cubicInOut,
+        cubicOutIn = sequence.easing.cubicOutIn,
+        quartIn = sequence.easing.quartIn,
+        quartOut = sequence.easing.quartOut,
+        quartInOut = sequence.easing.quartInOut,
+        quartOutIn = sequence.easing.quartOutIn,
+        quintIn = sequence.easing.quintIn,
+        quintOut = sequence.easing.quintOut,
+        quintInOut = sequence.easing.quintInOut,
+        quintOutIn = sequence.easing.quintOutIn,
+        sineIn = sequence.easing.sineIn,
+        sineOut = sequence.easing.sineOut,
+        sineInOut = sequence.easing.sineInOut,
+        sineOutIn = sequence.easing.sineOutIn,
+        expoIn = sequence.easing.expoIn,
+        expoOut = sequence.easing.expoOut,
+        expoInOut = sequence.easing.expoInOut,
+        expoOutIn = sequence.easing.expoOutIn,
+        backIn = sequence.easing.backIn,
+        backOut = sequence.easing.backOut,
+        backInOut = sequence.easing.backInOut,
+        backOutIn = sequence.easing.backOutIn,
+        elasticIn = sequence.easing.elasticIn,
+        elasticOut = sequence.easing.elasticOut,
+        elasticInOut = sequence.easing.elasticInOut,
+        elasticOutIn = sequence.easing.elasticOutIn,
+        bounceIn = sequence.easing.bounceIn,
+        bounceOut = sequence.easing.bounceOut,
+        bounceInOut = sequence.easing.bounceInOut,
+        bounceOutIn = sequence.easing.bounceOutIn,
     }
 
     for name, fn in pairs(allEasings) do
@@ -104,7 +135,7 @@ describe("easing", function()
     end
 
     it("linear: f(0.5) == 0.5", function()
-        luassert.is_near(0.5, tween.linear(0.5), 1e-9)
+        luassert.is_near(0.5, sequence.easing.linear(0.5), 1e-9)
     end)
 end)
 
@@ -129,7 +160,7 @@ describe("targets", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        local target <const> = tween.field(Transform, "x") as TargetImpl
+        local target <const> = sequence.target.field(Transform, "x") as TargetImpl
         local s1, s2, s3, s4, d1, d2, d3, d4 = target.init(world, entity, false, 200, 0, 0, 0)
 
         target.apply(world, entity, 0, s1, s2, s3, s4, d1, d2, d3, d4)
@@ -148,17 +179,17 @@ describe("targets", function()
 
         local s1, s2, s3, s4, d1, d2, d3, d4: number, number, number, number, number, number, number, number
 
-        local translateX <const> = tween.translateX as TargetImpl
+        local translateX <const> = sequence.target.translateX as TargetImpl
         s1, s2, s3, s4, d1, d2, d3, d4 = translateX.init(world, entity, false, 100, 0, 0, 0)
         translateX.apply(world, entity, 1, s1, s2, s3, s4, d1, d2, d3, d4)
         luassert.is_near(100, world:get(entity, Transform).x, 1e-3)
 
-        local translateY <const> = tween.translateY as TargetImpl
+        local translateY <const> = sequence.target.translateY as TargetImpl
         s1, s2, s3, s4, d1, d2, d3, d4 = translateY.init(world, entity, false, 50, 0, 0, 0)
         translateY.apply(world, entity, 1, s1, s2, s3, s4, d1, d2, d3, d4)
         luassert.is_near(50, world:get(entity, Transform).y, 1e-3)
 
-        local rotation <const> = tween.rotation as TargetImpl
+        local rotation <const> = sequence.target.rotation as TargetImpl
         s1, s2, s3, s4, d1, d2, d3, d4 = rotation.init(world, entity, false, math.pi, 0, 0, 0)
         rotation.apply(world, entity, 1, s1, s2, s3, s4, d1, d2, d3, d4)
         luassert.is_near(math.pi, world:get(entity, Transform).rotation, 1e-3)
@@ -177,7 +208,7 @@ describe("targets", function()
         local entity = world:spawn(Transform(0, 0), CustomComp(0) as tecs.Component)
         tick(world, 0)
 
-        local tweenFill <const> = tween.field(CustomComp, "fill") as TargetImpl
+        local tweenFill <const> = sequence.target.field(CustomComp, "fill") as TargetImpl
         local s1, s2, s3, s4, d1, d2, d3, d4 = tweenFill.init(world, entity, false, 1, 0, 0, 0)
         tweenFill.apply(world, entity, 0.5, s1, s2, s3, s4, d1, d2, d3, d4)
         luassert.is_near(0.5, (world:get(entity, CustomComp) as {string:number}).fill, 1e-3)
@@ -191,7 +222,7 @@ describe("targets", function()
         })
 
         luassert.has_error(function()
-            tween.target(CustomComp, {"a", "b", "c"})
+            sequence.target.of(CustomComp, {"a", "b", "c"})
         end, "tween.target supports one or two fields")
     end)
 end)
@@ -217,10 +248,9 @@ describe("timeline system", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        tween.timeline({
-            tween.to(1.0, tween.linear, tween.translateX, 100),
+        play(world, entity, {
+            sequence.tweenTo(1.0, sequence.easing.linear, sequence.target.translateX, 100),
         })
-            :play(world, entity)
 
         tick(world, 0.5)
         luassert.is_near(50, world:get(entity, Transform).x, 1e-1)
@@ -233,10 +263,9 @@ describe("timeline system", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        tween.timeline({
-            tween.to(0.5, tween.linear, tween.translateX, 100),
+        play(world, entity, {
+            sequence.tweenTo(0.5, sequence.easing.linear, sequence.target.translateX, 100),
         })
-            :play(world, entity)
 
         tick(world, 0.25)
         luassert.is_near(50, world:get(entity, Transform).x, 1e-1)
@@ -256,11 +285,10 @@ describe("timeline system", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        tween.timeline({
-            tween.to(0.5, tween.linear, tween.translateX, 100),
-            tween.to(0.5, tween.linear, tween.translateY, 200),
+        play(world, entity, {
+            sequence.tweenTo(0.5, sequence.easing.linear, sequence.target.translateX, 100),
+            sequence.tweenTo(0.5, sequence.easing.linear, sequence.target.translateY, 200),
         })
-            :play(world, entity)
 
         tick(world, 0.25)
         luassert.is_near(50, world:get(entity, Transform).x, 1e-1)
@@ -275,12 +303,11 @@ describe("timeline system", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        tween.timeline({
-            tween.to(0.3, tween.linear, tween.translateX, 100),
-            tween.wait(0.2),
-            tween.to(0.3, tween.linear, tween.translateY, 100),
+        play(world, entity, {
+            sequence.tweenTo(0.3, sequence.easing.linear, sequence.target.translateX, 100),
+            sequence.tweenWait(0.2),
+            sequence.tweenTo(0.3, sequence.easing.linear, sequence.target.translateY, 100),
         })
-            :play(world, entity)
 
         tick(world, 0.3)
         luassert.is_near(100, world:get(entity, Transform).x, 1e-1)
@@ -299,10 +326,10 @@ describe("timeline system", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        tween.timeline({
-            tween.to(0.1, "linear", "transform.x", 100),
-            tween.wait(1),
-        }):play(world, entity)
+        play(world, entity, {
+            sequence.tweenTo(0.1, "linear", "transform.x", 100),
+            sequence.tweenWait(1),
+        })
 
         tick(world, 0.1)
         local transform = world:getMut(entity, Transform)
@@ -316,9 +343,9 @@ describe("timeline system", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        tween.timeline({
-            tween.to(1.0, tween.linear, tween.translateX, 100),
-        }):play(world, entity, {mode = "pingPong", count = 2})
+        play(world, entity, {
+            sequence.tweenTo(1.0, sequence.easing.linear, sequence.target.translateX, 100),
+        }, {mode = "pingPong", count = 2})
 
         tick(world, 0.5)
         luassert.is_near(50, world:get(entity, Transform).x, 1e-1)
@@ -336,45 +363,40 @@ describe("timeline system", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        local completed = false
-        world:observe(0, tween.TweenComplete, function()
-            completed = true
-        end)
-        tween.timeline({
-            tween.to(0.5, tween.linear, tween.translateX, 100),
-        }):play(world, entity, {mode = "loop", count = 2})
+        local handle = play(world, entity, {
+            sequence.tweenTo(0.5, sequence.easing.linear, sequence.target.translateX, 100),
+        }, {mode = "loop", count = 2})
 
         tick(world, 0.5)
-        luassert.is_false(completed)
+        luassert.is_true(isPlaying(world, handle))
 
         tick(world, 0.5)
-        luassert.is_true(completed)
+        luassert.equals("completed", sequence.status(world, handle).state)
     end)
 
     it("consumes every loop pass crossed by one update", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        tween.timeline({
-            tween.adjust(1, "linear", "transform.x", 10),
-        }):play(world, entity, {mode = "loop", count = 3})
+        play(world, entity, {
+            sequence.tweenAdjust(1, "linear", "transform.x", 10),
+        }, {mode = "loop", count = 3})
+        local handle <const> = sequence.playbacks(world)[1]
 
         tick(world, 2.5)
         luassert.is_near(25, world:get(entity, Transform).x, 1e-9)
 
-        local playback <const> = world:get(entity, tween.TweenPlayback) as PlaybackImpl
-        luassert.is_not_nil(playback)
-        luassert.is_near(0.5, playback.cursors[1].elapsed, 1e-9)
-        luassert.equals(1, playback.cursors[1].remainingPasses)
+        luassert.is_true(isPlaying(world, handle),
+            "two of three passes are done; the third is still running")
     end)
 
     it("preserves ping-pong overshoot in the same update", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        tween.timeline({
-            tween.to(1, "linear", "transform.x", 100),
-        }):play(world, entity, {mode = "pingPong", count = 2})
+        play(world, entity, {
+            sequence.tweenTo(1, "linear", "transform.x", 100),
+        }, {mode = "pingPong", count = 2})
 
         tick(world, 1.25)
         luassert.is_near(75, world:get(entity, Transform).x, 1e-9)
@@ -384,9 +406,9 @@ describe("timeline system", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        tween.timeline({
-            tween.to(0.5, tween.linear, tween.translateX, 100),
-        }):play(world, entity, {mode = "loop"})
+        play(world, entity, {
+            sequence.tweenTo(0.5, sequence.easing.linear, sequence.target.translateX, 100),
+        }, {mode = "loop"})
 
         for _ = 1, 10 do
             tick(world, 0.25)
@@ -400,9 +422,9 @@ describe("timeline system", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        tween.timeline({
-            tween.to(1.0, tween.linear, tween.translateX, 100),
-        }):play(world, entity, {mode = "loop"})
+        play(world, entity, {
+            sequence.tweenTo(1.0, sequence.easing.linear, sequence.target.translateX, 100),
+        }, {mode = "loop"})
 
         tick(world, 0.1)
         world:despawn(entity)
@@ -417,23 +439,15 @@ describe("timeline system", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        local called = false
-        world:observe(0, tween.TweenComplete, function(ev: tween.TweenComplete)
-            if ev.entity == entity then
-                luassert.is_nil(ev.channel)
-                called = true
-            end
-        end)
-        tween.timeline({
-            tween.to(0.5, tween.linear, tween.translateX, 100),
+        local handle = play(world, entity, {
+            sequence.tweenTo(0.5, sequence.easing.linear, sequence.target.translateX, 100),
         })
-            :play(world, entity)
 
         tick(world, 0.25)
-        luassert.is_false(called)
+        luassert.is_true(isPlaying(world, handle))
 
         tick(world, 0.5)
-        luassert.is_true(called)
+        luassert.equals("completed", sequence.status(world, handle).state)
     end)
 end)
 
@@ -452,142 +466,126 @@ describe("playback tokens", function()
         if world then world:shutdown() end
     end)
 
-    local function shortTimeline(channel?: string): tween.Timeline
-        local spec: tween.TimelineSpec = {
-            tween.to(0.5, tween.linear, tween.translateX, 100),
+    local function shortSpec(): sequence.TimelineSpec
+        return {
+            sequence.tweenTo(0.5, sequence.easing.linear, sequence.target.translateX, 100),
         }
-        spec.channel = channel
-        return tween.timeline(spec)
     end
 
-    it("hands every playback its own token", function()
+    local function playShort(
+        entity: integer, channel?: string
+    ): sequence.Handle
+        local handle <const> = sequence.play(world,
+            sequence.timeline(uniqueName(), shortSpec()),
+            {owner = entity, channel = channel})
+        world:update(0)
+        return handle
+    end
+
+    local function stateOf(handle: sequence.Handle): string
+        local status <const> = sequence.status(world, handle)
+        return status and status.state as string or nil
+    end
+
+    it("hands every playback its own handle", function()
         local a = world:spawn(Transform(0, 0))
         local b = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        local first = shortTimeline():play(world, a)
-        local second = shortTimeline():play(world, a)
-        local third = tween.play(world, b, shortTimeline())
+        local first = playShort(a)
+        local second = playShort(a)
+        local third = playShort(b)
 
         luassert.is_number(first)
         luassert.not_equals(first, second, "two runs on one entity are two playbacks")
         luassert.not_equals(second, third)
-        luassert.is_true(tween.isPlaying(world, a, first))
-        luassert.is_false(tween.isPlaying(world, b, first),
-            "a token belongs to the entity it was issued for")
+        luassert.is_true(isPlaying(world, first))
     end)
 
-    it("carries the token on completion", function()
+    it("reports a completed playback on its handle", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        local seen: integer = nil
-        world:observe(0, tween.TweenComplete, function(ev: tween.TweenComplete)
-            seen = ev.playback
-        end)
-        local token = shortTimeline():play(world, entity)
+        local handle = playShort(entity)
+        luassert.is_true(isPlaying(world, handle))
 
         tick(world, 0.6)
-        luassert.equals(token, seen)
-        luassert.is_false(tween.isPlaying(world, entity, token))
+        luassert.equals("completed", stateOf(handle))
     end)
 
     it("reports a cancelled playback", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        local ended: tween.TweenCancelled = nil
-        world:observe(0, tween.TweenCancelled, function(ev: tween.TweenCancelled)
-            ended = ev
-        end)
-        local token = shortTimeline():play(world, entity)
-        tween.cancel(world, entity)
+        local handle = playShort(entity)
+        luassert.is_true(sequence.cancel(world, handle))
 
-        luassert.is_not_nil(ended)
-        luassert.equals(token, ended.playback)
-        luassert.equals("cancelled", ended.reason)
-        luassert.is_false(tween.isPlaying(world, entity, token))
+        luassert.equals("cancelled", stateOf(handle))
+        luassert.is_false(isPlaying(world, handle))
     end)
 
     it("reports a playback replaced on its channel", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        local ended: tween.TweenCancelled = nil
-        world:observe(0, tween.TweenCancelled, function(ev: tween.TweenCancelled)
-            ended = ev
-        end)
-        local first = shortTimeline("move"):play(world, entity)
-        local second = shortTimeline("move"):play(world, entity)
+        local first = playShort(entity, "move")
+        local second = playShort(entity, "move")
 
-        luassert.is_not_nil(ended)
-        luassert.equals(first, ended.playback)
-        luassert.equals("replaced", ended.reason)
-        luassert.equals("move", ended.channel)
-        luassert.is_true(tween.isPlaying(world, entity, second))
+        luassert.equals("cancelled", stateOf(first),
+            "the second playback took the channel from the first")
+        luassert.is_true(isPlaying(world, second))
     end)
 
     it("reports a playback whose entity died", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        local ended: tween.TweenCancelled = nil
-        world:observe(0, tween.TweenCancelled, function(ev: tween.TweenCancelled)
-            ended = ev
-        end)
-        local token = shortTimeline():play(world, entity)
+        local handle = playShort(entity)
         world:despawn(entity)
         world:commit()
 
-        luassert.is_not_nil(ended, "a dead target must not leave a waiter hanging")
-        luassert.equals(token, ended.playback)
-        luassert.equals("targetLost", ended.reason)
-        luassert.is_false(tween.isPlaying(world, entity, token))
+        luassert.equals("cancelled", stateOf(handle),
+            "a dead owner must not leave a playback running")
+        luassert.is_false(isPlaying(world, handle))
     end)
 
     it("ends a playback exactly once", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        local ends = 0
-        world:observe(0, tween.TweenCancelled, function() ends = ends + 1 end)
-        world:observe(0, tween.TweenComplete, function() ends = ends + 1 end)
-
-        shortTimeline():play(world, entity)
-        tween.cancel(world, entity)
+        local handle = playShort(entity)
+        luassert.is_true(sequence.cancel(world, handle))
+        luassert.is_false(sequence.cancel(world, handle),
+            "a finished playback cannot end a second time")
         tick(world, 1.0)
         world:despawn(entity)
         world:commit()
-
-        luassert.equals(1, ends)
+        luassert.equals("cancelled", stateOf(handle))
     end)
 
-    it("keeps a token across a snapshot", function()
+    it("keeps a handle meaningful across a snapshot", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
-        local token = shortTimeline():play(world, entity)
+        local handle = playShort(entity)
 
         local saved = world:saveSnapshot().buffer
         world:loadSnapshot(saved)
 
-        local seen: integer = nil
-        world:observe(0, tween.TweenComplete, function(ev: tween.TweenComplete)
-            seen = ev.playback
-        end)
-        luassert.is_true(tween.isPlaying(world, entity, token))
+        luassert.is_true(isPlaying(world, handle),
+            "the same handle names the same playback after a load")
         tick(world, 0.6)
-        luassert.equals(token, seen)
+        luassert.equals("completed", stateOf(handle))
     end)
 
-    it("does not reissue a token after a snapshot load", function()
+    it("does not reissue a handle after a snapshot load", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
-        local first = shortTimeline():play(world, entity)
+        local first = playShort(entity)
 
         local saved = world:saveSnapshot().buffer
         world:loadSnapshot(saved)
 
-        local second = shortTimeline():play(world, entity)
+        local second = playShort(entity)
         luassert.not_equals(first, second)
     end)
 end)
@@ -598,45 +596,45 @@ end)
 
 describe("timeline compilation", function()
     it("parallel entries get the same start time", function()
-        local def <const> = tween.timeline({
-            tween.parallel(
-                tween.to(0.5, tween.linear, tween.translateX, 100),
-                tween.to(0.3, tween.linear, tween.translateY, 100)),
-        })
+        local def <const> = {
+            sequence.tweenParallel(
+                sequence.tweenTo(0.5, sequence.easing.linear, sequence.target.translateX, 100),
+                sequence.tweenTo(0.3, sequence.easing.linear, sequence.target.translateY, 100)),
+        }
 
-        local impl <const> = def as TimelineImpl
+        local impl <const> = compile(def) as TimelineImpl
         luassert.is_equal(impl.slots[1].startTime, impl.slots[2].startTime)
         luassert.is_equal(0, impl.slots[1].startTime)
     end)
 
     it("parallel advances by its longest entry", function()
-        local def <const> = tween.timeline({
-            tween.parallel(
-                tween.to(0.5, tween.linear, tween.translateX, 100),
-                tween.to(0.3, tween.linear, tween.translateY, 100)),
-            tween.to(0.4, tween.linear, tween.rotation, 1),
-        })
+        local def <const> = {
+            sequence.tweenParallel(
+                sequence.tweenTo(0.5, sequence.easing.linear, sequence.target.translateX, 100),
+                sequence.tweenTo(0.3, sequence.easing.linear, sequence.target.translateY, 100)),
+            sequence.tweenTo(0.4, sequence.easing.linear, sequence.target.rotation, 1),
+        }
 
-        luassert.is_equal(0.5, (def as TimelineImpl).slots[3].startTime)
+        luassert.is_equal(0.5, (compile(def) as TimelineImpl).slots[3].startTime)
     end)
 
     it("wait advances the time offset", function()
-        local def <const> = tween.timeline({
-            tween.to(0.3, tween.linear, tween.translateX, 100),
-            tween.wait(0.2),
-            tween.to(0.4, tween.linear, tween.translateY, 100),
-        })
+        local def <const> = {
+            sequence.tweenTo(0.3, sequence.easing.linear, sequence.target.translateX, 100),
+            sequence.tweenWait(0.2),
+            sequence.tweenTo(0.4, sequence.easing.linear, sequence.target.translateY, 100),
+        }
 
-        luassert.is_equal(0.5, (def as TimelineImpl).slots[2].startTime)
+        luassert.is_equal(0.5, (compile(def) as TimelineImpl).slots[2].startTime)
     end)
 
     it("compiles the supplied nodes in place", function()
-        local operation = tween.to(0.5, tween.linear, tween.translateX, 100)
+        local operation = sequence.tweenTo(0.5, sequence.easing.linear, sequence.target.translateX, 100)
         local spec = {operation}
-        local timeline <const> = tween.timeline(spec)
+        local timeline <const> = spec
 
         luassert.is_true(rawequal(timeline, spec))
-        local impl <const> = timeline as TimelineImpl
+        local impl <const> = compile(timeline) as TimelineImpl
         luassert.is_true(rawequal(impl.slots[1], operation))
         luassert.is_equal(0, impl.slots[1].startTime)
         luassert.is_equal(0.5, impl.slots[1].endTime)
@@ -647,9 +645,9 @@ describe("timeline compilation", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        tween.timeline({
-            tween.to(1.0, "linear", "transform.x", 100),
-        }):play(world, entity)
+        play(world, entity, {
+            sequence.tweenTo(1.0, "linear", "transform.x", 100),
+        })
 
         tick(world, 0.5)
         luassert.is_near(50, world:get(entity, Transform).x, 2)
@@ -657,16 +655,16 @@ describe("timeline compilation", function()
     end)
 
     it("supports sequential branches inside parallel", function()
-        local def <const> = tween.timeline({
-            tween.parallel(
+        local def <const> = {
+            sequence.tweenParallel(
                 {
-                    tween.to(0.2, "linear", "transform.x", 10),
-                    tween.to(0.3, "linear", "transform.y", 20)},
-                tween.to(0.4, "linear", "transform.rotation", 1)),
-            tween.to(0.1, "linear", "transform.scaleX", 2),
-        })
+                    sequence.tweenTo(0.2, "linear", "transform.x", 10),
+                    sequence.tweenTo(0.3, "linear", "transform.y", 20)},
+                sequence.tweenTo(0.4, "linear", "transform.rotation", 1)),
+            sequence.tweenTo(0.1, "linear", "transform.scaleX", 2),
+        }
 
-        local impl <const> = def as TimelineImpl
+        local impl <const> = compile(def) as TimelineImpl
         luassert.is_equal(0, impl.slots[1].startTime)
         luassert.is_equal(0.2, impl.slots[2].startTime)
         luassert.is_equal(0, impl.slots[3].startTime)
@@ -675,17 +673,17 @@ describe("timeline compilation", function()
 
     it("rejects malformed entries", function()
         luassert.has_error(function()
-            tween.timeline(({{} as any}) as tween.TimelineSpec)
+            sequence.timeline(uniqueName(), {{} as any} as sequence.TimelineSpec)
         end, nil)
     end)
 
     it("does not accept a named sequence", function()
         luassert.has_error(function()
-            tween.timeline(({
+            sequence.timeline(uniqueName(), ({
                 sequence = {
-                    tween.to(0.5, "linear", "transform.x", 100),
+                    sequence.tweenTo(0.5, "linear", "transform.x", 100),
                 },
-            } as any) as tween.TimelineSpec)
+            } as any) as sequence.TimelineSpec)
         end, nil)
     end)
 
@@ -696,14 +694,14 @@ describe("timeline compilation", function()
         local e2 = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        local def <const> = tween.timeline({
-            tween.to(1.0, tween.linear, tween.translateX, 100),
-        })
+        local def <const> = {
+            sequence.tweenTo(1.0, sequence.easing.linear, sequence.target.translateX, 100),
+        }
 
-        def:play(world, e1)
+        play(world, e1, def)
         tick(world, 0.5)
 
-        def:play(world, e2)
+        play(world, e2, def)
         tick(world, 0.25)
 
         luassert.is_near(75, world:get(e1, Transform).x, 2)
@@ -714,15 +712,15 @@ describe("timeline compilation", function()
 
     it("keeps multiple plays created in one deferred scope", function()
         local world = makeWorld()
-        local entity = world:spawn(Transform(0, 0))
+        world:spawn(Transform(0, 0))
         tick(world, 0)
 
         local query <const> = world:query({include = {Transform}})
-        local moveX <const> = tween.timeline({
-            tween.to(1, "linear", "transform.x", 100),
+        local xProgram <const> = sequence.timeline(uniqueName(), {
+            sequence.tweenTo(1, "linear", "transform.x", 100),
         })
-        local moveY <const> = tween.timeline({
-            tween.to(1, "linear", "transform.y", 100),
+        local yProgram <const> = sequence.timeline(uniqueName(), {
+            sequence.tweenTo(1, "linear", "transform.y", 100),
         })
         local played = false
         world:addSystem({
@@ -732,8 +730,8 @@ describe("timeline compilation", function()
                 if played then return end
                 for _, len, entities in query:iter() do
                     for i = 1, len do
-                        moveX:play(world, entities[i])
-                        moveY:play(world, entities[i])
+                        sequence.play(world, xProgram, {owner = entities[i]})
+                        sequence.play(world, yProgram, {owner = entities[i]})
                     end
                 end
                 played = true
@@ -741,35 +739,35 @@ describe("timeline compilation", function()
         })
 
         tick(world, 0)
-        local playback <const> = world:get(entity, tween.TweenPlayback) as PlaybackImpl
-        luassert.is_not_nil(playback)
-        luassert.equals(2, #playback.cursors)
+        tick(world, 0)
+        luassert.equals(2, sequence.activeCount(world),
+            "both timelines started from inside the deferred region")
         world:shutdown()
     end)
 
     it("run uses the child timeline duration", function()
-        local sub <const> = tween.timeline({
-            tween.to(0.5, tween.linear, tween.translateY, 100),
-        })
+        local sub <const> = {
+            sequence.tweenTo(0.5, sequence.easing.linear, sequence.target.translateY, 100),
+        }
 
-        local def <const> = tween.timeline({
-            tween.to(0.5, tween.linear, tween.translateX, 100),
-            tween.run(sub),
-        })
+        local def <const> = {
+            sequence.tweenTo(0.5, sequence.easing.linear, sequence.target.translateX, 100),
+            sequence.tweenRun(sub),
+        }
 
-        luassert.is_near(1.0, (def as TimelineImpl).totalDuration, 1e-9)
+        luassert.is_near(1.0, (compile(def) as TimelineImpl).totalDuration, 1e-9)
     end)
 
     it("run options repeat a child for a finite pass count", function()
-        local sub <const> = tween.timeline({
-            tween.to(0.5, tween.linear, tween.translateY, 100),
-        })
+        local sub <const> = {
+            sequence.tweenTo(0.5, sequence.easing.linear, sequence.target.translateY, 100),
+        }
 
-        local def <const> = tween.timeline({
-            tween.run(sub, {mode = "loop", count = 3}),
-        })
+        local def <const> = {
+            sequence.tweenRun(sub, {mode = "loop", count = 3}),
+        }
 
-        luassert.is_near(1.5, (def as TimelineImpl).totalDuration, 1e-9)
+        luassert.is_near(1.5, (compile(def) as TimelineImpl).totalDuration, 1e-9)
     end)
 
     it("consumes every nested run pass crossed by one update", function()
@@ -777,12 +775,12 @@ describe("timeline compilation", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        local child <const> = tween.timeline({
-            tween.adjust(1, "linear", "transform.x", 10),
+        local child <const> = {
+            sequence.tweenAdjust(1, "linear", "transform.x", 10),
+        }
+        play(world, entity, {
+            sequence.tweenRun(child, {mode = "loop", count = 3}),
         })
-        tween.timeline({
-            tween.run(child, {mode = "loop", count = 3}),
-        }):play(world, entity)
 
         tick(world, 2.5)
         luassert.is_near(25, world:get(entity, Transform).x, 1e-9)
@@ -793,12 +791,12 @@ describe("timeline compilation", function()
         local world = makeWorld()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
-        local child <const> = tween.timeline({
-            tween.to(1.0, "linear", "transform.x", 100),
+        local child <const> = {
+            sequence.tweenTo(1.0, "linear", "transform.x", 100),
+        }
+        play(world, entity, {
+            sequence.tweenRun(child, {mode = "pingPong", count = 2}),
         })
-        tween.timeline({
-            tween.run(child, {mode = "pingPong", count = 2}),
-        }):play(world, entity)
 
         tick(world, 0.5)
         luassert.is_near(50, world:get(entity, Transform).x, 2)
@@ -812,13 +810,13 @@ describe("timeline compilation", function()
     end)
 
     it("rejects an unbounded nested run", function()
-        local sub <const> = tween.timeline({
-            tween.to(0.5, tween.linear, tween.translateY, 100),
-        })
+        local sub <const> = {
+            sequence.tweenTo(0.5, sequence.easing.linear, sequence.target.translateY, 100),
+        }
 
         luassert.has_error(function()
-            tween.timeline({
-                tween.run(sub, {mode = "loop"}),
+            sequence.timeline(uniqueName(), {
+                sequence.tweenRun(sub, {mode = "loop"}),
             })
         end, nil)
     end)
@@ -828,14 +826,14 @@ describe("timeline compilation", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        tween.timeline({
-            tween.to(1.0, tween.linear, tween.translateX, 100),
-        }):play(world, entity, {mode = "loop"})
+        play(world, entity, {
+            sequence.tweenTo(1.0, sequence.easing.linear, sequence.target.translateX, 100),
+        }, {mode = "loop"})
 
         tick(world, 0.5)
         luassert.is_near(50, world:get(entity, Transform).x, 2)
 
-        tween.cancel(world, entity)
+        sequence.cancelOwnedBy(world, entity)
 
         local t = world:get(entity, Transform)
         t.x = 999
@@ -852,11 +850,11 @@ describe("timeline compilation", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        local def <const> = tween.timeline({
-            tween.to(0.5, tween.linear, tween.translateX, 100),
-        })
+        local def <const> = {
+            sequence.tweenTo(0.5, sequence.easing.linear, sequence.target.translateX, 100),
+        }
 
-        def:play(world, entity)
+        play(world, entity, def)
         tick(world, 0.6)
         luassert.is_near(100, world:get(entity, Transform).x, 2)
 
@@ -864,7 +862,7 @@ describe("timeline compilation", function()
         transform.x = 0
         world:markComponentDirty(entity, Transform as tecs.Component)
 
-        def:play(world, entity)
+        play(world, entity, def)
         tick(world, 0.25)
         luassert.is_near(50, world:get(entity, Transform).x, 2)
 
@@ -876,22 +874,22 @@ describe("timeline compilation", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        local def <const> = tween.timeline({
-            tween.to(1.0, tween.linear, tween.translateX, 100),
-        })
+        local def <const> = {
+            sequence.tweenTo(1.0, sequence.easing.linear, sequence.target.translateX, 100),
+        }
 
-        def:play(world, entity, {mode = "loop"})
+        play(world, entity, def, {mode = "loop"})
         tick(world, 0.5)
         luassert.is_near(50, world:get(entity, Transform).x, 2)
 
-        tween.cancel(world, entity)
+        sequence.cancelOwnedBy(world, entity)
         tick(world, 0.01)
 
         local transform = world:getMut(entity, Transform)
         transform.x = 0
         world:markComponentDirty(entity, Transform as tecs.Component)
 
-        def:play(world, entity, {mode = "loop"})
+        play(world, entity, def, {mode = "loop"})
         tick(world, 0.25)
         luassert.is_near(25, world:get(entity, Transform).x, 2)
 
@@ -903,10 +901,9 @@ describe("timeline compilation", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        tween.timeline({
-            tween.to(1.0, tween.linear, tween.translateX, 100),
+        play(world, entity, {
+            sequence.tweenTo(1.0, sequence.easing.linear, sequence.target.translateX, 100),
         })
-            :play(world, entity)
 
         tick(world, 0.5)
         luassert.is_near(50, world:get(entity, Transform).x, 2)
@@ -926,10 +923,9 @@ describe("timeline compilation", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        tween.timeline({
-            tween.to(1.0, tween.linear, tween.translateX, 100),
+        play(world, entity, {
+            sequence.tweenTo(1.0, sequence.easing.linear, sequence.target.translateX, 100),
         })
-            :play(world, entity)
 
         tick(world, 0.5)
         local snap = world:saveSnapshot({format = "table"})
@@ -946,9 +942,9 @@ describe("timeline compilation", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        tween.timeline({
-            tween.to(1.0, "linear", "transform.x", 100),
-        }):play(world, entity, {mode = "pingPong", count = 2})
+        play(world, entity, {
+            sequence.tweenTo(1.0, "linear", "transform.x", 100),
+        }, {mode = "pingPong", count = 2})
 
         tick(world, 1.0)
         luassert.is_near(100, world:get(entity, Transform).x, 2)
@@ -959,7 +955,7 @@ describe("timeline compilation", function()
         luassert.is_near(50, world:get(entity, Transform).x, 2)
         tick(world, 0.5)
         luassert.is_near(0, world:get(entity, Transform).x, 2)
-        luassert.is_nil(world:get(entity, tween.TweenPlayback))
+        luassert.equals(0, sequence.activeCount(world))
 
         world:shutdown()
     end)
@@ -969,16 +965,16 @@ describe("timeline compilation", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        local child <const> = tween.timeline({
-            tween.to(1.0, tween.linear, tween.translateY, 100),
-        })
+        local child <const> = {
+            sequence.tweenTo(1.0, sequence.easing.linear, sequence.target.translateY, 100),
+        }
 
-        local parent <const> = tween.timeline({
-            tween.to(0.5, tween.linear, tween.translateX, 50),
-            tween.run(child),
-        })
+        local parent <const> = {
+            sequence.tweenTo(0.5, sequence.easing.linear, sequence.target.translateX, 50),
+            sequence.tweenRun(child),
+        }
 
-        parent:play(world, entity)
+        play(world, entity, parent)
         tick(world, 0.75)
         luassert.is_near(50, world:get(entity, Transform).x, 2)
         luassert.is_near(25, world:get(entity, Transform).y, 2)
@@ -993,39 +989,42 @@ describe("timeline compilation", function()
         world:shutdown()
     end)
 
-    it("plays a preset by name immediately after registration", function()
+    it("plays a timeline by name straight after compiling it", function()
         local world = makeWorld()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        tween.registerPreset(world, "spec.immediate", tween.timeline({
-            tween.to(1, "linear", "transform.x", 100),
-        }))
-        tween.play(world, entity, "spec.immediate")
+        sequence.timeline("spec.immediate", {
+            sequence.tweenTo(1, "linear", "transform.x", 100),
+        })
+        sequence.play(world, sequence.program("spec.immediate"), {owner = entity})
+        world:update(0)
 
         tick(world, 0.5)
         luassert.is_near(50, world:get(entity, Transform).x, 1e-9)
         world:shutdown()
     end)
 
-    it("keeps inactive presets across snapshot load", function()
+    it("keeps a timeline nothing is playing across a snapshot load", function()
         local world = makeWorld()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        tween.registerPreset(world, "spec.inactive", tween.timeline({
-            tween.to(0.1, "linear", "transform.x", 10),
-        }))
-        tween.play(world, entity, "spec.inactive")
+        sequence.timeline("spec.inactive", {
+            sequence.tweenTo(0.1, "linear", "transform.x", 10),
+        })
+        sequence.play(world, sequence.program("spec.inactive"), {owner = entity})
+        world:update(0)
         tick(world, 0.2)
-        luassert.is_nil(world:get(entity, tween.TweenPlayback))
+        luassert.equals(0, sequence.activeCount(world))
 
         local snap <const> = world:saveSnapshot({format = "table"})
         world:loadSnapshot(snap)
         local transform = world:getMut(entity, Transform)
         transform.x = 0
 
-        tween.play(world, entity, "spec.inactive")
+        sequence.play(world, sequence.program("spec.inactive"), {owner = entity})
+        world:update(0)
         tick(world, 0.05)
         luassert.is_near(5, world:get(entity, Transform).x, 1e-9)
         world:shutdown()
@@ -1037,43 +1036,45 @@ describe("timeline compilation", function()
         tick(world, 0)
 
         -- Keep cursors and their templates live at save time.
-        local child <const> = tween.timeline({
-            tween.to(0.2, tween.linear, tween.translateY, 10),
+        local child <const> = {
+            sequence.tweenTo(0.2, sequence.easing.linear, sequence.target.translateY, 10),
+        }
+        local preset <const> = sequence.timeline("spec.nested", {
+            sequence.tweenTo(0.2, sequence.easing.linear, sequence.target.translateX, 10),
+            sequence.tweenRun(child, {mode = "loop", count = 3}),
         })
-        local preset <const> = tween.registerPreset(world, "spec.nested", tween.timeline({
-            tween.to(0.2, tween.linear, tween.translateX, 10),
-            tween.run(child, {mode = "loop", count = 3}),
-        }))
 
-        local function templateCount(snap: {string:any}): integer
+        local function programCount(snap: {string:any}): integer
             local inner = snap.snapshot as {string:any}
             local dataEntries = inner and inner.data as {{string:any}}
             if not dataEntries then return -1 end
             for i = 1, #dataEntries do
-                if dataEntries[i].key == "tecs2d.tween.registry" then
-                    local tweenData = dataEntries[i].value as {string:any}
-                    local templates = tweenData.templates as {any}
-                    return templates and #templates or -1
+                if dataEntries[i].key == "tecs2d.sequence" then
+                    local payload = dataEntries[i].value as {string:any}
+                    local programs = payload.programs as {any}
+                    return programs and #programs or -1
                 end
             end
             return -1
         end
 
-        preset:play(world, entity, {mode = "loop"})
+        sequence.play(world, preset, {owner = entity, params = {mode = "loop"}})
+        world:update(0)
         tick(world, 0.5)
         local first = world:saveSnapshot({format = "table"}) as {string:any}
-        local baseline = templateCount(first)
-        luassert.is_true(baseline > 0, "no templates serialized")
+        local baseline = programCount(first)
+        luassert.is_true(baseline > 0, "no programs serialized")
 
         -- Two load -> replay -> save rounds must not grow the registry.
         for _ = 1, 2 do
             world:loadSnapshot(first as any)
-            tween.play(world, entity, "spec.nested", {mode = "loop"})
+            sequence.play(world, sequence.program("spec.nested"),
+                {owner = entity, params = {mode = "loop"}})
             tick(world, 0.5)
         end
         local final = world:saveSnapshot({format = "table"}) as {string:any}
-        luassert.equals(baseline, templateCount(final),
-            "template registry grew across save/load/play cycles")
+        luassert.equals(baseline, programCount(final),
+            "the program list grew across save/load/play cycles")
 
         world:shutdown()
     end)
@@ -1093,10 +1094,9 @@ describe("timeline compilation", function()
         local entity = world:spawn(PairComp(0, 0) as tecs.Component)
         tick(world, 0)
 
-        tween.timeline({
-            tween.to(1.0, tween.linear, tween.field2(PairComp, "x", "y"), 100, 200),
+        play(world, entity, {
+            sequence.tweenTo(1.0, sequence.easing.linear, sequence.target.field2(PairComp, "x", "y"), 100, 200),
         })
-            :play(world, entity)
 
         tick(world, 0.5)
         local snap = world:saveSnapshot({format = "table"})
@@ -1123,10 +1123,9 @@ describe("timeline compilation", function()
         local entity = world:spawn(AngleComp(0) as tecs.Component)
         tick(world, 0)
 
-        tween.timeline({
-            tween.to(1.0, tween.linear, tween.angle(AngleComp, "theta"), math.pi / 2),
+        play(world, entity, {
+            sequence.tweenTo(1.0, sequence.easing.linear, sequence.target.angle(AngleComp, "theta"), math.pi / 2),
         })
-            :play(world, entity)
 
         tick(world, 0.5)
         local snap = world:saveSnapshot({format = "table"})
@@ -1138,32 +1137,34 @@ describe("timeline compilation", function()
         world:shutdown()
     end)
 
-    it("serializes one shared template for multiple active cursors", function()
+    it("serializes one shared program for several playbacks of it", function()
         local world = makeWorld()
         local e1 = world:spawn(Transform(0, 0))
         local e2 = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        local fade <const> = tween.timeline({
-            tween.to(1.0, tween.linear, tween.translateX, 100),
+        local fade <const> = sequence.timeline(uniqueName(), {
+            sequence.tweenTo(1.0, sequence.easing.linear, sequence.target.translateX, 100),
         })
 
-        fade:play(world, e1)
-        fade:play(world, e2)
+        sequence.play(world, fade, {owner = e1})
+        sequence.play(world, fade, {owner = e2})
+        world:update(0)
 
         local out = world:saveSnapshot({format = "table"}) as {string:any}
         local snap = out.snapshot as {string:any}
         local data = snap.data as {{string:any}}
-        local registry: {string:any} = nil
+        local payload: {string:any} = nil
         for i = 1, #data do
-            if data[i].key == "tecs2d.tween.registry" then
-                registry = data[i].value as {string:any}
+            if data[i].key == "tecs2d.sequence" then
+                payload = data[i].value as {string:any}
                 break
             end
         end
 
-        luassert.is_truthy(registry)
-        luassert.equals(1, #(registry.templates as {{string:any}}))
+        luassert.is_truthy(payload)
+        luassert.equals(1, #(payload.programs as {{string:any}}),
+            "two playbacks of one timeline carry it once")
 
         world:shutdown()
     end)
@@ -1174,18 +1175,16 @@ describe("timeline compilation", function()
         tick(world, 0)
 
         local seen = false
-        world:observe(0, tween.TweenEvent, function(ev: tween.TweenEvent)
-            if ev.entity == entity and ev.name == "flash" then
-                luassert.is_nil(ev.channel)
+        world:observe(0, sequence.Event, function(ev: sequence.Event)
+            if ev.name == "flash" and ev.args[1] == entity then
                 seen = true
             end
         end)
 
-        tween.timeline({
-            tween.to(0.2, tween.linear, tween.translateX, 10),
-            tween.emit("flash"),
+        play(world, entity, {
+            sequence.tweenTo(0.2, sequence.easing.linear, sequence.target.translateX, 10),
+            sequence.tweenEmit("flash"),
         })
-            :play(world, entity)
 
         tick(world, 0.2)
         luassert.is_true(seen)
@@ -1196,13 +1195,12 @@ describe("timeline compilation", function()
     it("tracks a target resolved from TweenTrackingTarget", function()
         local world = makeWorld()
         local player = world:spawn(tecs.builtins.Key("player"), Transform(100, 50))
-        local missile = world:spawn(Transform(0, 0), tween.TrackingTarget(0, "player"))
+        local missile = world:spawn(Transform(0, 0), sequence.TrackingTarget(0, "player"))
         tick(world, 0)
 
-        tween.timeline({
-            tween.track(1.0, tween.linear, tween.translateXY, tween.sourceTrackingTarget(Transform, {"x", "y"})),
+        play(world, missile, {
+            sequence.tweenTrack(1.0, sequence.easing.linear, sequence.target.translateXY, sequence.source.tracking(Transform, {"x", "y"})),
         })
-            :play(world, missile)
 
         tick(world, 0.5)
         luassert.is_near(50, world:get(missile, Transform).x, 2)
@@ -1226,11 +1224,10 @@ describe("timeline compilation", function()
         local child = world:spawn(Transform(0, 0), tecs.builtins.ChildOf(parent) as tecs.Component)
         tick(world, 0)
 
-        tween.timeline({
-            tween.track(1.0, tween.linear, tween.translateXY,
-                tween.sourceRelationship(tecs.builtins.ChildOf, Transform, {"x", "y"})),
+        play(world, child, {
+            sequence.tweenTrack(1.0, sequence.easing.linear, sequence.target.translateXY,
+                sequence.source.related(tecs.builtins.ChildOf, Transform, {"x", "y"})),
         })
-            :play(world, child)
 
         tick(world, 0.5)
         luassert.is_near(50, world:get(child, Transform).x, 2)
@@ -1253,10 +1250,9 @@ describe("timeline compilation", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        tween.timeline({
-            tween.to(1.0, tween.linear, tween.translateX, 100),
-        })
-            :play(world, entity, {speed = 2})
+        play(world, entity, {
+            sequence.tweenTo(1.0, sequence.easing.linear, sequence.target.translateX, 100),
+        }, {speed = 2})
 
         tick(world, 0.25) -- 0.25 * 2 = 0.5 effective
         luassert.is_near(50, world:get(entity, Transform).x, 2)
@@ -1270,12 +1266,12 @@ describe("timeline compilation", function()
         local e2 = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        local def <const> = tween.timeline({
-            tween.to(1.0, tween.linear, tween.translateX, 100),
-        })
+        local def <const> = {
+            sequence.tweenTo(1.0, sequence.easing.linear, sequence.target.translateX, 100),
+        }
 
-        def:play(world, e1)
-        def:play(world, e2, {speed = 2})
+        play(world, e1, def)
+        play(world, e2, def, {speed = 2})
 
         tick(world, 0.5)
         luassert.is_near(50, world:get(e1, Transform).x, 2)
@@ -1289,19 +1285,18 @@ describe("timeline compilation", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        tween.timeline({
-            tween.to(1.0, tween.linear, tween.translateX, 100),
+        local handle <const> = play(world, entity, {
+            sequence.tweenTo(1.0, sequence.easing.linear, sequence.target.translateX, 100),
         })
-            :play(world, entity)
 
         tick(world, 0.25)
         luassert.is_near(25, world:get(entity, Transform).x, 2)
 
-        tween.pause(world, entity)
+        sequence.pause(world, handle)
         tick(world, 0.5) -- should not advance
         luassert.is_near(25, world:get(entity, Transform).x, 2)
 
-        tween.resume(world, entity)
+        sequence.resume(world, handle)
         tick(world, 0.25)
         luassert.is_near(50, world:get(entity, Transform).x, 2)
 
@@ -1313,10 +1308,9 @@ describe("timeline compilation", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        tween.timeline({
-            tween.to(1.0, tween.linear, tween.translateX, 100),
-        })
-            :play(world, entity, {delay = 0.5})
+        play(world, entity, {
+            sequence.tweenTo(1.0, sequence.easing.linear, sequence.target.translateX, 100),
+        }, {delay = 0.5})
 
         tick(world, 0.25) -- still in delay
         luassert.is_near(0, world:get(entity, Transform).x, 2)
@@ -1336,12 +1330,12 @@ describe("timeline compilation", function()
         local e2 = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        local def <const> = tween.timeline({
-            tween.to(1.0, tween.linear, tween.translateX, 100),
-        })
+        local def <const> = {
+            sequence.tweenTo(1.0, sequence.easing.linear, sequence.target.translateX, 100),
+        }
 
-        def:play(world, e1, {delay = 0})
-        def:play(world, e2, {delay = 0.5})
+        play(world, e1, def, {delay = 0})
+        play(world, e2, def, {delay = 0.5})
 
         tick(world, 0.5)
         luassert.is_near(50, world:get(e1, Transform).x, 2)
@@ -1359,22 +1353,20 @@ describe("timeline compilation", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        local moveRight = tween.timeline({
-            channel = "movement",
-            tween.to(1.0, tween.linear, tween.translateX, 100),
-        })
+        local moveRight = {
+            sequence.tweenTo(1.0, sequence.easing.linear, sequence.target.translateX, 100),
+        }
 
-        local moveDown = tween.timeline({
-            channel = "movement",
-            tween.to(1.0, tween.linear, tween.translateY, 200),
-        })
+        local moveDown = {
+            sequence.tweenTo(1.0, sequence.easing.linear, sequence.target.translateY, 200),
+        }
 
-        moveRight:play(world, entity)
+        play(world, entity, moveRight, nil, "movement")
         tick(world, 0.5)
         luassert.is_near(50, world:get(entity, Transform).x, 2)
 
-        -- Play new tween on same channel: cancels moveRight
-        moveDown:play(world, entity)
+        -- Play on the same owner and channel: cancels moveRight
+        play(world, entity, moveDown, nil, "movement")
         tick(world, 0.5)
 
         -- x should stay at 50 (cancelled), y should be at 100
@@ -1384,30 +1376,26 @@ describe("timeline compilation", function()
         world:shutdown()
     end)
 
-    it("pause/resume can select by channel", function()
+    it("pause and resume act on one playback, not on the entity", function()
         local world = makeWorld()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        tween.timeline({
-            channel = "movement",
-            tween.to(1.0, tween.linear, tween.translateX, 100),
-        })
-            :play(world, entity)
+        local movement <const> = play(world, entity, {
+            sequence.tweenTo(1.0, sequence.easing.linear, sequence.target.translateX, 100),
+        }, nil, "movement")
 
-        tween.timeline({
-            channel = "fade",
-            tween.to(1.0, tween.linear, tween.translateY, 100),
-        })
-            :play(world, entity)
+        play(world, entity, {
+            sequence.tweenTo(1.0, sequence.easing.linear, sequence.target.translateY, 100),
+        }, nil, "fade")
 
         tick(world, 0.25)
-        tween.pause(world, entity, "movement")
+        sequence.pause(world, movement)
         tick(world, 0.25)
         luassert.is_near(25, world:get(entity, Transform).x, 2)
         luassert.is_near(50, world:get(entity, Transform).y, 2)
 
-        tween.resume(world, entity, "movement")
+        sequence.resume(world, movement)
         tick(world, 0.25)
         luassert.is_near(50, world:get(entity, Transform).x, 2)
         luassert.is_near(75, world:get(entity, Transform).y, 2)
@@ -1420,15 +1408,16 @@ describe("timeline compilation", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        local preset <const> = tween.registerPreset(world, "spec.moveRight", tween.timeline({
-            tween.to(1.0, tween.linear, tween.translateX, 100),
-        }))
+        local preset <const> = sequence.timeline("spec.moveRight", {
+            sequence.tweenTo(1.0, sequence.easing.linear, sequence.target.translateX, 100),
+        })
 
-        preset:play(world, entity)
+        local handle <const> = sequence.play(world, preset, {owner = entity})
+        world:update(0)
         tick(world, 0.5)
         luassert.is_near(50, world:get(entity, Transform).x, 2)
 
-        tween.cancel(world, entity, "spec.moveRight")
+        sequence.cancel(world, handle)
         local t = world:getMut(entity, Transform)
         t.x = 999
         world:markComponentDirty(entity, Transform as tecs.Component)
@@ -1443,18 +1432,18 @@ describe("timeline compilation", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        local moveX <const> = tween.timeline({
-            tween.to(1.0, tween.linear, tween.translateX, 100),
-        })
-        local moveY <const> = tween.timeline({
-            tween.to(1.0, tween.linear, tween.translateY, 100),
-        })
+        local moveX <const> = {
+            sequence.tweenTo(1.0, sequence.easing.linear, sequence.target.translateX, 100),
+        }
+        local moveY <const> = {
+            sequence.tweenTo(1.0, sequence.easing.linear, sequence.target.translateY, 100),
+        }
 
-        moveX:play(world, entity)
-        moveY:play(world, entity)
+        local xHandle <const> = play(world, entity, moveX)
+        play(world, entity, moveY)
         tick(world, 0.5)
 
-        tween.cancel(world, entity, moveX)
+        sequence.cancel(world, xHandle)
         tick(world, 0.25)
         luassert.is_near(50, world:get(entity, Transform).x, 2)
         luassert.is_near(75, world:get(entity, Transform).y, 2)
@@ -1467,15 +1456,13 @@ describe("timeline compilation", function()
         local entity = world:spawn(Transform(0, 0))
         tick(world, 0)
 
-        tween.timeline({
-            tween.to(1.0, tween.linear, tween.translateX, 100),
+        play(world, entity, {
+            sequence.tweenTo(1.0, sequence.easing.linear, sequence.target.translateX, 100),
         })
-            :play(world, entity)
 
-        tween.timeline({
-            tween.to(1.0, tween.linear, tween.translateY, 100),
+        play(world, entity, {
+            sequence.tweenTo(1.0, sequence.easing.linear, sequence.target.translateY, 100),
         })
-            :play(world, entity)
 
         tick(world, 0.5)
         -- Both should be running

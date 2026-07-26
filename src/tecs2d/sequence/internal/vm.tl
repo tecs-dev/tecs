@@ -462,8 +462,8 @@ local function walkActive()
         walkCursor = cursor
         if cursor.state == "running" then
             local evaluator <const> = cursor.evalImpl
-            local done = evaluator == nil or evaluator.step(world, cursor, dt)
-            if done and cursor.alive then
+            local finished = evaluator == nil or evaluator.step(world, cursor, dt)
+            if finished and cursor.alive then
                 seqcursors.deactivate(state, cursor)
                 cursor.evaluator = nil
                 cursor.evalImpl = nil

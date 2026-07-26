@@ -1,4 +1,4 @@
---- Love2D integration suite: tween plugin under the real frame loop.
+--- Love2D integration suite: timelines under the real frame loop.
 --- Covers absolute targets, relative adjustments, loop counts, completion
 --- events, and playback cleanup under the real frame loop.
 ---
@@ -28,7 +28,7 @@ local function waitX(app: fixture.App, globalName: string, expected: number, lab
         "%s: expected x ~ %.1f, got %.3f", label, expected, transformX(app, globalName)))
 end
 
-describe("tween: timelines drive transforms in the live loop", function()
+describe("timelines drive transforms in the live loop", function()
     local app: fixture.App
 
     setup(function()
@@ -43,40 +43,40 @@ describe("tween: timelines drive transforms in the live loop", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
             local gfx = require("tecs2d.gfx")
-            local tween = require("tecs2d.tween")
+            local sequence = require("tecs2d.sequence")
             local Transform = tecs.builtins.Transform
             _G.tecsTweenA = world:spawn(Transform(60, 60, 0, 1), gfx.Rectangle(8, 8), gfx.Color(1, 0, 0, 1))
-            tween.timeline({
-                tween.to(0.4, tween.linear, tween.translateX, 200),
-            })
-                :play(world, _G.tecsTweenA)
+            _G.tecsTweenAHandle = sequence.play(world,
+                sequence.timeline("spec.tweenA", {
+                    sequence.tweenTo(0.4, "linear", "transform.x", 200),
+                }), {owner = _G.tecsTweenA})
             return true
         ]])
         waitX(app, "tecsTweenA", 200, "absolute target")
 
-        -- Playback removes itself once the timeline finishes.
+        -- The playback retires itself once the timeline finishes.
         local cleaned = fixture.eventually(fixture.callTimeout, function(): boolean
             local values = fixture.runLua(app, [[
-                local tween = require("tecs2d.tween")
-                return world:get(_G.tecsTweenA, tween.TweenPlayback) == nil
+                local sequence = require("tecs2d.sequence")
+                local status = sequence.status(world, _G.tecsTweenAHandle)
+                return status ~= nil and status.state == "completed"
             ]])
             if values[1] == "true" then return true end
             return nil
         end)
-        luassert.is_true(cleaned == true, "TweenPlayback lingered after completion")
+        luassert.is_true(cleaned == true, "the playback kept running after it finished")
     end)
 
     it("adjust moves relative to the start value", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
             local gfx = require("tecs2d.gfx")
-            local tween = require("tecs2d.tween")
+            local sequence = require("tecs2d.sequence")
             local Transform = tecs.builtins.Transform
             _G.tecsTweenB = world:spawn(Transform(50, 90, 0, 1), gfx.Rectangle(8, 8), gfx.Color(0, 1, 0, 1))
-            tween.timeline({
-                tween.adjust(0.3, tween.linear, tween.translateX, 40),
-            })
-                :play(world, _G.tecsTweenB)
+            sequence.play(world, sequence.timeline("spec.tweenB", {
+                sequence.tweenAdjust(0.3, "linear", "transform.x", 40),
+            }), {owner = _G.tecsTweenB})
             return true
         ]])
         waitX(app, "tecsTweenB", 90, "relative adjustment by +40 from 50")
@@ -86,43 +86,39 @@ describe("tween: timelines drive transforms in the live loop", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
             local gfx = require("tecs2d.gfx")
-            local tween = require("tecs2d.tween")
+            local sequence = require("tecs2d.sequence")
             local Transform = tecs.builtins.Transform
             _G.tecsTweenC = world:spawn(Transform(30, 150, 0, 1), gfx.Rectangle(8, 8), gfx.Color(0, 0, 1, 1))
-            tween.timeline({
-                tween.adjust(0.2, tween.linear, tween.translateX, 25),
-            }):play(world, _G.tecsTweenC, {mode = "loop", count = 3})
+            sequence.play(world, sequence.timeline("spec.tweenC", {
+                sequence.tweenAdjust(0.2, "linear", "transform.x", 25),
+            }), {owner = _G.tecsTweenC, params = {mode = "loop", count = 3}})
             return true
         ]])
         waitX(app, "tecsTweenC", 30 + 25 * 3, "three passes of +25")
     end)
 
-    it("emits TweenComplete when a timeline finishes", function()
+    it("completes the playback when a timeline finishes", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
             local gfx = require("tecs2d.gfx")
-            local tween = require("tecs2d.tween")
+            local sequence = require("tecs2d.sequence")
             local Transform = tecs.builtins.Transform
             _G.tecsTweenD = world:spawn(Transform(60, 200, 0, 1), gfx.Rectangle(8, 8), gfx.Color(1, 1, 0, 1))
-            -- TweenComplete is emitted to the global address (0) with
-            -- the entity carried in the payload.
-            _G.tecsTweenDone = false
-            world:observe(0, tween.TweenComplete, function(e)
-                if e.entity == _G.tecsTweenD then
-                    _G.tecsTweenDone = true
-                end
-            end)
-            tween.timeline({
-                tween.to(0.2, tween.linear, tween.translateX, 120),
-            })
-                :play(world, _G.tecsTweenD)
+            _G.tecsTweenDHandle = sequence.play(world,
+                sequence.timeline("spec.tweenD", {
+                    sequence.tweenTo(0.2, "linear", "transform.x", 120),
+                }), {owner = _G.tecsTweenD})
             return true
         ]])
         local done = fixture.eventually(fixture.callTimeout, function(): boolean
-            local values = fixture.runLua(app, "return _G.tecsTweenDone")
+            local values = fixture.runLua(app, [[
+                local sequence = require("tecs2d.sequence")
+                local status = sequence.status(world, _G.tecsTweenDHandle)
+                return status ~= nil and status.state == "completed"
+            ]])
             if values[1] == "true" then return true end
             return nil
         end)
-        luassert.is_true(done == true, "TweenComplete never fired")
+        luassert.is_true(done == true, "the playback never completed")
     end)
 end)

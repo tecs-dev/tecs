@@ -40,15 +40,14 @@ describe("pause and time scale: motion control from MCP", function()
         fixture.runLua(app, [[
             local tecs = require("tecs")
             local gfx = require("tecs2d.gfx")
-            local tween = require("tecs2d.tween")
+            local sequence = require("tecs2d.sequence")
             local Transform = tecs.builtins.Transform
             _G.tecsMover = world:spawn(
                 Transform(20, 120, 0, 1), gfx.Rectangle(10, 10), gfx.Color(1, 0, 0, 1))
             -- Long, slow, linear drift so every phase of the suite has motion.
-            tween.timeline({
-                tween.to(120, tween.linear, tween.translateX, 20000),
-            })
-                :play(world, _G.tecsMover)
+            sequence.play(world, sequence.timeline("spec.drift", {
+                sequence.tweenTo(120, "linear", "transform.x", 20000),
+            }), {owner = _G.tecsMover})
             return true
         ]])
         local moving = fixture.eventually(fixture.callTimeout, function(): boolean
