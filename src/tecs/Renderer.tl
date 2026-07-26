@@ -44,8 +44,13 @@ local Texture <const> = require("tecs.gpu.Texture")
 local Camera <const> = require("tecs.gfx.Camera")
 local assets <const> = require("tecs.assets")
 local components <const> = require("tecs.components")
+local timing <const> = require("tecs.timing")
 
 local C <const> = sdl.C
+
+--- Extraction: the world-facing half of the frame, and the half that moves to
+--- the simulation thread when the pipeline splits.
+local EXTRACT <const> = timing.stage("extract")
 
 --- Floats per instance: four vec4s.
 local INSTANCE_FLOATS <const> = 16
@@ -89,6 +94,8 @@ local record RendererOptions
 end
 
 local record Renderer
+    --- Seconds the last extraction took. Zero unless timing is on.
+    _extractSeconds: number
     deferred: Deferred
     instances: Buffer
     pipeline: GraphicsPipeline
@@ -485,10 +492,21 @@ function Renderer:install(world: ecs.World)
         name = "tecs.SyncRenderState",
         phase = ecs.phases.RenderFirst,
         run = function()
+            local started = timing.begin()
             self.count, self.dropped, self.rewritten = syncInstances(self)
             self.deferred:setLights(syncLights(self))
+            self._extractSeconds = timing.finish(EXTRACT, started)
         end,
     })
+end
+
+--- Seconds the last extraction took, or zero when nothing is being measured.
+---
+--- Read by the frame loop, which subtracts it from the update to leave
+--- simulation on its own. Extraction runs inside `world:update`, so the two
+--- are one number until something takes them apart.
+function Renderer:extractSeconds(): number
+    return self._extractSeconds or 0.0
 end
 
 --- Uploads what the sync produced, culls, and runs the pipeline.

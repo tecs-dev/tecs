@@ -25,6 +25,7 @@ local Tint <const> = tecs.components.Tint
 local Renderable <const> = tecs.components.Renderable
 local Material <const> = tecs.components.Material
 local materials <const> = require("tecs.gpu.materials")
+local timing <const> = require("tecs.timing")
 
 --- Shapes of each kind: this many circles and this many rectangles, matching
 --- the reference bench. Both are the same quad with the same instance format;
@@ -43,8 +44,6 @@ local FRAMES <const> = math.floor(tonumber(os.getenv("BENCH_FRAMES")) or 300)
 local WIDTH <const> = 1280
 local HEIGHT <const> = 720
 
-local samples: {number} = {}
-local sampled = 0
 
 --- Fills the area, centred on the viewport so the visible fraction matches.
 local function spawnField(world: tecs.World)
@@ -99,16 +98,13 @@ local function spawnField(world: tecs.World)
     fill("rounded", 0.25, 10.0, 20.0)
 end
 
---- Sorts a copy and reads a percentile out of it.
-local function percentile(values: {number}, fraction: number): number
-    local sorted: {number} = {}
-    for i = 1, #values do sorted[i] = values[i] end
-    table.sort(sorted)
-    local index = math.floor(#sorted * fraction)
-    if index < 1 then index = 1 end
-    if index > #sorted then index = #sorted end
-    return sorted[index]
-end
+-- Measuring is the whole point of this file, so it does not wait to be asked.
+timing.enable()
+
+--- Wall time between iterations, which is the frame time a player feels. The
+--- engine's own `frame` stage covers the iteration only, so the gap between
+--- the two is the host loop and the presentation wait around it.
+local DELTA <const> = timing.stage("delta")
 
 return tecs.application({
     window = { title = "shapes", width = WIDTH, height = HEIGHT },
@@ -151,21 +147,17 @@ return tecs.application({
     end,
 
     update = function(app: tecs.Application, dt: number)
-        if app.frame >= WARMUP then
-            sampled = sampled + 1
-            samples[sampled] = dt * 1000.0
-        end
+        -- Warmup frames are the ones that built and first uploaded the scene.
+        -- Dropping them from every stage at once is what makes the report a
+        -- distribution of the steady state rather than of the run.
+        if app.frame == WARMUP then timing.reset() end
+        if app.frame >= WARMUP then timing.mark(DELTA, dt) end
     end,
 
     quit = function(app: tecs.Application)
-        if sampled == 0 then return end
-        local total = 0.0
-        for i = 1, sampled do total = total + samples[i] end
-        print(("frames %d after %d warmup"):format(sampled, WARMUP))
-        print(("  p50   %.2f ms"):format(percentile(samples, 0.50)))
-        print(("  p95   %.2f ms"):format(percentile(samples, 0.95)))
-        print(("  mean  %.2f ms"):format(total / sampled))
-        print(("  drawn %d of %d instances synced"):format(
-            app.renderer.count, COUNT))
+        print(("frames after %d warmup, %d of %d instances synced")
+            :format(WARMUP, app.renderer.count, COUNT))
+        local report = timing.format()
+        if report ~= "" then print(report) end
     end,
 })

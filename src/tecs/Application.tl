@@ -20,6 +20,7 @@ local components <const> = require("tecs.components")
 local paths <const> = require("tecs.platform.paths")
 local log <const> = require("tecs.log")
 local mcp <const> = require("tecs.mcp")
+local timing <const> = require("tecs.timing")
 
 local LOGGER <const> = log.get("tecs.app")
 local shaderpack <const> = require("tecs.gpu.shaderpack")
@@ -27,6 +28,14 @@ local shadercompiler <const> = require("tecs.gpu.shadercompiler")
 
 local C <const> = sdl.C
 local K <const> = sdl.K
+
+-- The stages of a frame, named once. Extraction is registered by the renderer,
+-- since that is where it happens.
+local FRAME <const> = timing.stage("frame")
+local SIMULATE <const> = timing.stage("simulate")
+local ACQUIRE <const> = timing.stage("acquire")
+local RECORD <const> = timing.stage("record")
+local SUBMIT <const> = timing.stage("submit")
 
 local record WindowConfig
     title: string
@@ -88,8 +97,6 @@ local record Application
     --- Traceback of a gameplay crash. Once set, the loop stops simulating and
     --- rendering but keeps draining events and answering the debug server.
     _crashed: string
-    --- Per-phase frame timing, accumulated when TECS_TIMING is set.
-    _timing: {string: number}
     _started: boolean
     _shutdownDone: boolean
 end
@@ -106,9 +113,6 @@ function Application.create(config: Application.Config): Application
     self.suspended = false
     self.elapsed = 0.0
     self.frame = 0
-    if os.getenv("TECS_TIMING") ~= nil then
-        self._timing = { update = 0, acquire = 0, record = 0, submit = 0, frames = 0 }
-    end
     return self
 end
 
@@ -252,6 +256,7 @@ end
 --- Called once per iteration by the host. Returning false stops the loop.
 function Application:_iterate(queue: loader.CValue, count: integer): boolean
     local dt = clock.step()
+    local frameStart = timing.begin()
 
     self.input:beginFrame()
     events.drain(queue, count, function(event: events.Event)
@@ -272,6 +277,8 @@ function Application:_iterate(queue: loader.CValue, count: integer): boolean
         if self._crashed == nil then self:_simulate(dt) end
     end
 
+    timing.finish(FRAME, frameStart)
+
     self.frame = self.frame + 1
     if self._config.maxFrames ~= nil and self.frame >= self._config.maxFrames then
         return false
@@ -287,25 +294,28 @@ end
 --- was watching gets the traceback rather than a refused connection. That is
 --- the moment the tooling is most useful and the worst one to lose it in.
 function Application:_simulate(dt: number)
-    local t0 = clock.now()
+    local t0 = timing.begin()
     local ok, failure = xpcall(function(): boolean
         self.world:update(dt)
 
-        local t1 = clock.now()
+        local t1 = timing.begin()
         local frame = self.device:beginFrame()
-        local t2 = clock.now()
+        local t2 = timing.begin()
         if frame ~= nil then
             self.renderer:render(frame)
-            local t3 = clock.now()
+            local t3 = timing.begin()
             frame:submit()
-            local t4 = clock.now()
-            if self._timing ~= nil then
-                local t = self._timing
-                t.update = t.update + (t1 - t0)
-                t.acquire = t.acquire + (t2 - t1)
-                t.record = t.record + (t3 - t2)
-                t.submit = t.submit + (t4 - t3)
-                t.frames = t.frames + 1
+            local t4 = timing.begin()
+            if timing.enabled then
+                -- Simulation is the update without the extraction inside it.
+                -- The renderer's sync system runs in RenderFirst, so its cost
+                -- is in t1 - t0 and has to come back out: the two land on
+                -- opposite sides of the pipelined boundary, and a change that
+                -- moves cost between them is invisible if they are one number.
+                timing.mark(SIMULATE, (t1 - t0) - self.renderer:extractSeconds())
+                timing.mark(ACQUIRE, t2 - t1)
+                timing.mark(RECORD, t3 - t2)
+                timing.mark(SUBMIT, t4 - t3)
             end
         end
         return true
@@ -330,13 +340,9 @@ function Application:_shutdown(): boolean
     if self._shutdownDone then return true end
     self._shutdownDone = true
 
-    local t = self._timing
-    if t ~= nil and t.frames > 0 then
-        local n = t.frames
-        io.stderr:write(("timing over %d frames (ms/frame):\n"):format(math.floor(n) as integer))
-        io.stderr:write(("  update  %.3f\n  acquire %.3f\n  record  %.3f\n  submit  %.3f\n")
-            :format(t.update / n * 1000, t.acquire / n * 1000,
-                    t.record / n * 1000, t.submit / n * 1000))
+    if timing.auto then
+        local report = timing.format()
+        if report ~= "" then io.stderr:write(report .. "\n") end
     end
 
     if self._started and self._config.quit ~= nil then

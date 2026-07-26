@@ -26,6 +26,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
 local tecs <const> = require("tecs")
 local physics <const> = require("tecs.physics")
 local materials <const> = require("tecs.gpu.materials")
+local timing <const> = require("tecs.timing")
 local Transform2D <const> = tecs.components.Transform2D
 local Tint <const> = tecs.components.Tint
 local Material <const> = tecs.components.Material
@@ -72,20 +73,15 @@ local SIZE <const> = tonumber(os.getenv("BENCH_SIZE")) or 3.0
 --- Wall thickness, and the inset from the window a wall sits at.
 local WALL <const> = 20.0
 
-local samples: {number} = {}
-local sampled = 0
 local spawned = 0
 
---- Sorts a copy and reads a percentile out of it.
-local function percentile(values: {number}, fraction: number): number
-    local sorted: {number} = {}
-    for index = 1, #values do sorted[index] = values[index] end
-    table.sort(sorted)
-    local at = math.floor(#sorted * fraction)
-    if at < 1 then at = 1 end
-    if at > #sorted then at = #sorted end
-    return sorted[at]
-end
+-- Measuring is the whole point of this file, so it does not wait to be asked.
+timing.enable()
+
+--- Wall time between iterations, which is the frame time a player feels. The
+--- engine's own `frame` stage covers the iteration only, so the gap between
+--- the two is the host loop and the presentation wait around it.
+local DELTA <const> = timing.stage("delta")
 
 --- Interior of the box, in world pixels.
 local MIN_X <const> = WALL * 2
@@ -255,28 +251,18 @@ return tecs.application({
     end,
 
     update = function(app: tecs.Application, dt: number)
-        if app.frame >= WARMUP then
-            sampled = sampled + 1
-            samples[sampled] = dt * 1000.0
-        end
+        -- Everything before this built the scene: waves still landing, the
+        -- pile still settling, archetypes still moving. Dropping those frames
+        -- from every stage at once is what makes the report a distribution of
+        -- the steady state rather than of the run.
+        if app.frame == WARMUP then timing.reset() end
+        if app.frame >= WARMUP then timing.mark(DELTA, dt) end
     end,
 
     quit = function(app: tecs.Application)
-        if sampled == 0 then return end
-        local total = 0.0
-        local worst = 0.0
-        for index = 1, sampled do
-            total = total + samples[index]
-            if samples[index] > worst then worst = samples[index] end
-        end
-
-        print(("frames %d after %d warmup, %d bodies spawned")
-            :format(sampled, WARMUP, spawned))
-        print(("  p50   %.2f ms"):format(percentile(samples, 0.50)))
-        print(("  p95   %.2f ms"):format(percentile(samples, 0.95)))
-        print(("  p99   %.2f ms"):format(percentile(samples, 0.99)))
-        print(("  max   %.2f ms"):format(worst))
-        print(("  mean  %.2f ms"):format(total / sampled))
-        print(("  drawn %d instances synced"):format(app.renderer.count))
+        print(("frames after %d warmup, %d bodies spawned, %d instances synced")
+            :format(WARMUP, spawned, app.renderer.count))
+        local report = timing.format()
+        if report ~= "" then print(report) end
     end,
 })
