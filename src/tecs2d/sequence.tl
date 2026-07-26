@@ -470,6 +470,9 @@ local record ProgramImpl is sequence.Program
     consts: {any}
     loopSlots: integer
     loopCounts: {integer: integer}
+    -- Const indexes whose argument list holds a `bind` reference, so a call
+    -- with plain constants hands its arguments over without copying them.
+    bindingArgs: {integer: boolean}
 end
 
 function sequence.Event.init(
@@ -722,6 +725,26 @@ compileBlock = function(c: Compiler, nodes: {sequence.Node}, depth: integer)
     end
 end
 
+-- Mark the argument lists that need resolving. Derived rather than stored:
+-- a restored program computes the same thing from its own const pool.
+local function indexBindingArgs(prog: ProgramImpl)
+    local flags: {integer: boolean} = {}
+    local consts = prog.consts
+    for i = 1, #consts do
+        local value = consts[i]
+        if type(value) == "table" then
+            local list = value as {any}
+            for j = 1, #list do
+                if isEntityRef(list[j]) then
+                    flags[i] = true
+                    break
+                end
+            end
+        end
+    end
+    prog.bindingArgs = flags
+end
+
 function sequence.define(name: string, nodes: {sequence.Node}): sequence.Program
     if type(name) ~= "string" or name == "" then
         error("sequence.define requires a non-empty program name", 2)
@@ -748,7 +771,9 @@ function sequence.define(name: string, nodes: {sequence.Node}): sequence.Program
         consts = c.consts,
         loopSlots = c.loopSlots,
         loopCounts = c.loopCounts,
+        bindingArgs = {},
     }
+    indexBindingArgs(prog)
 
     programsByName[name] = prog
     local versions = programVersions[name]
@@ -822,13 +847,6 @@ local record Cursor
     faultMessage: string
 end
 
-local record HeapEntry
-    wakeAt: integer
-    seq: integer
-    slot: integer
-    generation: integer
-end
-
 local record WorldState
     cursors: {integer: Cursor}
     freeSlots: {integer}
@@ -840,7 +858,13 @@ local record WorldState
     seq: integer
     budget: integer
 
-    heap: {HeapEntry}
+    -- Wake heap as parallel arrays rather than a heap of entry tables. One
+    -- table per reschedule is the single largest allocation in a stepping
+    -- population, and every playback reschedules on every wait.
+    heapWake: {integer}
+    heapSeq: {integer}
+    heapSlot: {integer}
+    heapGen: {integer}
     heapSize: integer
 
     -- Cursors blocked on a signal are held here rather than in the heap:
@@ -861,6 +885,11 @@ local record WorldState
     tweenOwners: {integer: integer}
     tweenWaiters: {integer: boolean}
 
+    -- Scratch reused across calls: one argument list and one context. Calls
+    -- never overlap, since a cursor runs to a wait before any other does.
+    argScratch: {any}
+    context: sequence.ActionContext
+
     ownerIndex: {integer: {integer: boolean}}
 end
 
@@ -879,7 +908,10 @@ local function stateFor(world: World): WorldState
         step = 0,
         seq = 0,
         budget = DEFAULT_BUDGET,
-        heap = {},
+        heapWake = {},
+        heapSeq = {},
+        heapSlot = {},
+        heapGen = {},
         heapSize = 0,
         channels = {},
         pendingSignals = {},
@@ -888,6 +920,7 @@ local function stateFor(world: World): WorldState
         dirtyQueries = {},
         tweenOwners = {},
         tweenWaiters = {},
+        argScratch = {},
         ownerIndex = {},
     }
     states[world] = state
@@ -898,49 +931,84 @@ end
 -- Deterministic min-heap keyed on (wakeAt, seq)
 -------------------------------------------------------------------------------
 
-local function heapLess(a: HeapEntry, b: HeapEntry): boolean
-    if a.wakeAt ~= b.wakeAt then return a.wakeAt < b.wakeAt end
-    return a.seq < b.seq
-end
-
-local function heapPush(state: WorldState, entry: HeapEntry)
-    local heap = state.heap
+-- Sifting moves the hole rather than swapping pairs: one write per level per
+-- array instead of two reads and two writes, which is most of the cost of a
+-- population that reschedules on every step.
+local function heapPush(
+    state: WorldState,
+    wakeAt: integer,
+    seq: integer,
+    slot: integer,
+    generation: integer
+)
+    local wake, seqs, slots, gens =
+        state.heapWake, state.heapSeq, state.heapSlot, state.heapGen
     local i = state.heapSize + 1
     state.heapSize = i
-    heap[i] = entry
+
     while i > 1 do
         local parent = floor(i / 2)
-        if heapLess(heap[i], heap[parent]) then
-            heap[i], heap[parent] = heap[parent], heap[i]
+        local parentWake = wake[parent]
+        if wakeAt < parentWake or (wakeAt == parentWake and seq < seqs[parent]) then
+            wake[i], seqs[i] = parentWake, seqs[parent]
+            slots[i], gens[i] = slots[parent], gens[parent]
             i = parent
         else
             break
         end
     end
+
+    wake[i], seqs[i], slots[i], gens[i] = wakeAt, seq, slot, generation
 end
 
-local function heapPop(state: WorldState): HeapEntry
-    local heap = state.heap
+--- Remove the earliest entry, returning its seq, slot, and generation.
+local function heapPop(state: WorldState): integer, integer, integer
     local size = state.heapSize
-    if size == 0 then return nil end
-    local top = heap[1]
-    heap[1] = heap[size]
-    heap[size] = nil
+    if size == 0 then return nil, nil, nil end
+    local wake, seqs, slots, gens =
+        state.heapWake, state.heapSeq, state.heapSlot, state.heapGen
+
+    local seq <const> = seqs[1]
+    local slot <const> = slots[1]
+    local generation <const> = gens[1]
+
+    -- The tail element sifts down from the root into the hole the top left.
+    local tailWake, tailSeq = wake[size], seqs[size]
+    local tailSlot, tailGen = slots[size], gens[size]
+    wake[size], seqs[size], slots[size], gens[size] = nil, nil, nil, nil
     size = size - 1
     state.heapSize = size
 
     local i = 1
     while true do
         local left = i * 2
+        if left > size then break end
+        local child = left
         local right = left + 1
-        local smallest = i
-        if left <= size and heapLess(heap[left], heap[smallest]) then smallest = left end
-        if right <= size and heapLess(heap[right], heap[smallest]) then smallest = right end
-        if smallest == i then break end
-        heap[i], heap[smallest] = heap[smallest], heap[i]
-        i = smallest
+        if right <= size then
+            local leftWake, rightWake = wake[left], wake[right]
+            if rightWake < leftWake
+                or (rightWake == leftWake and seqs[right] < seqs[left])
+            then
+                child = right
+            end
+        end
+        local childWake = wake[child]
+        if childWake < tailWake
+            or (childWake == tailWake and seqs[child] < tailSeq)
+        then
+            wake[i], seqs[i] = childWake, seqs[child]
+            slots[i], gens[i] = slots[child], gens[child]
+            i = child
+        else
+            break
+        end
     end
-    return top
+
+    if size > 0 then
+        wake[i], seqs[i], slots[i], gens[i] = tailWake, tailSeq, tailSlot, tailGen
+    end
+    return seq, slot, generation
 end
 
 -------------------------------------------------------------------------------
@@ -951,12 +1019,7 @@ local function schedule(state: WorldState, cursor: Cursor, wakeAt: integer)
     state.seq = state.seq + 1
     cursor.wakeAt = wakeAt
     cursor.seq = state.seq
-    heapPush(state, {
-        wakeAt = wakeAt,
-        seq = cursor.seq,
-        slot = cursor.slot,
-        generation = cursor.generation,
-    })
+    heapPush(state, wakeAt, cursor.seq, cursor.slot, cursor.generation)
 end
 
 -------------------------------------------------------------------------------
@@ -1253,9 +1316,22 @@ local function contextEntity(self: sequence.ActionContext, name: string): intege
     return id
 end
 
-local function resolveArgs(world: World, cursor: Cursor, raw: {any}): {any}
-    local out: {any} = {}
-    for i = 1, #raw do
+-- Arguments without a binding in them are handed over as the program stored
+-- them; the rest are resolved into the world's scratch list. Either way the
+-- list belongs to the sequencer, and an action must read it rather than keep
+-- or modify it.
+local function resolveArgs(
+    world: World,
+    state: WorldState,
+    cursor: Cursor,
+    index: integer
+): {any}
+    local raw = cursor.program.consts[index] as {any}
+    if not cursor.program.bindingArgs[index] then return raw end
+
+    local out = state.argScratch
+    local count = #raw
+    for i = 1, count do
         local value = raw[i]
         if isEntityRef(value) then
             local name = (value as sequence.EntityRef).bindName
@@ -1265,6 +1341,7 @@ local function resolveArgs(world: World, cursor: Cursor, raw: {any}): {any}
             out[i] = value
         end
     end
+    for i = #out, count + 1, -1 do out[i] = nil end
     return out
 end
 
@@ -1397,17 +1474,19 @@ local function run(
                     "action '" .. name .. "' is not registered on this world")
                 return budget
             end
-            local ctx: sequence.ActionContext = {
-                world = world,
-                handle = packHandle(cursor.slot, cursor.generation),
-                owner = cursor.owner,
-                args = resolveArgs(world, cursor, consts[b] as {any}),
-                entity = contextEntity,
-                _cursor = cursor,
-            }
-            local result: {any} = {pcall(action, world, ctx)}
-            if not result[1] then
-                faultCursor(state, cursor, "actionError", tostring(result[2]))
+            local ctx = state.context
+            if not ctx then
+                ctx = {world = world, entity = contextEntity} as sequence.ActionContext
+                state.context = ctx
+            end
+            ctx.handle = packHandle(cursor.slot, cursor.generation)
+            ctx.owner = cursor.owner
+            ctx.args = resolveArgs(world, state, cursor, b)
+            ctx._cursor = cursor
+
+            local ok, err = pcall(action, world, ctx) as (boolean, any)
+            if not ok then
+                faultCursor(state, cursor, "actionError", tostring(err))
                 return budget
             end
             -- An action may cancel its own playback.
@@ -1417,7 +1496,7 @@ local function run(
         elseif op == OP_EMIT then
             world:emit(0, sequence.Event,
                 consts[a] as string,
-                resolveArgs(world, cursor, consts[b] as {any}),
+                resolveArgs(world, state, cursor, b),
                 packHandle(cursor.slot, cursor.generation))
             cursor.pc = cursor.pc + 1
 
@@ -1801,7 +1880,9 @@ local function restoreProgram(data: {string: any}): ProgramImpl
         consts = data.consts as {any},
         loopSlots = data.loopSlots as integer,
         loopCounts = (data.loopCounts as {integer: integer}) or {},
+        bindingArgs = {},
     }
+    indexBindingArgs(prog)
     if not versions then
         versions = {}
         programVersions[name] = versions
@@ -1895,7 +1976,10 @@ local function loadState(world: World, value: any)
     state.cursors = {}
     state.freeSlots = {}
     state.ownerIndex = {}
-    state.heap = {}
+    state.heapWake = {}
+    state.heapSeq = {}
+    state.heapSlot = {}
+    state.heapGen = {}
     state.heapSize = 0
     state.channels = {}
     state.pendingSignals = {}
@@ -1976,12 +2060,8 @@ local function loadState(world: World, value: any)
             elseif cursor.waitingTween then
                 state.tweenWaiters[cursor.slot] = true
             elseif not cursor.joining then
-                heapPush(state, {
-                    wakeAt = cursor.wakeAt,
-                    seq = cursor.seq,
-                    slot = cursor.slot,
-                    generation = cursor.generation,
-                })
+                heapPush(state, cursor.wakeAt, cursor.seq,
+                    cursor.slot, cursor.generation)
             end
         else
             LOGGER:warn("dropping cursor for missing program %s", key)
@@ -2140,15 +2220,14 @@ local function tick(world: World, state: WorldState)
     deliverTweenWaits(world, state)
 
     while state.heapSize > 0 do
-        local top = state.heap[1]
-        if top.wakeAt > step then break end
-        local entry = heapPop(state)
-        local cursor = state.cursors[entry.slot]
+        if state.heapWake[1] > step then break end
+        local seq, slot, generation = heapPop(state)
+        local cursor = state.cursors[slot]
         -- Stale entry: the cursor was cancelled, retired, or rescheduled.
         if cursor
-            and cursor.generation == entry.generation
+            and cursor.generation == generation
             and cursor.alive
-            and cursor.seq == entry.seq
+            and cursor.seq == seq
         then
             if cursor.state == "paused" then
                 -- Keep a paused cursor out of the heap; resume re-schedules.

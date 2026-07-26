@@ -394,6 +394,23 @@ The debugger exposes the same view, in the overlay and as `cmd_*` MCP tools:
 `sequence info` disassembles the exact version that playback is running, which is the version worth
 reading when a hot reload has moved on without it.
 
+## Performance
+
+Playbacks are scheduled through a min-heap keyed on `(wakeAt, seq)`, so a step costs one
+comparison plus the playbacks that actually wake on it. Measured with
+`make bench-love SCENARIO=sequence`, and directly under LuaJIT at 1K through 100K playbacks all
+waking on every step:
+
+- About **200ns per playback per wake**, flat across that whole range — a thousand playbacks all
+  running on the same step cost roughly 0.2ms.
+- **Sleeping playbacks cost nothing.** Only the earliest wake time is examined per step, so a large
+  population that mostly waits does not show up at all. This is why the heap is worth keeping over
+  a scan of the arena, which would pay per playback per step regardless.
+- **No steady-state allocation.** Waking, running, and rescheduling a playback allocates nothing,
+  so the sequencer adds no GC pressure at any population size.
+
+Actions are the exception: whatever a `call` does is the program's own cost.
+
 ## See also
 
 - [Tween](/tecs2d/tween) for animating numeric component fields
