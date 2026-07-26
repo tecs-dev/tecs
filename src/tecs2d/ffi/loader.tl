@@ -28,6 +28,13 @@ local record loader
     --- An opaque handle. Stored and passed on, never dereferenced from Lua.
     type CPtr = CValue
 
+    --- A byte pointer that supports arithmetic, so a producer can be handed
+    --- the exact address to write at.
+    record BytePointer
+        metamethod __add: function(self: BytePointer, offset: integer): BytePointer
+        metamethod __index: function(self: BytePointer, index: integer): integer
+    end
+
     --- A loaded library's symbol table. Resolution happens in the FFI at
     --- call time, so the namespace is open rather than enumerated.
     record CNamespace
@@ -146,9 +153,27 @@ function loader.newArray(declaration: string, count?: integer): loader.CArray
     return ffi.new(declaration) as loader.CArray
 end
 
+--- Views a pointer as bytes, so callers can offset into it.
+function loader.bytePointer(base: loader.CValue): loader.BytePointer
+    return ffi.cast("uint8_t *", base) as loader.BytePointer
+end
+
+--- Reinterprets a pointer as another type, for writing struct fields directly
+--- into mapped memory instead of memcpying a staging array.
+function loader.castPointer(declaration: string, base: loader.CValue): loader.CArray
+    return ffi.cast(declaration, base) as loader.CArray
+end
+
 --- Copies `size` bytes between FFI buffers.
 function loader.copyBytes(destination: loader.CArray, source: loader.CValue,
                           size: integer)
+    ffi.copy(destination as string, source as string, size)
+end
+
+--- Copies `size` bytes to a byte pointer, which may be an offset into a
+--- mapped region.
+function loader.copyTo(destination: loader.BytePointer, source: loader.CValue,
+                       size: integer)
     ffi.copy(destination as string, source as string, size)
 end
 

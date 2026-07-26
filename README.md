@@ -27,6 +27,31 @@ Working today:
 Not built yet: shadows, post-processing, audio, workers, assets, and the MCP
 surface.
 
+## Buffer writes
+
+SDL_GPU has no mappable device buffer. Data reaches one by being written into
+a mapped transfer buffer and copied across in a copy pass, and the transfer
+buffer must be unmapped before that copy is encoded. That staged copy is
+unavoidable.
+
+What is avoidable is a second one. `Buffer:map` returns the driver's own
+address, so a producer walking archetype columns copies straight into it
+rather than filling a staging array that then has to be copied again.
+`mapAs` gives the same memory as a typed array, for writing struct fields in
+place.
+
+Writes are tracked as ranges rather than replacing the whole buffer, because
+most frames change very little of what is resident. Adjacent writes merge;
+past a fixed number of distinct spans the dirty region collapses to one,
+trading bandwidth for bounded bookkeeping but never dropping a range.
+
+The destination is never cycled. Cycling discards a buffer's contents, which
+would erase every range a frame did not rewrite, and that failure looks
+exactly like a bug in whatever reads the buffer later rather than like an
+upload problem. `flush` takes the caller's command buffer so the copy is
+ordered against the frame that consumes it instead of racing a separate
+submission.
+
 ## The pass graph
 
 Passes name the targets they read and write. The graph owns those targets,

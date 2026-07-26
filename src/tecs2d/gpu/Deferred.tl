@@ -137,7 +137,6 @@ local record Deferred
     ambient: {number}
     _device: loader.CPtr
     _lightBuffer: Buffer
-    _lightStaging: loader.CArray
     _lightingPipeline: GraphicsPipeline
     _compositePipeline: GraphicsPipeline
     _sceneUniform: loader.CArray
@@ -178,7 +177,6 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer,
         usage = { "storage" },
         size = MAX_LIGHTS * LIGHT_STRIDE,
     })
-    self._lightStaging = loader.newArray("float[?]", MAX_LIGHTS * 8)
     self._sceneUniform = loader.newArray("float[8]")
 
     local graph = PassGraph.create(device, swapchainFormat)
@@ -251,14 +249,15 @@ end
 
 --- Replaces the light set for subsequent frames.
 ---
---- Uploads once rather than per light: the staging array is filled in place
---- and copied in a single transfer.
+--- Writes straight into the buffer's mapped staging: there is no intermediate
+--- array to fill and then copy. The upload itself is deferred to `render`, so
+--- it rides the frame's command buffer instead of submitting its own.
 function Deferred:setLights(lights: {Light})
     local count = math.min(#lights, MAX_LIGHTS)
     self.lightCount = count
     if count == 0 then return end
 
-    local staging = self._lightStaging
+    local staging = self._lightBuffer:mapAs("float *")
     for index = 1, count do
         local light = lights[index]
         local base = (index - 1) * 8
@@ -271,12 +270,16 @@ function Deferred:setLights(lights: {Light})
         staging[base + 6] = light.b or 1.0
         staging[base + 7] = light.intensity or 1.0
     end
-
-    self._lightBuffer:upload(staging, count * LIGHT_STRIDE)
+    self._lightBuffer:markDirty(0, count * LIGHT_STRIDE)
 end
 
 --- Runs the pipeline for one frame.
+---
+--- Any pending light writes are flushed onto this frame's command buffer
+--- first, so the copy is ordered against the lighting pass that reads it
+--- rather than racing a separately submitted upload.
 function Deferred:render(frame: Frame)
+    self._lightBuffer:flush(frame.commandBuffer)
     self.graph:execute(frame)
 end
 
