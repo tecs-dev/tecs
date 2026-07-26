@@ -54,8 +54,16 @@ Working today:
 - Box2D 3 simulation with value-typed body handles
 - Frame pacing from the swapchain, with no sleep heuristic
 
-Not built yet: shadows, post-processing, audio, workers, assets, and the MCP
-surface.
+- Shaders packaged as artifacts, so a release links no compiler
+- A platform contract with five seams, and an SDL implementation of all five
+- Tweening and sequencing, ported with their suites
+
+Not built yet: shadows, post-processing, audio, text, UI, tiled maps, and the
+MCP surface.
+
+This project is merging into `tecs`; the two are becoming one. See
+[PLAN.md](PLAN.md) for the merge, the render contract being locked, Clay for UI
+layout, fonts, and what is left to port.
 
 ## Workers and assets
 
@@ -374,6 +382,13 @@ and replay is the same copy back, with no second representation to keep in sync.
 and devices are released by an explicit `destroy`. Tying GPU-adjacent lifetimes
 to finalizers makes hot reload either leak or double-free depending on
 collection order.
+
+**The ECS and the engine are one project.** They were separate while this
+replaced Love2D and the ECS stayed renderer-agnostic. The renderer's whole job
+is reading archetype columns, and the ECS's storage layout decides whether that
+is fast, so the boundary stopped paying for itself. Storage that a GPU can read
+directly is the reason to merge, and it is not expressible with the two apart.
+Headless worlds keep working: GPU-backed storage is opt-in per component.
 
 **Workers will be the only threading path.** LuaJIT FFI callbacks invoked from
 threads the VM did not create are unsafe, so raw thread creation will not be

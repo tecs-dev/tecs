@@ -32,7 +32,11 @@ local COUNT <const> = math.floor(tonumber(os.getenv("TECS2D_INSTANCES")) or 4000
 --- How far the field spreads relative to the window. Above one, most of the
 --- world sits outside the view, which is the case culling exists for.
 local WORLD <const> = tonumber(os.getenv("TECS2D_WORLD")) or 1.0
-local LIGHTS <const> = 3
+
+-- Scales quad size without moving anything, so a bench can separate the cost
+-- of covering pixels from the cost of having instances.
+local SCALE <const> = tonumber(os.getenv("TECS2D_SCALE")) or 1.0
+local LIGHTS <const> = math.floor(tonumber(os.getenv("TECS2D_LIGHTS")) or 3)
 
 --- Seeds a sunflower spiral of renderable quads.
 ---
@@ -57,7 +61,7 @@ local function spawnField(world: tecs.World, width: number, height: number)
                 local index = row - firstRow
                 local angle = index * golden
                 local radius = math.sqrt(index / COUNT) * extent
-                local size = 6.0 + 10.0 * (1.0 - radius / extent)
+                local size = (6.0 + 10.0 * (1.0 - radius / extent)) * SCALE
                 local hue = index / COUNT
 
                 local transform = transforms[row]
@@ -82,10 +86,19 @@ local function spawnLights(world: tecs.World, width: number, height: number)
         { 0.38, 1.0, 0.62 },
         { 0.42, 0.58, 1.0 },
     }
+    local golden <const> = 2.39996
     for index = 1, LIGHTS do
-        local colour = palette[index]
+        -- The palette cycles, and lights past the first three spread over the
+        -- view so a bench with many of them is not three stacked in the middle.
+        local colour = palette[(index - 1) % #palette + 1]
+        local x, y = width * 0.5, height * 0.5
+        if index > #palette then
+            local radius = math.sqrt(index / LIGHTS) * math.min(width, height) * 0.45
+            x = x + math.cos(index * golden) * radius
+            y = y + math.sin(index * golden) * radius
+        end
         world:spawn(
-            Transform2D(width * 0.5, height * 0.5, 0, 1, 1),
+            Transform2D(x, y, 0, 1, 1),
             PointLight(120.0, math.min(width, height) * 0.7,
                 colour[1], colour[2], colour[3], 3.0)
         )
