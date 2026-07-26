@@ -19,6 +19,7 @@ local Renderer <const> = require("tecs2d.Renderer")
 local tween <const> = require("tecs2d.tween")
 local sequence <const> = require("tecs2d.sequence")
 local paths <const> = require("tecs2d.platform.paths")
+local log <const> = require("tecs2d.log")
 local shaderpack <const> = require("tecs2d.gpu.shaderpack")
 local shadercompiler <const> = require("tecs2d.gpu.shadercompiler")
 
@@ -43,6 +44,9 @@ local record Application
         --- Shader pack to read, relative to the asset root. Defaults to
         --- `shaders.tsp`. A build that links a compiler runs without one.
         shaderPack: string
+        --- Log file name, under the writable root. Defaults to `log.jsonl`.
+        --- Set to "" to write only to the platform's own destination.
+        logFile: string
         capacity: integer
         maxEntities: integer
         --- Stops after this many iterations. Lets an automated run drive a
@@ -107,6 +111,14 @@ function Application:_init(): boolean
 
     sdl.check(C.SDL_Init(K.SDL_INIT_VIDEO + K.SDL_INIT_GAMEPAD) as boolean,
         "SDL_Init")
+
+    -- Before anything else that might have something to say. The platform
+    -- destination works without this; the file is what makes a log queryable
+    -- after the fact, and what SDL has no sink for.
+    local logFile = config.logFile or "log.jsonl"
+    if logFile ~= "" then
+        log.openFile(paths.writable(logFile))
+    end
 
     -- Before the device, because the pack decides which shader format the
     -- device may claim, and that decides which backend SDL selects.
@@ -264,6 +276,8 @@ function Application:_shutdown(): boolean
     if self._started and self._config.quit ~= nil then
         self._config.quit(self)
     end
+
+    log.closeFile()
 
     if self.device ~= nil then
         self.device:waitForIdle()

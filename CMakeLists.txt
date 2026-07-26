@@ -71,7 +71,7 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH ${TECS2D_SYSTEM_DEPS})
 # Worker threads and channels. Native because a LuaJIT FFI callback invoked
 # from a thread the VM did not create is unsafe, so a thread entry point cannot
 # be a Lua function.
-add_library(tecs2d_worker SHARED native/worker.c)
+add_library(tecs2d_worker SHARED native/worker.c native/logsink.c)
 set_target_properties(tecs2d_worker PROPERTIES
     OUTPUT_NAME tecs2dworker
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
@@ -183,6 +183,7 @@ if(TECS2D_BUILD_LUA)
     # The engine's own native API. Generated the same way as a third-party
     # header so the binding cannot drift from the C even though both live here.
     tecs2d_cdef(worker worker.h /native/ TECS2D_ "${CMAKE_SOURCE_DIR}/native")
+    tecs2d_cdef(logsink logsink.h /native/ TECS2D_ "${CMAKE_SOURCE_DIR}/native")
 
     # Each library also gets a table of function pointers, taken at build
     # time. A target that cannot dlopen still links, and the engine calls
@@ -220,6 +221,7 @@ if(TECS2D_BUILD_LUA)
     tecs2d_registry(sdl3image Tecs2dSdl3ImageApi IMG_ SDL3_image/SDL_image.h)
     tecs2d_registry(box2d Tecs2dBox2dApi b2 box2d/box2d.h)
     tecs2d_registry(worker Tecs2dWorkerApi tecs2d worker.h)
+    tecs2d_registry(logsink Tecs2dLogsinkApi tecs2d logsink.h)
 
     # Shader compilation is a development capability. A release consumes
     # packaged artifacts, so a target built without it links no compiler and
@@ -259,7 +261,7 @@ if(TECS2D_BUILD_LUA)
     target_link_libraries(tecs2d_worker PRIVATE tecs2d_registry)
 
     add_custom_target(tecs2d_bindings ALL DEPENDS
-        "${GEN}/workercdef.lua"
+        "${GEN}/workercdef.lua" "${GEN}/logsinkcdef.lua"
         "${GEN}/sdl3cdef.lua" "${GEN}/sdl3imagecdef.lua"
         "${GEN}/box2dcdef.lua" "${GEN}/shaderccdef.lua"
         "${GEN}/spvccdef.lua")

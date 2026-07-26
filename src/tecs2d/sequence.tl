@@ -22,13 +22,13 @@
 ---   sequence.play(world, intro, {owner = encounter, bindings = {boss = bossId}})
 
 local tecs <const> = require("tecs")
-local logging <const> = require("tecs.utils.logging")
+local logging <const> = require("tecs2d.log")
 local tween <const> = require("tecs2d.tween")
 local wakeheap <const> = require("tecs2d.internal.wakeheap")
 
 local type World = tecs.World
 
-local LOGGER <const> = logging.getLogger("tecs2d.sequence")
+local LOGGER <const> = logging.get("tecs2d.sequence")
 
 local floor <const> = math.floor
 
