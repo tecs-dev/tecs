@@ -96,3 +96,76 @@ describe("ecs.physics", function()
         assert.is_true(math.abs(world:get(entity, Transform2D).rotation) < 1e-3)
     end)
 end)
+
+describe("ecs.physics write-back", function()
+    local function newWorld(gravity)
+        local world = tecs.newWorld()
+        world:addPlugin(physics.plugin({ gravity = gravity or { 0, 980 } }))
+        return world
+    end
+
+    -- The sync takes a transform column mutable only for a body the step
+    -- actually moved. Everything downstream is gated on that bit, so a world
+    -- whose bodies have settled must stop re-uploading them; taking the column
+    -- up front would leave every consumer working every frame forever.
+    it("stops dirtying transforms once a body has settled", function()
+        local world = newWorld()
+        local ground = world:spawn(Transform2D(0, 400, 0, 2000, 40))
+        physics.attach(world, ground,
+            { type = "static", halfWidth = 1000, halfHeight = 20 })
+
+        local entity = world:spawn(Transform2D(0, 100, 0, 20, 20))
+        physics.attach(world, entity, {
+            type = "dynamic", halfWidth = 10, halfHeight = 10,
+            density = 1.0, friction = 0.9, restitution = 0.0,
+        })
+
+        local query = world:query({ include = { Transform2D, physics.RigidBody } })
+
+        -- Sampled from inside the frame, because the dirty bits clear at the
+        -- end of every update and a check afterwards reads false whatever
+        -- happened.
+        local dirty = false
+        world:addSystem({
+            name = "spec.ObserveDirty",
+            phase = tecs.phases.Last,
+            run = function()
+                dirty = false
+                for archetype in query:iter() do
+                    if archetype:isComponentDirty(Transform2D) then
+                        dirty = true
+                    end
+                end
+            end,
+        })
+
+        local function step()
+            world:update(1 / 60)
+        end
+
+        -- Falling: the column is dirty, because the body is moving.
+        for _ = 1, 10 do step() end
+        assert.is_true(dirty)
+
+        -- Box2D puts a resting body to sleep, and a sleeping body reports no
+        -- movement, so the column stops being taken mutable at all.
+        for _ = 1, 600 do step() end
+        assert.is_false(dirty)
+    end)
+
+    it("writes a moving body every step it moves", function()
+        local world = newWorld()
+        local entity = world:spawn(Transform2D(0, 0, 0, 20, 20))
+        physics.attach(world, entity, {
+            type = "dynamic", halfWidth = 10, halfHeight = 10, density = 1.0,
+        })
+
+        world:update(1 / 60)
+        local first = world:get(entity, Transform2D).y
+        for _ = 1, 30 do world:update(1 / 60) end
+        local later = world:get(entity, Transform2D).y
+
+        -- Falling under gravity, so it is strictly lower than it was.
+        assert.is_true(later > first)
+    end)
+end)

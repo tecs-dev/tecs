@@ -51,6 +51,12 @@ local record World
     --- lifetime is exactly the world's.
     taskPool: TaskPool
     _destroyed: boolean
+
+    --- The last step's movement, indexed by body. See `World:beginMoves`.
+    _moves: loader.CValue
+    _moveCount: integer
+    _moveOf: loader.CArray
+    _moveOfCapacity: integer
 end
 
 local WorldMT <const>: metatable<World> = { __index = World }
@@ -85,6 +91,8 @@ function World.create(options: WorldOptions): World
     self.subStepCount = options.subStepCount or 4
     self.taskPool = pool
     self._destroyed = false
+    self._moveCount = 0
+    self._moveOfCapacity = 0
     return self
 end
 
@@ -94,6 +102,74 @@ end
 --- not robust to a varying one, and a variable step makes replay diverge.
 function World:step(dt: number)
     C.b2World_Step(self.handle, dt, self.subStepCount)
+end
+
+--- Indexes the bodies the last step moved, so a caller can ask about one by
+--- its id rather than by calling into Box2D for every body it owns.
+---
+--- Box2D reports movement as a contiguous array covering only the bodies that
+--- moved, which is both fewer bodies and, more importantly, no call per body:
+--- reading a position through the C API returns a struct by value, and every
+--- one of those is a cdata allocation. A thousand bodies is a thousand
+--- allocations a frame that this avoids entirely.
+---
+--- Valid until the next step, which is Box2D's guarantee about the array.
+function World:beginMoves()
+    local events = C.b2World_GetBodyEvents(self.handle) as loader.CStruct
+    local count = events.moveCount as integer
+    self._moves = events.moveEvents as loader.CValue
+    self._moveCount = count
+
+    -- Indexed by `b2BodyId.index1`, which Box2D keeps dense and reuses, so a
+    -- plain array stays small rather than growing with the session.
+    local highest = 0
+    for index = 0, count - 1 do
+        local id = (self._moves as {integer: loader.CStruct})[index].bodyId as loader.CStruct
+        local slot = id.index1 as integer
+        if slot > highest then highest = slot end
+    end
+
+    if highest >= self._moveOfCapacity then
+        local capacity = self._moveOfCapacity
+        if capacity < 64 then capacity = 64 end
+        while capacity <= highest do capacity = capacity * 2 end
+        self._moveOf = ffi.new("int32_t[?]", capacity) as loader.CArray
+        self._moveOfCapacity = capacity
+    end
+
+    local moveOf = self._moveOf as {integer: integer}
+    for index = 0, count - 1 do
+        local id = (self._moves as {integer: loader.CStruct})[index].bodyId as loader.CStruct
+        moveOf[id.index1 as integer] = index + 1
+    end
+end
+
+--- Clears the index. Paired with `beginMoves` around a pass over the bodies,
+--- and clearing only what was set keeps the cost proportional to what moved
+--- rather than to the highest body id ever seen.
+function World:endMoves()
+    local moveOf = self._moveOf as {integer: integer}
+    for index = 0, self._moveCount - 1 do
+        local id = (self._moves as {integer: loader.CStruct})[index].bodyId as loader.CStruct
+        moveOf[id.index1 as integer] = 0
+    end
+    self._moveCount = 0
+end
+
+--- The last step's transform for the body with this id, or nil if it did not
+--- move. Position in metres, rotation as its cosine and sine.
+---
+--- The rotation is not converted to an angle here: a caller that only needs
+--- the pair should not pay for an inverse tangent it throws away.
+function World:moveOf(index1: integer): number, number, number, number
+    if index1 >= self._moveOfCapacity then return nil end
+    local slot = (self._moveOf as {integer: integer})[index1]
+    if slot == 0 then return nil end
+    local transform = (self._moves as {integer: loader.CStruct})[slot - 1].transform as loader.CStruct
+    local position = transform.p as loader.CStruct
+    local rotation = transform.q as loader.CStruct
+    return position.x as number, position.y as number,
+        rotation.c as number, rotation.s as number
 end
 
 --- Creates a body and returns its handle.

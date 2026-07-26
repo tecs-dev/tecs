@@ -16,6 +16,8 @@ local box2d <const> = require("tecs.ffi.box2d")
 local components <const> = require("tecs.components")
 local timing <const> = require("tecs.timing")
 
+local atan2 <const> = math.atan2
+
 local B <const> = box2d.C
 local Transform2D <const> = components.Transform2D
 
@@ -235,19 +237,36 @@ function physics.plugin(options: PhysicsOptions): function(ecs.World)
             phase = ecs.phases.FixedPostUpdate,
             run = function()
                 local started = timing.begin()
+                local simulation = physics.world
+                simulation:beginMoves()
+
                 for archetype, length in bodies:iter() do
-                    -- Transforms are written from the simulation, so the
-                    -- column is taken mutable. The body column is only read.
-                    local transforms = archetype:getMut(Transform2D)
                     local rows = archetype:get(RigidBody)
+
+                    -- Taken mutable on the first body that actually moved, and
+                    -- not at all otherwise. Taking it up front would mark the
+                    -- column dirty every frame for every archetype holding a
+                    -- body, which defeats every consumer gated on that: a
+                    -- world whose bodies have gone to sleep would still
+                    -- re-upload each of their instances.
+                    local transforms: {any} = nil
+
                     for row = 1, length do
-                        local body = handleOf(rows[row])
-                        local px, py = World.getPosition(body)
-                        transforms[row].x = toPixels(px)
-                        transforms[row].y = toPixels(py)
-                        transforms[row].rotation = World.getAngle(body)
+                        local px, py, cosine, sine =
+                            simulation:moveOf(rows[row].index1 as integer)
+                        if px ~= nil then
+                            if transforms == nil then
+                                transforms = archetype:getMut(Transform2D) as {any}
+                            end
+                            local transform = transforms[row] as Transform2D
+                            transform.x = toPixels(px)
+                            transform.y = toPixels(py)
+                            transform.rotation = atan2(sine, cosine)
+                        end
                     end
                 end
+
+                simulation:endMoves()
                 timing.finish(SYNC, started)
             end,
         })
