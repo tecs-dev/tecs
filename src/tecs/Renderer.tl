@@ -16,6 +16,13 @@
 --- layout: with nothing to sort by, each archetype keeps a contiguous run,
 --- and a run whose components did not change does not have to be rewritten.
 ---
+--- Which layer an image occupies is this renderer's answer, not the image's
+--- identity: layers are handed out as images register, so the number depends on
+--- load order. A Sprite therefore names its image, and a registry here maps
+--- that name to a layer. Resolving happens once, when the Sprite is built or
+--- the first time a restored one is written, and the answer is cached in the
+--- Sprite so extraction reads a field per row rather than a lookup.
+---
 --- That dirty gating is the point. Walking every entity every frame is the
 --- cost that decides whether a large world is affordable, and most frames
 --- change very little. Layer zero is a white pixel, so an entity with no
@@ -133,6 +140,13 @@ local record Renderer
     --- undefined remainder rather than the image.
     _whiteU1: number
     _whiteV1: number
+    --- Texture-array layer each registered image name occupies, keyed by the
+    --- name's index. This is the registry a Sprite's name resolves through,
+    --- and the only place a layer number is decided.
+    _slotByImage: {integer: integer}
+    --- Region each registered image name occupies, so registering a name a
+    --- second time answers with the layer it already has.
+    _regionByImage: {integer: TextureArray.Region}
     _runs: {ecs.Archetype: Run}
     _seen: {ecs.Archetype: integer}
     _destroyed: boolean
@@ -149,6 +163,24 @@ local RendererMT <const>: metatable<Renderer> = { __index = Renderer }
 local record Run
     offset: integer
     length: integer
+end
+
+--- Texture-array layer the given image name index resolves to.
+---
+--- Fails on a name nothing was registered under. A sprite naming an image the
+--- renderer has never seen has no layer to sample, and every layer that does
+--- exist holds some other image, so there is nothing to fall back to that is
+--- not a wrong picture on the quad.
+local function slotOf(self: Renderer, image: integer): integer
+    local slot = self._slotByImage[image]
+    if slot ~= nil then return slot end
+
+    local name = components.imageName(image)
+    if name == nil then
+        error("tecs: a Sprite names no image; build one with "
+            .. "Renderer:registerImage or Renderer:sprite", 2)
+    end
+    error(("tecs: no image is registered as '%s'"):format(name), 2)
 end
 
 --- Writes one archetype's rows into its run.
@@ -175,6 +207,17 @@ local function writeRun(self: Renderer, archetype: ecs.Archetype,
         if sprites ~= nil then
             local sprite = sprites[row]
             layer = sprite.slot
+            if layer < 0 then
+                -- A sprite arrives unresolved when it came from a snapshot,
+                -- which carries its image's name because a layer is this
+                -- process's answer and not something a save can hold. Caching
+                -- the answer back into the column keeps the read above a field
+                -- access: one lookup per sprite, not one per row per frame. The
+                -- write is deliberately not marked dirty, since this pass is
+                -- writing the row it belongs to now.
+                layer = slotOf(self, sprite.image as integer)
+                sprite.slot = layer
+            end
             u0, v0, u1, v1 = sprite.u0, sprite.v0, sprite.u1, sprite.v1
         end
 
@@ -351,6 +394,8 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
     self._lights = {}
     self._runs = {}
     self._seen = {}
+    self._slotByImage = {}
+    self._regionByImage = {}
     self._destroyed = false
 
     self.sampler = Sampler.create(device, { filter = "nearest", address = "clamp" })
@@ -457,20 +502,53 @@ end
 
 --- Uploads a decoded image into the array and returns a Sprite for it.
 ---
---- A Sprite is returned rather than a bare layer index because an image
---- smaller than a cell does not reach the cell's edge, so the UV range is not
---- 0..1 and a caller guessing it would sample the undefined remainder. The
---- second return is the region, for building sub-rects of an atlas.
+--- The image is registered under its path, which is what a Sprite names it by
+--- and what a snapshot stores. Registering a path a second time answers with
+--- the layer it already holds instead of consuming another, so a name means
+--- one image for the life of the renderer however many times it is asked for.
+---
+--- A Sprite is returned rather than a bare region because an image smaller
+--- than a cell does not reach the cell's edge, so the UV range is not 0..1 and
+--- a caller guessing it would sample the undefined remainder. The second
+--- return is the region, which reports the size that was uploaded.
 ---
 --- The handle's pixels are released here: the array holds them now.
 function Renderer:registerImage(handle: assets.Handle): components.Sprite, TextureArray.Region
     if handle.status ~= "ready" then
         error(("tecs: image '%s' is %s"):format(handle.path, handle.status), 2)
     end
-    local region = self.images:add(handle.pixels, handle.width, handle.height,
-        handle.pitch)
+
+    local image = components.imageId(handle.path)
+    local region = self._regionByImage[image]
+    if region == nil then
+        region = self.images:add(handle.pixels, handle.width, handle.height,
+            handle.pitch)
+        self._slotByImage[image] = region.layer
+        self._regionByImage[image] = region
+    end
     handle:release()
-    return components.Sprite(region.layer, 0.0, 0.0, region.u1, region.v1), region
+
+    return components.Sprite(image, 0.0, 0.0, region.u1, region.v1,
+        region.layer), region
+end
+
+--- A resolved Sprite for a registered image, ready to spawn.
+---
+--- UVs are fractions of the image rather than of the cell it sits in, so a
+--- sub-rect of an atlas is written as the fraction it occupies and the padding
+--- a cell may carry stays the renderer's business. Omitted, they select the
+--- whole image.
+---
+--- Fails on a name nothing is registered under, because the alternative is a
+--- quad that draws whichever image happens to hold that layer.
+function Renderer:sprite(name: string, u0?: number, v0?: number,
+                         u1?: number, v1?: number): components.Sprite
+    local image = components.imageId(name)
+    local slot = slotOf(self, image)
+    local region = self._regionByImage[image]
+    return components.Sprite(image,
+        (u0 or 0.0) * region.u1, (v0 or 0.0) * region.v1,
+        (u1 or 1.0) * region.u1, (v1 or 1.0) * region.v1, slot)
 end
 
 

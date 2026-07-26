@@ -15,6 +15,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
 
 local tecs = require("tecs")
 local sdl = require("tecs.ffi.sdl3")
+local loader = require("tecs.ffi.loader")
 local Window = require("tecs.platform.Window")
 local Device = require("tecs.gpu.Device")
 local Texture = require("tecs.gpu.Texture")
@@ -67,6 +68,30 @@ describe("ecs.Renderer", function()
         })
         renderer:install(world)
         return world, renderer
+    end
+
+    -- A decoded image of one solid colour, in the shape registerImage
+    -- consumes. Telling a name apart from a layer takes two images whose
+    -- difference reaches the screen, and building them here keeps that
+    -- difference in the test rather than in a fixture file.
+    local function solid(name, r, g, b)
+        local pixels = loader.newArray("uint8_t[4]")
+        pixels[0], pixels[1], pixels[2], pixels[3] = r, g, b, 255
+        return {
+            status = "ready",
+            path = name,
+            pixels = pixels,
+            width = 1,
+            height = 1,
+            pitch = 4,
+            release = function() end,
+        }
+    end
+
+    local function readyFixture()
+        local handle = assets.loadImage(FIXTURE)
+        assets.waitAll()
+        return handle
     end
 
     local function frameOnce(world, renderer)
@@ -253,15 +278,12 @@ describe("ecs.Renderer", function()
         -- Sampling only the right half must make the whole quad green, which
         -- is what makes an atlas the same thing as a whole image.
         local world, renderer = newScene()
-        local handle = assets.loadImage(FIXTURE)
-        assets.waitAll()
-
-        local _, region = renderer:registerImage(handle)
-        -- Sample only the right half of the image within its cell.
+        renderer:registerImage(readyFixture())
+        -- Sample only the right half of the image.
         world:spawn(
             Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
             Tint(1.0, 1.0, 1.0, 1.0),
-            Sprite(region.layer, region.u1 * 0.55, 0.0, region.u1, region.v1),
+            renderer:sprite(FIXTURE, 0.55, 0.0, 1.0, 1.0),
             Renderable()
         )
 
@@ -277,15 +299,12 @@ describe("ecs.Renderer", function()
 
     it("tints a sampled texture", function()
         local world, renderer = newScene()
-        local handle = assets.loadImage(FIXTURE)
-        assets.waitAll()
-
-        local _, region = renderer:registerImage(handle)
+        renderer:registerImage(readyFixture())
         world:spawn(
             Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
             -- Half brightness, so the red half reads as half red.
             Tint(0.5, 0.5, 0.5, 1.0),
-            Sprite(region.layer, 0.0, 0.0, region.u1 * 0.45, region.v1),
+            renderer:sprite(FIXTURE, 0.0, 0.0, 0.45, 1.0),
             Renderable()
         )
 
@@ -299,9 +318,7 @@ describe("ecs.Renderer", function()
         -- Both quads go through one draw because the texture is a layer
         -- index, so a wrong layer would put the wrong image on a quad.
         local world, renderer = newScene()
-        local handle = assets.loadImage(FIXTURE)
-        assets.waitAll()
-        local _, region = renderer:registerImage(handle)
+        renderer:registerImage(readyFixture())
 
         -- Left quad untextured (layer 0, white default) tinted blue.
         world:spawn(
@@ -313,7 +330,7 @@ describe("ecs.Renderer", function()
         world:spawn(
             Transform2D(SIZE * 0.75, SIZE / 2, 0, SIZE * 0.4, SIZE * 0.4),
             Tint(1.0, 1.0, 1.0, 1.0),
-            Sprite(region.layer, region.u1 * 0.55, 0.0, region.u1, region.v1),
+            renderer:sprite(FIXTURE, 0.55, 0.0, 1.0, 1.0),
             Renderable()
         )
 
@@ -327,6 +344,96 @@ describe("ecs.Renderer", function()
         assert.are.equal(0, left.g)
         assert.are.equal(255, right.g, "the sprite quad samples green")
         assert.are.equal(0, right.b)
+        renderer:destroy()
+    end)
+
+
+    -- A Sprite names its image and the renderer decides which layer that name
+    -- occupies. These pin the two halves of that: a name is one layer however
+    -- often it is asked for, and a name outlives the layer numbering of the run
+    -- that saved it.
+    it("hands a name one layer however often it is registered", function()
+        local world, renderer = newScene()
+        local first = renderer:registerImage(readyFixture())
+        local layers = renderer.images.used
+        local second = renderer:registerImage(readyFixture())
+
+        assert.are.equal(first.image, second.image, "one name, one image")
+        assert.are.equal(first.slot, second.slot)
+        assert.are.equal(layers, renderer.images.used,
+            "registering a name again must not consume another layer")
+
+        -- And it still draws: the second registration answers with the layer
+        -- the first one uploaded into, not with an empty one.
+        world:spawn(
+            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+            Tint(1.0, 1.0, 1.0, 1.0),
+            second,
+            Renderable()
+        )
+        local pixels = frameOnce(world, renderer)
+        assert.are.equal(255, screen:getPixel(pixels, SIZE / 4, SIZE / 2).r)
+        assert.are.equal(255, screen:getPixel(pixels, SIZE * 3 / 4, SIZE / 2).g)
+        renderer:destroy()
+    end)
+
+    it("resolves a restored sprite by its image's name", function()
+        -- The two renderers register the same two images in opposite orders,
+        -- so red and green swap layers between them. A snapshot that carried a
+        -- layer would come back as the other image; one that carries the name
+        -- comes back as itself.
+        local world, first = newScene()
+        first:registerImage(solid("spec://red", 255, 0, 0))
+        first:registerImage(solid("spec://green", 0, 255, 0))
+        local green = first:sprite("spec://green")
+        world:spawn(
+            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+            Tint(1.0, 1.0, 1.0, 1.0),
+            green,
+            Renderable()
+        )
+        assert.are.equal(255,
+            screen:getPixel(frameOnce(world, first), SIZE / 2, SIZE / 2).g,
+            "green before the round trip")
+        local savedSlot = green.slot
+        local saved = world:saveSnapshot({}).buffer
+        first:destroy()
+
+        local restored, second = newScene()
+        second:registerImage(solid("spec://green", 0, 255, 0))
+        second:registerImage(solid("spec://red", 255, 0, 0))
+        assert.are_not.equal(savedSlot, second:sprite("spec://green").slot,
+            "the point of the test is that the layer moved")
+
+        restored:loadSnapshot(saved)
+        local centre = screen:getPixel(frameOnce(restored, second),
+            SIZE / 2, SIZE / 2)
+        assert.are.equal(255, centre.g, "and green after it")
+        assert.are.equal(0, centre.r)
+        second:destroy()
+    end)
+
+    it("fails on a sprite whose image is not registered", function()
+        local world, renderer = newScene()
+
+        local ok, reason = pcall(function() renderer:sprite("spec://missing") end)
+        assert.is_false(ok, "asking for an unregistered name must not answer")
+        assert.is_truthy(tostring(reason):find("spec://missing", 1, true),
+            "the error should name the image that is missing")
+
+        -- And the same is true of a Sprite that reaches extraction unresolved,
+        -- which is how one restored from a snapshot arrives. Drawing it against
+        -- whatever layer happens to hold that number is the failure a name
+        -- exists to prevent.
+        world:spawn(
+            Transform2D(SIZE / 2, SIZE / 2, 0, 4, 4),
+            Tint(1.0, 1.0, 1.0, 1.0),
+            Sprite(components.imageId("spec://missing"), 0.0, 0.0, 1.0, 1.0),
+            Renderable()
+        )
+        local drawn, failure = pcall(frameOnce, world, renderer)
+        assert.is_false(drawn)
+        assert.is_truthy(tostring(failure):find("spec://missing", 1, true))
         renderer:destroy()
     end)
 

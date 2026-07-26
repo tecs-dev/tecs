@@ -190,6 +190,17 @@ smaller than a cell does not reach the cell's edge, so `registerImage` returns
 a ready `Sprite` rather than a bare index: a caller guessing the UV range
 would sample the undefined remainder.
 
+A `Sprite` names its image; which layer that name occupies is the renderer's
+answer to it. Layers are handed out as images register, so a layer number
+means whatever loaded in that position, and one written into a snapshot is a
+different image the moment the assets load in a different order. So a snapshot
+stores the name, `registerImage` keeps a registry from name to layer, and
+registering a name twice answers with the layer it already holds instead of
+consuming another. The layer is cached in the `Sprite` when it is built, or on
+the first frame that writes a restored one, because extraction reads it for
+every row and a lookup per row is a lookup too many. A name nothing is
+registered under fails rather than drawing whichever image holds that layer.
+
 Its sync reads columns with `get`, never `getMut`. Taking a mutable column to
 read would mark those components dirty on every archetype every frame, which
 defeats every dirty-gated consumer downstream. That distinction is the single
