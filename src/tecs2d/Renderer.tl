@@ -181,16 +181,14 @@ local function writeRun(self: Renderer, archetype: tecs.Archetype,
         end
 
         local angle = transform.rotation
-        local cosine = math.cos(angle)
-        local sine = math.sin(angle)
         local scaleX = transform.scaleX
         local scaleY = transform.scaleY
 
         local base = (offset + row - 1) * INSTANCE_FLOATS
-        floats[base] = cosine * scaleX
-        floats[base + 1] = -sine * scaleY
-        floats[base + 2] = sine * scaleX
-        floats[base + 3] = cosine * scaleY
+        floats[base] = angle
+        floats[base + 1] = scaleX
+        floats[base + 2] = scaleY
+        floats[base + 3] = 0.0
 
         floats[base + 4] = transform.x
         floats[base + 5] = transform.y
@@ -207,14 +205,25 @@ local function writeRun(self: Renderer, archetype: tecs.Archetype,
         floats[base + 14] = u1
         floats[base + 15] = v1
 
-        -- A rotated quad reaches further than its scale alone, so both columns
-        -- of the basis contribute to both axes. Resolved here so the cull does
-        -- not repeat it for every entity every frame.
+        -- Extents without a trigonometric call. Unrotated, each axis is its
+        -- own scale. Rotated, half the sum of both scales covers every angle,
+        -- which is looser than the true extent but never smaller, so the cull
+        -- can only ever keep something it might have dropped.
+        local ex: number
+        local ey: number
+        if angle == 0.0 then
+            ex = 0.5 * abs(scaleX)
+            ey = 0.5 * abs(scaleY)
+        else
+            ex = 0.5 * (abs(scaleX) + abs(scaleY))
+            ey = ex
+        end
+
         local bound = (offset + row - 1) * BOUND_FLOATS
         bounds[bound] = transform.x
         bounds[bound + 1] = transform.y
-        bounds[bound + 2] = 0.5 * (abs(cosine * scaleX) + abs(sine * scaleX))
-        bounds[bound + 3] = 0.5 * (abs(sine * scaleY) + abs(cosine * scaleY))
+        bounds[bound + 2] = ex
+        bounds[bound + 3] = ey
     end
 
     self.instances:markDirty(offset * INSTANCE_BYTES, length * INSTANCE_BYTES)

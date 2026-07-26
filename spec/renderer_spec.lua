@@ -577,4 +577,68 @@ describe("ecs.Renderer", function()
         renderer:destroy()
     end)
 
+
+    -- Rotation is applied in the vertex shader, so nothing on the host side
+    -- would notice if it were dropped or had its sign flipped. A long thin
+    -- quad makes the difference unmistakable: unrotated it is a horizontal
+    -- band, and a quarter turn makes it a vertical one.
+    local function bandScene(rotation)
+        local world, renderer = newScene()
+        world:spawn(
+            Transform2D(SIZE / 2, SIZE / 2, rotation, SIZE * 2, SIZE / 4),
+            Tint(1.0, 0.0, 0.0, 1.0),
+            Renderable()
+        )
+        return screen:readback(), world, renderer
+    end
+
+    it("leaves an unrotated quad on its own axes", function()
+        local world, renderer = newScene()
+        world:spawn(
+            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE / 4),
+            Tint(1.0, 0.0, 0.0, 1.0),
+            Renderable()
+        )
+        local pixels = frameOnce(world, renderer)
+        assert.are.equal(255, screen:getPixel(pixels, 4, SIZE / 2).r,
+            "a wide band reaches the left edge")
+        assert.are.equal(0, screen:getPixel(pixels, SIZE / 2, 4).r,
+            "and does not reach the top")
+        renderer:destroy()
+    end)
+
+    it("turns a quad a quarter turn", function()
+        local world, renderer = newScene()
+        world:spawn(
+            Transform2D(SIZE / 2, SIZE / 2, math.pi / 2, SIZE * 2, SIZE / 4),
+            Tint(1.0, 0.0, 0.0, 1.0),
+            Renderable()
+        )
+        local pixels = frameOnce(world, renderer)
+        -- Exactly the reverse of the unrotated case. Either sign of a quarter
+        -- turn produces this, so the test does not depend on the convention.
+        assert.are.equal(0, screen:getPixel(pixels, 4, SIZE / 2).r,
+            "a turned band no longer reaches the left edge")
+        assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, 4).r,
+            "and now reaches the top")
+        renderer:destroy()
+    end)
+
+    it("culls a rotated quad by an extent that covers its turn", function()
+        -- The bound is computed without trigonometry, so it has to be
+        -- conservative enough that a quad turned to reach into view is kept.
+        -- Placed off the left edge, unrotated it misses; turned, its long axis
+        -- swings into view and it must survive the cull.
+        local world, renderer = newScene()
+        world:spawn(
+            Transform2D(-SIZE / 3, SIZE / 2, math.pi / 2, SIZE / 4, SIZE * 2),
+            Tint(0.0, 1.0, 0.0, 1.0),
+            Renderable()
+        )
+        local pixels = frameOnce(world, renderer)
+        assert.are.equal(255, screen:getPixel(pixels, 4, SIZE / 2).g,
+            "the turned quad reaches into view and must not be culled")
+        renderer:destroy()
+    end)
+
 end)

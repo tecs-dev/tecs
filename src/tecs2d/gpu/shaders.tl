@@ -283,8 +283,8 @@ shaders.register({
 #version 450
 
 struct Instance {
-    vec4 xform;   // 2x2 basis of rotation and scale
-    vec4 origin;  // xy world position, z array layer, w spare
+    vec4 xform;   // rotation, scaleX, scaleY, spare
+    vec4 origin;  // xy world position, z array layer, w material
     vec4 color;
     vec4 uvRect;  // u0 v0 u1 v1
 };
@@ -314,7 +314,21 @@ void main() {
     // than the instance array.
     uint slot = visible.index[gl_InstanceIndex];
     Instance self = instances.item[slot];
-    mat2 basis = mat2(self.xform.x, self.xform.y, self.xform.z, self.xform.w);
+
+    // The basis is built here rather than on the CPU. Sine and cosine are one
+    // hardware instruction on a GPU and a libm call on the host, and the host
+    // would pay them once per entity per frame while this pays them across
+    // however many cores are free.
+    float angle = self.xform.x;
+    float sx = self.xform.y;
+    float sy = self.xform.z;
+    float c = cos(angle);
+    float s = sin(angle);
+    // Column major, which is what the constructor takes: the first pair is
+    // the first column, not the first row. Transposing these gives a matrix
+    // that scales along world axes after rotating, so a turned rectangle keeps
+    // an upright footprint and only its sampling spins.
+    mat2 basis = mat2(c * sx, s * sx, -s * sy, c * sy);
     vec2 corner = CORNERS[gl_VertexIndex];
     vec2 world = self.origin.xy + basis * corner;
 
