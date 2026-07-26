@@ -47,7 +47,16 @@ contains, because serialization stays in Lua.
 
 That boundary is not a style choice. LuaJIT has no shared mutable heap across
 threads, so a worker cannot see the spawning state's objects at all. What
-crosses is what `string.buffer` encodes.
+crosses is numbers, strings, booleans, and tables of those.
+
+Sends are checked before encoding rather than left to fail inside the encoder.
+That is partly for the message, which names the offending path instead of
+saying a function turned up somewhere. It is mostly because the failing path
+proved unsafe: an encode error raised while worker threads are running
+intermittently terminated the process instead of surfacing, at roughly one run
+in ten under a coroutine-based test runner and never standalone. The mechanism
+is below this code and unresolved. Not calling the encoder with something it
+will reject keeps that path unreached.
 
 Asset loading rides on that. Decoding a PNG is milliseconds of pure CPU work
 with no GPU involvement, so it happens on a worker and the main thread only

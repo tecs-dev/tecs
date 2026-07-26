@@ -130,12 +130,29 @@ end
     end)
 
     it("rejects values it cannot serialize", function()
-        local worker = workers.spawn({ source = ECHO })
-        -- Functions cannot cross: the other state could not run them, since
-        -- it shares no heap and no upvalues with this one.
+        -- Tested on a bare channel rather than through a worker: what is
+        -- under test is the encoder rejecting a function, and a live thread
+        -- has nothing to do with that.
+        --
+        local channel = workers.Channel.create()
+
+        -- Functions cannot cross: the other state shares neither heap nor
+        -- upvalues with this one, so it could not run them. The rejection
+        -- names the path, which the encoder's own message does not.
+        local ok, err = pcall(function()
+            channel:send({ nested = { callback = function() end } })
+        end)
+        assert.is_false(ok)
+        assert.is_truthy(tostring(err):find("value.nested.callback is a function"))
+
+        -- Non-string, non-number keys cannot cross either.
         assert.is_false(pcall(function()
-            worker:send({ callback = function() end })
+            channel:send({ [{}] = 1 })
         end))
-        worker:stop()
+
+        channel:send({ fine = 1, nested = { "ok" } })
+        assert.are.equal(1, channel:count())
+        assert.are.equal(1, channel:receive(0).fine)
+        channel:destroy()
     end)
 end)

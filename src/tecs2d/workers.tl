@@ -48,6 +48,8 @@ local record workers
     path: string
 end
 
+workers.Channel = Channel
+workers.Worker = Worker
 workers.path = libraryPath
 
 local ChannelMT <const>: metatable<Channel> = { __index = Channel }
@@ -78,10 +80,49 @@ function Channel.wrap(handle: loader.CPtr): Channel
     return self
 end
 
+--- Types that survive the trip. A worker shares neither heap nor upvalues
+--- with the state that spawned it, so anything holding a reference into this
+--- state cannot cross.
+local SENDABLE <const>: {string: boolean} = {
+    number = true, string = true, boolean = true, ["nil"] = true,
+}
+
+--- Reports the path to the first value that cannot cross, or nil.
+---
+--- Checked rather than left to the encoder. Letting the encoder fail is not
+--- only a worse message, it is a path that has proved unsafe: a failure
+--- raised out of the C encoder while worker threads are running has
+--- intermittently terminated the process rather than surfacing. Refusing to
+--- call it with something it will reject keeps that path unreached.
+local function unsendable(value: any, path: string, depth: integer): string
+    local kind = type(value)
+    if SENDABLE[kind] then return nil end
+    if kind ~= "table" then
+        return ("%s is a %s"):format(path, kind)
+    end
+    if depth > 32 then
+        return ("%s nests deeper than 32 levels"):format(path)
+    end
+    for key, item in pairs(value as {any: any}) do
+        if not SENDABLE[type(key)] then
+            return ("%s has a %s key"):format(path, type(key))
+        end
+        local found = unsendable(item, ("%s.%s"):format(path, tostring(key)),
+            depth + 1)
+        if found ~= nil then return found end
+    end
+    return nil
+end
+
 --- Serializes `value` and queues it.
 function Channel:send(value: any)
+    local rejected = unsendable(value, "value", 0)
+    if rejected ~= nil then
+        error(("tecs2d: cannot send to a worker: %s"):format(rejected), 2)
+    end
+
     -- The cast is to satisfy the buffer type declaration, which names only
-    -- scalars; the encoder itself handles tables of scalars fine.
+    -- scalars; the encoder handles tables of scalars fine.
     local encoded = buffer.encode(value as string) as string
     if not C.tecs2dChannelPush(self.handle, encoded, #encoded) then
         error("tecs2d: channel send failed", 2)
