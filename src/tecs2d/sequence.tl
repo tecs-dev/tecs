@@ -46,6 +46,7 @@ local OP_EMIT <const> = 3     -- a = const index of event name
 local OP_JUMP <const> = 4     -- a = target pc
                               -- b = loop register, or -1 for unconditional
 local OP_END <const> = 5
+local OP_WAIT_SIGNAL <const> = 6  -- a = const index of signal name
 
 local STRIDE <const> = 3
 
@@ -188,8 +189,12 @@ local record sequence
         --- Instruction index, for disassembly and debugging.
         pc: integer
 
-        --- Fixed step this playback next runs on. Nil when it is not waiting.
+        --- Fixed step this playback next runs on. Nil when it is blocked on
+        --- a signal rather than a time.
         wakeAt: integer
+
+        --- Signal name this playback is blocked on, when it is.
+        waitingFor: string
 
         --- Set when `state` is `"faulted"`.
         fault: FaultReason
@@ -221,6 +226,14 @@ local record sequence
     --- matters more than the wall-clock duration.
     wait: function(seconds: number): Node
 
+    --- Block until a named signal is raised.
+    ---
+    --- Signals are delivered on the fixed step after `signal` is called, so a
+    --- signal raised by one sequence never runs another within the same step.
+    --- That bounds a chain of signals to one link per step and keeps delivery
+    --- order independent of which cursor happened to run first.
+    waitSignal: function(name: string): Node
+
     --- Wait for a whole number of fixed steps.
     ---
     --- `waitSteps(0)` yields: the cursor resumes on the next fixed step
@@ -248,6 +261,17 @@ local record sequence
 
     --- Whether an action name is registered on this world.
     hasAction: function(world: World, name: string): boolean
+
+    --- Raise a named signal, waking every playback blocked on it.
+    ---
+    --- Delivery happens on the next fixed step. Raising a signal nothing is
+    --- waiting on is not an error and is not remembered: a playback that
+    --- reaches `waitSignal` afterwards keeps waiting.
+    --- @return Playbacks that will wake.
+    signal: function(world: World, name: string): integer
+
+    --- Playbacks currently blocked on a signal name.
+    waitingOn: function(world: World, name: string): integer
 
     ---------------------------------------------------------------------------
     -- Playback
@@ -370,6 +394,13 @@ function sequence.waitSteps(steps: integer): sequence.Node
     return {kind = "waitSteps", number = steps} as sequence.Node
 end
 
+function sequence.waitSignal(name: string): sequence.Node
+    if type(name) ~= "string" or name == "" then
+        error("sequence.waitSignal requires a non-empty signal name", 2)
+    end
+    return {kind = "waitSignal", text = name} as sequence.Node
+end
+
 function sequence.emit(event: string, ...: sequence.Argument): sequence.Node
     if type(event) ~= "string" or event == "" then
         error("sequence.emit requires a non-empty event name", 2)
@@ -430,6 +461,8 @@ local function compileNode(c: Compiler, node: NodeImpl, depth: integer)
         emitOp(c, OP_EMIT, intern(c, node.text), intern(c, node.args))
     elseif kind == "wait" then
         emitOp(c, OP_WAIT, intern(c, node.number), -1)
+    elseif kind == "waitSignal" then
+        emitOp(c, OP_WAIT_SIGNAL, intern(c, node.text), -1)
     elseif kind == "waitSteps" then
         emitOp(c, OP_WAIT, -1, node.number as integer)
     elseif kind == "loop" then
@@ -544,6 +577,7 @@ local record Cursor
     wakeAt: integer
     seq: integer
     loopRegs: {integer: integer}
+    waitChannel: string
 
     fault: FaultReason
     faultMessage: string
@@ -570,6 +604,11 @@ local record WorldState
     heap: {HeapEntry}
     heapSize: integer
 
+    -- Cursors blocked on a signal are held here rather than in the heap:
+    -- they have no wake time until the signal arrives.
+    channels: {string: {integer: boolean}}
+    pendingSignals: {string}
+
     ownerIndex: {integer: {integer: boolean}}
 end
 
@@ -590,6 +629,8 @@ local function stateFor(world: World): WorldState
         budget = DEFAULT_BUDGET,
         heap = {},
         heapSize = 0,
+        channels = {},
+        pendingSignals = {},
         ownerIndex = {},
     }
     states[world] = state
@@ -693,6 +734,16 @@ local function allocCursor(state: WorldState): Cursor
     return cursor
 end
 
+local function unlinkChannel(state: WorldState, cursor: Cursor)
+    local channel = cursor.waitChannel
+    if not channel then return end
+    cursor.waitChannel = nil
+    local blocked = state.channels[channel]
+    if not blocked then return end
+    blocked[cursor.slot] = nil
+    if next(blocked) == nil then state.channels[channel] = nil end
+end
+
 local function unlinkOwner(state: WorldState, cursor: Cursor)
     if cursor.owner == 0 then return end
     local owned = state.ownerIndex[cursor.owner]
@@ -711,6 +762,7 @@ local function retire(state: WorldState, cursor: Cursor, finalState: PlaybackSta
     if not cursor.alive then return end
     cursor.state = finalState
     cursor.alive = false
+    unlinkChannel(state, cursor)
     unlinkOwner(state, cursor)
     state.freeSlots[#state.freeSlots + 1] = cursor.slot
 end
@@ -831,6 +883,19 @@ local function advance(world: World, state: WorldState, cursor: Cursor)
             schedule(state, cursor, state.step + (steps > 0 and steps or 1))
             return
 
+        elseif op == OP_WAIT_SIGNAL then
+            local channel = consts[a] as string
+            cursor.pc = cursor.pc + 1
+            cursor.waitChannel = channel
+            cursor.wakeAt = nil
+            local blocked = state.channels[channel]
+            if not blocked then
+                blocked = {}
+                state.channels[channel] = blocked
+            end
+            blocked[cursor.slot] = true
+            return
+
         elseif op == OP_CALL then
             local name = consts[a] as string
             local action = state.actions[name]
@@ -897,6 +962,29 @@ end
 -------------------------------------------------------------------------------
 -- Playback API
 -------------------------------------------------------------------------------
+
+function sequence.signal(world: World, name: string): integer
+    if type(name) ~= "string" or name == "" then
+        error("sequence.signal requires a non-empty signal name", 2)
+    end
+    local state = stateFor(world)
+    local blocked = state.channels[name]
+    if not blocked then return 0 end
+    local count = 0
+    for _ in pairs(blocked) do count = count + 1 end
+    -- Delivery is deferred to the next step so a signal raised from inside a
+    -- running cursor cannot cascade within the same step.
+    state.pendingSignals[#state.pendingSignals + 1] = name
+    return count
+end
+
+function sequence.waitingOn(world: World, name: string): integer
+    local blocked = stateFor(world).channels[name]
+    if not blocked then return 0 end
+    local count = 0
+    for _ in pairs(blocked) do count = count + 1 end
+    return count
+end
 
 function sequence.play(
     world: World,
@@ -971,6 +1059,7 @@ function sequence.status(world: World, handle: sequence.Handle): sequence.Status
         version = cursor.program.version,
         pc = cursor.pc,
         wakeAt = cursor.alive and cursor.wakeAt or nil,
+        waitingFor = cursor.alive and cursor.waitChannel or nil,
         fault = cursor.fault,
         faultMessage = cursor.faultMessage,
     }
@@ -1055,6 +1144,8 @@ function sequence.disassemble(program: sequence.Program): string
             text = a >= 0
                 and string.format("WAIT      %ss", tostring(prog.consts[a]))
                 or string.format("WAIT      %d step(s)", b)
+        elseif op == OP_WAIT_SIGNAL then
+            text = string.format("WAITSIG   %q", prog.consts[a] as string)
         elseif op == OP_CALL then
             text = string.format("CALL      %q%s",
                 prog.consts[a] as string, describeArgs(prog.consts[b] as {any}))
@@ -1160,6 +1251,7 @@ local function saveState(world: World): any
                 wakeAt = cursor.wakeAt,
                 seq = cursor.seq,
                 loopRegs = cursor.loopRegs,
+                waitChannel = cursor.waitChannel,
             }
         end
     end
@@ -1172,6 +1264,7 @@ local function saveState(world: World): any
         generations = state.generations,
         programs = programs,
         cursors = cursors,
+        pendingSignals = state.pendingSignals,
     }
 end
 
@@ -1183,6 +1276,8 @@ local function loadState(world: World, value: any)
     state.ownerIndex = {}
     state.heap = {}
     state.heapSize = 0
+    state.channels = {}
+    state.pendingSignals = {}
     state.nextSlot = 1
     state.generations = {}
     state.step = 0
@@ -1196,6 +1291,7 @@ local function loadState(world: World, value: any)
     state.budget = (data.budget as integer) or DEFAULT_BUDGET
     state.nextSlot = (data.nextSlot as integer) or 1
     state.generations = (data.generations as {integer: integer}) or {}
+    state.pendingSignals = (data.pendingSignals as {string}) or {}
 
     local restored: {string: ProgramImpl} = {}
     local programs = (data.programs as {{string: any}}) or {}
@@ -1223,6 +1319,7 @@ local function loadState(world: World, value: any)
                 wakeAt = row.wakeAt as integer,
                 seq = row.seq as integer,
                 loopRegs = row.loopRegs as {integer: integer},
+                waitChannel = row.waitChannel as string,
             }
             state.cursors[cursor.slot] = cursor
             if cursor.owner ~= 0 then
@@ -1233,13 +1330,24 @@ local function loadState(world: World, value: any)
                 end
                 owned[cursor.slot] = true
             end
-            -- Rebuild the wake index rather than serializing it.
-            heapPush(state, {
-                wakeAt = cursor.wakeAt,
-                seq = cursor.seq,
-                slot = cursor.slot,
-                generation = cursor.generation,
-            })
+            -- Rebuild the wake indexes rather than serializing them. A
+            -- signal-blocked cursor has no wake time and belongs in its
+            -- channel instead of the heap.
+            if cursor.waitChannel then
+                local blocked = state.channels[cursor.waitChannel]
+                if not blocked then
+                    blocked = {}
+                    state.channels[cursor.waitChannel] = blocked
+                end
+                blocked[cursor.slot] = true
+            else
+                heapPush(state, {
+                    wakeAt = cursor.wakeAt,
+                    seq = cursor.seq,
+                    slot = cursor.slot,
+                    generation = cursor.generation,
+                })
+            end
         else
             LOGGER:warn("dropping cursor for missing program %s", key)
         end
@@ -1257,9 +1365,36 @@ end
 -- Plugin
 -------------------------------------------------------------------------------
 
+local function deliverSignals(state: WorldState)
+    local pending = state.pendingSignals
+    local count = #pending
+    if count == 0 then return end
+    state.pendingSignals = {}
+
+    for i = 1, count do
+        local blocked = state.channels[pending[i]]
+        if blocked then
+            -- Sort by slot so wake order is reproducible regardless of the
+            -- hash iteration order.
+            local slots: {integer} = {}
+            for slot in pairs(blocked) do slots[#slots + 1] = slot end
+            table.sort(slots)
+            for j = 1, #slots do
+                local cursor = state.cursors[slots[j]]
+                if cursor and cursor.alive then
+                    unlinkChannel(state, cursor)
+                    schedule(state, cursor, state.step)
+                end
+            end
+        end
+    end
+end
+
 local function tick(world: World, state: WorldState)
     state.step = state.step + 1
     local step = state.step
+
+    deliverSignals(state)
 
     while state.heapSize > 0 do
         local top = state.heap[1]

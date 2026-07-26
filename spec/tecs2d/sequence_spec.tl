@@ -216,6 +216,110 @@ describe("tecs2d.sequence", function()
         end)
     end)
 
+    describe("signals", function()
+        local function blockingProgram(): sequence.Program
+            return sequence.define(uniqueName(), {
+                sequence.waitSignal("gate"),
+                sequence.call("spec.count"),
+            })
+        end
+
+        before_each(function()
+            sequence.registerAction(world, "spec.count", function() end)
+        end)
+
+        it("blocks until the signal is raised", function()
+            local calls = 0
+            sequence.registerAction(world, "spec.count", function() calls = calls + 1 end)
+            local handle = sequence.play(world, blockingProgram())
+
+            stepWorld(world, 5)
+            luassert.equals(0, calls)
+            luassert.equals("gate", sequence.status(world, handle).waitingFor)
+            luassert.is_nil(sequence.status(world, handle).wakeAt)
+            luassert.equals(1, sequence.waitingOn(world, "gate"))
+
+            sequence.signal(world, "gate")
+            stepWorld(world, 1)
+            luassert.equals(1, calls)
+            luassert.equals(0, sequence.waitingOn(world, "gate"))
+        end)
+
+        it("delivers on the step after the signal, not the same one", function()
+            local calls = 0
+            sequence.registerAction(world, "spec.count", function() calls = calls + 1 end)
+            sequence.play(world, blockingProgram())
+            stepWorld(world, 1)
+
+            -- Raising from an action would otherwise let one signal cascade
+            -- through several playbacks inside a single step.
+            sequence.registerAction(world, "spec.raise", function(w)
+                sequence.signal(w, "gate")
+            end)
+            sequence.play(world, sequence.define(uniqueName(), {
+                sequence.call("spec.raise"),
+            }))
+
+            stepWorld(world, 1)
+            luassert.equals(0, calls, "the waiter must not run in the raising step")
+            stepWorld(world, 1)
+            luassert.equals(1, calls)
+        end)
+
+        it("wakes every playback blocked on the name", function()
+            local calls = 0
+            sequence.registerAction(world, "spec.count", function() calls = calls + 1 end)
+            for _ = 1, 3 do sequence.play(world, blockingProgram()) end
+            stepWorld(world, 1)
+
+            luassert.equals(3, sequence.waitingOn(world, "gate"))
+            luassert.equals(3, sequence.signal(world, "gate"))
+            stepWorld(world, 1)
+            luassert.equals(3, calls)
+        end)
+
+        it("does not remember a signal nothing was waiting on", function()
+            local calls = 0
+            sequence.registerAction(world, "spec.count", function() calls = calls + 1 end)
+            luassert.equals(0, sequence.signal(world, "gate"))
+            stepWorld(world, 1)
+
+            sequence.play(world, blockingProgram())
+            stepWorld(world, 3)
+            luassert.equals(0, calls, "an earlier signal must not satisfy a later wait")
+        end)
+
+        it("releases the channel when a blocked playback is cancelled", function()
+            local handle = sequence.play(world, blockingProgram())
+            stepWorld(world, 1)
+            luassert.equals(1, sequence.waitingOn(world, "gate"))
+
+            sequence.cancel(world, handle)
+            luassert.equals(0, sequence.waitingOn(world, "gate"))
+        end)
+
+        it("restores blocked playbacks and undelivered signals", function()
+            local calls = 0
+            sequence.registerAction(world, "spec.count", function() calls = calls + 1 end)
+            sequence.play(world, blockingProgram())
+            stepWorld(world, 1)
+
+            local saved = world:saveSnapshot().buffer
+            world:loadSnapshot(saved)
+
+            luassert.equals(1, sequence.waitingOn(world, "gate"),
+                "a blocked cursor belongs in its channel, not the wake heap")
+            sequence.signal(world, "gate")
+            stepWorld(world, 1)
+            luassert.equals(1, calls)
+        end)
+
+        it("rejects an empty signal name", function()
+            luassert.has_error(function() sequence.waitSignal("") end)
+            luassert.has_error(function() sequence.signal(world, "") end)
+        end)
+    end)
+
     describe("bindings and ownership", function()
         it("resolves a binding through the context", function()
             local seen: integer = nil

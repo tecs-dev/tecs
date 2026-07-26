@@ -71,6 +71,7 @@ and an explicit migration step. That is deliberately not supported.
 | `call(action, ...)` | Run a registered action with constant arguments |
 | `wait(seconds)` | Wait a duration |
 | `waitSteps(n)` | Wait a whole number of fixed steps |
+| `waitSignal(name)` | Block until a named signal is raised |
 | `emit(event, ...)` | Emit a `sequence.Event` at address 0 |
 | `loop(count, nodes)` | Repeat a block, or forever when `count` is nil |
 
@@ -194,6 +195,37 @@ Prefer `waitSteps(0)` in a loop body over raising the budget.
 
 A faulted playback stops and retains its `pc`, so the failure is inspectable rather than silent.
 
+## Signals
+
+A sequence can block on game state instead of time. `waitSignal` parks a playback on a named
+channel; `sequence.signal` wakes everything waiting on that name.
+
+```teal
+local fight = sequence.define("game.bossFight", {
+    sequence.call("game.spawnAdds"),
+    sequence.waitSignal("adds.cleared"),
+    sequence.call("game.phaseTwo"),
+})
+
+-- from an ordinary system, an observer, or another sequence
+sequence.signal(world, "adds.cleared")
+```
+
+**Delivery is next-step.** A signal raised during step *N* wakes its waiters on step *N+1*. That
+bounds a chain of signals to one link per step, and makes wake order independent of which cursor
+happened to run first. Within a step, waiters wake in slot order, so the ordering is reproducible.
+
+**Signals are not remembered.** Raising a signal nothing is waiting on is not an error and has no
+lasting effect: a playback that reaches `waitSignal` afterwards keeps waiting. Signals are edges,
+not state. Model "has this already happened" with a component or a resource and check it with an
+action.
+
+A blocked playback has no `wakeAt`; its `status` reports `waitingFor` instead. Undelivered signals
+and blocked cursors both survive a snapshot.
+
+`sequence.waitingOn(world, name)` reports how many playbacks are parked on a name, which is useful
+in tests and in the debugger.
+
 ## Events
 
 `emit` dispatches a `sequence.Event` at address 0, carrying the authored name, the arguments with
@@ -214,7 +246,7 @@ from `status` or a fault points at a specific step.
 
 Later phases add orchestration and tween composition:
 
-- Signals, event waits, and query waits, so a sequence can block on game state rather than time
+- Event and query waits, so a sequence can block on an ECS event or a query transition
 - `fork` and `join` for parallel branches
 - `playTween` / `waitTween`, waiting on a specific tween playback and resuming on completion,
   cancellation, channel replacement, or binding destruction
