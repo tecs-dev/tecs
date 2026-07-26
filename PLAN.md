@@ -437,13 +437,27 @@ and audio device problems, arrive in the same stream with no tee.
 
 What is lost: timestamps on desktop stderr. logcat and os_log stamp for us.
 
-A log file is the one thing SDL has no sink for. If one is wanted, it is a small
+A log file is the one thing SDL has no sink for, and MCP needs it. It is a small
 C output function that writes the line and then delegates to
-`SDL_GetDefaultLogOutputFunction()`. It lives in C rather than Lua because SDL
-logs from its own audio and async IO threads, and an FFI callback from a thread
-the VM did not create is the unsafe pattern behind the unexplained worker crash
-in section 9. With a file, `get_logs` returns its path, mirroring how
-`cmd_screenshot` already prefers an artifact over inline base64.
+`SDL_GetDefaultLogOutputFunction()`, so the platform destination still gets the
+usual human-readable text. It lives in C rather than Lua because SDL logs from
+its own audio and async IO threads, and an FFI callback from a thread the VM did
+not create is the unsafe pattern behind the unexplained worker crash in section
+9.
+
+The file is what lets `get_logs` drop its ring buffer. The cursor stops being a
+synthetic sequence number and becomes a byte offset: seek, read to the end,
+return the lines and the new offset. Co-located agents get the path and grep it
+directly, mirroring how `cmd_screenshot` already prefers an artifact over inline
+base64; remote ones get the tail over the wire.
+
+Write it as JSON Lines. The output function receives category, priority and
+message as separate arguments, already structured, so nothing ever re-parses
+formatted text. That was logtap's mistake: it formatted a prefix and then
+recovered the logger name back out of it with a pattern match.
+
+On a target with no writable log file the output function keeps a small ring in
+C instead. Not before something needs it.
 
 ### Not included
 
