@@ -92,7 +92,27 @@ components did not change is not rewritten.
 
 That gating is the point. Walking every entity every frame is the cost that
 decides whether a large world is affordable, and most frames change very
-little. A still scene of half a million entities resyncs nothing.
+little. A still scene resyncs nothing at any size:
+
+```
+ entities    spawn     frame     resynced
+ ─────────   ───────   ───────   ────────
+ 500,000       15 ms    7.8 ms          0
+ 1,000,000     30 ms   15.6 ms          0
+ 2,000,000     62 ms   32.3 ms          0
+ 4,000,000    128 ms   72.5 ms          0
+```
+
+Four million is the ECS's ceiling: an entity id packs its slot into 22 bits.
+The frame cost there is the GPU rasterising four million overlapping quads
+with no frustum culling, which is a worst case rather than a workload.
+
+Populate with `world:batchSpawn`, not a spawn per entity. A single spawn
+resolves an archetype, allocates an id, and moves a row every time it is
+called; in bulk that is the difference between fifteen milliseconds and nine
+seconds. The callback writes columns in place, so no component values are
+constructed at all. Note that `batchSpawn` skips FFI defaults, so every field
+has to be written in the callback.
 
 Layer zero is a white pixel, so an entity with no `Sprite` samples it and
 textured and untextured geometry share one shader and one pipeline. An image

@@ -19,34 +19,45 @@ local COUNT <const> = math.floor(tonumber(os.getenv("TECS2D_INSTANCES")) or 4000
 local LIGHTS <const> = 3
 
 --- Seeds a sunflower spiral of renderable quads.
+---
+--- Uses batchSpawn rather than a spawn per entity. One spawn resolves the
+--- archetype, allocates an id, and moves a row every time it is called, which
+--- at a million entities is the difference between a fifth of a second and
+--- twenty. The callback writes columns in place, so no component values are
+--- constructed at all.
 local function spawnField(world: tecs.World, width: number, height: number)
     local centreX = width * 0.5
     local centreY = height * 0.5
     local extent = math.min(width, height) * 0.46
-    local golden = 2.39996
+    local golden <const> = 2.39996
 
-    for index = 0, COUNT - 1 do
-        local angle = index * golden
-        local radius = math.sqrt(index / COUNT) * extent
-        local size = 6.0 + 10.0 * (1.0 - radius / extent)
-        local hue = index / COUNT
+    world:batchSpawn(COUNT, { Transform2D, Tint, Renderable },
+        function(archetype: tecs.Archetype, firstRow: integer, lastRow: integer)
+            -- batchSpawn skips FFI defaults, so every field is written here.
+            local transforms = archetype:getMut(Transform2D)
+            local tints = archetype:getMut(Tint)
 
-        world:spawn(
-            Transform2D(
-                centreX + math.cos(angle) * radius,
-                centreY + math.sin(angle) * radius,
-                angle,
-                size, size
-            ),
-            Tint(
-                0.55 + 0.45 * math.cos(6.28318 * hue),
-                0.55 + 0.45 * math.cos(6.28318 * (hue + 0.33)),
-                0.55 + 0.45 * math.cos(6.28318 * (hue + 0.67)),
-                1.0
-            ),
-            Renderable()
-        )
-    end
+            for row = firstRow, lastRow do
+                local index = row - firstRow
+                local angle = index * golden
+                local radius = math.sqrt(index / COUNT) * extent
+                local size = 6.0 + 10.0 * (1.0 - radius / extent)
+                local hue = index / COUNT
+
+                local transform = transforms[row]
+                transform.x = centreX + math.cos(angle) * radius
+                transform.y = centreY + math.sin(angle) * radius
+                transform.rotation = angle
+                transform.scaleX = size
+                transform.scaleY = size
+
+                local tint = tints[row]
+                tint.r = 0.55 + 0.45 * math.cos(6.28318 * hue)
+                tint.g = 0.55 + 0.45 * math.cos(6.28318 * (hue + 0.33))
+                tint.b = 0.55 + 0.45 * math.cos(6.28318 * (hue + 0.67))
+                tint.a = 1.0
+            end
+        end)
 end
 
 local function spawnLights(world: tecs.World, width: number, height: number)
@@ -80,8 +91,11 @@ os.exit(tecs2d.run({
         print(("  driver: %s"):format(app.device.driver))
         print(("  window: %dx%d px"):format(width, height))
 
+        local t0 = tecs2d.clock.now()
         spawnField(app.world, width, height)
+        local t1 = tecs2d.clock.now()
         spawnLights(app.world, width, height)
+        print(("  spawn: %.0f ms for %d entities"):format((t1 - t0) * 1000, COUNT))
 
         local elapsed = 0.0
 
