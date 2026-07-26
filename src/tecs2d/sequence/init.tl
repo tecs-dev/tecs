@@ -23,6 +23,7 @@
 
 local tecs <const> = require("tecs")
 local seqtypes <const> = require("tecs2d.sequence.internal.types")
+local seqprogram <const> = require("tecs2d.sequence.internal.program")
 local logging <const> = require("tecs.utils.logging")
 local tween <const> = require("tecs2d.tween")
 local wakeheap <const> = require("tecs2d.internal.wakeheap")
@@ -31,7 +32,6 @@ local type World = tecs.World
 
 local LOGGER <const> = logging.getLogger("tecs2d.sequence")
 
-local floor <const> = math.floor
 
 -- The runtime records live in the leaf types module; bind them so the body
 -- below reads the same as when they were declared here.
@@ -39,7 +39,6 @@ local type FaultReason = seqtypes.FaultReason
 local type PlaybackState = seqtypes.PlaybackState
 local type TweenOutcome = seqtypes.TweenOutcome
 local type ProgramImpl = seqtypes.ProgramImpl
-local type NodeImpl = seqtypes.NodeImpl
 local type Cursor = seqtypes.Cursor
 local type WorldState = seqtypes.WorldState
 
@@ -58,27 +57,6 @@ local DEFAULT_BUDGET <const> = 512
 --   4: tween playback waits
 local SNAPSHOT_VERSION <const> = 4
 
--- Instruction opcodes. Code is a flat array with stride 3: (op, a, b).
-local OP_WAIT <const> = 1     -- a = const index holding seconds, or -1
-                              -- b = literal step count when a is -1
-local OP_CALL <const> = 2     -- a = const index of action name
-                              -- b = const index of args array
-local OP_EMIT <const> = 3     -- a = const index of event name
-                              -- b = const index of args array
-local OP_JUMP <const> = 4     -- a = target pc
-                              -- b = loop register, or -1 for unconditional
-local OP_END <const> = 5
-local OP_WAIT_SIGNAL <const> = 6  -- a = const index of signal name
-local OP_FORK <const> = 7     -- a = first pc of the branch body
-                              -- b = pc the forking cursor continues at
-local OP_JOIN <const> = 8
-local OP_WAIT_QUERY <const> = 9   -- a = const index of query name
-                                  -- b = 1 to wait for a match, 0 for none
-local OP_PLAY_TWEEN <const> = 10  -- a = const index of preset name
-                                  -- b = const index of {bind, options}
-local OP_WAIT_TWEEN <const> = 11
-
-local STRIDE <const> = 3
 
 local record sequence
     ---------------------------------------------------------------------------
@@ -372,11 +350,6 @@ function sequence.bind(name: string): sequence.EntityRef
     return {bindName = name, isBinding = true}
 end
 
-local function isEntityRef(value: any): boolean
-    if type(value) ~= "table" then return false end
-    local ref = value as sequence.EntityRef
-    return ref.isBinding == true and type(ref.bindName) == "string"
-end
 
 function sequence.call(action: string, ...: sequence.Argument): sequence.Node
     if type(action) ~= "string" or action == "" then
@@ -445,7 +418,7 @@ function sequence.playTween(
     if type(preset) ~= "string" or preset == "" then
         error("sequence.playTween requires a non-empty preset name", 2)
     end
-    if not isEntityRef(target) then
+    if not seqprogram.isEntityRef(target) then
         error("sequence.playTween requires a sequence.bind(name) target", 2)
     end
     return {kind = "playTween", text = preset, args = {target, options}}
@@ -485,122 +458,6 @@ end
 -- Compiler
 -------------------------------------------------------------------------------
 
-local record Compiler
-    code: {integer}
-    consts: {any}
-    constIndex: {any: integer}
-    loopSlots: integer
-    loopCounts: {integer: integer}
-end
-
-local function intern(c: Compiler, value: any): integer
-    -- Only scalars can be deduplicated by value; tables are appended as-is.
-    if type(value) ~= "table" then
-        local existing = c.constIndex[value]
-        if existing then return existing end
-    end
-    local index = #c.consts + 1
-    c.consts[index] = value
-    if type(value) ~= "table" then
-        c.constIndex[value] = index
-    end
-    return index
-end
-
-local function emitOp(c: Compiler, op: integer, a: integer, b: integer): integer
-    local pc = floor(#c.code / STRIDE)
-    c.code[#c.code + 1] = op
-    c.code[#c.code + 1] = a
-    c.code[#c.code + 1] = b
-    return pc
-end
-
-local compileBlock: function(c: Compiler, nodes: {sequence.Node}, depth: integer)
-
--- A branch body is laid out inline, between the fork and the instruction the
--- forking cursor continues at, and terminated by its own END. One program
--- holds the whole tree, so a snapshot carries one program and a disassembly
--- shows every branch in place.
-local function compileFork(c: Compiler, nodes: {sequence.Node}, depth: integer)
-    local forkPc = emitOp(c, OP_FORK, 0, 0)
-    c.code[forkPc * STRIDE + 2] = forkPc + 1
-    compileBlock(c, nodes, depth)
-    emitOp(c, OP_END, -1, -1)
-    c.code[forkPc * STRIDE + 3] = floor(#c.code / STRIDE)
-end
-
-local function compileNode(c: Compiler, node: NodeImpl, depth: integer)
-    local kind = node.kind
-    if kind == "call" then
-        emitOp(c, OP_CALL, intern(c, node.text), intern(c, node.args))
-    elseif kind == "emit" then
-        emitOp(c, OP_EMIT, intern(c, node.text), intern(c, node.args))
-    elseif kind == "wait" then
-        emitOp(c, OP_WAIT, intern(c, node.number), -1)
-    elseif kind == "waitSignal" then
-        emitOp(c, OP_WAIT_SIGNAL, intern(c, node.text), -1)
-    elseif kind == "waitQuery" then
-        emitOp(c, OP_WAIT_QUERY, intern(c, node.text), node.count)
-    elseif kind == "waitSteps" then
-        emitOp(c, OP_WAIT, -1, node.number as integer)
-    elseif kind == "loop" then
-        local slot = depth + 1
-        if slot > c.loopSlots then c.loopSlots = slot end
-        local top = floor(#c.code / STRIDE)
-        compileBlock(c, node.nodes, slot)
-        -- A nil count loops forever; the register is unused in that case.
-        local jumpPc = emitOp(c, OP_JUMP, top, node.count and slot or -1)
-        -- Counts are keyed by the jump's own pc, so a cursor reaching that
-        -- jump for the first time knows what to seed its register with.
-        if node.count then c.loopCounts[jumpPc] = node.count end
-    elseif kind == "fork" then
-        compileFork(c, node.nodes, depth)
-    elseif kind == "playTween" then
-        emitOp(c, OP_PLAY_TWEEN, intern(c, node.text), intern(c, node.args))
-    elseif kind == "waitTween" then
-        emitOp(c, OP_WAIT_TWEEN, -1, -1)
-    elseif kind == "join" then
-        emitOp(c, OP_JOIN, -1, -1)
-    elseif kind == "parallel" then
-        local blocks = node.blocks
-        for i = 1, #blocks do
-            compileFork(c, blocks[i], depth)
-        end
-        emitOp(c, OP_JOIN, -1, -1)
-    else
-        error("sequence: unknown node kind '" .. tostring(kind) .. "'")
-    end
-end
-
-compileBlock = function(c: Compiler, nodes: {sequence.Node}, depth: integer)
-    for i = 1, #nodes do
-        local node = nodes[i] as NodeImpl
-        if type(node) ~= "table" or node.kind == nil then
-            error("sequence: entry " .. tostring(i) .. " is not a sequence node")
-        end
-        compileNode(c, node, depth)
-    end
-end
-
--- Mark the argument lists that need resolving. Derived rather than stored:
--- a restored program computes the same thing from its own const pool.
-local function indexBindingArgs(prog: ProgramImpl)
-    local flags: {integer: boolean} = {}
-    local consts = prog.consts
-    for i = 1, #consts do
-        local value = consts[i]
-        if type(value) == "table" then
-            local list = value as {any}
-            for j = 1, #list do
-                if isEntityRef(list[j]) then
-                    flags[i] = true
-                    break
-                end
-            end
-        end
-    end
-    prog.bindingArgs = flags
-end
 
 function sequence.define(name: string, nodes: {sequence.Node}): sequence.Program
     if type(name) ~= "string" or name == "" then
@@ -610,27 +467,9 @@ function sequence.define(name: string, nodes: {sequence.Node}): sequence.Program
         error("sequence.define requires an array of nodes", 2)
     end
 
-    local c: Compiler = {
-        code = {},
-        consts = {},
-        constIndex = {},
-        loopSlots = 0,
-        loopCounts = {},
-    }
-    compileBlock(c, nodes, 0)
-    emitOp(c, OP_END, -1, -1)
-
     local previous = programsByName[name]
-    local prog: ProgramImpl = {
-        name = name,
-        version = previous and previous.version + 1 or 1,
-        code = c.code,
-        consts = c.consts,
-        loopSlots = c.loopSlots,
-        loopCounts = c.loopCounts,
-        bindingArgs = {},
-    }
-    indexBindingArgs(prog)
+    local prog = seqprogram.compile(
+        name, previous and previous.version + 1 or 1, nodes)
 
     programsByName[name] = prog
     local versions = programVersions[name]
@@ -1017,7 +856,7 @@ local function resolveArgs(
     local count = #raw
     for i = 1, count do
         local value = raw[i]
-        if isEntityRef(value) then
+        if seqprogram.isEntityRef(value) then
             local name = (value as sequence.EntityRef).bindName
             local id = cursor.bindings and cursor.bindings[name]
             out[i] = (id and world:isAlive(id)) and id or nil
@@ -1072,22 +911,22 @@ local function run(
             return budget
         end
 
-        local base = cursor.pc * STRIDE
+        local base = cursor.pc * seqprogram.STRIDE
         local op = code[base + 1]
         local a = code[base + 2]
         local b = code[base + 3]
 
-        if op == OP_END then
+        if op == seqprogram.END then
             retire(state, cursor, "completed")
             return budget
 
-        elseif op == OP_WAIT then
+        elseif op == seqprogram.WAIT then
             local steps = a >= 0 and secondsToSteps(world, consts[a] as number) or b
             cursor.pc = cursor.pc + 1
             schedule(state, cursor, state.step + (steps > 0 and steps or 1))
             return budget
 
-        elseif op == OP_WAIT_SIGNAL then
+        elseif op == seqprogram.WAIT_SIGNAL then
             local channel = consts[a] as string
             cursor.pc = cursor.pc + 1
             cursor.waitChannel = channel
@@ -1095,7 +934,7 @@ local function run(
             park(state.channels, channel, cursor.slot)
             return budget
 
-        elseif op == OP_WAIT_QUERY then
+        elseif op == seqprogram.WAIT_QUERY then
             local name = consts[a] as string
             if not state.queries[name] then
                 faultCursor(state, cursor, "unregisteredQuery",
@@ -1113,7 +952,7 @@ local function run(
             state.dirtyQueries[name] = true
             return budget
 
-        elseif op == OP_PLAY_TWEEN then
+        elseif op == seqprogram.PLAY_TWEEN then
             local preset = consts[a] as string
             local spec = consts[b] as {any}
             local ref = spec[1] as sequence.EntityRef
@@ -1139,7 +978,7 @@ local function run(
             end
             cursor.pc = cursor.pc + 1
 
-        elseif op == OP_WAIT_TWEEN then
+        elseif op == seqprogram.WAIT_TWEEN then
             cursor.pc = cursor.pc + 1
             if cursor.tweenPlayback then
                 cursor.waitingTween = true
@@ -1150,7 +989,7 @@ local function run(
             -- Nothing to wait for: either no playTween ran or its target
             -- was already gone, and the outcome says which.
 
-        elseif op == OP_CALL then
+        elseif op == seqprogram.CALL then
             local name = consts[a] as string
             local action = state.actions[name]
             if not action then
@@ -1177,7 +1016,7 @@ local function run(
             if not cursor.alive then return budget end
             cursor.pc = cursor.pc + 1
 
-        elseif op == OP_EMIT then
+        elseif op == seqprogram.EMIT then
             -- An emitted list is copied rather than borrowed: it leaves with
             -- the event, and an observer is entitled to keep it.
             local resolved = resolveArgs(world, state, cursor, b)
@@ -1188,7 +1027,7 @@ local function run(
                 packHandle(cursor.slot, cursor.generation))
             cursor.pc = cursor.pc + 1
 
-        elseif op == OP_JUMP then
+        elseif op == seqprogram.JUMP then
             if b < 0 then
                 cursor.pc = a
             else
@@ -1211,7 +1050,7 @@ local function run(
                 end
             end
 
-        elseif op == OP_FORK then
+        elseif op == seqprogram.FORK then
             -- The branch is queued for this same step rather than entered
             -- here: it runs once this cursor yields, which keeps a tree of
             -- branches breadth-first, off the Lua stack, and ordered by the
@@ -1237,7 +1076,7 @@ local function run(
             schedule(state, child, state.step)
             cursor.pc = b
 
-        elseif op == OP_JOIN then
+        elseif op == seqprogram.JOIN then
             cursor.pc = cursor.pc + 1
             local children = cursor.children
             if children and next(children) ~= nil then
@@ -1459,78 +1298,13 @@ end
 -- Disassembler
 -------------------------------------------------------------------------------
 
-local function describeArgs(args: {any}): string
-    if not args or #args == 0 then return "" end
-    local parts: {string} = {}
-    for i = 1, #args do
-        local value = args[i]
-        if isEntityRef(value) then
-            parts[#parts + 1] = "bind(" .. (value as sequence.EntityRef).bindName .. ")"
-        elseif type(value) == "string" then
-            parts[#parts + 1] = string.format("%q", value as string)
-        else
-            parts[#parts + 1] = tostring(value)
-        end
-    end
-    return ", " .. table.concat(parts, ", ")
-end
 
 function sequence.disassemble(program: sequence.Program, pc?: integer): string
     local prog = program as ProgramImpl
     if type(prog) ~= "table" or prog.code == nil then
         error("sequence.disassemble requires a program from sequence.define", 2)
     end
-    local out: {string} = {
-        string.format("%s v%d  (%d instructions)",
-            prog.name, prog.version, floor(#prog.code / STRIDE)),
-    }
-    local counts = prog.loopCounts
-    local marked = pc
-    for at = 0, floor(#prog.code / STRIDE) - 1 do
-        local base = at * STRIDE
-        local op = prog.code[base + 1]
-        local a = prog.code[base + 2]
-        local b = prog.code[base + 3]
-        local text: string
-        if op == OP_WAIT then
-            text = a >= 0
-                and string.format("WAIT      %ss", tostring(prog.consts[a]))
-                or string.format("WAIT      %d step(s)", b)
-        elseif op == OP_WAIT_SIGNAL then
-            text = string.format("WAITSIG   %q", prog.consts[a] as string)
-        elseif op == OP_WAIT_QUERY then
-            text = string.format("WAITQUERY %q %s",
-                prog.consts[a] as string, b == 1 and "any" or "empty")
-        elseif op == OP_CALL then
-            text = string.format("CALL      %q%s",
-                prog.consts[a] as string, describeArgs(prog.consts[b] as {any}))
-        elseif op == OP_EMIT then
-            text = string.format("EMIT      %q%s",
-                prog.consts[a] as string, describeArgs(prog.consts[b] as {any}))
-        elseif op == OP_JUMP then
-            local count = counts and counts[at]
-            text = string.format("JUMP      -> %d  (%s)", a,
-                b < 0 and "forever" or ("x" .. tostring(count or 1)))
-        elseif op == OP_FORK then
-            text = string.format("FORK      branch %d..%d, continue -> %d", a, b - 1, b)
-        elseif op == OP_PLAY_TWEEN then
-            local spec = prog.consts[b] as {any}
-            local ref = spec[1] as sequence.EntityRef
-            text = string.format("PLAYTWEEN %q, bind(%s)",
-                prog.consts[a] as string, ref.bindName)
-        elseif op == OP_WAIT_TWEEN then
-            text = "WAITTWEEN"
-        elseif op == OP_JOIN then
-            text = "JOIN"
-        elseif op == OP_END then
-            text = "END"
-        else
-            text = "?? " .. tostring(op)
-        end
-        out[#out + 1] = string.format("%s %4d  %s",
-            at == marked and "->" or "  ", at, text)
-    end
-    return table.concat(out, "\n")
+    return seqprogram.disassemble(prog, pc)
 end
 
 
@@ -1572,7 +1346,7 @@ local function restoreProgram(data: {string: any}): ProgramImpl
         loopCounts = (data.loopCounts as {integer: integer}) or {},
         bindingArgs = {},
     }
-    indexBindingArgs(prog)
+    seqprogram.indexBindingArgs(prog)
     if not versions then
         versions = {}
         programVersions[name] = versions
