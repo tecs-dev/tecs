@@ -42,6 +42,27 @@ local record program
 
     --- Render a program as readable instructions, marking a pc.
     disassemble: function(prog: ProgramImpl, pc?: integer): string
+
+    --- One step a playback will reach without branching.
+    record Step
+        --- Ticks of the program's clock from the reference point until it
+        --- runs.
+        ticks: integer
+        --- `"call"` or `"emit"`.
+        kind: string
+        --- Action name for a call, event name for an emit.
+        name: string
+        --- Constants the step carries, unresolved.
+        args: {any}
+    end
+
+    --- Walk the straight-line run ahead of `pc`, accumulating waits.
+    ---
+    --- Stops at the first instruction whose successor cannot be known
+    --- without running it -- a jump, a fork, a join, or a wait on something
+    --- other than time -- so what it returns is what the playback will
+    --- certainly do, not everything it might.
+    ahead: function(prog: ProgramImpl, pc: integer, offset: integer, withinTicks: integer): {Step}
 end
 
 -- Instruction opcodes. Code is a flat array with stride 3: (op, a, b).
@@ -288,6 +309,48 @@ function program.disassemble(prog: ProgramImpl, pc?: integer): string
             at == marked and "->" or "  ", at, text)
     end
     return table.concat(out, "\n")
+end
+
+--- Walk the straight-line run ahead of `pc`.
+function program.ahead(
+    prog: ProgramImpl,
+    pc: integer,
+    offset: integer,
+    withinTicks: integer
+): {program.Step}
+    local out: {program.Step} = {}
+    local code <const> = prog.code
+    local consts <const> = prog.consts
+    local count <const> = floor(#code / STRIDE)
+    local ticks = offset
+
+    local at = pc
+    while at >= 0 and at < count do
+        local base <const> = at * STRIDE
+        local op <const> = code[base + 1]
+        local a <const> = code[base + 2]
+        local b <const> = code[base + 3]
+
+        if op == OP_WAIT then
+            -- Seconds convert against a clock the program does not carry, so
+            -- only literal tick counts are predictable.
+            if a >= 0 then return out end
+            ticks = ticks + (b > 0 and b or 1)
+            if withinTicks and ticks > withinTicks then return out end
+        elseif op == OP_CALL or op == OP_EMIT then
+            out[#out + 1] = {
+                ticks = ticks,
+                kind = op == OP_CALL and "call" or "emit",
+                name = consts[a] as string,
+                args = (consts[b] as {any}) or {},
+            }
+        else
+            -- Anything else needs the world to say where it goes next.
+            return out
+        end
+        at = at + 1
+    end
+    return out
 end
 
 program.WAIT = OP_WAIT

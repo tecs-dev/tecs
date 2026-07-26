@@ -1458,6 +1458,91 @@ describe("tecs2d.sequence", function()
         end)
     end)
 
+    describe("upcoming", function()
+        before_each(function()
+            sequence.registerAction(world, "spec.noop", function() end)
+        end)
+
+        it("reports the straight-line run ahead with its timings", function()
+            local prog = sequence.define(uniqueName(), {
+                sequence.waitSteps(2),
+                sequence.call("spec.noop", "first"),
+                sequence.waitSteps(3),
+                sequence.emit("spec.done"),
+            })
+            local handle = sequence.play(world, prog)
+
+            local ahead = sequence.upcoming(world, handle)
+            luassert.equals(2, #ahead)
+            -- One tick to reach the first instruction, then the wait it makes.
+            luassert.equals(3, ahead[1].ticks)
+            luassert.equals("call", ahead[1].kind)
+            luassert.equals("spec.noop", ahead[1].name)
+            luassert.equals("first", ahead[1].args[1])
+            luassert.equals(6, ahead[2].ticks, "waits accumulate")
+            luassert.equals("emit", ahead[2].kind)
+        end)
+
+        it("counts down as the playback advances", function()
+            local prog = sequence.define(uniqueName(), {
+                sequence.waitSteps(4),
+                sequence.call("spec.noop"),
+            })
+            local handle = sequence.play(world, prog)
+
+            stepWorld(world, 2)
+            luassert.equals(3, sequence.upcoming(world, handle)[1].ticks)
+            stepWorld(world, 2)
+            luassert.equals(1, sequence.upcoming(world, handle)[1].ticks)
+        end)
+
+        it("reports only what is due within the window", function()
+            local prog = sequence.define(uniqueName(), {
+                sequence.call("spec.noop", "now"),
+                sequence.waitSteps(9),
+                sequence.call("spec.noop", "later"),
+            })
+            local handle = sequence.play(world, prog)
+
+            luassert.equals(1, #sequence.upcoming(world, handle, 3))
+            luassert.equals(2, #sequence.upcoming(world, handle, 20))
+        end)
+
+        it("stops where the program branches", function()
+            local prog = sequence.define(uniqueName(), {
+                sequence.call("spec.noop", "certain"),
+                sequence.loop(2, {sequence.waitSteps(1), sequence.call("spec.noop", "maybe")}),
+            })
+            local handle = sequence.play(world, prog)
+
+            local ahead = sequence.upcoming(world, handle)
+            luassert.equals(2, #ahead, "the loop body is reached, its repeat is not predicted")
+            luassert.equals("certain", ahead[1].args[1])
+            luassert.equals("maybe", ahead[2].args[1])
+        end)
+
+        it("predicts nothing for a playback parked on something other than time", function()
+            local prog = sequence.define(uniqueName(), {
+                sequence.waitSignal("spec.gate"),
+                sequence.call("spec.noop"),
+            })
+            local handle = sequence.play(world, prog)
+            stepWorld(world, 1)
+
+            luassert.same({}, sequence.upcoming(world, handle),
+                "a signal has no predictable arrival")
+        end)
+
+        it("reports nothing for a finished or unknown playback", function()
+            local prog = sequence.define(uniqueName(), {sequence.call("spec.noop")})
+            local handle = sequence.play(world, prog)
+            stepWorld(world, 1)
+
+            luassert.same({}, sequence.upcoming(world, handle))
+            luassert.same({}, sequence.upcoming(world, 123456789))
+        end)
+    end)
+
     describe("disassembly", function()
         it("renders every instruction with its index", function()
             local name = uniqueName()

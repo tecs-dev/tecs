@@ -281,8 +281,21 @@ local record sequence
     --- Per-step instruction budget for playbacks that do not set their own.
     setInstructionBudget: function(world: World, instructions: integer)
 
-    --- The world's current fixed step, as counted by the sequencer.
-    currentStep: function(world: World): integer
+    --- A clock's current tick, as counted by the sequencer. Defaults to the
+    --- fixed clock.
+    currentStep: function(world: World, clock?: ClockId): integer
+
+    --- What a playback will certainly do next, and when.
+    ---
+    --- Walks the straight-line run ahead of where it sits, accumulating
+    --- waits, and stops at the first instruction whose successor cannot be
+    --- known without running it. Ticks are counted in the playback's own
+    --- clock, from now.
+    --- @param withinTicks Report only what is due within this many ticks.
+    upcoming: function(world: World, handle: Handle, withinTicks?: integer): {Step}
+
+    --- One step a playback will reach without branching.
+    type Step = seqprogram.Step
 
     --- Render a program as readable instructions.
     --- @param pc Mark this instruction, as a playback's `status` reports it.
@@ -690,8 +703,24 @@ function sequence.setInstructionBudget(world: World, instructions: integer)
     seqcursors.stateFor(world).budget = instructions
 end
 
-function sequence.currentStep(world: World): integer
-    return seqcursors.stateFor(world).clocks.fixed.step
+function sequence.currentStep(world: World, clock?: sequence.ClockId): integer
+    return seqcursors.stateFor(world).clocks[clock or "fixed"].step
+end
+
+function sequence.upcoming(
+    world: World,
+    handle: sequence.Handle,
+    withinTicks?: integer
+): {sequence.Step}
+    local state = seqcursors.stateFor(world)
+    local cursor = seqcursors.resolve(state, handle)
+    if not cursor or not cursor.alive then return {} end
+    -- A scheduled cursor is already some ticks out; one parked on a signal,
+    -- a query, a join, or a tween has no predictable start at all.
+    if not cursor.wakeAt then return {} end
+    local offset <const> = cursor.wakeAt - seqcursors.clockOf(state, cursor).step
+    return seqprogram.ahead(cursor.program, cursor.pc,
+        offset > 0 and offset or 0, withinTicks)
 end
 
 -------------------------------------------------------------------------------
