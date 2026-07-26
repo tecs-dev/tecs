@@ -20,6 +20,11 @@ struct MaterialInput {
 
 struct MaterialOutput {
     vec4 albedo;
+    // Zero leaves the fragment out of the lighting pass entirely, so it draws
+    // at its own colour. A property of the material rather than of the layer it
+    // sits on, because whether a thing emits or is a HUD element is what it is,
+    // not where it is.
+    float lit;
     // At or below zero the fragment is discarded. Coverage rather than alpha
     // because the G-buffer pass writes with replace rather than blend, so a
     // partly covered fragment would overwrite what is behind it instead of

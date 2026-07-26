@@ -22,6 +22,7 @@ local Renderer = require("tecs2d.Renderer")
 local assets = require("tecs2d.assets")
 local components = require("tecs2d.components")
 local materials = require("tecs2d.gpu.materials")
+local Camera = require("tecs2d.gfx.Camera")
 
 local C = sdl.C
 local FORMAT = 4  -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
@@ -706,6 +707,137 @@ describe("ecs.Renderer", function()
         assert.is_false(ok)
         assert.is_truthy(tostring(reason):find("circle", 1, true),
             "the error should list what is available")
+    end)
+
+
+    it("lets a material opt out of lighting", function()
+        -- Ambient is dim, so a lit fragment comes back darkened and an unlit
+        -- one does not. With full ambient the two are indistinguishable, which
+        -- is why the scene is built dark here rather than reusing the default.
+        materials.reset()
+        materials.define("spec.lit", [[
+            MaterialOutput material(MaterialInput frag) {
+                MaterialOutput result;
+                result.albedo = vec4(1.0, 1.0, 1.0, 1.0);
+                result.coverage = 1.0;
+                result.lit = 1.0;
+                return result;
+            }
+        ]])
+        materials.define("spec.unlit", [[
+            MaterialOutput material(MaterialInput frag) {
+                MaterialOutput result;
+                result.albedo = vec4(1.0, 1.0, 1.0, 1.0);
+                result.coverage = 1.0;
+                result.lit = 0.0;
+                return result;
+            }
+        ]])
+
+        local function draw(material)
+            local world, renderer = newScene({ 0.25, 0.25, 0.25 })
+            world:spawn(
+                Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+                Tint(1.0, 1.0, 1.0, 1.0),
+                components.Material(materials.id(material), 0),
+                Renderable()
+            )
+            local pixel = screen:getPixel(frameOnce(world, renderer),
+                SIZE / 2, SIZE / 2)
+            renderer:destroy()
+            return pixel
+        end
+
+        assert.are.equal(255, draw("spec.unlit").r,
+            "an unlit material keeps its own colour")
+        assert.is_true(draw("spec.lit").r < 128,
+            "a lit one is darkened by the dim ambient")
+        materials.reset()
+    end)
+
+
+    -- The camera is the one place the world-to-clip transform lives, including
+    -- the Y flip. These pin that it moves what is drawn and what survives the
+    -- cull together, since a camera that panned the image but not the culling
+    -- would blank the edges of the screen.
+    it("defaults to leaving world coordinates as screen coordinates", function()
+        local world, renderer = newScene()
+        world:spawn(
+            Transform2D(SIZE * 0.25, SIZE * 0.25, 0, SIZE * 0.3, SIZE * 0.3),
+            Tint(1.0, 0.0, 0.0, 1.0),
+            Renderable()
+        )
+        local pixels = frameOnce(world, renderer)
+        assert.are.equal(255, screen:getPixel(pixels, SIZE * 0.25, SIZE * 0.25).r)
+        renderer:destroy()
+    end)
+
+    it("pans what is drawn", function()
+        local world, renderer = newScene()
+        world:spawn(
+            Transform2D(SIZE * 0.25, SIZE / 2, 0, SIZE * 0.3, SIZE * 0.3),
+            Tint(1.0, 0.0, 0.0, 1.0),
+            Renderable()
+        )
+        frameOnce(world, renderer)
+
+        -- Moving the camera left moves the subject right by the same amount.
+        renderer.camera.x = renderer.camera.x - SIZE * 0.5
+        local pixels = frameOnce(world, renderer)
+        assert.are.equal(255, screen:getPixel(pixels, SIZE * 0.75, SIZE / 2).r,
+            "the subject should have moved with the camera")
+        assert.are.equal(0, screen:getPixel(pixels, SIZE * 0.25, SIZE / 2).r,
+            "and left where it was")
+        renderer:destroy()
+    end)
+
+    it("culls against what the camera can see, not the window", function()
+        -- A subject far outside the default view, brought into frame by moving
+        -- the camera. If the cull still worked in screen space this would be
+        -- rejected before it could draw.
+        local world, renderer = newScene()
+        world:spawn(
+            Transform2D(SIZE * 10, SIZE / 2, 0, SIZE * 2, SIZE * 2),
+            Tint(0.0, 1.0, 0.0, 1.0),
+            Renderable()
+        )
+        assert.are.equal(0, screen:getPixel(frameOnce(world, renderer),
+            SIZE / 2, SIZE / 2).g, "not visible before the camera moves")
+
+        renderer.camera.x = SIZE * 10
+        assert.are.equal(255, screen:getPixel(frameOnce(world, renderer),
+            SIZE / 2, SIZE / 2).g, "visible once the camera looks at it")
+        renderer:destroy()
+    end)
+
+    it("zooms about the centre of the view", function()
+        local world, renderer = newScene()
+        -- A quarter-size square at the centre, which zooming doubles.
+        world:spawn(
+            Transform2D(SIZE / 2, SIZE / 2, 0, SIZE * 0.25, SIZE * 0.25),
+            Tint(1.0, 0.0, 0.0, 1.0),
+            Renderable()
+        )
+        local before = screen:getPixel(frameOnce(world, renderer),
+            SIZE / 2 + SIZE * 0.2, SIZE / 2)
+        assert.are.equal(0, before.r, "outside the square at rest")
+
+        renderer.camera.zoom = 2.0
+        local after = screen:getPixel(frameOnce(world, renderer),
+            SIZE / 2 + SIZE * 0.2, SIZE / 2)
+        assert.are.equal(255, after.r, "inside it once magnified")
+        renderer:destroy()
+    end)
+
+    it("agrees with itself converting between world and screen", function()
+        -- toWorld and toScreen are written out rather than inverted, so the
+        -- only thing keeping them consistent is that they round-trip.
+        local camera = Camera.create({ x = 120, y = 80, zoom = 1.5,
+            rotation = 0.7 })
+        local screenX, screenY = camera:toScreen(200, 140, SIZE, SIZE)
+        local worldX, worldY = camera:toWorld(screenX, screenY, SIZE, SIZE)
+        assert.is_true(math.abs(worldX - 200) < 0.01)
+        assert.is_true(math.abs(worldY - 140) < 0.01)
     end)
 
 end)

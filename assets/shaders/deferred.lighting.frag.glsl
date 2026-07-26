@@ -22,10 +22,20 @@ layout(set = 3, binding = 0) uniform Scene {
 
 void main() {
     vec4 albedo = texture(gAlbedo, vUV);
+    vec4 encoded = texture(gNormal, vUV);
+
+    // A material that asked not to be lit passes through at its own colour.
+    // The G-buffer clears this to zero, so anything nothing drew over also
+    // takes this path and stays the clear colour rather than picking up
+    // ambient.
+    if (encoded.a < 0.5) {
+        outColor = albedo;
+        return;
+    }
 
     // Normals are stored biased into unsigned range, as the G-buffer format
     // has no signed representation.
-    vec3 normal = normalize(texture(gNormal, vUV).xyz * 2.0 - 1.0);
+    vec3 normal = normalize(encoded.xyz * 2.0 - 1.0);
 
     vec2 fragment = vUV * scene.viewport.xy;
     vec3 accumulated = scene.ambient.rgb;

@@ -9,7 +9,7 @@ struct Instance {
 
 layout(set = 0, binding = 0) readonly buffer Instances { Instance item[]; } instances;
 layout(set = 0, binding = 1) readonly buffer Visible { uint index[]; } visible;
-layout(set = 1, binding = 0) uniform View { vec4 viewport; } view;
+layout(set = 1, binding = 0) uniform View { mat4 viewProjection; } view;
 
 layout(location = 0) out vec4 vColor;
 layout(location = 1) out vec3 vUV;
@@ -50,11 +50,9 @@ void main() {
     vec2 corner = CORNERS[gl_VertexIndex];
     vec2 world = self.origin.xy + basis * corner;
 
-    // World units are pixels with the origin at the top left, which is also
-    // what the lighting pass works in, so light positions need no conversion.
-    vec2 ndc = vec2(world.x / view.viewport.x * 2.0 - 1.0,
-                    1.0 - world.y / view.viewport.y * 2.0);
-    gl_Position = vec4(ndc, 0.0, 1.0);
+    // The camera owns the world-to-clip transform, including the Y flip, so
+    // this does no coordinate arithmetic of its own.
+    gl_Position = view.viewProjection * vec4(world, 0.0, 1.0);
     vColor = self.color;
 
     // Corners run -0.5..0.5, and V is flipped because texture rows run down

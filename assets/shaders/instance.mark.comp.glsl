@@ -13,7 +13,12 @@ layout(set = 0, binding = 0) readonly buffer Bounds {
 
 layout(set = 1, binding = 0) writeonly buffer Slots { uint slot[]; } slots;
 layout(set = 1, binding = 1) writeonly buffer Counts { uint count[]; } counts;
-layout(set = 2, binding = 0) uniform Cull { vec4 params; } cull;
+layout(set = 2, binding = 0) uniform Cull {
+    // World-space rectangle the camera can see: min xy, max xy.
+    vec4 view;
+    // Instance count, workgroup count.
+    vec4 params;
+} cull;
 
 #include "cull.glsl"
 
@@ -24,10 +29,12 @@ void main() {
     uint t = gl_LocalInvocationID.x;
 
     uint keep = 0u;
-    if (i < uint(cull.params.z)) {
+    if (i < uint(cull.params.x)) {
         vec4 box = bounds.item[i];
-        bool outside = box.x + box.z < 0.0 || box.x - box.z > cull.params.x ||
-                       box.y + box.w < 0.0 || box.y - box.w > cull.params.y;
+        // Tested in world space now that a camera exists, so panning and
+        // zooming change what survives rather than only what is drawn.
+        bool outside = box.x + box.z < cull.view.x || box.x - box.z > cull.view.z ||
+                       box.y + box.w < cull.view.y || box.y - box.w > cull.view.w;
         keep = outside ? 0u : 1u;
     }
 
@@ -43,7 +50,7 @@ void main() {
         barrier();
     }
 
-    if (i < uint(cull.params.z)) {
+    if (i < uint(cull.params.x)) {
         slots.slot[i] = keep == 1u ? scratch[t] - 1u : CULLED;
     }
     if (t == 255u) {

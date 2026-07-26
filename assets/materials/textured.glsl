@@ -7,5 +7,6 @@ MaterialOutput material(MaterialInput frag) {
     MaterialOutput result;
     result.albedo = texture(images, frag.uv) * frag.color;
     result.coverage = 1.0;
+    result.lit = 1.0;
     return result;
 }

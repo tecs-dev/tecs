@@ -31,5 +31,8 @@ void main() {
     if (shaded.coverage <= 0.0) { discard; }
 
     albedo = shaded.albedo;
-    normal = vec4(0.5, 0.5, 1.0, 1.0);
+    // The normal's alpha carries whether the fragment wants lighting. It was
+    // written as one and read by nothing, so this costs no attachment and no
+    // bandwidth.
+    normal = vec4(0.5, 0.5, 1.0, shaded.lit);
 }

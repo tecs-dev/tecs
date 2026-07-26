@@ -41,6 +41,7 @@ local ComputePipeline <const> = require("tecs2d.gpu.ComputePipeline")
 local ComputePass <const> = require("tecs2d.gpu.ComputePass")
 local TextureArray <const> = require("tecs2d.gpu.TextureArray")
 local Texture <const> = require("tecs2d.gpu.Texture")
+local Camera <const> = require("tecs2d.gfx.Camera")
 local assets <const> = require("tecs2d.assets")
 local components <const> = require("tecs2d.components")
 
@@ -110,9 +111,13 @@ local record Renderer
     _visible: Buffer
     _drawArgs: Buffer
     _indices: Buffer
+    --- What the view is looking at. Centred on the viewport the first time a
+    --- frame is drawn, so a scene that never mentions a camera sees world
+    --- coordinates as screen coordinates.
+    camera: Camera
+    _centred: boolean
     _cullUniform: loader.CArray
     _device: loader.CPtr
-    _view: loader.CArray
     _lights: {Deferred.Light}
     _renderables: tecs.Query
     _lightSources: tecs.Query
@@ -336,7 +341,6 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
     self.count = 0
     self.dropped = 0
     self.rewritten = 0
-    self._view = loader.newArray("float[4]")
     self._lights = {}
     self._runs = {}
     self._seen = {}
@@ -401,7 +405,10 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
     quad[0], quad[1], quad[2] = 0, 1, 2
     quad[3], quad[4], quad[5] = 1, 3, 2
     self._indices:upload(quad, QUAD_INDICES * 2)
-    self._cullUniform = loader.newArray("float[4]")
+    self.camera = Camera.create()
+    self._centred = false
+    -- Two vec4s: the world rectangle the camera sees, then the counts.
+    self._cullUniform = loader.newArray("float[8]")
 
     self._mark = ComputePipeline.load(device, "instance.mark.comp", {})
     self._scan = ComputePipeline.load(device, "instance.scan.comp", {})
@@ -413,9 +420,8 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
             if self.count == 0 then return end
             context.pass:bindPipeline(self.pipeline.handle)
 
-            self._view[0] = context.width
-            self._view[1] = context.height
-            context.pass:pushVertexUniform(0, self._view, 16)
+            context.pass:pushVertexUniform(0,
+                self.camera:matrix(context.width, context.height), 64)
             context.pass:bindVertexStorageBuffers(0,
                 { self.instances.handle, self._visible.handle })
             context.pass:bindTextures(0, { self.images.handle }, self.sampler.handle)
@@ -495,11 +501,20 @@ function Renderer:render(frame: Frame)
     self._bounds:flush(frame.commandBuffer)
 
     if self.count > 0 then
+        if not self._centred then
+            self._centred = true
+            self.camera.x = frame.width * 0.5
+            self.camera.y = frame.height * 0.5
+        end
+
         local groups = math.ceil(self.count / CULL_GROUP)
-        self._cullUniform[0] = frame.width
-        self._cullUniform[1] = frame.height
-        self._cullUniform[2] = self.count
-        self._cullUniform[3] = groups
+        local view = self.camera:viewBounds(frame.width, frame.height)
+        self._cullUniform[0] = view[1]
+        self._cullUniform[1] = view[2]
+        self._cullUniform[2] = view[3]
+        self._cullUniform[3] = view[4]
+        self._cullUniform[4] = self.count
+        self._cullUniform[5] = groups
 
         -- Mark, scan, compact. Each pass reads what the one before it wrote,
         -- and SDL orders them because each declares what it writes.
@@ -508,7 +523,7 @@ function Renderer:render(frame: Frame)
         mark:bindPipeline(self._mark.handle)
         mark:bindStorageBuffers(0, { self._bounds.handle })
         C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0,
-            self._cullUniform, 16)
+            self._cullUniform, 32)
         mark:dispatch(groups)
         mark:finish()
 
@@ -516,7 +531,7 @@ function Renderer:render(frame: Frame)
             { self._blocks.handle, self._drawArgs.handle })
         scan:bindPipeline(self._scan.handle)
         C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0,
-            self._cullUniform, 16)
+            self._cullUniform, 32)
         scan:dispatch(1)
         scan:finish()
 
@@ -526,7 +541,7 @@ function Renderer:render(frame: Frame)
         compact:bindStorageBuffers(0,
             { self._slots.handle, self._blocks.handle })
         C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0,
-            self._cullUniform, 16)
+            self._cullUniform, 32)
         compact:dispatch(groups)
         compact:finish()
     end

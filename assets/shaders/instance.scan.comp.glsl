@@ -9,13 +9,13 @@ layout(local_size_x = 256) in;
 
 layout(set = 1, binding = 0) buffer Counts { uint count[]; } counts;
 layout(set = 1, binding = 1) buffer DrawArgs { uint value[]; } args;
-layout(set = 2, binding = 0) uniform Cull { vec4 params; } cull;
+layout(set = 2, binding = 0) uniform Cull { vec4 view; vec4 params; } cull;
 
 shared uint partial[256];
 
 void main() {
     uint t = gl_LocalInvocationID.x;
-    uint blocks = uint(cull.params.w);
+    uint blocks = uint(cull.params.y);
     uint span = (blocks + 255u) / 256u;
     uint begin = t * span;
     uint end = min(begin + span, blocks);

@@ -15,6 +15,8 @@ local Device <const> = require("tecs2d.gpu.Device")
 local Frame <const> = require("tecs2d.gpu.Frame")
 local RenderPass <const> = require("tecs2d.gpu.RenderPass")
 local Renderer <const> = require("tecs2d.Renderer")
+local Camera <const> = require("tecs2d.gfx.Camera")
+local materials <const> = require("tecs2d.gpu.materials")
 local Application <const> = require("tecs2d.Application")
 local components <const> = require("tecs2d.components")
 local tween <const> = require("tecs2d.tween")
@@ -24,6 +26,8 @@ local log <const> = require("tecs2d.log")
 local record tecs2d
     Application: Application
     Renderer: Renderer
+    Camera: Camera
+    materials: materials
     Window: Window
     Device: Device
     Frame: Frame
@@ -41,6 +45,8 @@ end
 
 tecs2d.Application = Application
 tecs2d.Renderer = Renderer
+tecs2d.Camera = Camera
+tecs2d.materials = materials
 tecs2d.Window = Window
 tecs2d.Device = Device
 tecs2d.Frame = Frame
