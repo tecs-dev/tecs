@@ -113,6 +113,14 @@ set_target_properties(tecs2d_spirvcross PROPERTIES LINKER_LANGUAGE CXX)
 # The application host. SDL owns the loop, so this implements SDL's callback
 # entry points and reaches Lua through the Lua C API.
 add_executable(tecs2d native/host.c)
+
+# Where content sits relative to the executable, in the tree this build
+# installs. The host resolves its entry chunk and the engine resolves assets
+# against it, so the layout is described once here instead of being sniffed for
+# at run time.
+set(TECS2D_CONTENT "../share/tecs2d/lua/" CACHE STRING
+    "Content directory relative to the installed executable")
+target_compile_definitions(tecs2d PRIVATE TECS2D_CONTENT="${TECS2D_CONTENT}")
 set_target_properties(tecs2d PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 target_link_libraries(tecs2d PRIVATE PkgConfig::SDL3 PkgConfig::LUAJIT)
@@ -286,4 +294,8 @@ install(TARGETS tecs2d RUNTIME DESTINATION bin)
 install(TARGETS tecs2d_worker tecs2d_spirvcross LIBRARY DESTINATION lib)
 if(TECS2D_BUILD_LUA)
     install(DIRECTORY "${TECS2D_LUA_OUT}/" DESTINATION share/tecs2d/lua)
+    # The ECS is part of what ships: a game is written against it directly, so
+    # an install without it is an install that cannot run.
+    install(DIRECTORY "${TECS2D_TECS_DIR}/build/tecs"
+        DESTINATION share/tecs2d/lua)
 endif()

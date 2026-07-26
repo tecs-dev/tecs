@@ -63,10 +63,19 @@ describe("platform.capabilities", function()
 
     it("reports runtime shaders as a property of the build", function()
         -- A release links no compiler and consumes packaged artifacts, so this
-        -- cannot be derived from the platform.
+        -- cannot be derived from the platform. The two are independent: a
+        -- development build has a compiler and may also have a pack.
         local caps = capabilities.get()
         assert.is_boolean(caps.runtimeShaders)
-        assert.is_true(#caps.shaderFormats >= 1)
+        assert.is_boolean(caps.packagedShaders)
+        assert.are.equal(1, #caps.shaderFormats,
+            "one format, the one the shader pipeline supplies")
+    end)
+
+    it("reports touch by asking the platform", function()
+        -- Not inferred from the OS: a desktop with a touchscreen has one and a
+        -- simulator may not, so neither answer follows from the platform name.
+        assert.is_boolean(capabilities.get().touch)
     end)
 
     it("reports dynamic loading as the inverse of a linked registry", function()

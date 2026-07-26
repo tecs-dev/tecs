@@ -7,15 +7,21 @@
 --- Transform2D, the lights are entities too, and systems move them. Nothing
 --- here touches a buffer, a pass, or a command buffer.
 
--- Our build first, so it wins over the ECS repo's own engine tree.
--- The build directory is the build system's to choose, so it is passed in.
--- Our tree comes first, so it wins over the ECS repo's own engine tree.
-local root = os.getenv("TECS2D_LUA") or "out/macos-arm64-dev/lua"
+-- Where this tree was compiled to: the build says so during development, the
+-- host says so for an installed run, and neither is the working directory. Our
+-- tree comes first so it wins over the ECS repo's own copy of the engine.
+local root = os.getenv("TECS2D_LUA")
+    or (_G as {string: any})["__tecs2dContent"] as string
+    or "out/macos-arm64-dev/lua"
+if root:sub(-1) == "/" then root = root:sub(1, -2) end
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
+    -- Development only: the ECS is referenced in place rather than installed.
     .. "../tecs/build/?.lua;../tecs/build/?/init.lua;" .. package.path
 
 local tecs <const> = require("tecs")
 local tecs2d <const> = require("tecs2d")
+local shadercompiler <const> = require("tecs2d.gpu.shadercompiler")
+local shaderpack <const> = require("tecs2d.gpu.shaderpack")
 local Transform2D <const> = tecs2d.components.Transform2D
 local Tint <const> = tecs2d.components.Tint
 local PointLight <const> = tecs2d.components.PointLight
@@ -100,6 +106,19 @@ return tecs2d.application({
         print(("tecs2d %s"):format(tecs2d.version))
         print(("  driver: %s"):format(app.device.driver))
         print(("  window: %dx%d px"):format(width, height))
+
+        -- Which of the two shader paths ran. Worth saying out loud: a packaged
+        -- build and a compiling one produce the same frame, so nothing else
+        -- distinguishes them.
+        local pack = shadercompiler.pack()
+        if pack ~= nil then
+            local count = 0
+            for _ in pairs(pack.shaders) do count = count + 1 end
+            print(("  shaders: %d from a %s pack built for %s"):format(
+                count, shaderpack.formatName(pack.format), pack.target))
+        else
+            print("  shaders: compiled from source")
+        end
 
         local t0 = tecs2d.clock.now()
         spawnField(app.world, width, height)

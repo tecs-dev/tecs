@@ -19,12 +19,17 @@ TECS_DIR ?= $(CURDIR)/../tecs
 export TECS2D_LUA := $(CURDIR)/$(LUA)
 export TECS2D_LIB := $(CURDIR)/$(OUT)/lib
 
+# A development run reads content out of the build tree. Nothing resolves
+# against the working directory, so this is how the shader pack and any other
+# asset are found without installing a package first.
+export TECS2D_ASSETS := $(CURDIR)/$(LUA)
+
 SOURCE_TL := $(shell find src -name '*.tl' 2>/dev/null)
 TL_FLAGS  := -I $(CURDIR)/vendor/tl -I $(CURDIR)/vendor/share/lua/5.1 \
              -I $(TECS_DIR)/vendor/share/lua/5.1
 
 .PHONY: help all configure build check test abi-check run clean rebuild \
-        deps package check-package presets
+        deps package check-package presets shaders
 
 help: ## List targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -53,6 +58,9 @@ check: ## Type-check Teal sources
 test: build $(LUA)/main.lua ## Run the spec suite
 	@busted --lua=luajit spec/
 
+shaders: build ## Build the shader pack a target without a compiler consumes
+	@luajit scripts/buildshaders.lua
+
 abi-check: build ## Verify generated cdefs against the C ABI
 	@python3 scripts/abicheck.py $(LUA)/tecs2d/ffi
 
@@ -62,7 +70,7 @@ $(LUA)/main.lua: main.tl
 run: build $(LUA)/main.lua ## Run the demo
 	@$(BIN) --entry $(LUA)/main.lua
 
-package: build ## Install a tree into out/package
+package: build shaders $(LUA)/main.lua ## Install a tree into out/package
 	@cmake --install $(OUT) --prefix $(CURDIR)/out/package
 
 check-package: package ## Verify a package carries its own dependencies

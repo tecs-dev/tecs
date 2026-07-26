@@ -56,11 +56,18 @@ end
 
 --- Root the engine reads content from.
 ---
---- `TECS2D_ASSETS` overrides it, which is how a development run reads straight
---- out of a source tree instead of a staged copy.
+--- Three sources, in order. `TECS2D_ASSETS` wins, which is how a development
+--- run reads straight out of a build tree instead of a staged copy. Then what
+--- the host was told at build time, since the build knows the layout it
+--- installed and this is not something to sniff for. Then the executable's own
+--- directory, which is where a single-directory build puts everything.
 function paths.assets(): string
     if assetsCache ~= nil then return assetsCache end
+
     local override = os.getenv("TECS2D_ASSETS")
+    if override == nil or override == "" then
+        override = (_G as {string: any})["__tecs2dContent"] as string
+    end
     if override ~= nil and override ~= "" then
         assetsCache = override:sub(-1) == "/" and override or override .. "/"
     else

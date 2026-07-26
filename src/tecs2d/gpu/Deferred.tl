@@ -28,83 +28,6 @@ local MAX_LIGHTS <const> = 256
 --- Bytes per light: vec4 position and radius, vec4 colour and intensity.
 local LIGHT_STRIDE <const> = 32
 
---- Emits a fullscreen triangle and the UV to sample a full-target texture.
----
---- The V coordinate is flipped against the NDC Y: NDC +Y is up while texture
---- V runs down from the top-left, so a pass that samples its input without
---- this correction produces a vertically mirrored image, which reads as a
---- content bug rather than a coordinate one.
-local FULLSCREEN_VERTEX <const> = [[
-#version 450
-layout(location = 0) out vec2 vUV;
-void main() {
-    vec2 corner = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2);
-    gl_Position = vec4(corner * 2.0 - 1.0, 0.0, 1.0);
-    vUV = vec2(corner.x, 1.0 - corner.y);
-}
-]]
-
-local LIGHTING_FRAGMENT <const> = ([[
-#version 450
-
-layout(location = 0) in vec2 vUV;
-layout(location = 0) out vec4 outColor;
-
-layout(set = 2, binding = 0) uniform sampler2D gAlbedo;
-layout(set = 2, binding = 1) uniform sampler2D gNormal;
-
-struct Light {
-    vec4 position;   // xy in target pixels, z height, w radius
-    vec4 color;      // rgb colour, a intensity
-};
-
-layout(set = 2, binding = 2) readonly buffer Lights {
-    Light item[];
-} lights;
-
-layout(set = 3, binding = 0) uniform Scene {
-    vec4 ambient;      // rgb ambient colour, a unused
-    vec4 viewport;     // xy target size, z light count, w unused
-} scene;
-
-void main() {
-    vec4 albedo = texture(gAlbedo, vUV);
-
-    // Normals are stored biased into unsigned range, as the G-buffer format
-    // has no signed representation.
-    vec3 normal = normalize(texture(gNormal, vUV).xyz * 2.0 - 1.0);
-
-    vec2 fragment = vUV * scene.viewport.xy;
-    vec3 accumulated = scene.ambient.rgb;
-
-    int count = int(scene.viewport.z);
-    for (int i = 0; i < count; i++) {
-        Light light = lights.item[i];
-        vec3 toLight = vec3(light.position.xy - fragment, light.position.z);
-        float distance = length(toLight);
-        float radius = max(light.position.w, 1.0);
-
-        // Smooth falloff to zero at the radius so a light has bounded reach
-        // and the lighting cost stays proportional to what it touches.
-        float attenuation = clamp(1.0 - distance / radius, 0.0, 1.0);
-        attenuation *= attenuation;
-
-        float lambert = max(dot(normal, normalize(toLight)), 0.0);
-        accumulated += light.color.rgb * light.color.a * attenuation * lambert;
-    }
-
-    outColor = vec4(albedo.rgb * accumulated, albedo.a);
-}
-]])
-
-local COMPOSITE_FRAGMENT <const> = [[
-#version 450
-layout(location = 0) in vec2 vUV;
-layout(location = 0) out vec4 outColor;
-layout(set = 2, binding = 0) uniform sampler2D litTexture;
-void main() { outColor = texture(litTexture, vUV); }
-]]
-
 local record Light
     x: number
     y: number
@@ -145,12 +68,10 @@ end
 
 local DeferredMT <const>: metatable<Deferred> = { __index = Deferred }
 
-local function buildPipeline(device: loader.CPtr, fragmentSource: string,
+local function buildPipeline(device: loader.CPtr, fragmentName: string,
                              format: integer, name: string): GraphicsPipeline
-    local vertex = Shader.fromGLSL(device, FULLSCREEN_VERTEX, "vertex",
-        { name = name .. ".vert" })
-    local fragment = Shader.fromGLSL(device, fragmentSource, "fragment",
-        { name = name .. ".frag" })
+    local vertex = Shader.load(device, "deferred.fullscreen.vert", {})
+    local fragment = Shader.load(device, fragmentName, {})
     local pipeline = GraphicsPipeline.create(device, {
         vertexShader = vertex,
         fragmentShader = fragment,
@@ -198,9 +119,9 @@ function Deferred.create(device: loader.CPtr, swapchainFormat: integer,
         clear = { r = 0, g = 0, b = 0, a = 1 },
     })
 
-    self._lightingPipeline = buildPipeline(device, LIGHTING_FRAGMENT,
+    self._lightingPipeline = buildPipeline(device, "deferred.lighting.frag",
         RGBA8, "lighting")
-    self._compositePipeline = buildPipeline(device, COMPOSITE_FRAGMENT,
+    self._compositePipeline = buildPipeline(device, "deferred.composite.frag",
         swapchainFormat, "composite")
 
     graph:pass({

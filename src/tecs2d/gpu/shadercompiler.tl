@@ -29,13 +29,44 @@
 
 local ffi <const> = require("ffi")
 local sdl <const> = require("tecs2d.ffi.sdl3")
-local shaderc <const> = require("tecs2d.ffi.shaderc")
-local spvc <const> = require("tecs2d.ffi.spvc")
 local loader <const> = require("tecs2d.ffi.loader")
+local shaders <const> = require("tecs2d.gpu.shaders")
+local shaderpack <const> = require("tecs2d.gpu.shaderpack")
 
-local SC <const> = shaderc.C
-local SP <const> = spvc.C
 local K <const> = sdl.K
+
+--- shaderc and SPIRV-Cross, loaded on first use.
+---
+--- Not at require time: a release links neither and reads a pack instead, and
+--- that build still has to be able to load this module to consume one. So the
+--- absence of a compiler is a condition to report, not a load failure.
+local SC: loader.CNamespace = nil
+local SP: loader.CNamespace = nil
+local compilerMissing: string = nil
+
+local function loadCompiler(): boolean
+    if SC ~= nil then return true end
+    if compilerMissing ~= nil then return false end
+    local okShaderc, shadercModule = pcall(require, "tecs2d.ffi.shaderc")
+    if not okShaderc then
+        compilerMissing = tostring(shadercModule)
+        return false
+    end
+    local okSpvc, spvcModule = pcall(require, "tecs2d.ffi.spvc")
+    if not okSpvc then
+        compilerMissing = tostring(spvcModule)
+        return false
+    end
+    SC = (shadercModule as {string: any}).C as loader.CNamespace
+    SP = (spvcModule as {string: any}).C as loader.CNamespace
+    return true
+end
+
+local function requireCompiler(level: integer)
+    if loadCompiler() then return end
+    error("tecs2d: this build links no shader compiler, so every shader must "
+        .. "come from a pack: " .. compilerMissing, level + 1)
+end
 
 -- SPIR-V decorations, from the SPIR-V core grammar.
 local DECORATION_BINDING <const> = 33
@@ -61,14 +92,10 @@ local SET_LAYOUTS <const>: {string: SetLayout} = {
 --- MSL reserves `main`, so SPIRV-Cross renames the entry point.
 local MSL_ENTRYPOINT <const> = "main0"
 
-local record ResourceCounts
-    samplers: integer
-    readOnlyStorageTextures: integer
-    readOnlyStorageBuffers: integer
-    readWriteStorageTextures: integer
-    readWriteStorageBuffers: integer
-    uniformBuffers: integer
-end
+--- Resources a shader binds. Owned by `shaderpack`, because it is part of a
+--- pack's serialized layout, and re-exported here so callers reach it through
+--- the module that produces it.
+local type ResourceCounts = shaderpack.ResourceCounts
 
 local record CompiledShader
     --- Backend bytecode or source, as a byte buffer.
@@ -84,6 +111,7 @@ local record CompiledShader
 end
 
 local record shadercompiler
+    Pack: shaderpack.Pack
     ResourceCounts: ResourceCounts
     CompiledShader: CompiledShader
 end
@@ -98,6 +126,7 @@ local compilerHandle: loader.CValue = nil
 
 local function shadercCompiler(): loader.CValue
     if compilerHandle == nil then
+        requireCompiler(3)
         compilerHandle = SC.shaderc_compiler_initialize()
         if compilerHandle == nil then
             error("tecs2d: shaderc_compiler_initialize failed", 2)
@@ -428,6 +457,112 @@ function shadercompiler.translate(source: string, stage: string,
     local words, wordCount = toSpirv(source, stage,
         options.name or "<shader>", options.defines)
     return reflect(words, wordCount, stage, true)
+end
+
+--- Whether this build can compile a shader from source.
+---
+--- False in a release that links no compiler, where every shader has to be
+--- found in a pack. Nothing degrades quietly on that path: a shader the pack
+--- does not contain raises, because the alternative is a window that opens and
+--- then draws nothing.
+function shadercompiler.available(): boolean
+    return loadCompiler()
+end
+
+-------------------------------------------------------------------------------
+-- Packs
+-------------------------------------------------------------------------------
+
+local loadedPack: shaderpack.Pack = nil
+
+--- Uses `pack` for every subsequent lookup by name.
+function shadercompiler.usePack(pack: shaderpack.Pack)
+    loadedPack = pack
+end
+
+--- The pack in use, or nil if shaders are being compiled.
+function shadercompiler.pack(): shaderpack.Pack
+    return loadedPack
+end
+
+--- The shader format this build supplies.
+---
+--- A loaded pack decides it, because a pack holds one format and no compiler
+--- may be present to produce another. This is what the device claims, so
+--- getting it wrong selects a backend that then fails at shader creation
+--- rather than at device creation.
+function shadercompiler.format(): integer
+    if loadedPack ~= nil then return loadedPack.format end
+    if ffi.os == "OSX" or ffi.os == "iOS" then
+        return K.SDL_GPU_SHADERFORMAT_MSL
+    end
+    return K.SDL_GPU_SHADERFORMAT_SPIRV
+end
+
+--- Turns a pack entry into the same shape a fresh compile produces.
+local function fromPack(entry: shaderpack.Shader): CompiledShader
+    local bytes, size = loader.fromString(entry.code)
+    return {
+        code = bytes,
+        codeSize = size,
+        _codeOwner = bytes,
+        format = entry.format,
+        entrypoint = entry.entrypoint,
+        counts = entry.counts,
+        threadCount = entry.threadCount,
+    }
+end
+
+--- Decides where a shader comes from, or raises if it can come from nowhere.
+---
+--- Separated from `load` and given `hasCompiler` explicitly because this is the
+--- rule that matters on a target with no compiler, and a running process cannot
+--- unlink one to check it. Returns "pack" or "compile".
+---
+--- A pack entry built from source that has since changed is not used. On a
+--- build that can compile that is a recompile; on one that cannot it is an
+--- error, because drawing with a shader that no longer matches its source is
+--- worse than not starting.
+function shadercompiler.plan(name: string, defines: {string: string},
+                             hasCompiler: boolean): string
+    local entry = shaders.get(name)
+    local key = shaders.key(name, defines)
+    local packed = loadedPack ~= nil and loadedPack.shaders[key] or nil
+
+    if packed ~= nil then
+        local hash = shaders.hash(entry.source)
+        if packed.sourceHash == hash then return "pack" end
+        if not hasCompiler then
+            error(("tecs2d: packed shader '%s' was built from different source "
+                .. "(%s, now %s) and this build cannot recompile")
+                :format(key, packed.sourceHash, hash), 2)
+        end
+        return "compile"
+    end
+
+    if hasCompiler then return "compile" end
+    if loadedPack == nil then
+        error(("tecs2d: no shader pack is loaded and this build cannot compile "
+            .. "'%s'"):format(key), 2)
+    end
+    error(("tecs2d: shader '%s' is not in the pack and this build cannot "
+        .. "compile it"):format(key), 2)
+end
+
+--- Resolves a registered shader, from the pack if there is one.
+---
+--- This is how the engine asks for a shader. Going through a name rather than
+--- a source is what lets a build ship artifacts: a name is enumerable ahead of
+--- time and a source assembled at the call site is not.
+function shadercompiler.load(name: string, defines?: {string: string}): CompiledShader
+    local entry = shaders.get(name)
+    if shadercompiler.plan(name, defines, shadercompiler.available()) == "pack" then
+        return fromPack(loadedPack.shaders[shaders.key(name, defines)])
+    end
+    return shadercompiler.compile(entry.source, entry.stage, {
+        name = name,
+        defines = defines,
+    })
 end
 
 return shadercompiler

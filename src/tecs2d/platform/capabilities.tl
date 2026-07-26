@@ -8,6 +8,8 @@
 local ffi <const> = require("ffi")
 local sdl <const> = require("tecs2d.ffi.sdl3")
 local loader <const> = require("tecs2d.ffi.loader")
+local shadercompiler <const> = require("tecs2d.gpu.shadercompiler")
+local shaderpack <const> = require("tecs2d.gpu.shaderpack")
 
 local C <const> = sdl.C
 
@@ -30,6 +32,10 @@ local record capabilities
     dynamicLibraries: boolean
     --- Whether shaders can be compiled from source at run time.
     runtimeShaders: boolean
+    --- Whether shaders are being read from a packaged artifact. Independent of
+    --- `runtimeShaders`: a development build may have both, and a release has
+    --- only this.
+    packagedShaders: boolean
     --- Shader formats this target consumes.
     shaderFormats: {string}
 
@@ -46,6 +52,18 @@ local record capabilities
 end
 
 local resolved: capabilities = nil
+
+--- Whether the platform reports a touch device.
+---
+--- Asked rather than inferred from the platform: a desktop with a touchscreen
+--- has one and a simulator may not, so neither answer follows from the OS.
+local function hasTouch(): boolean
+    local count = loader.newArray("int[1]")
+    local devices = C.SDL_GetTouchDevices(count)
+    if devices == nil then return false end
+    C.SDL_free(devices)
+    return tonumber(count[0]) > 0
+end
 
 --- Whether LuaJIT is compiling rather than interpreting.
 ---
@@ -68,17 +86,11 @@ function capabilities.get(): capabilities
 
     local platform = loader.toString(C.SDL_GetPlatform())
 
-    -- Compiling a shader needs the compiler to have been linked. A release
-    -- links none and consumes packaged artifacts, so this is a property of the
-    -- build rather than of the platform.
-    local hasCompiler = pcall(require, "tecs2d.ffi.shaderc")
-        and pcall(require, "tecs2d.ffi.spvc")
-
-    -- Metal takes MSL, everything else takes SPIR-V.
-    local formats: {string} = { "spirv" }
-    if ffi.os == "OSX" or ffi.os == "iOS" then
-        formats = { "msl", "metallib" }
-    end
+    -- The shader pipeline is asked rather than guessed at: whether a compiler
+    -- was linked is a property of the build, and a loaded pack narrows the
+    -- format to the one it holds.
+    local pack = shadercompiler.pack()
+    local formats: {string} = { shaderpack.formatName(shadercompiler.format()) }
 
     resolved = {
         target = platform,
@@ -90,10 +102,10 @@ function capabilities.get(): capabilities
         -- A registry means the libraries were linked, which is the case
         -- precisely where loading one by name is not available.
         dynamicLibraries = not loader.isStatic("sdl3"),
-        runtimeShaders = hasCompiler,
+        runtimeShaders = shadercompiler.available(),
+        packagedShaders = pack ~= nil,
         shaderFormats = formats,
-        touch = tonumber(C.SDL_GetNumLogicalCPUCores()) ~= nil
-            and (platform == "iOS" or platform == "Android"),
+        touch = hasTouch(),
         controller = true,
         sensors = platform == "iOS" or platform == "Android",
         workers = pcall(require, "tecs2d.workers"),

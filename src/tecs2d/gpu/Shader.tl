@@ -1,13 +1,17 @@
 --- A compiled shader stage on the device.
 ---
---- Created from GLSL, which is compiled and reflected by `shadercompiler`.
---- The resource counts SDL_GPU needs come from that reflection rather than
---- from the caller: a wrong count is not a compile error, it is a silent
---- binding mismatch.
+--- The resource counts SDL_GPU needs come from reflection rather than from the
+--- caller: a wrong count is not a compile error, it is a silent binding
+--- mismatch.
+---
+--- Prefer `load`, which asks for a registered shader by name and so works on a
+--- build that ships packaged artifacts instead of a compiler. `fromGLSL` takes
+--- source directly and therefore always needs one.
 
 local sdl <const> = require("tecs2d.ffi.sdl3")
 local loader <const> = require("tecs2d.ffi.loader")
 local shadercompiler <const> = require("tecs2d.gpu.shadercompiler")
+local shaders <const> = require("tecs2d.gpu.shaders")
 
 local C <const> = sdl.C
 
@@ -35,20 +39,13 @@ local STAGES <const>: {string: integer} = {
     fragment = 1,
 }
 
---- Compiles GLSL and creates a shader on `device`.
---- @param stage "vertex" or "fragment". Compute uses `ComputePipeline`.
-function Shader.fromGLSL(device: loader.CPtr, source: string, stage: string,
-                         options: ShaderOptions): Shader
-    options = options or {}
+--- Creates a shader on `device` from an already compiled stage.
+local function create(device: loader.CPtr, stage: string,
+                      compiled: shadercompiler.CompiledShader): Shader
     local stageEnum = STAGES[stage]
     if stageEnum == nil then
-        error(("tecs2d: '%s' is not a graphics shader stage"):format(tostring(stage)), 2)
+        error(("tecs2d: '%s' is not a graphics shader stage"):format(tostring(stage)), 3)
     end
-
-    local compiled = shadercompiler.compile(source, stage, {
-        name = options.name,
-        defines = options.defines,
-    })
 
     local info = loader.newArray("SDL_GPUShaderCreateInfo[1]")
     local settings = info[0] as loader.CStruct
@@ -74,6 +71,35 @@ function Shader.fromGLSL(device: loader.CPtr, source: string, stage: string,
     self._code = compiled.code
     self._destroyed = false
     return self
+end
+
+--- Creates a shader from the GLSL registered under `name`.
+---
+--- This is how the engine asks for a shader, because a name is what a pack is
+--- keyed by. On a build that links a compiler this compiles; on one that does
+--- not, it reads the packaged artifact, and a shader missing from the pack
+--- raises rather than leaving a pass silently unbuilt.
+function Shader.load(device: loader.CPtr, name: string,
+                     options: ShaderOptions): Shader
+    options = options or {}
+    local entry = shaders.get(name)
+    return create(device, entry.stage,
+        shadercompiler.load(name, options.defines))
+end
+
+--- Compiles GLSL directly and creates a shader on `device`.
+---
+--- Needs a shader compiler, so a packaged build cannot use this. Engine code
+--- goes through `load`; this is for a caller holding source that was never
+--- registered, which in practice means a test.
+--- @param stage "vertex" or "fragment". Compute uses `ComputePipeline`.
+function Shader.fromGLSL(device: loader.CPtr, source: string, stage: string,
+                         options: ShaderOptions): Shader
+    options = options or {}
+    return create(device, stage, shadercompiler.compile(source, stage, {
+        name = options.name,
+        defines = options.defines,
+    }))
 end
 
 --- Releases the shader. Safe to call more than once.

@@ -225,6 +225,15 @@ function loader.toString(value: loader.CValue): string
     return ffi.string(value as string) as string
 end
 
+--- Converts `length` bytes at `value` to a Lua string.
+---
+--- Unlike `toString` this does not stop at a NUL, so it is what reads a binary
+--- blob such as SPIR-V or a packed shader artifact.
+function loader.toBytes(value: loader.CValue, length: integer): string
+    if value == nil then return "" end
+    return ffi.string(value as string, length) as string
+end
+
 --- Allocates a single C struct.
 ---
 --- Prefer this to a one-element array when a reusable scratch struct is
@@ -268,9 +277,20 @@ function loader.copyTo(destination: loader.BytePointer, source: loader.CValue,
     ffi.copy(destination as string, source as string, size)
 end
 
---- Copies a Lua string into an FFI buffer, without a terminator.
+--- Copies a Lua string into an FFI buffer, including its NUL terminator.
+--- The destination must have room for `#source + 1` bytes.
 function loader.copyString(destination: loader.CArray, source: string)
     ffi.copy(destination as string, source)
+end
+
+--- Allocates a byte buffer holding exactly the bytes of `source`.
+---
+--- No terminator, so this is what carries a blob whose length is known and
+--- whose content may contain NULs, such as SPIR-V.
+function loader.fromString(source: string): loader.CArray, integer
+    local bytes = ffi.new("uint8_t[?]", #source) as loader.CArray
+    ffi.copy(bytes as string, source, #source)
+    return bytes, #source
 end
 
 --- Loads a generated table of integer `#define` constants.

@@ -1,6 +1,6 @@
 # Hashes of file build rules.
 36dd7b384f86022043a2d7036a3963d0 CMakeFiles/tecs2d_bindings
-4679f33e79a5978972defaea21b48341 CMakeFiles/tecs2d_lua
+9ff0bb0c042334f41e1c3ae4cc93c0a2 CMakeFiles/tecs2d_lua
 c87635007f88a0221536a5a595c693ab generated/box2dapi.c
 0b18bdf9d151e4bd2776aca6eecb6406 generated/sdl3api.c
 40771dff4c395016a96af90ed49ba5f0 generated/sdl3imageapi.c

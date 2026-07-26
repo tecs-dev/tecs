@@ -4,14 +4,13 @@
 --- immediate mode and no global render state: SDL_GPU bakes blend, depth, and
 --- cull into immutable pipeline objects, so every draw goes through a render
 --- pass on an explicit frame.
-local ffi <const> = require("ffi")
 local sdl <const> = require("tecs2d.ffi.sdl3")
+local shadercompiler <const> = require("tecs2d.gpu.shadercompiler")
 local loader <const> = require("tecs2d.ffi.loader")
 local Frame <const> = require("tecs2d.gpu.Frame")
 local Window <const> = require("tecs2d.platform.Window")
 
 local C <const> = sdl.C
-local K <const> = sdl.K
 
 local record DeviceOptions
     --- Enables the backend's validation layers.
@@ -43,16 +42,14 @@ local DeviceMT <const>: metatable<Device> = { __index = Device }
 --- not abstract shaders: `SDL_CreateGPUShader` takes precompiled bytecode in a
 --- backend-specific format and never compiles or translates. This set is what
 --- SDL uses to choose a backend, so declaring a format the shader pipeline
---- cannot emit selects a backend that then fails at shader creation.
+--- cannot supply selects a backend that then fails at shader creation.
 ---
---- Only MSL and SPIR-V are claimed, because those are what `shadercompiler`
---- produces. DXIL needs DXC, which is not wired up, so Windows currently
---- resolves to the Vulkan backend rather than D3D12.
+--- The shader pipeline is asked rather than the platform, because a build that
+--- ships a pack supplies exactly the pack's format and nothing else. Only MSL
+--- and SPIR-V are ever claimed: DXIL needs DXC, which is not wired up, so
+--- Windows resolves to the Vulkan backend rather than D3D12.
 local function supportedShaderFormats(): integer
-    if ffi.os == "OSX" then
-        return K.SDL_GPU_SHADERFORMAT_MSL
-    end
-    return K.SDL_GPU_SHADERFORMAT_SPIRV
+    return shadercompiler.format()
 end
 
 --- Creates a GPU device and claims `window` for presentation.

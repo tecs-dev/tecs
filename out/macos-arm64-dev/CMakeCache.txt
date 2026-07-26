@@ -270,6 +270,9 @@ SPVC_spirv-cross-util_LIB:FILEPATH=/opt/homebrew/Cellar/spirv-cross/1.4.350.1/li
 //Generate FFI bindings and compile the Teal sources
 TECS2D_BUILD_LUA:BOOL=ON
 
+//Content directory relative to the installed executable
+TECS2D_CONTENT:STRING=../share/tecs2d/lua/
+
 //Where compiled Lua and generated bindings are written
 TECS2D_LUA_OUT:PATH=/Users/dowling/projects/tecs2d/out/macos-arm64-dev/lua
 

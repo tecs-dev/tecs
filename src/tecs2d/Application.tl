@@ -16,6 +16,9 @@ local Input <const> = require("tecs2d.platform.Input")
 local Window <const> = require("tecs2d.platform.Window")
 local Device <const> = require("tecs2d.gpu.Device")
 local Renderer <const> = require("tecs2d.Renderer")
+local paths <const> = require("tecs2d.platform.paths")
+local shaderpack <const> = require("tecs2d.gpu.shaderpack")
+local shadercompiler <const> = require("tecs2d.gpu.shadercompiler")
 
 local C <const> = sdl.C
 local K <const> = sdl.K
@@ -35,6 +38,9 @@ local record Application
         framesInFlight: integer
         presentMode: string
         ambient: {number}
+        --- Shader pack to read, relative to the asset root. Defaults to
+        --- `shaders.tsp`. A build that links a compiler runs without one.
+        shaderPack: string
         capacity: integer
         maxEntities: integer
         --- Stops after this many iterations. Lets an automated run drive a
@@ -94,6 +100,17 @@ function Application:_init(): boolean
 
     sdl.check(C.SDL_Init(K.SDL_INIT_VIDEO + K.SDL_INIT_GAMEPAD) as boolean,
         "SDL_Init")
+
+    -- Before the device, because the pack decides which shader format the
+    -- device may claim, and that decides which backend SDL selects.
+    local packPath = paths.asset(config.shaderPack or "shaders.tsp")
+    local pack = shaderpack.read(packPath)
+    if pack ~= nil then
+        shadercompiler.usePack(pack)
+    elseif not shadercompiler.available() then
+        error(("tecs2d: this build links no shader compiler and there is no "
+            .. "pack at %s"):format(packPath))
+    end
 
     local windowConfig = config.window or {} as WindowConfig
     self.window = Window.create({

@@ -59,122 +59,6 @@ local DEFAULT_CELL <const> = 512
 --- beyond it are dropped rather than growing the buffer mid-frame.
 local DEFAULT_CAPACITY <const> = 65536
 
---- Zeroes the visible counter before the cull accumulates into it. A separate
---- pass rather than a branch inside the cull, because invocations within one
---- dispatch have no ordering against each other.
-local RESET_COMPUTE <const> = [[
-#version 450
-layout(local_size_x = 1) in;
-layout(set = 1, binding = 0) writeonly buffer DrawArgs { uint value[]; } args;
-void main() {
-    args.value[0] = 6u;   // vertices per quad
-    args.value[1] = 0u;   // instances, accumulated by the cull
-    args.value[2] = 0u;
-    args.value[3] = 0u;
-}
-]]
-
---- Rejects instances outside the view and compacts the rest.
-local CULL_COMPUTE <const> = [[
-#version 450
-layout(local_size_x = 64) in;
-
-struct Instance {
-    vec4 xform;
-    vec4 origin;
-    vec4 color;
-    vec4 uvRect;
-};
-
-layout(set = 0, binding = 0) readonly buffer Instances { Instance item[]; } instances;
-layout(set = 1, binding = 0) buffer DrawArgs { uint value[]; } args;
-layout(set = 1, binding = 1) writeonly buffer Visible { uint index[]; } visible;
-layout(set = 2, binding = 0) uniform Cull { vec4 params; } cull;
-
-void main() {
-    uint i = gl_GlobalInvocationID.x;
-    if (i >= uint(cull.params.z)) { return; }
-
-    Instance self = instances.item[i];
-
-    // The quad's half extent along each axis, from the columns of its basis.
-    // A rotated quad reaches further than its scale alone, so both columns
-    // contribute to both axes.
-    float ex = 0.5 * (abs(self.xform.x) + abs(self.xform.z));
-    float ey = 0.5 * (abs(self.xform.y) + abs(self.xform.w));
-
-    vec2 origin = self.origin.xy;
-    if (origin.x + ex < 0.0 || origin.x - ex > cull.params.x ||
-        origin.y + ey < 0.0 || origin.y - ey > cull.params.y) {
-        return;
-    }
-
-    visible.index[atomicAdd(args.value[1], 1u)] = i;
-}
-]]
-
-local INSTANCE_VERTEX <const> = [[
-#version 450
-
-struct Instance {
-    vec4 xform;   // 2x2 basis of rotation and scale
-    vec4 origin;  // xy world position, z array layer, w spare
-    vec4 color;
-    vec4 uvRect;  // u0 v0 u1 v1
-};
-
-layout(set = 0, binding = 0) readonly buffer Instances { Instance item[]; } instances;
-layout(set = 0, binding = 1) readonly buffer Visible { uint index[]; } visible;
-layout(set = 1, binding = 0) uniform View { vec4 viewport; } view;
-
-layout(location = 0) out vec4 vColor;
-layout(location = 1) out vec3 vUV;
-
-const vec2 CORNERS[6] = vec2[6](
-    vec2(-0.5, -0.5), vec2( 0.5, -0.5), vec2(-0.5,  0.5),
-    vec2( 0.5, -0.5), vec2( 0.5,  0.5), vec2(-0.5,  0.5)
-);
-
-void main() {
-    // The cull compacted the survivors, so this walks the visible list rather
-    // than the instance array.
-    uint slot = visible.index[gl_InstanceIndex];
-    Instance self = instances.item[slot];
-    mat2 basis = mat2(self.xform.x, self.xform.y, self.xform.z, self.xform.w);
-    vec2 corner = CORNERS[gl_VertexIndex];
-    vec2 world = self.origin.xy + basis * corner;
-
-    // World units are pixels with the origin at the top left, which is also
-    // what the lighting pass works in, so light positions need no conversion.
-    vec2 ndc = vec2(world.x / view.viewport.x * 2.0 - 1.0,
-                    1.0 - world.y / view.viewport.y * 2.0);
-    gl_Position = vec4(ndc, 0.0, 1.0);
-    vColor = self.color;
-
-    // Corners run -0.5..0.5, and V is flipped because texture rows run down
-    // from the top while the quad's local Y runs up.
-    vUV = vec3(mix(self.uvRect.xy, self.uvRect.zw,
-                   vec2(corner.x + 0.5, 0.5 - corner.y)),
-               self.origin.z);
-}
-]]
-
-local INSTANCE_FRAGMENT <const> = [[
-#version 450
-layout(location = 0) in vec4 vColor;
-layout(location = 1) in vec3 vUV;
-layout(location = 0) out vec4 albedo;
-layout(location = 1) out vec4 normal;
-
-layout(set = 2, binding = 0) uniform sampler2DArray images;
-
-void main() {
-    // Untextured geometry samples layer zero, so both paths land here.
-    albedo = texture(images, vUV) * vColor;
-    normal = vec4(0.5, 0.5, 1.0, 1.0);
-}
-]]
-
 local record RendererOptions
     --- Ambient colour applied everywhere.
     ambient: {number}
@@ -429,10 +313,8 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
     })
     self._cullUniform = loader.newArray("float[4]")
 
-    self._reset = ComputePipeline.fromGLSL(device, RESET_COMPUTE,
-        { name = "renderer.reset" })
-    self._cull = ComputePipeline.fromGLSL(device, CULL_COMPUTE,
-        { name = "renderer.cull" })
+    self._reset = ComputePipeline.load(device, "instance.reset.comp", {})
+    self._cull = ComputePipeline.load(device, "instance.cull.comp", {})
 
     self.deferred = Deferred.create(device, swapchainFormat, {
         ambient = options.ambient,
@@ -453,10 +335,8 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
     })
 
     local albedoFormat, normalFormat = self.deferred:geometryFormats()
-    local vertex = Shader.fromGLSL(device, INSTANCE_VERTEX, "vertex",
-        { name = "ecs.instance.vert" })
-    local fragment = Shader.fromGLSL(device, INSTANCE_FRAGMENT, "fragment",
-        { name = "ecs.instance.frag" })
+    local vertex = Shader.load(device, "instance.vert", {})
+    local fragment = Shader.load(device, "instance.frag", {})
     self.pipeline = GraphicsPipeline.create(device, {
         vertexShader = vertex,
         fragmentShader = fragment,

@@ -10,6 +10,7 @@
 local sdl <const> = require("tecs2d.ffi.sdl3")
 local loader <const> = require("tecs2d.ffi.loader")
 local shadercompiler <const> = require("tecs2d.gpu.shadercompiler")
+local shaders <const> = require("tecs2d.gpu.shaders")
 
 local C <const> = sdl.C
 
@@ -32,15 +33,9 @@ local ComputePipelineMT <const>: metatable<ComputePipeline> = {
     __index = ComputePipeline,
 }
 
---- Compiles a GLSL compute shader and creates a pipeline from it.
-function ComputePipeline.fromGLSL(device: loader.CPtr, source: string,
-                                  options: ComputePipelineOptions): ComputePipeline
-    options = options or {}
-    local compiled = shadercompiler.compile(source, "compute", {
-        name = options.name,
-        defines = options.defines,
-    })
-
+--- Creates a pipeline from an already compiled compute shader.
+local function create(device: loader.CPtr,
+                      compiled: shadercompiler.CompiledShader): ComputePipeline
     local info = loader.newArray("SDL_GPUComputePipelineCreateInfo[1]")
     local settings = info[0] as loader.CStruct
     settings.code = compiled.code
@@ -69,6 +64,33 @@ function ComputePipeline.fromGLSL(device: loader.CPtr, source: string,
     self._code = compiled.code
     self._destroyed = false
     return self
+end
+
+--- Creates a pipeline from the compute shader registered under `name`.
+---
+--- The path the engine uses: a name is what a pack is keyed by, so this works
+--- on a build that ships artifacts rather than a compiler.
+function ComputePipeline.load(device: loader.CPtr, name: string,
+                              options: ComputePipelineOptions): ComputePipeline
+    options = options or {}
+    local entry = shaders.get(name)
+    if entry.stage ~= "compute" then
+        error(("tecs2d: '%s' is a %s shader, not compute"):format(
+            name, entry.stage), 2)
+    end
+    return create(device, shadercompiler.load(name, options.defines))
+end
+
+--- Compiles GLSL directly and creates a pipeline from it.
+---
+--- Needs a shader compiler. Engine code goes through `load`.
+function ComputePipeline.fromGLSL(device: loader.CPtr, source: string,
+                                  options: ComputePipelineOptions): ComputePipeline
+    options = options or {}
+    return create(device, shadercompiler.compile(source, "compute", {
+        name = options.name,
+        defines = options.defines,
+    }))
 end
 
 --- Releases the pipeline. Safe to call more than once.

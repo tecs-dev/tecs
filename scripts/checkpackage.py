@@ -90,6 +90,22 @@ def main():
                     problems.append(
                         f"{binary.name}: a shader compiler must not ship in a release")
 
+    # A release ships no compiler, so it has to ship the shaders. An install
+    # missing its pack opens a window and then fails at the first pipeline,
+    # which is a far worse failure than this one.
+    packs = list(prefix.rglob("*.tsp"))
+    if not packs:
+        problems.append("no shader pack (*.tsp): a release ships no compiler, "
+                        "so it must ship compiled shaders")
+    for pack in packs:
+        manifest = pack.with_suffix(pack.suffix + ".txt")
+        if not manifest.exists():
+            problems.append(f"{pack.name}: no manifest beside it, so what it "
+                            "contains cannot be checked")
+        else:
+            summary = manifest.read_text().splitlines()[1]
+            print(f"{pack.relative_to(prefix)}: {summary}")
+
     print(f"checked {len(binaries)} binaries under {prefix}")
 
     if development:

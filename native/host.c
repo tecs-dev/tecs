@@ -33,6 +33,14 @@ typedef struct Tecs2dHost Tecs2dHost;
 #define TECS2D_ENTRY "main.lua"
 #endif
 
+/* Where content sits relative to the executable. The build knows the layout it
+ * installed, so it says; nothing here guesses and nothing resolves against the
+ * working directory, which is meaningless once an application is launched by
+ * anything other than a shell. */
+#ifndef TECS2D_CONTENT
+#define TECS2D_CONTENT ""
+#endif
+
 /* Events arriving in one iteration before growth. Sized past a burst of mouse
  * motion so warmup reaches steady state and stays there. */
 #define TECS2D_EVENTS_INITIAL 256
@@ -145,14 +153,35 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
     }
     lua_setglobal(L, "arg");
 
-    const char *entry = TECS2D_ENTRY;
+    /* The content root, which the engine reads assets from and which holds the
+     * entry chunk unless one was named. SDL_GetBasePath is the executable's own
+     * directory, or a bundle's resources where there is one. */
+    const char *base = SDL_GetBasePath();
+    char *content = NULL;
+    if (base) {
+        SDL_asprintf(&content, "%s%s", base, TECS2D_CONTENT);
+    }
+    if (content) {
+        lua_pushstring(L, content);
+        lua_setglobal(L, "__tecs2dContent");
+    }
+
+    char *resolved = NULL;
+    const char *entry = NULL;
     for (int i = 1; i + 1 < argc; i++) {
         if (strcmp(argv[i], "--entry") == 0) entry = argv[i + 1];
     }
+    if (!entry) {
+        if (content) SDL_asprintf(&resolved, "%s%s", content, TECS2D_ENTRY);
+        entry = resolved ? resolved : TECS2D_ENTRY;
+    }
+    SDL_free(content);
 
     lua_pushcfunction(L, traceback);
-    if (luaL_loadfile(L, entry) != 0 || lua_pcall(L, 0, 1, -2) != 0) {
+    int loaded = luaL_loadfile(L, entry) == 0 && lua_pcall(L, 0, 1, -2) == 0;
+    if (!loaded) {
         SDL_Log("tecs2d: %s", lua_tostring(L, -1));
+        SDL_free(resolved);
         return SDL_APP_FAILURE;
     }
 
@@ -160,8 +189,10 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
      * life of the process. */
     if (!lua_istable(L, -1)) {
         SDL_Log("tecs2d: %s must return tecs2d.application(config)", entry);
+        SDL_free(resolved);
         return SDL_APP_FAILURE;
     }
+    SDL_free(resolved);
     host->application = luaL_ref(L, LUA_REGISTRYINDEX);
     lua_pop(L, 1);
 
