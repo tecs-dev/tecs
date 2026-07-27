@@ -88,6 +88,9 @@ Working today:
   seek and tell, 3D position or a plain left-and-right pan, streaming for long
   clips, and a `Sound` component that names a group and follows what is
   written to it for as long as its entity is around and enabled
+- The clipboard read and written, and the primary selection beside it, so the
+  `clipboardUpdate` event is something a game can act on rather than only
+  notice
 
 Not built yet: shadows, post-processing, UI, tiled maps and multi-camera.
 
@@ -570,6 +573,57 @@ other and against nothing else, so the host takes its own reading instead of
 converting that one across an offset SDL does not promise. It is stamped where
 SDL hands the event over rather than where a step picks it up, because the
 interval between those two is the thing worth measuring.
+
+## The clipboard
+
+`clipboardUpdate` says the clipboard changed and lists the mime types now on
+offer. `tecs.clipboard` is the other half: what those bytes are, and how to put
+text there. Being told and having no way to look is the worse of the two
+halves to ship alone.
+
+Reads are not cached. The clipboard belongs to the desktop rather than to this
+process, so a value read a frame ago may already be wrong, and the event is the
+only invalidation there is.
+
+Every read hands back an allocation the caller frees, and a failed read hands
+back an empty string rather than nothing, so the free is owed on that case too.
+`loader.toString` copies and does not free, which makes it the right converter
+and half the job; the pairing lives in one place in `platform/clipboard.tl`
+rather than at each call site, because a read that forgot would leak once per
+paste and nothing about a process that grows while a text field is pasted into
+points back at the clipboard.
+
+Text goes out through `setText`, which SDL copies, so nothing is retained here
+and the value's lifetime is SDL's from the moment the call returns. Offering an
+arbitrary mime type is the one clipboard entry point that works the other way
+round: `SDL_SetClipboardData` takes no copy, retaining a callback it calls when
+some other application asks for the bytes, which may be long after the call
+returned and is a moment this process does not choose. In Lua that is an FFI
+callback pinned for the lifetime of the offer and entered from wherever SDL
+fulfils the request, and [`physics/TaskPool.tl`](src/tecs/physics/TaskPool.tl)
+already records why this engine keeps its callbacks native rather than take
+that bet. Reading an arbitrary mime type carries none of it, so `mimeTypes`,
+`hasData` and `data` are here and the offer side is not.
+
+The primary selection is a second, independent clipboard rather than a flavour
+of the first: X11 and Wayland fill it with whatever was last selected and paste
+it on a middle click, with no copy step at all. Elsewhere there is no such
+concept, and SDL does not fail there but keeps the value in the video device,
+so `setPrimary` succeeds, `primary` reads back what this process wrote, and
+nothing outside the process ever sees it.
+
+The clipboard is part of SDL's video subsystem, so a headless tool has none.
+`available` reports that, which is the only answer that separates no clipboard
+from an empty one; the rest short-circuit to empty and false without calling
+SDL, so a question that was never going to be answered does not overwrite the
+SDL error a caller is about to read for some other reason.
+
+Text is UTF-8 and passes through byte for byte. Line endings are not
+normalised, so text copied on Windows arrives as CRLF and stays CRLF, and
+nothing is trimmed from either end. Text stops at the first NUL, because that
+is what terminates the C string SDL returns and what every producer of
+clipboard text intends; `data` uses the length SDL reports instead, so a blob
+keeps its NULs.
 
 ## Measuring latency
 
@@ -1428,7 +1482,7 @@ host/main.c                 process entry: a Lua state and argv, nothing else
 scripts/gencdef.py          header -> cdef + constants generator
 scripts/abicheck.py         cdef vs C compiler layout verification
 src/tecs/ffi/             library loading and generated binding wrappers
-src/tecs/platform/        window, clock, events, input and audio backends
+src/tecs/platform/        window, clock, events, clipboard, input and audio
 src/tecs/gpu/             device, frame, passes, shaders, pipelines, buffers
 src/tecs/components.tl    components the engine renders and simulates
 src/tecs/gfx/             camera, layers, sprite sheets and their playback

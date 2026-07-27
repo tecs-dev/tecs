@@ -40,6 +40,7 @@ local type Input = require("tecs.platform.Input")
 local type Gamepad = require("tecs.platform.Gamepad")
 local type clock = require("tecs.platform.clock")
 local type events = require("tecs.platform.events")
+local type clipboard = require("tecs.platform.clipboard")
 local type capabilities = require("tecs.platform.capabilities")
 local type paths = require("tecs.platform.paths")
 local type components = require("tecs.components")
@@ -103,6 +104,7 @@ local record tecs
     Gamepad: Gamepad
     clock: clock
     events: events
+    clipboard: clipboard
     capabilities: capabilities
     paths: paths
     components: components
@@ -278,6 +280,7 @@ local ENGINE <const>: {string: string} = {
     Gamepad = "tecs.platform.Gamepad",
     clock = "tecs.platform.clock",
     events = "tecs.platform.events",
+    clipboard = "tecs.platform.clipboard",
     capabilities = "tecs.platform.capabilities",
     paths = "tecs.platform.paths",
     components = "tecs.components",
