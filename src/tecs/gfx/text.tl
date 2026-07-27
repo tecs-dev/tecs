@@ -475,6 +475,15 @@ local record Glyphs
     --- leaves holes. Compaction is the answer if a measurement shows it
     --- mattering; there is none here until one does.
     _free: {integer: {integer}}
+    --- The text holding each span, by entity, and how many entries that is.
+    --- A span is reachable from its `Text` and from nowhere else, so this is
+    --- what lets a text that lost its component be noticed at all.
+    _owners: {integer: Text}
+    _ownerCount: integer
+    --- The two counts the last sweep compared, so a scene that is merely
+    --- holding spans a query cannot see is swept once rather than every frame.
+    _sweptOwners: integer
+    _sweptLive: integer
     --- Sub-ranges written since the last sync, as flat one-based inclusive
     --- pairs, and how many entries are in use.
     _dirty: {integer}
@@ -532,6 +541,11 @@ local function reset(self: Glyphs)
     self.high = 0
     local free = self._free
     for size in pairs(free) do free[size] = nil end
+    local owners = self._owners
+    for entity in pairs(owners) do owners[entity] = nil end
+    self._ownerCount = 0
+    self._sweptOwners = 0
+    self._sweptLive = 0
     clearDirty(self)
 end
 
@@ -659,6 +673,51 @@ local function reserve(self: Glyphs, item: Text, count: integer)
     item._spanCount = count
 end
 
+--- Drops the record of `entity` holding a span.
+local function disown(self: Glyphs, entity: integer)
+    if self._owners[entity] == nil then return end
+    self._owners[entity] = nil
+    self._ownerCount = self._ownerCount - 1
+end
+
+--- Records that `entity`'s text holds the span it was just given.
+---
+--- A text that lost its component and was given another one arrives here as a
+--- different table under the same entity, and the span the first one held is
+--- reachable through nothing else, so it goes back before the record moves.
+local function own(self: Glyphs, entity: integer, item: Text)
+    local owners = self._owners
+    local held = owners[entity]
+    if held ~= nil and held ~= item then
+        reserve(self, held, 0)
+    end
+
+    if item._spanCount == 0 then
+        disown(self, entity)
+        return
+    end
+    if held == nil then self._ownerCount = self._ownerCount + 1 end
+    owners[entity] = item
+end
+
+--- Hands back every span whose text is gone.
+---
+--- Despawning is observed and removing a component is not, so a text that lost
+--- its `Text` leaves a span allocated with nothing pointing at it: the slots
+--- never rejoin the free list and the high-water mark never comes back down.
+--- Walking the owners is what finds those, and identity is what it compares,
+--- so a component replaced rather than removed is caught too.
+local function sweepOwners(self: Glyphs, world: World)
+    local owners = self._owners
+    for entity, item in pairs(owners) do
+        if world:get(entity, text.Text) ~= item then
+            reserve(self, item, 0)
+            owners[entity] = nil
+            self._ownerCount = self._ownerCount - 1
+        end
+    end
+end
+
 --- Slots the run reserves, which is the high-water mark rather than the number
 --- of slots in use: a freed span keeps its place so the run's length stops
 --- moving once the scene settles.
@@ -692,6 +751,10 @@ local function newGlyphs(): Glyphs
     self.capacity = 0
     self.high = 0
     self._free = {}
+    self._owners = {}
+    self._ownerCount = 0
+    self._sweptOwners = 0
+    self._sweptLive = 0
     self._dirty = {}
     self._dirtyCount = 0
     self._taken = false
@@ -1118,7 +1181,9 @@ function text.plugin(options: TextOptions): function(World)
                 waiting = false
 
                 local built = 0
-                for archetype, length in texts:iter() do
+                local live = 0
+                for archetype, length, entities in texts:iter() do
+                    live = live + length
                     if all or archetype:isComponentDirty(text.Text)
                         or archetype:isComponentDirty(Tint)
                         or archetype:isComponentDirty(Clip)
@@ -1143,9 +1208,23 @@ function text.plugin(options: TextOptions): function(World)
                                              transform, tint, clip) then
                                     waiting = true
                                 end
+                                own(glyphs, entities[row] as integer, item)
                             end
                         end
                     end
+                end
+
+                -- More spans held than there are texts to hold them means at
+                -- least one lost its component, which nothing reports. The
+                -- counts the last sweep saw are remembered so a scene that
+                -- keeps texts out of this query, by disabling them, is walked
+                -- once rather than every frame.
+                if glyphs._ownerCount > live
+                    and (glyphs._ownerCount ~= glyphs._sweptOwners
+                        or live ~= glyphs._sweptLive) then
+                    sweepOwners(glyphs, world)
+                    glyphs._sweptOwners = glyphs._ownerCount
+                    glyphs._sweptLive = live
                 end
 
                 if built > 0 then
@@ -1159,7 +1238,9 @@ function text.plugin(options: TextOptions): function(World)
         world:observe(0, ecs.builtins.OnDespawn,
             function(event: ecs.builtins.OnDespawn)
                 local item = world:get(event.entity, text.Text)
-                if item == nil or item._spanCount == 0 then return end
+                if item == nil then return end
+                disown(glyphs, event.entity)
+                if item._spanCount == 0 then return end
                 reserve(glyphs, item, 0)
             end)
 

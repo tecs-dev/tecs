@@ -701,6 +701,15 @@ the tradeoff, since a span freed at one length is only reclaimed at that length;
 compaction is the answer if a measurement ever shows it mattering, and there is
 none until one does.
 
+A span outlives its text unless something hands it back. Despawning is observed
+and `world:remove` is not, so the plugin records which entity holds each span
+and sweeps the ones whose entity no longer carries the same `Text`. The sweep is
+gated on there being more spans held than there are texts to hold them, and on
+those two counts having moved since it last ran, so a scene keeping texts out of
+the query by disabling them is walked once rather than every frame. A removal
+hook in the ECS is the deeper answer and a much larger change; a walk of the
+spans in hand costs nothing while nothing is being removed.
+
 The producer keeps its own copy of the instances, so a layout writes into
 ordinary memory and the renderer's sync is a bulk copy of the ranges that moved.
 A glyph carries an absolute position, so a text composes its own transform onto

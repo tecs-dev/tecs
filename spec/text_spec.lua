@@ -516,6 +516,43 @@ describe("gfx.text", function()
         renderer:destroy()
     end)
 
+    it("gives back the span of a text whose component was removed", function()
+        -- Despawning is observed and removing a component is not, so a span
+        -- freed by a removal has to be noticed rather than reported. Left
+        -- alone it is a leak with no upper bound: the slots never rejoin the
+        -- free list and the run's high-water mark never comes back down.
+        local world, renderer = newScene()
+        spawnText(world, 20, 30, "AAA", 24)
+        local second = spawnText(world, 20, 60, "BBB", 24)
+        settle(world, renderer)
+        assert.are.equal(6, renderer.count)
+
+        world:remove(second, text.Text)
+        frame(world, renderer)
+        assert.are.equal(3, renderer.count,
+            "the span was at the top of the run, so the mark comes back down")
+
+        -- And one that was not at the top rejoins the free list, so the next
+        -- text of that length takes it instead of growing the run.
+        local third = spawnText(world, 20, 90, "CCC", 24)
+        spawnText(world, 20, 120, "DDD", 24)
+        frame(world, renderer)
+        assert.are.equal(9, renderer.count)
+
+        local span = world:get(third, text.Text)._span
+        world:remove(third, text.Text)
+        frame(world, renderer)
+        assert.are.equal(9, renderer.count,
+            "a freed span in the middle keeps its place in the run")
+
+        local fifth = spawnText(world, 20, 150, "EEE", 24)
+        frame(world, renderer)
+        assert.are.equal(span, world:get(fifth, text.Text)._span,
+            "the freed span is what the next three-glyph text gets")
+        assert.are.equal(9, renderer.count, "so the run never grew for it")
+        renderer:destroy()
+    end)
+
     it("rewrites only the sub-range of the text that changed", function()
         local world, renderer = newScene()
         for index = 1, 4 do
