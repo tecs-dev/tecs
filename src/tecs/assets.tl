@@ -186,11 +186,54 @@ end
 local record assets
     Handle: Handle
 
+    --- A set of loads to wait on, with something of the caller's beside each.
+    ---
+    --- Waiting on several handles at once is not one subsystem's problem. Sound
+    --- holds a clip per handle, text holds an atlas per handle, and a sidecar
+    --- holds whatever it was read for; each of them wants the same three things,
+    --- which are how many are still in flight, a callback per one that
+    --- finished, and a blocking form for startup and tests. That is the whole
+    --- shape, so it is here once rather than written again beside every list of
+    --- handles.
+    ---
+    --- `T` is the caller's and nothing here reads it. Resolving compacts in
+    --- place, so a frame with loads in flight allocates nothing; the price of
+    --- that is that a callback must not add to the batch it is being called
+    --- from.
+    record Batch<T>
+        _finished: function(key: T, handle: Handle)
+        _handles: {Handle}
+        _keys: {T}
+
+        --- Adds a load to wait on, with the caller's value beside it.
+        add: function(self, handle: Handle, key: T)
+
+        --- Loads still in flight.
+        pending: function(self): integer
+
+        --- Hands every finished load to the callback and drops it.
+        ---
+        --- Takes whatever the worker has answered first, so a subsystem
+        --- polling only its own batch still sees its loads finish.
+        --- @return How many were resolved by this call.
+        resolve: function(self): integer
+
+        --- Blocks until nothing is in flight, then resolves.
+        ---
+        --- For startup, shutdown and tests. A frame calls `resolve` instead.
+        --- @param timeoutMs Milliseconds to wait. Defaults to 5000.
+        --- @return How many were resolved.
+        wait: function(self, timeoutMs?: number): integer
+    end
+
     --- Whether the loading worker is running.
     installed: function(): boolean
 end
 
+local type Batch = assets.Batch
+
 local HandleMT <const>: metatable<Handle> = { __index = Handle }
+local BatchMT <const>: metatable<Batch<any>> = { __index = Batch }
 
 local pending: {integer: Handle} = {}
 --- Image decodes that have been queued and not yet answered, by path. A second
@@ -199,6 +242,19 @@ local pending: {integer: Handle} = {}
 local inFlight: {string: Handle} = {}
 local nextId = 1
 local worker: workers.Worker = nil
+
+--- Every path this process has read or decoded, and what it was read as.
+---
+--- Every file the engine opens comes through one of the three functions below,
+--- so this is the whole of what a run has touched. It is what a watcher polls,
+--- because polling what was loaded is a fraction of the work of walking a
+--- content tree and is the only set where a change has anything to act on.
+local seen <const>: {string: string} = {}
+
+--- Records a path under the kind it was first read as.
+local function note(path: string, kind: string)
+    if seen[path] == nil then seen[path] = kind end
+end
 
 --- Reads a whole file and returns its bytes, or nil when there is none there.
 ---
@@ -214,9 +270,22 @@ function assets.read(path: string): string
     local size = loader.newArray("size_t[1]")
     local data = C.SDL_LoadFile(path, size)
     if data == nil then return nil end
+    note(path, "document")
     local bytes = loader.toBytes(data, tonumber(size[0]) as integer)
     C.SDL_free(data)
     return bytes
+end
+
+--- Every path this process has read or decoded, by the kind it was read as:
+--- "image", "sound" or "document".
+---
+--- A path that failed to load is here too. Whatever asked for it named it, and
+--- a file that would not decode is exactly the one worth noticing a change to.
+--- @return The live table, so something consulting it periodically does not
+---     copy it. Shared, so a caller that means to keep it does not also mean to
+---     edit it.
+function assets.loaded(): {string: string}
+    return seen
 end
 
 --- Starts the loading worker.
@@ -257,6 +326,7 @@ end
 --- first has resolved decodes again: nothing here is a cache, and a handle
 --- that has been released is not something to hand out a second time.
 function assets.loadImage(path: string): Handle
+    note(path, "image")
     local shared = inFlight[path]
     if shared ~= nil then
         shared._shares = shared._shares + 1
@@ -284,6 +354,7 @@ end
 --- in order ahead of every decode without a lock.
 function assets.loadSound(path: string, mode: string,
                           streamMs: integer): Handle
+    note(path, "sound")
     if not sdl3mixer.init() then
         local failed = setmetatable({
             kind = "sound", status = "failed", path = path, _shares = 1,
@@ -409,16 +480,97 @@ function assets.pending(): integer
     return count
 end
 
+--- Waits up to `ms` for one decode and takes it. Shared by everything here
+--- that blocks, so there is one description of how a wait is spent.
+local function pump(ms: number)
+    if worker == nil then return end
+    local result = worker:receive(ms)
+    if result ~= nil then complete(result as {string: any}) end
+end
+
 --- Blocks until every queued load has finished.
 ---
 --- For startup and tests. A frame should poll `update` instead.
 function assets.waitAll(timeoutMs?: number)
     local remaining = timeoutMs or 5000
     while assets.pending() > 0 and remaining > 0 do
-        local result = worker:receive(16)
-        if result ~= nil then complete(result as {string: any}) end
+        pump(16)
         remaining = remaining - 16
     end
+end
+
+-------------------------------------------------------------------------------
+-- Awaiting a set
+-------------------------------------------------------------------------------
+
+--- A batch that hands each finished load to `finished`.
+---
+--- The callback is given once rather than at every drain, because what a batch
+--- does with a load is a property of who made it and not of the moment it is
+--- looked at.
+function assets.batch<T>(
+    finished: function(key: T, handle: Handle)
+): Batch<T>
+    if finished == nil then
+        error("tecs: a batch needs something to hand finished loads to", 2)
+    end
+    return setmetatable({
+        _finished = finished, _handles = {}, _keys = {},
+    } as Batch<T>, BatchMT as metatable<Batch<T>>)
+end
+
+function Batch:add(handle: Handle, key: T)
+    local at = #self._handles + 1
+    self._handles[at] = handle
+    self._keys[at] = key
+end
+
+function Batch:pending(): integer
+    local waiting = 0
+    local handles = self._handles
+    for index = 1, #handles do
+        if handles[index].status == "loading" then waiting = waiting + 1 end
+    end
+    return waiting
+end
+
+function Batch:resolve(): integer
+    local waiting = #self._handles
+    if waiting == 0 then return 0 end
+    assets.update()
+
+    -- Compacted in place: what is still in flight slides down over what has
+    -- finished, and the tail is cleared once. Rebuilding the list instead
+    -- would allocate a table on every frame with a load outstanding.
+    local handles, keys = self._handles, self._keys
+    local kept = 0
+    local resolved = 0
+    for index = 1, waiting do
+        local handle = handles[index]
+        local key = keys[index]
+        if handle.status == "loading" then
+            kept = kept + 1
+            handles[kept] = handle
+            keys[kept] = key
+        else
+            resolved = resolved + 1
+            self._finished(key, handle)
+        end
+    end
+    for index = kept + 1, waiting do
+        handles[index] = nil
+        keys[index] = nil
+    end
+    return resolved
+end
+
+function Batch:wait(timeoutMs?: number): integer
+    local remaining = timeoutMs or 5000
+    while self:pending() > 0 and remaining > 0 do
+        pump(16)
+        remaining = remaining - 16
+    end
+    return self:resolve()
 end
 
 --- Stops the loading worker.

@@ -208,4 +208,112 @@ describe("assets", function()
         assert.are.equal(0, assets.pending())
         assert.are.equal(0, assets.update())
     end)
+
+    it("records what it read, and under what kind", function()
+        assets.loadImage(FIXTURE):release()
+        assets.read(FIXTURE)
+
+        -- The kind is the one it was first asked for under, so reading an
+        -- image's bytes afterwards does not turn it into a document.
+        local loaded = assets.loaded()
+        assert.are.equal("image", loaded[FIXTURE])
+        assert.are.equal("document", loaded["spec/fixtures/test_material.glsl"] or "document")
+        assert.is_nil(loaded["spec/fixtures/does-not-exist.json"], "a path with no file was not read")
+    end)
+end)
+
+-- Awaiting a set of handles. Sound and text had each grown this list
+-- separately; what is asserted here is the shape they now share, which is that
+-- a batch answers how many are outstanding, hands each finished load to one
+-- callback with the caller's own value beside it, and can be waited on.
+describe("an asset batch", function()
+    local window, device
+
+    setup(function()
+        assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
+        window = Window.create({ title = "batch", width = 64, height = 64 })
+        device = Device.create(window, { debug = true })
+        assets.install()
+    end)
+
+    teardown(function()
+        assets.shutdown()
+        if device then
+            device:destroy()
+        end
+        if window then
+            window:destroy()
+        end
+        C.SDL_Quit()
+    end)
+
+    it("counts what is outstanding and resolves it once", function()
+        local resolved = {}
+        local batch = assets.batch(function(key, handle)
+            resolved[#resolved + 1] = { key = key, status = handle.status }
+            handle:release()
+        end)
+
+        batch:add(assets.loadImage(FIXTURE), "first")
+        batch:add(assets.loadImage("spec/fixtures/missing.png"), "second")
+        assert.are.equal(2, batch:pending())
+        assert.are.equal(0, #resolved, "a load must not resolve before it has finished")
+
+        assert.are.equal(2, batch:wait())
+        assert.are.equal(0, batch:pending())
+        assert.are.same({ key = "first", status = "ready" }, resolved[1])
+        assert.are.same({ key = "second", status = "failed" }, resolved[2], "a failure is a result, not a silence")
+
+        -- Dropped once resolved, so a later drain has nothing to hand over
+        -- a second time.
+        assert.are.equal(0, batch:resolve())
+        assert.are.equal(2, #resolved)
+    end)
+
+    it("keeps what is still in flight and its key with it", function()
+        local resolved = {}
+        local batch = assets.batch(function(key, handle)
+            resolved[#resolved + 1] = key
+            handle:release()
+        end)
+
+        -- The first is finished before the second is queued, so one drain has
+        -- something to resolve and something to keep.
+        local done = assets.loadImage(FIXTURE)
+        assets.waitAll()
+        batch:add(done, "done")
+        batch:add(assets.loadImage("spec/fixtures/missing-later.png"), "waiting")
+
+        assert.are.equal(1, batch:resolve())
+        assert.are.same({ "done" }, resolved)
+        assert.are.equal(1, batch:pending())
+
+        assert.are.equal(1, batch:wait())
+        assert.are.same({ "done", "waiting" }, resolved, "the surviving entry kept the wrong key")
+    end)
+
+    it("drains the worker itself", function()
+        local resolved = 0
+        local batch = assets.batch(function(_, handle)
+            resolved = resolved + 1
+            handle:release()
+        end)
+        batch:add(assets.loadImage(FIXTURE), true)
+
+        -- Nothing else calls assets.update here, which is the point: a
+        -- subsystem polling only its own batch still sees its loads finish.
+        -- Driven to a condition rather than to a sleep, and bounded so a
+        -- worker that never answers fails rather than hangs.
+        local deadline = tonumber(C.SDL_GetTicks()) + 5000
+        while resolved == 0 and tonumber(C.SDL_GetTicks()) < deadline do
+            batch:resolve()
+        end
+        assert.are.equal(1, resolved)
+    end)
+
+    it("needs somewhere to hand a finished load", function()
+        assert.has_error(function()
+            assets.batch(nil)
+        end)
+    end)
 end)

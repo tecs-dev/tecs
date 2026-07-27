@@ -13,6 +13,7 @@ local log <const> = require("tecs.log")
 local ecs <const> = require("tecs.ecs")
 local mcp <const> = require("tecs.mcp")
 local events <const> = require("tecs.platform.events")
+local watch <const> = require("tecs.platform.watch")
 local sandbox <const> = require("tecs.mcp.sandbox")
 local shaders <const> = require("tecs.gpu.shaders")
 local shadercompiler <const> = require("tecs.gpu.shadercompiler")
@@ -29,6 +30,18 @@ local record tools
     bind: function(renderer: Renderer, world: ecs.World)
     --- Supplies what rebuilds the pipelines after a shader reload.
     bindReload: function(rebuild: function())
+
+    --- The three reloads, as the functions the tools below are wrappers over.
+    ---
+    --- Each raises with the reason when it refuses, which is what the tool
+    --- reports and what the file watcher logs. They are named here because the
+    --- rules a reload may not break are the interesting part and there must be
+    --- one description of them: an agent asking and a saved file arriving have
+    --- to be refused on identical terms or the two disagree about what the
+    --- process is drawing.
+    reloadShaders: function(): {string}
+    reloadImage: function(path: string): integer, integer, integer
+    reloadSound: function(path: string): boolean
 end
 
 local bound: Renderer = nil
@@ -476,14 +489,82 @@ mcp.register({
 
 --- Re-reads the shader and material sources and rebuilds what draws from them.
 ---
---- Driven from here rather than from a watcher on the filesystem. Whatever
---- edited a `.glsl` knows that it did, and a watcher is the part of a reload
---- with no decision in it: the interesting question is what a reload may not
---- do, and both answers to that are checked below.
+--- The interesting question is what a reload may not do, and both answers to
+--- that are checked here.
 ---
 --- The pipeline objects a frame binds are read through the backend every
 --- frame, so replacing them is picked up by the next frame with no graph
 --- rebuild and nothing in the world touched.
+function tools.reloadShaders(): {string}
+    -- A pack decides the shader format the device claimed at creation, so a
+    -- build without a compiler has nothing to put in its place and no way to
+    -- change what it draws with while it is running.
+    if not shadercompiler.available() then
+        error("this build links no shader compiler, so its shaders are "
+            .. "fixed at the pack it was built against", 0)
+    end
+    if boundReload == nil then
+        error("no shader rebuild is registered, so the sources would be "
+            .. "re-read and nothing would draw differently", 0)
+    end
+
+    local reloaded, refused = materials.reload()
+    if not reloaded then error(refused, 0) end
+    shaders.invalidate()
+    boundReload()
+    return materials.names()
+end
+
+--- Re-reads an image file and writes it over the one already registered.
+---
+--- Refuses on the same principle `reloadShaders` does: a reload may not change
+--- what is already drawn to mean something else. An image keeps its layer and
+--- its rect, so every sprite naming it goes on naming the right texels and the
+--- next frame draws the new pixels with nothing in the world touched. A file
+--- that changed size cannot do that, so it is refused rather than half applied.
+--- @return The layer the image occupies, and its width and height.
+function tools.reloadImage(path: string): integer, integer, integer
+    if path == nil or path == "" then
+        error("path is required", 0)
+    end
+    local target = renderer()
+    if not assets.installed() then
+        error("no asset loader is running, so there is nothing here that "
+            .. "decodes an image file", 0)
+    end
+
+    -- Nothing in `assets` is a cache, so this decodes the file as it is now
+    -- rather than answering with what the first load produced.
+    local handle = assets.loadImage(path)
+    assets.waitAll()
+    if handle.status ~= "ready" then
+        local reason = handle.error or ("still " .. handle.status)
+        handle:release()
+        error(("'%s' did not load: %s"):format(path, reason), 0)
+    end
+
+    local _, region = target:replaceImage(handle)
+    return region.layer, region.width, region.height
+end
+
+--- Re-reads a sound file over the clip already loaded from it.
+---
+--- The mixer's half is `Audio:reload`, which is where the difference between a
+--- resident clip and a streamed one lives. This is the part that finds the
+--- mixer and turns a refusal into a raise.
+--- @return Whether the clip is held in memory, which is what was replaced. A
+---     streamed clip holds nothing and had nothing to replace.
+function tools.reloadSound(path: string): boolean
+    if path == nil or path == "" then
+        error("path is required", 0)
+    end
+    local sound = audio()
+    local reloaded, refused = sound:reload(path)
+    if not reloaded then error(refused, 0) end
+    local clip = sound:clip(Audio.clipId(path))
+    return clip ~= nil and clip.resident
+end
+
 mcp.register({
     name = "reload_shaders",
     description = "Re-reads shaders and materials from their files and "
@@ -492,35 +573,10 @@ mcp.register({
     destructive = true,
     inputSchema = { type = "object", properties = cjson.empty_array },
     handler = function(_: {string: any}): {string: any}
-        -- A pack decides the shader format the device claimed at creation, so
-        -- a build without a compiler has nothing to put in its place and no
-        -- way to change what it draws with while it is running.
-        if not shadercompiler.available() then
-            error("this build links no shader compiler, so its shaders are "
-                .. "fixed at the pack it was built against", 0)
-        end
-        if boundReload == nil then
-            error("no shader rebuild is registered, so the sources would be "
-                .. "re-read and nothing would draw differently", 0)
-        end
-
-        local reloaded, refused = materials.reload()
-        if not reloaded then error(refused, 0) end
-        shaders.invalidate()
-        boundReload()
-
-        return { materials = materials.names() }
+        return { materials = tools.reloadShaders() }
     end,
 })
 
---- Re-reads an image file and writes it over the one already registered.
----
---- The counterpart to `reload_shaders`, and it refuses on the same principle:
---- a reload may not change what is already drawn to mean something else. An
---- image keeps its layer and its rect, so every sprite naming it goes on naming
---- the right texels and the next frame draws the new pixels with nothing in the
---- world touched. A file that changed size cannot do that, so it is refused
---- rather than half applied.
 mcp.register({
     name = "reload_image",
     description = "Re-reads an image file and uploads it over the one already "
@@ -538,31 +594,96 @@ mcp.register({
     },
     handler = function(args: {string: any}): {string: any}
         local path = args.path as string
-        if path == nil or path == "" then
-            error("path is required", 0)
-        end
-        local target = renderer()
-        if not assets.installed() then
-            error("no asset loader is running, so there is nothing here that "
-                .. "decodes an image file", 0)
+        local layer, width, height = tools.reloadImage(path)
+        return { path = path, layer = layer, width = width, height = height }
+    end,
+})
+
+--- Re-reads a sound file over the clip already loaded from it.
+---
+--- The same operation for the mixer, and identity is kept the same way: a clip
+--- is its path, so an edited file comes back under the index every `Sound` row
+--- already carries. What differs from an image is that there is a case with
+--- nothing to do, because a streamed clip holds nothing and each voice opens
+--- the file for itself.
+mcp.register({
+    name = "reload_sound",
+    description = "Re-reads a sound file over the clip already loaded from "
+        .. "that path. A streamed clip holds nothing, so it reports that "
+        .. "rather than replacing anything.",
+    destructive = true,
+    inputSchema = {
+        type = "object",
+        properties = {
+            path = {
+                type = "string",
+                description = "The path the clip was loaded from.",
+            },
+        },
+        required = { "path" },
+    },
+    handler = function(args: {string: any}): {string: any}
+        local path = args.path as string
+        local resident = tools.reloadSound(path)
+        return { path = path, resident = resident, replaced = resident }
+    end,
+})
+
+--- Turns the file watcher on and off, and drives it a poll at a time.
+---
+--- The watcher is what makes the three reloads above happen without being
+--- asked, so this is the switch over them rather than a fourth reload. Polling
+--- from here as well as from the loop is what lets an agent that has just
+--- written a file wait for the effect rather than for the interval.
+mcp.register({
+    name = "watch",
+    description = "Reports, starts, stops or steps the content file watcher, "
+        .. "which reloads shaders, images and sounds when their files change.",
+    destructive = true,
+    inputSchema = {
+        type = "object",
+        properties = {
+            enabled = {
+                type = "boolean",
+                description = "Starts or stops the watcher. Omit to leave it "
+                    .. "as it is.",
+            },
+            poll = {
+                type = "boolean",
+                description = "Looks at every watched file now, without "
+                    .. "waiting for the interval.",
+            },
+        },
+    },
+    handler = function(args: {string: any}): {string: any}
+        if not watch.available() then
+            error("this build links no shader compiler, so it is a release "
+                .. "and has no business polling the filesystem", 0)
         end
 
-        -- Nothing in `assets` is a cache, so this decodes the file as it is
-        -- now rather than answering with what the first load produced.
-        local handle = assets.loadImage(path)
-        assets.waitAll()
-        if handle.status ~= "ready" then
-            local reason = handle.error or ("still " .. handle.status)
-            handle:release()
-            error(("'%s' did not load: %s"):format(path, reason), 0)
+        local enabled = args.enabled as boolean
+        if enabled == true and not watch.installed() then
+            watch.install()
+        elseif enabled == false then
+            watch.uninstall()
         end
 
-        local _, region = target:replaceImage(handle)
+        local fired = 0
+        if args.poll == true then fired = watch.scan() end
+
+        local watching = watch.watching()
+        local unsettled = watch.unsettled()
+        local kinds = watch.kinds()
         return {
-            path = path,
-            layer = region.layer,
-            width = region.width,
-            height = region.height,
+            watching = watch.installed(),
+            files = #watching,
+            paths = #watching > 0 and watching or cjson.empty_array,
+            -- Files seen changing and not acted on yet, which is what a save
+            -- still being written looks like from here.
+            unsettled = #unsettled > 0 and unsettled or cjson.empty_array,
+            kinds = #kinds > 0 and kinds or cjson.empty_array,
+            dispatched = watch.dispatched(),
+            reloaded = fired,
         }
     end,
 })
