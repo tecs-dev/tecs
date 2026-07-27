@@ -710,6 +710,225 @@ describe("ecs.Renderer", function()
         renderer:destroy()
     end)
 
+    -- The rest of the shapes, each checked the same way: a pixel the silhouette
+    -- must contain and one it must not. A shape that quietly filled its quad
+    -- passes any test that only samples the middle, so every one of these has a
+    -- sample outside the shape and inside the quad.
+    --
+    -- The quad covers the target exactly, so a pixel's position in the readback
+    -- is its position in the shape: local coordinates run -0.5 to 0.5 across
+    -- these 64 pixels, and -Y is up on screen.
+    local function shape(world, name, param)
+        world:spawn(
+            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE, SIZE),
+            Tint(1.0, 0.0, 0.0, 1.0),
+            components.Material(materials.id(name), param),
+            Renderable()
+        )
+    end
+
+    it("fills an ellipse to the quad's width and its parameter's height", function()
+        local world, renderer = newScene()
+        shape(world, "ellipse", 0.5)
+
+        local pixels = frameOnce(world, renderer)
+        assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, SIZE / 2).r,
+            "the middle of the ellipse is filled")
+        assert.are.equal(0, screen:getPixel(pixels, SIZE / 2, 6).r,
+            "half the height leaves the top of the quad outside")
+        assert.are.equal(0, screen:getPixel(pixels, 2, 2).r,
+            "and the corner is outside whatever the height")
+        renderer:destroy()
+    end)
+
+    it("takes an ellipse's height from its parameter", function()
+        -- The parameter has to reach the silhouette rather than merely reach
+        -- the shader, so the same pixel is sampled at two of them.
+        local flatWorld, flatRenderer = newScene()
+        shape(flatWorld, "ellipse", 0.5)
+        local flat = frameOnce(flatWorld, flatRenderer)
+
+        local fullWorld, fullRenderer = newScene()
+        shape(fullWorld, "ellipse", 0.99)
+        local full = frameOnce(fullWorld, fullRenderer)
+
+        assert.are.equal(0, screen:getPixel(flat, SIZE / 2, 6).r,
+            "a half-height ellipse stops short of the quad's top")
+        assert.are.equal(255, screen:getPixel(full, SIZE / 2, 6).r,
+            "a full-height one reaches it")
+        assert.are.equal(0, screen:getPixel(full, 2, 2).r,
+            "and is still an ellipse rather than the quad")
+        flatRenderer:destroy()
+        fullRenderer:destroy()
+
+        -- A height of zero is a division by it, and a coverage that is not a
+        -- number compares false against the discard, so the failure this pins
+        -- is the quad filling where the shape vanished.
+        local noneWorld, noneRenderer = newScene()
+        shape(noneWorld, "ellipse", 0.0)
+        local none = frameOnce(noneWorld, noneRenderer)
+        assert.are.equal(0, screen:getPixel(none, SIZE / 2, 6).r,
+            "an ellipse with no height covers nothing but its own line")
+        assert.are.equal(0, screen:getPixel(none, 2, 2).r)
+        noneRenderer:destroy()
+    end)
+
+    it("cuts a ring's hole to its parameter", function()
+        local world, renderer = newScene()
+        shape(world, "ring", 0.5)
+        local pixels = frameOnce(world, renderer)
+
+        assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, 8).r,
+            "the band between the two radii is filled")
+        assert.are.equal(0, screen:getPixel(pixels, SIZE / 2, SIZE / 2).r,
+            "the hole is not")
+        assert.are.equal(0, screen:getPixel(pixels, 2, 2).r,
+            "and the corner is outside the ring entirely")
+        renderer:destroy()
+
+        -- A hole of no radius is a disc, which is the parameter's other end.
+        local solidWorld, solidRenderer = newScene()
+        shape(solidWorld, "ring", 0.0)
+        local solid = frameOnce(solidWorld, solidRenderer)
+        assert.are.equal(255, screen:getPixel(solid, SIZE / 2, SIZE / 2).r,
+            "a ring with no hole is filled to its middle")
+        assert.are.equal(0, screen:getPixel(solid, 2, 2).r,
+            "and still rejects the quad's corner")
+        solidRenderer:destroy()
+    end)
+
+    it("caps a capsule with semicircles at the quad's ends", function()
+        local world, renderer = newScene()
+        shape(world, "capsule", 0.4)
+        local pixels = frameOnce(world, renderer)
+
+        assert.are.equal(255, screen:getPixel(pixels, 4, SIZE / 2).r,
+            "the bar runs the full width, so its cap reaches the left edge")
+        assert.are.equal(0, screen:getPixel(pixels, SIZE / 2, 6).r,
+            "and its thickness leaves the top of the quad outside")
+        assert.are.equal(0, screen:getPixel(pixels, 2, 2).r,
+            "as does the corner beside the cap")
+        renderer:destroy()
+    end)
+
+    it("draws a line along the quad's diagonal", function()
+        local world, renderer = newScene()
+        shape(world, "line", 0.2)
+        local pixels = frameOnce(world, renderer)
+
+        assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, SIZE / 2).r,
+            "the line passes through the middle")
+        assert.are.equal(255, screen:getPixel(pixels, 2, 2).r,
+            "and its cap reaches the corner it runs from")
+        assert.are.equal(0, screen:getPixel(pixels, SIZE - 3, 2).r,
+            "while the other diagonal's corner is nowhere near it")
+        renderer:destroy()
+    end)
+
+    it("sweeps a pie by its parameter", function()
+        local world, renderer = newScene()
+        shape(world, "pie", 0.25)
+        local quarter = frameOnce(world, renderer)
+
+        assert.are.equal(255, screen:getPixel(quarter, SIZE / 2, 20).r,
+            "a quarter turn opens upwards from the middle")
+        assert.are.equal(0, screen:getPixel(quarter, SIZE / 2, 44).r,
+            "and does not reach the other way")
+        assert.are.equal(0, screen:getPixel(quarter, 2, 2).r,
+            "nor outside the circle it is a wedge of")
+        renderer:destroy()
+
+        local wideWorld, wideRenderer = newScene()
+        shape(wideWorld, "pie", 0.75)
+        local wide = frameOnce(wideWorld, wideRenderer)
+        assert.are.equal(0, screen:getPixel(quarter, 16, 40).r,
+            "a quarter turn stops well short of the lower left")
+        assert.are.equal(255, screen:getPixel(wide, 16, 40).r,
+            "and three quarters of one sweeps past it")
+        wideRenderer:destroy()
+    end)
+
+    it("points a triangle at the quad's top edge", function()
+        local world, renderer = newScene()
+        shape(world, "triangle", 0)
+        local pixels = frameOnce(world, renderer)
+
+        assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, SIZE / 2).r,
+            "the middle of the triangle is filled")
+        assert.are.equal(255, screen:getPixel(pixels, 6, SIZE - 4).r,
+            "its base is the whole bottom edge, corner included")
+        assert.are.equal(0, screen:getPixel(pixels, 6, 4).r,
+            "and the apex leaves the top corners out, so it points up")
+        renderer:destroy()
+    end)
+
+    it("cuts the valleys between a star's points", function()
+        local world, renderer = newScene()
+        shape(world, "star", 0.4)
+        local pixels = frameOnce(world, renderer)
+
+        assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, SIZE / 2).r,
+            "the body of the star is filled")
+        assert.are.equal(255, screen:getPixel(pixels, 17, 52).r,
+            "and so is a point reaching down to the left")
+        assert.are.equal(0, screen:getPixel(pixels, SIZE / 2, 52).r,
+            "while the valley between the two lower points is not")
+        assert.are.equal(0, screen:getPixel(pixels, 2, 2).r,
+            "and neither is the quad's corner")
+        renderer:destroy()
+    end)
+
+    it("frames a rectangle without filling it", function()
+        local world, renderer = newScene()
+        shape(world, "frame", 0.25)
+        local pixels = frameOnce(world, renderer)
+
+        assert.are.equal(255, screen:getPixel(pixels, 2, SIZE / 2).r,
+            "the border is drawn")
+        assert.are.equal(255, screen:getPixel(pixels, 2, 2).r,
+            "including its corner, which a rounded rectangle drops")
+        assert.are.equal(0, screen:getPixel(pixels, SIZE / 2, SIZE / 2).r,
+            "and the middle is the hole it frames")
+        renderer:destroy()
+    end)
+
+    it("puts a shape's edge in the same place at four times the size", function()
+        -- Shapes are distance fields evaluated from the quad's own coordinates,
+        -- so nothing about them may be measured in pixels. Drawing the same
+        -- triangle onto a target four times as large has to put its slanted
+        -- edge at the same fraction of the quad, which two samples a thirty
+        -- second of the quad either side of it pin.
+        local LARGE = SIZE * 4
+        local large = Texture.create(device.handle,
+            { width = LARGE, height = LARGE, format = FORMAT })
+
+        local world, renderer = newScene()
+        shape(world, "triangle", 0)
+        local small = frameOnce(world, renderer)
+
+        local bigWorld, bigRenderer = newScene()
+        bigWorld:spawn(
+            Transform(LARGE / 2, LARGE / 2, 0, 1, 0, LARGE, LARGE),
+            Tint(1.0, 0.0, 0.0, 1.0),
+            components.Material(materials.id("triangle"), 0),
+            Renderable()
+        )
+        local big = frameInto(bigWorld, bigRenderer, large, LARGE)
+
+        assert.are.equal(255, screen:getPixel(small, 18, SIZE / 2).r,
+            "inside the slanted edge at the target's own size")
+        assert.are.equal(0, screen:getPixel(small, 13, SIZE / 2).r,
+            "and outside it a little further out")
+        assert.are.equal(255, large:getPixel(big, 72, LARGE / 2).r,
+            "the same fraction of the quad is inside at four times the size")
+        assert.are.equal(0, large:getPixel(big, 52, LARGE / 2).r,
+            "and the same fraction outside, so the edge did not move")
+
+        renderer:destroy()
+        bigRenderer:destroy()
+        large:destroy()
+    end)
+
 
     -- The compaction has to be ordered, not merely correct. An atomic append
     -- produces a different list every frame, so overlapping geometry swaps
