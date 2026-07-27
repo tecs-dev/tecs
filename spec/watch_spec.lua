@@ -53,13 +53,14 @@ end
 --- at the moment it was called.
 local function recorder()
     local seen = {}
-    return seen, function(change)
-        seen[#seen + 1] = {
-            path = change.path,
-            kind = change.kind,
-            contents = read(change.path),
-        }
-    end
+    return seen,
+        function(change)
+            seen[#seen + 1] = {
+                path = change.path,
+                kind = change.kind,
+                contents = read(change.path),
+            }
+        end
 end
 
 describe("the file watcher", function()
