@@ -33,6 +33,8 @@ local WorldImpl <const> = require("tecs.internal.world")
 local type Application = require("tecs.Application")
 local type Renderer = require("tecs.Renderer")
 local type Camera = require("tecs.gfx.Camera")
+local type sheet = require("tecs.gfx.sheet")
+local type animation = require("tecs.gfx.animation")
 local type Window = require("tecs.platform.Window")
 local type Input = require("tecs.platform.Input")
 local type clock = require("tecs.platform.clock")
@@ -90,6 +92,8 @@ local record tecs
     Application: Application
     Renderer: Renderer
     Camera: Camera
+    sheet: sheet
+    animation: animation
     Window: Window
     Input: Input
     clock: clock
@@ -260,6 +264,8 @@ local ENGINE <const>: {string: string} = {
     Application = "tecs.Application",
     Renderer = "tecs.Renderer",
     Camera = "tecs.gfx.Camera",
+    sheet = "tecs.gfx.sheet",
+    animation = "tecs.gfx.animation",
     Window = "tecs.platform.Window",
     Input = "tecs.platform.Input",
     clock = "tecs.platform.clock",
