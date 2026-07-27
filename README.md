@@ -73,10 +73,12 @@ Working today:
   instructions, playback position kept as data so it survives a snapshot, and
   three clocks (fixed, frame, presentation) for the three rates gameplay,
   scripted input and presentation run at
-- Sprite sheets and playback: an image cut into frames by a grid or by an
-  explicit rect list, named ranges over those frames, and a fixed-phase system
-  that writes the current frame's region into `Sprite` and reports a range
-  completing or looping on the world's event bus
+- Sprite sheets on Aseprite's model: frames with their own durations, named
+  tags playing forward, in reverse or pingpong, and slices carrying pivots,
+  built by a grid, an explicit rect list, a builder, or read from an Aseprite
+  JSON export; and a fixed-phase system that writes the current frame's region
+  and image into `Sprite` and reports a tag completing or looping on the
+  world's event bus
 - Layers: sixteen bands of the depth range, each choosing how its contents sort
   within it, and each able to sit in screen pixels, in virtual coordinates,
   outside the camera's zoom, at its own parallax, or unlit
@@ -613,6 +615,18 @@ seconds. The callback writes columns in place, so no component values are
 constructed at all. Note that `batchSpawn` skips FFI defaults, so every field
 has to be written in the callback.
 
+Every image lives in one 2D array texture, bound once, with the layer as a
+per-instance float. That is not a workaround for the absence of bindless: it is
+the only thing SDL_GPU offers, and it will stay so. SDL lists bindless among the
+features it has chosen not to support, on the grounds that it would need large
+changes to every backend and to the shader tooling, that the only technique
+strictly requiring it is hardware raytracing, which the GPU API is also unlikely
+to gain, and that debugging tooling for bindless renderers is immature. They
+would rather design a future API around it than graft it onto this one. So the
+constraint is architectural rather than a gap waiting to close. It is also worth
+keeping in proportion: resource binding was the only way to write a renderer for
+over twenty years, and only a minority of shipped games use bindless today.
+
 Layer zero is a white pixel, so an entity with no `Sprite` samples it and
 textured and untextured geometry share one shader and one pipeline. An image
 smaller than a cell does not reach the cell's edge, so `registerImage` returns
@@ -652,15 +666,54 @@ is held for as little of the frame as possible.
 
 ## Sprite sheets and playback
 
-A sheet is an image divided into frames, cut either by a uniform grid
-(`sheet.grid`, with an optional margin around the grid and spacing between the
-cells) or by an explicit list of rects (`sheet.rects`). Frames are addressed by
-index, and named ranges are inclusive spans over those indices. A range is what
-an animation plays.
+The model is Aseprite's, because that is what the art is authored in. A sheet
+is a list of frames, each holding for its own duration; a set of named tags,
+each an inclusive span of frames played forward, in reverse, or pingpong; and a
+set of named slices carrying rectangles, nine-slice centres and pivots that
+move from frame to frame. Tag zero is the whole sheet, forward.
+
+Reading an Aseprite JSON export is one function in front of that model rather
+than a second model: `sheet.fromAseprite` walks the export and writes what it
+finds through the same builder everything else uses, so a reader for the binary
+`.aseprite` format populates the same sheet without reshaping anything. Both of
+Aseprite's frame layouts are read, the array and the object keyed by frame name,
+the second in sorted name order because the names carry the frame number.
+Trimmed exports are not: `spriteSourceSize` is ignored, so export with trimming
+off.
+
+`sheet.build` is the model's own front door, for an atlas from any other tool:
+frames, tags and slices in any order, `finish` to register. `sheet.grid` cuts a
+uniform grid (with an optional margin around it and spacing between the cells)
+and `sheet.rects` takes an explicit list, and both are that builder with a loop
+in front.
+
+Timing is per frame rather than per entity, which is the thing a single frames-
+per-second number cannot express: a hold frame is a frame with a long duration,
+and that is how an artist writes one. Durations are authored in milliseconds
+because Aseprite writes milliseconds, and converted to seconds once when the
+sheet is built so playback never divides. What an `Animation` carries instead is
+a `speed`, a multiplier on the sheet's own timing, so changing it leaves
+playback on the frame it was showing rather than jumping.
+
+A tag's direction is spent when the sheet is built rather than at every step of
+playback. What comes out is the frames in the order they are shown and the
+second each one ends on, so finding the current frame is a scan of numbers and
+never a branch on direction, and pingpong is a longer list rather than a special
+case. Pingpong repeats neither end, so a three-frame tag is 1, 2, 3, 2 and its
+cycle is four frames long.
+
+Slices are where pivots come from, rather than an origin API invented beside
+them. A slice holds a key until the next one, so `Sheet:pivotOf` answers the
+key in force on a frame, adds the slice's own origin, and divides by the frame:
+what comes back is a fraction of the frame, so nothing downstream has to know
+the sheet's pixel sizes. A slice with a nine-slice centre but no pivot answers
+the middle of that centre, one with neither answers the middle of its own
+rectangle, and no slice at all answers the middle of the frame, which is where
+a quad sits with no pivot.
 
 A sheet is data, not a component: a hundred entities drawing one character
 share one sheet and point at it. What the `Animation` component carries is the
-sheet's registration index and the index of a range within it, because a
+sheet's registration index and the index of a tag within it, because a
 component is plain C memory and a sheet is a table. Both indices depend on the
 order sheets were built in, so a snapshot writes the pair of names instead and
 resolves them again on the way back, for the reason a `Sprite` writes an image
@@ -699,7 +752,7 @@ the index the last one left behind, and the quad would go on sampling the old
 image with the new rect. A sheet with no image bound writes the region alone
 and leaves the `Sprite` whatever it carried.
 
-A range that does not loop parks on its last frame, stops, and emits
+A tag that does not loop parks on its last frame, stops, and emits
 `animation.Completed`; a looping one wraps and emits `animation.Looped`. Both
 go to address zero with the entity in the payload, matching `OnSpawn` and
 `OnDespawn`, which lets the system ask the bus once per step whether anyone is
@@ -710,7 +763,7 @@ which reads as asking for the animation again, so it starts over. Advancing
 from the end instead would park it again on that step and on every step after
 it, emitting `Completed` each time. `animation.restart` is the explicit form
 and also rewinds one that has not finished; `animation.play` is for pointing an
-entity at a different sheet or range.
+entity at a different sheet or tag.
 
 ## Buffer writes
 
