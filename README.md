@@ -450,9 +450,16 @@ separately from committed text, so a field draws what is being typed before it
 commits, and an area is passed so the platform places its candidate window
 clear of what the player is looking at.
 
+A pen reports pressure, tilt and barrel rotation the way a pad reports a stick:
+one axis event per reading, numbered by the platform. Those four are folded into
+`penPressure`, `penTiltX`, `penTiltY` and `penRotation`; hover distance, the
+barrel slider and tangential pressure are named by the backend and read by
+nothing, so they are a line each to fold in when something wants them.
+
 Held state clears on focus loss and on device removal. The platform delivers no
 release for a key held as the window loses focus, and a button left held on a
-device that is gone is worse than one that never worked.
+device that is gone is worse than one that never worked. A pen carried out of
+range clears its pressure for the same reason: nothing reports the lift.
 
 Queries are never answered by polling the device. `SDL_GetKeyboardState` and
 its relatives are read when a device is opened or resynchronised and never
@@ -809,6 +816,15 @@ exactly, so the run's length settles and nothing relays out. Fragmentation is
 the tradeoff, since a span freed at one length is only reclaimed at that length;
 compaction is the answer if a measurement ever shows it mattering, and there is
 none until one does.
+
+A span outlives its text unless something hands it back. Despawning is observed
+and `world:remove` is not, so the plugin records which entity holds each span
+and sweeps the ones whose entity no longer carries the same `Text`. The sweep is
+gated on there being more spans held than there are texts to hold them, and on
+those two counts having moved since it last ran, so a scene keeping texts out of
+the query by disabling them is walked once rather than every frame. A removal
+hook in the ECS is the deeper answer and a much larger change; a walk of the
+spans in hand costs nothing while nothing is being removed.
 
 The producer keeps its own copy of the instances, so a layout writes into
 ordinary memory and the renderer's sync is a bulk copy of the ranges that moved.

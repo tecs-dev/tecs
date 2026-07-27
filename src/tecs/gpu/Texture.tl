@@ -37,8 +37,8 @@ local record TextureOptions
     --- Any of "colorTarget", "sampled", "depthTarget", "computeRead",
     --- "computeWrite", "graphicsRead". Defaults to a samplable colour target.
     usage: {string}
-    --- Label for the caller's own diagnostics. Not handed to SDL, so it does
-    --- not reach a graphics debugger.
+    --- Label handed to SDL, which a graphics debugger shows against the
+    --- resource. Optional; a texture created without one is unnamed there.
     name: string
 end
 
@@ -52,6 +52,8 @@ local record Texture
     --- Format as created. A pipeline drawing into this texture has to be
     --- created against the same value.
     format: integer
+    --- The name SDL was given, or nil when none was asked for.
+    name: string
     _device: loader.CPtr
     --- Download staging, created by the first `readback` and kept for the ones
     --- after it. A texture nobody reads back never allocates one.
@@ -139,8 +141,15 @@ function Texture.create(device: loader.CPtr, options: TextureOptions): Texture
     local handle = C.SDL_CreateGPUTexture(device, info)
     if handle == nil then sdl.fail("SDL_CreateGPUTexture") end
 
+    -- A device created without debug mode keeps no names, so this is free in a
+    -- release and the difference is only visible in a graphics debugger.
+    if options.name ~= nil then
+        C.SDL_SetGPUTextureName(device, handle, options.name)
+    end
+
     local self = setmetatable({} as Texture, TextureMT)
     self.handle = handle
+    self.name = options.name
     self.width = options.width
     self.height = options.height
     self.format = options.format

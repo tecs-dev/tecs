@@ -157,6 +157,9 @@ local record Backend
     gamepadButtonFromName: function(name: string): integer
     --- "leftX", "rightY", "leftTrigger" and so on.
     gamepadAxisFromName: function(name: string): integer
+    --- "pressure", "tiltX", "tiltY", "distance", "rotation", "slider",
+    --- "tangentialPressure".
+    penAxisFromName: function(name: string): integer
     --- "gyro", "accelerometer", and the per-side names a split device has.
     sensorFromName: function(name: string): integer
 end
@@ -227,6 +230,22 @@ local GAMEPAD_AXES <const>: {string: integer} = {
     rightY = enumValue("SDL_GAMEPAD_AXIS_RIGHTY"),
     leftTrigger = enumValue("SDL_GAMEPAD_AXIS_LEFT_TRIGGER"),
     rightTrigger = enumValue("SDL_GAMEPAD_AXIS_RIGHT_TRIGGER"),
+}
+
+--- Pen axis names.
+---
+--- A pen reports every one of these the way a pad reports a stick: as an axis
+--- event carrying a number and a value. The whole set is named here because
+--- this table is the vocabulary; which of them the input state folds into a
+--- field is a separate question, answered in `Input`.
+local PEN_AXES <const>: {string: integer} = {
+    pressure = enumValue("SDL_PEN_AXIS_PRESSURE"),
+    tiltX = enumValue("SDL_PEN_AXIS_XTILT"),
+    tiltY = enumValue("SDL_PEN_AXIS_YTILT"),
+    distance = enumValue("SDL_PEN_AXIS_DISTANCE"),
+    rotation = enumValue("SDL_PEN_AXIS_ROTATION"),
+    slider = enumValue("SDL_PEN_AXIS_SLIDER"),
+    tangentialPressure = enumValue("SDL_PEN_AXIS_TANGENTIAL_PRESSURE"),
 }
 
 local SENSORS <const>: {string: integer} = {
@@ -500,6 +519,10 @@ local sdlBackend <const>: Backend = {
 
     gamepadAxisFromName = function(name: string): integer
         return GAMEPAD_AXES[name]
+    end,
+
+    penAxisFromName = function(name: string): integer
+        return PEN_AXES[name]
     end,
 
     sensorFromName = function(name: string): integer
