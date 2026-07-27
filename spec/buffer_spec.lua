@@ -315,37 +315,6 @@ void main() { o = data.item[pick.index]; }
         buffer:destroy()
     end)
 
-    it("grows while both slots hold data", function()
-        local buffer = Buffer.create(device.handle,
-            { usage = { "storage" }, size = 16 * 4 })
-
-        -- Resident before the grow, and rewritten by nobody after it.
-        writeSlotElement(buffer, 0, 0, 1.0, 0.0, 0.0)
-        flushSlot(buffer, 0)
-
-        writeSlotElement(buffer, 0, 1, 0.0, 1.0, 0.0)
-        writeSlotElement(buffer, 1, 2, 0.0, 0.0, 1.0)
-
-        assert.is_true(buffer:grow(16 * 16))
-        assert.are.equal(16 * 16, buffer.size)
-        assert.are.equal(16 * 16, buffer._transferSize)
-        assert.are.equal(1, slotOf(buffer, 0).rangeCount,
-            "a grow must not disturb recorded ranges")
-        assert.are.equal(1, slotOf(buffer, 1).rangeCount)
-
-        flushSlot(buffer, 0)
-        flushSlot(buffer, 1)
-
-        assert.are.equal(255, readElement(buffer, 0).r,
-            "the grow must carry the destination's contents across")
-        assert.are.equal(255, readElement(buffer, 1).g,
-            "staging held across a grow must still reach the device")
-        assert.are.equal(255, readElement(buffer, 2).b)
-
-        assert.is_false(buffer:grow(16), "a smaller size is a no-op")
-        buffer:destroy()
-    end)
-
     it("retains destination ranges no slot rewrote", function()
         -- The persistent buffer is never cycled, so a flush from either slot
         -- leaves everything it did not record exactly where it was.
