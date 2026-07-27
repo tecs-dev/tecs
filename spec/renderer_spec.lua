@@ -120,6 +120,21 @@ describe("ecs.Renderer", function()
         return screen:readback()
     end
 
+    -- A frame onto a target of the caller's size, for anything whose answer
+    -- depends on how large the target is.
+    local function frameInto(world, renderer, target, size)
+        world:update(1 / 60)
+        local commandBuffer = C.SDL_AcquireGPUCommandBuffer(device.handle)
+        renderer:render({
+            width = size,
+            height = size,
+            commandBuffer = commandBuffer,
+            swapchainTexture = target.handle,
+        })
+        assert(C.SDL_SubmitGPUCommandBuffer(commandBuffer))
+        return target:readback()
+    end
+
     it("draws nothing when the world is empty", function()
         local world, renderer = newScene()
         local pixels = frameOnce(world, renderer)
@@ -1219,6 +1234,159 @@ describe("ecs.Renderer", function()
             assert.has_error(function()
                 layers.configure(1, { sort = "sideways" })
             end)
+            assert.has_error(function()
+                layers.configure(1, {
+                    sort = "z", screenSpace = true, virtualCoords = true,
+                })
+            end)
+        end)
+
+        -- A layer also decides where its contents are positioned and whether
+        -- they are lit. These are the four transforms and the one lighting
+        -- answer, each checked against a layer that did not ask for it, since
+        -- a feature that changes nothing about where a quad lands is the
+        -- failure that gets shipped.
+        local function box(world, x, y, layer, size, r, g, b)
+            world:spawn(
+                Transform(x, y, 0, layer, 0, size, size),
+                Tint(r, g, b, 1), Renderable())
+        end
+
+        it("holds a screen-space layer still while the camera moves", function()
+            local world, renderer = newScene()
+            layers.configure(3, { sort = "z", screenSpace = true })
+            -- The red one is placed by the camera and the blue one in screen
+            -- pixels, and both start a quarter of the target across.
+            box(world, SIZE / 2, SIZE / 4, 1, SIZE / 4, 1, 0, 0)
+            box(world, SIZE / 2, SIZE * 0.75, 3, SIZE / 4, 0, 0, 1)
+
+            frameOnce(world, renderer)
+            -- The camera centres itself on the first frame it draws, so this
+            -- pans a quarter of the target to the right.
+            renderer.camera.x = renderer.camera.x + SIZE / 4
+            local pixels = frameOnce(world, renderer)
+            layers.configure(3, { sort = "topdown" })
+
+            assert.is_true(screen:getPixel(pixels, SIZE / 4, SIZE / 4).r > 200,
+                "the camera carried the world layer left with it")
+            assert.is_true(screen:getPixel(pixels, SIZE / 2, SIZE / 4).r < 50,
+                "and left nothing where it was")
+            assert.is_true(
+                screen:getPixel(pixels, SIZE / 2, SIZE * 0.75).b > 200,
+                "the screen-space layer is where it was put, camera or not")
+            renderer:destroy()
+        end)
+
+        it("keeps an ignore-zoom layer its size while the view zooms", function()
+            local world, renderer = newScene()
+            layers.configure(4, { sort = "topdown", ignoreZoom = true })
+            -- Eight units each, above and below the camera's centre so zoom
+            -- moves them apart rather than over each other.
+            box(world, SIZE / 2, SIZE * 0.375, 1, 8, 1, 0, 0)
+            box(world, SIZE / 2, SIZE * 0.625, 4, 8, 0, 0, 1)
+
+            local before = frameOnce(world, renderer)
+            assert.is_true(screen:getPixel(before, 32, 24).r > 200,
+                "the world layer starts eight pixels across")
+            assert.is_true(screen:getPixel(before, 26, 24).r < 50,
+                "so nothing reaches six pixels out from its centre")
+
+            renderer.camera.zoom = 2.0
+            local pixels = frameOnce(world, renderer)
+            layers.configure(4, { sort = "topdown" })
+
+            assert.is_true(screen:getPixel(pixels, 26, 16).r > 200,
+                "the world layer doubled and now reaches that far out")
+            assert.is_true(screen:getPixel(pixels, 32, 41).b > 200,
+                "the ignore-zoom layer is still drawn")
+            assert.is_true(screen:getPixel(pixels, 26, 41).b < 50,
+                "and is still eight pixels across, where the zoom left it")
+            renderer:destroy()
+        end)
+
+        it("moves a parallax layer at the fraction it asked for", function()
+            local world, renderer = newScene()
+            layers.configure(5, { sort = "topdown", parallax = 0.5 })
+            -- Placed so that both land in the middle of the target while the
+            -- camera is centred, one carried half as far as the other.
+            box(world, SIZE / 4, 0, 5, 8, 0, 0, 1)
+            box(world, SIZE / 2, SIZE * 0.75, 1, 8, 1, 0, 0)
+
+            local before = frameOnce(world, renderer)
+            assert.is_true(screen:getPixel(before, 32, 16).b > 200,
+                "the parallax layer starts halfway across")
+            assert.is_true(screen:getPixel(before, 32, 48).r > 200,
+                "and so does the layer that moves with the world")
+
+            renderer.camera.x = renderer.camera.x + SIZE / 4
+            local pixels = frameOnce(world, renderer)
+            layers.configure(5, { sort = "topdown" })
+
+            assert.is_true(screen:getPixel(pixels, 16, 48).r > 200,
+                "the world layer moved the whole quarter the camera did")
+            assert.is_true(screen:getPixel(pixels, 24, 16).b > 200,
+                "the parallax layer moved half of it")
+            assert.is_true(screen:getPixel(pixels, 32, 16).b < 50,
+                "which is a move, not a layer that ignored the camera")
+            renderer:destroy()
+        end)
+
+        it("leaves an unlit layer at its own colour", function()
+            -- No ambient and no lights, so everything the lighting pass
+            -- resolves comes out black and only what bypasses it has a colour.
+            local world, renderer = newScene({ 0.0, 0.0, 0.0 })
+            layers.configure(6, { sort = "z", unlit = true })
+            box(world, SIZE / 2, SIZE / 4, 1, SIZE / 4, 1, 0, 0)
+            box(world, SIZE / 2, SIZE * 0.75, 6, SIZE / 4, 1, 0, 0)
+
+            local pixels = frameOnce(world, renderer)
+            layers.configure(6, { sort = "z" })
+
+            assert.is_true(
+                screen:getPixel(pixels, SIZE / 2, SIZE * 0.75).r > 200,
+                "the unlit layer kept the colour it was tinted")
+            assert.is_true(screen:getPixel(pixels, SIZE / 2, SIZE / 4).r < 50,
+                "and the lit one went to what the lighting resolved")
+            renderer:destroy()
+        end)
+
+        it("holds a virtual layer's proportions across target sizes", function()
+            local world, renderer = newScene()
+            local half = Texture.create(device.handle,
+                { width = SIZE / 2, height = SIZE / 2, format = FORMAT })
+            local savedWidth = layers.virtualWidth
+            local savedHeight = layers.virtualHeight
+
+            layers.configure(7, { sort = "z", virtualCoords = true })
+            layers.virtualWidth = 200
+            layers.virtualHeight = 200
+            -- The middle half of the virtual space, which is the middle half
+            -- of whatever target it is scaled onto.
+            box(world, 100, 100, 7, 100, 0, 0, 1)
+
+            local wide = frameOnce(world, renderer)
+            local narrow = frameInto(world, renderer, half, SIZE / 2)
+
+            layers.configure(7, { sort = "z" })
+            layers.virtualWidth = savedWidth
+            layers.virtualHeight = savedHeight
+
+            assert.is_true(screen:getPixel(wide, 32, 32).b > 200,
+                "the middle of the virtual space is the middle of the target")
+            assert.is_true(screen:getPixel(wide, 18, 32).b > 200,
+                "reaching a quarter of the way in")
+            assert.is_true(screen:getPixel(wide, 13, 32).b < 50,
+                "and no further")
+
+            assert.is_true(half:getPixel(narrow, 16, 16).b > 200,
+                "and the same on a target half the size")
+            assert.is_true(half:getPixel(narrow, 10, 16).b > 200,
+                "reaching a quarter of that target's width in")
+            assert.is_true(half:getPixel(narrow, 6, 16).b < 50,
+                "and no further, so the layout kept its proportions")
+
+            half:destroy()
+            renderer:destroy()
         end)
     end)
 

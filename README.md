@@ -44,6 +44,10 @@ Working today:
 - Compute pipelines with reflected workgroup size, and GPU-driven drawing: a
   compute pass writes the draw arguments, one indirect draw consumes them
 - A declarative pass graph, and a deferred pipeline built on it
+- Sixteen layers, each a band of the depth range that never sorts against
+  another, deciding how its contents sort within that band, where they are
+  positioned (by the camera, in screen pixels, in a virtual resolution, at
+  their own parallax, or at a fixed size under zoom) and whether they are lit
 - An ECS binding: Transform2D, Tint, Sprite, Material, PointLight and
   Renderable components, with a sync that walks archetype columns straight into
   mapped GPU staging, and a depth-tested G-buffer
@@ -67,7 +71,7 @@ Working today:
   scripted input and presentation run at
 
 Not built yet: shadows, post-processing, audio, text, UI, tiled maps, sprite
-animation, layers and multi-camera.
+animation and multi-camera.
 
 Design notes live in `../tecs-plans`, kept outside this repository so plans and
 code have separate histories.
@@ -350,6 +354,42 @@ is the fourth float of its transform vector, and the comparison is
 so draw order still decides ties and depth only decides between instances that
 differ. Lighting and composite have no attachment. Each covers every pixel
 exactly once and has nothing to be occluded by.
+
+## Layers
+
+A `Transform` carries a layer, and a layer is a band of that depth range.
+Everything on a layer sorts within its band and never against another one, so a
+HUD on layer 8 covers a world on layer 1 whatever the world contains.
+`layers.configure` says what a layer does with its contents: how they sort
+within the band (lower on the screen, by z alone, or by both axes for a diamond
+grid), where they are positioned, and whether they are lit.
+
+Positioning is four cases and one multiplier. Screen-space contents are placed
+in pixels and ignore the camera; virtual-coordinate contents are placed in a
+fixed design resolution scaled to fill the target; ignore-zoom contents follow
+the camera's position but not its scale, so they hold their size on screen;
+parallax multiplies how far the camera's position carries them. Unlit contents
+bypass the lighting pass, which the material can also ask for, and a fragment is
+lit only where the material and the layer agree.
+
+The vertex shader recovers an entity's layer from the depth already in its
+instance rather than being told it: `depthOf` writes `(MAX - layer) / MAX` plus
+a within-band offset strictly narrower than a band, so multiplying by `MAX`
+leaves `MAX - layer` as the integer part exactly. That keeps the instance at
+four vec4s. What the shader is told is a uniform of sixteen entries and the
+camera's parameters, rather than a matrix per case: parallax multiplies the
+camera's position, so a precomputed matrix would have to exist per layer and be
+rebuilt every frame the camera moved, while the camera's position, its
+reciprocal zoom and two clip scales compose all four cases in a handful of
+instructions and leave the table itself constant between the frames that
+configure it.
+
+The cull tests a world bound against the world rectangle the camera sees, which
+only means something on a layer the camera places where that bound says. A layer
+that asks for screen space, virtual coordinates, parallax or ignore-zoom is
+given a bound no view can be outside of, so it draws whatever the camera is
+looking at. That gives up culling on those layers and keeps it exactly on every
+layer that does not ask, which is where the entities are.
 
 ## GPU-driven by default
 
