@@ -611,6 +611,49 @@ describe("audio", function()
             audio:destroy()
         end)
 
+        it("takes everything down over one fade", function()
+            local audio, clip, backend = loaded()
+            local first = audio:play(clip)
+            local second = audio:play(clip)
+
+            audio:stopAll(0.75)
+            assert.are.equal(750, backend.tracks[1].fadeOutMs)
+            assert.are.equal(750, backend.tracks[2].fadeOutMs)
+            assert.is_true(audio:playing(first), "a fading voice has not finished, so it keeps its slot")
+            assert.is_true(audio:playing(second))
+            assert.are.equal(2, audio:sounding())
+
+            backend.tracks[1].playing = false
+            backend.tracks[2].playing = false
+            audio:update(1 / 60)
+            assert.are.equal(0, audio:sounding())
+            audio:destroy()
+        end)
+
+        it("lets a paused voice run its fade out", function()
+            local audio, clip, backend = loaded()
+            local voice = audio:play(clip)
+            audio:pause(voice)
+
+            audio:stopAll(0.5)
+            assert.is_false(audio:paused(voice), "a paused voice does not advance, so a fade on one would never finish")
+            assert.are.equal(500, backend.tracks[1].fadeOutMs)
+            audio:destroy()
+        end)
+
+        it("ends everything at once when no fade is given", function()
+            local audio, clip, backend = loaded()
+            local voice = audio:play(clip)
+            audio:play(clip)
+
+            audio:stopAll()
+            assert.are.equal(0, backend.tracks[1].fadeOutMs)
+            assert.is_false(backend.tracks[1].playing)
+            assert.is_false(audio:playing(voice))
+            assert.are.equal(0, audio:sounding())
+            audio:destroy()
+        end)
+
         it("ignores a second stop while one is fading", function()
             local audio, clip, backend = loaded()
             local voice = audio:play(clip)

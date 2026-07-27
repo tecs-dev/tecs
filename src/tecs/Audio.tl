@@ -914,13 +914,26 @@ function Audio:stop(handle: integer, fadeOut?: number)
     voice.stopping = true
 end
 
---- Stops everything, at once.
-function Audio:stopAll()
+--- Stops everything, over `fadeOut` seconds if that is given.
+---
+--- A faded stop leaves each voice sounding until the mixer finishes it, so
+--- they are reaped by `update` rather than here. The ramp is the mixer's, on
+--- the same terms as `stop` and `stopGroup`.
+function Audio:stopAll(fadeOut?: number)
+    local seconds = fadeOut or 0.0
+    local fadeMs = math.floor(seconds * 1000)
     for slot = 1, #self._voices do
         local voice = self._voices[slot]
         if voice.sounding then
-            self._backend.stop(voice.track, 0)
-            release(self, slot)
+            self._backend.stop(voice.track, fadeMs)
+            if seconds > 0.0 then
+                voice.stopping = true
+                -- A paused voice does not advance, so a fade on one would
+                -- never finish and the slot would never come back.
+                voice.paused = false
+            else
+                release(self, slot)
+            end
         end
     end
 end
@@ -939,6 +952,24 @@ end
 
 --- Holds a voice where it is. It keeps its slot until something resumes or
 --- stops it, because a paused voice has not finished.
+---
+--- Neither this nor `resume` takes a fade, and that is a decision rather than
+--- an omission. The mixer ramps on a play and on a stop and nowhere else, so a
+--- faded pause has to be a ramp run from here: a list of voices in flight, a
+--- `setGain` per voice per frame, and the pause itself issued only once the
+--- ramp reaches zero, which makes this a command that takes effect later and
+--- needs its own answer for what a stop, a group gain or a second pause
+--- during the ramp means. Each step also lands on a frame boundary, so a
+--- quarter-second fade at 60 frames a second is fifteen steps on a stream
+--- running at 48000, and its length follows the frame rate rather than the
+--- clock. Drift and cost of exactly that kind are what handing fades to the
+--- mixer avoids, and one voice held for a menu is not worth giving it up.
+---
+--- The mixer does offer the pieces to fade out and take a sound back where it
+--- left off: `tell` reads the position, `stop` fades out, and `play` returns
+--- with `start` and `fadeIn`. That re-reads the input rather than holding it,
+--- so it is a different thing from a pause, and which of the two a moment
+--- wants is a game's answer rather than this layer's.
 function Audio:pause(handle: integer)
     local voice = voiceOf(self, handle)
     if voice == nil or voice.paused or voice.stopping then return end
