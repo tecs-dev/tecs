@@ -53,6 +53,7 @@ local assets <const> = require("tecs.assets")
 local components <const> = require("tecs.components")
 local layers <const> = require("tecs.gfx.layers")
 local timing <const> = require("tecs.timing")
+local instancelayout <const> = require("tecs.gpu.instancelayout")
 
 local C <const> = sdl.C
 
@@ -60,22 +61,12 @@ local C <const> = sdl.C
 --- the simulation thread when the pipeline splits.
 local EXTRACT <const> = timing.stage("extract")
 
---- Floats per instance: four vec4s.
-local INSTANCE_FLOATS <const> = 16
-local INSTANCE_BYTES <const> = INSTANCE_FLOATS * 4
-
---- Floats per cull bound: centre xy and half extent xy.
----
---- Kept apart from the instance because the cull reads it for every entity
---- every frame, drawn or not, while the instance is only read for what
---- survives. Sixteen bytes streamed beats sixty-four bytes gathered.
-local BOUND_FLOATS <const> = 4
-local BOUND_BYTES <const> = BOUND_FLOATS * 4
-
---- Half extent for a row on a layer the view rectangle does not describe. Big
---- enough that no finite view can be outside it, and finite so the comparison
---- stays arithmetic rather than a special case.
-local UNBOUNDED <const> = 1e30
+local INSTANCE_FLOATS <const> = instancelayout.FLOATS
+local INSTANCE_BYTES <const> = instancelayout.BYTES
+local BOUND_FLOATS <const> = instancelayout.BOUND_FLOATS
+local BOUND_BYTES <const> = instancelayout.BOUND_BYTES
+local UNBOUNDED <const> = instancelayout.UNBOUNDED
+local extentOf <const> = instancelayout.extentOf
 
 --- Floats in the layer uniform: the camera's parameters, the two fixed clip
 --- scales, and four per layer.
@@ -88,7 +79,6 @@ local QUAD_INDICES <const> = 6
 --- Threads per cull workgroup, matching the scan shaders' local size.
 local CULL_GROUP <const> = 256
 
-local abs <const> = math.abs
 local PI <const> = math.pi
 local TWO_PI <const> = math.pi * 2.0
 
@@ -367,10 +357,6 @@ local function writeRun(self: Renderer, archetype: ecs.Archetype,
         floats[base + 14] = u1
         floats[base + 15] = v1
 
-        -- Extents without a trigonometric call. Unrotated, each axis is its
-        -- own scale. Rotated, half the sum of both scales covers every angle,
-        -- which is looser than the true extent but never smaller, so the cull
-        -- can only ever keep something it might have dropped.
         local ex: number
         local ey: number
         if not layers.viewCulled(entityLayer) then
@@ -379,12 +365,8 @@ local function writeRun(self: Renderer, archetype: ecs.Archetype,
             -- bound no view can be outside of hands the decision to the layer.
             ex = UNBOUNDED
             ey = UNBOUNDED
-        elseif angle == 0.0 then
-            ex = 0.5 * abs(scaleX)
-            ey = 0.5 * abs(scaleY)
         else
-            ex = 0.5 * (abs(scaleX) + abs(scaleY))
-            ey = ex
+            ex, ey = extentOf(angle, scaleX, scaleY)
         end
 
         local bound = (offset + row - 1) * BOUND_FLOATS

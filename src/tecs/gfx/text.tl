@@ -55,6 +55,7 @@ local loader <const> = require("tecs.ffi.loader")
 local assets <const> = require("tecs.assets")
 local components <const> = require("tecs.components")
 local materials <const> = require("tecs.gpu.materials")
+local instancelayout <const> = require("tecs.gpu.instancelayout")
 local layersModule <const> = require("tecs.gfx.layers")
 local paths <const> = require("tecs.platform.paths")
 local json <const> = require("tecs.utils.json")
@@ -85,21 +86,12 @@ local MATERIAL <const> = "glyph"
 --- The font the engine ships, relative to the asset root.
 local DEFAULT_METRICS <const> = "fonts/jetbrainsmono-extrabold-msdf.json"
 
---- The shape of one instance, which is the producer contract: four vec4s of
---- instance data and one vec4 of cull bound.
-local INSTANCE_FLOATS <const> = 16
-local INSTANCE_BYTES <const> = INSTANCE_FLOATS * 4
-local BOUND_FLOATS <const> = 4
-local BOUND_BYTES <const> = BOUND_FLOATS * 4
-
---- Half extent for a glyph on a layer the view rectangle does not describe.
---- Big enough that no finite view can be outside it, and finite so the
---- comparison stays arithmetic rather than a special case.
-local UNBOUNDED <const> = 1e30
-
---- Centre a slot nothing owns is given. No view can overlap a bound out here,
---- so the cull drops it before the draw ever sees it.
-local HIDDEN <const> = 1e30
+local INSTANCE_FLOATS <const> = instancelayout.FLOATS
+local INSTANCE_BYTES <const> = instancelayout.BYTES
+local BOUND_FLOATS <const> = instancelayout.BOUND_FLOATS
+local BOUND_BYTES <const> = instancelayout.BOUND_BYTES
+local UNBOUNDED <const> = instancelayout.UNBOUNDED
+local HIDDEN <const> = instancelayout.HIDDEN
 
 --- Glyph slots the producer's arrays start at, and the floor every growth
 --- doubles from.
