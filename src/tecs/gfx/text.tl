@@ -426,6 +426,23 @@ local function residency(known: {Font: Atlas}, font: Font,
                          renderer: Renderer): Atlas
     local atlas = known[font]
     if atlas == nil then
+        -- Already on the renderer answers without the worker. Re-reading a
+        -- font's metrics gives up this record and its derived fields, but the
+        -- atlas itself is untouched and still holds its layer, so decoding the
+        -- file again would end at `registerImage` handing back the region it
+        -- already had and releasing the fresh pixels undrawn. The text would
+        -- blank for the frames that took.
+        local resident <const> = renderer:regionOf(font.atlas)
+        if resident ~= nil then
+            local sprite <const> = renderer:sprite(font.atlas)
+            atlas = { image = sprite.image, slot = sprite.slot,
+                u = resident.u1, v = resident.v1,
+                param = font.distanceRange * resident.u1 / font.atlasWidth,
+                handle = nil, failed = false }
+            known[font] = atlas
+            return atlas
+        end
+
         -- The worker is what decodes the atlas, and a game that only ever
         -- draws text has no other reason to have started it.
         if not assets.installed() then assets.install() end

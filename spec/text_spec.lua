@@ -652,14 +652,15 @@ describe("gfx.text", function()
             write(secondPath, shipped(2))
             assert.are.equal(second, text.reloadFont(secondPath), "a re-read keeps the table the Text holds")
 
-            -- The atlas was given up with the metrics, so it decodes again and
-            -- the text it belongs to is laid out on the frame that queues the
-            -- decode and again on the frame it arrives.
+            -- The record holding the atlas was given up with the metrics, but
+            -- the atlas is still on the renderer under its own name, so it is
+            -- picked up again without a decode and the text lays out once. If
+            -- the other text had relaid too this would be two.
             frame(world, renderer)
             assets.waitAll()
             frame(world, renderer)
 
-            assert.are.equal(before + 2, text.layouts(world), "a text naming another font was laid out again")
+            assert.are.equal(before + 1, text.layouts(world), "a text naming another font was laid out again")
             assert.are.equal(keptSpan, world:get(kept, text.Text)._span, "and it kept its span")
             local afterX, afterY = text.glyphAt(world, kept, 2)
             assert.are.equal(keptX, afterX, "and its glyphs are where they were")

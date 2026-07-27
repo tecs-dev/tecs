@@ -246,6 +246,17 @@ end
 ---
 --- UVs are fractions of the image rather than of the cell it sits in. Omitted,
 --- they select the whole image. Fails on a name nothing is registered under.
+--- The region an image already occupies, or nil if none has registered it.
+---
+--- What `registerImage` answers, without a decoded handle to answer it with.
+--- A caller that has lost its derived copy of a region, which a font atlas
+--- does when its metrics are re-read, would otherwise have to decode the file
+--- again only to be handed back the layer it already had and have its pixels
+--- released undrawn.
+function Renderer:regionOf(path: string): TextureArray.Region
+    return self._extractor:regionOf(components.imageId(path))
+end
+
 --- Whether archetype runs are laid out with room to grow.
 function Renderer:reservesRuns(): boolean
     return self._extractor:reservesRuns()
