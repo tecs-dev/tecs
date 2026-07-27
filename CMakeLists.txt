@@ -38,6 +38,9 @@ else()
     if(NOT SDL3_NET_INCLUDE_DIR OR NOT SDL3_NET_LIBRARY)
         message(FATAL_ERROR "SDL3_net not found. Set SDL3_NET_INCLUDE_DIR and SDL3_NET_LIBRARY.")
     endif()
+    # Its .pc file still answers what version this is, which is the one thing
+    # the version check needs from it.
+    pkg_check_modules(SDL3_NET QUIET sdl3-net)
     pkg_check_modules(LUAJIT REQUIRED IMPORTED_TARGET luajit)
     pkg_check_modules(SHADERC REQUIRED IMPORTED_TARGET shaderc)
     pkg_check_modules(SPIRV_CROSS REQUIRED spirv-cross-c)
@@ -48,6 +51,8 @@ else()
     if(NOT BOX2D_INCLUDE_DIR OR NOT BOX2D_LIBRARY)
         message(FATAL_ERROR "Box2D 3 not found. Set BOX2D_INCLUDE_DIR and BOX2D_LIBRARY.")
     endif()
+
+    include(cmake/SystemVersions.cmake)
 endif()
 
 # Runtime search paths are relative, so a package finds its own libraries
