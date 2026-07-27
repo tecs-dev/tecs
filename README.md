@@ -69,9 +69,16 @@ Working today:
   instructions, playback position kept as data so it survives a snapshot, and
   three clocks (fixed, frame, presentation) for the three rates gameplay,
   scripted input and presentation run at
+- Sprite sheets and playback: an image cut into frames by a grid or by an
+  explicit rect list, named ranges over those frames, and a fixed-phase system
+  that writes the current frame's region into `Sprite` and reports a range
+  completing or looping on the world's event bus
+- Layers: sixteen bands of the depth range, each choosing how its contents sort
+  within it, and each able to sit in screen pixels, in virtual coordinates,
+  outside the camera's zoom, at its own parallax, or unlit
 
-Not built yet: shadows, post-processing, audio, text, UI, tiled maps, sprite
-animation and multi-camera.
+Not built yet: shadows, post-processing, audio, text, UI, tiled maps and
+multi-camera.
 
 Design notes live in `../tecs-plans`, kept outside this repository so plans and
 code have separate histories.
@@ -288,6 +295,54 @@ Syncing runs in `RenderFirst` inside the world's update; rendering happens
 afterwards against a frame. The two stay separable because the sync needs no
 command buffer and the render needs no world, which also means the swapchain
 is held for as little of the frame as possible.
+
+## Sprite sheets and playback
+
+A sheet is an image divided into frames, cut either by a uniform grid
+(`sheet.grid`, with an optional margin around the grid and spacing between the
+cells) or by an explicit list of rects (`sheet.rects`). Frames are addressed by
+index, and named ranges are inclusive spans over those indices. A range is what
+an animation plays.
+
+A sheet is data, not a component: a hundred entities drawing one character
+share one sheet and point at it. What the `Animation` component carries is the
+sheet's registration index and the index of a range within it, because a
+component is plain C memory and a sheet is a table. Both indices depend on the
+order sheets were built in, so a snapshot writes the pair of names instead and
+resolves them again on the way back, for the reason a `Sprite` writes an image
+name rather than a texture-array layer.
+
+Two coordinate spaces meet in a sheet and only one of them is its business. A
+frame is written in pixels, because that is how an image is cut up. What a
+`Sprite` carries is a region of a texture-array layer, which is the frame's
+fraction of the image scaled by the fraction of the layer the image occupies.
+That second fraction is the renderer's answer, so `sheet:bind` takes what
+`Renderer:sprite` returns for a whole image and rescales every frame once.
+Before it, a frame's region is its plain fraction of the image, which is what a
+sheet can say without a renderer and what makes one testable headless.
+
+Playback advances in `FixedPostUpdate`, not per frame, because animation is
+simulation: two machines fed the same recording have to show the same frame,
+and a system driven by frame time shows a different one on the machine that
+drew more frames. The system is handed the fixed step and never reads a clock.
+`FixedPostUpdate` is late enough that gameplay logic in `FixedUpdate` has
+already chosen what should be playing.
+
+`Animation.frame` is the frame the `Sprite` was last written from, which is
+what turns the write into a gate: a step that leaves an entity on the frame it
+was already showing writes nothing, and an archetype where no frame changed
+leaves its `Sprite` column clean for the sync to skip. So the column is taken
+with `getMut` the first time a row is actually written and not before, and
+`Animation` and `Sprite` are gated separately: time moves every step, regions
+do not. Zero means nothing has been written yet, which is how a fresh or
+restored animation gets its region on the first step rather than drawing
+whatever its `Sprite` held.
+
+A range that does not loop parks on its last frame, stops, and emits
+`animation.Completed`; a looping one wraps and emits `animation.Looped`. Both
+go to address zero with the entity in the payload, matching `OnSpawn` and
+`OnDespawn`, which lets the system ask the bus once per step whether anyone is
+listening rather than once per entity that finished.
 
 ## Buffer writes
 
@@ -611,6 +666,7 @@ src/tecs/ffi/             library loading and generated binding wrappers
 src/tecs/platform/        window, clock, events
 src/tecs/gpu/             device, frame, passes, shaders, pipelines, buffers
 src/tecs/components.tl    components the engine renders and simulates
+src/tecs/gfx/             camera, layers, sprite sheets and their playback
 src/tecs/Renderer.tl      the world-to-GPU bridge
 src/tecs/physics/         Box2D binding and its world plugin
 src/tecs/sequence/        the sequencer, and the tween runtime inside it
