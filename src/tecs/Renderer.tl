@@ -102,6 +102,36 @@ local DEFAULT_CELL <const> = 512
 --- beyond it are dropped rather than growing the buffer mid-frame.
 local DEFAULT_CAPACITY <const> = 65536
 
+--- Something that draws instances without owning entities.
+---
+--- Text is the reason this exists. A glyph is a textured quad like any other,
+--- but making each one an entity puts every glyph in the world into one
+--- archetype, so editing one string marks that column dirty and rewrites all of
+--- them; and spawning or despawning glyphs moves an archetype's length, which
+--- forces the whole scene to be laid out again. A producer sidesteps both: it
+--- is laid out as its own run, and it says which parts of that run changed.
+---
+--- It writes the same sixteen floats and four bounds floats every other
+--- instance carries, so culling, depth, layers and materials all apply to it
+--- without knowing it is not an entity.
+local record InstanceProducer
+    --- Instances to reserve. Changing it moves the layout, so a producer that
+    --- can avoid changing it should.
+    count: function(self: InstanceProducer): integer
+
+    --- Sub-ranges written since the last sync, as flat one-based inclusive
+    --- pairs, and cleared by returning them. Empty means nothing changed and
+    --- the run is skipped.
+    takeDirty: function(self: InstanceProducer): {integer}
+
+    --- Writes instances `first` through `last` of its run. `base` is the
+    --- instance index the run starts at, so instance `first` is written at
+    --- `base + first - 1`.
+    write: function(self: InstanceProducer, floats: loader.CArray,
+                    bounds: loader.CArray, base: integer,
+                    first: integer, last: integer)
+end
+
 local record RendererOptions
     --- Ambient colour applied everywhere.
     ambient: {number}
@@ -114,6 +144,7 @@ local record RendererOptions
 end
 
 local record Renderer
+    type InstanceProducer = InstanceProducer
     --- Seconds the last extraction took. Zero unless timing is on.
     _extractSeconds: number
     --- How far through the current fixed step this frame falls, 0 to 1. Read
@@ -124,6 +155,14 @@ local record Renderer
     --- point in the step as the last one rewrites nothing.
     _lastAlpha: number
     _world: ecs.World
+    --- Producers, in the order they were added, which is the order their runs
+    --- are laid out after the archetypes.
+    _producers: {InstanceProducer}
+    --- Where each producer's run starts and how long it is, so a change in
+    --- length is noticed the same way an archetype's is.
+    _producerRuns: {integer}
+    --- Instance index each producer's run begins at this sync.
+    _producerBase: {integer}
     --- Staging slot this frame writes into, rotated after each submission.
     ---
     --- Rotating is what lets the mapping skip cycling. Cycling exists so a
@@ -367,6 +406,15 @@ end
 --- because a run cannot grow in place without shifting its neighbours. Short
 --- of that, an archetype whose Transform, Tint, and Sprite columns are all
 --- clean is skipped entirely: its bytes are already resident and correct.
+--- Marks the bytes a run of instances occupies, in both buffers.
+local function markRun(self: Renderer, offset: integer, count: integer)
+    if count <= 0 then return end
+    self.instances:markSlotDirty(self._slot, offset * INSTANCE_BYTES,
+        count * INSTANCE_BYTES)
+    self._bounds:markSlotDirty(self._slot, offset * BOUND_BYTES,
+        count * BOUND_BYTES)
+end
+
 local function syncInstances(self: Renderer): integer, integer, integer
     local runs = self._runs
     local seen = self._seen
@@ -389,6 +437,24 @@ local function syncInstances(self: Renderer): integer, integer, integer
             runs[archetype] = nil
             relayout = true
         end
+    end
+
+    -- Producers are laid out after the archetypes, in the order they were
+    -- added. A producer whose count moved shifts everything after it, which is
+    -- the same condition an archetype's length changing creates.
+    local producers <const> = self._producers
+    local producerRuns <const> = self._producerRuns
+    local producerBase: {integer} = self._producerBase
+    for index = 1, #producers do
+        local count = producers[index]:count()
+        producerBase[index] = total
+        if producerRuns[index * 2 - 1] ~= total
+            or producerRuns[index * 2] ~= count then
+            relayout = true
+        end
+        producerRuns[index * 2 - 1] = total
+        producerRuns[index * 2] = count
+        total = total + count
     end
 
     local dropped = 0
@@ -440,6 +506,38 @@ local function syncInstances(self: Renderer): integer, integer, integer
         offset = offset + length
     end
     cursor:close()
+
+    if #producers > 0 then
+        local floats = self.instances:mapSlotAs(self._slot, "float *", false)
+        local bounds = self._bounds:mapSlotAs(self._slot, "float *", false)
+        for index = 1, #producers do
+            local producer = producers[index]
+            local base = producerBase[index]
+            local count = producerRuns[index * 2]
+            if base + count > self.capacity then
+                count = self.capacity - base
+                if count < 0 then count = 0 end
+            end
+
+            local ranges = producer:takeDirty()
+            if relayout and count > 0 then
+                producer:write(floats, bounds, base, 1, count)
+                markRun(self, base, count)
+                rewritten = rewritten + count
+            else
+                for entry = 1, #ranges, 2 do
+                    local first = ranges[entry]
+                    local last = ranges[entry + 1]
+                    if last > count then last = count end
+                    if first <= last then
+                        producer:write(floats, bounds, base, first, last)
+                        markRun(self, base + first - 1, last - first + 1)
+                        rewritten = rewritten + (last - first + 1)
+                    end
+                end
+            end
+        end
+    end
 
     return total, dropped, rewritten
 end
@@ -590,6 +688,9 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
     self.camera = Camera.create()
     self._centred = false
     self._slot = 0
+    self._producers = {}
+    self._producerRuns = {}
+    self._producerBase = {}
     -- Two vec4s: the world rectangle the camera sees, then the counts.
     self._cullUniform = loader.newArray("float[8]")
     self._layerUniform = loader.newArray("float[?]", LAYER_FLOATS)
@@ -687,6 +788,15 @@ function Renderer:sprite(name: string, u0?: number, v0?: number,
         (u1 or 1.0) * region.u1, (v1 or 1.0) * region.v1, slot)
 end
 
+
+--- Adds a producer, laid out after the archetypes in the order added.
+---
+--- A producer draws instances it owns rather than entities, which is what lets
+--- a subsystem whose items are not entities take part in the one draw
+--- everything else goes through.
+function Renderer:addProducer(producer: InstanceProducer)
+    self._producers[#self._producers + 1] = producer
+end
 
 --- Registers the sync system and queries on `world`.
 ---

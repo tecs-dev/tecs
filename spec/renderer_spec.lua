@@ -1390,4 +1390,102 @@ describe("ecs.Renderer", function()
         end)
     end)
 
+
+    -- A producer draws instances it owns rather than entities. Text is why:
+    -- an entity per glyph puts every glyph in one archetype, so editing one
+    -- string rewrites all of them, and spawning glyphs moves an archetype's
+    -- length, which lays the whole scene out again.
+    describe("instance producers", function()
+        --- Writes `count` quads in a row, each the colour it is told.
+        local function stripe(count, r, g, b)
+            local self = { written = {}, dirty = {} }
+            function self:count() return count end
+            function self:takeDirty()
+                local out = self.dirty
+                self.dirty = {}
+                return out
+            end
+            function self:write(floats, bounds, base, first, last)
+                for index = first, last do
+                    local at = (base + index - 1) * 16
+                    floats[at] = 0.0
+                    floats[at + 1] = SIZE / count
+                    floats[at + 2] = SIZE
+                    floats[at + 3] = 0.5
+                    floats[at + 4] = (index - 0.5) * (SIZE / count)
+                    floats[at + 5] = SIZE / 2
+                    floats[at + 6] = 0.0
+                    floats[at + 7] = 0.0
+                    floats[at + 8], floats[at + 9] = r, g
+                    floats[at + 10], floats[at + 11] = b, 1.0
+                    floats[at + 12], floats[at + 13] = 0.0, 0.0
+                    floats[at + 14], floats[at + 15] = 1.0, 1.0
+
+                    local bound = (base + index - 1) * 4
+                    bounds[bound] = (index - 0.5) * (SIZE / count)
+                    bounds[bound + 1] = SIZE / 2
+                    bounds[bound + 2] = SIZE
+                    bounds[bound + 3] = SIZE
+                    self.written[#self.written + 1] = index
+                end
+            end
+            return self
+        end
+
+        it("draws instances that belong to no entity", function()
+            local world, renderer = newScene()
+            local producer = stripe(4, 1.0, 0.0, 0.0)
+            renderer:addProducer(producer)
+
+            local pixels = frameOnce(world, renderer)
+            assert.is_true(screen:getPixel(pixels, SIZE / 2, SIZE / 2).r > 200,
+                "the producer's instances are drawn")
+            assert.are.equal(4, renderer.count)
+            renderer:destroy()
+        end)
+
+        it("writes only the sub-ranges a producer reports", function()
+            local world, renderer = newScene()
+            local producer = stripe(8, 0.0, 1.0, 0.0)
+            renderer:addProducer(producer)
+            frameOnce(world, renderer)
+
+            -- The first frame lays the run out, so everything is written. The
+            -- point of a producer is what the second frame costs.
+            producer.written = {}
+            producer.dirty = { 3, 4 }
+            frameOnce(world, renderer)
+
+            assert.are.same({ 3, 4 }, producer.written,
+                "a changed pair, not the whole run")
+            renderer:destroy()
+        end)
+
+        it("writes nothing for a producer that reports nothing", function()
+            local world, renderer = newScene()
+            local producer = stripe(8, 0.0, 0.0, 1.0)
+            renderer:addProducer(producer)
+            frameOnce(world, renderer)
+
+            producer.written = {}
+            frameOnce(world, renderer)
+            assert.are.equal(0, #producer.written,
+                "an unchanged producer costs nothing")
+            renderer:destroy()
+        end)
+
+        it("lays a producer out after the entities", function()
+            local world, renderer = newScene()
+            world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, 4, 4),
+                Tint(1, 1, 1, 1), Renderable())
+            local producer = stripe(3, 1.0, 1.0, 0.0)
+            renderer:addProducer(producer)
+
+            frameOnce(world, renderer)
+            assert.are.equal(4, renderer.count,
+                "one entity plus three produced instances")
+            renderer:destroy()
+        end)
+    end)
+
 end)
