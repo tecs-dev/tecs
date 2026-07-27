@@ -22,6 +22,9 @@
 -- decoder is exercised rather than assumed; it was produced from `blip.wav`
 -- with `oggenc -q 4 -o spec/fixtures/blip.ogg spec/fixtures/blip.wav`.
 --
+-- The debug tool is driven the same way, through `mcp.dispatch`, because what
+-- an agent gets is the encoded payload and not the Lua tables behind it.
+--
 -- What that leaves untested, rather than asserted: whether anything is
 -- audible, whether SDL_mixer sums two tracks the way its documentation says,
 -- whether a fade is actually a ramp rather than a cut, what a frequency ratio
@@ -37,9 +40,12 @@ local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
     .. package.path
 
+local cjson = require("cjson")
 local tecs = require("tecs")
 local Audio = require("tecs.Audio")
 local assets = require("tecs.assets")
+local mcp = require("tecs.mcp")
+local mcpTools = require("tecs.mcp.tools")
 
 -- A tenth of a second of 16-bit mono at 48000 Hz, and the same tenth of a
 -- second encoded as Ogg Vorbis. Whole numbers, so a duration that is off by a
@@ -206,6 +212,21 @@ local function holds(value, wanted)
     return false
 end
 
+--- Replaces every occurrence of the string `from` inside a nest of tables.
+---
+--- Stands in for a save file written by a run that interned its names in a
+--- different order, which is exactly the case an index in a file gets wrong.
+local function rewrite(value, from, to)
+    if type(value) ~= "table" then return end
+    for key, item in pairs(value) do
+        if item == from then
+            value[key] = to
+        else
+            rewrite(item, from, to)
+        end
+    end
+end
+
 --- An audio object on a recording backend, with its fixture already loaded.
 local function loaded(config, path)
     config = config or {}
@@ -214,6 +235,23 @@ local function loaded(config, path)
     local clip = audio:load(path or FIXTURE)
     audio:waitForLoads()
     return audio, clip, config.backend
+end
+
+--- The same, plus a world the audio is installed into.
+local function scene(config)
+    local audio, clip, backend = loaded(config)
+    local world = tecs.newWorld()
+    audio:install(world)
+    return audio, clip, backend, world
+end
+
+--- Calls a debug tool the way an agent does, and returns its payload.
+local function callTool(name, args)
+    local response = cjson.decode(mcp.dispatch(cjson.encode({
+        jsonrpc = "2.0", id = 1, method = "tools/call",
+        params = { name = name, arguments = args or {} },
+    })))
+    return response.result
 end
 
 describe("audio", function()
@@ -704,6 +742,137 @@ describe("audio", function()
         end)
     end)
 
+    describe("interned group names", function()
+        it("hands out one index per name and reads it back", function()
+            local first = Audio.groupId("music")
+            assert.are.equal(first, Audio.groupId("music"))
+            assert.are_not.equal(first, Audio.groupId("dialogue"))
+            assert.are.equal("music", Audio.groupName(first))
+            assert.is_nil(Audio.groupName(0), "zero is no group at all")
+        end)
+
+        it("refuses a name with nothing in it", function()
+            assert.has_error(function() Audio.groupId("") end)
+        end)
+    end)
+
+    describe("a paused group", function()
+        it("holds a sound that starts after the pause", function()
+            local audio, clip, backend = loaded()
+            audio:pauseGroup("sfx")
+            assert.is_true(audio:groupPaused("sfx"))
+
+            local voice = audio:play(clip, { group = "sfx" })
+            assert.is_true(voice > 0, "the pause holds a sound, it does not "
+                .. "refuse one")
+            assert.is_true(backend.tracks[1].paused,
+                "the mixer's tag pause reaches what is sounding when it is "
+                    .. "called and ignores everything that starts afterwards")
+            assert.is_true(audio:paused(voice))
+
+            audio:update(1 / 60)
+            assert.are.equal(1, audio:sounding(),
+                "and a held voice is not reaped")
+
+            audio:resumeGroup("sfx")
+            assert.is_false(audio:groupPaused("sfx"))
+            assert.is_false(audio:paused(voice))
+            assert.is_true(backend.tracks[1].playing)
+            audio:destroy()
+        end)
+
+        it("holds an entity's sound that starts after the pause", function()
+            local audio, clip, backend, world = scene()
+            audio:pauseGroup("sfx")
+            world:spawn(Audio.Sound(clip.id, 1.0, 1, 1.0, 0, 0, 0, 0,
+                Audio.groupId("sfx")))
+            world:update(1 / 60)
+
+            assert.is_true(backend.tracks[1].paused,
+                "an entity spawned during the menu is the case a sticky "
+                    .. "pause exists for")
+            audio:destroy()
+        end)
+
+        it("leaves a sound outside the group alone", function()
+            local audio, clip, backend = loaded()
+            audio:pauseGroup("sfx")
+            audio:play(clip, { group = "music" })
+            audio:play(clip)
+
+            assert.is_false(backend.tracks[1].paused)
+            assert.is_false(backend.tracks[2].paused)
+            audio:destroy()
+        end)
+
+        it("reports a group nothing has paused as running", function()
+            local audio = Audio.create({ backend = recorder() })
+            assert.is_false(audio:groupPaused("sfx"))
+            audio:destroy()
+        end)
+    end)
+
+    describe("mute", function()
+        it("silences a group without discarding its gain", function()
+            local audio, clip, backend = loaded()
+            audio:setGroupGain("sfx", 0.5)
+            audio:play(clip, { gain = 1.0, group = "sfx" })
+            assert.are.equal(0.5, backend.tracks[1].gain)
+
+            audio:setGroupMuted("sfx", true)
+            assert.is_true(audio:groupMuted("sfx"))
+            assert.are.equal(0, backend.tracks[1].gain)
+            assert.are.equal(0.5, audio:groupGain("sfx"),
+                "setting the gain to zero would lose the level to come back "
+                    .. "to, which is what a mute exists instead of")
+
+            audio:setGroupMuted("sfx", false)
+            assert.are.equal(0.5, backend.tracks[1].gain)
+            audio:destroy()
+        end)
+
+        it("silences a voice that joins a muted group later", function()
+            local audio, clip, backend = loaded()
+            audio:setGroupMuted("sfx", true)
+            audio:play(clip, { gain = 1.0, group = "sfx" })
+            audio:play(clip, { gain = 1.0, group = "music" })
+
+            assert.are.equal(0, backend.tracks[1].gain)
+            assert.are.equal(1.0, backend.tracks[2].gain,
+                "and reaches nothing outside it")
+            audio:destroy()
+        end)
+
+        it("puts the master on the mixer and does not fan out to the groups",
+            function()
+            local audio, clip, backend = loaded()
+            audio:setMasterGain(0.8)
+            audio:setGroupGain("sfx", 0.5)
+            audio:play(clip, { gain = 1.0, group = "sfx" })
+
+            audio:setMuted(true)
+            assert.is_true(audio:muted())
+            assert.are.equal(0, backend.mixerGain)
+            assert.are.equal(0.8, audio:masterGain(),
+                "the level a later unmute returns to")
+            assert.is_false(audio:groupMuted("sfx"),
+                "a master mute that wrote every group's bit would leave "
+                    .. "nothing to put back")
+            assert.are.equal(0.5, backend.tracks[1].gain,
+                "and one number on the mixer costs the same however many "
+                    .. "voices are sounding")
+
+            audio:setMasterGain(0.4)
+            assert.are.equal(0, backend.mixerGain,
+                "a slider moved while muted changes what an unmute returns "
+                    .. "to and nothing that is audible now")
+
+            audio:setMuted(false)
+            assert.are.equal(0.4, backend.mixerGain)
+            audio:destroy()
+        end)
+    end)
+
     describe("keyed limits", function()
         it("caps how many voices one key holds", function()
             local audio, clip = loaded()
@@ -821,13 +990,6 @@ describe("audio", function()
     end)
 
     describe("the Sound component", function()
-        local function scene(config)
-            local audio, clip, backend = loaded(config)
-            local world = tecs.newWorld()
-            audio:install(world)
-            return audio, clip, backend, world
-        end
-
         it("starts a sound the frame its entity appears", function()
             local audio, clip, backend, world = scene()
             local entity = world:spawn(Audio.Sound(clip.id))
@@ -945,6 +1107,83 @@ describe("audio", function()
             audio:destroy()
         end)
 
+        it("joins the group its component names", function()
+            local audio, clip, backend, world = scene()
+            audio:setGroupGain("sfx", 0.5)
+            world:spawn(Audio.Sound(clip.id, 0.5, 0, 1.0, 0, 0, 0, 0,
+                Audio.groupId("sfx")))
+            world:update(1 / 60)
+
+            assert.is_true(backend.tracks[1].tags.sfx,
+                "an effects slider that only reached sounds a game started "
+                    .. "by hand would reach almost nothing")
+            assert.are.equal(0.25, backend.tracks[1].gain,
+                "and the group's gain multiplies what the component asked for")
+            audio:destroy()
+        end)
+
+        it("reaches an entity's sound through its group", function()
+            local audio, clip, backend, world = scene()
+            world:spawn(Audio.Sound(clip.id, 1.0, 1, 1.0, 0, 0, 0, 0,
+                Audio.groupId("sfx")))
+            world:update(1 / 60)
+
+            audio:pauseGroup("sfx")
+            assert.is_true(backend.tracks[1].paused)
+            audio:resumeGroup("sfx")
+
+            audio:stopGroup("sfx")
+            assert.are.equal(0, audio:sounding())
+            audio:destroy()
+        end)
+
+        it("leaves a sound naming no group untagged", function()
+            local audio, clip, backend, world = scene()
+            world:spawn(Audio.Sound(clip.id))
+            world:update(1 / 60)
+            assert.is_nil(next(backend.tracks[1].tags))
+            audio:destroy()
+        end)
+
+        it("carries a group's name through a snapshot, not this run's index",
+            function()
+            local audio, clip, _, world = scene()
+            local entity = world:spawn(Audio.Sound(clip.id, 1.0, 0, 1.0, 0,
+                0, 0, 0, Audio.groupId("sfx")))
+            world:update(1 / 60)
+
+            local saved = world:saveSnapshot({ format = "table" }).snapshot
+            assert.is_true(holds(saved.archetypes, "sfx"),
+                "an index in a file names whatever the next run happens to "
+                    .. "intern in its place")
+
+            world:loadSnapshot(saved)
+            assert.are.equal(Audio.groupId("sfx"),
+                world:get(entity, Audio.Sound).group)
+            audio:destroy()
+        end)
+
+        it("resolves a saved group this run has never interned", function()
+            local audio, clip, _, world = scene()
+            world:spawn(Audio.Sound(clip.id, 1.0, 1, 1.0, 0, 0, 0, 0,
+                Audio.groupId("sfx")))
+            world:update(1 / 60)
+
+            -- The name is the only thing the file carries, so rewriting it
+            -- moves the sound. A file holding an index could not do this: it
+            -- would land on whichever group this run numbered the same.
+            local saved = world:saveSnapshot({ format = "table" }).snapshot
+            rewrite(saved, "sfx", "cutscene")
+
+            world:loadSnapshot(saved)
+            world:update(1 / 60)
+
+            local sounding = audio:voices()
+            assert.are.equal(1, #sounding)
+            assert.are.equal("cutscene", sounding[1].group)
+            audio:destroy()
+        end)
+
         it("survives a round trip through a snapshot", function()
             local audio, clip, _, world = scene()
             local entity = world:spawn(
@@ -971,6 +1210,144 @@ describe("audio", function()
         end)
     end)
 
+    describe("the mixer in a snapshot", function()
+        it("carries the master and every group's settings", function()
+            local audio, _, backend, world = scene()
+            audio:setMasterGain(0.3)
+            audio:setMuted(true)
+            audio:setGroupGain("music", 0.25)
+            audio:setGroupMuted("sfx", true)
+            audio:pauseGroup("ambience")
+
+            local saved = world:saveSnapshot({ format = "table" }).snapshot
+
+            audio:setMasterGain(1.0)
+            audio:setMuted(false)
+            audio:setGroupGain("music", 1.0)
+            audio:setGroupMuted("sfx", false)
+            audio:resumeGroup("ambience")
+
+            world:loadSnapshot(saved)
+
+            assert.are.equal(0.3, audio:masterGain(),
+                "none of this is in the world, so nothing else would carry it")
+            assert.is_true(audio:muted())
+            assert.are.equal(0, backend.mixerGain)
+            assert.are.equal(0.25, audio:groupGain("music"))
+            assert.is_true(audio:groupMuted("sfx"))
+            assert.is_true(audio:groupPaused("ambience"))
+            audio:destroy()
+        end)
+
+        it("puts a group the snapshot does not name back to its defaults",
+            function()
+            local audio, _, _, world = scene()
+            local saved = world:saveSnapshot({ format = "table" }).snapshot
+
+            audio:setGroupGain("menu", 0.1)
+            audio:setGroupMuted("menu", true)
+            audio:pauseGroup("menu")
+            world:loadSnapshot(saved)
+
+            assert.are.equal(1.0, audio:groupGain("menu"),
+                "a load is the saved state, not the saved state merged over "
+                    .. "whatever this run had set")
+            assert.is_false(audio:groupMuted("menu"))
+            assert.is_false(audio:groupPaused("menu"))
+            audio:destroy()
+        end)
+
+        it("reaches the voices already sounding", function()
+            local audio, clip, backend, world = scene()
+            audio:setGroupGain("sfx", 0.25)
+            local saved = world:saveSnapshot({ format = "table" }).snapshot
+
+            audio:setGroupGain("sfx", 1.0)
+            audio:play(clip, { gain = 1.0, group = "sfx" })
+            assert.are.equal(1.0, backend.tracks[1].gain)
+
+            world:loadSnapshot(saved)
+            assert.are.equal(0.25, backend.tracks[1].gain,
+                "a restored level that only reached later sounds would leave "
+                    .. "what is playing at the wrong volume")
+            audio:destroy()
+        end)
+
+        it("leaves keyed limits to the build rather than to the file",
+            function()
+            local audio, _, _, world = scene()
+            audio:setLimit("hit", { voices = 3 })
+            local saved = world:saveSnapshot({ format = "table" }).snapshot
+
+            -- A limit is a rule the build states at startup beside the clip
+            -- it governs. Restoring one would let an old save override a rule
+            -- the build has since changed.
+            audio:setLimit("hit", { voices = 1 })
+            world:loadSnapshot(saved)
+            assert.are.equal(1, audio:limit("hit").voices)
+            audio:destroy()
+        end)
+    end)
+
+    describe("the debug surface", function()
+        it("reports the mixer, the clips and the voices sounding", function()
+            local audio, clip, _, world = scene()
+            mcpTools.bind(nil, world)
+
+            audio:setMasterGain(0.5)
+            audio:setGroupGain("sfx", 0.25)
+            audio:setGroupMuted("music", true)
+            audio:pauseGroup("ambience")
+            audio:setLimit("hit", { voices = 3, cooldown = 0.05 })
+            local voice = audio:play(clip, { group = "sfx", key = "hit" })
+
+            local result = callTool("audio")
+            assert.is_falsy(result.isError, tostring(result.content
+                and result.content[1] and result.content[1].text))
+            local reported = result.structuredContent
+
+            assert.is_true(reported.available)
+            assert.are.equal(0.5, reported.masterGain)
+            assert.is_false(reported.muted)
+            assert.are.equal(1, reported.sounding)
+            assert.are.equal(0, reported.loading)
+
+            local groups = {}
+            for _, group in ipairs(reported.groups) do
+                groups[group.name] = group
+            end
+            assert.are.equal(0.25, groups.sfx.gain)
+            assert.are.equal(1, groups.sfx.voices)
+            assert.is_true(groups.music.muted)
+            assert.is_true(groups.ambience.paused,
+                "a group holding nothing yet still holds what starts")
+
+            assert.are.equal(1, #reported.voices)
+            assert.are.equal(voice, reported.voices[1].handle,
+                "the handle stop and playing take, so what this shows can be "
+                    .. "acted on")
+            assert.are.equal(FIXTURE, reported.voices[1].clip)
+            assert.are.equal("sfx", reported.voices[1].group)
+
+            local keys = {}
+            for _, key in ipairs(reported.keys) do keys[key.key] = key end
+            assert.are.equal(3, keys.hit.voices)
+            assert.are.equal(1, keys.hit.count)
+
+            assert.are.equal(FIXTURE, reported.clips[1].path)
+            assert.are.equal("ready", reported.clips[1].status)
+            audio:destroy()
+        end)
+
+        it("says why rather than failing when no audio is installed",
+            function()
+            mcpTools.bind(nil, tecs.newWorld())
+            local result = callTool("audio")
+            assert.is_true(result.isError)
+            assert.is_truthy(result.content[1].text:find("no audio", 1, true))
+        end)
+    end)
+
     describe("no output", function()
         it("keeps working when no mixer opens", function()
             local backend = recorder({ silent = true })
@@ -986,8 +1363,13 @@ describe("audio", function()
             assert.are.equal(0, #backend.tracks)
             audio:update(1 / 60)
             audio:setMasterGain(0.5)
+            audio:setMuted(true)
             audio:setGroupGain("sfx", 0.5)
+            audio:setGroupMuted("sfx", true)
             audio:pauseGroup("sfx")
+            assert.is_true(audio:groupPaused("sfx"),
+                "the settings are recorded whether or not there is an output "
+                    .. "to send them to, so a snapshot carries them either way")
             audio:resumeGroup("sfx")
             audio:stopGroup("sfx")
             audio:stopAll()

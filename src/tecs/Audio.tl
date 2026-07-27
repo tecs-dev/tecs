@@ -37,6 +37,17 @@
 --- these at once, and not twice inside fifty milliseconds", which is what keeps
 --- forty enemies dying together from playing forty identical sounds.
 ---
+--- **A group's settings outlive the voices in it.** A gain, a mute and a pause
+--- are recorded against the name and consulted when a voice starts, so a sound
+--- that begins after "hold every effect for the menu" is held rather than
+--- heard. The mixer cannot answer that on its own: `MIX_PauseTag` reaches what
+--- is sounding at the moment it is called and nothing that starts afterwards.
+---
+--- **The mixer's own state is in the snapshot.** The master gain, the master
+--- mute and every group's gain, mute and pause are a game's state as much as
+--- an entity is, and none of them is in the world, so `install` adds a
+--- snapshot handler that carries them.
+---
 --- **Position is passed through and nothing else.** See `Sound` for what a
 --- caller still has to do by hand.
 
@@ -113,6 +124,34 @@ local function clipId(path: string): integer
 end
 
 -------------------------------------------------------------------------------
+-- Interned group names
+-------------------------------------------------------------------------------
+
+--- A group's name is its identity, for the same reason a clip's path is: the
+--- integer a component carries is handed out in the order names are first
+--- asked for, and that order is not something a snapshot can rely on
+--- reproducing.
+local groupIds: {string: integer} = {}
+local groupNames: {integer: string} = {}
+local groupCount = 0
+
+--- Index of a group name, assigning one the first time it is seen.
+---
+--- Indices start at one, so zero is the index of no group at all and that is
+--- what a `Sound` carries until something names one.
+local function groupId(name: string): integer
+    if name == nil or name == "" then
+        error("tecs: a group name cannot be empty", 2)
+    end
+    local id = groupIds[name]
+    if id ~= nil then return id end
+    groupCount = groupCount + 1
+    groupIds[name] = groupCount
+    groupNames[groupCount] = name
+    return groupCount
+end
+
+-------------------------------------------------------------------------------
 -- The component
 -------------------------------------------------------------------------------
 
@@ -141,10 +180,17 @@ end
 ---    move with the camera has no world position to convert, and the answer is
 ---    to leave `spatial` at zero.
 ---
---- No group is named here. A group is a string, an FFI component holds
---- numbers, and interning group names into a second integer space would make
---- the mixer's tags something a snapshot had to reproduce. A game that wants an
---- entity's sound in a group starts it with `play` and holds the handle.
+--- A group is named the way a clip is. An FFI component holds numbers, so what
+--- `group` carries is an interned index from `Audio.groupId` rather than the
+--- mixer's tag itself, and `Audio.groupName` reads it back. The index is this
+--- run's and no other, which is why `serialize` writes the name: an integer in
+--- a save file would name a different group the next time a build interned its
+--- names in a different order.
+---
+--- `clip`, `loop`, `pitch` and `group` are read when a voice starts and not
+--- afterwards; `gain` and the position are followed for as long as it sounds.
+--- So moving a sound into another group is done by setting `group` and
+--- clearing `voice`, which is the same thing changing its clip takes.
 local record Sound is Component
     --- Clip index, from `Audio.clipId`. Zero plays nothing.
     clip: number
@@ -159,6 +205,8 @@ local record Sound is Component
     x: number
     y: number
     z: number
+    --- Group index, from `Audio.groupId`. Zero joins no group.
+    group: number
     --- Voice the audio pass assigned: zero before it starts, negative once a
     --- one-shot has finished. Written by the engine; setting it back to zero
     --- is how a game asks for the sound again.
@@ -177,10 +225,14 @@ ecs.newFFIComponent({
         { "x", "float" },
         { "y", "float" },
         { "z", "float" },
+        { "group", "int32_t" },
         { "voice", "int32_t" },
     },
-    defaults = { 0, 1.0, 0, 1.0, 0, 0.0, 0.0, 0.0, 0 },
+    defaults = { 0, 1.0, 0, 1.0, 0, 0.0, 0.0, 0.0, 0, 0 },
     serialize = function(instance: Sound): {string: any}
+        -- Both the clip and the group cross as the names they were interned
+        -- from. An index is this run's numbering, and a file that carried one
+        -- would name whatever the next run happened to intern in its place.
         return {
             clip = clipPaths[instance.clip as integer],
             gain = instance.gain,
@@ -190,12 +242,16 @@ ecs.newFFIComponent({
             x = instance.x,
             y = instance.y,
             z = instance.z,
+            group = groupNames[instance.group as integer],
         }
     end,
     deserialize = function(_world: ecs.World, data: {string: any}): Sound
         local path = data.clip as string
         local clip = 0
         if path ~= nil and path ~= "" then clip = clipId(path) end
+        local name = data.group as string
+        local group = 0
+        if name ~= nil and name ~= "" then group = groupId(name) end
         -- The voice is not restored. A snapshot records that an entity has a
         -- sound, not how far through it the mixer had got, so it starts.
         return Sound(clip, data.gain as number,
@@ -203,7 +259,7 @@ ecs.newFFIComponent({
             (data.pitch as number) or 1.0,
             (data.spatial as boolean) and 1 or 0,
             (data.x as number) or 0.0, (data.y as number) or 0.0,
-            (data.z as number) or 0.0)
+            (data.z as number) or 0.0, group)
     end,
 })
 
@@ -329,6 +385,30 @@ local record Audio
         cooldown: number
     end
 
+    --- One sounding voice, as something looking in reads it.
+    record VoiceInfo
+        --- The handle a game holds, which `playing` and `stop` take.
+        handle: integer
+        --- Path of the clip it is reading, or nil once it has been released.
+        clip: string
+        --- What the voice asked for, before its group and the master.
+        gain: number
+        --- What reached the track, the group's gain and mute included.
+        applied: number
+        pitch: number
+        group: string
+        key: string
+        paused: boolean
+        --- Whether a fade-out is running it down.
+        stopping: boolean
+        --- Whether a `Sound` component started this rather than `play`.
+        owned: boolean
+        spatial: boolean
+        x: number
+        y: number
+        z: number
+    end
+
     Sound: Sound
 
     --- Whether an output opened. False on a machine with no sound, where
@@ -344,7 +424,10 @@ local record Audio
     _sounding: integer
     _streamMs: integer
     _masterGain: number
+    _muted: boolean
     _groupGains: {string: number}
+    _groupMuted: {string: boolean}
+    _groupPaused: {string: boolean}
     _limits: {string: Audio.Limit}
     _buckets: {string: Bucket}
     _clips: {integer: Clip}
@@ -370,6 +453,19 @@ end
 --- Path a clip index stands for, or nil when it names nothing.
 function Audio.clipPath(id: integer): string
     return clipPaths[id]
+end
+
+--- Index of a group name, assigning one the first time it is seen.
+---
+--- What a `Sound` carries in `group`. The index means nothing outside the run
+--- that handed it out, so it belongs in a component and never in a file.
+function Audio.groupId(name: string): integer
+    return groupId(name)
+end
+
+--- Name a group index stands for, or nil when it names nothing.
+function Audio.groupName(id: integer): string
+    return groupNames[id]
 end
 
 --- The decoders this build linked, in the mixer's own order.
@@ -423,7 +519,10 @@ function Audio.create(config?: Audio.Config): Audio
 
     self._sounding = 0
     self._masterGain = 1.0
+    self._muted = false
     self._groupGains = {}
+    self._groupMuted = {}
+    self._groupPaused = {}
     self._limits = {}
     self._buckets = {}
     self._clips = {}
@@ -586,11 +685,13 @@ local function voiceOf(self: Audio, handle: integer): Voice
     return voice
 end
 
---- The gain a voice should carry, group included. The master is the mixer's
---- own number and is not multiplied in here.
+--- The gain a voice should carry, its group's gain and mute included. The
+--- master is the mixer's own number and is not multiplied in here.
 local function composedGain(self: Audio, voice: Voice): number
-    if voice.group == nil then return voice.gain end
-    local scale = self._groupGains[voice.group]
+    local group = voice.group
+    if group == nil then return voice.gain end
+    if self._groupMuted[group] then return 0.0 end
+    local scale = self._groupGains[group]
     if scale == nil then return voice.gain end
     return voice.gain * scale
 end
@@ -744,6 +845,16 @@ local function start(self: Audio, clip: Audio.Clip, options: Audio.PlayOptions,
         return 0
     end
 
+    -- A group's pause is a standing instruction rather than something the
+    -- mixer keeps: `MIX_PauseTag` reaches the tracks sounding when it is
+    -- called and explicitly ignores the rest, so a voice starting into a
+    -- paused group is held here or it would be the one sound the menu missed.
+    -- After the play, because a track that has not started cannot be paused.
+    if voice.group ~= nil and self._groupPaused[voice.group] then
+        voice.paused = true
+        self._backend.pause(voice.track)
+    end
+
     if key ~= nil then
         local bucket = self._buckets[key]
         if bucket == nil then
@@ -865,19 +976,52 @@ end
 
 --- Scales everything. One number on the mixer, so this costs the same whether
 --- one voice is sounding or every voice is.
+---
+--- Setting this while muted changes the level a later unmute returns to and
+--- nothing that is audible now, which is what a volume slider moved with the
+--- sound off should do.
 function Audio:setMasterGain(gain: number)
     self._masterGain = gain
-    if self._mixer ~= nil then self._backend.setMixerGain(self._mixer, gain) end
+    if self._mixer ~= nil and not self._muted then
+        self._backend.setMixerGain(self._mixer, gain)
+    end
 end
 
---- The master gain.
+--- The master gain, whether or not a mute is holding it down.
 function Audio:masterGain(): number
     return self._masterGain
+end
+
+--- Silences everything without discarding the master gain.
+---
+--- The mixer's own number again, so it costs one call however many voices are
+--- sounding. It does not fan out to the groups: `groupMuted` answers "is this
+--- group silenced", and writing every group's bit here would overwrite the
+--- answers an unmute has to put back. That is the same loss as setting a gain
+--- to zero, which is what a mute exists instead of.
+function Audio:setMuted(muted: boolean)
+    local wanted = muted == true
+    if self._muted == wanted then return end
+    self._muted = wanted
+    if self._mixer ~= nil then
+        self._backend.setMixerGain(self._mixer,
+            wanted and 0.0 or self._masterGain)
+    end
+end
+
+--- Whether a master mute is holding the output down.
+function Audio:muted(): boolean
+    return self._muted
 end
 
 --- Voices sounding right now, including paused and fading ones.
 function Audio:sounding(): integer
     return self._sounding
+end
+
+--- Voices that may sound at once, as `maxVoices` configured it.
+function Audio:maxVoices(): integer
+    return #self._voices
 end
 
 -------------------------------------------------------------------------------
@@ -899,12 +1043,44 @@ function Audio:setGroupGain(name: string, gain: number)
 end
 
 --- A group's gain. 1 for one nothing has set.
+---
+--- The level, not what is audible: a muted group still answers with the gain
+--- an unmute would put back.
 function Audio:groupGain(name: string): number
     return self._groupGains[name] or 1.0
 end
 
---- Holds every voice in a group where it is.
+--- Silences a group without discarding the level it was set to.
+---
+--- Bookkeeping over the gains that already exist rather than anything the
+--- mixer is told about: every voice in the group is composed at zero while
+--- this holds, and an unmute puts each one back at its own gain times
+--- `groupGain(name)`.
+function Audio:setGroupMuted(name: string, muted: boolean)
+    local wanted = muted == true
+    if (self._groupMuted[name] == true) == wanted then return end
+    self._groupMuted[name] = wanted or nil
+    for slot = 1, #self._voices do
+        local voice = self._voices[slot]
+        if voice.sounding and voice.group == name then
+            applyGain(self, voice)
+        end
+    end
+end
+
+--- Whether a group is muted.
+function Audio:groupMuted(name: string): boolean
+    return self._groupMuted[name] == true
+end
+
+--- Holds every voice in a group where it is, and every voice that joins it
+--- later.
+---
+--- Recorded as well as sent, because the mixer's tag pause reaches what is
+--- sounding when it is called: without the record, a sound started into a
+--- paused group would be the one thing still heard.
 function Audio:pauseGroup(name: string)
+    self._groupPaused[name] = true
     if self._mixer == nil then return end
     self._backend.pauseTag(self._mixer, name)
     for slot = 1, #self._voices do
@@ -913,14 +1089,52 @@ function Audio:pauseGroup(name: string)
     end
 end
 
---- Lets a paused group carry on.
+--- Lets a paused group carry on, and lets later joiners start sounding.
 function Audio:resumeGroup(name: string)
+    self._groupPaused[name] = nil
     if self._mixer == nil then return end
     self._backend.resumeTag(self._mixer, name)
     for slot = 1, #self._voices do
         local voice = self._voices[slot]
         if voice.sounding and voice.group == name then voice.paused = false end
     end
+end
+
+--- Whether a group is holding its voices, including the ones not started yet.
+function Audio:groupPaused(name: string): boolean
+    return self._groupPaused[name] == true
+end
+
+--- Appends a name to `names` unless `seen` already holds it.
+local function note(names: {string}, seen: {string: boolean}, name: string)
+    if seen[name] then return end
+    seen[name] = true
+    names[#names + 1] = name
+end
+
+--- Every group with a gain, a mute or a pause recorded against it.
+local function settledGroups(self: Audio, names: {string},
+                             seen: {string: boolean})
+    for name in pairs(self._groupGains) do note(names, seen, name) end
+    for name in pairs(self._groupMuted) do note(names, seen, name) end
+    for name in pairs(self._groupPaused) do note(names, seen, name) end
+end
+
+--- Every group this instance knows of: one whose gain, mute or pause has been
+--- set, and one a sounding voice is in. Sorted, so a caller reading it twice
+--- reads it the same way.
+function Audio:groups(): {string}
+    local names: {string} = {}
+    local seen: {string: boolean} = {}
+    settledGroups(self, names, seen)
+    for slot = 1, #self._voices do
+        local voice = self._voices[slot]
+        if voice.sounding and voice.group ~= nil then
+            note(names, seen, voice.group)
+        end
+    end
+    table.sort(names)
+    return names
 end
 
 --- Ends every voice in a group, over `fadeOut` seconds if that is given.
@@ -972,6 +1186,68 @@ end
 function Audio:keyCount(key: string): integer
     local bucket = self._buckets[key]
     return bucket ~= nil and bucket.count or 0
+end
+
+--- Every key with a limit set or a voice counted against it, sorted.
+function Audio:keys(): {string}
+    local names: {string} = {}
+    local seen: {string: boolean} = {}
+    for name in pairs(self._limits) do
+        seen[name] = true
+        names[#names + 1] = name
+    end
+    for name in pairs(self._buckets) do
+        if not seen[name] then names[#names + 1] = name end
+    end
+    table.sort(names)
+    return names
+end
+
+-------------------------------------------------------------------------------
+-- Looking in
+-------------------------------------------------------------------------------
+
+--- Every clip this instance has loaded, in the order they were asked for.
+---
+--- For introspection: it builds a list per call, so nothing on a frame's path
+--- should read it.
+function Audio:clips(): {Audio.Clip}
+    local ids: {integer} = {}
+    for id in pairs(self._clips) do ids[#ids + 1] = id end
+    table.sort(ids)
+    local list: {Audio.Clip} = {}
+    for index = 1, #ids do list[index] = self._clips[ids[index]] end
+    return list
+end
+
+--- Every sounding voice, paused and fading ones included.
+---
+--- For introspection, on the same terms as `clips`. The handles it reports are
+--- the ones `playing` and `stop` take, so what this shows can be acted on.
+function Audio:voices(): {Audio.VoiceInfo}
+    local list: {Audio.VoiceInfo} = {}
+    for slot = 1, #self._voices do
+        local voice = self._voices[slot]
+        if voice.sounding then
+            list[#list + 1] = {
+                handle = voice.generation * SLOT_SPAN + slot,
+                clip = voice.clip ~= nil and voice.clip.path or nil,
+                gain = voice.gain,
+                applied = voice.applied,
+                pitch = voice.pitch,
+                group = voice.group,
+                key = voice.key,
+                paused = voice.paused,
+                stopping = voice.stopping,
+                owned = voice.owned,
+                spatial = voice.spatial,
+                x = voice.x,
+                y = voice.y,
+                z = voice.z,
+            }
+        end
+    end
+    return list
 end
 
 -------------------------------------------------------------------------------
@@ -1038,6 +1314,11 @@ local function reconcile(self: Audio, sounds: ecs.Query)
                 rowOptions.x = entry.x as number
                 rowOptions.y = entry.y as number
                 rowOptions.z = entry.z as number
+                -- nil for index zero, which is what "no group" reads as. Only
+                -- rows that are starting pay for the lookup: a group is read
+                -- once, like the clip, and a sounding voice keeps the one it
+                -- joined.
+                rowOptions.group = groupNames[entry.group as integer]
                 local started = start(self,
                     self._clips[entry.clip as integer], rowOptions, true)
                 if started ~= 0 then
@@ -1079,12 +1360,107 @@ local function reconcile(self: Audio, sounds: ecs.Query)
     end
 end
 
---- Adds the system that plays `Sound` components.
+-------------------------------------------------------------------------------
+-- The mixer in a snapshot
+-------------------------------------------------------------------------------
+
+--- The mixer state a snapshot carries.
+---
+--- The master gain and mute, and every group's gain, mute and pause. A player
+--- who turned the music down and held the effects for a menu expects to find
+--- it that way after a load, and none of it is in the world, so nothing else
+--- would carry it.
+---
+--- Keyed limits are not here, and neither is what a bucket holds. A limit is a
+--- rule the build states at startup beside the clip it governs, so restoring
+--- one from a file would let an old save override a rule the build has since
+--- changed. A bucket is derived from voices, and a snapshot restores no voices:
+--- a `Sound` comes back with its voice cleared and starts again.
+local function saveMixer(self: Audio): {string: any}
+    local groups: {string: any} = {}
+    for _, name in ipairs(self:groups()) do
+        local gain = self._groupGains[name]
+        local muted = self._groupMuted[name] == true
+        local paused = self._groupPaused[name] == true
+        -- A group that only has voices in it has nothing set, and writing its
+        -- defaults out would make a save grow with what a run happened to play.
+        if gain ~= nil or muted or paused then
+            groups[name] = {
+                gain = gain or 1.0, muted = muted, paused = paused,
+            }
+        end
+    end
+    return {
+        masterGain = self._masterGain,
+        muted = self._muted,
+        groups = groups,
+    }
+end
+
+--- Puts saved mixer state back, through the ordinary setters.
+---
+--- Every group this instance knows about is visited, not only the ones the
+--- snapshot names, so loading a save made before a group was ever touched puts
+--- that group back to its defaults rather than leaving this run's settings on
+--- it. Going through the setters is what makes the voices already sounding
+--- follow, since each one recomposes its gain and the tags are told about a
+--- pause.
+local function loadMixer(self: Audio, value: {string: any})
+    local saved = (value ~= nil and value.groups or nil) as {string: any}
+
+    -- The groups this run has settings on, and the ones the file names. A
+    -- group that only ever had voices in it carries no settings, so there is
+    -- nothing on it to put back.
+    local names: {string} = {}
+    local seen: {string: boolean} = {}
+    settledGroups(self, names, seen)
+    if saved ~= nil then
+        for name in pairs(saved) do note(names, seen, name) end
+    end
+
+    for _, name in ipairs(names) do
+        local entry = (saved ~= nil and saved[name] or nil) as {string: any}
+        self:setGroupGain(name,
+            entry ~= nil and (entry.gain as number) or 1.0)
+        self:setGroupMuted(name, entry ~= nil and entry.muted == true)
+        if entry ~= nil and entry.paused == true then
+            self:pauseGroup(name)
+        else
+            self:resumeGroup(name)
+        end
+    end
+
+    self:setMasterGain(
+        value ~= nil and (value.masterGain as number) or 1.0)
+    self:setMuted(value ~= nil and value.muted == true)
+end
+
+-------------------------------------------------------------------------------
+-- The plugin
+-------------------------------------------------------------------------------
+
+--- The audio each world had installed into it. Weak, so a world that has gone
+--- takes its entry with it.
+local installed <const>: {ecs.World: Audio} =
+    setmetatable({}, {__mode = "k"} as metatable<{ecs.World: Audio}>)
+
+--- The audio installed into a world, or nil when none has been.
+---
+--- What lets something holding only the world reach the mixer, which is what
+--- the debug tools have and what a game writing its own systems often has too.
+function Audio.of(world: ecs.World): Audio
+    return installed[world]
+end
+
+--- Adds the system that plays `Sound` components, and the snapshot handler
+--- that carries the mixer.
 ---
 --- `update` is not added here. Reaping voices is not world work: it has to
 --- keep happening while the world is paused, and an application drives it from
 --- the iteration instead.
 function Audio:install(world: ecs.World)
+    installed[world] = self
+
     local sounds = world:query({
         name = "tecs.Sounds",
         include = { Sound },
@@ -1096,6 +1472,16 @@ function Audio:install(world: ecs.World)
         -- so a sound spawned this frame starts this frame.
         phase = ecs.phases.PostUpdate,
         run = function() reconcile(self, sounds) end,
+    })
+
+    world:addSnapshotHandler({
+        name = "tecs.audio",
+        save = function(_world: ecs.World): any
+            return saveMixer(self)
+        end,
+        load = function(_world: ecs.World, value: any)
+            loadMixer(self, value as {string: any})
+        end,
     })
 end
 

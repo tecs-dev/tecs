@@ -62,7 +62,8 @@ Working today:
 - Shaders packaged as artifacts, so a release links no compiler
 - A platform contract with seven seams, and an SDL implementation of all seven
 - A debug server over HTTP that survives a crash in game code, with tools that
-  read and write the world
+  read and write the world, capture the frame, and report what the mixer is
+  doing
 - Per-stage frame timing with percentiles, which is how any of the numbers in
   this file were arrived at, and event-to-photon latency reported through the
   same stages
@@ -80,9 +81,10 @@ Working today:
   within it, and each able to sit in screen pixels, in virtual coordinates,
   outside the camera's zoom, at its own parallax, or unlit
 - Sound: clips read on the asset worker through SDL_mixer's decoders, a voice
-  per mixer track, groups by tag, keyed limits with cooldowns, fades, pitch,
-  loop points, streaming for long clips, and a `Sound` component that plays for
-  as long as its entity exists
+  per mixer track, groups by tag with a gain, a mute and a sticky pause each,
+  keyed limits with cooldowns, fades, pitch, loop points, streaming for long
+  clips, and a `Sound` component that names a group and plays for as long as
+  its entity exists
 
 Not built yet: shadows, post-processing, UI, tiled maps and multi-camera.
 
@@ -269,12 +271,30 @@ separate multiplier: it writes each tagged track's own gain, and using it for a
 group would overwrite what the voice asked for.
 
 Groups are the mixer's tags. A voice names one on `play`, and the group's gain,
-pause, resume and stop reach every voice carrying it. Keyed limits are not:
-`setLimit` caps how many voices a key may hold at once and how soon after one
-starts another may, which is what keeps forty enemies dying together from
+mute, pause, resume and stop reach every voice carrying it. Keyed limits are
+not: `setLimit` caps how many voices a key may hold at once and how soon after
+one starts another may, which is what keeps forty enemies dying together from
 playing forty identical sounds, and SDL_mixer has no notion of it. The two
 compose without either knowing the other, because a group says where a gain
 comes from and a key says how many the mix will carry.
+
+**A group's settings outlive the voices in it.** A gain, a mute and a pause are
+recorded against the name and consulted when a voice starts, so a sound that
+begins after "hold every effect for the menu" is held rather than heard.
+`MIX_PauseTag` cannot answer that alone: it reaches the tracks sounding at the
+moment it is called and explicitly ignores the rest. A mute is bookkeeping over
+the gains that already exist and the mixer is never told about it, because
+setting a group's gain to zero would lose the level an unmute has to put back.
+The master mute is the exception that proves it: it goes to the mixer's own
+number, the same place the master gain goes, and does not fan out to the groups,
+whose mutes are the answers a later unmute needs.
+
+None of that is in the world, so `Audio:install` adds a snapshot handler that
+carries the master gain, the master mute and every group's gain, mute and
+pause. Keyed limits stay out of it. A limit is a rule the build states at
+startup beside the clip it governs, so restoring one from a file would let an
+old save override a rule the build has since changed, and what a limit's bucket
+holds is derived from voices a snapshot does not restore.
 
 The output is the platform's default rather than a device chosen by name, so
 SDL migrates the logical device when the system default changes and plugged-in
@@ -286,6 +306,16 @@ next audio pass and stops when the component or the entity goes away. One walk
 per frame starts what has not started, marks what has finished, and releases
 any voice no component referred to, which is what makes despawning something
 mid-sound do the obvious thing without an observer on every archetype.
+
+A `Sound` names its group the way it names its clip. The component is FFI and
+holds numbers, so `Sound.group` carries an interned index from `Audio.groupId`
+rather than the tag itself, and zero is no group. The index is one run's
+numbering and nothing else, which is why the component serializes the name: an
+integer in a save file would name whatever the next run happened to intern in
+its place. `clip`, `loop`, `pitch` and `group` are read when a voice starts and
+not afterwards, while `gain` and the position are followed for as long as it
+sounds, so moving a sound to another group means setting `group` and clearing
+`voice`.
 
 Position is passed to the mixer and nothing more. `Sound.spatial` switches it
 on and `x`, `y` and `z` are read as SDL_mixer reads them: a right-handed system
@@ -1112,7 +1142,7 @@ src/tecs/Renderer.tl      the world-to-GPU bridge, owning both halves below
 src/tecs/Extractor.tl     the world-facing half: a world to a frame packet
 src/tecs/Backend.tl       the device-facing half: a frame packet to a frame
 src/tecs/FramePacket.tl   what crosses between the two
-src/tecs/Audio.tl         clips, voices, and the Sound component
+src/tecs/Audio.tl         clips, voices, groups, and the Sound component
 src/tecs/physics/         Box2D binding and its world plugin
 src/tecs/sequence/        the sequencer, and the tween runtime inside it
 spec/                       busted suite
