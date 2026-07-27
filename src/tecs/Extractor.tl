@@ -288,6 +288,16 @@ end
 --- The upload itself belongs to whoever owns the device. What comes back is
 --- the answer this side resolves names with, which is plain numbers and is
 --- what a snapshot's name has to be turned into again on the next run.
+--- Whether archetype runs are laid out with room to grow.
+---
+--- What a caller does with the answer is diagnose a layout: a scene that
+--- expected reservations and did not get them sized its capacity too tightly
+--- to leave anything to reserve out of, which looks like the setting being
+--- ignored rather than the buffer being full.
+function Extractor:reservesRuns(): boolean
+    return self._reserve
+end
+
 function Extractor:registerImage(image: integer, region: TextureArray.Region)
     self._slotByImage[image] = region.layer
     self._regionByImage[image] = region

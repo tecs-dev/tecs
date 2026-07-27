@@ -79,6 +79,22 @@ local record Application
         watch: watch.Config
         capacity: integer
         maxEntities: integer
+        --- Give each archetype a run with room to grow rather than packing the
+        --- runs end to end. Defaults to false, which packs.
+        ---
+        --- Packed, a run cannot grow without shifting every run after it, so a
+        --- spawn anywhere rewrites every instance in the scene. Reserved, it
+        --- grows into its own slack and the archetypes around it are left
+        --- alone. What it costs is that the cull is dispatched over the slack
+        --- as well as over the rows, and that reserving needs headroom: a
+        --- `capacity` sized to exactly the population leaves nothing to
+        --- reserve out of and the setting does nothing.
+        ---
+        --- Worth it for a scene that spawns into one archetype while most of
+        --- the world sits in others, which is what a game with a level and
+        --- projectiles in it looks like. Worth nothing for a scene held in a
+        --- single archetype, where there is no other run to leave alone.
+        reserveRuns: boolean
         --- Stops after this many iterations. Lets an automated run drive a
         --- real window to completion without a human closing it.
         maxFrames: integer
@@ -188,6 +204,7 @@ function Application:_init(): boolean
         self.device:getSwapchainFormat(), {
             ambient = config.ambient,
             capacity = config.capacity,
+            reserveRuns = config.reserveRuns,
         })
     self.renderer:install(self.world)
 

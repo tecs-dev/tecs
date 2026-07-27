@@ -243,6 +243,11 @@ end
 ---
 --- UVs are fractions of the image rather than of the cell it sits in. Omitted,
 --- they select the whole image. Fails on a name nothing is registered under.
+--- Whether archetype runs are laid out with room to grow.
+function Renderer:reservesRuns(): boolean
+    return self._extractor:reservesRuns()
+end
+
 function Renderer:sprite(name: string, u0?: number, v0?: number,
                          u1?: number, v1?: number): components.Sprite
     return self._extractor:sprite(name, u0, v0, u1, v1)

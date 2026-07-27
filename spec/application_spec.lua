@@ -70,4 +70,19 @@ describe("Application", function()
         assert.is_true(app:_shutdown())
         assert.is_false(assets.installed())
     end)
+
+    it("hands the renderer the run reservation it was configured with", function()
+        -- The setting decides how extraction lays archetype runs out, and the
+        -- only way a game reaches it is through this config: the renderer is
+        -- built here and never handed to the game before it exists.
+        local packed = build({})
+        assert.is_true(packed:_init())
+        assert.is_false(packed.renderer:reservesRuns())
+        packed:_shutdown()
+
+        local reserved = build({ reserveRuns = true })
+        assert.is_true(reserved:_init())
+        assert.is_true(reserved.renderer:reservesRuns(), "a game asking for reserved runs gets them")
+        reserved:_shutdown()
+    end)
 end)
