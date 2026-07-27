@@ -1,10 +1,10 @@
 --- Turns a frame packet into a submitted frame.
 ---
---- The device-facing half of rendering, and the half that stays on the main
---- thread when the pipeline splits. It owns the device buffers, the staging
---- slots, the cull, the deferred pass graph and the image array. It knows
---- nothing about worlds, queries, archetypes or components: everything it draws
---- arrives as bytes already in staging plus a packet saying what changed.
+--- The device-facing half of rendering. It owns the device buffers, the
+--- staging slots, the cull, the deferred pass graph and the image array. It
+--- knows nothing about worlds, queries, archetypes or components: everything it
+--- draws arrives as bytes already in staging plus a packet saying what changed,
+--- so it is testable against a device with no world behind it.
 ---
 --- Images live in one array texture, so the texture is a per-instance integer
 --- and the whole scene is one draw. That is also what frees the instance

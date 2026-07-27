@@ -1237,21 +1237,25 @@ world, and a physics plugin.
 `Renderer` is the bridge, and the only module that knows about both archetypes
 and GPU buffers. Everything below it is renderer; above it is Tecs.
 
-It is two halves and the seam between them, divided along the line the
-simulation and render threads will fall either side of. `Extractor` is
-world-facing: queries, archetype runs, relayout detection, dirty gating,
-producers and the interpolation alpha, writing instances straight into mapped
-staging and never touching a device. `Backend` is device-facing: the buffers,
-the flush, the mark/scan/compact cull, the deferred pass graph and the image
-array, and it names no world, query, archetype or component.
+It is two halves and the seam between them. `Extractor` is world-facing:
+queries, archetype runs, relayout detection, dirty gating, producers and the
+interpolation alpha, writing instances straight into mapped staging and never
+touching a device. `Backend` is device-facing: the buffers, the flush, the
+mark/scan/compact cull, the deferred pass graph and the image array, and it
+names no world, query, archetype or component.
+
+Both halves run on the main thread, one after the other, and the seam is not a
+thread boundary. It earns its place without being one: a world extracts with no
+device behind it, which is what a headless run is; the backend is exercised
+against a device with no world behind it; the dirty bits a frame consumes are
+consumed in one place rather than wherever a draw happened to read them; and no
+GPU handle ever lands in ECS storage.
 
 `FramePacket` is everything that crosses. It carries the staging slot that was
 written, the byte ranges within it, the counts, a copy of the camera and the
 frame's lights, and it carries no instance bytes at all: those are already in
 the staging the backend owns, and copying them into a packet would be the
-intermediate copy the design exists to avoid. Nothing in it refers to a Lua
-object, so it becomes a native slot struct rather than being rewritten when the
-two halves stop sharing a heap.
+intermediate copy the design exists to avoid.
 
 `Renderer` is what still sees both. It owns the packet, rotates the staging
 slot, hands the backend's mapped addresses to the extractor, and centres the
@@ -2470,9 +2474,11 @@ is fast, so the boundary stopped paying for itself. Storage that a GPU can read
 directly is the reason to merge, and it is not expressible with the two apart.
 Headless worlds keep working: GPU-backed storage is opt-in per component.
 
-**Workers will be the only threading path.** LuaJIT FFI callbacks invoked from
-threads the VM did not create are unsafe, so raw thread creation will not be
-exposed even though the symbols are bound.
+**Workers are the only threading path.** LuaJIT FFI callbacks invoked from
+threads the VM did not create are unsafe, so raw thread creation is not exposed
+even though the symbols are bound. The frame itself is not split across
+threads: simulation, extraction and submission are one sequence on the main
+thread.
 
 ## Reaching native code
 

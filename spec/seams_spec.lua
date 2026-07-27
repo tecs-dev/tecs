@@ -35,9 +35,8 @@ local filesystem = require("tecs.platform.filesystem")
 
 -- The generated bindings. `tecs.ffi.loader` is deliberately not one: it finds
 -- and types libraries rather than being one, and the engine's own native code
--- reached through it -- the frame pipeline, the worker channels, the solver
--- pool -- ships with the engine on every target and is not a portability
--- question.
+-- reached through it -- the worker channels, the log sink, the solver pool --
+-- ships with the engine on every target and is not a portability question.
 local BINDINGS = { "box2d", "sdl3", "sdl3image", "sdl3mixer", "sdl3net", "shaderc", "spvc" }
 
 -- Every SDL entry point that reaches content, and the decoders that take a

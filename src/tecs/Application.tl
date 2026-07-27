@@ -542,9 +542,9 @@ function Application:_simulate(dt: number)
             if timing.enabled then
                 -- Simulation is the update without the extraction inside it.
                 -- The renderer's sync system runs in RenderFirst, so its cost
-                -- is in t1 - t0 and has to come back out: the two land on
-                -- opposite sides of the pipelined boundary, and a change that
-                -- moves cost between them is invisible if they are one number.
+                -- is in t1 - t0 and has to come back out: game work and
+                -- extraction are separate stages, and a change that moves cost
+                -- between them is invisible if they are one number.
                 timing.mark(SIMULATE, (t1 - t0) - self.renderer:extractSeconds())
                 timing.mark(ACQUIRE, t2 - t1)
                 timing.mark(RECORD, t3 - t2)

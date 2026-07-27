@@ -5,11 +5,10 @@
 --- It is expensive, it never touches the GPU, and it is lumpy, because the
 --- frame where a stack collapses costs far more than the one before it.
 ---
---- That makes this the benchmark the pipelining work has to be judged against.
---- Simulation and rendering are serialised today, so physics adds directly to
---- frame time; pipelined, the frame becomes the slower of the two and the
---- lumpiness is absorbed into the GPU's slack rather than landing on the
---- frame. Neither effect shows up on a scene whose simulation is a loop.
+--- That makes this the benchmark a frame-structure change has to be judged
+--- against. Simulation and rendering are serialised, so physics adds directly
+--- to frame time and every spike in it lands on the frame. Neither effect
+--- shows up on a scene whose simulation is a loop.
 ---
 --- Run it before and after any change to the frame structure. The numbers to
 --- compare are p50 and p95 together: an optimisation that improves the median
@@ -34,8 +33,8 @@ local Material <const> = tecs.components.Material
 local Renderable <const> = tecs.components.Renderable
 
 --- Dynamic bodies. The default is chosen so a frame costs enough that
---- simulation is the larger stage, which is the regime the pipelining work
---- exists for.
+--- simulation is the larger stage, which is the regime a frame-structure
+--- change has to survive.
 local BODIES <const> = math.floor(tonumber(os.getenv("BENCH_BODIES")) or 4000)
 
 --- Dropped in waves rather than all at once, so the scene passes through

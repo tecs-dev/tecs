@@ -154,15 +154,7 @@ set_target_properties(
 )
 target_link_libraries(cjson PRIVATE tecs::luajit)
 
-add_library(
-    tecs_worker
-    SHARED
-    native/worker.c
-    native/logsink.c
-    native/taskpool.c
-    native/framepipeline.c
-    native/luamods.c
-)
+add_library(tecs_worker SHARED native/worker.c native/logsink.c native/taskpool.c native/luamods.c)
 set_target_properties(tecs_worker PROPERTIES OUTPUT_NAME tecsworker LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 target_link_libraries(tecs_worker PRIVATE tecs::sdl3 tecs::luajit)
 # Box2D's headers, for the task callback types the pool is declared with. No
@@ -356,7 +348,6 @@ if(TECS_BUILD_LUA)
     tecs_cdef(worker worker.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
     tecs_cdef(logsink logsink.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
     tecs_cdef(taskpool taskpool.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
-    tecs_cdef(framepipeline framepipeline.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
 
     # Each library also gets a table of function pointers, taken at build
     # time. A target that cannot dlopen still links, and the engine calls
@@ -399,7 +390,6 @@ if(TECS_BUILD_LUA)
     tecs_registry(worker TecsWorkerApi tecs worker.h)
     tecs_registry(logsink TecsLogsinkApi tecs logsink.h)
     tecs_registry(taskpool TecsTaskpoolApi tecs taskpool.h)
-    tecs_registry(framepipeline TecsFramePipelineApi tecs framepipeline.h)
 
     # Shader compilation is a development capability. A release consumes
     # packaged artifacts, so a target built without it links no compiler and
@@ -466,7 +456,6 @@ if(TECS_BUILD_LUA)
             "${GEN}/workercdef.lua"
             "${GEN}/logsinkcdef.lua"
             "${GEN}/taskpoolcdef.lua"
-            "${GEN}/framepipelinecdef.lua"
             "${GEN}/sdl3cdef.lua"
             "${GEN}/sdl3imagecdef.lua"
             "${GEN}/sdl3netcdef.lua"

@@ -1,10 +1,10 @@
 --- Turns a world into a frame packet.
 ---
---- The world-facing half of rendering, and the half that moves to the
---- simulation thread when the pipeline splits. It touches queries, archetypes
---- and components, and it never touches a device: the staging it writes into
+--- The world-facing half of rendering. It touches queries, archetypes and
+--- components, and it never touches a device: the staging it writes into
 --- arrives as a pair of mapped pointers, and what it did with them leaves as
---- ranges in a packet.
+--- ranges in a packet. That is what lets a world be extracted with no device
+--- at all, and what keeps every dirty bit consumed in one place.
 ---
 --- The sync walks archetype columns and writes instances straight into mapped
 --- staging. There is no intermediate array: the column is contiguous C memory
@@ -40,8 +40,7 @@ local instancelayout <const> = require("tecs.gpu.instancelayout")
 
 local type TextureArray = require("tecs.gpu.TextureArray")
 
---- Extraction: the world-facing half of the frame, and the half that moves to
---- the simulation thread when the pipeline splits.
+--- Extraction: the world-facing half of the frame.
 local EXTRACT <const> = timing.stage("extract")
 
 local INSTANCE_FLOATS <const> = instancelayout.FLOATS
