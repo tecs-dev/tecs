@@ -764,6 +764,50 @@ is what terminates the C string SDL returns and what every producer of
 clipboard text intends; `data` uses the length SDL reports instead, so a blob
 keeps its NULs.
 
+## Touching the filesystem
+
+`tecs.paths` answers where a path is; `tecs.filesystem` is what to do once you
+have one. It is one SDL call per function and nothing composed out of several:
+`SDL_GetPathInfo` behind `info`, `exists`, `isFile` and `isDirectory`,
+`SDL_GlobDirectory` behind `list` and `glob`, then `createDirectory`, `remove`,
+`rename`, `copy`, `write`, `currentDirectory` and `userFolder`. No virtual
+filesystem and no invented path scheme, so a failure is SDL's failure and the
+name says which call to read about. Like `proc` it initialises no subsystem and
+is more useful with no window than with one.
+
+Reading is deliberately absent, because `assets.read` is already `SDL_LoadFile`
+plus the record of what this process has opened that `watch` polls, and a
+second reader would mean a file opened through the wrong one never reloads. So
+`write` is here and its other half is one module along.
+
+Enumeration is glob rather than `SDL_EnumerateDirectory`, so no FFI callback is
+installed for a walk; the list comes back as one allocation holding the array
+and its strings, freed in one place the way the clipboard's mime list is.
+**`SDL_GlobDirectory` recurses when nothing stops it**: with no pattern it
+walks the whole tree and returns `/`-joined relative paths, and `"*"` is one
+level only because a wildcard never matches a separator, which is what `list`
+is. The other surprises are documented rather than smoothed over:
+`createDirectory` makes parents and leaves an SDL error set even when it
+succeeds, `remove` reports success when there was nothing there, `rename` and
+`copy` overwrite silently, and `userFolder` is legitimately nil on a platform
+with no such folder.
+
+Everything blocks, and that is the whole of stage one. A path call is one
+syscall rather than another program's lifetime, which is what put `proc` on a
+worker, and `SDL_LoadFileAsync` reads a file rather than a directory, so it
+would leave the one unbounded case, a recursive glob over a large tree, exactly
+where it was. That case runs on a worker instead: every function takes a path
+and returns a value, so nothing crosses a thread that must not.
+
+`SDL_Storage` is not covered yet. Its readiness model has no equivalent in a
+path call and, on a desktop, no test: every backing it can have here is the
+plain filesystem, so a spec would only exercise the ready-immediately path.
+Adopting it later is a `Storage` class whose methods are these functions minus
+the module, reusing the same `Info`, `PathType` and `GlobOptions`, and adding
+`ready`, `close`, `spaceRemaining` and a `read` of its own, since
+`SDL_ReadStorageFile` is not `SDL_LoadFile`. Nothing above changes shape for
+it, which is why nothing above resolves a path.
+
 ## Shelling out
 
 A command line tool, a resource pipeline or an asset build wants to run another

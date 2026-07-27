@@ -45,6 +45,7 @@ local type clipboard = require("tecs.platform.clipboard")
 local type proc = require("tecs.platform.proc")
 local type capabilities = require("tecs.platform.capabilities")
 local type paths = require("tecs.platform.paths")
+local type filesystem = require("tecs.platform.filesystem")
 local type watch = require("tecs.platform.watch")
 local type layers = require("tecs.gfx.layers")
 local type sequence = require("tecs.sequence")
@@ -116,6 +117,7 @@ local record tecs
     proc: proc
     capabilities: capabilities
     paths: paths
+    filesystem: filesystem
     watch: watch
     layers: layers
     sequence: sequence
@@ -302,6 +304,7 @@ local ENGINE <const>: {string: string} = {
     proc = "tecs.platform.proc",
     capabilities = "tecs.platform.capabilities",
     paths = "tecs.platform.paths",
+    filesystem = "tecs.platform.filesystem",
     watch = "tecs.platform.watch",
     layers = "tecs.gfx.layers",
     sequence = "tecs.sequence",
