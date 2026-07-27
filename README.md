@@ -95,6 +95,11 @@ Working today:
   error output and exit status answered through a handle a frame polls, an
   environment and a working directory the caller chooses, and a teardown that
   ends a child rather than leaving it behind
+- The window: size, position, limits and aspect, fullscreen and the mode lists
+  behind it, visibility and minimisation, focus, opacity, borders, icon, safe
+  area, taskbar attention and progress, pointer and keyboard confinement, and
+  the displays underneath it all, every one of them also settable in the
+  application's config
 
 Not built yet: shadows, post-processing, UI, tiled maps and multi-camera.
 
@@ -807,6 +812,37 @@ directory, `env` sets variables over the inherited environment, and `clearEnv`
 starts from an empty one so `env` is the whole of what the child sees. `input`
 writes bytes to the child's standard input and closes it, which is what a child
 reading to end of input is waiting for.
+
+## The window
+
+[`platform/Window.tl`](src/tecs/platform/Window.tl) is what SDL's window and
+display API looks like in this engine's idiom, and the whole of it is reachable
+from `Application.Config.window`, which is passed through rather than copied
+field by field so a setting cannot exist in one place and not the other.
+
+`getSize` is screen coordinates and `getPixelSize` is the drawable, and there
+is no converter between them: one would have to pick one system as the real one
+and silently reinterpret the other, where the pair says which is which at every
+call site. `pixelDensity` is the ratio and `displayScale` is the desktop's own
+scaling preference, which are different questions.
+
+Events report a _change_; nothing reports the state a window started in. A
+window created hidden fires no `windowHidden` and a window that has always had
+focus fires no `windowFocusLost`, so `hasFocus`, `isVisible`, `isMinimized` and
+the rest are how the first frame learns where it stands. They agree with the
+events by construction, since each asks SDL rather than caching, and `id` is
+what ties a window to the `which` an event carries.
+
+Size, position, fullscreen, borders, opacity and visibility are all safe to
+change while the device holds the window: the pass graph sizes its targets from
+the swapchain texture it acquires each frame, so a change is picked up on the
+next frame with no reconfiguration, and a hidden window acquires no texture and
+the frame is skipped whole. Where a compositor answers a request later,
+`sync` waits for it. Presentation pacing is not here: SDL's window vsync paces
+the software surface, which cannot coexist with a claimed window, so a game
+that wants it calls `Device:setPresentMode`. Message boxes are not here either,
+being a blocking modal dialog whose one real use is a failure before or after a
+window exists.
 
 ## Measuring latency
 

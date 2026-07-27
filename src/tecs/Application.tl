@@ -46,17 +46,13 @@ local SUBMIT <const> = timing.stage("submit")
 --- flatters anything that only moves the other one.
 local GAME <const> = timing.stage("game")
 
-local record WindowConfig
-    title: string
-    width: integer
-    height: integer
-    resizable: boolean
-    highPixelDensity: boolean
-end
-
 local record Application
     record Config
-        window: WindowConfig
+        --- The window to open, as `Window.Options` describes it. Passed
+        --- through whole rather than copied field by field, so everything a
+        --- window can be created with is reachable from here and a field
+        --- added there needs nothing added here.
+        window: Window.Options
         debug: boolean
         framesInFlight: integer
         presentMode: string
@@ -180,14 +176,7 @@ function Application:_init(): boolean
             .. "pack at %s"):format(packPath))
     end
 
-    local windowConfig = config.window or {} as WindowConfig
-    self.window = Window.create({
-        title = windowConfig.title,
-        width = windowConfig.width,
-        height = windowConfig.height,
-        resizable = windowConfig.resizable,
-        highPixelDensity = windowConfig.highPixelDensity,
-    })
+    self.window = Window.create(config.window or {} as Window.Options)
 
     self.device = Device.create(self.window, { debug = config.debug })
     if config.framesInFlight ~= nil then
