@@ -174,9 +174,11 @@ describe("gfx.text", function()
 
     it("draws a glyph the right way up", function()
         -- An L is ink across the bottom of its box and only a stem at the
-        -- top, so it tells an upside-down glyph from a correct one. A quad's
-        -- local Y and the screen's disagree in sign, and getting that wrong
-        -- renders a plausible glyph that happens to be mirrored.
+        -- top, so it tells an upside-down glyph from a correct one. A glyph
+        -- reaches the screen through the same UV rect a sprite does, and a
+        -- sign wrong anywhere along that path renders a plausible glyph that
+        -- happens to be mirrored. spec/orientation_spec.lua is the other half
+        -- of that: this pins the atlas rect, that one pins the mapping.
         local world, renderer = newScene()
         local size = 96
         local x, y = 40, 60

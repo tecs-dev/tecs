@@ -68,7 +68,7 @@ layout(location = 6) flat out int vClip;
 // `origin.xy` before the instance is written, because origin - basis * pivot
 // places every corner exactly where corner - pivot would: the same geometry
 // for no extra bytes in the instance. Two things here decide the sign it uses:
-// these corners, and the `0.5 - corner.y` below that maps them onto V. Change
+// these corners, and the `corner + 0.5` below that maps them onto UV. Change
 // either and the pivot's Y follows.
 const vec2 CORNERS[4] = vec2[4](
     vec2(-0.5, -0.5), vec2( 0.5, -0.5),
@@ -158,11 +158,12 @@ void main() {
     float arrayLayer = mod(packedSlot, LAYER_SLOTS);
     vClip = int(floor(packedSlot / LAYER_SLOTS));
 
-    // Corners run -0.5..0.5, and V is flipped because texture rows run down
-    // from the top while the quad's local Y runs up.
-    vUV = vec3(mix(self.uvRect.xy, self.uvRect.zw,
-                   vec2(corner.x + 0.5, 0.5 - corner.y)),
-               arrayLayer);
+    // Corners run -0.5..0.5, so shifting by a half is the fraction across the
+    // frame. Both axes map the same way and neither is flipped: world Y runs
+    // down the screen the way texture rows run down the image, and the one
+    // negation between them is the camera's, applied to clip space after this.
+    // A flip here would compose with that one instead of cancelling it.
+    vUV = vec3(mix(self.uvRect.xy, self.uvRect.zw, corner + 0.5), arrayLayer);
 
     vLocal = corner;
     // Material and parameter share origin.w, which is otherwise spare: the
