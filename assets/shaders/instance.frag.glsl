@@ -7,6 +7,7 @@ layout(location = 1) in vec3 vUV;
 layout(location = 2) in vec2 vLocal;
 layout(location = 3) flat in int vMaterial;
 layout(location = 4) flat in float vParam;
+layout(location = 5) flat in float vLit;
 layout(location = 0) out vec4 albedo;
 layout(location = 1) out vec4 normal;
 
@@ -31,8 +32,10 @@ void main() {
     if (shaded.coverage <= 0.0) { discard; }
 
     albedo = shaded.albedo;
-    // The normal's alpha carries whether the fragment wants lighting. It was
-    // written as one and read by nothing, so this costs no attachment and no
-    // bandwidth.
-    normal = vec4(0.5, 0.5, 1.0, shaded.lit);
+    // The normal's alpha carries whether the fragment wants lighting, and both
+    // the material and the layer have a say: the product is nonzero only where
+    // the two agree, so either one asking to be left out is enough. The alpha
+    // was written as one and read by nothing, so this costs no attachment and
+    // no bandwidth.
+    normal = vec4(0.5, 0.5, 1.0, shaded.lit * vLit);
 }

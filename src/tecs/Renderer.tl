@@ -72,6 +72,16 @@ local INSTANCE_BYTES <const> = INSTANCE_FLOATS * 4
 local BOUND_FLOATS <const> = 4
 local BOUND_BYTES <const> = BOUND_FLOATS * 4
 
+--- Half extent for a row on a layer the view rectangle does not describe. Big
+--- enough that no finite view can be outside it, and finite so the comparison
+--- stays arithmetic rather than a special case.
+local UNBOUNDED <const> = 1e30
+
+--- Floats in the layer uniform: the camera's parameters, the two fixed clip
+--- scales, and four per layer.
+local LAYER_FLOATS <const> = 8 + layers.MAX * 4
+local LAYER_BYTES <const> = LAYER_FLOATS * 4
+
 --- Indices per quad, over four distinct corners.
 local QUAD_INDICES <const> = 6
 
@@ -152,6 +162,12 @@ local record Renderer
     camera: Camera
     _centred: boolean
     _cullUniform: loader.CArray
+    --- What each layer does to its contents, in the shape the vertex shader
+    --- reads it.
+    _layerUniform: loader.CArray
+    --- Revision the packed table was built from, so a frame that configured
+    --- nothing repacks nothing.
+    _layerRevision: integer
     _device: loader.CPtr
     _lights: {Deferred.Light}
     _renderables: ecs.Query
@@ -263,6 +279,7 @@ local function writeRun(self: Renderer, archetype: ecs.Archetype,
             material = entry.id + param
         end
 
+        local entityLayer <const> = transform.layer as integer
         local angle = transform.rotation
         local scaleX = transform.scaleX
         local scaleY = transform.scaleY
@@ -293,8 +310,8 @@ local function writeRun(self: Renderer, archetype: ecs.Archetype,
         -- The band this entity's layer owns, and where in it the sort mode
         -- puts it. Zero is nearest, so a higher layer resolves to a smaller
         -- value and covers everything below it whatever the two contain.
-        floats[base + 3] = layers.depthOf(transform.layer as integer,
-            transform.z, originX, originY)
+        floats[base + 3] = layers.depthOf(entityLayer, transform.z,
+            originX, originY)
 
         floats[base + 4] = originX
         floats[base + 5] = originY
@@ -317,7 +334,13 @@ local function writeRun(self: Renderer, archetype: ecs.Archetype,
         -- can only ever keep something it might have dropped.
         local ex: number
         local ey: number
-        if angle == 0.0 then
+        if not layers.viewCulled(entityLayer) then
+            -- The layer draws its contents somewhere the view rectangle does
+            -- not describe, so a world bound would cull what is on screen. A
+            -- bound no view can be outside of hands the decision to the layer.
+            ex = UNBOUNDED
+            ey = UNBOUNDED
+        elseif angle == 0.0 then
             ex = 0.5 * abs(scaleX)
             ey = 0.5 * abs(scaleY)
         else
@@ -447,6 +470,46 @@ local function syncLights(self: Renderer): {Deferred.Light}
     return lights
 end
 
+--- Fills the uniform the vertex shader reads a layer's behaviour from.
+---
+--- The camera's parameters rather than a matrix for each mode. Parallax
+--- multiplies the camera's position, so a matrix per mode would have to be a
+--- matrix per layer and be rebuilt every frame the camera moved. Passed this
+--- way, the camera's position, its reciprocal zoom and two clip scales compose
+--- all four cases in a handful of shader instructions, and the sixteen entries
+--- stay what they were.
+local function layerUniform(self: Renderer, width: number,
+                            height: number): loader.CArray
+    local data = self._layerUniform
+    local camera = self.camera
+    data[0] = camera.x
+    data[1] = camera.y
+    -- The camera's matrix carries the zoom, so a layer that ignores zoom
+    -- divides it back out rather than reaching for a second matrix.
+    data[2] = camera.zoom ~= 0.0 and 1.0 / camera.zoom or 1.0
+    data[3] = 0.0
+    -- Position to clip for the two fixed spaces, with Y negated because both
+    -- run down from the top left while clip Y runs up.
+    data[4] = 2.0 / width
+    data[5] = -2.0 / height
+    data[6] = 2.0 / layers.virtualWidth
+    data[7] = -2.0 / layers.virtualHeight
+
+    -- Packed when it changes rather than every frame: it is configuration, and
+    -- the frame that configures a layer is the rare one.
+    local revision = layers.revision()
+    if revision ~= self._layerRevision then
+        self._layerRevision = revision
+        for layer = 1, layers.MAX do
+            local base = 8 + (layer - 1) * 4
+            data[base], data[base + 1], data[base + 2], data[base + 3] =
+                layers.entryOf(layer)
+        end
+    end
+
+    return data
+end
+
 --- Builds a renderer for `device`.
 function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
                          options: RendererOptions): Renderer
@@ -529,6 +592,9 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
     self._slot = 0
     -- Two vec4s: the world rectangle the camera sees, then the counts.
     self._cullUniform = loader.newArray("float[8]")
+    self._layerUniform = loader.newArray("float[?]", LAYER_FLOATS)
+    -- Below every revision the table can hold, so the first frame packs it.
+    self._layerRevision = -1
 
     self._mark = ComputePipeline.load(device, "instance.mark.comp", {})
     self._scan = ComputePipeline.load(device, "instance.scan.comp", {})
@@ -542,6 +608,8 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
 
             context.pass:pushVertexUniform(0,
                 self.camera:matrix(context.width, context.height), 64)
+            context.pass:pushVertexUniform(1,
+                layerUniform(self, context.width, context.height), LAYER_BYTES)
             context.pass:bindVertexStorageBuffers(0,
                 { self.instances.handle, self._visible.handle })
             context.pass:bindTextures(0, { self.images.handle }, self.sampler.handle)
