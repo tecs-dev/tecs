@@ -36,9 +36,14 @@
 ---               installed as a table. Nothing calls `ffi.load` when one is
 ---               present.
 ---
----   storage     Where content is read from and state is written to. Never the
----               working directory, which on a console does not exist in any
----               useful sense.
+---   storage     Where content is read from and state is written to, and how
+---               it is reached once it is found. Never the working directory,
+---               which on a console does not exist in any useful sense. Both
+---               halves are the seam and neither is useful alone: a platform
+---               that says its content lives at a root it invented is not
+---               served by the engine then reading that root with the host's
+---               own file calls, which is why `storage` carries operations
+---               and not just paths.
 ---
 ---   shaders     A pack of compiled shaders plus the reflection SDL_GPU wants,
 ---               keyed by name. A platform with its own bytecode format
@@ -53,6 +58,7 @@ local loader <const> = require("tecs.ffi.loader")
 local events <const> = require("tecs.platform.events")
 local inputbackend <const> = require("tecs.platform.inputbackend")
 local audiobackend <const> = require("tecs.platform.audiobackend")
+local storagebackend <const> = require("tecs.platform.storagebackend")
 
 local C <const> = sdl.C
 
@@ -70,6 +76,12 @@ local record adapter
         --- Created if absent. Raising here is correct if there is none: a build
         --- that cannot save should fail where that is discovered.
         prefPath: function(organisation: string, application: string): string
+
+        --- Reaching a file once one of the two roots above has named it.
+        --- Leave nil to keep SDL's, which is right for any target where the
+        --- roots are directories. A target where they are not supplies this
+        --- and `filesystem` is unchanged above it.
+        storage: storagebackend.Backend
 
         --- SDL shader format the platform's own bytecode is declared as. A
         --- private format is what a licensed backend uses, since its shader
@@ -110,6 +122,8 @@ local sdlPlatform <const>: adapter.Platform = {
         C.SDL_free(given)
         return path
     end,
+
+    storage = storagebackend.sdl,
 
     shaderFormat = function(): integer
         -- Metal takes MSL, every other public backend takes SPIR-V.
@@ -154,6 +168,21 @@ function adapter.install(platform: adapter.Platform)
             error(("tecs: a platform must supply %s"):format(required), 2)
         end
     end
+    -- A storage backend is optional, and a partial one is not. `filesystem`
+    -- calls these without checking, so a missing operation would surface as
+    -- whichever file the game happened to open first rather than here. The two
+    -- that are left out are `currentDirectory` and `userFolder`, which have no
+    -- answer on a target that is not a desktop and are documented as absent.
+    if platform.storage ~= nil then
+        for _, operation in ipairs({ "read", "write", "info", "glob",
+                                     "createDirectory", "remove", "rename",
+                                     "copy" }) do
+            if (platform.storage as {string: any})[operation] == nil then
+                error(("tecs: a storage backend must supply %s")
+                    :format(operation), 2)
+            end
+        end
+    end
     installed = platform
     generation = generation + 1
     -- The event stream already has one hook for a source that is not SDL's
@@ -164,6 +193,16 @@ end
 --- The platform in use. The SDL one unless something replaced it.
 function adapter.current(): adapter.Platform
     return installed
+end
+
+--- How the installed platform reaches a file.
+---
+--- Resolved per call rather than cached, because `filesystem` is the only
+--- caller and every one of its functions is already a syscall wrapped in a
+--- table lookup. A platform that left this nil gets SDL's, which is the same
+--- fallback `Input` and `Audio` make for their own backends.
+function adapter.storage(): storagebackend.Backend
+    return installed.storage or storagebackend.sdl
 end
 
 --- Restores the SDL platform. For a test that installed another.

@@ -297,9 +297,9 @@ describe("platform.filesystem", function()
             assert.are.equal(blob, filesystem.read(at("blob.bin")))
         end)
 
-        it("pairs with assets.read, which is the reader", function()
-            -- The module has no `read` of its own on purpose. This is the pair
-            -- it documents: SDL_SaveFile here, SDL_LoadFile one module along.
+        it("pairs with the read beside it", function()
+            -- One pair in one module, and the record of what was opened kept
+            -- with them, because that record is what `watch` polls.
             local save = at("slot1.json")
             assert.is_true(filesystem.write(save, '{"score":41}'))
             assert.are.equal('{"score":41}', filesystem.read(save))
@@ -451,7 +451,9 @@ describe("platform.filesystem", function()
         it("refuses a call with no path", function()
             -- LuaJIT hands a Lua nil to a `const char *` as a null pointer, so
             -- one that reached SDL would be a call against an invalid path
-            -- with nothing pointing back at the caller that made it.
+            -- with nothing pointing back at the caller that made it. Checked
+            -- once here rather than in a backend, so a port inherits it, and
+            -- named after the function the caller actually called.
             local calls = {
                 { "info", filesystem.info },
                 { "exists", filesystem.exists },
@@ -462,6 +464,7 @@ describe("platform.filesystem", function()
                 { "createDirectory", filesystem.createDirectory },
                 { "remove", filesystem.remove },
                 { "write", filesystem.write },
+                { "read", filesystem.read },
             }
             for _, call in ipairs(calls) do
                 assert.has_error(function()
