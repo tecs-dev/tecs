@@ -58,7 +58,7 @@ local materials <const> = require("tecs.gpu.materials")
 local instancelayout <const> = require("tecs.gpu.instancelayout")
 local layersModule <const> = require("tecs.gfx.layers")
 local paths <const> = require("tecs.platform.paths")
-local json <const> = require("tecs.utils.json")
+local json <const> = require("tecs.json")
 local log <const> = require("tecs.log")
 
 local type Renderer = require("tecs.Renderer")
@@ -287,12 +287,23 @@ local function directoryOf(path: string): string
     return path:sub(1, cut as integer)
 end
 
---- Reads a BMFont-style metrics document into a Font.
-local function parseMetrics(document: string, name: string, atlas: string): Font
-    local root = json.parse(document) as {string: any}
-    if root == nil then
+--- The metrics document as a table, or an error naming the font.
+---
+--- The decoder raises on malformed input, and its message says where in the
+--- text it gave up rather than which font asked. The name is the part a caller
+--- can act on, so the raise is caught and replaced. Level zero because the
+--- message locates itself and the frame that called this does not.
+local function decodeMetrics(document: string, name: string): {string: any}
+    local ok, root = pcall(json.decode, document)
+    if not ok or type(root) ~= "table" then
         error(("tecs: '%s' is not a font metrics document"):format(name), 0)
     end
+    return root as {string: any}
+end
+
+--- Reads a BMFont-style metrics document into a Font.
+local function parseMetrics(document: string, name: string, atlas: string): Font
+    local root = decodeMetrics(document, name)
 
     local info = root.info as {string: any}
     local common = root.common as {string: any}
@@ -379,8 +390,8 @@ function text.loadFont(options: FontOptions): Font
 
     local atlas = options.atlas
     if atlas == nil then
-        local root = json.parse(document) as {string: any}
-        local pages = root ~= nil and root.pages as {string} or nil
+        local root = decodeMetrics(document, metricsPath)
+        local pages = root.pages as {string}
         if pages == nil or pages[1] == nil then
             error(("tecs: '%s' names no atlas page; pass `atlas`")
                 :format(metricsPath), 2)

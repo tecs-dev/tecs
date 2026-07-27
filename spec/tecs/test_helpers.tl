@@ -1,7 +1,6 @@
 local tecs <const> = require("tecs")
 local Archetype <const> = require("tecs.internal.Archetype")
 local ffi <const> = require("tecs.internal.ffi")
-local type logging = require("tecs.utils.logging")
 
 local type DoubleArray = tecs.DoubleArray
 local setDoubleArraySize <const> = ffi.setDoubleArraySize
@@ -77,9 +76,6 @@ local record TestHelpers
 
     -- Create a mock file for testing file operations
     createMockFile: function(): MockFile
-
-    -- Create a mock sink for logging tests
-    createMockSink: function(): logging.LogSink
 
     -- Add entities to an archetype with optional component data
     addEntitiesToArchetype: function(archetype: Archetype, entityIds: {integer}, componentData: {{tecs.Component: any}})
@@ -194,16 +190,6 @@ function TestHelpers.createMockFile(): TestHelpers.MockFile
         read = spy.new(function(): string return "" end),
         seek = spy.new(function(): integer return 0 end)
     } as any as TestHelpers.MockFile
-end
-
-function TestHelpers.createMockSink(): logging.LogSink
-    local spy <const> = require("luassert.spy")
-
-    return {
-        log = spy.new(function() end),
-        flush = spy.new(function() end),
-        close = spy.new(function() end)
-    } as any as logging.LogSink
 end
 
 -- Record for accessing archetype implementation fields

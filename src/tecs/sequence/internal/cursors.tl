@@ -12,7 +12,7 @@
 --- handle report nothing rather than another playback's state.
 
 local ecs <const> = require("tecs.ecs")
-local logging <const> = require("tecs.utils.logging")
+local log <const> = require("tecs.log")
 local seqawaitables <const> = require("tecs.sequence.internal.awaitables")
 local seqclock <const> = require("tecs.sequence.internal.clock")
 local seqregistry <const> = require("tecs.sequence.internal.registry")
@@ -24,7 +24,7 @@ local type WorldState = seqtypes.WorldState
 local type FaultReason = seqtypes.FaultReason
 local type PlaybackState = seqtypes.PlaybackState
 
-local LOGGER <const> = logging.getLogger("tecs.sequence")
+local LOGGER <const> = log.get("tecs.sequence")
 
 -- Handle packing. A handle is slot + generation * SLOT_LIMIT, so it stays a
 -- plain integer that survives snapshots and compares by value.

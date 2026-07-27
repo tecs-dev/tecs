@@ -26,7 +26,7 @@ code; migrate old code opportunistically.
   or prevent ambiguity: `local C <const> = require("ffi")`, or
   distinguishing a public module from an internal one with the same name.
 - Package roots use `init.tl`; public leaf modules may be named `.tl` files
-  (`tecs.input`, `tecs.tween`, `tecs.utils.logging`). Internal helpers
+  (`tecs.log`, `tecs.json`, `tecs.utils.pool`). Internal helpers
   live under `internal/` and are not part of the supported surface.
 
 ## Formatting and alignment
@@ -206,8 +206,9 @@ metamethods (`__call`, `__index`), and generated bindings.
 
 - `error(msg, 0)` for user-actionable failures with a message that says what
   to do next; reserve stack levels for programmer errors.
-- Log through `tecs.utils.logging` with a named logger
-  (`logging.getLogger("tecs-mcp")`), not `print`.
+- Log through `tecs.log` with a named logger (`log.get("tecs.gfx")`), not
+  `print`. The name is the unit of filtering, so it is what
+  `SDL_SetLogPriority` acts on.
 - Validate options at construction time with clear messages; do not defer
   failures into the first frame.
 

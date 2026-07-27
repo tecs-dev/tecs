@@ -1,5 +1,4 @@
 local types <const> = require("tecs.types")
-local logging <const> = require("tecs.utils.logging")
 
 -- Internal implementation shape. Public Tealdoc lives on `tecs` and
 -- `types.Context`.
@@ -26,7 +25,12 @@ function ContextModule.newKey<T>(name?: string, _forType?: T): types.Context.Key
         return KEY_COUNTER as types.Context.Key<T>
     end
     KEY_COUNTER = KEY_COUNTER + 1
-    logging.getLogger("tecs.context"):warn(
+    -- Required here rather than at the top. Logging is SDL's, reached through
+    -- the FFI, and this module loads with the ECS: a tool that only wants
+    -- worlds and queries would be made to find SDL to build one. An unnamed
+    -- key is a cold path, so the lookup costs nothing that matters.
+    local log <const> = require("tecs.log")
+    log.get("tecs.context"):warn(
         "Context key #%d created without a name; pass a name to newKey so "
             .. "tools (MCP inspect, tecs info --keys) can find it",
         KEY_COUNTER)

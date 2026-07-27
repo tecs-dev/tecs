@@ -23,8 +23,8 @@ local table_concat <const> = table.concat
 local table_sort <const> = table.sort
 local table_remove <const> = table.remove
 
-local logging <const> = require("tecs.utils.logging")
-local log <const> = logging.getLogger("tecs.profile")
+local log <const> = require("tecs.log")
+local LOGGER <const> = log.get("tecs.profile")
 
 local record profile
 
@@ -365,7 +365,7 @@ function profile.sample(opts?: profile.SampleOptions): profile.SampleSession
     profileStart("li" .. string_format("%d", intervalMs), callback)
     sampleActive = true
 
-    log:info("sample session started (intervalMs=%d, zone=%s)",
+    LOGGER:info("sample session started (intervalMs=%d, zone=%s)",
         intervalMs, zoneFilter or "*")
 
     local session = setmetatable({
@@ -422,9 +422,9 @@ function profile.SampleSession:stop(filename?: string): string
     local text = encodeCollapsed(filtered)
     if filename then
         writeToFile(filename, text)
-        log:info("sample session stopped, %d bytes written to %s", #text, filename)
+        LOGGER:info("sample session stopped, %d bytes written to %s", #text, filename)
     else
-        log:info("sample session stopped, %d bytes of collapsed-stack text", #text)
+        LOGGER:info("sample session stopped, %d bytes of collapsed-stack text", #text)
     end
     return text
 end
@@ -589,7 +589,7 @@ function profile.trace(opts?: profile.TraceOptions): profile.TraceSession
     jitAttach(callback, "trace")
     traceActive = true
 
-    log:info("trace session started (includeBenign=%s)", tostring(includeBenign))
+    LOGGER:info("trace session started (includeBenign=%s)", tostring(includeBenign))
 
     local session = setmetatable({
         _callback = callback,
@@ -649,10 +649,10 @@ function profile.TraceSession:stop(filename?: string): profile.TraceReport
     } as profile.TraceReport, TRACE_REPORT_MT)
     if filename then
         writeToFile(filename, tostring(report))
-        log:info("trace session stopped (%.2fs, %d aborts, %d blacklisted), report written to %s",
+        LOGGER:info("trace session stopped (%.2fs, %d aborts, %d blacklisted), report written to %s",
             report.durationSec, report.totalAborts, report.blacklisted, filename)
     else
-        log:info("trace session stopped (%.2fs, %d aborts, %d blacklisted)",
+        LOGGER:info("trace session stopped (%.2fs, %d aborts, %d blacklisted)",
             report.durationSec, report.totalAborts, report.blacklisted)
     end
     return report

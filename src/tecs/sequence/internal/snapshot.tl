@@ -11,7 +11,7 @@
 --- untouched for later `play` calls.
 
 local ecs <const> = require("tecs.ecs")
-local logging <const> = require("tecs.utils.logging")
+local log <const> = require("tecs.log")
 local seqclock <const> = require("tecs.sequence.internal.clock")
 local seqcursors <const> = require("tecs.sequence.internal.cursors")
 local seqevaluators <const> = require("tecs.sequence.internal.evaluators")
@@ -25,7 +25,7 @@ local type ProgramImpl = seqtypes.ProgramImpl
 local type PlaybackState = seqtypes.PlaybackState
 local type TweenOutcome = seqtypes.TweenOutcome
 
-local LOGGER <const> = logging.getLogger("tecs.sequence")
+local LOGGER <const> = log.get("tecs.sequence")
 
 local floor <const> = math.floor
 

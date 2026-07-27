@@ -108,7 +108,7 @@ describe("snapshot save/load", function()
         -- Mirrors the save-game paint demo: one FFI component (Transform-ish)
         -- plus one table component (Cell-ish) on the same entity, through the
         -- full save -> serialize -> parse -> load pipeline.
-        local json <const> = require("tecs.utils.json")
+        local json <const> = require("tecs.json")
         local testId = math.random(1, 1000000)
 
         local record FFIStruct is tecs.Component
@@ -150,8 +150,8 @@ describe("snapshot save/load", function()
         world:commit()
 
         local snap = saveTableSnapshot(world)
-        local jsonStr = json.serialize(snap as {string: any})
-        local parsed = json.parse(jsonStr) as tecs.Snapshot
+        local jsonStr = json.encode(snap as {string: any})
+        local parsed = json.decode(jsonStr) as tecs.Snapshot
 
         world:loadSnapshot(parsed)
 
@@ -228,15 +228,15 @@ describe("snapshot save/load", function()
     end)
 
     it("round-trips through JSON serialization", function()
-        local json <const> = require("tecs.utils.json")
+        local json <const> = require("tecs.json")
         local world = tecs.newWorld()
         local a = world:spawn(PositionComp(10, 20), HealthComp(100))
         local b = world:spawn(PositionComp(30, 40))
         world:commit()
 
         local snap = saveTableSnapshot(world)
-        local jsonStr = json.serialize(snap as {string: any})
-        local parsed = json.parse(jsonStr) as tecs.Snapshot
+        local jsonStr = json.encode(snap as {string: any})
+        local parsed = json.decode(jsonStr) as tecs.Snapshot
 
         world:loadSnapshot(parsed)
 

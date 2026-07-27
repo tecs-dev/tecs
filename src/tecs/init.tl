@@ -10,16 +10,15 @@ local internalComponents <const> = require("tecs.internal.components")
 local internalEvents <const> = require("tecs.internal.events")
 local phases <const> = require("tecs.internal.phases")
 local runIfHelpers <const> = require("tecs.internal.runif")
-local json <const> = require("tecs.utils.json")
 local IdAllocator <const> = require("tecs.internal.IdAllocator")
 local WorldImpl <const> = require("tecs.internal.world")
 
 --- Public API surface.
 ---
 --- Support policy: values and types exported from `require("tecs")` are the
---- supported API, as are the `tecs.utils.*` modules (json, logging, profile,
---- pool, Bitset), which may be required directly. `tecs.internal.*` modules
---- are implementation details unless re-exported here.
+--- supported API, as are the `tecs.utils.*` modules (profile, pool, Bitset),
+--- which may be required directly. `tecs.internal.*` modules are
+--- implementation details unless re-exported here.
 -- The engine half, named for its types and loaded on demand.
 --
 -- `local type` is erased at codegen, so these lines cost nothing at runtime and
@@ -51,6 +50,7 @@ local type workers = require("tecs.workers")
 local type physics = require("tecs.physics")
 local type log = require("tecs.log")
 local type mcp = require("tecs.mcp")
+local type json = require("tecs.json")
 
 local record tecs
     type World = types.World
@@ -241,7 +241,6 @@ tecs.newContext = Context.new
 tecs.newEvent = internalEvents.newEvent
 tecs.newFFIEvent = internalEvents.newFFIEvent
 tecs.newMessageBus = internalEvents.MessageBus.new
-tecs.json = json
 tecs.phases = phases
 tecs.builtins = builtins
 tecs.runif = runIfHelpers
@@ -262,7 +261,8 @@ function tecs.application(config: Application.Config): Application
     return create(config)
 end
 
---- Engine module paths, resolved on first use.
+--- Module paths resolved on first use, being everything that reaches native
+--- code: the engine, and JSON, whose parser is C.
 ---
 --- Listed rather than discovered, so `tecs.Aplication` is an error where it is
 --- written instead of a nil where it is called.
@@ -288,6 +288,7 @@ local ENGINE <const>: {string: string} = {
     physics = "tecs.physics",
     log = "tecs.log",
     mcp = "tecs.mcp",
+    json = "tecs.json",
 }
 
 setmetatable(tecs as {string: any}, {
