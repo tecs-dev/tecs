@@ -99,6 +99,12 @@ local record Event
     --- step.
     wheelTicksX: integer
     wheelTicksY: integer
+    --- Whether the wheel event being handed to `push` is one a platform with
+    --- natural scrolling would send, which is what SDL's direction flag says
+    --- and what the conversion undoes. Read only there: an event coming out
+    --- of the conversion has had that applied already, so nothing above it
+    --- has a flag to check.
+    flipped: boolean
     --- Zoom factor a pinch gesture reports since the previous event in it.
     --- Below one is a pinch closed, above one is a pinch opened.
     scale: number
@@ -303,8 +309,9 @@ local AXIS_SCALE <const> = 1.0 / 32767.0
 
 --- The direction a wheel event carries when the platform has natural
 --- scrolling on, which means both of its axes are the opposite of what they
---- read as.
+--- read as, and the direction it carries otherwise.
 local WHEEL_FLIPPED <const> = tonumber(C.SDL_MOUSEWHEEL_FLIPPED) as integer
+local WHEEL_NORMAL <const> = tonumber(C.SDL_MOUSEWHEEL_NORMAL) as integer
 
 --- Kinds a player produces, as against ones the platform reports about
 --- itself. Latency is only meaningful for these: nobody is waiting on a
@@ -717,10 +724,15 @@ end
 --- can inject input without knowing SDL's layout. Only the fields a kind uses
 --- are read.
 ---
---- Payloads are filled for the key, mouse, gamepad, device, pinch, window and
---- display kinds. Any other recognised kind is pushed carrying its type and
---- nothing else, which is what a kind whose payload nobody injects needs and is
---- not what a caller expecting a full event would assume.
+--- Payloads are filled for the key, mouse, wheel, pen, gamepad, device, pinch,
+--- window and display kinds. Any other recognised kind is pushed carrying its
+--- type and nothing else, which is what a kind whose payload nobody injects
+--- needs and is not what a caller expecting a full event would assume.
+---
+--- A wheel payload is written the way the platform writes one, so `flipped`
+--- sets the direction and the axes beside it are left as given. The conversion
+--- then negates them, which is what a caller asking for a flipped scroll is
+--- asking to see: the round trip is the normalisation, not the identity.
 ---
 --- SDL stamps the timestamp, so a pushed event arrives ordered against real
 --- ones rather than ahead of them.
@@ -750,6 +762,9 @@ function events.push(kind: string, fields: Event)
             local button = (holder[0] as loader.CValue).button as loader.CStruct
             button.button = fields.button or 1
             button.down = kind == "mouseDown"
+            -- A press nobody counted is still one press. Zero would say the
+            -- platform saw the button go down and counted no click.
+            button.clicks = fields.clicks or 1
             button.x = fields.x or 0.0
             button.y = fields.y or 0.0
             button.which = fields.which or 0
@@ -760,6 +775,46 @@ function events.push(kind: string, fields: Event)
             motion.xrel = fields.dx or 0.0
             motion.yrel = fields.dy or 0.0
             motion.which = fields.which or 0
+        elseif kind == "mouseWheel" then
+            local wheel = (holder[0] as loader.CValue).wheel as loader.CStruct
+            -- Written unnegated whichever direction this carries, because
+            -- that is what the platform sends and the conversion is what
+            -- reads the flag. A scroll pushed without one is an ordinary one.
+            local direction = WHEEL_NORMAL
+            if fields.flipped == true then direction = WHEEL_FLIPPED end
+            wheel.direction = direction
+            wheel.x = fields.wheelX or 0.0
+            wheel.y = fields.wheelY or 0.0
+            wheel.integer_x = fields.wheelTicksX or 0
+            wheel.integer_y = fields.wheelTicksY or 0
+            wheel.mouse_x = fields.x or 0.0
+            wheel.mouse_y = fields.y or 0.0
+            wheel.which = fields.which or 0
+        elseif kind:sub(1, 3) == "pen" then
+            -- Every pen event shares a prefix, so the position and the state
+            -- are written once and only the tail differs. A proximity event
+            -- has neither, which is why the guard matches the conversion's.
+            local union = holder[0] as loader.CValue
+            local pen = union.pmotion as loader.CStruct
+            pen.which = fields.which or 0
+            if kind ~= "penProximityIn" and kind ~= "penProximityOut" then
+                pen.x = fields.x or 0.0
+                pen.y = fields.y or 0.0
+                pen.pen_state = fields.penState or 0
+            end
+            if kind == "penDown" or kind == "penUp" then
+                local touch = union.ptouch as loader.CStruct
+                touch.eraser = fields.eraser == true
+                touch.down = kind == "penDown"
+            elseif kind == "penButtonDown" or kind == "penButtonUp" then
+                local pressed = union.pbutton as loader.CStruct
+                pressed.button = fields.button or 0
+                pressed.down = kind == "penButtonDown"
+            elseif kind == "penAxis" then
+                local axis = union.paxis as loader.CStruct
+                axis.axis = fields.axis or 0
+                axis.value = fields.value or 0.0
+            end
         elseif kind == "gamepadButtonDown" or kind == "gamepadButtonUp" then
             local pad = (holder[0] as loader.CValue).gbutton as loader.CStruct
             pad.button = fields.button or 0

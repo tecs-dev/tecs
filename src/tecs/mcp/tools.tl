@@ -279,6 +279,27 @@ mcp.register({
             button = { type = "integer", description = "For mouseDown, mouseUp." },
             x = { type = "number" },
             y = { type = "number" },
+            clicks = {
+                type = "integer",
+                description = "Clicks in the run, for mouseDown and mouseUp. "
+                    .. "One when omitted.",
+            },
+            wheelX = { type = "number", description = "For mouseWheel." },
+            wheelY = { type = "number", description = "For mouseWheel." },
+            wheelTicksX = {
+                type = "integer",
+                description = "Whole notches, for mouseWheel.",
+            },
+            wheelTicksY = { type = "integer", description = "Whole notches." },
+            flipped = {
+                type = "boolean",
+                description = "Send the wheel event as a platform with "
+                    .. "natural scrolling does, which arrives negated.",
+            },
+            penState = {
+                type = "integer",
+                description = "SDL_PEN_INPUT_* mask, for the pen kinds.",
+            },
             repeated = { type = "boolean", description = "For keyDown." },
             which = {
                 type = "integer",
@@ -311,6 +332,13 @@ mcp.register({
             button = args.button as integer,
             x = args.x as number,
             y = args.y as number,
+            clicks = args.clicks as integer,
+            wheelX = args.wheelX as number,
+            wheelY = args.wheelY as number,
+            wheelTicksX = args.wheelTicksX as integer,
+            wheelTicksY = args.wheelTicksY as integer,
+            flipped = args.flipped as boolean,
+            penState = args.penState as integer,
             repeated = args.repeated as boolean,
             which = args.which as number,
             data1 = args.data1 as integer,
