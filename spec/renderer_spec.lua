@@ -88,6 +88,26 @@ describe("ecs.Renderer", function()
         }
     end
 
+    -- Two texels side by side, the left one opaque and the right one cut away.
+    -- Both carry the same colour, because that is what a cut-out looks like
+    -- when a paint program keeps the pixels it made transparent: a coverage
+    -- test that read the tinted result rather than the texture's own alpha
+    -- would find ink on both halves and keep them both.
+    local function cutout(name, r, g, b)
+        local pixels = loader.newArray("uint8_t[8]")
+        pixels[0], pixels[1], pixels[2], pixels[3] = r, g, b, 255
+        pixels[4], pixels[5], pixels[6], pixels[7] = r, g, b, 0
+        return {
+            status = "ready",
+            path = name,
+            pixels = pixels,
+            width = 2,
+            height = 1,
+            pitch = 8,
+            release = function() end,
+        }
+    end
+
     local function readyFixture()
         local handle = assets.loadImage(FIXTURE)
         assets.waitAll()
@@ -372,6 +392,62 @@ describe("ecs.Renderer", function()
         assert.are.equal(0, left.g)
         assert.are.equal(255, right.g, "the sprite quad samples green")
         assert.are.equal(0, right.b)
+        renderer:destroy()
+    end)
+
+
+    -- A sprite's silhouette is its texture's, not its quad's. The geometry pass
+    -- writes depth with no blending, so a fragment that survives claims the
+    -- pixel: a cut-out that covered its whole rectangle would both paint over
+    -- the background and reject anything behind it inside that rectangle.
+    it("cuts a transparent texel out of the quad", function()
+        local world, renderer = newScene()
+        renderer:registerImage(cutout("spec://cutout", 255, 0, 0))
+        world:spawn(
+            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
+            Tint(1.0, 1.0, 1.0, 1.0),
+            renderer:sprite("spec://cutout"),
+            Renderable()
+        )
+
+        local pixels = frameOnce(world, renderer)
+        assert.are.equal(255, screen:getPixel(pixels, SIZE / 4, SIZE / 2).r,
+            "the opaque half of the sprite draws")
+        assert.are.equal(0, screen:getPixel(pixels, SIZE * 3 / 4, SIZE / 2).r,
+            "and the cut-away half leaves the background showing")
+        renderer:destroy()
+    end)
+
+    it("lets geometry behind a cut-out show through it", function()
+        -- This is the half a colour test cannot see. The cut-out is on the
+        -- nearer layer, so its depth is what the blue quad behind it is tested
+        -- against, and a full-quad silhouette rejects that quad before its
+        -- colour can reach the target. Which of the two draws first does not
+        -- change the answer: covering the whole rectangle either hides the blue
+        -- one or paints over it.
+        local world, renderer = newScene()
+        renderer:registerImage(cutout("spec://cutoutdepth", 255, 0, 0))
+        world:spawn(
+            Transform(SIZE / 2, SIZE / 2, 0, 8, 0, SIZE * 2, SIZE * 2),
+            Tint(1.0, 1.0, 1.0, 1.0),
+            renderer:sprite("spec://cutoutdepth"),
+            Renderable()
+        )
+        world:spawn(
+            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
+            Tint(0.0, 0.0, 1.0, 1.0),
+            Renderable()
+        )
+
+        local pixels = frameOnce(world, renderer)
+        local behind = screen:getPixel(pixels, SIZE * 3 / 4, SIZE / 2)
+        local front = screen:getPixel(pixels, SIZE / 4, SIZE / 2)
+
+        assert.are.equal(255, behind.b,
+            "the quad behind the cut-away half must reach the target")
+        assert.are.equal(0, behind.r)
+        assert.are.equal(255, front.r, "while the opaque half still covers it")
+        assert.are.equal(0, front.b)
         renderer:destroy()
     end)
 

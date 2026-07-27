@@ -829,10 +829,22 @@ not built.
 A shape is not geometry. Every entity is the same quad, and a `Material` names
 the fragment function that decides which part of it exists: `circle`, `ellipse`,
 `ring`, `rounded`, `frame`, `capsule`, `line`, `pie`, `triangle` and `star`,
-alongside `textured`, which is the whole quad, and `glyph`. They are compiled
-into one fragment shader with a generated dispatch, so a scene of shapes is
-still one batch, one cull and one draw, and a shape is one entity rather than
-the several a fan of triangles would need.
+alongside `textured`, which is the image's own silhouette, and `glyph`. They
+are compiled into one fragment shader with a generated dispatch, so a scene of
+shapes is still one batch, one cull and one draw, and a shape is one entity
+rather than the several a fan of triangles would need.
+
+`textured` takes its coverage from the texel's alpha, at a threshold of a
+half. That is what makes a cut-out sprite a cut-out: the geometry pass writes
+depth and does not blend, so a fragment that survives claims the pixel, and a
+quad that covered its whole rectangle would hide whatever stood behind the
+transparent part of the image as well as painting over it. The test is on the
+texture's alpha rather than on the product with the tint, so an entity with no
+`Sprite` samples the opaque white layer and draws at whatever tint alpha it
+carries. The threshold is a half rather than any nonzero alpha because
+coverage here is a yes or no: a texel kept at low alpha would land at full
+strength as a dark fringe rather than as a soft edge. Smooth edges want either
+multisampling or a forward-blended path, both of which follow depth.
 
 Each answers with a signed distance rather than a yes or a no. Positive inside
 and negative outside, in the quad's own coordinates, which run -0.5 to 0.5
