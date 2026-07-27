@@ -163,10 +163,11 @@ local function assemble(): string
             :format(material.id, mangle(name))
     end
     -- An unknown id is a bug rather than a state to render, so it is loud:
-    -- magenta at full coverage is visible in any scene.
-    parts[#parts + 1] = "    MaterialOutput unknown;"
+    -- magenta at full coverage is visible in any scene. Built from the
+    -- defaults for the same reason every material is, so the fields this path
+    -- has no opinion about are answers rather than whatever the stack held.
+    parts[#parts + 1] = "    MaterialOutput unknown = materialDefaults();"
     parts[#parts + 1] = "    unknown.albedo = vec4(1.0, 0.0, 1.0, 1.0);"
-    parts[#parts + 1] = "    unknown.coverage = 1.0;"
     parts[#parts + 1] = "    return unknown;"
     parts[#parts + 1] = "}"
     parts[#parts + 1] = ""

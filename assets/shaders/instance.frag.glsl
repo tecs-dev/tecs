@@ -9,6 +9,7 @@ layout(location = 3) flat in int vMaterial;
 layout(location = 4) flat in float vParam;
 layout(location = 5) flat in float vLit;
 layout(location = 6) flat in int vClip;
+layout(location = 7) flat in vec4 vNormalBasis;
 layout(location = 0) out vec4 albedo;
 layout(location = 1) out vec4 normal;
 
@@ -60,10 +61,20 @@ void main() {
     if (coverage <= 0.0) { discard; }
 
     albedo = shaded.albedo;
-    // The normal's alpha carries whether the fragment wants lighting, and both
-    // the material and the layer have a say: the product is nonzero only where
-    // the two agree, so either one asking to be left out is enough. The alpha
-    // was written as one and read by nothing, so this costs no attachment and
-    // no bandwidth.
-    normal = vec4(0.5, 0.5, 1.0, shaded.lit * vLit);
+
+    // Out of the quad's space and into the world, which is where the lighting
+    // pass works. Only the two in-plane axes turn: the quad lies in the XY
+    // plane, so its perpendicular is unaffected by anything a 2x2 can do, and
+    // the basis is a rotation, so what arrives unit length leaves unit length
+    // and nothing has to be renormalised.
+    mat2 turn = mat2(vNormalBasis.x, vNormalBasis.y,
+                     vNormalBasis.z, vNormalBasis.w);
+    vec3 faced = vec3(turn * shaded.normal.xy, shaded.normal.z);
+
+    // Biased into unsigned range, since the attachment has no signed
+    // representation, and the lighting pass undoes exactly this. The alpha
+    // carries whether the fragment wants lighting, and both the material and
+    // the layer have a say: the product is nonzero only where the two agree,
+    // so either one asking to be left out is enough.
+    normal = vec4(faced * 0.5 + 0.5, shaded.lit * vLit);
 }

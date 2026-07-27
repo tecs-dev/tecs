@@ -71,6 +71,20 @@ layout(location = 5) flat out float vLit;
 // downstream is uniform across the primitive rather than a per-fragment
 // decision that could go either way.
 layout(location = 6) flat out int vClip;
+// Turns a material's local-space normal into the world, as the four components
+// of a 2x2 in column order. Flat, because it is the instance's own transform.
+//
+// The rotation and the mirroring, and not the scale. A normal usually
+// transforms by the inverse transpose of the basis, which would divide the
+// in-plane components through by the scale and leave every shape larger than a
+// unit quad reading as flat. That is right when the third axis has a scale of
+// its own to stay in proportion with, and here it does not: a 2D transform
+// says how wide and how tall a shape is drawn and nothing at all about how far
+// it stands out of the plane. So a shape is taken to swell with itself, which
+// makes the scale drop out and leaves the rotation. The sign does not drop
+// out: a negative scale mirrors the quad, and a mirrored surface faces the
+// other way.
+layout(location = 7) flat out vec4 vNormalBasis;
 
 // Four distinct corners, visited through an index buffer. A non-indexed quad
 // runs the vertex shader six times for the four positions it actually has.
@@ -109,6 +123,10 @@ void main() {
     // that scales along world axes after rotating, so a turned rectangle keeps
     // an upright footprint and only its sampling spins.
     mat2 basis = mat2(c * sx, s * sx, -s * sy, c * sy);
+
+    // The same rotation, carrying whichever axes the scale mirrored.
+    vec2 flip = vec2(sx < 0.0 ? -1.0 : 1.0, sy < 0.0 ? -1.0 : 1.0);
+    vNormalBasis = vec4(c * flip.x, s * flip.x, -s * flip.y, c * flip.y);
 
     // An animated instance resolves its region here rather than carrying one,
     // which is what stops a frame changing from being a write to the instance

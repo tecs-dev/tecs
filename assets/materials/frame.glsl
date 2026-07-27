@@ -7,7 +7,7 @@
 // puts a seam at each corner.
 
 MaterialOutput material(MaterialInput frag) {
-    MaterialOutput result;
+    MaterialOutput result = materialDefaults();
     result.albedo = texture(images, frag.uv) * frag.color;
 
     float thickness = 0.5 * frag.param;

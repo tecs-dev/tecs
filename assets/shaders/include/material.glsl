@@ -20,6 +20,21 @@ struct MaterialInput {
 
 struct MaterialOutput {
     vec4 albedo;
+    // Which way the surface faces, in the quad's own space: X and Y along the
+    // quad's own axes and +Z out of it, towards the viewer. The fragment
+    // shader turns it by the instance's rotation and scale, so a material says
+    // what its shape means and never what the entity is doing with it.
+    //
+    // Flat is the honest default, and `materialDefaults` supplies it. A 2D
+    // sprite genuinely has no normal: it is a picture of a surface rather than
+    // a surface, and inventing a curve for it would light every sprite as
+    // though it bulged towards the viewer. So this is per material rather than
+    // per texture, and a material claims a shape only where its own silhouette
+    // is one: a circle is a dome because a circle is what a dome looks like,
+    // and a rectangle is flat because a rectangle is what a wall looks like.
+    // A sprite that really does want a normal per texel wants a normal map,
+    // which is a sidecar image and a different piece of work.
+    vec3 normal;
     // Zero leaves the fragment out of the lighting pass entirely, so it draws
     // at its own colour. Whether a thing emits is what it is rather than where
     // it is, so the material answers here; the layer it sits on answers too,
@@ -31,6 +46,33 @@ struct MaterialOutput {
     // blending into it.
     float coverage;
 };
+
+// What a material starts from, so a field it never mentions has a value.
+//
+// Every material begins here rather than declaring a bare `MaterialOutput`,
+// which is what lets the contract grow a field without every material in every
+// root having to learn about it on the same day. The albedo and the coverage
+// are placeholders a material is expected to overwrite; the normal and the lit
+// flag are answers in their own right.
+MaterialOutput materialDefaults() {
+    MaterialOutput result;
+    result.albedo = vec4(1.0);
+    result.normal = vec3(0.0, 0.0, 1.0);
+    result.lit = 1.0;
+    result.coverage = 1.0;
+    return result;
+}
+
+// The normal of a dome over a flat field, from how far out the fragment is.
+//
+// `rim` is the fragment's position across the shape's own radius, zero at the
+// middle and unit length at the silhouette, so a circle passes its local
+// coordinate doubled and an ellipse divides by its two radii. What comes back
+// is already unit length: the height is the leg that makes it so, which is
+// also what makes the surface a hemisphere rather than a cone.
+vec3 domeNormal(vec2 rim) {
+    return vec3(rim, sqrt(max(1.0 - dot(rim, rim), 0.0)));
+}
 
 // Signed distance to a rounded box, negative inside. Here rather than in each
 // material that wants it, since a rectangle, a circle and a capsule are the

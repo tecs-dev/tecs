@@ -30,7 +30,7 @@ float starDistance(vec2 point, float outer, float inner) {
 }
 
 MaterialOutput material(MaterialInput frag) {
-    MaterialOutput result;
+    MaterialOutput result = materialDefaults();
     result.albedo = texture(images, frag.uv) * frag.color;
     result.coverage = -starDistance(frag.local, 0.5, 0.5 * frag.param);
     result.lit = 1.0;

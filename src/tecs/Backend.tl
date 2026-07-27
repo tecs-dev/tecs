@@ -623,6 +623,12 @@ function Backend:consume(packet: FramePacket, frame: Frame)
     view.y = packet.cameraY
     view.zoom = packet.cameraZoom
     view.rotation = packet.cameraRotation
+    -- The same view the geometry pass draws with, handed to the pass that has
+    -- to invert it. Lights arrive in world units, so a lighting pass working
+    -- in target pixels needs this to put a fragment back where its geometry
+    -- came from, and taking it from the one camera is what stops the two
+    -- spaces drifting apart.
+    self.deferred:setView(view.x, view.y, view.zoom, view.rotation)
     self.deferred:setLightData(packet.lights, packet.lightCount)
 
     if self.count > 0 then

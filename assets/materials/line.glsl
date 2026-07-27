@@ -11,7 +11,7 @@
 // quad instead of being cut off at the corner.
 
 MaterialOutput material(MaterialInput frag) {
-    MaterialOutput result;
+    MaterialOutput result = materialDefaults();
     result.albedo = texture(images, frag.uv) * frag.color;
 
     // Half the quad's diagonal, which is also the unit vector along it.

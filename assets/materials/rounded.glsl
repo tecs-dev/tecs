@@ -2,7 +2,7 @@
 // the quad, so half of it is a circle.
 
 MaterialOutput material(MaterialInput frag) {
-    MaterialOutput result;
+    MaterialOutput result = materialDefaults();
     result.albedo = texture(images, frag.uv) * frag.color;
     result.coverage = -sdRoundedBox(frag.local, vec2(0.5), frag.param);
     result.lit = 1.0;

@@ -4,7 +4,7 @@
 // textured and untextured geometry share one path.
 
 MaterialOutput material(MaterialInput frag) {
-    MaterialOutput result;
+    MaterialOutput result = materialDefaults();
     vec4 texel = texture(images, frag.uv);
     result.albedo = texel * frag.color;
 

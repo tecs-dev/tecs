@@ -34,7 +34,7 @@ vec3 glyphField(vec3 coordinate) {
 }
 
 MaterialOutput material(MaterialInput frag) {
-    MaterialOutput result;
+    MaterialOutput result = materialDefaults();
 
     float inside = glyphMedian(glyphField(frag.uv)) - 0.5;
 

@@ -113,8 +113,8 @@ end
 
 --- Appends one light, dropping it if the frame is already full.
 ---
---- Positions are in the lighting target's pixels; see `Deferred.Light` for
---- what each value means.
+--- Positions are in world units, like everything else a packet carries; see
+--- `Deferred.Light` for what each value means.
 function FramePacket:addLight(x: number, y: number, z: number, radius: number,
                               r: number, g: number, b: number,
                               intensity: number)

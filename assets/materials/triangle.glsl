@@ -8,7 +8,7 @@
 // say what the transform says.
 
 MaterialOutput material(MaterialInput frag) {
-    MaterialOutput result;
+    MaterialOutput result = materialDefaults();
     result.albedo = texture(images, frag.uv) * frag.color;
 
     // Three half-planes, folded about X so the two slanted sides are one. The

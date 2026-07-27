@@ -19,13 +19,18 @@ float ellipseDistance(vec2 point, vec2 radii) {
 }
 
 MaterialOutput material(MaterialInput frag) {
-    MaterialOutput result;
+    MaterialOutput result = materialDefaults();
     result.albedo = texture(images, frag.uv) * frag.color;
     // A height of exactly zero divides by it, and the result compares false
     // against the discard, so the quad would fill rather than empty. Held at a
     // hairline instead, which is what a vanishing ellipse should look like.
     vec2 radii = vec2(0.5, max(0.5 * frag.param, 1e-4));
     result.coverage = -ellipseDistance(frag.local, radii);
+    // The circle's dome, squashed the way the silhouette is: dividing by the
+    // two radii puts the rim at unit length on both axes, so a wide flat
+    // ellipse domes gently across and steeply up rather than bulging into a
+    // sphere that its own outline does not describe.
+    result.normal = domeNormal(frag.local / radii);
     result.lit = 1.0;
     return result;
 }

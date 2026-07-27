@@ -1210,6 +1210,60 @@ describe("ecs.Renderer", function()
         renderer:destroy()
     end)
 
+    -- A normal is what makes a light have a direction. With one constant
+    -- normal everywhere the Lambert term collapses to the light's height over
+    -- its distance, so lighting is radial falloff and nothing else and no
+    -- surface faces anywhere. These pin that a material's own shape decides
+    -- which way its fragments face.
+    --
+    -- The light sits directly over the middle of the quad, so distance and
+    -- attenuation are the same function of the radius for both materials and
+    -- the only thing left that can separate them is the normal.
+    local function litAt(materialName, param, offset)
+        local world, renderer = newScene({ 0.0, 0.0, 0.0 })
+        local parts = {
+            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE, SIZE),
+            Tint(1.0, 1.0, 1.0, 1.0),
+            Renderable(),
+        }
+        if materialName ~= nil then
+            parts[#parts + 1] = components.Material(materials.id(materialName), param)
+        end
+        world:spawn(table.unpack(parts))
+        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, 1, 1), PointLight(SIZE / 2, SIZE * 1.5, 1.0, 1.0, 1.0, 3.0))
+
+        local pixels = frameOnce(world, renderer)
+        local centre = screen:getPixel(pixels, SIZE / 2, SIZE / 2).r
+        local out = screen:getPixel(pixels, SIZE / 2 + offset, SIZE / 2).r
+        renderer:destroy()
+        return centre, out
+    end
+
+    it("faces a flat material at the viewer", function()
+        -- The default material is a picture on a quad, and a picture has no
+        -- shape of its own to face with. So it stays flat, and what varies
+        -- across it is only how far the light is.
+        local centre, out = litAt(nil, 0, 22)
+        assert.is_true(centre > 200, ("under the light, got %d"):format(centre))
+        assert.is_true(out > 180, ("a flat surface turns towards the light everywhere, got %d"):format(out))
+    end)
+
+    it("domes a circle so its edge turns away from the light", function()
+        -- The same quad, the same light, the same pixel. A circle is what a
+        -- dome looks like from above, so two thirds of the way out its surface
+        -- has turned far enough that the light rakes across it.
+        local flatCentre, flatOut = litAt(nil, 0, 22)
+        local centre, out = litAt("circle", 0, 22)
+
+        assert.is_true(centre > 200, ("the top of the dome faces the light, got %d"):format(centre))
+        assert.is_true(out < 120, ("its flank should be raking, got %d"):format(out))
+        assert.is_true(
+            flatOut - out > 80,
+            ("the shape has to be the difference: flat %d against domed %d"):format(flatOut, out)
+        )
+        assert.is_true(math.abs(flatCentre - centre) < 8, "and the two agree where both face the viewer")
+    end)
+
     it("keeps a quad square when no Material is present", function()
         -- The default path must be untouched: absence of Material means the
         -- default material, which covers the whole quad, corners included.
@@ -1793,6 +1847,135 @@ describe("ecs.Renderer", function()
             "the subject should have moved with the camera"
         )
         assert.are.equal(0, screen:getPixel(pixels, SIZE * 0.25, SIZE / 2).r, "and left where it was")
+        renderer:destroy()
+    end)
+
+    -- Lights are binned into a grid over the world rectangle the camera can
+    -- see, so a fragment consults the lights that reach its tile rather than
+    -- every light in the scene. Two things have to hold: the grid has to be
+    -- registered against the view the geometry was drawn with, and a tile has
+    -- to hold a bounded number of lights. Both are visible in pixels.
+    --
+    -- Stacking lights at one point is what makes the bound observable. Each
+    -- carries a small enough share that sixty-four of them fall well short of
+    -- saturating, so a tile that took more would read brighter rather than
+    -- reading the same.
+    local function stacked(count, camera)
+        local world, renderer = newScene({ 0.0, 0.0, 0.0 })
+        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 4, SIZE * 4), Tint(1.0, 1.0, 1.0, 1.0), Renderable())
+        for _ = 1, count do
+            world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, 1, 1), PointLight(8.0, 96.0, 1.0, 1.0, 1.0, 0.0087))
+        end
+        -- After the first frame, so the renderer has finished centring its
+        -- own camera and does not overwrite what a test asked for.
+        frameOnce(world, renderer)
+        if camera ~= nil then
+            camera(renderer)
+        end
+        local pixels = frameOnce(world, renderer)
+        renderer:destroy()
+        return pixels
+    end
+
+    it("bounds how many lights one tile carries", function()
+        local sixtyFour = screen:getPixel(stacked(64), SIZE / 2, SIZE / 2).r
+        local double = screen:getPixel(stacked(128), SIZE / 2, SIZE / 2).r
+
+        assert.is_true(
+            sixtyFour > 60 and sixtyFour < 200,
+            ("sixty-four must land clear of both ends, got %d"):format(sixtyFour)
+        )
+        assert.are.equal(sixtyFour, double, "a tile holds sixty-four lights, so the second sixty-four change nothing")
+    end)
+
+    it("bins against the world rectangle the camera can see", function()
+        -- A panned, magnified and turned camera. The grid is registered on the
+        -- view rather than on the window, so all three have to reach the
+        -- binning pass and the lighting pass as one rectangle: a grid the two
+        -- disagree about puts a light in a tile nothing looks in, and the
+        -- picture breaks into lit and unlit rectangles.
+        local view
+        local pixels = stacked(128, function(renderer)
+            renderer.camera.x = SIZE / 2 + 9
+            renderer.camera.y = SIZE / 2 - 7
+            renderer.camera.zoom = 1.7
+            renderer.camera.rotation = 0.6
+            view = renderer.camera
+        end)
+
+        -- The lights stayed at the middle of the world; the camera did not, so
+        -- where they land is the camera's answer rather than the target's.
+        local atX, atY = view:toScreen(SIZE / 2, SIZE / 2, SIZE, SIZE)
+        local under = screen:getPixel(pixels, math.floor(atX), math.floor(atY)).r
+        assert.is_true(under > 60 and under < 200, ("the tile under the lights is still capped, got %d"):format(under))
+
+        -- Every corner of the view is inside the lights' reach, so every tile
+        -- the view covers has to have been given them.
+        local corners = { { 12, 12 }, { SIZE - 12, 12 }, { 12, SIZE - 12 }, { SIZE - 12, SIZE - 12 } }
+        for _, at in ipairs(corners) do
+            local pixel = screen:getPixel(pixels, at[1], at[2]).r
+            assert.is_true(pixel > 8, ("no tile may be missed: %d,%d came back at %d"):format(at[1], at[2], pixel))
+        end
+    end)
+
+    it("pans what is lit", function()
+        -- A light is a thing in the world, so the camera has to carry it the
+        -- same way it carries geometry. The two are only visibly separate once
+        -- the camera moves: at rest a light's world position and the pixel it
+        -- lands on are the same number, and a light left in target pixels
+        -- passes every test taken with the camera where it started.
+        local world, renderer = newScene({ 0.0, 0.0, 0.0 })
+        -- Wider than the view at either camera position, so what changes is
+        -- where the light falls and never whether there is albedo to light.
+        world:spawn(
+            Transform(SIZE * 0.25, SIZE / 2, 0, 1, 0, SIZE * 4, SIZE * 4),
+            Tint(1.0, 1.0, 1.0, 1.0),
+            Renderable()
+        )
+        world:spawn(Transform(SIZE * 0.25, SIZE / 2, 0, 1, 0, 1, 1), PointLight(6.0, 18.0, 1.0, 1.0, 1.0, 6.0))
+
+        local before = frameOnce(world, renderer)
+        assert.is_true(
+            screen:getPixel(before, SIZE * 0.25, SIZE / 2).r > 200,
+            "the light lands where the world says it is"
+        )
+        assert.is_true(screen:getPixel(before, SIZE / 2, SIZE / 2).r < 40, "and its radius bounds it")
+
+        -- The same move the geometry test makes, so the two answers can be
+        -- read together: the subject travels right and its light travels with
+        -- it.
+        renderer.camera.x = renderer.camera.x - SIZE * 0.25
+        local after = frameOnce(world, renderer)
+        assert.is_true(
+            screen:getPixel(after, SIZE / 2, SIZE / 2).r > 200,
+            ("the light should have moved with the camera, got %d"):format(screen:getPixel(after, SIZE / 2, SIZE / 2).r)
+        )
+        assert.is_true(
+            screen:getPixel(after, SIZE * 0.25, SIZE / 2).r < 40,
+            ("and left the pixels it was over, got %d"):format(screen:getPixel(after, SIZE * 0.25, SIZE / 2).r)
+        )
+        renderer:destroy()
+    end)
+
+    it("scales a light's reach with the zoom", function()
+        -- Radius is a world quantity, so magnifying the view has to magnify
+        -- what the light covers on screen. A light carried into the pass in
+        -- target pixels would keep the same pixel reach at every zoom.
+        local world, renderer = newScene({ 0.0, 0.0, 0.0 })
+        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 4, SIZE * 4), Tint(1.0, 1.0, 1.0, 1.0), Renderable())
+        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, 1, 1), PointLight(4.0, 12.0, 1.0, 1.0, 1.0, 12.0))
+
+        local at = SIZE / 2 + 16
+        assert.is_true(
+            screen:getPixel(frameOnce(world, renderer), at, SIZE / 2).r < 40,
+            "sixteen pixels out is beyond a radius of twelve"
+        )
+
+        renderer.camera.zoom = 3.0
+        assert.is_true(
+            screen:getPixel(frameOnce(world, renderer), at, SIZE / 2).r > 200,
+            "and inside it once the view magnifies the world by three"
+        )
         renderer:destroy()
     end)
 

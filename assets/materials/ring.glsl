@@ -2,7 +2,7 @@
 // one, so zero is a disc, a half is a broad band and most of one is a hairline.
 
 MaterialOutput material(MaterialInput frag) {
-    MaterialOutput result;
+    MaterialOutput result = materialDefaults();
     result.albedo = texture(images, frag.uv) * frag.color;
 
     // The band is a circle of the mean radius, thickened by half the

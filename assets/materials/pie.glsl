@@ -17,7 +17,7 @@ float pieDistance(vec2 point, float halfAperture, float radius) {
 }
 
 MaterialOutput material(MaterialInput frag) {
-    MaterialOutput result;
+    MaterialOutput result = materialDefaults();
     result.albedo = texture(images, frag.uv) * frag.color;
     result.coverage = -pieDistance(frag.local, 3.14159265 * frag.param, 0.5);
     result.lit = 1.0;

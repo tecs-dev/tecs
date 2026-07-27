@@ -1589,6 +1589,88 @@ so draw order still decides ties and depth only decides between instances that
 differ. Lighting and composite have no attachment. Each covers every pixel
 exactly once and has nothing to be occluded by.
 
+### Lights are in the world
+
+A light is placed in world units, like everything else, and the lighting pass
+is handed the view through `Deferred:setView` so it can take each fragment back
+out to the world rather than bringing the lights in. Moving the camera
+therefore moves what is lit, and zoom scales what a radius covers on screen
+rather than what it covers in the world.
+
+The direction is chosen rather than incidental. Projecting lights on the host
+would be the same arithmetic once, but everything that comes after wants a
+world-space ray: an occluder mask is built with a world projection and a shadow
+march is a march through the world, so the projection would have to be undone
+again at the first of them. The view arrives as a centre and a rotation divided
+by the zoom, because an orthographic projection inverts to a 2x2 and an offset
+and a fragment should pay two multiply-adds rather than a 4x4 by a vec4. A
+pipeline nothing sets a view on centres one on its own target, which makes
+world units target pixels and is the same default the renderer's camera takes.
+
+### Materials say which way they face
+
+The G-buffer's normal attachment carries a real per-fragment normal, and what
+writes it is the material. A `MaterialOutput` starts from `materialDefaults`
+and the default is flat, facing the viewer, because a 2D sprite genuinely has
+no normal: it is a picture of a surface rather than a surface, and inventing a
+curve would light every sprite as though it bulged. So the answer is per
+material rather than per texture, and a material claims a shape only where its
+own silhouette is one. `circle` and `ellipse` return a dome, `capsule` returns
+a cylinder with hemispherical caps, and everything else is flat. A sprite that
+really wants a normal per texel wants a normal map, which is a sidecar image
+and a separate piece of work.
+
+The vertex shader hands the fragment shader the instance's rotation and the
+axes its scale mirrored, and not the scale itself. A normal usually transforms
+by the inverse transpose of the basis, which divides the in-plane components
+through by the scale and would leave every shape larger than a unit quad
+reading as flat. That is right when the third axis has a scale of its own to
+stay in proportion with, and here it does not: a 2D transform says how wide and
+how tall a shape is drawn and nothing about how far it stands out of the plane.
+A shape is taken to swell with itself, which makes the scale drop out.
+
+No attachment was added for this. The normal target already existed and was
+already being written, with a constant; four colour attachments is what a
+render pass allows and the G-buffer is using two of them.
+
+### Lights are binned into tiles
+
+A fragment consults the lights whose tile it is in rather than every light in
+the scene. Without that the loop runs its whole body for every light however
+far away it is, because falloff clamps to zero rather than rejecting, so a
+scene's light count is a per-pixel cost: at 1280x720 with 256 lights each
+reaching a small part of the view, the lighting pass measured 9.8 ms a frame
+against 0.8 with binning.
+
+The grid is in world space. It covers the world rectangle the camera can see,
+so a light's position and its radius are already in the space the tiles are
+measured in and the zoom enters once, as the half extent of that rectangle.
+Binning in device coordinates would mean projecting a radius, which is not a
+length under a projection. The rectangle is resolved once per frame and read by
+both the pass that fills the grid and the pass that reads it, because a grid the
+two disagree about puts a light in a tile nothing looks in.
+
+It is a fixed count of tiles rather than a fixed tile size in pixels, so its two
+buffers are allocated once and never replaced while a frame in flight is still
+reading them, and a tile holds a bounded number of lights.
+
+The fill is a thread per tile walking the light buffer, rather than a thread per
+light scattering into the tiles it covers. The scatter does less arithmetic and
+needs an atomic to claim a slot and a pass to zero the counts first. Gathering
+needs neither: a tile is written by the one thread that owns it, so a count is a
+local variable until it is stored and the list comes out in light-buffer order
+every time. That order is worth having rather than merely free. Summing a tile's
+lights is floating-point addition, which is not associative, so a list in a
+different order sums to a different last bit; the rule here is that a result
+nothing can observe an order in may use an atomic, and this one would have
+needed the argument made. Gathering means the question does not arise. The cost
+is tiles times lights, which is a few hundred comparisons per thread against the
+millions of pixels it saves.
+
+It runs every frame, including a frame with no lights at all, because it is the
+only thing that writes the counts and a frame that skipped it would leave the
+last frame's lists standing.
+
 ## Layers
 
 A `Transform` carries a layer, and a layer is a band of that depth range.
