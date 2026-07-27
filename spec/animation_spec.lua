@@ -1851,4 +1851,44 @@ describe("tecs.gfx.animation", function()
             assert.is_false(animation.restart(world, entity))
         end)
     end)
+
+    describe("a saved animated sprite", function()
+        it("carries the whole image rather than this run's playback", function()
+            -- The four UV lanes hold a playback while an animation resolves on
+            -- the GPU: an index into this run's frame table and a count of
+            -- this world's fixed steps. A file holding those would land on
+            -- whatever the next run numbered the same.
+            local world = animatedWorld()
+            local live = sheet
+                .build(uniqueName("savedplayback"), 64, 32)
+                :frame(0, 0, 32, 32)
+                :frame(32, 0, 32, 32)
+                :tag("all", 1, 2)
+                :finish()
+            local entity = world:spawn(live:sprite(1), animation.of(live, "all"))
+            drive(world, 3)
+
+            local sprite = world:get(entity, Sprite)
+            assert.is_true(sprite.u0 < 0.0, "the lanes really do hold a playback")
+
+            local saved = world:saveSnapshot({ format = "table" }).snapshot
+
+            -- Restored and read before a step re-encodes it, which is the only
+            -- moment the file's own value is what the component holds.
+            local fresh = animatedWorld()
+            fresh:loadSnapshot(saved)
+            local restored = nil
+            local query = fresh:query({ include = { Sprite } })
+            for archetype, length in query:iter() do
+                local column = archetype:get(Sprite)
+                for row = 1, length do
+                    restored = column[row]
+                end
+            end
+
+            assert.is_not_nil(restored, "the sprite came back")
+            assert.is_true(restored.u0 >= 0.0, "and not carrying a playback this run never handed out")
+            assert.are.equal(1.0, restored.u1)
+        end)
+    end)
 end)

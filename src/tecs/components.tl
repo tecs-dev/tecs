@@ -216,6 +216,20 @@ ecs.newFFIComponent({
     },
     defaults = { 0, 0, 0, 1, 1, -1 },
     serialize = function(instance: Sprite): {string: any}
+        -- A negative first coordinate is not a rect. The four UV lanes carry a
+        -- playback instead when an animation resolves on the GPU, and what
+        -- they hold then is an index into this run's frame table and a count
+        -- of this world's fixed steps, neither of which means anything in
+        -- another run. `Animation` writes what is playing by name and the
+        -- encoder derives these again on the first step after a load, so the
+        -- whole image is what a saved sprite carries and the animation puts
+        -- its own answer back.
+        if instance.u0 < 0.0 then
+            return {
+                image = imageNames[instance.image as integer],
+                u0 = 0.0, v0 = 0.0, u1 = 1.0, v1 = 1.0,
+            }
+        end
         return {
             image = imageNames[instance.image as integer],
             u0 = instance.u0, v0 = instance.v0,
