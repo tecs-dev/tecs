@@ -55,8 +55,16 @@ build: ## Build the selected preset
 check: ## Type-check Teal sources
 	@tl check $(TL_FLAGS) $(SOURCE_TL) $(BENCH_TL) main.tl
 
+# Two runs, because the headless specs fork. `io.popen` forks this process, and
+# by the time the rest of the suite has run there are live threads in it: the
+# solver's pool, asset workers, the graphics driver's own. Forking a
+# multithreaded process is unsafe between the fork and the exec, and the child
+# dies there often enough to fail about one run in five, with its output buffer
+# unflushed so the failure reads as a program that printed nothing. Running them
+# first, in a process that has not started a thread yet, is the fix.
 test: build $(LUA)/main.lua ## Run the spec suite
-	@busted
+	@busted --pattern=headless_spec
+	@busted --exclude-pattern=headless_spec
 
 shaders: build ## Build the shader pack a target without a compiler consumes
 	@luajit scripts/buildshaders.lua
