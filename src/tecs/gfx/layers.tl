@@ -26,7 +26,9 @@ local record layers
     MAX: integer
 
     --- Highest z a scene is expected to use, which sets the resolution of
-    --- sorting within a band rather than a limit on the value.
+    --- sorting within a band. A scene reaching past this still draws, with
+    --- entities beyond the edge resting on it and no longer sorting against
+    --- each other.
     maxZ: number
 
     --- Half the world extent a scene is expected to occupy, for normalising
@@ -141,13 +143,17 @@ local record layers
     --- larger value is farther, and quietly invert the order a scene was built
     --- expecting.
     --- @param layer One to `MAX`, which picks the band and, through `sortOf`,
-    ---     what the rest of the arguments mean.
+    ---     what the rest of the arguments mean. Outside that range this takes
+    ---     the nearest layer whole and goes on sorting within it, because a
+    ---     band is the only thing a depth can name.
     --- @param z Height in the sort, against `maxZ`. Read by every sort mode.
-    --- @param x World x, read only by the isometric sort.
-    --- @param y World y, read by the topdown and isometric sorts. Larger is
-    ---     lower on screen and so nearer.
-    --- @return A depth clamped into 0.001 to 0.999, which is what keeps the
-    ---     shader's recovery of the layer index in range.
+    --- @param x World x, read only by the isometric sort, against `maxY`.
+    --- @param y World y, read by the topdown and isometric sorts, against
+    ---     `maxY`. Larger is lower on screen and so nearer.
+    --- @return A depth inside the layer's own band, whatever the arguments
+    ---     were: each of them is normalised and then held to zero and one, so
+    ---     a scene reaching past what the module was told to expect stops
+    ---     sorting rather than spilling into the next layer.
     depthOf: function(layer: integer, z: number, x: number, y: number): number
 end
 
@@ -202,6 +208,21 @@ end
 --- Bumped by every `configure`, so a consumer holding a packed copy of the
 --- table can tell whether its copy is still the answer.
 local revision = 0
+
+--- A normalised sort term, with anything past either end resting on it.
+---
+--- Every sort divides a position by the extent the module was told to expect,
+--- and a scene that reaches past that extent has to stop sorting rather than
+--- carry the depth out of its band: the vertex shader recovers a layer by
+--- multiplying a depth by `MAX`, so a term that left zero to one would hand
+--- the geometry a different layer's positioning, parallax, zoom and lit flag.
+--- Losing the order between two entities off the edge of the expected extent
+--- is the smaller of those two failures by a wide margin.
+local function saturate(value: number): number
+    if value < 0.0 then return 0.0 end
+    if value > 1.0 then return 1.0 end
+    return value
+end
 
 function layers.configure(layer: integer, config: layers.Config)
     if layer < 1 or layer > layers.MAX then
@@ -260,22 +281,34 @@ function layers.viewCulled(layer: integer): boolean
 end
 
 function layers.depthOf(layer: integer, z: number, x: number, y: number): number
+    -- The band is picked from a layer held inside the range there are bands
+    -- for. A depth is the only thing that reaches the shader, and the shader
+    -- reads the layer back out of it, so an entity outside the range has to
+    -- take a real layer whole rather than land between two of them.
+    local index = layer
+    if index < 1 then
+        index = 1
+    elseif index > layers.MAX then
+        index = layers.MAX
+    end
+
     local band <const> = 1.0 / layers.MAX
-    local base <const> = (layers.MAX - layer) * band
-    local sort <const> = sorts[layer] or SORT_TOPDOWN
+    local base <const> = (layers.MAX - index) * band
+    local sort <const> = sorts[index] or SORT_TOPDOWN
+    local nz <const> = saturate(z / layers.maxZ)
 
     local within: number
     if sort == SORT_Z then
-        within = (1.0 - z / layers.maxZ) * band * 0.99
+        within = (1.0 - nz) * band * 0.99
     elseif sort == SORT_ISOMETRIC then
-        local nx = (x + layers.maxY) / (2.0 * layers.maxY)
-        local ny = (y + layers.maxY) / (2.0 * layers.maxY)
-        local iso = nx + ny + z / layers.maxZ
-        if iso < 0.0 then iso = 0.0 elseif iso > 3.0 then iso = 3.0 end
-        within = (1.0 - iso / 3.0) * band * 0.99
+        local nx <const> = saturate((x + layers.maxY) / (2.0 * layers.maxY))
+        local ny <const> = saturate((y + layers.maxY) / (2.0 * layers.maxY))
+        -- Every term is already inside zero and one, so their sum is inside
+        -- zero and three and wants no clamp of its own.
+        within = (1.0 - (nx + ny + nz) / 3.0) * band * 0.99
     else
-        local ny = (y + layers.maxY) / (2.0 * layers.maxY)
-        within = (1.0 - (z / layers.maxZ * 0.7 + ny * 0.3)) * band * 0.99
+        local ny <const> = saturate((y + layers.maxY) / (2.0 * layers.maxY))
+        within = (1.0 - (nz * 0.7 + ny * 0.3)) * band * 0.99
     end
 
     local depth = base + within
