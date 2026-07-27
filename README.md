@@ -396,6 +396,21 @@ pixels: surfaces live in process memory, so the pointer is valid in either
 state, and passing it avoids copying an image through a serialized message
 only to copy it again into staging. Ownership transfers with the address.
 
+An image is a PNG or a JPEG, and nothing else. SDL_image offers eighteen
+formats and `cmake/Pinned.cmake` turns off every one of the other sixteen,
+because each is a codec that a statically linked game carries whether or not it
+loads one: WebP, AVIF, TIFF and JPEG XL between them cost several megabytes,
+and libavif reaches dav1d and aom behind it for about five more. Two backend
+options go with them. `SDLIMAGE_BACKEND_IMAGEIO` is off because with it on
+`IMG_Load` is not SDL_image's function at all on Apple platforms: CoreGraphics
+answers it and reads WebP, AVIF, TIFF, BMP and GIF whatever the format options
+say, which would mean a game shipping an atlas that works on macOS and fails
+everywhere else. `SDLIMAGE_BACKEND_WIC` is off for the same reason in the
+small. What is left decodes identically on every target: libpng for PNG, and
+the bundled stb_image for JPEG, which is why keeping JPEG costs no libjpeg. An
+asset in any other format is converted when it is built, not enabled when the
+engine is configured.
+
 Sound takes the same route. A clip is read and decoded on the worker by
 SDL_mixer and handed back as the address of a `MIX_Audio`, so a file that turns
 out to be a minute of Vorbis costs the frame nothing. A clip long enough to
@@ -2495,6 +2510,31 @@ whatever the packager configured: Homebrew's loads its optional decoders by
 name at `MIX_Init`, so a developer's machine may well have the LGPL ones
 available where a package built from `cmake/Pinned.cmake` does not.
 `Audio.decoders()` is how to tell which build is running.
+
+The same gap runs the other way for images, and it is the sharper one because
+there is no runtime call that reports it. A development build takes SDL_image
+from the system, and a packager's build reads everything: a WebP that loads on
+a developer's machine is refused by a package built from `cmake/Pinned.cmake`,
+where PNG and JPEG are the whole list. Test an unfamiliar format against a
+packaged preset before shipping an asset in it.
+
+### Licences
+
+Everything this engine links is permissive, and it stays that way. LGPL is the
+one rule with no exceptions, because a statically linked game cannot satisfy
+the relinking obligation and a shipped binary is what this is for. It is not
+left to a document: `cmake/Pinned.cmake` names every decoder option that would
+fetch one, `spec/licenses_spec.lua` holds those options to their values and
+fails on a name it does not recognise, and `scripts/checkpackage.py` holds the
+libraries an installed tree actually links against a list carrying a licence
+and a reason for each. Neither of those two checks reads a licence out of a
+binary, because that is not something a binary carries; what they prove is that
+nothing gets linked without somebody having written down what it is.
+
+`THIRD_PARTY_NOTICES.md` is the list, and it installs to `share/tecs` with the
+binaries it describes. A package that carried the code and not the notice would
+be the one compliance failure this engine could commit on its own, so
+`make check-package` fails an install that is missing it.
 
 Dependencies are found through pkg-config rather than a package manager's
 paths, which is what lets the same build description cross-compile. Box2D ships

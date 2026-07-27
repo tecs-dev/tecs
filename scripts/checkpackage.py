@@ -13,6 +13,13 @@ Teal sources; if those are absent or incomplete, the failure lands on whoever
 unpacked the package, not on whoever built it. So a file using the `tecs`
 global is type-checked here against the package.
 
+The licence position is checked here too, because this is the only place that
+sees what a build actually linked. Every library an installed binary references
+has to be one somebody declared, with a licence and a reason beside it, and the
+notices have to be installed alongside the binaries they describe. Neither of
+those reads a licence out of a binary, which is not something a binary carries;
+`spec/licenses_spec.lua` holds the configure-time half of the same rule.
+
 The one thing the package is not asked to carry is the declarations for LuaJIT
 itself and for cjson. Those belong to the `luajit-tl-type` rock and to the
 JSON library, not to tecs, and any Teal project on LuaJIT installs them
@@ -46,6 +53,43 @@ SYSTEM_PREFIXES = (
 # silently on a target that was supposed to have none.
 COMPILER_NAMES = ("shaderc", "spirvcross", "spirv-cross", "dxcompiler")
 
+# What a package carries the notices for. Nothing here reads a licence out of a
+# binary, because nothing can; this holds the libraries a package links against
+# a list somebody wrote down, with the licence and the reason beside each. Its
+# whole value is that a library nobody has thought about fails the check, so the
+# thinking happens before the package ships rather than after.
+#
+# The rule it exists to keep is "no LGPL, ever". `spec/licenses_spec.lua` holds
+# the configure-time half of that, which is the options in `cmake/Pinned.cmake`
+# that would fetch an LGPL codec. This is the link-time half: a library that
+# arrived some other way still has to be named.
+#
+# Matched against a normalised stem, so `libluajit-5.1.2.dylib`,
+# `libluajit.so.2` and `libluajit-5.1.dylib` are all `luajit`.
+LINKED_LIBRARIES = (
+    (r"tecs\w*", "MIT OR Apache-2.0", "the engine's own"),
+    (r"spirvcrossc", "Apache-2.0 OR MIT", "the shared object the FFI needs over SPIRV-Cross's archives"),
+    (r"cjson", "MIT", "lua-cjson, vendored under vendor/cjson"),
+    (r"SDL3(_image|_mixer|_net)?", "Zlib", "SDL and its three satellites"),
+    (r"luajit", "MIT", "the VM, carrying PUC-Rio Lua's own notice inside it"),
+    (r"box2d", "MIT", "the physics solver"),
+    (r"shaderc(_shared)?", "Apache-2.0", "a development build's shader compiler; a release links none"),
+    (r"png\d*", "libpng-2.0", "PNG decoding under SDL3_image"),
+    (r"z", "Zlib", "the deflate libpng reads through"),
+    (r"(ogg|opus|opusfile)", "BSD-3-Clause", "SDL_mixer's Opus decoder and its container"),
+    (r"wavpack", "BSD-3-Clause", "SDL_mixer's WavPack decoder"),
+)
+
+# The notices travel with the binaries they describe. A package that carries the
+# code and not the notice is the one licence failure this engine is capable of
+# committing on its own, and it is invisible until someone else audits a
+# release, so it is checked on every install rather than only on a packaged one.
+REQUIRED_NOTICES = (
+    "share/tecs/THIRD_PARTY_NOTICES.md",
+    "share/tecs/LICENSE-MIT",
+    "share/tecs/LICENSE-APACHE",
+)
+
 
 # Enough of the surface to prove the type information is whole: the ECS half,
 # the engine half reached as a value, and the engine half reached as a type.
@@ -55,7 +99,7 @@ world:update(1 / 60)
 tecs.log.get("game"):info("entities: %d", world:getStats().entities)
 
 return tecs.application({
-    load = function(app: tecs.Application) print(app.world ~= nil) end,
+    plugin = function(world: tecs.World, app: tecs.Application) print(world ~= nil and app.world ~= nil) end,
 })
 """
 
@@ -103,6 +147,36 @@ def checkTealTypes(prefix: Path, tealTypes: str, problems: list):
     print(f"{teal.relative_to(prefix)}: types a file using the `tecs` global")
 
 
+def libraryStem(reference: str) -> str:
+    """Reduces a link-table entry to the library's name, without version or path."""
+    name = reference.rsplit("/", 1)[-1]
+    name = re.sub(r"\.(dylib|so)(\.[\d.]+)?$", "", name)
+    name = re.sub(r"\.[\d.]+$", "", name)
+    name = re.sub(r"-[\d.]+$", "", name)
+    return name.removeprefix("lib")
+
+
+def checkLicenses(binary: Path, libs: list, problems: list):
+    """Holds a binary's linked libraries against the declared set.
+
+    What this proves is narrow and worth stating: that every library the
+    package links is one somebody named, with a licence beside it. It does not
+    read the licence, which is not something a binary carries. A dependency
+    that changed its terms between revisions passes here, and so does anything
+    linked statically, since a static archive leaves no entry in a link table.
+    """
+    for lib in libs:
+        if lib.startswith(("/usr/lib/", "/System/", "/lib/", "/lib64/")):
+            continue
+        stem = libraryStem(lib)
+        if not any(re.fullmatch(pattern, stem) for pattern, _, _ in LINKED_LIBRARIES):
+            problems.append(
+                f"{binary.name}: links {stem}, which is not a declared dependency. "
+                "Add it to LINKED_LIBRARIES with its licence and why it is here, "
+                "or take it out. This engine brings in no LGPL."
+            )
+
+
 def machoReferences(binary: Path):
     """Returns (rpaths, linked libraries) for a Mach-O file."""
     out = subprocess.run(["otool", "-l", str(binary)], capture_output=True, text=True)
@@ -145,9 +219,20 @@ def main():
     if not binaries:
         sys.exit(f"no binaries found under {prefix}")
 
+    # Kept apart from the list below for the same reason the type check is: what
+    # a development install borrows from its machine is allowed to differ, but
+    # the licence position does not change with the preset. A Homebrew SDL3_image
+    # is still SDL3_image, and holding both kinds to this is what makes the
+    # check run today rather than only when someone builds a packaged preset.
+    licenseProblems = []
+    for notice in REQUIRED_NOTICES:
+        if not (prefix / notice).exists():
+            licenseProblems.append(f"no {notice}: a package that ships the code has to ship the notice")
+
     problems = []
     for binary in binaries:
         rpaths, libs = machoReferences(binary) if sys.platform == "darwin" else elfReferences(binary)
+        checkLicenses(binary, libs, licenseProblems)
 
         for rpath in rpaths:
             if not rpath.startswith(("@executable_path", "@loader_path", "$ORIGIN")):
@@ -184,6 +269,13 @@ def main():
     checkTealTypes(prefix, tealTypes, typeProblems)
 
     print(f"checked {len(binaries)} binaries under {prefix}")
+
+    if licenseProblems:
+        print(f"\n{len(licenseProblems)} problems with the licence position:")
+        for problem in sorted(set(licenseProblems)):
+            print(f"  {problem}")
+        sys.exit(1)
+    print(f"{len(LINKED_LIBRARIES)} declared dependencies, and the notices to go with them")
 
     if typeProblems:
         print(f"\n{len(typeProblems)} problems with the packaged types:")

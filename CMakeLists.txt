@@ -506,6 +506,20 @@ file(
 )
 install(FILES "${CMAKE_BINARY_DIR}/build-info.txt" DESTINATION share/tecs)
 
+# The notices ship with the binaries they describe. Almost everything linked
+# here is permissive, and permissive still means the copyright notice travels
+# with the code: a package carrying the code and not the notice is the only
+# licence failure this engine is actually capable of committing. The engine's
+# own two licences go for the same reason, since MIT asks the same thing.
+# `scripts/checkpackage.py` fails an install that is missing any of them.
+install(
+    FILES
+        "${CMAKE_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
+        "${CMAKE_SOURCE_DIR}/LICENSE-MIT"
+        "${CMAKE_SOURCE_DIR}/LICENSE-APACHE"
+    DESTINATION share/tecs
+)
+
 install(TARGETS tecs RUNTIME DESTINATION bin)
 install(TARGETS tecs_worker tecs_spirvcross LIBRARY DESTINATION lib)
 install(TARGETS cjson LIBRARY DESTINATION lib)

@@ -1,5 +1,14 @@
 --- Asynchronous asset loading.
 ---
+--- **The formats an image may be in are PNG and JPEG.** SDL_image offers
+--- eighteen and `cmake/Pinned.cmake` turns off every other one, because each is
+--- a codec a shipped binary carries: WebP, AVIF, TIFF and JPEG XL between them
+--- are several megabytes for formats nothing here reads. That is a decision the
+--- engine makes on a game's behalf, so it is stated here rather than met as a
+--- failed load: an atlas in any other format is converted at build time, not
+--- enabled at configure time. Sound is the other way round, and
+--- `Audio.decoders()` reports what the mixer actually linked.
+---
 --- Decoding a PNG is milliseconds of pure CPU work with no GPU involvement,
 --- so it happens on a worker and the main thread only uploads. A load never
 --- blocks a frame; a handle reports that it is still loading and callers draw

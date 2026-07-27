@@ -16,6 +16,68 @@ FetchContent_Declare(
     GIT_TAG ${TECS_SDL3_TAG}
     GIT_SHALLOW TRUE
 )
+# SDL_image's formats are separate options as well, and every one of them is on
+# by default. Four of them reach out to a codec library of their own, so the
+# defaults cost a shipped binary megabytes for formats nothing here reads.
+#
+# On: PNG and JPEG. That is what a game built on this engine can decode, and it
+# is the whole list. Off: every other format the pinned revision offers. AVIF,
+# JXL, TIFF and WebP are the expensive ones, each carrying an external codec.
+# The rest are readers SDL_image implements itself and cost little more than
+# their own code, and they are off all the same: a format that is on is a format
+# a game ships assets in, and then every platform port has to keep it working.
+#
+# JPEG decodes through SDLIMAGE_BACKEND_STB, so keeping it links no libjpeg.
+# PNG keeps libpng rather than falling back to stb_image, because libpng is the
+# only decoder here that reads APNG and IMG_SavePNG is what the debug server
+# writes a screenshot with.
+#
+# BACKEND_IMAGEIO is off, and it is the option that makes the rest of this block
+# mean anything on Apple. With it on, `IMG_Load` is not SDL_image's own at all:
+# `src/IMG.c` compiles its entry point out under `__APPLE__` and `IMG_ImageIO.m`
+# hands the file to CoreGraphics, which reads WebP, AVIF, JPEG XL, TIFF, BMP and
+# GIF whatever these options say. Measured on release-3.4.4, over one sample of
+# each format in its own test suite: with everything below off and ImageIO on,
+# eight of the thirteen disabled formats still load, WebP and AVIF among them.
+# Leaving it on would be worse than not trimming, because a game would ship a
+# WebP atlas that works on macOS and fails everywhere. BACKEND_WIC is off for the
+# smaller version of the same reason: it is per-format rather than wholesale,
+# but it would still mean PNG and JPEG decoded by a different implementation on
+# Windows than everywhere else.
+#
+# STRICT and DEPS_SHARED are set for the reasons the mixer sets them. Without
+# STRICT a libpng that cannot be found silently drops PNG, which is every
+# texture this engine loads. DEPS_SHARED off links libpng rather than loading it
+# by name at run time, which also makes it visible: `make check-package` reads a
+# binary's link table, and a dlopen of a bare name appears in no link table.
+set(SDLIMAGE_STRICT ON CACHE BOOL "" FORCE)
+set(SDLIMAGE_DEPS_SHARED OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_SAMPLES OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_TESTS OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_BACKEND_STB ON CACHE BOOL "" FORCE)
+set(SDLIMAGE_BACKEND_IMAGEIO OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_BACKEND_WIC OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_PNG ON CACHE BOOL "" FORCE)
+set(SDLIMAGE_PNG_LIBPNG ON CACHE BOOL "" FORCE)
+set(SDLIMAGE_PNG_SAVE ON CACHE BOOL "" FORCE)
+set(SDLIMAGE_JPG ON CACHE BOOL "" FORCE)
+set(SDLIMAGE_ANI OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_AVIF OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_BMP OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_GIF OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_JXL OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_LBM OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_PCX OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_PNM OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_QOI OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_SVG OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_TGA OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_TIF OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_WEBP OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_XCF OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_XPM OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_XV OFF CACHE BOOL "" FORCE)
+
 FetchContent_Declare(
     SDL3_image
     GIT_REPOSITORY https://github.com/libsdl-org/SDL_image.git
@@ -35,8 +97,9 @@ FetchContent_Declare(
 #
 # Off, and why:
 #   GME           game-music-emu, LGPL, and no permissive alternative backend
-#   MOD           libxmp, LGPL, likewise
-#   MIDI          FluidSynth, LGPL
+#   MOD           libxmp, which is MIT rather than LGPL as it is often called;
+#                 off because no format here needs it, not for its licence
+#   MIDI          FluidSynth, LGPL, and the bundled TiMidity with it, Artistic-1.0
 #   MP3_MPG123    LGPL; dr_mp3 decodes the same files under a permissive one
 #   VORBIS_VORBISFILE, FLAC_LIBFLAC
 #                 permissive, but redundant beside the single-file decoders
