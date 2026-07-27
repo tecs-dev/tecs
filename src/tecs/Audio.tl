@@ -49,7 +49,11 @@
 --- snapshot handler that carries them.
 ---
 --- **Position is passed through and nothing else.** See `Sound` for what a
---- caller still has to do by hand.
+--- caller still has to do by hand. `setStereo` is the other way to place a
+--- voice, a plain left and right gain with no listener and no distance model
+--- in it, which is usually what a game laid out on a plane wants. The two are
+--- exclusive: the mixer holds one placement per track, so the later call
+--- replaces the earlier one rather than layering over it.
 
 local ecs <const> = require("tecs.ecs")
 local assets <const> = require("tecs.assets")
@@ -302,6 +306,14 @@ local record Voice
     x: number
     y: number
     z: number
+    --- Whether the voice is pinned to the front pair rather than placed, and
+    --- the gains last pushed for it. The mixer holds one placement per track,
+    --- so at most one of this and `spatial` is ever set.
+    stereo: boolean
+    left: number
+    right: number
+    --- Whether the voice repeats, as the mixer was last told.
+    loop: boolean
 end
 
 --- How many of one key are sounding, and when one last started.
@@ -375,6 +387,13 @@ local record Audio
         x: number
         y: number
         z: number
+        --- Pins the voice to the front pair of speakers at `left` and
+        --- `right`, which is a pan rather than a position. Ignored when
+        --- `spatial` is set, because the mixer holds one placement per track.
+        --- Both gains default to 1.
+        stereo: boolean
+        left: number
+        right: number
     end
 
     --- What a key allows.
@@ -403,10 +422,16 @@ local record Audio
         stopping: boolean
         --- Whether a `Sound` component started this rather than `play`.
         owned: boolean
+        --- Whether it repeats when it reaches the end.
+        loop: boolean
         spatial: boolean
         x: number
         y: number
         z: number
+        --- Whether it is pinned to the front pair, and at what gains.
+        stereo: boolean
+        left: number
+        right: number
     end
 
     Sound: Sound
@@ -518,7 +543,9 @@ function Audio.create(config?: Audio.Config): Audio
         self._voices[slot] = {
             gain = 1.0, applied = -1.0, pitch = 1.0, generation = 0,
             sounding = false, stopping = false, paused = false, owned = false,
-            referenced = false, spatial = false, x = 0.0, y = 0.0, z = 0.0,
+            referenced = false, loop = false,
+            spatial = false, x = 0.0, y = 0.0, z = 0.0,
+            stereo = false, left = 1.0, right = 1.0,
         }
         -- Taken from the end, so the first sound of a run uses slot one and a
         -- log or a snapshot reads in the order things happened.
@@ -722,6 +749,56 @@ local function applyGain(self: Audio, voice: Voice)
     self._backend.setGain(voice.track, applied)
 end
 
+--- Pushes a voice's rate, skipping the call when nothing changed.
+local function applyPitch(self: Audio, voice: Voice, ratio: number)
+    if voice.pitch == ratio then return end
+    voice.pitch = ratio
+    self._backend.setPitch(voice.track, ratio)
+end
+
+--- Pushes whether a voice repeats, skipping the call when nothing changed.
+local function applyLoop(self: Audio, voice: Voice, loop: boolean)
+    if voice.loop == loop then return end
+    voice.loop = loop
+    self._backend.setLoops(voice.track, loop and LOOP_FOREVER or 0)
+end
+
+--- Places a voice, skipping the call when it has not moved.
+local function applyPosition(self: Audio, voice: Voice,
+                             x: number, y: number, z: number)
+    if voice.spatial and voice.x == x and voice.y == y and voice.z == z then
+        return
+    end
+    -- The mixer keeps one placement per track, so this leaves the other.
+    voice.spatial = true
+    voice.stereo = false
+    voice.x = x
+    voice.y = y
+    voice.z = z
+    self._backend.setPosition(voice.track, x, y, z)
+end
+
+--- Pans a voice, skipping the call when nothing changed.
+local function applyStereo(self: Audio, voice: Voice,
+                           left: number, right: number)
+    if voice.stereo and voice.left == left and voice.right == right then
+        return
+    end
+    voice.stereo = true
+    voice.spatial = false
+    voice.left = left
+    voice.right = right
+    self._backend.setStereo(voice.track, left, right)
+end
+
+--- Returns a voice to unpositioned mixing, out of either placement.
+local function applyUnplaced(self: Audio, voice: Voice)
+    if not voice.spatial and not voice.stereo then return end
+    voice.spatial = false
+    voice.stereo = false
+    self._backend.clearSpatial(voice.track)
+end
+
 --- Gives a slot back, untagging and un-counting whatever it held.
 local function release(self: Audio, slot: integer)
     local voice = self._voices[slot]
@@ -746,10 +823,7 @@ local function release(self: Audio, slot: integer)
     voice.owned = false
     voice.clip = nil
     voice.applied = -1.0
-    if voice.spatial then
-        self._backend.clearPosition(voice.track)
-        voice.spatial = false
-    end
+    applyUnplaced(self, voice)
     self._sounding = self._sounding - 1
     self._free[#self._free + 1] = slot
 end
@@ -830,21 +904,23 @@ local function start(self: Audio, clip: Audio.Clip, options: Audio.PlayOptions,
     end
     -- Compared against what this track already carries, not against one,
     -- because a reused slot would otherwise keep the last voice's rate.
-    if pitch ~= voice.pitch then
-        self._backend.setPitch(voice.track, pitch)
-        voice.pitch = pitch
+    applyPitch(self, voice, pitch)
+
+    -- The two placements are exclusive, and a position wins when a caller
+    -- asks for both rather than one silently undoing the other.
+    if options.spatial == true then
+        applyPosition(self, voice, options.x or 0.0, options.y or 0.0,
+            options.z or 0.0)
+    elseif options.stereo == true then
+        applyStereo(self, voice, options.left or 1.0, options.right or 1.0)
     end
 
-    voice.spatial = options.spatial == true
-    if voice.spatial then
-        voice.x = options.x or 0.0
-        voice.y = options.y or 0.0
-        voice.z = options.z or 0.0
-        self._backend.setPosition(voice.track, voice.x, voice.y, voice.z)
-    end
+    -- The play carries the loop count, so nothing is pushed here; what is
+    -- recorded is what a later `setLoop` compares against.
+    voice.loop = options.loop == true
 
     local params = self._params
-    params.loops = options.loop == true and LOOP_FOREVER or 0
+    params.loops = voice.loop and LOOP_FOREVER or 0
     params.loopStartMs = math.floor((options.loopStart or 0.0) * 1000)
     params.startMs = math.floor((options.start or 0.0) * 1000)
     params.fadeInMs = math.floor((options.fadeIn or 0.0) * 1000)
@@ -855,8 +931,10 @@ local function start(self: Audio, clip: Audio.Clip, options: Audio.PlayOptions,
             voice.group = nil
         end
         -- Dropped here as well as in `release`, because a slot that never
-        -- started is not released and a streamed input would stay open.
+        -- started is not released and a streamed input would stay open. The
+        -- placement goes with it, for the same reason.
         self._backend.clearTrack(voice.track)
+        applyUnplaced(self, voice)
         voice.sounding = false
         voice.key = nil
         self._free[#self._free + 1] = slot
@@ -996,31 +1074,83 @@ end
 --- Sets a voice's playback rate. 1 is unchanged.
 function Audio:setPitch(handle: integer, ratio: number)
     local voice = voiceOf(self, handle)
-    if voice == nil or voice.pitch == ratio then return end
-    voice.pitch = ratio
-    self._backend.setPitch(voice.track, ratio)
+    if voice == nil then return end
+    applyPitch(self, voice, ratio)
+end
+
+--- Changes whether a voice repeats, part way through.
+---
+--- The mixer replaces the count it was started with, so clearing this on a
+--- looping piece of music lets it play out to its end rather than cutting it,
+--- and setting it on a one-shot keeps it going. It reaches a sounding voice
+--- only: a stopped one takes its count from the next play.
+function Audio:setLoop(handle: integer, loop: boolean)
+    local voice = voiceOf(self, handle)
+    if voice == nil then return end
+    applyLoop(self, voice, loop == true)
+end
+
+--- Whether a voice repeats when it reaches the end.
+function Audio:looping(handle: integer): boolean
+    local voice = voiceOf(self, handle)
+    return voice ~= nil and voice.loop
+end
+
+--- Moves a voice's read position, in seconds from the start of its clip.
+---
+--- False when the handle names nothing, or when the input cannot seek: a
+--- decoder is allowed not to be able to, and some can only reach a time
+--- rather than an exact sample.
+function Audio:seek(handle: integer, seconds: number): boolean
+    local voice = voiceOf(self, handle)
+    if voice == nil then return false end
+    return self._backend.seek(voice.track, math.floor(seconds * 1000))
+end
+
+--- Seconds into its clip a voice is reading, or nil.
+---
+--- Nil when the handle names nothing or the mixer cannot say. A paused voice
+--- reports where it stopped, which with `seek` and `fadeIn` is what taking a
+--- sound back where it left off is built from.
+function Audio:tell(handle: integer): number
+    local voice = voiceOf(self, handle)
+    if voice == nil then return nil end
+    local ms = self._backend.tell(voice.track)
+    if ms < 0 then return nil end
+    return ms / 1000
 end
 
 --- Places a voice in space. See `Sound` for what the numbers mean.
+---
+--- Replaces a pan set by `setStereo` rather than combining with it.
 function Audio:setPosition(handle: integer, x: number, y: number, z: number)
     local voice = voiceOf(self, handle)
     if voice == nil then return end
-    if voice.spatial and voice.x == x and voice.y == y and voice.z == z then
-        return
-    end
-    voice.spatial = true
-    voice.x = x
-    voice.y = y
-    voice.z = z
-    self._backend.setPosition(voice.track, x, y, z)
+    applyPosition(self, voice, x, y, z)
 end
 
---- Returns a voice to unpositioned mixing.
-function Audio:clearPosition(handle: integer)
+--- Pins a voice to the front pair of speakers at explicit gains.
+---
+--- A pan rather than a position, and usually what a game laid out on a plane
+--- wants: there is no listener to subtract and no distance model to argue
+--- with, only "how much of this comes out of each side". `left` at 0.8 and
+--- `right` at 0.2 is a sound over to the left, whatever the speakers are.
+--- Negative reads as silence and above 1 is louder, on the same terms as a
+--- gain.
+---
+--- Replaces a position set by `setPosition` rather than combining with it:
+--- the mixer holds one placement per track, and each call writes it.
+function Audio:setStereo(handle: integer, left: number, right: number)
     local voice = voiceOf(self, handle)
-    if voice == nil or not voice.spatial then return end
-    voice.spatial = false
-    self._backend.clearPosition(voice.track)
+    if voice == nil then return end
+    applyStereo(self, voice, left, right)
+end
+
+--- Returns a voice to unpositioned mixing, out of either placement.
+function Audio:clearSpatial(handle: integer)
+    local voice = voiceOf(self, handle)
+    if voice == nil then return end
+    applyUnplaced(self, voice)
 end
 
 --- Scales everything. One number on the mixer, so this costs the same whether
@@ -1289,10 +1419,14 @@ function Audio:voices(): {Audio.VoiceInfo}
                 paused = voice.paused,
                 stopping = voice.stopping,
                 owned = voice.owned,
+                loop = voice.loop,
                 spatial = voice.spatial,
                 x = voice.x,
                 y = voice.y,
                 z = voice.z,
+                stereo = voice.stereo,
+                left = voice.left,
+                right = voice.right,
             }
         end
     end
@@ -1387,13 +1521,14 @@ local function reconcile(self: Audio, sounds: ecs.Query)
                 else
                     voice.referenced = true
                     if voice.gain ~= entry.gain then
-                        self:setGain(handle, entry.gain as number)
+                        voice.gain = entry.gain as number
+                        applyGain(self, voice)
                     end
                     if (entry.spatial as integer) ~= 0 then
-                        self:setPosition(handle, entry.x as number,
+                        applyPosition(self, voice, entry.x as number,
                             entry.y as number, entry.z as number)
                     elseif voice.spatial then
-                        self:clearPosition(handle)
+                        applyUnplaced(self, voice)
                     end
                 end
             end

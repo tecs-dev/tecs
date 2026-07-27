@@ -26,6 +26,20 @@
 --- separate multiplier: it writes each tagged track's own gain, so using it for
 --- a group would overwrite whatever the voice asked for.
 ---
+--- A voice is placed one way or the other, never both. `setPosition` and
+--- `setStereo` look like they might layer a pan over a position, and they do
+--- not: SDL_mixer keeps one spatialization mode per track, and each call
+--- writes it. `MIX_SetTrack3DPosition` puts the track in 3D mode, folds its
+--- input down to mono and computes the speaker gains from the coordinates;
+--- `MIX_SetTrackStereo` puts it in forced-stereo mode, writes those same
+--- speaker gains from `left` and `right`, and resets the recorded 3D position
+--- to the origin. Whichever was called last is the one that is heard, and a
+--- null to either leaves both, which is why one `clearSpatial` answers for
+--- them. That is what the header states, and `MIX_SetTrackStereo` and
+--- `MIX_SetTrack3DPosition` in `src/SDL_mixer.c` of release-3.2.4 confirm it:
+--- both assign `track->spatialization_mode` and both fill the one
+--- `track->spatialization_panning` array.
+---
 --- Clips are not loaded through here. A clip is decoded on the asset worker and
 --- arrives as a pointer, the same route a decoded image takes, so what this
 --- seam takes is a loaded clip or a path to stream from.
@@ -109,16 +123,38 @@ local record Backend
     --- rather than inferred from here.
     playing: function(track: loader.CPtr): boolean
 
+    --- Changes what a sounding voice does when it reaches the end. Negative
+    --- repeats forever, zero plays out and stops.
+    ---
+    --- The count replaces whatever the play asked for, even part way through,
+    --- which is what lets a piece of music be told to finish its bar rather
+    --- than being cut. It reaches a sounding voice only: a stopped one takes
+    --- its count from the next play.
+    setLoops: function(track: loader.CPtr, loops: integer)
+
+    --- Moves a voice's read position. False when the input cannot seek, which
+    --- a decoder is allowed not to be able to do.
+    seek: function(track: loader.CPtr, ms: integer): boolean
+    --- Where a voice is reading, in milliseconds, or negative when the mixer
+    --- cannot say. A paused or stopped voice reports where it halted.
+    tell: function(track: loader.CPtr): integer
+
     --- Scales a voice, 0 to 1 for silence to unchanged. Above 1 is louder and
     --- may clip, which is the platform's business rather than this layer's.
     setGain: function(track: loader.CPtr, gain: number)
     --- Playback rate, 1 for unchanged. Doubling it raises the pitch an octave
     --- and halves the duration.
     setPitch: function(track: loader.CPtr, ratio: number)
+
     --- Places a voice in space, relative to a listener fixed at the origin.
     setPosition: function(track: loader.CPtr, x: number, y: number, z: number)
-    --- Returns a voice to unpositioned mixing.
-    clearPosition: function(track: loader.CPtr)
+    --- Pins a voice to the front pair of speakers at explicit gains, which is
+    --- a pan rather than a position. Negative gains read as silence; above 1
+    --- is louder, on the same terms as `setGain`.
+    setStereo: function(track: loader.CPtr, left: number, right: number)
+    --- Returns a voice to unpositioned mixing, out of whichever of the two
+    --- placements it was in.
+    clearSpatial: function(track: loader.CPtr)
 
     --- Tags are names several voices answer to at once, and are how a group
     --- reaches its members without this layer holding a list.
@@ -153,10 +189,11 @@ local PROP_LOOP_START_MS <const> = "SDL_mixer.play.loop_start_millisecond"
 local PROP_FADE_IN_MS <const> = "SDL_mixer.play.fade_in_milliseconds"
 local PROP_START_MS <const> = "SDL_mixer.play.start_millisecond"
 
---- Reusable spec and position, filled per call. Opening is startup-shaped
+--- Reusable spec, position and pan, filled per call. Opening is startup-shaped
 --- work, but positioning happens per voice per frame and must not allocate.
 local audioSpec <const> = loader.newStruct("SDL_AudioSpec")
 local point <const> = loader.newStruct("MIX_Point3D")
+local gains <const> = loader.newStruct("MIX_StereoGains")
 
 --- Options handed to every play. Made once and overwritten, because every
 --- field is set on every call: each option's default is the value that means
@@ -264,6 +301,24 @@ local sdlBackend <const>: Backend = {
         return MIX.MIX_TrackPlaying(track) as boolean
     end,
 
+    setLoops = function(track: loader.CPtr, loops: integer)
+        MIX.MIX_SetTrackLoops(track, loops)
+    end,
+
+    seek = function(track: loader.CPtr, ms: integer): boolean
+        -- Sample frames, so that a seek is exact rather than rounded to a
+        -- tick. Converted through the track, so the answer follows the rate
+        -- the input decodes at.
+        return MIX.MIX_SetTrackPlaybackPosition(track,
+            MIX.MIX_TrackMSToFrames(track, ms)) as boolean
+    end,
+
+    tell = function(track: loader.CPtr): integer
+        local frames = MIX.MIX_GetTrackPlaybackPosition(track)
+        if tonumber(frames) < 0 then return -1 end
+        return tonumber(MIX.MIX_TrackFramesToMS(track, frames)) as integer
+    end,
+
     setGain = function(track: loader.CPtr, gain: number)
         MIX.MIX_SetTrackGain(track, gain)
     end,
@@ -281,7 +336,15 @@ local sdlBackend <const>: Backend = {
         MIX.MIX_SetTrack3DPosition(track, point)
     end,
 
-    clearPosition = function(track: loader.CPtr)
+    setStereo = function(track: loader.CPtr, left: number, right: number)
+        local fields = gains as loader.CStruct
+        fields.left = left
+        fields.right = right
+        MIX.MIX_SetTrackStereo(track, gains)
+    end,
+
+    clearSpatial = function(track: loader.CPtr)
+        -- Either call clears both modes, so one of them answers for both.
         MIX.MIX_SetTrack3DPosition(track, nil)
     end,
 

@@ -111,8 +111,13 @@ local function recorder(options)
             tags = {},
             input = nil,
             position = nil,
+            stereo = nil,
             params = nil,
             fadeOutMs = nil,
+            -- What the mixer reports for a seek and a tell. A track that
+            -- cannot seek is what `seekable = false` stands in for.
+            loops = nil,
+            positionMs = 0,
         }
         backend.tracks[track.index] = track
         return track
@@ -189,12 +194,37 @@ local function recorder(options)
         track.pitch = ratio
     end
 
-    function backend.setPosition(track, x, y, z)
-        track.position = { x = x, y = y, z = z }
+    function backend.setLoops(track, loops)
+        track.loops = loops
     end
 
-    function backend.clearPosition(track)
+    function backend.seek(track, ms)
+        if options.unseekable then
+            return false
+        end
+        track.positionMs = ms
+        return true
+    end
+
+    function backend.tell(track)
+        return track.positionMs
+    end
+
+    function backend.setPosition(track, x, y, z)
+        track.position = { x = x, y = y, z = z }
+        -- The mixer holds one placement per track, so recording both would
+        -- let a test pass that the real thing fails.
+        track.stereo = nil
+    end
+
+    function backend.setStereo(track, left, right)
+        track.stereo = { left = left, right = right }
         track.position = nil
+    end
+
+    function backend.clearSpatial(track)
+        track.position = nil
+        track.stereo = nil
     end
 
     function backend.tag(track, tag)
@@ -575,6 +605,104 @@ describe("audio", function()
             local params = backend.tracks[1].params
             assert.are.equal(20, params.loopStartMs, "so an intro plays once and the rest of it repeats")
             assert.are.equal(50, params.startMs)
+            audio:destroy()
+        end)
+
+        it("changes whether a voice repeats part way through", function()
+            local audio, clip, backend = loaded()
+            local voice = audio:play(clip, { loop = true })
+            assert.is_true(audio:looping(voice))
+            assert.is_nil(backend.tracks[1].loops, "the play already carried the count, so nothing is pushed twice")
+
+            audio:setLoop(voice, false)
+            assert.are.equal(
+                0,
+                backend.tracks[1].loops,
+                "a piece of music told to stop looping plays out to its end rather than being cut"
+            )
+            assert.is_false(audio:looping(voice))
+
+            audio:setLoop(voice, true)
+            assert.are.equal(-1, backend.tracks[1].loops)
+            audio:destroy()
+        end)
+
+        it("pushes a loop change once", function()
+            local audio, clip, backend = loaded()
+            local voice = audio:play(clip)
+            audio:setLoop(voice, false)
+            assert.is_nil(backend.tracks[1].loops, "a one-shot already plays once")
+
+            audio:setLoop(voice, true)
+            audio:setLoop(voice, true)
+            assert.are.equal(-1, backend.tracks[1].loops)
+
+            backend.tracks[1].loops = nil
+            audio:setLoop(voice, true)
+            assert.is_nil(backend.tracks[1].loops, "an unchanged loop costs no call")
+            audio:destroy()
+        end)
+
+        it("leaves a loop change to a finished voice inert", function()
+            local audio, clip, backend = loaded()
+            local stale = audio:play(clip, { loop = true })
+            backend.tracks[1].playing = false
+            audio:update(1 / 60)
+
+            audio:setLoop(stale, false)
+            assert.is_nil(backend.tracks[1].loops)
+            assert.is_false(audio:looping(stale))
+            audio:destroy()
+        end)
+
+        it("returns a reused track's loop to what the next voice asked for", function()
+            local audio, clip, backend = loaded()
+            local voice = audio:play(clip, { loop = true })
+            audio:setLoop(voice, false)
+            backend.tracks[1].playing = false
+            audio:update(1 / 60)
+
+            local again = audio:play(clip, { loop = true })
+            assert.is_true(audio:looping(again), "the next sound on this slot must not inherit a loop")
+            audio:destroy()
+        end)
+    end)
+
+    describe("seek and tell", function()
+        it("moves a voice's read position and reads it back", function()
+            local audio, clip = loaded()
+            local voice = audio:play(clip)
+
+            assert.are.equal(0, audio:tell(voice))
+            assert.is_true(audio:seek(voice, 0.04))
+            assert.is_true(math.abs(audio:tell(voice) - 0.04) < 1e-9, "seconds in and seconds out")
+            audio:destroy()
+        end)
+
+        it("reports an input that cannot seek rather than raising", function()
+            local audio, clip = loaded({ backend = recorder({ unseekable = true }) })
+            local voice = audio:play(clip)
+            assert.is_false(audio:seek(voice, 0.04), "a decoder is allowed not to be able to seek")
+            audio:destroy()
+        end)
+
+        it("answers nothing for a handle that names no voice", function()
+            local audio, clip, backend = loaded()
+            local stale = audio:play(clip)
+            backend.tracks[1].playing = false
+            audio:update(1 / 60)
+
+            assert.is_false(audio:seek(stale, 0.01))
+            assert.is_nil(audio:tell(stale))
+            audio:destroy()
+        end)
+
+        it("says nothing rather than a negative when the mixer cannot answer", function()
+            local audio, clip, backend = loaded()
+            local voice = audio:play(clip)
+            -- What a decoder that will not report a position looks like here.
+            backend.tracks[1].positionMs = -1
+            assert.is_nil(audio:tell(voice))
             audio:destroy()
         end)
     end)
@@ -1025,7 +1153,7 @@ describe("audio", function()
             audio:setPosition(voice, 4, 0, 0)
             assert.are.same({ x = 4, y = 0, z = 0 }, backend.tracks[1].position)
 
-            audio:clearPosition(voice)
+            audio:clearSpatial(voice)
             assert.is_nil(backend.tracks[1].position)
             audio:destroy()
         end)
@@ -1046,6 +1174,94 @@ describe("audio", function()
 
             audio:play(clip)
             assert.is_nil(backend.tracks[1].position, "the next sound on this slot must not inherit a position")
+            audio:destroy()
+        end)
+    end)
+
+    describe("stereo panning", function()
+        it("puts a plain left and right gain on the track", function()
+            local audio, clip, backend = loaded()
+            local voice = audio:play(clip, { stereo = true, left = 0.8, right = 0.2 })
+            assert.are.same(
+                { left = 0.8, right = 0.2 },
+                backend.tracks[1].stereo,
+                "a game on a plane wants a pan, not a listener to subtract from"
+            )
+
+            audio:setStereo(voice, 0.1, 0.9)
+            assert.are.same({ left = 0.1, right = 0.9 }, backend.tracks[1].stereo)
+            audio:destroy()
+        end)
+
+        it("defaults both gains to one", function()
+            local audio, clip, backend = loaded()
+            audio:play(clip, { stereo = true })
+            assert.are.same({ left = 1.0, right = 1.0 }, backend.tracks[1].stereo)
+            audio:destroy()
+        end)
+
+        it("replaces a position rather than layering over it", function()
+            -- The mixer keeps one spatialization mode per track: setting a
+            -- pan resets the 3D position and setting a position recomputes
+            -- the same speaker gains a pan wrote.
+            local audio, clip, backend = loaded()
+            local voice = audio:play(clip, { spatial = true, x = 3, y = 0, z = 0 })
+            assert.are.same({ x = 3, y = 0, z = 0 }, backend.tracks[1].position)
+
+            audio:setStereo(voice, 0.25, 0.75)
+            assert.is_nil(backend.tracks[1].position, "the later call is the one that is heard")
+            assert.are.same({ left = 0.25, right = 0.75 }, backend.tracks[1].stereo)
+
+            audio:setPosition(voice, 0, 0, -1)
+            assert.is_nil(backend.tracks[1].stereo, "and it goes the other way too")
+            assert.are.same({ x = 0, y = 0, z = -1 }, backend.tracks[1].position)
+            audio:destroy()
+        end)
+
+        it("takes the position when a play asks for both", function()
+            local audio, clip, backend = loaded()
+            audio:play(clip, { spatial = true, x = 1, y = 2, z = 3, stereo = true, left = 0.5, right = 0.5 })
+            assert.are.same(
+                { x = 1, y = 2, z = 3 },
+                backend.tracks[1].position,
+                "one of the two has to win, and it must not be whichever the code happens to write last"
+            )
+            assert.is_nil(backend.tracks[1].stereo)
+            audio:destroy()
+        end)
+
+        it("leaves both behind on one call", function()
+            local audio, clip, backend = loaded()
+            local voice = audio:play(clip, { stereo = true, left = 0.3, right = 0.7 })
+
+            audio:clearSpatial(voice)
+            assert.is_nil(backend.tracks[1].stereo, "a null to either mode leaves both, so one call answers for them")
+            assert.is_nil(backend.tracks[1].position)
+            audio:destroy()
+        end)
+
+        it("clears a reused track's pan", function()
+            local audio, clip, backend = loaded()
+            audio:play(clip, { stereo = true, left = 0.0, right = 1.0 })
+            backend.tracks[1].playing = false
+            audio:update(1 / 60)
+            assert.is_nil(backend.tracks[1].stereo)
+
+            audio:play(clip)
+            assert.is_nil(backend.tracks[1].stereo, "the next sound on this slot must not inherit a pan")
+            audio:destroy()
+        end)
+
+        it("reports the placement a voice is in", function()
+            local audio, clip = loaded()
+            local voice = audio:play(clip, { stereo = true, left = 0.4, right = 0.6 })
+
+            local sounding = audio:voices()
+            assert.are.equal(voice, sounding[1].handle)
+            assert.is_true(sounding[1].stereo)
+            assert.is_false(sounding[1].spatial, "the two are exclusive, so what looks in must not show both")
+            assert.are.equal(0.4, sounding[1].left)
+            assert.are.equal(0.6, sounding[1].right)
             audio:destroy()
         end)
     end)
