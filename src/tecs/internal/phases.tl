@@ -85,11 +85,6 @@ local record phases
     --- Main rendering phase (e.g., drawing sprites, meshes, UI).
     record Render is Phase end
 
-    --- Custom CPU draw calls that participate in world-space lighting and depth sorting.
-    --- Invoked during G-buffer rendering (inside Render), not as a sequential phase.
-    --- Use pipeline:worldShader():at(...):attach() before drawing, detachWorldShader() after.
-    record Draw is Phase end
-
     --- Runs just after rendering (e.g., post-processing effects, screen transitions).
     record PostRender is Phase end
 
@@ -198,8 +193,5 @@ addPhases(phases.AllGroups)
 
 -- Set phase names after all positions are assigned
 setPhaseNames()
-
--- Draw is not in any group (invoked programmatically during Render), so set name manually
-phases.Draw.name = "Draw"
 
 return phases

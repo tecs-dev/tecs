@@ -27,8 +27,7 @@ component while its builds do.
 ]]
 function(tecs_check_version name found tag mode)
     if(NOT found)
-        list(APPEND TECS_VERSION_DRIFT
-            "  ${name}: installed, but reports no version to compare")
+        list(APPEND TECS_VERSION_DRIFT "  ${name}: installed, but reports no version to compare")
         set(TECS_VERSION_DRIFT "${TECS_VERSION_DRIFT}" PARENT_SCOPE)
         return()
     endif()
@@ -46,8 +45,7 @@ function(tecs_check_version name found tag mode)
         return()
     endif()
 
-    list(APPEND TECS_VERSION_DRIFT
-        "  ${name}: system has ${found}, this tree pins ${tag}")
+    list(APPEND TECS_VERSION_DRIFT "  ${name}: system has ${found}, this tree pins ${tag}")
     set(TECS_VERSION_DRIFT "${TECS_VERSION_DRIFT}" PARENT_SCOPE)
 endfunction()
 
@@ -84,7 +82,8 @@ tecs_check_version("shaderc" "${SHADERC_VERSION}" "${TECS_SHADERC_TAG}" PREFIX)
 
 if(TECS_VERSION_DRIFT AND NOT TECS_ALLOW_VERSION_DRIFT)
     string(REPLACE ";" "\n" drift "${TECS_VERSION_DRIFT}")
-    message(FATAL_ERROR
+    message(
+        FATAL_ERROR
         "tecs: system dependencies disagree with the revisions this tree "
         "pins.\n\n${drift}\n\n"
         "The spec suite runs against what is installed here, so a difference "
@@ -92,9 +91,9 @@ if(TECS_VERSION_DRIFT AND NOT TECS_ALLOW_VERSION_DRIFT)
         "pinned version, or raise the revision in cmake/Revisions.cmake if "
         "moving to the newer one is the intent.\n\n"
         "Configure with -DTECS_ALLOW_VERSION_DRIFT=ON to proceed anyway, "
-        "which is for working on a dependency before its revision is raised.")
+        "which is for working on a dependency before its revision is raised."
+    )
 elseif(TECS_VERSION_DRIFT)
     string(REPLACE ";" "\n" drift "${TECS_VERSION_DRIFT}")
-    message(WARNING "tecs: proceeding with system dependencies that disagree "
-        "with the pinned revisions.\n${drift}")
+    message(WARNING "tecs: proceeding with system dependencies that disagree " "with the pinned revisions.\n${drift}")
 endif()
