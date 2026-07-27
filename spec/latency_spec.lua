@@ -182,10 +182,15 @@ describe("input latency", function()
         assert.is_true(events.isInput("fingerDown"))
         assert.is_true(events.isInput("penMotion"))
         assert.is_true(events.isInput("textInput"))
+        -- A pinch is a player moving two fingers, so a camera that zooms on
+        -- one is waiting on it exactly as it waits on a wheel.
+        assert.is_true(events.isInput("pinchUpdate"))
 
         -- Nobody is waiting on these, so a frame that only saw one has no
         -- latency to report.
         assert.is_false(events.isInput("windowExposed"))
+        assert.is_false(events.isInput("windowOccluded"))
+        assert.is_false(events.isInput("keyboardAdded"))
         assert.is_false(events.isInput("quit"))
         assert.is_false(events.isInput("clipboardUpdate"))
         assert.is_false(events.isInput("unknown"))

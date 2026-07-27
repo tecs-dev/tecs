@@ -288,6 +288,142 @@ describe("platform.events", function()
         assert.are.equal("appWillEnterBackground", drainOne(queue, count)[1].kind)
     end)
 
+    it("converts a display event with the display it is about", function()
+        -- A display event whose display was left unread names a change on a
+        -- two-monitor machine without saying which monitor changed.
+        local queue, count = queueOf(function(q)
+            q[0].type = C.SDL_EVENT_DISPLAY_ORIENTATION
+            q[0].display.displayID = 7
+            q[0].display.data1 = 3
+            q[1].type = C.SDL_EVENT_DISPLAY_MOVED
+            q[1].display.displayID = 8
+            q[2].type = C.SDL_EVENT_DISPLAY_DESKTOP_MODE_CHANGED
+            q[2].display.displayID = 9
+            q[3].type = C.SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED
+            q[3].display.displayID = 10
+            q[4].type = C.SDL_EVENT_DISPLAY_USABLE_BOUNDS_CHANGED
+            q[4].display.displayID = 11
+        end, 5)
+
+        local seen = drainOne(queue, count)
+        assert.are.equal("displayOrientation", seen[1].kind)
+        assert.are.equal(7, seen[1].which, "the display it happened on")
+        assert.are.equal(3, seen[1].data1, "and the orientation it turned to")
+        assert.are.equal("displayMoved", seen[2].kind)
+        assert.are.equal(8, seen[2].which)
+        assert.are.equal("displayDesktopModeChanged", seen[3].kind)
+        assert.are.equal(9, seen[3].which)
+        assert.are.equal("displayCurrentModeChanged", seen[4].kind)
+        assert.are.equal(10, seen[4].which)
+        assert.are.equal("displayUsableBoundsChanged", seen[5].kind)
+        assert.are.equal(11, seen[5].which)
+    end)
+
+    it("names the window states a game has to draw differently for", function()
+        -- Occlusion and fullscreen change what is worth drawing, and both
+        -- scale changes change what a layout measured in points comes out as.
+        local queue, count = queueOf(function(q)
+            q[0].type = C.SDL_EVENT_WINDOW_OCCLUDED
+            q[0].window.windowID = 2
+            q[1].type = C.SDL_EVENT_WINDOW_ENTER_FULLSCREEN
+            q[1].window.windowID = 2
+            q[2].type = C.SDL_EVENT_WINDOW_LEAVE_FULLSCREEN
+            q[2].window.windowID = 2
+            q[3].type = C.SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED
+            q[3].window.windowID = 2
+            q[4].type = C.SDL_EVENT_WINDOW_SAFE_AREA_CHANGED
+            q[4].window.windowID = 2
+        end, 5)
+
+        local seen = drainOne(queue, count)
+        assert.are.equal("windowOccluded", seen[1].kind)
+        assert.are.equal("windowEnterFullscreen", seen[2].kind)
+        assert.are.equal("windowLeaveFullscreen", seen[3].kind)
+        assert.are.equal("windowDisplayScaleChanged", seen[4].kind)
+        assert.are.equal("windowSafeAreaChanged", seen[5].kind)
+        for index = 1, 5 do
+            assert.are.equal(2, seen[index].which,
+                "every one of them says which window")
+        end
+    end)
+
+    it("reports a keyboard or a mouse arriving and leaving", function()
+        -- Key and mouse events already say which device produced them, so a
+        -- binding screen showing what is plugged in needs the other half.
+        local queue, count = queueOf(function(q)
+            q[0].type = C.SDL_EVENT_KEYBOARD_ADDED
+            q[0].kdevice.which = 3
+            q[1].type = C.SDL_EVENT_KEYBOARD_REMOVED
+            q[1].kdevice.which = 3
+            q[2].type = C.SDL_EVENT_MOUSE_ADDED
+            q[2].mdevice.which = 4
+            q[3].type = C.SDL_EVENT_MOUSE_REMOVED
+            q[3].mdevice.which = 4
+        end, 4)
+
+        local seen = drainOne(queue, count)
+        assert.are.equal("keyboardAdded", seen[1].kind)
+        assert.are.equal(3, seen[1].which)
+        assert.are.equal("keyboardRemoved", seen[2].kind)
+        assert.are.equal(3, seen[2].which)
+        assert.are.equal("mouseAdded", seen[3].kind)
+        assert.are.equal(4, seen[3].which)
+        assert.are.equal("mouseRemoved", seen[4].kind)
+        assert.are.equal(4, seen[4].which)
+    end)
+
+    it("reports an audio device the system reformatted", function()
+        -- The third member of the family, and the one a mixer holding a stream
+        -- against the old format has to hear about.
+        local queue, count = queueOf(function(q)
+            q[0].type = C.SDL_EVENT_AUDIO_DEVICE_FORMAT_CHANGED
+            q[0].adevice.which = 8
+            q[0].adevice.recording = true
+        end)
+
+        local event = drainOne(queue, count)[1]
+        assert.are.equal("audioDeviceFormatChanged", event.kind)
+        assert.are.equal(8, event.which)
+        assert.is_true(event.recording)
+    end)
+
+    it("converts a pinch gesture with the factor it zoomed by", function()
+        local queue, count = queueOf(function(q)
+            q[0].type = C.SDL_EVENT_PINCH_BEGIN
+            q[0].pinch.windowID = 2
+            q[0].pinch.scale = 1.0
+            q[1].type = C.SDL_EVENT_PINCH_UPDATE
+            q[1].pinch.windowID = 2
+            q[1].pinch.scale = 1.5
+            q[2].type = C.SDL_EVENT_PINCH_END
+            q[2].pinch.windowID = 2
+            q[2].pinch.scale = 1.0
+        end, 3)
+
+        local seen = drainOne(queue, count)
+        assert.are.equal("pinchBegin", seen[1].kind)
+        assert.are.equal("pinchUpdate", seen[2].kind)
+        assert.is_true(math.abs(seen[2].scale - 1.5) < 0.001,
+            "a pinch that carried no scale is a gesture nothing can act on")
+        assert.are.equal(2, seen[2].which)
+        assert.are.equal("pinchEnd", seen[3].kind)
+    end)
+
+    it("carries a user event's code and the window it names", function()
+        -- A named kind promises usable fields, and the code is the only part
+        -- of a user event that crosses: the two data pointers cannot.
+        local queue, count = queueOf(function(q)
+            q[0].type = C.SDL_EVENT_USER
+            q[0].user.code = 42
+            q[0].user.windowID = 5
+        end)
+
+        local event = drainOne(queue, count)[1]
+        assert.are.equal("user", event.kind)
+        assert.are.equal(42, event.data1)
+        assert.are.equal(5, event.which)
+    end)
+
     it("carries a touch finger as an exact opaque identity", function()
         -- A finger id is 64 bits. Reporting it as a number would round, and two
         -- distinct fingers could collapse into one.
@@ -407,6 +543,52 @@ describe("platform.events", function()
         assert.are.equal(77, tonumber(holder[0].key.scancode))
 
         assert.is_false(pcall(function() events.push("notAKind", {}) end))
+        C.SDL_Quit()
+    end)
+
+    it("pushes the window, display, device and pinch payloads too", function()
+        -- A tool drives these by name through `send_event`, and a kind that
+        -- pushed only its type would arrive saying nothing about which window,
+        -- which display or how far the gesture moved.
+        assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
+        C.SDL_PumpEvents()
+        C.SDL_FlushEvents(0, 0xFFFFFFFF)
+
+        events.push("windowOccluded", { which = 2, data1 = 5, data2 = 6 })
+        events.push("displayCurrentModeChanged", { which = 7 })
+        events.push("keyboardAdded", { which = 3 })
+        events.push("mouseRemoved", { which = 4 })
+        events.push("audioDeviceFormatChanged", { which = 8, recording = true })
+        events.push("pinchUpdate", { which = 2, scale = 1.5 })
+
+        local holder = loader.newArray("SDL_Event[1]")
+        local seen = {}
+        while C.SDL_PollEvent(holder) ~= false do
+            events.drain(holder, 1, function(event)
+                seen[event.kind] = events.copy(event)
+            end)
+        end
+        C.SDL_Quit()
+
+        assert.are.equal(2, seen.windowOccluded.which)
+        assert.are.equal(5, seen.windowOccluded.data1)
+        assert.are.equal(6, seen.windowOccluded.data2)
+        assert.are.equal(7, seen.displayCurrentModeChanged.which)
+        assert.are.equal(3, seen.keyboardAdded.which)
+        assert.are.equal(4, seen.mouseRemoved.which)
+        assert.are.equal(8, seen.audioDeviceFormatChanged.which)
+        assert.is_true(seen.audioDeviceFormatChanged.recording)
+        assert.are.equal(2, seen.pinchUpdate.which)
+        assert.is_true(math.abs(seen.pinchUpdate.scale - 1.5) < 0.001)
+
+        -- A pinch pushed with no scale is one that has not moved.
+        assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
+        C.SDL_FlushEvents(0, 0xFFFFFFFF)
+        events.push("pinchBegin", { which = 2 })
+        assert.is_true(C.SDL_PollEvent(holder) ~= false)
+        events.drain(holder, 1, function(event)
+            assert.are.equal(1.0, event.scale)
+        end)
         C.SDL_Quit()
     end)
 end)

@@ -85,6 +85,9 @@ local record Event
     --- Wheel movement.
     wheelX: number
     wheelY: number
+    --- Zoom factor a pinch gesture reports since the previous event in it.
+    --- Below one is a pinch closed, above one is a pinch opened.
+    scale: number
     --- Gamepad or pen axis, and its value in -1..1.
     axis: integer
     value: number
@@ -131,7 +134,9 @@ local record Event
     --- Whether an audio device is a recording device.
     recording: boolean
 
-    --- Window and display payloads, as SDL reports them.
+    --- Window, display and user payloads, as SDL reports them. A user event's
+    --- code arrives in `data1`; the two data pointers beside it do not cross,
+    --- since a pointer is not a value this vocabulary can carry.
     data1: integer
     data2: integer
 
@@ -180,7 +185,11 @@ map("SDL_EVENT_SYSTEM_THEME_CHANGED", "themeChanged")
 map("SDL_EVENT_DISPLAY_ORIENTATION", "displayOrientation")
 map("SDL_EVENT_DISPLAY_ADDED", "displayAdded")
 map("SDL_EVENT_DISPLAY_REMOVED", "displayRemoved")
+map("SDL_EVENT_DISPLAY_MOVED", "displayMoved")
 map("SDL_EVENT_DISPLAY_CONTENT_SCALE_CHANGED", "displayScaleChanged")
+map("SDL_EVENT_DISPLAY_DESKTOP_MODE_CHANGED", "displayDesktopModeChanged")
+map("SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED", "displayCurrentModeChanged")
+map("SDL_EVENT_DISPLAY_USABLE_BOUNDS_CHANGED", "displayUsableBoundsChanged")
 
 map("SDL_EVENT_WINDOW_SHOWN", "windowShown")
 map("SDL_EVENT_WINDOW_HIDDEN", "windowHidden")
@@ -197,6 +206,11 @@ map("SDL_EVENT_WINDOW_FOCUS_GAINED", "windowFocusGained")
 map("SDL_EVENT_WINDOW_FOCUS_LOST", "windowFocusLost")
 map("SDL_EVENT_WINDOW_CLOSE_REQUESTED", "windowCloseRequested")
 map("SDL_EVENT_WINDOW_DISPLAY_CHANGED", "windowDisplayChanged")
+map("SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED", "windowDisplayScaleChanged")
+map("SDL_EVENT_WINDOW_SAFE_AREA_CHANGED", "windowSafeAreaChanged")
+map("SDL_EVENT_WINDOW_OCCLUDED", "windowOccluded")
+map("SDL_EVENT_WINDOW_ENTER_FULLSCREEN", "windowEnterFullscreen")
+map("SDL_EVENT_WINDOW_LEAVE_FULLSCREEN", "windowLeaveFullscreen")
 
 map("SDL_EVENT_KEY_DOWN", "keyDown")
 map("SDL_EVENT_KEY_UP", "keyUp")
@@ -204,6 +218,8 @@ map("SDL_EVENT_TEXT_EDITING", "textEditing")
 map("SDL_EVENT_TEXT_EDITING_CANDIDATES", "textCandidates")
 map("SDL_EVENT_TEXT_INPUT", "textInput")
 map("SDL_EVENT_KEYMAP_CHANGED", "keymapChanged")
+map("SDL_EVENT_KEYBOARD_ADDED", "keyboardAdded")
+map("SDL_EVENT_KEYBOARD_REMOVED", "keyboardRemoved")
 map("SDL_EVENT_SCREEN_KEYBOARD_SHOWN", "screenKeyboardShown")
 map("SDL_EVENT_SCREEN_KEYBOARD_HIDDEN", "screenKeyboardHidden")
 
@@ -211,11 +227,17 @@ map("SDL_EVENT_MOUSE_MOTION", "mouseMotion")
 map("SDL_EVENT_MOUSE_BUTTON_DOWN", "mouseDown")
 map("SDL_EVENT_MOUSE_BUTTON_UP", "mouseUp")
 map("SDL_EVENT_MOUSE_WHEEL", "mouseWheel")
+map("SDL_EVENT_MOUSE_ADDED", "mouseAdded")
+map("SDL_EVENT_MOUSE_REMOVED", "mouseRemoved")
 
 map("SDL_EVENT_FINGER_DOWN", "fingerDown")
 map("SDL_EVENT_FINGER_UP", "fingerUp")
 map("SDL_EVENT_FINGER_MOTION", "fingerMotion")
 map("SDL_EVENT_FINGER_CANCELED", "fingerCanceled")
+
+map("SDL_EVENT_PINCH_BEGIN", "pinchBegin")
+map("SDL_EVENT_PINCH_UPDATE", "pinchUpdate")
+map("SDL_EVENT_PINCH_END", "pinchEnd")
 
 map("SDL_EVENT_PEN_PROXIMITY_IN", "penProximityIn")
 map("SDL_EVENT_PEN_PROXIMITY_OUT", "penProximityOut")
@@ -246,6 +268,7 @@ map("SDL_EVENT_DROP_POSITION", "dropPosition")
 map("SDL_EVENT_CLIPBOARD_UPDATE", "clipboardUpdate")
 map("SDL_EVENT_AUDIO_DEVICE_ADDED", "audioDeviceAdded")
 map("SDL_EVENT_AUDIO_DEVICE_REMOVED", "audioDeviceRemoved")
+map("SDL_EVENT_AUDIO_DEVICE_FORMAT_CHANGED", "audioDeviceFormatChanged")
 map("SDL_EVENT_SENSOR_UPDATE", "sensorUpdate")
 map("SDL_EVENT_USER", "user")
 
@@ -267,6 +290,9 @@ local INPUT <const>: {string: boolean} = {
     fingerDown = true,
     fingerUp = true,
     fingerMotion = true,
+    pinchBegin = true,
+    pinchUpdate = true,
+    pinchEnd = true,
     penDown = true,
     penUp = true,
     penMotion = true,
@@ -401,6 +427,14 @@ local function convert(raw: loader.CValue): Event
         event.which = tonumber(wheel.which) as number
         event.synthetic = event.which == TOUCH_MOUSE
             or event.which == PEN_MOUSE
+    elseif kind == "mouseAdded" or kind == "mouseRemoved" then
+        local device = raw.mdevice
+        event.timestamp = tonumber(device.timestamp) as number
+        event.which = tonumber(device.which) as number
+    elseif kind == "keyboardAdded" or kind == "keyboardRemoved" then
+        local device = raw.kdevice
+        event.timestamp = tonumber(device.timestamp) as number
+        event.which = tonumber(device.which) as number
     elseif kind == "fingerDown" or kind == "fingerUp"
         or kind == "fingerMotion" or kind == "fingerCanceled" then
         local touch = raw.tfinger
@@ -418,6 +452,11 @@ local function convert(raw: loader.CValue): Event
         event.dy = (tonumber(touch.dy) as number) * touchHeight
         event.pressure = tonumber(touch.pressure) as number
         event.down = kind == "fingerDown"
+    elseif kind:sub(1, 5) == "pinch" then
+        local gesture = raw.pinch
+        event.timestamp = tonumber(gesture.timestamp) as number
+        event.which = tonumber(gesture.windowID) as number
+        event.scale = tonumber(gesture.scale) as number
     elseif kind == "textInput" then
         local typed = raw.text
         event.timestamp = tonumber(typed.timestamp) as number
@@ -525,7 +564,7 @@ local function convert(raw: loader.CValue): Event
         event.owner = clipboard.owner as boolean
         event.mimeTypes = strings(clipboard.mime_types as loader.CValue,
             tonumber(clipboard.num_mime_types) as integer)
-    elseif kind == "audioDeviceAdded" or kind == "audioDeviceRemoved" then
+    elseif kind:sub(1, 11) == "audioDevice" then
         local device = raw.adevice
         event.timestamp = tonumber(device.timestamp) as number
         event.which = tonumber(device.which) as number
@@ -536,6 +575,20 @@ local function convert(raw: loader.CValue): Event
         event.data1 = tonumber(window.data1) as integer
         event.data2 = tonumber(window.data2) as integer
         event.which = tonumber(window.windowID) as number
+    elseif kind:sub(1, 7) == "display" then
+        -- The display an event is about is its whole subject, so a display
+        -- event that did not carry one would name a change on a machine with
+        -- two monitors without saying which of them changed.
+        local display = raw.display
+        event.timestamp = tonumber(display.timestamp) as number
+        event.data1 = tonumber(display.data1) as integer
+        event.data2 = tonumber(display.data2) as integer
+        event.which = tonumber(display.displayID) as number
+    elseif kind == "user" then
+        local pushed = raw.user
+        event.timestamp = tonumber(pushed.timestamp) as number
+        event.data1 = tonumber(pushed.code) as integer
+        event.which = tonumber(pushed.windowID) as number
     else
         event.timestamp = tonumber(raw.common.timestamp) as number
     end
@@ -607,10 +660,10 @@ end
 --- can inject input without knowing SDL's layout. Only the fields a kind uses
 --- are read.
 ---
---- Payloads are filled for the key, mouse and gamepad kinds. Any other
---- recognised kind is pushed carrying its type and nothing else, which is what
---- a kind whose payload nobody injects needs and is not what a caller expecting
---- a full event would assume.
+--- Payloads are filled for the key, mouse, gamepad, device, pinch, window and
+--- display kinds. Any other recognised kind is pushed carrying its type and
+--- nothing else, which is what a kind whose payload nobody injects needs and is
+--- not what a caller expecting a full event would assume.
 ---
 --- SDL stamps the timestamp, so a pushed event arrives ordered against real
 --- ones rather than ahead of them.
@@ -660,6 +713,33 @@ function events.push(kind: string, fields: Event)
             pad.axis = fields.axis or 0
             pad.which = fields.which or 0
             pad.value = math.floor((fields.value or 0.0) * 32767.0 + 0.5)
+        elseif kind == "mouseAdded" or kind == "mouseRemoved" then
+            local device = (holder[0] as loader.CValue).mdevice as loader.CStruct
+            device.which = fields.which or 0
+        elseif kind == "keyboardAdded" or kind == "keyboardRemoved" then
+            local device = (holder[0] as loader.CValue).kdevice as loader.CStruct
+            device.which = fields.which or 0
+        elseif kind:sub(1, 11) == "audioDevice" then
+            local device = (holder[0] as loader.CValue).adevice as loader.CStruct
+            device.which = fields.which or 0
+            device.recording = fields.recording == true
+        elseif kind:sub(1, 5) == "pinch" then
+            local gesture = (holder[0] as loader.CValue).pinch as loader.CStruct
+            gesture.windowID = fields.which or 0
+            -- One is the neutral factor, so a pinch pushed without a scale
+            -- reads as a gesture that has not moved rather than as one that
+            -- collapsed the view to nothing.
+            gesture.scale = fields.scale or 1.0
+        elseif kind:sub(1, 6) == "window" then
+            local window = (holder[0] as loader.CValue).window as loader.CStruct
+            window.windowID = fields.which or 0
+            window.data1 = fields.data1 or 0
+            window.data2 = fields.data2 or 0
+        elseif kind:sub(1, 7) == "display" then
+            local display = (holder[0] as loader.CValue).display as loader.CStruct
+            display.displayID = fields.which or 0
+            display.data1 = fields.data1 or 0
+            display.data2 = fields.data2 or 0
         end
     end
 
