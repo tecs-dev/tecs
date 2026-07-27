@@ -146,13 +146,19 @@ local COMPARE_OPS <const>: {string: integer} = {
     always = 8,
 }
 
--- SDL_GPUBlendFactor / SDL_GPUBlendOp values used for straight alpha. Both
--- enums open with an INVALID member, so ZERO is one and every later name sits
--- one above where the header lists it.
-local BLEND_FACTOR_SRC_ALPHA <const> = 7
-local BLEND_FACTOR_ONE_MINUS_SRC_ALPHA <const> = 8
-local BLEND_FACTOR_ONE <const> = 2
-local BLEND_OP_ADD <const> = 1
+-- The blend factors and op straight alpha needs, read from the generated
+-- cdef rather than copied out of the header. An enum constant is a
+-- compile-time value the FFI resolves through any namespace, so this needs no
+-- library loaded, and a number that comes from the header cannot drift from
+-- it. Copying went wrong here once: these enums open with an INVALID member,
+-- so every name sits one above where the header appears to list it, and
+-- source alpha spent that time meaning destination colour.
+local BLEND_FACTOR_SRC_ALPHA <const> =
+    tonumber(C.SDL_GPU_BLENDFACTOR_SRC_ALPHA) as integer
+local BLEND_FACTOR_ONE_MINUS_SRC_ALPHA <const> =
+    tonumber(C.SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA) as integer
+local BLEND_FACTOR_ONE <const> = tonumber(C.SDL_GPU_BLENDFACTOR_ONE) as integer
+local BLEND_OP_ADD <const> = tonumber(C.SDL_GPU_BLENDOP_ADD) as integer
 
 function GraphicsPipeline.create(device: loader.CPtr, options: PipelineOptions): GraphicsPipeline
     local primitive = PRIMITIVES[options.primitive or "triangleList"]
