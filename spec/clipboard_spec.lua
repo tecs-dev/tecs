@@ -49,11 +49,15 @@ local function residentBytes()
             ffi.cast("int32_t *", taskInfo),
             taskInfoCount
         )
-        if answered ~= 0 then return nil end
+        if answered ~= 0 then
+            return nil
+        end
         return tonumber(taskInfo.residentSize)
     end
     local statm = io.open("/proc/self/statm", "r")
-    if statm == nil then return nil end
+    if statm == nil then
+        return nil
+    end
     local line = statm:read("*l")
     statm:close()
     local pages = tonumber(line:match("%d+%s+(%d+)"))
@@ -100,7 +104,9 @@ describe("platform.clipboard with no video", function()
 
     setup(function()
         for _ = 1, 8 do
-            if sdl.C.SDL_WasInit(sdl.K.SDL_INIT_VIDEO) == 0 then break end
+            if sdl.C.SDL_WasInit(sdl.K.SDL_INIT_VIDEO) == 0 then
+                break
+            end
             sdl.C.SDL_QuitSubSystem(sdl.K.SDL_INIT_VIDEO)
             held = held + 1
         end
@@ -141,16 +147,36 @@ describe("platform.clipboard with no video", function()
         -- been initialized" when video is down. Short-circuiting means an
         -- unrelated failure reported later is still the one that happened.
         local asked = {
-            function() clipboard.text() end,
-            function() clipboard.hasText() end,
-            function() clipboard.setText("ignored") end,
-            function() clipboard.clear() end,
-            function() clipboard.mimeTypes() end,
-            function() clipboard.hasData(TEXT_MIME) end,
-            function() clipboard.data(TEXT_MIME) end,
-            function() clipboard.primary() end,
-            function() clipboard.setPrimary("ignored") end,
-            function() clipboard.hasPrimary() end,
+            function()
+                clipboard.text()
+            end,
+            function()
+                clipboard.hasText()
+            end,
+            function()
+                clipboard.setText("ignored")
+            end,
+            function()
+                clipboard.clear()
+            end,
+            function()
+                clipboard.mimeTypes()
+            end,
+            function()
+                clipboard.hasData(TEXT_MIME)
+            end,
+            function()
+                clipboard.data(TEXT_MIME)
+            end,
+            function()
+                clipboard.primary()
+            end,
+            function()
+                clipboard.setPrimary("ignored")
+            end,
+            function()
+                clipboard.hasPrimary()
+            end,
         }
         for index, ask in ipairs(asked) do
             sdl.C.SDL_SetError("sentinel")
@@ -249,7 +275,9 @@ describe("platform.clipboard", function()
         local offered = clipboard.mimeTypes()
         local found = false
         for _, mime in ipairs(offered) do
-            if mime == TEXT_MIME then found = true end
+            if mime == TEXT_MIME then
+                found = true
+            end
         end
         assert.is_true(found, "text on the clipboard is offered as " .. TEXT_MIME)
     end)
@@ -307,8 +335,10 @@ describe("platform.clipboard", function()
         local grew = settled() - before
         assert.is_true(
             grew < ALLOWED_GROWTH,
-            ("reading text, the primary selection and a blob %d times grew the process by %.0f MB")
-                :format(READS, grew / 1048576)
+            ("reading text, the primary selection and a blob %d times grew the process by %.0f MB"):format(
+                READS,
+                grew / 1048576
+            )
         )
     end)
 
