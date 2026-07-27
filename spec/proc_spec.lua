@@ -9,6 +9,13 @@
 -- mostly about the boundary: that a run does not hold the caller, that the
 -- caller can still end a child it cannot touch, and that teardown does not
 -- leave one behind.
+--
+-- A run is a Future<proc.Result>, so the four words for how it ended are the
+-- ones every other asynchronous thing in the tree uses. The one worth reading
+-- twice is that an exit code is not a failure: a child that ran and exited 3
+-- settles "ready" carrying a result that says 3, because the code is the
+-- answer rather than an error. "failed" is a child that never started and
+-- "cancelled" is one this process ended.
 
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
 package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
@@ -16,6 +23,7 @@ package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 local ffi = require("ffi")
 local Application = require("tecs.Application")
 local proc = require("tecs.platform.proc")
+local Future = require("tecs.Future")
 local sdl = require("tecs.ffi.sdl3")
 
 ffi.cdef([[
@@ -40,6 +48,16 @@ local function trimmed(text)
     return (text:gsub("%s+$", ""))
 end
 
+--- Pumps until the child behind `run` has started, so a kill has something to
+--- land on rather than a task still queued.
+local function untilStarted(run)
+    local deadline = now() + 20000
+    while proc.result(run).pid == 0 and now() < deadline do
+        proc.update()
+    end
+    assert.is_true(proc.result(run).pid > 0, "the child never started")
+end
+
 describe("proc", function()
     teardown(function()
         proc.shutdown()
@@ -47,48 +65,53 @@ describe("proc", function()
 
     it("runs a program and answers its output and exit code", function()
         local run = proc.run({ args = { "/bin/echo", "hello", "child" } })
-        assert.are.equal("running", run.status)
-        assert.is_true(run:isRunning())
+        assert.are.equal("pending", run.status)
 
         run:wait(20000)
-        assert.are.equal("exited", run.status)
-        assert.are.equal(0, run.exitCode)
-        assert.are.equal("hello child", trimmed(run.output))
-        assert.is_true(run:succeeded())
-        assert.is_false(run:isRunning())
+        assert.are.equal("ready", run.status)
         assert.is_nil(run.error)
-        assert.is_true(run.pid > 0, "a started child reports its process id")
+
+        local result = run.value
+        assert.are.equal(0, result.exitCode)
+        assert.are.equal("hello child", trimmed(result.output))
+        assert.is_true(result:succeeded())
+        assert.is_true(result.pid > 0, "a started child reports its process id")
+        assert.are.same({ "/bin/echo", "hello", "child" }, result.args)
+        assert.are.equal(result, proc.result(run), "the future carries the record it filled in")
     end)
 
+    -- The distinction the four states exist to make. A tool whose exit code is
+    -- data must not have every non-zero exit propagate as a failure through
+    -- `map`, so a child that ran is "ready" whatever it reported.
     it("keeps error output apart from output, and reports a failing exit", function()
         local run = shell("echo written; echo complained 1>&2; exit 3")
-        assert.are.equal("exited", run.status)
-        assert.are.equal(3, run.exitCode)
-        assert.are.equal("written", trimmed(run.output))
-        assert.are.equal("complained", trimmed(run.errorOutput))
-        assert.is_false(run:succeeded(), "a non-zero exit is not success")
+        assert.are.equal("ready", run.status, "an exit code is an answer, not a failure")
+        assert.are.equal(3, run.value.exitCode)
+        assert.are.equal("written", trimmed(run.value.output))
+        assert.are.equal("complained", trimmed(run.value.errorOutput))
+        assert.is_false(run.value:succeeded(), "a non-zero exit is not success")
     end)
 
     it("folds error output into output when asked", function()
         local run = shell("echo complained 1>&2", { mergeStderr = true })
-        assert.are.equal("exited", run.status)
-        assert.are.equal("complained", trimmed(run.output))
-        assert.are.equal("", run.errorOutput)
+        assert.are.equal("ready", run.status)
+        assert.are.equal("complained", trimmed(run.value.output))
+        assert.are.equal("", run.value.errorOutput)
     end)
 
     it("reports a program it cannot start as a status, not a raise", function()
         local run = proc.run({ args = { "/no/such/tecs-program" } })
         run:wait(20000)
-        assert.are.equal("failed", run.status)
+        assert.are.equal("failed", run.status, "a child that never started is the failure case")
         assert.is_string(run.error)
         assert.is_true(#run.error > 0, "a failure says what went wrong")
-        assert.is_false(run:succeeded())
+        assert.is_nil(run.value, "there is no result for a child that never ran")
     end)
 
     it("runs the child in a given working directory", function()
         local run = shell("pwd", { cwd = "/" })
-        assert.are.equal("exited", run.status)
-        assert.are.equal("/", trimmed(run.output))
+        assert.are.equal("ready", run.status)
+        assert.are.equal("/", trimmed(run.value.output))
     end)
 
     it("inherits the environment and lets a variable be set over it", function()
@@ -97,7 +120,7 @@ describe("proc", function()
         local inherited = shell("echo [$TECS_PROC_MARKER][$TECS_PROC_EXTRA]", {
             env = { TECS_PROC_EXTRA = "added" },
         })
-        assert.are.equal("[parent][added]", trimmed(inherited.output))
+        assert.are.equal("[parent][added]", trimmed(inherited.value.output))
     end)
 
     it("gives the child only what it is handed when the environment is cleared", function()
@@ -107,7 +130,7 @@ describe("proc", function()
             clearEnv = true,
             env = { TECS_PROC_EXTRA = "only" },
         })
-        assert.are.equal("[][only]", trimmed(cleared.output))
+        assert.are.equal("[][only]", trimmed(cleared.value.output))
     end)
 
     it("feeds bytes to the child and closes its input", function()
@@ -117,8 +140,8 @@ describe("proc", function()
             args = { "/bin/cat" },
             input = "fed through a pipe\n",
         }):wait(20000)
-        assert.are.equal("exited", run.status)
-        assert.are.equal("fed through a pipe", trimmed(run.output))
+        assert.are.equal("ready", run.status)
+        assert.are.equal("fed through a pipe", trimmed(run.value.output))
     end)
 
     it("does not hold the caller while the child runs", function()
@@ -133,12 +156,12 @@ describe("proc", function()
             proc.update()
             polls = polls + 1
         end
-        assert.is_true(slow:isRunning(), "the child is still going")
+        assert.are.equal("pending", slow.status, "the child is still going")
         assert.is_true(polls > 200, "polling is cheap: " .. polls .. " passes in 200ms")
 
         slow:wait(20000)
-        assert.are.equal("exited", slow.status)
-        assert.are.equal("late", trimmed(slow.output))
+        assert.are.equal("ready", slow.status)
+        assert.are.equal("late", trimmed(slow.value.output))
     end)
 
     it("runs several children at once on one worker", function()
@@ -150,8 +173,8 @@ describe("proc", function()
             runs[index] = proc.run({ args = { "/bin/sh", "-c", "sleep 30" } })
         end
 
-        -- A child reports its process id as soon as it is started, so four
-        -- ids alongside four "running" is the overlap itself rather than a
+        -- A child reports its process id as soon as it is started, so four ids
+        -- alongside four pending futures is the overlap itself rather than a
         -- clock reading that says it probably happened.
         local deadline = now() + 20000
         local live
@@ -159,7 +182,7 @@ describe("proc", function()
             proc.update()
             live = 0
             for index = 1, 4 do
-                if runs[index].pid > 0 and runs[index]:isRunning() then
+                if proc.result(runs[index]).pid > 0 and runs[index].status == "pending" then
                     live = live + 1
                 end
             end
@@ -168,15 +191,44 @@ describe("proc", function()
 
         local seen = {}
         for index = 1, 4 do
-            assert.is_nil(seen[runs[index].pid], "each child is its own process")
-            seen[runs[index].pid] = true
-            runs[index]:kill(true)
+            local pid = proc.result(runs[index]).pid
+            assert.is_nil(seen[pid], "each child is its own process")
+            seen[pid] = true
+            proc.kill(runs[index], true)
         end
 
         for index = 1, 4 do
             runs[index]:wait(20000)
-            assert.are.equal("killed", runs[index].status)
+            assert.are.equal("cancelled", runs[index].status)
         end
+    end)
+
+    -- What replaces waiting on the module's own list of runs: the join every
+    -- other subsystem uses, keeping input order whatever order they finish in.
+    it("waits for several runs through one join", function()
+        local runs = {
+            proc.run({ args = { "/bin/sh", "-c", "sleep 0.3; echo first" } }),
+            proc.run({ args = { "/bin/echo", "second" } }),
+            proc.run({ args = { "/bin/echo", "third" } }),
+        }
+        local joined = Future.all(runs):wait(20000)
+
+        assert.are.equal("ready", joined.status)
+        assert.are.equal(0, proc.pending())
+        assert.are.equal("first", trimmed(joined.value[1].output))
+        assert.are.equal("second", trimmed(joined.value[2].output))
+        assert.are.equal("third", trimmed(joined.value[3].output))
+    end)
+
+    it("composes a run into what the caller actually wanted", function()
+        local text = proc.run({ args = { "/bin/echo", "composed" } })
+            :map(function(result)
+                return trimmed(result.output)
+            end)
+            :wait(20000)
+
+        assert.are.equal("ready", text.status)
+        assert.are.equal("composed", text.value)
     end)
 
     it("kills a child on request", function()
@@ -184,11 +236,39 @@ describe("proc", function()
         -- The kill is a message to the worker, so the child has to exist
         -- before it lands; the worker starts it before it reads the next
         -- message, so ordering is the channel's rather than a sleep's.
-        run:kill(true)
+        proc.kill(run, true)
         run:wait(20000)
-        assert.are.equal("killed", run.status)
+        assert.are.equal("cancelled", run.status, "this process ended it")
         assert.are.equal("killed", run.error)
-        assert.is_false(run:succeeded())
+    end)
+
+    -- The other spelling, and the one that counts holders. A run nothing else
+    -- is watching ends when its last consumer gives it up.
+    it("ends a child when the last holder of its future cancels", function()
+        local run = proc.run({ args = { "/bin/sh", "-c", "sleep 30" } })
+        untilStarted(run)
+
+        run:cancel()
+        assert.are.equal("cancelled", run.status)
+
+        -- And the kill really went out: the worker stops holding the child.
+        local deadline = now() + 20000
+        while proc.pending() > 0 and now() < deadline do
+            proc.update()
+        end
+        assert.are.equal(0, proc.pending(), "the runner is still holding the child")
+    end)
+
+    it("keeps the child for another holder when one gives up", function()
+        local run = proc.run({ args = { "/bin/echo", "shared" } })
+        run._watchers = run._watchers + 1
+
+        run:cancel()
+        assert.are.equal("pending", run.status, "a shared run was ended by one holder")
+
+        run:wait(20000)
+        assert.are.equal("ready", run.status)
+        assert.are.equal("shared", trimmed(run.value.output))
     end)
 
     it("kills a child that outruns its timeout", function()
@@ -197,26 +277,30 @@ describe("proc", function()
             args = { "/bin/sh", "-c", "sleep 30" },
             timeoutMs = 200,
         }):wait(20000)
-        assert.are.equal("killed", run.status)
+        assert.are.equal("cancelled", run.status)
         assert.are.equal("timed out", run.error)
         assert.is_true(now() - started < 5000, "the timeout is what ended it")
     end)
 
+    -- A killed child settles with no value, because there is no answer to the
+    -- question it was asked. What it managed to say before it was stopped is
+    -- still worth having, and it is on the record the run filled in.
     it("keeps what a child wrote before it was killed", function()
         local run = proc.run({
             args = { "/bin/sh", "-c", "echo spoke; sleep 30" },
             timeoutMs = 500,
         }):wait(20000)
-        assert.are.equal("killed", run.status)
-        assert.are.equal("spoke", trimmed(run.output))
+        assert.are.equal("cancelled", run.status)
+        assert.is_nil(run.value)
+        assert.are.equal("spoke", trimmed(proc.result(run).output))
     end)
 
     it("reads more than a pipe will hold without deadlocking", function()
         -- A child writing past the pipe buffer stops until someone reads. The
         -- worker reads as it polls, which is what keeps this from hanging.
         local run = shell("for i in $(seq 1 8000); do echo " .. ("x"):rep(40) .. "; done")
-        assert.are.equal("exited", run.status)
-        assert.are.equal(8000 * 41, #run.output, "every byte past the pipe buffer arrives")
+        assert.are.equal("ready", run.status)
+        assert.are.equal(8000 * 41, #run.value.output, "every byte past the pipe buffer arrives")
     end)
 
     it("refuses a run with nothing to run", function()
@@ -230,22 +314,43 @@ describe("proc", function()
 
     it("kills a child that is still running at shutdown, and returns", function()
         local run = proc.run({ args = { "/bin/sh", "-c", "trap '' TERM; sleep 60" } })
-        -- Started, so shutdown has something to end rather than a queued task.
-        while run.pid == 0 do
-            proc.update()
-        end
+        untilStarted(run)
 
         local started = now()
         proc.shutdown()
         local elapsed = now() - started
 
-        assert.are.equal("killed", run.status, "teardown ends a child, it does not detach it")
+        assert.are.equal("cancelled", run.status, "teardown ends a child, it does not detach it")
         assert.is_false(proc.installed(), "the worker is joined")
         assert.is_true(elapsed < 5000, "teardown is bounded: " .. elapsed .. "ms")
 
         -- And the module still works afterwards: the next run installs again.
         local after = proc.run({ args = { "/bin/echo", "again" } }):wait(20000)
-        assert.are.equal("again", trimmed(after.output))
+        assert.are.equal("again", trimmed(after.value.output))
+    end)
+
+    -- The defect the duplicated shutdown carried: `pending` was cleared
+    -- whatever state it was in, so a child the kernel had not reaped left its
+    -- handle reading "running" for the rest of the process, against a runner
+    -- that no longer existed and would never answer. Nothing in flight may
+    -- outlive shutdown unsettled, by whichever branch it got there.
+    it("leaves nothing pending after shutdown", function()
+        local runs = {}
+        for index = 1, 3 do
+            runs[index] = proc.run({ args = { "/bin/sh", "-c", "trap '' TERM; sleep 60" } })
+        end
+        untilStarted(runs[3])
+
+        proc.shutdown()
+
+        assert.are.equal(0, proc.pending())
+        for index = 1, 3 do
+            assert.are.equal(
+                "cancelled",
+                runs[index].status,
+                "a run outlived the runner still reading as though it were going"
+            )
+        end
     end)
 
     it("runs a child with no SDL subsystem initialised", function()
@@ -263,7 +368,7 @@ describe("proc", function()
             local sdl = require("tecs.ffi.sdl3")
             print(("%%d %%s %%s"):format(
                 tonumber(sdl.C.SDL_WasInit(0)), run.status,
-                (run.output:gsub("%%s+$", ""))))
+                (run.value.output:gsub("%%s+$", ""))))
             tecs.proc.shutdown()
         ]]):format(root, root))
         file:close()
@@ -271,8 +376,8 @@ describe("proc", function()
         local run = proc.run({ args = { "luajit", script } }):wait(30000)
         os.remove(script)
 
-        assert.are.equal("exited", run.status, run.errorOutput)
-        assert.are.equal("0 exited headless", trimmed(run.output))
+        assert.are.equal("ready", run.status, run.error)
+        assert.are.equal("0 ready headless", trimmed(run.value.output))
     end)
 
     describe("through the application lifecycle", function()
@@ -291,19 +396,19 @@ describe("proc", function()
                 end,
             })
             assert.is_true(app:_init())
-            assert.are.equal("running", run.status)
+            assert.are.equal("pending", run.status)
 
             -- Nothing in this application waits on the run, so only the loop's
             -- own call can move it.
             for _ = 1, 400 do
-                if not run:isRunning() then
+                if run.status ~= "pending" then
                     break
                 end
                 app:_iterate(nil, 0, nil)
             end
 
-            assert.are.equal("exited", run.status, "the loop never drained the runner")
-            assert.are.equal("framed", trimmed(run.output))
+            assert.are.equal("ready", run.status, "the loop never drained the runner")
+            assert.are.equal("framed", trimmed(run.value.output))
             app:_shutdown()
         end)
 
@@ -315,12 +420,10 @@ describe("proc", function()
                 end,
             })
             assert.is_true(app:_init())
-            while run.pid == 0 do
-                proc.update()
-            end
+            untilStarted(run)
 
             assert.is_true(app:_shutdown())
-            assert.are.equal("killed", run.status, "the child outlived the application")
+            assert.are.equal("cancelled", run.status, "the child outlived the application")
             assert.is_false(proc.installed(), "the runner thread outlived the application")
         end)
     end)

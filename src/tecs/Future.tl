@@ -230,6 +230,16 @@ local record Future<T>
     --- Settles this future as failed, if nothing has settled it yet.
     fail: function(self: Future<T>, err: string)
 
+    --- Settles this future as cancelled, if nothing has settled it yet.
+    ---
+    --- The producer half of the third terminal state, and the counterpart of
+    --- `cancel` rather than a spelling of it: `cancel` is a consumer saying it
+    --- no longer wants the work and counts the others who might, while this
+    --- states an outcome that has already happened. A child killed on request
+    --- or at its deadline reaches its future through here, as does a transfer
+    --- taken off the multi.
+    abandon: function(self: Future<T>, err: string)
+
     ---------------------------------------------------------------------------
     -- Statics
     ---------------------------------------------------------------------------
@@ -546,6 +556,10 @@ end
 
 function Future:fail(err: string)
     settle(self as Future<any>, "failed", nil, err or "failed")
+end
+
+function Future:abandon(err: string)
+    settle(self as Future<any>, "cancelled", nil, err or "cancelled")
 end
 
 -------------------------------------------------------------------------------

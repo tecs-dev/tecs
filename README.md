@@ -938,6 +938,82 @@ the module, reusing the same `Info`, `PathType` and `GlobOptions`, and adding
 `SDL_ReadStorageFile` is not `SDL_LoadFile`. Nothing above changes shape for
 it, which is why nothing above resolves a path.
 
+## A value that settles once
+
+Several things in this tree are work in flight: an asset decode, a child
+process, a request. Each of them used to own a private cell with four states, a
+failure string, a registry keyed by a worker correlation id, and a blocking wait
+that pumped, and each of them had a different word for the same four states.
+[`Future.tl`](src/tecs/Future.tl) is the shape they share, written once.
+
+```lua
+local Future = require("tecs.Future")
+
+tecs.proc.run({ args = { "git", "rev-parse", "HEAD" } })
+    :map(function(result) return result.output end)
+    :recover(function() return "unknown" end)
+    :onSettle(function(future) print(future.value) end)
+```
+
+**`status` is a plain field.** `"pending"`, `"ready"`, `"failed"` or
+`"cancelled"`, read directly rather than through a method, because several call
+sites read it once a frame and a field read plus a string compare is what that
+should cost. `"cancelled"` is a state of its own rather than a kind of failure,
+because `recover` must not run for it: a caller who cancelled a load did not ask
+for a fallback value.
+
+**A `Source` is the whole driver interface.** Two functions: `poll`, which takes
+whatever is ready, and `advance(ms)`, which blocks for up to that long and takes
+whatever arrives. That is all a worker channel is and all a curl multi handle
+is, so the same hook covers a decode, a subprocess and a transfer. `poll` is
+what the loop calls once a frame, and `wait` spends its budget inside `advance`
+rather than spinning.
+
+**The budget is wall clock.** Every wait this replaces subtracted the nominal
+slice size whatever the slice actually cost, and a source returns as soon as one
+message arrives, so a "5000 ms" wait was really "at most 312 messages". The
+default and the slice size live on the source, which is what lets a subprocess
+keep a longer default than a decode without a second convention.
+
+**Settling drains iteratively.** A dependent that settles another future extends
+a loop instead of the stack. `flatMap` is what makes that necessary rather than
+tidy: it builds link N inside the settlement of link N-1, so a paginated fetch
+written as a recursion is a chain as long as there are pages, bounded by nothing
+in the source text and failing inside the frame pump. A thousand-link chain runs
+at 38 frames of Lua stack; recursing runs at 7031. It also makes re-entrancy
+legal by construction, so a listener may settle, cancel or register on anything,
+including the future it is being called from.
+
+**Order is registration order,** at both levels: the drain is first-in-first-out
+across futures, and a future's listeners run from the first registered. Java
+runs dependents backwards because a Treiber stack is what one compare-and-swap
+buys, and dropping the concurrency drops the reason -- every source here settles
+on the thread that pumps it, so the dependent list is a plain array. Order is
+observable rather than academic: a listener that registers an image allocates
+through a shelf packer whose coordinates depend on arrival order and end up in a
+`Sprite`, which a snapshot stores. That removes order as a source of
+nondeterminism; it does not make the system deterministic, since two decodes
+still race on the worker and arrive in whatever order they finish.
+
+**Cancellation is reference counted,** because a shared root is real: two loads
+of one path that overlap get the same future, and one consumer giving up must
+not break the other. So `cancel` decrements, and only the last holder settles
+the future and asks the source to stop the work -- and only for a future the
+source made, since a derived link inherits the source to know what a wait
+advances and nothing else. Cancelling a `flatMap` before its outer settles stops
+the inner from ever being created, which is the one place the rule needs a
+second sentence: there is no inner to cancel after the fact.
+
+**A future is never in a snapshot.** It holds listeners, a source and, through
+it, a native handle. What a snapshot does carry is a sequence cursor parked on
+one, as a provider name, an entity and a key. `Future.track` is the engine's one
+registrant in the sequencer's awaitable registry, so a program can park on a
+decode or a request, and it is keyed by entity and key rather than by identity
+so the wait survives a round trip the future cannot. After a load nothing is
+tracked, `isPending` answers false, and the parked cursor resumes on the next
+fixed step; a game that wants the wait to mean something re-issues the work and
+re-tracks it under the same key.
+
 ## Shelling out
 
 A command line tool, a resource pipeline or an asset build wants to run another
@@ -949,10 +1025,15 @@ works under a plain interpreter.
 ```lua
 local run = tecs.proc.run({ args = { "git", "rev-parse", "HEAD" } })
 -- ... frames pass, the loop pumps ...
-if not run:isRunning() and run:succeeded() then
-    print(run.output)
+if run.status == "ready" and run.value:succeeded() then
+    print(run.value.output)
 end
 ```
+
+A run is a [`Future`](#a-value-that-settles-once), so the words for how it
+ended are the ones every asynchronous thing in the tree uses, and a caller who
+wants the answer rather than the polling writes
+`proc.run(...):map(function(result) return result.output end)`.
 
 **One shape, and it is run-to-completion.** The result arrives whole, once,
 with the exit status beside it. The long-running child whose output you want as
@@ -1000,13 +1081,19 @@ about to unmap, which is the failure
 So `proc.shutdown`, which the application runs at teardown, asks every live
 child to stop, gives it a quarter second, and then forces it. A forced kill is
 not refusable, so the join that follows is bounded by the kernel reaping the
-child, and a handle whose child was still running ends at `"killed"` rather
-than at a status that implies it finished.
+child, and a run whose child was still going ends at `"cancelled"` rather than
+at a status that implies it finished. That includes a child the kernel never
+reaped: its future is settled on the way out rather than dropped, because the
+runner is about to stop and nothing would ever answer for it.
 
-**A failed spawn is a status.** A program that cannot be started resolves at
-`"failed"` with `error` set, the way a failed decode resolves rather than
-raising. A caller that shells out is already branching on the exit code, and a
-spawn that did not happen is one more branch on the same value.
+**A failed spawn is a status, and an exit code is not one.** A program that
+cannot be started settles at `"failed"` with `error` set, the way a failed
+decode settles rather than raising. A child that ran and exited 3 settles
+`"ready"` carrying a result that says 3, because the code is the answer rather
+than an error, and `Result:succeeded` is the separate question about it. Reading
+that the other way would make every non-zero exit propagate as a failure through
+`map`, which is wrong for everything that shells out to a tool whose exit code
+is data.
 
 **Error output is separate by default.** `SDL_CreateProcess` inherits the
 child's standard error, and interleaving diagnostics into standard output

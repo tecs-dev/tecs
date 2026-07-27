@@ -480,10 +480,7 @@ describe("tecs.Future", function()
             -- what says the budget is time rather than turns.
             assert.is_true(
                 source.advances > BUDGET / 16,
-                ("only %d slices in %d ms, which is a slice count and not a clock"):format(
-                    source.advances,
-                    BUDGET
-                )
+                ("only %d slices in %d ms, which is a slice count and not a clock"):format(source.advances, BUDGET)
             )
         end)
 

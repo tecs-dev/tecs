@@ -67,22 +67,33 @@
 ---
 --- ## Failure is a status
 ---
---- A program that cannot be started resolves the handle at `"failed"` with
+--- A program that cannot be started settles its future at `"failed"` with
 --- `error` set, rather than raising. A caller that shells out is already
 --- branching on the exit code, and a spawn that failed is one more branch on
 --- the same value; a raise would be the only path in the module that has to be
 --- wrapped.
 ---
+--- An exit code is not a failure. A child that ran and exited 1 settles
+--- `"ready"`, because the run did what it was asked to and the code is the
+--- answer rather than an error; `Result:succeeded` is the separate question.
+--- Reading that the other way would make every non-zero exit propagate as a
+--- failure through `map`, which is wrong for everything that shells out to a
+--- tool whose exit code is data. `"failed"` means the child never started and
+--- `"cancelled"` means this process ended it, through `kill`, a timeout, or
+--- shutdown.
+---
 --- ## Headless
 ---
 --- SDL's process API needs no subsystem initialised, and nothing here
---- initialises one. This side does not reach SDL at all: the whole binding is
---- inside the worker's source, so a state that only ever queues runs loads the
---- worker library and nothing else. That is the point, since this is one of
---- the few subsystems more useful without a window than with one; it works
---- under a plain interpreter with no video, no device and no host.
+--- initialises one. No process call is made on this side: the whole binding is
+--- inside the worker's source, so a state that only ever queues runs starts no
+--- child of its own. That is the point, since this is one of the few
+--- subsystems more useful without a window than with one; it works under a
+--- plain interpreter with no video, no device and no host.
 
 local workers <const> = require("tecs.workers")
+local clock <const> = require("tecs.platform.clock")
+local Future <const> = require("tecs.Future")
 
 --- Runs on the worker. Creates children, polls them, answers when they end.
 ---
@@ -344,63 +355,113 @@ local record proc
         timeoutMs: integer
     end
 
-    --- A run in flight, or one that has finished.
-    record Proc
-        --- "running", "exited", "killed", or "failed". A child that ran is
-        --- "exited" whatever its exit code; "killed" means this process ended
-        --- it, through `kill`, a timeout, or shutdown; "failed" means it never
-        --- started.
-        status: string
+    --- What a child that ran leaves behind.
+    ---
+    --- Everything here is meaningless before the child ends, which is why none
+    --- of it is on the future: a run in flight is a `Future<Result>` reading
+    --- "pending" and a run that ended is the same future carrying one of
+    --- these. The one thing worth knowing in between is the child's process id,
+    --- and `proc.pid` answers that from the runner's own bookkeeping.
+    record Result
         --- The program and its arguments, as given.
         args: {string}
-        --- The child's process id, or 0 before it has started and for a run
-        --- that failed to start.
+        --- The child's process id.
         pid: integer
-        --- The child's exit code, or the negated signal that ended it. Zero
-        --- until the run finishes.
+        --- The child's exit code, or the negated signal that ended it.
         exitCode: integer
         --- Everything the child wrote to standard output.
         output: string
         --- Everything it wrote to standard error, or "" when `mergeStderr`
         --- folded that into `output`.
         errorOutput: string
-        --- Why the run failed or was killed. Nil for a child that exited on
-        --- its own, whatever its exit code.
-        error: string
 
-        --- Id the worker answers with.
-        _id: integer
-
-        --- Whether the child ran to completion and reported success.
-        succeeded: function(self: Proc): boolean
-
-        --- Whether the child is still going.
-        isRunning: function(self: Proc): boolean
-
-        --- Asks the worker to end the child.
+        --- Whether the child reported success.
         ---
-        --- Queued rather than immediate: every process call belongs to the
-        --- worker, so this is picked up on its next pass. Gentle by default,
-        --- which a child may ignore; `force` cannot be refused but leaves
-        --- whatever it was writing half written.
-        kill: function(self: Proc, force?: boolean)
-
-        --- Blocks until this run finishes, pumping the worker.
-        ---
-        --- For startup, tools and tests. A frame calls `proc.update` instead.
-        --- @param timeoutMs How long to wait. Defaults to 30000. Running out
-        ---     leaves the handle at "running"; it does not kill the child.
-        --- @return This handle.
-        wait: function(self: Proc, timeoutMs?: number): Proc
+        --- A question about the answer rather than about whether there is one,
+        --- which is why it is here and not a status: a result exists exactly
+        --- when a child ran to completion, whatever it then reported.
+        succeeded: function(self: Result): boolean
     end
+
+    --- Runs a program and answers a future for it, immediately.
+    ---
+    --- Nothing here blocks. The future reads "pending" until `proc.update`, or
+    --- a `wait` on it, takes the worker's answer.
+    run: function(options: Options): Future<Result>
+
+    --- The record a run fills in, whatever became of it.
+    ---
+    --- The same object the future carries on "ready", reachable in the two
+    --- cases where the future does not carry it. Before the child ends, so
+    --- `pid` can be read as soon as it has started, which is the one thing
+    --- about a run that means anything before there is an answer. And after a
+    --- child was killed, which settles "cancelled" with no value but does not
+    --- throw away what the child managed to say first.
+    ---
+    --- The runner's bookkeeping rather than the caller's, which is why it is a
+    --- function here rather than a field on the future: a future carries no
+    --- fields of any subsystem's own.
+    ---
+    --- Nil for a run that never started, which has nothing to report, and for
+    --- anything that is not a run from here.
+    result: function(run: Future<Result>): Result
+
+    --- Asks the worker to end a child.
+    ---
+    --- Queued rather than immediate: every process call belongs to the worker,
+    --- so this is picked up on its next pass. Gentle by default, which a child
+    --- may ignore; `force` cannot be refused but leaves whatever it was writing
+    --- half written. The future settles "cancelled" when the child goes.
+    ---
+    --- `run:cancel()` is the other spelling, and it counts holders: it ends the
+    --- child only when the last consumer of the future has given it up. This
+    --- one ends the child whoever else is watching.
+    kill: function(run: Future<Result>, force?: boolean)
+
+    --- Takes whatever the worker has answered. Call once per frame.
+    --- @return How many runs finished.
+    update: function(): integer
+
+    --- Runs that have not answered yet.
+    pending: function(): integer
+
+    --- Starts the runner worker.
+    ---
+    --- Called for you by the first `run`, so a process that never shells out
+    --- never starts a thread. Call it directly to pay that cost up front, or to
+    --- give the worker a module path other than this state's.
+    install: function(luaPath?: string)
+
+    --- Whether the runner worker is running.
+    installed: function(): boolean
+
+    --- Ends every child still running and stops the worker.
+    ---
+    --- Gentle first, then forced, because a child that is mid-write deserves
+    --- the chance to finish the line and a teardown that waits forever deserves
+    --- nothing. What it does not do is walk away: a detached child outlives the
+    --- process that started it, and the worker still blocked on it would be a
+    --- thread running inside a library about to be unmapped, which this
+    --- codebase has already paid for once.
+    ---
+    --- Every future still in flight ends at "cancelled", including one whose
+    --- child the kernel never reaped. Leaving those pending would be a handle
+    --- that reads "still running" for the rest of the process against a runner
+    --- that no longer exists.
+    --- @param graceMs How long a child gets to end gently. Defaults to 250.
+    shutdown: function(graceMs?: number)
 end
 
-local type Proc = proc.Proc
+local type Result = proc.Result
 local type Options = proc.Options
 
-local ProcMT <const>: metatable<Proc> = { __index = Proc }
+local ResultMT <const>: metatable<Result> = { __index = Result }
 
---- How long `Proc:wait` waits when the caller names nothing.
+--- How long a wait on a run spends when the caller names nothing.
+---
+--- Longer than a decode's, because a child process is a different order of
+--- work. It lives on the source, which is what lets the two keep different
+--- defaults without a second convention.
 local DEFAULT_WAIT_MS <const> = 30000
 
 --- How long `shutdown` gives a child to end gently before forcing it.
@@ -409,19 +470,34 @@ local DEFAULT_GRACE_MS <const> = 250
 --- How long `shutdown` waits for a forced kill to be reaped.
 local FORCED_WAIT_MS <const> = 5000
 
---- Milliseconds spent in one blocking pump.
-local PUMP_MS <const> = 8
+--- Milliseconds one blocking slice of a wait spends.
+local SLICE_MS <const> = 8
 
-local pending: {integer: Proc} = {}
+--- A run the worker has not answered for yet.
+---
+--- The result is built here as the messages arrive rather than at the end,
+--- because the child's process id comes back before anything else does and
+--- this is where it waits until there is a result to put it in.
+local record Entry
+    id: integer
+    future: Future<Result>
+    result: Result
+end
+
+local pending: {integer: Entry} = {}
+--- The same entries by future, so `kill` can start from what the caller holds.
+--- Cleared at settlement, so it is only ever as large as the number of children
+--- in flight.
+local byFuture: {Future<Result>: Entry} = {}
+--- Every run's result by its future, which outlives the entry because a child
+--- that was killed settles with no value and what it wrote is still worth
+--- having. Weak in its keys, so it holds nothing the caller has let go of.
+local results <const>: {Future<Result>: Result} = setmetatable(
+    {} as {Future<Result>: Result}, { __mode = "k" })
 local pendingCount = 0
 local nextId = 1
 local worker: workers.Worker = nil
 
---- Starts the runner worker.
----
---- Called for you by the first `run`, so a process that never shells out never
---- starts a thread. Call it directly to pay that cost up front, or to give the
---- worker a module path other than this state's.
 function proc.install(luaPath?: string)
     if worker ~= nil then return end
     worker = workers.spawn({
@@ -430,16 +506,123 @@ function proc.install(luaPath?: string)
     })
 end
 
---- Whether the runner worker is running.
 function proc.installed(): boolean
     return worker ~= nil
 end
 
---- Runs a program and returns its handle immediately.
+function Result:succeeded(): boolean
+    return self.exitCode == 0
+end
+
+--- Forgets an entry, whatever ended it.
+local function retire(entry: Entry)
+    pending[entry.id] = nil
+    byFuture[entry.future] = nil
+    pendingCount = pendingCount - 1
+end
+
+--- Folds one worker message into its run.
 ---
---- Nothing here blocks. The handle reports "running" until `proc.update`, or a
---- `wait`, takes the worker's answer.
-function proc.run(options: Options): Proc
+--- @return Whether it was the message that ended a run.
+local function complete(message: {string: any}): boolean
+    local entry = pending[message.id as integer]
+    if entry == nil then return false end
+
+    if message.started == true then
+        entry.result.pid = message.pid as integer
+        return false
+    end
+
+    retire(entry)
+
+    if message.failed == true then
+        entry.future:fail(message.error as string)
+        return true
+    end
+
+    local result = entry.result
+    result.exitCode = message.exitCode as integer
+    result.output = message.output as string
+    result.errorOutput = message.errorOutput as string
+
+    if message.killed == true then
+        -- Ended by this process, through `kill`, a deadline, or shutdown. Not a
+        -- failure: nothing about the child went wrong, it was stopped.
+        entry.future:abandon(message.timedOut == true and "timed out" or "killed")
+        return true
+    end
+
+    -- Whatever the exit code. A child that ran answered the question it was
+    -- asked, and `Result:succeeded` is the separate question about the answer.
+    entry.future:complete(result)
+    return true
+end
+
+-------------------------------------------------------------------------------
+-- The source
+-------------------------------------------------------------------------------
+
+--- What drives every future this module hands out.
+---
+--- `poll` and `advance` are the same receive with a different budget, which is
+--- the whole of what a future needs from a worker channel.
+local record Runner
+    sliceMs: number
+    defaultWaitMs: number
+
+    poll: function(self: Runner): integer
+    advance: function(self: Runner, ms: number): integer
+    cancel: function(self: Runner, future: Future<any>)
+end
+
+local RunnerMT <const>: metatable<Runner> = { __index = Runner }
+
+function Runner:poll(): integer
+    if worker == nil then return 0 end
+    local finished = 0
+    while true do
+        local message = worker:receive(0)
+        if message == nil then break end
+        if complete(message as {string: any}) then finished = finished + 1 end
+    end
+    return finished
+end
+
+function Runner:advance(ms: number): integer
+    if worker == nil then return 0 end
+    local message = worker:receive(ms)
+    if message == nil then return 0 end
+    return complete(message as {string: any}) and 1 or 0
+end
+
+--- Asks the worker to end a child whose last watcher has gone.
+---
+--- Forced, which is the opposite of what "a consumer politely losing interest"
+--- suggests and is right for the same reason. The gentle kill exists to let a
+--- child finish writing output somebody wants; here the last consumer of that
+--- output has just gone, so there is nothing left to be gentle on behalf of,
+--- and a refusable signal would leave the child running with no future left to
+--- observe it. A caller who does want to ask rather than insist has
+--- `proc.kill(run, false)`, which is that question spelled out.
+function Runner:cancel(future: Future<any>)
+    local entry = byFuture[future as Future<Result>]
+    if entry == nil or worker == nil then return end
+    worker:send({ kind = "kill", id = entry.id, force = true })
+end
+
+local runner <const> = setmetatable({
+    -- Both live here rather than in `Future`, which is what lets a child
+    -- process keep a longer default than a decode without a second convention.
+    sliceMs = SLICE_MS, defaultWaitMs = DEFAULT_WAIT_MS,
+} as Runner, RunnerMT)
+
+local source <const> = runner as Future.Source
+
+-------------------------------------------------------------------------------
+-- Running
+-------------------------------------------------------------------------------
+
+function proc.run(options: Options): Future<Result>
     if options == nil or options.args == nil or #options.args == 0 then
         error("tecs: proc.run needs args, starting with the program", 2)
     end
@@ -451,15 +634,21 @@ function proc.run(options: Options): Proc
 
     proc.install()
 
-    local handle = setmetatable({
-        status = "running", args = options.args, pid = 0, exitCode = 0,
-        output = "", errorOutput = "",
-    } as Proc, ProcMT)
-
     local id = nextId
     nextId = nextId + 1
-    handle._id = id
-    pending[id] = handle
+
+    local future = Future.pending(source) as Future<Result>
+    local entry: Entry = {
+        id = id,
+        future = future,
+        result = setmetatable({
+            args = options.args, pid = 0, exitCode = 0,
+            output = "", errorOutput = "",
+        } as Result, ResultMT),
+    }
+    pending[id] = entry
+    byFuture[future] = entry
+    results[future] = entry.result
     pendingCount = pendingCount + 1
 
     worker:send({
@@ -472,144 +661,78 @@ function proc.run(options: Options): Proc
         input = options.input,
         timeoutMs = options.timeoutMs,
     })
-    return handle
+    return future
 end
 
---- Folds one worker message into its handle.
----
---- @return Whether it was the message that ended a run.
-local function complete(result: {string: any}): boolean
-    local handle = pending[result.id as integer]
-    if handle == nil then return false end
-
-    if result.started == true then
-        handle.pid = result.pid as integer
-        return false
-    end
-
-    pending[handle._id] = nil
-    pendingCount = pendingCount - 1
-
-    if result.failed == true then
-        handle.status = "failed"
-        handle.error = result.error as string
-        return true
-    end
-
-    handle.exitCode = result.exitCode as integer
-    handle.output = result.output as string
-    handle.errorOutput = result.errorOutput as string
-    if result.killed == true then
-        handle.status = "killed"
-        if result.timedOut == true then
-            handle.error = "timed out"
-        else
-            handle.error = "killed"
-        end
-        return true
-    end
-    handle.status = "exited"
-    return true
+function proc.result(run: Future<Result>): Result
+    if run == nil then return nil end
+    return results[run]
 end
 
---- Takes whatever the worker has answered. Call once per frame.
---- @return How many runs finished.
+function proc.kill(run: Future<Result>, force?: boolean)
+    if worker == nil or run == nil then return end
+    local entry = byFuture[run]
+    if entry == nil then return end
+    worker:send({ kind = "kill", id = entry.id, force = force == true })
+end
+
 function proc.update(): integer
-    if worker == nil then return 0 end
-    local finished = 0
-    while true do
-        local result = worker:receive(0)
-        if result == nil then break end
-        if complete(result as {string: any}) then finished = finished + 1 end
-    end
-    return finished
+    return runner:poll()
 end
 
---- Runs that have not answered yet.
 function proc.pending(): integer
     return pendingCount
 end
 
---- Waits up to `ms` for one message and folds it in. Shared by everything here
---- that blocks, so there is one description of how a wait is spent.
-local function pump(ms: number)
-    if worker == nil then return end
-    local result = worker:receive(ms)
-    if result ~= nil then complete(result as {string: any}) end
-end
+-------------------------------------------------------------------------------
+-- Shutting down
+-------------------------------------------------------------------------------
 
-function Proc:succeeded(): boolean
-    return self.status == "exited" and self.exitCode == 0
-end
-
-function Proc:isRunning(): boolean
-    return self.status == "running"
-end
-
-function Proc:kill(force?: boolean)
-    if worker == nil or self.status ~= "running" then return end
-    worker:send({ kind = "kill", id = self._id, force = force == true })
-end
-
-function Proc:wait(timeoutMs?: number): Proc
-    local remaining = timeoutMs or DEFAULT_WAIT_MS
-    while self.status == "running" and remaining > 0 do
-        pump(PUMP_MS)
-        remaining = remaining - PUMP_MS
-    end
-    return self
-end
-
---- Blocks until every run in flight has finished.
+--- Spends up to `ms` of wall clock taking whatever the worker answers.
 ---
---- For tools and tests. A frame polls `update` instead.
-function proc.waitAll(timeoutMs?: number)
-    local remaining = timeoutMs or DEFAULT_WAIT_MS
-    while pendingCount > 0 and remaining > 0 do
-        pump(PUMP_MS)
-        remaining = remaining - PUMP_MS
+--- Wall clock rather than a count of slices: `advance` returns as soon as one
+--- message arrives, so subtracting the slice size for it would make a "5000 ms"
+--- wait into "at most 625 messages".
+local function drainFor(ms: number)
+    local deadline = clock.now() * 1000.0 + ms
+    while pendingCount > 0 do
+        local remaining = deadline - clock.now() * 1000.0
+        if remaining <= 0 then break end
+        runner:advance(remaining < runner.sliceMs and remaining or runner.sliceMs)
     end
 end
 
---- Ends every child still running and stops the worker.
----
---- Gentle first, then forced, because a child that is mid-write deserves the
---- chance to finish the line and a teardown that waits forever deserves
---- nothing. What it does not do is walk away: a detached child outlives the
---- process that started it, and the worker still blocked on it would be a
---- thread running inside a library about to be unmapped, which this codebase
---- has already paid for once.
----
---- Handles for children that were still running end at "killed".
---- @param graceMs How long a child gets to end gently. Defaults to 250.
 function proc.shutdown(graceMs?: number)
     if worker == nil then return end
 
     if pendingCount > 0 then
-        for _, handle in pairs(pending) do handle:kill(false) end
-        local remaining = graceMs or DEFAULT_GRACE_MS
-        while pendingCount > 0 and remaining > 0 do
-            pump(PUMP_MS)
-            remaining = remaining - PUMP_MS
+        for _, entry in pairs(pending) do
+            worker:send({ kind = "kill", id = entry.id, force = false })
         end
+        drainFor(graceMs or DEFAULT_GRACE_MS)
     end
 
     if pendingCount > 0 then
-        for _, handle in pairs(pending) do handle:kill(true) end
-        local remaining = FORCED_WAIT_MS
-        while pendingCount > 0 and remaining > 0 do
-            pump(PUMP_MS)
-            remaining = remaining - PUMP_MS
+        for _, entry in pairs(pending) do
+            worker:send({ kind = "kill", id = entry.id, force = true })
         end
+        drainFor(FORCED_WAIT_MS)
     end
 
-    -- The worker leaves its loop when its inbox closes and nothing is live,
-    -- and a forced kill is not something a child can refuse, so by here it has
-    -- nothing left to hold. Anything still pending is a handle whose child the
-    -- kernel has not reaped, which no amount of further waiting here fixes.
+    -- Anything still here is a child the kernel has not reaped, which no
+    -- further waiting fixes. Its future is settled rather than dropped: the
+    -- runner is about to stop, so nothing will ever answer for it, and leaving
+    -- it "pending" would be a future that reads "still running" for the rest of
+    -- the process against a worker that no longer exists.
+    for _, entry in pairs(pending) do
+        entry.future:abandon("ended at shutdown")
+        byFuture[entry.future] = nil
+    end
+
     worker:stop()
     worker = nil
     pending = {}
+    byFuture = {}
     pendingCount = 0
 end
 
