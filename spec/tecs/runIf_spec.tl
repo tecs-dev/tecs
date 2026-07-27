@@ -359,5 +359,69 @@ describe("runIf helpers", function()
             luassert.is_true(fires < 200,
                 "jitter >= interval must not fire every frame, got " .. fires)
         end)
+
+        -- Jitter comes off the world's `tecs.runif` stream rather than a
+        -- process-wide generator, so the frames a jittered system fires on are
+        -- a function of the world's seed and nothing else.
+        local function schedule(seed: integer): {integer}
+            local scoped <const> = tecs.newWorld()
+            tecs.random.seed(scoped, seed)
+            local pred <const> = tecs.runif.every(0.1, 0.05)
+            local hits: {integer} = {}
+            for frame = 1, 600 do
+                if pred(1 / 60, scoped, "s") then
+                    hits[#hits + 1] = frame
+                end
+            end
+            return hits
+        end
+
+        it("fires on the same frames for the same world seed", function()
+            local first <const> = schedule(4242)
+            luassert.is_true(#first > 20, "only " .. tostring(#first) .. " fires to compare")
+            luassert.same(first, schedule(4242))
+        end)
+
+        it("fires on different frames for a different world seed", function()
+            local a <const> = schedule(4242)
+            local b <const> = schedule(4243)
+            local same = #a == #b
+            if same then
+                for i = 1, #a do
+                    if a[i] ~= b[i] then same = false end
+                end
+            end
+            luassert.is_false(same, "two seeds produced the same schedule")
+        end)
+
+        it("carries its place through a snapshot", function()
+            local scoped <const> = tecs.newWorld()
+            tecs.random.seed(scoped, 4242)
+
+            -- Rolled a few times first, so the save is taken mid-sequence and
+            -- restoring it is doing more than restarting from the seed.
+            local warm <const> = tecs.runif.every(0.1, 0.05)
+            for _ = 1, 120 do warm(1 / 60, scoped, "s") end
+
+            local out <const> = scoped:saveSnapshot()
+            local saved <const> = out.buffer
+            if saved == nil then error("saveSnapshot returned no buffer") end
+
+            -- A predicate's own elapsed time is closure state a snapshot does
+            -- not reach, so both runs start with a fresh one; what is asserted
+            -- is that the rolls the second makes are the restored ones.
+            local function drive(): {integer}
+                local pred <const> = tecs.runif.every(0.1, 0.05)
+                local hits: {integer} = {}
+                for frame = 1, 300 do
+                    if pred(1 / 60, scoped, "s") then hits[#hits + 1] = frame end
+                end
+                return hits
+            end
+
+            local expected <const> = drive()
+            scoped:loadSnapshot(saved)
+            luassert.same(expected, drive())
+        end)
     end)
 end)

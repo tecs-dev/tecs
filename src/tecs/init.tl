@@ -10,6 +10,7 @@ local internalComponents <const> = require("tecs.internal.components")
 local internalEvents <const> = require("tecs.internal.events")
 local phases <const> = require("tecs.internal.phases")
 local runIfHelpers <const> = require("tecs.internal.runif")
+local random <const> = require("tecs.random")
 local IdAllocator <const> = require("tecs.internal.IdAllocator")
 local WorldImpl <const> = require("tecs.internal.world")
 
@@ -131,6 +132,7 @@ local record tecs
     phases: phases
     builtins: builtins
     runif: runIfHelpers
+    random: random
 
     --- Absolute ceiling for `World.Config.maxEntities` (2^22 - 1 usable
     --- slots; slot 0 is reserved by the entity-id format).
@@ -254,6 +256,7 @@ tecs.newMessageBus = internalEvents.MessageBus.new
 tecs.phases = phases
 tecs.builtins = builtins
 tecs.runif = runIfHelpers
+tecs.random = random
 tecs.MAX_ENTITIES = IdAllocator.ABSOLUTE_MAX_SLOT_COUNT
 tecs.DEFAULT_MAX_ENTITIES = IdAllocator.DEFAULT_MAX_SLOT_COUNT
 

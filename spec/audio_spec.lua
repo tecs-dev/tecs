@@ -971,6 +971,57 @@ describe("audio", function()
             assert.is_true(distinct > 1, "forty of one sound must not all come out at one pitch")
             audio:destroy()
         end)
+
+        -- Variance is drawn from the world's `tecs.audio` stream rather than
+        -- from a process-wide generator, so a run that seeded the world fires
+        -- the same rates in the same order every time it is played back.
+        local function variedRates(seed, count)
+            local audio, clip, backend, world = scene({ maxVoices = 32 })
+            tecs.random.seed(world, seed)
+            local rates = {}
+            for index = 1, count do
+                audio:play(clip, { pitch = 2.0, pitchVariance = 0.25 })
+                rates[index] = backend.tracks[index].pitch
+            end
+            audio:destroy()
+            return rates
+        end
+
+        it("repeats the same variance for the same world seed", function()
+            assert.are.same(variedRates(4242, 12), variedRates(4242, 12))
+        end)
+
+        it("gives a different world seed different variance", function()
+            local a, b = variedRates(4242, 12), variedRates(4243, 12)
+            local shared = 0
+            for index = 1, 12 do
+                if a[index] == b[index] then
+                    shared = shared + 1
+                end
+            end
+            assert.is_true(shared < 3, shared .. " of 12 rates matched across seeds")
+        end)
+
+        it("carries the variance stream through a snapshot", function()
+            local audio, clip, backend, world = scene({ maxVoices = 32 })
+            tecs.random.seed(world, 4242)
+            audio:play(clip, { pitch = 2.0, pitchVariance = 0.25 })
+
+            local saved = world:saveSnapshot().buffer
+            audio:play(clip, { pitch = 2.0, pitchVariance = 0.25 })
+            local afterSave = backend.tracks[2].pitch
+
+            -- Left a long way from where it was saved, so a load that did not
+            -- restore the stream would not land back on the same rate.
+            for _ = 3, 24 do
+                audio:play(clip, { pitch = 2.0, pitchVariance = 0.25 })
+            end
+
+            world:loadSnapshot(saved)
+            audio:play(clip, { pitch = 2.0, pitchVariance = 0.25 })
+            assert.are.equal(afterSave, backend.tracks[25].pitch)
+            audio:destroy()
+        end)
     end)
 
     describe("groups", function()

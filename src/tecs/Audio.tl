@@ -46,7 +46,8 @@
 --- **The mixer's own state is in the snapshot.** The master gain, the master
 --- mute and every group's gain, mute and pause are a game's state as much as
 --- an entity is, and none of them is in the world, so `install` adds a
---- snapshot handler that carries them.
+--- snapshot handler that carries them. Pitch variance is drawn from the
+--- world's `tecs.audio` stream, so `tecs.random` carries that part.
 ---
 --- **Position is passed through and nothing else.** See `Sound` for what a
 --- caller still has to do by hand. `setStereo` is the other way to place a
@@ -57,6 +58,7 @@
 
 local ecs <const> = require("tecs.ecs")
 local assets <const> = require("tecs.assets")
+local random <const> = require("tecs.random")
 local loader <const> = require("tecs.ffi.loader")
 local sdl3mixer <const> = require("tecs.ffi.sdl3mixer")
 local adapter <const> = require("tecs.platform.adapter")
@@ -479,6 +481,10 @@ local record Audio
     _buckets: {string: Bucket}
     _clips: {integer: Clip}
     _loads: assets.Batch<Audio.Clip>
+    --- Where pitch variance is drawn from. A mixer of its own until `install`
+    --- points it at the world's `tecs.audio` stream, so a save carries the
+    --- rate the next shot fires at rather than restarting the variance.
+    _random: random.Random
     --- Seconds `update` has been told about, which is what a cooldown is
     --- measured against.
     _now: number
@@ -597,6 +603,7 @@ function Audio.create(config?: Audio.Config): Audio
     self._buckets = {}
     self._clips = {}
     self._loads = assets.batch(settleClip)
+    self._random = random.new()
     self._now = 0.0
     -- One options record, overwritten per play. Every field is set each time,
     -- so nothing carries over from the previous voice.
@@ -958,7 +965,7 @@ local function start(self: Audio, clip: Audio.Clip, options: Audio.PlayOptions,
     local pitch = options.pitch or 1.0
     local variance = options.pitchVariance or 0.0
     if variance ~= 0.0 then
-        pitch = pitch * (1.0 + (math.random() * 2.0 - 1.0) * variance)
+        pitch = pitch * (1.0 + self._random:range(-1.0, 1.0) * variance)
     end
     -- Compared against what this track already carries, not against one,
     -- because a reused slot would otherwise keep the last voice's rate.
@@ -1762,6 +1769,12 @@ end
 --- the iteration instead.
 function Audio:install(world: ecs.World)
     installed[world] = self
+
+    -- Pitch variance moves onto the world's stream, so it is seeded with
+    -- everything else and a snapshot carries where it had got to. Kept as the
+    -- same field the play path already reads: a mixer with no world still has
+    -- the generator it was made with.
+    self._random = random.stream(world, "tecs.audio")
 
     local sounds = world:query({
         name = "tecs.Sounds",

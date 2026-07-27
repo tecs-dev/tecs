@@ -1,7 +1,6 @@
 --- runIf.tl - Scheduling and timer helpers for system execution
 local types <const> = require("tecs.types")
-
-local random <const> = math.random
+local random <const> = require("tecs.random")
 
 local type World = types.World
 
@@ -23,6 +22,10 @@ local record runIf
     --- The system will fire every `interval` seconds (approximately).
     --- Optional jitter can be added to desynchronize multiple systems
     --- using the same interval.
+    ---
+    --- Jitter is drawn from the world's `tecs.runif` stream, so a run reseeded
+    --- with `tecs.random.seed` fires on the same frames every time and a
+    --- snapshot carries where the jitter had got to.
     ---
     --- @param interval The interval in seconds between fires.
     --- @param jitter Optional random variance (±jitter seconds) added to each interval.
@@ -107,14 +110,19 @@ function runIf.every(interval: number, jitter?: number): RunIfFn
         end
     end
 
-    return function(dt: number, _world: World, _systemName: string): boolean
+    return function(dt: number, world: World, _systemName: string): boolean
         elapsed = elapsed + dt
         if elapsed >= currentInterval then
             elapsed = elapsed - currentInterval
+            -- Looked up per roll rather than held, because the predicate is
+            -- built before it has ever seen a world and the same predicate can
+            -- be added to two of them. A roll happens once an interval, so the
+            -- lookup is nowhere near a hot path.
+            local rolls <const> = random.stream(world, "tecs.runif")
             -- Apply jitter for next interval. Clamp so jitter >= interval
             -- cannot roll a zero or negative interval that fires every
             -- frame until the next roll.
-            local variance = (random() * 2 - 1) * jitter
+            local variance = rolls:range(-1.0, 1.0) * jitter
             currentInterval = interval + variance
             if currentInterval < interval * 0.01 then
                 currentInterval = interval * 0.01

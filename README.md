@@ -73,6 +73,9 @@ Working today:
   instructions, playback position kept as data so it survives a snapshot, and
   three clocks (fixed, frame, presentation) for the three rates gameplay,
   scripted input and presentation run at
+- Seeded generation in named, independent streams, whose state a snapshot
+  carries and whose sequence is the same on every machine, with Perlin noise
+  seeded the same way ([`src/tecs/random.tl`](src/tecs/random.tl))
 - Sprite sheets on Aseprite's model: frames with their own durations, named
   tags playing forward, in reverse or pingpong, and slices carrying pivots,
   built by a grid, an explicit rect list, a builder, or read from an Aseprite
@@ -1959,6 +1962,15 @@ read through a provider that defaults to the real source. A replay driver
 substitutes recorded dt and recorded input without either subsystem knowing.
 Events are delivered as a reused `SDL_Event`, so recording is a 128 byte copy
 and replay is the same copy back, with no second representation to keep in sync.
+
+**Randomness is seeded, and split by name rather than by order.** `tecs.random`
+gives a world a generator per name, each seeded by hashing the name against the
+world's seed, so a stream that did not exist before takes a seed of its own
+without moving any other stream's. One generator shared between consumers has
+the opposite property: whichever ran first decides what the rest get, which is
+exactly the case a replay needs to survive. The state is four 32-bit words a
+snapshot carries, and the arithmetic is integer, so a sequence is the same on
+every machine rather than the same on most of them.
 
 **Resource handles are owned by the platform, not by Lua's collector.** Windows
 and devices are released by an explicit `destroy`. Tying GPU-adjacent lifetimes
