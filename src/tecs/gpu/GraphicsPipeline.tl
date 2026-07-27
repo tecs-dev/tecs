@@ -8,6 +8,20 @@
 --- No vertex input state is declared. The renderer is SSBO-driven: vertex data
 --- is read from storage buffers indexed by vertex ID, so there are no vertex
 --- buffers to describe.
+---
+--- What a pipeline bakes has to agree with the pass it is bound in and with the
+--- shaders it was built from, and neither agreement is checked here:
+---
+--- - Colour formats must match the pass's attachments in count and in order.
+---   `RenderPass.begin` takes the attachments and this takes the formats, and
+---   nothing joins the two up before SDL rejects the bind.
+--- - A pipeline with `depth` set can only be bound in a pass begun with a depth
+---   attachment, and one without it only in a pass begun without one.
+--- - Resource bindings follow the set numbering SDL fixes for SPIR-V: the
+---   vertex stage reads sampled textures then storage textures then storage
+---   buffers from set 0 and its uniforms from set 1, and the fragment stage
+---   reads the same sequence from set 2 and its uniforms from set 3. A shader
+---   that numbers its sets otherwise binds nothing where the pass puts it.
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
@@ -22,7 +36,8 @@ local C <const> = sdl.C
 --- two cases are different pipelines because the target info is part of what a
 --- pipeline is, not something a pass can flip on afterwards.
 local record DepthConfig
-    --- Format of the attachment. Must match the pass this pipeline draws in.
+    --- Format of the attachment. Required, and it must be the format of the
+    --- texture the pass attaches, not merely a depth format.
     format: integer
     --- Tests each fragment against the attachment. Defaults to true; false
     --- attaches depth without letting it reject anything.
@@ -32,36 +47,73 @@ local record DepthConfig
     write: boolean
     --- "never", "less", "equal", "lessOrEqual", "greater", "notEqual",
     --- "greaterOrEqual", or "always". Defaults to "lessOrEqual".
+    ---
+    --- The incoming fragment is the left side, so "lessOrEqual" keeps a
+    --- fragment nearer than or level with what is stored. Level is what makes
+    --- draw order the tie-breaker for two instances at one depth: the later
+    --- draw passes the test and overwrites, which is the resolution
+    --- `layers.depthOf` is written to rely on.
     compare: string
 end
 
 local record PipelineOptions
+    --- Both are required, and both may be destroyed once `create` returns:
+    --- SDL keeps whatever it needs out of them.
     vertexShader: Shader
     fragmentShader: Shader
     --- Format of the single colour target this pipeline writes to. Use
-    --- `colorFormats` for a G-buffer or any other multi-target pass.
+    --- `colorFormats` for a G-buffer or any other multi-target pass. One of the
+    --- two is required and `colorFormats` wins when both are given.
     colorFormat: integer
     --- Formats of every colour target, in attachment order. A pipeline bakes
     --- these, so they must match the pass it is used in exactly.
     colorFormats: {integer}
     --- "triangleList", "triangleStrip", "lineList", "lineStrip", "pointList".
+    --- Defaults to "triangleList".
     primitive: string
-    --- "none", "front", or "back".
+    --- "none", "front", or "back", defaulting to "none". Facing is decided by
+    --- counter-clockwise winding, which this does not expose, so a mesh wound
+    --- the other way has its two faces swapped rather than its culling
+    --- disabled.
     cull: string
-    --- Straight alpha blending on the colour target.
+    --- Straight alpha blending, applied to every colour target rather than to
+    --- one of them. Defaults to false, which writes the fragment's colour and
+    --- alpha through unmodified.
     blend: boolean
-    --- Depth state. Omit for a pipeline with no depth-stencil target.
+    --- Depth state. Omit for a pipeline with no depth-stencil target, which is
+    --- also the only kind that can be bound in a pass begun without one.
     depth: DepthConfig
-    --- Name shown in GPU debugging tools.
+    --- Accepted and not applied. Nothing here reaches the pipeline's debug
+    --- name, so a capture labels this pipeline whatever the driver defaults to.
     name: string
 end
 
 local record GraphicsPipeline
     DepthConfig: DepthConfig
 
+    --- The `SDL_GPUGraphicsPipeline`. Nil once `destroy` has run.
     handle: loader.CPtr
     _device: loader.CPtr
     _destroyed: boolean
+
+    --- Creates a pipeline.
+    ---
+    --- Raises on an unknown primitive, cull mode or depth compare op, and on
+    --- options that name no colour format at all. Everything that has to agree
+    --- with a pass or a shader is unchecked and surfaces as an SDL failure at
+    --- creation or at bind.
+    --- @param device The `SDL_GPUDevice` the pipeline is created on, and the
+    ---     one `destroy` releases it against.
+    --- @param options Baked state. Nothing here is amendable afterwards; a
+    ---     second combination is a second pipeline.
+    --- @return The pipeline, whose shaders the caller is free to destroy.
+    create: function(device: loader.CPtr, options: PipelineOptions): GraphicsPipeline
+
+    --- Releases the pipeline.
+    ---
+    --- Safe to call more than once. The device outlives its pipelines, so this
+    --- has to run before the device is destroyed rather than after.
+    destroy: function(self)
 end
 
 local GraphicsPipelineMT <const>: metatable<GraphicsPipeline> = {
@@ -94,15 +146,15 @@ local COMPARE_OPS <const>: {string: integer} = {
     always = 8,
 }
 
--- SDL_GPUBlendFactor / SDL_GPUBlendOp values used for straight alpha.
-local BLEND_FACTOR_SRC_ALPHA <const> = 5
-local BLEND_FACTOR_ONE_MINUS_SRC_ALPHA <const> = 6
+-- SDL_GPUBlendFactor / SDL_GPUBlendOp values used for straight alpha. Both
+-- enums open with an INVALID member, so ZERO is one and every later name sits
+-- one above where the header lists it.
+local BLEND_FACTOR_SRC_ALPHA <const> = 7
+local BLEND_FACTOR_ONE_MINUS_SRC_ALPHA <const> = 8
 local BLEND_FACTOR_ONE <const> = 2
 local BLEND_OP_ADD <const> = 1
 
---- Creates a pipeline. The shaders may be released once this returns.
-function GraphicsPipeline.create(device: loader.CPtr,
-                                 options: PipelineOptions): GraphicsPipeline
+function GraphicsPipeline.create(device: loader.CPtr, options: PipelineOptions): GraphicsPipeline
     local primitive = PRIMITIVES[options.primitive or "triangleList"]
     if primitive == nil then
         error(("tecs: unknown primitive type '%s'"):format(
@@ -173,6 +225,8 @@ function GraphicsPipeline.create(device: loader.CPtr,
         targetInfo.has_depth_stencil_target = true
         targetInfo.depth_stencil_format = depth.format
 
+        -- Stencil is never enabled, so the stencil ops in this struct describe
+        -- nothing and are left at zero.
         local state = settings.depth_stencil_state as loader.CStruct
         state.compare_op = compare
         state.enable_depth_test = depth.test ~= false
@@ -190,7 +244,6 @@ function GraphicsPipeline.create(device: loader.CPtr,
     return self
 end
 
---- Releases the pipeline. Safe to call more than once.
 function GraphicsPipeline:destroy()
     if self._destroyed then return end
     self._destroyed = true

@@ -83,6 +83,72 @@ local record layers
         --- background wants. Defaults to one.
         parallax: number
     end
+
+    --- Sets what a layer does with its contents.
+    ---
+    --- Replaces the layer's configuration rather than amending it: a `Config`
+    --- is the whole of what a layer is, so a field left out is that field's
+    --- default and not whatever the layer held before.
+    --- @param layer One to `MAX`. Anything else raises.
+    --- @param config Raises on a missing or unknown `sort`, and on asking for
+    ---     `screenSpace` and `virtualCoords` together.
+    configure: function(layer: integer, config: layers.Config)
+
+    --- How a layer sorts, as the identifier `depthOf` takes.
+    --- @param layer One to `MAX`. Outside that this answers topdown rather than
+    ---     raising, since it is the default every layer starts on.
+    --- @return The sort identifier, which is an internal number and not one of
+    ---     the `Sort` strings.
+    sortOf: function(layer: integer): integer
+
+    --- How many times the table has been configured.
+    --- @return A count that starts at zero and only rises. A consumer compares
+    ---     it against the value it packed at, so the number itself means
+    ---     nothing beyond having changed.
+    revision: function(): integer
+
+    --- The four floats the vertex shader reads for one layer: its mode, its
+    --- parallax offset factor, whether it ignores zoom, and whether it is lit.
+    ---
+    --- Handed over as a group because they are packed as a group, which happens
+    --- when `revision` moves rather than every frame.
+    --- @param layer One to `MAX`. Outside that every return is nil, since only
+    ---     that range is ever filled in.
+    --- @return The positioning mode, then the camera position's multiplier,
+    ---     then one when the layer ignores zoom, then one when it is lit.
+    entryOf: function(layer: integer): number, number, number, number
+
+    --- Whether the camera's view rectangle decides if this layer is drawn.
+    ---
+    --- False on a layer the camera does not place where its world bound says:
+    --- screen-space and virtual-coordinate contents have no world position for
+    --- the view to test, and parallax and ignore-zoom draw them somewhere the
+    --- bound does not describe. Extraction reads this per row and writes a
+    --- bound no view can be outside of for those, so the layer is drawn
+    --- whatever the camera is looking at. Culling is given up on a layer that
+    --- asks for one of these, and kept exactly on every layer that does not.
+    --- @param layer One to `MAX`. Outside that this answers true, which is what
+    ---     an unconfigured layer answers too.
+    --- @return Whether extraction should write this row's real world bound.
+    viewCulled: function(layer: integer): boolean
+
+    --- Depth for one entity, in zero to one with zero nearest.
+    ---
+    --- Exact ties carry no tie-breaker. Instances are drawn in index order and
+    --- the depth test lets an equal fragment through, so two entities at the
+    --- same depth already resolve the same way every frame: the later one wins.
+    --- Nudging depth by identity would resolve them the other way, since a
+    --- larger value is farther, and quietly invert the order a scene was built
+    --- expecting.
+    --- @param layer One to `MAX`, which picks the band and, through `sortOf`,
+    ---     what the rest of the arguments mean.
+    --- @param z Height in the sort, against `maxZ`. Read by every sort mode.
+    --- @param x World x, read only by the isometric sort.
+    --- @param y World y, read by the topdown and isometric sorts. Larger is
+    ---     lower on screen and so nearer.
+    --- @return A depth clamped into 0.001 to 0.999, which is what keeps the
+    ---     shader's recovery of the layer index in range.
+    depthOf: function(layer: integer, z: number, x: number, y: number): number
 end
 
 layers.MAX = 16
@@ -137,11 +203,6 @@ end
 --- table can tell whether its copy is still the answer.
 local revision = 0
 
---- Sets what a layer does with its contents.
----
---- Replaces the layer's configuration rather than amending it: a `Config` is
---- the whole of what a layer is, so a field left out is that field's default
---- and not whatever the layer held before.
 function layers.configure(layer: integer, config: layers.Config)
     if layer < 1 or layer > layers.MAX then
         error(("tecs: layer %d is outside 1..%d")
@@ -179,50 +240,26 @@ function layers.configure(layer: integer, config: layers.Config)
     revision = revision + 1
 end
 
---- How a layer sorts, as the identifier `depthOf` takes.
 function layers.sortOf(layer: integer): integer
     return sorts[layer] or SORT_TOPDOWN
 end
 
---- How many times the table has been configured.
 function layers.revision(): integer
     return revision
 end
 
---- The four floats the vertex shader reads for one layer: its mode, its
---- parallax offset factor, whether it ignores zoom, and whether it is lit.
----
---- Handed over as a group because they are packed as a group, which happens
---- when `revision` moves rather than every frame.
 function layers.entryOf(layer: integer): number, number, number, number
     return modes[layer], parallaxOffsets[layer],
         zoomFlags[layer], litFlags[layer]
 end
 
---- Whether the camera's view rectangle decides if this layer is drawn.
----
---- False on a layer the camera does not place where its world bound says:
---- screen-space and virtual-coordinate contents have no world position for the
---- view to test, and parallax and ignore-zoom draw them somewhere the bound
---- does not describe. Extraction reads this per row and writes a bound no view
---- can be outside of for those, so the layer is drawn whatever the camera is
---- looking at. Culling is given up on a layer that asks for one of these, and
---- kept exactly on every layer that does not.
 function layers.viewCulled(layer: integer): boolean
     local culled = culledByView[layer]
     if culled == nil then return true end
     return culled
 end
 
---- Depth for one entity, in zero to one with zero nearest.
----
---- Exact ties carry no tie-breaker. Instances are drawn in index order and the
---- depth test lets an equal fragment through, so two entities at the same
---- depth already resolve the same way every frame: the later one wins. Nudging
---- depth by identity would resolve them the other way, since a larger value is
---- farther, and quietly invert the order a scene was built expecting.
-function layers.depthOf(layer: integer, z: number, x: number,
-                        y: number): number
+function layers.depthOf(layer: integer, z: number, x: number, y: number): number
     local band <const> = 1.0 / layers.MAX
     local base <const> = (layers.MAX - layer) * band
     local sort <const> = sorts[layer] or SORT_TOPDOWN
