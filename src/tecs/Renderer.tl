@@ -47,6 +47,14 @@ local record RendererOptions
     cell: integer
     --- Layers the image array holds.
     layers: integer
+    --- Give each archetype a run with room to grow rather than packing the
+    --- runs end to end. Defaults to false, which packs.
+    ---
+    --- Packed, one spawn anywhere shifts every run after it and the whole
+    --- scene is rewritten and re-uploaded. Reserved, an archetype grows into
+    --- its own slack and the rest of the scene stays resident, and the cull is
+    --- dispatched over the slack as well as over the rows.
+    reserveRuns: boolean
     --- Fit many images into each layer of the image array rather than one.
     --- Defaults to false. On, the ceiling on distinct images is the array's
     --- area rather than its layer count, and a small image costs its own size
@@ -124,6 +132,7 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
     -- crosses once, at construction, rather than being asked for per frame.
     local extractor = Extractor.create({
         capacity = self.capacity,
+        reserveRuns = options.reserveRuns,
         whiteU0 = backend.whiteU0,
         whiteV0 = backend.whiteV0,
         whiteU1 = backend.whiteU1,

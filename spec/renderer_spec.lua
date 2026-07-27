@@ -65,11 +65,12 @@ describe("ecs.Renderer", function()
 
     -- Builds a world with a renderer installed. Ambient is full white by
     -- default so transport can be tested without lighting in the way.
-    local function newScene(ambient, capacity)
+    local function newScene(ambient, capacity, reserveRuns)
         local world = tecs.newWorld()
         local renderer = Renderer.create(device.handle, FORMAT, {
             ambient = ambient or { 1.0, 1.0, 1.0 },
             capacity = capacity or 256,
+            reserveRuns = reserveRuns,
         })
         renderer:install(world)
         return world, renderer
@@ -2419,6 +2420,75 @@ describe("ecs.Renderer", function()
                 0,
                 screen:getPixel(pixels, SIZE * 3 / 4, SIZE / 2).g,
                 "and the region packed beside it still clips"
+            )
+            renderer:destroy()
+        end)
+    end)
+
+    -- Runs with room to grow in them, from the far end: the slack is real
+    -- geometry in the buffer the cull walks, so what it draws is the claim.
+    describe("with reserved runs", function()
+        it("draws a scene laid out with slack in it", function()
+            local world, renderer = newScene(nil, nil, true)
+            world:spawn(
+                Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
+                Tint(1.0, 0.0, 0.0, 1.0),
+                Renderable()
+            )
+
+            local pixels = frameOnce(world, renderer)
+            local centre = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
+
+            assert.is_true(renderer.count > 1, "the extent covers the room the run was given")
+            assert.are.equal(255, centre.r, "and the row still reaches the screen")
+            assert.are.equal(0, centre.g)
+            renderer:destroy()
+        end)
+
+        it("keeps every slot a run gave up off the screen", function()
+            -- Two archetypes, because a run only moves when something is
+            -- allocated after it, and both outgrow what they were given.
+            local Clip = components.Clip
+            local world, renderer = newScene(nil, nil, true)
+            local ids = {}
+            local function fill(count, clip)
+                for _ = 1, count do
+                    if clip then
+                        ids[#ids + 1] = world:spawn(
+                            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
+                            Tint(1.0, 0.0, 0.0, 1.0),
+                            Clip(0),
+                            Renderable()
+                        )
+                    else
+                        ids[#ids + 1] = world:spawn(
+                            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
+                            Tint(1.0, 0.0, 0.0, 1.0),
+                            Renderable()
+                        )
+                    end
+                end
+            end
+
+            fill(20, false)
+            fill(20, true)
+            assert.are.equal(255, screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2).r)
+
+            -- Past the reservation, so each run is laid out somewhere else and
+            -- what it stood on is left holding instances nothing owns.
+            fill(20, false)
+            fill(20, true)
+            assert.are.equal(255, screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2).r)
+
+            for _, id in ipairs(ids) do
+                world:despawn(id)
+            end
+
+            local pixels = frameOnce(world, renderer)
+            assert.are.equal(
+                0,
+                screen:getPixel(pixels, SIZE / 2, SIZE / 2).r,
+                "an empty world draws nothing, whatever the buffer still holds"
             )
             renderer:destroy()
         end)
