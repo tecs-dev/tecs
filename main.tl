@@ -112,8 +112,10 @@ return tecs.application({
     framesInFlight = tonumber(os.getenv("TECS_INFLIGHT")) as integer,
     debug = true,
     ambient = { 0.05, 0.05, 0.08 },
-    capacity = COUNT + 16,
-    maxEntities = COUNT + 64,
+    -- Headroom over the field for the lights and for a glyph per character of
+    -- the caption, since a glyph is an entity and an instance like any other.
+    capacity = COUNT + 256,
+    maxEntities = COUNT + 512,
     maxFrames = tonumber(os.getenv("TECS_FRAMES")) as integer,
     presentMode = os.getenv("TECS_PRESENT"),
     mcpPort = tonumber(os.getenv("TECS_MCP")) as integer,
@@ -142,6 +144,20 @@ return tecs.application({
         local t1 = tecs.clock.now()
         spawnLights(app.world, width, height)
         print(("  spawn: %.0f ms for %d entities"):format((t1 - t0) * 1000, COUNT))
+
+        -- Text is entities too. The plugin lays the string out into one child
+        -- entity per glyph, and each of those is an ordinary renderable that
+        -- the same cull and the same draw pick up.
+        app.world:addPlugin(tecs.text.plugin({ renderer = app.renderer }))
+        app.world:spawn(
+            Transform(24, 24, 0, 1),
+            Tint(0.92, 0.96, 1.0, 1.0),
+            tecs.text.Text.new({
+                text = ("tecs %s\n%d entities"):format(tecs.version, COUNT),
+                font = tecs.text.defaultFont(),
+                size = 28,
+            })
+        )
 
         local elapsed = 0.0
 

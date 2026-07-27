@@ -65,6 +65,8 @@ Working today:
 - Per-stage frame timing with percentiles, which is how any of the numbers in
   this file were arrived at, and event-to-photon latency reported through the
   same stages
+- Text from a signed distance field, laid out into one entity per glyph so it
+  goes through the same cull and the same draw as everything else
 - Deterministic sequencing with tweening merged into it: programs compiled to
   instructions, playback position kept as data so it survives a snapshot, and
   three clocks (fixed, frame, presentation) for the three rates gameplay,
@@ -77,7 +79,7 @@ Working today:
   within it, and each able to sit in screen pixels, in virtual coordinates,
   outside the camera's zoom, at its own parallax, or unlit
 
-Not built yet: shadows, post-processing, audio, text, UI, tiled maps and
+Not built yet: shadows, post-processing, audio, UI, tiled maps and
 multi-camera.
 
 Design notes live in `../tecs-plans`, kept outside this repository so plans and
@@ -446,6 +448,38 @@ given a bound no view can be outside of, so it draws whatever the camera is
 looking at. That gives up culling on those layers and keeps it exactly on every
 layer that does not ask, which is where the entities are.
 
+## Text is entities
+
+A `Text` names a font and a string, and a system in `PostUpdate` lays it out
+and keeps one child entity per glyph. Each glyph carries a `Transform`, a
+`Sprite` whose UV rect addresses its cell of the font atlas, and a `Material`
+selecting the distance-field shader. Nothing about text is special from there:
+extraction, culling, the indirect draw, layers and depth all work on glyphs
+because glyphs are ordinary renderables, and a text on a screen-space layer or
+moved by a parent works without any of the text code knowing about either.
+
+The glyph is a multi-channel signed distance field. The median of the three
+channels is the signed distance to the outline, and scaling it by how many
+screen pixels the field's range covers is what keeps the outline exact at any
+size: the quad grows and the threshold stays on the curve. The material
+reconstructs the field bilinearly itself, because the shared image sampler
+reads nearest and the median has to be taken after interpolation; taking it
+first collapses three channels into one and loses the corners they encode,
+which is exactly where a glyph has its sharp features.
+
+A glyph belongs to its text through `ChildOf`, which cascades on despawn, so a
+text takes its glyphs with it, and its position is a `RelativeTransform`, so
+moving a text is the hierarchy's work rather than a relayout. Layout runs every
+frame and almost no text changes, so it is gated twice: an archetype whose
+`Text` and `Tint` columns are both clean is skipped whole, and within a dirty
+archetype a row whose authored fields match what its glyphs were built from is
+skipped too.
+
+The cost is an entity per glyph: an archetype row, an instance and a cull bound
+per character on screen. That is the right first version and the wrong final
+one. The optimisation, if a measurement ever asks for it, is to batch a text's
+glyphs into a buffer of their own and draw them together, which trades all of
+the above for a second path through the renderer.
 ## GPU-driven by default
 
 `make run` animates 512 instances and issues exactly one dispatch and one

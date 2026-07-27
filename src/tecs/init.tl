@@ -42,6 +42,7 @@ local type events = require("tecs.platform.events")
 local type capabilities = require("tecs.platform.capabilities")
 local type paths = require("tecs.platform.paths")
 local type components = require("tecs.components")
+local type text = require("tecs.gfx.text")
 local type materials = require("tecs.gpu.materials")
 local type assets = require("tecs.assets")
 local type workers = require("tecs.workers")
@@ -101,6 +102,7 @@ local record tecs
     capabilities: capabilities
     paths: paths
     components: components
+    text: text
     materials: materials
     assets: assets
     workers: workers
@@ -273,6 +275,7 @@ local ENGINE <const>: {string: string} = {
     capabilities = "tecs.platform.capabilities",
     paths = "tecs.platform.paths",
     components = "tecs.components",
+    text = "tecs.gfx.text",
     materials = "tecs.gpu.materials",
     assets = "tecs.assets",
     workers = "tecs.workers",
