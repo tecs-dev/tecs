@@ -44,9 +44,12 @@ local record Animation is Component
     --- Index of the range within that sheet, from `Sheet:rangeId`. Zero plays
     --- the whole sheet in order.
     range: number
-    --- Frames per second. Zero or less holds the first frame.
+    --- Frames per second. Zero or less holds the first frame and stops time
+    --- advancing, which is a pause that leaves `playing` alone.
     fps: number
-    --- Seconds into the cycle.
+    --- Seconds into the cycle, which is the range's frame count divided by
+    --- `fps`. Changing `fps` therefore rescales where in the range this lands
+    --- rather than keeping the frame and changing the speed.
     time: number
     --- Frame the Sprite currently shows, or zero for none yet.
     frame: number
@@ -56,8 +59,9 @@ local record Animation is Component
     playing: boolean
 end
 
---- Emitted at address zero when a range that does not loop reaches its last
---- frame. The animation stops there, so this fires once per playthrough.
+--- Emitted at address zero on the step a range that does not loop runs past its
+--- last frame. The animation stops and holds that frame, so this fires once per
+--- playthrough and never again until something restarts it.
 local record Completed is ecs.Event
     entity: integer
     sheet: Sheet
@@ -69,8 +73,12 @@ local record Completed is ecs.Event
     ): Completed
 end
 
---- Emitted at address zero when a looping range passes its last frame and
---- restarts. Fires once per wrap.
+--- Emitted at address zero on the step a looping range passes its last frame
+--- and restarts.
+---
+--- Once per step at most, not once per cycle: a step long enough to cover
+--- several cycles wraps the time once and reports one loop, so counting these
+--- is not a way to count playthroughs.
 local record Looped is ecs.Event
     entity: integer
     sheet: Sheet
@@ -98,24 +106,51 @@ local record animation
     --- Playback state for one entity.
     Animation: Animation
 
-    --- Emitted when a range that does not loop reaches its last frame.
+    --- Emitted when a range that does not loop runs past its last frame.
     Completed: Completed
 
     --- Emitted when a looping range passes its last frame and restarts.
     Looped: Looped
 
     --- An Animation playing a named range of a sheet, ready to spawn.
-    of: function(
-        source: Sheet, range?: string, options?: PlayOptions
-    ): Animation
+    ---
+    --- Omit the range to play the whole sheet in order. Fails on a range the
+    --- sheet does not carry, since the alternative is a typo that plays every
+    --- frame.
+    ---
+    --- The entity also needs a `Sprite`, which is what the query matches on and
+    --- what playback writes the frame's region into. An Animation on its own
+    --- advances nothing.
+    --- @param source The sheet to play. Nil raises.
+    --- @param range A range the sheet names, or nil for the whole sheet.
+    --- @param options Defaults are `sheet.DEFAULT_FPS`, looping, and playing.
+    --- @return A component value, not an entity: pass it to `world:spawn` or
+    ---     `world:set` yourself.
+    of: function(source: Sheet, range?: string, options?: PlayOptions): Animation
 
     --- Points a live entity at a range and restarts it there.
-    play: function(
-        world: World, entity: integer, source: Sheet,
-        range?: string, options?: PlayOptions
-    )
+    ---
+    --- Restarting is the point: time and frame both reset, so the next step
+    --- writes the range's first frame whatever the entity was showing. An
+    --- entity carrying no Animation gets one.
+    --- @param world The world the entity lives in.
+    --- @param entity A live entity, which needs a `Sprite` for playback to
+    ---     reach it.
+    --- @param source The sheet to play. Nil raises.
+    --- @param range A range the sheet names, or nil for the whole sheet.
+    --- @param options Defaults are `sheet.DEFAULT_FPS`, looping, and playing.
+    play: function(world: World, entity: integer, source: Sheet, range?: string, options?: PlayOptions)
 
     --- Adds the system that advances playback.
+    ---
+    --- Not installed for you, so a world that draws no sprite sheets pays
+    --- nothing for the query. Call it once; a second call on the same world is
+    --- ignored, because adding a system twice under one name is an error.
+    ---
+    --- The query is a logic query, so a paused entity holds the frame it is on.
+    --- Animation runs on the simulation clock and a pause stops the simulation.
+    --- @param world The world to add `tecs.AdvanceAnimation` to, in
+    ---     `FixedPostUpdate`.
     plugin: function(world: World)
 end
 
@@ -186,12 +221,7 @@ ecs.newEvent(animation.Looped)
 -- Authoring
 -------------------------------------------------------------------------------
 
---- An Animation playing a named range of a sheet, ready to spawn.
----
---- Omit the range to play the whole sheet in order. Fails on a range the sheet
---- does not carry, since the alternative is a typo that plays every frame.
-function animation.of(source: Sheet, range?: string,
-                      options?: PlayOptions): Animation
+function animation.of(source: Sheet, range?: string, options?: PlayOptions): Animation
     if source == nil then
         error("tecs: an animation needs a sheet", 2)
     end
@@ -210,13 +240,7 @@ function animation.of(source: Sheet, range?: string,
         0.0, 0, loop, playing)
 end
 
---- Points a live entity at a range and restarts it there.
----
---- Restarting is the point: time and frame both reset, so the next step writes
---- the range's first frame whatever the entity was showing. An entity carrying
---- no Animation gets one.
-function animation.play(world: World, entity: integer, source: Sheet,
-                        range?: string, options?: PlayOptions)
+function animation.play(world: World, entity: integer, source: Sheet, range?: string, options?: PlayOptions)
     local built <const> = animation.of(source, range, options)
     if not world:has(entity, Animation) then
         world:set(entity, built)
@@ -346,14 +370,6 @@ end
 local installed: {World: boolean} =
     setmetatable({}, { __mode = "k" } as metatable<{World: boolean}>)
 
---- Adds the system that advances playback.
----
---- Not installed for you, so a world that draws no sprite sheets pays nothing
---- for the query. Call it once; a second call on the same world is ignored,
---- because adding a system twice under one name is an error.
----
---- The query is a logic query, so a paused entity holds the frame it is on.
---- Animation runs on the simulation clock and a pause stops the simulation.
 function animation.plugin(world: World)
     if installed[world] then return end
     installed[world] = true

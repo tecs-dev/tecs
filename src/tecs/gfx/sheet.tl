@@ -44,11 +44,16 @@ end
 local record Sheet
     --- Name the sheet is registered under, and what a snapshot writes.
     name: string
-    --- Registration index, which is what an Animation carries.
+    --- Registration index, which is what an Animation carries. Assigned when
+    --- the sheet is built and never reused, so a second sheet built under a
+    --- taken name gets a fresh id rather than the old one.
     id: integer
-    --- Number of frames.
+    --- Number of frames, and so the largest index `rect`, `uv` and `sprite`
+    --- accept.
     count: integer
-    --- Size of the image the frames are cut from, in pixels.
+    --- Size of the image the frames are cut from, in pixels. What frame rects
+    --- are measured against, so a sheet cut for one image and bound to another
+    --- of a different size places its frames wrongly with no complaint.
     imageWidth: number
     imageHeight: number
 
@@ -68,6 +73,78 @@ local record Sheet
     _slot: number
     _scaleU: number
     _scaleV: number
+
+    --- A frame's pixel rect, as x, y, w and h.
+    --- @param frame One to `count`. Anything else raises, since a frame index
+    ---     out of range is a sheet and an animation disagreeing rather than
+    ---     something to paper over.
+    --- @return The rect's left, top, width and height, in the pixels of the
+    ---     image the sheet was cut from.
+    rect: function(self, frame: integer): number, number, number, number
+
+    --- A frame's region, as u0, v0, u1 and v1.
+    ---
+    --- Fractions of the image before `bind` and of the texture-array layer
+    --- after it, which is the pair of numbers a `Sprite` wants.
+    --- @param frame One to `count`. Anything else raises.
+    --- @return The region's left, top, right and bottom edges.
+    uv: function(self, frame: integer): number, number, number, number
+
+    --- True when the sheet names the given range.
+    --- @param name Any string, and nil answers false rather than raising, so
+    ---     this is what to ask before `range`.
+    --- @return Whether `range` would answer for that name.
+    hasRange: function(self, name: string): boolean
+
+    --- The first and last frame of a named range.
+    ---
+    --- Fails on a name the sheet does not carry, because the alternative is an
+    --- animation silently playing the whole sheet on a typo.
+    --- @param name A range this sheet was built with.
+    --- @return The range's first frame index, then its last, both inclusive.
+    range: function(self, name: string): integer, integer
+
+    --- Index a range name stands for, or zero when the sheet does not name it.
+    ---
+    --- Zero reads as the whole sheet rather than as nothing, so an animation
+    --- that names no range plays every frame in order.
+    --- @param name A range name, or nil for the whole sheet.
+    --- @return The index an `Animation` carries, which is this sheet's answer
+    ---     alone: ids follow the range names in sorted order, so the same name
+    ---     in another sheet is another number.
+    rangeId: function(self, name: string): integer
+
+    --- Name a range index stands for, or the empty string for the whole sheet.
+    --- @param id An index from `rangeId`. Nil, zero and anything the sheet does
+    ---     not carry all answer the empty string.
+    --- @return The range's name, which is what a snapshot writes instead of the
+    ---     index.
+    rangeName: function(self, id: integer): string
+
+    --- Resolves the sheet's frames against a registered image.
+    ---
+    --- `sprite` is what `Renderer:sprite(name)` returns for a whole image: its
+    --- `u1` and `v1` are the fractions of the texture-array layer that image
+    --- occupies, and a frame's fraction of the image has to be scaled by them
+    --- before it names a region of the layer. Pass a sub-rect and the frames
+    --- land inside that sub-rect, which is not what the sheet describes.
+    ---
+    --- Binding again rescales from the pixel rects rather than from the last
+    --- result, so a sheet survives its image being registered a second time.
+    --- Entities already carrying regions from an earlier bind keep them: a
+    --- rebind moves nothing that has already been written into a `Sprite`.
+    --- @param sprite A whole image, from `Renderer:sprite`.
+    --- @return The sheet, so a bind can be chained onto the construction.
+    bind: function(self, sprite: Sprite): Sheet
+
+    --- A Sprite showing one frame, ready to spawn.
+    ---
+    --- Defaults to the first frame. Meaningful after `bind`, since before it
+    --- the sheet names no image and the quad has no layer to sample.
+    --- @param frame One to `count`, defaulting to one. Anything else raises.
+    --- @return A fresh `Sprite`, which is a value the caller owns rather than a
+    ---     view onto the sheet.
+    sprite: function(self, frame?: integer): Sprite
 end
 
 local SheetMT <const>: metatable<Sheet> = { __index = Sheet }
@@ -122,15 +199,43 @@ local record sheet
     DEFAULT_FPS: number
 
     --- A sheet whose frames are the cells of a uniform grid.
+    ---
+    --- Margin surrounds the grid and spacing separates the cells, so a cell's
+    --- left edge is `margin + column * (frameWidth + spacing)`. Both default to
+    --- zero, which is an image cut with nothing between its cells.
+    --- @param options Raises on a missing name, a non-positive image or frame
+    ---     size, a grid that fits no cells, or a `count` past what the grid
+    ---     holds. Frames come out in row-major order.
+    --- @return The finished sheet, already registered under its name and
+    ---     carrying an `id`.
     grid: function(options: GridOptions): Sheet
 
     --- A sheet whose frames are listed one rect at a time.
+    ---
+    --- For an image no grid describes: frames of differing sizes, or an atlas
+    --- whose cells a packing tool placed.
+    --- @param options Raises on a missing name, a non-positive image size, an
+    ---     empty frame list, or a frame with no positive size. Rects are not
+    ---     checked against the image, so one that runs off the edge samples
+    ---     whatever the layer holds there.
+    --- @return The finished sheet, already registered under its name and
+    ---     carrying an `id`.
     rects: function(options: RectsOptions): Sheet
 
     --- The sheet a registration index stands for, or nil.
+    --- @param id An `id` from a sheet this process built. Ids are handed out in
+    ---     construction order, so one is only meaningful within a run.
+    --- @return The sheet, or nil for an id nothing was built under.
     byId: function(id: integer): Sheet
 
     --- The sheet registered under a name, or nil.
+    ---
+    --- Building a second sheet under a name already taken replaces what this
+    --- returns, so a reload points new entities at the new sheet. Entities
+    --- already carrying the old id keep drawing the old one, which is what
+    --- stops a reload from pulling a frame out from under them.
+    --- @param name The name a sheet was built under.
+    --- @return The sheet most recently registered under that name, or nil.
     byName: function(name: string): Sheet
 end
 
@@ -141,7 +246,6 @@ sheet.DEFAULT_FPS = DEFAULT_FPS
 -- Frames
 -------------------------------------------------------------------------------
 
---- A frame's pixel rect, as x, y, w and h.
 function Sheet:rect(frame: integer): number, number, number, number
     if frame == nil or frame < 1 or frame > self.count then
         error(("tecs: sheet '%s' has no frame %s")
@@ -152,10 +256,6 @@ function Sheet:rect(frame: integer): number, number, number, number
     return rects[base + 1], rects[base + 2], rects[base + 3], rects[base + 4]
 end
 
---- A frame's region, as u0, v0, u1 and v1.
----
---- Fractions of the image before `bind` and of the texture-array layer after
---- it, which is the pair of numbers a `Sprite` wants.
 function Sheet:uv(frame: integer): number, number, number, number
     if frame == nil or frame < 1 or frame > self.count then
         error(("tecs: sheet '%s' has no frame %s")
@@ -170,15 +270,10 @@ end
 -- Ranges
 -------------------------------------------------------------------------------
 
---- True when the sheet names the given range.
 function Sheet:hasRange(name: string): boolean
     return name ~= nil and self._ids[name] ~= nil
 end
 
---- The first and last frame of a named range.
----
---- Fails on a name the sheet does not carry, because the alternative is an
---- animation silently playing the whole sheet on a typo.
 function Sheet:range(name: string): integer, integer
     local id = self._ids[name]
     if id == nil then
@@ -188,16 +283,11 @@ function Sheet:range(name: string): integer, integer
     return self._from[id], self._to[id]
 end
 
---- Index a range name stands for, or zero when the sheet does not name it.
----
---- Zero reads as the whole sheet rather than as nothing, so an animation that
---- names no range plays every frame in order.
 function Sheet:rangeId(name: string): integer
     if name == nil then return 0 end
     return self._ids[name] or 0
 end
 
---- Name a range index stands for, or the empty string for the whole sheet.
 function Sheet:rangeName(id: integer): string
     if id == nil or id < 1 then return "" end
     return self._names[id] or ""
@@ -222,16 +312,6 @@ local function rescale(self: Sheet)
     end
 end
 
---- Resolves the sheet's frames against a registered image.
----
---- `sprite` is what `Renderer:sprite(name)` returns for a whole image: its
---- `u1` and `v1` are the fractions of the texture-array layer that image
---- occupies, and a frame's fraction of the image has to be scaled by them
---- before it names a region of the layer. Pass a sub-rect and the frames land
---- inside that sub-rect, which is not what the sheet describes.
----
---- Binding again rescales from the pixel rects rather than from the last
---- result, so a sheet survives its image being registered a second time.
 function Sheet:bind(sprite: Sprite): Sheet
     self._image = sprite.image
     self._slot = sprite.slot
@@ -241,10 +321,6 @@ function Sheet:bind(sprite: Sprite): Sheet
     return self
 end
 
---- A Sprite showing one frame, ready to spawn.
----
---- Defaults to the first frame. Meaningful after `bind`, since before it the
---- sheet names no image and the quad has no layer to sample.
 function Sheet:sprite(frame?: integer): Sprite
     local u0, v0, u1, v1 = self:uv(frame or 1)
     return components.Sprite(self._image, u0, v0, u1, v1, self._slot)
@@ -269,10 +345,6 @@ function sheet.byId(id: integer): Sheet
     return sheetsById[id]
 end
 
---- Building a second sheet under a name already taken replaces what this
---- returns, so a reload points new entities at the new sheet. Entities already
---- carrying the old id keep drawing the old one, which is what stops a reload
---- from pulling a frame out from under them.
 function sheet.byName(name: string): Sheet
     if name == nil then return nil end
     return sheetsByName[name]
@@ -351,11 +423,6 @@ end
 -- Constructors
 -------------------------------------------------------------------------------
 
---- A sheet whose frames are the cells of a uniform grid.
----
---- Margin surrounds the grid and spacing separates the cells, so a cell's left
---- edge is `margin + column * (frameWidth + spacing)`. Both default to zero,
---- which is an image cut with nothing between its cells.
 function sheet.grid(options: GridOptions): Sheet
     local self = newSheet(options.name, options.imageWidth, options.imageHeight)
 
@@ -405,10 +472,6 @@ function sheet.grid(options: GridOptions): Sheet
     return register(self, options.ranges)
 end
 
---- A sheet whose frames are listed one rect at a time.
----
---- For an image no grid describes: frames of differing sizes, or an atlas
---- whose cells a packing tool placed.
 function sheet.rects(options: RectsOptions): Sheet
     local self = newSheet(options.name, options.imageWidth, options.imageHeight)
 

@@ -1,8 +1,15 @@
 --- A render pass recorded into a command buffer.
 ---
---- Held as a value rather than reached through module state, so passes on
---- different threads cannot collide and a pass can never outlive the frame
---- that opened it without that being visible at the call site.
+--- Held as a value rather than reached through module state, so a pass can
+--- never outlive the frame that opened it without that being visible at the
+--- call site, and two passes recorded from different command buffers keep their
+--- own handles.
+---
+--- One pass at a time, per command buffer and in practice per thread: SDL
+--- forbids beginning any render, compute or copy pass on a command buffer
+--- before the open render pass is finished, and `begin` fills a module-level
+--- staging struct that a concurrent `begin` would overwrite. `finish` is what
+--- releases both.
 ---
 --- Supports multiple colour attachments, which is what makes a deferred
 --- G-buffer one pass rather than one pass per channel.
@@ -12,11 +19,17 @@ local loader <const> = require("tecs.ffi.loader")
 
 local C <const> = sdl.C
 
---- Largest number of simultaneous colour attachments a pass may bind.
+--- Colour attachments the staging array holds, and so the most `begin` accepts.
+---
+--- Not the device's ceiling, which is lower: SDL documents four colour textures
+--- and one depth texture per pass. A pass begun with five to eight is rejected
+--- by SDL rather than by the check here.
 local MAX_COLOR_TARGETS <const> = 8
 
 local record RenderPass
     record ClearColor
+        --- In 0..1 per channel. A field left out is zero, except `a`, which is
+        --- one, so a colour given as rgb alone clears opaque.
         r: number
         g: number
         b: number
@@ -24,14 +37,22 @@ local record RenderPass
     end
 
     record Attachment
-        --- Texture handle to render into.
+        --- Texture handle to render into, created with the colour-target usage
+        --- bit. Its format has to be the one the bound pipeline baked for this
+        --- attachment's position in the list.
         texture: loader.CValue
-        --- Clears to this colour. Omit to load and preserve existing contents.
+        --- Clears to this colour. Omit to load and preserve existing contents,
+        --- which is only defined once something has written the texture: a load
+        --- from a texture nothing has drawn to yet reads undefined memory
+        --- rather than black.
         clear: RenderPass.ClearColor
     end
 
     record DepthAttachment
-        --- Depth texture handle the pass tests and writes against.
+        --- Depth texture handle the pass tests and writes against. Only a
+        --- pipeline that baked a matching depth format can be bound while this
+        --- is attached, and only one that baked none can be bound while it is
+        --- not.
         texture: loader.CValue
         --- Clears to this value. Omit to load and preserve existing contents.
         --- One is the far plane, so that is what a pass drawing a fresh frame
@@ -39,6 +60,8 @@ local record RenderPass
         clear: number
     end
 
+    --- The `SDL_GPURenderPass`. Nil once `finish` has run, and valid only
+    --- between the begin and the end.
     handle: loader.CPtr
     --- The command buffer this pass records into. Uniform pushes target the
     --- command buffer rather than the pass, so it is kept here to save every
@@ -47,17 +70,161 @@ local record RenderPass
     --- Number of colour attachments this pass was begun with.
     targetCount: integer
     _finished: boolean
+
+    --- Wraps an already-begun pass handle.
+    ---
+    --- For a caller that began the pass itself. `begin` is the usual way in,
+    --- and calls this.
+    --- @param handle An `SDL_GPURenderPass` that has been begun and not ended.
+    --- @param commandBuffer The command buffer it was begun on, which uniform
+    ---     pushes need and the handle does not carry.
+    --- @param targetCount Colour attachments it was begun with. Defaults to
+    ---     one; it is recorded, not enforced, so a wrong value misreports
+    ---     rather than misbinds.
+    --- @return A pass that owns the handle and will end it on `finish`.
+    wrap: function(handle: loader.CPtr, commandBuffer: loader.CValue, targetCount?: integer): RenderPass
+
+    --- Begins a render pass over one or more colour attachments.
+    ---
+    --- The depth attachment is optional and its absence is meaningful: a pass
+    --- begun without one cannot test or write depth, and a pipeline bound in it
+    --- must declare no depth-stencil target either.
+    ---
+    --- Beginning resets viewport and scissor to cover the attachments, so a
+    --- pass starts drawing to the whole target whatever the previous one did.
+    --- @param commandBuffer The command buffer to record into, with no other
+    ---     pass open on it.
+    --- @param attachments At least one, and no more than SDL's four. Order is
+    ---     the fragment shader's output location order and the order the bound
+    ---     pipeline's `colorFormats` were given in.
+    --- @param depth Omit for a pass with no depth attachment.
+    --- @return The open pass, which the caller must `finish` before beginning
+    ---     another or submitting the frame.
+    begin: function(
+        commandBuffer: loader.CValue, attachments: {RenderPass.Attachment},
+        depth?: RenderPass.DepthAttachment
+    ): RenderPass
+
+    --- Binds a pipeline. All subsequent draws in this pass use its baked state.
+    --- @param pipeline An `SDL_GPUGraphicsPipeline` whose colour formats and
+    ---     depth-stencil target match what this pass was begun with. A pipeline
+    ---     must be bound before the pass's first draw.
+    bindPipeline: function(self, pipeline: loader.CValue)
+
+    --- Binds textures with their samplers to the fragment stage.
+    ---
+    --- This is how a deferred pass reads the previous pass's output. One
+    --- sampler covers every texture in the call, so textures wanting different
+    --- filtering are separate calls at separate slots.
+    --- @param firstSlot Zero-based index into the fragment stage's sampled
+    ---     texture range, which the list continues from in order.
+    --- @param textures Texture handles, each created with the sampler usage
+    ---     bit. A texture this pass is also rendering into cannot be read here.
+    --- @param sampler One `SDL_GPUSampler`, paired with every texture in the
+    ---     list.
+    bindTextures: function(self, firstSlot: integer, textures: {loader.CValue}, sampler: loader.CValue)
+
+    --- Binds read-only storage buffers to the vertex stage.
+    --- @param firstSlot Zero-based index into the vertex stage's storage buffer
+    ---     range, which sits after its sampled and storage textures in set 0.
+    --- @param buffers Device buffer handles, not `Buffer` objects. The count
+    ---     has to be what the vertex shader declared.
+    bindVertexStorageBuffers: function(self, firstSlot: integer, buffers: {loader.CValue})
+
+    --- Binds read-only storage buffers to the fragment stage.
+    --- @param firstSlot Zero-based index into the fragment stage's storage
+    ---     buffer range, which sits after its sampled and storage textures in
+    ---     set 2.
+    --- @param buffers Device buffer handles, not `Buffer` objects. The count
+    ---     has to be what the fragment shader declared.
+    bindFragmentStorageBuffers: function(self, firstSlot: integer, buffers: {loader.CValue})
+
+    --- Pushes uniform data to the vertex stage.
+    ---
+    --- Uniforms belong to the command buffer, not the pass, so a push applies
+    --- to every draw recorded after it until the next push to that slot.
+    --- @param slot Zero-based uniform buffer index in the vertex stage's set 1.
+    --- @param data The bytes to copy, read immediately: the array may be reused
+    ---     as soon as this returns.
+    --- @param byteCount Bytes to copy out of `data`. Anything short of the
+    ---     shader's declared block leaves the remainder of that block holding
+    ---     no defined value.
+    pushVertexUniform: function(self, slot: integer, data: loader.CArray, byteCount: integer)
+
+    --- Pushes uniform data to the fragment stage.
+    ---
+    --- Uniforms belong to the command buffer, not the pass, so a push applies
+    --- to every draw recorded after it until the next push to that slot.
+    --- @param slot Zero-based uniform buffer index in the fragment stage's
+    ---     set 3.
+    --- @param data The bytes to copy, read immediately: the array may be reused
+    ---     as soon as this returns.
+    --- @param byteCount Bytes to copy out of `data`. Anything short of the
+    ---     shader's declared block leaves the remainder of that block holding
+    ---     no defined value.
+    pushFragmentUniform: function(self, slot: integer, data: loader.CArray, byteCount: integer)
+
+    --- Issues a draw.
+    ---
+    --- There are no vertex buffers: the vertex shader reads whatever it needs
+    --- from storage buffers, indexed by vertex and instance ID.
+    --- @param vertexCount Vertices per instance, which the bound pipeline's
+    ---     primitive type groups.
+    --- @param instanceCount Defaults to one.
+    --- @param firstVertex Value `gl_VertexIndex` starts at. Defaults to zero.
+    --- @param firstInstance Value `gl_InstanceIndex` starts at. Defaults to
+    ---     zero.
+    draw: function(self, vertexCount: integer, instanceCount?: integer, firstVertex?: integer, firstInstance?: integer)
+
+    --- Issues a draw whose parameters the GPU wrote into `buffer`.
+    ---
+    --- This is the shape the renderer is built around: a compute pass culls and
+    --- writes the draw arguments, and the CPU never learns the count.
+    --- @param buffer A device buffer created with the indirect usage bit,
+    ---     holding `SDL_GPUIndirectDrawCommand` records. The compute pass that
+    ---     wrote it has to have declared it read-write and been finished, or
+    ---     the draw reads whatever was there before.
+    --- @param offset Bytes from the start of the buffer to the first command.
+    --- @param drawCount Commands to read, laid out back to back from `offset`.
+    drawIndirect: function(self, buffer: loader.CValue, offset: integer, drawCount: integer)
+
+    --- Binds the index buffer subsequent indexed draws read.
+    ---
+    --- 16-bit indices: a quad needs four distinct corners, so the values never
+    --- approach the limit and the buffer stays half the size of a 32-bit one.
+    --- An index buffer holding 32-bit values read through this is silently
+    --- misinterpreted rather than rejected.
+    --- @param buffer A device buffer created with the index usage bit.
+    --- @param offset Bytes from the start of the buffer to index zero.
+    ---     Defaults to zero.
+    bindIndexBuffer: function(self, buffer: loader.CValue, offset?: integer)
+
+    --- Issues an indexed draw whose parameters the GPU wrote.
+    --- @param buffer A device buffer created with the indirect usage bit,
+    ---     holding `SDL_GPUIndexedIndirectDrawCommand` records, whose indices
+    ---     address the buffer last given to `bindIndexBuffer`.
+    --- @param offset Bytes from the start of the buffer to the first command.
+    --- @param drawCount Commands to read, laid out back to back from `offset`.
+    drawIndexedIndirect: function(self, buffer: loader.CValue, offset: integer, drawCount: integer)
+
+    --- Ends the pass.
+    ---
+    --- Every begun pass must be finished before another pass begins on its
+    --- command buffer and before the frame submits. Safe to call more than
+    --- once. Ending discards every binding, so a pass reopened over the same
+    --- attachments rebinds its pipeline and its buffers from scratch.
+    finish: function(self)
 end
 
 local RenderPassMT <const>: metatable<RenderPass> = { __index = RenderPass }
 
--- Reused across passes; a pass is begun far too often to allocate for it.
+-- Reused across passes; a pass is begun far too often to allocate for it. SDL
+-- copies out of these during the begin call, so they only have to hold still
+-- for its duration, and only one begin may be in flight over them.
 local targets <const> = loader.newArray("SDL_GPUColorTargetInfo[?]", MAX_COLOR_TARGETS)
 local depthTarget <const> = loader.newArray("SDL_GPUDepthStencilTargetInfo[1]")
 
---- Wraps an already-begun pass handle.
-function RenderPass.wrap(handle: loader.CPtr, commandBuffer: loader.CValue,
-                        targetCount?: integer): RenderPass
+function RenderPass.wrap(handle: loader.CPtr, commandBuffer: loader.CValue, targetCount?: integer): RenderPass
     local self = setmetatable({} as RenderPass, RenderPassMT)
     self.handle = handle
     self.commandBuffer = commandBuffer
@@ -66,14 +233,10 @@ function RenderPass.wrap(handle: loader.CPtr, commandBuffer: loader.CValue,
     return self
 end
 
---- Begins a render pass over one or more colour attachments.
----
---- The depth attachment is optional and its absence is meaningful: a pass begun
---- without one cannot test or write depth, and a pipeline bound in it must
---- declare no depth-stencil target either.
-function RenderPass.begin(commandBuffer: loader.CValue,
-                          attachments: {RenderPass.Attachment},
-                          depth?: RenderPass.DepthAttachment): RenderPass
+function RenderPass.begin(
+    commandBuffer: loader.CValue, attachments: {RenderPass.Attachment},
+    depth?: RenderPass.DepthAttachment
+): RenderPass
     local count = #attachments
     if count == 0 then
         error("tecs: a render pass needs at least one colour attachment", 2)
@@ -137,17 +300,11 @@ function RenderPass.begin(commandBuffer: loader.CValue,
     return RenderPass.wrap(handle, commandBuffer, count)
 end
 
---- Binds a pipeline. All subsequent draws in this pass use its baked state.
 function RenderPass:bindPipeline(pipeline: loader.CValue)
     C.SDL_BindGPUGraphicsPipeline(self.handle, pipeline)
 end
 
---- Binds textures with their samplers to the fragment stage.
----
---- This is how a deferred pass reads the previous pass's output.
-function RenderPass:bindTextures(firstSlot: integer,
-                                 textures: {loader.CValue},
-                                 sampler: loader.CValue)
+function RenderPass:bindTextures(firstSlot: integer, textures: {loader.CValue}, sampler: loader.CValue)
     local bindings = loader.newArray("SDL_GPUTextureSamplerBinding[?]", #textures)
     for index, texture in ipairs(textures) do
         local binding = bindings[index - 1] as loader.CStruct
@@ -157,9 +314,7 @@ function RenderPass:bindTextures(firstSlot: integer,
     C.SDL_BindGPUFragmentSamplers(self.handle, firstSlot, bindings, #textures)
 end
 
---- Binds read-only storage buffers to the vertex stage.
-function RenderPass:bindVertexStorageBuffers(firstSlot: integer,
-                                             buffers: {loader.CValue})
+function RenderPass:bindVertexStorageBuffers(firstSlot: integer, buffers: {loader.CValue})
     local handles = loader.newArray("SDL_GPUBuffer*[?]", #buffers)
     for index, buffer in ipairs(buffers) do
         handles[index - 1] = buffer
@@ -167,9 +322,7 @@ function RenderPass:bindVertexStorageBuffers(firstSlot: integer,
     C.SDL_BindGPUVertexStorageBuffers(self.handle, firstSlot, handles, #buffers)
 end
 
---- Binds read-only storage buffers to the fragment stage.
-function RenderPass:bindFragmentStorageBuffers(firstSlot: integer,
-                                               buffers: {loader.CValue})
+function RenderPass:bindFragmentStorageBuffers(firstSlot: integer, buffers: {loader.CValue})
     local handles = loader.newArray("SDL_GPUBuffer*[?]", #buffers)
     for index, buffer in ipairs(buffers) do
         handles[index - 1] = buffer
@@ -177,43 +330,23 @@ function RenderPass:bindFragmentStorageBuffers(firstSlot: integer,
     C.SDL_BindGPUFragmentStorageBuffers(self.handle, firstSlot, handles, #buffers)
 end
 
---- Pushes uniform data to the vertex stage.
-function RenderPass:pushVertexUniform(slot: integer, data: loader.CArray,
-                                      byteCount: integer)
+function RenderPass:pushVertexUniform(slot: integer, data: loader.CArray, byteCount: integer)
     C.SDL_PushGPUVertexUniformData(self.commandBuffer, slot, data, byteCount)
 end
 
---- Pushes uniform data to the fragment stage.
-function RenderPass:pushFragmentUniform(slot: integer, data: loader.CArray,
-                                        byteCount: integer)
+function RenderPass:pushFragmentUniform(slot: integer, data: loader.CArray, byteCount: integer)
     C.SDL_PushGPUFragmentUniformData(self.commandBuffer, slot, data, byteCount)
 end
 
---- Issues a draw.
----
---- There are no vertex buffers: the vertex shader reads whatever it needs
---- from storage buffers, indexed by vertex and instance ID.
-function RenderPass:draw(vertexCount: integer, instanceCount?: integer,
-                         firstVertex?: integer, firstInstance?: integer)
+function RenderPass:draw(vertexCount: integer, instanceCount?: integer, firstVertex?: integer, firstInstance?: integer)
     C.SDL_DrawGPUPrimitives(self.handle, vertexCount, instanceCount or 1,
         firstVertex or 0, firstInstance or 0)
 end
 
---- Issues a draw whose parameters the GPU wrote into `buffer`.
----
---- This is the shape the renderer is built around: a compute pass culls and
---- writes the draw arguments, and the CPU never learns the count.
-function RenderPass:drawIndirect(buffer: loader.CValue, offset: integer,
-                                 drawCount: integer)
+function RenderPass:drawIndirect(buffer: loader.CValue, offset: integer, drawCount: integer)
     C.SDL_DrawGPUPrimitivesIndirect(self.handle, buffer, offset or 0, drawCount or 1)
 end
 
---- Ends the pass. Every begun pass must be finished before its frame submits.
---- Safe to call more than once.
---- Binds the index buffer subsequent indexed draws read.
----
---- 16-bit indices: a quad needs four distinct corners, so the values never
---- approach the limit and the buffer stays half the size of a 32-bit one.
 function RenderPass:bindIndexBuffer(buffer: loader.CValue, offset?: integer)
     local binding = loader.newArray("SDL_GPUBufferBinding[1]")
     local slot = binding[0] as loader.CStruct
@@ -223,9 +356,7 @@ function RenderPass:bindIndexBuffer(buffer: loader.CValue, offset?: integer)
         C.SDL_GPU_INDEXELEMENTSIZE_16BIT)
 end
 
---- Issues an indexed draw whose parameters the GPU wrote.
-function RenderPass:drawIndexedIndirect(buffer: loader.CValue, offset: integer,
-                                        drawCount: integer)
+function RenderPass:drawIndexedIndirect(buffer: loader.CValue, offset: integer, drawCount: integer)
     C.SDL_DrawGPUIndexedPrimitivesIndirect(self.handle, buffer, offset,
         drawCount)
 end
