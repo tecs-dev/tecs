@@ -412,11 +412,12 @@ and ICC profile and HDR state, because there is no colour-managed path for a
 game to respond through.
 
 Every kind is drivable by name. `events.push` takes the engine's vocabulary
-rather than an SDL union and fills the payload for the key, mouse, gamepad,
-device, pinch, window and display kinds, so the debug server's `send_event`
-tool can occlude a window, move a display or zoom a pinch and have the game see
-what a real one carries. A kind whose payload nobody injects is pushed carrying
-its type alone, which is honest about the difference.
+rather than an SDL union and fills the payload for the key, mouse, wheel, pen,
+gamepad, device, pinch, window and display kinds, so the debug server's
+`send_event` tool can occlude a window, move a display, zoom a pinch, scroll a
+wheel or draw with a pen and have the game see what a real one carries. A kind
+whose payload nobody injects is pushed carrying its type alone, which is honest
+about the difference.
 
 A mouse event the platform synthesised from a touch or a pen is marked as such.
 Those arrive beside the finger events they were made from, and a game handling
@@ -432,6 +433,13 @@ the right. Beside them, `wheelTicksX` and `wheelTicksY` carry the whole notches
 SDL accumulated against the platform's own threshold, so a menu stepping one
 item per notch does not re-derive them from the fractional pair and disagree
 with the rest of the machine about where a step begins.
+
+That normalisation is drivable rather than only unit-tested. A pushed wheel
+carries its axes the way the platform sends them, and `flipped` sets the flag
+beside them, so a session or a test can scroll as a machine with the setting on
+does and watch the signs arrive undone. The round trip is the conversion, not
+the identity: what goes in flipped comes back negated, which is the whole point
+of pushing it.
 
 Where the platform has already done a piece of bookkeeping, the event carries
 its answer rather than inviting a worse one above. A mouse button carries how

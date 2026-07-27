@@ -32,6 +32,19 @@ local function drainOne(queue, count)
     return seen
 end
 
+-- Everything SDL has queued, converted, in the order it hands them back.
+-- A pushed event is only proved by what comes out the far end.
+local function pollAll()
+    local holder = loader.newArray("SDL_Event[1]")
+    local seen = {}
+    while C.SDL_PollEvent(holder) ~= false do
+        events.drain(holder, 1, function(event)
+            seen[#seen + 1] = events.copy(event)
+        end)
+    end
+    return seen
+end
+
 describe("platform.events", function()
     after_each(function()
         events.source = nil
@@ -706,5 +719,105 @@ describe("platform.events", function()
             assert.are.equal(1.0, event.scale)
         end)
         C.SDL_Quit()
+    end)
+
+    it("pushes a wheel the way a platform sends one, flipped or not",
+        function()
+            -- Natural scrolling is undone by the conversion, so a push that
+            -- carried the normalised pair would never reach that code. These
+            -- are the raw axes, and the flipped one is expected back negated.
+            assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
+            C.SDL_PumpEvents()
+            C.SDL_FlushEvents(0, 0xFFFFFFFF)
+
+            events.push("mouseWheel", {
+                wheelX = 0.5, wheelY = 1.5,
+                wheelTicksX = 1, wheelTicksY = 2,
+                x = 30.0, y = 40.0, which = 3,
+            })
+            events.push("mouseWheel", {
+                flipped = true,
+                wheelX = 0.5, wheelY = 1.5,
+                wheelTicksX = 1, wheelTicksY = 2,
+                x = 30.0, y = 40.0, which = 3,
+            })
+
+            local seen = pollAll()
+            C.SDL_Quit()
+
+            local ordinary, natural = seen[1], seen[2]
+            assert.are.equal("mouseWheel", ordinary.kind)
+            assert.are.equal(0.5, ordinary.wheelX)
+            assert.are.equal(1.5, ordinary.wheelY)
+            assert.are.equal(1, ordinary.wheelTicksX)
+            assert.are.equal(2, ordinary.wheelTicksY)
+            assert.are.equal(30.0, ordinary.x, "the pointer, not the movement")
+            assert.are.equal(40.0, ordinary.y)
+            assert.are.equal(3, ordinary.which)
+
+            assert.are.equal(-ordinary.wheelX, natural.wheelX,
+                "the same scroll pushed flipped comes back negated")
+            assert.are.equal(-ordinary.wheelY, natural.wheelY)
+            assert.are.equal(-ordinary.wheelTicksX, natural.wheelTicksX,
+                "the notches flip with the pair they were counted from")
+            assert.are.equal(-ordinary.wheelTicksY, natural.wheelTicksY)
+            assert.are.equal(ordinary.x, natural.x,
+                "the pointer is a position, so the flag says nothing about it")
+            assert.are.equal(ordinary.y, natural.y)
+        end)
+
+    it("pushes how many times a click ran together", function()
+        assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
+        C.SDL_PumpEvents()
+        C.SDL_FlushEvents(0, 0xFFFFFFFF)
+
+        events.push("mouseDown", { button = 1, clicks = 2 })
+        events.push("mouseDown", { button = 1 })
+
+        local seen = pollAll()
+        C.SDL_Quit()
+
+        assert.are.equal(2, seen[1].clicks)
+        assert.are.equal(1, seen[2].clicks,
+            "a press pushed without a count is one click, not none")
+    end)
+
+    it("pushes a pen through its whole vocabulary", function()
+        -- The state mask is the only field that answers which barrel button
+        -- is held, so a pen driven from a tool has to be able to carry it.
+        local held = sdl.K.SDL_PEN_INPUT_DOWN + sdl.K.SDL_PEN_INPUT_BUTTON_2
+        assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
+        C.SDL_PumpEvents()
+        C.SDL_FlushEvents(0, 0xFFFFFFFF)
+
+        events.push("penMotion", {
+            which = 9, x = 12.0, y = 34.0, penState = held,
+        })
+        events.push("penDown", { which = 9, eraser = true, penState = held })
+        events.push("penButtonDown", { which = 9, button = 2, penState = held })
+        events.push("penAxis", { which = 9, axis = 1, value = 0.5 })
+
+        local seen = pollAll()
+        C.SDL_Quit()
+
+        assert.are.equal("penMotion", seen[1].kind)
+        assert.are.equal(9, seen[1].which)
+        assert.are.equal(12.0, seen[1].x)
+        assert.are.equal(34.0, seen[1].y)
+        assert.are.equal(held, seen[1].penState)
+
+        assert.are.equal("penDown", seen[2].kind)
+        assert.is_true(seen[2].down)
+        assert.is_true(seen[2].eraser)
+        assert.are.equal(held, seen[2].penState)
+
+        assert.are.equal("penButtonDown", seen[3].kind)
+        assert.are.equal(2, seen[3].button)
+        assert.is_true(seen[3].down)
+        assert.are.equal(held, seen[3].penState)
+
+        assert.are.equal("penAxis", seen[4].kind)
+        assert.are.equal(1, seen[4].axis)
+        assert.are.equal(0.5, seen[4].value)
     end)
 end)
