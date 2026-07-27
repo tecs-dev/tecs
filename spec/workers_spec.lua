@@ -138,6 +138,61 @@ end
         worker:stop()
     end)
 
+    it("watches its own traces when asked, and stops either way", function()
+        -- A worker cannot be told anything at spawn but its source, so the
+        -- switch is an environment variable and the environment is the
+        -- process's. Set around the spawn and cleared after it, so no other
+        -- spec inherits it.
+        local ffi = require("ffi")
+        ffi.cdef([[
+            int tecsSpecSetenv(const char *, const char *, int) asm("setenv");
+            int tecsSpecUnsetenv(const char *) asm("unsetenv");
+        ]])
+
+        ffi.C.tecsSpecSetenv("TECS_TRACEPROF", "1", 1)
+        local watched = workers.spawn({ source = ECHO })
+        watched:send({ id = 1 })
+
+        -- An answer means the worker has read the variable, so clearing it
+        -- here cannot race the read it is meant to be seen by.
+        assert.are.equal(1, #drain(watched, 1), "watching must not change what a worker does")
+        ffi.C.tecsSpecUnsetenv("TECS_TRACEPROF")
+
+        -- Reporting happens where the inbox closes, and closing it is what
+        -- `stop` does. A worker whose report raised would join non-zero.
+        assert.are.equal(0, watched:stop())
+
+        local plain = workers.spawn({ source = ECHO })
+        plain:send({ id = 2 })
+        assert.are.equal(1, #drain(plain, 1))
+        assert.are.equal(0, plain:stop())
+    end)
+
+    it("does not read a poll that came up empty as a closed inbox", function()
+        -- A worker that polls sees nil whenever its queue is empty, which says
+        -- nothing about whether it has been asked to stop. Only a wait with no
+        -- timeout does.
+        local worker = workers.spawn({
+            source = PRELUDE .. [[
+local workers = require("tecs.workers")
+local self = workers.current()
+local empty = 0
+local task = self:receive(0)
+while task == nil and empty < 200000 do
+    empty = empty + 1
+    task = self:receive(0)
+end
+self:send({ empty = empty, arrived = task ~= nil })
+while self:receive() ~= nil do end
+]],
+        })
+        worker:send({ go = true })
+        local results = drain(worker, 1)
+        assert.are.equal(1, #results)
+        assert.is_true(results[1].arrived, "a polling worker keeps its loop through empty polls")
+        assert.are.equal(0, worker:stop())
+    end)
+
     it("rejects values it cannot serialize", function()
         -- Tested on a bare channel rather than through a worker: what is
         -- under test is the encoder rejecting a function, and a live thread

@@ -159,7 +159,7 @@ set_target_properties(tecs_spirvcross PROPERTIES LINKER_LANGUAGE CXX)
 
 # The application host. SDL owns the loop, so this implements SDL's callback
 # entry points and reaches Lua through the Lua C API.
-add_executable(tecs native/host.c native/luamods.c)
+add_executable(tecs native/host.c native/luamods.c native/mcodearena.c)
 
 # Where content sits relative to the executable, in the tree this build
 # installs. The host resolves its entry chunk and the engine resolves assets
