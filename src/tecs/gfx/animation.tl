@@ -141,6 +141,18 @@ local record animation
     --- @param options Defaults are `sheet.DEFAULT_FPS`, looping, and playing.
     play: function(world: World, entity: integer, source: Sheet, range?: string, options?: PlayOptions)
 
+    --- Plays an entity's animation again from the start of its range.
+    ---
+    --- The sheet, range, rate and loop flag are left as they are; what resets
+    --- is where in the cycle playback has got to and whether it is running. For
+    --- replaying a one-shot that has finished, and for rewinding one that has
+    --- not.
+    --- @param world The world the entity lives in.
+    --- @param entity A live entity.
+    --- @return Whether there was an Animation to restart. False leaves the
+    ---     entity untouched, since there is nothing to say what it would play.
+    restart: function(world: World, entity: integer): boolean
+
     --- Adds the system that advances playback.
     ---
     --- Not installed for you, so a world that draws no sprite sheets pays
@@ -256,6 +268,17 @@ function animation.play(world: World, entity: integer, source: Sheet, range?: st
     current.playing = built.playing
 end
 
+function animation.restart(world: World, entity: integer): boolean
+    if not world:has(entity, Animation) then return false end
+    local current <const> = world:getMut(entity, Animation)
+    current.time = 0.0
+    -- Zero is no frame written yet, so the next step writes the range's first
+    -- one whatever the entity was showing.
+    current.frame = 0
+    current.playing = true
+    return true
+end
+
 -------------------------------------------------------------------------------
 -- Playback
 -------------------------------------------------------------------------------
@@ -276,9 +299,12 @@ local function advance(world: World, query: Query, dt: number)
         -- `get` and `getMut` hand back the same column and only `getMut` sets
         -- the dirty bit, so each is taken the first time a row is actually
         -- written. An archetype whose frames all stood still this step leaves
-        -- its Sprite column clean, which is what the renderer skips on.
+        -- its Sprite column clean, which is what the renderer skips on. The
+        -- Sprite column is read from the first row, because deciding whether a
+        -- row needs writing means comparing against what it already holds.
         local marked = false
-        local sprites: {components.Sprite} = nil
+        local sprites <const> = archetype:get(Sprite)
+        local wrote = false
         -- Sheets are few and neighbouring rows tend to share one.
         local cachedId = 0
         local cached: Sheet = nil
@@ -310,8 +336,17 @@ local function advance(world: World, query: Query, dt: number)
                         archetype:getMut(Animation)
                         marked = true
                     end
-                    time = time + dt
                     local cycle <const> = span / fps
+                    -- A one-shot parks at the end of its cycle and stops, so
+                    -- finding one there and playing is something that set
+                    -- `playing` back to true. That reads as asking for the
+                    -- animation again, and it starts over: advancing from the
+                    -- end instead would park it again on this step and on every
+                    -- step after it, emitting Completed each time, forever.
+                    if not instance.loop and time >= cycle then
+                        time = 0.0
+                    end
+                    time = time + dt
                     if time >= cycle then
                         if instance.loop then
                             time = time % cycle
@@ -336,22 +371,40 @@ local function advance(world: World, query: Query, dt: number)
                 end
 
                 local frame <const> = from + index
-                if frame ~= instance.frame then
-                    if not marked then
-                        archetype:getMut(Animation)
-                        marked = true
+                local target <const> = sprites[row]
+                -- A frame is a region of an image, not a region on its own, so
+                -- a sheet bound to another image moves the quad's layer as well
+                -- as its UVs. The layer is compared rather than assumed to
+                -- follow the frame index, because a sheet swapped under an
+                -- entity can land on the index the last one left behind and the
+                -- quad would go on sampling the old image with the new rect.
+                --
+                -- An unbound sheet names no image, so it writes the region
+                -- alone and leaves whatever the entity's Sprite already had.
+                local slot <const> = source._slot
+                local changed <const> = frame ~= instance.frame
+                if changed or (slot >= 0 and target.slot ~= slot) then
+                    if changed then
+                        if not marked then
+                            archetype:getMut(Animation)
+                            marked = true
+                        end
+                        instance.frame = frame
                     end
-                    instance.frame = frame
-                    if sprites == nil then
-                        sprites = archetype:getMut(Sprite)
+                    if not wrote then
+                        archetype:getMut(Sprite)
+                        wrote = true
                     end
-                    local target = sprites[row]
                     local base <const> = (frame - 1) * 4
                     local uvs <const> = source._uvs
                     target.u0 = uvs[base + 1]
                     target.v0 = uvs[base + 2]
                     target.u1 = uvs[base + 3]
                     target.v1 = uvs[base + 4]
+                    if slot >= 0 then
+                        target.image = source._image
+                        target.slot = slot
+                    end
                 end
 
                 if completed and wantsCompleted then

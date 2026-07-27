@@ -612,5 +612,153 @@ describe("tecs.gfx.animation", function()
 
             assert.equal(1, world:get(entity, Animation).frame)
         end)
+
+        -- A frame is a region of an image. Playback that wrote only the region
+        -- would leave an entity pointed at a sheet on another image sampling
+        -- the old layer with the new rect, which draws part of the wrong
+        -- picture rather than nothing at all.
+        it("moves the Sprite's image when the sheet does", function()
+            local world = animatedWorld()
+            local first = stripSheet()
+            local second = stripSheet()
+            -- What Renderer:sprite hands back for two images that landed on
+            -- different layers of the array.
+            first:bind(Sprite(4, 0, 0, 1.0, 1.0, 2))
+            second:bind(Sprite(9, 0, 0, 1.0, 1.0, 5))
+
+            local entity = world:spawn(first:sprite(1),
+                animation.of(first, "run", { fps = FPS }))
+            drive(world, 3)
+            assert.equal(2, world:get(entity, Sprite).slot)
+
+            animation.play(world, entity, second, "run", { fps = FPS })
+            drive(world, 3)
+
+            local sprite = world:get(entity, Sprite)
+            assert.equal(5, sprite.slot, "the layer follows the sheet")
+            assert.equal(9, sprite.image, "and so does the image it names")
+        end)
+
+        it("moves the image even when the frame index does not change",
+            function()
+                -- Both sheets are playing their first frame, so the index the
+                -- second one lands on is the one the first one left behind.
+                -- Gating the write on the frame alone misses this entirely.
+                local world = animatedWorld()
+                local first = stripSheet()
+                local second = stripSheet()
+                first:bind(Sprite(4, 0, 0, 1.0, 1.0, 2))
+                second:bind(Sprite(9, 0, 0, 1.0, 1.0, 5))
+
+                local entity = world:spawn(first:sprite(1),
+                    animation.of(first, "run", { fps = 0 }))
+                drive(world, 3)
+                assert.equal(1, world:get(entity, Animation).frame)
+
+                -- Written straight into the component, which is the case
+                -- `play` would have papered over by resetting the frame.
+                world:getMut(entity, Animation).sheet = second.id
+                drive(world, 1)
+
+                local sprite = world:get(entity, Sprite)
+                assert.equal(1, world:get(entity, Animation).frame,
+                    "the frame index is the one it already had")
+                assert.equal(5, sprite.slot, "and the layer moved anyway")
+                assert.equal(9, sprite.image)
+            end)
+
+        it("leaves the Sprite's image alone for an unbound sheet", function()
+            -- A sheet that names no image has no layer to write, so playback
+            -- writes the region and leaves whatever the Sprite carried.
+            local world = animatedWorld()
+            local s = stripSheet()
+            local entity = world:spawn(Sprite(3, 0, 0, 1, 1, 6),
+                animation.of(s, "run", { fps = FPS }))
+
+            drive(world, 3)
+            local sprite = world:get(entity, Sprite)
+            assert.equal(6, sprite.slot)
+            assert.equal(3, sprite.image)
+        end)
+    end)
+
+    describe("restart", function()
+        -- A one-shot parks at the end of its cycle and stops. Setting it
+        -- playing again from there used to leave the time at the end, so it
+        -- parked and completed again on that step, and on every step after it.
+        it("plays a finished one-shot again instead of completing forever",
+            function()
+                local world = animatedWorld()
+                local s = stripSheet()
+                local entity = world:spawn(s:sprite(1),
+                    animation.of(s, "run", { fps = FPS, loop = false }))
+
+                local completions = 0
+                world:observe(0, animation.Completed, function()
+                    completions = completions + 1
+                end)
+
+                drive(world, 27)
+                assert.equal(1, completions)
+                assert.is_false(world:get(entity, Animation).playing)
+
+                world:getMut(entity, Animation).playing = true
+                drive(world, 3)
+                assert.equal(1, world:get(entity, Animation).frame,
+                    "asking for it again starts it again")
+                assert.equal(1, completions, "and does not complete on the way")
+
+                -- Through the whole cycle once more: one more completion, not
+                -- one per step.
+                drive(world, 24)
+                assert.equal(2, completions)
+                drive(world, 60)
+                assert.equal(2, completions)
+            end)
+
+        it("rewinds an entity without changing what it plays", function()
+            local world = animatedWorld()
+            local s = stripSheet()
+            local entity = world:spawn(s:sprite(1),
+                animation.of(s, "run", { fps = FPS, loop = false }))
+
+            drive(world, 3 + STEPS_PER_FRAME * 2)
+            assert.equal(3, world:get(entity, Animation).frame)
+
+            assert.is_true(animation.restart(world, entity))
+            local instance = world:get(entity, Animation)
+            assert.equal(0, instance.frame)
+            assert.equal(0, instance.time)
+            assert.is_true(instance.playing)
+            assert.equal(s.id, instance.sheet, "the sheet is left alone")
+            assert.equal(s:rangeId("run"), instance.range)
+            assert.is_false(instance.loop)
+
+            drive(world, 3)
+            assert.equal(1, world:get(entity, Animation).frame)
+        end)
+
+        it("restarts a one-shot that has already finished", function()
+            local world = animatedWorld()
+            local s = stripSheet()
+            local entity = world:spawn(s:sprite(1),
+                animation.of(s, "run", { fps = FPS, loop = false }))
+
+            drive(world, 27)
+            assert.is_false(world:get(entity, Animation).playing)
+
+            animation.restart(world, entity)
+            drive(world, 3)
+            local instance = world:get(entity, Animation)
+            assert.equal(1, instance.frame)
+            assert.is_true(instance.playing)
+        end)
+
+        it("answers false for an entity carrying no Animation", function()
+            local world = animatedWorld()
+            local s = stripSheet()
+            local entity = world:spawn(s:sprite(1))
+            assert.is_false(animation.restart(world, entity))
+        end)
     end)
 end)

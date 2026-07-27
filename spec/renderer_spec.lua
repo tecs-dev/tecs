@@ -541,6 +541,47 @@ describe("ecs.Renderer", function()
         renderer:destroy()
     end)
 
+    -- Which leaves the question of what the failed frame costs. The row is
+    -- found inside a query cursor, and an error thrown out of one leaves the
+    -- world deferred: every spawn after it queues silently and the world is
+    -- past saving. A snapshot naming an image a later build dropped would take
+    -- the process down rather than the frame.
+    it("leaves the world whole after a sprite fails to resolve", function()
+        local world, renderer = newScene()
+        world:spawn(
+            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
+            Tint(1.0, 1.0, 1.0, 1.0),
+            Sprite(components.imageId("spec://absent"), 0.0, 0.0, 1.0, 1.0),
+            Renderable()
+        )
+
+        local drawn, failure = pcall(frameOnce, world, renderer)
+        assert.is_false(drawn)
+        assert.is_truthy(tostring(failure):find("spec://absent", 1, true))
+
+        -- A spawn that only queued would be invisible here, which is how a
+        -- scope the sync failed to pop shows itself from outside.
+        local Marker = tecs.newTagComponent({ name = "AfterMissingImage" })
+        world:spawn(Marker)
+        local seen = 0
+        for _, length in world:query({ include = { Marker } }):iter() do
+            seen = seen + length
+        end
+        assert.are.equal(1, seen,
+            "the failed frame left a query scope open behind it")
+
+        -- And it is the frame that failed, not the world: registering the
+        -- image the sprite named lets the very next frame through, with the
+        -- same entity resident on it.
+        assert.are.equal(0, renderer.count,
+            "the frame that raised laid nothing out")
+        renderer:registerImage(solid("spec://absent", 0, 255, 0))
+        assert.is_true(pcall(frameOnce, world, renderer),
+            "the next frame draws rather than raising again")
+        assert.are.equal(1, renderer.count)
+        renderer:destroy()
+    end)
+
     it("rewrites nothing on a frame where nothing changed", function()
         -- This is the whole point of the layout being archetype-contiguous.
         -- Walking every entity every frame is the cost that decides whether a

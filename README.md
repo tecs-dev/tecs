@@ -630,6 +630,16 @@ the first frame that writes a restored one, because extraction reads it for
 every row and a lookup per row is a lookup too many. A name nothing is
 registered under fails rather than drawing whichever image holds that layer.
 
+That failure is found deep inside a query cursor, so it is recorded and raised
+after the cursor closes rather than thrown through it. An error thrown through
+one leaves the world deferred, and every spawn made after that queues in
+silence: the frame would take the world down with it instead of only itself.
+Raised after, the world is whole, and a caller that registers the image draws
+on the next frame. The lazy resolve is also why this cannot be moved to load
+time: a snapshot legitimately restores before the images it names have
+finished loading, so the first frame that tries to draw the row is the earliest
+point anything can tell.
+
 Its sync reads columns with `get`, never `getMut`. Taking a mutable column to
 read would mark those components dirty on every archetype every frame, which
 defeats every dirty-gated consumer downstream. That distinction is the single
@@ -682,11 +692,25 @@ do not. Zero means nothing has been written yet, which is how a fresh or
 restored animation gets its region on the first step rather than drawing
 whatever its `Sprite` held.
 
+A frame is a region of an image, not a region on its own, so a step that
+writes one writes the layer with it. Which layer is compared rather than
+assumed to follow the frame index: a sheet swapped under an entity can land on
+the index the last one left behind, and the quad would go on sampling the old
+image with the new rect. A sheet with no image bound writes the region alone
+and leaves the `Sprite` whatever it carried.
+
 A range that does not loop parks on its last frame, stops, and emits
 `animation.Completed`; a looping one wraps and emits `animation.Looped`. Both
 go to address zero with the entity in the payload, matching `OnSpawn` and
 `OnDespawn`, which lets the system ask the bus once per step whether anyone is
 listening rather than once per entity that finished.
+
+Finding a parked one-shot playing means something set `playing` back to true,
+which reads as asking for the animation again, so it starts over. Advancing
+from the end instead would park it again on that step and on every step after
+it, emitting `Completed` each time. `animation.restart` is the explicit form
+and also rewinds one that has not finished; `animation.play` is for pointing an
+entity at a different sheet or range.
 
 ## Buffer writes
 

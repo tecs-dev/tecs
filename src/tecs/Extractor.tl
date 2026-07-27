@@ -147,6 +147,10 @@ local record Extractor
     --- Region each registered image name occupies, so registering a name a
     --- second time answers with the layer it already has.
     _regionByImage: {integer: TextureArray.Region}
+    --- Image name index a row asked for that nothing is registered under, or
+    --- nil. Held rather than raised where it is found, because that point is
+    --- inside a query cursor: see `syncInstances`.
+    _missingImage: integer
 end
 
 local ExtractorMT <const>: metatable<Extractor> = { __index = Extractor }
@@ -190,16 +194,19 @@ end
 --- renderer has never seen has no layer to sample, and every layer that does
 --- exist holds some other image, so there is nothing to fall back to that is
 --- not a wrong picture on the quad.
+local function missingImageMessage(image: integer): string
+    local name = components.imageName(image)
+    if name == nil then
+        return "tecs: a Sprite names no image; build one with "
+            .. "Renderer:registerImage or Renderer:sprite"
+    end
+    return ("tecs: no image is registered as '%s'"):format(name)
+end
+
 local function slotOf(self: Extractor, image: integer): integer
     local slot = self._slotByImage[image]
     if slot ~= nil then return slot end
-
-    local name = components.imageName(image)
-    if name == nil then
-        error("tecs: a Sprite names no image; build one with "
-            .. "Renderer:registerImage or Renderer:sprite", 2)
-    end
-    error(("tecs: no image is registered as '%s'"):format(name), 2)
+    error(missingImageMessage(image), 2)
 end
 
 --- Records the layer and region an image name was uploaded into.
@@ -287,8 +294,22 @@ local function writeRun(self: Extractor, packet: FramePacket,
                 -- access: one lookup per sprite, not one per row per frame. The
                 -- write is deliberately not marked dirty, since this pass is
                 -- writing the row it belongs to now.
-                layer = slotOf(self, sprite.image as integer)
-                sprite.slot = layer
+                local image <const> = sprite.image as integer
+                local resolved <const> = self._slotByImage[image]
+                if resolved == nil then
+                    -- Reported after the loop rather than raised here. This
+                    -- runs inside a query cursor, and an error thrown through
+                    -- one leaves the world deferred, which silently queues
+                    -- every spawn made after it: the frame would take the
+                    -- world down with it instead of only itself. The row is
+                    -- written against layer zero and the slot is left
+                    -- unresolved, so a name registered later still resolves.
+                    self._missingImage = image
+                    layer = 0
+                else
+                    layer = resolved
+                    sprite.slot = layer
+                end
             end
             u0, v0, u1, v1 = sprite.u0, sprite.v0, sprite.u1, sprite.v1
         end
@@ -494,6 +515,18 @@ local function syncInstances(self: Extractor, packet: FramePacket)
         offset = offset + length
     end
     cursor:close()
+
+    -- A Sprite naming an image nothing registered is still an error: every
+    -- layer that exists holds some other picture, so drawing one of those
+    -- instead would turn a broken asset into an art bug nobody traces back.
+    -- What the cursor above buys is that it is only this frame's error. The
+    -- world is whole, and a caller that catches this can register the image
+    -- and draw again.
+    local missing <const> = self._missingImage
+    if missing ~= nil then
+        self._missingImage = nil
+        error(missingImageMessage(missing), 2)
+    end
 
     if #producers > 0 then
         local floats = self._instances
