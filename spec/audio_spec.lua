@@ -440,6 +440,141 @@ describe("audio", function()
         end)
     end)
 
+    -- Re-reading a file over the clip already loaded from it. Identity is the
+    -- point, exactly as it is for an image: a clip's index is its path's, so a
+    -- `Sound` row keeps naming the right sound and nothing in the world is
+    -- touched. The fixture is copied to a temporary path first, because what is
+    -- being edited is the file behind a clip that is already loaded.
+    describe("reloading a clip", function()
+        local temp
+
+        local function copyInto(target, source)
+            local input = assert(io.open(source, "rb"))
+            local bytes = input:read("*a")
+            input:close()
+            local output = assert(io.open(target, "wb"))
+            output:write(bytes)
+            output:close()
+        end
+
+        before_each(function()
+            temp = os.tmpname() .. ".wav"
+            copyInto(temp, FIXTURE)
+        end)
+
+        after_each(function()
+            os.remove(temp)
+        end)
+
+        it("decodes the file again under the index the clip already had", function()
+            local audio, clip = loaded(nil, temp)
+            assert.is_true(clip.resident)
+            local id, handle = clip.id, clip._handle
+
+            -- A different file entirely, under the same name. A reload that
+            -- answered from a cache would report success and change nothing.
+            copyInto(temp, VORBIS)
+            assert.is_true(audio:reload(temp))
+
+            assert.are.equal(id, clip.id, "a re-read must not move what a Sound carries")
+            assert.are.equal(clip, audio:clip(id), "the clip is the same object, so every row still names it")
+            assert.are_not.equal(handle, clip._handle, "the file was not read again")
+            assert.are.equal("released", handle.status, "the clip it replaced was not let go")
+            assert.are.equal("ready", clip.status)
+            assert.is_true(clip.resident)
+            audio:destroy()
+        end)
+
+        it("starts the next voice on what was just read", function()
+            local audio, clip, backend = loaded(nil, temp)
+            copyInto(temp, VORBIS)
+            audio:reload(temp)
+
+            audio:play(clip)
+            assert.are.equal(clip._handle.audio, backend.tracks[1].input.clip)
+            audio:destroy()
+        end)
+
+        it("leaves a voice already sounding on the samples it started with", function()
+            local audio, clip, backend = loaded(nil, temp)
+            local voice = audio:play(clip)
+            local started = backend.tracks[1].input.clip
+
+            copyInto(temp, VORBIS)
+            assert.is_true(audio:reload(temp))
+
+            assert.is_true(audio:playing(voice), "a reload must not cut a sound off")
+            assert.are.equal(
+                started,
+                backend.tracks[1].input.clip,
+                "the mixer counts a reference per track, so a sounding voice plays out on what it had"
+            )
+            audio:destroy()
+        end)
+
+        it("has nothing to replace for a streamed clip", function()
+            local audio = Audio.create({ backend = recorder() })
+            local clip = audio:load(temp, { stream = true })
+            audio:waitForLoads()
+            assert.is_false(clip.resident)
+            local handle = clip._handle
+
+            copyInto(temp, VORBIS)
+            assert.is_true(audio:reload(temp), "every voice opens the file itself, so there is nothing held")
+            assert.are.equal(handle, clip._handle, "a streamed clip holds nothing that needed re-reading")
+            audio:destroy()
+        end)
+
+        it("refuses a path nothing has loaded", function()
+            local audio = Audio.create({ backend = recorder() })
+            local ok, reason = audio:reload("spec/fixtures/never-loaded.wav")
+            assert.is_false(ok)
+            assert.is_truthy(reason:find("never-loaded.wav", 1, true), "unexpected refusal: " .. tostring(reason))
+            audio:destroy()
+        end)
+
+        it("keeps the clip it had when the new file will not decode", function()
+            local audio, clip, backend = loaded(nil, temp)
+            local handle = clip._handle
+
+            local broken = assert(io.open(temp, "wb"))
+            broken:write("not a sound file")
+            broken:close()
+
+            local ok, reason = audio:reload(temp)
+            assert.is_false(ok)
+            assert.is_truthy(reason:find("did not load", 1, true), "unexpected refusal: " .. tostring(reason))
+
+            -- Refused means nothing moved, which for a clip means it is still
+            -- playable off what it already held.
+            assert.are.equal("ready", clip.status)
+            assert.are.equal(handle, clip._handle)
+            audio:play(clip)
+            assert.are.equal(handle.audio, backend.tracks[1].input.clip)
+            audio:destroy()
+        end)
+
+        it("is driven by the debug tool the way an agent drives it", function()
+            local audio, clip, _, world = scene()
+            local reloadable = audio:load(temp)
+            audio:waitForLoads()
+            mcpTools.bind(nil, world)
+            assert.are.equal("ready", clip.status)
+
+            copyInto(temp, VORBIS)
+            local result = callTool("reload_sound", { path = temp })
+            assert.is_falsy(result.isError, tostring(result.content and result.content[1] and result.content[1].text))
+            assert.are.equal(temp, result.structuredContent.path)
+            assert.is_true(result.structuredContent.resident)
+            assert.are.equal("ready", reloadable.status)
+
+            local refused = callTool("reload_sound", { path = "spec/fixtures/never-loaded.wav" })
+            assert.is_true(refused.isError)
+            assert.is_truthy(refused.content[1].text:find("nothing has loaded", 1, true))
+            audio:destroy()
+        end)
+    end)
+
     describe("playing", function()
         it("starts one track per voice", function()
             local audio, clip, backend = loaded()

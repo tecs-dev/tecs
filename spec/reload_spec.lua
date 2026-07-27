@@ -296,6 +296,84 @@ describe("mcp reload_image", function()
     end)
 end)
 
+-- The watcher's switch, which is the tool an agent reaches for rather than a
+-- fourth reload: what it turns on is the three above happening without being
+-- asked. The watcher's own behaviour is asserted in `watch_spec`; what is here
+-- is that the tool reports it, steps it, and stops it.
+describe("mcp watch", function()
+    local watch = require("tecs.platform.watch")
+
+    local function callTool(arguments)
+        local response = cjson.decode(mcp.dispatch(cjson.encode({
+            jsonrpc = "2.0",
+            id = 1,
+            method = "tools/call",
+            params = { name = "watch", arguments = arguments },
+        })))
+        local result = response.result
+        local text = result.content and result.content[1] and result.content[1].text or ""
+        return result.isError ~= true, result.structuredContent, text
+    end
+
+    local paths = require("tecs.platform.paths")
+    local dir, contentRoot
+
+    -- The tool takes no root, so it watches the content root. Pointing that at
+    -- a temp directory is what keeps this to its own files, and putting it back
+    -- here rather than at the end of a case is what stops a failure leaking it
+    -- into every later spec.
+    before_each(function()
+        dir = tempDir()
+        contentRoot = paths.assets()
+        paths.setAssets(dir)
+        watch.uninstall()
+    end)
+
+    after_each(function()
+        paths.setAssets(contentRoot)
+        watch.uninstall()
+        watch.on("shader", nil)
+        os.execute("rm -rf '" .. dir .. "'")
+    end)
+
+    it("reports that nothing is being watched", function()
+        local ok, result, text = callTool({})
+        assert.is_true(ok, text)
+        assert.is_false(result.watching)
+        assert.are.equal(0, result.files)
+    end)
+
+    it("starts, steps and stops the watcher", function()
+        write(dir .. "watched.frag.glsl", "#version 450\n// FIRST\n")
+        assert.is_string(assets.read(dir .. "watched.frag.glsl"))
+
+        local reloaded = 0
+        watch.on("shader", function()
+            reloaded = reloaded + 1
+        end)
+
+        local ok, result, text = callTool({ enabled = true })
+        assert.is_true(ok, text)
+        assert.is_true(result.watching)
+        assert.are.equal(1, result.files)
+        assert.are.same({ dir .. "watched.frag.glsl" }, result.paths)
+
+        write(dir .. "watched.frag.glsl", "#version 450\n// SECOND, longer\n")
+        local _, pending = callTool({ poll = true })
+        assert.are.equal(0, pending.reloaded, "a change was acted on before it settled")
+        assert.are.same({ dir .. "watched.frag.glsl" }, pending.unsettled)
+
+        local _, settled = callTool({ poll = true })
+        assert.are.equal(1, settled.reloaded)
+        assert.are.equal(1, settled.dispatched)
+        assert.are.equal(1, reloaded)
+
+        local _, stopped = callTool({ enabled = false })
+        assert.is_false(stopped.watching)
+        assert.are.equal(0, stopped.files)
+    end)
+end)
+
 -- The whole operation, driven the way an agent drives it: a real application
 -- with a device behind it and a tool call over the dispatcher. What this pins
 -- that neither half above can is that the application hands its renderer to the
@@ -303,6 +381,7 @@ end)
 -- running game answers with.
 describe("reload_shaders against a running application", function()
     local Application = require("tecs.Application")
+    local watch = require("tecs.platform.watch")
 
     it("rebuilds the pipelines of the application that is running", function()
         local app = Application.create({
@@ -334,5 +413,38 @@ describe("reload_shaders against a running application", function()
 
         assert.is_falsy(result.isError, "the reload was refused: " .. text)
         assert.is_true(drawn, "the frame after the rebuild did not run")
+    end)
+
+    -- A watcher asked for in the config has to be running by the first
+    -- iteration and gone by the last, and the reloaders it routes to have to be
+    -- registered without a port being opened: an edit picked up is worth having
+    -- whether or not a debug server was wanted.
+    it("runs the watcher an application was configured with", function()
+        local app = Application.create({
+            window = { title = "watch", width = 64, height = 64 },
+            logFile = "",
+            watch = { interval = 0 },
+        })
+        assert.is_true(app:_init())
+
+        assert.is_true(watch.installed(), "the watcher the config asked for is not running")
+        local kinds = {}
+        for _, kind in ipairs(watch.kinds()) do
+            kinds[kind] = true
+        end
+        assert.is_true(kinds.shader, "no reloader owns a changed shader")
+        assert.is_true(kinds.image, "no reloader owns a changed image")
+        assert.is_true(kinds.sound, "no reloader owns a changed sound")
+
+        -- The engine's own shaders are read through `assets`, so a run that has
+        -- drawn a frame is already watching them.
+        app:_iterate(nil, 0, nil)
+        assert.is_true(#watch.watching() > 0, "a run that has drawn is watching nothing")
+
+        app:_shutdown()
+        assert.is_false(watch.installed(), "the watcher outlived the application")
+        tools.bind(nil, nil)
+        tools.bindReload(nil)
+        restore()
     end)
 end)

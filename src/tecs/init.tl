@@ -42,6 +42,7 @@ local type clock = require("tecs.platform.clock")
 local type events = require("tecs.platform.events")
 local type capabilities = require("tecs.platform.capabilities")
 local type paths = require("tecs.platform.paths")
+local type watch = require("tecs.platform.watch")
 local type components = require("tecs.components")
 local type text = require("tecs.gfx.text")
 local type materials = require("tecs.gpu.materials")
@@ -105,6 +106,7 @@ local record tecs
     events: events
     capabilities: capabilities
     paths: paths
+    watch: watch
     components: components
     text: text
     materials: materials
@@ -280,6 +282,7 @@ local ENGINE <const>: {string: string} = {
     events = "tecs.platform.events",
     capabilities = "tecs.platform.capabilities",
     paths = "tecs.platform.paths",
+    watch = "tecs.platform.watch",
     components = "tecs.components",
     text = "tecs.gfx.text",
     materials = "tecs.gpu.materials",

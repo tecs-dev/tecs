@@ -478,7 +478,7 @@ local record Audio
     _limits: {string: Audio.Limit}
     _buckets: {string: Bucket}
     _clips: {integer: Clip}
-    _loading: {Clip}
+    _loads: assets.Batch<Audio.Clip>
     --- Seconds `update` has been told about, which is what a cooldown is
     --- measured against.
     _now: number
@@ -493,10 +493,6 @@ local AudioMT <const>: metatable<Audio> = { __index = Audio }
 --- entries naming it and reads this well before that point in the file.
 local installed <const>: {ecs.World: Audio} =
     setmetatable({}, {__mode = "k"} as metatable<{ecs.World: Audio}>)
-
---- Takes finished loads. Declared here and defined below, because shutting
---- down has to drain what is in flight and shutting down is described first.
-local resolveLoads: function(self: Audio): integer
 
 Audio.Sound = Sound
 
@@ -530,6 +526,23 @@ end
 function Audio.decoders(): {string}
     if not sdl3mixer.init() then return {} end
     return sdl3mixer.decoders()
+end
+
+--- Takes one finished load into the clip it was read for.
+---
+--- Shared rather than closed over an instance: nothing here reads the mixer,
+--- so every `Audio` hands its batch the same function.
+local function settleClip(clip: Audio.Clip, handle: assets.Handle)
+    if handle.status == "ready" then
+        clip.resident = handle.resident
+        clip.duration = handle.durationMs >= 0
+            and handle.durationMs / 1000 or 0.0
+        clip.status = "ready"
+        return
+    end
+    clip.status = "failed"
+    clip.error = handle.error
+    LOGGER:error("cannot load '%s': %s", clip.path, handle.error or "unknown")
 end
 
 -------------------------------------------------------------------------------
@@ -583,7 +596,7 @@ function Audio.create(config?: Audio.Config): Audio
     self._limits = {}
     self._buckets = {}
     self._clips = {}
-    self._loading = {}
+    self._loads = assets.batch(settleClip)
     self._now = 0.0
     -- One options record, overwritten per play. Every field is set each time,
     -- so nothing carries over from the previous voice.
@@ -601,10 +614,7 @@ end
 function Audio:destroy()
     -- Drained first. A clip that arrived after the mixer had gone would hold a
     -- pointer into a library that has released everything it made.
-    if #self._loading > 0 then
-        assets.waitAll()
-        resolveLoads(self)
-    end
+    self._loads:wait()
 
     for slot = 1, #self._voices do
         local voice = self._voices[slot]
@@ -629,7 +639,10 @@ function Audio:destroy()
         clip.status = "released"
     end
     self._clips = {}
-    self._loading = {}
+    -- A fresh batch rather than a drained one, so a load the wait above ran out
+    -- of time on is dropped with the clips it was for rather than resolving
+    -- into a mixer that has gone.
+    self._loads = assets.batch(settleClip)
 
     if self._mixer ~= nil then
         self._backend.close(self._mixer)
@@ -684,7 +697,7 @@ function Audio:load(path: string, options?: Audio.LoadOptions): Audio.Clip
         _handle = assets.loadSound(path, mode, self._streamMs),
     }
     self._clips[id] = clip
-    self._loading[#self._loading + 1] = clip
+    self._loads:add(clip._handle, clip)
     return clip
 end
 
@@ -693,49 +706,72 @@ function Audio:clip(id: integer): Audio.Clip
     return self._clips[id]
 end
 
---- Takes finished loads. Called by `update`.
-resolveLoads = function(self: Audio): integer
-    local waiting = #self._loading
-    if waiting == 0 then return 0 end
-    assets.update()
-
-    local resolved = 0
-    local kept: {Audio.Clip} = {}
-    for index = 1, waiting do
-        local clip = self._loading[index]
-        local handle = clip._handle
-        if handle.status == "loading" then
-            kept[#kept + 1] = clip
-        elseif handle.status == "ready" then
-            clip.resident = handle.resident
-            clip.duration = handle.durationMs >= 0
-                and handle.durationMs / 1000 or 0.0
-            clip.status = "ready"
-            resolved = resolved + 1
-        else
-            clip.status = "failed"
-            clip.error = handle.error
-            LOGGER:error("cannot load '%s': %s", clip.path,
-                handle.error or "unknown")
-            resolved = resolved + 1
-        end
-    end
-    self._loading = kept
-    return resolved
-end
-
 --- Blocks until every queued load has finished.
 ---
 --- For startup and tests. A frame should let `update` resolve them instead.
 function Audio:waitForLoads(timeoutMs?: number)
-    if #self._loading == 0 then return end
-    assets.waitAll(timeoutMs)
-    resolveLoads(self)
+    self._loads:wait(timeoutMs)
 end
 
 --- Clips still being read.
 function Audio:loading(): integer
-    return #self._loading
+    return self._loads:pending()
+end
+
+--- Re-reads a clip's file over the clip already loaded from it.
+---
+--- The counterpart to `Renderer:replaceImage`, and it keeps identity on the
+--- same terms. A clip's index is its path's, so an edited file comes back under
+--- the index every `Sound` row already carries and nothing in the world is
+--- touched.
+---
+--- A streamed clip holds nothing to replace. Each voice opens the file for
+--- itself, so the next one to start reads what is on disk now and this has only
+--- to say so. Voices already sounding read the stream they opened, which is
+--- what happens to a file edited under a running voice with or without a
+--- reload.
+---
+--- A resident clip is decoded again and swapped, and it stays resident whatever
+--- the new file's length would have chosen: rows already pointing at it were
+--- started against held samples, and turning it into a stream under them would
+--- change what a voice is, not what it sounds like. The clip it replaces is
+--- destroyed here, which is safe with voices still on it: the mixer counts a
+--- reference per track and frees at the last one, so a sound playing across the
+--- swap finishes on the samples it started with.
+---
+--- Blocking, like every other reload: it is a debug operation, and answering
+--- before the file has been read would report a success that had not happened
+--- yet.
+--- @param path The path the clip was loaded from.
+--- @return Whether the clip was re-read, and a reason when it was not.
+function Audio:reload(path: string): boolean, string
+    local id = clipIds[path]
+    local clip = id ~= nil and self._clips[id] or nil
+    if clip == nil then
+        return false, ("nothing has loaded '%s', so there is no clip to "
+            .. "re-read"):format(path)
+    end
+    if clip.status == "loading" then
+        return false, ("'%s' is still loading"):format(path)
+    end
+    if not clip.resident then return true end
+
+    if not assets.installed() then assets.install() end
+    local handle = assets.loadSound(path, "resident", self._streamMs)
+    assets.waitAll()
+    if handle.status ~= "ready" then
+        local reason = handle.error or ("still " .. handle.status)
+        handle:release()
+        return false, ("'%s' did not load: %s"):format(path, reason)
+    end
+
+    -- Swapped before the old one is let go, so the clip is never pointing at a
+    -- handle that has been released.
+    local previous = clip._handle
+    clip._handle = handle
+    settleClip(clip, handle)
+    if previous ~= nil then previous:release() end
+    return true
 end
 
 -------------------------------------------------------------------------------
@@ -1467,7 +1503,7 @@ end
 --- so rather than when a clock here says it should be.
 function Audio:update(dt?: number): integer
     self._now = self._now + (dt or 0.0)
-    resolveLoads(self)
+    self._loads:resolve()
 
     for slot = 1, #self._voices do
         local voice = self._voices[slot]

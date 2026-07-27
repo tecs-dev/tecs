@@ -541,6 +541,37 @@ local record sheet
     --- @param name The name a sheet was built under.
     --- @return The sheet most recently registered under that name, or nil.
     byName: function(name: string): Sheet
+
+    --- Folds a freshly built sheet into the one already registered under its
+    --- name, keeping the old sheet's id.
+    ---
+    --- The reverse of what building under a taken name does, and it exists
+    --- because a reload wants the reverse. Building again answers new entities
+    --- with the new sheet and leaves every entity already playing on the old
+    --- one, which is right for two sheets that happen to share a name and wrong
+    --- for one file that was re-exported. This overwrites in place instead, so
+    --- an `Animation` holding the id goes on playing and shows the new frames
+    --- on its next step, with nothing in the world touched.
+    ---
+    --- The refusals are the same ones a shader reload makes, for the same
+    --- reason: a component holds an index into this sheet, so anything that
+    --- renumbers one is refused rather than half applied. Tag ids follow the
+    --- tag names in sorted order and slice ids follow the slices, so adding,
+    --- removing or renaming either is a restart. Frames are free to change:
+    --- what an entity carries is a tag and a time, and the frame is resolved
+    --- from the cycle on every step.
+    ---
+    --- The bind is carried over. A sheet re-exported over the same image is
+    --- already bound to the right layer, so its frames are rescaled against
+    --- the region the old sheet held rather than needing `bind` called again.
+    ---
+    --- The sheet handed in is spent. Its id resolves to the live sheet rather
+    --- than to itself, because the two share their frame tables once the fold
+    --- is done and only one of them may be bound.
+    --- @param built A sheet from any constructor here, registered moments ago
+    ---     under a name something else already holds.
+    --- @return The live sheet, and nil, or nil and the reason it was refused.
+    replace: function(built: Sheet): Sheet, string
 end
 
 
@@ -785,6 +816,14 @@ end
 local sheetsById: {Sheet} = {}
 local sheetsByName: {string: Sheet} = {}
 
+--- The sheet a name held immediately before the one it holds now.
+---
+--- Building under a taken name replaces what `byName` answers, which is the
+--- documented behaviour and the wrong one for a file that was exported twice.
+--- `replace` is the reverse of it and has to know what was displaced, and only
+--- registration is in a position to say.
+local displaced: {string: Sheet} = {}
+
 function sheet.byId(id: integer): Sheet
     if id == nil or id < 1 then return nil end
     return sheetsById[id]
@@ -942,8 +981,93 @@ local function register(self: Sheet, tags: {string: Tag}, slices: {Slice},
     rescale(self)
     sheetsById[#sheetsById + 1] = self
     self.id = #sheetsById
+    displaced[self.name] = sheetsByName[self.name]
     sheetsByName[self.name] = self
     return self
+end
+
+--- Whether two name-to-index maps hand out the same indices.
+---
+--- A name that appeared or went away is looked for before one that merely
+--- moved, because adding a tag renumbers every tag after it alphabetically and
+--- the name a refusal should carry is the one that was edited rather than the
+--- first one the edit pushed along.
+--- @return Whether they agree, and the name that does not when they do not.
+local function sameIndices(before: {string: integer},
+                           after: {string: integer}): boolean, string
+    for name in pairs(before) do
+        if after[name] == nil then return false, name end
+    end
+    for name in pairs(after) do
+        if before[name] == nil then return false, name end
+    end
+    for name, id in pairs(before) do
+        if after[name] ~= id then return false, name end
+    end
+    return true
+end
+
+function sheet.replace(built: Sheet): Sheet, string
+    if built == nil then
+        error("tecs: there is no sheet to replace with", 2)
+    end
+    -- What the name held before this build took it, since building is what
+    -- registers and `built` has already taken the name by the time it is
+    -- handed over.
+    local live = displaced[built.name]
+    if live == nil or live == built then
+        return nil, ("no sheet is registered as '%s', so there is nothing to "
+            .. "replace"):format(built.name)
+    end
+
+    -- Checked before anything is written, so a refusal leaves the live sheet
+    -- exactly as it was rather than part way through.
+    local ok, moved = sameIndices(live._ids, built._ids)
+    if not ok then
+        sheetsByName[built.name] = live
+        return nil, ("sheet '%s' would renumber its tags at '%s', and an "
+            .. "Animation already holds a tag index"):format(built.name, moved)
+    end
+    ok, moved = sameIndices(live._sliceIds, built._sliceIds)
+    if not ok then
+        sheetsByName[built.name] = live
+        return nil, ("sheet '%s' would renumber its slices at '%s', and a "
+            .. "Pivot already holds a slice index"):format(built.name, moved)
+    end
+
+    live.count = built.count
+    live.imageWidth = built.imageWidth
+    live.imageHeight = built.imageHeight
+    live._rects = built._rects
+    live._durations = built._durations
+    live._uvs = built._uvs
+    live._from = built._from
+    live._to = built._to
+    live._direction = built._direction
+    live._names = built._names
+    live._ids = built._ids
+    live._order = built._order
+    live._timing = built._timing
+    live._cycle = built._cycle
+    live._slices = built._slices
+    live._sliceIds = built._sliceIds
+
+    -- The bind is the live sheet's and is kept: a re-export of the same image
+    -- lands on the layer that image already holds, so the frames are rescaled
+    -- against it rather than waiting for `bind` to be called a second time.
+    rescale(live)
+
+    -- Both the name and the id the build took now answer the live sheet. The id
+    -- is not given back, because an id is handed out once and never reused;
+    -- what it does is resolve to the sheet its frames ended up in, so anything
+    -- that read `built.id` between the build and this call is pointed at the
+    -- right one. It also takes the build out of the registry, which matters:
+    -- the two share their frame tables now, and a `bind` on one would write
+    -- through the other.
+    sheetsByName[built.name] = live
+    sheetsById[built.id] = live
+    displaced[built.name] = nil
+    return live
 end
 
 -------------------------------------------------------------------------------

@@ -783,6 +783,131 @@ describe("tecs.gfx.sheet", function()
             assert.equal(2, world:get(entity, Animation).frame, "and the cycle wrapped once both were spent")
         end)
     end)
+
+    -- Overwriting a sheet in place, which is what a re-exported file wants and
+    -- the opposite of what building under a taken name does. Building again is
+    -- right for two sheets that happen to share a name and wrong for one file
+    -- that was exported twice: an entity already playing keeps the old id and
+    -- goes on showing the old frames, which is exactly what a reload must not
+    -- do.
+    describe("replacing a sheet in place", function()
+        --- The same grid at a chosen cell size, so a re-export can change the
+        --- frames without changing the tags over them.
+        local function grid(name, cell, tags)
+            return sheet.grid({
+                name = name,
+                imageWidth = 32,
+                imageHeight = 32,
+                frameWidth = cell,
+                frameHeight = cell,
+                tags = tags or { walk = { from = 1, to = 2 } },
+            })
+        end
+
+        it("keeps the id and the object, and shows the new frames", function()
+            local name = uniqueName("reload")
+            local live = grid(name, 16)
+            local id = live.id
+            near(select(3, live:rect(1)), 16, "the frame width before")
+
+            local built = grid(name, 8)
+            local replaced = sheet.replace(built)
+
+            assert.are.equal(live, replaced, "an entity already playing holds this table")
+            assert.are.equal(id, live.id, "an Animation carries the id, so it cannot move")
+            assert.are.equal(live, sheet.byName(name), "the name answers the live sheet again")
+            assert.are.equal(16, live.count, "the re-export cut sixteen frames, not four")
+            near(select(3, live:rect(1)), 8, "the frame width after")
+
+            -- The build is spent, so the id it took resolves to the sheet its
+            -- frames ended up in. The two share those tables now, and leaving
+            -- both reachable would let a bind on one write through the other.
+            assert.are.equal(live, sheet.byId(built.id))
+            assert.are.equal(live, sheet.byId(id))
+        end)
+
+        it("rescales the new frames against the bind the sheet already had", function()
+            local name = uniqueName("reload")
+            local live = grid(name, 16)
+            -- Half a layer, the way a packed image reports itself.
+            live:bind(components.Sprite(3, 0.0, 0.0, 0.5, 0.5, 2))
+            near(select(3, live:uv(1)), 0.25, "half of half the image")
+
+            sheet.replace(grid(name, 8))
+
+            local _, _, u1 = live:uv(1)
+            near(u1, 0.125, "the new frame is a quarter of the image and the image is half the layer")
+            assert.are.equal(2, live:sprite(1).slot, "the layer the sheet was bound to")
+        end)
+
+        it("refuses a re-export whose tags would renumber", function()
+            local name = uniqueName("reload")
+            local live = grid(name, 16)
+            local before = live:tagId("walk")
+
+            local replaced, reason = sheet.replace(grid(name, 8, {
+                walk = { from = 1, to = 2 },
+                idle = { from = 3, to = 4 },
+            }))
+
+            assert.is_nil(replaced)
+            assert.is_truthy(reason:find("idle", 1, true), "the refusal must name what moved: " .. tostring(reason))
+            assert.are.equal(before, live:tagId("walk"), "a refusal leaves the live sheet alone")
+            assert.are.equal(4, live.count)
+            assert.are.equal(live, sheet.byName(name), "and leaves the name answering it")
+        end)
+
+        it("refuses a re-export whose slices would renumber", function()
+            local name = uniqueName("reload")
+            local live = sheet.grid({
+                name = name,
+                imageWidth = 32,
+                imageHeight = 32,
+                frameWidth = 16,
+                frameHeight = 16,
+                slices = { { name = "head", keys = { { frame = 1, x = 0, y = 0, w = 4, h = 4 } } } },
+            })
+            local before = live:sliceId("head")
+
+            local replaced, reason = sheet.replace(sheet.grid({
+                name = name,
+                imageWidth = 32,
+                imageHeight = 32,
+                frameWidth = 16,
+                frameHeight = 16,
+                slices = {
+                    { name = "foot", keys = { { frame = 1, x = 0, y = 0, w = 4, h = 4 } } },
+                    { name = "head", keys = { { frame = 1, x = 0, y = 0, w = 4, h = 4 } } },
+                },
+            }))
+
+            assert.is_nil(replaced)
+            assert.is_truthy(reason:find("Pivot", 1, true), "unexpected refusal: " .. tostring(reason))
+            assert.are.equal(before, live:sliceId("head"))
+        end)
+
+        it("refuses a name nothing is registered under", function()
+            local replaced, reason = sheet.replace(grid(uniqueName("fresh"), 16))
+            assert.is_nil(replaced)
+            assert.is_truthy(reason:find("nothing to replace", 1, true), "unexpected refusal: " .. tostring(reason))
+        end)
+
+        it("carries an entity that is already playing onto the new frames", function()
+            local name = uniqueName("reload")
+            local live = grid(name, 16)
+            local world = animatedWorld()
+            local entity = world:spawn(live:sprite(1), animation.of(live, "walk"))
+
+            sheet.replace(grid(name, 8))
+            drive(world, 12)
+
+            -- The id never moved, so playback resolved through the same sheet
+            -- and wrote a region from the frames it now holds.
+            assert.are.equal(live.id, world:get(entity, Animation).sheet)
+            local _, _, u1 = live:uv(world:get(entity, Animation).frame)
+            near(world:get(entity, Sprite).u1, u1, "the sprite is showing a frame of the sheet as it reads now")
+        end)
+    end)
 end)
 
 describe("tecs.gfx.animation", function()

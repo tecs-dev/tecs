@@ -21,6 +21,7 @@ local assets <const> = require("tecs.assets")
 local components <const> = require("tecs.components")
 local sequence <const> = require("tecs.sequence")
 local paths <const> = require("tecs.platform.paths")
+local watch <const> = require("tecs.platform.watch")
 local log <const> = require("tecs.log")
 local mcp <const> = require("tecs.mcp")
 local timing <const> = require("tecs.timing")
@@ -71,6 +72,11 @@ local record Application
         --- Port for the MCP server. Omitted means no server, since a game
         --- should not open a socket nobody asked for.
         mcpPort: integer
+        --- Watches the content files this run has loaded and reloads them when
+        --- they change. Omitted means no watcher, on the same footing as the
+        --- server above: a poll of the filesystem is not something to start
+        --- because a build happened to be able to. A release refuses it.
+        watch: watch.Config
         capacity: integer
         maxEntities: integer
         --- Stops after this many iterations. Lets an automated run drive a
@@ -220,7 +226,10 @@ function Application:_init(): boolean
         run = function() input:exitFixedPhase() end,
     })
 
-    if config.mcpPort ~= nil then
+    -- The debug tools carry the reloads, and both the server and the file
+    -- watcher drive them, so they are bound when either is asked for rather
+    -- than by the server alone.
+    if config.mcpPort ~= nil or config.watch ~= nil then
         local tools = require("tecs.mcp.tools")
         tools.bind(self.renderer, self.world)
 
@@ -230,7 +239,9 @@ function Application:_init(): boolean
         -- is a pipeline swap and belongs to whoever owns the device.
         local renderer = self.renderer
         tools.bindReload(function() renderer:rebuildPipelines() end)
+    end
 
+    if config.mcpPort ~= nil then
         -- The engine's own components, plus the ECS builtins. A game adds its
         -- own through mcpWorld.register, since nothing here can know them.
         local mcpWorld = require("tecs.mcp.world")
@@ -258,6 +269,23 @@ function Application:_init(): boolean
     self.input:refreshDevices()
 
     if config.load ~= nil then config.load(self) end
+
+    -- After the game's load, so the first look takes up everything the run has
+    -- opened. Which reloader owns which kind is registered here rather than
+    -- inside the watcher: nothing in `tecs.platform` knows what an image or a
+    -- clip is, and the rules a reload may not break are stated once, in the
+    -- functions the debug tools are wrappers over.
+    if config.watch ~= nil then
+        local tools = require("tecs.mcp.tools")
+        watch.on("shader", function() tools.reloadShaders() end)
+        watch.on("image", function(change: watch.Change)
+            tools.reloadImage(change.path)
+        end)
+        watch.on("sound", function(change: watch.Change)
+            tools.reloadSound(change.path)
+        end)
+        watch.install(config.watch)
+    end
 
     -- Startup cost must not land in the first iteration's dt.
     clock.reset()
@@ -327,6 +355,12 @@ function Application:_iterate(queue: loader.CValue, count: integer,
     -- would stay "loading" for the life of the process. Outside the suspension
     -- guard, because a decode that finished while backgrounded is finished.
     assets.update()
+
+    -- Outside the suspension and crash guards, for the reason above and one
+    -- more: a shader edited to fix the crash is exactly what a stopped process
+    -- is waiting for. Costs a clock read on a frame the interval has not
+    -- elapsed on, and nothing at all when no watcher was asked for.
+    watch.poll()
 
     if not self.suspended then
         self.elapsed = self.elapsed + dt
@@ -432,6 +466,7 @@ function Application:_shutdown(): boolean
         self._config.quit(self)
     end
 
+    watch.uninstall()
     if self.mcp ~= nil then self.mcp:destroy() end
     -- Before SDL_Quit, since closing a device after the subsystem it belongs
     -- to has gone is undefined.

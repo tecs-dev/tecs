@@ -295,6 +295,20 @@ local level = tecs.json.decode(bytes)
 `read` answers nil for a path with no file, so an absent document is
 distinguishable from a malformed one, which the decoder raises on.
 
+Waiting on several handles at once is `assets.batch`. Sound holds a clip per
+handle and text holds an atlas per handle; each of them had grown the same list
+separately, and each wanted the same three things, which are how many are still
+in flight, one callback per load that finished with the caller's own value
+beside it, and a blocking form for startup and tests. A batch resolves by
+compacting in place, so a frame with loads outstanding allocates nothing, and it
+drains the worker itself, so a subsystem polling only its own batch still sees
+its loads finish. The one rule it imposes is that a callback must not add to the
+batch it is being called from, because the compaction is walking it.
+
+All three entry points record what they touched. `assets.loaded` answers every
+path this process has read or decoded and the kind it was read as, which is what
+the file watcher polls instead of walking the content tree.
+
 ## Sound
 
 `app.audio` is the whole surface: load a clip, play it, set a gain, fade it,
@@ -1215,9 +1229,8 @@ the build cannot supply selects a backend that fails at shader creation rather
 than at startup.
 
 Shaders and materials are re-readable while the process runs, through the
-debug server's `reload_shaders` tool rather than a watcher on the filesystem.
-Whatever edited a `.glsl` knows that it did, and a watcher is the part of a
-reload with no decision in it. The decisions are the refusals. A build that
+debug server's `reload_shaders` tool. The interesting part of a reload is not
+noticing the edit; it is the refusals. A build that
 links no compiler cannot reload at all: a pack decides the shader format the
 device claimed when it was created, so there is nothing to put in a pipeline's
 place. And a material file appearing or disappearing renumbers every material
@@ -1242,6 +1255,85 @@ second upload, and it is also why the size has to match: a resize is a different
 rect, packed or not, and the instances already carrying the old one have no way
 to be told. Packed or not, only the image's own rectangle and the gutter around
 it are written, so the neighbours sharing its layer are untouched.
+
+Sound re-reads through `reload_sound`, and identity is kept the same way: a
+clip's index is its path's, so an edited file comes back under the index every
+`Sound` row already carries. What differs is that there is a case with nothing
+to do. A streamed clip holds nothing, because each voice opens the file for
+itself, so the next voice reads the new file and the reload only says so. A
+resident clip is decoded again and swapped, and the samples it replaces are
+destroyed while voices may still be reading them: `MIX_DestroyAudio` drops a
+reference rather than freeing, and a track holds one, so a sound playing across
+the swap finishes on what it started with and the last track to let go is what
+frees. A resident clip stays resident whatever the new file's length would have
+chosen on a first load, because rows pointing at it were started against held
+samples and turning it into a stream under them would change what a voice is.
+
+A sheet re-reads through `sheet.replace`, which exists because building a sheet
+under a name that is already taken does the opposite of what a reload wants: it
+answers new entities with the new sheet and leaves every entity already playing
+on the old one, which is right for two sheets that share a name and wrong for
+one file that was exported twice. `replace` folds a freshly built sheet into the
+one the name already held, keeping its id, so an `Animation` goes on playing and
+shows the new frames on its next step. Frames, durations and image size are free
+to change, since what an entity carries is a tag and a time and the frame is
+resolved from the cycle at every step. Tags and slices are not: their ids follow
+their names in sorted order, an `Animation` holds a tag index and a `Pivot`
+holds a slice index, so a re-export that adds, removes or renames either is
+refused by name, exactly as a material file appearing is.
+
+### The file watcher
+
+Those four are driven by an agent that knows it edited something, and also by a
+watcher that notices. SDL has no change notification: not in 3.4 and not behind
+a hint, and `SDL_AddEventWatch` watches the event queue rather than the
+filesystem. What `SDL_filesystem.h` offers is `SDL_GetPathInfo`, which answers a
+type, a size and three timestamps. So `tecs.platform.watch` polls, and going
+native to avoid polling would mean inotify, FSEvents and
+`ReadDirectoryChangesW`, plus one more for every platform whose SDK is licensed,
+to save work measured below in microseconds.
+
+It polls what was loaded rather than the content tree. `assets` records every
+path this process has read or decoded, which is both a much smaller set and the
+only set where a change has anything to act on, since a file nothing opened has
+no reloader to route to. That is also why `SDL_EnumerateDirectory` is never
+called: there is nothing to enumerate.
+
+The poll is synchronous, on the main thread, between frames. Async IO is not an
+option rather than a rejected one: SDL's asynchronous IO opens, reads, writes
+and closes files, and there is no asynchronous `SDL_GetPathInfo`, so asking a
+file's size and modification time is a blocking `stat` however it is reached. A
+thread is a rejected one. A poll costs one call per watched path, measured at
+0.86 microseconds a path, so a hundred files at two polls a second is 172
+microseconds a second, and a frame the interval has not elapsed on costs a clock
+read and a compare. A worker would have to be told the watched set every time
+something loaded, every reload it could trigger has to happen on the main thread
+anyway, and what it would move off the frame is already free.
+
+The part with a real decision in it is the half-written file. An editor saving
+commonly truncates and rewrites, so a poll can land on a file of zero length or
+of half its eventual size, and handing either to a reloader is how a watcher
+takes a process down. Two rules cover it. A file must report the same size and
+modification time on consecutive polls before it is dispatched, so a rewrite in
+progress is seen changing and is not acted on until it stops changing; and a
+file of zero length is never dispatched, since that is a truncation whatever
+else it is. Under both, a handler runs guarded and a raise is logged rather than
+propagated, and the reloads themselves already refuse safely: a truncated PNG
+does not decode, a broken shader does not compile, and neither replaces what the
+process is drawing.
+
+Dispatch is by kind, and the kind comes from how the file was loaded rather than
+from its name: something asked for a path as an image, which is what makes it
+one. A suffix decides in one place only, because `read` answers bytes and cannot
+know what wanted them, so a `.glsl` document is a shader and every other
+document is a document. Which reloader owns a kind is registered by the
+application, not by the watcher, so nothing in `tecs.platform` has to know what
+an image or a clip is.
+
+It is development only. `Application.Config.watch` starts it, the `watch` tool
+turns it on, off and a poll at a time, and `install` refuses on a build that
+links no shader compiler, which is the same bit `reload_shaders` refuses on and
+the same thing it means: a release polls nothing.
 
 Content is never resolved against the working directory. That happens to work
 when a build is launched from a project root and is meaningless the moment
