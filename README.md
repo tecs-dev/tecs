@@ -334,9 +334,16 @@ separately from committed text, so a field draws what is being typed before it
 commits, and an area is passed so the platform places its candidate window
 clear of what the player is looking at.
 
+A pen reports pressure, tilt and barrel rotation the way a pad reports a stick:
+one axis event per reading, numbered by the platform. Those four are folded into
+`penPressure`, `penTiltX`, `penTiltY` and `penRotation`; hover distance, the
+barrel slider and tangential pressure are named by the backend and read by
+nothing, so they are a line each to fold in when something wants them.
+
 Held state clears on focus loss and on device removal. The platform delivers no
 release for a key held as the window loses focus, and a button left held on a
-device that is gone is worse than one that never worked.
+device that is gone is worse than one that never worked. A pen carried out of
+range clears its pressure for the same reason: nothing reports the lift.
 
 Queries are never answered by polling the device. `SDL_GetKeyboardState` and
 its relatives are read when a device is opened or resynchronised and never

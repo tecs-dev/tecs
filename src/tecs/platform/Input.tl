@@ -118,8 +118,8 @@ local record Input
     --- rather than pixels. Cleared by `beginFrame`.
     wheelX: number
     wheelY: number
-    --- Device that produced the most recent mouse button or motion event. A
-    --- wheel event does not set it.
+    --- Device that produced the most recent mouse button, motion or wheel
+    --- event.
     mouseWhich: number
     --- Whether that event was the platform's own translation of a touch or a
     --- pen. A game that handles touch itself reads this and ignores the
@@ -141,9 +141,17 @@ local record Input
     --- Pen position in window coordinates, from the top-left.
     penX: number
     penY: number
-    --- How hard the pen is pressed, in 0..1. Pressure arrives on a pen axis
-    --- event, which nothing folds into here, so this holds zero.
+    --- How hard the pen is pressed, in 0..1. Zero until the pen reports it,
+    --- and on a pen that measures no pressure it stays there.
     penPressure: number
+    --- How far the pen leans from upright, in degrees, negative towards the
+    --- left and towards the top of the surface. Both zero on a pen that does
+    --- not report tilt.
+    penTiltX: number
+    penTiltY: number
+    --- Barrel rotation in degrees clockwise, for a pen with a chisel nib. Zero
+    --- on a pen that does not report it.
+    penRotation: number
     --- Whether the pen is touching the surface. Cleared when the pen leaves
     --- proximity, since a pen carried away never reports lifting.
     penTouching: boolean
@@ -172,6 +180,12 @@ local record Input
     --- Scancodes already resolved from a name, since a binding screen asks for
     --- the same names every frame.
     _scancodes: {string: integer}
+    --- Platform numbers of the pen axes folded into fields above, resolved
+    --- once so an axis event costs comparisons rather than lookups.
+    _penPressureAxis: integer
+    _penTiltXAxis: integer
+    _penTiltYAxis: integer
+    _penRotationAxis: integer
     _backend: Backend
     --- The window text input and the cursor modes act on. Nil in a headless
     --- test, where those commands report failure instead.
@@ -210,6 +224,10 @@ function Input.create(options?: InputOptions): Input
     self._padList = {}
     self._scancodes = {}
     self._backend = given.backend or adapter.current().input or inputbackend.sdl
+    self._penPressureAxis = self._backend.penAxisFromName("pressure")
+    self._penTiltXAxis = self._backend.penAxisFromName("tiltX")
+    self._penTiltYAxis = self._backend.penAxisFromName("tiltY")
+    self._penRotationAxis = self._backend.penAxisFromName("rotation")
     self._window = given.window
     self._textStarted = false
     self.mouseX, self.mouseY = 0.0, 0.0
@@ -222,6 +240,7 @@ function Input.create(options?: InputOptions): Input
     self.compositionStart = 0
     self.compositionLength = 0
     self.penX, self.penY, self.penPressure = 0.0, 0.0, 0.0
+    self.penTiltX, self.penTiltY, self.penRotation = 0.0, 0.0, 0.0
     self.penTouching = false
     self.penEraser = false
     return self
@@ -410,6 +429,7 @@ local function releaseHeld(self: Input)
     end
     for key in pairs(self._touches) do self._touches[key] = nil end
     self.penTouching = false
+    self.penPressure = 0.0
 end
 
 local function touchKey(event: eventStream.Event): string
@@ -451,6 +471,11 @@ function Input:handleEvent(event: eventStream.Event)
         self.mouseDeltaX = self.mouseDeltaX + event.dx
         self.mouseDeltaY = self.mouseDeltaY + event.dy
     elseif kind == "mouseWheel" then
+        -- The wheel says which device it came from like every other mouse
+        -- event, and a scroll the platform made out of a touch is exactly what
+        -- these two fields exist to let a game recognise.
+        self.mouseWhich = event.which
+        self.mouseSynthetic = event.synthetic == true
         self.wheelX = self.wheelX + event.wheelX
         self.wheelY = self.wheelY + event.wheelY
     elseif kind == "fingerDown" or kind == "fingerMotion" then
@@ -465,16 +490,34 @@ function Input:handleEvent(event: eventStream.Event)
         touch.pressure = event.pressure
     elseif kind == "fingerUp" or kind == "fingerCanceled" then
         self._touches[touchKey(event)] = nil
-    elseif kind == "penMotion" or kind == "penAxis" then
+    elseif kind == "penMotion" then
         self.penWhich = event.which
         self.penX, self.penY = event.x, event.y
+    elseif kind == "penAxis" then
+        self.penWhich = event.which
+        self.penX, self.penY = event.x, event.y
+        -- One axis per event, so the value belongs to whichever field this
+        -- axis names. An axis with no field here is a reading nothing reads.
+        local axis = event.axis
+        if axis == self._penPressureAxis then
+            self.penPressure = event.value
+        elseif axis == self._penTiltXAxis then
+            self.penTiltX = event.value
+        elseif axis == self._penTiltYAxis then
+            self.penTiltY = event.value
+        elseif axis == self._penRotationAxis then
+            self.penRotation = event.value
+        end
     elseif kind == "penDown" or kind == "penUp" then
         self.penWhich = event.which
         self.penX, self.penY = event.x, event.y
         self.penTouching = kind == "penDown"
         self.penEraser = event.eraser == true
     elseif kind == "penProximityOut" then
+        -- A pen out of range is pressing on nothing, and the pressure it
+        -- reported last would otherwise read as a stroke still under way.
         self.penTouching = false
+        self.penPressure = 0.0
     elseif kind == "textInput" then
         self.text = self.text .. (event.text or "")
         -- Committing ends whatever was being composed, so a field does not

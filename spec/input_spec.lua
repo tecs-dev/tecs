@@ -336,6 +336,65 @@ describe("platform.Input", function()
         assert.is_false(input.penTouching)
         assert.are.equal(41, input.penX)
     end)
+
+    it("folds the pen axes it names into the pen state", function()
+        -- A pen reports pressure the way a pad reports a stick: one axis event
+        -- per reading, numbered by the platform. The numbers come from the
+        -- backend rather than being written here, so the test cannot agree
+        -- with itself about a number SDL has moved.
+        local axis = inputbackend.sdl.penAxisFromName
+
+        input:handleEvent({ kind = "penDown", which = 3, x = 40, y = 60 })
+        assert.are.equal(0.0, input.penPressure,
+            "nothing has been reported yet")
+
+        input:handleEvent({
+            kind = "penAxis", which = 3, x = 40, y = 60,
+            axis = axis("pressure"), value = 0.75,
+        })
+        assert.are.equal(0.75, input.penPressure)
+
+        input:handleEvent({
+            kind = "penAxis", which = 3, x = 40, y = 60,
+            axis = axis("tiltX"), value = -30.0,
+        })
+        input:handleEvent({
+            kind = "penAxis", which = 3, x = 40, y = 60,
+            axis = axis("tiltY"), value = 12.5,
+        })
+        input:handleEvent({
+            kind = "penAxis", which = 3, x = 40, y = 60,
+            axis = axis("rotation"), value = 90.0,
+        })
+        assert.are.equal(-30.0, input.penTiltX)
+        assert.are.equal(12.5, input.penTiltY)
+        assert.are.equal(90.0, input.penRotation)
+        assert.are.equal(0.75, input.penPressure,
+            "one axis per event, so the others keep what they held")
+
+        -- A pen carried out of range is pressing on nothing, and a stroke that
+        -- reads as still under way is what a drawing tool would draw.
+        input:handleEvent({ kind = "penProximityOut", which = 3 })
+        assert.are.equal(0.0, input.penPressure)
+    end)
+
+    it("says which device a wheel event came from", function()
+        -- The platform scrolls by synthesising wheel events from a touch, and
+        -- a game handling touch itself has to recognise those or act on one
+        -- gesture twice. Reading the last button event's device instead is
+        -- exactly the confusion these two fields exist to prevent.
+        input:handleEvent({
+            kind = "mouseDown", button = 1, which = 1, synthetic = false,
+        })
+        input:handleEvent({
+            kind = "mouseWheel", which = 12, synthetic = true,
+            wheelX = 0, wheelY = 1,
+        })
+
+        assert.are.equal(12, input.mouseWhich)
+        assert.is_true(input.mouseSynthetic)
+        assert.are.equal(1, input.wheelY)
+    end)
 end)
 
 describe("platform.Input gamepads", function()
