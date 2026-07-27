@@ -13,6 +13,9 @@ local Application = require("tecs.Application")
 local assets = require("tecs.assets")
 local events = require("tecs.platform.events")
 local phases = require("tecs.internal.phases")
+local components = require("tecs.components")
+local passscope = require("tecs.gpu.passscope")
+local ComputePass = require("tecs.gpu.ComputePass")
 
 local FIXTURE = "spec/fixtures/split.png"
 
@@ -281,6 +284,168 @@ describe("Application", function()
             assert.is_true(app:_shutdown())
 
             assert.are.equal(1, releases, "a startup that threw took the teardown down with it")
+        end)
+    end)
+
+    -- What the guard puts back, driven through the four methods the host
+    -- calls. The unit-level proofs are in `exceptions_spec`; these are here
+    -- because the guard is the only finally the loop has, and a leak is only
+    -- real once a whole frame has gone through it.
+    describe("recovery", function()
+        -- One entity, so extraction has something to write and the frame does
+        -- real work rather than returning early.
+        local function scene(world)
+            world:spawn(
+                components.Transform(32, 32, 0, 1, 0, 16, 16),
+                components.Tint(1, 0, 0, 1),
+                components.Renderable()
+            )
+        end
+
+        it("unwinds the scope a system threw out of", function()
+            local explode = true
+            local query
+            local app = build({
+                plugin = function(world)
+                    scene(world)
+                    query = world:query({ name = "spec.Recovered", include = { components.Tint } })
+                    world:addSystem({
+                        name = "spec.ThrowsInIter",
+                        phase = phases.Update,
+                        run = function()
+                            for _ in query:iter() do
+                                if explode then
+                                    error("iter boom")
+                                end
+                            end
+                        end,
+                    })
+                end,
+            })
+            assert.is_true(app:_init())
+
+            local open = passscope.openCount()
+            app:_simulate(1 / 60)
+
+            assert.is_truthy(app:crashed():match("iter boom"))
+            assert.are.equal(0, app.world._scopeDepth, "the world was left deferred")
+            assert.are.equal(open, passscope.openCount())
+
+            -- Applied rather than staged, which is the difference a deferred
+            -- world hides. Nothing has been unwound by hand here: the guard
+            -- did it.
+            local spawned = app.world:spawn(components.Tint(0, 1, 0, 1))
+            assert.is_true(app.world:isAlive(spawned))
+
+            explode = false
+            app:_simulate(1 / 60)
+            assert.are.equal("submitted", app._frame.state, "the frame after the crash did not draw")
+            app:_shutdown()
+        end)
+
+        it("resolves the frame a throw between acquire and submit left open", function()
+            local app = build({ plugin = scene })
+            assert.is_true(app:_init())
+
+            local open = passscope.openCount()
+            local recorded = app.renderer.render
+            app.renderer.render = function()
+                error("render boom")
+            end
+
+            app:_simulate(1 / 60)
+
+            assert.is_truthy(app:crashed():match("render boom"))
+            local crashedFrame = app._frame
+            assert.is_not_nil(crashedFrame, "the frame was not reachable from the application")
+            -- Submitted rather than cancelled: a swapchain texture had been
+            -- acquired on it, and SDL documents cancelling after that as an
+            -- error.
+            assert.is_true(crashedFrame.acquired)
+            assert.are.equal("submitted", crashedFrame.state)
+            assert.is_nil(crashedFrame.commandBuffer)
+            assert.are.equal(open, passscope.openCount())
+
+            app.renderer.render = recorded
+            app:_simulate(1 / 60)
+            assert.is_false(rawequal(crashedFrame, app._frame), "the next frame reused the broken one")
+            assert.are.equal("submitted", app._frame.state)
+            app:_shutdown()
+        end)
+
+        it("ends a compute pass a stage left open, and draws the frame after", function()
+            local explode = true
+            local openInside = -1
+            local app = build({
+                plugin = function(world, self)
+                    scene(world)
+                    self.renderer:addComputeStage({
+                        active = function()
+                            return true
+                        end,
+                        record = function(_, frame, instances)
+                            if not explode then
+                                return
+                            end
+                            ComputePass.begin(frame.commandBuffer, { instances.handle })
+                            openInside = passscope.openCount()
+                            error("stage boom")
+                        end,
+                        destroy = function() end,
+                    })
+                end,
+            })
+            assert.is_true(app:_init())
+
+            local open = passscope.openCount()
+            app:_simulate(1 / 60)
+
+            assert.is_truthy(app:crashed():match("stage boom"))
+            assert.are.equal(open + 1, openInside, "the stage's pass was never begun")
+            assert.are.equal(open, passscope.openCount(), "the pass outlived the frame")
+            assert.are.equal("submitted", app._frame.state)
+
+            explode = false
+            app:_simulate(1 / 60)
+            assert.are.equal("submitted", app._frame.state)
+            assert.are.equal(open, passscope.openCount())
+            app:_shutdown()
+        end)
+
+        it("recovers from an instance producer that throws", function()
+            local explode = true
+            local app = build({
+                plugin = function(world, self)
+                    scene(world)
+                    self.renderer:addProducer({
+                        count = function()
+                            return 4
+                        end,
+                        takeDirty = function()
+                            return explode and { 1, 4 } or {}
+                        end,
+                        write = function()
+                            error("producer boom")
+                        end,
+                    })
+                end,
+            })
+            assert.is_true(app:_init())
+
+            local open = passscope.openCount()
+            app:_simulate(1 / 60)
+
+            -- Extraction runs in RenderFirst, so this throws out of the update
+            -- and no frame was ever acquired. What has to survive is the
+            -- world, which was inside a query loop when the producer ran.
+            assert.is_truthy(app:crashed():match("producer boom"))
+            assert.are.equal(0, app.world._scopeDepth)
+            assert.are.equal(open, passscope.openCount())
+
+            explode = false
+            app:_simulate(1 / 60)
+            assert.are.equal("submitted", app._frame.state)
+            app:_shutdown()
         end)
     end)
 end)

@@ -38,6 +38,7 @@ local events <const> = require("tecs.platform.events")
 local Input <const> = require("tecs.platform.Input")
 local Window <const> = require("tecs.platform.Window")
 local Device <const> = require("tecs.gpu.Device")
+local Frame <const> = require("tecs.gpu.Frame")
 local Renderer <const> = require("tecs.Renderer")
 local Audio <const> = require("tecs.Audio")
 local assets <const> = require("tecs.assets")
@@ -155,6 +156,12 @@ local record Application
 
     _config: Application.Config
     _simulate: function(self: Application, dt: number)
+    _recover: function(self: Application)
+    --- The frame this iteration acquired, held so that recovery can resolve one
+    --- the throw left open. It survives into the next iteration and is
+    --- harmless there: a frame that submitted or cancelled is already
+    --- resolved, and resolving it again does nothing.
+    _frame: Frame
     --- Traceback of a gameplay crash. Once set, the loop stops simulating and
     --- rendering but keeps draining events and answering the debug server.
     _crashed: string
@@ -187,14 +194,57 @@ end
 ---
 --- Engine code is deliberately not guarded. An engine that throws is a bug
 --- here rather than in the game, and swallowing it would hide it.
+---
+--- This is also the only finally the language offers. A throw leaves whatever
+--- it was inside half done: a render or compute pass open, a command buffer
+--- holding a swapchain texture the presenter is waiting for, a world stuck in
+--- deferred mutation because the pop that ends a query loop was skipped.
+--- Recovery runs here rather than at each of the five call sites, because a
+--- call site that forgot it would be a leak nobody could see.
 local function guard(self: Application, what: string, body: function): boolean
     local ok, failure = xpcall(body, traceback) as (boolean, string)
     if ok then return true end
 
+    -- Recorded before anything is put back. Recovery has its own failures to
+    -- report and none of them may replace the traceback that says what
+    -- actually went wrong.
     self._crashed = failure
     LOGGER:error("%s crashed, still serving:\n%s", what, failure)
     mcp.setCrashed(failure)
+    self:_recover()
     return false
+end
+
+--- Puts back what a throw was holding.
+---
+--- Ordered outwards from the scarcest thing: the command buffer, which holds a
+--- slot in a finite pool and possibly the swapchain texture the display is
+--- waiting on; then the world, whose staged mutations every later read would
+--- otherwise miss; then the latency sample, which is measuring against a frame
+--- that will never be submitted.
+---
+--- Every step is protected on its own, so a step that fails does not stop the
+--- ones after it and none of them can throw out of the guard that called this.
+--- What they report is logged beside the crash, never in place of it.
+function Application:_recover()
+    local frame = self._frame
+    if frame ~= nil then
+        local failure = frame:abandon()
+        if failure ~= nil then
+            LOGGER:error("the frame could not be resolved: %s", failure)
+        end
+    end
+
+    local world = self.world
+    if world ~= nil then
+        local ok, failure = pcall(world.unwind, world) as (boolean, any)
+        if not ok then
+            LOGGER:error("the world could not be unwound: %s",
+                tostring(failure))
+        end
+    end
+
+    timing.abandonInput()
 end
 
 --- The body of a guarded emit, as one function rather than one per event.
@@ -517,46 +567,66 @@ function Application:_iterate(queue: loader.CValue, count: integer,
 end
 
 
+--- What a guarded frame runs, as one function rather than one per frame. Held
+--- here for the reason `deliver` is: a frame should not allocate a closure to
+--- be able to fail.
+local simulating: Application = nil
+local simulatingDt: number = 0.0
+local simulatingStart: number = 0.0
+
+local function step()
+    local self <const> = simulating
+    local t0 <const> = simulatingStart
+    self.world:update(simulatingDt)
+
+    local t1 = timing.begin()
+    local frame = self.device:beginFrame()
+    -- Recorded before anything is drawn into it, because everything after this
+    -- line can throw and the recovery path has no other way to reach it.
+    self._frame = frame
+    local t2 = timing.begin()
+    if frame == nil then return end
+
+    self.renderer:render(frame)
+    local t3 = timing.begin()
+    frame:submit()
+    local t4 = timing.begin()
+    if timing.enabled then
+        -- Simulation is the update without the extraction inside it. The
+        -- renderer's sync system runs in RenderFirst, so its cost is in
+        -- t1 - t0 and has to come back out: game work and extraction are
+        -- separate stages, and a change that moves cost between them is
+        -- invisible if they are one number.
+        timing.mark(SIMULATE, (t1 - t0) - self.renderer:extractSeconds())
+        timing.mark(ACQUIRE, t2 - t1)
+        timing.mark(RECORD, t3 - t2)
+        timing.mark(SUBMIT, t4 - t3)
+        -- Submission is where the frame leaves us for the display, so it is
+        -- where the event's path through the engine ends. A frame that
+        -- acquired nothing never got there and is not a sample.
+        timing.inputPresented(t1, t4)
+    end
+end
+
 --- One frame of simulation and rendering, guarded.
 ---
 --- A crash here does not end the process. The loop keeps draining events so the
 --- window still closes, and keeps answering the debug server so an agent that
 --- was watching gets the traceback rather than a refused connection. That is
 --- the moment the tooling is most useful and the worst one to lose it in.
+---
+--- It also does not leak. Everything the frame holds is reachable from the
+--- application while it is held, so `guard` can put all of it back; see
+--- `_recover` for what "all of it" is.
 function Application:_simulate(dt: number)
     local t0 = timing.begin()
     -- This step observes whatever the drain above delivered, so this is the
     -- moment the input stops waiting and starts being acted on.
     timing.inputConsumed(t0)
-    guard(self, "gameplay", function()
-        self.world:update(dt)
-
-        local t1 = timing.begin()
-        local frame = self.device:beginFrame()
-        local t2 = timing.begin()
-        if frame ~= nil then
-            self.renderer:render(frame)
-            local t3 = timing.begin()
-            frame:submit()
-            local t4 = timing.begin()
-            if timing.enabled then
-                -- Simulation is the update without the extraction inside it.
-                -- The renderer's sync system runs in RenderFirst, so its cost
-                -- is in t1 - t0 and has to come back out: game work and
-                -- extraction are separate stages, and a change that moves cost
-                -- between them is invisible if they are one number.
-                timing.mark(SIMULATE, (t1 - t0) - self.renderer:extractSeconds())
-                timing.mark(ACQUIRE, t2 - t1)
-                timing.mark(RECORD, t3 - t2)
-                timing.mark(SUBMIT, t4 - t3)
-                -- Submission is where the frame leaves us for the display, so
-                -- it is where the event's path through the engine ends. A
-                -- frame that acquired nothing never got there and is not a
-                -- sample.
-                timing.inputPresented(t1, t4)
-            end
-        end
-    end)
+    simulating = self
+    simulatingDt = dt
+    simulatingStart = t0
+    guard(self, "gameplay", step)
 end
 
 --- The gameplay traceback, or nil while the game is healthy.

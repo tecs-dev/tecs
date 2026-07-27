@@ -1225,8 +1225,14 @@ function WorldImpl:_pushQueryScope()
 end
 
 -- Leave query iteration scope; drain when the outer scope closes.
+--
+-- Clamped at zero because a cursor opened before an `unwind` is still holding
+-- a scope this world no longer has. Closing it afterwards would otherwise push
+-- the depth negative and leave every later `defer` one level short of
+-- deferring anything.
 function WorldImpl:_popQueryScope()
     local depth = self._scopeDepth - 1
+    if depth < 0 then depth = 0 end
     self._scopeDepth = depth
     if depth == 0 and self.isDirty then self:_drain() end
 end
@@ -1242,8 +1248,19 @@ function WorldImpl:commit()
     if self._scopeDepth == 0 and self.isDirty then self:_drain() end
 end
 
+function WorldImpl:unwind()
+    self._scopeDepth = 0
+    if self.isDirty then self:_drain() end
+end
+
 function WorldImpl:update(dt: number)
-    self:commit()
+    -- Unwind rather than commit one level. A system that threw inside
+    -- `query:iter()` never reached the pop that ends the loop's scope, and a
+    -- world left deferred stages every later mutation instead of applying it,
+    -- which nothing announces. At depth zero or one this is exactly the commit
+    -- it replaces; the difference is only that a frame which failed cannot
+    -- make the frames after it lie.
+    self:unwind()
     if self._ffiSliceId ~= 0 then
         GLOBAL_FFI_EVENTS:clearSlice(self._ffiSliceId)
     end

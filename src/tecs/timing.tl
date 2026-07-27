@@ -190,6 +190,15 @@ function timing.inputPresented(drawStarted: number, at: number)
     timing.mark(LATENCY, at - arrival)
 end
 
+--- Drops the sample a step began and its frame never finished.
+---
+--- A frame that threw was never submitted, so there is no moment to measure it
+--- against. Left in place, the batch it took would be completed by the next
+--- frame that did submit and reported as a wait nobody had.
+function timing.abandonInput()
+    takenArrival = nil
+end
+
 --- Discards what has been recorded. A bench calls this after warmup, so the
 --- frames that built the scene are not in the distribution of frames that ran
 --- it.

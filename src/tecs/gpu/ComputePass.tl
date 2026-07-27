@@ -13,6 +13,7 @@
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
+local passscope <const> = require("tecs.gpu.passscope")
 
 local C <const> = sdl.C
 
@@ -21,6 +22,12 @@ local record ComputePass
     --- between the begin and the end: a pass does not outlive its command
     --- buffer's recording.
     handle: loader.CPtr
+    --- The command buffer this pass was begun on, or nil for a pass wrapped
+    --- without one. Kept so the pass can take itself off the open list, which
+    --- is what lets a recovery path end a pass whose body threw. Nothing else
+    --- reads it: a compute uniform is pushed onto the buffer the caller
+    --- already holds.
+    commandBuffer: loader.CValue
     _finished: boolean
 
     --- Wraps a begun compute pass handle.
@@ -28,8 +35,11 @@ local record ComputePass
     --- For a caller that began the pass itself. `begin` is the usual way in,
     --- and calls this.
     --- @param handle An `SDL_GPUComputePass` that has been begun and not ended.
+    --- @param commandBuffer The command buffer it was begun on. Omitting it
+    ---     leaves the pass untracked, so a body that throws inside it leaves it
+    ---     open and only the caller can end it.
     --- @return A pass that owns the handle and will end it on `finish`.
-    wrap: function(handle: loader.CPtr): ComputePass
+    wrap: function(handle: loader.CPtr, commandBuffer?: loader.CValue): ComputePass
 
     --- Begins a compute pass on `commandBuffer`.
     ---
@@ -93,10 +103,15 @@ end
 
 local ComputePassMT <const>: metatable<ComputePass> = { __index = ComputePass }
 
-function ComputePass.wrap(handle: loader.CPtr): ComputePass
+function ComputePass.wrap(handle: loader.CPtr,
+                          commandBuffer?: loader.CValue): ComputePass
     local self = setmetatable({} as ComputePass, ComputePassMT)
     self.handle = handle
+    self.commandBuffer = commandBuffer
     self._finished = false
+    if commandBuffer ~= nil then
+        passscope.opened(commandBuffer, self as passscope.Pass)
+    end
     return self
 end
 
@@ -118,7 +133,7 @@ function ComputePass.begin(commandBuffer: loader.CValue, readWriteBuffers: {load
     local handle = C.SDL_BeginGPUComputePass(commandBuffer,
         nil, 0, bindings, #readWriteBuffers)
     if handle == nil then sdl.fail("SDL_BeginGPUComputePass") end
-    return ComputePass.wrap(handle)
+    return ComputePass.wrap(handle, commandBuffer)
 end
 
 function ComputePass:bindPipeline(pipeline: loader.CValue)
@@ -140,6 +155,7 @@ end
 function ComputePass:finish()
     if self._finished then return end
     self._finished = true
+    if self.commandBuffer ~= nil then passscope.closed(self.commandBuffer) end
     C.SDL_EndGPUComputePass(self.handle)
     self.handle = nil
 end

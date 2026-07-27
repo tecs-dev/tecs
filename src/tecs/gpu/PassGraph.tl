@@ -250,8 +250,14 @@ end
 local function resize(self: PassGraph, width: integer, height: integer)
     if self._width ~= width or self._height ~= height then
         for _, name in ipairs(self._order) do
+            -- Dropped before the replacement is built rather than after, so a
+            -- creation that fails leaves the name empty instead of leaving it
+            -- pointing at a texture that has already been released.
             local existing = self._textures[name]
-            if existing ~= nil then existing:destroy() end
+            if existing ~= nil then
+                self._textures[name] = nil
+                existing:destroy()
+            end
 
             local spec = self._targets[name]
             local scaledWidth = math.max(1, math.floor(width * spec.scale))
@@ -291,6 +297,11 @@ local function resize(self: PassGraph, width: integer, height: integer)
 end
 
 --- Runs every enabled pass against `frame`.
+---
+--- A pass body that throws takes the whole frame with it, and the pass it was
+--- inside is left open. Nothing here catches that: the pass is on the frame's
+--- open list from the moment it began, and `Frame:abandon` is what ends it, so
+--- recovery happens once where the frame is resolved rather than once per pass.
 function PassGraph:execute(frame: Frame)
     local frameWidth = frame.width
     local frameHeight = frame.height

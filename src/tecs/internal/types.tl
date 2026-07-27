@@ -440,6 +440,7 @@ local record internal
         _popQueryScope: function(self: WorldImpl)
         defer: function(self: WorldImpl)
         commit: function(self: WorldImpl)
+        unwind: function(self: WorldImpl)
         update: function(self: WorldImpl, dt: number)
         enablePhase: function(self: WorldImpl, phase: Phase)
         disablePhase: function(self: WorldImpl, phase: Phase)

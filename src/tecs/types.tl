@@ -688,6 +688,16 @@ local record types
         --- outermost scope finishes.
         commit: function(self)
 
+        --- Close every open scope and apply what they staged.
+        ---
+        --- The recovery path after something threw part way through a frame.
+        --- A throw inside `query:iter()` skips the pop that ends the loop's
+        --- scope, and a world left deferred stages every later mutation rather
+        --- than applying it, silently. This is what puts it back, and it is
+        --- safe on a healthy world: at depth zero it is the drain `commit`
+        --- already does.
+        unwind: function(self)
+
         -------------------------------------------------------------------------------
         -- Plugin methods
         -------------------------------------------------------------------------------

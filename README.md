@@ -350,6 +350,54 @@ and `context` reports `world.components` from `world:getStats` beside
 `world.declaredComponents` from the registry. An agent that cannot find a
 component can tell which of the two it is looking at.
 
+### A frame that throws puts back what it was holding
+
+The guard keeps the process alive, and that is only half of what a crash needs.
+The other half is that a frame holds things across calls that can fail. A render
+or compute pass is open between its begin and its end; a command buffer holds a
+slot in a finite pool and, once a swapchain texture has been acquired on it, the
+texture the display is waiting for; and a query loop holds the world in deferred
+mutation for as long as it is iterating. Lua has no finally, so a throw between
+two of those lines releases none of it.
+
+So the guard is the finally. It records the traceback first and puts back
+afterwards, in that order, because recovery has failures of its own to report
+and none of them may replace the one that explains the crash. What it puts back
+is reachable from the application while it is held: the frame is recorded on
+`app._frame` the moment it is acquired, so recovery can resolve one that the
+throw skipped past.
+
+A begun pass registers itself against its command buffer in `gpu.passscope` and
+takes itself off there when it finishes. That is the one thing a call site
+cannot do for itself, and registering by command buffer rather than by frame is
+what makes it cover every caller, including a compute stage a game installs and
+records its own passes from.
+
+How a broken frame is resolved is SDL's decision, not a preference.
+`SDL_CancelGPUCommandBuffer` is documented as an error once a swapchain texture
+has been acquired, and `Device:beginFrame` returns only after acquiring one, so
+cancelling was invalid on essentially every frame that existed. `Frame:cancel`
+now refuses in that state and `Frame:abandon` is the recovery path: it ends the
+open pass and then submits when a texture was acquired and cancels when none
+was. What reaches the screen is what the frame drew before it threw, which for a
+throw ahead of the composite is whatever the swapchain texture last held.
+Clearing it would be a decision about what the game looks like, and recovery is
+not the place that makes those.
+
+Acquiring the swapchain later than `beginFrame` does would make cancellation
+legal again and would shorten the block that dominates a 60 Hz budget, which is
+the better shape and is not this change: the frame's size comes back from that
+acquire and is read by the cull, the pass graph and every target it sizes, so
+moving it needs a second source for the size and a benchmark on both ends.
+
+`world:unwind` closes every open scope and drains. `world:update` calls it
+instead of committing one level, so a system that threw two loops deep cannot
+leave the world staging mutations through every update after it, and popping a
+query scope is clamped at zero so a cursor closed after an unwind cannot push
+the depth negative. Nothing in the ECS catches to do this: catching there would
+build the traceback at the rethrow rather than at the line that failed, and the
+traceback is the point.
+
 ## Workers and assets
 
 Workers are the only sanctioned way to run work off the main thread. Raw

@@ -151,6 +151,13 @@ end
 --- under vsync and where a CPU running ahead of `framesInFlight` is held back.
 --- The frame's size is the swapchain's, which is not the window's on a
 --- high-density display and is what a pass should size targets to.
+---
+--- Both failures below cancel, and both are before an acquisition: a call that
+--- returned false acquired nothing, and one that filled the handle with NULL
+--- did not either, which SDL says is not an error and happens while the window
+--- is minimised. Cancelling is only legal there. Once a texture has come back,
+--- the command buffer's only way out is a submission, which is why the frame
+--- this returns carries that fact rather than leaving it to be worked out.
 --- @return A frame to record into, or nil to skip this one.
 function Device:beginFrame(): Frame
     local commandBuffer = C.SDL_AcquireGPUCommandBuffer(self.handle)

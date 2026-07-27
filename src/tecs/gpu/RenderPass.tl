@@ -11,11 +11,17 @@
 --- staging struct that a concurrent `begin` would overwrite. `finish` is what
 --- releases both.
 ---
+--- A begun pass is also recorded in `passscope` against its command buffer and
+--- taken off there by `finish`. That is the one thing the call site cannot do
+--- for itself: a body that throws skips the `finish` written after it, and the
+--- command buffer is all a recovery path has to find the pass by.
+---
 --- Supports multiple colour attachments, which is what makes a deferred
 --- G-buffer one pass rather than one pass per channel.
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
+local passscope <const> = require("tecs.gpu.passscope")
 
 local C <const> = sdl.C
 
@@ -65,7 +71,9 @@ local record RenderPass
     handle: loader.CPtr
     --- The command buffer this pass records into. Uniform pushes target the
     --- command buffer rather than the pass, so it is kept here to save every
-    --- caller from threading it alongside.
+    --- caller from threading it alongside. It is also what the pass takes
+    --- itself off the open list by, which is what lets a recovery path end a
+    --- pass whose body threw.
     commandBuffer: loader.CValue
     --- Number of colour attachments this pass was begun with.
     targetCount: integer
@@ -230,6 +238,7 @@ function RenderPass.wrap(handle: loader.CPtr, commandBuffer: loader.CValue, targ
     self.commandBuffer = commandBuffer
     self.targetCount = targetCount or 1
     self._finished = false
+    passscope.opened(commandBuffer, self as passscope.Pass)
     return self
 end
 
@@ -364,6 +373,7 @@ end
 function RenderPass:finish()
     if self._finished then return end
     self._finished = true
+    passscope.closed(self.commandBuffer)
     C.SDL_EndGPURenderPass(self.handle)
     self.handle = nil
 end
