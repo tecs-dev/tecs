@@ -42,7 +42,9 @@ describe("phases", function()
                 world:addSystem({
                     name = "spec.Mark." .. phase.name,
                     phase = phase,
-                    run = function() ran[phase.name] = true end,
+                    run = function()
+                        ran[phase.name] = true
+                    end,
                 })
             end
         end
@@ -58,7 +60,9 @@ describe("phases", function()
         -- FixedLast as dead and be wrong about it. Pinning dt to two steps
         -- makes that arithmetic rather than a race with the machine.
         local previous = clock.provider
-        clock.provider = function() return clock.nominal * 2.0 end
+        clock.provider = function()
+            return clock.nominal * 2.0
+        end
 
         finally(function()
             clock.provider = previous
@@ -80,7 +84,6 @@ describe("phases", function()
             end
         end
 
-        assert.are.equal(0, #dead,
-            "phases that never ran: " .. table.concat(dead, ", "))
+        assert.are.equal(0, #dead, "phases that never ran: " .. table.concat(dead, ", "))
     end)
 end)
