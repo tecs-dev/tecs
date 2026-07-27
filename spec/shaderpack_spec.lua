@@ -172,7 +172,7 @@ describe("shaders", function()
 
     it("hashes source so a changed shader is detectable", function()
         local one = shaders.hash("#version 450\nvoid main() {}\n")
-        assert.are.equal(8, #one)
+        assert.are.equal(16, #one)
         assert.are.equal(one, shaders.hash("#version 450\nvoid main() {}\n"))
         assert.are_not.equal(one, shaders.hash("#version 450\nvoid main(){}\n"))
     end)

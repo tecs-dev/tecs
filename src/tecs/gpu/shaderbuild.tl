@@ -87,8 +87,8 @@ function shaderbuild.manifest(pack: shaderpack.Pack): string
         pack.target, shaderpack.formatName(pack.format), #keys)
     lines[#lines + 1] = ""
     lines[#lines + 1] = "key                          stage     bytes  entry  "
-        .. "source    resources"
-    lines[#lines + 1] = ("-"):rep(96)
+        .. "source            resources"
+    lines[#lines + 1] = ("-"):rep(104)
 
     for _, key in ipairs(keys) do
         local entry = pack.shaders[key]
@@ -103,7 +103,7 @@ function shaderbuild.manifest(pack: shaderpack.Pack): string
             threads = (" threads %dx%dx%d"):format(
                 entry.threadCount[1], entry.threadCount[2], entry.threadCount[3])
         end
-        lines[#lines + 1] = ("%-28s %-9s %6d  %-6s %-9s %s%s"):format(
+        lines[#lines + 1] = ("%-28s %-9s %6d  %-6s %-17s %s%s"):format(
             key, entry.stage, #entry.code, entry.entrypoint, entry.sourceHash,
             resources, threads)
     end

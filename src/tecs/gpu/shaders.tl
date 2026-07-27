@@ -16,8 +16,8 @@
 ---   shaders/instance.cull.comp.glsl   compute
 ---   shaders/include/depth.glsl        included, never compiled alone
 
-local bit <const> = require("bit")
 local sdl <const> = require("tecs.ffi.sdl3")
+local hash <const> = require("tecs.hash")
 local loader <const> = require("tecs.ffi.loader")
 local paths <const> = require("tecs.platform.paths")
 local assets <const> = require("tecs.assets")
@@ -115,21 +115,21 @@ local function find(relative: string): string
     return nil
 end
 
---- FNV-1a over the bytes, as eight hex digits.
+--- Identity of a shader source, as sixteen hex digits.
 ---
---- Identifies a source so a pack built from different text is detected rather
---- than trusted. Hashed after includes are expanded, which is the whole reason
---- they are expanded here rather than left to the compiler: a hash of the
---- top-level file alone would not change when an include did, and a stale pack
---- would pass its own check.
+--- The hash itself is `tecs.hash`, which is where an engine-wide facility
+--- belongs. What stays here is the rule about *what* is hashed, because that
+--- rule is about shaders and nothing else: the text passed in must be a source
+--- with its includes already expanded. That is the whole reason expansion
+--- happens in this module rather than being left to the compiler's own include
+--- callbacks. A hash of a top-level file alone would not change when one of its
+--- includes did, and a pack built before that edit would pass its own check.
+---
+--- Every caller here holds a `shaders.Entry`, whose `source` is expanded by
+--- construction, so the invariant is carried by the type rather than
+--- remembered at each call.
 function shaders.hash(text: string): string
-    local h = 0x811c9dc5
-    for i = 1, #text do
-        h = bit.bxor(h, text:byte(i))
-        h = bit.bor(0, bit.lshift(h, 24) + bit.lshift(h, 8)
-            + bit.lshift(h, 7) + bit.lshift(h, 4) + bit.lshift(h, 1) + h)
-    end
-    return bit.tohex(h)
+    return hash.fnv1a64(text)
 end
 
 --- Expands `#include "name"` against the include directory.

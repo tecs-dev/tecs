@@ -58,6 +58,8 @@ local type physics = require("tecs.physics")
 local type log = require("tecs.log")
 local type mcp = require("tecs.mcp")
 local type json = require("tecs.json")
+local type hash = require("tecs.hash")
+local type compress = require("tecs.compress")
 
 local record tecs
     type World = types.World
@@ -131,6 +133,8 @@ local record tecs
     application: function(config: Application.Config): Application
 
     json: json
+    hash: hash
+    compress: compress
     phases: phases
     builtins: builtins
     runif: runIfHelpers
@@ -276,8 +280,9 @@ function tecs.application(config: Application.Config): Application
     return create(config)
 end
 
---- Module paths resolved on first use, being everything that reaches native
---- code: the engine, and JSON, whose parser is C.
+--- Module paths resolved on first use: everything that reaches native code,
+--- which is the engine and JSON, whose parser is C, plus the byte facilities,
+--- which cost nothing to skip and which most programs never ask for.
 ---
 --- Listed rather than discovered, so `tecs.Aplication` is an error where it is
 --- written instead of a nil where it is called.
@@ -310,6 +315,8 @@ local ENGINE <const>: {string: string} = {
     log = "tecs.log",
     mcp = "tecs.mcp",
     json = "tecs.json",
+    hash = "tecs.hash",
+    compress = "tecs.compress",
 }
 
 setmetatable(tecs as {string: any}, {

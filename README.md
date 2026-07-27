@@ -407,6 +407,36 @@ All three entry points record what they touched. `assets.loaded` answers every
 path this process has read or decoded and the kind it was read as, which is what
 the file watcher polls instead of walking the content tree.
 
+## Hashing and decompression
+
+`tecs.hash` and `tecs.compress` are two modules rather than one, because
+"operations over bytes" is a category and not a concern: they share no code and
+no state, and a tool that wants a shader's identity has no reason to load a
+DEFLATE decoder. What they do share runs one way, which is the evidence they
+are two: `compress` verifies a zlib stream against the Adler-32 in its trailer,
+and Adler-32 is a hash, so it lives in `hash` and `compress` requires it. Both
+resolve lazily off the surface, the way `json` and `log` do.
+
+`hash.fnv1a64` is what identifies content: the shader pack carries one per
+source so a pack built before an edit is detected rather than trusted. It is
+not an integrity primitive and is not offered as one. Sixty-four bits puts an
+accidental collision out of reach and a deliberate one within it, and
+establishing that an asset is the asset that was published is a different
+question with a different answer. The algorithm is in the name because the
+values are written into files that outlive the process, so changing it has to
+be a rename that every caller is rechecked against rather than a silent change
+of meaning. `hash.adler32` is there for the format that specifies it.
+
+`compress.inflate` reads zlib streams and `compress.inflateRaw` reads the
+DEFLATE inside them. Nothing writes, so there is no `deflate`: packs are
+LuaJIT's own serialization, snapshots are JSON, and a screenshot is compressed
+inside SDL_image. It is Lua rather than the zlib already in the process as a
+dependency of SDL3_image, which is neither bound nor linked by name. Binding it
+would mean cdefs, the ABI check, and a pinned source build on every packaged
+preset; decompressing happens once per asset, on a worker, off the frame, so
+what that buys is milliseconds nothing waits on. If a profile ever disagrees,
+the two functions keep their names and something else answers them.
+
 ## Sound
 
 `app.audio` is the whole surface: load a clip, play it, set a gain, fade it,
@@ -2187,6 +2217,8 @@ src/tecs/FramePacket.tl   what crosses between the two
 src/tecs/Audio.tl         clips, voices, groups, and the Sound component
 src/tecs/physics/         Box2D binding and its world plugin
 src/tecs/sequence/        the sequencer, and the tween runtime inside it
+src/tecs/hash.tl          FNV-1a and Adler-32 over byte strings
+src/tecs/compress.tl      zlib and raw DEFLATE decompression
 spec/                       busted suite
 ```
 

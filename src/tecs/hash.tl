@@ -1,0 +1,129 @@
+--- Content hashes over byte strings.
+---
+--- What a hash is for decides what belongs here, and two callers ask for
+--- different things.
+---
+--- A build artifact carries a hash of the source it was built from, so a pack
+--- that no longer matches its shaders is detected rather than trusted. That
+--- wants speed, and a collision rate low enough that an accident never reaches
+--- it. It does not want resistance to a collision built on purpose: the source
+--- and the artifact are produced by the same build, on the same machine, from
+--- a tree the person running it already controls.
+---
+--- A compressed stream carries a checksum of what it decompresses to, and the
+--- checksum is fixed by the format rather than chosen. `tecs.compress` verifies
+--- a zlib stream against the Adler-32 in its trailer, so Adler-32 lives here:
+--- it is a hash function, and a caller that inflated by some other route still
+--- wants a way to check one.
+---
+--- **`fnv1a64` is not an integrity primitive.** Sixty-four bits puts an
+--- accidental collision far beyond anything a build will produce, and puts a
+--- deliberate one within reach of anyone who wants one. Establishing that a
+--- downloaded asset is the asset that was published is a different question
+--- with a different answer: a cryptographic digest over the bytes and a
+--- signature over the manifest that lists them. Nothing here asks that
+--- question yet, so nothing here answers it, and the day something does it
+--- gets its own function rather than a wider version of this one.
+---
+--- **The algorithm is in the name on purpose.** A hash produced here is
+--- written into files that outlive the process. Called `hash.content`, a
+--- change to what it computes would invalidate every stored value with nothing
+--- at any call site to notice; called `hash.fnv1a64`, the format is part of
+--- the signature and a change is a rename that every caller is rechecked
+--- against.
+
+local ffi <const> = require("ffi")
+local bit <const> = require("bit")
+
+local sbyte <const> = string.byte
+
+--- A 64-bit unsigned integer, as FFI cdata.
+---
+--- FNV-1a is defined over 64-bit arithmetic and there is no other way to spell
+--- that here: a double holds integers exactly only to 2^53, and doing it in two
+--- 32-bit halves costs a carry, two moduli and a division per byte. Handing it
+--- to the FFI instead is the same three lines the specification is written in,
+--- and it is measured at four times the throughput of the halves and two and a
+--- half times that of the 32-bit hash this replaces.
+---
+--- That rests on LuaJIT sinking the box, which it does inside a compiled trace
+--- and not in the interpreter, so the first few dozen bytes of a call allocate
+--- and the rest do not. Bounded by the trace threshold rather than by the input,
+--- so it does not grow with what is being hashed.
+local record U64
+    metamethod __mul: function(self: U64, other: U64): U64
+end
+
+--- LuaJIT widens the bit operations to 64 bits when they are handed cdata, and
+--- `tohex` takes the digit count that goes with it. Declared here because the
+--- library is typed over Lua numbers, which is what it does for everything else.
+local u64 <const> = ffi.typeof("uint64_t") as function(value: number): U64
+local bxor <const> = bit.bxor as function(value: U64, byte: integer): U64
+local lshift <const> = bit.lshift as function(value: U64, bits: integer): U64
+local bor <const> = bit.bor as function(value: U64, other: number): U64
+local tohex <const> = bit.tohex as function(value: U64, digits: integer): string
+
+--- FNV-1a's 64-bit prime, 0x100000001b3, and its offset basis,
+--- 0xcbf29ce484222325. Assembled from 32-bit halves because the basis is larger
+--- than a double holds exactly, so no Lua number names it and it cannot simply
+--- be written down.
+local PRIME <const> = bor(lshift(u64(0x100), 32), 0x1b3)
+local BASIS <const> = bor(lshift(u64(0xcbf29ce4), 32), 0x84222325)
+
+--- Adler-32's modulus, from RFC 1950.
+local ADLER_MODULUS <const> = 65521
+
+--- The most bytes that may be summed before the modulus has to be applied.
+--- Past this the inner sum leaves the range a double holds exactly, and the
+--- checksum starts coming back wrong on long inputs only.
+local ADLER_RUN <const> = 5552
+
+local record hash
+end
+
+--- FNV-1a over the bytes of `text`, 64-bit, as sixteen lowercase hex digits.
+---
+--- @param text Any string. NUL and bytes above 127 hash like any other.
+--- @return Sixteen hex digits, high half first, so hashes sort as their values
+---     do and two of them compare as strings.
+function hash.fnv1a64(text: string): string
+    local state = BASIS
+    for index = 1, #text do
+        state = bxor(state, sbyte(text, index)) * PRIME
+    end
+    return tohex(state, 16)
+end
+
+--- Adler-32 over the bytes of `text`, as a number in [0, 2^32).
+---
+--- The checksum RFC 1950 puts in a zlib stream's trailer, which is the only
+--- reason it is here. It is a poor content hash and is not offered as one: it
+--- is a sum of a sum, it barely mixes on short inputs, and two files that
+--- differ by reordering equal-length runs collide outright. Use `fnv1a64` for
+--- identity and this only for the format that specifies it.
+---
+--- The modulus is applied once per run of 5552 bytes rather than once per byte,
+--- which is the longest run whose sums stay exact in a double. Doubles rather
+--- than cdata here because nothing in it exceeds 2^53 and the arithmetic is
+--- what LuaJIT is already fastest at.
+function hash.adler32(text: string): integer
+    local a, b = 1, 0
+    local size = #text
+    local index = 1
+
+    while index <= size do
+        local last = index + ADLER_RUN - 1
+        if last > size then last = size end
+        for at = index, last do
+            a = a + sbyte(text, at)
+            b = b + a
+        end
+        a = a % ADLER_MODULUS
+        b = b % ADLER_MODULUS
+        index = last + 1
+    end
+
+    return b * 65536 + a
+end
+
+return hash

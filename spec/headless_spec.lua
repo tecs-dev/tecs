@@ -112,6 +112,7 @@ describe("tecs headless", function()
                     "tecs.Application", "tecs.Renderer", "tecs.workers",
                     "tecs.assets", "tecs.physics", "tecs.mcp",
                     "tecs.gpu.Device", "tecs.ffi.sdl3", "tecs.ffi.box2d",
+                    "tecs.hash", "tecs.compress",
                 }
                 local loaded = {}
                 for _, name in ipairs(engine) do

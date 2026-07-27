@@ -80,10 +80,17 @@ local record shaderpack
     --- Layout this build writes and the only one it reads. Bumping it is what
     --- makes an older pack fail loudly instead of decoding into the wrong
     --- fields.
+    ---
+    --- Version 2 is version 1's fields with `sourceHash` computed differently.
+    --- The layout did not change, so a version 1 pack still decodes; what
+    --- changed is that every hash in it now describes nothing this build
+    --- computes, and every entry would be reported as built from source that
+    --- has since been edited. That message would be wrong about why. Bumping
+    --- the version replaces it with the true one.
     VERSION: integer
 end
 
-shaderpack.VERSION = 1
+shaderpack.VERSION = 2
 
 local FORMAT_NAMES <const>: {string} = {
     "private", "spirv", "dxbc", "dxil", "msl", "metallib",
