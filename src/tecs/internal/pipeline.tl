@@ -49,6 +49,13 @@ local record PipelineImpl is Pipeline
 
     fixedAccumulator: number
 
+    -- Fixed steps run since the world was made. The clock anything advancing
+    -- on the simulation rather than on frame time reads, which is why it counts
+    -- steps rather than accumulating seconds: two runs fed the same steps read
+    -- the same number however many frames either drew, and a whole number of
+    -- steps stays exact in a float far longer than a sum of them would.
+    fixedStepCount: integer
+
     count: integer
 
     beforeFixedGroup: FlatGroup
@@ -91,6 +98,7 @@ function pipeline.new(fixedTimestep: number): Pipeline
         phaseStates = table_new(#phases.index, 0) as {boolean},
         fixedTimestep = fixedTimestep or (1 / 60), -- Default to 60 FPS if not provided
         fixedAccumulator = 0,
+        fixedStepCount = 0,
         count = 0,
         beforeFixedGroup = EMPTY_GROUP,
         fixedGroup = EMPTY_GROUP,
@@ -323,6 +331,10 @@ local function runFixedLoop(self: PipelineImpl, dt: number, world: World)
 
     repeat
         iterations = iterations + 1
+        -- Counted whether or not any system runs, because it is a clock and not
+        -- a measure of work: playback advances on a world with no fixed systems
+        -- in it exactly as it does on one with many.
+        self.fixedStepCount = self.fixedStepCount + 1
         fixedtracking.beginStep(world)
         if hasWork then
             runGroup(fixedGroup, fixedTimestep, world)

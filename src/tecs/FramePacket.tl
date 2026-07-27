@@ -49,6 +49,15 @@ local record FramePacket
     cameraZoom: number
     cameraRotation: number
 
+    --- Fixed steps the world had run when this frame was extracted.
+    ---
+    --- What GPU-side animation resolves a frame against. It crosses in the
+    --- packet rather than being read where it is used, so every pass that draws
+    --- one frame resolves against one number: a shadow reading a clock a
+    --- moment later than the sprite that cast it is exactly the drift this
+    --- avoids by construction.
+    stepClock: number
+
     --- Lights, `lightlayout.FLOATS` each, in the order the lighting pass reads
     --- them.
     lights: loader.CArray
@@ -74,6 +83,7 @@ function FramePacket.create(): FramePacket
     self.cameraY = 0.0
     self.cameraZoom = 1.0
     self.cameraRotation = 0.0
+    self.stepClock = 0.0
     self.lights = loader.newArray("float[?]", MAX_LIGHTS * LIGHT_FLOATS)
     self.lightCount = 0
     self.instanceRanges = dirtyranges.create()

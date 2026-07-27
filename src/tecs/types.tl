@@ -544,6 +544,9 @@ local record types
         --- Use with fixedTimestep to compute interpolation alpha: accumulator / timestep.
         fixedAccumulator: number
 
+        --- Fixed steps run since the pipeline was made.
+        fixedStepCount: integer
+
         --- Update the pipeline.
         --- @param dt The delta time since the last update.
         --- @param world The world to update.
@@ -725,6 +728,18 @@ local record types
         --- @return accumulator Residual time in seconds.
         --- @return alpha Clamped interpolation fraction.
         getFixedTiming: function(self): number, number, number
+
+        --- Fixed steps run since the world was made.
+        ---
+        --- The clock for anything that advances on the simulation rather than
+        --- on frame time. It counts steps rather than summing seconds, so two
+        --- runs fed the same steps read the same number however many frames
+        --- either of them drew, and the value stays a whole number.
+        ---
+        --- Counted whether or not any system is registered in a fixed phase.
+        ---
+        --- @return Steps run, from zero.
+        fixedStepCount: function(self): integer
 
         --- Run the startup systems.
         startup: function(self)

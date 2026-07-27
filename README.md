@@ -932,6 +932,82 @@ it, emitting `Completed` each time. `animation.restart` is the explicit form
 and also rewinds one that has not finished; `animation.play` is for pointing an
 entity at a different sheet or tag.
 
+## Playback on the GPU
+
+The gate above cuts the walk and not the rewrite, and the rewrite is what
+decides whether a large animated scene is affordable. One animating sprite marks
+the `Sprite` column of the archetype it lives in, and a dirty column has its
+whole run rewritten and uploaded, so two thousand animating sprites in a field
+of two hundred thousand cost two hundred thousand instances written. That is
+measured rather than argued: `make bench-sprites` reports it as `rewritten`, and
+the sparse regime exists to show it.
+
+`animation.useGPU(true)` moves the resolution to the shader. The instance's
+region fields stop carrying a region and start carrying enough to compute one:
+which animation is playing, the fixed step it began on, and how many ticks of
+clip time it advances per step. A frame changing then writes nothing at all, and
+what a step costs is what actually changed rather than what is shaped like it.
+At two hundred thousand sprites all animating, `rewritten` goes from a mean of
+eighty-five thousand per frame to zero, and the frame time lands on what a scene
+of the same size that never animates costs.
+
+What makes it fit in the instance is that it needs no room. A region is four
+floats and a playback is four floats, and no region is ever negative, so the
+sign of the first says which is which for one comparison and no memory traffic.
+The instance stays at sixteen floats, which at four million is 256 MB either
+way: a fifth `vec4` would have been 64 MB a frame to say something most
+instances have nothing to say about, which is the same argument the pivot fold
+already makes.
+
+What it resolves against is `src/tecs/gfx/frametable.tl`, one buffer holding a
+directory, a tick table and the frame regions. A tick is a millisecond because
+that is the unit the model is authored in, so every boundary an artist can write
+lands on a tick and the table reproduces `Sheet:frameAt` exactly rather than
+approximately. That makes a lookup constant time whatever the tag holds: one
+directory read, one tick read, one region read, and no loop. A scan of
+cumulative durations would cost the length of the tag, in the vertex shader,
+once per vertex, for every pass that draws the sprite.
+
+The clock is the world's count of fixed steps, from `world:fixedStepCount`,
+carried in the frame packet and pushed in the spare component of the layer
+uniform. Steps rather than seconds is what keeps playback on the simulation's
+clock: two machines fed the same steps show the same frame however many frames
+either drew, which is the property the host path has and the reason it runs in
+`FixedPostUpdate`. It also costs no binding and no second push, because that
+block is already sent every frame.
+
+Resolution lives in `assets/shaders/include/playback.glsl` rather than in the
+vertex shader, because it will have more than one caller. An occluder pass takes
+a silhouette from the same texture at the same region, a drop-shadow pass draws
+a stretched copy of that silhouette, and an animated light cookie needs a frame
+too. All of them have to arrive at the same frame, so the include takes the
+playback and the clock as parameters and declares its buffer behind a define
+pair: a second caller needs no edit to it. The rule that goes with it is to
+resolve at the point of use and never carry a resolved region from one pass to
+another, because a buffer of regions written by one pass and read by the next is
+what makes a shadow lag the sprite casting it.
+
+What writes the encoding is `tecs.EncodeAnimation`, in `PostUpdate`, gated on
+the `Animation` column's own dirty bit. That bit is set by exactly the things
+that change what is playing: a spawn, an archetype move, `play`, `restart`, and
+any direct write. So a step where nothing changed visits no archetype, and a
+`batchSpawn` or a snapshot load is encoded on the first update after it without
+either knowing this exists. The phase is `PostUpdate` rather than a render one
+so it lands before extraction whatever order the plugins were installed in.
+
+Pausing has to be said rather than assumed, because the world's clock does not
+stop for one entity. A rate of zero means held, and the second field then
+carries the tick to hold instead of the step playback began on. `Paused` moves
+an entity to another archetype and a move marks every component on the
+destination dirty, so the freeze and the thaw both arrive at the encoder without
+anything having to notice them.
+
+The host path is still the default while the two are measured against each
+other, and what is not ported to the GPU one yet is the pivot that follows a
+moving slice, the `Completed` and `Looped` events, and reading the current frame
+back on the host. `../tecs-plans/gpu-animation.md` is the design and says what
+each of those costs.
+
 ## Buffer writes
 
 SDL_GPU has no mappable device buffer. Data reaches one by being written into

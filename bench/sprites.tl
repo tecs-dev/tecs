@@ -71,6 +71,14 @@ local MODE <const> = os.getenv("BENCH_MODE") or "dense"
 --- where a few characters are walking is one archetype, not two.
 local CHURN <const> = tonumber(os.getenv("BENCH_CHURN")) or 0.01
 
+--- Resolve playback on the GPU rather than on the host.
+---
+--- The regime this changes is `dense` and `sparse`, and what it should change
+--- is `rewritten`: a frame advancing stops being a write to the Sprite column,
+--- so it stops rewriting every instance in the archetype. `churn` is untouched
+--- either way, because what drives that one is the layout moving.
+local GPU <const> = os.getenv("BENCH_GPU_ANIM") == "1"
+
 --- Sprites spawned per frame in `churn`, each despawned `BENCH_LIFETIME`
 --- frames later, so the population is level while the identities turn over.
 local SPAWN_RATE <const> = math.floor(tonumber(os.getenv("BENCH_SPAWN")) or 64)
@@ -252,6 +260,7 @@ return tecs.application({
             duration = FRAME_MS,
         }):bind(resident)
 
+        animation.useGPU(GPU)
         if MODE ~= "static" then animation.plugin(app.world) end
 
         math.randomseed(42)
@@ -265,9 +274,10 @@ return tecs.application({
             print(("sprites: %d sprites over %.0fx%.0f, %d animating")
                 :format(COUNT, AREA_W, AREA_H, PLAYING))
         end
-        print(("sprites: mode %s, viewport %dx%d, measuring %d frames after "
-            .. "%d warmup")
-            :format(MODE, WIDTH, HEIGHT, FRAMES, WARMUP))
+        print(("sprites: mode %s, playback on the %s, viewport %dx%d, "
+            .. "measuring %d frames after %d warmup")
+            :format(MODE, GPU and "GPU" or "host", WIDTH, HEIGHT, FRAMES,
+                WARMUP))
     end,
 
     update = function(app: tecs.Application, dt: number)

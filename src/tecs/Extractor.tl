@@ -663,6 +663,11 @@ function Extractor:extract(packet: FramePacket)
     self._alpha = timestep > 0.0 and accumulator / timestep or 1.0
     if self._alpha > 1.0 then self._alpha = 1.0 end
 
+    -- Read once and carried, so every pass drawing this frame resolves an
+    -- animation against the same step. Whole steps rather than seconds, which
+    -- is what keeps playback on the simulation's clock rather than the frame's.
+    packet.stepClock = self._world:fixedStepCount()
+
     syncInstances(self, packet)
     syncLights(self, packet)
     packet:setCamera(self.camera)
