@@ -352,9 +352,29 @@ Tecs itself is unchanged and consumed as a dependency. What lives here is
 tecs's own surface on top of it: components, a renderer that syncs from a
 world, and a physics plugin.
 
-`Renderer` is the bridge, and the only module that knows about both
-archetypes and GPU buffers. Everything below it is renderer; above it is
-Tecs.
+`Renderer` is the bridge, and the only module that knows about both archetypes
+and GPU buffers. Everything below it is renderer; above it is Tecs.
+
+It is two halves and the seam between them, divided along the line the
+simulation and render threads will fall either side of. `Extractor` is
+world-facing: queries, archetype runs, relayout detection, dirty gating,
+producers and the interpolation alpha, writing instances straight into mapped
+staging and never touching a device. `Backend` is device-facing: the buffers,
+the flush, the mark/scan/compact cull, the deferred pass graph and the image
+array, and it names no world, query, archetype or component.
+
+`FramePacket` is everything that crosses. It carries the staging slot that was
+written, the byte ranges within it, the counts, a copy of the camera and the
+frame's lights, and it carries no instance bytes at all: those are already in
+the staging the backend owns, and copying them into a packet would be the
+intermediate copy the design exists to avoid. Nothing in it refers to a Lua
+object, so it becomes a native slot struct rather than being rewritten when the
+two halves stop sharing a heap.
+
+`Renderer` is what still sees both. It owns the packet, rotates the staging
+slot, hands the backend's mapped addresses to the extractor, and centres the
+camera on the first frame that draws, which is the one thing needing a target
+size on the side that has no device.
 
 Images live in one array texture, so the texture is a per-instance layer index
 and the whole scene is one draw. That is also what frees the instance layout:
@@ -911,7 +931,10 @@ src/tecs/platform/        window, clock, events, input and audio backends
 src/tecs/gpu/             device, frame, passes, shaders, pipelines, buffers
 src/tecs/components.tl    components the engine renders and simulates
 src/tecs/gfx/             camera, layers, sprite sheets and their playback
-src/tecs/Renderer.tl      the world-to-GPU bridge
+src/tecs/Renderer.tl      the world-to-GPU bridge, owning both halves below
+src/tecs/Extractor.tl     the world-facing half: a world to a frame packet
+src/tecs/Backend.tl       the device-facing half: a frame packet to a frame
+src/tecs/FramePacket.tl   what crosses between the two
 src/tecs/Audio.tl         clips, voices, and the Sound component
 src/tecs/physics/         Box2D binding and its world plugin
 src/tecs/sequence/        the sequencer, and the tween runtime inside it

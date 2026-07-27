@@ -59,7 +59,10 @@ tecs/
 │   ├── sequence/          # Sequencer, with the tween runtime inside it
 │   ├── mcp/               # Debug server: transport, tools, sandbox
 │   ├── Application.tl     # The lifecycle the host drives
-│   ├── Renderer.tl        # World to GPU
+│   ├── Renderer.tl        # World to GPU, owning the two halves below
+│   ├── Extractor.tl       # World-facing: a world to a frame packet
+│   ├── Backend.tl         # Device-facing: a frame packet to a frame
+│   ├── FramePacket.tl     # What crosses between them
 │   ├── Audio.tl           # Clips, voices, the Sound component
 │   ├── components.tl      # Engine components
 │   ├── assets.tl

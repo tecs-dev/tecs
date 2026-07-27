@@ -1,151 +1,42 @@
 --- Feeds the deferred pipeline from a world.
 ---
---- This is the bridge, and the only module that knows about both archetypes
---- and GPU buffers. Everything below it is renderer; above it is Tecs.
+--- Two halves and the seam between them. `Extractor` is world-facing: queries,
+--- archetype runs, relayout detection, dirty gating, producers and the
+--- interpolation alpha, writing instances straight into mapped staging.
+--- `Backend` is device-facing: the buffers, the flush, the cull, the deferred
+--- pass graph and the image array. A `FramePacket` is everything that crosses,
+--- and neither half holds a reference to the other.
 ---
---- The sync walks archetype columns and writes instances straight into mapped
---- staging. There is no intermediate array: the column is contiguous C memory
---- and so is the destination, so a row becomes a handful of float stores into
---- driver memory rather than a copy between two buffers.
+--- The line is where the thread boundary falls. The extractor runs inside
+--- `world:update`, in RenderFirst, and the backend runs afterwards against a
+--- frame, so the extraction needs no command buffer and the render needs no
+--- world. This object is what still sees both: it owns the packet, rotates the
+--- staging slot, and hands the backend's mapped addresses to the extractor.
 ---
---- Instances pack as four vec4s: a 2x2 basis, an origin, a colour, and a UV
---- rect. A precomputed basis costs less on the GPU than a per-vertex sincos.
----
---- Images live in one array texture, so the texture is a per-instance integer
---- and the whole scene is one draw. That is also what frees the instance
---- layout: with nothing to sort by, each archetype keeps a contiguous run,
---- and a run whose components did not change does not have to be rewritten.
----
---- Which layer an image occupies is this renderer's answer, not the image's
---- identity: layers are handed out as images register, so the number depends on
---- load order. A Sprite therefore names its image, and a registry here maps
---- that name to a layer. Resolving happens once, when the Sprite is built or
---- the first time a restored one is written, and the answer is cached in the
---- Sprite so extraction reads a field per row rather than a lookup.
----
---- That dirty gating is the point. Walking every entity every frame is the
---- cost that decides whether a large world is affordable, and most frames
---- change very little. Layer zero is a white pixel, so an entity with no
---- Sprite samples it and textured and untextured geometry share one path.
----
---- What is drawn is decided on the GPU. A compute pass tests each instance
---- against the view, compacts the survivors into an index list, and writes the
---- draw arguments, so the draw touches only what is visible and the CPU never
---- learns how many that was. The instance buffer stays archetype-contiguous
---- for the dirty gate; the compacted list is rebuilt every frame and is a
---- separate array, so the two do not fight.
+--- What a game holds is this. `renderer.camera` is the extractor's camera and
+--- `renderer.images` is the backend's array, named here so neither half has to
+--- be reached for by name.
 
 local ecs <const> = require("tecs.ecs")
-local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
 local Buffer <const> = require("tecs.gpu.Buffer")
-local Shader <const> = require("tecs.gpu.Shader")
 local Frame <const> = require("tecs.gpu.Frame")
-local GraphicsPipeline <const> = require("tecs.gpu.GraphicsPipeline")
-local Deferred <const> = require("tecs.gpu.Deferred")
-local Sampler <const> = require("tecs.gpu.Sampler")
-local ComputePipeline <const> = require("tecs.gpu.ComputePipeline")
-local ComputePass <const> = require("tecs.gpu.ComputePass")
-local TextureArray <const> = require("tecs.gpu.TextureArray")
 local Texture <const> = require("tecs.gpu.Texture")
+local TextureArray <const> = require("tecs.gpu.TextureArray")
+local Deferred <const> = require("tecs.gpu.Deferred")
 local Camera <const> = require("tecs.gfx.Camera")
+local Extractor <const> = require("tecs.Extractor")
+local Backend <const> = require("tecs.Backend")
+local FramePacket <const> = require("tecs.FramePacket")
 local assets <const> = require("tecs.assets")
 local components <const> = require("tecs.components")
-local layers <const> = require("tecs.gfx.layers")
-local timing <const> = require("tecs.timing")
-local instancelayout <const> = require("tecs.gpu.instancelayout")
 
-local C <const> = sdl.C
+local type InstanceProducer = Extractor.InstanceProducer
+local type ClipRegion = Backend.ClipRegion
 
---- Extraction: the world-facing half of the frame, and the half that moves to
---- the simulation thread when the pipeline splits.
-local EXTRACT <const> = timing.stage("extract")
-
-local INSTANCE_FLOATS <const> = instancelayout.FLOATS
-local INSTANCE_BYTES <const> = instancelayout.BYTES
-local BOUND_FLOATS <const> = instancelayout.BOUND_FLOATS
-local BOUND_BYTES <const> = instancelayout.BOUND_BYTES
-local UNBOUNDED <const> = instancelayout.UNBOUNDED
-local extentOf <const> = instancelayout.extentOf
-local packSlot <const> = instancelayout.packSlot
-
---- Floats in the layer uniform: the camera's parameters, the two fixed clip
---- scales, and four per layer.
-local LAYER_FLOATS <const> = 8 + layers.MAX * 4
-local LAYER_BYTES <const> = LAYER_FLOATS * 4
-
---- Floats in the clip uniform: a rectangle per region, as minimum xy and
---- maximum xy in target pixels. Region zero is never read, and its four floats
---- are kept so a region index is the array index and the shader needs no
---- subtraction to look one up.
-local CLIP_FLOATS <const> = instancelayout.CLIPS * 4
-local CLIP_BYTES <const> = CLIP_FLOATS * 4
-
---- Bound of a region that clips nothing. Finite, so the shader's comparisons
---- stay arithmetic, and beyond any target a fragment can land on.
-local CLIP_UNBOUNDED <const> = 1e30
-
---- Indices per quad, over four distinct corners.
-local QUAD_INDICES <const> = 6
-
---- Threads per cull workgroup, matching the scan shaders' local size.
-local CULL_GROUP <const> = 256
-
-local PI <const> = math.pi
-local TWO_PI <const> = math.pi * 2.0
-
---- Layers the image array holds, including the white default in layer zero.
-local MAX_LAYERS <const> = 64
-
---- Cell size of the image array. Every image must fit within it.
-local DEFAULT_CELL <const> = 512
-
---- Instances the buffer is sized for. This is a ceiling, not a hint: rows
+--- Instances the buffers are sized for. This is a ceiling, not a hint: rows
 --- beyond it are dropped rather than growing the buffer mid-frame.
 local DEFAULT_CAPACITY <const> = 65536
-
---- Something that draws instances without owning entities.
----
---- Text is the reason this exists. A glyph is a textured quad like any other,
---- but making each one an entity puts every glyph in the world into one
---- archetype, so editing one string marks that column dirty and rewrites all of
---- them; and spawning or despawning glyphs moves an archetype's length, which
---- forces the whole scene to be laid out again. A producer sidesteps both: it
---- is laid out as its own run, and it says which parts of that run changed.
----
---- It writes the same sixteen floats and four bounds floats every other
---- instance carries, so culling, depth, layers and materials all apply to it
---- without knowing it is not an entity.
-local record InstanceProducer
-    --- Instances to reserve. Changing it moves the layout, so a producer that
-    --- can avoid changing it should.
-    count: function(self: InstanceProducer): integer
-
-    --- Sub-ranges written since the last sync, as flat one-based inclusive
-    --- pairs, and cleared by returning them. Empty means nothing changed and
-    --- the run is skipped.
-    takeDirty: function(self: InstanceProducer): {integer}
-
-    --- Writes instances `first` through `last` of its run. `base` is the
-    --- instance index the run starts at, so instance `first` is written at
-    --- `base + first - 1`.
-    write: function(self: InstanceProducer, floats: loader.CArray,
-                    bounds: loader.CArray, base: integer,
-                    first: integer, last: integer)
-end
-
---- A clip rectangle, in target pixels measured from the top left.
----
---- Screen space rather than world space, because that is what a fragment is
---- tested in and what a scissor means: a panel occupies a part of the window
---- whether its contents are placed by the camera, in screen pixels, or in
---- virtual coordinates, and one rectangle is right for all three.
-local record ClipRegion
-    x: number
-    y: number
-    width: number
-    height: number
-end
 
 local record RendererOptions
     --- Ambient colour applied everywhere.
@@ -161,40 +52,11 @@ end
 local record Renderer
     type InstanceProducer = InstanceProducer
     type ClipRegion = ClipRegion
-    --- Seconds the last extraction took. Zero unless timing is on.
-    _extractSeconds: number
-    --- How far through the current fixed step this frame falls, 0 to 1. Read
-    --- once per sync rather than per row, since it is the same for every
-    --- entity in the frame.
-    _alpha: number
-    --- Alpha the previous sync drew at, so a frame that lands at the same
-    --- point in the step as the last one rewrites nothing.
-    _lastAlpha: number
-    _world: ecs.World
-    --- Producers, in the order they were added, which is the order their runs
-    --- are laid out after the archetypes.
-    _producers: {InstanceProducer}
-    --- Where each producer's run starts and how long it is, so a change in
-    --- length is noticed the same way an archetype's is.
-    _producerRuns: {integer}
-    --- Instance index each producer's run begins at this sync.
-    _producerBase: {integer}
-    --- Staging slot this frame writes into, rotated after each submission.
-    ---
-    --- Rotating is what lets the mapping skip cycling. Cycling exists so a
-    --- write cannot land in memory the GPU is still copying out of, and it pays
-    --- for that with a fresh driver allocation every frame: at four million
-    --- instances the instance and bounds staging alone is over three hundred
-    --- megabytes a frame, retired and reallocated, which the driver cannot
-    --- reclaim fast enough. Writing to a slot the GPU is not reading gives the
-    --- same guarantee and allocates nothing.
-    _slot: integer
-    deferred: Deferred
-    instances: Buffer
-    pipeline: GraphicsPipeline
-    sampler: Sampler
-    --- Every image, one binding, so the scene is one draw.
-    images: TextureArray
+
+    --- What the view is looking at. Centred on the viewport the first time a
+    --- frame is drawn, so a scene that never mentions a camera sees world
+    --- coordinates as screen coordinates.
+    camera: Camera
     capacity: integer
     --- Instances the last sync left resident.
     count: integer
@@ -202,435 +64,29 @@ local record Renderer
     dropped: integer
     --- Instances the last sync actually rewrote. Zero on a still frame.
     rewritten: integer
-    _mark: ComputePipeline
-    _scan: ComputePipeline
-    _compact: ComputePipeline
-    _bounds: Buffer
-    _slots: Buffer
-    _blocks: Buffer
-    _visible: Buffer
-    _drawArgs: Buffer
-    _indices: Buffer
-    --- What the view is looking at. Centred on the viewport the first time a
-    --- frame is drawn, so a scene that never mentions a camera sees world
-    --- coordinates as screen coordinates.
-    camera: Camera
+    --- Every image, one binding, so the scene is one draw.
+    images: TextureArray
+    --- The instance buffer the scene is drawn from, and the staging behind it.
+    instances: Buffer
+    --- The pipeline the packet is drawn through, so a caller can add targets
+    --- and passes around the three it already has.
+    deferred: Deferred
+
+    _extractor: Extractor
+    _backend: Backend
+    _packet: FramePacket
+    --- Staging slot the next extraction writes into, rotated after each
+    --- submission.
+    ---
+    --- Rotating is what lets the mapping skip cycling. Cycling exists so a
+    --- write cannot land in memory the GPU is still copying out of, and it pays
+    --- for that with a fresh driver allocation every frame. Writing to a slot
+    --- the GPU is not reading gives the same guarantee and allocates nothing.
+    _slot: integer
     _centred: boolean
-    _cullUniform: loader.CArray
-    --- What each layer does to its contents, in the shape the vertex shader
-    --- reads it.
-    _layerUniform: loader.CArray
-    --- Revision the packed table was built from, so a frame that configured
-    --- nothing repacks nothing.
-    _layerRevision: integer
-    --- The clip rectangles, in the shape the fragment shader reads them.
-    --- Written in place as regions are set, so there is nothing to repack.
-    _clipUniform: loader.CArray
-    _device: loader.CPtr
-    _lights: {Deferred.Light}
-    _renderables: ecs.Query
-    _lightSources: ecs.Query
-    --- UV extent of the white pixel within its cell. An image smaller than a
-    --- cell does not reach the cell's edge, so sampling 0..1 would read the
-    --- undefined remainder rather than the image.
-    _whiteU1: number
-    _whiteV1: number
-    --- Texture-array layer each registered image name occupies, keyed by the
-    --- name's index. This is the registry a Sprite's name resolves through,
-    --- and the only place a layer number is decided.
-    _slotByImage: {integer: integer}
-    --- Region each registered image name occupies, so registering a name a
-    --- second time answers with the layer it already has.
-    _regionByImage: {integer: TextureArray.Region}
-    _runs: {ecs.Archetype: Run}
-    _seen: {ecs.Archetype: integer}
-    _destroyed: boolean
 end
 
 local RendererMT <const>: metatable<Renderer> = { __index = Renderer }
-
---- Writes every renderable archetype into mapped staging.
----
---- Columns are read, not mutated, so `get` is correct here. Taking `getMut`
---- would mark these components dirty on every archetype every frame and
---- defeat every dirty-gated consumer downstream.
---- One archetype's contiguous run in the instance buffer.
-local record Run
-    offset: integer
-    length: integer
-end
-
---- Texture-array layer the given image name index resolves to.
----
---- Fails on a name nothing was registered under. A sprite naming an image the
---- renderer has never seen has no layer to sample, and every layer that does
---- exist holds some other image, so there is nothing to fall back to that is
---- not a wrong picture on the quad.
-local function slotOf(self: Renderer, image: integer): integer
-    local slot = self._slotByImage[image]
-    if slot ~= nil then return slot end
-
-    local name = components.imageName(image)
-    if name == nil then
-        error("tecs: a Sprite names no image; build one with "
-            .. "Renderer:registerImage or Renderer:sprite", 2)
-    end
-    error(("tecs: no image is registered as '%s'"):format(name), 2)
-end
-
---- Writes one archetype's rows into its run.
----
---- Columns are read, not mutated, so `get` is correct here. Taking `getMut`
---- would mark these components dirty on every archetype every frame, which
---- would make the gate below always true and defeat its own purpose.
-local function writeRun(self: Renderer, archetype: ecs.Archetype,
-                        length: integer, offset: integer)
-    local slot = self._slot
-    local floats = self.instances:mapSlotAs(slot, "float *", false)
-    local bounds = self._bounds:mapSlotAs(slot, "float *", false)
-    local transforms = archetype:get(components.Transform)
-    local tints = archetype:get(components.Tint)
-    local sprites = archetype:get(components.Sprite)
-    local materialColumn = archetype:get(components.Material)
-    -- Absent on every archetype that clips nothing, which is the common case:
-    -- the rows below then write the texture-array layer on its own and the
-    -- fragments they produce never look at the region table.
-    local clips = archetype:get(components.Clip)
-    -- Loop invariant: an archetype either carries the previous transform or it
-    -- does not, so an entity that is not interpolated costs one test per run
-    -- rather than anything per row.
-    local previous = archetype:get(components.PreviousTransform)
-    local alpha <const> = self._alpha
-
-    for row = 1, length do
-        local transform = transforms[row]
-        local tint = tints[row]
-
-        local layer = 0.0
-        local u0, v0 = 0.0, 0.0
-        local u1, v1 = self._whiteU1, self._whiteV1
-        if sprites ~= nil then
-            local sprite = sprites[row]
-            layer = sprite.slot
-            if layer < 0 then
-                -- A sprite arrives unresolved when it came from a snapshot,
-                -- which carries its image's name because a layer is this
-                -- process's answer and not something a save can hold. Caching
-                -- the answer back into the column keeps the read above a field
-                -- access: one lookup per sprite, not one per row per frame. The
-                -- write is deliberately not marked dirty, since this pass is
-                -- writing the row it belongs to now.
-                layer = slotOf(self, sprite.image as integer)
-                sprite.slot = layer
-            end
-            u0, v0, u1, v1 = sprite.u0, sprite.v0, sprite.u1, sprite.v1
-        end
-
-        -- The clip region rides above the layer in one float. Region zero
-        -- packs to the layer unchanged, so an archetype with no Clip column
-        -- writes exactly what it wrote before there were regions.
-        local packedSlot = layer
-        if clips ~= nil then
-            packedSlot = packSlot(clips[row].index as integer, layer)
-        end
-
-        -- Material and parameter share one float: the integer part selects and
-        -- the fraction carries the parameter, which is a ratio in 0..1 for
-        -- every material that has one. Keeps the instance at four vec4s.
-        local material = 0.0
-        if materialColumn ~= nil then
-            local entry = materialColumn[row]
-            local param = entry.param
-            if param < 0.0 then
-                param = 0.0
-            elseif param > 0.999 then
-                param = 0.999
-            end
-            material = entry.id + param
-        end
-
-        local entityLayer <const> = transform.layer as integer
-        local angle = transform.rotation
-        local scaleX = transform.scaleX
-        local scaleY = transform.scaleY
-        local originX = transform.x
-        local originY = transform.y
-
-        if previous ~= nil then
-            local before = previous[row]
-            originX = before.x + (originX - before.x) * alpha
-            originY = before.y + (originY - before.y) * alpha
-
-            -- The shortest arc, because an angle that crossed pi would
-            -- otherwise be interpolated the long way round and the entity
-            -- would spin backwards through nearly a full turn on that frame.
-            local turn = angle - before.rotation
-            if turn > PI then
-                turn = turn - TWO_PI
-            elseif turn < -PI then
-                turn = turn + TWO_PI
-            end
-            angle = before.rotation + turn * alpha
-        end
-
-        local base = (offset + row - 1) * INSTANCE_FLOATS
-        floats[base] = angle
-        floats[base + 1] = scaleX
-        floats[base + 2] = scaleY
-        -- The band this entity's layer owns, and where in it the sort mode
-        -- puts it. Zero is nearest, so a higher layer resolves to a smaller
-        -- value and covers everything below it whatever the two contain.
-        floats[base + 3] = layers.depthOf(entityLayer, transform.z,
-            originX, originY)
-
-        floats[base + 4] = originX
-        floats[base + 5] = originY
-        floats[base + 6] = packedSlot
-        floats[base + 7] = material
-
-        floats[base + 8] = tint.r
-        floats[base + 9] = tint.g
-        floats[base + 10] = tint.b
-        floats[base + 11] = tint.a
-
-        floats[base + 12] = u0
-        floats[base + 13] = v0
-        floats[base + 14] = u1
-        floats[base + 15] = v1
-
-        local ex: number
-        local ey: number
-        if not layers.viewCulled(entityLayer) then
-            -- The layer draws its contents somewhere the view rectangle does
-            -- not describe, so a world bound would cull what is on screen. A
-            -- bound no view can be outside of hands the decision to the layer.
-            ex = UNBOUNDED
-            ey = UNBOUNDED
-        else
-            ex, ey = extentOf(angle, scaleX, scaleY)
-        end
-
-        local bound = (offset + row - 1) * BOUND_FLOATS
-        bounds[bound] = originX
-        bounds[bound + 1] = originY
-        bounds[bound + 2] = ex
-        bounds[bound + 3] = ey
-    end
-
-    self.instances:markSlotDirty(slot, offset * INSTANCE_BYTES,
-        length * INSTANCE_BYTES)
-    self._bounds:markSlotDirty(slot, offset * BOUND_BYTES,
-        length * BOUND_BYTES)
-end
-
---- Rewrites only what changed.
----
---- The layout is rebuilt when the set of archetypes or their lengths move,
---- because a run cannot grow in place without shifting its neighbours. Short
---- of that, an archetype whose Transform, Tint, and Sprite columns are all
---- clean is skipped entirely: its bytes are already resident and correct.
---- Marks the bytes a run of instances occupies, in both buffers.
-local function markRun(self: Renderer, offset: integer, count: integer)
-    if count <= 0 then return end
-    self.instances:markSlotDirty(self._slot, offset * INSTANCE_BYTES,
-        count * INSTANCE_BYTES)
-    self._bounds:markSlotDirty(self._slot, offset * BOUND_BYTES,
-        count * BOUND_BYTES)
-end
-
-local function syncInstances(self: Renderer): integer, integer, integer
-    local runs = self._runs
-    local seen = self._seen
-    for archetype in pairs(seen) do seen[archetype] = nil end
-
-    local total = 0
-    local relayout = false
-    for archetype, length in self._renderables:iter() do
-        seen[archetype] = length
-        local run = runs[archetype]
-        if run == nil or run.length ~= length or run.offset ~= total then
-            relayout = true
-        end
-        total = total + length
-    end
-
-    -- An archetype that went away leaves a hole, so the layout must move.
-    for archetype in pairs(runs) do
-        if seen[archetype] == nil then
-            runs[archetype] = nil
-            relayout = true
-        end
-    end
-
-    -- Producers are laid out after the archetypes, in the order they were
-    -- added. A producer whose count moved shifts everything after it, which is
-    -- the same condition an archetype's length changing creates.
-    local producers <const> = self._producers
-    local producerRuns <const> = self._producerRuns
-    local producerBase: {integer} = self._producerBase
-    for index = 1, #producers do
-        local count = producers[index]:count()
-        producerBase[index] = total
-        if producerRuns[index * 2 - 1] ~= total
-            or producerRuns[index * 2] ~= count then
-            relayout = true
-        end
-        producerRuns[index * 2 - 1] = total
-        producerRuns[index * 2] = count
-        total = total + count
-    end
-
-    local dropped = 0
-    if total > self.capacity then
-        dropped = total - self.capacity
-        total = self.capacity
-    end
-
-    -- An interpolated entity's drawn position moves with alpha even when the
-    -- simulation did not touch its transform, so the dirty bits alone would
-    -- hold it still between fixed steps. Alpha standing still is the case
-    -- where they are enough: a frame rate matching the step rate rewrites
-    -- nothing, which is what makes this cost nothing when it buys nothing.
-    local interpolating <const> = self._alpha ~= self._lastAlpha
-    self._lastAlpha = self._alpha
-
-    local rewritten = 0
-    local offset = 0
-    -- A cursor rather than iter, because this stops once the buffer is full and
-    -- leaving an archetype loop early through iter leaves the world deferred,
-    -- which silently queues every spawn made after it.
-    local cursor = self._renderables:cursor()
-    for archetype, length in cursor:iter() do
-        if offset >= self.capacity then break end
-        if offset + length > self.capacity then
-            length = self.capacity - offset
-        end
-
-        local run = runs[archetype]
-        local dirty = relayout
-            or archetype:isComponentDirty(components.Transform)
-            or archetype:isComponentDirty(components.Tint)
-            or archetype:isComponentDirty(components.Sprite)
-            or archetype:isComponentDirty(components.Material)
-            or archetype:isComponentDirty(components.Clip)
-            or (interpolating
-                and archetype:get(components.PreviousTransform) ~= nil)
-
-        if dirty then
-            writeRun(self, archetype, length, offset)
-            rewritten = rewritten + length
-        end
-
-        if run == nil then
-            runs[archetype] = { offset = offset, length = length }
-        else
-            run.offset = offset
-            run.length = length
-        end
-        offset = offset + length
-    end
-    cursor:close()
-
-    if #producers > 0 then
-        local floats = self.instances:mapSlotAs(self._slot, "float *", false)
-        local bounds = self._bounds:mapSlotAs(self._slot, "float *", false)
-        for index = 1, #producers do
-            local producer = producers[index]
-            local base = producerBase[index]
-            local count = producerRuns[index * 2]
-            if base + count > self.capacity then
-                count = self.capacity - base
-                if count < 0 then count = 0 end
-            end
-
-            local ranges = producer:takeDirty()
-            if relayout and count > 0 then
-                producer:write(floats, bounds, base, 1, count)
-                markRun(self, base, count)
-                rewritten = rewritten + count
-            else
-                for entry = 1, #ranges, 2 do
-                    local first = ranges[entry]
-                    local last = ranges[entry + 1]
-                    if last > count then last = count end
-                    if first <= last then
-                        producer:write(floats, bounds, base, first, last)
-                        markRun(self, base + first - 1, last - first + 1)
-                        rewritten = rewritten + (last - first + 1)
-                    end
-                end
-            end
-        end
-    end
-
-    return total, dropped, rewritten
-end
-
---- Collects lights from the world.
-local function syncLights(self: Renderer): {Deferred.Light}
-    local lights = self._lights
-    for index = #lights, 1, -1 do lights[index] = nil end
-
-    for archetype, length in self._lightSources:iter() do
-        local transforms = archetype:get(components.Transform)
-        local sources = archetype:get(components.PointLight)
-        for row = 1, length do
-            local transform = transforms[row]
-            local source = sources[row]
-            lights[#lights + 1] = {
-                x = transform.x,
-                y = transform.y,
-                z = source.height,
-                radius = source.radius,
-                r = source.r,
-                g = source.g,
-                b = source.b,
-                intensity = source.intensity,
-            }
-        end
-    end
-    return lights
-end
-
---- Fills the uniform the vertex shader reads a layer's behaviour from.
----
---- The camera's parameters rather than a matrix for each mode. Parallax
---- multiplies the camera's position, so a matrix per mode would have to be a
---- matrix per layer and be rebuilt every frame the camera moved. Passed this
---- way, the camera's position, its reciprocal zoom and two clip scales compose
---- all four cases in a handful of shader instructions, and the sixteen entries
---- stay what they were.
-local function layerUniform(self: Renderer, width: number,
-                            height: number): loader.CArray
-    local data = self._layerUniform
-    local camera = self.camera
-    data[0] = camera.x
-    data[1] = camera.y
-    -- The camera's matrix carries the zoom, so a layer that ignores zoom
-    -- divides it back out rather than reaching for a second matrix.
-    data[2] = camera.zoom ~= 0.0 and 1.0 / camera.zoom or 1.0
-    data[3] = 0.0
-    -- Position to clip for the two fixed spaces, with Y negated because both
-    -- run down from the top left while clip Y runs up.
-    data[4] = 2.0 / width
-    data[5] = -2.0 / height
-    data[6] = 2.0 / layers.virtualWidth
-    data[7] = -2.0 / layers.virtualHeight
-
-    -- Packed when it changes rather than every frame: it is configuration, and
-    -- the frame that configures a layer is the rare one.
-    local revision = layers.revision()
-    if revision ~= self._layerRevision then
-        self._layerRevision = revision
-        for layer = 1, layers.MAX do
-            local base = 8 + (layer - 1) * 4
-            data[base], data[base + 1], data[base + 2], data[base + 3] =
-                layers.entryOf(layer)
-        end
-    end
-
-    return data
-end
 
 --- Builds a renderer for `device`.
 function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
@@ -638,150 +94,48 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
     options = options or {}
 
     local self = setmetatable({} as Renderer, RendererMT)
-    self._device = device
     self.capacity = options.capacity or DEFAULT_CAPACITY
     self.count = 0
     self.dropped = 0
     self.rewritten = 0
-    self._lights = {}
-    self._runs = {}
-    self._seen = {}
-    self._slotByImage = {}
-    self._regionByImage = {}
-    self._destroyed = false
-
-    -- A layer number shares its float with the clip index, so a layer beyond
-    -- the packing's stride would be read back as a different layer in a
-    -- different region. Refused here rather than discovered as a wrong image.
-    local layerCount <const> = options.layers or MAX_LAYERS
-    if layerCount > instancelayout.LAYER_SLOTS then
-        error(("tecs: the image array holds at most %d layers")
-            :format(instancelayout.LAYER_SLOTS), 2)
-    end
-
-    self.sampler = Sampler.create(device, { filter = "nearest", address = "clamp" })
-    self.images = TextureArray.create(device, {
-        width = options.cell or DEFAULT_CELL,
-        height = options.cell or DEFAULT_CELL,
-        layers = layerCount,
-    })
-
-    -- Layer zero is a single white pixel. Entities without a Sprite sample it,
-    -- so textured and untextured geometry share one shader and one pipeline
-    -- rather than needing a branch or a second path.
-    local pixel = loader.newArray("uint8_t[4]")
-    pixel[0], pixel[1], pixel[2], pixel[3] = 255, 255, 255, 255
-    local white = self.images:add(pixel as loader.CValue, 1, 1, 4)
-    self._whiteU1 = white.u1
-    self._whiteV1 = white.v1
-
-    self.instances = Buffer.create(device, {
-        usage = { "storage", "computeRead" },
-        size = self.capacity * INSTANCE_BYTES,
-    })
-    self._bounds = Buffer.create(device, {
-        usage = { "computeRead" },
-        size = self.capacity * BOUND_BYTES,
-    })
-    self._slots = Buffer.create(device, {
-        usage = { "computeRead", "computeWrite" },
-        size = self.capacity * 4,
-    })
-    self._blocks = Buffer.create(device, {
-        usage = { "computeRead", "computeWrite" },
-        size = math.ceil(self.capacity / CULL_GROUP) * 4,
-    })
-    self._visible = Buffer.create(device, {
-        usage = { "storage", "computeWrite" },
-        size = self.capacity * 4,
-    })
-    self._drawArgs = Buffer.create(device, {
-        -- Five uints: SDL_GPUIndexedIndirectDrawCommand.
-        usage = { "indirect", "computeWrite" },
-        size = 32,
-    })
-
-    -- Every field but the instance count is constant, and the scan writes that
-    -- one. So the arguments are seeded once here rather than by a compute pass
-    -- that reruns every frame to write the same five numbers back.
-    local args = loader.newArray("uint32_t[8]")
-    args[0] = QUAD_INDICES
-    for slot = 1, 7 do args[slot] = 0 end
-    self._drawArgs:upload(args, 32)
-
-    -- Two triangles over four corners, uploaded once and never touched again.
-    self._indices = Buffer.create(device, {
-        usage = { "index" },
-        size = QUAD_INDICES * 2,
-    })
-    local quad = loader.newArray("uint16_t[6]")
-    quad[0], quad[1], quad[2] = 0, 1, 2
-    quad[3], quad[4], quad[5] = 1, 3, 2
-    self._indices:upload(quad, QUAD_INDICES * 2)
-    self.camera = Camera.create()
     self._centred = false
     self._slot = 0
-    self._producers = {}
-    self._producerRuns = {}
-    self._producerBase = {}
-    -- Two vec4s: the world rectangle the camera sees, then the counts.
-    self._cullUniform = loader.newArray("float[8]")
-    self._layerUniform = loader.newArray("float[?]", LAYER_FLOATS)
-    -- Below every revision the table can hold, so the first frame packs it.
-    self._layerRevision = -1
+    self._packet = FramePacket.create()
 
-    -- Every region starts clipping nothing, so an index nobody configured
-    -- draws the same as region zero rather than making its contents vanish.
-    self._clipUniform = loader.newArray("float[?]", CLIP_FLOATS)
-    for entry = 0, instancelayout.CLIPS - 1 do
-        local base = entry * 4
-        self._clipUniform[base] = -CLIP_UNBOUNDED
-        self._clipUniform[base + 1] = -CLIP_UNBOUNDED
-        self._clipUniform[base + 2] = CLIP_UNBOUNDED
-        self._clipUniform[base + 3] = CLIP_UNBOUNDED
-    end
-
-    self._mark = ComputePipeline.load(device, "instance.mark.comp", {})
-    self._scan = ComputePipeline.load(device, "instance.scan.comp", {})
-    self._compact = ComputePipeline.load(device, "instance.compact.comp", {})
-
-    self.deferred = Deferred.create(device, swapchainFormat, {
+    local backend = Backend.create(device, swapchainFormat, {
         ambient = options.ambient,
-        geometry = function(context: Deferred.PassContext)
-            if self.count == 0 then return end
-            context.pass:bindPipeline(self.pipeline.handle)
-
-            context.pass:pushVertexUniform(0,
-                self.camera:matrix(context.width, context.height), 64)
-            context.pass:pushVertexUniform(1,
-                layerUniform(self, context.width, context.height), LAYER_BYTES)
-            -- Once for the whole scene, and only the fragments of an instance
-            -- that named a region ever read it.
-            context.pass:pushFragmentUniform(0, self._clipUniform, CLIP_BYTES)
-            context.pass:bindVertexStorageBuffers(0,
-                { self.instances.handle, self._visible.handle })
-            context.pass:bindTextures(0, { self.images.handle }, self.sampler.handle)
-            context.pass:bindIndexBuffer(self._indices.handle)
-            -- One draw for the scene, with its instance count decided by the
-            -- cull rather than by anything here.
-            context.pass:drawIndexedIndirect(self._drawArgs.handle, 0, 1)
-        end,
+        capacity = self.capacity,
+        cell = options.cell,
+        layers = options.layers,
     })
+    self._backend = backend
+    self.images = backend.images
+    self.instances = backend.instances
+    self.deferred = backend.deferred
 
-    local albedoFormat, normalFormat = self.deferred:geometryFormats()
-    local vertex = Shader.load(device, "instance.vert", {})
-    local fragment = Shader.load(device, "instance.frag", {})
-    self.pipeline = GraphicsPipeline.create(device, {
-        vertexShader = vertex,
-        fragmentShader = fragment,
-        colorFormats = { albedoFormat, normalFormat },
-        depth = self.deferred:geometryDepth(),
-        name = "ecs.instances",
+    -- The white pixel's extent is the backend's answer, decided by uploading
+    -- it, and the extractor needs it for every row that carries no Sprite. It
+    -- crosses once, at construction, rather than being asked for per frame.
+    local extractor = Extractor.create({
+        capacity = self.capacity,
+        whiteU1 = backend.whiteU1,
+        whiteV1 = backend.whiteV1,
     })
-    vertex:destroy()
-    fragment:destroy()
+    self._extractor = extractor
+    self.camera = extractor.camera
+    extractor:setStaging(self._slot, backend:mapSlot(self._slot))
 
     return self
+end
+
+--- Registers the sync system and queries on `world`.
+function Renderer:install(world: ecs.World)
+    self._extractor:install(world, self._packet, function()
+        local packet = self._packet
+        self.count = packet.count
+        self.dropped = packet.dropped
+        self.rewritten = packet.rewritten
+    end)
 end
 
 --- Uploads a decoded image into the array and returns a Sprite for it.
@@ -803,12 +157,11 @@ function Renderer:registerImage(handle: assets.Handle): components.Sprite, Textu
     end
 
     local image = components.imageId(handle.path)
-    local region = self._regionByImage[image]
+    local region = self._extractor:regionOf(image)
     if region == nil then
-        region = self.images:add(handle.pixels, handle.width, handle.height,
-            handle.pitch)
-        self._slotByImage[image] = region.layer
-        self._regionByImage[image] = region
+        region = self._backend:addImage(handle.pixels, handle.width,
+            handle.height, handle.pitch)
+        self._extractor:registerImage(image, region)
     end
     handle:release()
 
@@ -818,147 +171,31 @@ end
 
 --- A resolved Sprite for a registered image, ready to spawn.
 ---
---- UVs are fractions of the image rather than of the cell it sits in, so a
---- sub-rect of an atlas is written as the fraction it occupies and the padding
---- a cell may carry stays the renderer's business. Omitted, they select the
---- whole image.
----
---- Fails on a name nothing is registered under, because the alternative is a
---- quad that draws whichever image happens to hold that layer.
+--- UVs are fractions of the image rather than of the cell it sits in. Omitted,
+--- they select the whole image. Fails on a name nothing is registered under.
 function Renderer:sprite(name: string, u0?: number, v0?: number,
                          u1?: number, v1?: number): components.Sprite
-    local image = components.imageId(name)
-    local slot = slotOf(self, image)
-    local region = self._regionByImage[image]
-    return components.Sprite(image,
-        (u0 or 0.0) * region.u1, (v0 or 0.0) * region.v1,
-        (u1 or 1.0) * region.u1, (v1 or 1.0) * region.v1, slot)
-end
-
-
---- Fails on a region index outside the table.
-local function checkClipIndex(index: integer, level: integer)
-    if index == nil or index ~= math.floor(index)
-        or index < 1 or index >= instancelayout.CLIPS then
-        error(("tecs: a clip region is numbered 1 to %d, not %s")
-            :format(instancelayout.CLIPS - 1, tostring(index)), level + 1)
-    end
+    return self._extractor:sprite(name, u0, v0, u1, v1)
 end
 
 --- Points region `index` at a rectangle in target pixels.
 ---
 --- Fragments of an instance carrying `Clip(index)` are kept where they land
---- inside the rectangle and thrown away where they do not, whatever placed
---- them there. Region zero is not a region and cannot be set: it is what an
---- instance says when it wants no clipping at all.
----
---- A region is one rectangle. Whoever sets it up owns the nesting, so a panel
---- within a panel is set as the intersection of the two and the fragment tests
---- once rather than walking a chain.
+--- inside the rectangle and thrown away where they do not. Region zero is not
+--- a region and cannot be set: it is what an instance says when it wants no
+--- clipping at all.
 function Renderer:setClipRegion(index: integer, region: ClipRegion)
-    checkClipIndex(index, 2)
-    if region == nil then
-        error("tecs: setClipRegion needs a rectangle; clearClipRegion "
-            .. "is how a region stops clipping", 2)
-    end
-
-    -- Stored as bounds rather than as position and size, because that is what
-    -- the comparison wants and the shader would otherwise redo the addition
-    -- for every fragment.
-    local base <const> = index * 4
-    local data <const> = self._clipUniform
-    data[base] = region.x
-    data[base + 1] = region.y
-    data[base + 2] = region.x + region.width
-    data[base + 3] = region.y + region.height
+    self._backend:setClipRegion(index, region)
 end
 
 --- Stops region `index` clipping anything.
----
---- The region goes back to what it was before anyone set it, so instances
---- still pointing at it draw whole rather than disappearing. An adapter handing
---- indices out and taking them back therefore leaves nothing behind that
---- silently removes content.
 function Renderer:clearClipRegion(index: integer)
-    checkClipIndex(index, 2)
-    local base <const> = index * 4
-    local data <const> = self._clipUniform
-    data[base] = -CLIP_UNBOUNDED
-    data[base + 1] = -CLIP_UNBOUNDED
-    data[base + 2] = CLIP_UNBOUNDED
-    data[base + 3] = CLIP_UNBOUNDED
+    self._backend:clearClipRegion(index)
 end
 
 --- Adds a producer, laid out after the archetypes in the order added.
----
---- A producer draws instances it owns rather than entities, which is what lets
---- a subsystem whose items are not entities take part in the one draw
---- everything else goes through.
 function Renderer:addProducer(producer: InstanceProducer)
-    self._producers[#self._producers + 1] = producer
-end
-
---- Registers the sync system and queries on `world`.
----
---- Syncing runs inside the world's update, in RenderFirst. Rendering happens
---- afterwards against a frame, so the two stay separable: the sync needs no
---- command buffer and the render needs no world.
-function Renderer:install(world: ecs.World)
-    self._world = world
-    self._alpha = 1.0
-    self._lastAlpha = 1.0
-
-    -- Snapshotting before anything in the step moves is what makes the pair a
-    -- pair: taken later, the two would be the same value and every frame would
-    -- draw the entity where the step left it.
-    local interpolated = world:query({
-        include = { components.Transform, components.PreviousTransform },
-    })
-    world:addSystem({
-        name = "tecs.SnapshotTransforms",
-        phase = ecs.phases.FixedFirst,
-        run = function()
-            for archetype, length in interpolated:iter() do
-                local transforms = archetype:get(components.Transform)
-                -- Mutable, because this writes every row it visits: the whole
-                -- column is what the next frame interpolates from.
-                local before = archetype:getMut(components.PreviousTransform)
-                for row = 1, length do
-                    local transform = transforms[row]
-                    local target = before[row]
-                    target.x = transform.x
-                    target.y = transform.y
-                    target.rotation = transform.rotation
-                end
-            end
-        end,
-    })
-
-    self._renderables = world:query({
-        include = {
-            components.Transform, components.Tint, components.Renderable,
-        },
-    })
-    self._lightSources = world:query({
-        include = { components.Transform, components.PointLight },
-    })
-
-    world:addSystem({
-        name = "tecs.SyncRenderState",
-        phase = ecs.phases.RenderFirst,
-        run = function()
-            local started = timing.begin()
-            -- Whatever the fixed steps left unconsumed, as a fraction of one
-            -- step. Read here rather than per row: it is the same for the
-            -- whole frame.
-            local timestep, accumulator = self._world:getFixedTiming()
-            self._alpha = timestep > 0.0 and accumulator / timestep or 1.0
-            if self._alpha > 1.0 then self._alpha = 1.0 end
-            self.count, self.dropped, self.rewritten = syncInstances(self)
-            self.deferred:setLights(syncLights(self))
-            self._extractSeconds = timing.finish(EXTRACT, started)
-        end,
-    })
+    self._extractor:addProducer(producer)
 end
 
 --- Seconds the last extraction took, or zero when nothing is being measured.
@@ -967,99 +204,41 @@ end
 --- simulation on its own. Extraction runs inside `world:update`, so the two
 --- are one number until something takes them apart.
 function Renderer:extractSeconds(): number
-    return self._extractSeconds or 0.0
+    return self._extractor:extractSeconds()
 end
 
---- Uploads what the sync produced, culls, and runs the pipeline.
----
---- The cull runs on the frame's command buffer, after the upload and before
---- the passes that consume it, so SDL orders all three without anything here
---- having to wait.
+--- Draws the packet the last extraction produced.
 function Renderer:render(frame: Frame)
-    local slot = self._slot
-    self.instances:flushSlot(slot, frame.commandBuffer)
-    self._bounds:flushSlot(slot, frame.commandBuffer)
-    -- Advanced after the copies are encoded, so the next frame writes a slot
-    -- this one is not still uploading from.
-    self._slot = (slot + 1) % Buffer.slotCount
+    local packet = self._packet
 
-    if self.count > 0 then
-        if not self._centred then
-            self._centred = true
-            self.camera.x = frame.width * 0.5
-            self.camera.y = frame.height * 0.5
-        end
-
-        local groups = math.ceil(self.count / CULL_GROUP)
-        local view = self.camera:viewBounds(frame.width, frame.height)
-        self._cullUniform[0] = view[1]
-        self._cullUniform[1] = view[2]
-        self._cullUniform[2] = view[3]
-        self._cullUniform[3] = view[4]
-        self._cullUniform[4] = self.count
-        self._cullUniform[5] = groups
-
-        -- Mark, scan, compact. Each pass reads what the one before it wrote,
-        -- and SDL orders them because each declares what it writes.
-        local mark = ComputePass.begin(frame.commandBuffer,
-            { self._slots.handle, self._blocks.handle })
-        mark:bindPipeline(self._mark.handle)
-        mark:bindStorageBuffers(0, { self._bounds.handle })
-        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0,
-            self._cullUniform, 32)
-        mark:dispatch(groups)
-        mark:finish()
-
-        local scan = ComputePass.begin(frame.commandBuffer,
-            { self._blocks.handle, self._drawArgs.handle })
-        scan:bindPipeline(self._scan.handle)
-        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0,
-            self._cullUniform, 32)
-        scan:dispatch(1)
-        scan:finish()
-
-        local compact = ComputePass.begin(frame.commandBuffer,
-            { self._visible.handle })
-        compact:bindPipeline(self._compact.handle)
-        compact:bindStorageBuffers(0,
-            { self._slots.handle, self._blocks.handle })
-        C.SDL_PushGPUComputeUniformData(frame.commandBuffer, 0,
-            self._cullUniform, 32)
-        compact:dispatch(groups)
-        compact:finish()
+    -- The camera centres itself the first time there is something to draw, and
+    -- the size to centre on is only known once there is a frame to draw into.
+    -- Written to the camera the game holds, since that is where a game reads it
+    -- back from, and copied into the packet this frame is drawn from.
+    if not self._centred and packet.count > 0 then
+        self._centred = true
+        self.camera.x = frame.width * 0.5
+        self.camera.y = frame.height * 0.5
+        packet:setCamera(self.camera)
     end
 
-    self.deferred:render(frame)
+    self._backend:consume(packet, frame)
+
+    -- Rotated after the copies are encoded, so the next extraction writes a
+    -- slot this frame is not still uploading from.
+    local slot = (self._slot + 1) % Buffer.slotCount
+    self._slot = slot
+    self._extractor:setStaging(slot, self._backend:mapSlot(slot))
 end
 
 --- The composited image the last frame produced.
----
---- The lit target rather than the swapchain, because a swapchain texture
---- belongs to the presenter once the frame is submitted while this one
---- persists and can be read at any point between frames. What it does not
---- include is anything drawn after compose, which today is nothing.
 function Renderer:captureTexture(): Texture
-    return self.deferred.graph:texture("lit")
+    return self._backend:captureTexture()
 end
 
 --- Releases everything the renderer owns. Safe to call more than once.
 function Renderer:destroy()
-    if self._destroyed then return end
-    self._destroyed = true
-    self.pipeline:destroy()
-    self.deferred:destroy()
-    self.instances:destroy()
-    self.sampler:destroy()
-    self.images:destroy()
-    self._bounds:destroy()
-    self._slots:destroy()
-    self._blocks:destroy()
-    self._visible:destroy()
-    self._drawArgs:destroy()
-    self._indices:destroy()
-    self._mark:destroy()
-    self._scan:destroy()
-    self._compact:destroy()
+    self._backend:destroy()
 end
 
 return Renderer

@@ -132,6 +132,12 @@ void main() { o = data.item[pick.index]; }
         return buffer._slots[slot + 1]
     end
 
+    -- A slot's recorded writes. The list is a dirtyranges, shared with the
+    -- frame packet that carries ranges to whoever owns the device.
+    local function rangesOf(buffer, slot)
+        return slotOf(buffer, slot).ranges
+    end
+
     it("uploads a range written directly into mapped memory", function()
         local buffer = Buffer.create(device.handle,
             { usage = { "storage" }, size = 16 * 8 })
@@ -172,7 +178,7 @@ void main() { o = data.item[pick.index]; }
         buffer:markDirty(0, 16)
         buffer:markDirty(16, 16)
         buffer:markDirty(32, 16)
-        assert.are.equal(1, slotOf(buffer, 0).rangeCount,
+        assert.are.equal(1, rangesOf(buffer, 0).count,
             "sequential rows should collapse into a single copy")
         assert.are.equal(48, buffer.dirtyBytes)
         buffer:destroy()
@@ -184,7 +190,7 @@ void main() { o = data.item[pick.index]; }
         buffer:map()
         buffer:markDirty(0, 16)
         buffer:markDirty(512, 16)
-        assert.are.equal(2, slotOf(buffer, 0).rangeCount)
+        assert.are.equal(2, rangesOf(buffer, 0).count)
         buffer:destroy()
     end)
 
@@ -196,9 +202,9 @@ void main() { o = data.item[pick.index]; }
         for index = 0, 200 do
             buffer:markDirty(index * 64, 16)
         end
-        assert.are.equal(1, slotOf(buffer, 0).rangeCount,
+        assert.are.equal(1, rangesOf(buffer, 0).count,
             "overflow must collapse, never drop a range")
-        local ranges = slotOf(buffer, 0).ranges
+        local ranges = rangesOf(buffer, 0).entries
         assert.are.equal(0, tonumber(ranges[0]))
         assert.is_true(tonumber(ranges[1]) >= 200 * 64,
             "the collapsed span must cover every marked write")
@@ -233,10 +239,10 @@ void main() { o = data.item[pick.index]; }
         writeSlotElement(buffer, 0, 0, 1.0, 0.0, 0.0)
         writeSlotElement(buffer, 1, 3, 0.0, 0.0, 1.0)
 
-        assert.are.equal(1, slotOf(buffer, 0).rangeCount)
-        assert.are.equal(1, slotOf(buffer, 1).rangeCount)
-        assert.are.equal(0, tonumber(slotOf(buffer, 0).ranges[0]))
-        assert.are.equal(48, tonumber(slotOf(buffer, 1).ranges[0]),
+        assert.are.equal(1, rangesOf(buffer, 0).count)
+        assert.are.equal(1, rangesOf(buffer, 1).count)
+        assert.are.equal(0, tonumber(rangesOf(buffer, 0).entries[0]))
+        assert.are.equal(48, tonumber(rangesOf(buffer, 1).entries[0]),
             "each slot records its own offsets")
         assert.are.equal(16, buffer:slotDirtyBytes(0))
         assert.are.equal(16, buffer:slotDirtyBytes(1))
@@ -245,7 +251,7 @@ void main() { o = data.item[pick.index]; }
         assert.are.equal(0, buffer:slotDirtyBytes(0))
         assert.are.equal(16, buffer:slotDirtyBytes(1),
             "flushing one slot must leave the other's bookkeeping alone")
-        assert.are.equal(1, slotOf(buffer, 1).rangeCount)
+        assert.are.equal(1, rangesOf(buffer, 1).count)
 
         assert.is_true(flushSlot(buffer, 1))
         assert.are.equal(0, buffer:slotDirtyBytes(1))

@@ -27,13 +27,10 @@
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
+local dirtyranges <const> = require("tecs.gpu.dirtyranges")
 
 local C <const> = sdl.C
 local K <const> = sdl.K
-
---- Distinct dirty ranges tracked before they are collapsed into one span.
---- Collapsing costs bandwidth; tracking costs nothing until it is exceeded.
-local MAX_RANGES <const> = 64
 
 --- Staging slots every buffer carries.
 ---
@@ -53,20 +50,9 @@ local record Slot
     --- Held rather than remapped, because remapping cycles and cycling would
     --- move the address out from under a writer still holding it.
     mapped: loader.CValue
-    --- Recorded writes as offset and size pairs, flat: entry n occupies
-    --- indices 2n and 2n+1. A C array rather than a Lua table because it is
-    --- written on every marked range, which is every row a producer touches.
-    ranges: loader.CArray
-    --- Pairs recorded, not entries in the array. Zero is a slot with nothing
-    --- to flush, which is what `flushSlot` returns false on.
-    rangeCount: integer
-    --- True once the ranges collapsed into the single span at index 0. Every
-    --- later mark widens that span instead of adding an entry.
-    collapsed: boolean
-    --- Bytes marked since the last flush, summed as marked. Overlapping writes
-    --- count twice, so this sizes the work a producer did rather than the
-    --- bytes the flush will copy.
-    dirtyBytes: integer
+    --- Recorded writes. Empty is a slot with nothing to flush, which is what
+    --- `flushSlot` returns false on.
+    ranges: dirtyranges
 end
 
 local record BufferOptions
@@ -171,12 +157,7 @@ function Buffer.create(device: loader.CPtr, options: BufferOptions): Buffer
     self._destroyed = false
     self._slots = {}
     for index = 1, SLOT_COUNT do
-        self._slots[index] = {
-            rangeCount = 0,
-            collapsed = false,
-            dirtyBytes = 0,
-            ranges = loader.newArray("uint32_t[?]", MAX_RANGES * 2),
-        }
+        self._slots[index] = { ranges = dirtyranges.create() }
     end
     return self
 end
@@ -253,66 +234,27 @@ end
 
 --- Records that `size` bytes at `offset` were written into a slot.
 ---
---- Adjacent and overlapping writes merge, which is the common case when a
---- producer walks rows in order. Beyond `MAX_RANGES` distinct spans the whole
---- dirty region collapses to one, trading bandwidth for bounded bookkeeping.
----
---- Only the last recorded range is tested for a merge, so writes that arrive
---- out of order fill the list faster and collapse sooner. That costs
---- bandwidth and nothing else: the collapsed span still covers every write.
+--- Adjacent and overlapping writes merge; see `dirtyranges` for the ceiling
+--- and what happens past it.
 --- @param offset Bytes from the start of the buffer, matching the address
 ---     `mapSlot` returned. A size of zero or less records nothing.
 function Buffer:markSlotDirty(index: integer, offset: integer, size: integer)
     if size <= 0 then return end
     local slot = slotAt(self, index)
-    slot.dirtyBytes = slot.dirtyBytes + size
-    if index == 0 then self.dirtyBytes = slot.dirtyBytes end
+    slot.ranges:mark(offset, size)
+    if index == 0 then self.dirtyBytes = slot.ranges.bytes end
+end
 
-    local ranges = slot.ranges
-    if slot.collapsed then
-        local start = math.min(ranges[0] as integer, offset)
-        local finish = math.max((ranges[0] as integer) + (ranges[1] as integer),
-            offset + size)
-        ranges[0] = start
-        ranges[1] = finish - start
-        return
+--- Records every range in `ranges` against a slot.
+---
+--- What a frame packet's ranges arrive through: the half that wrote the bytes
+--- recorded them without a buffer to record them on, and this is where they
+--- meet the device buffer they describe.
+function Buffer:markSlotRanges(index: integer, ranges: dirtyranges)
+    for entry = 0, ranges.count - 1 do
+        local offset, size = ranges:at(entry)
+        self:markSlotDirty(index, offset, size)
     end
-
-    local count = slot.rangeCount
-
-    if count > 0 then
-        local lastOffset = ranges[(count - 1) * 2] as integer
-        local lastSize = ranges[(count - 1) * 2 + 1] as integer
-        if offset <= lastOffset + lastSize and offset + size >= lastOffset then
-            local start = math.min(lastOffset, offset)
-            local finish = math.max(lastOffset + lastSize, offset + size)
-            ranges[(count - 1) * 2] = start
-            ranges[(count - 1) * 2 + 1] = finish - start
-            return
-        end
-    end
-
-    if count >= MAX_RANGES then
-        local start = ranges[0] as integer
-        local finish = start
-        for entry = 0, count - 1 do
-            local rangeEnd = (ranges[entry * 2] as integer)
-                + (ranges[entry * 2 + 1] as integer)
-            start = math.min(start, ranges[entry * 2] as integer)
-            finish = math.max(finish, rangeEnd)
-        end
-        start = math.min(start, offset)
-        finish = math.max(finish, offset + size)
-        ranges[0] = start
-        ranges[1] = finish - start
-        slot.rangeCount = 1
-        slot.collapsed = true
-        return
-    end
-
-    ranges[count * 2] = offset
-    ranges[count * 2 + 1] = size
-    slot.rangeCount = count + 1
 end
 
 --- Copies `size` bytes from `source` into a slot at `offset` and marks it.
@@ -332,7 +274,7 @@ end
 --- producer wrote and not how much the flush copies. Zero means the flush
 --- would encode nothing, which is the useful test.
 function Buffer:slotDirtyBytes(index: integer): integer
-    return slotAt(self, index).dirtyBytes
+    return slotAt(self, index).ranges.bytes
 end
 
 --- Unmaps a slot without flushing it.
@@ -363,7 +305,8 @@ function Buffer:flushSlot(index: integer, commandBuffer: loader.CValue): boolean
     local slot = slotAt(self, index)
     unmapSlotRecord(self, slot)
 
-    local count = slot.rangeCount
+    local ranges = slot.ranges
+    local count = ranges.count
     if count == 0 then return false end
 
     local from = loader.newArray("SDL_GPUTransferBufferLocation[1]")
@@ -375,8 +318,7 @@ function Buffer:flushSlot(index: integer, commandBuffer: loader.CValue): boolean
 
     local copyPass = C.SDL_BeginGPUCopyPass(commandBuffer)
     for entry = 0, count - 1 do
-        local offset = slot.ranges[entry * 2] as integer
-        local size = slot.ranges[entry * 2 + 1] as integer
+        local offset, size = ranges:at(entry)
         source.offset = offset
         destination.offset = offset
         destination.size = size
@@ -384,9 +326,7 @@ function Buffer:flushSlot(index: integer, commandBuffer: loader.CValue): boolean
     end
     C.SDL_EndGPUCopyPass(copyPass)
 
-    slot.rangeCount = 0
-    slot.collapsed = false
-    slot.dirtyBytes = 0
+    ranges:clear()
     if index == 0 then self.dirtyBytes = 0 end
     return true
 end
