@@ -82,9 +82,23 @@ local record Event
     normalY: number
     --- Mouse, gamepad or pen button.
     button: integer
-    --- Wheel movement.
+    --- How many times this button was pressed in quick succession, as the
+    --- platform counts it against its own double-click interval. One for a
+    --- single click, two for a double, and up from there.
+    clicks: integer
+    --- Wheel movement, with one meaning whatever the platform is set to:
+    --- positive `wheelY` is a scroll away from the player and positive
+    --- `wheelX` is a scroll to the right. A platform reporting natural
+    --- scrolling sends the opposite pair and flags it, and the conversion
+    --- undoes that, so nothing above binds a sign twice.
     wheelX: number
     wheelY: number
+    --- The same movement accumulated to whole notches by the platform, on the
+    --- same sign convention. What a menu stepping one item per notch reads,
+    --- rather than deciding for itself where a fraction of a notch becomes a
+    --- step.
+    wheelTicksX: integer
+    wheelTicksY: integer
     --- Zoom factor a pinch gesture reports since the previous event in it.
     --- Below one is a pinch closed, above one is a pinch opened.
     scale: number
@@ -97,6 +111,13 @@ local record Event
     pressure: number
     --- Whether the pen's eraser end is in use.
     eraser: boolean
+    --- Everything the pen was doing at the instant of the event, as a mask:
+    --- the tip down, the eraser end in use, whether it is in proximity, and
+    --- each barrel button. `eraser` and `down` answer for one stroke; this
+    --- answers which barrel button is held right now. The bits are the
+    --- platform's `SDL_PEN_INPUT_*` values. Not carried on the proximity
+    --- events, which report no state.
+    penState: integer
 
     --- Device that produced the event: a gamepad, a keyboard, a mouse, a pen,
     --- a sensor, a display, or a window. These identifiers are 32 bits and fit
@@ -124,6 +145,11 @@ local record Event
     sensorY: number
     sensorZ: number
     sensorData: {number}
+    --- When the hardware took the reading, in nanoseconds on the sensor's own
+    --- clock. Like `timestamp` it orders readings against each other and
+    --- against nothing else, which is what integrating a rotation over them
+    --- needs and is all it is for.
+    sensorTimestamp: number
 
     --- Where a dropped file or text came from, when the platform says.
     source: string
@@ -275,6 +301,11 @@ map("SDL_EVENT_USER", "user")
 --- Axis values arrive as signed 16-bit and are reported as -1..1.
 local AXIS_SCALE <const> = 1.0 / 32767.0
 
+--- The direction a wheel event carries when the platform has natural
+--- scrolling on, which means both of its axes are the opposite of what they
+--- read as.
+local WHEEL_FLIPPED <const> = tonumber(C.SDL_MOUSEWHEEL_FLIPPED) as integer
+
 --- Kinds a player produces, as against ones the platform reports about
 --- itself. Latency is only meaningful for these: nobody is waiting on a
 --- window expose.
@@ -411,6 +442,10 @@ local function convert(raw: loader.CValue): Event
         local pressed = raw.button
         event.timestamp = tonumber(pressed.timestamp) as number
         event.button = tonumber(pressed.button) as integer
+        -- The platform already counted the run against its own double-click
+        -- interval, which is the interval the player set and the one every
+        -- other application on the machine uses.
+        event.clicks = tonumber(pressed.clicks) as integer
         event.x = tonumber(pressed.x) as number
         event.y = tonumber(pressed.y) as number
         event.down = pressed.down as boolean
@@ -420,8 +455,24 @@ local function convert(raw: loader.CValue): Event
     elseif kind == "mouseWheel" then
         local wheel = raw.wheel
         event.timestamp = tonumber(wheel.timestamp) as number
-        event.wheelX = tonumber(wheel.x) as number
-        event.wheelY = tonumber(wheel.y) as number
+        -- Natural scrolling is reported rather than applied: the platform
+        -- sends both axes negated and sets the flag. Undoing it here is what
+        -- lets everything above mean one thing by a positive scroll, instead
+        -- of each reader learning that the flag exists and half of them not.
+        local flipped =
+            (tonumber(wheel.direction) as integer) == WHEEL_FLIPPED
+        local wheelX = tonumber(wheel.x) as number
+        local wheelY = tonumber(wheel.y) as number
+        local ticksX = tonumber(wheel.integer_x) as integer
+        local ticksY = tonumber(wheel.integer_y) as integer
+        if flipped then
+            wheelX, wheelY = -wheelX, -wheelY
+            ticksX, ticksY = -ticksX, -ticksY
+        end
+        event.wheelX = wheelX
+        event.wheelY = wheelY
+        event.wheelTicksX = ticksX
+        event.wheelTicksY = ticksY
         event.x = tonumber(wheel.mouse_x) as number
         event.y = tonumber(wheel.mouse_y) as number
         event.which = tonumber(wheel.which) as number
@@ -486,6 +537,10 @@ local function convert(raw: loader.CValue): Event
         if kind ~= "penProximityIn" and kind ~= "penProximityOut" then
             event.x = tonumber(pen.x) as number
             event.y = tonumber(pen.y) as number
+            -- The whole of what the pen was doing when this happened, which
+            -- is the only field that answers which barrel button is held.
+            -- A proximity event carries no state, hence the guard.
+            event.penState = tonumber(pen.pen_state) as integer
         end
         if kind == "penDown" or kind == "penUp" then
             event.eraser = raw.ptouch.eraser as boolean
@@ -514,6 +569,7 @@ local function convert(raw: loader.CValue): Event
         event.timestamp = tonumber(reading.timestamp) as number
         event.which = tonumber(reading.which) as number
         event.sensor = tonumber(reading.sensor) as integer
+        event.sensorTimestamp = tonumber(reading.sensor_timestamp) as number
         local data = reading.data as loader.CArray
         event.sensorX = tonumber(data[0]) as number
         event.sensorY = tonumber(data[1]) as number
@@ -538,6 +594,7 @@ local function convert(raw: loader.CValue): Event
         local reading = raw.sensor
         event.timestamp = tonumber(reading.timestamp) as number
         event.which = tonumber(reading.which) as number
+        event.sensorTimestamp = tonumber(reading.sensor_timestamp) as number
         local data = reading.data as loader.CArray
         event.sensorX = tonumber(data[0]) as number
         event.sensorY = tonumber(data[1]) as number

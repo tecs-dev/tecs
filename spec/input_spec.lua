@@ -261,6 +261,35 @@ describe("platform.Input", function()
         assert.are.equal(0.0, input.wheelY)
     end)
 
+    it("accumulates whole scroll notches beside the fractional pair", function()
+        -- A menu stepping one item per notch reads these, so a trackpad that
+        -- reports a tenth of a notch per event steps once rather than ten
+        -- times or not at all.
+        local partial = {
+            kind = "mouseWheel", wheelX = 0.0, wheelY = 0.4,
+            wheelTicksX = 0, wheelTicksY = 0,
+        }
+        local whole = {
+            kind = "mouseWheel", wheelX = 0.0, wheelY = 0.6,
+            wheelTicksX = 0, wheelTicksY = 1,
+        }
+
+        input:beginFrame()
+        input:handleEvent(partial)
+        assert.are.equal(0, input.wheelTicksY, "part of a notch is no notch")
+        input:handleEvent(whole)
+        assert.are.equal(1, input.wheelTicksY,
+            "and the event that completed it is one")
+
+        input:beginFrame()
+        assert.are.equal(0, input.wheelTicksY, "cleared with the frame")
+
+        -- A replayed stream recorded before the pair existed carries neither,
+        -- and must add nothing rather than fail.
+        input:handleEvent({ kind = "mouseWheel", wheelX = 0.0, wheelY = 1.0 })
+        assert.are.equal(0, input.wheelTicksY)
+    end)
+
     it("distinguishes a mouse event the platform made from a touch", function()
         -- A game that handles touch itself would otherwise act on one tap
         -- twice: once as a finger and once as the virtual click the platform

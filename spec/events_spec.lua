@@ -153,6 +153,31 @@ describe("platform.events", function()
         assert.are.equal(0.75, seen[2].normalX)
     end)
 
+    it("carries when the hardware took a sensor reading", function()
+        -- Integrating a rotation needs the interval between two readings, and
+        -- the interval between the events that delivered them is the
+        -- platform's scheduling rather than the sensor's.
+        local queue, count = queueOf(function(q)
+            q[0].type = C.SDL_EVENT_GAMEPAD_SENSOR_UPDATE
+            q[0].gsensor.which = 5
+            q[0].gsensor.sensor = 3
+            q[0].gsensor.sensor_timestamp = 1250000
+            q[1].type = C.SDL_EVENT_SENSOR_UPDATE
+            q[1].sensor.which = 6
+            q[1].sensor.data[0] = 0.5
+            q[1].sensor.data[5] = -1.5
+            q[1].sensor.sensor_timestamp = 2500000
+        end, 2)
+
+        local seen = drainOne(queue, count)
+        assert.are.equal("gamepadSensor", seen[1].kind)
+        assert.are.equal(1250000, seen[1].sensorTimestamp)
+        assert.are.equal("sensorUpdate", seen[2].kind)
+        assert.are.equal(2500000, seen[2].sensorTimestamp)
+        assert.are.equal(-1.5, seen[2].sensorData[6],
+            "beside the six components a standalone sensor reports")
+    end)
+
     it("carries a key's layout and its physical position, plus modifiers",
         function()
             -- A movement binding wants the position and a text binding wants
@@ -172,6 +197,75 @@ describe("platform.events", function()
             assert.are.equal(sdl.K.SDL_KMOD_LSHIFT, event.modifiers)
             assert.are.equal(6, event.which, "and which keyboard produced it")
         end)
+
+    it("normalises a wheel the platform reports flipped", function()
+        -- Natural scrolling is reported, not applied: the platform negates
+        -- both axes and sets a flag saying it did. A conversion that carried
+        -- the pair through unread would scroll every menu backwards on every
+        -- machine that has the setting on, and only on those.
+        local queue, count = queueOf(function(q)
+            q[0].type = C.SDL_EVENT_MOUSE_WHEEL
+            q[0].wheel.direction = C.SDL_MOUSEWHEEL_NORMAL
+            q[0].wheel.x = 1.0
+            q[0].wheel.y = 3.0
+            q[1].type = C.SDL_EVENT_MOUSE_WHEEL
+            q[1].wheel.direction = C.SDL_MOUSEWHEEL_FLIPPED
+            q[1].wheel.x = 1.0
+            q[1].wheel.y = 3.0
+        end, 2)
+
+        local seen = drainOne(queue, count)
+        -- Positive is away from the player and to the right, always.
+        assert.are.equal(3.0, seen[1].wheelY)
+        assert.are.equal(1.0, seen[1].wheelX)
+        assert.are.equal(-3.0, seen[2].wheelY,
+            "a flagged pair means the opposite of what it reads as")
+        assert.are.equal(-1.0, seen[2].wheelX,
+            "and the horizontal axis flips with it")
+    end)
+
+    it("carries the whole notches the platform counted", function()
+        -- SDL accumulates the fractional scroll into ticks itself, against
+        -- the same threshold every other application on the machine uses. A
+        -- menu stepping one item per notch reads those rather than picking
+        -- its own threshold on the fractional pair.
+        local queue, count = queueOf(function(q)
+            q[0].type = C.SDL_EVENT_MOUSE_WHEEL
+            q[0].wheel.direction = C.SDL_MOUSEWHEEL_NORMAL
+            q[0].wheel.x = 0.25
+            q[0].wheel.y = 2.5
+            q[0].wheel.integer_x = 0
+            q[0].wheel.integer_y = 2
+            q[1].type = C.SDL_EVENT_MOUSE_WHEEL
+            q[1].wheel.direction = C.SDL_MOUSEWHEEL_FLIPPED
+            q[1].wheel.x = 0.25
+            q[1].wheel.y = 2.5
+            q[1].wheel.integer_x = 0
+            q[1].wheel.integer_y = 2
+        end, 2)
+
+        local seen = drainOne(queue, count)
+        assert.are.equal(2, seen[1].wheelTicksY)
+        assert.are.equal(0, seen[1].wheelTicksX)
+        assert.are.equal(-2, seen[2].wheelTicksY,
+            "the notches flip with the pair they were counted from")
+    end)
+
+    it("carries how many times a click ran together", function()
+        -- The platform counted the run against the interval the player set,
+        -- so a double click here is a double click everywhere else on the
+        -- machine.
+        local queue, count = queueOf(function(q)
+            q[0].type = C.SDL_EVENT_MOUSE_BUTTON_DOWN
+            q[0].button.button = 1
+            q[0].button.down = true
+            q[0].button.clicks = 2
+        end)
+
+        local event = drainOne(queue, count)[1]
+        assert.are.equal("mouseDown", event.kind)
+        assert.are.equal(2, event.clicks)
+    end)
 
     it("marks a mouse event the platform made from a touch or a pen", function()
         -- These arrive alongside the finger events they were made from, so a
@@ -261,6 +355,28 @@ describe("platform.events", function()
         assert.are.equal(0.5, seen[2].value)
         assert.is_false(seen[2].eraser,
             "the eraser flag must not carry over from the press before it")
+    end)
+
+    it("carries the whole pen state, not only the end in use", function()
+        -- `eraser` and `down` describe one stroke. Which barrel button is
+        -- held right now is a question only the mask answers, and a drawing
+        -- tool binding the barrel has nothing else to read.
+        local held = sdl.K.SDL_PEN_INPUT_DOWN + sdl.K.SDL_PEN_INPUT_BUTTON_2
+        local queue, count = queueOf(function(q)
+            q[0].type = C.SDL_EVENT_PEN_MOTION
+            q[0].pmotion.which = 9
+            q[0].pmotion.pen_state = held
+            q[1].type = C.SDL_EVENT_PEN_BUTTON_DOWN
+            q[1].pbutton.which = 9
+            q[1].pbutton.button = 2
+            q[1].pbutton.down = true
+            q[1].pbutton.pen_state = held
+        end, 2)
+
+        local seen = drainOne(queue, count)
+        assert.are.equal(held, seen[1].penState)
+        assert.are.equal(held, seen[2].penState,
+            "every pen event that reports a state has to carry it")
     end)
 
     it("reports a drop with its path and its origin", function()

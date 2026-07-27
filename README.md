@@ -392,6 +392,26 @@ A mouse event the platform synthesised from a touch or a pen is marked as such.
 Those arrive beside the finger events they were made from, and a game handling
 both would otherwise act on one gesture twice.
 
+Natural scrolling is normalised where the conversion happens, not left for each
+reader to discover. SDL reports a flipped wheel by negating both axes and
+setting a flag, so a game that read the pair without the flag scrolls backwards
+on every machine with the setting on and nowhere else, which is the kind of
+defect that reaches a player before it reaches a test. `wheelX` and `wheelY`
+therefore mean one thing everywhere: positive is away from the player and to
+the right. Beside them, `wheelTicksX` and `wheelTicksY` carry the whole notches
+SDL accumulated against the platform's own threshold, so a menu stepping one
+item per notch does not re-derive them from the fractional pair and disagree
+with the rest of the machine about where a step begins.
+
+Where the platform has already done a piece of bookkeeping, the event carries
+its answer rather than inviting a worse one above. A mouse button carries how
+many clicks ran together, counted against the interval the player set. Every
+pen event that reports one carries the full input mask, which is the only field
+that says which barrel button is held rather than which end drew the current
+stroke. A sensor reading carries the time the hardware took it, on the sensor's
+own clock, since the interval between the events that delivered two readings is
+the platform's scheduling and not the interval an integration wants.
+
 The engine acts on lifecycle and input events and then hands every event to the
 game anyway. An engine that consumed events would leave a game unable to tell
 an event it never received from one it mishandled.

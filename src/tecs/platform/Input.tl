@@ -116,8 +116,20 @@ local record Input
     mouseDeltaY: number
     --- Wheel movement accumulated this frame, in the platform's own notches
     --- rather than pixels. Cleared by `beginFrame`.
+    ---
+    --- One sign whatever the machine is set to: positive `wheelY` is a scroll
+    --- away from the player, positive `wheelX` a scroll to the right. A
+    --- platform with natural scrolling on reports the opposite pair and says
+    --- so, and the conversion in `events` puts it back, so a binding written
+    --- against these fields does not invert on somebody else's desk.
     wheelX: number
     wheelY: number
+    --- The same movement accumulated to whole notches by the platform, on the
+    --- same sign convention and cleared by `beginFrame` alongside the pair
+    --- above. What a menu stepping one item per notch reads, rather than
+    --- picking its own threshold on the fractional pair.
+    wheelTicksX: integer
+    wheelTicksY: integer
     --- Device that produced the most recent mouse button, motion or wheel
     --- event.
     mouseWhich: number
@@ -233,6 +245,7 @@ function Input.create(options?: InputOptions): Input
     self.mouseX, self.mouseY = 0.0, 0.0
     self.mouseDeltaX, self.mouseDeltaY = 0.0, 0.0
     self.wheelX, self.wheelY = 0.0, 0.0
+    self.wheelTicksX, self.wheelTicksY = 0, 0
     self.mouseWhich = 0
     self.mouseSynthetic = false
     self.text = ""
@@ -299,6 +312,7 @@ function Input:beginFrame()
     end
     self.mouseDeltaX, self.mouseDeltaY = 0.0, 0.0
     self.wheelX, self.wheelY = 0.0, 0.0
+    self.wheelTicksX, self.wheelTicksY = 0, 0
     self.text = ""
 end
 
@@ -478,6 +492,11 @@ function Input:handleEvent(event: eventStream.Event)
         self.mouseSynthetic = event.synthetic == true
         self.wheelX = self.wheelX + event.wheelX
         self.wheelY = self.wheelY + event.wheelY
+        -- A replayed event carries only what was recorded, so a stream from
+        -- before the whole-notch pair existed adds nothing rather than
+        -- failing.
+        self.wheelTicksX = self.wheelTicksX + (event.wheelTicksX or 0)
+        self.wheelTicksY = self.wheelTicksY + (event.wheelTicksY or 0)
     elseif kind == "fingerDown" or kind == "fingerMotion" then
         local key = touchKey(event)
         local touch = self._touches[key]
