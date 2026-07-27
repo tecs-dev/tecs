@@ -9,6 +9,7 @@
 
 local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
+local layers <const> = require("tecs.gfx.layers")
 
 local C <const> = sdl.C
 local K <const> = sdl.K
@@ -78,16 +79,97 @@ local DEFAULT_USAGE <const>: {string} = { "colorTarget", "sampled" }
 --- SDL_GPU_TEXTURETYPE_2D
 local TEXTURE_TYPE_2D <const> = 0
 
+--- A depth format and what it can tell apart.
+local record DepthFormat
+    --- An `SDL_GPU_TEXTUREFORMAT_*` value.
+    format: integer
+    --- What it is called, so a diagnostic names something a reader can look
+    --- up rather than an enum value.
+    name: string
+    --- The smallest difference the format keeps anywhere in zero to one.
+    ---
+    --- A normalised integer steps uniformly, so this is one over the values it
+    --- has. A float does not: its step is finest near zero and coarsest at the
+    --- top of the range, so what is quoted is the step at the top, which is
+    --- the one the far layers are drawn at.
+    resolution: number
+end
+
 --- Depth formats, best precision first.
 ---
 --- D16 is the only one SDL guarantees, so it is the floor rather than a
 --- preference. The two above it are asked for and taken only if the backend
 --- answers yes.
-local DEPTH_FORMATS <const>: {integer} = {
-    tonumber(C.SDL_GPU_TEXTUREFORMAT_D32_FLOAT) as integer,
-    tonumber(C.SDL_GPU_TEXTUREFORMAT_D24_UNORM) as integer,
-    tonumber(C.SDL_GPU_TEXTUREFORMAT_D16_UNORM) as integer,
+---
+--- Each carries its resolution because the fallback is otherwise silent:
+--- taking the floor costs the sort inside a layer, and a format added here
+--- without saying what it resolves would go unchecked.
+local DEPTH_FORMATS <const>: {DepthFormat} = {
+    {
+        format = tonumber(C.SDL_GPU_TEXTUREFORMAT_D32_FLOAT) as integer,
+        name = "D32_FLOAT",
+        resolution = 2 ^ -24,
+    },
+    {
+        format = tonumber(C.SDL_GPU_TEXTUREFORMAT_D24_UNORM) as integer,
+        name = "D24_UNORM",
+        resolution = 1.0 / (2 ^ 24 - 1),
+    },
+    {
+        format = tonumber(C.SDL_GPU_TEXTUREFORMAT_D16_UNORM) as integer,
+        name = "D16_UNORM",
+        resolution = 1.0 / (2 ^ 16 - 1),
+    },
 }
+
+--- Says so in the log when a depth format cannot hold the layer sort, and
+--- answers by how much it misses.
+---
+--- The sort divides the depth range into bands and positions within a band,
+--- and the finest distinction it draws is `layers.depthResolution`. A format
+--- whose step is larger than that keeps the bands, so a HUD still covers a
+--- world, and loses the sort inside them: entities closer together than one
+--- step share a depth value and draw in the order they were written. Nothing
+--- fails and nothing is dropped, so this is the only place it is visible.
+---
+--- Reports rather than raising. The shortfall is not fatal to every scene: a
+--- layer sorted by z alone resolves in the shallowest format SDL guarantees
+--- with room to spare, and a game whose world is smaller than the default
+--- extents resolves whatever it configures. Refusing the depth target would
+--- take a device those scenes render correctly on and leave it with no
+--- picture at all, which is a worse answer than a wrong sort for a scene that
+--- never sorts by position. So the engine says what is lost and draws.
+--- @param format An `SDL_GPU_TEXTUREFORMAT_*` value. One whose step is not
+---     known here answers zero, since there is nothing to compare against.
+--- @return World units that collapse onto one depth value, or zero when the
+---     format resolves everything the sort produces.
+function Texture.checkDepthSorting(format: integer): number
+    local known: DepthFormat = nil
+    for _, entry in ipairs(DEPTH_FORMATS) do
+        if entry.format == format then
+            known = entry
+            break
+        end
+    end
+    if known == nil then return 0.0 end
+
+    local needed <const> = layers.depthResolution()
+    if known.resolution <= needed then return 0.0 end
+
+    -- Required here rather than at the top. Logging reaches SDL through a
+    -- native sink, and a texture is created by tools and tests that have no
+    -- use for one; a depth format that falls short is a cold path met once.
+    local log <const> = require("tecs.log")
+    local collapsed <const> = known.resolution / needed
+    log.get("tecs.gpu"):error(
+        "the depth target is %s, which steps by %.3g, and the layer sort "
+        .. "resolves to %.3g: entities within %.4g world units of each other "
+        .. "share a depth value and draw in the order they were written "
+        .. "rather than the order they were sorted into. Dividing "
+        .. "layers.maxY and layers.maxZ by %.4g resolves the sort again",
+        known.name, known.resolution, needed, collapsed, collapsed)
+    return collapsed
+end
 
 --- The best depth format `device` supports as a depth target.
 ---
@@ -99,13 +181,19 @@ local DEPTH_FORMATS <const>: {integer} = {
 --- Raises rather than returning nil when nothing in the list works, since a
 --- device that supports no depth format at all cannot run the geometry pass
 --- and there is nothing a caller could do with the answer.
+---
+--- Falling back is reported. What the depth target holds decides how finely a
+--- layer sorts, so a device that offers only the floor draws a scene in an
+--- order nobody asked for, and `checkDepthSorting` is what stops that being
+--- the one thing about this choice nobody is told.
 --- @return An `SDL_GPU_TEXTUREFORMAT_*` value to create a depth target with.
 function Texture.depthFormat(device: loader.CPtr): integer
     local usage = USAGE_FLAGS.depthTarget
-    for _, format in ipairs(DEPTH_FORMATS) do
-        if C.SDL_GPUTextureSupportsFormat(device, format, TEXTURE_TYPE_2D,
-            usage) then
-            return format
+    for _, entry in ipairs(DEPTH_FORMATS) do
+        if C.SDL_GPUTextureSupportsFormat(device, entry.format,
+            TEXTURE_TYPE_2D, usage) then
+            Texture.checkDepthSorting(entry.format)
+            return entry.format
         end
     end
     error("tecs: this device supports no depth format as a depth target", 2)
