@@ -212,6 +212,44 @@ in ten under a coroutine-based test runner and never standalone. The mechanism
 is below this code and unresolved. Not calling the encoder with something it
 will reject keeps that path unreached.
 
+A worker's state has to be given somewhere to compile into, and that is the
+host's job rather than the worker's. A LuaJIT trace reaches the interpreter
+with one immediate branch, so its machine code has to sit within that branch's
+reach: 128MB on arm64, which LuaJIT halves to 62MB either side of the
+interpreter's own code so mcode can reach mcode too. There is no way to hand
+LuaJIT memory. It asks the kernel for an area near that anchor and rejects
+whatever lands outside, and there is nowhere else a trace can go.
+
+This process fills those 124MB. Below the anchor is `__PAGEZERO`, four
+gigabytes the kernel refuses to shrink. Above it is where the loader stacks
+every dylib and where the graphics driver maps. Sweeping the window with one
+mmap per 64KB slot, all 1984 land before the engine boots and none do once a
+window and a device exist, so a state created after that point never gets an
+area and runs entirely interpreted. Measured on one hot numeric loop, a worker
+took 27.8 seconds against the main state's 20.3 milliseconds, and
+`jit.status()` answered true throughout.
+
+So `native/mcodearena.c` holds 24MB of that window from the host's first
+instruction and gives it back once initialisation returns. Everything mapped in
+between goes elsewhere, because the block is already there, and what is
+released is free address space in reach that nothing else has taken. The same
+loop then runs in 23 milliseconds on a worker, within noise of the main state,
+with LuaJIT's own defaults and no tuning. Reserving costs no memory: the block
+is mapped unreadable and never touched.
+
+Twenty-four megabytes is what fits, measured: a block that size places on every
+launch and thirty-two on none. It also has to be that large to be enough, since
+the driver's first-frame mappings take most of what is released before any
+worker compiles; eight megabytes places just as reliably and left the worker
+interpreted in three launches out of four. About six megabytes survives to
+steady state, which is a dozen states compiling the 512KB LuaJIT allows each of
+them, and many more compiling a few loops apiece: 48 workers running one loop
+at once were measured with none of them interpreted. Past that bound a worker
+competes for whatever the loader left, and the symptom is only that it runs
+slowly. `TECS_TRACEPROF=1` makes each worker report its trace aborts when it
+stops, which is how that is told apart from a worker that is merely busy: the
+failure reads as tens of thousands of `failed to allocate mcode memory`.
+
 Asset loading rides on that. Decoding a PNG is milliseconds of pure CPU work
 with no GPU involvement, so it happens on a worker and the main thread only
 uploads. The worker returns the _address_ of a decoded surface rather than its

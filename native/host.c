@@ -27,6 +27,7 @@
 
 #include "registry.h"
 #include "luamods.h"
+#include "mcodearena.h"
 
 typedef struct TecsHost TecsHost;
 
@@ -240,6 +241,11 @@ static void pushQueue(lua_State *L, TecsHost *host)
 
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
 {
+    /* Before anything, because its whole value is being there before the
+     * loader and the graphics driver have taken the address space a compiled
+     * trace has to live in. */
+    tecsMcodeArenaReserve();
+
     TecsHost *host = (TecsHost *)SDL_calloc(1, sizeof(TecsHost));
     if (!host) return SDL_APP_FAILURE;
     host->application = LUA_NOREF;
@@ -310,6 +316,11 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
 
     if (!reserveEvents(host, TECS_EVENTS_INITIAL)) return SDL_APP_FAILURE;
     if (!callMethod(host, "_init", NULL, 0)) return SDL_APP_FAILURE;
+
+    /* The window and the device exist, so everything that maps at startup has
+     * mapped. What was held is now the free address space this state and every
+     * worker compile into for the rest of the run. */
+    tecsMcodeArenaRelease();
     return SDL_APP_CONTINUE;
 }
 

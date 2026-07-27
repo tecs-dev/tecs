@@ -246,6 +246,35 @@ local record Self
     send: function(self: Self, value: any)
 end
 
+--- Watches this state's trace aborts when `TECS_TRACEPROF` is set, so the
+--- question of whether a worker compiles at all has an answer measured from
+--- inside it.
+---
+--- It is worth asking because nothing else reports it. A worker's machine code
+--- has to sit within a branch's reach of the interpreter, the host holds a
+--- block of that address space open so there is somewhere for it to go, and a
+--- state that finds nowhere anyway runs entirely interpreted with
+--- `jit.status()` still answering true. Aborts reading `failed to allocate
+--- mcode memory` in the tens of thousands are that failure and nothing else.
+---
+--- Returns a function that writes the report, or nil when nothing is watching.
+local function watchTraces(): function()
+    if os.getenv("TECS_TRACEPROF") == nil then return nil end
+    local profile <const> = require("tecs.utils.profile")
+    local session <const> = profile.trace()
+    return function()
+        local report <const> = session:stop()
+        local lines <const> = { ("worker traces: %d aborts, %d blacklisted")
+            :format(report.totalAborts, report.blacklisted) }
+        for index = 1, math.min(#report.sites, 5) do
+            local site <const> = report.sites[index]
+            lines[#lines + 1] = ("  %7d  %s  %s")
+                :format(site.count, site.reason, site.location)
+        end
+        io.stderr:write(table.concat(lines, "\n") .. "\n")
+    end
+end
+
 --- The channels of the worker this code is running inside.
 ---
 --- Only valid in a worker's state, where the native entry point installed the
@@ -260,10 +289,20 @@ function workers.current(): Self
 
     local incoming = Channel.wrap(ffi.cast("void *", inbox) as loader.CPtr)
     local results = Channel.wrap(ffi.cast("void *", outbox) as loader.CPtr)
+    local reportTraces = watchTraces()
 
     return {
         receive = function(_self: Self, timeoutMs?: number): any
-            return incoming:receive(timeoutMs or FOREVER)
+            local value = incoming:receive(timeoutMs or FOREVER)
+            -- A wait with no timeout returns nil only when the inbox closes,
+            -- which is how a worker is asked to stop; that is where a report
+            -- covering the whole run belongs. A polling receive returns nil
+            -- whenever the queue is empty and says nothing about the state.
+            if value == nil and timeoutMs == nil and reportTraces ~= nil then
+                reportTraces()
+                reportTraces = nil
+            end
+            return value
         end,
         send = function(_self: Self, value: any)
             results:send(value)
