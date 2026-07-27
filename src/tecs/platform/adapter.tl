@@ -6,7 +6,7 @@
 --- the engine names its platform seams instead, and a licensed port supplies a
 --- platform through this module without touching anything above it.
 ---
---- There are six seams, and the reason each is a seam rather than a fork is
+--- There are seven seams, and the reason each is a seam rather than a fork is
 --- that everything else in the engine is already indifferent to the answer:
 ---
 ---   lifecycle   SDL owns the loop and calls the application's `_init`,
@@ -26,6 +26,10 @@
 ---               vocabulary can express one. Device enumeration belongs here
 ---               too, since a pad has to be opened before it reports anything.
 ---
+---   audio       Outbound in the same sense: opening an output, queueing PCM,
+---               setting a gain, stopping a voice. Nothing about sound comes
+---               back as an event, so it has no other face.
+---
 ---   static FFI  A target that forbids `dlopen` cannot reach a library by
 ---               name, so function pointers are taken at build time and
 ---               installed as a table. Nothing calls `ffi.load` when one is
@@ -39,7 +43,7 @@
 ---               keyed by name. A platform with its own bytecode format
 ---               declares that format; the pack layout does not change.
 ---
---- Only storage, the shader format and the input backend need to be *asked
+--- Only storage, the shader format and the device backends need to be *asked
 --- for*, which is what this module does. The rest are already substitutable
 --- where they live, and installing a platform wires them up.
 
@@ -47,6 +51,7 @@ local sdl <const> = require("tecs.ffi.sdl3")
 local loader <const> = require("tecs.ffi.loader")
 local events <const> = require("tecs.platform.events")
 local inputbackend <const> = require("tecs.platform.inputbackend")
+local audiobackend <const> = require("tecs.platform.audiobackend")
 
 local C <const> = sdl.C
 
@@ -76,6 +81,9 @@ local record adapter
 
         --- Devices and outbound input commands. Leave nil to keep SDL's.
         input: inputbackend.Backend
+
+        --- Sound output. Leave nil to keep SDL's.
+        audio: audiobackend.Backend
 
         --- Whether a library can be loaded by name at run time.
         dynamicLibraries: boolean
@@ -116,6 +124,8 @@ local sdlPlatform <const>: adapter.Platform = {
     events = nil,
 
     input = inputbackend.sdl,
+
+    audio = audiobackend.sdl,
 
     dynamicLibraries = not loader.isStatic("sdl3"),
 }

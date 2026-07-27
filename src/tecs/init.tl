@@ -32,6 +32,7 @@ local WorldImpl <const> = require("tecs.internal.world")
 -- graphics stack from a test, a server or a tool that only wanted the ECS.
 local type Application = require("tecs.Application")
 local type Renderer = require("tecs.Renderer")
+local type Audio = require("tecs.Audio")
 local type Camera = require("tecs.gfx.Camera")
 local type sheet = require("tecs.gfx.sheet")
 local type animation = require("tecs.gfx.animation")
@@ -93,6 +94,7 @@ local record tecs
     --- The engine surface.
     Application: Application
     Renderer: Renderer
+    Audio: Audio
     Camera: Camera
     sheet: sheet
     animation: animation
@@ -267,6 +269,7 @@ end
 local ENGINE <const>: {string: string} = {
     Application = "tecs.Application",
     Renderer = "tecs.Renderer",
+    Audio = "tecs.Audio",
     Camera = "tecs.gfx.Camera",
     sheet = "tecs.gfx.sheet",
     animation = "tecs.gfx.animation",
