@@ -241,6 +241,13 @@ end
 --- that consumed events would leave a game unable to tell the difference
 --- between an event it never received and one it mishandled.
 function Application:_receive(event: events.Event)
+    -- Before anything acts on the event, so what is measured is the wait from
+    -- the host's stamp rather than from some point inside the reaction.
+    if timing.enabled and event.arrival ~= nil
+        and events.isInput(event.kind) then
+        timing.inputArrived(event.arrival)
+    end
+
     self.input:handleEvent(event)
 
     local kind = event.kind
@@ -260,14 +267,21 @@ function Application:_receive(event: events.Event)
 end
 
 --- Called once per iteration by the host. Returning false stops the loop.
-function Application:_iterate(queue: loader.CValue, count: integer): boolean
+---
+--- `arrivals` is the host's parallel array of arrival stamps, one per queued
+--- event.
+function Application:_iterate(queue: loader.CValue, count: integer,
+                              arrivals: loader.CValue): boolean
     local dt = clock.step()
     local frameStart = timing.begin()
 
+    -- Everything SDL delivered since the previous iteration, taken whole by
+    -- this iteration's step. Holding a batch back for a later step would cost
+    -- an event a frame, which is what the latency stages are there to catch.
     self.input:beginFrame()
     events.drain(queue, count, function(event: events.Event)
         self:_receive(event)
-    end)
+    end, arrivals)
 
     if self.quitRequested then return false end
 
@@ -305,6 +319,9 @@ end
 --- the moment the tooling is most useful and the worst one to lose it in.
 function Application:_simulate(dt: number)
     local t0 = timing.begin()
+    -- This step observes whatever the drain above delivered, so this is the
+    -- moment the input stops waiting and starts being acted on.
+    timing.inputConsumed(t0)
     local ok, failure = xpcall(function(): boolean
         self.world:update(dt)
 
@@ -326,6 +343,11 @@ function Application:_simulate(dt: number)
                 timing.mark(ACQUIRE, t2 - t1)
                 timing.mark(RECORD, t3 - t2)
                 timing.mark(SUBMIT, t4 - t3)
+                -- Submission is where the frame leaves us for the display, so
+                -- it is where the event's path through the engine ends. A
+                -- frame that acquired nothing never got there and is not a
+                -- sample.
+                timing.inputPresented(t1, t4)
             end
         end
         return true

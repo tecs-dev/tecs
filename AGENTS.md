@@ -28,6 +28,7 @@ make check          # Type-check Teal sources
 make run            # Run the demo
 make bench          # Shapes benchmark
 make bench-physics  # Physics benchmark
+make bench-latency  # Event-to-photon latency, with synthetic input
 make abi-check      # Verify generated cdefs against the C ABI
 make shaders        # Build the shader pack a target without a compiler consumes
 make package        # Install a tree into out/package
@@ -169,6 +170,8 @@ appropriate, early returns over deep nesting, comments sparse and informational.
 - Be careful when changing rendering, storage and snapshot code paths; they are performance-sensitive.
 - Benchmarks are the argument. `make bench` is a uniform loop over transforms, `make bench-physics` is lumpy and
   CPU-bound, and a frame-structure change has to be judged against both, p50 and p95 together.
+- `make bench-latency` measures what neither of those can see: the wait from an event arriving to the frame that
+  reacted to it being submitted. Anything that pipelines the frame buys throughput and pays for it there.
 
 ## History
 

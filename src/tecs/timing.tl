@@ -10,6 +10,10 @@
 ---
 --- Stages are registered rather than enumerated here, so the threaded pipeline
 --- adds `packetWait` where it happens rather than in a list somewhere else.
+---
+--- Event to photon is reported as stages too, through the same table. Frame
+--- time cannot see input latency, and a pipeline change moves the two in
+--- opposite directions often enough that they have to be read together.
 
 local ffi <const> = require("ffi")
 local clock <const> = require("tecs.platform.clock")
@@ -120,11 +124,80 @@ function timing.finish(stage: timing.Stage, started: number): number
     return elapsed
 end
 
+-------------------------------------------------------------------------------
+-- Event to photon
+-------------------------------------------------------------------------------
+
+--- The interval between SDL handing an event over and the frame that reacted
+--- to it being submitted, and the three parts it divides into. They sum to the
+--- whole exactly, so a regression is attributable rather than merely visible.
+---
+--- Moving simulation onto its own thread costs about a frame of `latencyWait`
+--- by construction. That is the point of measuring it before the move: frame
+--- time does not see the cost at all.
+local LATENCY <const> = timing.stage("latency")
+--- Arrival to the beginning of the step that took the batch.
+local LATENCY_WAIT <const> = timing.stage("latencyWait")
+--- That step, up to where the frame it produced starts being drawn.
+local LATENCY_STEP <const> = timing.stage("latencyStep")
+--- Drawing that frame, up to its submission.
+local LATENCY_DRAW <const> = timing.stage("latencyDraw")
+
+--- Arrival of the oldest event no step has taken yet, or nil when no input is
+--- pending. The oldest is the batch's worst case, and a batch held back an
+--- extra step lengthens it first.
+local pendingArrival: number = nil
+--- Arrival of the batch the running step took, held until that step's frame is
+--- submitted and the sample can be completed.
+local takenArrival: number = nil
+local consumedAt = 0.0
+
+--- Records an input event arriving, in `clock.now` seconds.
+---
+--- Stamped where the platform handed the event over, not where a step picked
+--- it up: the interval between those two is what the measurement exists for.
+function timing.inputArrived(at: number)
+    if not timing.enabled then return end
+    if pendingArrival == nil or at < pendingArrival then
+        pendingArrival = at
+    end
+end
+
+--- Records a simulation step beginning with the pending batch in hand.
+---
+--- The pending batch is cleared, so the next step measures the events that
+--- arrived after this one rather than counting these twice. A step that takes
+--- no input records nothing: a frame nobody was waiting on has no latency, and
+--- averaging it in only makes the number smaller.
+function timing.inputConsumed(at: number)
+    if not timing.enabled then return end
+    takenArrival = pendingArrival
+    pendingArrival = nil
+    consumedAt = at
+end
+
+--- Records the frame that step produced being submitted, and completes the
+--- sample. `drawStarted` is where simulation ended and drawing began.
+function timing.inputPresented(drawStarted: number, at: number)
+    if not timing.enabled then return end
+    local arrival = takenArrival
+    if arrival == nil then return end
+    takenArrival = nil
+
+    timing.mark(LATENCY_WAIT, consumedAt - arrival)
+    timing.mark(LATENCY_STEP, drawStarted - consumedAt)
+    timing.mark(LATENCY_DRAW, at - drawStarted)
+    timing.mark(LATENCY, at - arrival)
+end
+
 --- Discards what has been recorded. A bench calls this after warmup, so the
 --- frames that built the scene are not in the distribution of frames that ran
 --- it.
 function timing.reset()
     for index = 1, #stages do stages[index].count = 0 end
+    pendingArrival = nil
+    takenArrival = nil
+    consumedAt = 0.0
 end
 
 local sorted: {number} = {}

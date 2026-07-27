@@ -25,8 +25,14 @@ local C <const> = sdl.C
 local record Event
     --- What happened. Determines which other fields mean anything.
     kind: string
-    --- Milliseconds since SDL started, as SDL reported it.
+    --- Nanoseconds since SDL started, as SDL reported it. That is the
+    --- `SDL_GetTicksNS` epoch, which is not the clock `clock.now` reads, so it
+    --- orders events against each other and against nothing else.
     timestamp: number
+    --- Monotonic seconds on the clock `clock.now` reads, taken where the host
+    --- received the event from SDL. Nil for an event that did not come through
+    --- the host's queue, such as a replayed one.
+    arrival: number
 
     --- Keyboard.
     scancode: integer
@@ -77,6 +83,7 @@ local record events
 end
 
 local Cast <const> = "SDL_Event *"
+local StampCast <const> = "uint64_t *"
 
 -------------------------------------------------------------------------------
 -- Kind mapping
@@ -160,6 +167,30 @@ map("SDL_EVENT_USER", "user")
 --- Axis values arrive as signed 16-bit and are reported as -1..1.
 local AXIS_SCALE <const> = 1.0 / 32767.0
 
+--- Kinds a player produces, as against ones the platform reports about
+--- itself. Latency is only meaningful for these: nobody is waiting on a
+--- window expose.
+local INPUT <const>: {string: boolean} = {
+    keyDown = true,
+    keyUp = true,
+    textInput = true,
+    mouseMotion = true,
+    mouseDown = true,
+    mouseUp = true,
+    mouseWheel = true,
+    fingerDown = true,
+    fingerUp = true,
+    fingerMotion = true,
+    controllerButtonDown = true,
+    controllerButtonUp = true,
+    controllerAxis = true,
+}
+
+--- Whether a kind carries player input rather than describing the platform.
+function events.isInput(kind: string): boolean
+    return INPUT[kind] == true
+end
+
 -------------------------------------------------------------------------------
 -- Conversion
 -------------------------------------------------------------------------------
@@ -171,6 +202,10 @@ local scratch: Event = {} as Event
 --- Window size, needed to scale SDL's normalised touch coordinates.
 local touchWidth = 1.0
 local touchHeight = 1.0
+
+--- Ticks per second on the counter the host stamps arrivals with. Read once,
+--- since it is fixed for the life of the process.
+local counterFrequency = 0.0
 
 --- Tells the converter how large the window is, so touch positions arrive in
 --- the same units as mouse positions rather than in SDL's 0..1.
@@ -187,6 +222,7 @@ local function convert(raw: loader.CValue): Event
     event.sdlType = sdlType
     event.repeated = false
     event.finger = nil
+    event.arrival = nil
 
     local kind = event.kind
 
@@ -273,8 +309,12 @@ end
 --- The host owns the queue and clears it; this only reads. A replay driver
 --- installs `source` instead, which is handed the same handler and calls it
 --- with recorded events.
+---
+--- `arrivals` is the host's parallel array of performance counter readings,
+--- one per event, taken where SDL handed each one over. Given it, every
+--- converted event carries `arrival` in the units `clock.now` reports.
 function events.drain(queue: loader.CValue, count: integer,
-                      handler: function(Event))
+                      handler: function(Event), arrivals?: loader.CValue)
     local replay = events.source
     if replay ~= nil then
         replay(handler)
@@ -283,9 +323,23 @@ function events.drain(queue: loader.CValue, count: integer,
 
     if count == 0 or queue == nil then return end
 
-    local events_ = ffi.cast(Cast, queue) as loader.CArray
+    local stamps: loader.CArray = nil
+    if arrivals ~= nil then
+        if counterFrequency == 0.0 then
+            counterFrequency =
+                tonumber(C.SDL_GetPerformanceFrequency()) as number
+        end
+        stamps = ffi.cast(StampCast, arrivals) as loader.CArray
+    end
+
+    local queued = ffi.cast(Cast, queue) as loader.CArray
     for index = 0, count - 1 do
-        handler(convert(events_[index] as loader.CValue))
+        local event = convert(queued[index] as loader.CValue)
+        if stamps ~= nil then
+            event.arrival =
+                (tonumber(stamps[index]) as number) / counterFrequency
+        end
+        handler(event)
     end
 end
 

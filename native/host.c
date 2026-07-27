@@ -52,6 +52,9 @@ struct TecsHost {
     int application;
     /* Copied out of SDL_AppEvent, whose pointer is only valid for that call. */
     SDL_Event *events;
+    /* Performance counter reading taken as each event was handed over, one per
+     * entry of `events`. */
+    Uint64 *arrivals;
     uint32_t count;
     uint32_t capacity;
     bool shutdownCalled;
@@ -70,6 +73,12 @@ static bool reserveEvents(TecsHost *host, uint32_t needed)
                                                 capacity * sizeof(SDL_Event));
     if (!grown) return false;
     host->events = grown;
+
+    Uint64 *stamps = (Uint64 *)SDL_realloc(host->arrivals,
+                                           capacity * sizeof(Uint64));
+    if (!stamps) return false;
+    host->arrivals = stamps;
+
     host->capacity = capacity;
     return true;
 }
@@ -119,11 +128,14 @@ static bool callMethod(TecsHost *host, const char *method,
 
 /* The queue is handed over as a pointer and a count rather than exposed
  * through functions Lua has to resolve. C owns its lifetime either way, and
- * this keeps the host's symbols out of the dynamic namespace entirely. */
+ * this keeps the host's symbols out of the dynamic namespace entirely. The
+ * arrival stamps travel beside it as a second array rather than inside the
+ * events, since an SDL_Event has nowhere to put one. */
 static void pushQueue(lua_State *L, TecsHost *host)
 {
     lua_pushlightuserdata(L, host->events);
     lua_pushinteger(L, (lua_Integer)host->count);
+    lua_pushlightuserdata(L, host->arrivals);
 }
 
 /* -------------------------------------------------------------- callbacks */
@@ -211,6 +223,17 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
      * call, and dispatching mid-frame would show the application a world that
      * is halfway through an update. */
     if (!reserveEvents(host, host->count + 1)) return SDL_APP_FAILURE;
+
+    /* Arrival is stamped here, where SDL hands the event over, because that is
+     * where the wait a player feels begins. Stamping it when a step picks the
+     * event up would hide exactly the interval worth measuring: the queueing
+     * between delivery and the step that reacts.
+     *
+     * The event's own `timestamp` is not used for this. It is nanoseconds on
+     * the SDL_GetTicksNS epoch, and the engine's clock reads the performance
+     * counter, so the two are the same magnitude only by an offset SDL does
+     * not promise. Reading the counter here needs no such assumption. */
+    host->arrivals[host->count] = SDL_GetPerformanceCounter();
     host->events[host->count++] = *event;
     return SDL_APP_CONTINUE;
 }
@@ -218,7 +241,7 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 SDL_AppResult SDL_AppIterate(void *appstate)
 {
     TecsHost *host = (TecsHost *)appstate;
-    bool keepGoing = callMethod(host, "_iterate", pushQueue, 2);
+    bool keepGoing = callMethod(host, "_iterate", pushQueue, 3);
 
     /* Drained whether or not the iteration succeeded, so a failing frame does
      * not replay its events into the next one. */
@@ -246,5 +269,6 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result)
 
     if (host->L) lua_close(host->L);
     SDL_free(host->events);
+    SDL_free(host->arrivals);
     SDL_free(host);
 }
