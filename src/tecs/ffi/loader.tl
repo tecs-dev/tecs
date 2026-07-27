@@ -381,16 +381,33 @@ function loader.fromString(source: string): loader.CArray, integer
     return bytes, #source
 end
 
---- Loads a generated table of integer `#define` constants.
----
---- These never reach the cdef: the preprocessor expands them away, so they
---- are recovered separately and cannot be read through a C namespace.
-function loader.constants(name: string): {string: integer}
+local function constantTable(name: string): {string: any}
     local ok, table_ = requireGenerated(name .. "const")
     if not ok then
         error(("tecs: missing generated constants for %s. Run `make cdef`."):format(name), 2)
     end
-    return table_ as {string: integer}
+    return table_ as {string: any}
+end
+
+--- Loads a generated table of numeric `#define` constants.
+---
+--- These never reach the cdef: the preprocessor expands them away, so they
+--- are recovered separately and cannot be read through a C namespace.
+---
+--- Numbers only. The same table holds the string constants, which
+--- `loader.textConstants` reads under the type they actually have.
+function loader.constants(name: string): {string: integer}
+    return constantTable(name) as {string: integer}
+end
+
+--- The same table, for the constants whose value is text.
+---
+--- SDL names every hint and every property with a string macro, and that name
+--- is the argument the API reading it takes, so they are recovered alongside
+--- the numbers rather than left out. Two views because one table cannot be
+--- typed as both, and a caller knows which kind it is asking for.
+function loader.textConstants(name: string): {string: string}
+    return constantTable(name) as {string: string}
 end
 
 return loader
