@@ -7,6 +7,7 @@
 local sdl <const> = require("tecs.ffi.sdl3")
 local shadercompiler <const> = require("tecs.gpu.shadercompiler")
 local loader <const> = require("tecs.ffi.loader")
+local Buffer <const> = require("tecs.gpu.Buffer")
 local Frame <const> = require("tecs.gpu.Frame")
 local Window <const> = require("tecs.platform.Window")
 
@@ -106,7 +107,19 @@ end
 ---
 --- Resource retirement must match this depth: a buffer replaced this frame
 --- stays live until every frame still referencing it has retired.
+---
+--- Staging rotation has to reach at least as far. A buffer rotates through
+--- `Buffer.slotCount` staging slots and maps them without cycling, which is
+--- only safe while the slot being written is not one the GPU is still copying
+--- out of. Allowing more frames in flight than there are slots makes that
+--- false, and the result is a write landing under a copy in progress: geometry
+--- that is wrong only under load, which is why this refuses rather than
+--- clamping.
 function Device:setFramesInFlight(count: integer)
+    if count > Buffer.slotCount then
+        error(("tecs: %d frames in flight needs at least that many staging "
+            .. "slots, and a buffer has %d"):format(count, Buffer.slotCount), 2)
+    end
     sdl.check(C.SDL_SetGPUAllowedFramesInFlight(self.handle, count) as boolean,
         "SDL_SetGPUAllowedFramesInFlight")
     self.framesInFlight = count

@@ -103,6 +103,16 @@ end
 local record Renderer
     --- Seconds the last extraction took. Zero unless timing is on.
     _extractSeconds: number
+    --- Staging slot this frame writes into, rotated after each submission.
+    ---
+    --- Rotating is what lets the mapping skip cycling. Cycling exists so a
+    --- write cannot land in memory the GPU is still copying out of, and it pays
+    --- for that with a fresh driver allocation every frame: at four million
+    --- instances the instance and bounds staging alone is over three hundred
+    --- megabytes a frame, retired and reallocated, which the driver cannot
+    --- reclaim fast enough. Writing to a slot the GPU is not reading gives the
+    --- same guarantee and allocates nothing.
+    _slot: integer
     deferred: Deferred
     instances: Buffer
     pipeline: GraphicsPipeline
@@ -190,8 +200,9 @@ end
 --- would make the gate below always true and defeat its own purpose.
 local function writeRun(self: Renderer, archetype: ecs.Archetype,
                         length: integer, offset: integer)
-    local floats = self.instances:mapAs("float *")
-    local bounds = self._bounds:mapAs("float *")
+    local slot = self._slot
+    local floats = self.instances:mapSlotAs(slot, "float *", false)
+    local bounds = self._bounds:mapSlotAs(slot, "float *", false)
     local transforms = archetype:get(components.Transform)
     local tints = archetype:get(components.Tint)
     local sprites = archetype:get(components.Sprite)
@@ -282,8 +293,10 @@ local function writeRun(self: Renderer, archetype: ecs.Archetype,
         bounds[bound + 3] = ey
     end
 
-    self.instances:markDirty(offset * INSTANCE_BYTES, length * INSTANCE_BYTES)
-    self._bounds:markDirty(offset * BOUND_BYTES, length * BOUND_BYTES)
+    self.instances:markSlotDirty(slot, offset * INSTANCE_BYTES,
+        length * INSTANCE_BYTES)
+    self._bounds:markSlotDirty(slot, offset * BOUND_BYTES,
+        length * BOUND_BYTES)
 end
 
 --- Rewrites only what changed.
@@ -464,6 +477,7 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
     self._indices:upload(quad, QUAD_INDICES * 2)
     self.camera = Camera.create()
     self._centred = false
+    self._slot = 0
     -- Two vec4s: the world rectangle the camera sees, then the counts.
     self._cullUniform = loader.newArray("float[8]")
 
@@ -599,8 +613,12 @@ end
 --- the passes that consume it, so SDL orders all three without anything here
 --- having to wait.
 function Renderer:render(frame: Frame)
-    self.instances:flush(frame.commandBuffer)
-    self._bounds:flush(frame.commandBuffer)
+    local slot = self._slot
+    self.instances:flushSlot(slot, frame.commandBuffer)
+    self._bounds:flushSlot(slot, frame.commandBuffer)
+    -- Advanced after the copies are encoded, so the next frame writes a slot
+    -- this one is not still uploading from.
+    self._slot = (slot + 1) % Buffer.slotCount
 
     if self.count > 0 then
         if not self._centred then
