@@ -17,10 +17,12 @@
 local home = os.getenv("HOME") or ""
 
 package.path = package.path
-        .. ";../../out/macos-arm64-dev/lua/?.lua;../../out/macos-arm64-dev/lua/?/init.lua;"
-        .. "../?.lua;../?/init.lua;"
-        .. home .. "/.luarocks/share/lua/5.1/?.lua;"
-        .. home .. "/.luarocks/share/lua/5.1/?/init.lua"
+    .. ";../../out/macos-arm64-dev/lua/?.lua;../../out/macos-arm64-dev/lua/?/init.lua;"
+    .. "../?.lua;../?/init.lua;"
+    .. home
+    .. "/.luarocks/share/lua/5.1/?.lua;"
+    .. home
+    .. "/.luarocks/share/lua/5.1/?/init.lua"
 package.cpath = package.cpath .. ";" .. home .. "/.luarocks/lib/lua/5.1/?.so"
 
 assert(jit, "LuaJIT is required to run this benchmark")
@@ -35,7 +37,7 @@ local sink = 0
 local benchParamsEnv = os.getenv("PARAMS") or os.getenv("BENCH_PARAMS") or ""
 
 local implementations = {
-    {name = "current", module = "tecs.utils.Bitset"},
+    { name = "current", module = "tecs.utils.Bitset" },
 }
 
 local function loadBitset(moduleName)
@@ -91,7 +93,7 @@ local function buildRanges(bits, setCount)
             hi = bits - 1
             width = hi - lo + 1
         end
-        ranges[#ranges + 1] = {lo = lo, hi = hi}
+        ranges[#ranges + 1] = { lo = lo, hi = hi }
         remaining = remaining - width
         lo = hi + 1 + gap
         span = span == 31 and 19 or 31
@@ -149,7 +151,7 @@ local function buildPopulatedBitset(Bitset, indices, bits)
 end
 
 local function getRelationPair(Bitset, bits, setCount, mode)
-    local key = table.concat({tostring(Bitset), bits, setCount, mode}, ":")
+    local key = table.concat({ tostring(Bitset), bits, setCount, mode }, ":")
     local pair = relationCache[key]
     if pair then
         return pair
@@ -162,7 +164,7 @@ local function getRelationPair(Bitset, bits, setCount, mode)
         for i = 1, #fixture.sparseIndices, 2 do
             subset[#subset + 1] = fixture.sparseIndices[i]
         end
-        pair = {a = left, b = buildPopulatedBitset(Bitset, subset, bits)}
+        pair = { a = left, b = buildPopulatedBitset(Bitset, subset, bits) }
     elseif mode == "contains_no" then
         pair = {
             a = buildPopulatedBitset(Bitset, fixture.sparseIndices, bits),
@@ -234,7 +236,7 @@ local function shouldRunSuite(validOps)
     return false
 end
 
-if shouldRunSuite({"set_sparse", "setRange_runs", "clear_sparse"}) then
+if shouldRunSuite({ "set_sparse", "setRange_runs", "clear_sparse" }) then
     bench.suite({
         name = "Bitset Mutation",
         warmupIterations = 40,
@@ -273,16 +275,16 @@ if shouldRunSuite({"set_sparse", "setRange_runs", "clear_sparse"}) then
             {
                 name = "mutation",
                 parameters = {
-                    op = {"set_sparse", "setRange_runs", "clear_sparse"},
-                    bits = {4096, 65536},
-                    setCount = {256, 4096},
+                    op = { "set_sparse", "setRange_runs", "clear_sparse" },
+                    bits = { 4096, 65536 },
+                    setCount = { 256, 4096 },
                 },
             },
         },
     })
 end
 
-if shouldRunSuite({"nextSetBit"}) then
+if shouldRunSuite({ "nextSetBit" }) then
     bench.suite({
         name = "Bitset Scan",
         warmupIterations = 60,
@@ -320,35 +322,35 @@ if shouldRunSuite({"nextSetBit"}) then
             {
                 name = "scan small/medium",
                 parameters = {
-                    op = {"nextSetBit"},
-                    layout = {"scatter"},
-                    bits = {4096, 65536},
-                    setCount = {64, 1024},
+                    op = { "nextSetBit" },
+                    layout = { "scatter" },
+                    bits = { 4096, 65536 },
+                    setCount = { 64, 1024 },
                 },
             },
             {
                 name = "scan large",
                 parameters = {
-                    op = {"nextSetBit"},
-                    layout = {"scatter"},
-                    bits = {65536, 1048576},
-                    setCount = {16384},
+                    op = { "nextSetBit" },
+                    layout = { "scatter" },
+                    bits = { 65536, 1048576 },
+                    setCount = { 16384 },
                 },
             },
             {
                 name = "scan nextSetBit zero gaps",
                 parameters = {
-                    op = {"nextSetBit"},
-                    layout = {"zero_gaps"},
-                    bits = {65536, 1048576},
-                    setCount = {64, 1024},
+                    op = { "nextSetBit" },
+                    layout = { "zero_gaps" },
+                    bits = { 65536, 1048576 },
+                    setCount = { 64, 1024 },
                 },
             },
         },
     })
 end
 
-if shouldRunSuite({"contains_yes", "contains_no", "overlap_yes", "overlap_no"}) then
+if shouldRunSuite({ "contains_yes", "contains_no", "overlap_yes", "overlap_no" }) then
     bench.suite({
         name = "Bitset Relations",
         warmupIterations = 80,
@@ -382,9 +384,9 @@ if shouldRunSuite({"contains_yes", "contains_no", "overlap_yes", "overlap_no"}) 
             {
                 name = "relations",
                 parameters = {
-                    op = {"contains_yes", "contains_no", "overlap_yes", "overlap_no"},
-                    bits = {4096, 65536},
-                    setCount = {256, 4096},
+                    op = { "contains_yes", "contains_no", "overlap_yes", "overlap_no" },
+                    bits = { 4096, 65536 },
+                    setCount = { 256, 4096 },
                 },
             },
         },

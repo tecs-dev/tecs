@@ -8,8 +8,7 @@
 -- The build directory is the build system's to choose, so it is passed in.
 -- Our tree comes first, so it wins over the ECS repo's own engine tree.
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local sdl = require("tecs.ffi.sdl3")
 local Window = require("tecs.platform.Window")
@@ -33,15 +32,18 @@ describe("assets", function()
 
     teardown(function()
         assets.shutdown()
-        if device then device:destroy() end
-        if window then window:destroy() end
+        if device then
+            device:destroy()
+        end
+        if window then
+            window:destroy()
+        end
         C.SDL_Quit()
     end)
 
     it("returns a handle immediately and resolves it later", function()
         local handle = assets.loadImage(FIXTURE)
-        assert.are.equal("loading", handle.status,
-            "loading must not block the caller")
+        assert.are.equal("loading", handle.status, "loading must not block the caller")
 
         assets.waitAll()
         assert.are.equal("ready", handle.status)
@@ -128,8 +130,7 @@ describe("assets", function()
         local first = assets.loadImage(FIXTURE)
         local second = assets.loadImage(FIXTURE)
         local third = assets.loadImage(FIXTURE)
-        assert.are.equal(1, assets.pending(),
-            "a path already being decoded must not be queued again")
+        assert.are.equal(1, assets.pending(), "a path already being decoded must not be queued again")
         assert.are.equal(first, second)
         assert.are.equal(first, third)
 
@@ -164,8 +165,7 @@ describe("assets", function()
         assets.waitAll()
         handle:release()
 
-        assert.are.equal("released", handle.status,
-            "a released handle must say so rather than look like a nil decode")
+        assert.are.equal("released", handle.status, "a released handle must say so rather than look like a nil decode")
         assert.is_nil(handle.pixels)
 
         -- Terminal, and releasing twice does not free twice.

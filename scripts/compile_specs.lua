@@ -26,7 +26,9 @@ local tl = require("tl")
 local ok_lfs, lfs = pcall(require, "lfs")
 
 local function path_join(a, b)
-    if a == "" then return b end
+    if a == "" then
+        return b
+    end
     return a .. "/" .. b
 end
 
@@ -47,15 +49,18 @@ end
 local function find_files(root, extension)
     local files = {}
     if ok_lfs then
-        if lfs.attributes(root, "mode") ~= "directory" then return files end
+        if lfs.attributes(root, "mode") ~= "directory" then
+            return files
+        end
         find_files_lfs(root, extension, files)
         table.sort(files)
         return files
     end
 
-    local handle = io.popen("find " .. root .. " -name '*." .. extension
-        .. "' 2>/dev/null")
-    if not handle then return files end
+    local handle = io.popen("find " .. root .. " -name '*." .. extension .. "' 2>/dev/null")
+    if not handle then
+        return files
+    end
     for line in handle:lines() do
         if line and line ~= "" then
             files[#files + 1] = line
@@ -72,7 +77,9 @@ end
 
 local function read_file(path)
     local fh, err = io.open(path, "r")
-    if not fh then error(err) end
+    if not fh then
+        error(err)
+    end
     local content = fh:read("*a")
     fh:close()
     return content
@@ -87,8 +94,7 @@ local function write_file(path, content)
             -- tree under the working directory instead.
             local current = dir:sub(1, 1) == "/" and "/" or ""
             for part in dir:gmatch("[^/]+") do
-                current = current == "/" and ("/" .. part)
-                    or path_join(current, part)
+                current = current == "/" and ("/" .. part) or path_join(current, part)
                 if lfs.attributes(current, "mode") ~= "directory" then
                     assert(lfs.mkdir(current))
                 end
@@ -98,7 +104,9 @@ local function write_file(path, content)
         end
     end
     local fh, err = io.open(path, "w")
-    if not fh then error(err) end
+    if not fh then
+        error(err)
+    end
     fh:write(content)
     fh:close()
 end
@@ -139,8 +147,7 @@ local function prune_orphans(expected)
         end
     end
     if removed > 0 then
-        print(string.format("Removed %d compiled spec(s) with no source",
-            removed))
+        print(string.format("Removed %d compiled spec(s) with no source", removed))
     end
 end
 
@@ -150,7 +157,9 @@ local function file_mtime(path)
     end
 
     local handle = io.popen("stat -f %m '" .. path .. "' 2>/dev/null || stat -c %Y '" .. path .. "' 2>/dev/null")
-    if not handle then return 0 end
+    if not handle then
+        return 0
+    end
     local result = handle:read("*a")
     handle:close()
     return math.floor(tonumber((result or ""):match("%d+")) or 0)
@@ -164,7 +173,9 @@ end
 
 local function main()
     local files = find_spec_files()
-    if #files == 0 then return end
+    if #files == 0 then
+        return
+    end
 
     local to_compile = {}
     local expected = {}
@@ -180,7 +191,9 @@ local function main()
     -- is exactly the run after a spec was deleted and nothing else changed.
     prune_orphans(expected)
 
-    if #to_compile == 0 then return end
+    if #to_compile == 0 then
+        return
+    end
 
     print(string.format("Compiling %d spec files...", #to_compile))
     local t0 = os.clock()
@@ -203,9 +216,14 @@ local function main()
         end
     end
 
-    print(string.format("Compiled %d spec files in %.2fs%s",
-        #to_compile, os.clock() - t0,
-        errors > 0 and (" (" .. errors .. " errors)") or ""))
+    print(
+        string.format(
+            "Compiled %d spec files in %.2fs%s",
+            #to_compile,
+            os.clock() - t0,
+            errors > 0 and (" (" .. errors .. " errors)") or ""
+        )
+    )
 
     if errors > 0 then
         os.exit(1)

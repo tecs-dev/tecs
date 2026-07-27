@@ -32,6 +32,7 @@ if not ok then
 end
 
 local count = 0
-for _ in pairs(pack.shaders) do count = count + 1 end
-print(("wrote %s: %d shaders, %s"):format(
-    output, count, shaderpack.formatName(pack.format)))
+for _ in pairs(pack.shaders) do
+    count = count + 1
+end
+print(("wrote %s: %d shaders, %s"):format(output, count, shaderpack.formatName(pack.format)))

@@ -11,8 +11,7 @@
 -- five things to supply and nothing above them to touch.
 
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local sdl = require("tecs.ffi.sdl3")
 local adapter = require("tecs.platform.adapter")
@@ -38,16 +37,26 @@ local function fakeAudio()
     end
     backend.close = function() end
     backend.setMixerGain = function() end
-    backend.createTrack = function() return {} end
+    backend.createTrack = function()
+        return {}
+    end
     backend.destroyTrack = function() end
-    backend.setTrackClip = function() return true end
-    backend.setTrackFile = function() return true end
+    backend.setTrackClip = function()
+        return true
+    end
+    backend.setTrackFile = function()
+        return true
+    end
     backend.clearTrack = function() end
-    backend.play = function() return true end
+    backend.play = function()
+        return true
+    end
     backend.stop = function() end
     backend.pause = function() end
     backend.resume = function() end
-    backend.playing = function() return false end
+    backend.playing = function()
+        return false
+    end
     backend.setGain = function() end
     backend.setPitch = function() end
     backend.setPosition = function() end
@@ -65,7 +74,9 @@ end
 local function fakePlatform(queued)
     return {
         name = "spec.console",
-        basePath = function() return "/dev/content/" end,
+        basePath = function()
+            return "/dev/content/"
+        end,
         prefPath = function(organisation, application)
             return "/dev/save/" .. organisation .. "/" .. application .. "/"
         end,
@@ -75,14 +86,18 @@ local function fakePlatform(queued)
             return sdl.K.SDL_GPU_SHADERFORMAT_PRIVATE
         end,
         events = queued and function(handler)
-            for _, event in ipairs(queued) do handler(event) end
+            for _, event in ipairs(queued) do
+                handler(event)
+            end
         end or nil,
         dynamicLibraries = false,
     }
 end
 
 describe("platform contract", function()
-    setup(function() assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO)) end)
+    setup(function()
+        assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
+    end)
 
     before_each(function()
         adapter.reset()
@@ -104,12 +119,18 @@ describe("platform contract", function()
     it("refuses a platform that is missing part of the contract", function()
         -- Half a platform is worse than none: the missing half silently falls
         -- back to SDL, which on a target without it is a crash somewhere else.
-        assert.has_error(function() adapter.install(nil) end)
         assert.has_error(function()
-            adapter.install({ name = "half", basePath = function() return "/" end })
+            adapter.install(nil)
         end)
-        assert.are.equal("sdl", adapter.current().name,
-            "a rejected platform must not be half installed")
+        assert.has_error(function()
+            adapter.install({
+                name = "half",
+                basePath = function()
+                    return "/"
+                end,
+            })
+        end)
+        assert.are.equal("sdl", adapter.current().name, "a rejected platform must not be half installed")
     end)
 
     it("resolves content and state through the installed platform", function()
@@ -118,8 +139,7 @@ describe("platform contract", function()
 
         assert.are.equal("/dev/content/", paths.base())
         assert.are.equal("/dev/save/tecs/tecs/", paths.pref())
-        assert.are.equal("/dev/save/tecs/tecs/save.json",
-            paths.writable("save.json"))
+        assert.are.equal("/dev/save/tecs/tecs/save.json", paths.writable("save.json"))
 
         -- A development run has TECS_ASSETS set and it outranks everything,
         -- so content is checked against the platform only where nothing has
@@ -135,17 +155,18 @@ describe("platform contract", function()
         paths.reset()
         paths.setAssets("/tmp/staging")
         assert.are.equal("/tmp/staging/", paths.assets())
-        assert.are.equal("/dev/save/tecs/tecs/", paths.pref(),
-            "the writable root is the platform's and is not overridable")
+        assert.are.equal(
+            "/dev/save/tecs/tecs/",
+            paths.pref(),
+            "the writable root is the platform's and is not overridable"
+        )
     end)
 
     it("takes the platform's shader format for the device to claim", function()
         adapter.install(fakePlatform())
         shadercompiler.usePack(nil)
-        assert.are.equal(sdl.K.SDL_GPU_SHADERFORMAT_PRIVATE,
-            shadercompiler.format())
-        assert.are.equal("private",
-            shaderpack.formatName(shadercompiler.format()))
+        assert.are.equal(sdl.K.SDL_GPU_SHADERFORMAT_PRIVATE, shadercompiler.format())
+        assert.are.equal("private", shaderpack.formatName(shadercompiler.format()))
     end)
 
     it("still prefers a loaded pack's format over the platform's", function()
@@ -158,8 +179,7 @@ describe("platform contract", function()
             format = sdl.K.SDL_GPU_SHADERFORMAT_SPIRV,
             shaders = {},
         })
-        assert.are.equal(sdl.K.SDL_GPU_SHADERFORMAT_SPIRV,
-            shadercompiler.format())
+        assert.are.equal(sdl.K.SDL_GPU_SHADERFORMAT_SPIRV, shadercompiler.format())
         shadercompiler.usePack(nil)
     end)
 
@@ -181,8 +201,7 @@ describe("platform contract", function()
         end)
 
         assert.are.same({ "keyDown", "mouseMotion" }, seen)
-        assert.is_true(input:keyDown(44),
-            "a platform key press must reach the live tier")
+        assert.is_true(input:keyDown(44), "a platform key press must reach the live tier")
         assert.is_true(input:keyPressed(44), "and the frame tier")
         assert.are.equal(120, input.mouseX)
         assert.are.equal(48, input.mouseY)
@@ -200,8 +219,7 @@ describe("platform contract", function()
         assert.are.same({ "private" }, caps.shaderFormats)
 
         adapter.reset()
-        assert.are_not.equal("spec.console", capabilities.get().target,
-            "removing the platform must be reflected too")
+        assert.are_not.equal("spec.console", capabilities.get().target, "removing the platform must be reflected too")
     end)
 
     it("plays sound through the platform's own output", function()
@@ -226,8 +244,7 @@ describe("platform contract", function()
         paths.reset()
 
         assert.are.equal("sdl", adapter.current().name)
-        assert.is_nil(events.source,
-            "the event hook must be cleared with the platform")
+        assert.is_nil(events.source, "the event hook must be cleared with the platform")
         assert.are_not.equal("/dev/content/", paths.base())
     end)
 end)

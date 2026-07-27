@@ -9,8 +9,7 @@
 -- The build directory is the build system's to choose, so it is passed in.
 -- Our tree comes first, so it wins over the ECS repo's own engine tree.
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local sdl = require("tecs.ffi.sdl3")
 local Window = require("tecs.platform.Window")
@@ -23,7 +22,7 @@ local PassGraph = require("tecs.gpu.PassGraph")
 local Deferred = require("tecs.gpu.Deferred")
 
 local C = sdl.C
-local FORMAT = 4  -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
+local FORMAT = 4 -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
 local SIZE = 64
 
 -- Fills the target with a gradient that differs in every direction, so a
@@ -58,8 +57,12 @@ describe("pass graph", function()
     end)
 
     teardown(function()
-        if device then device:destroy() end
-        if window then window:destroy() end
+        if device then
+            device:destroy()
+        end
+        if window then
+            window:destroy()
+        end
         C.SDL_Quit()
     end)
 
@@ -126,13 +129,16 @@ describe("pass graph", function()
         graph:pass({
             name = "gated",
             outputs = { "scratch" },
-            enabled = function() return gate end,
-            execute = function() ran = ran + 1 end,
+            enabled = function()
+                return gate
+            end,
+            execute = function()
+                ran = ran + 1
+            end,
         })
 
         -- A frame stands in for the swapchain; only the gate is under test.
-        local frame = { width = SIZE, height = SIZE, commandBuffer = nil,
-                        swapchainTexture = nil }
+        local frame = { width = SIZE, height = SIZE, commandBuffer = nil, swapchainTexture = nil }
 
         local commandBuffer = C.SDL_AcquireGPUCommandBuffer(device.handle)
         frame.commandBuffer = commandBuffer
@@ -155,14 +161,19 @@ describe("deferred pipeline", function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
         window = Window.create({ title = "deferred", width = SIZE, height = SIZE })
         device = Device.create(window, { debug = true })
-        screen = Texture.create(device.handle,
-            { width = SIZE, height = SIZE, format = FORMAT })
+        screen = Texture.create(device.handle, { width = SIZE, height = SIZE, format = FORMAT })
     end)
 
     teardown(function()
-        if screen then screen:destroy() end
-        if device then device:destroy() end
-        if window then window:destroy() end
+        if screen then
+            screen:destroy()
+        end
+        if device then
+            device:destroy()
+        end
+        if window then
+            window:destroy()
+        end
         C.SDL_Quit()
     end)
 
@@ -193,17 +204,14 @@ describe("deferred pipeline", function()
             ambient = { 1.0, 1.0, 1.0 },
             geometry = function(context)
                 context.pass:bindPipeline(geometryPipeline.handle)
-                C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0,
-                    sizeUniform, 16)
+                C.SDL_PushGPUFragmentUniformData(context.commandBuffer, 0, sizeUniform, 16)
                 context.pass:draw(3)
             end,
         })
 
         local albedoFormat, normalFormat = pipeline:geometryFormats()
-        local vertex = Shader.fromGLSL(device.handle, FULLSCREEN_VS, "vertex",
-            { name = "gbuffer.vert" })
-        local fragment = Shader.fromGLSL(device.handle, GRADIENT_GEOMETRY,
-            "fragment", { name = "gbuffer.frag" })
+        local vertex = Shader.fromGLSL(device.handle, FULLSCREEN_VS, "vertex", { name = "gbuffer.vert" })
+        local fragment = Shader.fromGLSL(device.handle, GRADIENT_GEOMETRY, "fragment", { name = "gbuffer.frag" })
         geometryPipeline = GraphicsPipeline.create(device.handle, {
             vertexShader = vertex,
             fragmentShader = fragment,
@@ -222,12 +230,15 @@ describe("deferred pipeline", function()
         local topRight = screen:getPixel(pixels, SIZE - 4, 4)
         local bottomLeft = screen:getPixel(pixels, 4, SIZE - 4)
 
-        assert.is_true(topRight.r > topLeft.r + 200,
-            ("red must grow rightward: %d then %d"):format(topLeft.r, topRight.r))
-        assert.is_true(bottomLeft.g > topLeft.g + 200,
-            ("green must grow downward: %d then %d"):format(topLeft.g, bottomLeft.g))
-        assert.is_true(math.abs(topLeft.b - 64) <= 2,
-            ("blue must survive transport, got %d"):format(topLeft.b))
+        assert.is_true(
+            topRight.r > topLeft.r + 200,
+            ("red must grow rightward: %d then %d"):format(topLeft.r, topRight.r)
+        )
+        assert.is_true(
+            bottomLeft.g > topLeft.g + 200,
+            ("green must grow downward: %d then %d"):format(topLeft.g, bottomLeft.g)
+        )
+        assert.is_true(math.abs(topLeft.b - 64) <= 2, ("blue must survive transport, got %d"):format(topLeft.b))
 
         geometryPipeline:destroy()
         pipeline:destroy()
@@ -245,7 +256,9 @@ describe("deferred pipeline", function()
 
         local albedoFormat, normalFormat = pipeline:geometryFormats()
         local vertex = Shader.fromGLSL(device.handle, FULLSCREEN_VS, "vertex", {})
-        local fragment = Shader.fromGLSL(device.handle, [[
+        local fragment = Shader.fromGLSL(
+            device.handle,
+            [[
 #version 450
 layout(location = 0) out vec4 albedo;
 layout(location = 1) out vec4 normal;
@@ -253,7 +266,10 @@ void main() {
     albedo = vec4(1.0, 1.0, 1.0, 1.0);
     normal = vec4(0.5, 0.5, 1.0, 1.0);
 }
-]], "fragment", {})
+]],
+            "fragment",
+            {}
+        )
         geometryPipeline = GraphicsPipeline.create(device.handle, {
             vertexShader = vertex,
             fragmentShader = fragment,
@@ -269,18 +285,15 @@ void main() {
         -- One light over the centre must brighten it and leave a far corner
         -- comparatively dark, which is what proves attenuation is applied.
         pipeline:setLights({
-            { x = SIZE / 2, y = SIZE / 2, z = 12, radius = 28,
-              r = 1, g = 1, b = 1, intensity = 4 },
+            { x = SIZE / 2, y = SIZE / 2, z = 12, radius = 28, r = 1, g = 1, b = 1, intensity = 4 },
         })
 
         local pixels = render(pipeline)
         local center = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
         local corner = screen:getPixel(pixels, 2, 2)
 
-        assert.is_true(center.r > 180,
-            ("lit centre should be bright, got %d"):format(center.r))
-        assert.is_true(corner.r < 40,
-            ("beyond the radius should stay dark, got %d"):format(corner.r))
+        assert.is_true(center.r > 180, ("lit centre should be bright, got %d"):format(center.r))
+        assert.is_true(corner.r < 40, ("beyond the radius should stay dark, got %d"):format(corner.r))
 
         geometryPipeline:destroy()
         pipeline:destroy()
@@ -299,15 +312,16 @@ void main() {
         assert.is_true(depth.write)
         assert.are.equal(pipeline.graph.depthFormat, depth.format)
 
-        assert.is_nil(pipeline.graph:depthOf("lighting"),
-            "a fullscreen resolve has nothing to be occluded by")
+        assert.is_nil(pipeline.graph:depthOf("lighting"), "a fullscreen resolve has nothing to be occluded by")
         assert.is_nil(pipeline.graph:depthOf("composite"))
         pipeline:destroy()
     end)
 
     it("refuses to answer for a pass it does not have", function()
         local pipeline = Deferred.create(device.handle, FORMAT, {})
-        local ok, err = pcall(function() pipeline.graph:depthOf("noSuchPass") end)
+        local ok, err = pcall(function()
+            pipeline.graph:depthOf("noSuchPass")
+        end)
         assert.is_false(ok)
         assert.is_truthy(tostring(err):find("no pass named"))
         pipeline:destroy()

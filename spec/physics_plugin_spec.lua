@@ -8,8 +8,7 @@
 -- The build directory is the build system's to choose, so it is passed in.
 -- Our tree comes first, so it wins over the ECS repo's own engine tree.
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs = require("tecs")
 local components = require("tecs.components")
@@ -29,7 +28,9 @@ describe("ecs.physics", function()
         local entity = world:spawn(Transform(100, 200, 0, 1, 0, 32, 32))
         physics.attach(world, entity, { type = "static", halfWidth = 16, halfHeight = 16 })
 
-        for _ = 1, 60 do world:update(1 / 60) end
+        for _ = 1, 60 do
+            world:update(1 / 60)
+        end
 
         local transform = world:get(entity, Transform)
         assert.is_true(math.abs(transform.x - 100) < 0.5)
@@ -41,12 +42,16 @@ describe("ecs.physics", function()
         local entity = world:spawn(Transform(0, 0, 0, 1, 0, 16, 16))
         physics.attach(world, entity, { type = "dynamic", radius = 8, density = 1 })
 
-        for _ = 1, 60 do world:update(1 / 60) end
+        for _ = 1, 60 do
+            world:update(1 / 60)
+        end
 
         -- One second at 980 px/s^2 covers about half that in pixels.
         local transform = world:get(entity, Transform)
-        assert.is_true(transform.y > 400 and transform.y < 550,
-            ("expected roughly 490 px of fall, got %.1f"):format(transform.y))
+        assert.is_true(
+            transform.y > 400 and transform.y < 550,
+            ("expected roughly 490 px of fall, got %.1f"):format(transform.y)
+        )
     end)
 
     it("rests a falling body on a static one", function()
@@ -55,15 +60,20 @@ describe("ecs.physics", function()
         physics.attach(world, ground, { type = "static", halfWidth = 200, halfHeight = 16 })
 
         local ball = world:spawn(Transform(100, 50, 0, 1, 0, 16, 16))
-        physics.attach(world, ball, { type = "dynamic", radius = 8, density = 1,
-                                       restitution = 0 })
+        physics.attach(world, ball, {
+            type = "dynamic",
+            radius = 8,
+            density = 1,
+            restitution = 0,
+        })
 
-        for _ = 1, 300 do world:update(1 / 60) end
+        for _ = 1, 300 do
+            world:update(1 / 60)
+        end
 
         -- Ground surface at 584, ball radius 8, so contact rests near 576.
         local transform = world:get(ball, Transform)
-        assert.is_true(math.abs(transform.y - 576) < 4,
-            ("expected rest near 576, got %.1f"):format(transform.y))
+        assert.is_true(math.abs(transform.y - 576) < 4, ("expected rest near 576, got %.1f"):format(transform.y))
     end)
 
     it("keeps each body addressed by its own stored handle", function()
@@ -75,7 +85,9 @@ describe("ecs.physics", function()
         physics.attach(world, high, { type = "dynamic", radius = 8, density = 1 })
         physics.attach(world, low, { type = "dynamic", radius = 8, density = 1 })
 
-        for _ = 1, 30 do world:update(1 / 60) end
+        for _ = 1, 30 do
+            world:update(1 / 60)
+        end
 
         local a = world:get(high, Transform)
         local b = world:get(low, Transform)
@@ -87,11 +99,15 @@ describe("ecs.physics", function()
     it("holds rotation fixed when asked", function()
         local world = newWorld()
         local entity = world:spawn(Transform(0, 0, 0, 1, 0, 32, 8))
-        physics.attach(world, entity, { type = "dynamic", halfWidth = 16,
-                                        halfHeight = 4, density = 1,
-                                        fixedRotation = true })
+        physics.attach(
+            world,
+            entity,
+            { type = "dynamic", halfWidth = 16, halfHeight = 4, density = 1, fixedRotation = true }
+        )
 
-        for _ = 1, 120 do world:update(1 / 60) end
+        for _ = 1, 120 do
+            world:update(1 / 60)
+        end
 
         assert.is_true(math.abs(world:get(entity, Transform).rotation) < 1e-3)
     end)
@@ -111,13 +127,16 @@ describe("ecs.physics write-back", function()
     it("stops dirtying transforms once a body has settled", function()
         local world = newWorld()
         local ground = world:spawn(Transform(0, 400, 0, 1, 0, 2000, 40))
-        physics.attach(world, ground,
-            { type = "static", halfWidth = 1000, halfHeight = 20 })
+        physics.attach(world, ground, { type = "static", halfWidth = 1000, halfHeight = 20 })
 
         local entity = world:spawn(Transform(0, 100, 0, 1, 0, 20, 20))
         physics.attach(world, entity, {
-            type = "dynamic", halfWidth = 10, halfHeight = 10,
-            density = 1.0, friction = 0.9, restitution = 0.0,
+            type = "dynamic",
+            halfWidth = 10,
+            halfHeight = 10,
+            density = 1.0,
+            friction = 0.9,
+            restitution = 0.0,
         })
 
         local query = world:query({ include = { Transform, physics.RigidBody } })
@@ -144,12 +163,16 @@ describe("ecs.physics write-back", function()
         end
 
         -- Falling: the column is dirty, because the body is moving.
-        for _ = 1, 10 do step() end
+        for _ = 1, 10 do
+            step()
+        end
         assert.is_true(dirty)
 
         -- Box2D puts a resting body to sleep, and a sleeping body reports no
         -- movement, so the column stops being taken mutable at all.
-        for _ = 1, 600 do step() end
+        for _ = 1, 600 do
+            step()
+        end
         assert.is_false(dirty)
     end)
 
@@ -157,12 +180,17 @@ describe("ecs.physics write-back", function()
         local world = newWorld()
         local entity = world:spawn(Transform(0, 0, 0, 1, 0, 20, 20))
         physics.attach(world, entity, {
-            type = "dynamic", halfWidth = 10, halfHeight = 10, density = 1.0,
+            type = "dynamic",
+            halfWidth = 10,
+            halfHeight = 10,
+            density = 1.0,
         })
 
         world:update(1 / 60)
         local first = world:get(entity, Transform).y
-        for _ = 1, 30 do world:update(1 / 60) end
+        for _ = 1, 30 do
+            world:update(1 / 60)
+        end
         local later = world:get(entity, Transform).y
 
         -- Falling under gravity, so it is strictly lower than it was.

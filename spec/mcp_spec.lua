@@ -7,8 +7,7 @@
 -- closed before it drained, both look fine from inside.
 
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local cjson = require("cjson")
 local sdl = require("tecs.ffi.sdl3")
@@ -23,7 +22,10 @@ local PORT = 7411
 
 local function rpc(method, params, id)
     return mcp.dispatch(cjson.encode({
-        jsonrpc = "2.0", id = id or 1, method = method, params = params,
+        jsonrpc = "2.0",
+        id = id or 1,
+        method = method,
+        params = params,
     }))
 end
 
@@ -35,15 +37,21 @@ describe("mcp protocol", function()
             description = "Returns what it was given.",
             readOnly = true,
             inputSchema = { type = "object" },
-            handler = function(args) return { echoed = args.value } end,
+            handler = function(args)
+                return { echoed = args.value }
+            end,
         })
         mcp.register({
             name = "spec_boom",
             description = "Always fails.",
-            handler = function() error("deliberate") end,
+            handler = function()
+                error("deliberate")
+            end,
         })
     end)
-    teardown(function() C.SDL_Quit() end)
+    teardown(function()
+        C.SDL_Quit()
+    end)
 
     it("answers initialize with a protocol version", function()
         local result = cjson.decode(rpc("initialize")).result
@@ -69,8 +77,7 @@ describe("mcp protocol", function()
     end)
 
     it("calls a tool and returns structured content", function()
-        local result = cjson.decode(
-            rpc("tools/call", { name = "spec_echo", arguments = { value = 42 } })).result
+        local result = cjson.decode(rpc("tools/call", { name = "spec_echo", arguments = { value = 42 } })).result
         assert.are.equal(42, result.structuredContent.echoed)
         -- The text block carries the same payload, for a client that only
         -- reads content.
@@ -78,8 +85,7 @@ describe("mcp protocol", function()
     end)
 
     it("reports a failing tool without taking the server down", function()
-        local result = cjson.decode(
-            rpc("tools/call", { name = "spec_boom" })).result
+        local result = cjson.decode(rpc("tools/call", { name = "spec_boom" })).result
         assert.is_true(result.isError)
         assert.is_truthy(result.content[1].text:find("deliberate", 1, true))
 
@@ -95,8 +101,7 @@ describe("mcp protocol", function()
 
     it("survives malformed input", function()
         assert.are.equal(-32700, cjson.decode(mcp.dispatch("{not json")).error.code)
-        assert.are.equal(-32600,
-            cjson.decode(mcp.dispatch('{"jsonrpc":"2.0","id":1}')).error.code)
+        assert.are.equal(-32600, cjson.decode(mcp.dispatch('{"jsonrpc":"2.0","id":1}')).error.code)
     end)
 
     it("preserves the request id, including a string one", function()
@@ -105,7 +110,9 @@ describe("mcp protocol", function()
 end)
 
 describe("run_lua sandbox", function()
-    before_each(function() sandbox.reset() end)
+    before_each(function()
+        sandbox.reset()
+    end)
 
     it("runs a statement block and a bare expression alike", function()
         -- An agent types `1 + 1` as often as `return 1 + 1`, and having to
@@ -177,14 +184,18 @@ describe("mcp after a crash", function()
         mcp.register({
             name = "spec_world",
             description = "Touches the world.",
-            handler = function() return { touched = true } end,
+            handler = function()
+                return { touched = true }
+            end,
         })
         mcp.register({
             name = "spec_survives",
             description = "Does not touch the world.",
             readOnly = true,
             whenCrashed = true,
-            handler = function() return { alive = true } end,
+            handler = function()
+                return { alive = true }
+            end,
         })
     end)
 
@@ -195,21 +206,20 @@ describe("mcp after a crash", function()
 
     it("refuses world tools and keeps the rest, with the traceback", function()
         assert.is_nil(mcp.crashed())
-        assert.is_true(cjson.decode(
-            rpc("tools/call", { name = "spec_world" })).result.structuredContent.touched)
+        assert.is_true(cjson.decode(rpc("tools/call", { name = "spec_world" })).result.structuredContent.touched)
 
         mcp.setCrashed("spec.lua:1: deliberate\nstack traceback:\n\t...")
         assert.is_not_nil(mcp.crashed())
 
-        local refused = cjson.decode(
-            rpc("tools/call", { name = "spec_world" })).result
+        local refused = cjson.decode(rpc("tools/call", { name = "spec_world" })).result
         assert.is_true(refused.isError)
         assert.is_true(refused.crashed)
-        assert.is_truthy(refused.content[1].text:find("deliberate", 1, true),
-            "the traceback is what the agent came for")
+        assert.is_truthy(
+            refused.content[1].text:find("deliberate", 1, true),
+            "the traceback is what the agent came for"
+        )
 
-        local survived = cjson.decode(
-            rpc("tools/call", { name = "spec_survives" })).result
+        local survived = cjson.decode(rpc("tools/call", { name = "spec_survives" })).result
         assert.is_true(survived.structuredContent.alive)
 
         -- And the protocol itself keeps working, so an agent can still find
@@ -229,8 +239,7 @@ describe("mcp after a crash", function()
 
     it("recovers when the crash is cleared", function()
         mcp.setCrashed(nil)
-        assert.is_true(cjson.decode(
-            rpc("tools/call", { name = "spec_world" })).result.structuredContent.touched)
+        assert.is_true(cjson.decode(rpc("tools/call", { name = "spec_world" })).result.structuredContent.touched)
     end)
 end)
 
@@ -244,7 +253,9 @@ describe("mcp over a socket", function()
     end)
 
     teardown(function()
-        if server then server:destroy() end
+        if server then
+            server:destroy()
+        end
         N.NET_Quit()
         C.SDL_Quit()
     end)
@@ -259,7 +270,9 @@ describe("mcp over a socket", function()
         assert.are.equal(1, tonumber(N.NET_WaitUntilConnected(socket, 2000)))
 
         local body = cjson.encode({
-            jsonrpc = "2.0", id = 9, method = "tools/call",
+            jsonrpc = "2.0",
+            id = 9,
+            method = "tools/call",
             params = { name = "spec_echo", arguments = { value = "over the wire" } },
         })
         local request = table.concat({
@@ -275,7 +288,10 @@ describe("mcp over a socket", function()
         -- runs on the game's thread, inside a frame.
         local answered = false
         for _ = 1, 200 do
-            if server:poll() then answered = true break end
+            if server:poll() then
+                answered = true
+                break
+            end
             C.SDL_Delay(5)
         end
         assert.is_true(answered, "the server never saw the request")
@@ -286,7 +302,9 @@ describe("mcp over a socket", function()
             local read = tonumber(N.NET_ReadFromStreamSocket(socket, buffer, 65536))
             if read > 0 then
                 text = text .. loader.toBytes(buffer, read)
-                if text:find("\r\n\r\n", 1, true) then break end
+                if text:find("\r\n\r\n", 1, true) then
+                    break
+                end
             elseif read < 0 then
                 break
             end
@@ -297,8 +315,7 @@ describe("mcp over a socket", function()
         assert.is_truthy(text:find("^HTTP/1.1 200 OK"))
         local length = tonumber(text:lower():match("content%-length:%s*(%d+)"))
         local payload = text:sub(text:find("\r\n\r\n", 1, true) + 4)
-        assert.are.equal(length, #payload,
-            "the declared length must match what was sent")
+        assert.are.equal(length, #payload, "the declared length must match what was sent")
 
         local decoded = cjson.decode(payload)
         assert.are.equal(9, decoded.id)

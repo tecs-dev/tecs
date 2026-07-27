@@ -6,8 +6,7 @@
 -- only the memory, which is the failure the dirty model exists to prevent.
 
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local cjson = require("cjson")
 local tecs = require("tecs")
@@ -20,7 +19,9 @@ local C = sdl.C
 
 local function call(name, args)
     local response = cjson.decode(mcp.dispatch(cjson.encode({
-        jsonrpc = "2.0", id = 1, method = "tools/call",
+        jsonrpc = "2.0",
+        id = 1,
+        method = "tools/call",
         params = { name = name, arguments = args },
     })))
     return response.result
@@ -28,17 +29,22 @@ end
 
 local function ok(name, args)
     local result = call(name, args)
-    assert.is_falsy(result.isError,
-        name .. " failed: " .. tostring(result.content
-            and result.content[1] and result.content[1].text))
+    assert.is_falsy(
+        result.isError,
+        name .. " failed: " .. tostring(result.content and result.content[1] and result.content[1].text)
+    )
     return result.structuredContent
 end
 
 describe("mcp world tools", function()
     local world
 
-    setup(function() assert(C.SDL_Init(0)) end)
-    teardown(function() C.SDL_Quit() end)
+    setup(function()
+        assert(C.SDL_Init(0))
+    end)
+    teardown(function()
+        C.SDL_Quit()
+    end)
 
     before_each(function()
         world = tecs.newWorld()
@@ -84,11 +90,9 @@ describe("mcp world tools", function()
 
     it("queries by component and reports what it did not return", function()
         for index = 1, 5 do
-            world:spawn(components.Transform(index, 0, 0, 1, 0, 1, 1),
-                components.Renderable())
+            world:spawn(components.Transform(index, 0, 0, 1, 0, 1, 1), components.Renderable())
         end
-        local result = ok("query",
-            { include = { "Transform", "Renderable" }, limit = 2 })
+        local result = ok("query", { include = { "Transform", "Renderable" }, limit = 2 })
 
         assert.are.equal(5, result.matched, "the total is not the page")
         assert.are.equal(2, result.returned)
@@ -99,8 +103,7 @@ describe("mcp world tools", function()
     it("names the components it knows when given one it does not", function()
         local result = call("query", { include = { "Nonexistent" } })
         assert.is_true(result.isError)
-        assert.is_truthy(result.content[1].text:find("Transform", 1, true),
-            "the error should list what can be named")
+        assert.is_truthy(result.content[1].text:find("Transform", 1, true), "the error should list what can be named")
     end)
 
     it("spawns with defaults for whatever the payload omits", function()
@@ -123,22 +126,18 @@ describe("mcp world tools", function()
         -- rather than black with green.
         local entity = world:spawn(components.Tint(0.5, 0.5, 0.5, 0.5))
 
-        local merged = ok("modify",
-            { entity = entity, component = "Tint", values = { r = 0.25 } })
+        local merged = ok("modify", { entity = entity, component = "Tint", values = { r = 0.25 } })
         assert.are.equal(0.25, merged.components.Tint.r)
         assert.are.equal(0.5, merged.components.Tint.g, "untouched by modify")
 
-        local replaced = ok("set",
-            { entity = entity, component = "Tint", values = { g = 0.75 } })
+        local replaced = ok("set", { entity = entity, component = "Tint", values = { g = 0.75 } })
         assert.are.equal(0.75, replaced.components.Tint.g)
-        assert.are.equal(1, replaced.components.Tint.r,
-            "omitted fields take the default, because set replaces")
+        assert.are.equal(1, replaced.components.Tint.r, "omitted fields take the default, because set replaces")
     end)
 
     it("adds a component on set and says that it did", function()
         local entity = world:spawn(components.Renderable())
-        local result = ok("set",
-            { entity = entity, component = "Tint", values = { r = 0.5 } })
+        local result = ok("set", { entity = entity, component = "Tint", values = { r = 0.5 } })
         assert.is_true(result.added)
         assert.is_true(world:has(entity, components.Tint))
     end)
@@ -148,8 +147,7 @@ describe("mcp world tools", function()
         -- half, where the name is right but the entity does not carry it.
         -- Adding one would be a surprise an agent cannot undo.
         local entity = world:spawn(components.Renderable())
-        local result = ok("modify",
-            { entity = entity, component = "Tint", values = { r = 0.5 } })
+        local result = ok("modify", { entity = entity, component = "Tint", values = { r = 0.5 } })
 
         assert.is_true(result.skipped)
         assert.is_false(world:has(entity, components.Tint))
@@ -157,13 +155,13 @@ describe("mcp world tools", function()
 
     it("removes and despawns, and says when there was nothing to do", function()
         local entity = world:spawn(components.Renderable(), components.Tint())
-        assert.is_false(ok("remove",
-            { entity = entity, component = "Tint" }).skipped)
+        assert.is_false(ok("remove", { entity = entity, component = "Tint" }).skipped)
         assert.is_false(world:has(entity, components.Tint))
 
-        assert.is_true(ok("remove",
-            { entity = entity, component = "Tint" }).skipped,
-            "removing it twice is not an error")
+        assert.is_true(
+            ok("remove", { entity = entity, component = "Tint" }).skipped,
+            "removing it twice is not an error"
+        )
 
         assert.is_false(ok("despawn", { entity = entity }).skipped)
         assert.is_false(world:isAlive(entity))
@@ -186,7 +184,9 @@ describe("mcp world tools", function()
         local query = world:query({ include = { components.Tint } })
         local function dirty()
             for archetype in query:iter() do
-                if archetype:isComponentDirty(components.Tint) then return true end
+                if archetype:isComponentDirty(components.Tint) then
+                    return true
+                end
             end
             return false
         end

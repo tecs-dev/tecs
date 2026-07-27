@@ -24,7 +24,7 @@ local function httpPost(url, body)
     local _, code = http.request({
         url = url,
         method = "POST",
-        headers = {["content-type"] = "application/json", ["content-length"] = tostring(#body)},
+        headers = { ["content-type"] = "application/json", ["content-length"] = tostring(#body) },
         source = ltn12.source.string(body),
         sink = ltn12.sink.table(resp),
         redirect = false,
@@ -49,9 +49,13 @@ log("Scanning ports " .. BASE_PORT .. "-" .. (BASE_PORT + PORT_COUNT - 1))
 
 while true do
     local line = io.read("*l")
-    if not line then break end
+    if not line then
+        break
+    end
 
-    if not gameUrl then gameUrl = discover() end
+    if not gameUrl then
+        gameUrl = discover()
+    end
 
     if not gameUrl then
         -- Retry once after a short wait (game might be starting)
@@ -65,12 +69,16 @@ while true do
     else
         local body, code = httpPost(gameUrl, line)
         if code == 200 or code == 202 then
-            if #body > 0 then io.stdout:write(body .. "\n") end
+            if #body > 0 then
+                io.stdout:write(body .. "\n")
+            end
         else
             -- Game may have restarted; rediscover on next request
             gameUrl = nil
             local id = line:match('"id"%s*:%s*(%d+)') or "null"
-            io.stdout:write('{"jsonrpc":"2.0","id":' .. id .. ',"error":{"code":-32000,"message":"Game unavailable"}}\n')
+            io.stdout:write(
+                '{"jsonrpc":"2.0","id":' .. id .. ',"error":{"code":-32000,"message":"Game unavailable"}}\n'
+            )
         end
     end
 end

@@ -15,20 +15,20 @@
 local home = os.getenv("HOME") or ""
 
 package.path = package.path
-        .. ";../../out/macos-arm64-dev/lua/?.lua;../../out/macos-arm64-dev/lua/?/init.lua;"
-        .. "../?.lua;../?/init.lua;"
-        .. home .. "/.luarocks/share/lua/5.1/?.lua;"
-        .. home .. "/.luarocks/share/lua/5.1/?/init.lua"
+    .. ";../../out/macos-arm64-dev/lua/?.lua;../../out/macos-arm64-dev/lua/?/init.lua;"
+    .. "../?.lua;../?/init.lua;"
+    .. home
+    .. "/.luarocks/share/lua/5.1/?.lua;"
+    .. home
+    .. "/.luarocks/share/lua/5.1/?/init.lua"
 package.cpath = package.cpath .. ";" .. home .. "/.luarocks/lib/lua/5.1/?.so"
 
 assert(jit, "LuaJIT is required to run this benchmark")
 print("LuaJIT version:", jit.version)
 
-
 local bench = require("lib.bench")
 local tecs = require("tecs")
 local buffer = require("string.buffer")
-
 
 -------------------------------------------------------------------------------
 -- FFI-only component set
@@ -38,8 +38,8 @@ local Position = tecs.newFFIComponent({
     name = "SnapPosition",
     container = {},
     fields = {
-        {"x", "double"},
-        {"y", "double"},
+        { "x", "double" },
+        { "y", "double" },
     },
 })
 
@@ -47,8 +47,8 @@ local Velocity = tecs.newFFIComponent({
     name = "SnapVelocity",
     container = {},
     fields = {
-        {"vx", "double"},
-        {"vy", "double"},
+        { "vx", "double" },
+        { "vy", "double" },
     },
 })
 
@@ -56,8 +56,8 @@ local Health = tecs.newFFIComponent({
     name = "SnapHealth",
     container = {},
     fields = {
-        {"hp", "int32_t"},
-        {"maxHp", "int32_t"},
+        { "hp", "int32_t" },
+        { "maxHp", "int32_t" },
     },
 })
 
@@ -76,41 +76,38 @@ local function buildWorld(count)
     local third = math.floor(count / 3)
     local rest = count - 2 * third
 
-    world:batchSpawn(third, {Position, Velocity, Health},
-        function(arch, startRow, n)
-            local positions = arch:getMut(Position)
-            local velocities = arch:getMut(Velocity)
-            local healths = arch:getMut(Health)
-            for i = startRow, startRow + n - 1 do
-                positions[i].x = i * 1.5
-                positions[i].y = i * 2.5
-                velocities[i].vx = i * 0.1
-                velocities[i].vy = i * 0.2
-                healths[i].hp = 100
-                healths[i].maxHp = 100
-            end
-        end)
+    world:batchSpawn(third, { Position, Velocity, Health }, function(arch, startRow, n)
+        local positions = arch:getMut(Position)
+        local velocities = arch:getMut(Velocity)
+        local healths = arch:getMut(Health)
+        for i = startRow, startRow + n - 1 do
+            positions[i].x = i * 1.5
+            positions[i].y = i * 2.5
+            velocities[i].vx = i * 0.1
+            velocities[i].vy = i * 0.2
+            healths[i].hp = 100
+            healths[i].maxHp = 100
+        end
+    end)
 
-    world:batchSpawn(third, {Position, Velocity},
-        function(arch, startRow, n)
-            local positions = arch:getMut(Position)
-            local velocities = arch:getMut(Velocity)
-            for i = startRow, startRow + n - 1 do
-                positions[i].x = i * 3.5
-                positions[i].y = i * 4.5
-                velocities[i].vx = i * 0.3
-                velocities[i].vy = i * 0.4
-            end
-        end)
+    world:batchSpawn(third, { Position, Velocity }, function(arch, startRow, n)
+        local positions = arch:getMut(Position)
+        local velocities = arch:getMut(Velocity)
+        for i = startRow, startRow + n - 1 do
+            positions[i].x = i * 3.5
+            positions[i].y = i * 4.5
+            velocities[i].vx = i * 0.3
+            velocities[i].vy = i * 0.4
+        end
+    end)
 
-    world:batchSpawn(rest, {Position},
-        function(arch, startRow, n)
-            local positions = arch:getMut(Position)
-            for i = startRow, startRow + n - 1 do
-                positions[i].x = i * 5.5
-                positions[i].y = i * 6.5
-            end
-        end)
+    world:batchSpawn(rest, { Position }, function(arch, startRow, n)
+        local positions = arch:getMut(Position)
+        for i = startRow, startRow + n - 1 do
+            positions[i].x = i * 5.5
+            positions[i].y = i * 6.5
+        end
+    end)
 
     world:commit()
     return world
@@ -127,7 +124,7 @@ local saveCache = {}
 local function getSaveResources(count)
     local r = saveCache[count]
     if not r then
-        r = {world = buildWorld(count), buf = buffer.new()}
+        r = { world = buildWorld(count), buf = buffer.new() }
         saveCache[count] = r
     end
     return r
@@ -142,7 +139,7 @@ local function getLoadResources(count)
         -- loadSnapshot despawns existing entities before refilling, so the
         -- same world ping-pongs full → empty → full across iterations. This
         -- matches the realistic "save game" pattern.
-        r = {bytes = srcBuf:tostring(), world = tecs.newWorld()}
+        r = { bytes = srcBuf:tostring(), world = tecs.newWorld() }
         loadCache[count] = r
     end
     return r
@@ -161,14 +158,16 @@ bench.suite({
     variants = {
         {
             name = "world:saveSnapshot",
-            setup = function(case) return getSaveResources(case.params.count) end,
+            setup = function(case)
+                return getSaveResources(case.params.count)
+            end,
             run = function(state)
-                state.world:saveSnapshot({buffer = state.buf})
+                state.world:saveSnapshot({ buffer = state.buf })
             end,
         },
     },
     cases = {
-        {name = "snapshot save", parameters = {count = {1000, 10000, 100000}}},
+        { name = "snapshot save", parameters = { count = { 1000, 10000, 100000 } } },
     },
 })
 
@@ -183,7 +182,9 @@ bench.suite({
     variants = {
         {
             name = "world:loadSnapshot",
-            setup = function(case) return getLoadResources(case.params.count) end,
+            setup = function(case)
+                return getLoadResources(case.params.count)
+            end,
             run = function(state)
                 -- Pass bytes (Lua string) directly; loadSnapshot handles
                 -- the buffer creation + put internally.
@@ -192,6 +193,6 @@ bench.suite({
         },
     },
     cases = {
-        {name = "snapshot load", parameters = {count = {1000, 10000, 100000}}},
+        { name = "snapshot load", parameters = { count = { 1000, 10000, 100000 } } },
     },
 })

@@ -8,8 +8,7 @@
 -- that a build with neither says so instead of opening a black window.
 
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs = require("tecs")
 local sdl = require("tecs.ffi.sdl3")
@@ -26,7 +25,7 @@ local materials = require("tecs.gpu.materials")
 local shadercompiler = require("tecs.gpu.shadercompiler")
 
 local C = sdl.C
-local FORMAT = 4  -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
+local FORMAT = 4 -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
 local SIZE = 64
 
 local Transform = components.Transform
@@ -40,20 +39,27 @@ describe("shaders", function()
         assert(C.SDL_Init(0))
         materials.install()
     end)
-    teardown(function() C.SDL_Quit() end)
+    teardown(function()
+        C.SDL_Quit()
+    end)
 
     it("finds every shader the engine loads by globbing", function()
         -- The glob is what a packaging step enumerates, so a shader the engine
         -- asks for at run time but that no root contains is one no pack can
         -- hold.
         local names = {}
-        for _, entry in ipairs(shaders.list()) do names[entry.name] = entry end
+        for _, entry in ipairs(shaders.list()) do
+            names[entry.name] = entry
+        end
 
         for _, expected in ipairs({
             "instance.mark.comp",
-            "instance.scan.comp", "instance.compact.comp",
-            "instance.vert", "instance.frag",
-            "deferred.fullscreen.vert", "deferred.lighting.frag",
+            "instance.scan.comp",
+            "instance.compact.comp",
+            "instance.vert",
+            "instance.frag",
+            "deferred.fullscreen.vert",
+            "deferred.lighting.frag",
             "deferred.composite.frag",
         }) do
             assert.is_not_nil(names[expected], expected .. " must be found")
@@ -69,7 +75,9 @@ describe("shaders", function()
     it("refuses a name with no stage in it", function()
         -- Otherwise an include would be compiled on its own, which fails much
         -- further along and much less clearly.
-        assert.has_error(function() shaders.get("instance") end)
+        assert.has_error(function()
+            shaders.get("instance")
+        end)
     end)
 
     it("says which directories it looked in when a file is missing", function()
@@ -84,8 +92,10 @@ describe("shaders", function()
         -- hash unchanged when the include changed, and a stale pack would pass
         -- its own check.
         local mark = shaders.get("instance.mark.comp")
-        assert.is_truthy(mark.source:find("const uint CULLED", 1, true),
-            "the include's text must be present, not its directive")
+        assert.is_truthy(
+            mark.source:find("const uint CULLED", 1, true),
+            "the include's text must be present, not its directive"
+        )
         assert.is_falsy(mark.source:find("#include", 1, true))
 
         -- And the same include reaches the pass on the other side of it, which
@@ -101,17 +111,19 @@ describe("shaders", function()
         assert.is_truthy(probe.source:find("CULLED", 1, true))
         shaders.override("spec.probe.frag", nil)
         -- Unchanged by the probe, so the hash is of content and not of state.
-        assert.are.equal(before,
-            shaders.hash(shaders.get("instance.mark.comp").source))
+        assert.are.equal(before, shaders.hash(shaders.get("instance.mark.comp").source))
     end)
 
     it("reads variants declared in the file", function()
-        shaders.override("spec.variants.frag", table.concat({
-            "#version 450",
-            "#pragma tecs variants LIGHTS=1",
-            "#pragma tecs variants LIGHTS=4 SHADOWS=1",
-            "void main() {}",
-        }, "\n"))
+        shaders.override(
+            "spec.variants.frag",
+            table.concat({
+                "#version 450",
+                "#pragma tecs variants LIGHTS=1",
+                "#pragma tecs variants LIGHTS=4 SHADOWS=1",
+                "void main() {}",
+            }, "\n")
+        )
 
         local entry = shaders.get("spec.variants.frag")
         assert.are.equal(2, #entry.variants)
@@ -132,15 +144,15 @@ describe("shaders", function()
     end)
 
     it("stops on an include cycle rather than recursing", function()
-        shaders.override("spec.cycle.frag",
-            '#version 450\n#include "spec.cycle.frag"\n')
-        assert.has_error(function() shaders.get("spec.cycle.frag") end)
+        shaders.override("spec.cycle.frag", '#version 450\n#include "spec.cycle.frag"\n')
+        assert.has_error(function()
+            shaders.get("spec.cycle.frag")
+        end)
         shaders.override("spec.cycle.frag", nil)
     end)
 
     it("names an include it cannot find", function()
-        shaders.override("spec.missing.frag",
-            '#version 450\n#include "no-such-include.glsl"\n')
+        shaders.override("spec.missing.frag", '#version 450\n#include "no-such-include.glsl"\n')
         local ok, reason = pcall(shaders.get, "spec.missing.frag")
         assert.is_false(ok)
         assert.is_truthy(tostring(reason):find("no-such-include", 1, true))
@@ -154,7 +166,8 @@ describe("shaders", function()
         assert.are.equal("a.frag", shaders.key("a.frag", {}))
         assert.are.equal(
             shaders.key("a.frag", { LIGHTS = "4", SHADOWS = "1" }),
-            shaders.key("a.frag", { SHADOWS = "1", LIGHTS = "4" }))
+            shaders.key("a.frag", { SHADOWS = "1", LIGHTS = "4" })
+        )
     end)
 
     it("hashes source so a changed shader is detectable", function()
@@ -165,13 +178,19 @@ describe("shaders", function()
     end)
 
     it("refuses a name it does not know", function()
-        assert.has_error(function() shaders.get("nothing.frag") end)
+        assert.has_error(function()
+            shaders.get("nothing.frag")
+        end)
     end)
 end)
 
 describe("shaderpack", function()
-    setup(function() assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO)) end)
-    teardown(function() C.SDL_Quit() end)
+    setup(function()
+        assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
+    end)
+    teardown(function()
+        C.SDL_Quit()
+    end)
 
     it("round-trips a pack through its container", function()
         local built = shaderbuild.build()
@@ -188,10 +207,8 @@ describe("shaderpack", function()
             assert.are.equal(entry.entrypoint, other.entrypoint)
             assert.are.equal(entry.sourceHash, other.sourceHash)
             assert.are.equal(entry.counts.samplers, other.counts.samplers)
-            assert.are.equal(entry.counts.readOnlyStorageBuffers,
-                other.counts.readOnlyStorageBuffers)
-            assert.are.equal(entry.counts.uniformBuffers,
-                other.counts.uniformBuffers)
+            assert.are.equal(entry.counts.readOnlyStorageBuffers, other.counts.readOnlyStorageBuffers)
+            assert.are.equal(entry.counts.uniformBuffers, other.counts.uniformBuffers)
         end
     end)
 
@@ -214,8 +231,12 @@ describe("shaderpack", function()
     end)
 
     it("rejects a file that is not a pack", function()
-        assert.has_error(function() shaderpack.decode("not a pack at all") end)
-        assert.has_error(function() shaderpack.decode("") end)
+        assert.has_error(function()
+            shaderpack.decode("not a pack at all")
+        end)
+        assert.has_error(function()
+            shaderpack.decode("")
+        end)
     end)
 
     it("rejects a pack whose layout this build does not read", function()
@@ -226,8 +247,7 @@ describe("shaderpack", function()
         -- this patching payload bytes while still reading as a pass.
         local MAGIC = "TECSSP"
         assert.are.equal(MAGIC, encoded:sub(1, #MAGIC))
-        local wrong = encoded:sub(1, #MAGIC) .. string.char(99)
-            .. encoded:sub(#MAGIC + 2)
+        local wrong = encoded:sub(1, #MAGIC) .. string.char(99) .. encoded:sub(#MAGIC + 2)
         local ok, reason = pcall(shaderpack.decode, wrong, "wrong.tsp")
         assert.is_false(ok)
         assert.is_truthy(tostring(reason):find("version 99"))
@@ -238,11 +258,11 @@ describe("shaderpack", function()
     end)
 
     it("names the formats it can carry", function()
-        assert.are.equal("msl", shaderpack.formatName(
-            shaderpack.formatValue("msl")))
-        assert.are.equal("spirv", shaderpack.formatName(
-            shaderpack.formatValue("spirv")))
-        assert.has_error(function() shaderpack.formatValue("hlsl") end)
+        assert.are.equal("msl", shaderpack.formatName(shaderpack.formatValue("msl")))
+        assert.are.equal("spirv", shaderpack.formatName(shaderpack.formatValue("spirv")))
+        assert.has_error(function()
+            shaderpack.formatValue("hlsl")
+        end)
     end)
 end)
 
@@ -253,17 +273,22 @@ describe("rendering from a pack", function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
         window = Window.create({ title = "pack", width = SIZE, height = SIZE })
         device = Device.create(window, { debug = true })
-        screen = Texture.create(device.handle,
-            { width = SIZE, height = SIZE, format = FORMAT })
+        screen = Texture.create(device.handle, { width = SIZE, height = SIZE, format = FORMAT })
         assets.install()
     end)
 
     teardown(function()
         shadercompiler.usePack(nil)
         assets.shutdown()
-        if screen then screen:destroy() end
-        if device then device:destroy() end
-        if window then window:destroy() end
+        if screen then
+            screen:destroy()
+        end
+        if device then
+            device:destroy()
+        end
+        if window then
+            window:destroy()
+        end
         C.SDL_Quit()
     end)
 
@@ -276,11 +301,7 @@ describe("rendering from a pack", function()
             capacity = 64,
         })
         renderer:install(world)
-        world:spawn(
-            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
-            Tint(1.0, 0.0, 0.0, 1.0),
-            Renderable()
-        )
+        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2), Tint(1.0, 0.0, 0.0, 1.0), Renderable())
 
         world:update(1 / 60)
         local commandBuffer = C.SDL_AcquireGPUCommandBuffer(device.handle)
@@ -341,7 +362,9 @@ describe("where a shader is allowed to come from", function()
     -- combination of "is it in the pack" and "can this build compile" is
     -- checked here, including the two that must fail.
 
-    setup(function() assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO)) end)
+    setup(function()
+        assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
+    end)
     teardown(function()
         shadercompiler.usePack(nil)
         C.SDL_Quit()
@@ -349,8 +372,7 @@ describe("where a shader is allowed to come from", function()
 
     it("compiles when nothing is packaged and a compiler exists", function()
         shadercompiler.usePack(nil)
-        assert.are.equal("compile",
-            shadercompiler.plan("instance.frag", nil, true))
+        assert.are.equal("compile", shadercompiler.plan("instance.frag", nil, true))
     end)
 
     it("raises when nothing is packaged and nothing can compile", function()
@@ -358,17 +380,17 @@ describe("where a shader is allowed to come from", function()
         local ok, reason = pcall(shadercompiler.plan, "instance.frag", nil, false)
         assert.is_false(ok)
         assert.is_truthy(tostring(reason):find("no shader pack"))
-        assert.is_truthy(tostring(reason):find("instance.frag"),
-            "the message must name the shader")
+        assert.is_truthy(tostring(reason):find("instance.frag"), "the message must name the shader")
     end)
 
     it("uses the pack when the entry matches its source", function()
         shadercompiler.usePack(shaderbuild.build())
-        assert.are.equal("pack",
-            shadercompiler.plan("instance.frag", nil, false))
-        assert.are.equal("pack",
+        assert.are.equal("pack", shadercompiler.plan("instance.frag", nil, false))
+        assert.are.equal(
+            "pack",
             shadercompiler.plan("instance.frag", nil, true),
-            "a packaged entry is preferred even where compiling is possible")
+            "a packaged entry is preferred even where compiling is possible"
+        )
     end)
 
     it("raises for a shader missing from the pack with no compiler", function()
@@ -396,8 +418,7 @@ describe("where a shader is allowed to come from", function()
         assert.is_truthy(tostring(reason):find("different source"))
         assert.is_truthy(tostring(reason):find("deadbeef"))
 
-        assert.are.equal("compile",
-            shadercompiler.plan("instance.vert", nil, true))
+        assert.are.equal("compile", shadercompiler.plan("instance.vert", nil, true))
     end)
 
     it("treats a variant as its own entry", function()
@@ -405,8 +426,7 @@ describe("where a shader is allowed to come from", function()
         -- so it has to be declared and baked. One that was not is missing, and
         -- on a packaged build that is a failure rather than a compile.
         shadercompiler.usePack(shaderbuild.build())
-        local ok, reason = pcall(shadercompiler.plan, "instance.frag",
-            { LIGHTS = "4" }, false)
+        local ok, reason = pcall(shadercompiler.plan, "instance.frag", { LIGHTS = "4" }, false)
         assert.is_false(ok)
         assert.is_truthy(tostring(reason):find("instance.frag|LIGHTS=4"))
     end)

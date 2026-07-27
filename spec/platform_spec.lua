@@ -6,22 +6,24 @@
 -- compiler from one that did not.
 
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local sdl = require("tecs.ffi.sdl3")
 local paths = require("tecs.platform.paths")
 local capabilities = require("tecs.platform.capabilities")
 
 describe("platform.paths", function()
-    setup(function() assert(sdl.C.SDL_Init(sdl.K.SDL_INIT_VIDEO)) end)
-    teardown(function() sdl.C.SDL_Quit() end)
+    setup(function()
+        assert(sdl.C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
+    end)
+    teardown(function()
+        sdl.C.SDL_Quit()
+    end)
 
     it("reports a writable directory the platform chose", function()
         local writable = paths.pref()
         assert.is_string(writable)
-        assert.are.equal("/", writable:sub(-1),
-            "a root must end in a separator so joining is plain concatenation")
+        assert.are.equal("/", writable:sub(-1), "a root must end in a separator so joining is plain concatenation")
         -- Not the working directory, which is not writable on every target.
         assert.is_truthy(writable:find("tecs"))
     end)
@@ -36,14 +38,17 @@ describe("platform.paths", function()
         paths.setAssets("/tmp/one")
         assert.are.equal("/tmp/one/", paths.assets())
         paths.setAssets("/tmp/two/")
-        assert.are.equal("/tmp/two/", paths.assets(),
-            "a trailing separator must not be doubled")
+        assert.are.equal("/tmp/two/", paths.assets(), "a trailing separator must not be doubled")
     end)
 end)
 
 describe("platform.capabilities", function()
-    setup(function() assert(sdl.C.SDL_Init(sdl.K.SDL_INIT_VIDEO)) end)
-    teardown(function() sdl.C.SDL_Quit() end)
+    setup(function()
+        assert(sdl.C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
+    end)
+    teardown(function()
+        sdl.C.SDL_Quit()
+    end)
 
     it("reports the target rather than inferring it", function()
         local caps = capabilities.get()
@@ -68,8 +73,7 @@ describe("platform.capabilities", function()
         local caps = capabilities.get()
         assert.is_boolean(caps.runtimeShaders)
         assert.is_boolean(caps.packagedShaders)
-        assert.are.equal(1, #caps.shaderFormats,
-            "one format, the one the shader pipeline supplies")
+        assert.are.equal(1, #caps.shaderFormats, "one format, the one the shader pipeline supplies")
     end)
 
     it("reports touch by asking the platform", function()

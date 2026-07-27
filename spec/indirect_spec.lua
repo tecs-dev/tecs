@@ -10,8 +10,7 @@
 -- The build directory is the build system's to choose, so it is passed in.
 -- Our tree comes first, so it wins over the ECS repo's own engine tree.
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local sdl = require("tecs.ffi.sdl3")
 local loader = require("tecs.ffi.loader")
@@ -26,7 +25,7 @@ local RenderPass = require("tecs.gpu.RenderPass")
 local Texture = require("tecs.gpu.Texture")
 
 local C = sdl.C
-local FORMAT = 4  -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
+local FORMAT = 4 -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
 local SIZE = 64
 
 -- Writes an SDL_GPUIndirectDrawCommand: {num_vertices, num_instances,
@@ -72,19 +71,29 @@ describe("gpu-driven drawing", function()
     end)
 
     teardown(function()
-        if target then target:destroy() end
-        if device then device:destroy() end
-        if window then window:destroy() end
+        if target then
+            target:destroy()
+        end
+        if device then
+            device:destroy()
+        end
+        if window then
+            window:destroy()
+        end
         C.SDL_Quit()
     end)
 
     it("reflects the declared workgroup size", function()
-        local pipeline = ComputePipeline.fromGLSL(device.handle, [[
+        local pipeline = ComputePipeline.fromGLSL(
+            device.handle,
+            [[
 #version 450
 layout(local_size_x = 8, local_size_y = 4, local_size_z = 2) in;
 layout(set = 1, binding = 0) writeonly buffer Out { uint v[]; } o;
 void main() { o.v[0] = 1u; }
-]], { name = "workgroup.comp" })
+]],
+            { name = "workgroup.comp" }
+        )
 
         assert.are.same({ 8, 4, 2 }, pipeline.threadCount)
         assert.are.equal(1, pipeline.counts.readWriteStorageBuffers)
@@ -100,12 +109,9 @@ void main() { o.v[0] = 1u; }
             size = 16,
         })
 
-        local build = ComputePipeline.fromGLSL(device.handle, BUILD_DRAW,
-            { name = "builddraw.comp" })
-        local vertex = Shader.fromGLSL(device.handle, FULLSCREEN_VS, "vertex",
-            { name = "indirect.vert" })
-        local fragment = Shader.fromGLSL(device.handle, SOLID_FS, "fragment",
-            { name = "indirect.frag" })
+        local build = ComputePipeline.fromGLSL(device.handle, BUILD_DRAW, { name = "builddraw.comp" })
+        local vertex = Shader.fromGLSL(device.handle, FULLSCREEN_VS, "vertex", { name = "indirect.vert" })
+        local fragment = Shader.fromGLSL(device.handle, SOLID_FS, "fragment", { name = "indirect.frag" })
         local pipeline = GraphicsPipeline.create(device.handle, {
             vertexShader = vertex,
             fragmentShader = fragment,
@@ -122,8 +128,8 @@ void main() { o.v[0] = 1u; }
         compute:dispatch(1)
         compute:finish()
 
-        local pass = RenderPass.begin(commandBuffer,
-            { { texture = target.handle, clear = { r = 0, g = 0, b = 0, a = 1 } } })
+        local pass =
+            RenderPass.begin(commandBuffer, { { texture = target.handle, clear = { r = 0, g = 0, b = 0, a = 1 } } })
         pass:bindPipeline(pipeline.handle)
         pass:drawIndirect(args.handle, 0, 1)
         pass:finish()
@@ -133,12 +139,9 @@ void main() { o.v[0] = 1u; }
         local pixels = target:readback()
         local center = target:getPixel(pixels, SIZE / 2, SIZE / 2)
 
-        assert.is_true(math.abs(center.r - 51) <= 2,
-            ("expected ~51 red, got %d"):format(center.r))
-        assert.is_true(math.abs(center.g - 230) <= 2,
-            ("expected ~230 green, got %d"):format(center.g))
-        assert.is_true(math.abs(center.b - 102) <= 2,
-            ("expected ~102 blue, got %d"):format(center.b))
+        assert.is_true(math.abs(center.r - 51) <= 2, ("expected ~51 red, got %d"):format(center.r))
+        assert.is_true(math.abs(center.g - 230) <= 2, ("expected ~230 green, got %d"):format(center.g))
+        assert.is_true(math.abs(center.b - 102) <= 2, ("expected ~102 blue, got %d"):format(center.b))
 
         pipeline:destroy()
         build:destroy()
@@ -149,7 +152,7 @@ void main() { o.v[0] = 1u; }
         -- The vertex stage reads storage buffers from set 0 while the fragment
         -- stage uses set 2. Covering both matters: a shader that binds the
         -- wrong set still compiles and still draws, just from the wrong data.
-        local data = loader.newArray("float[16]")   -- 2 instances x 8 floats
+        local data = loader.newArray("float[16]") -- 2 instances x 8 floats
         -- Instance 0: shifted left, red.
         data[0], data[1], data[2], data[3] = -0.5, 0.0, 0.4, 0.0
         data[4], data[5], data[6], data[7] = 1.0, 0.0, 0.0, 1.0
@@ -167,7 +170,9 @@ void main() { o.v[0] = 1u; }
             usage = { "indirect", "computeWrite" },
             size = 16,
         })
-        local build = ComputePipeline.fromGLSL(device.handle, [[
+        local build = ComputePipeline.fromGLSL(
+            device.handle,
+            [[
 #version 450
 layout(local_size_x = 1) in;
 layout(set = 1, binding = 0) writeonly buffer DrawArgs { uint value[]; } args;
@@ -177,9 +182,13 @@ void main() {
     args.value[2] = 0u;
     args.value[3] = 0u;
 }
-]], { name = "instanced.comp" })
+]],
+            { name = "instanced.comp" }
+        )
 
-        local vertex = Shader.fromGLSL(device.handle, [[
+        local vertex = Shader.fromGLSL(
+            device.handle,
+            [[
 #version 450
 struct Instance { vec4 transform; vec4 color; };
 layout(set = 0, binding = 0) readonly buffer Instances { Instance item[]; } instances;
@@ -191,17 +200,24 @@ void main() {
         + self.transform.xy, 0.0, 1.0);
     vColor = self.color;
 }
-]], "vertex", { name = "instanced.vert" })
+]],
+            "vertex",
+            { name = "instanced.vert" }
+        )
 
-        local fragment = Shader.fromGLSL(device.handle, [[
+        local fragment = Shader.fromGLSL(
+            device.handle,
+            [[
 #version 450
 layout(location = 0) in vec4 vColor;
 layout(location = 0) out vec4 o;
 void main() { o = vColor; }
-]], "fragment", { name = "instanced.frag" })
+]],
+            "fragment",
+            { name = "instanced.frag" }
+        )
 
-        assert.are.equal(1, vertex.counts.readOnlyStorageBuffers,
-            "vertex stage must reflect its set 0 storage buffer")
+        assert.are.equal(1, vertex.counts.readOnlyStorageBuffers, "vertex stage must reflect its set 0 storage buffer")
 
         local pipeline = GraphicsPipeline.create(device.handle, {
             vertexShader = vertex,
@@ -217,8 +233,8 @@ void main() { o = vColor; }
         compute:dispatch(1)
         compute:finish()
 
-        local pass = RenderPass.begin(commandBuffer,
-            { { texture = target.handle, clear = { r = 0, g = 0, b = 0, a = 1 } } })
+        local pass =
+            RenderPass.begin(commandBuffer, { { texture = target.handle, clear = { r = 0, g = 0, b = 0, a = 1 } } })
         pass:bindPipeline(pipeline.handle)
         pass:bindVertexStorageBuffers(0, { instances.handle })
         pass:drawIndirect(args.handle, 0, 1)
@@ -250,7 +266,9 @@ void main() { o = vColor; }
             size = 16,
         })
 
-        local build = ComputePipeline.fromGLSL(device.handle, [[
+        local build = ComputePipeline.fromGLSL(
+            device.handle,
+            [[
 #version 450
 layout(local_size_x = 1) in;
 layout(set = 1, binding = 0) writeonly buffer DrawArgs { uint value[]; } args;
@@ -260,7 +278,9 @@ void main() {
     args.value[2] = 0u;
     args.value[3] = 0u;
 }
-]], { name = "nodraw.comp" })
+]],
+            { name = "nodraw.comp" }
+        )
 
         local vertex = Shader.fromGLSL(device.handle, FULLSCREEN_VS, "vertex", {})
         local fragment = Shader.fromGLSL(device.handle, SOLID_FS, "fragment", {})
@@ -278,8 +298,8 @@ void main() {
         compute:dispatch(1)
         compute:finish()
 
-        local pass = RenderPass.begin(commandBuffer,
-            { { texture = target.handle, clear = { r = 0, g = 0, b = 0, a = 1 } } })
+        local pass =
+            RenderPass.begin(commandBuffer, { { texture = target.handle, clear = { r = 0, g = 0, b = 0, a = 1 } } })
         pass:bindPipeline(pipeline.handle)
         pass:drawIndirect(args.handle, 0, 1)
         pass:finish()

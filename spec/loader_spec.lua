@@ -5,8 +5,7 @@
 -- The build directory is the build system's to choose, so it is passed in.
 -- Our tree comes first, so it wins over the ECS repo's own engine tree.
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local loader = require("tecs.ffi.loader")
 
@@ -24,8 +23,7 @@ describe("ffi.loader", function()
     end)
 
     it("raises a directed error for a library that does not exist", function()
-        local ok, err = pcall(loader.library,
-            "definitely-not-a-real-library", "nope", "TECS_NOPE_PATH")
+        local ok, err = pcall(loader.library, "definitely-not-a-real-library", "nope", "TECS_NOPE_PATH")
         assert.is_false(ok)
         assert.is_truthy(tostring(err):find("cannot load"))
     end)

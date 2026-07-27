@@ -16,8 +16,7 @@
 -- The build directory is the build system's to choose, so it is passed in.
 -- Our tree comes first, so it wins over the ECS repo's own engine tree.
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local ffi = require("ffi")
 local sdl = require("tecs.ffi.sdl3")
@@ -128,11 +127,12 @@ end
 -- work but has not reached the pipeline yet is not the same thing.
 local function waitUntilBlocked(pipeline, count)
     for _ = 1, POLLS do
-        if pipeline:blockedCount() >= count then return end
+        if pipeline:blockedCount() >= count then
+            return
+        end
         sdl.C.SDL_Delay(POLL_MS)
     end
-    error(("only %d of %d callers ever blocked")
-        :format(pipeline:blockedCount(), count))
+    error(("only %d of %d callers ever blocked"):format(pipeline:blockedCount(), count))
 end
 
 -- How many slots are in each state.
@@ -151,7 +151,9 @@ local function stampOf(payload)
     local input = ffi.cast("uint32_t *", payload)
     local stamp = tonumber(input[0])
     for word = 1, WORDS - 1 do
-        if tonumber(input[word]) ~= stamp then return nil end
+        if tonumber(input[word]) ~= stamp then
+            return nil
+        end
     end
     return stamp
 end
@@ -241,8 +243,7 @@ describe("FramePipeline", function()
 
         it("refuses a second slot for writing", function()
             assert.is_not_nil(pipeline:acquireWrite())
-            assert.is_nil(pipeline:acquireWrite(),
-                "a producer holding two frames cannot say which it published")
+            assert.is_nil(pipeline:acquireWrite(), "a producer holding two frames cannot say which it published")
             assert.are.equal("writing", pipeline:slotState(1))
             assert.are.equal("free", pipeline:slotState(2))
         end)
@@ -345,19 +346,15 @@ describe("FramePipeline", function()
 
             for expected = 1, frames do
                 local report = consumer:receive(ANSWER_MS)
-                assert.is_not_nil(report,
-                    ("nothing arrived for frame %d"):format(expected))
-                assert.are.equal(expected, report.sequence,
-                    "frames are consumed in the order they were produced")
-                assert.are.equal(-1, report.torn,
-                    ("frame %d was read part written"):format(expected))
+                assert.is_not_nil(report, ("nothing arrived for frame %d"):format(expected))
+                assert.are.equal(expected, report.sequence, "frames are consumed in the order they were produced")
+                assert.are.equal(-1, report.torn, ("frame %d was read part written"):format(expected))
             end
 
             assert.is_true(consumer:receive(ANSWER_MS).done)
             local finished = producer:receive(ANSWER_MS)
             assert.is_true(finished.done)
-            assert.are.equal(frames, finished.published,
-                "the producer blocks rather than dropping a frame")
+            assert.are.equal(frames, finished.published, "the producer blocks rather than dropping a frame")
 
             assert.are.equal(0, consumer:stop())
             assert.are.equal(0, producer:stop())
@@ -371,8 +368,7 @@ describe("FramePipeline", function()
             -- and that only one published packet is ever waiting.
             local rounds = 6
             local pipeline = FramePipeline.create(PAYLOAD)
-            local producer = start(PRODUCER, pipeline,
-                { frames = rounds + 4, report = true })
+            local producer = start(PRODUCER, pipeline, { frames = rounds + 4, report = true })
 
             assert.are.equal(1, producer:receive(ANSWER_MS).published)
 
@@ -382,13 +378,11 @@ describe("FramePipeline", function()
                 local payload, sequence = pipeline:acquireRead()
                 assert.is_not_nil(payload)
                 assert.are.equal(frame, sequence)
-                assert.are.equal(frame, stampOf(payload),
-                    "a published packet is complete or invisible")
+                assert.are.equal(frame, stampOf(payload), "a published packet is complete or invisible")
 
                 local report = producer:receive(ANSWER_MS)
                 assert.is_not_nil(report, "taking a packet frees the producer")
-                assert.are.equal(frame + 1, report.published,
-                    "one packet taken releases one frame, not more")
+                assert.are.equal(frame + 1, report.published, "one packet taken releases one frame, not more")
 
                 -- One slot holds the frame being read, the other holds the only
                 -- packet allowed to be waiting behind it.
@@ -400,16 +394,14 @@ describe("FramePipeline", function()
             end
 
             pipeline:shutdown()
-            assert.are.equal("shuttingDown",
-                producer:receive(ANSWER_MS).stopped)
+            assert.are.equal("shuttingDown", producer:receive(ANSWER_MS).stopped)
             assert.are.equal(0, producer:stop())
             pipeline:destroy()
         end)
 
         it("wakes a producer parked for a slot when it shuts down", function()
             local pipeline = FramePipeline.create(PAYLOAD)
-            local producer = start(PRODUCER, pipeline,
-                { frames = 8, report = true })
+            local producer = start(PRODUCER, pipeline, { frames = 8, report = true })
 
             assert.are.equal(1, producer:receive(ANSWER_MS).published)
             waitUntilBlocked(pipeline, 1)
@@ -440,8 +432,7 @@ describe("FramePipeline", function()
 
         it("wakes a producer parked for a slot when it crashes", function()
             local pipeline = FramePipeline.create(PAYLOAD)
-            local producer = start(PRODUCER, pipeline,
-                { frames = 8, report = true })
+            local producer = start(PRODUCER, pipeline, { frames = 8, report = true })
 
             assert.are.equal(1, producer:receive(ANSWER_MS).published)
             waitUntilBlocked(pipeline, 1)
@@ -481,31 +472,29 @@ describe("FramePipeline", function()
             pipeline:destroy()
         end)
 
-        it("creates and destroys many without leaving a thread parked",
-            function()
-                -- A delta rather than an absolute count: other suites hold
-                -- pipelines of their own, and what this asserts is that these
-                -- ones went. Each round destroys with a thread parked inside,
-                -- which is the case that has to wake it and wait for it to
-                -- leave before releasing anything it is standing on.
-                local before = FramePipeline.liveCount()
+        it("creates and destroys many without leaving a thread parked", function()
+            -- A delta rather than an absolute count: other suites hold
+            -- pipelines of their own, and what this asserts is that these
+            -- ones went. Each round destroys with a thread parked inside,
+            -- which is the case that has to wake it and wait for it to
+            -- leave before releasing anything it is standing on.
+            local before = FramePipeline.liveCount()
 
-                for round = 1, 16 do
-                    local pipeline = FramePipeline.create(PAYLOAD)
-                    assert.are.equal(before + 1, FramePipeline.liveCount())
+            for round = 1, 16 do
+                local pipeline = FramePipeline.create(PAYLOAD)
+                assert.are.equal(before + 1, FramePipeline.liveCount())
 
-                    local parked = start(PARKED, pipeline)
-                    waitUntilBlocked(pipeline, 1)
+                local parked = start(PARKED, pipeline)
+                waitUntilBlocked(pipeline, 1)
 
-                    pipeline:destroy()
-                    local report = parked:receive(ANSWER_MS)
-                    assert.is_not_nil(report,
-                        ("round %d left a thread parked"):format(round))
-                    assert.is_true(report.woken)
-                    assert.are.equal(0, parked:stop())
-                    assert.are.equal(before, FramePipeline.liveCount())
-                end
-            end)
+                pipeline:destroy()
+                local report = parked:receive(ANSWER_MS)
+                assert.is_not_nil(report, ("round %d left a thread parked"):format(round))
+                assert.is_true(report.woken)
+                assert.are.equal(0, parked:stop())
+                assert.are.equal(before, FramePipeline.liveCount())
+            end
+        end)
 
         it("destroys once however often it is asked", function()
             local before = FramePipeline.liveCount()

@@ -8,8 +8,7 @@
 
 -- The build directory is the build system's to choose, so it is passed in.
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs = require("tecs")
 local components = require("tecs.components")
@@ -23,9 +22,10 @@ local STEP = 1 / 60
 local EPSILON = 1e-6
 
 local function near(actual, expected, what)
-    assert.is_true(math.abs(actual - expected) < EPSILON,
-        ("%s: expected %.6f, got %.6f")
-            :format(what or "value", expected, actual))
+    assert.is_true(
+        math.abs(actual - expected) < EPSILON,
+        ("%s: expected %.6f, got %.6f"):format(what or "value", expected, actual)
+    )
 end
 
 -- Sheet names are process wide, so each case takes a fresh one.
@@ -66,7 +66,9 @@ local function animatedWorld()
 end
 
 local function drive(world, steps)
-    for _ = 1, steps do world:update(STEP) end
+    for _ = 1, steps do
+        world:update(STEP)
+    end
 end
 
 describe("tecs.gfx.sheet", function()
@@ -343,18 +345,15 @@ describe("tecs.gfx.sheet", function()
             drive(world, 6)
             assert.equal(2, world:get(entity, Animation).frame)
             drive(world, 20)
-            assert.equal(2, world:get(entity, Animation).frame,
-                "the held frame is still up half a second in")
+            assert.equal(2, world:get(entity, Animation).frame, "the held frame is still up half a second in")
             drive(world, 8)
-            assert.equal(1, world:get(entity, Animation).frame,
-                "and the cycle wraps once it is spent")
+            assert.equal(1, world:get(entity, Animation).frame, "and the cycle wraps once it is spent")
         end)
 
         it("scales the whole cycle by an entity's speed", function()
             local world = animatedWorld()
             local s = stripSheet()
-            local entity = world:spawn(s:sprite(1),
-                animation.of(s, "run", { speed = 2 }))
+            local entity = world:spawn(s:sprite(1), animation.of(s, "run", { speed = 2 }))
 
             -- Twice as fast is three steps to the frame rather than six.
             drive(world, 2)
@@ -399,26 +398,22 @@ describe("tecs.gfx.sheet", function()
 
         it("walks forward from the first frame to the last", function()
             local seen = walked("forward", 20)
-            assert.are.same({ 1, 2, 3, 1 },
-                atFrames(seen, 3, 9, 15, 20))
+            assert.are.same({ 1, 2, 3, 1 }, atFrames(seen, 3, 9, 15, 20))
         end)
 
         it("walks a reverse tag from the last frame to the first", function()
             local seen = walked("reverse", 20)
-            assert.are.same({ 3, 2, 1, 3 },
-                atFrames(seen, 3, 9, 15, 20))
+            assert.are.same({ 3, 2, 1, 3 }, atFrames(seen, 3, 9, 15, 20))
         end)
 
-        it("walks a pingpong tag out and back without repeating an end",
-            function()
-                -- Three frames pingpong is 1, 2, 3, 2 and then round: five
-                -- steps of a hundred milliseconds is a cycle of four frames,
-                -- not six, because neither end plays twice.
-                local seen, s = walked("pingpong", 30)
-                near(s:cycle(s:tagId("go")), 0.4, "the cycle skips both ends")
-                assert.are.same({ 1, 2, 3, 2, 1, 2 },
-                    atFrames(seen, 3, 9, 15, 21, 27, 30))
-            end)
+        it("walks a pingpong tag out and back without repeating an end", function()
+            -- Three frames pingpong is 1, 2, 3, 2 and then round: five
+            -- steps of a hundred milliseconds is a cycle of four frames,
+            -- not six, because neither end plays twice.
+            local seen, s = walked("pingpong", 30)
+            near(s:cycle(s:tagId("go")), 0.4, "the cycle skips both ends")
+            assert.are.same({ 1, 2, 3, 2, 1, 2 }, atFrames(seen, 3, 9, 15, 21, 27, 30))
+        end)
 
         it("defaults to forward", function()
             local s = sheet.grid({
@@ -440,7 +435,8 @@ describe("tecs.gfx.sheet", function()
     -- and nowhere downstream.
     describe("slices", function()
         local function sliced()
-            return sheet.build(uniqueName("sliced"), 64, 32)
+            return sheet
+                .build(uniqueName("sliced"), 64, 32)
                 :frame(0, 0, 32, 32)
                 :frame(32, 0, 32, 32)
                 :slice("feet", 8, 24, 16, 8, 8, 8)
@@ -483,23 +479,21 @@ describe("tecs.gfx.sheet", function()
         end)
 
         it("holds a key until the next one", function()
-            local s = sheet.build(uniqueName("moving"), 64, 32)
+            local s = sheet
+                .build(uniqueName("moving"), 64, 32)
                 :frame(0, 0, 32, 32)
                 :frame(32, 0, 32, 32)
                 :frame(0, 0, 32, 32)
                 :sliceKeys("hand", "grip", {
-                    { frame = 1, x = 0, y = 0, w = 8, h = 8,
-                      pivotX = 4, pivotY = 4 },
-                    { frame = 3, x = 16, y = 16, w = 8, h = 8,
-                      pivotX = 4, pivotY = 4 },
+                    { frame = 1, x = 0, y = 0, w = 8, h = 8, pivotX = 4, pivotY = 4 },
+                    { frame = 3, x = 16, y = 16, w = 8, h = 8, pivotX = 4, pivotY = 4 },
                 })
                 :finish()
 
             local hand = s:sliceId("hand")
             assert.equal("grip", s:slice("hand").data)
             assert.equal(1, s:sliceKeyAt(hand, 1).frame)
-            assert.equal(1, s:sliceKeyAt(hand, 2).frame,
-                "frame two has no key of its own and holds frame one's")
+            assert.equal(1, s:sliceKeyAt(hand, 2).frame, "frame two has no key of its own and holds frame one's")
             assert.equal(3, s:sliceKeyAt(hand, 3).frame)
 
             local x, y = s:pivotOf(hand, 3)
@@ -510,7 +504,8 @@ describe("tecs.gfx.sheet", function()
 
     describe("the builder", function()
         it("writes frames, tags and slices in any order", function()
-            local s = sheet.build(uniqueName("built"), 64, 16)
+            local s = sheet
+                .build(uniqueName("built"), 64, 16)
                 :tag("blink", 2, 3, "pingpong")
                 :frame(0, 0, 16, 16, 40)
                 :frame(16, 0, 16, 16)
@@ -600,7 +595,8 @@ describe("tecs.gfx.sheet", function()
 
         it("reads frames, their durations, tags and slices", function()
             local s = sheet.fromAseprite({
-                name = uniqueName("hero"), json = EXPORT,
+                name = uniqueName("hero"),
+                json = EXPORT,
             })
 
             assert.equal(3, s.count)
@@ -642,12 +638,9 @@ describe("tecs.gfx.sheet", function()
                 name = uniqueName("keyed"),
                 json = {
                     frames = {
-                        ["hero 2.aseprite"] =
-                            { frame = { x = 32, y = 0, w = 16, h = 16 } },
-                        ["hero 0.aseprite"] =
-                            { frame = { x = 0, y = 0, w = 16, h = 16 } },
-                        ["hero 1.aseprite"] =
-                            { frame = { x = 16, y = 0, w = 16, h = 16 } },
+                        ["hero 2.aseprite"] = { frame = { x = 32, y = 0, w = 16, h = 16 } },
+                        ["hero 0.aseprite"] = { frame = { x = 0, y = 0, w = 16, h = 16 } },
+                        ["hero 1.aseprite"] = { frame = { x = 16, y = 0, w = 16, h = 16 } },
                     },
                     meta = { size = { w = 48, h = 16 } },
                 },
@@ -662,7 +655,8 @@ describe("tecs.gfx.sheet", function()
         it("reads the export as text as well as as a table", function()
             local json = require("tecs.json")
             local s = sheet.fromAseprite({
-                name = uniqueName("text"), json = json.encode(EXPORT),
+                name = uniqueName("text"),
+                json = json.encode(EXPORT),
             })
             assert.equal(3, s.count)
             near(s:duration(2), 0.3, "the held frame survived the round trip")
@@ -671,7 +665,8 @@ describe("tecs.gfx.sheet", function()
         it("plays what it read", function()
             local world = animatedWorld()
             local s = sheet.fromAseprite({
-                name = uniqueName("played"), json = EXPORT,
+                name = uniqueName("played"),
+                json = EXPORT,
             })
             local entity = world:spawn(s:sprite(1), animation.of(s, "walk"))
 
@@ -683,13 +678,11 @@ describe("tecs.gfx.sheet", function()
             drive(world, 3)
             assert.equal(2, world:get(entity, Animation).frame)
             drive(world, 14)
-            assert.equal(2, world:get(entity, Animation).frame,
-                "the three hundred millisecond frame is still up")
+            assert.equal(2, world:get(entity, Animation).frame, "the three hundred millisecond frame is still up")
             drive(world, 3)
             assert.equal(3, world:get(entity, Animation).frame)
             drive(world, 4)
-            assert.equal(2, world:get(entity, Animation).frame,
-                "and the cycle wrapped once both were spent")
+            assert.equal(2, world:get(entity, Animation).frame, "and the cycle wrapped once both were spent")
         end)
     end)
 end)
@@ -705,8 +698,7 @@ describe("tecs.gfx.animation", function()
         it("walks the tag in order", function()
             local world = animatedWorld()
             local s = stripSheet()
-            local entity = world:spawn(s:sprite(1),
-                animation.of(s, "run"))
+            local entity = world:spawn(s:sprite(1), animation.of(s, "run"))
 
             local expected = { 1, 2, 3, 4 }
             for index = 1, #expected do
@@ -726,8 +718,7 @@ describe("tecs.gfx.animation", function()
         it("plays only the frames the tag names", function()
             local world = animatedWorld()
             local s = walkSheet()
-            local entity = world:spawn(s:sprite(1),
-                animation.of(s, "walk"))
+            local entity = world:spawn(s:sprite(1), animation.of(s, "walk"))
 
             drive(world, 3)
             assert.equal(3, world:get(entity, Animation).frame)
@@ -745,8 +736,7 @@ describe("tecs.gfx.animation", function()
         it("plays the whole sheet when no tag is named", function()
             local world = animatedWorld()
             local s = stripSheet()
-            local entity = world:spawn(s:sprite(1),
-                animation.of(s, nil))
+            local entity = world:spawn(s:sprite(1), animation.of(s, nil))
 
             drive(world, 3 + STEPS_PER_FRAME * 2)
             assert.equal(3, world:get(entity, Animation).frame)
@@ -754,7 +744,9 @@ describe("tecs.gfx.animation", function()
 
         it("refuses a tag the sheet does not carry", function()
             local s = stripSheet()
-            assert.has_error(function() animation.of(s, "crawl") end)
+            assert.has_error(function()
+                animation.of(s, "crawl")
+            end)
         end)
     end)
 
@@ -762,8 +754,7 @@ describe("tecs.gfx.animation", function()
         it("wraps a looping tag back to its first frame", function()
             local world = animatedWorld()
             local s = stripSheet()
-            local entity = world:spawn(s:sprite(1),
-                animation.of(s, "run", { loop = true }))
+            local entity = world:spawn(s:sprite(1), animation.of(s, "run", { loop = true }))
 
             -- Four frames at ten a second is 24 steps to the cycle. Three past
             -- the wrap is the first frame again, not the last.
@@ -776,8 +767,7 @@ describe("tecs.gfx.animation", function()
         it("parks a one-shot on its last frame and stops", function()
             local world = animatedWorld()
             local s = stripSheet()
-            local entity = world:spawn(s:sprite(1),
-                animation.of(s, "run", { loop = false }))
+            local entity = world:spawn(s:sprite(1), animation.of(s, "run", { loop = false }))
 
             drive(world, 27)
             local instance = world:get(entity, Animation)
@@ -794,8 +784,7 @@ describe("tecs.gfx.animation", function()
         it("holds the first frame when the rate is zero", function()
             local world = animatedWorld()
             local s = stripSheet()
-            local entity = world:spawn(s:sprite(1),
-                animation.of(s, "run", { speed = 0 }))
+            local entity = world:spawn(s:sprite(1), animation.of(s, "run", { speed = 0 }))
 
             drive(world, 60)
             assert.equal(1, world:get(entity, Animation).frame)
@@ -806,8 +795,7 @@ describe("tecs.gfx.animation", function()
         it("reports a one-shot completing once", function()
             local world = animatedWorld()
             local s = stripSheet()
-            local entity = world:spawn(s:sprite(1),
-                animation.of(s, "run", { loop = false }))
+            local entity = world:spawn(s:sprite(1), animation.of(s, "run", { loop = false }))
 
             local seen = {}
             world:observe(0, animation.Completed, function(event)
@@ -829,8 +817,7 @@ describe("tecs.gfx.animation", function()
         it("reports a looping tag wrapping once per cycle", function()
             local world = animatedWorld()
             local s = stripSheet()
-            local entity = world:spawn(s:sprite(1),
-                animation.of(s, "run", { loop = true }))
+            local entity = world:spawn(s:sprite(1), animation.of(s, "run", { loop = true }))
 
             local seen = {}
             world:observe(0, animation.Looped, function(event)
@@ -851,11 +838,12 @@ describe("tecs.gfx.animation", function()
         it("does not report a loop for a one-shot, or the reverse", function()
             local world = animatedWorld()
             local s = stripSheet()
-            world:spawn(s:sprite(1),
-                animation.of(s, "run", { loop = false }))
+            world:spawn(s:sprite(1), animation.of(s, "run", { loop = false }))
 
             local loops, completions = 0, 0
-            world:observe(0, animation.Looped, function() loops = loops + 1 end)
+            world:observe(0, animation.Looped, function()
+                loops = loops + 1
+            end)
             world:observe(0, animation.Completed, function()
                 completions = completions + 1
             end)
@@ -894,36 +882,34 @@ describe("tecs.gfx.animation", function()
             return seen
         end
 
-        it("leaves the Sprite column clean on a step that changed no frame",
-            function()
-                local world = animatedWorld()
-                local s = stripSheet()
-                world:spawn(s:sprite(1), animation.of(s, "run"))
-                local seen = probe(world)
+        it("leaves the Sprite column clean on a step that changed no frame", function()
+            local world = animatedWorld()
+            local s = stripSheet()
+            world:spawn(s:sprite(1), animation.of(s, "run"))
+            local seen = probe(world)
 
-                -- The first step resolves the frame, which is a write.
+            -- The first step resolves the frame, which is a write.
+            world:update(STEP)
+            assert.is_true(seen.sprite)
+            assert.is_true(seen.animation)
+
+            -- The next five stay on it. Time still moves, so the two
+            -- columns have to disagree or the gate is not per component.
+            for _ = 1, 4 do
                 world:update(STEP)
-                assert.is_true(seen.sprite)
+                assert.is_false(seen.sprite)
                 assert.is_true(seen.animation)
+            end
 
-                -- The next five stay on it. Time still moves, so the two
-                -- columns have to disagree or the gate is not per component.
-                for _ = 1, 4 do
-                    world:update(STEP)
-                    assert.is_false(seen.sprite)
-                    assert.is_true(seen.animation)
-                end
-
-                -- Sixth step crosses into the next frame.
-                world:update(STEP)
-                assert.is_true(seen.sprite)
-            end)
+            -- Sixth step crosses into the next frame.
+            world:update(STEP)
+            assert.is_true(seen.sprite)
+        end)
 
         it("leaves both columns clean when nothing is playing", function()
             local world = animatedWorld()
             local s = stripSheet()
-            local entity = world:spawn(s:sprite(1),
-                animation.of(s, "run"))
+            local entity = world:spawn(s:sprite(1), animation.of(s, "run"))
             local seen = probe(world)
 
             -- One step to resolve the frame, then stop.
@@ -960,9 +946,10 @@ describe("tecs.gfx.animation", function()
         local function played(steps, frameLength)
             local world = animatedWorld()
             local s = eightFrames()
-            local entity = world:spawn(s:sprite(1),
-                animation.of(s, "run"))
-            for _ = 1, steps do world:update(frameLength) end
+            local entity = world:spawn(s:sprite(1), animation.of(s, "run"))
+            for _ = 1, steps do
+                world:update(frameLength)
+            end
             local instance = world:get(entity, Animation)
             local sprite = world:get(entity, Sprite)
             return {
@@ -973,37 +960,34 @@ describe("tecs.gfx.animation", function()
             }
         end
 
-        it("shows the same frame for the same steps however few frames ran",
-            function()
-                -- Two steps either way. The long frame carries nine tenths of
-                -- a third step that has not run and must not be counted.
-                local a = played(2, STEP)
-                local b = played(1, STEP * 2.9)
+        it("shows the same frame for the same steps however few frames ran", function()
+            -- Two steps either way. The long frame carries nine tenths of
+            -- a third step that has not run and must not be counted.
+            local a = played(2, STEP)
+            local b = played(1, STEP * 2.9)
 
-                assert.equal(a.frame, b.frame)
-                assert.equal(a.time, b.time)
-                assert.equal(a.u0, b.u0)
-                assert.equal(a.u1, b.u1)
-            end)
+            assert.equal(a.frame, b.frame)
+            assert.equal(a.time, b.time)
+            assert.equal(a.u0, b.u0)
+            assert.equal(a.u1, b.u1)
+        end)
 
-        it("ignores the leftover of frames that did not fill a step",
-            function()
-                -- Three steps either way, the second world drawing more than
-                -- three frames per step and finishing a third of one short.
-                local a = played(3, STEP)
-                local b = played(10, STEP / 3)
+        it("ignores the leftover of frames that did not fill a step", function()
+            -- Three steps either way, the second world drawing more than
+            -- three frames per step and finishing a third of one short.
+            local a = played(3, STEP)
+            local b = played(10, STEP / 3)
 
-                assert.equal(a.frame, b.frame)
-                assert.equal(a.time, b.time)
-            end)
+            assert.equal(a.frame, b.frame)
+            assert.equal(a.time, b.time)
+        end)
     end)
 
     describe("play", function()
         it("restarts an entity on the tag it is pointed at", function()
             local world = animatedWorld()
             local s = walkSheet()
-            local entity = world:spawn(s:sprite(1),
-                animation.of(s, "whole"))
+            local entity = world:spawn(s:sprite(1), animation.of(s, "whole"))
 
             drive(world, 3 + STEPS_PER_FRAME)
             assert.equal(2, world:get(entity, Animation).frame)
@@ -1041,8 +1025,7 @@ describe("tecs.gfx.animation", function()
             first:bind(Sprite(4, 0, 0, 1.0, 1.0, 2))
             second:bind(Sprite(9, 0, 0, 1.0, 1.0, 5))
 
-            local entity = world:spawn(first:sprite(1),
-                animation.of(first, "run"))
+            local entity = world:spawn(first:sprite(1), animation.of(first, "run"))
             drive(world, 3)
             assert.equal(2, world:get(entity, Sprite).slot)
 
@@ -1054,41 +1037,37 @@ describe("tecs.gfx.animation", function()
             assert.equal(9, sprite.image, "and so does the image it names")
         end)
 
-        it("moves the image even when the frame index does not change",
-            function()
-                -- Both sheets are playing their first frame, so the index the
-                -- second one lands on is the one the first one left behind.
-                -- Gating the write on the frame alone misses this entirely.
-                local world = animatedWorld()
-                local first = stripSheet()
-                local second = stripSheet()
-                first:bind(Sprite(4, 0, 0, 1.0, 1.0, 2))
-                second:bind(Sprite(9, 0, 0, 1.0, 1.0, 5))
+        it("moves the image even when the frame index does not change", function()
+            -- Both sheets are playing their first frame, so the index the
+            -- second one lands on is the one the first one left behind.
+            -- Gating the write on the frame alone misses this entirely.
+            local world = animatedWorld()
+            local first = stripSheet()
+            local second = stripSheet()
+            first:bind(Sprite(4, 0, 0, 1.0, 1.0, 2))
+            second:bind(Sprite(9, 0, 0, 1.0, 1.0, 5))
 
-                local entity = world:spawn(first:sprite(1),
-                    animation.of(first, "run", { speed = 0 }))
-                drive(world, 3)
-                assert.equal(1, world:get(entity, Animation).frame)
+            local entity = world:spawn(first:sprite(1), animation.of(first, "run", { speed = 0 }))
+            drive(world, 3)
+            assert.equal(1, world:get(entity, Animation).frame)
 
-                -- Written straight into the component, which is the case
-                -- `play` would have papered over by resetting the frame.
-                world:getMut(entity, Animation).sheet = second.id
-                drive(world, 1)
+            -- Written straight into the component, which is the case
+            -- `play` would have papered over by resetting the frame.
+            world:getMut(entity, Animation).sheet = second.id
+            drive(world, 1)
 
-                local sprite = world:get(entity, Sprite)
-                assert.equal(1, world:get(entity, Animation).frame,
-                    "the frame index is the one it already had")
-                assert.equal(5, sprite.slot, "and the layer moved anyway")
-                assert.equal(9, sprite.image)
-            end)
+            local sprite = world:get(entity, Sprite)
+            assert.equal(1, world:get(entity, Animation).frame, "the frame index is the one it already had")
+            assert.equal(5, sprite.slot, "and the layer moved anyway")
+            assert.equal(9, sprite.image)
+        end)
 
         it("leaves the Sprite's image alone for an unbound sheet", function()
             -- A sheet that names no image has no layer to write, so playback
             -- writes the region and leaves whatever the Sprite carried.
             local world = animatedWorld()
             local s = stripSheet()
-            local entity = world:spawn(Sprite(3, 0, 0, 1, 1, 6),
-                animation.of(s, "run"))
+            local entity = world:spawn(Sprite(3, 0, 0, 1, 1, 6), animation.of(s, "run"))
 
             drive(world, 3)
             local sprite = world:get(entity, Sprite)
@@ -1101,41 +1080,37 @@ describe("tecs.gfx.animation", function()
         -- A one-shot parks at the end of its cycle and stops. Setting it
         -- playing again from there used to leave the time at the end, so it
         -- parked and completed again on that step, and on every step after it.
-        it("plays a finished one-shot again instead of completing forever",
-            function()
-                local world = animatedWorld()
-                local s = stripSheet()
-                local entity = world:spawn(s:sprite(1),
-                    animation.of(s, "run", { loop = false }))
+        it("plays a finished one-shot again instead of completing forever", function()
+            local world = animatedWorld()
+            local s = stripSheet()
+            local entity = world:spawn(s:sprite(1), animation.of(s, "run", { loop = false }))
 
-                local completions = 0
-                world:observe(0, animation.Completed, function()
-                    completions = completions + 1
-                end)
-
-                drive(world, 27)
-                assert.equal(1, completions)
-                assert.is_false(world:get(entity, Animation).playing)
-
-                world:getMut(entity, Animation).playing = true
-                drive(world, 3)
-                assert.equal(1, world:get(entity, Animation).frame,
-                    "asking for it again starts it again")
-                assert.equal(1, completions, "and does not complete on the way")
-
-                -- Through the whole cycle once more: one more completion, not
-                -- one per step.
-                drive(world, 24)
-                assert.equal(2, completions)
-                drive(world, 60)
-                assert.equal(2, completions)
+            local completions = 0
+            world:observe(0, animation.Completed, function()
+                completions = completions + 1
             end)
+
+            drive(world, 27)
+            assert.equal(1, completions)
+            assert.is_false(world:get(entity, Animation).playing)
+
+            world:getMut(entity, Animation).playing = true
+            drive(world, 3)
+            assert.equal(1, world:get(entity, Animation).frame, "asking for it again starts it again")
+            assert.equal(1, completions, "and does not complete on the way")
+
+            -- Through the whole cycle once more: one more completion, not
+            -- one per step.
+            drive(world, 24)
+            assert.equal(2, completions)
+            drive(world, 60)
+            assert.equal(2, completions)
+        end)
 
         it("rewinds an entity without changing what it plays", function()
             local world = animatedWorld()
             local s = stripSheet()
-            local entity = world:spawn(s:sprite(1),
-                animation.of(s, "run", { loop = false }))
+            local entity = world:spawn(s:sprite(1), animation.of(s, "run", { loop = false }))
 
             drive(world, 3 + STEPS_PER_FRAME * 2)
             assert.equal(3, world:get(entity, Animation).frame)
@@ -1156,8 +1131,7 @@ describe("tecs.gfx.animation", function()
         it("restarts a one-shot that has already finished", function()
             local world = animatedWorld()
             local s = stripSheet()
-            local entity = world:spawn(s:sprite(1),
-                animation.of(s, "run", { loop = false }))
+            local entity = world:spawn(s:sprite(1), animation.of(s, "run", { loop = false }))
 
             drive(world, 27)
             assert.is_false(world:get(entity, Animation).playing)

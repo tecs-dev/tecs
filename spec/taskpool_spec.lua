@@ -10,8 +10,7 @@
 -- The build directory is the build system's to choose, so it is passed in.
 -- Our tree comes first, so it wins over the ECS repo's own engine tree.
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local World = require("tecs.physics.World")
 local TaskPool = require("tecs.physics.TaskPool")
@@ -52,7 +51,9 @@ end
 
 local function simulate(workerCount, steps)
     local world, bodies = build(workerCount)
-    for _ = 1, steps do world:step(1 / 60) end
+    for _ = 1, steps do
+        world:step(1 / 60)
+    end
 
     local poses = {}
     for i, body in ipairs(bodies) do
@@ -66,8 +67,7 @@ end
 describe("physics.TaskPool", function()
     it("reports a worker count derived from the machine", function()
         local count = TaskPool.defaultWorkerCount()
-        assert.is_true(count >= 1,
-            ("expected at least one worker, got %d"):format(count))
+        assert.is_true(count >= 1, ("expected at least one worker, got %d"):format(count))
     end)
 
     it("starts no thread for a single worker", function()
@@ -102,7 +102,9 @@ describe("physics.TaskPool", function()
         -- Three slots per pool, one of which is the stepping thread.
         assert.are.equal(before + 8, TaskPool.liveThreadCount())
 
-        for _, pool in ipairs(pools) do pool:destroy() end
+        for _, pool in ipairs(pools) do
+            pool:destroy()
+        end
         assert.are.equal(before, TaskPool.liveThreadCount())
     end)
 
@@ -137,15 +139,36 @@ describe("physics.TaskPool", function()
             local many = simulate(workerCount, steps)
             assert.are.equal(#single, #many)
             for i = 1, #single do
-                assert.are.equal(single[i].x, many[i].x,
-                    ("body %d x diverged with %d workers: %.17g vs %.17g")
-                        :format(i, workerCount, single[i].x, many[i].x))
-                assert.are.equal(single[i].y, many[i].y,
-                    ("body %d y diverged with %d workers: %.17g vs %.17g")
-                        :format(i, workerCount, single[i].y, many[i].y))
-                assert.are.equal(single[i].angle, many[i].angle,
-                    ("body %d angle diverged with %d workers: %.17g vs %.17g")
-                        :format(i, workerCount, single[i].angle, many[i].angle))
+                assert.are.equal(
+                    single[i].x,
+                    many[i].x,
+                    ("body %d x diverged with %d workers: %.17g vs %.17g"):format(
+                        i,
+                        workerCount,
+                        single[i].x,
+                        many[i].x
+                    )
+                )
+                assert.are.equal(
+                    single[i].y,
+                    many[i].y,
+                    ("body %d y diverged with %d workers: %.17g vs %.17g"):format(
+                        i,
+                        workerCount,
+                        single[i].y,
+                        many[i].y
+                    )
+                )
+                assert.are.equal(
+                    single[i].angle,
+                    many[i].angle,
+                    ("body %d angle diverged with %d workers: %.17g vs %.17g"):format(
+                        i,
+                        workerCount,
+                        single[i].angle,
+                        many[i].angle
+                    )
+                )
             end
         end
     end)
@@ -163,7 +186,6 @@ describe("physics.TaskPool", function()
             assert.are.equal(single[i].y, many[i].y)
             highest = math.max(highest, single[i].y)
         end
-        assert.is_true(highest < 20,
-            ("the pile never settled, top body at %.3f"):format(highest))
+        assert.is_true(highest < 20, ("the pile never settled, top body at %.3f"):format(highest))
     end)
 end)

@@ -10,14 +10,12 @@
 -- library installs one into every state it starts.
 
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local loader = require("tecs.ffi.loader")
 local workers = require("tecs.workers")
 
-local PRELUDE = ('package.path = "%s/?.lua;%s/?/init.lua;" .. package.path\n')
-    :format(root, root)
+local PRELUDE = ('package.path = "%s/?.lua;%s/?/init.lua;" .. package.path\n'):format(root, root)
 
 describe("ffi registry", function()
     it("falls back to dynamic loading when no host installed one", function()
@@ -31,7 +29,8 @@ describe("ffi registry", function()
     end)
 
     it("resolves through the registry inside a worker", function()
-        local worker = workers.spawn({ source = PRELUDE .. [[
+        local worker = workers.spawn({
+            source = PRELUDE .. [[
 local loader = require("tecs.ffi.loader")
 local workers = require("tecs.workers")
 local self = workers.current()
@@ -54,7 +53,8 @@ while true do
         quitKind = tonumber(sdl.C.SDL_EVENT_QUIT),
     })
 end
-]] })
+]],
+        })
 
         worker:send({ go = true })
         local result = worker:receive(4000)
@@ -65,13 +65,13 @@ end
         assert.is_true(result.static, "and resolve through it")
         assert.are.equal("(registry)", result.path)
         assert.is_true(result.ticks, "a call through the table must work")
-        assert.are.equal(0x100, result.quitKind,
-            "constants must resolve through the same handle as functions")
+        assert.are.equal(0x100, result.quitKind, "constants must resolve through the same handle as functions")
     end)
 
     it("reaches Box2D through the registry too", function()
         -- Every library the engine links gets a table, not just SDL.
-        local worker = workers.spawn({ source = PRELUDE .. [[
+        local worker = workers.spawn({
+            source = PRELUDE .. [[
 local loader = require("tecs.ffi.loader")
 local workers = require("tecs.workers")
 local World = require("tecs.physics.World")
@@ -91,7 +91,8 @@ while true do
 
     self:send({ static = loader.isStatic("box2d"), fell = y < -4 })
 end
-]] })
+]],
+        })
 
         worker:send({ go = true })
         local result = worker:receive(4000)

@@ -6,8 +6,7 @@
 -- at the handler. So these go the whole way round, through SDL's own queue.
 
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local cjson = require("cjson")
 local sdl = require("tecs.ffi.sdl3")
@@ -20,13 +19,16 @@ local C = sdl.C
 
 local function call(name, args)
     local response = cjson.decode(mcp.dispatch(cjson.encode({
-        jsonrpc = "2.0", id = 1, method = "tools/call",
+        jsonrpc = "2.0",
+        id = 1,
+        method = "tools/call",
         params = { name = name, arguments = args },
     })))
     local result = response.result
-    assert.is_falsy(result.isError,
-        name .. " failed: " .. tostring(result.content
-            and result.content[1] and result.content[1].text))
+    assert.is_falsy(
+        result.isError,
+        name .. " failed: " .. tostring(result.content and result.content[1] and result.content[1].text)
+    )
     return result.structuredContent
 end
 
@@ -48,7 +50,9 @@ describe("mcp send_event", function()
         C.SDL_FlushEvents(0, 0xFFFFFFFF)
     end)
 
-    after_each(function() C.SDL_Quit() end)
+    after_each(function()
+        C.SDL_Quit()
+    end)
 
     it("lists the kinds it accepts when given none", function()
         local kinds = {}
@@ -63,12 +67,22 @@ describe("mcp send_event", function()
         -- The negation lives in the conversion, so the tool asking for a
         -- flipped scroll is asking to see it applied.
         call("send_event", {
-            kind = "mouseWheel", wheelX = 0.5, wheelY = 1.5,
-            wheelTicksX = 1, wheelTicksY = 2, x = 20.0, y = 25.0,
+            kind = "mouseWheel",
+            wheelX = 0.5,
+            wheelY = 1.5,
+            wheelTicksX = 1,
+            wheelTicksY = 2,
+            x = 20.0,
+            y = 25.0,
         })
         call("send_event", {
-            kind = "mouseWheel", wheelX = 0.5, wheelY = 1.5,
-            wheelTicksX = 1, wheelTicksY = 2, x = 20.0, y = 25.0,
+            kind = "mouseWheel",
+            wheelX = 0.5,
+            wheelY = 1.5,
+            wheelTicksX = 1,
+            wheelTicksY = 2,
+            x = 20.0,
+            y = 25.0,
             flipped = true,
         })
 
@@ -82,8 +96,7 @@ describe("mcp send_event", function()
         assert.are.equal(20.0, ordinary.x)
         assert.are.equal(25.0, ordinary.y)
 
-        assert.are.equal(-ordinary.wheelY, natural.wheelY,
-            "the same scroll sent flipped comes back negated")
+        assert.are.equal(-ordinary.wheelY, natural.wheelY, "the same scroll sent flipped comes back negated")
         assert.are.equal(-ordinary.wheelTicksY, natural.wheelTicksY)
     end)
 
@@ -95,7 +108,10 @@ describe("mcp send_event", function()
     it("sends the whole pen state, barrel buttons and all", function()
         local held = sdl.K.SDL_PEN_INPUT_DOWN + sdl.K.SDL_PEN_INPUT_BUTTON_2
         call("send_event", {
-            kind = "penMotion", which = 9, x = 12.0, y = 34.0,
+            kind = "penMotion",
+            which = 9,
+            x = 12.0,
+            y = 34.0,
             penState = held,
         })
 

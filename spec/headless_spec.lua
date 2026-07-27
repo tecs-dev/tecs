@@ -39,7 +39,9 @@ local function run(chunk, libraries)
     local command = table.concat({
         libraries and ("TECS_LIB=%q"):format(lib) or "env -u TECS_LIB",
         ("LUA_PATH='%s/?.lua;%s/?/init.lua;;'"):format(lua, lua),
-        "luajit", path, "2>&1",
+        "luajit",
+        path,
+        "2>&1",
     }, " ")
     local pipe = assert(io.popen(command, "r"))
     local output = pipe:read("*a")
@@ -51,7 +53,8 @@ end
 describe("tecs headless", function()
     describe("with no native libraries reachable", function()
         it("builds and queries a world", function()
-            local output = run([[
+            local output = run(
+                [[
                 local tecs = require("tecs")
                 local world = tecs.newWorld()
                 local Tag = tecs.newTagComponent({ name = "Headless" })
@@ -66,7 +69,9 @@ describe("tecs headless", function()
                 local transform = world:get(entity, Transform)
                 print(("ok %d %d %d %d")
                     :format(entity, transform.x, transform.y, matched))
-            ]], false)
+            ]],
+                false
+            )
             assert.are.equal("ok 1 10 20 1\n", output)
         end)
 
@@ -75,7 +80,8 @@ describe("tecs headless", function()
         -- it silently: everything still works on a developer's machine, where
         -- the libraries are installed.
         it("loads no engine module until one is named", function()
-            local output = run([[
+            local output = run(
+                [[
                 require("tecs")
                 local engine = {
                     "tecs.Application", "tecs.Renderer", "tecs.workers",
@@ -89,7 +95,9 @@ describe("tecs headless", function()
                     end
                 end
                 print(#loaded == 0 and "none" or table.concat(loaded, " "))
-            ]], false)
+            ]],
+                false
+            )
             assert.are.equal("none\n", output)
         end)
 
@@ -97,11 +105,14 @@ describe("tecs headless", function()
             -- The names are listed rather than derived from a module path, so a
             -- typo answers nil here instead of raising out of `require` about a
             -- module nobody meant to ask for.
-            local output = run([[
+            local output = run(
+                [[
                 local tecs = require("tecs")
                 print(tostring(tecs.Aplication) .. " " ..
                     tostring(tecs.nosuchthing))
-            ]], false)
+            ]],
+                false
+            )
             assert.are.equal("nil nil\n", output)
         end)
     end)
@@ -110,7 +121,8 @@ describe("tecs headless", function()
         it("simulates physics across its thread pool", function()
             -- No device, no window, and the solver's threads running: a
             -- headless simulation is a supported thing to build.
-            local output = run([[
+            local output = run(
+                [[
                 local tecs = require("tecs")
                 local world = tecs.newWorld()
                 world:addPlugin(tecs.physics.plugin({
@@ -125,7 +137,9 @@ describe("tecs headless", function()
                 for _ = 1, 60 do world:update(1 / 60) end
                 -- One second of that gravity, so it is a long way down.
                 print(world:get(entity, Transform).y > 400 and "fell" or "stuck")
-            ]], true)
+            ]],
+                true
+            )
             assert.are.equal("fell\n", output)
         end)
 
@@ -137,7 +151,8 @@ describe("tecs headless", function()
             -- and the libraries carry a loader-relative runtime path so one
             -- resolves its siblings even though the process belongs to a plain
             -- interpreter rather than to the engine's own host.
-            local output = run([[
+            local output = run(
+                [[
                 local tecs = require("tecs")
                 local worker = tecs.workers.spawn({
                     source = "local s = require('tecs.workers').current()" ..
@@ -146,14 +161,17 @@ describe("tecs headless", function()
                 worker:send(41)
                 print(worker:receive(3000))
                 worker:stop()
-            ]], false)
+            ]],
+                false
+            )
             assert.are.equal("42\n", output)
         end)
 
         it("runs work on a worker thread", function()
             -- What a resource pipeline is: fan work out, collect answers, no
             -- graphics anywhere in it.
-            local output = run([[
+            local output = run(
+                [[
                 local tecs = require("tecs")
                 local worker = tecs.workers.spawn({ source = [==[
                     local workers = require("tecs.workers")
@@ -165,7 +183,9 @@ describe("tecs headless", function()
                 local reply = worker:receive(4000)
                 worker:stop()
                 print(reply.name .. " " .. reply.size)
-            ]], true)
+            ]],
+                true
+            )
             assert.are.equal("atlas.png 27\n", output)
         end)
     end)

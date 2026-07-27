@@ -39,7 +39,9 @@ local function parseCsvLine(line)
                 end
             end
             fields[#fields + 1] = table.concat(buf)
-            if line:sub(i, i) == "," then i = i + 1 end
+            if line:sub(i, i) == "," then
+                i = i + 1
+            end
         else
             local commaAt = line:find(",", i, true)
             if commaAt then
@@ -67,9 +69,12 @@ local function loadLog(path)
     end
     local header = parseCsvLine(headerLine)
     local colIdx = {}
-    for i, name in ipairs(header) do colIdx[name] = i end
+    for i, name in ipairs(header) do
+        colIdx[name] = i
+    end
 
-    local required = {"iso", "label", "suite", "case_name", "variant", "p50_us", "ci95_us", "min_us", "p99_us", "iterations"}
+    local required =
+        { "iso", "label", "suite", "case_name", "variant", "p50_us", "ci95_us", "min_us", "p99_us", "iterations" }
     for _, col in ipairs(required) do
         if not colIdx[col] then
             io.stderr:write("compare: log is missing required column '" .. col .. "'\n")
@@ -134,13 +139,21 @@ local function distinctLabels(rows)
 end
 
 local function formatTimeUs(us)
-    if us < 1 then return string.format("%.3f", us)
-    elseif us < 1000 then return string.format("%.1f", us)
-    else return string.format("%.0f", us) end
+    if us < 1 then
+        return string.format("%.3f", us)
+    elseif us < 1000 then
+        return string.format("%.1f", us)
+    else
+        return string.format("%.0f", us)
+    end
 end
 
-local function padRight(s, w) return s .. string.rep(" ", math.max(0, w - #s)) end
-local function padLeft(s, w) return string.rep(" ", math.max(0, w - #s)) .. s end
+local function padRight(s, w)
+    return s .. string.rep(" ", math.max(0, w - #s))
+end
+local function padLeft(s, w)
+    return string.rep(" ", math.max(0, w - #s)) .. s
+end
 
 -- Argument handling.
 local labelA = arg[1]
@@ -171,7 +184,10 @@ if not labelA and not labelB then
     labelA = labels[2]
 elseif labelA and not labelB then
     for _, l in ipairs(labels) do
-        if l ~= labelA then labelB = l; break end
+        if l ~= labelA then
+            labelB = l
+            break
+        end
     end
     if not labelB then
         io.stderr:write("compare: no other label to compare against '" .. labelA .. "'\n")
@@ -200,7 +216,10 @@ for _, row in ipairs(rows) do
         if not keySeen[key] then
             keySeen[key] = true
             keyOrder[#keyOrder + 1] = {
-                key = key, suite = row.suite, caseName = row.caseName, variant = row.variant,
+                key = key,
+                suite = row.suite,
+                caseName = row.caseName,
+                variant = row.variant,
             }
         end
     end
@@ -218,7 +237,7 @@ for _, k in ipairs(keyOrder) do
     local b = indexB[k.key]
     if a and b then
         if k.suite ~= currentSuite then
-            dataRows[#dataRows + 1] = {sectionHeader = k.suite}
+            dataRows[#dataRows + 1] = { sectionHeader = k.suite }
             currentSuite = k.suite
         end
         local delta = b.p50 - a.p50
@@ -230,10 +249,14 @@ for _, k in ipairs(keyOrder) do
         local significant = math.abs(delta) > (a.ci95 + b.ci95)
         if delta < 0 then
             improvements = improvements + 1
-            if significant then significantImprovements = significantImprovements + 1 end
+            if significant then
+                significantImprovements = significantImprovements + 1
+            end
         elseif delta > 0 then
             regressions = regressions + 1
-            if significant then significantRegressions = significantRegressions + 1 end
+            if significant then
+                significantRegressions = significantRegressions + 1
+            end
         end
         dataRows[#dataRows + 1] = {
             caseName = k.caseName,
@@ -245,15 +268,21 @@ for _, k in ipairs(keyOrder) do
         }
     elseif a and not b then
         dataRows[#dataRows + 1] = {
-            caseName = k.caseName, variant = k.variant,
-            aStr = formatTimeUs(a.p50), bStr = "—",
-            deltaStr = "B missing", marker = " ",
+            caseName = k.caseName,
+            variant = k.variant,
+            aStr = formatTimeUs(a.p50),
+            bStr = "—",
+            deltaStr = "B missing",
+            marker = " ",
         }
     else
         dataRows[#dataRows + 1] = {
-            caseName = k.caseName, variant = k.variant,
-            aStr = "—", bStr = formatTimeUs(b.p50),
-            deltaStr = "A missing", marker = " ",
+            caseName = k.caseName,
+            variant = k.variant,
+            aStr = "—",
+            bStr = formatTimeUs(b.p50),
+            deltaStr = "A missing",
+            marker = " ",
         }
     end
 end
@@ -262,26 +291,47 @@ end
 local wCase, wVariant, wA, wB, wDelta = #"case", #"variant", #("A: " .. labelA), #("B: " .. labelB), #"Δ p50"
 for _, r in ipairs(dataRows) do
     if not r.sectionHeader then
-        if #r.caseName > wCase then wCase = #r.caseName end
-        if #r.variant > wVariant then wVariant = #r.variant end
-        if #r.aStr > wA then wA = #r.aStr end
-        if #r.bStr > wB then wB = #r.bStr end
-        if #r.deltaStr > wDelta then wDelta = #r.deltaStr end
+        if #r.caseName > wCase then
+            wCase = #r.caseName
+        end
+        if #r.variant > wVariant then
+            wVariant = #r.variant
+        end
+        if #r.aStr > wA then
+            wA = #r.aStr
+        end
+        if #r.bStr > wB then
+            wB = #r.bStr
+        end
+        if #r.deltaStr > wDelta then
+            wDelta = #r.deltaStr
+        end
     end
 end
 
 local function printRow(case, variant, a, b, delta, marker)
-    print(string.format("%s  %s  %s  %s  %s %s",
-        padRight(case, wCase),
-        padRight(variant, wVariant),
-        padLeft(a, wA),
-        padLeft(b, wB),
-        padLeft(delta, wDelta),
-        marker))
+    print(
+        string.format(
+            "%s  %s  %s  %s  %s %s",
+            padRight(case, wCase),
+            padRight(variant, wVariant),
+            padLeft(a, wA),
+            padLeft(b, wB),
+            padLeft(delta, wDelta),
+            marker
+        )
+    )
 end
 
 printRow("case", "variant", "A: " .. labelA, "B: " .. labelB, "Δ p50", " ")
-printRow(string.rep("-", wCase), string.rep("-", wVariant), string.rep("-", wA), string.rep("-", wB), string.rep("-", wDelta), " ")
+printRow(
+    string.rep("-", wCase),
+    string.rep("-", wVariant),
+    string.rep("-", wA),
+    string.rep("-", wB),
+    string.rep("-", wDelta),
+    " "
+)
 
 for _, r in ipairs(dataRows) do
     if r.sectionHeader then
@@ -305,13 +355,23 @@ end
 if matched > 0 then
     local geomean = product ^ (1.0 / matched)
     local verdict
-    if geomean > 1.0 then verdict = string.format("%.2fx slower overall", geomean)
-    elseif geomean < 1.0 then verdict = string.format("%.2fx faster overall", 1 / geomean)
-    else verdict = "same overall" end
-    print(string.format("\nGeomean B/A across %d matched rows: %.3f  (B is %s)",
-        matched, geomean, verdict))
+    if geomean > 1.0 then
+        verdict = string.format("%.2fx slower overall", geomean)
+    elseif geomean < 1.0 then
+        verdict = string.format("%.2fx faster overall", 1 / geomean)
+    else
+        verdict = "same overall"
+    end
+    print(string.format("\nGeomean B/A across %d matched rows: %.3f  (B is %s)", matched, geomean, verdict))
 end
 
-print(string.format("\n%d improvements (%d significant), %d regressions (%d significant)",
-    improvements, significantImprovements, regressions, significantRegressions))
+print(
+    string.format(
+        "\n%d improvements (%d significant), %d regressions (%d significant)",
+        improvements,
+        significantImprovements,
+        regressions,
+        significantRegressions
+    )
+)
 print("Markers: ▼ B faster than A (significant)   ▲ B slower than A (significant)")

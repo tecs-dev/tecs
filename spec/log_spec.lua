@@ -7,8 +7,7 @@
 -- getting the readable one.
 
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local sdl = require("tecs.ffi.sdl3")
 local log = require("tecs.log")
@@ -18,15 +17,21 @@ local PATH = "/tmp/tecs-log-spec.jsonl"
 
 local function readLines(path)
     local file = io.open(path, "r")
-    if file == nil then return {} end
+    if file == nil then
+        return {}
+    end
     local lines = {}
-    for line in file:lines() do lines[#lines + 1] = line end
+    for line in file:lines() do
+        lines[#lines + 1] = line
+    end
     file:close()
     return lines
 end
 
 describe("log", function()
-    setup(function() assert(C.SDL_Init(0)) end)
+    setup(function()
+        assert(C.SDL_Init(0))
+    end)
     teardown(function()
         log.closeFile()
         os.remove(PATH)
@@ -60,12 +65,18 @@ describe("log", function()
         logger:setLevel(log.ERROR)
 
         local exploded = setmetatable({}, {
-            __tostring = function() error("formatted a filtered message") end,
+            __tostring = function()
+                error("formatted a filtered message")
+            end,
         })
-        assert.has_no.errors(function() logger:debug("%s", exploded) end)
+        assert.has_no.errors(function()
+            logger:debug("%s", exploded)
+        end)
 
         logger:setLevel(log.DEBUG)
-        assert.has_error(function() logger:debug("%s", exploded) end)
+        assert.has_error(function()
+            logger:debug("%s", exploded)
+        end)
     end)
 
     it("writes the file as JSON Lines with the logger's name", function()
@@ -120,7 +131,9 @@ describe("log", function()
 
         local found = false
         for _, line in ipairs(readLines(PATH)) do
-            if line:find("sdl.video", 1, true) then found = true end
+            if line:find("sdl.video", 1, true) then
+                found = true
+            end
         end
         assert.is_true(found, "SDL's own categories must be named too")
     end)

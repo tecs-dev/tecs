@@ -7,8 +7,7 @@
 -- other reason for anything to call one.
 
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local Application = require("tecs.Application")
 local assets = require("tecs.assets")
@@ -38,12 +37,13 @@ describe("Application", function()
         -- subsystems with pumps of their own never run. Only the loop's own
         -- call can move this handle.
         for _ = 1, 200 do
-            if handle.status ~= "loading" then break end
+            if handle.status ~= "loading" then
+                break
+            end
             app:_iterate(nil, 0, nil)
         end
 
-        assert.are.equal("ready", handle.status,
-            "the loop never drained the loading worker")
+        assert.are.equal("ready", handle.status, "the loop never drained the loading worker")
         assert.is_not_nil(handle.pixels)
         handle:release()
 
@@ -52,14 +52,15 @@ describe("Application", function()
 
     it("stops the loading worker at shutdown", function()
         local app = build({
-            load = function() assets.install() end,
+            load = function()
+                assets.install()
+            end,
         })
         assert.is_true(app:_init())
         assert.is_true(assets.installed())
 
         app:_shutdown()
-        assert.is_false(assets.installed(),
-            "the decoding thread outlived the application")
+        assert.is_false(assets.installed(), "the decoding thread outlived the application")
     end)
 
     it("shuts down cleanly when nothing ever loaded an asset", function()

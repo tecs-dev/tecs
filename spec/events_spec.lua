@@ -8,8 +8,7 @@
 -- The build directory is the build system's to choose, so it is passed in.
 -- Our tree comes first, so it wins over the ECS repo's own engine tree.
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local sdl = require("tecs.ffi.sdl3")
 local loader = require("tecs.ffi.loader")
@@ -52,7 +51,9 @@ describe("platform.events", function()
 
     it("names every kind it recognises", function()
         local kinds = {}
-        for _, kind in ipairs(events.kinds()) do kinds[kind] = true end
+        for _, kind in ipairs(events.kinds()) do
+            kinds[kind] = true
+        end
 
         -- Desktop and mobile lifecycle share one vocabulary.
         assert.is_true(kinds.quit)
@@ -83,8 +84,7 @@ describe("platform.events", function()
         assert.are.equal(1, #seen)
         assert.are.equal("keyDown", seen[1].kind)
         assert.are.equal(44, seen[1].scancode)
-        assert.is_true(seen[1].repeated,
-            "a repeat must be distinguishable from a fresh press")
+        assert.is_true(seen[1].repeated, "a repeat must be distinguishable from a fresh press")
     end)
 
     it("converts mouse motion with its delta", function()
@@ -187,29 +187,27 @@ describe("platform.events", function()
         assert.are.equal(1250000, seen[1].sensorTimestamp)
         assert.are.equal("sensorUpdate", seen[2].kind)
         assert.are.equal(2500000, seen[2].sensorTimestamp)
-        assert.are.equal(-1.5, seen[2].sensorData[6],
-            "beside the six components a standalone sensor reports")
+        assert.are.equal(-1.5, seen[2].sensorData[6], "beside the six components a standalone sensor reports")
     end)
 
-    it("carries a key's layout and its physical position, plus modifiers",
-        function()
-            -- A movement binding wants the position and a text binding wants
-            -- the layout, so neither can stand in for the other.
-            local queue, count = queueOf(function(q)
-                q[0].type = C.SDL_EVENT_KEY_DOWN
-                q[0].key.scancode = 4
-                q[0].key.key = 97
-                q[0].key.mod = sdl.K.SDL_KMOD_LSHIFT
-                q[0].key.which = 6
-                q[0].key.down = true
-            end)
-
-            local event = drainOne(queue, count)[1]
-            assert.are.equal(4, event.scancode)
-            assert.are.equal(97, event.keycode)
-            assert.are.equal(sdl.K.SDL_KMOD_LSHIFT, event.modifiers)
-            assert.are.equal(6, event.which, "and which keyboard produced it")
+    it("carries a key's layout and its physical position, plus modifiers", function()
+        -- A movement binding wants the position and a text binding wants
+        -- the layout, so neither can stand in for the other.
+        local queue, count = queueOf(function(q)
+            q[0].type = C.SDL_EVENT_KEY_DOWN
+            q[0].key.scancode = 4
+            q[0].key.key = 97
+            q[0].key.mod = sdl.K.SDL_KMOD_LSHIFT
+            q[0].key.which = 6
+            q[0].key.down = true
         end)
+
+        local event = drainOne(queue, count)[1]
+        assert.are.equal(4, event.scancode)
+        assert.are.equal(97, event.keycode)
+        assert.are.equal(sdl.K.SDL_KMOD_LSHIFT, event.modifiers)
+        assert.are.equal(6, event.which, "and which keyboard produced it")
+    end)
 
     it("normalises a wheel the platform reports flipped", function()
         -- Natural scrolling is reported, not applied: the platform negates
@@ -231,10 +229,8 @@ describe("platform.events", function()
         -- Positive is away from the player and to the right, always.
         assert.are.equal(3.0, seen[1].wheelY)
         assert.are.equal(1.0, seen[1].wheelX)
-        assert.are.equal(-3.0, seen[2].wheelY,
-            "a flagged pair means the opposite of what it reads as")
-        assert.are.equal(-1.0, seen[2].wheelX,
-            "and the horizontal axis flips with it")
+        assert.are.equal(-3.0, seen[2].wheelY, "a flagged pair means the opposite of what it reads as")
+        assert.are.equal(-1.0, seen[2].wheelX, "and the horizontal axis flips with it")
     end)
 
     it("carries the whole notches the platform counted", function()
@@ -260,8 +256,7 @@ describe("platform.events", function()
         local seen = drainOne(queue, count)
         assert.are.equal(2, seen[1].wheelTicksY)
         assert.are.equal(0, seen[1].wheelTicksX)
-        assert.are.equal(-2, seen[2].wheelTicksY,
-            "the notches flip with the pair they were counted from")
+        assert.are.equal(-2, seen[2].wheelTicksY, "the notches flip with the pair they were counted from")
     end)
 
     it("carries how many times a click ran together", function()
@@ -324,22 +319,21 @@ describe("platform.events", function()
         assert.are.equal(2, seen[2].length)
     end)
 
-    it("clears a string payload rather than carrying it to the next event",
-        function()
-            -- The record is reused, and a handler that checks `text ~= nil`
-            -- would otherwise act on the previous event's text.
-            local typed = "hi"
-            local queue, count = queueOf(function(q)
-                q[0].type = C.SDL_EVENT_TEXT_INPUT
-                q[0].text.text = typed
-                q[1].type = C.SDL_EVENT_KEY_DOWN
-                q[1].key.scancode = 44
-            end, 2)
+    it("clears a string payload rather than carrying it to the next event", function()
+        -- The record is reused, and a handler that checks `text ~= nil`
+        -- would otherwise act on the previous event's text.
+        local typed = "hi"
+        local queue, count = queueOf(function(q)
+            q[0].type = C.SDL_EVENT_TEXT_INPUT
+            q[0].text.text = typed
+            q[1].type = C.SDL_EVENT_KEY_DOWN
+            q[1].key.scancode = 44
+        end, 2)
 
-            local seen = drainOne(queue, count)
-            assert.are.equal("hi", seen[1].text)
-            assert.is_nil(seen[2].text)
-        end)
+        local seen = drainOne(queue, count)
+        assert.are.equal("hi", seen[1].text)
+        assert.is_nil(seen[2].text)
+    end)
 
     it("converts a pen through its whole vocabulary", function()
         local queue, count = queueOf(function(q)
@@ -366,8 +360,7 @@ describe("platform.events", function()
         assert.are.equal("penAxis", seen[2].kind)
         assert.are.equal(0, seen[2].axis)
         assert.are.equal(0.5, seen[2].value)
-        assert.is_false(seen[2].eraser,
-            "the eraser flag must not carry over from the press before it")
+        assert.is_false(seen[2].eraser, "the eraser flag must not carry over from the press before it")
     end)
 
     it("carries the whole pen state, not only the end in use", function()
@@ -388,8 +381,7 @@ describe("platform.events", function()
 
         local seen = drainOne(queue, count)
         assert.are.equal(held, seen[1].penState)
-        assert.are.equal(held, seen[2].penState,
-            "every pen event that reports a state has to carry it")
+        assert.are.equal(held, seen[2].penState, "every pen event that reports a state has to carry it")
     end)
 
     it("reports a drop with its path and its origin", function()
@@ -471,8 +463,7 @@ describe("platform.events", function()
         assert.are.equal("windowDisplayScaleChanged", seen[4].kind)
         assert.are.equal("windowSafeAreaChanged", seen[5].kind)
         for index = 1, 5 do
-            assert.are.equal(2, seen[index].which,
-                "every one of them says which window")
+            assert.are.equal(2, seen[index].which, "every one of them says which window")
         end
     end)
 
@@ -532,8 +523,10 @@ describe("platform.events", function()
         local seen = drainOne(queue, count)
         assert.are.equal("pinchBegin", seen[1].kind)
         assert.are.equal("pinchUpdate", seen[2].kind)
-        assert.is_true(math.abs(seen[2].scale - 1.5) < 0.001,
-            "a pinch that carried no scale is a gesture nothing can act on")
+        assert.is_true(
+            math.abs(seen[2].scale - 1.5) < 0.001,
+            "a pinch that carried no scale is a gesture nothing can act on"
+        )
         assert.are.equal(2, seen[2].which)
         assert.are.equal("pinchEnd", seen[3].kind)
     end)
@@ -569,10 +562,11 @@ describe("platform.events", function()
         local event = drainOne(queue, count)[1]
         assert.are.equal("fingerDown", event.kind)
         assert.is_string(event.finger)
-        assert.is_truthy(event.finger:find("9007199254740995"),
-            "the identity must survive exactly, not as a rounded double")
-        assert.is_truthy(event.touchDevice:find("42"),
-            "and so must the device it belongs to")
+        assert.is_truthy(
+            event.finger:find("9007199254740995"),
+            "the identity must survive exactly, not as a rounded double"
+        )
+        assert.is_truthy(event.touchDevice:find("42"), "and so must the device it belongs to")
         -- Touch arrives normalised and is reported in window units as well,
         -- since a window coordinate does not survive a resize and the
         -- normalised one does.
@@ -637,12 +631,13 @@ describe("platform.events", function()
         end, 2)
 
         local held = {}
-        events.drain(queue, count, function(event) held[#held + 1] = event end)
+        events.drain(queue, count, function(event)
+            held[#held + 1] = event
+        end)
 
         -- Both references are the same pooled record, which is why copy exists.
         assert.are.equal(held[1], held[2])
-        assert.are.equal(20, held[1].scancode,
-            "the retained reference shows the last event, not the first")
+        assert.are.equal(20, held[1].scancode, "the retained reference shows the last event, not the first")
     end)
 
     it("lets a replay driver stand in for the queue", function()
@@ -654,7 +649,9 @@ describe("platform.events", function()
         end
 
         local seen = {}
-        events.drain(nil, 0, function(event) seen[#seen + 1] = event.kind end)
+        events.drain(nil, 0, function(event)
+            seen[#seen + 1] = event.kind
+        end)
         assert.are.same({ "keyDown", "quit" }, seen)
     end)
 
@@ -671,7 +668,9 @@ describe("platform.events", function()
         assert.are.equal(tonumber(C.SDL_EVENT_KEY_DOWN), tonumber(holder[0].type))
         assert.are.equal(77, tonumber(holder[0].key.scancode))
 
-        assert.is_false(pcall(function() events.push("notAKind", {}) end))
+        assert.is_false(pcall(function()
+            events.push("notAKind", {})
+        end))
         C.SDL_Quit()
     end)
 
@@ -721,50 +720,58 @@ describe("platform.events", function()
         C.SDL_Quit()
     end)
 
-    it("pushes a wheel the way a platform sends one, flipped or not",
-        function()
-            -- Natural scrolling is undone by the conversion, so a push that
-            -- carried the normalised pair would never reach that code. These
-            -- are the raw axes, and the flipped one is expected back negated.
-            assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
-            C.SDL_PumpEvents()
-            C.SDL_FlushEvents(0, 0xFFFFFFFF)
+    it("pushes a wheel the way a platform sends one, flipped or not", function()
+        -- Natural scrolling is undone by the conversion, so a push that
+        -- carried the normalised pair would never reach that code. These
+        -- are the raw axes, and the flipped one is expected back negated.
+        assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
+        C.SDL_PumpEvents()
+        C.SDL_FlushEvents(0, 0xFFFFFFFF)
 
-            events.push("mouseWheel", {
-                wheelX = 0.5, wheelY = 1.5,
-                wheelTicksX = 1, wheelTicksY = 2,
-                x = 30.0, y = 40.0, which = 3,
-            })
-            events.push("mouseWheel", {
-                flipped = true,
-                wheelX = 0.5, wheelY = 1.5,
-                wheelTicksX = 1, wheelTicksY = 2,
-                x = 30.0, y = 40.0, which = 3,
-            })
+        events.push("mouseWheel", {
+            wheelX = 0.5,
+            wheelY = 1.5,
+            wheelTicksX = 1,
+            wheelTicksY = 2,
+            x = 30.0,
+            y = 40.0,
+            which = 3,
+        })
+        events.push("mouseWheel", {
+            flipped = true,
+            wheelX = 0.5,
+            wheelY = 1.5,
+            wheelTicksX = 1,
+            wheelTicksY = 2,
+            x = 30.0,
+            y = 40.0,
+            which = 3,
+        })
 
-            local seen = pollAll()
-            C.SDL_Quit()
+        local seen = pollAll()
+        C.SDL_Quit()
 
-            local ordinary, natural = seen[1], seen[2]
-            assert.are.equal("mouseWheel", ordinary.kind)
-            assert.are.equal(0.5, ordinary.wheelX)
-            assert.are.equal(1.5, ordinary.wheelY)
-            assert.are.equal(1, ordinary.wheelTicksX)
-            assert.are.equal(2, ordinary.wheelTicksY)
-            assert.are.equal(30.0, ordinary.x, "the pointer, not the movement")
-            assert.are.equal(40.0, ordinary.y)
-            assert.are.equal(3, ordinary.which)
+        local ordinary, natural = seen[1], seen[2]
+        assert.are.equal("mouseWheel", ordinary.kind)
+        assert.are.equal(0.5, ordinary.wheelX)
+        assert.are.equal(1.5, ordinary.wheelY)
+        assert.are.equal(1, ordinary.wheelTicksX)
+        assert.are.equal(2, ordinary.wheelTicksY)
+        assert.are.equal(30.0, ordinary.x, "the pointer, not the movement")
+        assert.are.equal(40.0, ordinary.y)
+        assert.are.equal(3, ordinary.which)
 
-            assert.are.equal(-ordinary.wheelX, natural.wheelX,
-                "the same scroll pushed flipped comes back negated")
-            assert.are.equal(-ordinary.wheelY, natural.wheelY)
-            assert.are.equal(-ordinary.wheelTicksX, natural.wheelTicksX,
-                "the notches flip with the pair they were counted from")
-            assert.are.equal(-ordinary.wheelTicksY, natural.wheelTicksY)
-            assert.are.equal(ordinary.x, natural.x,
-                "the pointer is a position, so the flag says nothing about it")
-            assert.are.equal(ordinary.y, natural.y)
-        end)
+        assert.are.equal(-ordinary.wheelX, natural.wheelX, "the same scroll pushed flipped comes back negated")
+        assert.are.equal(-ordinary.wheelY, natural.wheelY)
+        assert.are.equal(
+            -ordinary.wheelTicksX,
+            natural.wheelTicksX,
+            "the notches flip with the pair they were counted from"
+        )
+        assert.are.equal(-ordinary.wheelTicksY, natural.wheelTicksY)
+        assert.are.equal(ordinary.x, natural.x, "the pointer is a position, so the flag says nothing about it")
+        assert.are.equal(ordinary.y, natural.y)
+    end)
 
     it("pushes how many times a click ran together", function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
@@ -778,8 +785,7 @@ describe("platform.events", function()
         C.SDL_Quit()
 
         assert.are.equal(2, seen[1].clicks)
-        assert.are.equal(1, seen[2].clicks,
-            "a press pushed without a count is one click, not none")
+        assert.are.equal(1, seen[2].clicks, "a press pushed without a count is one click, not none")
     end)
 
     it("pushes a pen through its whole vocabulary", function()
@@ -791,7 +797,10 @@ describe("platform.events", function()
         C.SDL_FlushEvents(0, 0xFFFFFFFF)
 
         events.push("penMotion", {
-            which = 9, x = 12.0, y = 34.0, penState = held,
+            which = 9,
+            x = 12.0,
+            y = 34.0,
+            penState = held,
         })
         events.push("penDown", { which = 9, eraser = true, penState = held })
         events.push("penButtonDown", { which = 9, button = 2, penState = held })

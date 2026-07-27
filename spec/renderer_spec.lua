@@ -10,8 +10,7 @@
 -- The build directory is the build system's to choose, so it is passed in.
 -- Our tree comes first, so it wins over the ECS repo's own engine tree.
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs = require("tecs")
 local sdl = require("tecs.ffi.sdl3")
@@ -26,7 +25,7 @@ local materials = require("tecs.gpu.materials")
 local Camera = require("tecs.gfx.Camera")
 
 local C = sdl.C
-local FORMAT = 4  -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
+local FORMAT = 4 -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
 local SIZE = 64
 
 local Transform = components.Transform
@@ -45,16 +44,21 @@ describe("ecs.Renderer", function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
         window = Window.create({ title = "ecs", width = SIZE, height = SIZE })
         device = Device.create(window, { debug = true })
-        screen = Texture.create(device.handle,
-            { width = SIZE, height = SIZE, format = FORMAT })
+        screen = Texture.create(device.handle, { width = SIZE, height = SIZE, format = FORMAT })
         assets.install()
     end)
 
     teardown(function()
         assets.shutdown()
-        if screen then screen:destroy() end
-        if device then device:destroy() end
-        if window then window:destroy() end
+        if screen then
+            screen:destroy()
+        end
+        if device then
+            device:destroy()
+        end
+        if window then
+            window:destroy()
+        end
         C.SDL_Quit()
     end)
 
@@ -168,11 +172,7 @@ describe("ecs.Renderer", function()
     it("renders a spawned entity at its transform position", function()
         local world, renderer = newScene()
         -- Covers the whole target, so any position error shows as a miss.
-        world:spawn(
-            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
-            Tint(1.0, 0.0, 0.0, 1.0),
-            Renderable()
-        )
+        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2), Tint(1.0, 0.0, 0.0, 1.0), Renderable())
 
         local pixels = frameOnce(world, renderer)
         local centre = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
@@ -205,14 +205,10 @@ describe("ecs.Renderer", function()
 
     it("ignores entities without Renderable", function()
         local world, renderer = newScene()
-        world:spawn(
-            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
-            Tint(1.0, 0.0, 0.0, 1.0)
-        )
+        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2), Tint(1.0, 0.0, 0.0, 1.0))
 
         frameOnce(world, renderer)
-        assert.are.equal(0, renderer.count,
-            "a transform alone is a position, not geometry")
+        assert.are.equal(0, renderer.count, "a transform alone is a position, not geometry")
         renderer:destroy()
     end)
 
@@ -221,44 +217,29 @@ describe("ecs.Renderer", function()
         frameOnce(world, renderer)
         assert.are.equal(0, renderer.count)
 
-        world:spawn(
-            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
-            Tint(0.0, 0.0, 1.0, 1.0),
-            Renderable()
-        )
+        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2), Tint(0.0, 0.0, 1.0, 1.0), Renderable())
 
         local pixels = frameOnce(world, renderer)
         assert.are.equal(1, renderer.count)
-        assert.are.equal(255,
-            screen:getPixel(pixels, SIZE / 2, SIZE / 2).b)
+        assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, SIZE / 2).b)
         renderer:destroy()
     end)
 
     it("lights the scene from light entities", function()
         local world, renderer = newScene({ 0.0, 0.0, 0.0 })
-        world:spawn(
-            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
-            Tint(1.0, 1.0, 1.0, 1.0),
-            Renderable()
-        )
+        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2), Tint(1.0, 1.0, 1.0, 1.0), Renderable())
 
         local dark = frameOnce(world, renderer)
-        assert.are.equal(0, screen:getPixel(dark, SIZE / 2, SIZE / 2).r,
-            "no ambient and no lights must be black")
+        assert.are.equal(0, screen:getPixel(dark, SIZE / 2, SIZE / 2).r, "no ambient and no lights must be black")
 
-        world:spawn(
-            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, 1, 1),
-            PointLight(12.0, 30.0, 1.0, 1.0, 1.0, 4.0)
-        )
+        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, 1, 1), PointLight(12.0, 30.0, 1.0, 1.0, 1.0, 4.0))
 
         local pixels = frameOnce(world, renderer)
         local centre = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
         local corner = screen:getPixel(pixels, 2, 2)
 
-        assert.is_true(centre.r > 180,
-            ("under the light should be bright, got %d"):format(centre.r))
-        assert.is_true(corner.r < 60,
-            ("beyond the radius should stay dark, got %d"):format(corner.r))
+        assert.is_true(centre.r > 180, ("under the light should be bright, got %d"):format(centre.r))
+        assert.is_true(corner.r < 60, ("beyond the radius should stay dark, got %d"):format(corner.r))
         renderer:destroy()
     end)
 
@@ -357,8 +338,7 @@ describe("ecs.Renderer", function()
         )
 
         local centre = screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2)
-        assert.is_true(math.abs(centre.r - 128) <= 2,
-            ("expected the tint to halve red, got %d"):format(centre.r))
+        assert.is_true(math.abs(centre.r - 128) <= 2, ("expected the tint to halve red, got %d"):format(centre.r))
         renderer:destroy()
     end)
 
@@ -395,7 +375,6 @@ describe("ecs.Renderer", function()
         renderer:destroy()
     end)
 
-
     -- A sprite's silhouette is its texture's, not its quad's. The geometry pass
     -- writes depth with no blending, so a fragment that survives claims the
     -- pixel: a cut-out that covered its whole rectangle would both paint over
@@ -411,10 +390,12 @@ describe("ecs.Renderer", function()
         )
 
         local pixels = frameOnce(world, renderer)
-        assert.are.equal(255, screen:getPixel(pixels, SIZE / 4, SIZE / 2).r,
-            "the opaque half of the sprite draws")
-        assert.are.equal(0, screen:getPixel(pixels, SIZE * 3 / 4, SIZE / 2).r,
-            "and the cut-away half leaves the background showing")
+        assert.are.equal(255, screen:getPixel(pixels, SIZE / 4, SIZE / 2).r, "the opaque half of the sprite draws")
+        assert.are.equal(
+            0,
+            screen:getPixel(pixels, SIZE * 3 / 4, SIZE / 2).r,
+            "and the cut-away half leaves the background showing"
+        )
         renderer:destroy()
     end)
 
@@ -433,24 +414,18 @@ describe("ecs.Renderer", function()
             renderer:sprite("spec://cutoutdepth"),
             Renderable()
         )
-        world:spawn(
-            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
-            Tint(0.0, 0.0, 1.0, 1.0),
-            Renderable()
-        )
+        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2), Tint(0.0, 0.0, 1.0, 1.0), Renderable())
 
         local pixels = frameOnce(world, renderer)
         local behind = screen:getPixel(pixels, SIZE * 3 / 4, SIZE / 2)
         local front = screen:getPixel(pixels, SIZE / 4, SIZE / 2)
 
-        assert.are.equal(255, behind.b,
-            "the quad behind the cut-away half must reach the target")
+        assert.are.equal(255, behind.b, "the quad behind the cut-away half must reach the target")
         assert.are.equal(0, behind.r)
         assert.are.equal(255, front.r, "while the opaque half still covers it")
         assert.are.equal(0, front.b)
         renderer:destroy()
     end)
-
 
     -- One image a layer costs a whole cell for a sixteen-pixel icon and caps
     -- the process at one image per layer. Packing fits many into each, and what
@@ -500,15 +475,12 @@ describe("ecs.Renderer", function()
             -- blocks would need seventeen layers unpacked and fit inside one
             -- 64-pixel cell here.
             for index = 1, 16 do
-                renderer:registerImage(
-                    block("spec://pack" .. index, 8, index * 8, 0, 0))
+                renderer:registerImage(block("spec://pack" .. index, 8, index * 8, 0, 0))
             end
 
-            assert.are.equal(1, renderer.images.used,
-                "sixteen eight-pixel images belong in one layer")
+            assert.are.equal(1, renderer.images.used, "sixteen eight-pixel images belong in one layer")
             for index = 1, 16 do
-                assert.are.equal(0,
-                    renderer:sprite("spec://pack" .. index).slot)
+                assert.are.equal(0, renderer:sprite("spec://pack" .. index).slot)
             end
             renderer:destroy()
         end)
@@ -517,13 +489,10 @@ describe("ecs.Renderer", function()
             local _, renderer = packedScene()
             local seen = {}
             for index = 1, 8 do
-                renderer:registerImage(
-                    block("spec://rect" .. index, 8, 0, 0, 0))
+                renderer:registerImage(block("spec://rect" .. index, 8, 0, 0, 0))
                 local sprite = renderer:sprite("spec://rect" .. index)
-                local key = ("%d:%.6f:%.6f"):format(sprite.slot,
-                    sprite.u0, sprite.v0)
-                assert.is_nil(seen[key],
-                    "two images landed on the same texels")
+                local key = ("%d:%.6f:%.6f"):format(sprite.slot, sprite.u0, sprite.v0)
+                assert.is_nil(seen[key], "two images landed on the same texels")
                 seen[key] = true
                 assert.is_true(sprite.u1 > sprite.u0)
                 assert.is_true(sprite.v1 > sprite.v0)
@@ -538,14 +507,18 @@ describe("ecs.Renderer", function()
             -- the sampler shows up as a quad wearing a neighbour's colour.
             local world, renderer = packedScene()
             local colours = {
-                { 255, 0, 0 }, { 0, 255, 0 }, { 0, 0, 255 },
-                { 255, 255, 0 }, { 255, 0, 255 }, { 0, 255, 255 },
-                { 128, 0, 0 }, { 0, 128, 0 },
+                { 255, 0, 0 },
+                { 0, 255, 0 },
+                { 0, 0, 255 },
+                { 255, 255, 0 },
+                { 255, 0, 255 },
+                { 0, 255, 255 },
+                { 128, 0, 0 },
+                { 0, 128, 0 },
             }
             for index = 1, #colours do
                 local colour = colours[index]
-                renderer:registerImage(block("spec://draw" .. index, 8,
-                    colour[1], colour[2], colour[3]))
+                renderer:registerImage(block("spec://draw" .. index, 8, colour[1], colour[2], colour[3]))
             end
             assert.are.equal(1, renderer.images.used)
 
@@ -569,12 +542,14 @@ describe("ecs.Renderer", function()
                 -- one texel out reads correctly in the middle of the quad and
                 -- wrongly at its edges.
                 for _, at in ipairs({
-                    { SIZE / 2, SIZE / 2 }, { 3, 3 }, { SIZE - 3, 3 },
-                    { 3, SIZE - 3 }, { SIZE - 3, SIZE - 3 },
+                    { SIZE / 2, SIZE / 2 },
+                    { 3, 3 },
+                    { SIZE - 3, 3 },
+                    { 3, SIZE - 3 },
+                    { SIZE - 3, SIZE - 3 },
                 }) do
                     local pixel = screen:getPixel(pixels, at[1], at[2])
-                    assert.are.equal(colour[1], pixel.r,
-                        ("image %d at %d,%d"):format(index, at[1], at[2]))
+                    assert.are.equal(colour[1], pixel.r, ("image %d at %d,%d"):format(index, at[1], at[2]))
                     assert.are.equal(colour[2], pixel.g)
                     assert.are.equal(colour[3], pixel.b)
                 end
@@ -588,13 +563,10 @@ describe("ecs.Renderer", function()
             -- shelves of three fit a 64-pixel cell and the tenth block starts
             -- a second layer.
             for index = 1, 30 do
-                renderer:registerImage(
-                    block("spec://spill" .. index, 16, 0, 0, 0))
+                renderer:registerImage(block("spec://spill" .. index, 16, 0, 0, 0))
             end
-            assert.is_true(renderer.images.used > 1,
-                "thirty sixteen-pixel blocks do not fit in one 64-pixel cell")
-            assert.is_true(renderer.images.used < 30,
-                "and are nowhere near one layer each")
+            assert.is_true(renderer.images.used > 1, "thirty sixteen-pixel blocks do not fit in one 64-pixel cell")
+            assert.is_true(renderer.images.used < 30, "and are nowhere near one layer each")
             renderer:destroy()
         end)
 
@@ -603,8 +575,7 @@ describe("ecs.Renderer", function()
             -- One layer of 64 pixels, and blocks that fill a shelf each.
             assert.has_error(function()
                 for index = 1, 64 do
-                    renderer:registerImage(
-                        block("spec://full" .. index, 32, 0, 0, 0))
+                    renderer:registerImage(block("spec://full" .. index, 32, 0, 0, 0))
                 end
             end)
             renderer:destroy()
@@ -635,14 +606,14 @@ describe("ecs.Renderer", function()
 
             world:spawn(
                 Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
-                Tint(1.0, 1.0, 1.0, 1.0), second, Renderable())
-            assert.are.equal(255,
-                screen:getPixel(frameOnce(world, renderer),
-                    SIZE / 2, SIZE / 2).g)
+                Tint(1.0, 1.0, 1.0, 1.0),
+                second,
+                Renderable()
+            )
+            assert.are.equal(255, screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2).g)
             renderer:destroy()
         end)
     end)
-
 
     -- A Sprite names its image and the renderer decides which layer that name
     -- occupies. These pin the two halves of that: a name is one layer however
@@ -656,8 +627,7 @@ describe("ecs.Renderer", function()
 
         assert.are.equal(first.image, second.image, "one name, one image")
         assert.are.equal(first.slot, second.slot)
-        assert.are.equal(layers, renderer.images.used,
-            "registering a name again must not consume another layer")
+        assert.are.equal(layers, renderer.images.used, "registering a name again must not consume another layer")
 
         -- And it still draws: the second registration answers with the layer
         -- the first one uploaded into, not with an empty one.
@@ -688,9 +658,11 @@ describe("ecs.Renderer", function()
             green,
             Renderable()
         )
-        assert.are.equal(255,
+        assert.are.equal(
+            255,
             screen:getPixel(frameOnce(world, first), SIZE / 2, SIZE / 2).g,
-            "green before the round trip")
+            "green before the round trip"
+        )
         local savedSlot = green.slot
         local saved = world:saveSnapshot({}).buffer
         first:destroy()
@@ -698,12 +670,14 @@ describe("ecs.Renderer", function()
         local restored, second = newScene()
         second:registerImage(solid("spec://green", 0, 255, 0))
         second:registerImage(solid("spec://red", 255, 0, 0))
-        assert.are_not.equal(savedSlot, second:sprite("spec://green").slot,
-            "the point of the test is that the layer moved")
+        assert.are_not.equal(
+            savedSlot,
+            second:sprite("spec://green").slot,
+            "the point of the test is that the layer moved"
+        )
 
         restored:loadSnapshot(saved)
-        local centre = screen:getPixel(frameOnce(restored, second),
-            SIZE / 2, SIZE / 2)
+        local centre = screen:getPixel(frameOnce(restored, second), SIZE / 2, SIZE / 2)
         assert.are.equal(255, centre.g, "and green after it")
         assert.are.equal(0, centre.r)
         second:destroy()
@@ -712,10 +686,14 @@ describe("ecs.Renderer", function()
     it("fails on a sprite whose image is not registered", function()
         local world, renderer = newScene()
 
-        local ok, reason = pcall(function() renderer:sprite("spec://missing") end)
+        local ok, reason = pcall(function()
+            renderer:sprite("spec://missing")
+        end)
         assert.is_false(ok, "asking for an unregistered name must not answer")
-        assert.is_truthy(tostring(reason):find("spec://missing", 1, true),
-            "the error should name the image that is missing")
+        assert.is_truthy(
+            tostring(reason):find("spec://missing", 1, true),
+            "the error should name the image that is missing"
+        )
 
         -- And the same is true of a Sprite that reaches extraction unresolved,
         -- which is how one restored from a snapshot arrives. Drawing it against
@@ -759,17 +737,14 @@ describe("ecs.Renderer", function()
         for _, length in world:query({ include = { Marker } }):iter() do
             seen = seen + length
         end
-        assert.are.equal(1, seen,
-            "the failed frame left a query scope open behind it")
+        assert.are.equal(1, seen, "the failed frame left a query scope open behind it")
 
         -- And it is the frame that failed, not the world: registering the
         -- image the sprite named lets the very next frame through, with the
         -- same entity resident on it.
-        assert.are.equal(0, renderer.count,
-            "the frame that raised laid nothing out")
+        assert.are.equal(0, renderer.count, "the frame that raised laid nothing out")
         renderer:registerImage(solid("spec://absent", 0, 255, 0))
-        assert.is_true(pcall(frameOnce, world, renderer),
-            "the next frame draws rather than raising again")
+        assert.is_true(pcall(frameOnce, world, renderer), "the next frame draws rather than raising again")
         assert.are.equal(1, renderer.count)
         renderer:destroy()
     end)
@@ -780,11 +755,7 @@ describe("ecs.Renderer", function()
         -- large world is affordable, and most frames change very little.
         local world, renderer = newScene()
         for _ = 1, 8 do
-            world:spawn(
-                Transform(SIZE / 2, SIZE / 2, 0, 1, 0, 4, 4),
-                Tint(1, 1, 1, 1),
-                Renderable()
-            )
+            world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable())
         end
 
         frameOnce(world, renderer)
@@ -793,15 +764,13 @@ describe("ecs.Renderer", function()
 
         frameOnce(world, renderer)
         assert.are.equal(8, renderer.count, "the instances are still resident")
-        assert.are.equal(0, renderer.rewritten,
-            "a still frame must not touch the buffer")
+        assert.are.equal(0, renderer.rewritten, "a still frame must not touch the buffer")
         renderer:destroy()
     end)
 
     it("rewrites only when a component is actually written", function()
         local world, renderer = newScene()
-        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1),
-            Renderable())
+        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable())
 
         frameOnce(world, renderer)
         frameOnce(world, renderer)
@@ -824,8 +793,7 @@ describe("ecs.Renderer", function()
         })
 
         frameOnce(world, renderer)
-        assert.are.equal(1, renderer.rewritten,
-            "writing a transform must re-sync its archetype")
+        assert.are.equal(1, renderer.rewritten, "writing a transform must re-sync its archetype")
         renderer:destroy()
     end)
 
@@ -839,8 +807,7 @@ describe("ecs.Renderer", function()
         world:spawn(Transform(8, 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable())
         frameOnce(world, renderer)
         assert.are.equal(2, renderer.count)
-        assert.are.equal(2, renderer.rewritten,
-            "a changed length moves runs, so the layout is rebuilt")
+        assert.are.equal(2, renderer.rewritten, "a changed length moves runs, so the layout is rebuilt")
         renderer:destroy()
     end)
 
@@ -852,16 +819,15 @@ describe("ecs.Renderer", function()
 
         -- Well off the right edge, and large enough that a failed cull would
         -- be unmistakable if it were drawn at the origin instead.
-        world:spawn(
-            Transform(SIZE * 8, SIZE / 2, 0, 1, 0, SIZE, SIZE),
-            Tint(1.0, 0.0, 0.0, 1.0),
-            Renderable()
-        )
+        world:spawn(Transform(SIZE * 8, SIZE / 2, 0, 1, 0, SIZE, SIZE), Tint(1.0, 0.0, 0.0, 1.0), Renderable())
 
         local pixels = frameOnce(world, renderer)
         assert.are.equal(1, renderer.count, "it is still a resident instance")
-        assert.are.equal(0, screen:getPixel(pixels, SIZE / 2, SIZE / 2).r,
-            "but nothing offscreen should reach the target")
+        assert.are.equal(
+            0,
+            screen:getPixel(pixels, SIZE / 2, SIZE / 2).r,
+            "but nothing offscreen should reach the target"
+        )
         renderer:destroy()
     end)
 
@@ -870,41 +836,34 @@ describe("ecs.Renderer", function()
         -- pop things out at the border, which reads as flicker rather than as
         -- a culling bug.
         local world, renderer = newScene()
-        world:spawn(
-            Transform(0, SIZE / 2, 0, 1, 0, SIZE * 0.8, SIZE * 0.8),
-            Tint(0.0, 1.0, 0.0, 1.0),
-            Renderable()
-        )
+        world:spawn(Transform(0, SIZE / 2, 0, 1, 0, SIZE * 0.8, SIZE * 0.8), Tint(0.0, 1.0, 0.0, 1.0), Renderable())
 
         local pixels = frameOnce(world, renderer)
-        assert.are.equal(255, screen:getPixel(pixels, 2, SIZE / 2).g,
-            "the visible part of a straddling quad must survive the cull")
+        assert.are.equal(
+            255,
+            screen:getPixel(pixels, 2, SIZE / 2).g,
+            "the visible part of a straddling quad must survive the cull"
+        )
         renderer:destroy()
     end)
 
     it("draws only the survivors when the view is crowded", function()
         local world, renderer = newScene()
         -- One on screen, three far outside in different directions.
-        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE, SIZE),
-            Tint(0.0, 0.0, 1.0, 1.0), Renderable())
-        world:spawn(Transform(-SIZE * 8, SIZE / 2, 0, 1, 0, 4, 4),
-            Tint(1, 1, 1, 1), Renderable())
-        world:spawn(Transform(SIZE / 2, -SIZE * 8, 0, 1, 0, 4, 4),
-            Tint(1, 1, 1, 1), Renderable())
-        world:spawn(Transform(SIZE / 2, SIZE * 8, 0, 1, 0, 4, 4),
-            Tint(1, 1, 1, 1), Renderable())
+        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE, SIZE), Tint(0.0, 0.0, 1.0, 1.0), Renderable())
+        world:spawn(Transform(-SIZE * 8, SIZE / 2, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable())
+        world:spawn(Transform(SIZE / 2, -SIZE * 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable())
+        world:spawn(Transform(SIZE / 2, SIZE * 8, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable())
 
         local pixels = frameOnce(world, renderer)
         assert.are.equal(4, renderer.count, "all four are resident")
-        assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, SIZE / 2).b,
-            "the one in view draws")
+        assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, SIZE / 2).b, "the one in view draws")
         renderer:destroy()
     end)
 
     it("drops rows past capacity rather than overrunning the buffer", function()
         local world = tecs.newWorld()
-        local renderer = Renderer.create(device.handle, FORMAT,
-            { ambient = { 1, 1, 1 }, capacity = 4 })
+        local renderer = Renderer.create(device.handle, FORMAT, { ambient = { 1, 1, 1 }, capacity = 4 })
         renderer:install(world)
 
         for _ = 1, 10 do
@@ -923,8 +882,7 @@ describe("ecs.Renderer", function()
     -- same either way, so it takes a spawn after the sync to tell.
     it("leaves the world undeferred after dropping rows", function()
         local world = tecs.newWorld()
-        local renderer = Renderer.create(device.handle, FORMAT,
-            { ambient = { 1, 1, 1 }, capacity = 4 })
+        local renderer = Renderer.create(device.handle, FORMAT, { ambient = { 1, 1, 1 }, capacity = 4 })
         renderer:install(world)
 
         -- Two archetypes, because the break has to actually execute. With one,
@@ -935,8 +893,7 @@ describe("ecs.Renderer", function()
             world:spawn(Transform(0, 0, 0, 1, 0, 1, 1), Tint(1, 1, 1, 1), Renderable())
         end
         for _ = 1, 6 do
-            world:spawn(Transform(0, 0, 0, 1, 0, 1, 1), Tint(1, 1, 1, 1),
-                Renderable(), Second)
+            world:spawn(Transform(0, 0, 0, 1, 0, 1, 1), Tint(1, 1, 1, 1), Renderable(), Second)
         end
         frameOnce(world, renderer)
 
@@ -959,8 +916,7 @@ describe("ecs.Renderer", function()
         })
 
         world:update(1 / 60)
-        assert.are.equal(1, seen,
-            "a spawn in a later phase was deferred, so the sync left a scope open")
+        assert.are.equal(1, seen, "a spawn in a later phase was deferred, so the sync left a scope open")
         renderer:destroy()
     end)
 
@@ -981,8 +937,7 @@ describe("ecs.Renderer", function()
         local corner = screen:getPixel(pixels, 2, 2)
 
         assert.are.equal(255, centre.r, "the middle of the circle is filled")
-        assert.are.equal(0, corner.r,
-            "the quad's corner falls outside the circle and must be rejected")
+        assert.are.equal(0, corner.r, "the quad's corner falls outside the circle and must be rejected")
         renderer:destroy()
     end)
 
@@ -990,11 +945,7 @@ describe("ecs.Renderer", function()
         -- The default path must be untouched: absence of Material means the
         -- default material, which covers the whole quad, corners included.
         local world, renderer = newScene()
-        world:spawn(
-            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE, SIZE),
-            Tint(0.0, 1.0, 0.0, 1.0),
-            Renderable()
-        )
+        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE, SIZE), Tint(0.0, 1.0, 0.0, 1.0), Renderable())
 
         local pixels = frameOnce(world, renderer)
         local corner = screen:getPixel(pixels, 2, 2)
@@ -1014,8 +965,11 @@ describe("ecs.Renderer", function()
 
         local pixels = frameOnce(world, renderer)
         assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, SIZE / 2).b)
-        assert.are.equal(0, screen:getPixel(pixels, 2, 2).b,
-            "a fully rounded rectangle rejects its corners like a circle")
+        assert.are.equal(
+            0,
+            screen:getPixel(pixels, 2, 2).b,
+            "a fully rounded rectangle rejects its corners like a circle"
+        )
         renderer:destroy()
     end)
 
@@ -1041,12 +995,13 @@ describe("ecs.Renderer", function()
         shape(world, "ellipse", 0.5)
 
         local pixels = frameOnce(world, renderer)
-        assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, SIZE / 2).r,
-            "the middle of the ellipse is filled")
-        assert.are.equal(0, screen:getPixel(pixels, SIZE / 2, 6).r,
-            "half the height leaves the top of the quad outside")
-        assert.are.equal(0, screen:getPixel(pixels, 2, 2).r,
-            "and the corner is outside whatever the height")
+        assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, SIZE / 2).r, "the middle of the ellipse is filled")
+        assert.are.equal(
+            0,
+            screen:getPixel(pixels, SIZE / 2, 6).r,
+            "half the height leaves the top of the quad outside"
+        )
+        assert.are.equal(0, screen:getPixel(pixels, 2, 2).r, "and the corner is outside whatever the height")
         renderer:destroy()
     end)
 
@@ -1061,12 +1016,9 @@ describe("ecs.Renderer", function()
         shape(fullWorld, "ellipse", 0.99)
         local full = frameOnce(fullWorld, fullRenderer)
 
-        assert.are.equal(0, screen:getPixel(flat, SIZE / 2, 6).r,
-            "a half-height ellipse stops short of the quad's top")
-        assert.are.equal(255, screen:getPixel(full, SIZE / 2, 6).r,
-            "a full-height one reaches it")
-        assert.are.equal(0, screen:getPixel(full, 2, 2).r,
-            "and is still an ellipse rather than the quad")
+        assert.are.equal(0, screen:getPixel(flat, SIZE / 2, 6).r, "a half-height ellipse stops short of the quad's top")
+        assert.are.equal(255, screen:getPixel(full, SIZE / 2, 6).r, "a full-height one reaches it")
+        assert.are.equal(0, screen:getPixel(full, 2, 2).r, "and is still an ellipse rather than the quad")
         flatRenderer:destroy()
         fullRenderer:destroy()
 
@@ -1076,8 +1028,11 @@ describe("ecs.Renderer", function()
         local noneWorld, noneRenderer = newScene()
         shape(noneWorld, "ellipse", 0.0)
         local none = frameOnce(noneWorld, noneRenderer)
-        assert.are.equal(0, screen:getPixel(none, SIZE / 2, 6).r,
-            "an ellipse with no height covers nothing but its own line")
+        assert.are.equal(
+            0,
+            screen:getPixel(none, SIZE / 2, 6).r,
+            "an ellipse with no height covers nothing but its own line"
+        )
         assert.are.equal(0, screen:getPixel(none, 2, 2).r)
         noneRenderer:destroy()
     end)
@@ -1087,22 +1042,21 @@ describe("ecs.Renderer", function()
         shape(world, "ring", 0.5)
         local pixels = frameOnce(world, renderer)
 
-        assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, 8).r,
-            "the band between the two radii is filled")
-        assert.are.equal(0, screen:getPixel(pixels, SIZE / 2, SIZE / 2).r,
-            "the hole is not")
-        assert.are.equal(0, screen:getPixel(pixels, 2, 2).r,
-            "and the corner is outside the ring entirely")
+        assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, 8).r, "the band between the two radii is filled")
+        assert.are.equal(0, screen:getPixel(pixels, SIZE / 2, SIZE / 2).r, "the hole is not")
+        assert.are.equal(0, screen:getPixel(pixels, 2, 2).r, "and the corner is outside the ring entirely")
         renderer:destroy()
 
         -- A hole of no radius is a disc, which is the parameter's other end.
         local solidWorld, solidRenderer = newScene()
         shape(solidWorld, "ring", 0.0)
         local solid = frameOnce(solidWorld, solidRenderer)
-        assert.are.equal(255, screen:getPixel(solid, SIZE / 2, SIZE / 2).r,
-            "a ring with no hole is filled to its middle")
-        assert.are.equal(0, screen:getPixel(solid, 2, 2).r,
-            "and still rejects the quad's corner")
+        assert.are.equal(
+            255,
+            screen:getPixel(solid, SIZE / 2, SIZE / 2).r,
+            "a ring with no hole is filled to its middle"
+        )
+        assert.are.equal(0, screen:getPixel(solid, 2, 2).r, "and still rejects the quad's corner")
         solidRenderer:destroy()
     end)
 
@@ -1111,12 +1065,17 @@ describe("ecs.Renderer", function()
         shape(world, "capsule", 0.4)
         local pixels = frameOnce(world, renderer)
 
-        assert.are.equal(255, screen:getPixel(pixels, 4, SIZE / 2).r,
-            "the bar runs the full width, so its cap reaches the left edge")
-        assert.are.equal(0, screen:getPixel(pixels, SIZE / 2, 6).r,
-            "and its thickness leaves the top of the quad outside")
-        assert.are.equal(0, screen:getPixel(pixels, 2, 2).r,
-            "as does the corner beside the cap")
+        assert.are.equal(
+            255,
+            screen:getPixel(pixels, 4, SIZE / 2).r,
+            "the bar runs the full width, so its cap reaches the left edge"
+        )
+        assert.are.equal(
+            0,
+            screen:getPixel(pixels, SIZE / 2, 6).r,
+            "and its thickness leaves the top of the quad outside"
+        )
+        assert.are.equal(0, screen:getPixel(pixels, 2, 2).r, "as does the corner beside the cap")
         renderer:destroy()
     end)
 
@@ -1125,12 +1084,13 @@ describe("ecs.Renderer", function()
         shape(world, "line", 0.2)
         local pixels = frameOnce(world, renderer)
 
-        assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, SIZE / 2).r,
-            "the line passes through the middle")
-        assert.are.equal(255, screen:getPixel(pixels, 2, 2).r,
-            "and its cap reaches the corner it runs from")
-        assert.are.equal(0, screen:getPixel(pixels, SIZE - 3, 2).r,
-            "while the other diagonal's corner is nowhere near it")
+        assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, SIZE / 2).r, "the line passes through the middle")
+        assert.are.equal(255, screen:getPixel(pixels, 2, 2).r, "and its cap reaches the corner it runs from")
+        assert.are.equal(
+            0,
+            screen:getPixel(pixels, SIZE - 3, 2).r,
+            "while the other diagonal's corner is nowhere near it"
+        )
         renderer:destroy()
     end)
 
@@ -1139,21 +1099,16 @@ describe("ecs.Renderer", function()
         shape(world, "pie", 0.25)
         local quarter = frameOnce(world, renderer)
 
-        assert.are.equal(255, screen:getPixel(quarter, SIZE / 2, 20).r,
-            "a quarter turn opens upwards from the middle")
-        assert.are.equal(0, screen:getPixel(quarter, SIZE / 2, 44).r,
-            "and does not reach the other way")
-        assert.are.equal(0, screen:getPixel(quarter, 2, 2).r,
-            "nor outside the circle it is a wedge of")
+        assert.are.equal(255, screen:getPixel(quarter, SIZE / 2, 20).r, "a quarter turn opens upwards from the middle")
+        assert.are.equal(0, screen:getPixel(quarter, SIZE / 2, 44).r, "and does not reach the other way")
+        assert.are.equal(0, screen:getPixel(quarter, 2, 2).r, "nor outside the circle it is a wedge of")
         renderer:destroy()
 
         local wideWorld, wideRenderer = newScene()
         shape(wideWorld, "pie", 0.75)
         local wide = frameOnce(wideWorld, wideRenderer)
-        assert.are.equal(0, screen:getPixel(quarter, 16, 40).r,
-            "a quarter turn stops well short of the lower left")
-        assert.are.equal(255, screen:getPixel(wide, 16, 40).r,
-            "and three quarters of one sweeps past it")
+        assert.are.equal(0, screen:getPixel(quarter, 16, 40).r, "a quarter turn stops well short of the lower left")
+        assert.are.equal(255, screen:getPixel(wide, 16, 40).r, "and three quarters of one sweeps past it")
         wideRenderer:destroy()
     end)
 
@@ -1162,12 +1117,13 @@ describe("ecs.Renderer", function()
         shape(world, "triangle", 0)
         local pixels = frameOnce(world, renderer)
 
-        assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, SIZE / 2).r,
-            "the middle of the triangle is filled")
-        assert.are.equal(255, screen:getPixel(pixels, 6, SIZE - 4).r,
-            "its base is the whole bottom edge, corner included")
-        assert.are.equal(0, screen:getPixel(pixels, 6, 4).r,
-            "and the apex leaves the top corners out, so it points up")
+        assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, SIZE / 2).r, "the middle of the triangle is filled")
+        assert.are.equal(
+            255,
+            screen:getPixel(pixels, 6, SIZE - 4).r,
+            "its base is the whole bottom edge, corner included"
+        )
+        assert.are.equal(0, screen:getPixel(pixels, 6, 4).r, "and the apex leaves the top corners out, so it points up")
         renderer:destroy()
     end)
 
@@ -1176,14 +1132,14 @@ describe("ecs.Renderer", function()
         shape(world, "star", 0.4)
         local pixels = frameOnce(world, renderer)
 
-        assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, SIZE / 2).r,
-            "the body of the star is filled")
-        assert.are.equal(255, screen:getPixel(pixels, 17, 52).r,
-            "and so is a point reaching down to the left")
-        assert.are.equal(0, screen:getPixel(pixels, SIZE / 2, 52).r,
-            "while the valley between the two lower points is not")
-        assert.are.equal(0, screen:getPixel(pixels, 2, 2).r,
-            "and neither is the quad's corner")
+        assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, SIZE / 2).r, "the body of the star is filled")
+        assert.are.equal(255, screen:getPixel(pixels, 17, 52).r, "and so is a point reaching down to the left")
+        assert.are.equal(
+            0,
+            screen:getPixel(pixels, SIZE / 2, 52).r,
+            "while the valley between the two lower points is not"
+        )
+        assert.are.equal(0, screen:getPixel(pixels, 2, 2).r, "and neither is the quad's corner")
         renderer:destroy()
     end)
 
@@ -1192,12 +1148,9 @@ describe("ecs.Renderer", function()
         shape(world, "frame", 0.25)
         local pixels = frameOnce(world, renderer)
 
-        assert.are.equal(255, screen:getPixel(pixels, 2, SIZE / 2).r,
-            "the border is drawn")
-        assert.are.equal(255, screen:getPixel(pixels, 2, 2).r,
-            "including its corner, which a rounded rectangle drops")
-        assert.are.equal(0, screen:getPixel(pixels, SIZE / 2, SIZE / 2).r,
-            "and the middle is the hole it frames")
+        assert.are.equal(255, screen:getPixel(pixels, 2, SIZE / 2).r, "the border is drawn")
+        assert.are.equal(255, screen:getPixel(pixels, 2, 2).r, "including its corner, which a rounded rectangle drops")
+        assert.are.equal(0, screen:getPixel(pixels, SIZE / 2, SIZE / 2).r, "and the middle is the hole it frames")
         renderer:destroy()
     end)
 
@@ -1208,8 +1161,7 @@ describe("ecs.Renderer", function()
         -- edge at the same fraction of the quad, which two samples a thirty
         -- second of the quad either side of it pin.
         local LARGE = SIZE * 4
-        local large = Texture.create(device.handle,
-            { width = LARGE, height = LARGE, format = FORMAT })
+        local large = Texture.create(device.handle, { width = LARGE, height = LARGE, format = FORMAT })
 
         local world, renderer = newScene()
         shape(world, "triangle", 0)
@@ -1224,20 +1176,27 @@ describe("ecs.Renderer", function()
         )
         local big = frameInto(bigWorld, bigRenderer, large, LARGE)
 
-        assert.are.equal(255, screen:getPixel(small, 18, SIZE / 2).r,
-            "inside the slanted edge at the target's own size")
-        assert.are.equal(0, screen:getPixel(small, 13, SIZE / 2).r,
-            "and outside it a little further out")
-        assert.are.equal(255, large:getPixel(big, 72, LARGE / 2).r,
-            "the same fraction of the quad is inside at four times the size")
-        assert.are.equal(0, large:getPixel(big, 52, LARGE / 2).r,
-            "and the same fraction outside, so the edge did not move")
+        assert.are.equal(
+            255,
+            screen:getPixel(small, 18, SIZE / 2).r,
+            "inside the slanted edge at the target's own size"
+        )
+        assert.are.equal(0, screen:getPixel(small, 13, SIZE / 2).r, "and outside it a little further out")
+        assert.are.equal(
+            255,
+            large:getPixel(big, 72, LARGE / 2).r,
+            "the same fraction of the quad is inside at four times the size"
+        )
+        assert.are.equal(
+            0,
+            large:getPixel(big, 52, LARGE / 2).r,
+            "and the same fraction outside, so the edge did not move"
+        )
 
         renderer:destroy()
         bigRenderer:destroy()
         large:destroy()
     end)
-
 
     -- The compaction has to be ordered, not merely correct. An atomic append
     -- produces a different list every frame, so overlapping geometry swaps
@@ -1245,7 +1204,7 @@ describe("ecs.Renderer", function()
     -- replaced it: survivors keep their index order, so the highest index
     -- draws last and is what you see.
     it("draws overlapping entities in index order", function()
-        local COUNT = 700   -- more than two 256-wide cull workgroups
+        local COUNT = 700 -- more than two 256-wide cull workgroups
         local world, renderer = newScene(nil, COUNT + 16)
         for index = 1, COUNT do
             -- Every entity covers the target. The last one spawned is blue and
@@ -1258,10 +1217,8 @@ describe("ecs.Renderer", function()
             )
         end
 
-        local centre = screen:getPixel(frameOnce(world, renderer),
-            SIZE / 2, SIZE / 2)
-        assert.are.equal(255, centre.b,
-            "the highest-index entity must be the one on top")
+        local centre = screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2)
+        assert.are.equal(255, centre.b, "the highest-index entity must be the one on top")
         assert.are.equal(0, centre.r)
         renderer:destroy()
     end)
@@ -1314,13 +1271,11 @@ describe("ecs.Renderer", function()
 
     it("lets the nearer instance win regardless of draw order", function()
         local firstNearer = drawAtDepths(0.25, 0.75)
-        assert.are.equal(255, firstNearer.r,
-            "the nearer instance must win even though the other drew after it")
+        assert.are.equal(255, firstNearer.r, "the nearer instance must win even though the other drew after it")
         assert.are.equal(0, firstNearer.b)
 
         local secondNearer = drawAtDepths(0.75, 0.25)
-        assert.are.equal(255, secondNearer.b,
-            "and must still win when it is the one that drew last")
+        assert.are.equal(255, secondNearer.b, "and must still win when it is the one that drew last")
         assert.are.equal(0, secondNearer.r)
     end)
 
@@ -1356,7 +1311,6 @@ describe("ecs.Renderer", function()
         renderer:destroy()
     end)
 
-
     -- Rotation is applied in the vertex shader, so nothing on the host side
     -- would notice if it were dropped or had its sign flipped. A long thin
     -- quad makes the difference unmistakable: unrotated it is a horizontal
@@ -1373,16 +1327,10 @@ describe("ecs.Renderer", function()
 
     it("leaves an unrotated quad on its own axes", function()
         local world, renderer = newScene()
-        world:spawn(
-            Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE / 4),
-            Tint(1.0, 0.0, 0.0, 1.0),
-            Renderable()
-        )
+        world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE / 4), Tint(1.0, 0.0, 0.0, 1.0), Renderable())
         local pixels = frameOnce(world, renderer)
-        assert.are.equal(255, screen:getPixel(pixels, 4, SIZE / 2).r,
-            "a wide band reaches the left edge")
-        assert.are.equal(0, screen:getPixel(pixels, SIZE / 2, 4).r,
-            "and does not reach the top")
+        assert.are.equal(255, screen:getPixel(pixels, 4, SIZE / 2).r, "a wide band reaches the left edge")
+        assert.are.equal(0, screen:getPixel(pixels, SIZE / 2, 4).r, "and does not reach the top")
         renderer:destroy()
     end)
 
@@ -1396,10 +1344,8 @@ describe("ecs.Renderer", function()
         local pixels = frameOnce(world, renderer)
         -- Exactly the reverse of the unrotated case. Either sign of a quarter
         -- turn produces this, so the test does not depend on the convention.
-        assert.are.equal(0, screen:getPixel(pixels, 4, SIZE / 2).r,
-            "a turned band no longer reaches the left edge")
-        assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, 4).r,
-            "and now reaches the top")
+        assert.are.equal(0, screen:getPixel(pixels, 4, SIZE / 2).r, "a turned band no longer reaches the left edge")
+        assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, 4).r, "and now reaches the top")
         renderer:destroy()
     end)
 
@@ -1415,18 +1361,22 @@ describe("ecs.Renderer", function()
             Renderable()
         )
         local pixels = frameOnce(world, renderer)
-        assert.are.equal(255, screen:getPixel(pixels, 4, SIZE / 2).g,
-            "the turned quad reaches into view and must not be culled")
+        assert.are.equal(
+            255,
+            screen:getPixel(pixels, 4, SIZE / 2).g,
+            "the turned quad reaches into view and must not be culled"
+        )
         renderer:destroy()
     end)
-
 
     it("dispatches to a material supplied in memory", function()
         -- A material is a file, but it does not have to be: this is the same
         -- path a game's own material takes, minus the file. What it proves is
         -- that a material nobody built into the engine reaches the shader.
         materials.reset()
-        materials.define("spec.halfplane", [[
+        materials.define(
+            "spec.halfplane",
+            [[
             MaterialOutput material(MaterialInput frag) {
                 MaterialOutput result;
                 result.albedo = vec4(0.0, 0.0, 1.0, 1.0);
@@ -1434,7 +1384,8 @@ describe("ecs.Renderer", function()
                 result.coverage = -frag.local.x;
                 return result;
             }
-        ]])
+        ]]
+        )
 
         local world, renderer = newScene()
         world:spawn(
@@ -1445,10 +1396,12 @@ describe("ecs.Renderer", function()
         )
 
         local pixels = frameOnce(world, renderer)
-        assert.are.equal(255, screen:getPixel(pixels, 8, SIZE / 2).b,
-            "the kept half must draw in the material's colour")
-        assert.are.equal(0, screen:getPixel(pixels, SIZE - 8, SIZE / 2).b,
-            "and the discarded half must not")
+        assert.are.equal(
+            255,
+            screen:getPixel(pixels, 8, SIZE / 2).b,
+            "the kept half must draw in the material's colour"
+        )
+        assert.are.equal(0, screen:getPixel(pixels, SIZE - 8, SIZE / 2).b, "and the discarded half must not")
         renderer:destroy()
         materials.reset()
     end)
@@ -1472,9 +1425,13 @@ describe("ecs.Renderer", function()
         -- Everything after the default is in sorted order, so the same files
         -- always produce the same numbering.
         local rest = {}
-        for index = 2, #names do rest[#rest + 1] = names[index] end
+        for index = 2, #names do
+            rest[#rest + 1] = names[index]
+        end
         local sorted = {}
-        for index, name in ipairs(rest) do sorted[index] = name end
+        for index, name in ipairs(rest) do
+            sorted[index] = name
+        end
         table.sort(sorted)
         assert.are.same(sorted, rest)
     end)
@@ -1482,17 +1439,17 @@ describe("ecs.Renderer", function()
     it("names what it found when a material is missing", function()
         local ok, reason = pcall(materials.id, "no.such.material")
         assert.is_false(ok)
-        assert.is_truthy(tostring(reason):find("circle", 1, true),
-            "the error should list what is available")
+        assert.is_truthy(tostring(reason):find("circle", 1, true), "the error should list what is available")
     end)
-
 
     it("lets a material opt out of lighting", function()
         -- Ambient is dim, so a lit fragment comes back darkened and an unlit
         -- one does not. With full ambient the two are indistinguishable, which
         -- is why the scene is built dark here rather than reusing the default.
         materials.reset()
-        materials.define("spec.lit", [[
+        materials.define(
+            "spec.lit",
+            [[
             MaterialOutput material(MaterialInput frag) {
                 MaterialOutput result;
                 result.albedo = vec4(1.0, 1.0, 1.0, 1.0);
@@ -1500,8 +1457,11 @@ describe("ecs.Renderer", function()
                 result.lit = 1.0;
                 return result;
             }
-        ]])
-        materials.define("spec.unlit", [[
+        ]]
+        )
+        materials.define(
+            "spec.unlit",
+            [[
             MaterialOutput material(MaterialInput frag) {
                 MaterialOutput result;
                 result.albedo = vec4(1.0, 1.0, 1.0, 1.0);
@@ -1509,7 +1469,8 @@ describe("ecs.Renderer", function()
                 result.lit = 0.0;
                 return result;
             }
-        ]])
+        ]]
+        )
 
         local function draw(material)
             local world, renderer = newScene({ 0.25, 0.25, 0.25 })
@@ -1519,19 +1480,15 @@ describe("ecs.Renderer", function()
                 components.Material(materials.id(material), 0),
                 Renderable()
             )
-            local pixel = screen:getPixel(frameOnce(world, renderer),
-                SIZE / 2, SIZE / 2)
+            local pixel = screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2)
             renderer:destroy()
             return pixel
         end
 
-        assert.are.equal(255, draw("spec.unlit").r,
-            "an unlit material keeps its own colour")
-        assert.is_true(draw("spec.lit").r < 128,
-            "a lit one is darkened by the dim ambient")
+        assert.are.equal(255, draw("spec.unlit").r, "an unlit material keeps its own colour")
+        assert.is_true(draw("spec.lit").r < 128, "a lit one is darkened by the dim ambient")
         materials.reset()
     end)
-
 
     -- The camera is the one place the world-to-clip transform lives, including
     -- the Y flip. These pin that it moves what is drawn and what survives the
@@ -1561,10 +1518,12 @@ describe("ecs.Renderer", function()
         -- Moving the camera left moves the subject right by the same amount.
         renderer.camera.x = renderer.camera.x - SIZE * 0.5
         local pixels = frameOnce(world, renderer)
-        assert.are.equal(255, screen:getPixel(pixels, SIZE * 0.75, SIZE / 2).r,
-            "the subject should have moved with the camera")
-        assert.are.equal(0, screen:getPixel(pixels, SIZE * 0.25, SIZE / 2).r,
-            "and left where it was")
+        assert.are.equal(
+            255,
+            screen:getPixel(pixels, SIZE * 0.75, SIZE / 2).r,
+            "the subject should have moved with the camera"
+        )
+        assert.are.equal(0, screen:getPixel(pixels, SIZE * 0.25, SIZE / 2).r, "and left where it was")
         renderer:destroy()
     end)
 
@@ -1573,17 +1532,19 @@ describe("ecs.Renderer", function()
         -- the camera. If the cull still worked in screen space this would be
         -- rejected before it could draw.
         local world, renderer = newScene()
-        world:spawn(
-            Transform(SIZE * 10, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
-            Tint(0.0, 1.0, 0.0, 1.0),
-            Renderable()
+        world:spawn(Transform(SIZE * 10, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2), Tint(0.0, 1.0, 0.0, 1.0), Renderable())
+        assert.are.equal(
+            0,
+            screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2).g,
+            "not visible before the camera moves"
         )
-        assert.are.equal(0, screen:getPixel(frameOnce(world, renderer),
-            SIZE / 2, SIZE / 2).g, "not visible before the camera moves")
 
         renderer.camera.x = SIZE * 10
-        assert.are.equal(255, screen:getPixel(frameOnce(world, renderer),
-            SIZE / 2, SIZE / 2).g, "visible once the camera looks at it")
+        assert.are.equal(
+            255,
+            screen:getPixel(frameOnce(world, renderer), SIZE / 2, SIZE / 2).g,
+            "visible once the camera looks at it"
+        )
         renderer:destroy()
     end)
 
@@ -1595,13 +1556,11 @@ describe("ecs.Renderer", function()
             Tint(1.0, 0.0, 0.0, 1.0),
             Renderable()
         )
-        local before = screen:getPixel(frameOnce(world, renderer),
-            SIZE / 2 + SIZE * 0.2, SIZE / 2)
+        local before = screen:getPixel(frameOnce(world, renderer), SIZE / 2 + SIZE * 0.2, SIZE / 2)
         assert.are.equal(0, before.r, "outside the square at rest")
 
         renderer.camera.zoom = 2.0
-        local after = screen:getPixel(frameOnce(world, renderer),
-            SIZE / 2 + SIZE * 0.2, SIZE / 2)
+        local after = screen:getPixel(frameOnce(world, renderer), SIZE / 2 + SIZE * 0.2, SIZE / 2)
         assert.are.equal(255, after.r, "inside it once magnified")
         renderer:destroy()
     end)
@@ -1609,14 +1568,12 @@ describe("ecs.Renderer", function()
     it("agrees with itself converting between world and screen", function()
         -- toWorld and toScreen are written out rather than inverted, so the
         -- only thing keeping them consistent is that they round-trip.
-        local camera = Camera.create({ x = 120, y = 80, zoom = 1.5,
-            rotation = 0.7 })
+        local camera = Camera.create({ x = 120, y = 80, zoom = 1.5, rotation = 0.7 })
         local screenX, screenY = camera:toScreen(200, 140, SIZE, SIZE)
         local worldX, worldY = camera:toWorld(screenX, screenY, SIZE, SIZE)
         assert.is_true(math.abs(worldX - 200) < 0.01)
         assert.is_true(math.abs(worldY - 140) < 0.01)
     end)
-
 
     -- Simulation advances in fixed jumps while frames arrive whenever the display
     -- asks for one. An entity moved by a fixed step therefore belongs, on a frame
@@ -1633,14 +1590,15 @@ describe("ecs.Renderer", function()
         --- A world whose body teleports one span to the right per fixed step.
         local function movingScene(span)
             local world = tecs.newWorld()
-            local renderer = Renderer.create(device.handle, FORMAT,
-                { ambient = { 1, 1, 1 }, capacity = 64 })
+            local renderer = Renderer.create(device.handle, FORMAT, { ambient = { 1, 1, 1 }, capacity = 64 })
             renderer:install(world)
 
             local entity = world:spawn(
                 Transform(0, SIZE / 2, 0, 1, 0, 4, SIZE),
-                Tint(1, 1, 1, 1), Renderable(),
-                components.PreviousTransform(0, SIZE / 2, 0))
+                Tint(1, 1, 1, 1),
+                Renderable(),
+                components.PreviousTransform(0, SIZE / 2, 0)
+            )
 
             world:addSystem({
                 name = "spec.Teleport",
@@ -1660,10 +1618,8 @@ describe("ecs.Renderer", function()
             -- lands a quarter of the way into the step that has not run yet, so
             -- it is drawn a quarter of the way along.
             local pixels = frameAt(world, renderer, STEP * 1.25)
-            assert.is_true(screen:getPixel(pixels, SIZE * 0.25, SIZE / 2).r > 200,
-                "a quarter of the way along")
-            assert.is_true(screen:getPixel(pixels, SIZE * 0.75, SIZE / 2).r < 50,
-                "and not three quarters")
+            assert.is_true(screen:getPixel(pixels, SIZE * 0.25, SIZE / 2).r > 200, "a quarter of the way along")
+            assert.is_true(screen:getPixel(pixels, SIZE * 0.75, SIZE / 2).r < 50, "and not three quarters")
             renderer:destroy()
         end)
 
@@ -1686,19 +1642,18 @@ describe("ecs.Renderer", function()
 
         it("leaves an entity without the component alone", function()
             local world = tecs.newWorld()
-            local renderer = Renderer.create(device.handle, FORMAT,
-                { ambient = { 1, 1, 1 }, capacity = 64 })
+            local renderer = Renderer.create(device.handle, FORMAT, { ambient = { 1, 1, 1 }, capacity = 64 })
             renderer:install(world)
-            world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE, SIZE),
-                Tint(1, 1, 1, 1), Renderable())
+            world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE, SIZE), Tint(1, 1, 1, 1), Renderable())
 
             local pixels = frameAt(world, renderer, STEP * 1.5)
-            assert.is_true(screen:getPixel(pixels, SIZE / 2, SIZE / 2).r > 200,
-                "drawn where it is, with no previous transform to blend from")
+            assert.is_true(
+                screen:getPixel(pixels, SIZE / 2, SIZE / 2).r > 200,
+                "drawn where it is, with no previous transform to blend from"
+            )
             renderer:destroy()
         end)
     end)
-
 
     -- Layers are bands of the depth range, and a band never sorts against
     -- another one. That is the guarantee content is authored against: put the
@@ -1707,9 +1662,7 @@ describe("ecs.Renderer", function()
         local layers = require("tecs.gfx.layers")
 
         local function quad(world, x, y, layer, z, r, g, b)
-            world:spawn(
-                Transform(x, y, z, layer, 0, SIZE, SIZE),
-                Tint(r, g, b, 1), Renderable())
+            world:spawn(Transform(x, y, z, layer, 0, SIZE, SIZE), Tint(r, g, b, 1), Renderable())
         end
 
         it("draws a higher layer in front whatever the lower one does", function()
@@ -1735,7 +1688,8 @@ describe("ecs.Renderer", function()
             local pixels = frameOnce(world, renderer)
             assert.is_true(
                 screen:getPixel(pixels, SIZE / 2, SIZE / 2).b > 200,
-                "the entity lower on the screen is in front")
+                "the entity lower on the screen is in front"
+            )
             renderer:destroy()
         end)
 
@@ -1750,7 +1704,8 @@ describe("ecs.Renderer", function()
             local pixels = frameOnce(world, renderer)
             assert.is_true(
                 screen:getPixel(pixels, SIZE / 2, SIZE / 2).b > 200,
-                "greater z is in front when the layer sorts by z")
+                "greater z is in front when the layer sorts by z"
+            )
             layers.configure(2, { sort = "topdown" })
             renderer:destroy()
         end)
@@ -1764,7 +1719,9 @@ describe("ecs.Renderer", function()
             end)
             assert.has_error(function()
                 layers.configure(1, {
-                    sort = "z", screenSpace = true, virtualCoords = true,
+                    sort = "z",
+                    screenSpace = true,
+                    virtualCoords = true,
                 })
             end)
         end)
@@ -1775,9 +1732,7 @@ describe("ecs.Renderer", function()
         -- a feature that changes nothing about where a quad lands is the
         -- failure that gets shipped.
         local function box(world, x, y, layer, size, r, g, b)
-            world:spawn(
-                Transform(x, y, 0, layer, 0, size, size),
-                Tint(r, g, b, 1), Renderable())
+            world:spawn(Transform(x, y, 0, layer, 0, size, size), Tint(r, g, b, 1), Renderable())
         end
 
         it("holds a screen-space layer still while the camera moves", function()
@@ -1795,13 +1750,15 @@ describe("ecs.Renderer", function()
             local pixels = frameOnce(world, renderer)
             layers.configure(3, { sort = "topdown" })
 
-            assert.is_true(screen:getPixel(pixels, SIZE / 4, SIZE / 4).r > 200,
-                "the camera carried the world layer left with it")
-            assert.is_true(screen:getPixel(pixels, SIZE / 2, SIZE / 4).r < 50,
-                "and left nothing where it was")
+            assert.is_true(
+                screen:getPixel(pixels, SIZE / 4, SIZE / 4).r > 200,
+                "the camera carried the world layer left with it"
+            )
+            assert.is_true(screen:getPixel(pixels, SIZE / 2, SIZE / 4).r < 50, "and left nothing where it was")
             assert.is_true(
                 screen:getPixel(pixels, SIZE / 2, SIZE * 0.75).b > 200,
-                "the screen-space layer is where it was put, camera or not")
+                "the screen-space layer is where it was put, camera or not"
+            )
             renderer:destroy()
         end)
 
@@ -1814,21 +1771,22 @@ describe("ecs.Renderer", function()
             box(world, SIZE / 2, SIZE * 0.625, 4, 8, 0, 0, 1)
 
             local before = frameOnce(world, renderer)
-            assert.is_true(screen:getPixel(before, 32, 24).r > 200,
-                "the world layer starts eight pixels across")
-            assert.is_true(screen:getPixel(before, 26, 24).r < 50,
-                "so nothing reaches six pixels out from its centre")
+            assert.is_true(screen:getPixel(before, 32, 24).r > 200, "the world layer starts eight pixels across")
+            assert.is_true(screen:getPixel(before, 26, 24).r < 50, "so nothing reaches six pixels out from its centre")
 
             renderer.camera.zoom = 2.0
             local pixels = frameOnce(world, renderer)
             layers.configure(4, { sort = "topdown" })
 
-            assert.is_true(screen:getPixel(pixels, 26, 16).r > 200,
-                "the world layer doubled and now reaches that far out")
-            assert.is_true(screen:getPixel(pixels, 32, 41).b > 200,
-                "the ignore-zoom layer is still drawn")
-            assert.is_true(screen:getPixel(pixels, 26, 41).b < 50,
-                "and is still eight pixels across, where the zoom left it")
+            assert.is_true(
+                screen:getPixel(pixels, 26, 16).r > 200,
+                "the world layer doubled and now reaches that far out"
+            )
+            assert.is_true(screen:getPixel(pixels, 32, 41).b > 200, "the ignore-zoom layer is still drawn")
+            assert.is_true(
+                screen:getPixel(pixels, 26, 41).b < 50,
+                "and is still eight pixels across, where the zoom left it"
+            )
             renderer:destroy()
         end)
 
@@ -1841,21 +1799,22 @@ describe("ecs.Renderer", function()
             box(world, SIZE / 2, SIZE * 0.75, 1, 8, 1, 0, 0)
 
             local before = frameOnce(world, renderer)
-            assert.is_true(screen:getPixel(before, 32, 16).b > 200,
-                "the parallax layer starts halfway across")
-            assert.is_true(screen:getPixel(before, 32, 48).r > 200,
-                "and so does the layer that moves with the world")
+            assert.is_true(screen:getPixel(before, 32, 16).b > 200, "the parallax layer starts halfway across")
+            assert.is_true(screen:getPixel(before, 32, 48).r > 200, "and so does the layer that moves with the world")
 
             renderer.camera.x = renderer.camera.x + SIZE / 4
             local pixels = frameOnce(world, renderer)
             layers.configure(5, { sort = "topdown" })
 
-            assert.is_true(screen:getPixel(pixels, 16, 48).r > 200,
-                "the world layer moved the whole quarter the camera did")
-            assert.is_true(screen:getPixel(pixels, 24, 16).b > 200,
-                "the parallax layer moved half of it")
-            assert.is_true(screen:getPixel(pixels, 32, 16).b < 50,
-                "which is a move, not a layer that ignored the camera")
+            assert.is_true(
+                screen:getPixel(pixels, 16, 48).r > 200,
+                "the world layer moved the whole quarter the camera did"
+            )
+            assert.is_true(screen:getPixel(pixels, 24, 16).b > 200, "the parallax layer moved half of it")
+            assert.is_true(
+                screen:getPixel(pixels, 32, 16).b < 50,
+                "which is a move, not a layer that ignored the camera"
+            )
             renderer:destroy()
         end)
 
@@ -1872,16 +1831,18 @@ describe("ecs.Renderer", function()
 
             assert.is_true(
                 screen:getPixel(pixels, SIZE / 2, SIZE * 0.75).r > 200,
-                "the unlit layer kept the colour it was tinted")
-            assert.is_true(screen:getPixel(pixels, SIZE / 2, SIZE / 4).r < 50,
-                "and the lit one went to what the lighting resolved")
+                "the unlit layer kept the colour it was tinted"
+            )
+            assert.is_true(
+                screen:getPixel(pixels, SIZE / 2, SIZE / 4).r < 50,
+                "and the lit one went to what the lighting resolved"
+            )
             renderer:destroy()
         end)
 
         it("holds a virtual layer's proportions across target sizes", function()
             local world, renderer = newScene()
-            local half = Texture.create(device.handle,
-                { width = SIZE / 2, height = SIZE / 2, format = FORMAT })
+            local half = Texture.create(device.handle, { width = SIZE / 2, height = SIZE / 2, format = FORMAT })
             local savedWidth = layers.virtualWidth
             local savedHeight = layers.virtualHeight
 
@@ -1899,25 +1860,21 @@ describe("ecs.Renderer", function()
             layers.virtualWidth = savedWidth
             layers.virtualHeight = savedHeight
 
-            assert.is_true(screen:getPixel(wide, 32, 32).b > 200,
-                "the middle of the virtual space is the middle of the target")
-            assert.is_true(screen:getPixel(wide, 18, 32).b > 200,
-                "reaching a quarter of the way in")
-            assert.is_true(screen:getPixel(wide, 13, 32).b < 50,
-                "and no further")
+            assert.is_true(
+                screen:getPixel(wide, 32, 32).b > 200,
+                "the middle of the virtual space is the middle of the target"
+            )
+            assert.is_true(screen:getPixel(wide, 18, 32).b > 200, "reaching a quarter of the way in")
+            assert.is_true(screen:getPixel(wide, 13, 32).b < 50, "and no further")
 
-            assert.is_true(half:getPixel(narrow, 16, 16).b > 200,
-                "and the same on a target half the size")
-            assert.is_true(half:getPixel(narrow, 10, 16).b > 200,
-                "reaching a quarter of that target's width in")
-            assert.is_true(half:getPixel(narrow, 6, 16).b < 50,
-                "and no further, so the layout kept its proportions")
+            assert.is_true(half:getPixel(narrow, 16, 16).b > 200, "and the same on a target half the size")
+            assert.is_true(half:getPixel(narrow, 10, 16).b > 200, "reaching a quarter of that target's width in")
+            assert.is_true(half:getPixel(narrow, 6, 16).b < 50, "and no further, so the layout kept its proportions")
 
             half:destroy()
             renderer:destroy()
         end)
     end)
-
 
     -- A producer draws instances it owns rather than entities. Text is why:
     -- an entity per glyph puts every glyph in one archetype, so editing one
@@ -1927,7 +1884,9 @@ describe("ecs.Renderer", function()
         --- Writes `count` quads in a row, each the colour it is told.
         local function stripe(count, r, g, b)
             local self = { written = {}, dirty = {} }
-            function self:count() return count end
+            function self:count()
+                return count
+            end
             function self:takeDirty()
                 local out = self.dirty
                 self.dirty = {}
@@ -1966,8 +1925,7 @@ describe("ecs.Renderer", function()
             renderer:addProducer(producer)
 
             local pixels = frameOnce(world, renderer)
-            assert.is_true(screen:getPixel(pixels, SIZE / 2, SIZE / 2).r > 200,
-                "the producer's instances are drawn")
+            assert.is_true(screen:getPixel(pixels, SIZE / 2, SIZE / 2).r > 200, "the producer's instances are drawn")
             assert.are.equal(4, renderer.count)
             renderer:destroy()
         end)
@@ -1984,8 +1942,7 @@ describe("ecs.Renderer", function()
             producer.dirty = { 3, 4 }
             frameOnce(world, renderer)
 
-            assert.are.same({ 3, 4 }, producer.written,
-                "a changed pair, not the whole run")
+            assert.are.same({ 3, 4 }, producer.written, "a changed pair, not the whole run")
             renderer:destroy()
         end)
 
@@ -1997,25 +1954,21 @@ describe("ecs.Renderer", function()
 
             producer.written = {}
             frameOnce(world, renderer)
-            assert.are.equal(0, #producer.written,
-                "an unchanged producer costs nothing")
+            assert.are.equal(0, #producer.written, "an unchanged producer costs nothing")
             renderer:destroy()
         end)
 
         it("lays a producer out after the entities", function()
             local world, renderer = newScene()
-            world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, 4, 4),
-                Tint(1, 1, 1, 1), Renderable())
+            world:spawn(Transform(SIZE / 2, SIZE / 2, 0, 1, 0, 4, 4), Tint(1, 1, 1, 1), Renderable())
             local producer = stripe(3, 1.0, 1.0, 0.0)
             renderer:addProducer(producer)
 
             frameOnce(world, renderer)
-            assert.are.equal(4, renderer.count,
-                "one entity plus three produced instances")
+            assert.are.equal(4, renderer.count, "one entity plus three produced instances")
             renderer:destroy()
         end)
     end)
-
 
     -- A clip region is a rectangle in target pixels and an index the instance
     -- carries, and the fragment throws away what falls outside. That is what a
@@ -2034,11 +1987,16 @@ describe("ecs.Renderer", function()
             if clip == nil then
                 return world:spawn(
                     Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
-                    Tint(r, g, b, 1.0), Renderable())
+                    Tint(r, g, b, 1.0),
+                    Renderable()
+                )
             end
             return world:spawn(
                 Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
-                Tint(r, g, b, 1.0), Clip(clip), Renderable())
+                Tint(r, g, b, 1.0),
+                Clip(clip),
+                Renderable()
+            )
         end
 
         it("packs a region and a layer into one exact float", function()
@@ -2050,30 +2008,21 @@ describe("ecs.Renderer", function()
             assert.are.equal(16383, packed, "the largest value the pair packs")
             assert.are.equal(top, math.floor(packed / stride))
             assert.are.equal(stride - 1, packed % stride)
-            assert.are.equal(9, instancelayout.packSlot(0, 9),
-                "region zero packs to the layer unchanged")
+            assert.are.equal(9, instancelayout.packSlot(0, 9), "region zero packs to the layer unchanged")
         end)
 
         it("keeps a clipped instance inside its region", function()
             local world, renderer = newScene()
             -- The top-left quarter, so both axes are pinned and a flipped Y
             -- shows up as ink in the wrong corner rather than as no ink.
-            renderer:setClipRegion(1,
-                { x = 0, y = 0, width = SIZE / 2, height = SIZE / 2 })
+            renderer:setClipRegion(1, { x = 0, y = 0, width = SIZE / 2, height = SIZE / 2 })
             fill(world, 1.0, 0.0, 0.0, 1)
 
             local pixels = frameOnce(world, renderer)
-            assert.are.equal(255,
-                screen:getPixel(pixels, SIZE / 4, SIZE / 4).r,
-                "inside the region")
-            assert.are.equal(0,
-                screen:getPixel(pixels, SIZE * 3 / 4, SIZE / 4).r,
-                "and nothing to the right of it")
-            assert.are.equal(0,
-                screen:getPixel(pixels, SIZE / 4, SIZE * 3 / 4).r,
-                "nor below it")
-            assert.are.equal(0,
-                screen:getPixel(pixels, SIZE * 3 / 4, SIZE * 3 / 4).r)
+            assert.are.equal(255, screen:getPixel(pixels, SIZE / 4, SIZE / 4).r, "inside the region")
+            assert.are.equal(0, screen:getPixel(pixels, SIZE * 3 / 4, SIZE / 4).r, "and nothing to the right of it")
+            assert.are.equal(0, screen:getPixel(pixels, SIZE / 4, SIZE * 3 / 4).r, "nor below it")
+            assert.are.equal(0, screen:getPixel(pixels, SIZE * 3 / 4, SIZE * 3 / 4).r)
 
             -- Still one instance: clipping happens a fragment at a time and
             -- the cull knows nothing about it.
@@ -2083,10 +2032,8 @@ describe("ecs.Renderer", function()
 
         it("clips instances in different regions independently", function()
             local world, renderer = newScene()
-            renderer:setClipRegion(1,
-                { x = 0, y = 0, width = SIZE / 2, height = SIZE })
-            renderer:setClipRegion(2,
-                { x = SIZE / 2, y = 0, width = SIZE / 2, height = SIZE })
+            renderer:setClipRegion(1, { x = 0, y = 0, width = SIZE / 2, height = SIZE })
+            renderer:setClipRegion(2, { x = SIZE / 2, y = 0, width = SIZE / 2, height = SIZE })
             fill(world, 1.0, 0.0, 0.0, 1)
             fill(world, 0.0, 1.0, 0.0, 2)
 
@@ -2110,41 +2057,45 @@ describe("ecs.Renderer", function()
 
             local pixels = frameOnce(world, renderer)
             assert.are.equal(255, screen:getPixel(pixels, 2, 2).b)
-            assert.are.equal(255,
-                screen:getPixel(pixels, SIZE / 2, SIZE / 2).b,
-                "region zero is not a region")
-            assert.are.equal(255,
-                screen:getPixel(pixels, SIZE - 2, SIZE - 2).b)
+            assert.are.equal(255, screen:getPixel(pixels, SIZE / 2, SIZE / 2).b, "region zero is not a region")
+            assert.are.equal(255, screen:getPixel(pixels, SIZE - 2, SIZE - 2).b)
             renderer:destroy()
         end)
 
         it("stops clipping when a region is cleared", function()
             local world, renderer = newScene()
-            renderer:setClipRegion(3,
-                { x = 0, y = 0, width = SIZE / 2, height = SIZE })
+            renderer:setClipRegion(3, { x = 0, y = 0, width = SIZE / 2, height = SIZE })
             fill(world, 1.0, 0.0, 0.0, 3)
-            assert.are.equal(0,
-                screen:getPixel(frameOnce(world, renderer),
-                    SIZE * 3 / 4, SIZE / 2).r,
-                "clipped while the region holds a rectangle")
+            assert.are.equal(
+                0,
+                screen:getPixel(frameOnce(world, renderer), SIZE * 3 / 4, SIZE / 2).r,
+                "clipped while the region holds a rectangle"
+            )
 
             renderer:clearClipRegion(3)
-            assert.are.equal(255,
-                screen:getPixel(frameOnce(world, renderer),
-                    SIZE * 3 / 4, SIZE / 2).r,
-                "and whole once it does not, rather than gone")
+            assert.are.equal(
+                255,
+                screen:getPixel(frameOnce(world, renderer), SIZE * 3 / 4, SIZE / 2).r,
+                "and whole once it does not, rather than gone"
+            )
             renderer:destroy()
         end)
 
         it("refuses a region index outside the table", function()
             local _, renderer = newScene()
             local rect = { x = 0, y = 0, width = 1, height = 1 }
-            assert.is_false(pcall(function()
-                renderer:setClipRegion(0, rect)
-            end), "region zero means no clipping and cannot be set")
-            assert.is_false(pcall(function()
-                renderer:setClipRegion(256, rect)
-            end), "and the table ends at 255")
+            assert.is_false(
+                pcall(function()
+                    renderer:setClipRegion(0, rect)
+                end),
+                "region zero means no clipping and cannot be set"
+            )
+            assert.is_false(
+                pcall(function()
+                    renderer:setClipRegion(256, rect)
+                end),
+                "and the table ends at 255"
+            )
             renderer:destroy()
         end)
 
@@ -2181,7 +2132,9 @@ describe("ecs.Renderer", function()
                     Tint(0.0, 1.0, 0.0, 1.0),
                     text.Text.new({ text = "MM", font = font, size = 52 }),
                 }
-                if clip ~= nil then parts[#parts + 1] = Clip(clip) end
+                if clip ~= nil then
+                    parts[#parts + 1] = Clip(clip)
+                end
                 world:spawn(table.unpack(parts))
                 return world, renderer
             end
@@ -2190,26 +2143,20 @@ describe("ecs.Renderer", function()
             -- the clip rather than about where the glyphs happened to land.
             local world, renderer = scene(nil)
             local whole = settle(world, renderer)
-            assert.is_true(ink(whole, 0, SIZE / 2) > 0,
-                "the text should reach the left half")
-            assert.is_true(ink(whole, SIZE / 2, SIZE) > 0,
-                "and the right half")
+            assert.is_true(ink(whole, 0, SIZE / 2) > 0, "the text should reach the left half")
+            assert.is_true(ink(whole, SIZE / 2, SIZE) > 0, "and the right half")
             renderer:destroy()
 
             local clipped, clippedRenderer = scene(4)
-            clippedRenderer:setClipRegion(4,
-                { x = 0, y = 0, width = SIZE / 2, height = SIZE })
+            clippedRenderer:setClipRegion(4, { x = 0, y = 0, width = SIZE / 2, height = SIZE })
             local pixels = settle(clipped, clippedRenderer)
 
-            assert.is_true(ink(pixels, 0, SIZE / 2) > 0,
-                "a clipped text still draws inside its region")
-            assert.are.equal(0, ink(pixels, SIZE / 2, SIZE),
-                "and a glyph is clipped the same way an entity is")
+            assert.is_true(ink(pixels, 0, SIZE / 2) > 0, "a clipped text still draws inside its region")
+            assert.are.equal(0, ink(pixels, SIZE / 2, SIZE), "and a glyph is clipped the same way an entity is")
             clippedRenderer:destroy()
         end)
 
-        it("keeps the array layer a sprite named when a region rides with it",
-            function()
+        it("keeps the array layer a sprite named when a region rides with it", function()
             -- This is the regression the packing risks. `origin.z` carries the
             -- texture-array layer and the clip index in one float, so a shader
             -- reading it as a bare layer would sample layer 7 * 64 + n, which
@@ -2218,11 +2165,9 @@ describe("ecs.Renderer", function()
             renderer:registerImage(solid("spec://clipred", 255, 0, 0))
             renderer:registerImage(solid("spec://clipgreen", 0, 255, 0))
             local green = renderer:sprite("spec://clipgreen")
-            assert.is_true(green.slot > 0,
-                "the image must not be on the white default layer")
+            assert.is_true(green.slot > 0, "the image must not be on the white default layer")
 
-            renderer:setClipRegion(7,
-                { x = 0, y = 0, width = SIZE / 2, height = SIZE })
+            renderer:setClipRegion(7, { x = 0, y = 0, width = SIZE / 2, height = SIZE })
             world:spawn(
                 Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
                 Tint(1.0, 1.0, 1.0, 1.0),
@@ -2234,15 +2179,15 @@ describe("ecs.Renderer", function()
             local pixels = frameOnce(world, renderer)
             local inside = screen:getPixel(pixels, SIZE / 4, SIZE / 2)
 
-            assert.are.equal(255, inside.g,
-                "the sprite still samples the layer its name resolved to")
+            assert.are.equal(255, inside.g, "the sprite still samples the layer its name resolved to")
             assert.are.equal(0, inside.r, "and not the other image")
             assert.are.equal(0, inside.b, "nor the white default layer")
-            assert.are.equal(0,
+            assert.are.equal(
+                0,
                 screen:getPixel(pixels, SIZE * 3 / 4, SIZE / 2).g,
-                "and the region packed beside it still clips")
+                "and the region packed beside it still clips"
+            )
             renderer:destroy()
         end)
     end)
-
 end)

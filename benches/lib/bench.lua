@@ -28,7 +28,7 @@ local ffi = require("ffi")
 -- High-resolution monotonic clock via clock_gettime. os.clock() has ~1μs resolution
 -- on macOS which is too coarse for small iteration measurements. clock_gettime gives
 -- ~40ns resolution on typical hardware.
-ffi.cdef[[
+ffi.cdef [[
 struct bench_timespec { int64_t tv_sec; long tv_nsec; };
 int clock_gettime(int clk_id, struct bench_timespec *tp);
 ]]
@@ -45,7 +45,7 @@ end
 -- pressure. Sized for the max expected iteration count; reused across variants/cases.
 local MAX_TIMING_SAMPLES = 100000
 local _timesBuf = ffi.new("double[?]", MAX_TIMING_SAMPLES)
-local _sortBuf = {}  -- plain Lua table for sorting; table.sort works on Lua arrays
+local _sortBuf = {} -- plain Lua table for sorting; table.sort works on Lua arrays
 
 local bench = {}
 
@@ -63,11 +63,11 @@ local function measure(variant, case, minDuration, maxWall, microIterations, tra
     local iterations = 0
     local elapsed = 0
     local walltimeStart = now()
-    while elapsed < minDuration
-        and (now() - walltimeStart) < maxWall
-        and iterations < MAX_TIMING_SAMPLES do
+    while elapsed < minDuration and (now() - walltimeStart) < maxWall and iterations < MAX_TIMING_SAMPLES do
         local state
-        if setup then state = setup(case) end
+        if setup then
+            state = setup(case)
+        end
 
         -- Drain garbage from prior iterations (and the setup just above) so
         -- the timed window only pays GC costs that this iteration's own
@@ -80,15 +80,21 @@ local function measure(variant, case, minDuration, maxWall, microIterations, tra
         -- GC cleanup, and teardown don't contribute abort events. Caller
         -- passes a paused session; we resume just before the clock starts
         -- and pause again immediately after.
-        if traceSession then traceSession:resume() end
+        if traceSession then
+            traceSession:resume()
+        end
         local startTime = now()
         for _ = 1, microIterations do
             run(state, case)
         end
         local endTime = now()
-        if traceSession then traceSession:pause() end
+        if traceSession then
+            traceSession:pause()
+        end
 
-        if teardown then teardown(state) end
+        if teardown then
+            teardown(state)
+        end
 
         _timesBuf[iterations] = (endTime - startTime) / microIterations
         iterations = iterations + 1
@@ -125,8 +131,12 @@ local function measure(variant, case, minDuration, maxWall, microIterations, tra
     -- Percentile index: ceil(p * n), clamped to [1, n]
     local function pct(p)
         local idx = math.ceil(p * iterations)
-        if idx < 1 then idx = 1 end
-        if idx > iterations then idx = iterations end
+        if idx < 1 then
+            idx = 1
+        end
+        if idx > iterations then
+            idx = iterations
+        end
         return _sortBuf[idx]
     end
 
@@ -189,14 +199,18 @@ end
 -- headers can pass separatorRow=3 (or higher) and supply a placeholder row
 -- whose content will be replaced with dashes.
 local function printTable(rows, separatorRow)
-    if #rows == 0 then return end
+    if #rows == 0 then
+        return
+    end
     separatorRow = separatorRow or 2
 
     local widths = {}
     for _, row in ipairs(rows) do
         for col, cell in ipairs(row) do
             local w = displayWidth(cell)
-            if not widths[col] or w > widths[col] then widths[col] = w end
+            if not widths[col] or w > widths[col] then
+                widths[col] = w
+            end
         end
     end
 
@@ -216,7 +230,9 @@ end
 -- Sanitize a name for use in a file path.
 local function slug(name)
     local s = name:gsub("[^%w%-]+", "_"):gsub("^_+", ""):gsub("_+$", "")
-    if s == "" then return "unnamed" end
+    if s == "" then
+        return "unnamed"
+    end
     return s
 end
 
@@ -249,10 +265,16 @@ function bench.suite(config)
     -- is preserved as-is (scenarios that read `case.data.count` still work).
     -- When `parameters.count` is set, it overrides `case.data.count` per run.
     local function coerce(s)
-        if s == "true" then return true end
-        if s == "false" then return false end
+        if s == "true" then
+            return true
+        end
+        if s == "false" then
+            return false
+        end
         local n = tonumber(s)
-        if n ~= nil then return n end
+        if n ~= nil then
+            return n
+        end
         return s
     end
 
@@ -262,20 +284,23 @@ function bench.suite(config)
             local params = case.parameters
             local paramKeys = {}
             if params then
-                for k in pairs(params) do paramKeys[#paramKeys + 1] = k end
+                for k in pairs(params) do
+                    paramKeys[#paramKeys + 1] = k
+                end
                 table.sort(paramKeys)
             end
 
-            local combos = {{}}
+            local combos = { {} }
             for _, key in ipairs(paramKeys) do
                 local values = params[key]
-                assert(type(values) == "table" and #values > 0,
-                    "parameters." .. key .. " must be a non-empty list")
+                assert(type(values) == "table" and #values > 0, "parameters." .. key .. " must be a non-empty list")
                 local next = {}
                 for _, combo in ipairs(combos) do
                     for _, v in ipairs(values) do
                         local copy = {}
-                        for kk, vv in pairs(combo) do copy[kk] = vv end
+                        for kk, vv in pairs(combo) do
+                            copy[kk] = vv
+                        end
                         copy[key] = v
                         next[#next + 1] = copy
                     end
@@ -296,9 +321,13 @@ function bench.suite(config)
                 -- nothing sets `count` in parameters.
                 local data = {}
                 if case.data then
-                    for k, v in pairs(case.data) do data[k] = v end
+                    for k, v in pairs(case.data) do
+                        data[k] = v
+                    end
                 end
-                for k, v in pairs(combo) do data[k] = v end
+                for k, v in pairs(combo) do
+                    data[k] = v
+                end
                 expanded[#expanded + 1] = {
                     name = name,
                     scenario = case.scenario,
@@ -331,8 +360,10 @@ function bench.suite(config)
     if caseFilterEnv ~= nil and caseFilterEnv ~= "" then
         caseFilter = tonumber(caseFilterEnv)
         assert(caseFilter, "CASE must be a number, got: " .. caseFilterEnv)
-        assert(caseFilter >= 1 and caseFilter <= #config.cases,
-            string.format("CASE=%d out of range (1..%d)", caseFilter, #config.cases))
+        assert(
+            caseFilter >= 1 and caseFilter <= #config.cases,
+            string.format("CASE=%d out of range (1..%d)", caseFilter, #config.cases)
+        )
     end
 
     local paramsFilter
@@ -354,7 +385,9 @@ function bench.suite(config)
         variantFilter = {}
         for name in variantFilterEnv:gmatch("[^,]+") do
             local trimmed = name:match("^%s*(.-)%s*$")
-            if trimmed ~= "" then variantFilter[trimmed] = true end
+            if trimmed ~= "" then
+                variantFilter[trimmed] = true
+            end
         end
     end
 
@@ -371,17 +404,21 @@ function bench.suite(config)
     local childCaseEnv = os.getenv("BENCH_CHILD_CASE")
     if os.getenv("BENCH_CHILD") == "1" and childCaseEnv and childCaseEnv ~= "" then
         local idx = tonumber(childCaseEnv)
-        assert(idx and idx >= 1 and idx <= #allCases,
-            "BENCH_CHILD_CASE out of range: " .. tostring(childCaseEnv))
+        assert(idx and idx >= 1 and idx <= #allCases, "BENCH_CHILD_CASE out of range: " .. tostring(childCaseEnv))
         cases[1] = allCases[idx]
         caseIdxMap[1] = idx
     else
         for i, case in ipairs(allCases) do
             local ok = true
-            if caseFilter and case.baseIdx ~= caseFilter then ok = false end
+            if caseFilter and case.baseIdx ~= caseFilter then
+                ok = false
+            end
             if ok and paramsFilter then
                 for k, v in pairs(paramsFilter) do
-                    if case.params[k] ~= v then ok = false; break end
+                    if case.params[k] ~= v then
+                        ok = false
+                        break
+                    end
                 end
             end
             if ok then
@@ -403,7 +440,10 @@ function bench.suite(config)
         for name in pairs(variantFilter) do
             local found = false
             for _, v in ipairs(variants) do
-                if v.name == name then found = true; break end
+                if v.name == name then
+                    found = true
+                    break
+                end
             end
             assert(found, "BENCH_VARIANTS includes unknown variant: " .. name)
         end
@@ -433,7 +473,9 @@ function bench.suite(config)
     -- a per-permutation suffix (the slug of the expanded case name, which
     -- includes the `[k=v, k=v]` param stamp).
     local sampleRaw = os.getenv("SAMPLE") or os.getenv("BENCH_PROFILE_DIR")
-    if sampleRaw == "" then sampleRaw = nil end
+    if sampleRaw == "" then
+        sampleRaw = nil
+    end
     if sampleRaw == "true" or sampleRaw == "1" then
         local base = os.tmpname()
         os.remove(base)
@@ -441,7 +483,9 @@ function bench.suite(config)
     end
     local sampleIntervalMs = tonumber(os.getenv("SAMPLE_INTERVAL_MS") or "1")
     local sampleZone = os.getenv("SAMPLE_ZONE")
-    if sampleZone == "" then sampleZone = nil end
+    if sampleZone == "" then
+        sampleZone = nil
+    end
 
     -- Resolve the output path for the pair currently being profiled. When
     -- SAMPLE is a file path (basename contains a dot), use it directly for a
@@ -484,10 +528,8 @@ function bench.suite(config)
     local isChild = os.getenv("BENCH_CHILD") == "1"
 
     if isChild then
-        assert(#cases == 1,
-            "BENCH_CHILD=1 requires BENCH_CHILD_CASE to resolve to exactly one case")
-        assert(#variants == 1,
-            "BENCH_CHILD=1 requires BENCH_VARIANTS to resolve to exactly one variant")
+        assert(#cases == 1, "BENCH_CHILD=1 requires BENCH_CHILD_CASE to resolve to exactly one case")
+        assert(#variants == 1, "BENCH_CHILD=1 requires BENCH_VARIANTS to resolve to exactly one variant")
 
         local case = cases[1]
         local variant = variants[1]
@@ -500,9 +542,13 @@ function bench.suite(config)
         end
         for _ = 1, warmupIterations do
             local warmState
-            if variant.setup then warmState = variant.setup(case) end
+            if variant.setup then
+                warmState = variant.setup(case)
+            end
             variant.run(warmState, case)
-            if variant.teardown then variant.teardown(warmState) end
+            if variant.teardown then
+                variant.teardown(warmState)
+            end
         end
 
         -- Optional JIT trace diagnostics, scoped to the measurement phase.
@@ -518,7 +564,7 @@ function bench.suite(config)
         local traceSession
         if traceMode == "1" or traceMode == "v" then
             local profile = require("tecs.utils.profile")
-            traceSession = profile.trace({includeBenign = traceMode == "v"})
+            traceSession = profile.trace({ includeBenign = traceMode == "v" })
             -- Start paused so setup/teardown/GC between measured iterations
             -- don't pollute the aggregated report. measure() resumes and
             -- pauses around each timed run() window.
@@ -536,16 +582,24 @@ function bench.suite(config)
         if traceSession then
             local report = traceSession:stop()
             if report.totalAborts > 0 or report.blacklisted > 0 then
-                io.stderr:write(string.format(
-                    "--- TRACE report (case '%s', variant '%s'): %d aborts, %d blacklisted in %.2fs ---\n",
-                    case.name, variant.name,
-                    report.totalAborts, report.blacklisted, report.durationSec))
+                io.stderr:write(
+                    string.format(
+                        "--- TRACE report (case '%s', variant '%s'): %d aborts, %d blacklisted in %.2fs ---\n",
+                        case.name,
+                        variant.name,
+                        report.totalAborts,
+                        report.blacklisted,
+                        report.durationSec
+                    )
+                )
                 io.stderr:write(tostring(report))
                 io.stderr:write("--- end TRACE report ---\n")
                 io.stderr:flush()
             end
         end
-        if traceMode == "dump" then require("jit.dump").off() end
+        if traceMode == "dump" then
+            require("jit.dump").off()
+        end
 
         -- Optional sampling pass: produce a collapsed-stack profile covering
         -- just the run() windows. Uses profile.sample with pause/resume so
@@ -560,7 +614,9 @@ function bench.suite(config)
 
             for _ = 1, r.iterations do
                 local state
-                if variant.setup then state = variant.setup(case) end
+                if variant.setup then
+                    state = variant.setup(case)
+                end
                 -- Match measure()'s behavior so sampling isn't skewed by
                 -- cross-iteration GC cleanup.
                 collectgarbage("collect")
@@ -569,7 +625,9 @@ function bench.suite(config)
                     variant.run(state, case)
                 end
                 sampleSession:pause()
-                if variant.teardown then variant.teardown(state) end
+                if variant.teardown then
+                    variant.teardown(state)
+                end
             end
 
             -- Use the parent's total-pair count when running as a child. The
@@ -587,7 +645,9 @@ function bench.suite(config)
         local memKb = 0
         do
             local state
-            if variant.setup then state = variant.setup(case) end
+            if variant.setup then
+                state = variant.setup(case)
+            end
             collectgarbage("collect")
             collectgarbage("collect")
             local memBefore = collectgarbage("count")
@@ -595,7 +655,9 @@ function bench.suite(config)
                 variant.run(state, case)
             end
             memKb = collectgarbage("count") - memBefore
-            if variant.teardown then variant.teardown(state) end
+            if variant.teardown then
+                variant.teardown(state)
+            end
         end
 
         -- Emit result line for the parent via the BENCH_RESULT_FILE the
@@ -603,26 +665,50 @@ function bench.suite(config)
         -- jit.v, tracebacks) to pass through to the terminal unmolested.
         -- %.17g preserves full double precision so aggregation in the parent
         -- is bit-identical to what we measured here.
-        local resultPath = assert(os.getenv("BENCH_RESULT_FILE"),
-            "BENCH_CHILD=1 requires BENCH_RESULT_FILE to point at a writable path")
+        local resultPath = assert(
+            os.getenv("BENCH_RESULT_FILE"),
+            "BENCH_CHILD=1 requires BENCH_RESULT_FILE to point at a writable path"
+        )
         local rf = assert(io.open(resultPath, "w"))
-        rf:write(string.format(
-            "__BENCH_RESULT__ min=%.17g p50=%.17g p90=%.17g p99=%.17g mean=%.17g stdev=%.17g ci95=%.17g max=%.17g n=%d memKb=%.17g\n",
-            r.min, r.p50, r.p90, r.p99, r.mean, r.stdev, r.ci95, r.max, r.iterations, memKb))
+        rf:write(
+            string.format(
+                "__BENCH_RESULT__ min=%.17g p50=%.17g p90=%.17g p99=%.17g mean=%.17g stdev=%.17g ci95=%.17g max=%.17g n=%d memKb=%.17g\n",
+                r.min,
+                r.p50,
+                r.p90,
+                r.p99,
+                r.mean,
+                r.stdev,
+                r.ci95,
+                r.max,
+                r.iterations,
+                memKb
+            )
+        )
         rf:close()
         return
     end
 
     -- Parent mode: print header and orchestrate child processes.
     print("\n## " .. config.name .. "\n")
-    print(string.format(
-        "Warmup: %d iterations | Measured: adaptive (min %.1fs, max %.1fs wall) | Micro: %d run/iter",
-        warmupIterations, minDuration, maxDuration, microIterations))
+    print(
+        string.format(
+            "Warmup: %d iterations | Measured: adaptive (min %.1fs, max %.1fs wall) | Micro: %d run/iter",
+            warmupIterations,
+            minDuration,
+            maxDuration,
+            microIterations
+        )
+    )
     if sampleRaw then
-        print(string.format("Sampling: %s (interval=%dms%s)",
-            sampleRaw,
-            sampleIntervalMs,
-            sampleZone and (", zone=" .. sampleZone) or ""))
+        print(
+            string.format(
+                "Sampling: %s (interval=%dms%s)",
+                sampleRaw,
+                sampleIntervalMs,
+                sampleZone and (", zone=" .. sampleZone) or ""
+            )
+        )
     end
     print("Isolation: fresh LuaJIT process per (case, variant)\n")
 
@@ -675,7 +761,8 @@ function bench.suite(config)
                 shellEscape(resultFile),
                 totalPairs,
                 shellEscape(luajit),
-                shellEscape(arg[0]))
+                shellEscape(arg[0])
+            )
 
             local childStart = now()
             local ok = os.execute(cmd)
@@ -683,14 +770,22 @@ function bench.suite(config)
 
             local rf = io.open(resultFile, "r")
             local line = rf and rf:read("*l") or nil
-            if rf then rf:close() end
+            if rf then
+                rf:close()
+            end
             os.remove(resultFile)
 
             if not line or not line:find("__BENCH_RESULT__", 1, true) then
-                io.write("\n"); io.flush()
-                error(string.format(
-                    "bench: child did not emit a result line (exit=%s, case='%s', variant='%s')",
-                    tostring(ok), case.name, variant.name))
+                io.write("\n")
+                io.flush()
+                error(
+                    string.format(
+                        "bench: child did not emit a result line (exit=%s, case='%s', variant='%s')",
+                        tostring(ok),
+                        case.name,
+                        variant.name
+                    )
+                )
             end
 
             local r = {}
@@ -701,10 +796,11 @@ function bench.suite(config)
 
             -- Stream this variant's result inline. Winner info is appended
             -- once all variants for the case have reported p50.
-            if not first then io.write(" | ") end
+            if not first then
+                io.write(" | ")
+            end
             first = false
-            io.write(string.format("%s[p50=%s, t=%.1fs]",
-                variant.name, formatTimeUs(r.p50), childDuration))
+            io.write(string.format("%s[p50=%s, t=%.1fs]", variant.name, formatTimeUs(r.p50), childDuration))
             io.flush()
         end
 
@@ -742,25 +838,38 @@ function bench.suite(config)
     -- and digits line up vertically inside each variant's column.
     local cellWidths = {}
     for _, variant in ipairs(variants) do
-        local mw, pw, qw, sw = 3, 3, 3, 1  -- min widths for "min", "p50", "p99", "±ci95"
+        local mw, pw, qw, sw = 3, 3, 3, 1 -- min widths for "min", "p50", "p99", "±ci95"
         for _, case in ipairs(cases) do
             local r = results[variant.name][case.name]
             local ms = formatTimeUs(r.min)
             local ps = formatTimeUs(r.p50)
             local qs = formatTimeUs(r.p99)
             local ss = formatTimeUs(r.ci95 or r.stdev)
-            if #ms > mw then mw = #ms end
-            if #ps > pw then pw = #ps end
-            if #qs > qw then qw = #qs end
-            if #ss > sw then sw = #ss end
+            if #ms > mw then
+                mw = #ms
+            end
+            if #ps > pw then
+                pw = #ps
+            end
+            if #qs > qw then
+                qw = #qs
+            end
+            if #ss > sw then
+                sw = #ss
+            end
         end
-        cellWidths[variant.name] = {min = mw, p50 = pw, p99 = qw, ci = sw}
+        cellWidths[variant.name] = { min = mw, p50 = pw, p99 = qw, ci = sw }
     end
 
     local function formatCell(variantName, minStr, p50Str, ciStr, p99Str)
         local w = cellWidths[variantName]
-        return string.format("%" .. w.min .. "s  %" .. w.p50 .. "s ±%" .. w.ci .. "s  %" .. w.p99 .. "s",
-            minStr, p50Str, ciStr, p99Str)
+        return string.format(
+            "%" .. w.min .. "s  %" .. w.p50 .. "s ±%" .. w.ci .. "s  %" .. w.p99 .. "s",
+            minStr,
+            p50Str,
+            ciStr,
+            p99Str
+        )
     end
 
     -- Two-row header: variant names, then sub-headers labeling each sub-column.
@@ -768,8 +877,8 @@ function bench.suite(config)
     -- read it off the table and pass it back via CASE=<n> for targeted re-runs.
     -- Trailing "Winner" column (only when >1 variant) shows the fastest variant
     -- and the percent it beats the runner-up by, e.g. "tecs -37%".
-    local header = {"#", "Test"}
-    local subHeader = {"", ""}
+    local header = { "#", "Test" }
+    local subHeader = { "", "" }
     for _, variant in ipairs(variants) do
         header[#header + 1] = variant.name
         subHeader[#subHeader + 1] = formatCell(variant.name, "min", "p50", "ci95", "p99")
@@ -779,8 +888,10 @@ function bench.suite(config)
         subHeader[#subHeader + 1] = ""
     end
 
-    local rows = {header, subHeader, {}}
-    for i = 1, #header do rows[3][i] = "" end  -- placeholder; printTable replaces with dashes
+    local rows = { header, subHeader, {} }
+    for i = 1, #header do
+        rows[3][i] = ""
+    end -- placeholder; printTable replaces with dashes
 
     for _, case in ipairs(cases) do
         local winnerName, winnerP50 = nil, math.huge
@@ -798,14 +909,16 @@ function bench.suite(config)
             end
         end
 
-        local row = {tostring(case.baseIdx), case.name}
+        local row = { tostring(case.baseIdx), case.name }
         for _, variant in ipairs(variants) do
             local r = results[variant.name][case.name]
-            local timeStr = formatCell(variant.name,
+            local timeStr = formatCell(
+                variant.name,
                 formatTimeUs(r.min),
                 formatTimeUs(r.p50),
                 formatTimeUs(r.ci95 or r.stdev),
-                formatTimeUs(r.p99))
+                formatTimeUs(r.p99)
+            )
             row[#row + 1] = timeStr
         end
         if hasMultipleVariants then
@@ -837,23 +950,23 @@ function bench.suite(config)
 
         print("\n### Summary (geometric mean vs " .. config.baseline .. ")\n")
 
-        local summaryRows = {{"Variant", "vs " .. config.baseline}, {"-", "-"}}
+        local summaryRows = { { "Variant", "vs " .. config.baseline }, { "-", "-" } }
         for _, variant in ipairs(variants) do
             if variant.name == config.baseline then
-                summaryRows[#summaryRows + 1] = {variant.name, "baseline"}
+                summaryRows[#summaryRows + 1] = { variant.name, "baseline" }
             else
                 -- Group by baseIdx so each base case declaration carries equal
                 -- weight regardless of how many parameter expansions it has.
                 -- Per base case we geomean across its expansions, then geomean
                 -- across base cases for the overall ratio.
-                local perBase = {}  -- baseIdx → {product, count}
+                local perBase = {} -- baseIdx → {product, count}
                 for _, case in ipairs(cases) do
                     local baselineP50 = results[config.baseline][case.name].p50
                     local variantP50 = results[variant.name][case.name].p50
                     if baselineP50 > 0 and variantP50 > 0 then
                         local b = perBase[case.baseIdx]
                         if not b then
-                            b = {product = 1.0, count = 0}
+                            b = { product = 1.0, count = 0 }
                             perBase[case.baseIdx] = b
                         end
                         b.product = b.product * (baselineP50 / variantP50)
@@ -875,7 +988,7 @@ function bench.suite(config)
                 else
                     label = "same"
                 end
-                summaryRows[#summaryRows + 1] = {variant.name, label}
+                summaryRows[#summaryRows + 1] = { variant.name, label }
             end
         end
         printTable(summaryRows)
@@ -891,7 +1004,9 @@ function bench.suite(config)
                 break
             end
         end
-        if hasMemory then break end
+        if hasMemory then
+            break
+        end
     end
 
     if hasMemory then
@@ -907,15 +1022,17 @@ function bench.suite(config)
             end
         end
 
-        local memHeader = {"#", "Test"}
+        local memHeader = { "#", "Test" }
         for _, variant in ipairs(variants) do
             memHeader[#memHeader + 1] = variant.name
         end
-        local memRows = {memHeader, {}}
-        for i = 1, #memHeader do memRows[2][i] = "" end
+        local memRows = { memHeader, {} }
+        for i = 1, #memHeader do
+            memRows[2][i] = ""
+        end
 
         for _, case in ipairs(cases) do
-            local row = {tostring(case.baseIdx), case.name}
+            local row = { tostring(case.baseIdx), case.name }
             for _, variant in ipairs(variants) do
                 row[#row + 1] = formatMem(results[variant.name][case.name].memKb or 0)
             end
@@ -943,7 +1060,9 @@ function bench.suite(config)
 
         local function capture(cmd)
             local p = io.popen(cmd .. " 2>/dev/null")
-            if not p then return nil end
+            if not p then
+                return nil
+            end
             local out = p:read("*a") or ""
             p:close()
             return (out:gsub("%s+$", ""))
@@ -951,27 +1070,37 @@ function bench.suite(config)
         local sha = capture("git rev-parse --short HEAD") or ""
         if sha ~= "" then
             local dirty = capture("git status --porcelain")
-            if dirty and dirty ~= "" then sha = sha .. "-dirty" end
+            if dirty and dirty ~= "" then
+                sha = sha .. "-dirty"
+            end
         else
             sha = "unknown"
         end
         local label = os.getenv("LABEL")
-        if not label or label == "" then label = sha end
+        if not label or label == "" then
+            label = sha
+        end
         local iso = os.date("!%Y-%m-%dT%H:%M:%SZ")
 
         local parent = logPath:match("^(.*)/[^/]+$")
-        if parent and parent ~= "" then os.execute("mkdir -p " .. shellEscape(parent)) end
+        if parent and parent ~= "" then
+            os.execute("mkdir -p " .. shellEscape(parent))
+        end
 
         local probe = io.open(logPath, "r")
         local needsHeader = probe == nil
-        if probe then probe:close() end
+        if probe then
+            probe:close()
+        end
 
         local logFile, err = io.open(logPath, "a")
         if not logFile then
             io.stderr:write("bench: could not open log file " .. logPath .. ": " .. tostring(err) .. "\n")
         else
             if needsHeader then
-                logFile:write("iso,sha,label,suite,case_idx,case_name,variant,min_us,p50_us,p99_us,ci95_us,stdev_us,mean_us,iterations,mem_kb\n")
+                logFile:write(
+                    "iso,sha,label,suite,case_idx,case_name,variant,min_us,p50_us,p99_us,ci95_us,stdev_us,mean_us,iterations,mem_kb\n"
+                )
             end
             -- Quote fields that might contain commas/quotes (case names, suite
             -- names, labels). RFC 4180-ish: double up embedded quotes.
@@ -986,18 +1115,26 @@ function bench.suite(config)
             for _, case in ipairs(cases) do
                 for _, variant in ipairs(variants) do
                     local r = results[variant.name][case.name]
-                    logFile:write(string.format(
-                        "%s,%s,%s,%s,%d,%s,%s,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%.3f\n",
-                        csv(iso), csv(sha), csv(label), csv(config.name),
-                        case.baseIdx, csv(case.name), csv(variant.name),
-                        (r.min or 0) * 1e6,
-                        (r.p50 or 0) * 1e6,
-                        (r.p99 or 0) * 1e6,
-                        (r.ci95 or 0) * 1e6,
-                        (r.stdev or 0) * 1e6,
-                        (r.mean or 0) * 1e6,
-                        r.iterations or r.n or 0,
-                        r.memKb or 0))
+                    logFile:write(
+                        string.format(
+                            "%s,%s,%s,%s,%d,%s,%s,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%.3f\n",
+                            csv(iso),
+                            csv(sha),
+                            csv(label),
+                            csv(config.name),
+                            case.baseIdx,
+                            csv(case.name),
+                            csv(variant.name),
+                            (r.min or 0) * 1e6,
+                            (r.p50 or 0) * 1e6,
+                            (r.p99 or 0) * 1e6,
+                            (r.ci95 or 0) * 1e6,
+                            (r.stdev or 0) * 1e6,
+                            (r.mean or 0) * 1e6,
+                            r.iterations or r.n or 0,
+                            r.memKb or 0
+                        )
+                    )
                     rowCount = rowCount + 1
                 end
             end

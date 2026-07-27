@@ -9,8 +9,7 @@
 -- allow it and never when they do not.
 
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local cjson = require("cjson")
 local shaders = require("tecs.gpu.shaders")
@@ -85,11 +84,9 @@ describe("material reload", function()
         assert.is_true(materials.reload())
 
         local source = dispatch()
-        assert.is_truthy(source:find("SECOND", 1, true),
-            "the dispatch still holds the source read at install")
+        assert.is_truthy(source:find("SECOND", 1, true), "the dispatch still holds the source read at install")
         assert.is_falsy(source:find("FIRST", 1, true))
-        assert.are.equal(before, materials.id("specreload"),
-            "an edit must not move what an instance selects")
+        assert.are.equal(before, materials.id("specreload"), "an edit must not move what an instance selects")
     end)
 
     it("refuses a material that was not there at install", function()
@@ -100,8 +97,10 @@ describe("material reload", function()
         local reloaded, reason = materials.reload()
 
         assert.is_false(reloaded)
-        assert.is_truthy(reason:find("specreloadtwo", 1, true),
-            "the refusal must name what changed: " .. tostring(reason))
+        assert.is_truthy(
+            reason:find("specreloadtwo", 1, true),
+            "the refusal must name what changed: " .. tostring(reason)
+        )
 
         -- Refused means nothing moved, not that the new file was half taken.
         assert.are.equal(before, materials.id("specreload"))
@@ -139,8 +138,10 @@ describe("shader source invalidation", function()
         assert.is_truthy(shaders.source("specreload.frag"):find("FIRST", 1, true))
 
         write(dir .. "specreload.frag.glsl", "#version 450\n// SECOND\n")
-        assert.is_truthy(shaders.source("specreload.frag"):find("FIRST", 1, true),
-            "a resolved source is cached, which is what makes a reload a step")
+        assert.is_truthy(
+            shaders.source("specreload.frag"):find("FIRST", 1, true),
+            "a resolved source is cached, which is what makes a reload a step"
+        )
 
         shaders.invalidate()
         assert.is_truthy(shaders.source("specreload.frag"):find("SECOND", 1, true))
@@ -152,12 +153,13 @@ describe("mcp reload_shaders", function()
 
     local function callTool()
         local response = cjson.decode(mcp.dispatch(cjson.encode({
-            jsonrpc = "2.0", id = 1, method = "tools/call",
+            jsonrpc = "2.0",
+            id = 1,
+            method = "tools/call",
             params = { name = "reload_shaders", arguments = {} },
         })))
         local result = response.result
-        local text = result.content and result.content[1]
-            and result.content[1].text or ""
+        local text = result.content and result.content[1] and result.content[1].text or ""
         return result.isError ~= true, result.structuredContent, text
     end
 
@@ -175,19 +177,22 @@ describe("mcp reload_shaders", function()
     it("refuses when nothing can rebuild the pipelines", function()
         local ok, _, text = callTool()
         assert.is_false(ok)
-        assert.is_truthy(text:find("no shader rebuild is registered", 1, true),
-            "unexpected refusal: " .. text)
+        assert.is_truthy(text:find("no shader rebuild is registered", 1, true), "unexpected refusal: " .. text)
     end)
 
     it("re-reads the sources and rebuilds once", function()
-        tools.bindReload(function() rebuilt = rebuilt + 1 end)
+        tools.bindReload(function()
+            rebuilt = rebuilt + 1
+        end)
 
         local ok, result, text = callTool()
         assert.is_true(ok, text)
         assert.are.equal(1, rebuilt)
 
         local names = {}
-        for _, name in ipairs(result.materials) do names[name] = true end
+        for _, name in ipairs(result.materials) do
+            names[name] = true
+        end
         assert.is_true(names[materials.defaultName])
     end)
 
@@ -197,16 +202,16 @@ describe("mcp reload_shaders", function()
         materials.addRoot(dir)
         materials.install()
         write(dir .. "specreloadadded.glsl", body("ADDED"))
-        tools.bindReload(function() rebuilt = rebuilt + 1 end)
+        tools.bindReload(function()
+            rebuilt = rebuilt + 1
+        end)
 
         local ok, _, text = callTool()
         os.remove(dir .. "specreloadadded.glsl")
         os.remove(dir)
 
         assert.is_false(ok)
-        assert.is_truthy(text:find("specreloadadded", 1, true),
-            "unexpected refusal: " .. text)
-        assert.are.equal(0, rebuilt,
-            "the pipelines were rebuilt from a set that renumbered")
+        assert.is_truthy(text:find("specreloadadded", 1, true), "unexpected refusal: " .. text)
+        assert.are.equal(0, rebuilt, "the pipelines were rebuilt from a set that renumbered")
     end)
 end)

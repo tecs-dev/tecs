@@ -7,8 +7,7 @@
 -- no input averaged in.
 
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local sdl = require("tecs.ffi.sdl3")
 local loader = require("tecs.ffi.loader")
@@ -21,7 +20,9 @@ local C = sdl.C
 --- nothing is absent, which is how "no sample" is asserted.
 local function stages()
     local byName = {}
-    for _, row in ipairs(timing.report()) do byName[row.name] = row end
+    for _, row in ipairs(timing.report()) do
+        byName[row.name] = row
+    end
     return byName
 end
 
@@ -35,8 +36,10 @@ end
 --- is an interval charged to the wrong segment, which is microseconds at the
 --- very least and usually a whole frame.
 local function isMs(expected, actual, what)
-    assert.is_true(math.abs(expected - actual) < 1e-4,
-        ("%s: expected %.9f ms, got %.9f ms"):format(what, expected, actual))
+    assert.is_true(
+        math.abs(expected - actual) < 1e-4,
+        ("%s: expected %.9f ms, got %.9f ms"):format(what, expected, actual)
+    )
 end
 
 describe("input latency", function()
@@ -68,9 +71,11 @@ describe("input latency", function()
 
         -- Attribution is only worth anything if the parts account for all of
         -- it, so the sum is part of the contract rather than a coincidence.
-        isMs(report.latency.mean,
-            report.latencyWait.mean + report.latencyStep.mean
-                + report.latencyDraw.mean, "the segments")
+        isMs(
+            report.latency.mean,
+            report.latencyWait.mean + report.latencyStep.mean + report.latencyDraw.mean,
+            "the segments"
+        )
 
         assert.are.equal(1, report.latency.frames)
     end)
@@ -131,8 +136,7 @@ describe("input latency", function()
 
         local report = stages()
         assert.are.equal(1, report.latency.frames)
-        isMs(5.0, report.latency.mean,
-            "the presented frame's own event, not the dropped one")
+        isMs(5.0, report.latency.mean, "the presented frame's own event, not the dropped one")
     end)
 
     it("carries the host's arrival stamp onto every drained event", function()
@@ -171,7 +175,9 @@ describe("input latency", function()
         queue[0].type = C.SDL_EVENT_KEY_DOWN
 
         local seen
-        events.drain(queue, 1, function(event) seen = event.arrival end)
+        events.drain(queue, 1, function(event)
+            seen = event.arrival
+        end)
         assert.is_nil(seen)
     end)
 

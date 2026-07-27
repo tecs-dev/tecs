@@ -10,8 +10,7 @@
 -- Our build first, so it wins over the ECS repo's own engine tree.
 -- The build directory is the build system's to choose, so it is passed in.
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local tecs = require("tecs")
 local sdl = require("tecs.ffi.sdl3")
@@ -24,7 +23,7 @@ local components = require("tecs.components")
 local text = require("tecs.gfx.text")
 
 local C = sdl.C
-local FORMAT = 4  -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
+local FORMAT = 4 -- SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
 local SIZE = 256
 
 local Transform = components.Transform
@@ -37,17 +36,22 @@ describe("gfx.text", function()
         assert(C.SDL_Init(sdl.K.SDL_INIT_VIDEO))
         window = Window.create({ title = "text", width = SIZE, height = SIZE })
         device = Device.create(window, { debug = true })
-        screen = Texture.create(device.handle,
-            { width = SIZE, height = SIZE, format = FORMAT })
+        screen = Texture.create(device.handle, { width = SIZE, height = SIZE, format = FORMAT })
         assets.install()
         font = text.defaultFont()
     end)
 
     teardown(function()
         assets.shutdown()
-        if screen then screen:destroy() end
-        if device then device:destroy() end
-        if window then window:destroy() end
+        if screen then
+            screen:destroy()
+        end
+        if device then
+            device:destroy()
+        end
+        if window then
+            window:destroy()
+        end
         C.SDL_Quit()
     end)
 
@@ -120,8 +124,7 @@ describe("gfx.text", function()
         assert.are.equal(512, font.atlasWidth)
         assert.are.equal(8, font.distanceRange)
         assert.is_not_nil(font.glyphs[string.byte("H")])
-        assert.are.equal(0, font.glyphs[string.byte(" ")].width,
-            "a space has an advance and no quad")
+        assert.are.equal(0, font.glyphs[string.byte(" ")].width, "a space has an advance and no quad")
     end)
 
     it("gives every glyph an instance owned by its text", function()
@@ -130,18 +133,15 @@ describe("gfx.text", function()
         settle(world, renderer)
 
         -- Eight characters, one of them a space, which has no quad.
-        assert.are.equal(7, renderer.count,
-            "one instance per glyph, and a space is not one")
+        assert.are.equal(7, renderer.count, "one instance per glyph, and a space is not one")
 
         local item = world:get(entity, text.Text)
         assert.are.equal(7, item._spanCount, "the text owns a span of seven")
-        assert.are.equal(1, item._span,
-            "and it is the only text, so the span starts the run")
+        assert.are.equal(1, item._span, "and it is the only text, so the span starts the run")
         for index = 1, item._spanCount do
             local x, y = text.glyphAt(world, entity, index)
             assert.is_not_nil(x, "every glyph of the span was written")
-            assert.is_true(x > 16 and y > 16,
-                "a glyph belongs to its text, so it sits at its position")
+            assert.is_true(x > 16 and y > 16, "a glyph belongs to its text, so it sits at its position")
         end
         renderer:destroy()
     end)
@@ -164,16 +164,11 @@ describe("gfx.text", function()
         local bottom = top + metrics.height * scale
 
         assert.are.equal(1, renderer.count)
-        assert.is_true(ink(pixels, left, top, right, bottom) > 500,
-            "the glyph must fill the rect the metrics describe")
-        assert.are.equal(0, ink(pixels, 0, 0, SIZE, top - 2),
-            "and nothing above it")
-        assert.are.equal(0, ink(pixels, 0, bottom + 2, SIZE, SIZE),
-            "and nothing below it")
-        assert.are.equal(0, ink(pixels, 0, 0, left - 2, SIZE),
-            "and nothing to its left")
-        assert.are.equal(0, ink(pixels, right + 2, 0, SIZE, SIZE),
-            "and nothing to its right")
+        assert.is_true(ink(pixels, left, top, right, bottom) > 500, "the glyph must fill the rect the metrics describe")
+        assert.are.equal(0, ink(pixels, 0, 0, SIZE, top - 2), "and nothing above it")
+        assert.are.equal(0, ink(pixels, 0, bottom + 2, SIZE, SIZE), "and nothing below it")
+        assert.are.equal(0, ink(pixels, 0, 0, left - 2, SIZE), "and nothing to its left")
+        assert.are.equal(0, ink(pixels, right + 2, 0, SIZE, SIZE), "and nothing to its right")
         renderer:destroy()
     end)
 
@@ -199,14 +194,11 @@ describe("gfx.text", function()
         -- has room, so the ink stops that far short of the rect's edges.
         local margin = font.distanceRange * 0.5 * scale
 
-        local foot = ink(pixels, middle, bottom - margin - 10,
-            right - margin, bottom - margin)
-        local shoulder = ink(pixels, middle, top,
-            right, top + metrics.height * scale * 0.4)
+        local foot = ink(pixels, middle, bottom - margin - 10, right - margin, bottom - margin)
+        local shoulder = ink(pixels, middle, top, right, top + metrics.height * scale * 0.4)
 
         assert.is_true(foot > 100, "an L has its foot at the bottom right")
-        assert.are.equal(0, shoulder,
-            "and nothing at the top right; a flipped L would have it there")
+        assert.are.equal(0, shoulder, "and nothing at the top right; a flipped L would have it there")
         renderer:destroy()
     end)
 
@@ -231,19 +223,19 @@ describe("gfx.text", function()
         for index = 0, 2 do
             local left = x + index * pitch + metrics.xOffset * scale
             local right = left + metrics.width * scale
-            assert.is_true(ink(pixels, left, top, right, bottom) > 200,
-                ("glyph %d belongs one advance along from the last"):format(index))
+            assert.is_true(
+                ink(pixels, left, top, right, bottom) > 200,
+                ("glyph %d belongs one advance along from the last"):format(index)
+            )
         end
 
         -- The gap after the run is empty, which is what pins the advance
         -- rather than merely a wide smear of ink.
         local after = x + 3 * pitch
-        assert.are.equal(0, ink(pixels, after + 2, 0, SIZE, SIZE),
-            "nothing is drawn past the last glyph")
+        assert.are.equal(0, ink(pixels, after + 2, 0, SIZE, SIZE), "nothing is drawn past the last glyph")
 
         local item = world:get(entity, text.Text)
-        assert.is_true(math.abs(item.width - 3 * pitch) < 0.01,
-            "the measured width is three advances")
+        assert.is_true(math.abs(item.width - 3 * pitch) < 0.01, "the measured width is three advances")
         renderer:destroy()
     end)
 
@@ -256,18 +248,17 @@ describe("gfx.text", function()
         local item = world:get(entity, text.Text)
         local scale = size / font.size
         local pitch = font.glyphs[string.byte("I")].xAdvance * scale
-        assert.is_true(math.abs(item.width - 4 * pitch) < 0.01,
-            "the block is as wide as its widest line")
-        assert.is_true(
-            math.abs(item.height - 2 * font.lineHeight * scale) < 0.01,
-            "and two lines tall")
+        assert.is_true(math.abs(item.width - 4 * pitch) < 0.01, "the block is as wide as its widest line")
+        assert.is_true(math.abs(item.height - 2 * font.lineHeight * scale) < 0.01, "and two lines tall")
 
         -- Right alignment moves the short line to the block's right edge, so
         -- its first glyph starts two advances in.
         local firstX, _, firstWidth = text.glyphAt(world, entity, 1)
-        assert.is_true(math.abs(firstX - (20 + 2 * pitch + firstWidth * 0.5
-            + font.glyphs[string.byte("I")].xOffset * scale)) < 0.01,
-            "the shorter line is pushed right")
+        assert.is_true(
+            math.abs(firstX - (20 + 2 * pitch + firstWidth * 0.5 + font.glyphs[string.byte("I")].xOffset * scale))
+                < 0.01,
+            "the shorter line is pushed right"
+        )
         renderer:destroy()
     end)
 
@@ -284,15 +275,16 @@ describe("gfx.text", function()
         -- not yet.
         local secondLeft = 30 + metrics.xAdvance * scale
         local secondRight = secondLeft + metrics.width * scale
-        assert.are.equal(0, ink(before, secondLeft, top, secondRight, bottom),
-            "one glyph is drawn to start with")
+        assert.are.equal(0, ink(before, secondLeft, top, secondRight, bottom), "one glyph is drawn to start with")
 
         world:getMut(entity, text.Text).text = "II"
         local after = frame(world, renderer)
 
         assert.are.equal(2, renderer.count)
-        assert.is_true(ink(after, secondLeft, top, secondRight, bottom) > 200,
-            "the second glyph appears where the layout puts it")
+        assert.is_true(
+            ink(after, secondLeft, top, secondRight, bottom) > 200,
+            "the second glyph appears where the layout puts it"
+        )
         renderer:destroy()
     end)
 
@@ -323,9 +315,10 @@ describe("gfx.text", function()
         local built = text.layouts(world)
         assert.is_true(built >= 1, "the text was laid out at least once")
 
-        for _ = 1, 8 do frame(world, renderer) end
-        assert.are.equal(built, text.layouts(world),
-            "an unchanged string must not be laid out again")
+        for _ = 1, 8 do
+            frame(world, renderer)
+        end
+        assert.are.equal(built, text.layouts(world), "an unchanged string must not be laid out again")
 
         -- And the gate opens for a change, so it is a gate and not a
         -- permanent stop.
@@ -354,16 +347,16 @@ describe("gfx.text", function()
         tint.r, tint.g, tint.b = 1.0, 0.0, 0.0
         pixels = frame(world, renderer)
 
-        assert.are.equal(0, ink(pixels, 0, 0, SIZE, SIZE),
-            "nothing green is left")
+        assert.are.equal(0, ink(pixels, 0, 0, SIZE, SIZE), "nothing green is left")
         local red = 0
         for y = 0, SIZE - 1 do
             for x = 0, SIZE - 1 do
-                if screen:getPixel(pixels, x, y).r > 128 then red = red + 1 end
+                if screen:getPixel(pixels, x, y).r > 128 then
+                    red = red + 1
+                end
             end
         end
-        assert.is_true(math.abs(red - lit) <= lit * 0.1,
-            "the same glyph, in the tint the text now carries")
+        assert.is_true(math.abs(red - lit) <= lit * 0.1, "the same glyph, in the tint the text now carries")
         renderer:destroy()
     end)
 
@@ -382,14 +375,14 @@ describe("gfx.text", function()
         transform.x = transform.x + SIZE / 2
         local after = frame(world, renderer)
 
-        assert.are.equal(0, ink(after, 0, 0, SIZE / 2, SIZE),
-            "the glyph left the half it started in")
-        assert.is_true(ink(after, SIZE / 2, 0, SIZE, SIZE) > 500,
-            "and arrived in the other one")
-        assert.are.equal(built + 1, text.layouts(world),
-            "a move is a relayout, since the glyphs carry where they are")
-        assert.are.equal(span, world:get(entity, text.Text)._span,
-            "and it rewrites the span rather than taking another")
+        assert.are.equal(0, ink(after, 0, 0, SIZE / 2, SIZE), "the glyph left the half it started in")
+        assert.is_true(ink(after, SIZE / 2, 0, SIZE, SIZE) > 500, "and arrived in the other one")
+        assert.are.equal(built + 1, text.layouts(world), "a move is a relayout, since the glyphs carry where they are")
+        assert.are.equal(
+            span,
+            world:get(entity, text.Text)._span,
+            "and it rewrites the span rather than taking another"
+        )
         renderer:destroy()
     end)
 
@@ -407,16 +400,14 @@ describe("gfx.text", function()
             text.Text.new({ text = "H", font = font, size = 96 })
         )
         local before = settle(world, renderer)
-        assert.is_true(ink(before, 0, 0, SIZE / 2, SIZE) > 500,
-            "the glyph is drawn where the parent puts it")
+        assert.is_true(ink(before, 0, 0, SIZE / 2, SIZE) > 500, "the glyph is drawn where the parent puts it")
         assert.are.equal(0, ink(before, SIZE / 2, 0, SIZE, SIZE))
 
         local transform = world:getMut(parent, Transform)
         transform.x = transform.x + SIZE / 2
         local after = frame(world, renderer)
 
-        assert.are.equal(0, ink(after, 0, 0, SIZE / 2, SIZE),
-            "and goes with the parent in the frame the parent moved")
+        assert.are.equal(0, ink(after, 0, 0, SIZE / 2, SIZE), "and goes with the parent in the frame the parent moved")
         assert.is_true(ink(after, SIZE / 2, 0, SIZE, SIZE) > 500)
         renderer:destroy()
     end)
@@ -436,11 +427,12 @@ describe("gfx.text", function()
         restored:loadSnapshot(saved)
         local after = settle(restored, second)
 
-        assert.are.equal(4, second.count,
-            "the restored text laid out its own glyphs, and only its own")
-        assert.are.equal(ink(before, 0, 0, SIZE, SIZE),
+        assert.are.equal(4, second.count, "the restored text laid out its own glyphs, and only its own")
+        assert.are.equal(
+            ink(before, 0, 0, SIZE, SIZE),
             ink(after, 0, 0, SIZE, SIZE),
-            "and drew the same string in the same place")
+            "and drew the same string in the same place"
+        )
         second:destroy()
     end)
 
@@ -482,14 +474,16 @@ describe("gfx.text", function()
 
         assert.are.equal(span, item._span, "the front of the span stays")
         assert.are.equal(5, item._spanCount)
-        assert.are.equal(12, renderer.count,
-            "and the run does not shrink, so nothing after it moves")
+        assert.are.equal(12, renderer.count, "and the run does not shrink, so nothing after it moves")
 
         -- The three slots it gave up are the three a new text takes.
         local short = spawnText(world, 20, 90, "CCC", 24)
         frame(world, renderer)
-        assert.are.equal(span + 5, world:get(short, text.Text)._span,
-            "the freed tail is what the next three-glyph text gets")
+        assert.are.equal(
+            span + 5,
+            world:get(short, text.Text)._span,
+            "the freed tail is what the next three-glyph text gets"
+        )
         assert.are.equal(12, renderer.count, "so the run is still the same")
         renderer:destroy()
     end)
@@ -504,15 +498,12 @@ describe("gfx.text", function()
         local span = world:get(first, text.Text)._span
         world:despawn(first)
         frame(world, renderer)
-        assert.are.equal(6, renderer.count,
-            "a freed span keeps its place in the run")
+        assert.are.equal(6, renderer.count, "a freed span keeps its place in the run")
 
         local third = spawnText(world, 20, 90, "CCC", 24)
         frame(world, renderer)
-        assert.are.equal(span, world:get(third, text.Text)._span,
-            "and the next text of that length takes it")
-        assert.are.equal(6, renderer.count,
-            "so the run never grew for the second three glyphs")
+        assert.are.equal(span, world:get(third, text.Text)._span, "and the next text of that length takes it")
+        assert.are.equal(6, renderer.count, "so the run never grew for the second three glyphs")
         renderer:destroy()
     end)
 
@@ -529,8 +520,7 @@ describe("gfx.text", function()
 
         world:remove(second, text.Text)
         frame(world, renderer)
-        assert.are.equal(3, renderer.count,
-            "the span was at the top of the run, so the mark comes back down")
+        assert.are.equal(3, renderer.count, "the span was at the top of the run, so the mark comes back down")
 
         -- And one that was not at the top rejoins the free list, so the next
         -- text of that length takes it instead of growing the run.
@@ -542,13 +532,15 @@ describe("gfx.text", function()
         local span = world:get(third, text.Text)._span
         world:remove(third, text.Text)
         frame(world, renderer)
-        assert.are.equal(9, renderer.count,
-            "a freed span in the middle keeps its place in the run")
+        assert.are.equal(9, renderer.count, "a freed span in the middle keeps its place in the run")
 
         local fifth = spawnText(world, 20, 150, "EEE", 24)
         frame(world, renderer)
-        assert.are.equal(span, world:get(fifth, text.Text)._span,
-            "the freed span is what the next three-glyph text gets")
+        assert.are.equal(
+            span,
+            world:get(fifth, text.Text)._span,
+            "the freed span is what the next three-glyph text gets"
+        )
         assert.are.equal(9, renderer.count, "so the run never grew for it")
         renderer:destroy()
     end)
@@ -563,13 +555,11 @@ describe("gfx.text", function()
         assert.are.equal(40, renderer.count)
 
         frame(world, renderer)
-        assert.are.equal(0, renderer.rewritten,
-            "a still frame rewrites nothing at all")
+        assert.are.equal(0, renderer.rewritten, "a still frame rewrites nothing at all")
 
         world:getMut(edited, text.Text).text = "CCCCCCCC"
         frame(world, renderer)
-        assert.are.equal(8, renderer.rewritten,
-            "one string's eight glyphs, not the other thirty-two")
+        assert.are.equal(8, renderer.rewritten, "one string's eight glyphs, not the other thirty-two")
         renderer:destroy()
     end)
 
@@ -588,8 +578,7 @@ describe("gfx.text", function()
         world:loadSnapshot(saved)
         local pixels = settle(world, renderer)
 
-        assert.are.equal(2, renderer.count,
-            "only the restored text is drawn, and the old glyphs are gone")
+        assert.are.equal(2, renderer.count, "only the restored text is drawn, and the old glyphs are gone")
         assert.is_true(ink(pixels, 0, 0, SIZE, SIZE) > 100)
         renderer:destroy()
     end)
@@ -599,7 +588,6 @@ describe("gfx.text", function()
             return text.Text.new({ text = "x", font = font, align = "middle" })
         end)
         assert.is_false(ok)
-        assert.is_truthy(tostring(reason):find("middle", 1, true),
-            "the error should name what was asked for")
+        assert.is_truthy(tostring(reason):find("middle", 1, true), "the error should name what was asked for")
     end)
 end)

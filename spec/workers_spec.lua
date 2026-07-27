@@ -8,15 +8,15 @@
 -- The build directory is the build system's to choose, so it is passed in.
 -- Our tree comes first, so it wins over the ECS repo's own engine tree.
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local workers = require("tecs.workers")
 
 -- Every worker resolves modules the same way the spec does.
 local PRELUDE = 'package.path = "build/?.lua;build/?/init.lua;" .. package.path\n'
 
-local ECHO = PRELUDE .. [[
+local ECHO = PRELUDE
+    .. [[
 local workers = require("tecs.workers")
 local self = workers.current()
 while true do
@@ -31,7 +31,9 @@ local function drain(worker, count, timeoutMs)
     local got = {}
     for _ = 1, count do
         local value = worker:receive(timeoutMs or 2000)
-        if value == nil then break end
+        if value == nil then
+            break
+        end
         got[#got + 1] = value
     end
     return got
@@ -57,19 +59,21 @@ describe("workers", function()
 
     it("preserves order", function()
         local worker = workers.spawn({ source = ECHO })
-        for index = 1, 20 do worker:send({ index = index }) end
+        for index = 1, 20 do
+            worker:send({ index = index })
+        end
 
         local results = drain(worker, 20)
         assert.are.equal(20, #results)
         for index = 1, 20 do
-            assert.are.equal(index, results[index].index,
-                "a channel is a queue, not a bag")
+            assert.are.equal(index, results[index].index, "a channel is a queue, not a bag")
         end
         worker:stop()
     end)
 
     it("actually computes on the other thread", function()
-        local worker = workers.spawn({ source = PRELUDE .. [[
+        local worker = workers.spawn({
+            source = PRELUDE .. [[
 local workers = require("tecs.workers")
 local self = workers.current()
 while true do
@@ -79,7 +83,8 @@ while true do
     for i = 1, task.upTo do total = total + i end
     self:send({ total = total })
 end
-]] })
+]],
+        })
         worker:send({ upTo = 1000 })
         local results = drain(worker, 1)
         assert.are.equal(500500, results[1].total)
@@ -116,7 +121,8 @@ end
     end)
 
     it("reports queue depth on both sides", function()
-        local worker = workers.spawn({ source = PRELUDE .. [[
+        local worker = workers.spawn({
+            source = PRELUDE .. [[
 local workers = require("tecs.workers")
 local self = workers.current()
 while true do
@@ -124,11 +130,11 @@ while true do
     if task == nil then break end
     self:send(task)
 end
-]] })
+]],
+        })
         worker:send({ a = 1 })
         drain(worker, 1)
-        assert.are.equal(0, worker:available(),
-            "a taken result is no longer waiting")
+        assert.are.equal(0, worker:available(), "a taken result is no longer waiting")
         worker:stop()
     end)
 

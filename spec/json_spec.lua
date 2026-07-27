@@ -7,8 +7,7 @@
 -- structure round-trips, which is the MCP protocol and Tiled maps.
 
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local cjson = require("cjson")
 
@@ -47,21 +46,33 @@ describe("json", function()
         -- Not silently dropped, which is what makes it safe to hand arbitrary
         -- component data to: a cdata field fails loudly rather than vanishing
         -- from the payload.
-        assert.has_error(function() cjson.encode({ f = print }) end)
-        assert.has_error(function() cjson.encode({ c = require("ffi").new("int[1]") }) end)
+        assert.has_error(function()
+            cjson.encode({ f = print })
+        end)
+        assert.has_error(function()
+            cjson.encode({ c = require("ffi").new("int[1]") })
+        end)
     end)
 
     it("rejects malformed input rather than guessing", function()
-        assert.has_error(function() cjson.decode("{") end)
-        assert.has_error(function() cjson.decode("") end)
-        assert.has_error(function() cjson.decode("{'single':1}") end)
+        assert.has_error(function()
+            cjson.decode("{")
+        end)
+        assert.has_error(function()
+            cjson.decode("")
+        end)
+        assert.has_error(function()
+            cjson.decode("{'single':1}")
+        end)
     end)
 
     it("bounds nesting depth", function()
         -- A protocol server decodes whatever arrives, so unbounded recursion
         -- on a hostile payload would be a denial of service.
         local deep = string.rep("[", 2000) .. string.rep("]", 2000)
-        assert.has_error(function() cjson.decode(deep) end)
+        assert.has_error(function()
+            cjson.decode(deep)
+        end)
     end)
 
     it("keeps integers exact through a round trip", function()

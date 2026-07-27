@@ -37,8 +37,7 @@
 -- The build directory is the build system's to choose, so it is passed in.
 -- Our tree comes first, so it wins over the ECS repo's own engine tree.
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
-package.path = root .. "/?.lua;" .. root .. "/?/init.lua;"
-    .. package.path
+package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. package.path
 
 local cjson = require("cjson")
 local tecs = require("tecs")
@@ -71,7 +70,9 @@ local function recorder(options)
     local function tagged(tag)
         local found = {}
         for _, track in ipairs(backend.tracks) do
-            if track.tags[tag] then found[#found + 1] = track end
+            if track.tags[tag] then
+                found[#found + 1] = track
+            end
         end
         return found
     end
@@ -79,7 +80,9 @@ local function recorder(options)
     function backend.open(spec)
         backend.opens = backend.opens + 1
         backend.spec = spec
-        if options.silent then return nil end
+        if options.silent then
+            return nil
+        end
         backend.mixer = { id = 7 }
         return backend.mixer
     end
@@ -115,21 +118,29 @@ local function recorder(options)
         return track
     end
 
-    function backend.destroyTrack(track) track.destroyed = true end
+    function backend.destroyTrack(track)
+        track.destroyed = true
+    end
 
     function backend.setTrackClip(track, clip)
-        if options.refuseInput then return false end
+        if options.refuseInput then
+            return false
+        end
         track.input = { kind = "clip", clip = clip }
         return true
     end
 
     function backend.setTrackFile(track, path)
-        if options.refuseInput then return false end
+        if options.refuseInput then
+            return false
+        end
         track.input = { kind = "file", path = path }
         return true
     end
 
-    function backend.clearTrack(track) track.input = nil end
+    function backend.clearTrack(track)
+        track.input = nil
+    end
 
     function backend.play(track, params)
         track.plays = track.plays + 1
@@ -150,7 +161,9 @@ local function recorder(options)
         track.fadeOutMs = fadeMs
         -- A fade keeps the mixer taking samples until it finishes, so only an
         -- immediate stop ends the track here.
-        if fadeMs <= 0 then track.playing = false end
+        if fadeMs <= 0 then
+            track.playing = false
+        end
     end
 
     function backend.pause(track)
@@ -163,38 +176,53 @@ local function recorder(options)
         track.playing = true
     end
 
-    function backend.playing(track) return track.playing end
+    function backend.playing(track)
+        return track.playing
+    end
 
     function backend.setGain(track, gain)
         track.gain = gain
         track.gains[#track.gains + 1] = gain
     end
 
-    function backend.setPitch(track, ratio) track.pitch = ratio end
+    function backend.setPitch(track, ratio)
+        track.pitch = ratio
+    end
 
     function backend.setPosition(track, x, y, z)
         track.position = { x = x, y = y, z = z }
     end
 
-    function backend.clearPosition(track) track.position = nil end
+    function backend.clearPosition(track)
+        track.position = nil
+    end
 
-    function backend.tag(track, tag) track.tags[tag] = true end
-    function backend.untag(track, tag) track.tags[tag] = nil end
+    function backend.tag(track, tag)
+        track.tags[tag] = true
+    end
+    function backend.untag(track, tag)
+        track.tags[tag] = nil
+    end
 
     function backend.pauseTag(_mixer, tag)
         backend.tagOps[#backend.tagOps + 1] = { op = "pause", tag = tag }
-        for _, track in ipairs(tagged(tag)) do backend.pause(track) end
+        for _, track in ipairs(tagged(tag)) do
+            backend.pause(track)
+        end
     end
 
     function backend.resumeTag(_mixer, tag)
         backend.tagOps[#backend.tagOps + 1] = { op = "resume", tag = tag }
-        for _, track in ipairs(tagged(tag)) do backend.resume(track) end
+        for _, track in ipairs(tagged(tag)) do
+            backend.resume(track)
+        end
     end
 
     function backend.stopTag(_mixer, tag, fadeMs)
-        backend.tagOps[#backend.tagOps + 1] =
-            { op = "stop", tag = tag, fadeMs = fadeMs }
-        for _, track in ipairs(tagged(tag)) do backend.stop(track, fadeMs) end
+        backend.tagOps[#backend.tagOps + 1] = { op = "stop", tag = tag, fadeMs = fadeMs }
+        for _, track in ipairs(tagged(tag)) do
+            backend.stop(track, fadeMs)
+        end
     end
 
     return backend
@@ -204,10 +232,16 @@ end
 --- shape is the snapshot code's business; what matters here is which of two
 --- values, a path or an index, ended up in it.
 local function holds(value, wanted)
-    if value == wanted then return true end
-    if type(value) ~= "table" then return false end
+    if value == wanted then
+        return true
+    end
+    if type(value) ~= "table" then
+        return false
+    end
     for _, item in pairs(value) do
-        if holds(item, wanted) then return true end
+        if holds(item, wanted) then
+            return true
+        end
     end
     return false
 end
@@ -217,7 +251,9 @@ end
 --- Stands in for a save file written by a run that interned its names in a
 --- different order, which is exactly the case an index in a file gets wrong.
 local function rewrite(value, from, to)
-    if type(value) ~= "table" then return end
+    if type(value) ~= "table" then
+        return
+    end
     for key, item in pairs(value) do
         if item == from then
             value[key] = to
@@ -248,7 +284,9 @@ end
 --- Calls a debug tool the way an agent does, and returns its payload.
 local function callTool(name, args)
     local response = cjson.decode(mcp.dispatch(cjson.encode({
-        jsonrpc = "2.0", id = 1, method = "tools/call",
+        jsonrpc = "2.0",
+        id = 1,
+        method = "tools/call",
         params = { name = name, arguments = args or {} },
     })))
     return response.result
@@ -260,15 +298,13 @@ describe("audio", function()
     end)
 
     describe("the build", function()
-        it("carries a decoder for every fixture it is asked to read",
-            function()
+        it("carries a decoder for every fixture it is asked to read", function()
             local names = {}
             for _, decoder in ipairs(Audio.decoders()) do
                 names[decoder] = true
             end
             assert.is_true(names.WAV, "the built-in WAV reader is not optional")
-            assert.is_true(names.VORBIS or names.STBVORBIS,
-                "an Ogg Vorbis decoder, under either backend's name")
+            assert.is_true(names.VORBIS or names.STBVORBIS, "an Ogg Vorbis decoder, under either backend's name")
         end)
     end)
 
@@ -277,8 +313,7 @@ describe("audio", function()
             local audio = Audio.create({ backend = recorder() })
             local clip = audio:load(FIXTURE)
 
-            assert.are.equal("loading", clip.status,
-                "loading must not block the caller")
+            assert.are.equal("loading", clip.status, "loading must not block the caller")
             assert.are.equal(1, audio:loading())
 
             audio:waitForLoads()
@@ -289,10 +324,11 @@ describe("audio", function()
 
         it("reads a compressed file, not only PCM", function()
             local audio, clip = loaded(nil, VORBIS)
-            assert.are.equal("ready", clip.status,
-                "the mixer's decoders are what make this more than WAV")
-            assert.is_true(math.abs(clip.duration - CLIP_SECONDS) < 1e-3,
-                "a tenth of a second, whatever container it arrived in")
+            assert.are.equal("ready", clip.status, "the mixer's decoders are what make this more than WAV")
+            assert.is_true(
+                math.abs(clip.duration - CLIP_SECONDS) < 1e-3,
+                "a tenth of a second, whatever container it arrived in"
+            )
             audio:destroy()
         end)
 
@@ -327,30 +363,29 @@ describe("audio", function()
     describe("resident and streamed", function()
         it("holds a clip shorter than the threshold in memory", function()
             local audio, clip = loaded({ streamSeconds = 10 })
-            assert.is_true(clip.resident,
-                "a sound effect is decoded once and read by every voice")
+            assert.is_true(clip.resident, "a sound effect is decoded once and read by every voice")
             audio:destroy()
         end)
 
         it("streams one at or over the threshold", function()
             local audio, clip = loaded({ streamSeconds = 0.05 }, VORBIS)
-            assert.is_false(clip.resident,
-                "a long clip is not worth a decoded copy")
-            assert.is_nil(clip._handle.audio,
-                "and nothing was loaded to hold one")
+            assert.is_false(clip.resident, "a long clip is not worth a decoded copy")
+            assert.is_nil(clip._handle.audio, "and nothing was loaded to hold one")
             audio:destroy()
         end)
 
         it("takes an explicit answer over the threshold", function()
             local audio = Audio.create({
-                backend = recorder(), streamSeconds = 10,
+                backend = recorder(),
+                streamSeconds = 10,
             })
             local streamed = audio:load(VORBIS, { stream = true })
             audio:waitForLoads()
             assert.is_false(streamed.resident)
 
             local other = Audio.create({
-                backend = recorder(), streamSeconds = 0.05,
+                backend = recorder(),
+                streamSeconds = 0.05,
             })
             local kept = other:load(FIXTURE, { stream = false })
             other:waitForLoads()
@@ -360,10 +395,8 @@ describe("audio", function()
             other:destroy()
         end)
 
-        it("points a streamed voice at the file and a resident one at the clip",
-            function()
-            local streaming, music, backend =
-                loaded({ streamSeconds = 0.05 }, VORBIS)
+        it("points a streamed voice at the file and a resident one at the clip", function()
+            local streaming, music, backend = loaded({ streamSeconds = 0.05 }, VORBIS)
             streaming:play(music)
             assert.are.equal("file", backend.tracks[1].input.kind)
             assert.are.equal(VORBIS, backend.tracks[1].input.path)
@@ -386,8 +419,7 @@ describe("audio", function()
             local track = backend.tracks[1]
             assert.is_true(track.playing)
             assert.are.equal(1, track.plays)
-            assert.are.equal(backend.mixer, track.mixer,
-                "made on the mixer that was opened")
+            assert.are.equal(backend.mixer, track.mixer, "made on the mixer that was opened")
             assert.are.equal(1, audio:sounding())
             audio:destroy()
         end)
@@ -398,8 +430,7 @@ describe("audio", function()
             local second = audio:play(clip)
 
             assert.are_not.equal(first, second)
-            assert.are.equal(2, #backend.tracks,
-                "mixing is the mixer's job, so two sounds are two tracks")
+            assert.are.equal(2, #backend.tracks, "mixing is the mixer's job, so two sounds are two tracks")
             assert.are.equal(2, audio:sounding())
             audio:destroy()
         end)
@@ -425,10 +456,8 @@ describe("audio", function()
             assert.are.equal(0.5, track.gain)
 
             audio:setMasterGain(0.5)
-            assert.are.equal(0.5, backend.mixerGain,
-                "the master is the mixer's own number, not every voice's")
-            assert.are.equal(0.5, track.gain,
-                "so a voice's gain is left exactly as it was asked for")
+            assert.are.equal(0.5, backend.mixerGain, "the master is the mixer's own number, not every voice's")
+            assert.are.equal(0.5, track.gain, "so a voice's gain is left exactly as it was asked for")
             assert.are.equal(0.5, audio:masterGain())
             audio:destroy()
         end)
@@ -441,8 +470,7 @@ describe("audio", function()
             audio:stop(voice)
             assert.is_false(track.playing)
             assert.are.equal(1, track.stops)
-            assert.is_nil(track.input,
-                "the input is dropped, so a streamed voice closes its file")
+            assert.is_nil(track.input, "the input is dropped, so a streamed voice closes its file")
             assert.is_false(audio:playing(voice))
             assert.are.equal(0, audio:sounding())
             audio:destroy()
@@ -455,8 +483,7 @@ describe("audio", function()
             assert.is_true(audio:playing(voice))
 
             audio:update(1 / 60)
-            assert.is_true(audio:playing(voice),
-                "a voice the mixer is still taking samples from stays")
+            assert.is_true(audio:playing(voice), "a voice the mixer is still taking samples from stays")
 
             -- What a mixer running a voice to its end looks like from here.
             track.playing = false
@@ -476,8 +503,7 @@ describe("audio", function()
             local again = audio:play(clip)
             assert.are.equal(1, #backend.tracks, "the track is pooled")
             assert.are.equal(2, backend.tracks[1].plays)
-            assert.are_not.equal(voice, again,
-                "a reused slot answers to a new handle")
+            assert.are_not.equal(voice, again, "a reused slot answers to a new handle")
             audio:destroy()
         end)
 
@@ -489,8 +515,7 @@ describe("audio", function()
 
             local live = audio:play(clip, { gain = 0.75 })
             audio:setGain(stale, 0.1)
-            assert.are.equal(0.75, backend.tracks[1].gain,
-                "the stale handle must not reach the sound that replaced it")
+            assert.are.equal(0.75, backend.tracks[1].gain, "the stale handle must not reach the sound that replaced it")
             audio:stop(stale)
             assert.is_true(audio:playing(live))
             audio:destroy()
@@ -505,9 +530,10 @@ describe("audio", function()
             assert.is_true(audio:paused(voice))
 
             audio:update(1 / 60)
-            assert.is_true(audio:playing(voice),
-                "a paused track reports that it is not playing, and reaping "
-                    .. "on that alone would collect it")
+            assert.is_true(
+                audio:playing(voice),
+                "a paused track reports that it is not playing, and reaping " .. "on that alone would collect it"
+            )
 
             audio:resume(voice)
             assert.is_false(audio:paused(voice))
@@ -516,15 +542,14 @@ describe("audio", function()
         end)
 
         it("declines when the mixer will not take the input", function()
-            local audio, clip, backend =
-                loaded({ backend = recorder({ refuseInput = true }) })
+            local audio, clip, backend = loaded({ backend = recorder({ refuseInput = true }) })
             assert.are.equal(0, audio:play(clip))
             assert.are.equal(0, audio:sounding())
-            assert.are.equal(0, backend.tracks[1].plays,
-                "a track with no input is never started")
-            assert.is_nil(backend.tracks[1].input,
-                "and a resident clip that was refused does not fall back to "
-                    .. "reading the file")
+            assert.are.equal(0, backend.tracks[1].plays, "a track with no input is never started")
+            assert.is_nil(
+                backend.tracks[1].input,
+                "and a resident clip that was refused does not fall back to " .. "reading the file"
+            )
             audio:destroy()
         end)
     end)
@@ -544,34 +569,29 @@ describe("audio", function()
             audio:destroy()
         end)
 
-        it("carries a loop point and a start offset in milliseconds",
-            function()
+        it("carries a loop point and a start offset in milliseconds", function()
             local audio, clip, backend = loaded()
             audio:play(clip, { loop = true, loopStart = 0.02, start = 0.05 })
             local params = backend.tracks[1].params
-            assert.are.equal(20, params.loopStartMs,
-                "so an intro plays once and the rest of it repeats")
+            assert.are.equal(20, params.loopStartMs, "so an intro plays once and the rest of it repeats")
             assert.are.equal(50, params.startMs)
             audio:destroy()
         end)
     end)
 
     describe("fades", function()
-        it("hands a fade-in to the mixer rather than ramping gain here",
-            function()
+        it("hands a fade-in to the mixer rather than ramping gain here", function()
             local audio, clip, backend = loaded()
             local voice = audio:play(clip, { gain = 0.8, fadeIn = 0.25 })
             local track = backend.tracks[1]
 
             assert.are.equal(250, track.params.fadeInMs)
-            assert.are.equal(0.8, track.gain,
-                "the gain is where it will end up; the ramp is the mixer's")
+            assert.are.equal(0.8, track.gain, "the gain is where it will end up; the ramp is the mixer's")
             assert.is_true(audio:playing(voice))
             audio:destroy()
         end)
 
-        it("keeps a faded-out voice until the mixer has finished it",
-            function()
+        it("keeps a faded-out voice until the mixer has finished it", function()
             local audio, clip, backend = loaded()
             local voice = audio:play(clip)
             local track = backend.tracks[1]
@@ -579,8 +599,7 @@ describe("audio", function()
             audio:stop(voice, 0.5)
             assert.are.equal(500, track.fadeOutMs)
             assert.is_true(track.playing)
-            assert.is_true(audio:playing(voice),
-                "a fading voice has not finished, so it keeps its slot")
+            assert.is_true(audio:playing(voice), "a fading voice has not finished, so it keeps its slot")
 
             audio:update(1 / 60)
             assert.are.equal(1, audio:sounding())
@@ -616,16 +635,14 @@ describe("audio", function()
             audio:destroy()
         end)
 
-        it("returns a reused track to the rate the next voice asked for",
-            function()
+        it("returns a reused track to the rate the next voice asked for", function()
             local audio, clip, backend = loaded()
             audio:play(clip, { pitch = 1.5 })
             backend.tracks[1].playing = false
             audio:update(1 / 60)
 
             audio:play(clip)
-            assert.are.equal(1.0, backend.tracks[1].pitch,
-                "the next sound on this slot must not inherit a rate")
+            assert.are.equal(1.0, backend.tracks[1].pitch, "the next sound on this slot must not inherit a rate")
             audio:destroy()
         end)
 
@@ -637,14 +654,14 @@ describe("audio", function()
             end
             for index = 1, 16 do
                 local pitch = backend.tracks[index].pitch
-                assert.is_true(pitch >= 1.8 and pitch <= 2.2,
-                    "a tenth either side of the rate, and no further")
+                assert.is_true(pitch >= 1.8 and pitch <= 2.2, "a tenth either side of the rate, and no further")
                 spread[pitch] = true
             end
             local distinct = 0
-            for _ in pairs(spread) do distinct = distinct + 1 end
-            assert.is_true(distinct > 1,
-                "forty of one sound must not all come out at one pitch")
+            for _ in pairs(spread) do
+                distinct = distinct + 1
+            end
+            assert.is_true(distinct > 1, "forty of one sound must not all come out at one pitch")
             audio:destroy()
         end)
     end)
@@ -663,10 +680,8 @@ describe("audio", function()
             audio:play(clip, { gain = 1.0, group = "music" })
 
             audio:setGroupGain("sfx", 0.5)
-            assert.are.equal(0.25, backend.tracks[1].gain,
-                "the group multiplies what the voice asked for")
-            assert.are.equal(1.0, backend.tracks[2].gain,
-                "and reaches nothing outside it")
+            assert.are.equal(0.25, backend.tracks[1].gain, "the group multiplies what the voice asked for")
+            assert.are.equal(1.0, backend.tracks[2].gain, "and reaches nothing outside it")
             assert.are.equal(0.5, audio:groupGain("sfx"))
 
             audio:play(clip, { gain = 0.4, group = "sfx" })
@@ -687,8 +702,7 @@ describe("audio", function()
             assert.is_false(audio:paused(other))
 
             audio:update(1 / 60)
-            assert.is_true(audio:playing(voice),
-                "a paused voice is held, not finished")
+            assert.is_true(audio:playing(voice), "a paused voice is held, not finished")
             assert.are.equal(2, audio:sounding())
 
             audio:resumeGroup("sfx")
@@ -718,8 +732,7 @@ describe("audio", function()
 
             audio:stopGroup("music", 1.5)
             assert.are.equal(1500, backend.tagOps[1].fadeMs)
-            assert.is_true(audio:playing(voice),
-                "a group fading out is still sounding")
+            assert.is_true(audio:playing(voice), "a group fading out is still sounding")
 
             backend.tracks[1].playing = false
             audio:update(1 / 60)
@@ -727,8 +740,7 @@ describe("audio", function()
             audio:destroy()
         end)
 
-        it("untags a track when its voice ends, so the next one is clean",
-            function()
+        it("untags a track when its voice ends, so the next one is clean", function()
             local audio, clip, backend = loaded()
             audio:play(clip, { group = "sfx" })
             backend.tracks[1].playing = false
@@ -752,7 +764,9 @@ describe("audio", function()
         end)
 
         it("refuses a name with nothing in it", function()
-            assert.has_error(function() Audio.groupId("") end)
+            assert.has_error(function()
+                Audio.groupId("")
+            end)
         end)
     end)
 
@@ -763,16 +777,16 @@ describe("audio", function()
             assert.is_true(audio:groupPaused("sfx"))
 
             local voice = audio:play(clip, { group = "sfx" })
-            assert.is_true(voice > 0, "the pause holds a sound, it does not "
-                .. "refuse one")
-            assert.is_true(backend.tracks[1].paused,
+            assert.is_true(voice > 0, "the pause holds a sound, it does not " .. "refuse one")
+            assert.is_true(
+                backend.tracks[1].paused,
                 "the mixer's tag pause reaches what is sounding when it is "
-                    .. "called and ignores everything that starts afterwards")
+                    .. "called and ignores everything that starts afterwards"
+            )
             assert.is_true(audio:paused(voice))
 
             audio:update(1 / 60)
-            assert.are.equal(1, audio:sounding(),
-                "and a held voice is not reaped")
+            assert.are.equal(1, audio:sounding(), "and a held voice is not reaped")
 
             audio:resumeGroup("sfx")
             assert.is_false(audio:groupPaused("sfx"))
@@ -784,13 +798,13 @@ describe("audio", function()
         it("holds an entity's sound that starts after the pause", function()
             local audio, clip, backend, world = scene()
             audio:pauseGroup("sfx")
-            world:spawn(Audio.Sound(clip.id, 1.0, 1, 1.0, 0, 0, 0, 0,
-                Audio.groupId("sfx")))
+            world:spawn(Audio.Sound(clip.id, 1.0, 1, 1.0, 0, 0, 0, 0, Audio.groupId("sfx")))
             world:update(1 / 60)
 
-            assert.is_true(backend.tracks[1].paused,
-                "an entity spawned during the menu is the case a sticky "
-                    .. "pause exists for")
+            assert.is_true(
+                backend.tracks[1].paused,
+                "an entity spawned during the menu is the case a sticky " .. "pause exists for"
+            )
             audio:destroy()
         end)
 
@@ -822,9 +836,12 @@ describe("audio", function()
             audio:setGroupMuted("sfx", true)
             assert.is_true(audio:groupMuted("sfx"))
             assert.are.equal(0, backend.tracks[1].gain)
-            assert.are.equal(0.5, audio:groupGain("sfx"),
+            assert.are.equal(
+                0.5,
+                audio:groupGain("sfx"),
                 "setting the gain to zero would lose the level to come back "
-                    .. "to, which is what a mute exists instead of")
+                    .. "to, which is what a mute exists instead of"
+            )
 
             audio:setGroupMuted("sfx", false)
             assert.are.equal(0.5, backend.tracks[1].gain)
@@ -838,13 +855,11 @@ describe("audio", function()
             audio:play(clip, { gain = 1.0, group = "music" })
 
             assert.are.equal(0, backend.tracks[1].gain)
-            assert.are.equal(1.0, backend.tracks[2].gain,
-                "and reaches nothing outside it")
+            assert.are.equal(1.0, backend.tracks[2].gain, "and reaches nothing outside it")
             audio:destroy()
         end)
 
-        it("puts the master on the mixer and does not fan out to the groups",
-            function()
+        it("puts the master on the mixer and does not fan out to the groups", function()
             local audio, clip, backend = loaded()
             audio:setMasterGain(0.8)
             audio:setGroupGain("sfx", 0.5)
@@ -853,19 +868,23 @@ describe("audio", function()
             audio:setMuted(true)
             assert.is_true(audio:muted())
             assert.are.equal(0, backend.mixerGain)
-            assert.are.equal(0.8, audio:masterGain(),
-                "the level a later unmute returns to")
-            assert.is_false(audio:groupMuted("sfx"),
-                "a master mute that wrote every group's bit would leave "
-                    .. "nothing to put back")
-            assert.are.equal(0.5, backend.tracks[1].gain,
-                "and one number on the mixer costs the same however many "
-                    .. "voices are sounding")
+            assert.are.equal(0.8, audio:masterGain(), "the level a later unmute returns to")
+            assert.is_false(
+                audio:groupMuted("sfx"),
+                "a master mute that wrote every group's bit would leave " .. "nothing to put back"
+            )
+            assert.are.equal(
+                0.5,
+                backend.tracks[1].gain,
+                "and one number on the mixer costs the same however many " .. "voices are sounding"
+            )
 
             audio:setMasterGain(0.4)
-            assert.are.equal(0, backend.mixerGain,
-                "a slider moved while muted changes what an unmute returns "
-                    .. "to and nothing that is audible now")
+            assert.are.equal(
+                0,
+                backend.mixerGain,
+                "a slider moved while muted changes what an unmute returns " .. "to and nothing that is audible now"
+            )
 
             audio:setMuted(false)
             assert.are.equal(0.4, backend.mixerGain)
@@ -881,8 +900,11 @@ describe("audio", function()
             for _ = 1, 3 do
                 assert.is_true(audio:play(clip, { key = "hit" }) > 0)
             end
-            assert.are.equal(0, audio:play(clip, { key = "hit" }),
-                "forty enemies dying together do not play forty sounds")
+            assert.are.equal(
+                0,
+                audio:play(clip, { key = "hit" }),
+                "forty enemies dying together do not play forty sounds"
+            )
             assert.are.equal(3, audio:keyCount("hit"))
             assert.is_true(audio:play(clip) > 0, "and other sounds still start")
             audio:destroy()
@@ -910,28 +932,26 @@ describe("audio", function()
             assert.are.equal(0, audio:play(clip, { key = "hit" }))
 
             audio:update(0.02)
-            assert.are.equal(0, audio:play(clip, { key = "hit" }),
-                "the cooldown is measured against the frames that have run")
+            assert.are.equal(
+                0,
+                audio:play(clip, { key = "hit" }),
+                "the cooldown is measured against the frames that have run"
+            )
 
             audio:update(0.04)
             assert.is_true(audio:play(clip, { key = "hit" }) > 0)
             audio:destroy()
         end)
 
-        it("composes a limit with a group without either knowing the other",
-            function()
+        it("composes a limit with a group without either knowing the other", function()
             local audio, clip, backend = loaded()
             audio:setLimit("hit", { voices = 2 })
             audio:setGroupGain("sfx", 0.5)
 
-            local first = audio:play(clip,
-                { gain = 1.0, key = "hit", group = "sfx" })
+            local first = audio:play(clip, { gain = 1.0, key = "hit", group = "sfx" })
             audio:play(clip, { gain = 1.0, key = "hit", group = "sfx" })
-            assert.are.equal(0,
-                audio:play(clip, { key = "hit", group = "sfx" }),
-                "the key caps the count")
-            assert.are.equal(0.5, backend.tracks[1].gain,
-                "and the group sets the gain")
+            assert.are.equal(0, audio:play(clip, { key = "hit", group = "sfx" }), "the key caps the count")
+            assert.are.equal(0.5, backend.tracks[1].gain, "and the group sets the gain")
             assert.is_true(backend.tracks[1].tags.sfx)
 
             -- Stopping through the group also releases the key's count, since
@@ -944,7 +964,9 @@ describe("audio", function()
 
         it("counts nothing for a key with no limit", function()
             local audio, clip = loaded()
-            for _ = 1, 5 do audio:play(clip, { key = "step" }) end
+            for _ = 1, 5 do
+                audio:play(clip, { key = "step" })
+            end
             assert.are.equal(5, audio:keyCount("step"))
             assert.is_nil(audio:limit("step"))
             audio:destroy()
@@ -954,14 +976,11 @@ describe("audio", function()
     describe("spatial position", function()
         it("passes a position through and nothing else", function()
             local audio, clip, backend = loaded()
-            local voice = audio:play(clip,
-                { spatial = true, x = 3, y = -1, z = 2 })
-            assert.are.same({ x = 3, y = -1, z = 2 },
-                backend.tracks[1].position)
+            local voice = audio:play(clip, { spatial = true, x = 3, y = -1, z = 2 })
+            assert.are.same({ x = 3, y = -1, z = 2 }, backend.tracks[1].position)
 
             audio:setPosition(voice, 4, 0, 0)
-            assert.are.same({ x = 4, y = 0, z = 0 },
-                backend.tracks[1].position)
+            assert.are.same({ x = 4, y = 0, z = 0 }, backend.tracks[1].position)
 
             audio:clearPosition(voice)
             assert.is_nil(backend.tracks[1].position)
@@ -983,8 +1002,7 @@ describe("audio", function()
             assert.is_nil(backend.tracks[1].position)
 
             audio:play(clip)
-            assert.is_nil(backend.tracks[1].position,
-                "the next sound on this slot must not inherit a position")
+            assert.is_nil(backend.tracks[1].position, "the next sound on this slot must not inherit a position")
             audio:destroy()
         end)
     end)
@@ -1016,15 +1034,13 @@ describe("audio", function()
             world:update(1 / 60)
 
             assert.are.equal(1.25, backend.tracks[1].pitch)
-            assert.are.same({ x = 2, y = 3, z = 4 },
-                backend.tracks[1].position)
+            assert.are.same({ x = 2, y = 3, z = 4 }, backend.tracks[1].position)
             audio:destroy()
         end)
 
         it("follows a moving sound", function()
             local audio, clip, backend, world = scene()
-            local entity = world:spawn(
-                Audio.Sound(clip.id, 1.0, 1, 1.0, 1, 0, 0, 0))
+            local entity = world:spawn(Audio.Sound(clip.id, 1.0, 1, 1.0, 1, 0, 0, 0))
             world:update(1 / 60)
 
             world:getMut(entity, Audio.Sound).x = 5
@@ -1046,8 +1062,7 @@ describe("audio", function()
             world:despawn(entity)
             world:update(1 / 60)
 
-            assert.are.equal(0, audio:sounding(),
-                "a looping sound outlives its entity unless something ends it")
+            assert.are.equal(0, audio:sounding(), "a looping sound outlives its entity unless something ends it")
             assert.is_false(backend.tracks[1].playing)
             audio:destroy()
         end)
@@ -1065,8 +1080,7 @@ describe("audio", function()
             audio:destroy()
         end)
 
-        it("marks a finished one-shot rather than starting it again",
-            function()
+        it("marks a finished one-shot rather than starting it again", function()
             local audio, clip, backend, world = scene()
             local entity = world:spawn(Audio.Sound(clip.id))
             world:update(1 / 60)
@@ -1079,8 +1093,7 @@ describe("audio", function()
             assert.are.equal(0, audio:sounding())
 
             world:update(1 / 60)
-            assert.are.equal(0, audio:sounding(),
-                "a one-shot that ended must not restart every frame")
+            assert.are.equal(0, audio:sounding(), "a one-shot that ended must not restart every frame")
             audio:destroy()
         end)
 
@@ -1110,22 +1123,24 @@ describe("audio", function()
         it("joins the group its component names", function()
             local audio, clip, backend, world = scene()
             audio:setGroupGain("sfx", 0.5)
-            world:spawn(Audio.Sound(clip.id, 0.5, 0, 1.0, 0, 0, 0, 0,
-                Audio.groupId("sfx")))
+            world:spawn(Audio.Sound(clip.id, 0.5, 0, 1.0, 0, 0, 0, 0, Audio.groupId("sfx")))
             world:update(1 / 60)
 
-            assert.is_true(backend.tracks[1].tags.sfx,
-                "an effects slider that only reached sounds a game started "
-                    .. "by hand would reach almost nothing")
-            assert.are.equal(0.25, backend.tracks[1].gain,
-                "and the group's gain multiplies what the component asked for")
+            assert.is_true(
+                backend.tracks[1].tags.sfx,
+                "an effects slider that only reached sounds a game started " .. "by hand would reach almost nothing"
+            )
+            assert.are.equal(
+                0.25,
+                backend.tracks[1].gain,
+                "and the group's gain multiplies what the component asked for"
+            )
             audio:destroy()
         end)
 
         it("reaches an entity's sound through its group", function()
             local audio, clip, backend, world = scene()
-            world:spawn(Audio.Sound(clip.id, 1.0, 1, 1.0, 0, 0, 0, 0,
-                Audio.groupId("sfx")))
+            world:spawn(Audio.Sound(clip.id, 1.0, 1, 1.0, 0, 0, 0, 0, Audio.groupId("sfx")))
             world:update(1 / 60)
 
             audio:pauseGroup("sfx")
@@ -1145,28 +1160,25 @@ describe("audio", function()
             audio:destroy()
         end)
 
-        it("carries a group's name through a snapshot, not this run's index",
-            function()
+        it("carries a group's name through a snapshot, not this run's index", function()
             local audio, clip, _, world = scene()
-            local entity = world:spawn(Audio.Sound(clip.id, 1.0, 0, 1.0, 0,
-                0, 0, 0, Audio.groupId("sfx")))
+            local entity = world:spawn(Audio.Sound(clip.id, 1.0, 0, 1.0, 0, 0, 0, 0, Audio.groupId("sfx")))
             world:update(1 / 60)
 
             local saved = world:saveSnapshot({ format = "table" }).snapshot
-            assert.is_true(holds(saved.archetypes, "sfx"),
-                "an index in a file names whatever the next run happens to "
-                    .. "intern in its place")
+            assert.is_true(
+                holds(saved.archetypes, "sfx"),
+                "an index in a file names whatever the next run happens to " .. "intern in its place"
+            )
 
             world:loadSnapshot(saved)
-            assert.are.equal(Audio.groupId("sfx"),
-                world:get(entity, Audio.Sound).group)
+            assert.are.equal(Audio.groupId("sfx"), world:get(entity, Audio.Sound).group)
             audio:destroy()
         end)
 
         it("resolves a saved group this run has never interned", function()
             local audio, clip, _, world = scene()
-            world:spawn(Audio.Sound(clip.id, 1.0, 1, 1.0, 0, 0, 0, 0,
-                Audio.groupId("sfx")))
+            world:spawn(Audio.Sound(clip.id, 1.0, 1, 1.0, 0, 0, 0, 0, Audio.groupId("sfx")))
             world:update(1 / 60)
 
             -- The name is the only thing the file carries, so rewriting it
@@ -1186,14 +1198,12 @@ describe("audio", function()
 
         it("survives a round trip through a snapshot", function()
             local audio, clip, _, world = scene()
-            local entity = world:spawn(
-                Audio.Sound(clip.id, 0.5, 1, 1.5, 1, 7, 8, 9))
+            local entity = world:spawn(Audio.Sound(clip.id, 0.5, 1, 1.5, 1, 7, 8, 9))
             world:update(1 / 60)
             assert.is_true(world:get(entity, Audio.Sound).voice > 0)
 
             local saved = world:saveSnapshot({ format = "table" }).snapshot
-            assert.is_true(holds(saved.archetypes, FIXTURE),
-                "a snapshot carries the path, not this run's index")
+            assert.is_true(holds(saved.archetypes, FIXTURE), "a snapshot carries the path, not this run's index")
 
             world:loadSnapshot(saved)
             local restored = world:get(entity, Audio.Sound)
@@ -1204,8 +1214,7 @@ describe("audio", function()
             assert.are.equal(1, restored.spatial)
             assert.are.equal(7, restored.x)
             assert.are.equal(9, restored.z)
-            assert.are.equal(0, restored.voice,
-                "a restored sound starts again rather than resuming")
+            assert.are.equal(0, restored.voice, "a restored sound starts again rather than resuming")
             audio:destroy()
         end)
     end)
@@ -1229,8 +1238,7 @@ describe("audio", function()
 
             world:loadSnapshot(saved)
 
-            assert.are.equal(0.3, audio:masterGain(),
-                "none of this is in the world, so nothing else would carry it")
+            assert.are.equal(0.3, audio:masterGain(), "none of this is in the world, so nothing else would carry it")
             assert.is_true(audio:muted())
             assert.are.equal(0, backend.mixerGain)
             assert.are.equal(0.25, audio:groupGain("music"))
@@ -1239,8 +1247,7 @@ describe("audio", function()
             audio:destroy()
         end)
 
-        it("puts a group the snapshot does not name back to its defaults",
-            function()
+        it("puts a group the snapshot does not name back to its defaults", function()
             local audio, _, _, world = scene()
             local saved = world:saveSnapshot({ format = "table" }).snapshot
 
@@ -1249,9 +1256,11 @@ describe("audio", function()
             audio:pauseGroup("menu")
             world:loadSnapshot(saved)
 
-            assert.are.equal(1.0, audio:groupGain("menu"),
-                "a load is the saved state, not the saved state merged over "
-                    .. "whatever this run had set")
+            assert.are.equal(
+                1.0,
+                audio:groupGain("menu"),
+                "a load is the saved state, not the saved state merged over " .. "whatever this run had set"
+            )
             assert.is_false(audio:groupMuted("menu"))
             assert.is_false(audio:groupPaused("menu"))
             audio:destroy()
@@ -1267,14 +1276,15 @@ describe("audio", function()
             assert.are.equal(1.0, backend.tracks[1].gain)
 
             world:loadSnapshot(saved)
-            assert.are.equal(0.25, backend.tracks[1].gain,
-                "a restored level that only reached later sounds would leave "
-                    .. "what is playing at the wrong volume")
+            assert.are.equal(
+                0.25,
+                backend.tracks[1].gain,
+                "a restored level that only reached later sounds would leave " .. "what is playing at the wrong volume"
+            )
             audio:destroy()
         end)
 
-        it("leaves keyed limits to the build rather than to the file",
-            function()
+        it("leaves keyed limits to the build rather than to the file", function()
             local audio, _, _, world = scene()
             audio:setLimit("hit", { voices = 3 })
             local saved = world:saveSnapshot({ format = "table" }).snapshot
@@ -1302,8 +1312,7 @@ describe("audio", function()
             local voice = audio:play(clip, { group = "sfx", key = "hit" })
 
             local result = callTool("audio")
-            assert.is_falsy(result.isError, tostring(result.content
-                and result.content[1] and result.content[1].text))
+            assert.is_falsy(result.isError, tostring(result.content and result.content[1] and result.content[1].text))
             local reported = result.structuredContent
 
             assert.is_true(reported.available)
@@ -1319,18 +1328,21 @@ describe("audio", function()
             assert.are.equal(0.25, groups.sfx.gain)
             assert.are.equal(1, groups.sfx.voices)
             assert.is_true(groups.music.muted)
-            assert.is_true(groups.ambience.paused,
-                "a group holding nothing yet still holds what starts")
+            assert.is_true(groups.ambience.paused, "a group holding nothing yet still holds what starts")
 
             assert.are.equal(1, #reported.voices)
-            assert.are.equal(voice, reported.voices[1].handle,
-                "the handle stop and playing take, so what this shows can be "
-                    .. "acted on")
+            assert.are.equal(
+                voice,
+                reported.voices[1].handle,
+                "the handle stop and playing take, so what this shows can be " .. "acted on"
+            )
             assert.are.equal(FIXTURE, reported.voices[1].clip)
             assert.are.equal("sfx", reported.voices[1].group)
 
             local keys = {}
-            for _, key in ipairs(reported.keys) do keys[key.key] = key end
+            for _, key in ipairs(reported.keys) do
+                keys[key.key] = key
+            end
             assert.are.equal(3, keys.hit.voices)
             assert.are.equal(1, keys.hit.count)
 
@@ -1339,16 +1351,14 @@ describe("audio", function()
             audio:destroy()
         end)
 
-        it("says why rather than failing when no audio is installed",
-            function()
+        it("says why rather than failing when no audio is installed", function()
             mcpTools.bind(nil, tecs.newWorld())
             local result = callTool("audio")
             assert.is_true(result.isError)
             assert.is_truthy(result.content[1].text:find("no audio", 1, true))
         end)
 
-        it("stops answering for a world once the mixer is destroyed",
-            function()
+        it("stops answering for a world once the mixer is destroyed", function()
             -- Nothing can open an output again, so a world still naming a
             -- destroyed mixer would answer every reader with one that can
             -- only report itself unavailable. Two worlds because `install`
@@ -1362,14 +1372,14 @@ describe("audio", function()
             audio:destroy()
 
             assert.is_nil(Audio.of(world))
-            assert.is_nil(Audio.of(second),
-                "every world it was installed into, not just the last")
+            assert.is_nil(Audio.of(second), "every world it was installed into, not just the last")
 
             mcpTools.bind(nil, world)
             local result = callTool("audio")
-            assert.is_true(result.isError,
-                "so the debug tool says none is installed rather than "
-                    .. "reporting on a mixer that has gone")
+            assert.is_true(
+                result.isError,
+                "so the debug tool says none is installed rather than " .. "reporting on a mixer that has gone"
+            )
         end)
     end)
 
@@ -1381,8 +1391,7 @@ describe("audio", function()
             audio:waitForLoads()
 
             assert.is_false(audio.available)
-            assert.are.equal("ready", clip.status,
-                "loading does not need an output")
+            assert.are.equal("ready", clip.status, "loading does not need an output")
             assert.are.equal(0, audio:play(clip))
             assert.are.equal(0, audio:sounding())
             assert.are.equal(0, #backend.tracks)
@@ -1392,9 +1401,11 @@ describe("audio", function()
             audio:setGroupGain("sfx", 0.5)
             audio:setGroupMuted("sfx", true)
             audio:pauseGroup("sfx")
-            assert.is_true(audio:groupPaused("sfx"),
+            assert.is_true(
+                audio:groupPaused("sfx"),
                 "the settings are recorded whether or not there is an output "
-                    .. "to send them to, so a snapshot carries them either way")
+                    .. "to send them to, so a snapshot carries them either way"
+            )
             audio:resumeGroup("sfx")
             audio:stopGroup("sfx")
             audio:stopAll()
