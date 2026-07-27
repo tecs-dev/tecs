@@ -148,6 +148,9 @@ local NOTICE_NAMES = {
     LUAJIT = "LuaJIT",
     SHADERC = "shaderc",
     SPVC = "SPIRV-Cross",
+    ZLIB = "zlib",
+    CURL = "libcurl",
+    MBEDTLS = "Mbed TLS",
 }
 
 describe("the licence position", function()

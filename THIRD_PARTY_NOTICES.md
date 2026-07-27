@@ -258,46 +258,69 @@ the first is not compliance:
   makes reproducing it mandatory.
 - **dlmalloc** by Doug Lea, public domain. No obligation; named for completeness.
 
-## Pending
+### zlib
 
-Two dependencies are being added and one decision goes with them, so the answers
-are here rather than found afterwards.
+Compression, under the zlib licence. Reached through the FFI for DEFLATE and
+for the Adler-32 a zlib stream carries in its trailer, and linked by libcurl to
+answer a `Content-Encoding`. Nothing is strictly required of a binary; the
+notice ships anyway.
 
-- **zlib**, zlib licensed, on the same footing as the copy libpng already reads
-  through. Nothing is strictly required of a binary; the notice ships anyway.
-- **libcurl**, under the **curl** licence, which is its own SPDX identifier and
-  not MIT. It requires the copyright notice and permission notice in all copies,
-  with no source-only carve-out, so a binary distribution reproduces `COPYING`
-  in full. It also compiles in ISC-licensed `inet_pton` and `inet_ntop`
-  unconditionally, so the ISC notice goes with it.
+    Copyright (C) 1995-2024 Jean-loup Gailly and Mark Adler
 
-  How it is built matters more than its own licence, and its defaults are
-  against the rule here:
+    This software is provided 'as-is', without any express or implied warranty.
 
-  - **libidn2** is dual GPL-2.0-or-later or LGPL-3.0-or-later, so its better arm
-    is still disqualifying, and it is auto-detected on. It has to be refused
-    explicitly, not assumed absent.
-  - **libpsl** is the quiet one. libpsl is MIT, but curl's configure fails
-    without it unless it is refused, and libpsl's own runtime resolves to
-    libidn2 and libunistring on Linux, putting back exactly what refusing
-    libidn2 removed. Its Public Suffix List data is MPL-2.0 besides.
-  - The clean position is to refuse both, and to route international domain
-    names through the platform on Windows and Apple if they are needed at all.
+### libcurl
 
-- **A TLS backend**, which is the decision. Permissive and therefore available:
-  **OpenSSL 3.x** and **BoringSSL** and **AWS-LC** (Apache-2.0), **LibreSSL**
-  (ISC with the older OpenSSL and SSLeay terms), **mbedTLS** (Apache-2.0 or
-  GPL-2.0-or-later, electing Apache), **Rustls** (Apache-2.0, ISC or MIT), and
-  **Schannel** on Windows, which costs nothing to ship because it is part of the
-  target. Excluded: **GnuTLS**, LGPL-2.1-or-later and reaching LGPL-3.0 nettle
-  and gmp behind it, and **wolfSSL**, GPL-3.0-or-later with no linking
-  exception, which would put a whole game under GPLv3 unless a commercial
-  licence were bought. `spec/licenses_spec.lua` denies both.
+HTTP and HTTPS, under the **curl** licence, which is its own SPDX identifier
+and is not MIT. It requires the copyright notice and the permission notice in
+all copies, with no source-only carve-out, so a binary distribution reproduces
+`COPYING` in full.
 
-  Apple is worth stating plainly because the obvious answer is stale: Secure
-  Transport was removed from curl in 8.15.0 and there is no macOS-native TLS
-  backend any more. What remains is platform certificate verification bolted
-  onto one of the backends above, so an Apple build still chooses one of them.
+    Copyright (c) 1996 - 2026, Daniel Stenberg, <daniel@haxx.se>, and many
+    contributors, see the THANKS file.
+
+It also compiles in ISC-licensed `inet_pton` and `inet_ntop` unconditionally,
+so the ISC notice goes with it.
+
+How it is built matters more than its own licence, and its defaults are against
+the rule here. Both of these are refused in `cmake/Pinned.cmake` and denied by
+`spec/licenses_spec.lua`, because absence by luck is not absence:
+
+- **libidn2** is dual GPL-2.0-or-later or LGPL-3.0-or-later, so even its better
+  arm is disqualifying, and it is auto-detected on. `CURL_USE_LIBIDN2` is OFF.
+- **libpsl** is the quiet one. libpsl is MIT, but curl's configure fails without
+  it unless it is refused, and libpsl's own runtime resolves to libidn2 and
+  libunistring on Linux, putting back exactly what refusing libidn2 removed. Its
+  Public Suffix List data is MPL-2.0 besides. `CURL_USE_LIBPSL` is OFF.
+
+International domain names, if they are ever needed, route through the platform
+rather than through either.
+
+### Mbed TLS
+
+curl's TLS backend, offered as Apache-2.0 or GPL-2.0-or-later at the user's
+choice. **This distribution elects Apache-2.0**, and a tri-licensed dependency
+left unelected in a shipped artifact is the thing that election avoids.
+
+    Copyright The Mbed TLS Contributors
+    SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+
+Apache-2.0 requires the licence, the NOTICE file if one is present, and a
+statement of changes if any are made. None are made here.
+
+The backends that were available and were not chosen are recorded because the
+reasoning is worth keeping: **OpenSSL 3.x**, **BoringSSL** and **AWS-LC** are
+Apache-2.0, **LibreSSL** is ISC with the older OpenSSL and SSLeay terms,
+**Rustls** is Apache-2.0, ISC or MIT, and **Schannel** on Windows costs nothing
+to ship because it is part of the target. Excluded on the rule: **GnuTLS**,
+LGPL-2.1-or-later and reaching LGPL-3.0 nettle and gmp behind it, and
+**wolfSSL**, GPL-3.0-or-later with no linking exception, which would put a whole
+game under GPLv3 unless a commercial licence were bought.
+
+Apple is worth stating plainly because the obvious answer is stale: Secure
+Transport was removed from curl in 8.15.0 and there is no macOS-native TLS
+backend any more. What remains is platform certificate verification bolted onto
+one of the backends above, so an Apple build still chooses one of them.
 
 ## Where the list comes from
 
