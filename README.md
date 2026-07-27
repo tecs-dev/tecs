@@ -361,11 +361,32 @@ collapse into one.
 A recognised kind means usable fields. An event whose kind is named and whose
 payload was left unread is worse than an unknown one, because the caller has
 every reason to trust it, so text, composition, candidates, drops, the
-clipboard, sensors and gamepad touchpads all convert their payloads. Several of
-those carry pointers into memory SDL recycles as soon as the callback returns,
-so the C host copies those bytes into the queue it owns and frees them when the
-queue drains. Retaining the pointer is a use-after-free that reads as an
-occasional garbled string.
+clipboard, sensors, gamepad touchpads, displays, windows, pinches and user
+events all convert their payloads. Several of those carry pointers into memory
+SDL recycles as soon as the callback returns, so the C host copies those bytes
+into the queue it owns and frees them when the queue drains. Retaining the
+pointer is a use-after-free that reads as an occasional garbled string.
+
+The vocabulary covers what a game can act on and stops there. Displays report
+being added, removed, moved, reoriented, rescaled and remoded, each naming the
+display it happened to. Windows report occlusion, entering and leaving
+fullscreen, a display scale change and a safe area change, beside the states
+they already reported. Keyboards, mice and audio devices report arriving,
+leaving and being reformatted. A trackpad pinch arrives as `pinchBegin`,
+`pinchUpdate` and `pinchEnd` carrying the factor it zoomed by, and counts as
+player input for latency. What stays out is what this engine cannot act on: the
+joystick family, because every pad is opened as a gamepad and forwarding both
+would report one device twice; camera devices and the 2D renderer's device-loss
+events, because neither subsystem is used; hit tests, because none is installed;
+and ICC profile and HDR state, because there is no colour-managed path for a
+game to respond through.
+
+Every kind is drivable by name. `events.push` takes the engine's vocabulary
+rather than an SDL union and fills the payload for the key, mouse, gamepad,
+device, pinch, window and display kinds, so the debug server's `send_event`
+tool can occlude a window, move a display or zoom a pinch and have the game see
+what a real one carries. A kind whose payload nobody injects is pushed carrying
+its type alone, which is honest about the difference.
 
 A mouse event the platform synthesised from a touch or a pen is marked as such.
 Those arrive beside the finger events they were made from, and a game handling

@@ -280,6 +280,23 @@ mcp.register({
             x = { type = "number" },
             y = { type = "number" },
             repeated = { type = "boolean", description = "For keyDown." },
+            which = {
+                type = "integer",
+                description = "Device, window or display the event is about.",
+            },
+            data1 = {
+                type = "integer",
+                description = "First payload, for the window and display kinds.",
+            },
+            data2 = { type = "integer", description = "Second payload." },
+            scale = {
+                type = "number",
+                description = "Zoom factor, for the pinch kinds.",
+            },
+            recording = {
+                type = "boolean",
+                description = "Whether an audio device records.",
+            },
         },
     },
     handler = function(args: {string: any}): {string: any}
@@ -295,6 +312,11 @@ mcp.register({
             x = args.x as number,
             y = args.y as number,
             repeated = args.repeated as boolean,
+            which = args.which as number,
+            data1 = args.data1 as integer,
+            data2 = args.data2 as integer,
+            scale = args.scale as number,
+            recording = args.recording as boolean,
         } as events.Event)
         return { pushed = kind }
     end,
