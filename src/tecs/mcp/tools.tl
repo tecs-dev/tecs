@@ -19,6 +19,7 @@ local shadercompiler <const> = require("tecs.gpu.shadercompiler")
 local materials <const> = require("tecs.gpu.materials")
 local Renderer <const> = require("tecs.Renderer")
 local Audio <const> = require("tecs.Audio")
+local assets <const> = require("tecs.assets")
 
 local C <const> = sdl.C
 
@@ -509,6 +510,60 @@ mcp.register({
         boundReload()
 
         return { materials = materials.names() }
+    end,
+})
+
+--- Re-reads an image file and writes it over the one already registered.
+---
+--- The counterpart to `reload_shaders`, and it refuses on the same principle:
+--- a reload may not change what is already drawn to mean something else. An
+--- image keeps its layer and its rect, so every sprite naming it goes on naming
+--- the right texels and the next frame draws the new pixels with nothing in the
+--- world touched. A file that changed size cannot do that, so it is refused
+--- rather than half applied.
+mcp.register({
+    name = "reload_image",
+    description = "Re-reads an image file and uploads it over the one already "
+        .. "registered under that path. Refuses a file whose size changed.",
+    destructive = true,
+    inputSchema = {
+        type = "object",
+        properties = {
+            path = {
+                type = "string",
+                description = "The path the image was registered under.",
+            },
+        },
+        required = { "path" },
+    },
+    handler = function(args: {string: any}): {string: any}
+        local path = args.path as string
+        if path == nil or path == "" then
+            error("path is required", 0)
+        end
+        local target = renderer()
+        if not assets.installed() then
+            error("no asset loader is running, so there is nothing here that "
+                .. "decodes an image file", 0)
+        end
+
+        -- Nothing in `assets` is a cache, so this decodes the file as it is
+        -- now rather than answering with what the first load produced.
+        local handle = assets.loadImage(path)
+        assets.waitAll()
+        if handle.status ~= "ready" then
+            local reason = handle.error or ("still " .. handle.status)
+            handle:release()
+            error(("'%s' did not load: %s"):format(path, reason), 0)
+        end
+
+        local _, region = target:replaceImage(handle)
+        return {
+            path = path,
+            layer = region.layer,
+            width = region.width,
+            height = region.height,
+        }
     end,
 })
 

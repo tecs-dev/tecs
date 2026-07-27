@@ -16,6 +16,7 @@ local shaders = require("tecs.gpu.shaders")
 local materials = require("tecs.gpu.materials")
 local mcp = require("tecs.mcp")
 local tools = require("tecs.mcp.tools")
+local assets = require("tecs.assets")
 
 --- A material body naming itself, so the dispatch can be read back for it.
 local function body(marker)
@@ -213,5 +214,125 @@ describe("mcp reload_shaders", function()
         assert.is_false(ok)
         assert.is_truthy(text:find("specreloadadded", 1, true), "unexpected refusal: " .. text)
         assert.are.equal(0, rebuilt, "the pipelines were rebuilt from a set that renumbered")
+    end)
+end)
+
+-- The image half of the same operation. Writing the pixels needs a device and
+-- is asserted on in the renderer's own specs; what is here is the tool's own
+-- share of it, which is deciding what may be reloaded at all and handing a
+-- decoded file over exactly once.
+describe("mcp reload_image", function()
+    local FIXTURE = "spec/fixtures/split.png"
+    local handed
+
+    local function callTool(arguments)
+        local response = cjson.decode(mcp.dispatch(cjson.encode({
+            jsonrpc = "2.0",
+            id = 1,
+            method = "tools/call",
+            params = { name = "reload_image", arguments = arguments },
+        })))
+        local result = response.result
+        local text = result.content and result.content[1] and result.content[1].text or ""
+        return result.isError ~= true, result.structuredContent, text
+    end
+
+    -- A renderer that records rather than uploads, so the region it answers
+    -- with is the test's to choose and the reported layer can be told apart
+    -- from a default.
+    local function stub(region)
+        return {
+            replaceImage = function(_, handle)
+                handed = { path = handle.path, width = handle.width, height = handle.height }
+                handle:release()
+                return nil, region
+            end,
+        }
+    end
+
+    before_each(function()
+        handed = nil
+        tools.bind(nil, nil)
+        assets.install()
+    end)
+
+    after_each(function()
+        assets.shutdown()
+        tools.bind(nil, nil)
+    end)
+
+    it("refuses when nothing is bound to upload into", function()
+        local ok, _, text = callTool({ path = FIXTURE })
+        assert.is_false(ok)
+        assert.is_truthy(text:find("no renderer is bound", 1, true), "unexpected refusal: " .. text)
+        assert.is_nil(handed)
+    end)
+
+    it("refuses a path with no file behind it", function()
+        tools.bind(stub({ layer = 0, width = 4, height = 4 }), nil)
+
+        local ok, _, text = callTool({ path = "spec/fixtures/nothing.png" })
+        assert.is_false(ok)
+        assert.is_truthy(text:find("did not load", 1, true), "unexpected refusal: " .. text)
+        assert.is_nil(handed, "a file that did not decode must not reach the array")
+    end)
+
+    it("refuses a call that names no path", function()
+        tools.bind(stub({ layer = 0, width = 4, height = 4 }), nil)
+
+        local ok, _, text = callTool({})
+        assert.is_false(ok)
+        assert.is_truthy(text:find("path is required", 1, true), "unexpected refusal: " .. text)
+    end)
+
+    it("hands the decoded file over and reports where it went", function()
+        tools.bind(stub({ layer = 3, width = 4, height = 4 }), nil)
+
+        local ok, result, text = callTool({ path = FIXTURE })
+        assert.is_true(ok, text)
+        assert.are.same({ path = FIXTURE, width = 4, height = 4 }, handed)
+        assert.are.equal(3, result.layer, "the layer reported is the one the image already held")
+        assert.are.equal(FIXTURE, result.path)
+    end)
+end)
+
+-- The whole operation, driven the way an agent drives it: a real application
+-- with a device behind it and a tool call over the dispatcher. What this pins
+-- that neither half above can is that the application hands its renderer to the
+-- tool at all, so the refusal the first describe checks for is not what a
+-- running game answers with.
+describe("reload_shaders against a running application", function()
+    local Application = require("tecs.Application")
+
+    it("rebuilds the pipelines of the application that is running", function()
+        local app = Application.create({
+            window = { title = "reload", width = 64, height = 64 },
+            logFile = "",
+            -- Binding the tools is what registering a port turns on, and the
+            -- reload is registered beside them.
+            mcpPort = 7137,
+        })
+        assert.is_true(app:_init())
+        app:_iterate(nil, 0, nil)
+
+        local response = cjson.decode(mcp.dispatch(cjson.encode({
+            jsonrpc = "2.0",
+            id = 1,
+            method = "tools/call",
+            params = { name = "reload_shaders", arguments = {} },
+        })))
+        local result = response.result
+        local text = result.content and result.content[1] and result.content[1].text or ""
+
+        -- A frame after the swap, because a rebuild that left a pipeline
+        -- released and not replaced is only visible in the next one.
+        local drawn = app:_iterate(nil, 0, nil)
+        app:_shutdown()
+        tools.bind(nil, nil)
+        tools.bindReload(nil)
+        restore()
+
+        assert.is_falsy(result.isError, "the reload was refused: " .. text)
+        assert.is_true(drawn, "the frame after the rebuild did not run")
     end)
 end)

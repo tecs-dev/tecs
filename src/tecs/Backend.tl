@@ -185,6 +185,27 @@ local function layerUniform(self: Backend, width: number,
     return data
 end
 
+--- Builds the geometry pipeline against the G-buffer the deferred pass owns.
+---
+--- One description of it, shared by creation and by a reload, so the pipeline a
+--- reload installs cannot disagree with the one the backend started with.
+local function buildGeometry(self: Backend): GraphicsPipeline
+    local device <const> = self._device
+    local albedoFormat, normalFormat = self.deferred:geometryFormats()
+    local vertex = Shader.load(device, "instance.vert", {})
+    local fragment = Shader.load(device, "instance.frag", {})
+    local pipeline = GraphicsPipeline.create(device, {
+        vertexShader = vertex,
+        fragmentShader = fragment,
+        colorFormats = { albedoFormat, normalFormat },
+        depth = self.deferred:geometryDepth(),
+        name = "ecs.instances",
+    })
+    vertex:destroy()
+    fragment:destroy()
+    return pipeline
+end
+
 --- Builds a backend for `device`.
 function Backend.create(device: loader.CPtr, swapchainFormat: integer,
                         options: BackendOptions): Backend
@@ -311,18 +332,7 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer,
         end,
     })
 
-    local albedoFormat, normalFormat = self.deferred:geometryFormats()
-    local vertex = Shader.load(device, "instance.vert", {})
-    local fragment = Shader.load(device, "instance.frag", {})
-    self.pipeline = GraphicsPipeline.create(device, {
-        vertexShader = vertex,
-        fragmentShader = fragment,
-        colorFormats = { albedoFormat, normalFormat },
-        depth = self.deferred:geometryDepth(),
-        name = "ecs.instances",
-    })
-    vertex:destroy()
-    fragment:destroy()
+    self.pipeline = buildGeometry(self)
 
     return self
 end
@@ -345,6 +355,72 @@ function Backend:addImage(pixels: loader.CValue, width: integer,
                           height: integer,
                           pitch: integer): TextureArray.Region
     return self.images:add(pixels, width, height, pitch)
+end
+
+--- Writes a decoded image over one the array already holds.
+---
+--- The region is unchanged by this and stays the answer for that image, which
+--- is why nothing outside has to hear about it. Raises on a size that would
+--- need a different rect.
+function Backend:replaceImage(region: TextureArray.Region,
+                              pixels: loader.CValue, width: integer,
+                              height: integer, pitch: integer)
+    self.images:replace(region, pixels, width, height, pitch)
+end
+
+--- Rebuilds every pipeline from the shader sources as they read now.
+---
+--- What makes a shader reload reach the screen. The sources are re-read by
+--- whoever asked for the reload; this is the device's half, and it is the half
+--- that has to know the formats the G-buffer was created with and which
+--- compute shaders the cull is three passes of.
+---
+--- Every pass binds its pipeline through `self` as it executes, so swapping the
+--- objects in place is picked up by the next frame and the pass graph is not
+--- rebuilt. Must not run inside a pass: this releases handles a recorded pass
+--- would still be reading, which is what the wait it opens with is for.
+---
+--- Nothing is released until everything has been built, so a source that no
+--- longer compiles raises and leaves the process drawing exactly what it drew.
+function Backend:rebuildPipelines()
+    local device <const> = self._device
+    C.SDL_WaitForGPUIdle(device)
+
+    local pipeline: GraphicsPipeline = nil
+    local mark: ComputePipeline = nil
+    local scan: ComputePipeline = nil
+    local compact: ComputePipeline = nil
+    local built, reason = pcall(function(): string
+        pipeline = buildGeometry(self)
+        mark = ComputePipeline.load(device, "instance.mark.comp", {})
+        scan = ComputePipeline.load(device, "instance.scan.comp", {})
+        compact = ComputePipeline.load(device, "instance.compact.comp", {})
+    end)
+    if not built then
+        if pipeline ~= nil then pipeline:destroy() end
+        if mark ~= nil then mark:destroy() end
+        if scan ~= nil then scan:destroy() end
+        if compact ~= nil then compact:destroy() end
+        error(reason, 0)
+    end
+
+    local oldPipeline <const> = self.pipeline
+    local oldMark <const> = self._mark
+    local oldScan <const> = self._scan
+    local oldCompact <const> = self._compact
+    self.pipeline = pipeline
+    self._mark = mark
+    self._scan = scan
+    self._compact = compact
+    oldPipeline:destroy()
+    oldMark:destroy()
+    oldScan:destroy()
+    oldCompact:destroy()
+
+    -- Last, because a failure above must leave the lighting and composite
+    -- pipelines alone as well: half a reload is harder to reason about than
+    -- none of one.
+    self.deferred:rebuildPipelines()
 end
 
 --- Fails on a region index outside the table.

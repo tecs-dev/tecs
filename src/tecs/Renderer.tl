@@ -177,6 +177,59 @@ function Renderer:registerImage(handle: assets.Handle): components.Sprite, Textu
         region.v1, region.layer), region
 end
 
+--- Uploads a decoded image over the one already registered under its path.
+---
+--- Identity is the point. The image keeps the layer and the rect it was given
+--- at registration, so every `Sprite`, `Sheet` and glyph already spawned from
+--- it goes on naming the right texels and the next frame simply draws the new
+--- pixels. Nothing in the world is touched and nothing has to be invalidated.
+---
+--- The size has to match. A larger or smaller image needs a different rect, and
+--- the UVs of the old one are already copied into every instance that uses it,
+--- so this refuses rather than silently drawing part of a neighbour.
+---
+--- Fails on a path nothing is registered under, since there is no rect to write
+--- into and adding one would be `registerImage`.
+---
+--- The handle's pixels are released here: the array holds them now.
+function Renderer:replaceImage(handle: assets.Handle): components.Sprite, TextureArray.Region
+    if handle.status ~= "ready" then
+        error(("tecs: image '%s' is %s"):format(handle.path, handle.status), 2)
+    end
+
+    local image = components.imageId(handle.path)
+    local region = self._extractor:regionOf(image)
+    if region == nil then
+        error(("tecs: no image is registered as '%s', so there is nothing to "
+            .. "replace"):format(handle.path), 2)
+    end
+    if handle.width ~= region.width or handle.height ~= region.height then
+        error(("tecs: '%s' was registered at %dx%d and is now %dx%d; a "
+            .. "replacement keeps the size, because the sprites drawing it "
+            .. "already hold the old rect"):format(handle.path, region.width,
+            region.height, handle.width, handle.height), 2)
+    end
+
+    self._backend:replaceImage(region, handle.pixels, handle.width,
+        handle.height, handle.pitch)
+    handle:release()
+
+    return components.Sprite(image, region.u0, region.v0, region.u1,
+        region.v1, region.layer), region
+end
+
+--- Rebuilds every pipeline from the shader sources as they read now.
+---
+--- The device's half of a shader reload: whoever asked for one has already
+--- re-read the sources, and this is what makes the next frame draw from them.
+--- A source that no longer compiles raises and changes nothing.
+---
+--- Not to be called from inside a pass. It waits for the device to go idle and
+--- releases the handles a recorded pass would still be reading.
+function Renderer:rebuildPipelines()
+    self._backend:rebuildPipelines()
+end
+
 --- A resolved Sprite for a registered image, ready to spawn.
 ---
 --- UVs are fractions of the image rather than of the cell it sits in. Omitted,
