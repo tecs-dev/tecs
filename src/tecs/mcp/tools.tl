@@ -15,6 +15,7 @@ local mcp <const> = require("tecs.mcp")
 local events <const> = require("tecs.platform.events")
 local sandbox <const> = require("tecs.mcp.sandbox")
 local Renderer <const> = require("tecs.Renderer")
+local Audio <const> = require("tecs.Audio")
 
 local C <const> = sdl.C
 
@@ -46,6 +47,17 @@ local function renderer(): Renderer
         error("no renderer is bound; the application has not started", 0)
     end
     return bound
+end
+
+--- The audio installed into the bound world, or an error naming why there is
+--- not one. Found through the world rather than bound separately, because the
+--- audio is what `Audio:install` attached to it and there is no second one.
+local function audio(): Audio
+    local found = Audio.of(world())
+    if found == nil then
+        error("no audio is installed on the bound world", 0)
+    end
+    return found
 end
 
 mcp.register({
@@ -319,6 +331,99 @@ mcp.register({
             recording = args.recording as boolean,
         } as events.Event)
         return { pushed = kind }
+    end,
+})
+
+--- What the mixer is doing, in one call.
+---
+--- Sound is the one subsystem with nothing to look at. A screenshot answers
+--- what the frame drew, and there is no equivalent readback for what came out
+--- of the speakers, so what an agent can check is what the layer was asked
+--- for: which clips loaded, which voices are sounding and on what, and which
+--- of the gains, mutes and pauses over them explains a silence.
+mcp.register({
+    name = "audio",
+    description = "Sound output: the clips loaded, the voices sounding, and "
+        .. "the gains, mutes and pauses over them.",
+    readOnly = true,
+    inputSchema = { type = "object", properties = cjson.empty_array },
+    handler = function(_: {string: any}): {string: any}
+        local sound = audio()
+        -- What this build linked rather than what it asked for, which is the
+        -- first thing a clip that will not load needs ruling out.
+        local decoders = Audio.decoders()
+
+        local clips: {any} = {}
+        for _, clip in ipairs(sound:clips()) do
+            clips[#clips + 1] = {
+                path = clip.path,
+                id = clip.id,
+                status = clip.status,
+                duration = clip.duration,
+                resident = clip.resident,
+                error = clip.error or cjson.null,
+            }
+        end
+
+        local voices: {any} = {}
+        local perGroup: {string: integer} = {}
+        for _, voice in ipairs(sound:voices()) do
+            if voice.group ~= nil then
+                perGroup[voice.group] = (perGroup[voice.group] or 0) + 1
+            end
+            voices[#voices + 1] = {
+                handle = voice.handle,
+                clip = voice.clip or cjson.null,
+                gain = voice.gain,
+                applied = voice.applied,
+                pitch = voice.pitch,
+                group = voice.group or cjson.null,
+                key = voice.key or cjson.null,
+                paused = voice.paused,
+                stopping = voice.stopping,
+                owned = voice.owned,
+                spatial = voice.spatial,
+                x = voice.x, y = voice.y, z = voice.z,
+            }
+        end
+
+        local groups: {any} = {}
+        for _, name in ipairs(sound:groups()) do
+            groups[#groups + 1] = {
+                name = name,
+                gain = sound:groupGain(name),
+                muted = sound:groupMuted(name),
+                -- The standing instruction, not a count of held voices: a
+                -- paused group with nothing in it still holds what starts.
+                paused = sound:groupPaused(name),
+                voices = perGroup[name] or 0,
+            }
+        end
+
+        local keys: {any} = {}
+        for _, key in ipairs(sound:keys()) do
+            local limit = sound:limit(key)
+            keys[#keys + 1] = {
+                key = key,
+                count = sound:keyCount(key),
+                voices = limit ~= nil and limit.voices or cjson.null,
+                cooldown = limit ~= nil and limit.cooldown or cjson.null,
+            }
+        end
+
+        return {
+            available = sound.available,
+            masterGain = sound:masterGain(),
+            muted = sound:muted(),
+            sounding = sound:sounding(),
+            maxVoices = sound:maxVoices(),
+            loading = sound:loading(),
+            decoders = #decoders > 0 and decoders or cjson.empty_array,
+            clips = #clips > 0 and clips or cjson.empty_array,
+            groups = #groups > 0 and groups or cjson.empty_array,
+            keys = #keys > 0 and keys or cjson.empty_array,
+            voices = #voices > 0 and voices or cjson.empty_array,
+        }
     end,
 })
 
