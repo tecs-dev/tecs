@@ -29,8 +29,8 @@ TL_FLAGS  := -I $(CURDIR)/vendor/share/lua/5.1 -I $(CURDIR)/vendor/tl
 
 .PHONY: help all configure build check test abi-check run clean rebuild \
         deps package check-package presets shaders bench bench-physics \
-        bench-latency bench-ecs bench-json bench-snapshot bench-bitset \
-        format format-check
+        bench-sprites bench-text bench-latency bench-ecs bench-json \
+        bench-snapshot bench-bitset format format-check
 
 help: ## List targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -96,6 +96,9 @@ bench: build $(OUT)/bench/shapes.lua ## Run the shapes benchmark
 
 bench-physics: build $(OUT)/bench/physics.lua ## Run the physics benchmark
 	@$(BIN) --entry $(OUT)/bench/physics.lua
+
+bench-sprites: build $(OUT)/bench/sprites.lua ## Run the sprite benchmark
+	@$(BIN) --entry $(OUT)/bench/sprites.lua
 
 bench-text: build $(OUT)/bench/text.lua ## Run the text benchmark
 	@$(BIN) --entry $(OUT)/bench/text.lua

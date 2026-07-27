@@ -30,6 +30,7 @@ make format-check   # Report unformatted sources, writing nothing
 make run            # Run the demo
 make bench          # Shapes benchmark
 make bench-physics  # Physics benchmark
+make bench-sprites  # Sprite extraction, in four regimes
 make bench-latency  # Event-to-photon latency, with synthetic input
 make abi-check      # Verify generated cdefs against the C ABI
 make shaders        # Build the shader pack a target without a compiler consumes
