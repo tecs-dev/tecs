@@ -14,3 +14,7 @@
 
 # macOS system files
 .DS_Store
+
+# Python bytecode, which the generator scripts leave behind.
+__pycache__/
+*.pyc
