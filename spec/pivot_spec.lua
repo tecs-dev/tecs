@@ -6,11 +6,11 @@
 -- these assertions about two numbers: the origin the instance carries, and the
 -- centre of the bound the cull reads beside it.
 --
--- A pivot is a fraction of the frame and it lands on the texel it names, so
--- its Y is measured against the `0.5 - corner.y` the vertex shader maps V
--- through rather than against the screen. In quad-local units a pivot at the
--- foot of the frame is -0.5, which is why the numbers below run the way they
--- do.
+-- A pivot is a fraction of the frame measured from its top left, and world Y
+-- runs down the screen, so both axes read the same way. A pivot at the foot of
+-- the frame is +0.5 in quad-local units, and putting that point on the entity
+-- lifts the quad's middle half a height up the screen, which is to a smaller
+-- Y. That is what a character standing on its position means.
 
 -- The build directory is the build system's to choose, so it is passed in.
 local root = os.getenv("TECS_LUA") or "out/macos-arm64-dev/lua"
@@ -83,16 +83,15 @@ describe("a pivoted quad", function()
 
     it("hangs the quad off the point the pivot names", function()
         local world, _, instances = newExtraction()
-        -- The foot of the frame, which is half a height along the quad's own
-        -- -Y from its middle. Putting that point on the entity moves the
-        -- middle half a height the other way.
+        -- The foot of the frame. Standing that point on the entity lifts the
+        -- middle half a height up the screen, so to a smaller Y.
         world:spawn(quad(), Tint(1, 1, 1, 1), Renderable(), Pivot(0.5, 1.0))
 
         world:update(1 / 60)
 
         local x, y = originAt(instances, 0)
         near(x, 100, "origin x")
-        near(y, 230, "origin y")
+        near(y, 170, "origin y")
     end)
 
     it("draws an entity carrying no pivot on its own position", function()
@@ -109,29 +108,29 @@ describe("a pivoted quad", function()
     it("turns the quad about the pivot rather than about its middle", function()
         local world, _, instances = newExtraction()
         -- A quarter turn. Unpivoted the middle would not move at all; pivoted
-        -- it swings a half height round the entity, from thirty along Y to
-        -- thirty back along X.
+        -- it swings a half height round the entity, from thirty up the screen
+        -- to thirty along X.
         world:spawn(quad(math.pi / 2), Tint(1, 1, 1, 1), Renderable(), Pivot(0.5, 1.0))
 
         world:update(1 / 60)
 
         local x, y = originAt(instances, 0)
-        near(x, 70, "origin x")
+        near(x, 130, "origin x")
         near(y, 200, "origin y")
     end)
 
     it("turns a pivot off both axes to where the basis puts it", function()
         local world, _, instances = newExtraction()
         -- The frame's top left, which is off the quad's middle on both axes.
-        -- Unturned the middle would land at 120, 170; a half turn negates the
-        -- offset and puts it at 80, 230 instead.
+        -- Unturned the middle would land at 120, 230; a half turn negates the
+        -- offset and puts it at 80, 170 instead.
         world:spawn(quad(math.pi), Tint(1, 1, 1, 1), Renderable(), Pivot(0.0, 0.0))
 
         world:update(1 / 60)
 
         local x, y = originAt(instances, 0)
         near(x, 80, "origin x")
-        near(y, 230, "origin y")
+        near(y, 170, "origin y")
     end)
 
     it("moves the cull bound with the quad and leaves its size alone", function()
@@ -146,7 +145,7 @@ describe("a pivoted quad", function()
         local pivotedRow, plainRow
         for index = 0, 1 do
             local _, centreY = boundAt(bounds, index)
-            if math.abs(centreY - 230) < EPSILON then
+            if math.abs(centreY - 170) < EPSILON then
                 pivotedRow = index
             else
                 plainRow = index
@@ -157,7 +156,7 @@ describe("a pivoted quad", function()
 
         local px, py, pex, pey = boundAt(bounds, pivotedRow)
         near(px, 100, "pivoted bound centre x")
-        near(py, 230, "pivoted bound centre y")
+        near(py, 170, "pivoted bound centre y")
 
         local _, _, ex, ey = boundAt(bounds, plainRow)
         near(pex, ex, "half extent x is the quad's, whatever it hangs off")
@@ -196,6 +195,6 @@ describe("a pivoted quad", function()
 
         assert.are.equal(1, packet.rewritten)
         local _, y = originAt(instances, 0)
-        near(y, 170, "the quad hangs off the other end of the frame")
+        near(y, 230, "the quad hangs off the other end of the frame")
     end)
 end)

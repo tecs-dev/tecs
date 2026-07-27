@@ -398,12 +398,12 @@ local function writeRun(self: Extractor, packet: FramePacket,
         local centreY = originY
         if pivots ~= nil then
             local pivot = pivots[row]
-            -- Quad-local units, where the quad's corners run -0.5 to 0.5. Y is
-            -- measured the other way from the fraction because the vertex
-            -- shader reads the frame's V through `0.5 - corner.y`, so this
-            -- puts the pivot on the texel it names.
+            -- Quad-local units, where the quad's corners run -0.5 to 0.5 and
+            -- the fraction runs from the frame's top left. Both axes measure
+            -- the same way, because the vertex shader reads the frame's UV
+            -- straight off the corner.
             local px <const> = pivot.x - 0.5
-            local py <const> = 0.5 - pivot.y
+            local py <const> = pivot.y - 0.5
             if angle == 0.0 then
                 centreX = originX - px * scaleX
                 centreY = originY - py * scaleY
