@@ -1488,4 +1488,233 @@ describe("ecs.Renderer", function()
         end)
     end)
 
+
+    -- A clip region is a rectangle in target pixels and an index the instance
+    -- carries, and the fragment throws away what falls outside. That is what a
+    -- scrollable panel needs and what a UI library's scissor means, so these
+    -- check where the ink lands rather than that something was drawn.
+    --
+    -- The index shares `origin.z` with the texture-array layer, which is the
+    -- part of this design that can break something that already worked. The
+    -- last test here is that one.
+    describe("clip regions", function()
+        local Clip = components.Clip
+
+        -- A quad covering the whole target, so where its colour lands is the
+        -- clip's decision and nothing else's.
+        local function fill(world, r, g, b, clip)
+            if clip == nil then
+                return world:spawn(
+                    Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
+                    Tint(r, g, b, 1.0), Renderable())
+            end
+            return world:spawn(
+                Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
+                Tint(r, g, b, 1.0), Clip(clip), Renderable())
+        end
+
+        it("packs a region and a layer into one exact float", function()
+            local instancelayout = require("tecs.gpu.instancelayout")
+            local stride = instancelayout.LAYER_SLOTS
+            local top = instancelayout.CLIPS - 1
+            local packed = instancelayout.packSlot(top, stride - 1)
+
+            assert.are.equal(16383, packed, "the largest value the pair packs")
+            assert.are.equal(top, math.floor(packed / stride))
+            assert.are.equal(stride - 1, packed % stride)
+            assert.are.equal(9, instancelayout.packSlot(0, 9),
+                "region zero packs to the layer unchanged")
+        end)
+
+        it("keeps a clipped instance inside its region", function()
+            local world, renderer = newScene()
+            -- The top-left quarter, so both axes are pinned and a flipped Y
+            -- shows up as ink in the wrong corner rather than as no ink.
+            renderer:setClipRegion(1,
+                { x = 0, y = 0, width = SIZE / 2, height = SIZE / 2 })
+            fill(world, 1.0, 0.0, 0.0, 1)
+
+            local pixels = frameOnce(world, renderer)
+            assert.are.equal(255,
+                screen:getPixel(pixels, SIZE / 4, SIZE / 4).r,
+                "inside the region")
+            assert.are.equal(0,
+                screen:getPixel(pixels, SIZE * 3 / 4, SIZE / 4).r,
+                "and nothing to the right of it")
+            assert.are.equal(0,
+                screen:getPixel(pixels, SIZE / 4, SIZE * 3 / 4).r,
+                "nor below it")
+            assert.are.equal(0,
+                screen:getPixel(pixels, SIZE * 3 / 4, SIZE * 3 / 4).r)
+
+            -- Still one instance: clipping happens a fragment at a time and
+            -- the cull knows nothing about it.
+            assert.are.equal(1, renderer.count)
+            renderer:destroy()
+        end)
+
+        it("clips instances in different regions independently", function()
+            local world, renderer = newScene()
+            renderer:setClipRegion(1,
+                { x = 0, y = 0, width = SIZE / 2, height = SIZE })
+            renderer:setClipRegion(2,
+                { x = SIZE / 2, y = 0, width = SIZE / 2, height = SIZE })
+            fill(world, 1.0, 0.0, 0.0, 1)
+            fill(world, 0.0, 1.0, 0.0, 2)
+
+            local pixels = frameOnce(world, renderer)
+            local left = screen:getPixel(pixels, SIZE / 4, SIZE / 2)
+            local right = screen:getPixel(pixels, SIZE * 3 / 4, SIZE / 2)
+
+            assert.are.equal(255, left.r, "the first region's half is red")
+            assert.are.equal(0, left.g)
+            assert.are.equal(255, right.g, "the second's is green")
+            assert.are.equal(0, right.r)
+            renderer:destroy()
+        end)
+
+        it("draws region zero unclipped", function()
+            local world, renderer = newScene()
+            -- A region exists and is small, so an instance that read the table
+            -- when it should not have would lose most of itself.
+            renderer:setClipRegion(1, { x = 0, y = 0, width = 4, height = 4 })
+            fill(world, 0.0, 0.0, 1.0, 0)
+
+            local pixels = frameOnce(world, renderer)
+            assert.are.equal(255, screen:getPixel(pixels, 2, 2).b)
+            assert.are.equal(255,
+                screen:getPixel(pixels, SIZE / 2, SIZE / 2).b,
+                "region zero is not a region")
+            assert.are.equal(255,
+                screen:getPixel(pixels, SIZE - 2, SIZE - 2).b)
+            renderer:destroy()
+        end)
+
+        it("stops clipping when a region is cleared", function()
+            local world, renderer = newScene()
+            renderer:setClipRegion(3,
+                { x = 0, y = 0, width = SIZE / 2, height = SIZE })
+            fill(world, 1.0, 0.0, 0.0, 3)
+            assert.are.equal(0,
+                screen:getPixel(frameOnce(world, renderer),
+                    SIZE * 3 / 4, SIZE / 2).r,
+                "clipped while the region holds a rectangle")
+
+            renderer:clearClipRegion(3)
+            assert.are.equal(255,
+                screen:getPixel(frameOnce(world, renderer),
+                    SIZE * 3 / 4, SIZE / 2).r,
+                "and whole once it does not, rather than gone")
+            renderer:destroy()
+        end)
+
+        it("refuses a region index outside the table", function()
+            local _, renderer = newScene()
+            local rect = { x = 0, y = 0, width = 1, height = 1 }
+            assert.is_false(pcall(function()
+                renderer:setClipRegion(0, rect)
+            end), "region zero means no clipping and cannot be set")
+            assert.is_false(pcall(function()
+                renderer:setClipRegion(256, rect)
+            end), "and the table ends at 255")
+            renderer:destroy()
+        end)
+
+        it("clips a text drawn through the producer", function()
+            local text = require("tecs.gfx.text")
+            local font = text.defaultFont()
+
+            -- The atlas decodes on a worker, so the font arrives no earlier
+            -- than the frame after the one that asked for it.
+            local function settle(world, renderer)
+                frameOnce(world, renderer)
+                assets.waitAll()
+                frameOnce(world, renderer)
+                return frameOnce(world, renderer)
+            end
+
+            local function ink(pixels, x0, x1)
+                local count = 0
+                for y = 0, SIZE - 1 do
+                    for x = x0, x1 - 1 do
+                        if screen:getPixel(pixels, x, y).g > 128 then
+                            count = count + 1
+                        end
+                    end
+                end
+                return count
+            end
+
+            local function scene(clip)
+                local world, renderer = newScene()
+                world:addPlugin(text.plugin({ renderer = renderer }))
+                local parts = {
+                    Transform(2, 2, 0, 1),
+                    Tint(0.0, 1.0, 0.0, 1.0),
+                    text.Text.new({ text = "MM", font = font, size = 52 }),
+                }
+                if clip ~= nil then parts[#parts + 1] = Clip(clip) end
+                world:spawn(table.unpack(parts))
+                return world, renderer
+            end
+
+            -- Unclipped first, so "no ink on the right" below is a claim about
+            -- the clip rather than about where the glyphs happened to land.
+            local world, renderer = scene(nil)
+            local whole = settle(world, renderer)
+            assert.is_true(ink(whole, 0, SIZE / 2) > 0,
+                "the text should reach the left half")
+            assert.is_true(ink(whole, SIZE / 2, SIZE) > 0,
+                "and the right half")
+            renderer:destroy()
+
+            local clipped, clippedRenderer = scene(4)
+            clippedRenderer:setClipRegion(4,
+                { x = 0, y = 0, width = SIZE / 2, height = SIZE })
+            local pixels = settle(clipped, clippedRenderer)
+
+            assert.is_true(ink(pixels, 0, SIZE / 2) > 0,
+                "a clipped text still draws inside its region")
+            assert.are.equal(0, ink(pixels, SIZE / 2, SIZE),
+                "and a glyph is clipped the same way an entity is")
+            clippedRenderer:destroy()
+        end)
+
+        it("keeps the array layer a sprite named when a region rides with it",
+            function()
+            -- This is the regression the packing risks. `origin.z` carries the
+            -- texture-array layer and the clip index in one float, so a shader
+            -- reading it as a bare layer would sample layer 7 * 64 + n, which
+            -- nothing was ever uploaded into.
+            local world, renderer = newScene()
+            renderer:registerImage(solid("spec://clipred", 255, 0, 0))
+            renderer:registerImage(solid("spec://clipgreen", 0, 255, 0))
+            local green = renderer:sprite("spec://clipgreen")
+            assert.is_true(green.slot > 0,
+                "the image must not be on the white default layer")
+
+            renderer:setClipRegion(7,
+                { x = 0, y = 0, width = SIZE / 2, height = SIZE })
+            world:spawn(
+                Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE * 2, SIZE * 2),
+                Tint(1.0, 1.0, 1.0, 1.0),
+                green,
+                Clip(7),
+                Renderable()
+            )
+
+            local pixels = frameOnce(world, renderer)
+            local inside = screen:getPixel(pixels, SIZE / 4, SIZE / 2)
+
+            assert.are.equal(255, inside.g,
+                "the sprite still samples the layer its name resolved to")
+            assert.are.equal(0, inside.r, "and not the other image")
+            assert.are.equal(0, inside.b, "nor the white default layer")
+            assert.are.equal(0,
+                screen:getPixel(pixels, SIZE * 3 / 4, SIZE / 2).g,
+                "and the region packed beside it still clips")
+            renderer:destroy()
+        end)
+    end)
+
 end)

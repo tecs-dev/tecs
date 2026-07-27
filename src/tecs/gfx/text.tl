@@ -70,6 +70,7 @@ local C <const> = sdl.C
 
 local Transform <const> = ecs.builtins.Transform
 local Tint <const> = components.Tint
+local Clip <const> = components.Clip
 
 local type TransformInstance = ecs.builtins.Transform
 local type TintInstance = components.Tint
@@ -92,6 +93,7 @@ local BOUND_FLOATS <const> = instancelayout.BOUND_FLOATS
 local BOUND_BYTES <const> = instancelayout.BOUND_BYTES
 local UNBOUNDED <const> = instancelayout.UNBOUNDED
 local HIDDEN <const> = instancelayout.HIDDEN
+local packSlot <const> = instancelayout.packSlot
 
 --- Glyph slots the producer's arrays start at, and the floor every growth
 --- doubles from.
@@ -171,7 +173,8 @@ end
 --- The entity's Transform places the top-left corner of the text block and
 --- orients and scales the whole block, and its Tint, if it has one, colours
 --- every glyph. Both are ordinary components on an ordinary entity, so a text
---- is moved, parented, tweened and layered like anything else.
+--- is moved, parented, tweened and layered like anything else, and a `Clip`
+--- keeps its glyphs inside a rectangle exactly as it would any other quad.
 ---
 --- Write through `world:getMut(entity, Text)`. A write through `world:get`
 --- leaves the column clean and the glyphs stale.
@@ -218,6 +221,7 @@ local record Text is Component
     _builtRotation: number
     _builtScaleX: number
     _builtScaleY: number
+    _builtClip: integer
 end
 
 local record FontOptions
@@ -904,7 +908,7 @@ end
 --- Rewrites one text's glyph instances. False when its font has not arrived.
 local function build(renderer: Renderer, known: {Font: Atlas}, glyphs: Glyphs,
                      item: Text, transform: TransformInstance,
-                     tint: TintInstance): boolean
+                     tint: TintInstance, clip: integer): boolean
     local font = item.font
     local atlas = font ~= nil and residency(known, font, renderer) or nil
     if atlas == nil then
@@ -950,7 +954,10 @@ local function build(renderer: Renderer, known: {Font: Atlas}, glyphs: Glyphs,
         param = 0.999
     end
     local material <const> = glyphMaterial() + param
-    local slot <const> = atlas.slot
+    -- The clip region rides above the texture-array layer in one float, packed
+    -- the way the renderer packs an entity's. Region zero packs to the layer
+    -- unchanged, so an unclipped text writes what it always wrote.
+    local slot <const> = packSlot(clip, atlas.slot)
 
     -- Glyph rects are atlas pixels and the instance carries cell fractions,
     -- and an atlas smaller than its cell does not reach the cell's edge.
@@ -1034,12 +1041,15 @@ local function build(renderer: Renderer, known: {Font: Atlas}, glyphs: Glyphs,
     item._builtLayer = layer
     item._builtRotation = rotation
     item._builtScaleX, item._builtScaleY = blockX, blockY
+    item._builtClip = clip
     return true
 end
 
 --- Whether `item` differs from what its glyphs were built from.
 local function stale(item: Text, transform: TransformInstance,
-                     tint: TintInstance): boolean
+                     tint: TintInstance, clip: integer): boolean
+    if item._builtClip ~= clip then return true end
+
     if item._builtText ~= item.text
         or item._builtFont ~= item.font
         or item._builtSize ~= item.size
@@ -1111,18 +1121,26 @@ function text.plugin(options: TextOptions): function(World)
                 for archetype, length in texts:iter() do
                     if all or archetype:isComponentDirty(text.Text)
                         or archetype:isComponentDirty(Tint)
+                        or archetype:isComponentDirty(Clip)
                         or archetype:isComponentDirty(Transform) then
                         local column = archetype:get(text.Text)
                         local transforms = archetype:get(Transform)
                         local tints = archetype:get(Tint)
+                        -- Absent on a text nobody clips, which is the common
+                        -- case and costs one test for the whole archetype.
+                        local clips = archetype:get(Clip)
                         for row = 1, length do
                             local item = column[row]
                             local transform = transforms[row]
                             local tint = tints ~= nil and tints[row] or nil
-                            if stale(item, transform, tint) then
+                            local clip = 0
+                            if clips ~= nil then
+                                clip = clips[row].index as integer
+                            end
+                            if stale(item, transform, tint, clip) then
                                 built = built + 1
                                 if not build(renderer, known, glyphs, item,
-                                             transform, tint) then
+                                             transform, tint, clip) then
                                     waiting = true
                                 end
                             end

@@ -67,11 +67,23 @@ local BOUND_FLOATS <const> = instancelayout.BOUND_FLOATS
 local BOUND_BYTES <const> = instancelayout.BOUND_BYTES
 local UNBOUNDED <const> = instancelayout.UNBOUNDED
 local extentOf <const> = instancelayout.extentOf
+local packSlot <const> = instancelayout.packSlot
 
 --- Floats in the layer uniform: the camera's parameters, the two fixed clip
 --- scales, and four per layer.
 local LAYER_FLOATS <const> = 8 + layers.MAX * 4
 local LAYER_BYTES <const> = LAYER_FLOATS * 4
+
+--- Floats in the clip uniform: a rectangle per region, as minimum xy and
+--- maximum xy in target pixels. Region zero is never read, and its four floats
+--- are kept so a region index is the array index and the shader needs no
+--- subtraction to look one up.
+local CLIP_FLOATS <const> = instancelayout.CLIPS * 4
+local CLIP_BYTES <const> = CLIP_FLOATS * 4
+
+--- Bound of a region that clips nothing. Finite, so the shader's comparisons
+--- stay arithmetic, and beyond any target a fragment can land on.
+local CLIP_UNBOUNDED <const> = 1e30
 
 --- Indices per quad, over four distinct corners.
 local QUAD_INDICES <const> = 6
@@ -122,6 +134,19 @@ local record InstanceProducer
                     first: integer, last: integer)
 end
 
+--- A clip rectangle, in target pixels measured from the top left.
+---
+--- Screen space rather than world space, because that is what a fragment is
+--- tested in and what a scissor means: a panel occupies a part of the window
+--- whether its contents are placed by the camera, in screen pixels, or in
+--- virtual coordinates, and one rectangle is right for all three.
+local record ClipRegion
+    x: number
+    y: number
+    width: number
+    height: number
+end
+
 local record RendererOptions
     --- Ambient colour applied everywhere.
     ambient: {number}
@@ -135,6 +160,7 @@ end
 
 local record Renderer
     type InstanceProducer = InstanceProducer
+    type ClipRegion = ClipRegion
     --- Seconds the last extraction took. Zero unless timing is on.
     _extractSeconds: number
     --- How far through the current fixed step this frame falls, 0 to 1. Read
@@ -197,6 +223,9 @@ local record Renderer
     --- Revision the packed table was built from, so a frame that configured
     --- nothing repacks nothing.
     _layerRevision: integer
+    --- The clip rectangles, in the shape the fragment shader reads them.
+    --- Written in place as regions are set, so there is nothing to repack.
+    _clipUniform: loader.CArray
     _device: loader.CPtr
     _lights: {Deferred.Light}
     _renderables: ecs.Query
@@ -263,6 +292,10 @@ local function writeRun(self: Renderer, archetype: ecs.Archetype,
     local tints = archetype:get(components.Tint)
     local sprites = archetype:get(components.Sprite)
     local materialColumn = archetype:get(components.Material)
+    -- Absent on every archetype that clips nothing, which is the common case:
+    -- the rows below then write the texture-array layer on its own and the
+    -- fragments they produce never look at the region table.
+    local clips = archetype:get(components.Clip)
     -- Loop invariant: an archetype either carries the previous transform or it
     -- does not, so an entity that is not interpolated costs one test per run
     -- rather than anything per row.
@@ -291,6 +324,14 @@ local function writeRun(self: Renderer, archetype: ecs.Archetype,
                 sprite.slot = layer
             end
             u0, v0, u1, v1 = sprite.u0, sprite.v0, sprite.u1, sprite.v1
+        end
+
+        -- The clip region rides above the layer in one float. Region zero
+        -- packs to the layer unchanged, so an archetype with no Clip column
+        -- writes exactly what it wrote before there were regions.
+        local packedSlot = layer
+        if clips ~= nil then
+            packedSlot = packSlot(clips[row].index as integer, layer)
         end
 
         -- Material and parameter share one float: the integer part selects and
@@ -344,7 +385,7 @@ local function writeRun(self: Renderer, archetype: ecs.Archetype,
 
         floats[base + 4] = originX
         floats[base + 5] = originY
-        floats[base + 6] = layer
+        floats[base + 6] = packedSlot
         floats[base + 7] = material
 
         floats[base + 8] = tint.r
@@ -471,6 +512,7 @@ local function syncInstances(self: Renderer): integer, integer, integer
             or archetype:isComponentDirty(components.Tint)
             or archetype:isComponentDirty(components.Sprite)
             or archetype:isComponentDirty(components.Material)
+            or archetype:isComponentDirty(components.Clip)
             or (interpolating
                 and archetype:get(components.PreviousTransform) ~= nil)
 
@@ -608,11 +650,20 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
     self._regionByImage = {}
     self._destroyed = false
 
+    -- A layer number shares its float with the clip index, so a layer beyond
+    -- the packing's stride would be read back as a different layer in a
+    -- different region. Refused here rather than discovered as a wrong image.
+    local layerCount <const> = options.layers or MAX_LAYERS
+    if layerCount > instancelayout.LAYER_SLOTS then
+        error(("tecs: the image array holds at most %d layers")
+            :format(instancelayout.LAYER_SLOTS), 2)
+    end
+
     self.sampler = Sampler.create(device, { filter = "nearest", address = "clamp" })
     self.images = TextureArray.create(device, {
         width = options.cell or DEFAULT_CELL,
         height = options.cell or DEFAULT_CELL,
-        layers = options.layers or MAX_LAYERS,
+        layers = layerCount,
     })
 
     -- Layer zero is a single white pixel. Entities without a Sprite sample it,
@@ -679,6 +730,17 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
     -- Below every revision the table can hold, so the first frame packs it.
     self._layerRevision = -1
 
+    -- Every region starts clipping nothing, so an index nobody configured
+    -- draws the same as region zero rather than making its contents vanish.
+    self._clipUniform = loader.newArray("float[?]", CLIP_FLOATS)
+    for entry = 0, instancelayout.CLIPS - 1 do
+        local base = entry * 4
+        self._clipUniform[base] = -CLIP_UNBOUNDED
+        self._clipUniform[base + 1] = -CLIP_UNBOUNDED
+        self._clipUniform[base + 2] = CLIP_UNBOUNDED
+        self._clipUniform[base + 3] = CLIP_UNBOUNDED
+    end
+
     self._mark = ComputePipeline.load(device, "instance.mark.comp", {})
     self._scan = ComputePipeline.load(device, "instance.scan.comp", {})
     self._compact = ComputePipeline.load(device, "instance.compact.comp", {})
@@ -693,6 +755,9 @@ function Renderer.create(device: loader.CPtr, swapchainFormat: integer,
                 self.camera:matrix(context.width, context.height), 64)
             context.pass:pushVertexUniform(1,
                 layerUniform(self, context.width, context.height), LAYER_BYTES)
+            -- Once for the whole scene, and only the fragments of an instance
+            -- that named a region ever read it.
+            context.pass:pushFragmentUniform(0, self._clipUniform, CLIP_BYTES)
             context.pass:bindVertexStorageBuffers(0,
                 { self.instances.handle, self._visible.handle })
             context.pass:bindTextures(0, { self.images.handle }, self.sampler.handle)
@@ -770,6 +835,59 @@ function Renderer:sprite(name: string, u0?: number, v0?: number,
         (u1 or 1.0) * region.u1, (v1 or 1.0) * region.v1, slot)
 end
 
+
+--- Fails on a region index outside the table.
+local function checkClipIndex(index: integer, level: integer)
+    if index == nil or index ~= math.floor(index)
+        or index < 1 or index >= instancelayout.CLIPS then
+        error(("tecs: a clip region is numbered 1 to %d, not %s")
+            :format(instancelayout.CLIPS - 1, tostring(index)), level + 1)
+    end
+end
+
+--- Points region `index` at a rectangle in target pixels.
+---
+--- Fragments of an instance carrying `Clip(index)` are kept where they land
+--- inside the rectangle and thrown away where they do not, whatever placed
+--- them there. Region zero is not a region and cannot be set: it is what an
+--- instance says when it wants no clipping at all.
+---
+--- A region is one rectangle. Whoever sets it up owns the nesting, so a panel
+--- within a panel is set as the intersection of the two and the fragment tests
+--- once rather than walking a chain.
+function Renderer:setClipRegion(index: integer, region: ClipRegion)
+    checkClipIndex(index, 2)
+    if region == nil then
+        error("tecs: setClipRegion needs a rectangle; clearClipRegion "
+            .. "is how a region stops clipping", 2)
+    end
+
+    -- Stored as bounds rather than as position and size, because that is what
+    -- the comparison wants and the shader would otherwise redo the addition
+    -- for every fragment.
+    local base <const> = index * 4
+    local data <const> = self._clipUniform
+    data[base] = region.x
+    data[base + 1] = region.y
+    data[base + 2] = region.x + region.width
+    data[base + 3] = region.y + region.height
+end
+
+--- Stops region `index` clipping anything.
+---
+--- The region goes back to what it was before anyone set it, so instances
+--- still pointing at it draw whole rather than disappearing. An adapter handing
+--- indices out and taking them back therefore leaves nothing behind that
+--- silently removes content.
+function Renderer:clearClipRegion(index: integer)
+    checkClipIndex(index, 2)
+    local base <const> = index * 4
+    local data <const> = self._clipUniform
+    data[base] = -CLIP_UNBOUNDED
+    data[base + 1] = -CLIP_UNBOUNDED
+    data[base + 2] = CLIP_UNBOUNDED
+    data[base + 3] = CLIP_UNBOUNDED
+end
 
 --- Adds a producer, laid out after the archetypes in the order added.
 ---

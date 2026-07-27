@@ -205,6 +205,31 @@ ecs.newFFIComponent({
     defaults = { 0, 0.25 },
 })
 
+--- Which clip region a renderable's fragments are kept inside.
+---
+--- A component rather than a field on something every renderable has, because
+--- presence is the opt-in and absence is the common case: an archetype without
+--- this column is written by a loop that never mentions clipping, and the
+--- fragments it produces never read the region table. A world that clips
+--- nothing pays for this exactly nowhere.
+---
+--- The index names a rectangle set with `Renderer:setClipRegion`. Zero, which
+--- is the default, means no clipping. Nesting is the caller's: a region is one
+--- rectangle, so a panel inside a panel is set up as the intersection of the
+--- two rather than as two regions an instance sits in at once.
+local record Clip is Component
+    index: number
+end
+
+ecs.newFFIComponent({
+    name = "Clip",
+    container = Clip,
+    fields = {
+        { "index", "int32_t" },
+    },
+    defaults = { 0 },
+})
+
 --- Marks an entity as contributing geometry. Without it a Transform is just
 --- a position, which is what most entities in a world actually are.
 local record Renderable is Component end
@@ -221,6 +246,7 @@ local record components
     Sprite: Sprite
     Material: Material
     PointLight: PointLight
+    Clip: Clip
     Renderable: Renderable
 
     --- Index of an image name, assigning one the first time it is seen.
@@ -236,6 +262,7 @@ components.Tint = Tint
 components.Sprite = Sprite
 components.Material = Material
 components.PointLight = PointLight
+components.Clip = Clip
 components.Renderable = Renderable
 components.imageId = imageId
 components.imageName = imageName
