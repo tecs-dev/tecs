@@ -245,8 +245,7 @@ local STORAGE = {
             "SDL_GetCurrentDirectory",
             "SDL_GetUserFolder",
         },
-        reason = "The seam's SDL implementation, and the one place these "
-            .. "belong. Ten calls, one each.",
+        reason = "The seam's SDL implementation, and the one place these " .. "belong. Ten calls, one each.",
     },
     ["tecs/platform/adapter.lua"] = {
         bucket = "seam",
@@ -272,8 +271,7 @@ local STORAGE = {
     ["tecs/gpu/shaders.lua"] = {
         bucket = "bypass",
         symbols = { "SDL_GlobDirectory" },
-        reason = "The same enumeration for shader sources. Owned by the "
-            .. "render tree.",
+        reason = "The same enumeration for shader sources. Owned by the " .. "render tree.",
     },
     ["tecs/platform/watch.lua"] = {
         bucket = "bypass",
@@ -319,8 +317,7 @@ local STDIO = {
     },
     ["tecs/gpu/shaderbuild.lua"] = {
         bucket = "tool",
-        reason = "Writes the manifest beside that pack, on the same build "
-            .. "machine and in the same breath.",
+        reason = "Writes the manifest beside that pack, on the same build " .. "machine and in the same breath.",
     },
     ["tecs/utils/profile.lua"] = {
         bucket = "tool",
@@ -340,7 +337,7 @@ local STDIO = {
             .. "reaches. It cannot simply call filesystem: this is the ECS "
             .. "half, which a tool loads without the engine and therefore "
             .. "without SDL, and requiring the platform would put a graphics "
-            .. "stack behind `require(\"tecs.ecs\")`. Closing it means "
+            .. 'stack behind `require("tecs.ecs")`. Closing it means '
             .. "handing the writer in rather than naming a path.",
     },
 }
