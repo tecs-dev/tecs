@@ -27,8 +27,15 @@ end
 
 --- Milliseconds, to a tolerance that catches an accounting mistake and not the
 --- last bits of a subtraction of two large seconds values.
+---
+--- A tenth of a microsecond. The stamps are counter ticks divided by the
+--- counter's frequency, which is a nanosecond here, so a value that passed
+--- through two conversions can land a couple of ticks out and a nanosecond
+--- tolerance sits exactly on that boundary. Every mistake this exists to catch
+--- is an interval charged to the wrong segment, which is microseconds at the
+--- very least and usually a whole frame.
 local function isMs(expected, actual, what)
-    assert.is_true(math.abs(expected - actual) < 1e-6,
+    assert.is_true(math.abs(expected - actual) < 1e-4,
         ("%s: expected %.9f ms, got %.9f ms"):format(what, expected, actual))
 end
 
