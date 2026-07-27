@@ -212,7 +212,7 @@ will reject keeps that path unreached.
 
 Asset loading rides on that. Decoding a PNG is milliseconds of pure CPU work
 with no GPU involvement, so it happens on a worker and the main thread only
-uploads. The worker returns the *address* of a decoded surface rather than its
+uploads. The worker returns the _address_ of a decoded surface rather than its
 pixels: surfaces live in process memory, so the pointer is valid in either
 state, and passing it avoids copying an image through a serialized message
 only to copy it again into staging. Ownership transfers with the address.
@@ -889,6 +889,7 @@ quad's diagonal, so placing it at the midpoint of two points and scaling it by
 their signed difference draws the segment joining them. A negative scale mirrors
 the quad and takes the diagonal with it, so either direction works without the
 material knowing which.
+
 ## Text is a producer's run
 
 A `Text` names a font and a string, and a system in `PostUpdate` lays it out

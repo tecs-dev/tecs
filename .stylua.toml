@@ -1,0 +1,24 @@
+# Lua. STYLE.md sets the indent and the column limit; the rest matches what
+# spec/ and scripts/ already do.
+column_width = 120
+indent_type = "Spaces"
+indent_width = 4
+quote_style = "AutoPreferDouble"
+
+# Keep the call syntax the author wrote. Both forms are idiomatic and mean
+# different things to a reader: `require("tl")` is a call, `ffi.cdef[[ ... ]]`
+# is a block of C. Adding parentheses to the second turns a declaration back
+# into a call at every FFI site in the tree.
+call_parentheses = "Input"
+
+# Never join a conditional the author wrote across several lines. Lua has no
+# braces, so StyLua cannot tell a guard clause written on one line from a block
+# written on three, and the settings that keep the one-line guards also collapse
+# the blocks. Collapsing hides control flow behind the right margin, so this
+# takes the other cost: about 70 one-line guards in the tree expand to three
+# lines each.
+collapse_simple_statement = "Never"
+
+# Require order is load order. Sorting it is a behaviour change wearing a
+# formatter's clothes.
+sort_requires = { enabled = false }

@@ -190,8 +190,7 @@ static int workerThread(void *data)
 static b2EnqueueTaskCallback poolEnqueue;
 static b2FinishTaskCallback poolFinish;
 
-static void *poolEnqueue(b2TaskCallback *run, int itemCount, int minRange,
-                         void *taskContext, void *userContext)
+static void *poolEnqueue(b2TaskCallback *run, int itemCount, int minRange, void *taskContext, void *userContext)
 {
     TecsTaskPool *pool = (TecsTaskPool *)userContext;
 

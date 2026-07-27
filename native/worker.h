@@ -23,9 +23,7 @@ void *tecsChannelData(void *message);
 void tecsChannelFree(void *message);
 uint32_t tecsChannelCount(TecsChannel *channel);
 
-TecsWorker *tecsWorkerSpawn(const char *source, const char *luaPath,
-                                TecsChannel *toWorker,
-                                TecsChannel *fromWorker);
+TecsWorker *tecsWorkerSpawn(const char *source, const char *luaPath, TecsChannel *toWorker, TecsChannel *fromWorker);
 int tecsWorkerJoin(TecsWorker *worker);
 
 #endif

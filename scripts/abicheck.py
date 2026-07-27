@@ -22,8 +22,7 @@ LIBRARIES = [
     {"name": "sdl3", "headers": ["SDL3/SDL.h"], "module": "sdl3"},
     # `requires` names bindings that must be declared first. SDL_mixer's
     # header is written against SDL's types, so its cdef does not parse alone.
-    {"name": "sdl3mixer", "headers": ["SDL3_mixer/SDL_mixer.h"],
-     "module": "sdl3-mixer", "requires": ["sdl3"]},
+    {"name": "sdl3mixer", "headers": ["SDL3_mixer/SDL_mixer.h"], "module": "sdl3-mixer", "requires": ["sdl3"]},
     {"name": "box2d", "headers": ["box2d/box2d.h"], "module": None},
     {"name": "shaderc", "headers": ["shaderc/shaderc.h"], "module": "shaderc"},
 ]
@@ -45,8 +44,7 @@ def includeDirs(module):
     """
     if module:
         try:
-            out = subprocess.run(["pkg-config", "--cflags-only-I", module],
-                                 capture_output=True, text=True, check=True)
+            out = subprocess.run(["pkg-config", "--cflags-only-I", module], capture_output=True, text=True, check=True)
             dirs = [flag[2:] for flag in out.stdout.split() if flag.startswith("-I")]
             if dirs:
                 return dirs
@@ -55,8 +53,7 @@ def includeDirs(module):
 
     # Box2D ships no pkg-config file, and a fallback keeps the common case
     # working without configuration.
-    for candidate in ("/opt/homebrew/include", "/usr/local/include",
-                      "/usr/include"):
+    for candidate in ("/opt/homebrew/include", "/usr/local/include", "/usr/include"):
         if Path(candidate).is_dir():
             return [candidate]
     return []
@@ -70,8 +67,7 @@ def generatedDir() -> Path:
     """
     if len(sys.argv) > 1:
         return Path(sys.argv[1])
-    for candidate in (REPO / "build" / "tecs" / "ffi",
-                      REPO / "out" / "lua" / "tecs" / "ffi"):
+    for candidate in (REPO / "build" / "tecs" / "ffi", REPO / "out" / "lua" / "tecs" / "ffi"):
         if candidate.is_dir():
             return candidate
     sys.exit("cannot find generated bindings; pass their directory")
@@ -118,7 +114,7 @@ def parseRecords(cdef: str):
         if i >= len(cdef):
             return records
 
-        body = cdef[open_ + 1:i]
+        body = cdef[open_ + 1 : i]
         end = RECORD_END_RE.match(cdef, i + 1)
         position = i + 1
         if not end:
@@ -150,13 +146,11 @@ def cReport(headers, includeDirs, records):
     for name, _kind, fields in records:
         lines.append(
             f'    printf("{{\\"name\\":\\"{name}\\",\\"size\\":%zu,\\"align\\":%zu,\\"fields\\":{{",'
-            f' sizeof({name}), _Alignof({name}));'
+            f" sizeof({name}), _Alignof({name}));"
         )
         for i, field in enumerate(fields):
             comma = "" if i == 0 else ","
-            lines.append(
-                f'    printf("{comma}\\"{field}\\":%zu", offsetof({name}, {field}));'
-            )
+            lines.append(f'    printf("{comma}\\"{field}\\":%zu", offsetof({name}, {field}));')
         lines.append('    printf("}}\\n");')
 
     program = (
@@ -189,9 +183,7 @@ def cReport(headers, includeDirs, records):
 def luaReport(name: str, records, requires=()):
     """Ask LuaJIT for its view of the same records."""
     wanted = [{"name": n, "fields": f} for n, _k, f in records]
-    declare = "\n".join(
-        f'ffi.cdef(require("tecs.ffi.{dep}cdef"))' for dep in requires
-    )
+    declare = "\n".join(f'ffi.cdef(require("tecs.ffi.{dep}cdef"))' for dep in requires)
     script = """
 local ffi = require("ffi")
 local json = ...
@@ -219,13 +211,10 @@ print(table.concat(out, "\\n"))
 
     with tempfile.TemporaryDirectory() as d:
         listing = Path(d) / "records.txt"
-        listing.write_text("\n".join(
-            "\t".join([r["name"]] + r["fields"]) for r in wanted
-        ) + "\n")
+        listing.write_text("\n".join("\t".join([r["name"]] + r["fields"]) for r in wanted) + "\n")
         script_path = Path(d) / "probe.lua"
         script_path.write_text(script)
-        run = subprocess.run(["luajit", str(script_path), str(listing)],
-                             capture_output=True, text=True, cwd=REPO)
+        run = subprocess.run(["luajit", str(script_path), str(listing)], capture_output=True, text=True, cwd=REPO)
     if run.returncode != 0:
         sys.stderr.write(run.stderr[:3000])
         sys.exit("luajit abi probe failed")
@@ -270,19 +259,16 @@ def main():
                 continue
             checked += 1
             if c["size"] != lua["size"]:
-                mismatches.append(
-                    f"{name}.{recordName}: sizeof C={c['size']} lua={lua['size']}")
+                mismatches.append(f"{name}.{recordName}: sizeof C={c['size']} lua={lua['size']}")
             if c["align"] != lua["align"]:
-                mismatches.append(
-                    f"{name}.{recordName}: alignof C={c['align']} lua={lua['align']}")
+                mismatches.append(f"{name}.{recordName}: alignof C={c['align']} lua={lua['align']}")
             for field in fields:
                 cOffset = c["fields"].get(field)
                 luaOffset = lua["fields"].get(field)
                 if cOffset is None or luaOffset is None:
                     continue
                 if cOffset != luaOffset:
-                    mismatches.append(
-                        f"{name}.{recordName}.{field}: offset C={cOffset} lua={luaOffset}")
+                    mismatches.append(f"{name}.{recordName}.{field}: offset C={cOffset} lua={luaOffset}")
 
         totalChecked += checked
         print(f"{name}: {checked} records verified")

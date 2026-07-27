@@ -10,17 +10,12 @@ project(tecs C CXX)
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-option(TECS_SYSTEM_DEPS
-    "Resolve dependencies from the system rather than pinned sources" ON)
-option(TECS_BUILD_LUA
-    "Generate FFI bindings and compile the Teal sources" ON)
-option(TECS_RUNTIME_SHADERS
-    "Link a shader compiler, for development. Releases use packaged artifacts." ON)
+option(TECS_SYSTEM_DEPS "Resolve dependencies from the system rather than pinned sources" ON)
+option(TECS_BUILD_LUA "Generate FFI bindings and compile the Teal sources" ON)
+option(TECS_RUNTIME_SHADERS "Link a shader compiler, for development. Releases use packaged artifacts." ON)
 
-set(TECS_SPEC_OUT "${CMAKE_BINARY_DIR}/spec" CACHE PATH
-    "Where compiled Teal specs are written")
-set(TECS_LUA_OUT "${CMAKE_BINARY_DIR}/lua" CACHE PATH
-    "Where compiled Lua and generated bindings are written")
+set(TECS_SPEC_OUT "${CMAKE_BINARY_DIR}/spec" CACHE PATH "Where compiled Teal specs are written")
+set(TECS_LUA_OUT "${CMAKE_BINARY_DIR}/lua" CACHE PATH "Where compiled Lua and generated bindings are written")
 
 # ---------------------------------------------------------------- dependencies
 
@@ -41,8 +36,7 @@ else()
     find_path(SDL3_NET_INCLUDE_DIR SDL3_net/SDL_net.h)
     find_library(SDL3_NET_LIBRARY NAMES SDL3_net)
     if(NOT SDL3_NET_INCLUDE_DIR OR NOT SDL3_NET_LIBRARY)
-        message(FATAL_ERROR
-            "SDL3_net not found. Set SDL3_NET_INCLUDE_DIR and SDL3_NET_LIBRARY.")
+        message(FATAL_ERROR "SDL3_net not found. Set SDL3_NET_INCLUDE_DIR and SDL3_NET_LIBRARY.")
     endif()
     pkg_check_modules(LUAJIT REQUIRED IMPORTED_TARGET luajit)
     pkg_check_modules(SHADERC REQUIRED IMPORTED_TARGET shaderc)
@@ -90,9 +84,7 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH ${TECS_SYSTEM_DEPS})
 # plain interpreter can require it the ordinary way.
 # fpconv.c is deliberately absent: with USE_INTERNAL_FPCONV the header defines
 # fpconv_init inline and the conversions come from g_fmt.c and dtoa.c instead.
-set(TECS_CJSON_SOURCES
-    vendor/cjson/lua_cjson.c vendor/cjson/strbuf.c
-    vendor/cjson/g_fmt.c vendor/cjson/dtoa.c)
+set(TECS_CJSON_SOURCES vendor/cjson/lua_cjson.c vendor/cjson/strbuf.c vendor/cjson/g_fmt.c vendor/cjson/dtoa.c)
 set(TECS_CJSON_DEFINES USE_INTERNAL_FPCONV MULTIPLE_THREADS)
 
 add_library(tecs_cjson STATIC ${TECS_CJSON_SOURCES})
@@ -103,19 +95,23 @@ set_target_properties(tecs_cjson PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_library(cjson MODULE ${TECS_CJSON_SOURCES})
 target_compile_definitions(cjson PRIVATE ${TECS_CJSON_DEFINES})
 target_include_directories(cjson PRIVATE ${LUAJIT_INCLUDE_DIRS})
-set_target_properties(cjson PROPERTIES
-    PREFIX "" SUFFIX ".so"
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+set_target_properties(
+    cjson
+    PROPERTIES PREFIX "" SUFFIX ".so" LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+)
 target_link_libraries(cjson PRIVATE ${LUAJIT_LINK_LIBRARIES})
 
-add_library(tecs_worker SHARED
-    native/worker.c native/logsink.c native/taskpool.c
-    native/framepipeline.c native/luamods.c)
-set_target_properties(tecs_worker PROPERTIES
-    OUTPUT_NAME tecsworker
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
-target_link_libraries(tecs_worker PRIVATE
-    PkgConfig::SDL3 PkgConfig::LUAJIT)
+add_library(
+    tecs_worker
+    SHARED
+    native/worker.c
+    native/logsink.c
+    native/taskpool.c
+    native/framepipeline.c
+    native/luamods.c
+)
+set_target_properties(tecs_worker PROPERTIES OUTPUT_NAME tecsworker LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+target_link_libraries(tecs_worker PRIVATE PkgConfig::SDL3 PkgConfig::LUAJIT)
 # Box2D's headers, for the task callback types the pool is declared with. No
 # Box2D symbol is referenced: the solver calls in, through pointers it was
 # given, so this links nothing.
@@ -125,19 +121,25 @@ target_include_directories(tecs_worker PRIVATE ${BOX2D_INCLUDE_DIR})
 # Whole-archive linking is deliberate: the C API's symbols are not referenced
 # from this stub, so without it the linker would discard all of them.
 add_library(tecs_spirvcross SHARED native/spirvcross.c)
-set_target_properties(tecs_spirvcross PROPERTIES
-    OUTPUT_NAME spirvcrossc
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+set_target_properties(
+    tecs_spirvcross
+    PROPERTIES OUTPUT_NAME spirvcrossc LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+)
 target_include_directories(tecs_spirvcross PRIVATE ${SPIRV_CROSS_INCLUDE_DIRS})
 
 set(TECS_SPVC_ARCHIVES
-    spirv-cross-c spirv-cross-cpp spirv-cross-msl
-    spirv-cross-glsl spirv-cross-hlsl spirv-cross-reflect
-    spirv-cross-util spirv-cross-core)
+    spirv-cross-c
+    spirv-cross-cpp
+    spirv-cross-msl
+    spirv-cross-glsl
+    spirv-cross-hlsl
+    spirv-cross-reflect
+    spirv-cross-util
+    spirv-cross-core
+)
 set(TECS_SPVC_WHOLE "")
 foreach(archive IN LISTS TECS_SPVC_ARCHIVES)
-    find_library(SPVC_${archive}_LIB NAMES ${archive}
-        HINTS ${SPIRV_CROSS_LIBRARY_DIRS})
+    find_library(SPVC_${archive}_LIB NAMES ${archive} HINTS ${SPIRV_CROSS_LIBRARY_DIRS})
     if(NOT SPVC_${archive}_LIB)
         message(FATAL_ERROR "SPIRV-Cross archive ${archive} not found")
     endif()
@@ -163,17 +165,14 @@ add_executable(tecs native/host.c native/luamods.c)
 # installs. The host resolves its entry chunk and the engine resolves assets
 # against it, so the layout is described once here instead of being sniffed for
 # at run time.
-set(TECS_CONTENT "../share/tecs/lua/" CACHE STRING
-    "Content directory relative to the installed executable")
+set(TECS_CONTENT "../share/tecs/lua/" CACHE STRING "Content directory relative to the installed executable")
 target_compile_definitions(tecs PRIVATE TECS_CONTENT="${TECS_CONTENT}")
-set_target_properties(tecs PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+set_target_properties(tecs PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 target_link_libraries(tecs PRIVATE PkgConfig::SDL3 PkgConfig::LUAJIT)
 
 if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
     # LuaJIT on x64 macOS needs its allocations below 2GB.
-    target_link_options(tecs PRIVATE
-        -pagezero_size 10000 -image_base 100000000)
+    target_link_options(tecs PRIVATE -pagezero_size 10000 -image_base 100000000)
 endif()
 
 # ------------------------------------------------------- generated bindings
@@ -211,39 +210,32 @@ if(TECS_BUILD_LUA)
         endforeach()
         add_custom_command(
             OUTPUT "${GEN}/${name}cdef.lua" "${GEN}/${name}const.lua"
-            COMMAND ${Python3_EXECUTABLE}
-                "${CMAKE_SOURCE_DIR}/scripts/gencdef.py"
-                --header ${header} ${includes} ${TECS_CDEF_DEFINES}
-                --keep ${keep} --define-prefix ${prefix}
-                --defines-out "${GEN}/${name}const.lua"
+            COMMAND
+                ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/scripts/gencdef.py" --header ${header} ${includes}
+                ${TECS_CDEF_DEFINES} --keep ${keep} --define-prefix ${prefix} --defines-out "${GEN}/${name}const.lua"
                 --out "${GEN}/${name}cdef.lua"
             DEPENDS "${CMAKE_SOURCE_DIR}/scripts/gencdef.py" ${headerPath}
             COMMENT "Generating ${name} FFI bindings"
-            VERBATIM)
+            VERBATIM
+        )
     endfunction()
 
     tecs_cdef(sdl3 SDL3/SDL.h /SDL3/ SDL_ ${SDL3_INCLUDE_DIRS})
-    tecs_cdef(sdl3image SDL3_image/SDL_image.h /SDL3_image/ IMG_
-        ${SDL3_IMAGE_INCLUDE_DIRS} ${SDL3_INCLUDE_DIRS})
-    tecs_cdef(sdl3net SDL3_net/SDL_net.h /SDL3_net/ NET_
-        ${SDL3_NET_INCLUDE_DIR} ${SDL3_INCLUDE_DIRS})
-    tecs_cdef(sdl3mixer SDL3_mixer/SDL_mixer.h /SDL3_mixer/ MIX_
-        ${SDL3_MIXER_INCLUDE_DIRS} ${SDL3_INCLUDE_DIRS})
+    tecs_cdef(sdl3image SDL3_image/SDL_image.h /SDL3_image/ IMG_ ${SDL3_IMAGE_INCLUDE_DIRS} ${SDL3_INCLUDE_DIRS})
+    tecs_cdef(sdl3net SDL3_net/SDL_net.h /SDL3_net/ NET_ ${SDL3_NET_INCLUDE_DIR} ${SDL3_INCLUDE_DIRS})
+    tecs_cdef(sdl3mixer SDL3_mixer/SDL_mixer.h /SDL3_mixer/ MIX_ ${SDL3_MIXER_INCLUDE_DIRS} ${SDL3_INCLUDE_DIRS})
     tecs_cdef(box2d box2d/box2d.h /box2d/ B2_ ${BOX2D_INCLUDE_DIR})
-    tecs_cdef(shaderc shaderc/shaderc.h /shaderc/ shaderc_
-        ${SHADERC_INCLUDE_DIRS})
+    tecs_cdef(shaderc shaderc/shaderc.h /shaderc/ shaderc_ ${SHADERC_INCLUDE_DIRS})
     # pkg-config points into the spirv_cross directory rather than at its
     # parent, so the header is named relative to that.
-    tecs_cdef(spvc spirv_cross_c.h /spirv_cross/ SPVC_
-        ${SPIRV_CROSS_INCLUDE_DIRS})
+    tecs_cdef(spvc spirv_cross_c.h /spirv_cross/ SPVC_ ${SPIRV_CROSS_INCLUDE_DIRS})
 
     # The engine's own native API. Generated the same way as a third-party
     # header so the binding cannot drift from the C even though both live here.
     tecs_cdef(worker worker.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
     tecs_cdef(logsink logsink.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
     tecs_cdef(taskpool taskpool.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
-    tecs_cdef(framepipeline framepipeline.h /native/ TECS_
-        "${CMAKE_SOURCE_DIR}/native")
+    tecs_cdef(framepipeline framepipeline.h /native/ TECS_ "${CMAKE_SOURCE_DIR}/native")
 
     # Each library also gets a table of function pointers, taken at build
     # time. A target that cannot dlopen still links, and the engine calls
@@ -260,24 +252,17 @@ if(TECS_BUILD_LUA)
         endforeach()
         add_custom_command(
             OUTPUT "${source}" "${GEN}/${name}apicdef.lua"
-            COMMAND ${Python3_EXECUTABLE}
-                "${CMAKE_SOURCE_DIR}/scripts/genregistry.py"
-                --cdef "${GEN}/${name}cdef.lua"
-                --name ${name} --struct ${struct} --prefix ${prefix}
-                ${headers}
-                --source-out "${source}"
-                --cdef-out "${GEN}/${name}apicdef.lua"
-            DEPENDS "${GEN}/${name}cdef.lua"
-                    "${CMAKE_SOURCE_DIR}/scripts/genregistry.py"
+            COMMAND
+                ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/scripts/genregistry.py" --cdef "${GEN}/${name}cdef.lua"
+                --name ${name} --struct ${struct} --prefix ${prefix} ${headers} --source-out "${source}" --cdef-out
+                "${GEN}/${name}apicdef.lua"
+            DEPENDS "${GEN}/${name}cdef.lua" "${CMAKE_SOURCE_DIR}/scripts/genregistry.py"
             COMMENT "Generating ${name} native API table"
-            VERBATIM)
-        set(TECS_REGISTRY_PAIRS ${TECS_REGISTRY_PAIRS} "${name}:${struct}"
-            PARENT_SCOPE)
-        set(TECS_REGISTRY_SOURCES ${TECS_REGISTRY_SOURCES} "${source}"
-            PARENT_SCOPE)
-        set(TECS_REGISTRY_ENTRIES
-            "${TECS_REGISTRY_ENTRIES}TECS_API(${name}, ${struct})\n"
-            PARENT_SCOPE)
+            VERBATIM
+        )
+        set(TECS_REGISTRY_PAIRS ${TECS_REGISTRY_PAIRS} "${name}:${struct}" PARENT_SCOPE)
+        set(TECS_REGISTRY_SOURCES ${TECS_REGISTRY_SOURCES} "${source}" PARENT_SCOPE)
+        set(TECS_REGISTRY_ENTRIES "${TECS_REGISTRY_ENTRIES}TECS_API(${name}, ${struct})\n" PARENT_SCOPE)
     endfunction()
 
     tecs_registry(sdl3 TecsSdl3Api SDL_ SDL3/SDL.h)
@@ -302,40 +287,44 @@ if(TECS_BUILD_LUA)
     # hand-written table, and adding a library to the build without adding it
     # here failed only under the host, where the registry path is the one that
     # runs.
-    set(TECS_REGISTRY_LUA
-        "-- Generated. Library name to the struct its registry table has.\nreturn {\n")
+    set(TECS_REGISTRY_LUA "-- Generated. Library name to the struct its registry table has.\nreturn {\n")
     foreach(pair IN LISTS TECS_REGISTRY_PAIRS)
         string(REPLACE ":" ";" parts "${pair}")
         list(GET parts 0 pairName)
         list(GET parts 1 pairStruct)
-        set(TECS_REGISTRY_LUA
-            "${TECS_REGISTRY_LUA}    ${pairName} = \"${pairStruct}\",\n")
+        set(TECS_REGISTRY_LUA "${TECS_REGISTRY_LUA}    ${pairName} = \"${pairStruct}\",\n")
     endforeach()
-    file(WRITE "${TECS_LUA_OUT}/tecs/ffi/registrystructs.lua"
-        "${TECS_REGISTRY_LUA}}\n")
+    file(WRITE "${TECS_LUA_OUT}/tecs/ffi/registrystructs.lua" "${TECS_REGISTRY_LUA}}\n")
 
-    file(WRITE "${CMAKE_BINARY_DIR}/generated/registry_entries.h"
+    file(
+        WRITE "${CMAKE_BINARY_DIR}/generated/registry_entries.h"
         "/* Generated. Which libraries this target links. */\n"
-        "${TECS_REGISTRY_ENTRIES}")
+        "${TECS_REGISTRY_ENTRIES}"
+    )
 
-    add_library(tecs_registry STATIC
-        native/registry.c ${TECS_REGISTRY_SOURCES})
-    target_include_directories(tecs_registry PUBLIC
-        "${CMAKE_BINARY_DIR}/generated" "${CMAKE_SOURCE_DIR}/native")
-    target_link_libraries(tecs_registry PUBLIC
-        PkgConfig::SDL3 PkgConfig::SDL3_IMAGE PkgConfig::SDL3_MIXER
-        PkgConfig::LUAJIT ${BOX2D_LIBRARY} ${SDL3_NET_LIBRARY})
+    add_library(tecs_registry STATIC native/registry.c ${TECS_REGISTRY_SOURCES})
+    target_include_directories(tecs_registry PUBLIC "${CMAKE_BINARY_DIR}/generated" "${CMAKE_SOURCE_DIR}/native")
+    target_link_libraries(
+        tecs_registry
+        PUBLIC
+            PkgConfig::SDL3
+            PkgConfig::SDL3_IMAGE
+            PkgConfig::SDL3_MIXER
+            PkgConfig::LUAJIT
+            ${BOX2D_LIBRARY}
+            ${SDL3_NET_LIBRARY}
+    )
 
     # Taking the address of a shader compiler's functions means linking it.
     # That is the coupling TECS_RUNTIME_SHADERS exists to remove: a release
     # generates no table for them and links neither.
     if(TECS_RUNTIME_SHADERS)
-        target_link_libraries(tecs_registry PUBLIC
-            PkgConfig::SHADERC tecs_spirvcross)
+        target_link_libraries(tecs_registry PUBLIC PkgConfig::SHADERC tecs_spirvcross)
     endif()
-    target_include_directories(tecs_registry PRIVATE
-        ${BOX2D_INCLUDE_DIR} ${SDL3_NET_INCLUDE_DIR}
-        ${SHADERC_INCLUDE_DIRS} ${SPIRV_CROSS_INCLUDE_DIRS})
+    target_include_directories(
+        tecs_registry
+        PRIVATE ${BOX2D_INCLUDE_DIR} ${SDL3_NET_INCLUDE_DIR} ${SHADERC_INCLUDE_DIRS} ${SPIRV_CROSS_INCLUDE_DIRS}
+    )
 
     # Linked here rather than where the executables are declared, because the
     # registry's sources are generated from bindings produced above.
@@ -344,70 +333,108 @@ if(TECS_BUILD_LUA)
     target_link_libraries(tecs PRIVATE tecs_registry tecs_worker tecs_cjson)
     target_link_libraries(tecs_worker PRIVATE tecs_registry tecs_cjson)
 
-    add_custom_target(tecs_bindings ALL DEPENDS
-        "${GEN}/workercdef.lua" "${GEN}/logsinkcdef.lua"
-        "${GEN}/taskpoolcdef.lua" "${GEN}/framepipelinecdef.lua"
-        "${GEN}/sdl3cdef.lua" "${GEN}/sdl3imagecdef.lua" "${GEN}/sdl3netcdef.lua"
-        "${GEN}/sdl3mixercdef.lua"
-        "${GEN}/box2dcdef.lua" "${GEN}/shaderccdef.lua"
-        "${GEN}/spvccdef.lua")
+    add_custom_target(
+        tecs_bindings
+        ALL
+        DEPENDS
+            "${GEN}/workercdef.lua"
+            "${GEN}/logsinkcdef.lua"
+            "${GEN}/taskpoolcdef.lua"
+            "${GEN}/framepipelinecdef.lua"
+            "${GEN}/sdl3cdef.lua"
+            "${GEN}/sdl3imagecdef.lua"
+            "${GEN}/sdl3netcdef.lua"
+            "${GEN}/sdl3mixercdef.lua"
+            "${GEN}/box2dcdef.lua"
+            "${GEN}/shaderccdef.lua"
+            "${GEN}/spvccdef.lua"
+    )
 
     # Teal compilation. Kept as one custom target rather than per-file rules
     # because the compiler resolves the module graph itself.
     # CONFIGURE_DEPENDS so adding a source is a build, not a reconfigure.
     # Without it a new module is silently absent until someone remembers.
     file(GLOB_RECURSE TECS_TL CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/*.tl")
-    add_custom_target(tecs_lua ALL
+    add_custom_target(
+        tecs_lua
+        ALL
         # tl searches include paths last-first, so ours come last and win.
-        COMMAND tl -q gen -I "${CMAKE_SOURCE_DIR}/vendor/share/lua/5.1"
-            -I "${CMAKE_SOURCE_DIR}/vendor/tl"
-            --root "${CMAKE_SOURCE_DIR}/src"
-            --output-dir "${TECS_LUA_OUT}" ${TECS_TL}
+        COMMAND
+            tl -q gen -I "${CMAKE_SOURCE_DIR}/vendor/share/lua/5.1" -I "${CMAKE_SOURCE_DIR}/vendor/tl" --root
+            "${CMAKE_SOURCE_DIR}/src" --output-dir "${TECS_LUA_OUT}" ${TECS_TL}
         DEPENDS ${TECS_TL} tecs_bindings
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         COMMENT "Compiling Teal sources"
-        VERBATIM)
+        VERBATIM
+    )
 
     # Content lives beside the compiled Lua, because that directory is the
     # content root a development run resolves against and the one an install
     # copies. CONFIGURE_DEPENDS so adding a shader is a build, not a
     # reconfigure.
-    file(GLOB_RECURSE TECS_ASSET_FILES CONFIGURE_DEPENDS
-        "${CMAKE_SOURCE_DIR}/assets/*")
-    add_custom_target(tecs_assets ALL
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_SOURCE_DIR}/assets" "${TECS_LUA_OUT}"
+    file(GLOB_RECURSE TECS_ASSET_FILES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/assets/*")
+    add_custom_target(
+        tecs_assets
+        ALL
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/assets" "${TECS_LUA_OUT}"
         DEPENDS ${TECS_ASSET_FILES}
         COMMENT "Copying assets"
-        VERBATIM)
+        VERBATIM
+    )
 
     # Specs written in Teal, compiled the same way. The ECS suites are written
     # in Teal and the engine's in Lua, so both forms are built and Busted is
     # pointed at both trees.
-    file(GLOB_RECURSE TECS_SPEC_TL CONFIGURE_DEPENDS
-        "${CMAKE_SOURCE_DIR}/spec/*.tl")
+    file(GLOB_RECURSE TECS_SPEC_TL CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/spec/*.tl")
     if(TECS_SPEC_TL)
-        add_custom_target(tecs_spec ALL
-            COMMAND luajit "${CMAKE_SOURCE_DIR}/scripts/compile_specs.lua"
-                "${CMAKE_SOURCE_DIR}/spec" "${TECS_SPEC_OUT}"
+        add_custom_target(
+            tecs_spec
+            ALL
+            COMMAND
+                luajit "${CMAKE_SOURCE_DIR}/scripts/compile_specs.lua" "${CMAKE_SOURCE_DIR}/spec" "${TECS_SPEC_OUT}"
                 "${CMAKE_SOURCE_DIR}/vendor/share/lua/5.1"
             DEPENDS ${TECS_SPEC_TL} tecs_lua
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
             COMMENT "Compiling Teal specs"
-            VERBATIM)
+            VERBATIM
+        )
     endif()
+endif()
+
+# --------------------------------------------------------------- formatting
+
+# Which files are formatted, and by what, is described once in the script. These
+# targets exist so a CMake-driven workflow has them; the Makefile calls the same
+# script directly, since formatting a source tree does not need a build.
+find_package(Python3 QUIET COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    add_custom_target(
+        format
+        COMMAND ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/scripts/format.py"
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        COMMENT "Formatting sources"
+        VERBATIM
+    )
+    add_custom_target(
+        format-check
+        COMMAND ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/scripts/format.py" --check
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        COMMENT "Checking formatting"
+        VERBATIM
+    )
 endif()
 
 # --------------------------------------------------------------- packaging
 
 # Records how the tree was built, so a check can tell a development install
 # from a shippable one rather than guessing from what it finds.
-file(WRITE "${CMAKE_BINARY_DIR}/build-info.txt"
+file(
+    WRITE "${CMAKE_BINARY_DIR}/build-info.txt"
     "systemDeps=${TECS_SYSTEM_DEPS}\n"
     "system=${CMAKE_SYSTEM_NAME}\n"
-    "arch=${CMAKE_SYSTEM_PROCESSOR}\n")
-install(FILES "${CMAKE_BINARY_DIR}/build-info.txt"
-    DESTINATION share/tecs)
+    "arch=${CMAKE_SYSTEM_PROCESSOR}\n"
+)
+install(FILES "${CMAKE_BINARY_DIR}/build-info.txt" DESTINATION share/tecs)
 
 install(TARGETS tecs RUNTIME DESTINATION bin)
 install(TARGETS tecs_worker tecs_spirvcross LIBRARY DESTINATION lib)

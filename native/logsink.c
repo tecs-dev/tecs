@@ -30,35 +30,34 @@ static int categoryBase = 0;
 static const char *priorityName(SDL_LogPriority priority)
 {
     switch (priority) {
-    case SDL_LOG_PRIORITY_TRACE:    return "TRACE";
-    case SDL_LOG_PRIORITY_VERBOSE:  return "VERBOSE";
-    case SDL_LOG_PRIORITY_DEBUG:    return "DEBUG";
-    case SDL_LOG_PRIORITY_INFO:     return "INFO";
-    case SDL_LOG_PRIORITY_WARN:     return "WARN";
-    case SDL_LOG_PRIORITY_ERROR:    return "ERROR";
+    case SDL_LOG_PRIORITY_TRACE: return "TRACE";
+    case SDL_LOG_PRIORITY_VERBOSE: return "VERBOSE";
+    case SDL_LOG_PRIORITY_DEBUG: return "DEBUG";
+    case SDL_LOG_PRIORITY_INFO: return "INFO";
+    case SDL_LOG_PRIORITY_WARN: return "WARN";
+    case SDL_LOG_PRIORITY_ERROR: return "ERROR";
     case SDL_LOG_PRIORITY_CRITICAL: return "CRITICAL";
-    default:                        return "UNKNOWN";
+    default: return "UNKNOWN";
     }
 }
 
 static const char *categoryName(int category)
 {
     int index = category - categoryBase;
-    if (categoryBase > 0 && index >= 0 && index < TECS_MAX_CATEGORIES
-        && categoryNames[index][0] != '\0') {
+    if (categoryBase > 0 && index >= 0 && index < TECS_MAX_CATEGORIES && categoryNames[index][0] != '\0') {
         return categoryNames[index];
     }
     switch (category) {
     case SDL_LOG_CATEGORY_APPLICATION: return "sdl.application";
-    case SDL_LOG_CATEGORY_ERROR:       return "sdl.error";
-    case SDL_LOG_CATEGORY_ASSERT:      return "sdl.assert";
-    case SDL_LOG_CATEGORY_SYSTEM:      return "sdl.system";
-    case SDL_LOG_CATEGORY_AUDIO:       return "sdl.audio";
-    case SDL_LOG_CATEGORY_VIDEO:       return "sdl.video";
-    case SDL_LOG_CATEGORY_RENDER:      return "sdl.render";
-    case SDL_LOG_CATEGORY_INPUT:       return "sdl.input";
-    case SDL_LOG_CATEGORY_GPU:         return "sdl.gpu";
-    default:                           return "sdl";
+    case SDL_LOG_CATEGORY_ERROR: return "sdl.error";
+    case SDL_LOG_CATEGORY_ASSERT: return "sdl.assert";
+    case SDL_LOG_CATEGORY_SYSTEM: return "sdl.system";
+    case SDL_LOG_CATEGORY_AUDIO: return "sdl.audio";
+    case SDL_LOG_CATEGORY_VIDEO: return "sdl.video";
+    case SDL_LOG_CATEGORY_RENDER: return "sdl.render";
+    case SDL_LOG_CATEGORY_INPUT: return "sdl.input";
+    case SDL_LOG_CATEGORY_GPU: return "sdl.gpu";
+    default: return "sdl";
     }
 }
 
@@ -69,15 +68,29 @@ static size_t writeEscaped(char *out, size_t limit, const char *text)
     for (const unsigned char *p = (const unsigned char *)text; *p; p++) {
         if (used + 8 >= limit) break;
         switch (*p) {
-        case '"':  out[used++] = '\\'; out[used++] = '"';  break;
-        case '\\': out[used++] = '\\'; out[used++] = '\\'; break;
-        case '\n': out[used++] = '\\'; out[used++] = 'n';  break;
-        case '\r': out[used++] = '\\'; out[used++] = 'r';  break;
-        case '\t': out[used++] = '\\'; out[used++] = 't';  break;
+        case '"':
+            out[used++] = '\\';
+            out[used++] = '"';
+            break;
+        case '\\':
+            out[used++] = '\\';
+            out[used++] = '\\';
+            break;
+        case '\n':
+            out[used++] = '\\';
+            out[used++] = 'n';
+            break;
+        case '\r':
+            out[used++] = '\\';
+            out[used++] = 'r';
+            break;
+        case '\t':
+            out[used++] = '\\';
+            out[used++] = 't';
+            break;
         default:
             if (*p < 0x20) {
-                used += (size_t)SDL_snprintf(out + used, limit - used,
-                                             "\\u%04x", *p);
+                used += (size_t)SDL_snprintf(out + used, limit - used, "\\u%04x", *p);
             } else {
                 out[used++] = (char)*p;
             }
@@ -86,8 +99,7 @@ static size_t writeEscaped(char *out, size_t limit, const char *text)
     return used;
 }
 
-static void SDLCALL sink(void *userdata, int category,
-                         SDL_LogPriority priority, const char *message)
+static void SDLCALL sink(void *userdata, int category, SDL_LogPriority priority, const char *message)
 {
     /* The platform destination first, so a crash between here and the file
      * still leaves the message somewhere. */
@@ -97,17 +109,13 @@ static void SDLCALL sink(void *userdata, int category,
     if (!sinkFile) return;
 
     char line[2048];
-    int head = SDL_snprintf(line, sizeof(line),
-                            "{\"time\":%.3f,\"level\":\"%s\",\"logger\":\"",
-                            (double)SDL_GetTicks() / 1000.0,
-                            priorityName(priority));
+    int head = SDL_snprintf(line, sizeof(line), "{\"time\":%.3f,\"level\":\"%s\",\"logger\":\"",
+                            (double)SDL_GetTicks() / 1000.0, priorityName(priority));
     if (head < 0) return;
 
     size_t used = (size_t)head;
-    used += writeEscaped(line + used, sizeof(line) - used - 16,
-                         categoryName(category));
-    used += (size_t)SDL_snprintf(line + used, sizeof(line) - used,
-                                 "\",\"message\":\"");
+    used += writeEscaped(line + used, sizeof(line) - used - 16, categoryName(category));
+    used += (size_t)SDL_snprintf(line + used, sizeof(line) - used, "\",\"message\":\"");
     used += writeEscaped(line + used, sizeof(line) - used - 8, message);
     used += (size_t)SDL_snprintf(line + used, sizeof(line) - used, "\"}\n");
 

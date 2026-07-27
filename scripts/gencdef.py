@@ -31,9 +31,7 @@ DROP_TOKENS = [
 ]
 
 # Lines that are entire declarations we never want to forward.
-DROP_LINE_RE = re.compile(
-    r"^\s*(_Static_assert|static_assert|#pragma|extern\s+\"C\"|\})?\s*$"
-)
+DROP_LINE_RE = re.compile(r"^\s*(_Static_assert|static_assert|#pragma|extern\s+\"C\"|\})?\s*$")
 
 ATTRIBUTE_RE = re.compile(r"__attribute__\s*\(")
 ASM_RE = re.compile(r"__asm(__)?\s*\(")
@@ -219,33 +217,33 @@ def extractDefines(headers, includeDirs, defines, prefixes):
     # than anything a caller could use, and the only way to tell one of those
     # from a constant is that its value moves when the place it is written
     # does. Keeping what both runs agree on is what leaves them out.
-    first = evaluateMacros(names, headers, includeDirs, defines, limitFlags,
-                           "tecsFirst", 0)
-    second = evaluateMacros(names, headers, includeDirs, defines, limitFlags,
-                            "tecsSecond", 3)
-    return {name: value for name, value in first.items()
-            if second.get(name) == value}
+    first = evaluateMacros(names, headers, includeDirs, defines, limitFlags, "tecsFirst", 0)
+    second = evaluateMacros(names, headers, includeDirs, defines, limitFlags, "tecsSecond", 3)
+    return {name: value for name, value in first.items() if second.get(name) == value}
 
 
-def evaluateMacros(names, headers, includeDirs, defines, limitFlags,
-                   funcName, pad):
+def evaluateMacros(names, headers, includeDirs, defines, limitFlags, funcName, pad):
     """Compile and run one program that prints every macro it can."""
     # `(intptr_t)` sits in the middle of the text cast so that a macro whose
     # value is floating point still compiles: a double converts to an integer
     # and an integer converts to a pointer, where a double to a pointer is an
     # error that would drop the macro rather than classify it.
-    prologue = [f"#include <{h}>" for h in headers] + [
-        "#include <stdio.h>",
-        "#include <stdint.h>",
-        "#define TECS_KIND(x) _Generic((x) + 0,"
-        " char *: 2, const char *: 2,"
-        " _Bool: 1, short: 1, unsigned short: 1, int: 1, unsigned int: 1,"
-        " long: 1, unsigned long: 1, long long: 1, unsigned long long: 1,"
-        " float: 1, double: 1, long double: 1,"
-        " default: 0)",
-    ] + [""] * pad + [f"static void {funcName}(void) {{"]
-    epilogue = ["}", "int main(void) {", f"    {funcName}();",
-                "    return 0;", "}", ""]
+    prologue = (
+        [f"#include <{h}>" for h in headers]
+        + [
+            "#include <stdio.h>",
+            "#include <stdint.h>",
+            "#define TECS_KIND(x) _Generic((x) + 0,"
+            " char *: 2, const char *: 2,"
+            " _Bool: 1, short: 1, unsigned short: 1, int: 1, unsigned int: 1,"
+            " long: 1, unsigned long: 1, long long: 1, unsigned long long: 1,"
+            " float: 1, double: 1, long double: 1,"
+            " default: 0)",
+        ]
+        + [""] * pad
+        + [f"static void {funcName}(void) {{"]
+    )
+    epilogue = ["}", "int main(void) {", f"    {funcName}();", "    return 0;", "}", ""]
     dropped: set[str] = set()
 
     for _ in range(40):
@@ -254,8 +252,8 @@ def evaluateMacros(names, headers, includeDirs, defines, limitFlags,
             return {}
         body = [
             f'    if (TECS_KIND({n}) == 2) printf("{n}\\tS\\t%s\\n",'
-            f' (const char *)(intptr_t)({n}));'
-            f' else if (TECS_KIND({n}) == 1)'
+            f" (const char *)(intptr_t)({n}));"
+            f" else if (TECS_KIND({n}) == 1)"
             f' printf("{n}\\tI\\t%lld\\n", (long long)({n}));'
             for n in active
         ]
@@ -264,8 +262,7 @@ def evaluateMacros(names, headers, includeDirs, defines, limitFlags,
             csrc = Path(d) / f"{PROBE_NAME}.c"
             exe = Path(d) / PROBE_NAME
             csrc.write_text(program)
-            cmd = ["cc", "-std=c11", "-w", *limitFlags,
-                   "-o", str(exe), str(csrc)]
+            cmd = ["cc", "-std=c11", "-w", *limitFlags, "-o", str(exe), str(csrc)]
             for inc in includeDirs:
                 cmd += ["-I", inc]
             for dd in defines:
@@ -319,8 +316,7 @@ def errorLimitFlags():
         with tempfile.TemporaryDirectory() as d:
             probe = Path(d) / "probe.c"
             probe.write_text("int main(void) { return 0; }\n")
-            out = subprocess.run(["cc", flag, "-o", str(Path(d) / "probe"),
-                                  str(probe)], capture_output=True, text=True)
+            out = subprocess.run(["cc", flag, "-o", str(Path(d) / "probe"), str(probe)], capture_output=True, text=True)
             if out.returncode == 0:
                 return [flag]
     return []
@@ -330,30 +326,23 @@ def luaValue(value):
     """Render a recovered constant as Lua source."""
     if isinstance(value, int):
         return str(value)
-    escaped = (value.replace("\\", "\\\\").replace('"', '\\"')
-               .replace("\n", "\\n").replace("\r", "\\r"))
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "\\r")
     return f'"{escaped}"'
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--header", action="append", required=True,
-                    help="header to include, e.g. SDL3/SDL.h")
-    ap.add_argument("--include", action="append", default=[],
-                    help="include directory")
+    ap.add_argument("--header", action="append", required=True, help="header to include, e.g. SDL3/SDL.h")
+    ap.add_argument("--include", action="append", default=[], help="include directory")
     ap.add_argument("--define", action="append", default=[])
-    ap.add_argument("--keep", required=True,
-                    help="only keep declarations from paths containing this")
-    ap.add_argument("--define-prefix", action="append", default=[],
-                    help="emit integer #defines with this name prefix")
-    ap.add_argument("--defines-out",
-                    help="write recovered #define constants here as a Lua table")
+    ap.add_argument("--keep", required=True, help="only keep declarations from paths containing this")
+    ap.add_argument("--define-prefix", action="append", default=[], help="emit integer #defines with this name prefix")
+    ap.add_argument("--defines-out", help="write recovered #define constants here as a Lua table")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
     if args.defines_out:
-        consts = extractDefines(args.header, args.include, args.define,
-                                args.define_prefix)
+        consts = extractDefines(args.header, args.include, args.define, args.define_prefix)
         dest = Path(args.defines_out)
         dest.parent.mkdir(parents=True, exist_ok=True)
         lines = ["-- Generated by scripts/gencdef.py. Do not edit.", "return {"]

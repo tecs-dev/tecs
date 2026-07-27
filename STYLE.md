@@ -31,14 +31,10 @@ code; migrate old code opportunistically.
 
 ## Formatting and alignment
 
-No formatter is adopted yet. Cerulean is the closest candidate but is not
-ready (as of 1.8.0 it corrupts `macroexp` bodies and nested generic function
-types); revisit when those are fixed upstream. Until then, formatting is by
-hand:
-
 - 4-space indentation. No tabs.
-- Keep lines reasonable; wrap long signatures with one parameter group per
-  line, closing parenthesis on the final line:
+- 120 columns.
+- Wrap long signatures with one parameter group per line, closing parenthesis
+  on the final line:
 
   ```teal
   init: function(
@@ -56,6 +52,41 @@ hand:
 - Comments are sparse and informational. Public functions, records, and
   modules get `---` doc comments describing behavior and constraints, not
   restating the signature. No commented-out code.
+
+## Formatters
+
+`make format` applies them and `make format-check` reports without writing.
+Both call `scripts/format.py`, which is where the file list and the tool per
+language live. Every tool is configured to the two rules above, and none of
+them reflows a comment body.
+
+```
+ Language  Tool          Config
+ ────────  ────────────  ─────────────
+ C         clang-format  .clang-format
+ Lua       stylua        .stylua.toml
+ Python    ruff format   ruff.toml
+ CMake     gersemi       .gersemirc
+ Web       prettier      .prettierrc
+```
+
+Prettier covers JSON, Markdown, YAML, CSS and the JS/TS family. Markdown is
+formatted with `proseWrap: preserve`, so hand-wrapped prose keeps its line
+breaks and only structure is normalized.
+
+Two languages here are deliberately unformatted, because the available tool
+damages them rather than tidying them:
+
+- **Teal.** Cerulean 1.8.0 loses source. A `local macro name!()` declaration is
+  a parse error and the file comes back empty (`Bitset.tl`, and the three
+  `internal/world/` modules); a `= macroexp(...) ... end` body on a record field
+  is dropped with no diagnostic (`types.tl`, `IdAllocator.tl`). Six files under
+  `src/` hit one or the other. Revisit when both are fixed upstream.
+- **GLSL.** clang-format has no GLSL mode and reads an interface block as a
+  class definition, so `layout(...) uniform View { ... } view;` comes back with
+  `view;` stranded on a line of its own.
+
+Until those change, both are formatted by hand to the rules above.
 
 ## Naming
 
@@ -152,8 +183,8 @@ metamethods (`__call`, `__index`), and generated bindings.
   boolean field is the right call for high-frequency toggles.
 - Give every component a `name` matching its record name; tooling (queries,
   MCP, snapshots) uses it.
-- Keep components as data. Behavior belongs in systems; a `metamethod
-  __call` constructor is the accepted exception.
+- Keep components as data. Behavior belongs in systems; a
+  `metamethod __call` constructor is the accepted exception.
 
 ## Systems
 

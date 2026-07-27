@@ -18,8 +18,13 @@ from pathlib import Path
 # Libraries the platform itself provides. Referencing these absolutely is
 # correct: they are part of the target, not of the build machine.
 SYSTEM_PREFIXES = (
-    "/usr/lib/", "/System/Library/", "@rpath/", "@executable_path/",
-    "@loader_path/", "/lib/", "/lib64/",
+    "/usr/lib/",
+    "/System/Library/",
+    "@rpath/",
+    "@executable_path/",
+    "@loader_path/",
+    "/lib/",
+    "/lib64/",
 )
 
 # Shader compilation is a development capability. A release consumes packaged
@@ -30,20 +35,16 @@ COMPILER_NAMES = ("shaderc", "spirvcross", "spirv-cross", "dxcompiler")
 
 def machoReferences(binary: Path):
     """Returns (rpaths, linked libraries) for a Mach-O file."""
-    out = subprocess.run(["otool", "-l", str(binary)],
-                         capture_output=True, text=True)
+    out = subprocess.run(["otool", "-l", str(binary)], capture_output=True, text=True)
     rpaths = re.findall(r"cmd LC_RPATH.*?path ([^\s]+)", out.stdout, re.S)
 
-    linked = subprocess.run(["otool", "-L", str(binary)],
-                            capture_output=True, text=True)
-    libs = [line.split()[0] for line in linked.stdout.splitlines()[1:]
-            if line.strip()]
+    linked = subprocess.run(["otool", "-L", str(binary)], capture_output=True, text=True)
+    libs = [line.split()[0] for line in linked.stdout.splitlines()[1:] if line.strip()]
     return rpaths, libs
 
 
 def elfReferences(binary: Path):
-    out = subprocess.run(["readelf", "-d", str(binary)],
-                         capture_output=True, text=True)
+    out = subprocess.run(["readelf", "-d", str(binary)], capture_output=True, text=True)
     rpaths = re.findall(r"\(R(?:UN)?PATH\).*\[([^\]]+)\]", out.stdout)
     rpaths = [part for entry in rpaths for part in entry.split(":")]
     libs = re.findall(r"\(NEEDED\).*\[([^\]]+)\]", out.stdout)
@@ -65,16 +66,15 @@ def main():
     info = prefix / "share" / "tecs" / "build-info.txt"
     development = "systemDeps=ON" in info.read_text() if info.exists() else False
 
-    binaries = [p for p in prefix.rglob("*")
-                if p.is_file() and (p.suffix in (".dylib", ".so") or
-                                    (p.parent.name == "bin"))]
+    binaries = [
+        p for p in prefix.rglob("*") if p.is_file() and (p.suffix in (".dylib", ".so") or (p.parent.name == "bin"))
+    ]
     if not binaries:
         sys.exit(f"no binaries found under {prefix}")
 
     problems = []
     for binary in binaries:
-        rpaths, libs = (machoReferences(binary) if sys.platform == "darwin"
-                        else elfReferences(binary))
+        rpaths, libs = machoReferences(binary) if sys.platform == "darwin" else elfReferences(binary)
 
         for rpath in rpaths:
             if not rpath.startswith(("@executable_path", "@loader_path", "$ORIGIN")):
@@ -87,21 +87,18 @@ def main():
         if not allowCompiler:
             for name in COMPILER_NAMES:
                 if name in binary.name.lower():
-                    problems.append(
-                        f"{binary.name}: a shader compiler must not ship in a release")
+                    problems.append(f"{binary.name}: a shader compiler must not ship in a release")
 
     # A release ships no compiler, so it has to ship the shaders. An install
     # missing its pack opens a window and then fails at the first pipeline,
     # which is a far worse failure than this one.
     packs = list(prefix.rglob("*.tsp"))
     if not packs:
-        problems.append("no shader pack (*.tsp): a release ships no compiler, "
-                        "so it must ship compiled shaders")
+        problems.append("no shader pack (*.tsp): a release ships no compiler, so it must ship compiled shaders")
     for pack in packs:
         manifest = pack.with_suffix(pack.suffix + ".txt")
         if not manifest.exists():
-            problems.append(f"{pack.name}: no manifest beside it, so what it "
-                            "contains cannot be checked")
+            problems.append(f"{pack.name}: no manifest beside it, so what it contains cannot be checked")
         else:
             summary = manifest.read_text().splitlines()[1]
             print(f"{pack.relative_to(prefix)}: {summary}")
@@ -111,8 +108,7 @@ def main():
     if development:
         print("development install: system dependencies are expected here")
         if problems:
-            print(f"{len(problems)} references to the build machine, "
-                  "which a packaged preset would not have:")
+            print(f"{len(problems)} references to the build machine, which a packaged preset would not have:")
             for problem in problems:
                 print(f"  {problem}")
         return
