@@ -44,6 +44,13 @@ local sort <const> = table.sort
 --- Aseprite writes for a frame nobody retimed.
 local DEFAULT_DURATION <const> = 100.0
 
+--- Bumped whenever a frame's region moves, which is registration and `bind`.
+---
+--- Anything holding a copy of those regions compares this against what it
+--- copied from, which keeps the dependency running one way: a sheet knows
+--- nothing about who read it.
+local revision = 0
+
 --- How a tag walks its span.
 ---
 --- `pingpong` plays forward and then back without repeating either end, so a
@@ -572,6 +579,15 @@ local record sheet
     ---     under a name something else already holds.
     --- @return The live sheet, and nil, or nil and the reason it was refused.
     replace: function(built: Sheet): Sheet, string
+
+    --- How many times any sheet's frames have changed.
+    ---
+    --- Bumped by registration and by `bind`, both of which move where a frame's
+    --- region points. Anything holding a copy of those regions compares this
+    --- against what it copied from rather than being told, which keeps the
+    --- dependency running one way: a sheet knows nothing about who read it.
+    --- @return A number that only ever increases.
+    revision: function(): integer
 end
 
 
@@ -794,6 +810,8 @@ function Sheet:bind(sprite: Sprite): Sheet
     self._scaleU = sprite.u1 - sprite.u0
     self._scaleV = sprite.v1 - sprite.v0
     rescale(self)
+    -- Every frame's region just moved, so anything that copied them is stale.
+    revision = revision + 1
     return self
 end
 
@@ -823,6 +841,10 @@ local sheetsByName: {string: Sheet} = {}
 --- `replace` is the reverse of it and has to know what was displaced, and only
 --- registration is in a position to say.
 local displaced: {string: Sheet} = {}
+
+function sheet.revision(): integer
+    return revision
+end
 
 function sheet.byId(id: integer): Sheet
     if id == nil or id < 1 then return nil end
@@ -983,6 +1005,7 @@ local function register(self: Sheet, tags: {string: Tag}, slices: {Slice},
     self.id = #sheetsById
     displaced[self.name] = sheetsByName[self.name]
     sheetsByName[self.name] = self
+    revision = revision + 1
     return self
 end
 

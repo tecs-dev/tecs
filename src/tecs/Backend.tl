@@ -33,6 +33,7 @@ local Texture <const> = require("tecs.gpu.Texture")
 local Camera <const> = require("tecs.gfx.Camera")
 local FramePacket <const> = require("tecs.FramePacket")
 local layers <const> = require("tecs.gfx.layers")
+local frametable <const> = require("tecs.gfx.frametable")
 local instancelayout <const> = require("tecs.gpu.instancelayout")
 
 local C <const> = sdl.C
@@ -61,6 +62,15 @@ local QUAD_INDICES <const> = 6
 
 --- Threads per cull workgroup, matching the scan shaders' local size.
 local CULL_GROUP <const> = 256
+
+--- Floats the animation frame table is sized for.
+---
+--- A ceiling rather than a hint, for the reason the instance capacity is one:
+--- growing it would mean a second device buffer while a frame in flight is
+--- still reading the first. A quarter of a megabyte holds a few hundred
+--- animations, since a playback costs four floats of directory, one per
+--- millisecond of its cycle, and eight per step it visits.
+local PLAYBACK_FLOATS <const> = 65536
 
 --- Layers the image array holds, including the white default in layer zero.
 local MAX_LAYERS <const> = 64
@@ -125,6 +135,15 @@ local record Backend
     _visible: Buffer
     _drawArgs: Buffer
     _indices: Buffer
+    --- Frame tables every animated instance resolves against, and the revision
+    --- the resident copy was uploaded from. Uploaded when it moves rather than
+    --- per frame: it is content, and the frame that registers an animation is
+    --- the rare one.
+    _playbacks: Buffer
+    _playbackRevision: integer
+    --- Fixed steps the packet being drawn was extracted at, which is what an
+    --- animated instance resolves its frame against.
+    _stepClock: number
     --- Where the packet said the view was. A calculator for the matrix and the
     --- view bounds rather than the camera a game holds, which lives on the
     --- other side of the boundary and is copied into every packet.
@@ -162,7 +181,10 @@ local function layerUniform(self: Backend, width: number,
     -- The camera's matrix carries the zoom, so a layer that ignores zoom
     -- divides it back out rather than reaching for a second matrix.
     data[2] = view.zoom ~= 0.0 and 1.0 / view.zoom or 1.0
-    data[3] = 0.0
+    -- The animation clock, in whole fixed steps. It rides the spare component
+    -- of a block that is already pushed every frame, so playback on the GPU
+    -- costs no binding and no second push.
+    data[3] = self._stepClock
     -- Position to clip for the two fixed spaces, with Y negated because both
     -- run down from the top left while clip Y runs up.
     data[4] = 2.0 / width
@@ -268,6 +290,16 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer,
         usage = { "indirect", "computeWrite" },
         size = 32,
     })
+    self._playbacks = Buffer.create(device, {
+        usage = { "storage" },
+        size = PLAYBACK_FLOATS * 4,
+        name = "tecs.playbacks",
+    })
+    -- Below every revision the table can report, so the first frame uploads it
+    -- even when nothing has registered and the buffer would otherwise be read
+    -- before anything wrote it.
+    self._playbackRevision = -1
+    self._stepClock = 0.0
 
     -- Every field but the instance count is constant, and the scan writes that
     -- one. So the arguments are seeded once here rather than by a compute pass
@@ -323,7 +355,8 @@ function Backend.create(device: loader.CPtr, swapchainFormat: integer,
             -- that named a region ever read it.
             context.pass:pushFragmentUniform(0, self._clipUniform, CLIP_BYTES)
             context.pass:bindVertexStorageBuffers(0,
-                { self.instances.handle, self._visible.handle })
+                { self.instances.handle, self._visible.handle,
+                    self._playbacks.handle })
             context.pass:bindTextures(0, { self.images.handle }, self.sampler.handle)
             context.pass:bindIndexBuffer(self._indices.handle)
             -- One draw for the scene, with its instance count decided by the
@@ -492,6 +525,23 @@ function Backend:consume(packet: FramePacket, frame: Frame)
     self.instances:flushSlot(slot, frame.commandBuffer)
     self._bounds:flushSlot(slot, frame.commandBuffer)
 
+    -- Content rather than per-frame data, so it is written when it moves and
+    -- not when it is read. The revision also moves when a sheet is rebound,
+    -- since that changes every region the table copied, which is what makes a
+    -- rebind cost one upload here instead of a write to every entity playing it.
+    local revision <const> = frametable.revision()
+    if revision ~= self._playbackRevision then
+        self._playbackRevision = revision
+        local data, count = frametable.floats()
+        if count > PLAYBACK_FLOATS then
+            error(("tecs: the animation frame table needs %d floats and the "
+                .. "buffer holds %d"):format(count, PLAYBACK_FLOATS), 2)
+        end
+        self._playbacks:write(0, data as loader.CValue, count * 4)
+        self._playbacks:flush(frame.commandBuffer)
+    end
+
+    self._stepClock = packet.stepClock
     self.count = packet.count
     local view <const> = self._view
     view.x = packet.cameraX
@@ -568,6 +618,7 @@ function Backend:destroy()
     self._visible:destroy()
     self._drawArgs:destroy()
     self._indices:destroy()
+    self._playbacks:destroy()
     self._mark:destroy()
     self._scan:destroy()
     self._compact:destroy()

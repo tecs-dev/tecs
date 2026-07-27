@@ -11,6 +11,15 @@ layout(set = 0, binding = 0) readonly buffer Instances { Instance item[]; } inst
 layout(set = 0, binding = 1) readonly buffer Visible { uint index[]; } visible;
 layout(set = 1, binding = 0) uniform View { mat4 viewProjection; } view;
 
+// An animated instance carries a playback in `uvRect` instead of a region, and
+// what it resolves to is worked out by a shared include rather than here: an
+// occluder pass, a drop-shadow pass and an animated cookie all have to reach
+// the same frame this does, and the only arrangement that cannot drift is one
+// function against one table.
+#define PLAYBACK_SET 0
+#define PLAYBACK_BINDING 2
+#include "playback.glsl"
+
 // Bands the depth range divides into, and the same number as `layers.MAX` in
 // src/tecs/gfx/layers.tl. The two are one number and only work while they
 // agree.
@@ -37,7 +46,10 @@ const float LAYER_VIRTUAL = 2.0;
 // configuration, packed when it changes, and the four cases compose from it in
 // a handful of instructions.
 layout(set = 1, binding = 1) uniform Layers {
-    // xy camera position in world units, z reciprocal zoom, w unused.
+    // xy camera position in world units, z reciprocal zoom, w the animation
+    // clock in whole fixed steps. The clock rides here because this block is
+    // already pushed every frame and the fourth component was spare, so GPU
+    // playback costs no binding and no extra push.
     vec4 camera;
     // Position to clip: xy for screen pixels, zw for virtual coordinates.
     vec4 fixedScale;
@@ -158,12 +170,27 @@ void main() {
     float arrayLayer = mod(packedSlot, LAYER_SLOTS);
     vClip = int(floor(packedSlot / LAYER_SLOTS));
 
+    // An animated instance resolves its region here rather than carrying one,
+    // which is what stops a frame changing from being a write to the instance
+    // and a rewrite of every instance sharing its archetype. The layer comes
+    // from the table too, so rebinding a sheet to another image moves the table
+    // and touches no instance. Static instances take the comparison and no
+    // memory traffic.
+    vec4 region = self.uvRect;
+    if (isPlayback(region)) {
+        Playback frame = resolvePlayback(region, layers.camera.w);
+        region = frame.rect;
+        // A sheet bound to no image names no layer, and the instance keeps the
+        // one it was written with.
+        if (frame.layer >= 0.0) { arrayLayer = frame.layer; }
+    }
+
     // Corners run -0.5..0.5, so shifting by a half is the fraction across the
     // frame. Both axes map the same way and neither is flipped: world Y runs
     // down the screen the way texture rows run down the image, and the one
     // negation between them is the camera's, applied to clip space after this.
     // A flip here would compose with that one instead of cancelling it.
-    vUV = vec3(mix(self.uvRect.xy, self.uvRect.zw, corner + 0.5), arrayLayer);
+    vUV = vec3(mix(region.xy, region.zw, corner + 0.5), arrayLayer);
 
     vLocal = corner;
     // Material and parameter share origin.w, which is otherwise spare: the

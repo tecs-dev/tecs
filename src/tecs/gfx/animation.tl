@@ -23,6 +23,7 @@
 local ecs <const> = require("tecs.ecs")
 local components <const> = require("tecs.components")
 local sheet <const> = require("tecs.gfx.sheet")
+local frametable <const> = require("tecs.gfx.frametable")
 
 local type Component = ecs.Component
 local type World = ecs.World
@@ -31,6 +32,8 @@ local type Sheet = sheet.Sheet
 
 local Sprite <const> = components.Sprite
 local Pivot <const> = sheet.Pivot
+
+local TICK_HZ <const> = frametable.TICK_HZ
 
 --- Playback rate an animation runs at when nothing says otherwise, which is
 --- the timing the sheet's frames were authored with.
@@ -174,11 +177,37 @@ local record animation
     --- nothing for the query. Call it once; a second call on the same world is
     --- ignored, because adding a system twice under one name is an error.
     ---
-    --- The query is a logic query, so a paused entity holds the frame it is on.
-    --- Animation runs on the simulation clock and a pause stops the simulation.
-    --- @param world The world to add `tecs.AdvanceAnimation` to, in
-    ---     `FixedPostUpdate`.
+    --- Which system depends on `useGPU`. On the host it is
+    --- `tecs.AdvanceAnimation` in `FixedPostUpdate`, whose query is a logic
+    --- query, so a paused entity holds the frame it is on. On the GPU it is
+    --- `tecs.EncodeAnimation` in `PostUpdate`, which writes nothing on a step
+    --- where nothing changed what is playing.
+    --- @param world The world to add the system to.
     plugin: function(world: World)
+
+    --- Chooses whether playback is resolved on the GPU.
+    ---
+    --- Off, a system walks every playing animation on every fixed step and
+    --- writes the frame's region into the entity's `Sprite`, which marks that
+    --- column dirty and has extraction rewrite every instance in the
+    --- archetype. One animating sprite therefore costs a rewrite of everything
+    --- structurally like it, which is what stops a large animated scene being
+    --- affordable.
+    ---
+    --- On, the `Sprite` carries which animation is playing rather than the
+    --- region it resolved to, and the vertex shader works the region out from
+    --- a shared table and a clock. A frame changing then writes nothing at all,
+    --- so what a step costs is what actually changed rather than what is
+    --- shaped like it.
+    ---
+    --- Set before `plugin`, since it decides which system that installs. Worlds
+    --- already carrying one keep it.
+    --- @param enabled Defaults to false while this is being measured against
+    ---     the host path.
+    useGPU: function(enabled: boolean)
+
+    --- Whether playback resolves on the GPU.
+    usesGPU: function(): boolean
 end
 
 ecs.newFFIComponent({
@@ -465,6 +494,89 @@ local function advance(world: World, query: Query, dt: number)
     end
 end
 
+-------------------------------------------------------------------------------
+-- Playback on the GPU
+-------------------------------------------------------------------------------
+
+--- Whether `plugin` installs the encoder rather than the advance system.
+local useGPU = false
+
+function animation.useGPU(enabled: boolean)
+    useGPU = enabled == true
+end
+
+function animation.usesGPU(): boolean
+    return useGPU
+end
+
+--- Writes what each row is playing into its `Sprite`.
+---
+--- What the GPU reads is not a frame but an animation, a start and a rate, so
+--- this runs when what is playing changes and not when a frame does. The gate
+--- is the `Animation` column's own dirty bit, which is set by exactly the
+--- things that change what is playing: a spawn, an archetype move, `play`,
+--- `restart`, and any direct write through `getMut`. A step where nothing
+--- changed visits no archetype and writes nothing, which is the whole point.
+---
+--- `held` is for the archetypes carrying `Paused`. The world's clock does not
+--- stop for them, so holding has to be said rather than assumed, and a rate of
+--- zero says it: the encoding then carries the tick to hold instead of the step
+--- playback began on. An entity moving in or out of `Paused` changes archetype,
+--- and a move marks every component on the destination dirty, so the freeze and
+--- the thaw both arrive here without anything having to notice them.
+local function encode(world: World, query: Query, held: boolean)
+    local timestep <const> = world:getFixedTiming()
+    local clock <const> = world:fixedStepCount()
+
+    for archetype, length in query:iter() do
+        if archetype:isComponentDirty(Animation) then
+            local animations <const> = archetype:get(Animation)
+            local sprites <const> = archetype:getMut(Sprite)
+            -- Sheets are few and neighbouring rows tend to share one, and a
+            -- crowd playing one cycle shares the tag as well.
+            local cachedId = 0
+            local cachedTag = -1
+            local cached: Sheet = nil
+            local playback = 0
+
+            for row = 1, length do
+                local instance <const> = animations[row]
+                local sheetId <const> = instance.sheet as integer
+                local tagId <const> = instance.tag as integer
+                if sheetId ~= cachedId then
+                    cached = sheet.byId(sheetId)
+                    cachedId = sheetId
+                    cachedTag = -1
+                end
+
+                if cached ~= nil then
+                    if tagId ~= cachedTag then
+                        cachedTag = tagId
+                        playback = frametable.register(cached, tagId)
+                    end
+
+                    -- Where in the cycle the entity is, in ticks. `time` is
+                    -- what the host path advances and what a snapshot carries,
+                    -- so reading the phase from it is what makes the two paths
+                    -- interchangeable and a restored entity resume where it was.
+                    local ticks <const> = instance.time * TICK_HZ
+                    local speed <const> = instance.speed
+                    local running <const> = not held and instance.playing
+                        and speed > 0.0
+                    if running then
+                        local rate <const> = timestep * speed * TICK_HZ
+                        frametable.encode(sprites[row], playback,
+                            clock - ticks / rate, rate, instance.loop)
+                    else
+                        frametable.encode(sprites[row], playback, ticks, 0.0,
+                            instance.loop)
+                    end
+                end
+            end
+        end
+    end
+end
+
 --- Worlds the plugin has already installed into.
 local installed: {World: boolean} =
     setmetatable({}, { __mode = "k" } as metatable<{World: boolean}>)
@@ -472,6 +584,35 @@ local installed: {World: boolean} =
 function animation.plugin(world: World)
     if installed[world] then return end
     installed[world] = true
+
+    if useGPU then
+        -- Not a logic query: a paused entity still has to be told it is
+        -- holding, and one that has never been encoded still has to be
+        -- encoded. Which of the two it is decides the rate, so they are two
+        -- queries rather than one and a test per row.
+        local running <const> = world:query({
+            name = "tecs.EncodedSprites",
+            include = { Animation, Sprite },
+            exclude = { ecs.builtins.Paused },
+        })
+        local paused <const> = world:query({
+            name = "tecs.EncodedPausedSprites",
+            include = { Animation, Sprite, ecs.builtins.Paused },
+        })
+
+        -- `PostUpdate` rather than a render phase, so this lands before
+        -- extraction whatever order the renderer and this plugin were
+        -- installed in.
+        world:addSystem({
+            name = "tecs.EncodeAnimation",
+            phase = ecs.phases.PostUpdate,
+            run = function()
+                encode(world, running, false)
+                encode(world, paused, true)
+            end,
+        })
+        return
+    end
 
     local animated <const> = world:query({
         name = "tecs.AnimatedSprites",

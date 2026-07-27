@@ -1270,6 +1270,10 @@ function WorldImpl:getFixedTiming(): number, number, number
     return timestep, accumulator, alpha
 end
 
+function WorldImpl:fixedStepCount(): integer
+    return self.pipeline.fixedStepCount
+end
+
 function WorldImpl:enablePhase(phase: Phase)
     self.pipeline:enablePhase(phase)
 end

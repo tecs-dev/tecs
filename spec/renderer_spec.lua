@@ -2493,4 +2493,97 @@ describe("ecs.Renderer", function()
             renderer:destroy()
         end)
     end)
+
+    -- Playback resolved in the vertex shader rather than written into the
+    -- instance by a system.
+    --
+    -- The property worth a render test is that the two paths draw the same
+    -- thing on the same step. Everything else about the design is a claim about
+    -- what is written, which the frame table's own spec covers; this is the
+    -- claim that the picture is unchanged, and the only way to hold it is to
+    -- put both paths on a screen and compare.
+    describe("animation on the GPU", function()
+        local sheet = require("tecs.gfx.sheet")
+        local animation = require("tecs.gfx.animation")
+
+        local STEP = 1 / 60
+
+        local nextSheet = 0
+
+        -- Two texels side by side, one red and one green, cut into two frames
+        -- of one texel each. Which frame is showing is then a colour rather
+        -- than a subpixel offset, so the assertion is exact.
+        local function twoFrameSheet(renderer)
+            nextSheet = nextSheet + 1
+            local name = "spec://frames" .. nextSheet
+            local pixels = loader.newArray("uint8_t[8]")
+            pixels[0], pixels[1], pixels[2], pixels[3] = 255, 0, 0, 255
+            pixels[4], pixels[5], pixels[6], pixels[7] = 0, 255, 0, 255
+            local sprite = renderer:registerImage({
+                status = "ready",
+                path = name,
+                pixels = pixels,
+                width = 2,
+                height = 1,
+                pitch = 8,
+                release = function() end,
+            })
+            return sheet
+                .grid({
+                    name = name,
+                    imageWidth = 2,
+                    imageHeight = 1,
+                    frameWidth = 1,
+                    frameHeight = 1,
+                })
+                :bind(sprite)
+        end
+
+        -- Which frame the middle of the screen is showing, as its colour.
+        local function shownAfter(steps, gpu)
+            animation.useGPU(gpu)
+            local world, renderer = newScene()
+            local source = twoFrameSheet(renderer)
+            world:addPlugin(animation.plugin)
+            world:spawn(
+                Transform(SIZE / 2, SIZE / 2, 0, 1, 0, SIZE, SIZE),
+                Tint(1, 1, 1, 1),
+                Renderable(),
+                source:sprite(1),
+                animation.of(source)
+            )
+
+            local pixels
+            for _ = 1, steps do
+                pixels = frameAt(world, renderer, STEP)
+            end
+            local centre = screen:getPixel(pixels, SIZE / 2, SIZE / 2)
+            renderer:destroy()
+            animation.useGPU(false)
+            return centre
+        end
+
+        -- Frames hold for a tenth of a second each by default, so six steps of
+        -- a sixtieth carry the cycle from the first frame to the second and
+        -- twelve bring it back round.
+        it("shows the frame the host path shows, step for step", function()
+            for _, steps in ipairs({ 1, 5, 7, 11, 13 }) do
+                local host = shownAfter(steps, false)
+                local gpu = shownAfter(steps, true)
+                assert.are.equal(host.r, gpu.r, ("red after %d steps"):format(steps))
+                assert.are.equal(host.g, gpu.g, ("green after %d steps"):format(steps))
+            end
+        end)
+
+        it("advances the frame without the host writing anything", function()
+            -- The two frames are different colours, so seeing both proves the
+            -- shader moved between them; the frame table's spec is what proves
+            -- nothing was written to get there.
+            local first = shownAfter(1, true)
+            local second = shownAfter(7, true)
+            assert.are.equal(255, first.r, "the first frame is red")
+            assert.are.equal(255, second.g, "and the second is green")
+            assert.are_not.equal(first.g, second.g)
+        end)
+    end)
 end)
