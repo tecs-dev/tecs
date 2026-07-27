@@ -2,7 +2,7 @@
 
 struct Instance {
     vec4 xform;   // rotation, scaleX, scaleY, depth
-    vec4 origin;  // xy world position, z array layer, w material
+    vec4 origin;  // xy world position, z clip region and array layer, w material
     vec4 color;
     vec4 uvRect;  // u0 v0 u1 v1
 };
@@ -15,6 +15,13 @@ layout(set = 1, binding = 0) uniform View { mat4 viewProjection; } view;
 // src/tecs/gfx/layers.tl. The two are one number and only work while they
 // agree.
 const int LAYER_BANDS = 16;
+
+// Texture-array layers `origin.z` addresses, and the stride the clip region
+// index sits above them at. `LAYER_SLOTS` in src/tecs/gpu/instancelayout.tl is
+// the same number and the pair only works while they agree. Every value the
+// packing produces is a whole number well inside the range a float represents
+// integers exactly over, so both halves come back out exactly.
+const float LAYER_SLOTS = 64.0;
 
 // The space a layer positions its contents in, held in an entry's first
 // component.
@@ -48,6 +55,10 @@ layout(location = 3) flat out int vMaterial;
 layout(location = 4) flat out float vParam;
 // Whether the layer wants its contents lit, flat for the same reason.
 layout(location = 5) flat out float vLit;
+// Which clip region the fragments belong to, zero for none. Flat, so the test
+// downstream is uniform across the primitive rather than a per-fragment
+// decision that could go either way.
+layout(location = 6) flat out int vClip;
 
 // Four distinct corners, visited through an index buffer. A non-indexed quad
 // runs the vertex shader six times for the four positions it actually has.
@@ -133,11 +144,17 @@ void main() {
     vColor = self.color;
     vLit = entry.w;
 
+    // The array layer and the clip region share origin.z: the region is the
+    // number of whole strides in it and the layer is what is left over.
+    float packedSlot = self.origin.z;
+    float arrayLayer = mod(packedSlot, LAYER_SLOTS);
+    vClip = int(floor(packedSlot / LAYER_SLOTS));
+
     // Corners run -0.5..0.5, and V is flipped because texture rows run down
     // from the top while the quad's local Y runs up.
     vUV = vec3(mix(self.uvRect.xy, self.uvRect.zw,
                    vec2(corner.x + 0.5, 0.5 - corner.y)),
-               self.origin.z);
+               arrayLayer);
 
     vLocal = corner;
     // Material and parameter share origin.w, which is otherwise spare: the

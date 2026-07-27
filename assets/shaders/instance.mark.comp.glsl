@@ -36,6 +36,12 @@ void main() {
         bool outside = box.x + box.z < cull.view.x || box.x - box.z > cull.view.z ||
                        box.y + box.w < cull.view.y || box.y - box.w > cull.view.w;
         keep = outside ? 0u : 1u;
+        // An instance entirely outside its clip region is drawn and thrown
+        // away a fragment at a time, which is correct and wasteful. Rejecting
+        // it belongs here, as a second test against the region's rectangle
+        // projected into the same space this one works in, and it needs the
+        // region table and the instance's clip index reaching this pass. That
+        // is a separate change and nothing here does it today.
     }
 
     // Inclusive scan across the workgroup. Each survivor learns how many

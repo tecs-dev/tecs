@@ -48,7 +48,7 @@ Working today:
   another, deciding how its contents sort within that band, where they are
   positioned (by the camera, in screen pixels, in a virtual resolution, at
   their own parallax, or at a fixed size under zoom) and whether they are lit
-- An ECS binding: Transform2D, Tint, Sprite, Material, PointLight and
+- An ECS binding: Transform2D, Tint, Sprite, Material, PointLight, Clip and
   Renderable components, with a sync that walks archetype columns straight into
   mapped GPU staging, and a depth-tested G-buffer
 - Physics in the world: a RigidBody component holding a value-typed Box2D
@@ -499,6 +499,40 @@ that asks for screen space, virtual coordinates, parallax or ignore-zoom is
 given a bound no view can be outside of, so it draws whatever the camera is
 looking at. That gives up culling on those layers and keeps it exactly on every
 layer that does not ask, which is where the entities are.
+
+## Clip regions
+
+A `Clip` names a rectangle an instance's fragments are kept inside, and
+`Renderer:setClipRegion` says what that rectangle is. The rectangle is in
+target pixels, tested against `gl_FragCoord`, which is what a scrollable list
+inside a panel means and what is right for world contents and screen-space
+layers alike. Regions do not nest: a region is one rectangle, so a panel within
+a panel is set up as the intersection of the two and the fragment tests once.
+`clearClipRegion` puts a region back to clipping nothing, so an index handed
+out and taken back leaves instances still pointing at it drawing whole rather
+than silently gone.
+
+The index rides in `origin.z` beside the texture-array layer, as
+`clip * 64 + layer`. A layer is a small integer bounded by the array's 64
+slots, and a float32 represents integers exactly to 16,777,216, so the largest
+value the pair packs is 16,383 and both halves come back out exactly: the
+shader takes the layer with a modulo and the region with a division. That keeps
+the instance at four vec4s, which is the point. `instancelayout` owns the
+packing so the renderer's sync and the text producer state it once between
+them.
+
+Not clipping costs nothing. An archetype with no `Clip` column is written by a
+loop that never mentions a region, and the float it writes is the layer as it
+always was. In the fragment shader the index is a flat varying, so an unclipped
+instance takes a branch its whole primitive agrees on and never reads the
+region table; and the test lands on the coverage the material already returned,
+leaving through the `discard` that was there for distance fields rather than
+adding one.
+
+The cull knows nothing about regions. An instance entirely outside its region is
+drawn and thrown away a fragment at a time, which is correct and wasteful;
+rejecting it belongs in `instance.mark.comp.glsl` beside the view test, and is
+not built.
 
 ## Text is a producer's run
 
